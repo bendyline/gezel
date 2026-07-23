@@ -1,0 +1,32 @@
+{
+  "name": "@bendyline/gezel-eval-viewer",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Static SPA for browsing gezel eval runs — postmortems, artifacts, timeline.",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "scan": "node scripts/scan-runs.mjs",
+    "dev": "pnpm scan && vite",
+    "build": "pnpm scan && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test --experimental-strip-types src/*.test.mjs",
+    "clean": "rm -rf dist .turbo src/data/runs-index.json"
+  },
+  "dependencies": {
+    "dompurify": "^3.4.12",
+    "marked": "^18.0.7",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "react-router-dom": "^7.18.1"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.4",
+    "jsdom": "^29.1.1",
+    "typescript": "^6.0.3",
+    "vite": "^8.1.5"
+  }
+}

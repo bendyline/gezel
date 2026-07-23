@@ -1,0 +1,31 @@
+{
+  "modelId": "gemma4-e4b-q8",
+  "engine": "llama-cpp",
+  "trialId": "preflight-trial",
+  "runDir": "",
+  "createdAt": "2026-06-10T13:22:52.966Z",
+  "admitted": false,
+  "genTokensPerSec": null,
+  "checks": {
+    "spawn": {
+      "ok": true,
+      "detail": "daemon + engine spawned"
+    },
+    "toolRoundTrip": {
+      "ok": false,
+      "detail": "probe did not land a parsed tool call: interrupted (SIGINT/SIGTERM); cleanup ran"
+    },
+    "profileResolution": {
+      "ok": true,
+      "detail": "no tuning trace lines found (non-gating)"
+    },
+    "reasoningBudget": {
+      "ok": true,
+      "detail": "no reasoning-budget trace (non-thinking model or thinking disabled)"
+    },
+    "throughput": {
+      "ok": true,
+      "detail": "throughput not measured (no usage metrics) — non-gating"
+    }
+  }
+}

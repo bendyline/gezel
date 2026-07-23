@@ -1,0 +1,50 @@
+{
+  "id": "nemotron3-nano-30b-q4",
+  "name": "Nemotron-3 Nano (30B, MoE Reasoning)",
+  "description": "NVIDIA's Nemotron-3 Nano Omni — 30B-parameter hybrid Mamba/Transformer Mixture-of-Experts (~3B active per token) tuned for reasoning. Native function-calling, 128K context, multimodal (text + image + audio + video).",
+  "tags": [
+    "nvidia",
+    "reasoning",
+    "moe",
+    "hybrid",
+    "tools",
+    "multimodal",
+    "vision",
+    "audio",
+    "video"
+  ],
+  "category": "reasoning",
+  "maintainer": {
+    "name": "NVIDIA",
+    "url": "https://huggingface.co/nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning"
+  },
+  "version": "1.0.0",
+  "updatedAt": "2026-05-17T00:00:00Z",
+  "license": "NVIDIA Open Model License",
+  "parameterSize": "30B",
+  "approxSizeBytes": 24515129536,
+  "supportsTools": true,
+  "contextWindow": 131072,
+  "upstream": "https://huggingface.co/nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning",
+  "style": {
+    "family": "nemotron",
+    "reasoningFormat": "think",
+    "toolCallFormat": "function-call"
+  },
+  "behaviors": [
+    "reasoning.strip-think-tags",
+    "prompt.private-reasoning-guidance",
+    "fabrication.detect-past-tense-no-tools",
+    "turn.preamble-folding"
+  ],
+  "llamaCpp": {
+    "huggingfaceRepo": "lmstudio-community/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-GGUF",
+    "filename": "Nemotron-3-Nano-Omni-30B-A3B-Reasoning-Q4_K_M.gguf",
+    "quantization": "Q4_K_M",
+    "mmprojFilename": "mmproj-Nemotron-3-Nano-Omni-30B-A3B-Reasoning-BF16.gguf"
+  },
+  "mlx": {
+    "huggingfaceRepo": "mlx-community/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-nvfp4",
+    "quantization": "nvfp4"
+  }
+}

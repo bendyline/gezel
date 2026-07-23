@@ -1,0 +1,20 @@
+{
+  "name": "@bendyline/gezel-script-stdlib",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Standard gate-script library packed into the app. Plain defineScript sources resolved in place by the script runner (scope: 'standard'); read-only, trusted, versioned with the app.",
+  "license": "MIT",
+  "type": "module",
+  "files": ["scripts"],
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "clean": "rm -rf .turbo"
+  },
+  "devDependencies": {
+    "@bendyline/gezel-sdk": "workspace:*",
+    "@types/node": "^24.13.3",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10"
+  }
+}

@@ -1,0 +1,18 @@
+# whisper.cpp upstream pin.
+#
+# Format: two lines. First is a git tag (human-readable, used in
+# release notes). Second is the full 40-char commit sha (what build
+# scripts actually check out — tags move, shas don't).
+#
+# whisper.cpp shares the ggml-org build cadence with llama.cpp; pick
+# a stable tagged release rather than a daily build. Bump by editing
+# both lines together.
+#
+# Verify the commit is reachable from the tag:
+#   git -C native/engines/whisper-cpp/.upstream fetch --tags
+#   git -C native/engines/whisper-cpp/.upstream rev-parse <tag>^{commit}
+#
+# License: MIT (https://github.com/ggml-org/whisper.cpp)
+upstream=https://github.com/ggml-org/whisper.cpp.git
+tag=v1.9.1
+commit=f049fff95a089aa9969deb009cdd4892b3e74916

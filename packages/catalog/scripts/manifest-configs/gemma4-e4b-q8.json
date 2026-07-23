@@ -1,0 +1,44 @@
+{
+  "id": "gemma4-e4b-q8",
+  "name": "Gemma 4 (E4B)",
+  "description": "Google's edge-optimized Gemma 4 at ~4B effective parameters. Multimodal (text + image + audio), 256K context on the MLX/E4B-it variant, native tool calling. Strong compact default for laptops with 16GB+ memory.",
+  "tags": ["google", "multimodal", "vision", "audio", "tools"],
+  "category": "general",
+  "maintainer": { "name": "Google", "url": "https://huggingface.co/google/gemma-4-E4B-it" },
+  "version": "1.1.0",
+  "updatedAt": "2026-04-26T00:00:00Z",
+  "license": "Apache-2.0",
+  "recoScore": 15,
+  "parameterSize": "4.5B",
+  "approxSizeBytes": 8031240160,
+  "supportsTools": true,
+  "contextWindow": 128000,
+  "upstream": "https://huggingface.co/google/gemma-4-E4B-it",
+  "style": {
+    "family": "gemma",
+    "reasoningFormat": "channel",
+    "toolCallFormat": "function-call"
+  },
+  "behaviors": [
+    "reasoning.strip-channel-tags",
+    "prompt.private-reasoning-guidance",
+    "prompt.tool-cookbook-condensed",
+    "fabrication.detect-past-tense-no-tools",
+    "fabrication.detect-claim-without-tool",
+    "mcp.relax-required-fields",
+    "mcp.default-missing-fields",
+    "turn.preamble-folding",
+    "turn.ramble-detection",
+    "parse.gemma-special-token"
+  ],
+  "ollama": { "tag": "gemma4:e4b" },
+  "llamaCpp": {
+    "huggingfaceRepo": "ggml-org/gemma-4-E4B-it-GGUF",
+    "filename": "gemma-4-E4B-it-Q8_0.gguf",
+    "quantization": "Q8_0"
+  },
+  "mlx": {
+    "huggingfaceRepo": "mlx-community/gemma-4-e4b-it-4bit",
+    "quantization": "4bit"
+  }
+}

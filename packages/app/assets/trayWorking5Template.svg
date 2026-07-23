@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
+  <!-- Working frame 5/5: the bar is full before the indeterminate loop resets. -->
+  <defs>
+    <mask id="vise"><rect width="16" height="16" fill="#fff"/><circle cx="1.12" cy="4.15" r="0.5" fill="#000"/></mask>
+  </defs>
+  <g fill="#000">
+    <rect x="0.15" y="2.85" width="1.95" height="2.65" rx="0.38" mask="url(#vise)"/>
+    <rect x="0.82" y="0.65" width="0.6" height="7.05" rx="0.3"/><circle cx="1.12" cy="0.8" r="0.78"/><circle cx="1.12" cy="7.55" r="0.78"/>
+    <rect x="3.35" y="2.45" width="12.3" height="2.9" rx="0.52"/>
+    <path d="M4.25 6.25h1.9l-0.8 9.45h-1.9z"/><path d="M12.85 6.25h1.9l0.8 9.45h-1.9z"/><rect x="6.85" y="10.15" width="5.3" height="1.55" rx="0.32"/>
+  </g>
+</svg>

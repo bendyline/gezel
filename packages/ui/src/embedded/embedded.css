@@ -1,0 +1,68 @@
+/*
+ * Embedded-mode tweaks layered on top of styles.css. Loaded after the
+ * main stylesheet so the rules here win the cascade.
+ *
+ * Goal: a chrome-free chat surface that fills its container. The host
+ * (VS Code webview) is responsible for theme variables — see
+ * packages/vscode/resources/theme-bridge.css, which maps `--vscode-*`
+ * tokens onto gezel's bare `--bg`, `--fg`, `--accent`, etc.
+ */
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-ui, var(--vscode-font-family, sans-serif));
+}
+
+#root {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.embedded-chat-root {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/*
+ * ProjectsView mounts a `<div class="two-col detail-only">` wrapping
+ * `<section class="main">` with the tab bar and tab content. In the
+ * desktop app `.two-col` lives inside `.app-main` whose own content
+ * pressure makes the grid row stretch naturally. The embedded shell
+ * has a sparse chat surface (often a single message at the top), so
+ * the default `grid-template-rows: auto` collapses the row to the
+ * tab + composer's intrinsic height — leaving an empty band below
+ * the composer down to the bottom of the pane.
+ *
+ * Pin the single row to 1fr so the section fills the embedded chat
+ * root's available height; the section is already flex-column with
+ * `min-height: 0`, so its tab content (`.project-chat` with `flex: 1`)
+ * inherits the full height and the timeline expands to fill the gap
+ * between the gezel roster and the composer.
+ */
+.embedded-chat-root .two-col {
+  grid-template-rows: minmax(0, 1fr);
+}
+
+/* Belt to the row-template braces: ensure the section itself has a
+   definite height too so `flex: 1` on inner children (`.project-chat`,
+   `.chat-rail-body`) has a definite axis to grow into. */
+.embedded-chat-root .two-col > section {
+  height: 100%;
+  min-height: 0;
+}
+
+.embedded-chat-status {
+  padding: 16px;
+  font-size: 13px;
+  color: var(--text);
+  opacity: 0.85;
+}

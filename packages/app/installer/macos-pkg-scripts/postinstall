@@ -1,0 +1,228 @@
+#!/bin/bash
+#
+# Gezel PKG postinstall — runs as root after the .app has been copied to
+# /Applications/. Sets up the _gezeld system user, the system-scope data
+# directory, and bootstraps the LaunchDaemon.
+#
+# Idempotent: re-runs (e.g. on upgrade) skip work that's already done.
+# Failures inside this script are surfaced to the installer UI as a
+# generic "installation failed" — the install itself is treated as
+# transactional, so rolling back is the user's job (they can rerun).
+#
+# Logs go to /var/log/install.log (PKG default) and to stderr (visible
+# in the macOS Installer.app's "Show Log" pane).
+set -euo pipefail
+# Make every installer-created state file private by default. The launchd
+# plist applies the same umask to future daemon writes; runtime discovery
+# files are explicitly widened by gezeld after creation.
+umask 077
+
+DAEMON_USER="_gezeld"
+DAEMON_LABEL="com.bendyline.gezeld"
+DATA_DIR="/Library/Application Support/Gezel"
+SERVICE_TREE="${DATA_DIR}/service"
+PLIST_DST="/Library/LaunchDaemons/${DAEMON_LABEL}.plist"
+PLIST_SRC="/Applications/Gezel.app/Contents/Resources/${DAEMON_LABEL}.plist"
+ELECTRON_EXE="/Applications/Gezel.app/Contents/MacOS/Gezel"
+UNPACKED_DIR="/Applications/Gezel.app/Contents/Resources/app.asar.unpacked/dist"
+EXTRACT_CLI="${UNPACKED_DIR}/extract-service-bundle.js"
+BUNDLE_TARBALL="${UNPACKED_DIR}/service-bundle.tar.gz"
+BUNDLE_META="${UNPACKED_DIR}/service-bundle.meta.json"
+
+echo "[gezel postinstall] starting (user=$(whoami))"
+
+assert_not_symlink() {
+  path="$1"
+  description="$2"
+  if [ -L "$path" ]; then
+    echo "[gezel postinstall] ERROR: $description is a symlink: $path" >&2
+    exit 1
+  fi
+}
+
+abort_bad_service_identity() {
+  echo "[gezel postinstall] ERROR: refusing to use ${DAEMON_USER} as the daemon identity: $1" >&2
+  # Quarantine a prior registration before aborting. Otherwise an upgrade on
+  # a machine with a colliding human account could leave the old job running
+  # while the desktop assumes it will safely fall back.
+  launchctl disable "system/${DAEMON_LABEL}" 2>/dev/null || true
+  launchctl bootout "system/${DAEMON_LABEL}" 2>/dev/null || true
+  exit 1
+}
+
+# 1. Create the _gezeld system user/group if missing. macOS reserves
+# UIDs 200-400 for daemon users; we pick the next free UID in that
+# range. Underscore-prefixed users are conventionally hidden from the
+# login screen.
+if ! dscl . -read "/Users/${DAEMON_USER}" >/dev/null 2>&1; then
+  echo "[gezel postinstall] creating ${DAEMON_USER} system user"
+  # Pick an ID unused by either a user or a group. max(user UID)+1 can collide
+  # with an existing group or overflow the reserved daemon range.
+  used_ids=$({
+    dscl . -list /Users UniqueID
+    dscl . -list /Groups PrimaryGroupID
+  } | awk '$2 >= 200 && $2 < 400 { print $2 }' | sort -un)
+  new_uid=""
+  for candidate in $(seq 200 399); do
+    if ! printf '%s\n' "$used_ids" | grep -qx "$candidate"; then
+      new_uid=$candidate
+      break
+    fi
+  done
+  if [ -z "$new_uid" ]; then
+    echo "[gezel postinstall] ERROR: no unused daemon UID/GID remains in 200-399" >&2
+    exit 1
+  fi
+  dscl . -create "/Groups/${DAEMON_USER}"
+  dscl . -create "/Groups/${DAEMON_USER}" PrimaryGroupID "$new_uid"
+  dscl . -create "/Groups/${DAEMON_USER}" RealName "Gezel Service"
+
+  dscl . -create "/Users/${DAEMON_USER}"
+  dscl . -create "/Users/${DAEMON_USER}" UniqueID "$new_uid"
+  dscl . -create "/Users/${DAEMON_USER}" PrimaryGroupID "$new_uid"
+  dscl . -create "/Users/${DAEMON_USER}" UserShell /usr/bin/false
+  dscl . -create "/Users/${DAEMON_USER}" RealName "Gezel Service"
+  dscl . -create "/Users/${DAEMON_USER}" NFSHomeDirectory /var/empty
+  dscl . -create "/Users/${DAEMON_USER}" Password "*"
+  # Hide from the login screen.
+  dscl . -create "/Users/${DAEMON_USER}" IsHidden 1
+else
+  echo "[gezel postinstall] ${DAEMON_USER} already exists; skipping create"
+fi
+
+# Validate both new and pre-existing identities. Numeric UID/GID reuse would
+# make another local principal indistinguishable from the daemon to POSIX
+# ownership checks, so collision or reserved-range drift is installation-fatal.
+daemon_uid=$(dscl . -read "/Users/${DAEMON_USER}" UniqueID | awk '$1 == "UniqueID:" { print $2 }')
+daemon_user_gid=$(dscl . -read "/Users/${DAEMON_USER}" PrimaryGroupID | awk '$1 == "PrimaryGroupID:" { print $2 }')
+daemon_group_gid=$(dscl . -read "/Groups/${DAEMON_USER}" PrimaryGroupID | awk '$1 == "PrimaryGroupID:" { print $2 }')
+daemon_shell=$(dscl . -read "/Users/${DAEMON_USER}" UserShell | awk '$1 == "UserShell:" { print $2 }')
+daemon_home=$(dscl . -read "/Users/${DAEMON_USER}" NFSHomeDirectory | awk '$1 == "NFSHomeDirectory:" { print $2 }')
+daemon_hidden=$(dscl . -read "/Users/${DAEMON_USER}" IsHidden | awk '$1 == "IsHidden:" { print $2 }')
+if ! [[ "$daemon_uid" =~ ^[0-9]+$ && "$daemon_user_gid" =~ ^[0-9]+$ && "$daemon_group_gid" =~ ^[0-9]+$ ]]; then
+  abort_bad_service_identity "UID/GID identity is incomplete or non-numeric"
+fi
+user_id_count=$(dscl . -list /Users UniqueID | awk -v id="$daemon_uid" '$2 == id { count++ } END { print count + 0 }')
+group_id_count=$(dscl . -list /Groups PrimaryGroupID | awk -v id="$daemon_group_gid" '$2 == id { count++ } END { print count + 0 }')
+if [ "$daemon_uid" -lt 200 ] || [ "$daemon_uid" -ge 400 ] || \
+   [ "$daemon_uid" -ne "$daemon_user_gid" ] || \
+   [ "$daemon_uid" -ne "$daemon_group_gid" ] || \
+   [ "$user_id_count" -ne 1 ] || [ "$group_id_count" -ne 1 ]; then
+  abort_bad_service_identity "UID/GID is shared, mismatched, or outside 200-399"
+fi
+if [ "$daemon_shell" != "/usr/bin/false" ] || \
+   [ "$daemon_home" != "/var/empty" ] || \
+   [ "$daemon_hidden" != "1" ]; then
+  abort_bad_service_identity "account is login-capable or has unexpected home/visibility metadata"
+fi
+
+# Stop the old daemon before changing ownership/modes or replacing its service
+# tree. This closes the upgrade race where it could recreate a broadly-readable
+# file while the migration was tightening permissions.
+launchctl bootout "system/${DAEMON_LABEL}" 2>/dev/null || true
+for _ in $(seq 1 30); do
+  launchctl print "system/${DAEMON_LABEL}" >/dev/null 2>&1 || break
+  sleep 0.5
+done
+if launchctl print "system/${DAEMON_LABEL}" >/dev/null 2>&1; then
+  echo "[gezel postinstall] ERROR: ${DAEMON_LABEL} remained loaded after bootout; refusing live state migration" >&2
+  exit 1
+fi
+
+# 2. Create and migrate the system-scope data hierarchy. The parent is 0711:
+# desktop clients can traverse the known runtime path but cannot list or read
+# config/secrets/projects. runtime alone is 0755; its discovery files are the
+# only cross-account state gezeld explicitly publishes.
+assert_not_symlink "$DATA_DIR" "Gezel data directory"
+assert_not_symlink "$DATA_DIR/runtime" "Gezel runtime directory"
+assert_not_symlink "$DATA_DIR/logs" "Gezel logs directory"
+assert_not_symlink "$SERVICE_TREE" "Gezel service tree"
+mkdir -p "$DATA_DIR/runtime" "$DATA_DIR/logs"
+assert_not_symlink "$DATA_DIR" "Gezel data directory"
+assert_not_symlink "$DATA_DIR/runtime" "Gezel runtime directory"
+assert_not_symlink "$DATA_DIR/logs" "Gezel logs directory"
+assert_not_symlink "$SERVICE_TREE" "Gezel service tree"
+
+# Upgrade migration: remove legacy world/group permissions without following
+# symlinks into user-controlled targets, and make the daemon the trusted owner.
+# Physical, same-filesystem walks avoid following planted descendant symlinks
+# or crossing a mounted tree while privileged ownership/mode changes run.
+find -x "$DATA_DIR" -exec chown -h "${DAEMON_USER}:${DAEMON_USER}" {} +
+# `chmod go-rwx` alone does not reliably remove named macOS ACL entries.
+find -x "$DATA_DIR" ! -type l -exec chmod -N {} +
+find -x "$DATA_DIR" ! -type l -exec chmod go-rwx {} +
+chmod 711 "$DATA_DIR"
+chmod 755 "$DATA_DIR/runtime"
+chmod 700 "$DATA_DIR/logs"
+
+# Invalidate legacy root-equivalent discovery material before making runtime
+# traversable. The replacement auth-token is a scoped first-party credential.
+rm -f \
+  "$DATA_DIR/runtime/auth-token" \
+  "$DATA_DIR/runtime/web-ui-token" \
+  "$DATA_DIR/runtime/port" \
+  "$DATA_DIR/runtime/pid" \
+  "$DATA_DIR/runtime/cert.pem" \
+  "$DATA_DIR/runtime/cert-fingerprint" \
+  "$DATA_DIR/runtime/lock"
+
+# 2b. Extract the shipped service bundle (gezeld + node_modules) into
+# ${SERVICE_TREE}. We use the bundled Electron exe in Node mode
+# (ELECTRON_RUN_AS_NODE=1) to run our bundled CLI; same approach as the
+# Windows installer. `--force` skips the version compare since a fresh
+# install should always populate the tree, even if a partial previous
+# install left something behind. Stderr is left untouched so any failure
+# surfaces in /var/log/install.log.
+echo "[gezel postinstall] extracting service bundle"
+if [ ! -f "$BUNDLE_TARBALL" ] || [ ! -f "$EXTRACT_CLI" ]; then
+  echo "[gezel postinstall] ERROR: shipped bundle missing (tarball=$BUNDLE_TARBALL cli=$EXTRACT_CLI)" >&2
+  exit 1
+fi
+ELECTRON_RUN_AS_NODE=1 "$ELECTRON_EXE" "$EXTRACT_CLI" \
+  --tarball="$BUNDLE_TARBALL" \
+  --meta="$BUNDLE_META" \
+  --dest="$SERVICE_TREE" \
+  --force
+find -x "$SERVICE_TREE" -exec chown -h "${DAEMON_USER}:${DAEMON_USER}" {} +
+find -x "$SERVICE_TREE" ! -type l -exec chmod go-rwx {} +
+
+# 3. Install the LaunchDaemon plist (root:wheel 644 — Apple convention).
+if [ ! -f "$PLIST_SRC" ]; then
+  echo "[gezel postinstall] ERROR: plist missing at $PLIST_SRC" >&2
+  exit 1
+fi
+cp "$PLIST_SRC" "$PLIST_DST"
+chown root:wheel "$PLIST_DST"
+chmod 644 "$PLIST_DST"
+
+# 4. Bootstrap and start the already-stopped service.
+#
+# Idempotency notes — this whole block has to survive being run twice
+# in one install transaction. macOS PackageKit runs postinstall a
+# second time on upgrade-over-existing installs (the "old version
+# cleanup" pass), and that second pass would otherwise race against
+# the already-bootstrapped service from the first pass.
+#
+# `launchctl bootout` returns before the service has fully exited the
+# launchd domain; calling `bootstrap` immediately afterward races and
+# returns `5: Input/output error`. We poll `print` until the service
+# is gone before bootstrapping.
+#
+# `bootstrap` itself can also fail benignly if another concurrent
+# install path has already loaded the same plist — in that case the
+# desired end state (service is loaded) is already true, so we treat
+# it as success rather than failing the install transaction.
+bootstrap_err=$(launchctl bootstrap system "$PLIST_DST" 2>&1) || {
+  if launchctl print "system/${DAEMON_LABEL}" >/dev/null 2>&1; then
+    echo "[gezel postinstall] bootstrap reported '${bootstrap_err}' but service is loaded; continuing"
+  else
+    echo "[gezel postinstall] bootstrap failed: ${bootstrap_err}" >&2
+    exit 1
+  fi
+}
+
+launchctl enable "system/${DAEMON_LABEL}"
+launchctl kickstart -k "system/${DAEMON_LABEL}" || true
+
+echo "[gezel postinstall] GezelService installed and started."
+exit 0

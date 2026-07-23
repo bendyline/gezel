@@ -1,0 +1,18 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "./src",
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "types": ["node"],
+    // Pull DOM types into scope so the bodies passed to
+    // `page.evaluate(() => { document.querySelector(...) })` typecheck.
+    // Those bodies are serialized and run inside Chromium, where DOM
+    // types are real at runtime — TS just doesn't know that without
+    // the lib entry. Doesn't change emit (noEmit is on) or affect
+    // anything outside the evals package.
+    "lib": ["ES2022", "DOM"]
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "runs"]
+}

@@ -1,0 +1,39 @@
+{
+  "_note": "Recorded Airtable listRecords API responses (GET /v0/{baseId}/{table}), paginated. Page 1 carries an `offset`; page 2 omits it, ending the loop. Used by list-records.conformance.test.ts to drive the vendored action off-network, and mirrored (one record) by the service-side normalize golden test.",
+  "responses": [
+    {
+      "records": [
+        {
+          "id": "recA1",
+          "createdTime": "2026-06-01T10:00:00.000Z",
+          "fields": {
+            "Name": "Design review",
+            "Status": "In progress",
+            "Notes": "Ship the connectors tab"
+          }
+        },
+        {
+          "id": "recA2",
+          "createdTime": "2026-06-02T11:30:00.000Z",
+          "fields": {
+            "Name": "Write docs",
+            "Status": "Todo"
+          }
+        }
+      ],
+      "offset": "itrPage2/recA2"
+    },
+    {
+      "records": [
+        {
+          "id": "recA3",
+          "createdTime": "2026-06-03T09:15:00.000Z",
+          "fields": {
+            "Name": "Airtable spike",
+            "Status": "Done"
+          }
+        }
+      ]
+    }
+  ]
+}

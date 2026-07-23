@@ -1,0 +1,40 @@
+{
+  "id": "deepseek-v4-flash-284b-q4",
+  "name": "DeepSeek V4 Flash (FP4)",
+  "description": "DeepSeek V4 Flash in its native FP4+FP8 mixed-precision build — 284B-parameter Mixture-of-Experts (~13B active per token) with 1M-token context, Compressed Sparse Attention, and configurable Non-think / Think-High / Think-Max reasoning modes. The FP4 weights run in ~156 GB on llama.cpp via the `nsparks` GGUF (the FP4-FP8 native mix the upstream was trained at), and as a 4-bit MLX directory on Apple Silicon. Frontier-tier on-device reasoning for workstations and Mac Studio-class hardware — needs ~200 GB of usable memory.",
+  "tags": ["deepseek", "reasoning", "moe", "tools", "fp4", "long-context", "large"],
+  "category": "reasoning",
+  "maintainer": {
+    "name": "DeepSeek",
+    "url": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash"
+  },
+  "version": "1.0.0",
+  "updatedAt": "2026-05-17T00:00:00Z",
+  "license": "MIT",
+  "parameterSize": "284B",
+  "approxSizeBytes": 156148189760,
+  "supportsTools": true,
+  "contextWindow": 1000000,
+  "upstream": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash",
+  "style": {
+    "family": "deepseek",
+    "reasoningFormat": "think",
+    "toolCallFormat": "function-call"
+  },
+  "behaviors": [
+    "reasoning.strip-think-tags",
+    "prompt.private-reasoning-guidance",
+    "prompt.tool-cookbook-condensed",
+    "fabrication.detect-past-tense-no-tools",
+    "turn.preamble-folding"
+  ],
+  "llamaCpp": {
+    "huggingfaceRepo": "nsparks/DeepSeek-V4-Flash-FP4-FP8-GGUF",
+    "filename": "DeepSeek-V4-Flash-FP4-FP8-native.gguf",
+    "quantization": "FP4-FP8"
+  },
+  "mlx": {
+    "huggingfaceRepo": "mlx-community/deepseek-ai-DeepSeek-V4-Flash-4bit",
+    "quantization": "4bit"
+  }
+}

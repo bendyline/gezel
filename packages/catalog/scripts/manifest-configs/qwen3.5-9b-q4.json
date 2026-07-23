@@ -1,0 +1,39 @@
+{
+  "id": "qwen3.5-9b-q4",
+  "name": "Qwen 3.5 (9B)",
+  "description": "Alibaba's Qwen 3.5 at 9B parameters. Multimodal (text + images), native tool calling, 256K context. Strong reasoning + tool use for devices with a 12GB+ inference budget — the small-tier sweet spot for tool-heavy work.",
+  "tags": ["alibaba", "multimodal", "vision", "tools"],
+  "category": "general",
+  "maintainer": { "name": "Alibaba", "url": "https://ollama.com/library/qwen3.5" },
+  "version": "1.1.0",
+  "updatedAt": "2026-04-26T00:00:00Z",
+  "license": "Apache-2.0",
+  "parameterSize": "9B",
+  "approxSizeBytes": 6600000000,
+  "supportsTools": true,
+  "contextWindow": 262144,
+  "upstream": "https://ollama.com/library/qwen3.5",
+  "style": {
+    "family": "qwen",
+    "reasoningFormat": "think",
+    "toolCallFormat": "function-call"
+  },
+  "behaviors": [
+    "reasoning.strip-think-tags",
+    "prompt.private-reasoning-guidance",
+    "prompt.tool-cookbook-condensed",
+    "fabrication.detect-past-tense-no-tools",
+    "turn.ollama-num-predict-bumped",
+    "turn.preamble-folding"
+  ],
+  "ollama": { "tag": "qwen3.5:9b" },
+  "llamaCpp": {
+    "huggingfaceRepo": "lmstudio-community/Qwen3.5-9B-GGUF",
+    "filename": "Qwen3.5-9B-Q4_K_M.gguf",
+    "quantization": "Q4_K_M"
+  },
+  "mlx": {
+    "huggingfaceRepo": "mlx-community/Qwen3.5-9B-4bit",
+    "quantization": "4bit"
+  }
+}

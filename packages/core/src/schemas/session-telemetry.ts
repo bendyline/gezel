@@ -1,0 +1,64 @@
+import { z } from 'zod';
+
+/**
+ * Live per-session progress telemetry. Counters are accumulated in-memory by
+ * the service while a session's turns run (streamed content, tool activity,
+ * file mutations, GPU work) and reset on daemon restart — this is a runtime
+ * signal for stall detection and progress UI, not durable state. The eval
+ * harness reads the same shape over HTTP instead of scraping daemon logs.
+ */
+
+export const SessionGpuTaskSchema = z.enum(['image_generation', 'video_generation']);
+export type SessionGpuTask = z.infer<typeof SessionGpuTaskSchema>;
+
+export const SessionTurnTelemetrySchema = z.object({
+  /** Epoch ms when the in-flight turn started. */
+  startedAt: z.number(),
+  streamedContentChars: z.number().int().nonnegative(),
+  toolCalls: z.number().int().nonnegative(),
+  fileMutations: z.number().int().nonnegative(),
+});
+export type SessionTurnTelemetry = z.infer<typeof SessionTurnTelemetrySchema>;
+
+export const SessionTelemetrySchema = z.object({
+  sessionId: z.string(),
+  gezelId: z.string(),
+  projectId: z.string(),
+  /** True while a send is currently running for this session. */
+  inflight: z.boolean(),
+  turnsStarted: z.number().int().nonnegative(),
+  deltaChunks: z.number().int().nonnegative(),
+  streamedContentChars: z.number().int().nonnegative(),
+  wirePulses: z.number().int().nonnegative(),
+  heartbeats: z.number().int().nonnegative(),
+  enginePhaseEvents: z.number().int().nonnegative(),
+  /**
+   * `engine_phase === 'generating'` transitions — roughly one per completion
+   * request the engine served (the slot-launch granularity stall logic and
+   * the eval chatter threshold were calibrated against).
+   */
+  generationSpurts: z.number().int().nonnegative(),
+  toolCalls: z.number().int().nonnegative(),
+  toolArgChars: z.number().int().nonnegative(),
+  fileMutations: z.number().int().nonnegative(),
+  gpuEvents: z.number().int().nonnegative(),
+  gpuTaskActive: SessionGpuTaskSchema.nullable(),
+  /** Epoch ms of the last streamed signal (delta / pulse / heartbeat / phase). */
+  lastStreamActivityAt: z.number().nullable(),
+  lastToolActivityAt: z.number().nullable(),
+  lastMutationAt: z.number().nullable(),
+  lastGpuActivityAt: z.number().nullable(),
+  /** Max of all activity timestamps — "when did ANY progress signal last fire". */
+  lastProgressAt: z.number().nullable(),
+  /** Counters scoped to the currently-running turn; null between turns. */
+  currentTurn: SessionTurnTelemetrySchema.nullable(),
+});
+export type SessionTelemetry = z.infer<typeof SessionTelemetrySchema>;
+
+export const SessionTelemetryListResponseSchema = z.object({
+  /** Bumped when counter semantics change; consumers gate on it. */
+  version: z.literal(1),
+  capturedAt: z.number(),
+  sessions: z.array(SessionTelemetrySchema),
+});
+export type SessionTelemetryListResponse = z.infer<typeof SessionTelemetryListResponseSchema>;

@@ -1,0 +1,13 @@
+{
+  "name": "gezel",
+  "image": "mcr.microsoft.com/devcontainers/typescript-node:22",
+  "postCreateCommand": "bash .devcontainer/setup.sh",
+  "features": {
+    "ghcr.io/devcontainers/features/github-cli:1": {}
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": ["biomejs.biome", "dbaeumer.vscode-eslint"]
+    }
+  }
+}

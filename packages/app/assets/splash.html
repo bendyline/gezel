@@ -1,0 +1,39 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Gezel</title>
+    <style>
+      html, body {
+        margin: 0;
+        height: 100%;
+        background: #667f62;
+        overflow: hidden;
+        user-select: none;
+        -webkit-user-select: none;
+        -webkit-app-region: drag;
+      }
+      .splash {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 100%;
+        width: 100%;
+      }
+      .splash img {
+        width: 40%;
+        max-width: 360px;
+        opacity: 0;
+        animation: fade-in 220ms ease-out forwards;
+      }
+      @keyframes fade-in {
+        to { opacity: 1; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="splash">
+      <img src="./gezellogo.png" alt="Gezel" />
+    </div>
+  </body>
+</html>

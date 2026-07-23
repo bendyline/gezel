@@ -1,0 +1,62 @@
+name: Full E2E
+
+on:
+  schedule:
+    - cron: '23 9 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: full-e2e-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: '24'
+  PNPM_VERSION: '11.15.1'
+
+permissions:
+  contents: read
+
+jobs:
+  full-e2e:
+    name: ${{ matrix.surface }} E2E
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        surface: [browser, electron]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@008330803749db0355799c700092d9a85fd074e9 # v6.0.9
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - name: Reject local workspace links
+        run: pnpm check:local-links
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: Install Chromium
+        if: matrix.surface == 'browser'
+        run: pnpm --filter @bendyline/gezel-app exec playwright install --with-deps chromium
+      - name: Run browser suite
+        if: matrix.surface == 'browser'
+        run: pnpm test:e2e:web:run
+      - name: Run Electron suite
+        if: matrix.surface == 'electron'
+        run: xvfb-run -a pnpm test:e2e:run
+      - name: Repeat session restart regression without retries
+        if: matrix.surface == 'electron'
+        run: xvfb-run -a pnpm --filter @bendyline/gezel-app exec playwright test sessions.spec.ts --reporter=line --retries=0 --repeat-each=3
+      - name: Preserve diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0 # v7.0.1
+        with:
+          name: ${{ matrix.surface }}-e2e-diagnostics
+          path: |
+            packages/app/test-results/
+            packages/app/playwright-report/
+            packages/app/screenshots/
+          if-no-files-found: ignore
+          retention-days: 14

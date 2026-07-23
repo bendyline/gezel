@@ -1,0 +1,26 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`skillToCraftbookDoc > pins the careful conversion output (byte snapshot) 1`] = `
+"{
+  "id": "proj-skill-careful",
+  "name": "/careful — Destructive Command Guardrails",
+  "description": "Safety guardrails for destructive commands.\\n\\nWarns before rm -rf, DROP TABLE,\\nforce-push, git reset --hard, kubectl delete, and similar destructive operations.\\nUser can override each warning. Use when touching prod, debugging live systems,\\nor working in a shared environment. Use when asked to \\"be careful\\", \\"safety mode\\",\\n\\"prod mode\\", or \\"careful mode\\".\\n\\nSafety mode is now **active**. Every bash command will be checked for destructive\\npatterns before running. If a destructive command is detected, you'll be warned\\nand can choose to proceed or cancel.\\n\\n> Converted from \`.claude/skills/careful/SKILL.md\` (skill \\"careful\\" v0.1.0).\\n> - 1 hook declaration(s) not auto-converted — source hooks run host shell scripts\\n> - allowed-tools (Bash, Read) not mapped — gezel tool access comes from the session's toolsets",
+  "entryStepId": "run",
+  "triggers": [
+    "be careful",
+    "warn before destructive",
+    "safety mode"
+  ],
+  "command": "careful",
+  "steps": [
+    {
+      "id": "run",
+      "name": "/careful — Destructive Command Guardrails",
+      "prompt": "Safety mode is now **active**. Every bash command will be checked for destructive\\npatterns before running. If a destructive command is detected, you'll be warned\\nand can choose to proceed or cancel.\\n\\n## What's protected\\n\\n| Pattern | Example | Risk |\\n|---------|---------|------|\\n| \`rm -rf\` / \`rm -r\` / \`rm --recursive\` | \`rm -rf /var/data\` | Recursive delete |\\n| \`DROP TABLE\` / \`DROP DATABASE\` | \`DROP TABLE users;\` | Data loss |\\n| \`TRUNCATE\` | \`TRUNCATE orders;\` | Data loss |\\n| \`git push --force\` / \`-f\` | \`git push -f origin main\` | History rewrite |\\n| \`git reset --hard\` | \`git reset --hard HEAD~3\` | Uncommitted work loss |\\n| \`git checkout .\` / \`git restore .\` | \`git checkout .\` | Uncommitted work loss |\\n| \`kubectl delete\` | \`kubectl delete pod\` | Production impact |\\n| \`docker rm -f\` / \`docker system prune\` | \`docker system prune -a\` | Container/image loss |\\n\\n## Safe exceptions\\n\\nThese patterns are allowed without warning:\\n- \`rm -rf node_modules\` / \`.next\` / \`dist\` / \`__pycache__\` / \`.cache\` / \`build\` / \`.turbo\` / \`coverage\`\\n\\n## How it works\\n\\nThe hook reads the command from the tool input JSON, checks it against the\\npatterns above, and returns \`permissionDecision: \\"ask\\"\` with a warning message\\nif a match is found. You can always override the warning and proceed.\\n\\nTo deactivate, end the conversation or start a new one. Hooks are session-scoped.",
+      "terminal": true
+    }
+  ],
+  "version": "0.1.0"
+}
+"
+`;

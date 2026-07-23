@@ -1,0 +1,585 @@
+[
+  {
+    "id": "edit-notes",
+    "name": "Edit Notes Pass",
+    "description": "Review the footage like an editor: timestamped notes on pacing and cuts read against the transcript and the media index, then a machine-readable cut list the assembly step can execute — opinion upstream, precision downstream. Locks the review criteria FIRST (every keep or cut carries a timecode and a reason, b-roll gaps get named), then writes the edit notes, then distills them into the cut list — so the creative call and the executable record never drift apart. Use for edit passes, footage reviews, 'what should we cut', cutlist prep, and tightening a video that drags.",
+    "tags": ["video", "editing", "cutlist", "footage", "review", "ritual"],
+    "triggers": [
+      "edit pass",
+      "review the footage",
+      "make a cutlist",
+      "what should we cut",
+      "tighten the video"
+    ],
+    "phases": [
+      {
+        "id": "scope",
+        "name": "Scope the review",
+        "role": "regisseur",
+        "summary": "footage inventory, transcript read, review criteria locked",
+        "prompt": "Define the edit pass before forming a single opinion. Step 1: read media/index.json from the workspace — every clip with its id and duration — and read the transcript under transcripts/ plus the storyboard or brief if one exists, so you know what the piece is trying to be. Step 2: lock the review criteria — every keep-or-cut call carries a timecode and a stated reason, pacing judgments name the specific stretch that drags or rushes, b-roll gaps are named where the footage cannot carry the point, and no note references footage that is not in the index. Step 3: define what the cut list must record for each decision — which clip, the in and out points, the action (keep, cut, trim, reorder), and a short note tying it back to the edit notes. Step 4: write an acceptance-criteria checklist ('every note carries a timecode', 'every cut decision has a reason', 'every cut-list row points at a real clip', 'in and out points sit inside that clip's duration', 'the draggy stretches are addressed, not just observed'). Call write_task_note with the clip count + criteria + checklist and write notes/scope.md. No reviewing yet.",
+        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "review",
+        "name": "Write the edit notes",
+        "role": "reviewer",
+        "summary": "timestamped pacing and cut notes, clip by clip",
+        "prompt": "Review the footage against the locked criteria. Step 1: walk the transcript and the media index clip by clip, in story order, and write timestamped notes — what works, what drags, where the energy dips, where a cut or trim would help. Every observation carries a timecode in mm:ss form and names its clip. Step 2: for each stretch that drags, say exactly what to do about it — trim from where to where, cut entirely, or reorder — and why the piece is better for it. Step 3: name the b-roll gaps: the moments where the words need cover the footage does not have, so the owner can plan pickups. Step 4: keep opinions honest and concrete — 'the intro runs long' is a note, 'trim 0:12-0:38, the point lands at 0:39' is an edit. Write the notes to notes/edit-notes.md and call write_task_note with the count of cut decisions and the biggest pacing problem found.",
+        "produces": {
+          "path": "notes/edit-notes.md",
+          "kind": "markdown-notes",
+          "extraChecks": [
+            {
+              "kind": "contains",
+              "file": "notes/edit-notes.md",
+              "pattern": "\\d{1,2}:\\d{2}",
+              "label": "the edit notes carry mm:ss timecodes"
+            }
+          ]
+        }
+      },
+      {
+        "id": "cutlist",
+        "name": "Build the cut list",
+        "role": "developer",
+        "summary": "the machine-readable record of every edit decision",
+        "prompt": "Distill the edit notes into the cut list the assembly step can execute. Step 1: for every decision in notes/edit-notes.md, write one record to cutlist.json as a JSON array — each record with the clip id exactly as it appears in media/index.json, the in and out points, the action (keep, cut, trim, or reorder), and a short note carrying the reason over from the edit notes. Step 2: verify precision as you go — every clip id must exist in the media index, and every in and out point must sit within that clip's duration; a cut list that references invented footage or impossible timecodes is worse than no cut list. Step 3: order the records in final-piece order so the assembly reads top to bottom. Step 4: re-read the result once as JSON — valid, complete, no decision from the notes left behind. Call write_task_note with the record count and the total runtime the kept material adds up to.",
+        "produces": {
+          "path": "cutlist.json",
+          "kind": "json",
+          "extraChecks": [
+            {
+              "kind": "recordSchema",
+              "file": "cutlist.json",
+              "fields": [
+                { "name": "clip", "type": "nonempty" },
+                { "name": "in" },
+                { "name": "out" },
+                { "name": "action", "type": "nonempty" },
+                { "name": "note", "required": false }
+              ],
+              "minRows": 3
+            }
+          ]
+        }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Open cutlist.json, notes/edit-notes.md, and media/index.json and verify every criterion from notes/scope.md: every cut-list record names a clip id that exists in the media index, every in and out point sits inside that clip's duration, every record's action traces back to a timestamped note with a reason, the notes address the pacing problems rather than just observing them, and the b-roll gaps are named. Write PASS/FAIL per criterion; on any failure, name the offending record or note and loop back to cutlist.",
+      "loopBackTo": "cutlist"
+    }
+  },
+  {
+    "id": "rough-cut-assembly",
+    "name": "Rough Cut Assembly",
+    "description": "Execute the cut list and prove it ran: every clip verified against the media index before anything renders, the assembly driven through the project's media pipeline with a run log, and the result checked against the expected duration — an assembly you can trust unwatched. Locks the pre-flight checks FIRST (clips exist, in and out points sit inside their durations, failure handling decided), then runs the assembly, then verifies and reports. Use for rough cuts, assembling a cutlist, executing an edit pass, render runs, and 'put the cut together'.",
+    "tags": ["video", "assembly", "render", "cutlist", "pipeline", "ritual"],
+    "triggers": [
+      "assemble the rough cut",
+      "run the cutlist",
+      "put the cut together",
+      "render the rough cut",
+      "execute the edit"
+    ],
+    "phases": [
+      {
+        "id": "scope",
+        "name": "Pre-flight the cut list",
+        "role": "werkmeester",
+        "summary": "cutlist validated against the media index, run plan locked",
+        "prompt": "Verify before you render — an assembly that runs on a bad cut list wastes the whole pass. Step 1: read cutlist.json and media/index.json from the workspace and check every record: the clip id exists in the index, the in point is before the out point, and both sit inside that clip's duration. List every violation precisely; if any exist, stop and report them instead of assembling around them. Step 2: compute the expected output — how many segments, and the total duration the kept material should add up to — so the verify phase has a number to check against. Step 3: lock the run plan — the assembly runs through the project's pipeline script via the run_script tool, it writes its run log to renders/assembly-log.json with a status field, and on any failure the run stops and the error is reported rather than papered over. Step 4: write an acceptance-criteria checklist ('every cutlist record validated before the run', 'the render exists at renders/rough-cut.mp4', 'the run log reports status ok', 'actual duration matches the expected duration', 'the report states what ran and what to spot-check'). Call write_task_note with the segment count + expected duration + checklist and write notes/scope.md.",
+        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "assemble",
+        "name": "Run the assembly",
+        "role": "developer",
+        "summary": "the cutlist executed through the media pipeline, log on disk",
+        "prompt": "Execute the validated cut list. Step 1: the assembly pipeline is a project script — call list_scripts to find it, then run it with run_script({ name: \"<script name>\" }); never run it with run_nodejs_script and never reimplement it. It reads cutlist.json and media/index.json, refuses unknown clips and out-of-range timecodes, and writes the render to renders/rough-cut.mp4 plus its run log to renders/assembly-log.json. Step 2: if run_script reports an error, read the error text, fix exactly what it names (a cutlist record, a path), and run it again — never write renders/assembly-log.json yourself; the log is evidence the pipeline ran, not decoration. Step 3: once the run succeeds, read renders/assembly-log.json and confirm it reports status ok with the clips it assembled and the duration it computed. Call write_task_note with the run outcome, the segment count, and the computed duration.",
+        "produces": {
+          "path": "renders/assembly-log.json",
+          "kind": "json",
+          "extraChecks": [
+            {
+              "kind": "minBytes",
+              "file": "renders/rough-cut.mp4",
+              "bytes": 200
+            },
+            {
+              "kind": "jsonPathEquals",
+              "file": "renders/assembly-log.json",
+              "path": "status",
+              "value": "ok",
+              "label": "the assembly log reports status ok"
+            }
+          ]
+        }
+      },
+      {
+        "id": "report",
+        "name": "Verify and report",
+        "role": "reviewer",
+        "summary": "expected versus actual, segment count, the honest run report",
+        "prompt": "Check the run against the numbers locked in scope, then write the run report. Step 1: compare the log's computed duration against the expected duration from notes/scope.md and the log's clip list against the cut list — every segment accounted for, nothing extra, nothing dropped. Step 2: write report.md — what was assembled (segments, total duration, source clip count), the expected-versus-actual duration comparison with the delta stated plainly, any warnings the log carried, and the two or three moments a human should spot-check first when they watch the cut. Step 3: if the numbers do not match, say so plainly and name the likely cause — a report that hides a mismatch defeats the whole ritual. Call write_task_note with the report path and the expected-versus-actual result.",
+        "produces": {
+          "path": "report.md",
+          "kind": "markdown-report",
+          "minBytes": 800,
+          "extraChecks": [
+            {
+              "kind": "contains",
+              "file": "report.md",
+              "pattern": "duration",
+              "flags": "i",
+              "label": "the report compares expected versus actual duration"
+            }
+          ]
+        }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Open report.md, renders/assembly-log.json, and cutlist.json and verify every criterion from notes/scope.md: the render exists at renders/rough-cut.mp4, the log reports status ok, every clip in the log's list appears in the cut list (and nothing extra), the expected-versus-actual duration comparison is stated with real numbers from the log, and the report names what to spot-check. Write PASS/FAIL per criterion; on any failure, name the gap and loop back to report — or to assemble if the run itself is the problem.",
+      "loopBackTo": "report"
+    }
+  },
+  {
+    "id": "transcribe-index",
+    "name": "Transcribe and Index a Tape",
+    "description": "Give one tape the ten-second-findability treatment: transcript on file, then every moment worth finding indexed with its timecode and people tags — so 'the clip of Opa's 80th toast' becomes a query, not an afternoon of scrubbing. Locks the tape's metadata and the indexing rules FIRST (timecoded moments, people tags drawn from the family roster, searchable descriptions), then lands the transcript, then the clip records, then a tape summary with the highlights. Use for indexing a digitized tape, making home videos searchable, cataloging family footage, and 'what is on this tape'.",
+    "tags": ["archive", "video", "transcript", "index", "family", "ritual"],
+    "triggers": [
+      "index the tape",
+      "transcribe the tape",
+      "what is on this tape",
+      "make the tape searchable",
+      "catalog the footage"
+    ],
+    "phases": [
+      {
+        "id": "scope",
+        "name": "Scope the tape",
+        "role": "filmarchivaris",
+        "summary": "tape metadata, the family roster, indexing rules locked",
+        "prompt": "Define the indexing job before touching the tape. Step 1: identify the tape being indexed — its label or number, roughly when it was shot, and where its transcript lands under transcripts/ (when a transcript is already on file there, this run verifies and indexes it rather than re-transcribing). Step 2: read family.md from the workspace — the roster of names is the controlled vocabulary for people tags; a tag that is not on the roster is a typo waiting to break search. Step 3: read clips.json to see how prior tapes were indexed, and lock the indexing rules — every moment worth finding gets a record with the tape, the timecode where it starts, the people in it tagged from the roster, and a description written the way someone would actually search for it ('Opa's toast at the 80th', not 'man speaking'). Step 4: write an acceptance-criteria checklist ('transcript on file under transcripts/', 'every notable moment indexed with its timecode', 'every people tag matches the roster', 'descriptions are searchable phrases', 'existing clip records untouched'). Call write_task_note with the tape id + roster size + checklist and write notes/scope.md.",
+        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "transcript",
+        "name": "Land the transcript",
+        "role": "transcriber",
+        "summary": "the tape's transcript on file, timestamped and speaker-marked",
+        "prompt": "Get the tape's transcript on file. Step 1: produce the transcript through the project's transcription capabilities — or, when a transcript for this tape is already provided under transcripts/, read it end to end and treat it as the source. Step 2: make sure it carries what indexing needs — timestamps through the recording and speaker names where voices are identifiable from the family roster; normalize obvious mis-hearings of family names against family.md. Step 3: save the result under transcripts/ named for the tape, and skim once for the moments that will matter — celebrations, first words, arrivals, the stories people tell — noting rough timecodes as you go. Call write_task_note with the transcript path, its rough duration, and the count of candidate moments spotted."
+      },
+      {
+        "id": "index",
+        "name": "Index the moments",
+        "role": "archivist",
+        "summary": "clip records appended: tape, timecode, people, description",
+        "prompt": "Index every moment worth finding. Step 1: walk the transcript and pick the moments someone will one day search for — the toast, the song, the argument about the recipe, the baby's first steps in the background. Aim for completeness over polish: a missed moment is invisible forever. Step 2: for each moment, append a record to clips.json through the project's archive capabilities — the tape id, the timecode where the moment starts (matching a timestamp in the transcript), the people in it as an array of roster names from family.md, and a searchable description. Step 3: never edit or drop the existing records from prior tapes — this is an append, and the archive's history is the point. Step 4: re-read clips.json once — valid JSON, new records complete, timecodes real. Call write_task_note with the count of new records and the single best moment found.",
+        "produces": {
+          "path": "clips.json",
+          "kind": "json",
+          "extraChecks": [
+            {
+              "kind": "recordSchema",
+              "file": "clips.json",
+              "fields": [
+                { "name": "tape", "type": "nonempty" },
+                { "name": "timecode", "type": "nonempty" },
+                { "name": "people" },
+                { "name": "description", "type": "nonempty" }
+              ],
+              "minRows": 5
+            }
+          ]
+        }
+      },
+      {
+        "id": "report",
+        "name": "Write the tape summary",
+        "role": "copywriter",
+        "summary": "what is on the tape, the highlights, who appears",
+        "prompt": "Write the tape summary the family actually reads. Step 1: open with what the tape is — when it was shot, the occasions it covers, roughly how long it runs. Step 2: give the highlights — the five or so best moments with their timecodes, written warmly enough that someone wants to go watch them. Step 3: list who appears on the tape, drawn from the people tags just indexed. Step 4: close with how to find things — a line noting that every indexed moment is searchable in the archive by person or description. Keep it to a page; this is a family document, not a catalog printout. Write report.md and call write_task_note with the report path and the indexed-moment count.",
+        "produces": { "path": "report.md", "kind": "markdown-report", "minBytes": 800 }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Open report.md, clips.json, the transcript under transcripts/, and family.md and verify every criterion from notes/scope.md: the transcript is on file and timestamped, every new clip record carries a timecode that appears in the transcript, every people tag matches a roster name exactly, descriptions read as searchable phrases rather than shrugs, prior tapes' records are untouched, and the summary's highlights point at real indexed moments. Write PASS/FAIL per criterion; on any failure, name the offending record and loop back to index.",
+      "loopBackTo": "index",
+      "deliverable": { "path": "report.md", "kind": "markdown-report", "minBytes": 800 }
+    }
+  },
+  {
+    "id": "anniversary-cut",
+    "name": "Anniversary Cut",
+    "description": "Build the highlight reel for the occasion: the archive queried for the person and the years that matter, clips chosen with stated reasons, assembled through the project's media pipeline with a run log, and delivered with a chapter list and a dedication — the reel that makes the birthday. Locks the occasion and the selection criteria FIRST (era coverage, the famous moments in, a length budget), then selects from the archive with no invented footage, then assembles, then writes the presentation notes. Use for birthday reels, anniversary videos, memorial montages, 'make a highlight reel', and milestone tributes.",
+    "tags": ["archive", "video", "highlight-reel", "family", "assembly", "ritual"],
+    "triggers": [
+      "make a highlight reel",
+      "anniversary video",
+      "birthday montage",
+      "put together a tribute",
+      "clips of grandma over the years"
+    ],
+    "phases": [
+      {
+        "id": "scope",
+        "name": "Scope the occasion",
+        "role": "filmarchivaris",
+        "summary": "occasion, person, selection criteria and length budget locked",
+        "prompt": "Define the reel before pulling a single clip. Step 1: name the occasion and the person it honors, and read family.md so names and relationships are right. Step 2: read clips.json — the archive's indexed moments — and survey what exists for this person: which tapes, which years, which of the family-famous moments are on file. Step 3: lock the selection criteria — the reel covers the person's eras rather than clustering in one year, the moments the family always retells make the cut, every selection carries a stated reason, only clips that exist in the archive may be used (no invented footage, ever), and the total sticks to a length budget you set now from the occasion. Step 4: write an acceptance-criteria checklist ('every selected clip exists in clips.json', 'every selection has a reason', 'eras covered per the criteria', 'total within the length budget', 'assembled through the project's pipeline script via run_script with a status-ok log', 'chapter list and dedication delivered'). Call write_task_note with the occasion + archive counts + checklist and write notes/scope.md.",
+        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "select",
+        "name": "Select the clips",
+        "role": "curator",
+        "summary": "the cut list: archive clips chosen with reasons, in reel order",
+        "prompt": "Choose the reel's clips from the archive against the locked criteria. Step 1: sweep clips.json for every candidate moment featuring the person, across all tapes and years. Step 2: select — the famous moments first, then the quieter ones that show an era the famous ones miss; cut candidates that repeat a beat already covered. Every clip id must come from clips.json exactly as indexed; if a moment the family remembers is not in the archive, note it as missing footage rather than inventing a reference. Step 3: order the selections into the reel's emotional arc — chronology is the default, but a strong opening and a strong close outrank strict order. Step 4: write cutlist.json as a JSON array, each record with the clip id from the archive and the reason it made the cut; keep the running total inside the length budget. Call write_task_note with the selection count, the era coverage in one line, and anything remembered-but-missing.",
+        "produces": {
+          "path": "cutlist.json",
+          "kind": "json",
+          "extraChecks": [
+            {
+              "kind": "recordSchema",
+              "file": "cutlist.json",
+              "fields": [
+                { "name": "clip", "type": "nonempty" },
+                { "name": "reason", "type": "nonempty" }
+              ],
+              "minRows": 5
+            },
+            {
+              "kind": "valuesSubsetOf",
+              "file": "cutlist.json",
+              "sourceFiles": ["clips.json"],
+              "pattern": "\"clip\"\\s*:\\s*\"([^\"]+)\"",
+              "label": "every selected clip id exists in the archive — no invented footage"
+            }
+          ]
+        }
+      },
+      {
+        "id": "assemble",
+        "name": "Assemble the reel",
+        "role": "developer",
+        "summary": "the reel rendered through the media pipeline, log on disk",
+        "prompt": "Assemble the reel from the cut list. Step 1: the assembly pipeline is a project script — call list_scripts to find it, then run it with run_script({ name: \"<script name>\" }); never run it with run_nodejs_script and never reimplement it. It reads cutlist.json and the archive index, refuses any clip it cannot find, writes the render into renders/, and writes its run log to renders/assembly-log.json with a status field. Step 2: if run_script reports an error, read the error text, fix what it names, and run it again — never write renders/assembly-log.json yourself; a fabricated log on a family keepsake is still a fabricated log. Step 3: once it succeeds, read the log and confirm status ok, the clip list matching the cut list, and the computed duration inside the length budget. Call write_task_note with the run outcome and the reel's duration.",
+        "produces": {
+          "path": "renders/assembly-log.json",
+          "kind": "json",
+          "extraChecks": [
+            {
+              "kind": "fileCount",
+              "ext": ["mp4"],
+              "min": 1,
+              "dir": "renders"
+            },
+            {
+              "kind": "jsonPathEquals",
+              "file": "renders/assembly-log.json",
+              "path": "status",
+              "value": "ok",
+              "label": "the assembly log reports status ok"
+            }
+          ]
+        }
+      },
+      {
+        "id": "report",
+        "name": "Chapters and dedication",
+        "role": "copywriter",
+        "summary": "the chapter list, the dedication, how to play it on the day",
+        "prompt": "Write the presentation notes that turn a render into a gift. Step 1: write the chapter list — each selected moment in reel order with its rough position, who is in it, and one warm line about why it is there (the reasons from the cut list, written for the family rather than the archive). Step 2: write the dedication — a short paragraph to open or close the reel, in the family's voice, naming the occasion and the person. Step 3: add the practical notes — the reel's duration, where the render lives, and anything remembered-but-missing from the archive so nobody wonders why a famous moment is absent. Write report.md and call write_task_note with the report path and the chapter count.",
+        "produces": {
+          "path": "report.md",
+          "kind": "markdown-report",
+          "minBytes": 800,
+          "extraChecks": [
+            {
+              "kind": "contains",
+              "file": "report.md",
+              "pattern": "chapter",
+              "flags": "i",
+              "label": "a chapter list for the reel"
+            }
+          ]
+        }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Open report.md, cutlist.json, renders/assembly-log.json, and clips.json and verify every criterion from notes/scope.md: every selected clip id exists in the archive, every selection carries a real reason, the eras are covered per the criteria, the log reports status ok with a duration inside the length budget, the chapter list matches the assembled order, and the dedication names the occasion and the person warmly and correctly. Write PASS/FAIL per criterion; on any failure, name the gap and loop back to report — or to select if the selection itself is the problem.",
+      "loopBackTo": "report"
+    }
+  },
+  {
+    "id": "chapter-narration-run",
+    "name": "Narrate a Chapter",
+    "description": "Take one chapter from manuscript to narrated audio, deliberately: a narration script with pronunciations and pauses marked before anything renders, the audio driven through the project's narration capabilities with a run log, and a listen-check against the text — no skipped paragraphs, no mangled names. Locks the chapter and the style sheet FIRST (voice, pace, every proper noun's pronunciation), then preps the script, then renders, then checks coverage. Use for narrating a chapter, audiobook recording runs, text-to-speech passes, and 'read chapter two aloud'.",
+    "tags": ["audiobook", "narration", "tts", "audio", "chapter", "ritual"],
+    "triggers": [
+      "narrate the chapter",
+      "record chapter two",
+      "render the narration",
+      "audiobook chapter run",
+      "read the chapter aloud"
+    ],
+    "phases": [
+      {
+        "id": "scope",
+        "name": "Scope the chapter",
+        "role": "producer",
+        "summary": "chapter locked, style sheet read, pronunciation list built",
+        "prompt": "Define the narration run before prepping a word. Step 1: identify the chapter being narrated and read it end to end from the manuscript under manuscript/. Step 2: read the narration style sheet at narration/style.md — the voice, the pace, the pause conventions — and treat it as law for this run. Step 3: build the pronunciation list — every proper noun and unusual name in the chapter, each with its pronunciation from the style sheet; for any name the style sheet does not cover, propose a pronunciation and flag it for the owner rather than letting the render guess. Step 4: write an acceptance-criteria checklist ('narration script covers the full chapter, nothing skipped', 'every listed name carries pronunciation markup', 'pauses marked per the style sheet', 'rendered through the project's narration script via run_script with a status-ok log', 'listen-check confirms coverage and names'). Call write_task_note with the chapter, the pronunciation-list size + checklist, and write notes/scope.md.",
+        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "prep",
+        "name": "Prep the narration script",
+        "role": "copywriter",
+        "summary": "the chapter as a marked-up narration script",
+        "prompt": "Turn the chapter into the script the narration engine reads. Step 1: carry the chapter's full text into a narration script at narration/scripts/, named for the chapter — every paragraph present, in order, nothing summarized away; a narration script is the text plus markup, never a digest. Step 2: mark it up per the style sheet — pronunciation markup on every name from the locked list at its first occurrence, pause marks at scene breaks and where the prose needs air, and any pace notes the style sheet calls for. Step 3: re-read against the manuscript once, checking coverage paragraph by paragraph. Call write_task_note with the script path, its word count, and the count of pronunciation marks placed."
+      },
+      {
+        "id": "render",
+        "name": "Render the audio",
+        "role": "developer",
+        "summary": "the chapter rendered to audio with its run log",
+        "prompt": "Render the narration. Step 1: the narration engine is a project script — call list_scripts to find it, then run it with run_script({ name: \"<script name>\" }); never run it with run_nodejs_script and never reimplement it. It reads the narration script from narration/scripts/, writes the chapter's audio into audio/ named for the chapter, and writes a run log beside it as JSON with a status field and the word count it processed. Step 2: if run_script reports an error or the log flags names it could not resolve, read the error text, fix the script's markup, and run it again — never write the audio or its log yourself; the log is evidence the engine ran. Step 3: once it succeeds, read the log and confirm status ok and a word count in line with the script's. Call write_task_note with the audio path, the log's word count, and anything the log flagged."
+      },
+      {
+        "id": "report",
+        "name": "Listen-check and report",
+        "role": "reviewer",
+        "summary": "coverage and name check against the manuscript, run report",
+        "prompt": "Check the render against the text, then write the run report. Step 1: verify coverage — the log's word count against the script's, and the script's paragraphs against the manuscript's; a skipped paragraph is the failure this ritual exists to catch. Step 2: verify the names — every pronunciation from the locked list was marked in the script and none were flagged unresolved by the run log. Step 3: write report.md — the chapter, the audio path and duration or word count from the log, the coverage result stated plainly, the pronunciation check result name by name, and anything flagged for the owner (proposed pronunciations awaiting approval, spots worth a human listen). Call write_task_note with the report path and the coverage verdict.",
+        "produces": { "path": "report.md", "kind": "markdown-report", "minBytes": 600 }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Open report.md, the run log in audio/, the narration script in narration/scripts/, and the manuscript chapter and verify every criterion from notes/scope.md: the script covers the full chapter with nothing skipped, every locked name carries pronunciation markup, the log reports status ok with a word count consistent with the script, and the report states the coverage and name-check results honestly. Write PASS/FAIL per criterion; on any failure, name the gap and loop back to report — or to prep if the script itself is the problem.",
+      "loopBackTo": "report",
+      "deliverable": { "path": "report.md", "kind": "markdown-report", "minBytes": 600 }
+    }
+  },
+  {
+    "id": "audiobook-master-pack",
+    "name": "Master the Audiobook",
+    "description": "Assemble the finished chapters into a release: completeness swept against the manuscript first, the metadata manifest built and verified chapter by chapter, the master assembled through the project's media pipeline with a run log, and the listener-facing description written — the moment the folder of takes becomes a book. Locks the packaging rules FIRST (order, metadata fields, total duration), then the manifest, then the master, then the release copy. Use for mastering an audiobook, packaging the chapters, audiobook release prep, and 'all the chapters are rendered, now what'.",
+    "tags": ["audiobook", "mastering", "release", "audio", "packaging", "ritual"],
+    "triggers": [
+      "master the audiobook",
+      "package the chapters",
+      "assemble the book",
+      "audiobook release prep",
+      "finish the audiobook"
+    ],
+    "phases": [
+      {
+        "id": "scope",
+        "name": "Sweep for completeness",
+        "role": "producer",
+        "summary": "chapters on disk checked against the manuscript, rules locked",
+        "prompt": "Establish that the book is actually finished before packaging it. Step 1: read the manuscript's table of contents under manuscript/ and list every chapter the book should have. Step 2: sweep the rendered audio under audio/ — each chapter's audio file and its run log — and check the two lists against each other; a missing or failed chapter stops the run here, reported plainly, because a master with a hole in it is not a master. Step 3: lock the packaging rules — the manifest at master/manifest.json records every chapter with its audio file, duration, and play order; order follows the manuscript; durations come from the chapters' run logs, never estimated; and the master is assembled through the project's pipeline script via the run_script tool with a status-ok log. Step 4: write an acceptance-criteria checklist ('every manuscript chapter has rendered audio', 'manifest complete with file, duration, and order per chapter', 'no duplicate chapters', 'master assembled with a status-ok log', 'total duration equals the sum of the chapters', 'listener description written'). Call write_task_note with the chapter counts + checklist and write notes/scope.md.",
+        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "manifest",
+        "name": "Build the manifest",
+        "role": "data-analyst",
+        "summary": "master/manifest.json: chapter, file, duration, order",
+        "prompt": "Build the metadata manifest the master run and every player will trust. Step 1: write master/manifest.json as a JSON array, one record per chapter — the chapter title as the manuscript names it, the audio file path exactly as it exists under audio/, the duration taken from that chapter's run log, and the play order as a number following the manuscript. Step 2: verify as you go — every file path must point at a file that exists, no chapter appears twice, and the orders run without gaps. Step 3: total the durations and note the book's full running time for the release copy. Call write_task_note with the record count and the total duration.",
+        "produces": {
+          "path": "master/manifest.json",
+          "kind": "json",
+          "extraChecks": [
+            {
+              "kind": "recordSchema",
+              "file": "master/manifest.json",
+              "fields": [
+                { "name": "chapter", "type": "nonempty" },
+                { "name": "file", "type": "nonempty" },
+                { "name": "duration" },
+                { "name": "order" }
+              ],
+              "minRows": 3,
+              "uniqueBy": "chapter"
+            }
+          ]
+        }
+      },
+      {
+        "id": "assemble",
+        "name": "Assemble the master",
+        "role": "developer",
+        "summary": "the chapters concatenated into the master with its log",
+        "prompt": "Assemble the release master. Step 1: the mastering pipeline is a project script — call list_scripts to find it, then run it with run_script({ name: \"<script name>\" }); never run it with run_nodejs_script and never reimplement it. It reads master/manifest.json, verifies every referenced audio file exists, joins the chapters in manifest order into master/book.m4b, and writes its run log to master/assembly-log.json with a status field, the chapter count, and the total duration it computed. Step 2: if run_script reports an error, read the error text, fix what it names — usually a manifest path or order — and run it again; never write master/assembly-log.json yourself — the log is evidence the pipeline ran. Step 3: once it succeeds, read the log and confirm status ok, the chapter count matching the manifest, and the total duration matching the manifest's sum. Call write_task_note with the run outcome and the master's total duration.",
+        "produces": {
+          "path": "master/book.m4b",
+          "kind": "generic-file",
+          "minBytes": 200,
+          "extraChecks": [
+            {
+              "kind": "sniff",
+              "file": "master/assembly-log.json",
+              "sniff": "json-valid"
+            },
+            {
+              "kind": "jsonPathEquals",
+              "file": "master/assembly-log.json",
+              "path": "status",
+              "value": "ok",
+              "label": "the assembly log reports status ok"
+            }
+          ]
+        }
+      },
+      {
+        "id": "package",
+        "name": "Write the release copy",
+        "role": "copywriter",
+        "summary": "listener description and release notes for the finished book",
+        "prompt": "Write the words that travel with the book. Step 1: write the listener-facing description — what the book is about and who it is for, in the voice a listener browsing a store would actually read, without spoiling it. Step 2: add the release facts — the total running time from the master log, the chapter count, and the chapter list with per-chapter durations from the manifest. Step 3: add the release notes for the owner — what was assembled, anything flagged during the sweep, and the one-line confirmation that the master's numbers match the manifest. Write master/release-notes.md and call write_task_note with the path and the total running time.",
+        "produces": {
+          "path": "master/release-notes.md",
+          "kind": "markdown-report",
+          "minBytes": 600
+        }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Open master/release-notes.md, master/manifest.json, and master/assembly-log.json and verify every criterion from notes/scope.md: every manuscript chapter appears in the manifest exactly once with file, duration, and order, the referenced audio files exist, the log reports status ok with a chapter count and total duration matching the manifest, the release copy states the total running time, and the listener description reads like store copy rather than an internal note. Write PASS/FAIL per criterion; on any failure, name the gap and loop back to package — or to manifest if the metadata is the problem.",
+      "loopBackTo": "package"
+    }
+  },
+  {
+    "id": "mod-scaffold",
+    "name": "Scaffold a Mod",
+    "description": "Start the mod right: a correctly-shaped Minecraft datapack — pack.mcmeta carrying the right format number for the target game version, namespaced folders laid out properly, and one working example of the mod's core idea — plus install steps a twelve-year-old can follow. Locks the idea and the version's structure rules FIRST, then scaffolds the tree, then writes the README. Use for starting a datapack, scaffolding a mod, 'my kid wants a mod that…', datapack setup, and first-mod projects.",
+    "tags": ["mod", "minecraft", "datapack", "scaffold", "gamedev", "ritual"],
+    "triggers": [
+      "scaffold a mod",
+      "start a datapack",
+      "make a minecraft mod",
+      "set up the datapack",
+      "my kid wants a mod"
+    ],
+    "phases": [
+      {
+        "id": "scope",
+        "name": "Scope the mod",
+        "role": "modmaker",
+        "summary": "the idea, the target version, the structure rules locked",
+        "prompt": "Define the mod before creating a single file. Step 1: state the mod's core idea in one sentence — the thing that should happen in the game — and the target game version it must run on. Step 2: lock the structure rules for that version — the pack_format number pack.mcmeta must carry for the target version (from the project's version notes when present, stated explicitly either way), the namespace for this mod (short, lowercase, no spaces), and the folder layout the version expects under data/ for the mechanics the idea needs (functions, recipes, advancements, tags). Step 3: decide the one working example that proves the core idea end to end — the smallest set of files that makes the thing actually happen in-game. Step 4: write an acceptance-criteria checklist ('pack.mcmeta is valid JSON with the right pack_format for the target version', 'all content lives under the namespaced folders', 'the working example is complete — every file it needs exists', 'README has install steps and a test step a kid can follow'). Call write_task_note with the idea + version + pack_format + checklist and write notes/scope.md.",
+        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "scaffold",
+        "name": "Scaffold the datapack",
+        "role": "developer",
+        "summary": "pack.mcmeta plus the namespaced tree with one working example",
+        "prompt": "Build the datapack tree against the locked rules. Step 1: write pack.mcmeta at the workspace root — valid JSON with the pack object carrying the pack_format number locked in scope and a one-line description of the mod. Step 2: lay out the namespaced tree under data/ exactly as the target version expects, and build the working example — every function, recipe, advancement, or tag file the core idea needs, each in its right folder with its right name; a scaffold whose example is missing a file teaches a kid that mods do not work. Step 3: use the version's correct folder names and identifier syntax throughout — one renamed folder between versions is the classic silent break, so double-check against the structure rules from scope. Step 4: re-read every JSON file for validity and every function file for command syntax. Call write_task_note with the file count and the namespace.",
+        "produces": {
+          "path": "pack.mcmeta",
+          "kind": "json",
+          "extraChecks": [
+            {
+              "kind": "contains",
+              "file": "pack.mcmeta",
+              "pattern": "pack_format",
+              "label": "pack.mcmeta declares its pack_format"
+            },
+            {
+              "kind": "fileCount",
+              "ext": ["json", "mcfunction"],
+              "min": 3,
+              "dir": "data"
+            }
+          ]
+        }
+      },
+      {
+        "id": "docs",
+        "name": "Write the README",
+        "role": "copywriter",
+        "summary": "install and test steps a twelve-year-old can follow",
+        "prompt": "Write the README that gets the mod into the game. Step 1: open with what the mod does, in one line a kid would repeat to a friend. Step 2: write the install steps — where the datapack folder goes for the target version, written concretely for the platform, one action per step, no step assuming knowledge the last step did not give. Step 3: write the test step — exactly what to do in-game to see the mod work, and exactly what should happen when it does. Step 4: add the version note — which game version this pack targets and the one-line warning that other versions may need a different format number. Write README.md and call write_task_note with the README path and the test step in one line.",
+        "produces": {
+          "path": "README.md",
+          "kind": "markdown-doc",
+          "minBytes": 600,
+          "extraChecks": [
+            {
+              "kind": "contains",
+              "file": "README.md",
+              "pattern": "install",
+              "flags": "i",
+              "label": "the README carries install steps"
+            }
+          ]
+        }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Open pack.mcmeta, walk the tree under data/, and read README.md against every criterion from notes/scope.md: pack.mcmeta is valid JSON carrying the pack_format locked for the target version, all content sits under the namespaced folders with the version's correct folder names, the working example is complete — trace the core idea file by file and confirm every reference resolves — and the README's install and test steps are concrete enough for a twelve-year-old to follow without help. Write PASS/FAIL per criterion; on any failure, name the missing or misplaced file and loop back to scaffold.",
+      "loopBackTo": "scaffold",
+      "deliverable": { "path": "README.md", "kind": "markdown-doc", "minBytes": 600 }
+    }
+  },
+  {
+    "id": "compat-check",
+    "name": "Compatibility Check",
+    "description": "Answer 'does it still work on the new version?' with a matrix, not a shrug: the datapack's files checked against each target version's format rules, every break named with the exact file and the exact fix, and the upgrade path written down in order. Locks the target version list and the compat criteria FIRST (format numbers, renamed folders, changed identifiers), then checks version by version, then writes the matrix and the fixes. Use for version compatibility checks, 'does the mod work on 1.21', update breakage sweeps, and upgrade planning.",
+    "tags": ["mod", "minecraft", "datapack", "compatibility", "upgrade", "ritual"],
+    "triggers": [
+      "check compatibility",
+      "does it work on the new version",
+      "will the mod break",
+      "version check the datapack",
+      "plan the upgrade"
+    ],
+    "phases": [
+      {
+        "id": "scope",
+        "name": "Scope the check",
+        "role": "modmaker",
+        "summary": "target versions, format rules, compat criteria locked",
+        "prompt": "Define the check before judging a single file. Step 1: list the target game versions to check against, and read the version notes in the workspace (the version-to-pack_format table and any renamed-folder or changed-identifier notes) — every claim in the matrix must trace to these notes or to the pack's own files, never to memory. Step 2: inventory the datapack — pack.mcmeta's current pack_format, the folder names in use under data/, and the identifiers the functions and JSON files rely on. Step 3: lock the compat criteria per version — the pack_format the version expects, the folder names it expects, and the identifiers it renamed or removed; anything the notes do not cover gets checked as 'unverified', not guessed. Step 4: write an acceptance-criteria checklist ('every target version gets a verdict', 'every break names the exact file and what breaks', 'every break has a concrete fix', 'verdicts trace to the version notes or the pack files', 'the upgrade path is ordered'). Call write_task_note with the version list + criteria + checklist and write notes/scope.md.",
+        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "check",
+        "name": "Check each version",
+        "role": "developer",
+        "summary": "the pack walked against each version's rules, findings recorded",
+        "prompt": "Walk the datapack against each target version's locked criteria. Step 1: for each version, check pack.mcmeta's pack_format against the version's expected number; a mismatch is a break with a one-line fix. Step 2: check every folder under data/ against the version's expected folder names — renamed folders are the silent killer, the pack loads and the content just never fires. Step 3: sweep the function and JSON files for identifiers the version renamed or removed, listing each occurrence by file. Step 4: record the findings per version in notes/checks.md — works, breaks with the named file and reason, or unverified where the notes ran out — and be honest about the unverified ones; a confident wrong verdict costs an evening of debugging. Call write_task_note with the per-version verdict counts.",
+        "produces": { "path": "notes/checks.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "report",
+        "name": "Write the matrix",
+        "role": "reviewer",
+        "summary": "the compat matrix, the fixes, the ordered upgrade path",
+        "prompt": "Write the report that answers the question at a glance. Step 1: open with the verdict in one sentence — which versions the pack works on today and which break it. Step 2: build the compatibility matrix as a table — a row per target version with columns for Version and Status at minimum, the status stated plainly (works, breaks, unverified) with the one-line reason. Step 3: list the fixes — every break from notes/checks.md with the exact file and the exact change, grouped by version. Step 4: write the upgrade path — the fixes in the order to apply them, and what to test in-game after each, so the upgrade is an afternoon of steps rather than a weekend of guessing. Write report.md and call write_task_note with the report path and the verdict sentence.",
+        "produces": {
+          "path": "report.md",
+          "kind": "markdown-report",
+          "minBytes": 1000,
+          "extraChecks": [
+            {
+              "kind": "tableShape",
+              "file": "report.md",
+              "requiredColumns": ["Version", "Status"],
+              "minRows": 2
+            }
+          ]
+        }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Open report.md, notes/checks.md, and the version notes and verify every criterion from notes/scope.md: every target version has a row in the matrix with a plain verdict, every break names the exact file and carries a concrete fix, every verdict traces to the version notes or the pack's actual files (spot-check two against the notes), unverified items are marked as such rather than guessed, and the upgrade path is ordered with a test step per fix. Write PASS/FAIL per criterion; on any failure, name the gap and loop back to report.",
+      "loopBackTo": "report"
+    }
+  }
+]

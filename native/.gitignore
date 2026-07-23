@@ -1,0 +1,3 @@
+# Native build artifacts — reproduced from VERSION pin, never checked in.
+engines/*/.upstream/
+build/

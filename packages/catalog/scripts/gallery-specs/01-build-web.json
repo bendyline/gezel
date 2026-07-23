@@ -1,0 +1,1177 @@
+[
+  {
+    "id": "html-arcade-game",
+    "name": "HTML Arcade Game",
+    "description": "Build a playable single-file HTML5 canvas arcade game such as a space shooter, runner, dodger, or asteroids clone. Locks the core mechanic, controls, and win/lose loop first, then a visual look, then implements a real requestAnimationFrame game loop with input handling and collision. The deliberate design-before-code ordering is what stops a small model from shipping a static canvas that does not actually play; every phase tightens an acceptance bar the reviewer enforces until the game is genuinely fun and bug-free.",
+    "tags": ["game", "html", "canvas", "interactive", "arcade"],
+    "triggers": [
+      "arcade game",
+      "space shooter",
+      "html game",
+      "build a game",
+      "canvas game",
+      "make a shooter"
+    ],
+    "phases": [
+      {
+        "id": "game-design",
+        "name": "Game design",
+        "role": "game-designer",
+        "summary": "mechanics, controls, win/lose, difficulty curve",
+        "prompt": "Design the GAME, not the code. (1) Name the core mechanic in one sentence: what the player physically does each second (move-and-shoot, dodge, jump-and-collect). (2) Map exact controls: which keys (ArrowLeft/Right, Space) or pointer gestures do what. (3) Define the scoring rule and the explicit win AND lose conditions (e.g. 'lose when an enemy reaches the bottom OR collides with the player'). (4) Sketch a difficulty curve: what gets harder over time (spawn rate, speed) and how fast. (5) Write an acceptance-criteria checklist of 5-8 concrete, checkable items, e.g. 'arrow keys move the player horizontally', 'pressing Space fires a projectile', 'colliding with an enemy ends the game', 'score increments on each hit', 'the game runs >30s with no JS console error', 'difficulty visibly increases'. Good means every item is binary-checkable by playing for 30 seconds. Call write_task_note with the mechanics, controls, scoring, and the checklist, AND write the same content to notes/game-design.md. No code, no art yet.",
+        "produces": { "path": "notes/game-design.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "visual-design",
+        "name": "Visual design",
+        "role": "visual-designer",
+        "summary": "palette, shapes/sprites, HUD layout, juice",
+        "prompt": "Decide how it LOOKS, given the locked mechanics. (1) Pick a 3-5 color palette with hex codes (background, player, enemy, projectile, accent). (2) Specify the shape or sprite for each entity (player = white triangle, enemy = red square, etc.) drawable with canvas primitives — no external image downloads. (3) Lay out the HUD: where score and lives render, font, size. (4) Add one or two pieces of juice: a flash on hit, a tiny particle burst, or a screen shake — name exactly when each fires. (5) Confirm it is fully self-contained (canvas fillRect/arc + inline CSS only). Write the visual spec to notes/visual-design.md and via write_task_note so the build phase has an exact target. Still no game code.",
+        "produces": { "path": "notes/visual-design.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "build",
+        "name": "Build",
+        "role": "developer",
+        "summary": "implement the game in one index.html",
+        "prompt": "Implement the game in a single index.html with inline CSS and JS that satisfies every acceptance criterion and matches the visual spec. (1) Set up a <canvas> and a 2d context sized to the viewport. (2) Maintain real game state (player, arrays of enemies/projectiles, score, gameOver flag). (3) Drive a requestAnimationFrame loop that updates positions, spawns enemies on the locked curve, detects collisions, and redraws every frame. (4) Wire keydown/keyup (or pointer) handlers exactly as designed. (5) Render the HUD and the win/lose state, plus a restart affordance. Use only vanilla JS — no CDN libraries. On a loop-back, fix ONLY the gaps the reviewer named and do not regress criteria that already passed. Call write_task_note with the path and which criteria now pass.",
+        "produces": { "path": "index.html", "kind": "html-game" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Actually exercise the game. If a browser/QA capability is available, open index.html, play it for at least 30 seconds, and watch the console; otherwise read the source and trace the loop, input handlers, and collision math by hand. Check EACH acceptance criterion from notes/game-design.md and write PASS or FAIL with a one-line reason for each: does the core mechanic work, do controls respond, does scoring increment, do win and lose fire, does difficulty ramp, are there zero console errors? A canvas that renders but does not respond to input FAILS.",
+      "loopBackTo": "build",
+      "deliverable": { "path": "index.html", "kind": "html-game" }
+    }
+  },
+  {
+    "id": "html-puzzle-game",
+    "name": "HTML Puzzle Game",
+    "description": "Build a single-file HTML logic or puzzle game such as a match-3, sliding tile, Sokoban, 2048, minesweeper, or sudoku. Locks the rule system, the solve/fail condition, and the win detection first, then a clean grid visual language, then implements deterministic board state with valid-move enforcement. Puzzle games live or die on correct rules and reliable win detection, so the design phase pins the exact legal-move and victory logic before any rendering — the ordering that prevents a small model from shipping a grid that looks right but never registers a win.",
+    "tags": ["game", "html", "puzzle", "logic", "grid"],
+    "triggers": [
+      "puzzle game",
+      "logic game",
+      "make a 2048",
+      "sliding puzzle",
+      "match three game",
+      "sudoku"
+    ],
+    "phases": [
+      {
+        "id": "game-design",
+        "name": "Game design",
+        "role": "game-designer",
+        "summary": "rules, legal moves, win/fail detection",
+        "prompt": "Specify the PUZZLE precisely. (1) State the board: dimensions and what each cell can hold. (2) Enumerate the legal moves and the exact rule that makes a move valid or invalid. (3) Define the win condition as a checkable predicate over board state (e.g. 'a tile reaches 2048', 'every mine is flagged and every safe cell revealed') and the fail/stuck condition if any. (4) Describe the initial state and how a new puzzle is generated or shuffled so it is solvable. (5) Write an acceptance-criteria checklist of 5-8 binary items, e.g. 'illegal moves are rejected with no state change', 'a win triggers a visible win message', 'the board reshuffles on new-game', 'score/move-count updates each move', 'no console errors during a full solve'. Write it to notes/game-design.md and via write_task_note. No code yet.",
+        "produces": { "path": "notes/game-design.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "visual-design",
+        "name": "Visual design",
+        "role": "visual-designer",
+        "summary": "grid look, tile states, feedback",
+        "prompt": "Design the grid look from the locked rules. (1) Choose a palette (hex) and how each cell value or state maps to a color/glyph. (2) Specify the grid layout, cell sizing, gaps, and how the board stays square and centered. (3) Define visual feedback: selected cell, invalid-move shake, merge/clear animation, and the win banner. (4) Lay out the HUD (score, moves, timer, new-game button) and the typography. (5) Keep it self-contained with CSS grid or canvas — no external assets. Write the visual spec to notes/visual-design.md and via write_task_note. No game logic yet.",
+        "produces": { "path": "notes/visual-design.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "build",
+        "name": "Build",
+        "role": "developer",
+        "summary": "implement board state + move rules in index.html",
+        "prompt": "Implement the puzzle in a single index.html (inline CSS + JS) matching the visual spec and satisfying every criterion. (1) Model the board as a 2D array or flat array; render it to a CSS grid or canvas. (2) Implement the legal-move function so illegal inputs change nothing. (3) Implement the win predicate and check it after every move; show the win banner when true. (4) Wire input (clicks, drags, or arrow keys as designed) and a new-game button that reshuffles to a solvable state. (5) Update the HUD each move. Vanilla JS only, no CDN. On a loop-back, fix only the named gaps without regressing passing criteria. write_task_note the path and passing criteria.",
+        "produces": { "path": "index.html", "kind": "html-game" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Play the puzzle. Open index.html if a browser is available, otherwise trace the move and win logic in source. Check EACH criterion from notes/game-design.md and write PASS/FAIL with a reason: are illegal moves truly rejected, does a real solve trigger the win message, does new-game reshuffle solvably, does the HUD update, are there zero console errors? Most important: drive the board to a winning state and confirm the win actually fires — if it never does, FAIL and loop back.",
+      "loopBackTo": "build",
+      "deliverable": { "path": "index.html", "kind": "html-game" }
+    }
+  },
+  {
+    "id": "board-game-web",
+    "name": "Digital Board Game",
+    "description": "Build a single-file web version of a turn-based board game such as tic-tac-toe, checkers, connect-four, reversi, or a simple chess variant, with two-player hotseat or a basic AI opponent. Locks the rules, turn order, legal-move set, and win/draw detection first, then the board visual language, then implements an authoritative turn state machine. Board games demand correct turn alternation and exhaustive win/draw detection, so the rules phase enumerates every terminal condition before rendering — the ordering that stops a small model from shipping a board where turns desync or a win goes unnoticed.",
+    "tags": ["game", "html", "board-game", "turn-based", "strategy"],
+    "triggers": [
+      "board game",
+      "tic tac toe",
+      "connect four",
+      "checkers",
+      "make chess",
+      "two player game"
+    ],
+    "phases": [
+      {
+        "id": "rules-design",
+        "name": "Rules design",
+        "role": "game-designer",
+        "summary": "turn order, legal moves, win/draw detection",
+        "prompt": "Pin the RULES of the board game. (1) State the board size and pieces. (2) Define turn order and how the active player alternates. (3) Enumerate legal moves per piece and what makes a move illegal. (4) List EVERY terminal condition: each win pattern, draw/stalemate, and how each is detected from board state. (5) Decide the opponent: hotseat two-player, or a simple AI (random or one-ply) — state which. (6) Write an acceptance-criteria checklist of 5-8 items, e.g. 'players strictly alternate', 'illegal moves are rejected', 'every win line is detected and announced', 'a full board with no winner declares a draw', 'a new-game button resets cleanly', 'no console errors'. Write to notes/rules-design.md and via write_task_note. No code yet.",
+        "produces": { "path": "notes/rules-design.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "visual-design",
+        "name": "Visual design",
+        "role": "visual-designer",
+        "summary": "board look, pieces, turn indicator",
+        "prompt": "Design the board look from the locked rules. (1) Choose a palette (hex) and the board grid styling. (2) Specify how each piece/player renders (X vs O, red vs black discs, glyphs). (3) Show the active-player turn indicator and how a winning line is highlighted. (4) Lay out status text (whose turn, win/draw banner) and a new-game button. (5) Keep it self-contained CSS grid or canvas, no external assets. Write the visual spec to notes/visual-design.md and via write_task_note. No game logic yet.",
+        "produces": { "path": "notes/visual-design.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "build",
+        "name": "Build",
+        "role": "developer",
+        "summary": "implement the turn state machine in index.html",
+        "prompt": "Implement the board game in a single index.html (inline CSS + JS) to the visual spec, satisfying every criterion. (1) Model board state and a currentPlayer variable. (2) On a cell/piece interaction, validate the move, apply it, then check all terminal conditions before switching the active player. (3) Announce win (highlighting the line) or draw and lock further input until new-game. (4) If an AI was specified, have it move after the human. (5) Wire a new-game button that fully resets. Vanilla JS, no CDN. On a loop-back, fix only the named gaps without regressing passing criteria. write_task_note the path and passing criteria.",
+        "produces": { "path": "index.html", "kind": "html-game" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Play several full games. Open index.html if possible, else trace the turn and win logic. Check EACH criterion from notes/rules-design.md and write PASS/FAIL with a reason: do players strictly alternate, are illegal moves rejected, is every win line detected, does a full no-winner board declare a draw, does new-game reset, zero console errors? Force at least one win and one draw to confirm both fire. Any missed terminal condition is a FAIL — loop back.",
+      "loopBackTo": "build",
+      "deliverable": { "path": "index.html", "kind": "html-game" }
+    }
+  },
+  {
+    "id": "idle-clicker-game",
+    "name": "Idle / Incremental Game",
+    "description": "Build a single-file idle or incremental clicker game such as a cookie/factory clicker with upgrades, generators, and exponential growth. Designs the resource economy — base click yield, generator costs, cost-scaling factor, and per-second production — first, then the layout, then implements a tick loop with persistent-feeling progression. Idle games are an economy problem before a UI problem: if costs and yields are not tuned the game is boring in 10 seconds or unwinnable, so the economy phase locks the exact numbers and growth curve before any rendering.",
+    "tags": ["game", "html", "idle", "incremental", "clicker"],
+    "triggers": [
+      "idle game",
+      "clicker game",
+      "incremental game",
+      "cookie clicker",
+      "factory game",
+      "make an idle game"
+    ],
+    "phases": [
+      {
+        "id": "economy-design",
+        "name": "Economy design",
+        "role": "game-designer",
+        "summary": "resources, generator costs, scaling, tick rate",
+        "prompt": "Design the ECONOMY with real numbers. (1) Name the primary resource and the base yield per manual click. (2) Define 3-5 generators: each with a base cost, a per-second production, and a cost-scaling factor applied per purchase (e.g. cost *= 1.15). (3) Set the tick rate (how often production is added, e.g. every 100ms) and ensure offline-free production accumulates while playing. (4) Add at least one upgrade that multiplies click or generator output. (5) Sanity-check the curve: roughly when can the player afford generator 1, 2, 3 — it should feel rewarding within the first minute and keep escalating. (6) Write an acceptance-criteria checklist of 5-8 items, e.g. 'clicking increases the resource', 'each generator costs more after each buy', 'production accrues per tick automatically', 'an upgrade visibly boosts output', 'buttons disable when unaffordable', 'no console errors'. Write to notes/economy-design.md and via write_task_note. No code yet.",
+        "produces": { "path": "notes/economy-design.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "visual-design",
+        "name": "Visual design",
+        "role": "visual-designer",
+        "summary": "big-click target, shop layout, number formatting",
+        "prompt": "Design the layout from the locked economy. (1) Choose a palette (hex) and a prominent click target (a big button or icon). (2) Lay out the resource counter (with abbreviated large numbers like 1.2K, 3.4M), the per-second rate, and the generator/upgrade shop list with cost and owned-count. (3) Specify affordance feedback: unaffordable items dimmed/disabled, a small pop on click. (4) Keep numbers readable as they grow. (5) Self-contained CSS, no external assets. Write the visual spec to notes/visual-design.md and via write_task_note. No game logic yet.",
+        "produces": { "path": "notes/visual-design.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "build",
+        "name": "Build",
+        "role": "developer",
+        "summary": "implement the tick loop + shop in index.html",
+        "prompt": "Implement the idle game in a single index.html (inline CSS + JS) to the visual spec, satisfying every criterion. (1) Hold resource, generators (count, cost, rate), and upgrades in state. (2) On click, add the click yield. (3) On a setInterval/RAF tick, add total per-second production scaled by elapsed time. (4) Buying a generator deducts cost, increments count, and multiplies its cost by the scaling factor; disable buttons when unaffordable. (5) Apply upgrades as multipliers and format large numbers compactly. Vanilla JS, no CDN. On a loop-back, fix only the named gaps without regressing passing criteria. write_task_note the path and passing criteria.",
+        "produces": { "path": "index.html", "kind": "html-game" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Play for a minute. Open index.html if possible, else trace the tick loop and cost-scaling math. Check EACH criterion from notes/economy-design.md and write PASS/FAIL with a reason: does clicking add resource, does each purchase raise the next cost, does production accrue automatically per tick, does an upgrade boost output, do buttons disable when unaffordable, zero console errors? Confirm the curve feels rewarding-then-escalating, not instant-win or stuck. Any broken cost-scaling is a FAIL — loop back.",
+      "loopBackTo": "build",
+      "deliverable": { "path": "index.html", "kind": "html-game" }
+    }
+  },
+  {
+    "id": "physics-toy",
+    "name": "Interactive Physics Toy",
+    "description": "Build a single-file interactive canvas physics or particle toy such as a bouncing-ball sandbox, gravity wells, springs, cloth, fluid, or a boids flock that the user can poke with the mouse. Defines the simulation model — forces, integration, collisions, and the interaction verbs — first, then implements a stable per-frame integrator. Physics toys feel magical only when the numerics are stable and the mouse interaction is responsive, so the concept phase pins the forces and integration scheme before any drawing, the ordering that keeps a small model from shipping a jittery or exploding sim.",
+    "tags": ["canvas", "physics", "simulation", "interactive", "particles"],
+    "triggers": [
+      "physics simulation",
+      "particle toy",
+      "bouncing balls",
+      "gravity sandbox",
+      "interactive canvas",
+      "boids"
+    ],
+    "phases": [
+      {
+        "id": "concept",
+        "name": "Concept",
+        "role": "designer",
+        "summary": "forces, integration, collisions, interaction verbs",
+        "prompt": "Define the SIMULATION and its feel. (1) Name the system (bouncing balls, gravity wells, spring lattice, boids) and the entities with their state (position, velocity, mass/radius). (2) Enumerate the forces and the integration step (explicit Euler or Verlet with a fixed dt) and how you keep it stable (clamp velocities, damping). (3) Define collisions/boundaries (walls bounce with restitution, particle-particle if any). (4) Specify the interaction verbs: what the mouse does (attract, repel, spawn, drag) and any controls (gravity slider, reset). (5) Write an acceptance-criteria checklist of 5-8 items, e.g. 'particles move continuously without exploding off-screen', 'particles bounce off the canvas edges', 'the mouse visibly affects nearby particles', 'reset clears and re-seeds', 'runs smoothly with N particles', 'no console errors'. Write to notes/concept.md and via write_task_note. No code yet.",
+        "produces": { "path": "notes/concept.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "build",
+        "name": "Build",
+        "role": "developer",
+        "summary": "implement the integrator + interaction in index.html",
+        "prompt": "Implement the physics toy in a single index.html (inline CSS + JS) satisfying every criterion. (1) Set up a full-viewport <canvas> 2d context and seed the entities. (2) Run a requestAnimationFrame loop that applies forces, integrates with the chosen scheme and a fixed dt, resolves boundary/collision, then redraws. (3) Wire mouse/touch to the interaction verb (compute distance-based attraction/repulsion or spawn/drag). (4) Add the specified controls (sliders/reset). (5) Keep it numerically stable — clamp or damp so nothing explodes; choose a palette and trails or solid fills. Vanilla JS, no CDN. On a loop-back, fix only the named gaps without regressing passing criteria. write_task_note the path and passing criteria.",
+        "produces": { "path": "index.html", "kind": "html-page" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Interact with the toy. Open index.html if possible, else trace the integrator and mouse handler. Check EACH criterion from notes/concept.md and write PASS/FAIL with a reason: do particles move without flying off or freezing, do they bounce off edges, does the mouse visibly attract/repel/spawn, does reset re-seed, is it smooth, zero console errors? Let it run 30+ seconds to confirm it stays stable (no NaN explosion). An exploding or frozen sim is a FAIL — loop back.",
+      "loopBackTo": "build",
+      "deliverable": { "path": "index.html", "kind": "html-page" }
+    }
+  },
+  {
+    "id": "branding-website",
+    "name": "Branding Website",
+    "description": "Build a small brand or marketing website where the visual identity leads. Locks a visual language and section mockups FIRST — palette, type pairing, spacing scale, hero treatment — then writes the marketing copy in that voice, then builds responsive HTML to the locked design with real CSS. This visual-first ordering is the whole point: it makes brand sites feel intentionally designed rather than templated, and it stops a small model from redesigning in code mid-build.",
+    "tags": ["website", "branding", "marketing", "design", "html"],
+    "triggers": [
+      "branding website",
+      "marketing site",
+      "brand site",
+      "company website",
+      "build a brand page"
+    ],
+    "phases": [
+      {
+        "id": "brand-design",
+        "name": "Brand & visual design",
+        "role": "visual-designer",
+        "summary": "visual language + section mockups, BEFORE any HTML",
+        "prompt": "Lock the visual language before a line of HTML exists. (1) Decide the palette with exact hex codes (primary, secondary, neutral, accent). (2) Pick a type pairing (heading + body) and a spacing/size scale. (3) Choose the hero treatment (full-bleed image, gradient, big type) and overall mood in three adjectives. (4) Produce a concrete mock: an ASCII/markdown wireframe of every section in order (hero, value props, social proof, CTA, footer), or generate a hero image if image tools are available. (5) Write an acceptance-criteria checklist that bakes in the brand rules, e.g. 'headings use <font>', 'palette is exactly <hex list>', 'section order matches the mock', 'hero matches the treatment', 'site is responsive at 375px and 1280px'. Write the visual language, mock, and checklist to notes/brand-design.md and via write_task_note. No HTML yet.",
+        "produces": { "path": "notes/brand-design.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "copy",
+        "name": "Copywriting",
+        "role": "copywriter",
+        "summary": "headlines + section copy in the brand voice",
+        "prompt": "Write the words to the locked voice. (1) Hero headline (one line, benefit-led) and subhead. (2) Three value-prop blurbs, each a tight heading plus one sentence. (3) A social-proof line or testimonial. (4) The primary CTA label and a supporting microcopy line. (5) Footer text. Keep it punchy marketing copy, not paragraphs, and match the mood adjectives from the visual spec. Write the copy block keyed by section to notes/copy.md and via write_task_note so the build phase drops it straight in.",
+        "produces": { "path": "notes/copy.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "build",
+        "name": "Build",
+        "role": "developer",
+        "summary": "implement index.html to the locked design + copy",
+        "prompt": "Implement index.html with inline CSS to the locked visual language and approved copy — do NOT redesign in code. (1) Apply the exact palette as CSS variables and the chosen type pairing (web-safe or a single Google Font link). (2) Build each section in the mock's order with the approved copy. (3) Style the hero to the locked treatment and make the CTA prominent. (4) Make it responsive with fl/grid so it works at 375px and 1280px. (5) No external assets beyond any already-generated hero image; no CDN frameworks. On a loop-back, fix only the named gaps without regressing passing criteria. write_task_note the path and passing criteria.",
+        "produces": { "path": "index.html", "kind": "html-marketing-site" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Check the built site against the brand acceptance criteria specifically. Open index.html / render it if you can, and resize to 375px and 1280px. Check EACH criterion from notes/brand-design.md and write PASS/FAIL with a reason: does the palette match the exact hex list, does the type match, does the section order match the mock, does the hero match the treatment, is the approved copy used verbatim, is it responsive? A site that works but ignores the locked visual language FAILS — loop back to build.",
+      "loopBackTo": "build",
+      "deliverable": { "path": "index.html", "kind": "html-marketing-site" }
+    }
+  },
+  {
+    "id": "landing-page",
+    "name": "Landing Page",
+    "description": "Build a single high-conversion landing page for one offer — a product, signup, waitlist, or download — with a focused hero, benefits, social proof, and one primary call to action above and below the fold. Locks the offer, audience, and single CTA first, then a conversion-oriented visual design, then the persuasive copy, then builds responsive HTML with real CSS. The scope-then-design-then-copy ordering keeps the page ruthlessly focused on one conversion goal instead of becoming a sprawling site.",
+    "tags": ["website", "marketing", "landing-page", "conversion", "html"],
+    "triggers": [
+      "build a landing page",
+      "make a marketing page",
+      "conversion page",
+      "product launch page",
+      "waitlist page",
+      "signup page"
+    ],
+    "phases": [
+      {
+        "id": "offer-scope",
+        "name": "Offer scope",
+        "role": "planner",
+        "summary": "lock the offer, audience, and single primary CTA",
+        "prompt": "Lock the conversion fundamentals. (1) State the ONE offer in a sentence and the single primary CTA (e.g. 'Join the waitlist', 'Start free trial') — exactly one, repeated, no competing actions. (2) Name the target audience and the core pain the offer solves. (3) List the page sections in order: hero with CTA, 3 benefits, social proof, FAQ or objection-handling, final CTA. (4) Decide the success signal (what a converted visitor does). (5) Write an acceptance-criteria checklist of 5-8 items, e.g. 'the primary CTA appears above the fold and again at the bottom', 'exactly one CTA action exists', 'three benefits are present', 'a social-proof element is present', 'responsive at 375px and 1280px'. Write to notes/offer-scope.md and via write_task_note. No design or copy yet.",
+        "produces": { "path": "notes/offer-scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "visual-design",
+        "name": "Visual design",
+        "role": "visual-designer",
+        "summary": "conversion-focused layout + visual hierarchy",
+        "prompt": "Design for conversion. (1) Pick a palette (hex) with a high-contrast accent reserved for the CTA so it pops. (2) Choose type and a strong visual hierarchy that drives the eye to the CTA. (3) Lay out each scoped section as a wireframe, keeping the hero uncluttered. (4) Specify the CTA button style (size, color, hover) and where it repeats. (5) Note any directional cues or whitespace that focus attention. Bake into the criteria 'CTA uses the accent color and is the most prominent element'. Write the visual spec to notes/visual-design.md and via write_task_note. No HTML yet.",
+        "produces": { "path": "notes/visual-design.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "copy",
+        "name": "Copywriting",
+        "role": "copywriter",
+        "summary": "benefit-led persuasive copy + CTA label",
+        "prompt": "Write conversion copy. (1) A benefit-led hero headline (outcome, not feature) and a one-line subhead. (2) Three benefit blocks, each a verb-led heading plus one supporting sentence. (3) A social-proof line. (4) Two or three objection-handling FAQ pairs. (5) The exact CTA label (action verb) used everywhere. Keep it scannable and specific — no vague hype. Write the copy block keyed by section to notes/copy.md and via write_task_note.",
+        "produces": { "path": "notes/copy.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "build",
+        "name": "Build",
+        "role": "developer",
+        "summary": "implement index.html to the locked design + copy",
+        "prompt": "Implement index.html with inline CSS to the visual spec and approved copy. (1) Palette as CSS variables; the CTA uses the accent color and is the most prominent element. (2) Build the scoped sections in order with the approved copy. (3) Place the primary CTA above the fold in the hero and repeat it at the bottom — same single action. (4) Responsive at 375px and 1280px. (5) Vanilla HTML/CSS, no CDN frameworks, no external assets. On a loop-back, fix only the named gaps without regressing passing criteria. write_task_note the path and passing criteria.",
+        "produces": { "path": "index.html", "kind": "html-marketing-site" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Evaluate the page for conversion focus. Open/render index.html and resize to 375px and 1280px. Check EACH criterion from notes/offer-scope.md and the visual criteria, writing PASS/FAIL with a reason: is there exactly one CTA action, does it appear above the fold and at the bottom, is it the most prominent (accent) element, are there three benefits and social proof, is the approved copy used, is it responsive? A page with multiple competing CTAs or a buried CTA FAILS — loop back to build.",
+      "loopBackTo": "build",
+      "deliverable": { "path": "index.html", "kind": "html-marketing-site" }
+    }
+  },
+  {
+    "id": "portfolio-site",
+    "name": "Portfolio Site",
+    "description": "Build a personal or professional portfolio site that showcases projects, an about/bio, and contact links in a single polished page. Locks the content inventory — which projects, what bio, which links — first, then a clean gallery-style visual design, then builds responsive HTML with a project grid and real CSS. Scoping the content before designing prevents a small model from inventing fake projects or building a layout the real content does not fit; the portfolio's job is to present a finite set of real work cleanly.",
+    "tags": ["website", "portfolio", "personal-site", "showcase", "html"],
+    "triggers": [
+      "portfolio site",
+      "personal website",
+      "showcase my work",
+      "developer portfolio",
+      "designer portfolio",
+      "build a portfolio"
+    ],
+    "phases": [
+      {
+        "id": "content-scope",
+        "name": "Content scope",
+        "role": "planner",
+        "summary": "inventory projects, bio, links, sections",
+        "prompt": "Inventory the real content. (1) List the projects to feature (title, one-line description, role, link/repo, and whether an image exists) — use only what the user provided; if details are missing, leave placeholders the user must fill, do NOT fabricate. (2) Draft the bio focus (who, what they do, what they want). (3) List contact/social links to include. (4) Order the sections: hero/intro, project grid, about, contact. (5) Write an acceptance-criteria checklist of 5-8 items, e.g. 'every listed project has a card', 'the hero states name and role', 'an about section is present', 'contact links are present and clickable', 'responsive at 375px and 1280px', 'no fabricated projects'. Write to notes/content-scope.md and via write_task_note. No design or HTML yet.",
+        "produces": { "path": "notes/content-scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "visual-design",
+        "name": "Visual design",
+        "role": "visual-designer",
+        "summary": "gallery layout, project card, palette, type",
+        "prompt": "Design the showcase look. (1) Pick a restrained palette (hex) and type pairing that lets the work shine, not the chrome. (2) Design the project card (image/placeholder, title, description, link) and how cards lay out in a responsive grid. (3) Lay out the hero/intro and the about/contact sections. (4) Specify hover/focus states for cards and links and the overall spacing rhythm. (5) Self-contained CSS, no external assets beyond any provided images. Write the visual spec to notes/visual-design.md and via write_task_note. No HTML yet.",
+        "produces": { "path": "notes/visual-design.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "build",
+        "name": "Build",
+        "role": "developer",
+        "summary": "implement index.html with the project grid",
+        "prompt": "Implement index.html with inline CSS to the visual spec, using only the scoped content. (1) Palette as CSS variables and the chosen type. (2) Hero with name and role. (3) A responsive CSS-grid project gallery, one card per scoped project with its real (or placeholder) details and a clickable link. (4) About and contact sections with clickable links. (5) Responsive at 375px and 1280px; vanilla HTML/CSS, no CDN. Keep placeholders explicit where the user must supply content — never invent projects. On a loop-back, fix only the named gaps without regressing passing criteria. write_task_note the path and passing criteria.",
+        "produces": { "path": "index.html", "kind": "html-marketing-site" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Evaluate the portfolio. Open/render index.html and resize to 375px and 1280px. Check EACH criterion from notes/content-scope.md and write PASS/FAIL with a reason: does every scoped project have a card, does the hero state name and role, is there an about section, are contact links present and clickable, is it responsive, and crucially are there ZERO fabricated projects? Any invented project or missing scoped project is a FAIL — loop back to build.",
+      "loopBackTo": "build",
+      "deliverable": { "path": "index.html", "kind": "html-marketing-site" }
+    }
+  },
+  {
+    "id": "docs-site",
+    "name": "Documentation Site",
+    "description": "Build a single-page documentation site with a sidebar table of contents, anchored sections, code blocks, and in-page navigation — the kind of reference page a library or API ships. Locks the information architecture (the section tree and ordering) first, then a readable docs visual design with good typography and code styling, then builds the HTML with working anchor links and a sticky sidebar. Getting the IA right before layout is what makes docs findable; a small model that jumps straight to HTML produces an unnavigable wall of text.",
+    "tags": ["website", "documentation", "docs", "reference", "html"],
+    "triggers": [
+      "documentation site",
+      "docs page",
+      "api reference page",
+      "build docs",
+      "developer documentation",
+      "guide page"
+    ],
+    "phases": [
+      {
+        "id": "ia",
+        "name": "Information architecture",
+        "role": "planner",
+        "summary": "section tree, ordering, anchors",
+        "prompt": "Design the information architecture. (1) Define the top-level sections (e.g. Overview, Install, Quickstart, API, Examples, FAQ) and any sub-sections, in a logical learning order. (2) Assign each section a stable anchor id. (3) Decide what belongs in the sidebar TOC and the nesting depth. (4) Note which sections need code blocks. (5) Write an acceptance-criteria checklist of 5-8 items, e.g. 'every sidebar link scrolls to its section', 'sections follow the locked order', 'code blocks are visually distinct', 'sidebar stays visible while scrolling on desktop', 'responsive collapse on mobile', 'no broken anchors'. Write the section tree and checklist to notes/ia.md and via write_task_note. No design or HTML yet.",
+        "produces": { "path": "notes/ia.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "visual-design",
+        "name": "Visual design",
+        "role": "designer",
+        "summary": "docs typography, code styling, sidebar layout",
+        "prompt": "Design for readability. (1) Pick a content palette (hex) with strong text contrast and a max content width for comfortable line length. (2) Choose a type scale for headings/body and a monospace treatment for inline and block code (background, padding, overflow). (3) Lay out the sticky sidebar TOC and the main content column, and how they reflow on mobile (collapsible nav). (4) Specify link, active-section, and heading-anchor styles. (5) Self-contained CSS, no external assets. Write the visual spec to notes/visual-design.md and via write_task_note. No HTML yet.",
+        "produces": { "path": "notes/visual-design.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "build",
+        "name": "Build",
+        "role": "developer",
+        "summary": "implement index.html with sidebar + anchors",
+        "prompt": "Implement index.html with inline CSS/JS to the IA and visual spec. (1) Render the sidebar TOC with links to each section's anchor id. (2) Render the sections in the locked order with the right heading levels and anchor ids so links jump correctly. (3) Style code blocks distinctly with overflow handling. (4) Make the sidebar sticky on desktop and collapsible on mobile (a small JS toggle is fine); optionally highlight the active section on scroll. (5) Constrain content width; responsive at 375px and 1280px; vanilla only, no CDN. On a loop-back, fix only the named gaps without regressing passing criteria. write_task_note the path and passing criteria.",
+        "produces": { "path": "index.html", "kind": "html-page" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Evaluate the docs site. Open/render index.html, click every sidebar link, and resize to 375px and 1280px. Check EACH criterion from notes/ia.md and write PASS/FAIL with a reason: does every sidebar link scroll to its section (no broken anchors), are sections in the locked order, are code blocks distinct, does the sidebar stay visible on desktop and collapse on mobile, is line length comfortable? Any broken anchor is a FAIL — loop back to build.",
+      "loopBackTo": "build",
+      "deliverable": { "path": "index.html", "kind": "html-page" }
+    }
+  },
+  {
+    "id": "spa-dashboard",
+    "name": "Metrics / Admin Dashboard",
+    "description": "Build a single-page metrics or admin dashboard with KPI summary cards, at least one chart, and a data table, rendered from sample or provided data. Locks the data model and which metrics matter first, then a scannable dashboard layout (grid of cards, chart placement, table), then builds the interactive HTML with a lightweight charting approach and a sortable/filterable table. Deciding the metrics and layout before coding prevents a small model from dumping raw data with no hierarchy; a dashboard's value is the at-a-glance summary up top.",
+    "tags": ["website", "dashboard", "admin", "metrics", "charts", "html"],
+    "triggers": [
+      "admin dashboard",
+      "metrics dashboard",
+      "analytics page",
+      "kpi dashboard",
+      "build a dashboard",
+      "data dashboard"
+    ],
+    "phases": [
+      {
+        "id": "data-scope",
+        "name": "Data scope",
+        "role": "planner",
+        "summary": "data model + which KPIs and views matter",
+        "prompt": "Scope the data and the views. (1) Define the data shape: the records/rows and their fields (use provided data, or generate a realistic sample array embedded in the page). (2) Pick the 3-5 headline KPIs to show as summary cards and how each is computed. (3) Choose at least one chart (what it plots) and the table's columns. (4) Decide interactions: which column sorts, any filter/date-range. (5) Write an acceptance-criteria checklist of 5-8 items, e.g. 'KPI cards show computed values', 'the chart renders from the data', 'the table lists all rows', 'at least one column sorts', 'a filter narrows the table', 'responsive layout', 'no console errors'. Write to notes/data-scope.md and via write_task_note. No design or HTML yet.",
+        "produces": { "path": "notes/data-scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "layout-design",
+        "name": "Layout design",
+        "role": "designer",
+        "summary": "card grid, chart placement, table, hierarchy",
+        "prompt": "Design the dashboard layout for scannability. (1) Pick a calm palette (hex) with one accent for emphasis/positive-negative deltas. (2) Lay out KPI cards in a top row (value, label, delta), the chart below/beside, and the table at the bottom. (3) Specify card, chart, and table styling and the responsive reflow (cards stack on mobile). (4) Define the sort indicator and filter control look. (5) Self-contained CSS; charts via canvas or inline SVG (no chart-library CDN unless trivially inlined). Write the visual spec to notes/layout-design.md and via write_task_note. No HTML yet.",
+        "produces": { "path": "notes/layout-design.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "build",
+        "name": "Build",
+        "role": "developer",
+        "summary": "implement index.html with cards, chart, table",
+        "prompt": "Implement index.html with inline CSS/JS to the layout and data scope. (1) Embed the data array and compute the KPIs into the summary cards (show deltas in the accent color). (2) Render the chart from the data with canvas or inline SVG. (3) Render the full data table; implement click-to-sort on at least one column and a working filter/search that narrows rows. (4) Make it responsive (cards stack, table scrolls) at 375px and 1280px. (5) Vanilla JS, no CDN. On a loop-back, fix only the named gaps without regressing passing criteria. write_task_note the path and passing criteria.",
+        "produces": { "path": "index.html", "kind": "html-page" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Evaluate the dashboard. Open/render index.html, sort the table, use the filter, and resize. Check EACH criterion from notes/data-scope.md and write PASS/FAIL with a reason: do KPI cards show correctly computed values, does the chart render from the data, does the table list all rows, does at least one column sort, does the filter narrow the table, is it responsive, zero console errors? Verify a KPI value by hand against the data. Wrong KPIs or a dead chart is a FAIL — loop back to build.",
+      "loopBackTo": "build",
+      "deliverable": { "path": "index.html", "kind": "html-page" }
+    }
+  },
+  {
+    "id": "web-app-crud",
+    "name": "CRUD Web App",
+    "description": "Build a small single-file CRUD web app — a todo list, notes, contacts, or inventory manager — with create, read, update, and delete plus localStorage persistence so data survives a reload. Locks the data model and the four operations first, then a clean list-plus-form UI design, then builds vanilla JS with real state and persistence. CRUD apps fail when delete or edit silently does nothing or data vanishes on reload, so the model phase pins every operation's behavior before coding, the ordering that gets a small model to a genuinely working app.",
+    "tags": ["website", "crud", "app", "localstorage", "interactive", "html"],
+    "triggers": [
+      "crud app",
+      "todo app",
+      "notes app",
+      "build a web app",
+      "contacts manager",
+      "inventory app"
+    ],
+    "phases": [
+      {
+        "id": "model-scope",
+        "name": "Model scope",
+        "role": "planner",
+        "summary": "entity fields + the four CRUD operations",
+        "prompt": "Pin the data model and operations. (1) Define the entity and its fields (e.g. todo: id, text, done, createdAt) and any validation (required fields). (2) Specify each operation precisely: Create (form -> new record), Read (list/render, any sort/filter), Update (edit in place or via form), Delete (with confirm?). (3) Decide persistence: localStorage key and shape; data must survive reload. (4) Note empty-state behavior. (5) Write an acceptance-criteria checklist of 6-8 items, e.g. 'adding creates a visible item', 'editing updates the item', 'deleting removes it', 'data persists across reload', 'invalid input is rejected', 'an empty-state message shows when there are no items', 'no console errors'. Write to notes/model-scope.md and via write_task_note. No design or HTML yet.",
+        "produces": { "path": "notes/model-scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "ui-design",
+        "name": "UI design",
+        "role": "designer",
+        "summary": "list + form layout, item states, empty state",
+        "prompt": "Design the app UI. (1) Pick a clean palette (hex) and type. (2) Lay out the input/add form and the item list; specify how each item renders with its edit and delete affordances. (3) Design the editing state (inline field or modal) and the confirm-delete interaction. (4) Design the empty state and any filter/sort controls. (5) Self-contained CSS, responsive, no external assets. Write the visual spec to notes/ui-design.md and via write_task_note. No HTML yet.",
+        "produces": { "path": "notes/ui-design.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "build",
+        "name": "Build",
+        "role": "developer",
+        "summary": "implement index.html with full CRUD + persistence",
+        "prompt": "Implement index.html with inline CSS/JS to the model and UI spec. (1) Keep an in-memory array of records, hydrated from localStorage on load. (2) Create: validate then push and re-render. (3) Read: render the list (with empty state) and any sort/filter. (4) Update: edit a record in place and re-render. (5) Delete: remove (with confirm if specified) and re-render. (6) Persist to localStorage on every mutation so a reload restores state. Vanilla JS, no CDN. On a loop-back, fix only the named gaps without regressing passing criteria. write_task_note the path and passing criteria.",
+        "produces": { "path": "index.html", "kind": "html-page" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Exercise every operation. Open index.html if possible, add/edit/delete items, then RELOAD the page. Check EACH criterion from notes/model-scope.md and write PASS/FAIL with a reason: does add create a visible item, does edit update it, does delete remove it, does data persist across reload, is invalid input rejected, does the empty state show, zero console errors? The reload-persistence and the delete are the make-or-break checks — if either fails, FAIL and loop back to build.",
+      "loopBackTo": "build",
+      "deliverable": { "path": "index.html", "kind": "html-page" }
+    }
+  },
+  {
+    "id": "form-wizard",
+    "name": "Multi-Step Form Wizard",
+    "description": "Build a single-file multi-step form wizard — a signup, checkout, survey, or onboarding form split across steps with a progress indicator, per-step validation, back/next navigation, and a final review-and-submit. Designs the step flow, fields per step, and validation rules first, then implements stateful navigation that preserves entered data across steps. Wizards break when going back loses data or a step advances with invalid input, so the flow-design phase locks the field-per-step map and validation before any markup.",
+    "tags": ["form", "wizard", "multi-step", "validation", "html"],
+    "triggers": [
+      "multi step form",
+      "form wizard",
+      "checkout flow",
+      "survey form",
+      "step by step form",
+      "onboarding form"
+    ],
+    "phases": [
+      {
+        "id": "flow-design",
+        "name": "Flow design",
+        "role": "designer",
+        "summary": "steps, fields per step, validation, progress",
+        "prompt": "Design the wizard flow. (1) Enumerate the steps in order and the fields collected on each (with types: text, email, select, radio). (2) Define per-field validation rules and the exact error messages. (3) Specify navigation: Next validates the current step before advancing; Back preserves all entered data; a progress indicator shows current step of N. (4) Define the final review step that summarizes all answers before submit, and the success state. (5) Write an acceptance-criteria checklist of 6-8 items, e.g. 'Next is blocked until the current step is valid', 'Back preserves entered values', 'the progress indicator reflects the current step', 'the review step shows every answer', 'submit shows a success state', 'invalid fields show their error', 'no console errors'. Write to notes/flow-design.md and via write_task_note. No HTML yet.",
+        "produces": { "path": "notes/flow-design.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "build",
+        "name": "Build",
+        "role": "developer",
+        "summary": "implement index.html with stateful step navigation",
+        "prompt": "Implement index.html with inline CSS/JS to the flow design. (1) Render all steps but show only the active one; track current step and a form-data object. (2) On Next, validate the current step's fields; block advance and show inline errors if invalid; otherwise save values and advance. (3) On Back, go to the previous step with all values intact (re-populate inputs from the data object). (4) Render a progress indicator (step N of M or a bar). (5) Build the final review step summarizing every answer, and a submit that shows a success message. Style it cleanly and responsively. Vanilla JS, no CDN. On a loop-back, fix only the named gaps without regressing passing criteria. write_task_note the path and passing criteria.",
+        "produces": { "path": "index.html", "kind": "html-page" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Walk the whole wizard. Open index.html if possible: try to advance with invalid input, fill steps, go Back and forward to confirm data is kept, reach the review, and submit. Check EACH criterion from notes/flow-design.md and write PASS/FAIL with a reason: is Next blocked when invalid, does Back preserve values, does the progress indicator update, does review show every answer, does submit succeed, zero console errors? Going Back and losing entered data is a FAIL — loop back to build.",
+      "loopBackTo": "build",
+      "deliverable": { "path": "index.html", "kind": "html-page" }
+    }
+  },
+  {
+    "id": "data-viz-page",
+    "name": "Data Visualization Explorer",
+    "description": "Build a single interactive chart or data explorer page — bar, line, scatter, or pie — driven by sample or provided data, with controls to filter, switch series, or change the dimension and a tooltip on hover. Scopes the dataset and the question the chart answers first, then the chart type and encodings, then implements a canvas or SVG chart with real interactivity. A chart that does not map data to pixels correctly is worse than a table, so the data and chart-design phases lock the encoding and the axes before any rendering code.",
+    "tags": ["website", "data-viz", "chart", "interactive", "svg", "html"],
+    "triggers": [
+      "data visualization",
+      "interactive chart",
+      "data explorer",
+      "build a chart",
+      "visualize data",
+      "graph page"
+    ],
+    "phases": [
+      {
+        "id": "data-scope",
+        "name": "Data scope",
+        "role": "planner",
+        "summary": "dataset shape + the question the chart answers",
+        "prompt": "Scope the data and the question. (1) Define the dataset shape (fields, types) and embed a realistic sample array if none is provided. (2) State the ONE question the chart answers (e.g. 'how do sales trend by month?'). (3) Identify the dimension(s) and measure(s) to plot and any aggregation. (4) Decide the interactive controls (filter, series toggle, dimension switch) and the hover tooltip content. (5) Write an acceptance-criteria checklist of 5-8 items, e.g. 'the chart renders from the data', 'axes are labeled with correct scales', 'a hover tooltip shows the underlying value', 'a control filters or switches the view and the chart updates', 'responsive', 'no console errors'. Write to notes/data-scope.md and via write_task_note. No chart code yet.",
+        "produces": { "path": "notes/data-scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "chart-design",
+        "name": "Chart design",
+        "role": "designer",
+        "summary": "chart type, encodings, axes, legend, tooltip",
+        "prompt": "Design the chart precisely. (1) Choose the chart type that fits the question and justify it in one line. (2) Map each variable to a visual channel (x, y, color, size) and define the axis scales and ranges. (3) Specify the legend, gridlines, color palette (hex), and the tooltip layout. (4) Design the control affordances (dropdown/buttons) and the empty/loading state. (5) Self-contained — canvas or inline SVG, no chart-library CDN. Write the visual spec to notes/chart-design.md and via write_task_note. No HTML yet.",
+        "produces": { "path": "notes/chart-design.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "build",
+        "name": "Build",
+        "role": "developer",
+        "summary": "implement index.html with the interactive chart",
+        "prompt": "Implement index.html with inline CSS/JS to the chart and data scope. (1) Embed the data and compute scales mapping data values to pixel coordinates correctly (mind the inverted y-axis). (2) Render the chart with labeled axes, gridlines, and a legend via canvas or SVG. (3) Implement the hover tooltip showing the underlying value at the cursor's data point. (4) Wire the controls so changing them recomputes and re-renders the chart. (5) Make it responsive; vanilla JS, no CDN. Verify a couple of plotted points sit at the right coordinates. On a loop-back, fix only the named gaps without regressing passing criteria. write_task_note the path and passing criteria.",
+        "produces": { "path": "index.html", "kind": "html-page" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Evaluate the explorer. Open/render index.html, hover for tooltips, and operate every control. Check EACH criterion from notes/data-scope.md and write PASS/FAIL with a reason: does the chart render from the data, are axes labeled with correct scales, does the tooltip show the right underlying value, does a control update the chart, is it responsive, zero console errors? Verify one data point's screen position against its value by hand — a mis-scaled axis is a FAIL, loop back to build.",
+      "loopBackTo": "build",
+      "deliverable": { "path": "index.html", "kind": "html-page" }
+    }
+  },
+  {
+    "id": "email-template",
+    "name": "Responsive HTML Email",
+    "description": "Build a responsive HTML email template that renders across email clients — Outlook, Gmail, Apple Mail — using table-based layout, inline styles, and bulletproof buttons, for a newsletter, transactional, or promo send. Designs the visual structure and the client-safe constraints first, writes the copy, then builds the table-based HTML with all CSS inlined. Email is not the web: external CSS, flexbox, and modern selectors break, so the design phase locks the table layout and inline-only rule before any markup, the ordering that keeps a small model from producing a div-and-class email that renders broken in Outlook.",
+    "tags": ["email", "html-email", "responsive", "newsletter", "marketing"],
+    "triggers": [
+      "html email",
+      "email template",
+      "newsletter email",
+      "responsive email",
+      "marketing email",
+      "build an email"
+    ],
+    "phases": [
+      {
+        "id": "design",
+        "name": "Email design",
+        "role": "visual-designer",
+        "summary": "table layout, palette, client-safe constraints",
+        "prompt": "Design the email within email's constraints. (1) Pick a palette (hex) and a single web-safe font stack with fallbacks. (2) Lay out the structure as nested tables: a centered container (max ~600px), header/logo, hero, body sections, a bulletproof CTA button, and footer with unsubscribe. (3) State the hard rules: table-based layout, ALL CSS inline on elements, no external stylesheets, no flexbox/grid, images with width/alt and a text fallback. (4) Define the mobile behavior (single column, scalable text). (5) Write an acceptance-criteria checklist of 6-8 items, e.g. 'layout uses tables not divs', 'all styles are inline', 'container is max ~600px and centered', 'a bulletproof CTA button is present', 'a footer with unsubscribe exists', 'images have alt text', 'no external CSS or web fonts'. Write to notes/design.md and via write_task_note. No markup yet.",
+        "produces": { "path": "notes/design.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "copy",
+        "name": "Copywriting",
+        "role": "copywriter",
+        "summary": "subject, preheader, body copy, CTA label",
+        "prompt": "Write the email copy. (1) A subject line and a preheader (the preview snippet). (2) A headline and the body sections' copy, tight and scannable. (3) The CTA button label (action verb). (4) Footer text including an unsubscribe line and sender info. Match the send's purpose (newsletter, transactional, promo). Write the copy keyed by slot to notes/copy.md and via write_task_note.",
+        "produces": { "path": "notes/copy.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "build",
+        "name": "Build",
+        "role": "developer",
+        "summary": "implement email.html with table layout + inline CSS",
+        "prompt": "Implement email.html as a client-safe HTML email to the design and copy. (1) Use nested <table> layout with a centered max-600px container; NO divs-for-layout, NO external CSS, NO flexbox/grid. (2) Put every style inline on the element via style attributes. (3) Include the preheader as hidden preview text near the top. (4) Build a bulletproof CTA button (a styled table-cell anchor that survives Outlook). (5) Add alt text to images and a footer with an unsubscribe link. (6) Ensure it degrades to a single column on narrow widths. On a loop-back, fix only the named gaps without regressing passing criteria. write_task_note the path and passing criteria.",
+        "produces": { "path": "email.html", "kind": "html-page", "minBytes": 1200 }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Evaluate the email for client-safety. Open/render email.html and inspect the source. Check EACH criterion from notes/design.md and write PASS/FAIL with a reason: is the layout table-based (grep for layout <div> — should be none), are ALL styles inline (no <style> block doing layout, no external <link>), is the container ~600px and centered, is there a bulletproof CTA button, a footer with unsubscribe, image alt text, and zero web fonts/external CSS? Any external CSS or div-based layout is a FAIL — loop back to build.",
+      "loopBackTo": "build",
+      "deliverable": { "path": "email.html", "kind": "html-page", "minBytes": 1200 }
+    }
+  },
+  {
+    "id": "chrome-extension",
+    "name": "Browser Extension",
+    "description": "Build a Manifest V3 browser extension scaffold — a popup, a content script, and the manifest — that does one concrete thing on the current page (highlight, count, extract, or toggle). Scopes the single capability and the required permissions first, designs the popup UI, then builds a valid manifest.json plus popup and content-script files wired by messaging. Extensions fail at the manifest and the popup↔content messaging boundary, so the scope phase pins the exact MV3 permissions and message contract before any code, keeping a small model from producing a manifest the browser rejects.",
+    "tags": ["browser-extension", "chrome", "manifest-v3", "popup", "javascript"],
+    "triggers": [
+      "chrome extension",
+      "browser extension",
+      "build an extension",
+      "manifest v3 extension",
+      "firefox extension",
+      "browser plugin"
+    ],
+    "phases": [
+      {
+        "id": "scope",
+        "name": "Scope",
+        "role": "planner",
+        "summary": "the one capability + MV3 permissions + message contract",
+        "prompt": "Scope the extension to ONE capability. (1) State exactly what it does on the current page in one sentence (e.g. 'count and highlight all links'). (2) List the minimum MV3 permissions and host_permissions needed and why — no over-permissioning. (3) Define the components: popup (trigger + display), content script (acts on the page), and the message contract between them (message names and payloads). (4) Decide what the popup shows back to the user. (5) Write an acceptance-criteria checklist of 5-8 items, e.g. 'manifest is valid MV3 (manifest_version 3)', 'the popup has a working button', 'clicking it messages the content script', 'the content script performs the action on the page', 'a result is shown in the popup', 'only the listed permissions are requested'. Write to notes/scope.md and via write_task_note. No code yet.",
+        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "ui-design",
+        "name": "Popup UI design",
+        "role": "designer",
+        "summary": "popup layout, button, result display",
+        "prompt": "Design the popup UI. (1) Pick a small fixed popup size and a clean palette (hex). (2) Lay out the action button(s) and the result/status area. (3) Specify states: idle, running, result, and error. (4) Keep styles self-contained in the popup. (5) Note any icon needs. Write the popup spec to notes/ui-design.md and via write_task_note. No code yet.",
+        "produces": { "path": "notes/ui-design.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "build",
+        "name": "Build",
+        "role": "developer",
+        "summary": "manifest.json + popup + content script",
+        "prompt": "Build the extension files to the scope and UI spec. (1) Write a valid manifest.json with manifest_version 3, name, version, description, the exact permissions/host_permissions from scope, an action.default_popup, and a content_scripts entry. (2) Write popup.html + popup.js to the UI spec; the button sends the contract message to the active tab via chrome.tabs.query + chrome.tabs.sendMessage. (3) Write content.js that listens with chrome.runtime.onMessage, performs the page action, and replies with the result. (4) Render the reply in the popup, handling the error state. Bundle everything; the deliverable is index.html acting as the popup plus the supporting files. On a loop-back, fix only the named gaps. write_task_note the file paths and passing criteria.",
+        "produces": {
+          "path": "index.html",
+          "kind": "html-page",
+          "minBytes": 600,
+          "extraChecks": [{ "kind": "sniff", "file": "manifest.json", "sniff": "json-valid" }]
+        }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Evaluate the extension scaffold. Read manifest.json, popup (index.html) + its JS, and the content script. Check EACH criterion from notes/scope.md and write PASS/FAIL with a reason: is manifest.json valid JSON with manifest_version 3 and an action popup and content_scripts entry, does the popup have a working button, does it message the content script via chrome.tabs.sendMessage, does the content script onMessage perform the action and reply, does the popup show the result, are only the listed permissions requested? A manifest the browser would reject (missing manifest_version 3 or malformed) is a FAIL — loop back to build.",
+      "loopBackTo": "build",
+      "deliverable": {
+        "path": "index.html",
+        "kind": "html-page",
+        "minBytes": 600,
+        "extraChecks": [{ "kind": "sniff", "file": "manifest.json", "sniff": "json-valid" }]
+      }
+    }
+  },
+  {
+    "id": "pwa-offline",
+    "name": "Installable Offline PWA",
+    "description": "Build an installable Progressive Web App that works offline — an HTML app shell, a web app manifest, and a service worker that caches the shell so it loads with no network. Scopes the app's one job and the offline strategy first, designs the app shell, then implements the manifest, registration, and a cache-first service worker. PWAs fail at installability and the service-worker caching contract, so the scope phase locks the cached asset list and the offline behavior before coding, keeping a small model from shipping a manifest that fails the install criteria or a service worker that never caches.",
+    "tags": ["pwa", "service-worker", "offline", "installable", "web-app"],
+    "triggers": [
+      "pwa",
+      "progressive web app",
+      "offline web app",
+      "installable app",
+      "service worker app",
+      "add to home screen app"
+    ],
+    "phases": [
+      {
+        "id": "scope",
+        "name": "Scope",
+        "role": "planner",
+        "summary": "the app's job + offline strategy + cached assets",
+        "prompt": "Scope the PWA. (1) State the app's one job in a sentence (e.g. 'a checklist that works offline'). (2) List the app-shell assets to precache (index.html, the CSS/JS, icons) for offline load. (3) Choose the caching strategy (cache-first for the shell) and what happens for uncached requests. (4) Define the manifest essentials: name, short_name, start_url, display 'standalone', theme/background color, and at least a 192 and 512 icon. (5) Write an acceptance-criteria checklist of 5-8 items, e.g. 'a web app manifest is linked with required fields', 'a service worker registers', 'the SW precaches the shell on install', 'the app loads offline after first visit (cache-first)', 'icons are referenced', 'no console errors'. Write to notes/scope.md and via write_task_note. No code yet.",
+        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "design",
+        "name": "App shell design",
+        "role": "designer",
+        "summary": "shell layout, theme colors, offline indicator",
+        "prompt": "Design the app shell. (1) Lay out the minimal shell UI for the app's one job and pick a palette (hex) including the theme/background colors used in the manifest. (2) Specify an online/offline indicator so the user knows their state. (3) Keep the shell light so it caches small and loads instantly. (4) Note the icon look. Write the shell spec to notes/design.md and via write_task_note. No code yet.",
+        "produces": { "path": "notes/design.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "build",
+        "name": "Build",
+        "role": "developer",
+        "summary": "index.html + manifest + service worker",
+        "prompt": "Build the PWA to the scope and shell spec. (1) Write index.html as the app shell with the app's UI; link the web app manifest and add theme-color meta. (2) Write manifest.webmanifest (or manifest.json) with name, short_name, start_url, display standalone, theme/background colors, and 192/512 icon entries. (3) In index.html, register the service worker on load (navigator.serviceWorker.register). (4) Write sw.js that on 'install' precaches the shell asset list into a named cache, and on 'fetch' serves cache-first falling back to network. (5) Show the online/offline indicator. On a loop-back, fix only the named gaps. write_task_note the file paths and passing criteria.",
+        "produces": {
+          "path": "index.html",
+          "kind": "html-page",
+          "minBytes": 600,
+          "extraChecks": [
+            {
+              "kind": "contains",
+              "file": "index.html",
+              "pattern": "serviceWorker\\.register",
+              "flags": "i"
+            },
+            {
+              "kind": "contains",
+              "file": "sw.js",
+              "pattern": "addEventListener\\(['\"]install",
+              "flags": "i"
+            }
+          ]
+        }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Evaluate the PWA. Read index.html, the manifest, and sw.js. Check EACH criterion from notes/scope.md and write PASS/FAIL with a reason: is a manifest linked with name/start_url/display-standalone/theme-color and 192+512 icons, does index.html call serviceWorker.register, does sw.js cache the shell on the install event, does fetch serve cache-first (so a second load works offline), are icons referenced, zero console errors? If a browser/DevTools is available, simulate offline and reload to confirm it still loads. A service worker that never caches the shell is a FAIL — loop back to build.",
+      "loopBackTo": "build",
+      "deliverable": {
+        "path": "index.html",
+        "kind": "html-page",
+        "minBytes": 600,
+        "extraChecks": [
+          {
+            "kind": "contains",
+            "file": "index.html",
+            "pattern": "serviceWorker\\.register",
+            "flags": "i"
+          },
+          {
+            "kind": "contains",
+            "file": "sw.js",
+            "pattern": "addEventListener\\(['\"]install",
+            "flags": "i"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "id": "interactive-quiz",
+    "name": "Interactive Quiz Widget",
+    "description": "Build a single-file interactive quiz or assessment — multiple-choice, true/false, or a scored personality quiz — that asks questions one at a time, tracks the score, gives feedback, and shows a results screen. Authors the question bank, answer keys, and scoring logic first, designs the question and results UI, then implements stateful question flow with correct scoring. Quizzes break when the score is miscounted or the results screen never appears, so the content phase locks the answer key and the score-to-result mapping before any markup.",
+    "tags": ["quiz", "assessment", "interactive", "education", "html"],
+    "triggers": [
+      "quiz app",
+      "make a quiz",
+      "trivia game",
+      "assessment widget",
+      "personality quiz",
+      "multiple choice quiz"
+    ],
+    "phases": [
+      {
+        "id": "content",
+        "name": "Content",
+        "role": "planner",
+        "summary": "question bank, answer keys, scoring + results",
+        "prompt": "Author the quiz content. (1) Write the questions with their options and mark the correct answer(s) for each (the answer key) — for a scored personality quiz, map options to point buckets instead. (2) Define the scoring rule (one point per correct, or weighted) and the score-to-result mapping (e.g. 0-3 = beginner, 4-7 = ...). (3) Decide flow: one question per screen, whether to show immediate per-question feedback, and progress. (4) Define the results screen content. (5) Write an acceptance-criteria checklist of 5-8 items, e.g. 'each question shows its options', 'selecting an answer advances or enables Next', 'the score counts correct answers accurately', 'a progress indicator updates', 'the results screen shows the final score and the mapped result', 'a restart resets the quiz', 'no console errors'. Write to notes/content.md and via write_task_note. No HTML yet.",
+        "produces": { "path": "notes/content.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "design",
+        "name": "Design",
+        "role": "designer",
+        "summary": "question card, option states, results layout",
+        "prompt": "Design the quiz UI. (1) Pick a friendly palette (hex) and type. (2) Design the question card: question text, option buttons, and selected/correct/incorrect states (if showing feedback). (3) Design the progress indicator and the Next/submit affordance. (4) Design the results screen with the score and mapped outcome and a restart button. (5) Self-contained CSS, responsive. Write the visual spec to notes/design.md and via write_task_note. No HTML yet.",
+        "produces": { "path": "notes/design.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "build",
+        "name": "Build",
+        "role": "developer",
+        "summary": "implement index.html with question flow + scoring",
+        "prompt": "Implement index.html with inline CSS/JS to the content and design. (1) Hold the question bank, the current index, and the score in state. (2) Render the current question and options; on selection, record the answer, update the score per the rule, show feedback if specified, and advance (or enable Next). (3) Update the progress indicator each question. (4) After the last question, render the results screen with the accurate final score and the mapped result. (5) Wire a restart that resets index and score. Vanilla JS, no CDN. On a loop-back, fix only the named gaps without regressing passing criteria. write_task_note the path and passing criteria.",
+        "produces": { "path": "index.html", "kind": "html-page" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Take the quiz twice — once all-correct, once all-wrong. Open index.html if possible, else trace the scoring. Check EACH criterion from notes/content.md and write PASS/FAIL with a reason: do questions show options, does selecting advance, is the score counted ACCURATELY (all-correct = max, all-wrong = min), does progress update, does the results screen show the right score and mapped result, does restart reset, zero console errors? A miscounted score is a FAIL — loop back to build.",
+      "loopBackTo": "build",
+      "deliverable": { "path": "index.html", "kind": "html-page" }
+    }
+  },
+  {
+    "id": "onboarding-flow",
+    "name": "Product Onboarding Tour",
+    "description": "Build a single-file product onboarding tour or coachmark walkthrough that guides a new user through key features with sequential tooltips, a highlighted target, next/back/skip controls, and a finish state. Designs the step sequence, what each step points at, and the copy strategy first, writes the step copy, then implements the spotlight overlay and step navigation. Tours break when a step points at the wrong element or skip/finish does not dismiss, so the flow-design phase locks the step-to-target map before any code.",
+    "tags": ["onboarding", "tour", "walkthrough", "coachmarks", "html"],
+    "triggers": [
+      "onboarding tour",
+      "product tour",
+      "walkthrough",
+      "feature tour",
+      "coachmarks",
+      "guided tour"
+    ],
+    "phases": [
+      {
+        "id": "flow-design",
+        "name": "Flow design",
+        "role": "designer",
+        "summary": "step sequence, targets, spotlight, controls",
+        "prompt": "Design the tour flow. (1) Build a small demo UI (a few buttons/panels) the tour will run on, OR assume target elements by id; list each step and the element it points at. (2) Define the spotlight/overlay treatment (dim the page, highlight the target) and the tooltip position relative to each target. (3) Specify controls: Next, Back, Skip, and Finish on the last step, plus a step counter. (4) Define the finished state (tour dismisses, optionally remembers via localStorage). (5) Write an acceptance-criteria checklist of 5-8 items, e.g. 'the tour starts on load showing step 1', 'each step highlights its target', 'Next/Back move between steps', 'Skip and Finish dismiss the tour', 'a step counter shows position', 'the overlay dims the rest of the page', 'no console errors'. Write to notes/flow-design.md and via write_task_note. No code yet.",
+        "produces": { "path": "notes/flow-design.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "copy",
+        "name": "Copywriting",
+        "role": "copywriter",
+        "summary": "per-step tooltip copy + button labels",
+        "prompt": "Write the tour copy. (1) For each step, a short title and one or two sentences explaining the feature and the value — friendly, concise, action-oriented. (2) The button labels (Next, Back, Skip, Got it/Finish). (3) Keep each tooltip skimmable in a few seconds. Write the per-step copy keyed by step to notes/copy.md and via write_task_note.",
+        "produces": { "path": "notes/copy.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "build",
+        "name": "Build",
+        "role": "developer",
+        "summary": "implement index.html with spotlight + step nav",
+        "prompt": "Implement index.html with inline CSS/JS to the flow and copy. (1) Render the demo UI and a full-page overlay that dims everything. (2) Track the current step; for each, highlight its target (cut-out spotlight or a ring around the element) and position a tooltip with the step's copy near it. (3) Wire Next/Back to move steps and update the counter; Skip and Finish remove the overlay and end the tour (optionally set a localStorage flag). (4) Ensure the tour starts on load at step 1. Style it cleanly and responsively. Vanilla JS, no CDN. On a loop-back, fix only the named gaps without regressing passing criteria. write_task_note the path and passing criteria.",
+        "produces": { "path": "index.html", "kind": "html-page" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Run the tour. Open index.html if possible: confirm it starts at step 1, step through with Next/Back, try Skip and Finish. Check EACH criterion from notes/flow-design.md and write PASS/FAIL with a reason: does it start on load, does each step highlight the correct target, do Next/Back work, do Skip and Finish dismiss the overlay, does the counter update, does the overlay dim the page, zero console errors? A step pointing at the wrong element, or a tour that will not dismiss, is a FAIL — loop back to build.",
+      "loopBackTo": "build",
+      "deliverable": { "path": "index.html", "kind": "html-page" }
+    }
+  },
+  {
+    "id": "pricing-page",
+    "name": "Pricing Page",
+    "description": "Build a single pricing or plan-comparison page with tiered plan cards, a feature comparison, a highlighted recommended plan, and optionally a monthly/annual toggle that updates prices. Scopes the plans, features, and pricing model first, designs a comparison layout that makes the recommended tier obvious, writes the plan copy, then builds responsive HTML with a working billing toggle. Pricing pages fail when the toggle does not update prices or the tiers are not genuinely comparable, so the offer-scope phase locks the exact plans and feature matrix before any markup.",
+    "tags": ["website", "pricing", "plans", "comparison", "marketing", "html"],
+    "triggers": [
+      "pricing page",
+      "plan comparison",
+      "subscription tiers",
+      "pricing table",
+      "build a pricing page",
+      "compare plans"
+    ],
+    "phases": [
+      {
+        "id": "offer-scope",
+        "name": "Offer scope",
+        "role": "planner",
+        "summary": "plans, feature matrix, pricing model, recommended tier",
+        "prompt": "Lock the pricing offer. (1) Define each plan (name, price, who it is for) — typically 3 tiers. (2) Build the feature matrix: the rows of features and which plans include each (yes/no/limit). (3) Mark the ONE recommended/most-popular plan. (4) Decide the billing model: flat, or monthly/annual with the annual discount and the exact prices for each. (5) Each plan needs a CTA. (6) Write an acceptance-criteria checklist of 5-8 items, e.g. 'each plan shows its price and CTA', 'the recommended plan is visually distinguished', 'the feature comparison is present and consistent', 'a monthly/annual toggle updates all prices' (if applicable), 'responsive at 375px and 1280px', 'no console errors'. Write to notes/offer-scope.md and via write_task_note. No design or HTML yet.",
+        "produces": { "path": "notes/offer-scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "visual-design",
+        "name": "Visual design",
+        "role": "visual-designer",
+        "summary": "comparison layout + recommended-plan emphasis",
+        "prompt": "Design the pricing layout. (1) Pick a palette (hex) with an accent reserved for the recommended plan and CTAs. (2) Lay out the plan cards side by side with the recommended one emphasized (border, badge, scale). (3) Design the feature comparison (per-card lists or a comparison table) so plans are easy to scan against each other. (4) Design the billing toggle and the CTA buttons. (5) Specify the responsive reflow (cards stack on mobile). Self-contained CSS. Write the visual spec to notes/visual-design.md and via write_task_note. No HTML yet.",
+        "produces": { "path": "notes/visual-design.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "copy",
+        "name": "Copywriting",
+        "role": "copywriter",
+        "summary": "plan names, taglines, feature labels, CTA",
+        "prompt": "Write the pricing copy. (1) A page headline and subhead. (2) For each plan: a one-line tagline of who it is for. (3) Clear, consistent feature-row labels. (4) The CTA label per plan (and a note on the most-popular badge text). Keep it benefit-oriented and scannable. Write the copy keyed by plan/section to notes/copy.md and via write_task_note.",
+        "produces": { "path": "notes/copy.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "build",
+        "name": "Build",
+        "role": "developer",
+        "summary": "implement index.html with plan cards + toggle",
+        "prompt": "Implement index.html with inline CSS/JS to the offer, visual spec, and copy. (1) Palette as CSS variables; render the plan cards with prices, taglines, feature lists/table, and CTAs. (2) Visually distinguish the recommended plan (badge + emphasis). (3) If monthly/annual was scoped, build a toggle whose JS swaps every plan's displayed price to the right value. (4) Make the feature comparison consistent and scannable. (5) Responsive at 375px and 1280px; vanilla, no CDN. On a loop-back, fix only the named gaps without regressing passing criteria. write_task_note the path and passing criteria.",
+        "produces": { "path": "index.html", "kind": "html-marketing-site" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Evaluate the pricing page. Open/render index.html, flip the billing toggle if present, and resize. Check EACH criterion from notes/offer-scope.md and write PASS/FAIL with a reason: does each plan show price and CTA, is the recommended plan visually distinguished, is the feature comparison present and consistent, does the monthly/annual toggle update ALL prices correctly, is it responsive? A toggle that does not update prices, or inconsistent feature rows, is a FAIL — loop back to build.",
+      "loopBackTo": "build",
+      "deliverable": { "path": "index.html", "kind": "html-marketing-site" }
+    }
+  },
+  {
+    "id": "micro-game-jam",
+    "name": "Micro Game Jam",
+    "description": "Build a tiny, complete, themed micro-game from a one-word or one-line prompt — a 60-second arcade or one-mechanic toy that fully fits in a single HTML file with a clear goal and a win/lose. Interprets the theme into one tight mechanic and a scope you can actually finish first, then builds the whole game in one pass. The jam discipline is ruthless scope: pick ONE mechanic that expresses the theme, lock a tiny acceptance bar, and ship it playable rather than sprawling — the ordering that gets a small model to a finished game instead of an unfinished engine.",
+    "tags": ["game", "html", "game-jam", "micro-game", "canvas"],
+    "triggers": [
+      "game jam",
+      "tiny game",
+      "themed game",
+      "make a quick game",
+      "one mechanic game",
+      "micro game"
+    ],
+    "phases": [
+      {
+        "id": "theme-design",
+        "name": "Theme design",
+        "role": "game-designer",
+        "summary": "interpret the theme into ONE finishable mechanic",
+        "prompt": "Turn the theme into a finishable micro-game. (1) Restate the theme/prompt in one line and brainstorm the single mechanic that best expresses it — pick exactly ONE (resist scope creep). (2) Define controls, the goal, and a clear win AND lose in one screen. (3) Time-box the scope: what is in (one mechanic, one screen, score or timer) and explicitly what is OUT. (4) Pick a tiny visual style (a few shapes, a 3-color palette with hex). (5) Write a SHORT acceptance-criteria checklist of 4-6 binary items, e.g. 'the theme is recognizable in the mechanic', 'controls work', 'a win condition can be reached', 'a lose condition can be reached', 'a restart exists', 'runs with no console error'. Write to notes/theme-design.md and via write_task_note. No code yet.",
+        "produces": { "path": "notes/theme-design.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "build",
+        "name": "Build",
+        "role": "developer",
+        "summary": "implement the whole micro-game in one index.html",
+        "prompt": "Build the entire micro-game in a single index.html (inline CSS + JS) satisfying the small checklist. (1) <canvas> + 2d context, the one mechanic, real input handling, and a game loop. (2) Implement the goal and BOTH win and lose states on the single screen, plus a restart (press a key / click). (3) Apply the tiny visual style and show score or timer. (4) Keep it small and complete — finishing beats features. Vanilla JS, no CDN, no external assets. On a loop-back, fix only the named gaps without regressing passing criteria. write_task_note the path and passing criteria.",
+        "produces": { "path": "index.html", "kind": "html-game" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Play the micro-game. Open index.html if possible, else trace the loop. Check EACH criterion from notes/theme-design.md and write PASS/FAIL with a reason: is the theme recognizable in the mechanic, do controls work, can you reach BOTH a win and a lose, does restart work, zero console errors? It must be a complete tiny game, not an unfinished engine — if win or lose is unreachable, FAIL and loop back to build.",
+      "loopBackTo": "build",
+      "deliverable": { "path": "index.html", "kind": "html-game" }
+    }
+  },
+  {
+    "id": "svg-animation",
+    "name": "Animated SVG / CSS Hero",
+    "description": "Build a single-file animated SVG or CSS hero section — a looping illustrated scene, an animated logo, or a motion banner driven by CSS keyframes or SMIL with no JavaScript animation library. Storyboards the motion (what moves, the timing, easing, and loop) first, then implements clean, performant, GPU-friendly animation. Motion looks amateur when timing and easing are unconsidered, so the motion-design phase locks the keyframe storyboard and respects prefers-reduced-motion before any markup, the ordering that yields a polished, smooth hero instead of janky tweens.",
+    "tags": ["svg", "animation", "css", "motion", "hero", "html"],
+    "triggers": [
+      "animated svg",
+      "css animation",
+      "animated hero",
+      "motion graphic",
+      "svg animation",
+      "animated banner"
+    ],
+    "phases": [
+      {
+        "id": "motion-design",
+        "name": "Motion design",
+        "role": "visual-designer",
+        "summary": "storyboard the keyframes, timing, easing, loop",
+        "prompt": "Storyboard the motion. (1) Describe the scene and which elements move, in layers. (2) For each element, define its keyframes (start -> end state: position, opacity, scale, color), the duration, the easing curve, any delay, and whether it loops or plays once. (3) Specify the overall timeline so motions feel orchestrated, not random. (4) Decide the palette (hex) and that it must honor prefers-reduced-motion (reduce/disable animation). (5) Write an acceptance-criteria checklist of 5-8 items, e.g. 'the scene animates smoothly on load', 'the loop (if any) is seamless', 'easing is used (not all linear)', 'animation respects prefers-reduced-motion', 'no layout jank (transform/opacity only)', 'no JS animation library'. Write to notes/motion-design.md and via write_task_note. No markup yet.",
+        "produces": { "path": "notes/motion-design.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "build",
+        "name": "Build",
+        "role": "developer",
+        "summary": "implement index.html with CSS/SMIL keyframes",
+        "prompt": "Implement index.html with inline SVG and CSS to the storyboard. (1) Build the scene as inline SVG (or styled elements). (2) Drive motion with @keyframes / CSS transitions (or SMIL) per the storyboard timing and easing — animate transform and opacity for GPU-friendly, jank-free motion (avoid animating width/top/left). (3) Make loops seamless and orchestrate delays so it reads as one composition. (4) Add a prefers-reduced-motion media query that reduces or stops animation. (5) No JS animation library; minimal-to-no JS. On a loop-back, fix only the named gaps without regressing passing criteria. write_task_note the path and passing criteria.",
+        "produces": { "path": "index.html", "kind": "html-page" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Evaluate the animation. Open/render index.html and watch it loop; toggle reduced-motion if you can. Check EACH criterion from notes/motion-design.md and write PASS/FAIL with a reason: does the scene animate smoothly on load, is the loop seamless, is easing used (not all linear), does it respect prefers-reduced-motion, does it animate only transform/opacity (grep for animated width/top/left — should be none), and is there no JS animation library? Jank from animating layout properties is a FAIL — loop back to build.",
+      "loopBackTo": "build",
+      "deliverable": { "path": "index.html", "kind": "html-page" }
+    }
+  },
+  {
+    "id": "web-component",
+    "name": "Reusable Web Component",
+    "description": "Build a reusable custom element as a standards-based Web Component — a rating widget, toggle, accordion, modal, or color-picker — using the Custom Elements API and Shadow DOM with encapsulated styles, attributes, properties, and custom events. Designs the component's public API (tag name, observed attributes, properties, events, slots) first, then implements the class with a demo page proving it works. Components fail when the API is inconsistent or styles leak, so the api-design phase locks the contract before any code, the ordering that yields a genuinely reusable element rather than a one-off.",
+    "tags": ["web-component", "custom-element", "shadow-dom", "javascript", "reusable"],
+    "triggers": [
+      "web component",
+      "custom element",
+      "reusable widget",
+      "shadow dom component",
+      "build a component",
+      "custom html element"
+    ],
+    "phases": [
+      {
+        "id": "api-design",
+        "name": "API design",
+        "role": "developer",
+        "summary": "tag, attributes, properties, events, slots",
+        "prompt": "Design the component's PUBLIC API before any implementation. (1) Choose the custom-element tag name (must contain a hyphen, e.g. <star-rating>). (2) List the observed attributes (reflected to/from properties) and their types/defaults. (3) List the JS properties and methods consumers use. (4) Define the custom events it dispatches (name + detail payload). (5) Decide slots for projected content and the encapsulated style approach (Shadow DOM). (6) Write an acceptance-criteria checklist of 5-8 items, e.g. 'the element upgrades when added to the DOM', 'setting the observed attribute updates the rendering (attributeChangedCallback)', 'interacting dispatches the documented event with the right detail', 'styles are encapsulated in shadow DOM (no leakage)', 'a slot projects content', 'the demo shows it working', 'no console errors'. Write to notes/api-design.md and via write_task_note. No implementation yet.",
+        "produces": { "path": "notes/api-design.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "build",
+        "name": "Build",
+        "role": "developer",
+        "summary": "implement the element + a demo in index.html",
+        "prompt": "Implement the component and a demo in index.html (inline). (1) Define a class extending HTMLElement; attachShadow({mode:'open'}) and render template + encapsulated <style> in the constructor/connectedCallback. (2) Declare static observedAttributes and implement attributeChangedCallback to re-render on change; reflect attributes<->properties per the API. (3) Wire interaction to dispatch the documented CustomEvent(detail). (4) customElements.define the tag. (5) Add a demo section that uses the element, sets attributes, listens for its event, and shows the result. Vanilla JS, no CDN. On a loop-back, fix only the named gaps without regressing passing criteria. write_task_note the path and passing criteria.",
+        "produces": { "path": "index.html", "kind": "html-page" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Evaluate the component against its API. Open index.html if possible and interact via the demo; else read the class. Check EACH criterion from notes/api-design.md and write PASS/FAIL with a reason: does the element upgrade and render, does changing the observed attribute update it (attributeChangedCallback fires), does interacting dispatch the documented event with the right detail, are styles encapsulated in Shadow DOM (no global leakage), does a slot project content, does the demo work, zero console errors? An attribute that does not re-render, or leaked styles, is a FAIL — loop back to build.",
+      "loopBackTo": "build",
+      "deliverable": { "path": "index.html", "kind": "html-page" }
+    }
+  },
+  {
+    "id": "canvas-generative-art",
+    "name": "Canvas Generative Art",
+    "description": "Build a single-file generative art piece on canvas — flow fields, particle systems, recursive trees, Voronoi, noise terrain, or geometric tilings — that produces a fresh composition each run from a seed, with parameters the viewer can tweak. Defines the aesthetic and the generative algorithm first, then implements a seeded, reproducible renderer with a regenerate control. Generative art is an algorithm-and-aesthetic problem, so the aesthetic-scope phase locks the visual rules and the seedable randomness before any drawing, the ordering that yields a deliberate piece rather than random noise.",
+    "tags": ["canvas", "generative", "art", "creative-coding", "html"],
+    "triggers": [
+      "generative art",
+      "creative coding",
+      "procedural art",
+      "flow field",
+      "canvas art",
+      "algorithmic art"
+    ],
+    "phases": [
+      {
+        "id": "aesthetic-scope",
+        "name": "Aesthetic scope",
+        "role": "visual-designer",
+        "summary": "the algorithm, palette, composition rules, seed",
+        "prompt": "Define the aesthetic and the generative system. (1) Choose the algorithm (flow field, particles, recursive subdivision, noise, Voronoi, packing) and describe in steps how it draws a composition. (2) Pick a palette (hex) and the composition rules (density, scale, symmetry, margins, layering, blend). (3) Decide the seed: each run uses a seed so output is reproducible, and a regenerate control makes a new one. (4) List the tweakable parameters exposed to the viewer (count, scale, palette). (5) Write an acceptance-criteria checklist of 5-8 items, e.g. 'a composition renders on load', 'regenerate produces a clearly different composition', 'the same seed reproduces the same image', 'parameters change the output', 'the palette is used (not random colors)', 'no console errors'. Write to notes/aesthetic-scope.md and via write_task_note. No code yet.",
+        "produces": { "path": "notes/aesthetic-scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "build",
+        "name": "Build",
+        "role": "developer",
+        "summary": "implement the seeded renderer in index.html",
+        "prompt": "Implement the generative piece in a single index.html (inline CSS + JS) to the aesthetic spec. (1) Set up a full-canvas 2d context sized to the viewport. (2) Implement a seedable PRNG (e.g. mulberry32) so a given seed reproduces the same image; derive all randomness from it. (3) Implement the algorithm to draw a composition honoring the palette and composition rules. (4) Add a regenerate button (new seed -> redraw) and controls for the exposed parameters that recompute on change. (5) Optionally a save/export. Vanilla JS, no CDN, no external assets. On a loop-back, fix only the named gaps without regressing passing criteria. write_task_note the path and passing criteria.",
+        "produces": { "path": "index.html", "kind": "html-page" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Evaluate the art piece. Open/render index.html, regenerate several times, and tweak a parameter. Check EACH criterion from notes/aesthetic-scope.md and write PASS/FAIL with a reason: does a composition render on load, does regenerate clearly change it, does the same seed reproduce the same image, do parameters affect output, is the chosen palette used (not arbitrary colors), zero console errors? If regenerate does nothing or the same seed gives different images, FAIL and loop back to build.",
+      "loopBackTo": "build",
+      "deliverable": { "path": "index.html", "kind": "html-page" }
+    }
+  },
+  {
+    "id": "accessibility-retrofit",
+    "name": "Accessibility Retrofit (WCAG AA)",
+    "description": "Take an existing HTML page and retrofit it to WCAG 2.1 AA — fixing semantic structure, alt text, color contrast, keyboard operability, focus visibility, form labels, ARIA, and landmarks — without changing the visual design. Audits the page against the AA success criteria first to produce a prioritized findings list, then applies the fixes in place. Accessibility work fails when fixes are guessed rather than measured, so the audit phase enumerates the concrete violations and the target criteria before any edit, and the loop runs back to the FIX phase until every finding is resolved.",
+    "tags": ["accessibility", "a11y", "wcag", "retrofit", "html"],
+    "triggers": [
+      "accessibility fix",
+      "make it accessible",
+      "wcag compliance",
+      "a11y retrofit",
+      "fix accessibility",
+      "screen reader friendly"
+    ],
+    "phases": [
+      {
+        "id": "audit",
+        "name": "Audit",
+        "role": "reviewer",
+        "summary": "enumerate concrete WCAG-AA violations to fix",
+        "prompt": "Audit the existing page against WCAG 2.1 AA — do NOT fix yet. (1) Identify the target file and read it. (2) Check the high-yield AA criteria and record each concrete violation: missing/empty alt text on informative images, low text contrast (<4.5:1 normal, <3:1 large — estimate from the hex), missing form <label>s, non-semantic structure (divs where headings/landmarks/lists belong), keyboard traps or non-focusable interactive elements, missing focus indicator, missing lang attribute, missing skip link, improper heading order, and ARIA misuse. (3) For each finding note location, the failing criterion, and the fix. (4) Prioritize (blocker -> minor). (5) Write this as an acceptance-criteria checklist where each item is 'finding X is resolved' so evaluate can verify each. Write the findings + checklist to notes/audit.md and via write_task_note. No edits yet.",
+        "produces": { "path": "notes/audit.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "fix",
+        "name": "Fix",
+        "role": "developer",
+        "summary": "apply the a11y fixes in place, preserving design",
+        "prompt": "Apply the fixes to the page (write the corrected file as index.html) resolving every audited finding WITHOUT changing the visual design. (1) Add meaningful alt text (or alt=\"\" for decorative). (2) Adjust colors only as needed to hit AA contrast, staying on-brand. (3) Add <label>s / aria-label and associate them. (4) Use semantic HTML and landmarks (header/nav/main/footer), correct heading order, and lists. (5) Make all interactive elements keyboard-operable with a visible :focus indicator; add a skip link and the lang attribute; fix any ARIA. Change markup/CSS for semantics and a11y, not the look. On a loop-back, fix only the still-open findings. write_task_note the path and which findings are now resolved.",
+        "produces": { "path": "index.html", "kind": "html-page" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Verify the retrofit against the audit. Open/inspect index.html, tab through with the keyboard, and check contrast. Go through EACH finding in notes/audit.md and write PASS/FAIL with a reason: is every image's alt correct, does text meet AA contrast, is every control labeled and keyboard-operable with a visible focus ring, is the structure semantic with landmarks and correct heading order, is there a lang attribute and skip link, and is the original visual design preserved? Any unresolved finding, or a visual regression, is a FAIL — loop back to fix.",
+      "loopBackTo": "fix",
+      "deliverable": { "path": "index.html", "kind": "html-page" }
+    }
+  },
+  {
+    "id": "game-with-screens",
+    "name": "Full Game with Title & Game-Over Screens",
+    "description": "Build a complete single-file HTML game with the full screen flow — a title/start screen, the gameplay screen, a game-over screen showing the score, and a restart back to a fresh game — wrapping any core arcade or survival mechanic. Designs the mechanic and the screen-state machine first, a cohesive visual look across all screens, then implements a screen manager so transitions are clean and restart truly resets. Many small models nail gameplay but ship with no start or game-over screen; this archetype makes the screen flow a first-class, gated requirement.",
+    "tags": ["game", "html", "multiscreen", "canvas", "arcade"],
+    "triggers": [
+      "full game with menu",
+      "game with title screen",
+      "game over screen",
+      "complete game",
+      "game with start and restart",
+      "multiscreen game"
+    ],
+    "phases": [
+      {
+        "id": "game-design",
+        "name": "Game design",
+        "role": "game-designer",
+        "summary": "mechanic + the title/play/over/restart state machine",
+        "prompt": "Design the game AND its screen flow. (1) Define the core mechanic, controls, scoring, and the lose condition (a survival/arcade loop). (2) Specify the screen state machine: TITLE (instructions + a start control) -> PLAYING (the game) -> GAME OVER (final score + a restart control) -> back to a FRESH PLAYING state. (3) Define exactly how each transition triggers (press key/click to start; lose -> game over; restart -> reset all state). (4) Write an acceptance-criteria checklist of 6-8 items, e.g. 'a title screen shows before play with a start control', 'starting begins gameplay', 'the mechanic and controls work', 'losing shows a game-over screen with the final score', 'restart returns to a fully reset game (score 0)', 'no leftover state between runs', 'no console errors'. Write to notes/game-design.md and via write_task_note. No code yet.",
+        "produces": { "path": "notes/game-design.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "visual-design",
+        "name": "Visual design",
+        "role": "visual-designer",
+        "summary": "cohesive look across all three screens",
+        "prompt": "Design a cohesive look across all screens. (1) Pick one palette (hex) and type used on title, gameplay HUD, and game-over so they feel like one game. (2) Design the title screen (game name, brief how-to, start prompt), the in-game HUD (score, lives), and the game-over screen (final score, restart prompt). (3) Specify the entity shapes/sprites for gameplay (canvas primitives, no external assets). (4) Add a touch of juice on transitions. Write the visual spec to notes/visual-design.md and via write_task_note. No code yet.",
+        "produces": { "path": "notes/visual-design.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "build",
+        "name": "Build",
+        "role": "developer",
+        "summary": "implement screen manager + game in index.html",
+        "prompt": "Implement the full game in a single index.html (inline CSS + JS) to the visual spec, satisfying every criterion. (1) Maintain a gameState variable ('title' | 'playing' | 'over') and route rendering and input by it. (2) Build the title screen with a start control that switches to 'playing' and initializes fresh state. (3) Implement the gameplay loop (mechanic, input, scoring, collision) on canvas. (4) On the lose condition switch to 'over' and show the final score with a restart control. (5) Restart must RESET all state (score 0, entities cleared) and return to a fresh 'playing' (or title). Vanilla JS, no CDN, no external assets. On a loop-back, fix only the named gaps without regressing passing criteria. write_task_note the path and passing criteria.",
+        "produces": { "path": "index.html", "kind": "html-multiscreen-game" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Play a full cycle twice. Open index.html if possible: from the title, start, play until you lose, see game-over with the score, restart, and confirm it begins fresh. Check EACH criterion from notes/game-design.md and write PASS/FAIL with a reason: is there a title screen with a start control, does starting begin gameplay, do the mechanic/controls work, does losing show a game-over screen with the final score, does restart fully reset (score back to 0, no leftover entities), zero console errors? Stale state after restart, or a missing title/game-over screen, is a FAIL — loop back to build.",
+      "loopBackTo": "build",
+      "deliverable": { "path": "index.html", "kind": "html-multiscreen-game" }
+    }
+  },
+  {
+    "id": "feedback-widget",
+    "name": "Embeddable Feedback Widget",
+    "description": "Build a single-file embeddable feedback, contact, or rating widget — a floating button that opens a small panel with a rating, a message field, and validation, then shows a thank-you state and persists submissions to localStorage. Scopes the fields, validation, and submission behavior first, designs the floating launcher and panel, then implements an accessible, self-contained widget that drops into any page. Feedback widgets fail when submit does nothing, validation is missing, or the panel cannot be closed, so the scope phase locks the field set and the submit-and-thank-you flow before any markup.",
+    "tags": ["widget", "feedback", "form", "embeddable", "html"],
+    "triggers": [
+      "feedback widget",
+      "contact widget",
+      "rating widget",
+      "feedback form",
+      "embeddable form",
+      "support widget"
+    ],
+    "phases": [
+      {
+        "id": "scope",
+        "name": "Scope",
+        "role": "planner",
+        "summary": "fields, validation, submit + thank-you behavior",
+        "prompt": "Scope the widget. (1) Define the fields: a rating (e.g. 1-5 stars or emoji), a message textarea, and an optional email — with which are required. (2) Specify validation and the inline error messages. (3) Define the launcher (a floating button) and the panel open/close behavior (and Escape/overlay-click to close). (4) Define submission: on valid submit, store the entry in localStorage and show a thank-you state with a reset/close. (5) Write an acceptance-criteria checklist of 6-8 items, e.g. 'a floating button toggles the panel open and closed', 'the panel can be dismissed', 'required fields block submit with an inline error', 'a valid submit shows a thank-you state', 'the submission persists to localStorage', 'the widget is keyboard-accessible (focus, Escape)', 'no console errors'. Write to notes/scope.md and via write_task_note. No design or HTML yet.",
+        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "design",
+        "name": "Design",
+        "role": "designer",
+        "summary": "launcher button, panel layout, states",
+        "prompt": "Design the widget UI. (1) Pick a palette (hex) and a fixed-position floating launcher (corner button with an icon/label). (2) Lay out the panel: heading, rating control, message field, optional email, and submit button. (3) Design the states: closed, open, validation-error, submitting, and thank-you. (4) Specify focus styles and that it overlays page content without breaking it (high z-index, contained styles). (5) Self-contained CSS, responsive. Write the visual spec to notes/design.md and via write_task_note. No HTML yet.",
+        "produces": { "path": "notes/design.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "build",
+        "name": "Build",
+        "role": "developer",
+        "summary": "implement the widget in index.html",
+        "prompt": "Implement the widget in index.html (inline CSS + JS) to the scope and design, dropped onto a minimal demo page. (1) Render the floating launcher; clicking it toggles the panel open/closed, and Escape or an overlay click closes it. (2) Build the rating control, message textarea, and optional email with the specified validation; block submit and show inline errors when invalid. (3) On valid submit, push the entry (with a timestamp) to a localStorage array and switch to the thank-you state with a reset/close. (4) Manage focus for accessibility (focus the panel on open, restore on close). (5) Keep styles contained (scoped class names, high z-index). Vanilla JS, no CDN. On a loop-back, fix only the named gaps without regressing passing criteria. write_task_note the path and passing criteria.",
+        "produces": { "path": "index.html", "kind": "html-page" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Exercise the widget. Open index.html if possible: open and close the panel (button, Escape, overlay), try to submit empty, then submit a valid entry, and RELOAD to confirm persistence. Check EACH criterion from notes/scope.md and write PASS/FAIL with a reason: does the floating button toggle the panel, can it be dismissed, do required fields block submit with an inline error, does a valid submit show the thank-you state, does the submission persist to localStorage across reload, is it keyboard-accessible (focus + Escape), zero console errors? A submit that does nothing, or a panel that will not close, is a FAIL — loop back to build.",
+      "loopBackTo": "build",
+      "deliverable": { "path": "index.html", "kind": "html-page" }
+    }
+  }
+]

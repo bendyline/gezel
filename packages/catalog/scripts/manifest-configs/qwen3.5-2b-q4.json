@@ -1,0 +1,42 @@
+{
+  "id": "qwen3.5-2b-q4",
+  "name": "Qwen 3.5 (2B)",
+  "description": "Alibaba's Qwen 3.5 at 2B parameters. Multimodal (text + images) with native tool calling and a 256K context window. A very compact choice for constrained devices.",
+  "tags": ["alibaba", "multimodal", "vision", "tools", "small"],
+  "category": "general",
+  "maintainer": { "name": "Alibaba", "url": "https://ollama.com/library/qwen3.5" },
+  "version": "1.1.0",
+  "updatedAt": "2026-04-26T00:00:00Z",
+  "license": "Apache-2.0",
+  "parameterSize": "2B",
+  "approxSizeBytes": 2700000000,
+  "supportsTools": true,
+  "contextWindow": 256000,
+  "upstream": "https://ollama.com/library/qwen3.5",
+  "style": {
+    "family": "qwen",
+    "reasoningFormat": "think",
+    "toolCallFormat": "function-call"
+  },
+  "behaviors": [
+    "reasoning.strip-think-tags",
+    "prompt.private-reasoning-guidance",
+    "prompt.tool-cookbook-full",
+    "fabrication.detect-past-tense-no-tools",
+    "mcp.relax-required-fields",
+    "mcp.default-missing-fields",
+    { "id": "turn.continuation-budget", "config": { "count": 4 } },
+    "turn.ollama-num-predict-bumped",
+    "turn.preamble-folding"
+  ],
+  "ollama": { "tag": "qwen3.5:2b" },
+  "llamaCpp": {
+    "huggingfaceRepo": "unsloth/Qwen3.5-2B-GGUF",
+    "filename": "Qwen3.5-2B-Q4_K_M.gguf",
+    "quantization": "Q4_K_M"
+  },
+  "mlx": {
+    "huggingfaceRepo": "mlx-community/Qwen3.5-2B-4bit",
+    "quantization": "4bit"
+  }
+}

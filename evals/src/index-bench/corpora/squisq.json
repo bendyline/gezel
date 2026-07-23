@@ -1,0 +1,77 @@
+{
+  "id": "squisq",
+  "sha": "22d893c1f8a8609dbb62d258af9e3d2d660dfa71",
+  "sourceDir": "../squisq",
+  "archivePaths": ["packages/core", "packages/formats", "packages/react"],
+  "stripComponents": 1,
+  "goldenQueries": [
+    {
+      "query": "where is the markdown table parser that turns pipe tables into blocks",
+      "expected": ["core/src/markdown/convert.ts"],
+      "matchLevel": "dir+basename"
+    },
+    {
+      "query": "how is HTML sanitized to prevent cross-site scripting",
+      "expected": ["core/src/markdown/sanitize.ts"],
+      "matchLevel": "dir+basename"
+    },
+    {
+      "query": "where are Word docx documents imported and converted",
+      "expected": ["formats/src/docx/import.ts"],
+      "matchLevel": "dir+basename"
+    },
+    {
+      "query": "low-level Office Open XML reading and writing",
+      "expected": ["formats/src/ooxml/reader.ts", "formats/src/ooxml/writer.ts"],
+      "matchLevel": "dir+basename"
+    },
+    {
+      "query": "estimate how long the narration voiceover of a text will take",
+      "expected": ["core/src/timing/narrationTiming.ts"],
+      "matchLevel": "basename"
+    },
+    {
+      "query": "color contrast and WCAG luminance calculations for themes",
+      "expected": ["core/src/schemas/colorUtils.ts"],
+      "matchLevel": "basename"
+    },
+    {
+      "query": "encode a geographic location into a short string",
+      "expected": ["core/src/spatial/Geohash.ts"],
+      "matchLevel": "basename"
+    },
+    {
+      "query": "compute the distance between two geographic coordinates",
+      "expected": ["core/src/spatial/Haversine.ts"],
+      "matchLevel": "basename"
+    },
+    {
+      "query": "slide transitions and crossfade between blocks during playback",
+      "expected": ["react/src/DocPlayer.tsx"],
+      "matchLevel": "basename"
+    },
+    {
+      "query": "closed caption subtitle track generation for a document",
+      "expected": ["core/src/doc/markdownToDoc.ts"],
+      "matchLevel": "basename"
+    },
+    {
+      "query": "extract the main content and summary from a document",
+      "expected": ["core/src/generate/contentExtractor.ts"],
+      "matchLevel": "basename"
+    },
+    {
+      "query": "parse raw markdown text into a syntax tree",
+      "expected": ["core/src/markdown/parse.ts"],
+      "matchLevel": "dir+basename"
+    }
+  ],
+  "expectedAreas": ["core", "formats", "react"],
+  "refactor": {
+    "oldName": "parseMarkdown",
+    "newName": "parseMarkdownSource",
+    "defFile": "core/src/markdown/parse.ts",
+    "refFileCount": 34,
+    "minRenamedFiles": 28
+  }
+}

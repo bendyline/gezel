@@ -1,0 +1,454 @@
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+/**
+ * ChatManager + MCP tool-call coverage. Uses the MockProvider's
+ * `scriptToolCalls` hook so a session-level send() triggers real MCP bridge
+ * invocations against the live @bendyline/gezel-mcp server. Proves that
+ * session opts propagate the MCP spec into the provider correctly and that
+ * tools can read from / write to the gezel home.
+ */
+import { createRequire } from 'node:module';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { Store } from '../fs/store.js';
+import type { MemoryManager } from '../memory/manager.js';
+import { MockProvider } from '../providers/mock.js';
+import { type RunningService, startService } from '../service.js';
+import { ChatEventBus } from './events.js';
+import { ChatManager } from './manager.js';
+
+const require = createRequire(import.meta.url);
+
+const noopMemory = {
+  save: async () => {},
+  search: async () => [],
+  reindex: async () => 0,
+  writeSummary: async () => {},
+  getRecent: async () => '',
+} as unknown as MemoryManager;
+
+let svc: RunningService;
+let home: string;
+let store: Store;
+let events: ChatEventBus;
+let manager: ChatManager;
+let mock: MockProvider;
+
+beforeEach(async () => {
+  // Boot a live service because the MCP tools call back into /api/...
+  // Flag suppresses the background system-toolsets bootstrap — otherwise
+  // its tarball download races with `afterEach`'s home rm and throws.
+  process.env.GEZEL_MOCK_PROVIDER = '1';
+  home = await mkdtemp(join(tmpdir(), 'gezel-mgr-mcp-test-'));
+  svc = await startService({ home });
+  store = svc.context.store;
+  // Replace the running manager's provider cache with our mock instance
+  // so we can script tool calls on it directly.
+  events = new ChatEventBus();
+  mock = new MockProvider({ name: 'copilot' });
+  manager = new ChatManager({
+    store,
+    events,
+    memory: noopMemory,
+    getPort: () => svc.port,
+    getToken: () => svc.context.token,
+    // Spawned MCP children need to trust the daemon's per-launch HTTPS
+    // cert. Re-using the running service's cert is the same plumbing
+    // the production `service.ts` uses; without this the bridge tests
+    // hit `fetch failed` on every memory/document call.
+    getCert: () => svc.cert?.certPem ?? null,
+    home,
+    providers: [['copilot', mock]],
+    catalog: svc.context.catalog,
+    secrets: svc.context.secrets,
+  });
+  await store.createGezel({ name: 'Ada', role: 'Developer' });
+  // These tests exercise bridge plumbing — that a scripted tool call
+  // actually fires through the MCP bridge — not role-based tool gating.
+  // Disable the role filter so a Developer gezel can drive tools from the
+  // documents / team-management / images groups (write_document,
+  // create_gezel, generate_image) that the Developer role trims by default.
+  await store.writeConfig({ toolFilterMode: 'never' });
+}, 20_000);
+
+afterEach(async () => {
+  await manager?.shutdown();
+  await svc?.stop();
+  await rm(home, { recursive: true, force: true }).catch(() => {});
+  delete process.env.GEZEL_MOCK_PROVIDER;
+});
+
+describe('ChatManager + MCP — tool calls fire through the bridge', () => {
+  it('executes a scripted write_document tool call during send()', async () => {
+    // Sanity-check that the MCP server bundle exists.
+    const mcpPath = require.resolve('@bendyline/gezel-mcp/dist/server.js');
+    expect(mcpPath).toBeTruthy();
+
+    const session = await manager.createSession({ gezelId: 'ada' });
+
+    // Script the tool call + the text reply it precedes.
+    mock.scriptToolCalls([
+      {
+        name: 'write_document',
+        arguments: { path: 'from-mock/hello.md', content: '# Written via MCP\n' },
+      },
+    ]);
+    mock.script('I wrote the doc.');
+
+    await manager.send(session.id, 'please write a doc for me');
+
+    // Verify the bridge actually invoked the tool.
+    const names = mock.toolCallOutputs.map((o) => o.name);
+    expect(names).toContain('write_document');
+
+    // The doc should now be on disk under the service's home.
+    const onDisk = await readFile(
+      join(svc.context.home, 'documents', 'from-mock', 'hello.md'),
+      'utf8',
+    );
+    expect(onDisk).toContain('Written via MCP');
+
+    // And the assistant reply reached the persisted session.
+    const disk = await store.getSession('ada', session.id);
+    expect(disk?.messages.some((m) => m.content === 'I wrote the doc.')).toBe(true);
+
+    // The tool call was captured onto the assistant message so the UI's
+    // post-stream "thought process" expando has something to render.
+    const assistantMsg = disk!.messages.find((m) => m.content === 'I wrote the doc.');
+    expect(assistantMsg?.toolCalls).toBeTruthy();
+    expect(assistantMsg!.toolCalls!.length).toBe(1);
+    expect(assistantMsg!.toolCalls![0]!.name).toBe('write_document');
+    expect(assistantMsg!.toolCalls![0]!.success).toBe(true);
+  }, 30_000);
+
+  it('can script create_gezel (meester-style) and the new gezel appears on disk', async () => {
+    const session = await manager.createSession({ gezelId: 'ada' });
+
+    mock.scriptToolCalls([
+      {
+        name: 'create_gezel',
+        arguments: {
+          role: 'Reviewer',
+          about:
+            '## Identity\n\nYou are a reviewer gezel. You read artifacts and ' +
+            'give terse, actionable feedback. Prefer line-level comments ' +
+            'over abstract praise or dismissal.\n',
+        },
+      },
+    ]);
+    mock.script('Created your Reviewer.');
+
+    await manager.send(session.id, 'add a reviewer gezel');
+
+    // The MCP `create_gezel` tool auto-assigns the name from a curated
+    // pool; we only get to specify the role. Assert on role + count
+    // instead of a hard-coded name.
+    const gezels = await store.listGezels();
+    const reviewers = gezels.filter((g) => g.role === 'Reviewer');
+    expect(reviewers).toHaveLength(1);
+    // The create_gezel tool output should reflect success.
+    const createOutput = mock.toolCallOutputs.find((o) => o.name === 'create_gezel');
+    expect(createOutput?.output).toMatch(/Created gezel/);
+  }, 30_000);
+
+  it('chains multiple tool calls before the reply', async () => {
+    const session = await manager.createSession({ gezelId: 'ada' });
+
+    mock.scriptToolCalls([
+      { name: 'write_document', arguments: { path: 'a.md', content: 'A' } },
+      { name: 'write_document', arguments: { path: 'b.md', content: 'B' } },
+      { name: 'list_documents', arguments: { recursive: true } },
+    ]);
+    mock.script('Done writing two docs.');
+
+    await manager.send(session.id, 'create a.md and b.md');
+
+    const names = mock.toolCallOutputs.map((o) => o.name);
+    expect(names).toEqual(['write_document', 'write_document', 'list_documents']);
+
+    // The list_documents output should mention both files.
+    const listOutput = mock.toolCallOutputs.find((o) => o.name === 'list_documents')!.output;
+    expect(listOutput).toContain('a.md');
+    expect(listOutput).toContain('b.md');
+
+    // All three tool calls end up on the assistant message so the post-
+    // stream expando shows the full thought process, not just the reply.
+    const disk = await store.getSession('ada', session.id);
+    const assistantMsg = disk!.messages.find((m) => m.content === 'Done writing two docs.');
+    expect(assistantMsg?.toolCalls?.map((t) => t.name)).toEqual([
+      'write_document',
+      'write_document',
+      'list_documents',
+    ]);
+  }, 30_000);
+
+  it('runs the generate_image tool and writes a real PNG to project artifacts', async () => {
+    const session = await manager.createSession({ gezelId: 'ada' });
+
+    mock.scriptToolCalls([
+      {
+        name: 'generate_image',
+        arguments: {
+          prompt: 'a tiny abstract compass',
+          width: 8,
+          height: 8,
+          seed: 17,
+        },
+      },
+    ]);
+    mock.script('Here is your compass.');
+
+    await manager.send(session.id, 'draw me a compass');
+
+    const genOutput = mock.toolCallOutputs.find((o) => o.name === 'generate_image');
+    expect(genOutput?.output).toMatch(/Generated 8×8 image/);
+    expect(genOutput?.output).toMatch(/artifacts\/generated\//);
+
+    // The PNG should exist on disk under the default project's artifacts.
+    const generatedDir = join(svc.context.home, 'projects', 'default', 'artifacts', 'generated');
+    const entries = await (await import('node:fs/promises')).readdir(generatedDir);
+    const png = entries.find((f) => f.endsWith('.png'));
+    expect(png).toBeDefined();
+    const bytes = await readFile(join(generatedDir, png!));
+    // PNG signature
+    expect(
+      bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])),
+    ).toBe(true);
+  }, 30_000);
+
+  it('captures a failed tool call onto the assistant message for the post-stream expando', async () => {
+    const session = await manager.createSession({ gezelId: 'ada' });
+
+    // `read_document` against a path that doesn't exist → bridge returns
+    // "ERROR: ..." and onToolCall fires with success=false. The failure
+    // is what the user tends to remember afterward, so it's exactly the
+    // case where the persisted tool history matters most.
+    mock.scriptToolCalls([{ name: 'read_document', arguments: { path: 'does-not-exist.md' } }]);
+    mock.script('Could not find the doc.');
+
+    await manager.send(session.id, 'read me that missing doc');
+
+    const disk = await store.getSession('ada', session.id);
+    const assistantMsg = disk!.messages.find((m) => m.content === 'Could not find the doc.');
+    expect(assistantMsg?.toolCalls).toBeTruthy();
+    expect(assistantMsg!.toolCalls!.length).toBe(1);
+    expect(assistantMsg!.toolCalls![0]!.name).toBe('read_document');
+    // The failure is what we care about — the expando renders it as a red X.
+    expect(assistantMsg!.toolCalls![0]!.success).toBe(false);
+    expect(assistantMsg!.toolCalls![0]!.errorMessage).toBeTruthy();
+  }, 30_000);
+
+  it('nudges with CLOSING_SUMMARY when a turn ran tools but produced no closing text', async () => {
+    // Small models often emit only a tool_use block and stop, leaving
+    // the user staring at an expanded tool-call card with no narrative.
+    // The stall detector should route this through CLOSING_SUMMARY_NUDGE
+    // (not the original CONTINUATION_NUDGE, which would tell the model
+    // to re-execute the tool — wrong, since the tool already ran).
+    const session = await manager.createSession({ gezelId: 'ada' });
+
+    // Turn 1: write a doc, then return EMPTY text. This is the
+    // "tool ran, model went silent" scenario the nudge targets.
+    mock.scriptToolCalls([
+      {
+        name: 'write_document',
+        arguments: { path: 'silent-tool/note.md', content: '# made silently\n' },
+      },
+    ]);
+    mock.script('');
+    // Turn 2 (the synthetic nudge): a real wrap-up sentence.
+    mock.script('Wrote silent-tool/note.md.');
+
+    await manager.send(session.id, 'write the note');
+
+    // The nudge prompt the supervisor sent on the second turn carries
+    // a distinctive phrase from CLOSING_SUMMARY_NUDGE. Match a stable
+    // substring so minor wording changes don't break the test.
+    const sends = mock.calls.filter((c) => c.kind === 'send');
+    const nudgeSend = sends.find((c) => /No more tools — just words/i.test(c.prompt ?? ''));
+    expect(nudgeSend).toBeDefined();
+
+    // And critically: the persisted session has both bubbles — the
+    // tool-only one (with the toolCalls expando) and the wrap-up text.
+    // The user gets to see "what happened" via the expando AND the
+    // closing sentence, instead of just an orphaned tool card.
+    const disk = await store.getSession('ada', session.id);
+    const assistantMsgs = disk!.messages.filter((m) => m.role === 'assistant');
+    expect(assistantMsgs.length).toBeGreaterThanOrEqual(2);
+    const toolOnlyMsg = assistantMsgs.find(
+      (m) => m.content === '' && (m.toolCalls?.length ?? 0) > 0,
+    );
+    expect(toolOnlyMsg).toBeDefined();
+    expect(toolOnlyMsg!.toolCalls![0]!.name).toBe('write_document');
+    const wrapUpMsg = assistantMsgs.find((m) => m.content === 'Wrote silent-tool/note.md.');
+    expect(wrapUpMsg).toBeDefined();
+  }, 30_000);
+
+  it('skips CLOSING_SUMMARY after validation repair writes so checks can rerun', async () => {
+    const session = await manager.createSession({ gezelId: 'ada' });
+
+    mock.scriptToolCalls([
+      {
+        name: 'writeFile',
+        arguments: { path: 'src/app.js', content: 'export const ok = true;\n' },
+      },
+    ]);
+    mock.script('');
+
+    await manager.send(
+      session.id,
+      '[Message from Orion]: [runtime check seed-tasks-render] The app still fails. Patch src/app.js now.',
+    );
+
+    const sends = mock.calls.filter((c) => c.kind === 'send');
+    const nudgeSend = sends.find((c) => /No more tools — just words/i.test(c.prompt ?? ''));
+    expect(nudgeSend).toBeUndefined();
+    expect(sends).toHaveLength(1);
+
+    const onDisk = await store.readProjectWorkspaceFile('default', 'src/app.js');
+    expect(onDisk).toBe('export const ok = true;\n');
+
+    const disk = await store.getSession('ada', session.id);
+    const toolOnlyMsg = disk!.messages.find(
+      (m) => m.role === 'assistant' && m.content === '' && (m.toolCalls?.length ?? 0) > 0,
+    );
+    expect(toolOnlyMsg?.toolCalls?.[0]?.name).toBe('writeFile');
+  }, 30_000);
+
+  it('skips CLOSING_SUMMARY after repeat and escalated validation repair writes', async () => {
+    const prompts = [
+      "[Message from Nadia]: REPEAT MISS — attempt 2 on `repeat.md`: the same check is still failing.\n\n[scenario check] I looked at `repeat.md` and the success criteria aren't met yet.",
+      "REPEAT APPEND MISS — attempt 2 on `append.md`: the append did not clear the check.\n\n[scenario check] I looked at `append.md` and the success criteria aren't met yet.",
+      "REPEAT COMBINED MISS — attempt 3 on `combined.md`: the multi-defect repair did not clear the checks.\n\n[scenario check] I looked at `combined.md` and the success criteria aren't met yet.",
+      'GATE_FULL_REWRITE: 3 completed repairs of `rewrite.md` have failed this scenario check with the exact same result — targeted edits are not landing.',
+    ];
+
+    for (const [index, prompt] of prompts.entries()) {
+      const session = await manager.createSession({ gezelId: 'ada' });
+      mock.scriptToolCalls([
+        {
+          name: 'writeFile',
+          arguments: {
+            path: `validation-repair-${index}.md`,
+            content: `repair ${index}\n`,
+          },
+        },
+      ]);
+      mock.script('');
+
+      await manager.send(session.id, prompt);
+    }
+
+    const sends = mock.calls.filter((c) => c.kind === 'send');
+    const nudgeSend = sends.find((c) => /No more tools — just words/i.test(c.prompt ?? ''));
+    expect(nudgeSend).toBeUndefined();
+    for (const prompt of prompts) {
+      expect(sends.filter((call) => call.prompt === prompt)).toHaveLength(1);
+    }
+
+    for (const index of prompts.keys()) {
+      const onDisk = await store.readProjectWorkspaceFile(
+        'default',
+        `validation-repair-${index}.md`,
+      );
+      expect(onDisk).toBe(`repair ${index}\n`);
+    }
+  }, 30_000);
+
+  it('skips CLOSING_SUMMARY after direct file-work mutations so external checks can run', async () => {
+    const session = await manager.createSession({ gezelId: 'ada' });
+
+    mock.scriptToolCalls([
+      {
+        name: 'writeFile',
+        arguments: { path: 'out/customers.json', content: '[]\n' },
+      },
+    ]);
+    mock.script('');
+
+    await manager.send(
+      session.id,
+      'Please clean up the export and produce the normalized out/customers.json. Write the result to out/customers.json as a single JSON array.',
+    );
+
+    const sends = mock.calls.filter((c) => c.kind === 'send');
+    const nudgeSend = sends.find((c) => /No more tools — just words/i.test(c.prompt ?? ''));
+    expect(nudgeSend).toBeUndefined();
+    expect(sends).toHaveLength(1);
+
+    const onDisk = await store.readProjectWorkspaceFile('default', 'out/customers.json');
+    expect(onDisk).toBe('[]\n');
+  }, 30_000);
+
+  it('still fires CLOSING_SUMMARY_NUDGE under aiEngagementMode=reactive', async () => {
+    // Within-turn recovery from a stalled tool-only response is part of
+    // fulfilling the user's already-sent message — not new ambient
+    // outreach. `reactive` users still want their empty-bubble turn to
+    // recover. Regression test for the engagement-mode gate split:
+    // before the fix, `isProactiveAllowed` short-circuited the nudge
+    // and a tiny llama-cpp model that emitted one tool call and stopped
+    // would strand the user on an empty bubble.
+    await store.writeConfig({ aiEngagementMode: 'reactive' });
+    const session = await manager.createSession({ gezelId: 'ada' });
+
+    mock.scriptToolCalls([
+      {
+        name: 'write_document',
+        arguments: { path: 'reactive-recovery/note.md', content: '# made silently\n' },
+      },
+    ]);
+    mock.script('');
+    mock.script('Wrote reactive-recovery/note.md.');
+
+    await manager.send(session.id, 'write the note');
+
+    const sends = mock.calls.filter((c) => c.kind === 'send');
+    const nudgeSend = sends.find((c) => /No more tools — just words/i.test(c.prompt ?? ''));
+    expect(nudgeSend).toBeDefined();
+  }, 30_000);
+
+  it('does NOT fire any nudge when aiEngagementMode=off', async () => {
+    // The kill-switch still works: `off` blocks every nudge variant,
+    // including the within-turn recoveries. Counterpart to the
+    // reactive-mode test — together they pin the boundary.
+    await store.writeConfig({ aiEngagementMode: 'off' });
+    const session = await manager.createSession({ gezelId: 'ada' });
+
+    mock.scriptToolCalls([
+      {
+        name: 'write_document',
+        arguments: { path: 'off-mode/note.md', content: '# made silently\n' },
+      },
+    ]);
+    mock.script('');
+
+    await manager.send(session.id, 'write the note');
+
+    const sends = mock.calls.filter((c) => c.kind === 'send');
+    const nudgeSend = sends.find((c) => /No more tools — just words/i.test(c.prompt ?? ''));
+    expect(nudgeSend).toBeUndefined();
+  }, 30_000);
+
+  it('uses the original CONTINUATION_NUDGE (not closing summary) when no tools ran', async () => {
+    // The flip side: a stalled turn with NO tools is the original
+    // "you said you would, but didn't actually call the tool" case.
+    // The nudge text differs and matters — pointing the model at "wrap
+    // up" when it never even tried would let it off the hook.
+    const session = await manager.createSession({ gezelId: 'ada' });
+    mock.script("I'll work on that next.", 'Fine, I did the thing.');
+
+    await manager.send(session.id, 'do the thing');
+
+    const sends = mock.calls.filter((c) => c.kind === 'send');
+    // CONTINUATION_NUDGE always tells the model to act now —
+    // wording has shifted as the nudge generalized from "announced
+    // an action" to "described what you would do or what you read",
+    // but the imperative stays.
+    const continuation = sends.find(
+      (c) => /take that step now/i.test(c.prompt ?? '') || /act\b/i.test(c.prompt ?? ''),
+    );
+    expect(continuation).toBeDefined();
+    // And the closing-summary wording must NOT have been used here.
+    const closingSummary = sends.find((c) => /No more tools — just words/i.test(c.prompt ?? ''));
+    expect(closingSummary).toBeUndefined();
+  }, 30_000);
+});

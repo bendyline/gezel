@@ -1,0 +1,32 @@
+{
+  "id": "llama3.2-3b-q4",
+  "name": "Llama 3.2 (3B)",
+  "description": "Meta's 3B chat model. Small enough to run on modest hardware, sharp enough to be a useful default.",
+  "tags": ["meta", "small"],
+  "category": "general",
+  "maintainer": { "name": "Meta", "url": "https://ollama.com/library/llama3.2" },
+  "version": "1.1.0",
+  "updatedAt": "2026-04-26T00:00:00Z",
+  "license": "Llama 3.2 Community License",
+  "parameterSize": "3B",
+  "approxSizeBytes": 2019377696,
+  "supportsTools": true,
+  "contextWindow": 128000,
+  "upstream": "https://ollama.com/library/llama3.2",
+  "style": {
+    "family": "llama",
+    "reasoningFormat": "none",
+    "toolCallFormat": "function-call"
+  },
+  "behaviors": ["fabrication.detect-past-tense-no-tools"],
+  "ollama": { "tag": "llama3.2" },
+  "llamaCpp": {
+    "huggingfaceRepo": "bartowski/Llama-3.2-3B-Instruct-GGUF",
+    "filename": "Llama-3.2-3B-Instruct-Q4_K_M.gguf",
+    "quantization": "Q4_K_M"
+  },
+  "mlx": {
+    "huggingfaceRepo": "mlx-community/Llama-3.2-3B-Instruct-4bit",
+    "quantization": "4bit"
+  }
+}

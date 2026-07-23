@@ -1,0 +1,11 @@
+# Architecture decisions
+
+This directory records decisions whose rationale is easy to lose by reading
+the implementation alone. Keep the small amount of personality in nearby code
+comments; use a decision record to preserve the constraint, alternatives, and
+regression surface when an anecdote is carrying architectural weight.
+
+| Decision | Status | Subject |
+| --- | --- | --- |
+| [0001](0001-runtime-tool-inventory.md) | Accepted | Generate model tool instructions from the runtime tool surface |
+| [0002](0002-onnxruntime-public-hoist.md) | Accepted | Publicly hoist `onnxruntime-*` packages under pnpm |

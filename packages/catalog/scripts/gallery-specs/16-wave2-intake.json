@@ -1,0 +1,376 @@
+[
+  {
+    "id": "receipt-intake",
+    "name": "Receipt Intake",
+    "description": "Empty the shoebox inbox properly: every waiting receipt becomes a dated, categorized ledger entry that names its source file, likely duplicates get flagged instead of double-counted, and the genuinely ambiguous ones become owner questions instead of guesses. Locks the intake rules FIRST, then works the inbox receipt by receipt, then reports the totals and the question list — the year-round habit that makes April an afternoon. Use for receipt intake, emptying the receipt inbox, 'get these into the ledger', and monthly shoebox catch-ups.",
+    "tags": ["tax", "receipts", "ledger", "intake", "household", "finance"],
+    "triggers": [
+      "process the receipt inbox",
+      "get these receipts into the ledger",
+      "empty the shoebox",
+      "log this month's receipts",
+      "receipt intake"
+    ],
+    "phases": [
+      {
+        "id": "scope",
+        "name": "Scope the intake",
+        "role": "clerk",
+        "summary": "inbox listing, ledger categories, intake rules locked",
+        "prompt": "Define the intake before recording a single entry. Step 1: list the receipt notes waiting in inbox/ and read ledger.json from the workspace — the existing categories, the recent entries, and how entries are shaped. Step 2: lock the intake rules — one ledger entry per receipt; every entry records the source file it came from; a receipt that looks like one already in the ledger (same vendor, date, and amount) is flagged as a likely duplicate, never silently entered again; a receipt whose category is genuinely unclear becomes a question for the owner instead of a guess. Step 3: write an acceptance-criteria checklist ('every inbox receipt produced an entry, a duplicate flag, or an owner question', 'every new entry carries date, amount, category, and source', 'amounts copied exactly from the receipt, never rounded or invented', 'the report totals what was processed and lists every question'). Call write_task_note with the inbox count + rules + checklist and write notes/scope.md. No entries yet.",
+        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "extract",
+        "name": "Work the inbox",
+        "role": "data-analyst",
+        "summary": "one entry per receipt, duplicates flagged, questions parked",
+        "prompt": "Work the inbox against the locked rules, one receipt at a time. Step 1: read each receipt note in inbox/ and pull the vendor, date, and exact amount, and pick the most sensible category from the ledger's existing set. Step 2: record each clear receipt as a ledger entry through the project's ledger capabilities — date, amount, category, and the source file it came from. Step 3: where a receipt matches an existing entry on vendor, date, and amount, flag it as a likely duplicate and do not enter it again; where the category is genuinely ambiguous, park it as an owner question with your best two candidate categories instead of guessing. Step 4: keep a running log in notes/intake.md — per receipt: what it was, what you did (entered, flagged, question), and why. Call write_task_note with the entered/flagged/question counts.",
+        "produces": {
+          "path": "notes/intake.md",
+          "kind": "markdown-notes",
+          "extraChecks": [
+            {
+              "kind": "recordSchema",
+              "file": "ledger.json",
+              "fields": [
+                { "name": "date", "type": "iso-date" },
+                { "name": "amountCents", "type": "integer" },
+                { "name": "category", "type": "nonempty" },
+                { "name": "source", "type": "nonempty" }
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "id": "report",
+        "name": "Write the intake report",
+        "role": "copywriter",
+        "summary": "counts, totals by category, the question list",
+        "prompt": "Write the intake report from the run log. Step 1: open with the headline — how many receipts came in, how many became entries, how many were flagged or parked as questions. Step 2: give the totals of what was entered this run, by category, computed from the entries themselves. Step 3: list every owner question with the receipt it belongs to and your best candidate answers, so the owner can clear the list in one pass. Step 4: note anything that looked off — a likely duplicate, an amount that seems wrong for its vendor, a receipt too faded to trust — plainly and without alarm. Step 5: keep it short and warm; this is a chore done well, not an audit. Write report.md and call write_task_note with the entered/flagged/question counts.",
+        "produces": { "path": "report.md", "kind": "markdown-report", "minBytes": 1000 }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Open report.md, notes/intake.md, and the ledger and verify every criterion from notes/scope.md: every inbox receipt is accounted for as an entry, a duplicate flag, or an owner question; every new entry carries date, amount, category, and its source file; every entered amount matches its receipt exactly (spot-check three against the inbox notes); the report's totals trace to the entries; and every owner question appears in the report. Write PASS/FAIL per criterion; on any failure, name the gap and loop back to report.",
+      "loopBackTo": "report",
+      "deliverable": { "path": "report.md", "kind": "markdown-report", "minBytes": 1000 }
+    }
+  },
+  {
+    "id": "quarterly-summary",
+    "name": "Quarterly Shoebox Summary",
+    "description": "Close the quarter the way your accountant wishes everyone did: totals by category computed from the ledger entries themselves, the missing-documentation list naming each entry that lacks its paperwork, and the estimated-payment reminder in plain words. Locks the target quarter and the checks FIRST, then reconciles the numbers, then writes the summary — twenty minutes, four times a year, instead of an April archaeology dig. Use for quarterly tax summaries, 'how did the quarter shake out', estimated payment prep, and shoebox quarter closes.",
+    "tags": ["tax", "quarterly", "summary", "ledger", "household", "finance"],
+    "triggers": [
+      "quarterly shoebox summary",
+      "how did the quarter shake out",
+      "close the tax quarter",
+      "quarterly expense summary",
+      "estimated payment prep"
+    ],
+    "phases": [
+      {
+        "id": "scope",
+        "name": "Scope the quarter",
+        "role": "data-analyst",
+        "summary": "target quarter, checks, what the summary must report",
+        "prompt": "Define the close before computing anything. Step 1: read ledger.json from the workspace and lock the target quarter (default: the most recently ended calendar quarter) and the prior quarter as the comparison baseline. Step 2: define the checks — entries in the quarter with no category or a category that fits badly, entries with no source document behind them, and amounts that look like typos against their category's usual range. Step 3: define what the summary must report — totals by category computed from the entries, the missing-documentation list naming each entry that lacks its source, the delta versus the prior quarter, and a plain-words estimated-payment reminder. Step 4: write an acceptance-criteria checklist ('every quarter entry counted exactly once', 'totals computed from the entries, never estimated', 'every entry without a source document named', 'one concrete next-quarter action', 'no figure in the summary that is not derivable from the ledger'). Call write_task_note with the quarter + checks + checklist and write notes/scope.md. No totals yet.",
+        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "reconcile",
+        "name": "Reconcile the quarter",
+        "role": "data-analyst",
+        "summary": "category totals from the entries, missing docs, prior-quarter deltas",
+        "prompt": "Reconcile the quarter against the locked checks. Step 1: list every entry in the target quarter and total them by category directly from the amounts — show the per-category arithmetic in your notes so the summary phase inherits checkable numbers. Step 2: sweep for the problem entries — no category, no source document, amounts that look off — and list each one with what is missing. Step 3: compute the prior-quarter comparison per category and flag the big movers. Step 4: note anything that affects the estimated payment — a quarter well above or below the last one deserves a plain-words caution. Step 5: write the structured findings to notes/reconcile.md and call write_task_note with the quarter total, the biggest mover, and the missing-documentation count.",
+        "produces": { "path": "notes/reconcile.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "report",
+        "name": "Write the quarter summary",
+        "role": "copywriter",
+        "summary": "category table, missing-doc list, one next-quarter action",
+        "prompt": "Write the quarter summary from the reconciliation. Step 1: open with the headline — the quarter's total spend in one plain sentence. Step 2: give the category table — one row per category with its total, computed from the entries, under Category and Total columns. Step 3: list the missing-documentation entries by date and vendor so finding the paperwork is a checklist, not a hunt. Step 4: give the prior-quarter comparison in a line or two, and the estimated-payment reminder in words a non-accountant acts on. Step 5: close with ONE concrete action for next quarter. Keep it calm and factual. Write report.md and call write_task_note with the report path and the quarter total.",
+        "produces": {
+          "path": "report.md",
+          "kind": "markdown-report",
+          "minBytes": 1500,
+          "extraChecks": [
+            {
+              "kind": "tableShape",
+              "file": "report.md",
+              "requiredColumns": ["Category", "Total"],
+              "minRows": 3
+            }
+          ]
+        }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Open report.md and notes/reconcile.md and verify every criterion from notes/scope.md: every entry in the quarter is counted exactly once (re-add one category yourself to check), the category table's totals trace to the entries, every entry lacking a source document appears in the missing-documentation list, the prior-quarter comparison is present, the estimated-payment reminder is in plain words, and exactly one next-quarter action is named. Write PASS/FAIL per criterion; on any failure, name the gap and loop back to report.",
+      "loopBackTo": "report"
+    }
+  },
+  {
+    "id": "recipe-capture",
+    "name": "Capture a Recipe Card",
+    "description": "Rescue a handwritten recipe card without sanding off its soul: transcribe the original faithfully — spelling quirks, margin notes, and all — standardize quantities in a separate block alongside (never instead of) the original wording, and pin the provenance note: whose card, whose kitchen, what they always changed. Locks the capture rules FIRST, then captures each card into the book, then logs what needs a test-cook and what to ask the family. Use for capturing recipe cards, 'get oma's cards into the book', preserving family recipes, and recipe transcription.",
+    "tags": ["recipes", "family", "capture", "archive", "kitchen", "household"],
+    "triggers": [
+      "capture a recipe card",
+      "get this recipe into the book",
+      "transcribe oma's card",
+      "add a family recipe",
+      "preserve this recipe"
+    ],
+    "phases": [
+      {
+        "id": "scope",
+        "name": "Scope the capture",
+        "role": "kitchen-master",
+        "summary": "card intake notes read, capture rules locked",
+        "prompt": "Define the capture before transcribing a word. Step 1: read the card intake notes waiting in inbox/ and the recipe book's store (recipes.json) — what is already in the book and how entries are shaped. Step 2: lock the capture rules — the original wording is preserved exactly, spelling quirks, margin notes and all; every recipe carries its provenance (whose card, whose kitchen, what they always changed); the standardized ingredients-and-steps block sits alongside the original text, clearly separated, never replacing it; anything unreadable becomes a question, not a guess. Step 3: write an acceptance-criteria checklist ('every card captured as its own recipe file under recipes/', 'original text verbatim with margin notes kept and marked', 'provenance line on every recipe', 'standardized block separate from the original', 'each captured recipe recorded in the book's store'). Call write_task_note with the card count + rules + checklist and write notes/scope.md.",
+        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "capture",
+        "name": "Capture the cards",
+        "role": "archivist",
+        "summary": "one faithful recipe file per card, recorded in the book",
+        "prompt": "Capture each card against the locked rules. Step 1: for every card note in inbox/, write a recipe file under recipes/ — a title, the provenance line, the original text transcribed faithfully (margin notes included and marked as margin notes), and then a clearly separated standardized block with an Ingredients list and numbered steps. Step 2: record each captured recipe in the book's store through the project's recipe capabilities — title, provenance, and the file it lives in. Step 3: where the card is ambiguous or unreadable, keep the original as written and add the question inline rather than smoothing it over. Step 4: write a per-card capture log to notes/capture.md — what was captured, what was preserved as-is, what needs asking. Call write_task_note with the captured count.",
+        "produces": {
+          "path": "notes/capture.md",
+          "kind": "markdown-notes",
+          "extraChecks": [{ "kind": "fileCount", "ext": ["md"], "min": 1, "dir": "recipes" }]
+        }
+      },
+      {
+        "id": "report",
+        "name": "Write the capture log",
+        "role": "copywriter",
+        "summary": "what went in, what needs a test-cook, questions for the family",
+        "prompt": "Write the capture log for the family from your notes. Step 1: list what went into the book this session — each recipe with whose card it was. Step 2: name what needs a test-cook before it counts as verified, and why (an ambiguous quantity, a step that assumes the cook's hands already knew). Step 3: list the questions for the family — margin notes worth explaining, names and dates worth pinning down — so the next phone call captures them. Step 4: keep it warm; this is family history in food form. Write report.md and call write_task_note with the captured count and the top question.",
+        "produces": { "path": "report.md", "kind": "markdown-report", "minBytes": 800 }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Open report.md, notes/capture.md, and the recipe files under recipes/ and verify every criterion from notes/scope.md: every inbox card became its own recipe file, the original wording is verbatim (spot-check phrases against the card notes — no silent corrections), margin notes survived and are marked as such, every recipe carries a provenance line, the standardized block is present and separate from the original, and each captured recipe is recorded in the book's store. Write PASS/FAIL per criterion; on any failure, name the gap and loop back to capture.",
+      "loopBackTo": "capture"
+    }
+  },
+  {
+    "id": "item-intake",
+    "name": "Catalog an Item",
+    "description": "Take new arrivals from shoebox to catalog: identify each item from its photo notes, record it with condition and an honest value basis, and flag what needs a better photo or an expert eye — uncertain identification stays uncertain in the record instead of becoming confident fiction. Locks the record fields and the honesty rule FIRST, then catalogs each item, then reports confidence and follow-ups. Use for cataloging new items, collection intake, 'catalog these arrivals', and adding finds to the collection.",
+    "tags": ["collection", "catalog", "intake", "archive", "household"],
+    "triggers": [
+      "catalog new items",
+      "catalog these arrivals",
+      "add items to the collection",
+      "collection intake",
+      "record the new finds"
+    ],
+    "phases": [
+      {
+        "id": "scope",
+        "name": "Scope the intake",
+        "role": "curator",
+        "summary": "photo notes read, record fields and honesty rule locked",
+        "prompt": "Define the intake before recording anything. Step 1: read the photo intake notes waiting in inbox/ and the catalog store (collection.json) — the record fields in use and how existing items are shaped. Step 2: lock the record rules — every new item gets an id, name, category, condition, and its photo reference; a value estimate is welcome but only with its basis named; identification that is uncertain stays uncertain in the record ('pressing unverified'), never silently confident. Step 3: decide the follow-up buckets — needs a better photo, needs an expert eye, needs a document (receipt, certificate). Step 4: write an acceptance-criteria checklist ('every inbox item recorded exactly once', 'every record complete on the required fields', 'no identification stated above what the photos support', 'follow-ups named per item where earned'). Call write_task_note with the item count + rules + checklist and write notes/scope.md.",
+        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "catalog",
+        "name": "Catalog the arrivals",
+        "role": "curator",
+        "summary": "identify each item from its photos, record it honestly",
+        "prompt": "Catalog each arrival against the locked rules. Step 1: for every photo note in inbox/, identify the item as far as the evidence carries — name, category, and condition from what the photos actually show. Step 2: record each item through the project's collection capabilities with id, name, category, condition, and photo reference; add a value estimate only where you can name its basis. Step 3: where a detail is unreadable or the identification is uncertain, record the uncertainty on the item itself and put it in the right follow-up bucket. Step 4: keep a per-item log in notes/catalog.md — what you identified, how confident, and why. Call write_task_note with the recorded count and the follow-up count.",
+        "produces": {
+          "path": "notes/catalog.md",
+          "kind": "markdown-notes",
+          "extraChecks": [
+            {
+              "kind": "recordSchema",
+              "file": "collection.json",
+              "fields": [
+                { "name": "id", "type": "nonempty" },
+                { "name": "name", "type": "nonempty" },
+                { "name": "category", "type": "nonempty" },
+                { "name": "condition", "type": "nonempty" },
+                { "name": "photo", "type": "nonempty" }
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "id": "report",
+        "name": "Write the intake report",
+        "role": "copywriter",
+        "summary": "items added, identification confidence, follow-up worklist",
+        "prompt": "Write the intake report from the catalog log. Step 1: open with the headline — items added this intake, out of how many that came in. Step 2: give a line per item — what it is, its condition, and your identification confidence in plain words. Step 3: list the follow-ups by bucket — better photo, expert eye, missing document — so the next session has a worklist. Step 4: flag anything whose value or identification deserves a second opinion before it is trusted. Keep it precise and unhurried — gallery-grade records are built one honest intake at a time. Write report.md and call write_task_note with the added count and the follow-up count.",
+        "produces": { "path": "report.md", "kind": "markdown-report", "minBytes": 1000 }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Open report.md, notes/catalog.md, and the collection store and verify every criterion from notes/scope.md: every inbox item was recorded exactly once with the required fields complete, every identification stays within what the photo notes support (spot-check each against its inbox note), uncertainty is recorded on the item rather than smoothed over, and every earned follow-up is on the worklist. Write PASS/FAIL per criterion; on any failure, name the gap and loop back to catalog.",
+      "loopBackTo": "catalog"
+    }
+  },
+  {
+    "id": "insurance-inventory",
+    "name": "Insurance Inventory",
+    "description": "Compile the inventory nobody has until the day they desperately need it: every cataloged item with its value, photo reference, and acquisition info in one document, the gaps (no photo, no value) named instead of papered over, and the total stated with its basis. Locks the completeness criteria FIRST, then compiles the full table, then writes the cover note — the quiet payoff of keeping the catalog honest. Use for insurance inventories, 'our agent wants a full inventory', documenting the collection for coverage, and preparing a collection record for a claim.",
+    "tags": ["collection", "insurance", "inventory", "household", "report"],
+    "triggers": [
+      "insurance inventory",
+      "full inventory with values",
+      "document the collection for insurance",
+      "collection inventory for our agent",
+      "compile the insurance list"
+    ],
+    "phases": [
+      {
+        "id": "scope",
+        "name": "Scope the inventory",
+        "role": "curator",
+        "summary": "item and gap counts, completeness criteria locked",
+        "prompt": "Define the inventory before compiling it. Step 1: read the catalog store (collection.json) — the item count, which items carry values, which carry photo references and acquisition info. Step 2: lock the completeness criteria — every cataloged item appears in the inventory; every value in the inventory traces to the catalog, never invented on the spot; items without a value or photo are listed with the gap named, not quietly dropped or estimated; the total covers only the values actually on record and says so. Step 3: fix the document's shape — one table with Item, Value, and Photo columns (plus acquisition info where recorded), then a gaps section, then the stated total. Step 4: write an acceptance-criteria checklist ('every item present', 'every value traceable to the catalog', 'every gap named with a next step', 'total stated with its basis', 'readable by an insurance agent cold'). Call write_task_note with the item and gap counts + checklist and write notes/scope.md.",
+        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "compile",
+        "name": "Compile the inventory",
+        "role": "data-analyst",
+        "summary": "full item table, gaps section, stated total",
+        "prompt": "Compile the inventory document from the catalog. Step 1: build the full item table — one row per cataloged item with Item, Value, and Photo columns and acquisition info where the record has it; values copied exactly from the catalog, and gaps marked plainly in the cell rather than guessed. Step 2: after the table, list the gaps by kind — items with no value on record, items with no photo — each with the concrete step that would close it. Step 3: state the total of the recorded values and what it does not include. Write insurance-inventory.md and call write_task_note with the row count and the total.",
+        "produces": {
+          "path": "insurance-inventory.md",
+          "kind": "markdown-doc",
+          "minBytes": 1200,
+          "extraChecks": [
+            {
+              "kind": "tableShape",
+              "file": "insurance-inventory.md",
+              "requiredColumns": ["Item", "Value", "Photo"],
+              "minRows": 3
+            }
+          ]
+        }
+      },
+      {
+        "id": "report",
+        "name": "Write the cover note",
+        "role": "copywriter",
+        "summary": "one-page cover note: total, gaps, review date",
+        "prompt": "Write the cover note for the inventory. Step 1: one paragraph an insurance agent can read cold — what the collection is, how many items, the total of recorded values and what that total excludes. Step 2: the gap list in brief — how many items lack values or photos and the plan to close those gaps. Step 3: a review date a year out, so the inventory stays alive instead of rotting in a drawer. Keep it calm and professional. Write report.md and call write_task_note with the report path and the total.",
+        "produces": { "path": "report.md", "kind": "markdown-report", "minBytes": 800 }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Open insurance-inventory.md, report.md, and the catalog store and verify every criterion from notes/scope.md: every cataloged item has a row in the inventory (count them against the store), every value in the table matches the catalog exactly (spot-check five), every item missing a value or photo appears in the gaps section with a next step, the total re-adds correctly from the recorded values, and the cover note stands alone. Write PASS/FAIL per criterion; on any failure, name the gap and loop back to compile.",
+      "loopBackTo": "compile"
+    }
+  },
+  {
+    "id": "weekly-walkthrough",
+    "name": "Weekly Garden Walkthrough",
+    "description": "Walk the beds once a week with a plan instead of a vague worry: what each bed needs this week derived from the plantings and the season, the walkthrough ordered so it actually gets done, and the observations and harvests logged so the almanac accrues. Locks the week's due list FIRST, then plans the route, then logs what happened and seeds next week. Use for weekly garden walkthroughs, 'what does the garden need this week', weekend garden sessions, and garden check-ins.",
+    "tags": ["garden", "weekly", "walkthrough", "almanac", "household"],
+    "triggers": [
+      "weekly garden walkthrough",
+      "what does the garden need this week",
+      "garden check-in",
+      "walk the beds",
+      "weekend garden session"
+    ],
+    "phases": [
+      {
+        "id": "scope",
+        "name": "Scope the week",
+        "role": "gardener",
+        "summary": "per-bed due list from the plantings and the season",
+        "prompt": "Define the week before walking anywhere. Step 1: read garden.json from the workspace — the beds, what is planted where and since when, and the season parameters — plus the recent entries in journal.json and anything the owner has already reported. Step 2: derive what each bed needs this week from the plantings and the season — watering, feeding, thinning, staking, harvest windows opening or closing — tied to a specific planting, not generic garden advice. Step 3: split the list into this-week-or-it-matters versus can-wait. Step 4: write an acceptance-criteria checklist ('every bed considered, even the ones needing nothing', 'each due task tied to a planting or the season', 'observations and harvests logged so the almanac accrues', 'next week seeded in one line'). Call write_task_note with the due counts + checklist and write notes/scope.md.",
+        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "plan",
+        "name": "Plan the walkthrough",
+        "role": "planner",
+        "summary": "ordered route, per-bed tasks, supplies gathered first",
+        "prompt": "Plan the walkthrough from the locked list. Step 1: order the beds into a sensible route and lay out the per-bed tasks so the owner can walk it without stopping to think. Step 2: for each task, one concrete line — what to do and what to bring. Step 3: batch the supplies into one gather-first line at the top. Step 4: leave room for what the walk itself turns up — the plan is a spine, not a cage. Write the ordered plan to notes/plan.md and call write_task_note with the task count.",
+        "produces": { "path": "notes/plan.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "log",
+        "name": "Log the walkthrough",
+        "role": "gardener",
+        "summary": "observations and harvests logged, week written up, next week seeded",
+        "prompt": "Close the walkthrough once the owner reports what happened. Step 1: log each observation and harvest into the project's garden journal so the almanac accrues — dated and tied to its bed. Step 2: note what was done, what was deferred and why. Step 3: write report.md — the week in a few lines per bed: done, observed, deferred; anything spotted that needs watching; and next week's earliest due task as the closing line. Keep it warm and specific — this is the almanac's weekly page, not a chore-list autopsy. Call write_task_note with the done/observed/deferred counts.",
+        "produces": { "path": "report.md", "kind": "markdown-report", "minBytes": 1000 }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Open report.md, notes/plan.md, and the garden journal and verify every criterion from notes/scope.md: every bed appears in the report, each planned task traces to a planting or the season, every observation and harvest the owner reported was logged with a date (spot-check the journal), deferrals carry reasons, and next week's seed line is present. Write PASS/FAIL per criterion; on any failure, name the gap and loop back to log.",
+      "loopBackTo": "log"
+    }
+  },
+  {
+    "id": "pest-diagnosis",
+    "name": "Pest & Problem Diagnosis",
+    "description": "Turn 'something is wrong with the tomatoes' into a ranked differential: the likely culprits with the evidence for each, the gentlest treatment first, what to watch to confirm the diagnosis, and when to call in a professional — a garden clinic visit without the guesswork. Locks the diagnostic criteria FIRST, then builds the differential from the symptom notes and the plantings, then writes the treatment and monitoring plan. Use for garden pest problems, plant disease diagnosis, 'what is eating my plants', and sick-plant triage.",
+    "tags": ["garden", "pests", "diagnosis", "almanac", "household"],
+    "triggers": [
+      "diagnose a garden pest",
+      "what is eating my plants",
+      "plant disease diagnosis",
+      "something is wrong with the tomatoes",
+      "garden problem triage"
+    ],
+    "phases": [
+      {
+        "id": "scope",
+        "name": "Scope the diagnosis",
+        "role": "gardener",
+        "summary": "symptoms and plantings gathered, diagnostic criteria locked",
+        "prompt": "Define the diagnosis before naming a culprit. Step 1: read the symptom photo notes in photos/ and identify the affected plantings in garden.json — what is planted there, since when, and what the season makes likely. Step 2: lock the diagnostic criteria — at least two candidate explanations per problem, ranked; the specific evidence for and against each; the gentlest effective treatment considered first; and the escalation threshold — what result, by when, means calling in a professional. Step 3: write an acceptance-criteria checklist ('every symptom from the notes addressed', 'candidates ranked with evidence, not asserted', 'organic or lowest-impact option first', 'monitoring plan with dates', 'escalation named'). Call write_task_note with the symptoms + criteria + checklist and write notes/scope.md.",
+        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "diagnose",
+        "name": "Build the differential",
+        "role": "researcher",
+        "summary": "ranked candidates with evidence for and against each",
+        "prompt": "Build the differential against the locked criteria. Step 1: for each symptom, list the candidate culprits the evidence actually supports — the photo notes, the plant, the season, the pattern of damage. Step 2: rank the candidates and write the evidence for and against each, including what does not fit. Step 3: note what a second look would settle — the underside of a leaf, the time of day the damage happens — the cheap observations worth making before any treatment. Step 4: write the differential to notes/diagnosis.md and call write_task_note with the top candidate per symptom.",
+        "produces": { "path": "notes/diagnosis.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "report",
+        "name": "Write the treatment plan",
+        "role": "copywriter",
+        "summary": "treatment ladder, monitoring plan, escalation line",
+        "prompt": "Write the treatment and monitoring plan from the differential. Step 1: per problem, the likely culprit in plain words with its evidence, and what else it could be. Step 2: the treatment ladder — the gentlest effective option first, with exactly how and when to apply it, then the next rung if it fails. Step 3: the monitoring plan — what to watch, how often, and what change confirms or overturns the diagnosis. Step 4: the escalation line — the specific sign that means stop guessing and call a professional or the local extension service. Keep the confidence honest — a diagnosis from photo notes is a strong hunch, not a lab result. Write report.md and call write_task_note with the top culprits and the first treatment.",
+        "produces": {
+          "path": "report.md",
+          "kind": "markdown-report",
+          "minBytes": 1200,
+          "extraChecks": [
+            {
+              "kind": "notContains",
+              "file": "report.md",
+              "pattern": "(definitely|guaranteed|certainly) (is|will cure)",
+              "flags": "i",
+              "label": "diagnosis stays hedged, never absolute"
+            }
+          ]
+        }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Open report.md and notes/diagnosis.md and verify every criterion from notes/scope.md: every symptom from the photo notes is addressed, each problem carries at least two ranked candidates with evidence, the first treatment offered is the gentlest effective one, the monitoring plan says what to watch and when, the escalation threshold is named, and nowhere does the report claim certainty the evidence cannot support. Write PASS/FAIL per criterion; on any failure, name the gap and loop back to report.",
+      "loopBackTo": "report"
+    }
+  }
+]

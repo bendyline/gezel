@@ -1,0 +1,63 @@
+packages:
+  - "packages/*"
+  - "evals"
+
+publicHoistPattern:
+  - "*onnxruntime*"
+
+confirmModulesPurge: false
+
+# pnpm 11 holds new releases for one day by default. Version-specific entries
+# were reviewed as part of the July 2026 dependency sweep. Gilde is our
+# first-party catalog and is exempt by package name; gilde:update still exact-
+# pins each selected release in package.json and the lockfile.
+minimumReleaseAgeExclude:
+  - "@anthropic-ai/sdk@0.113.0"
+  - "@bendyline/gilde"
+  - "@bendyline/squisq-editor-react@2.4.5"
+  - "@bendyline/squisq-formats@2.3.7"
+  - "@bendyline/squisq-react@2.4.5"
+  - "@bendyline/squisq-video-react@2.2.9"
+  - "@bendyline/squisq-video@2.2.7"
+  - "@bendyline/squisq@2.4.3"
+  - "@csstools/css-calc@3.3.0"
+  - "@csstools/css-color-parser@4.1.10"
+  - "@csstools/css-syntax-patches-for-csstree@1.1.7"
+  - "@vitejs/plugin-react@6.0.4"
+  - "jose@6.2.4"
+  - "postcss@8.5.22"
+  - "tar@7.5.21"
+
+allowBuilds:
+  "@biomejs/biome": true
+  "electron": true
+  "electron-winstaller": true
+  "esbuild": true
+  "koffi": true
+  "node-pty": true
+  "onnxruntime-node": true
+  "protobufjs": true
+  "sharp": true
+
+ignoredOptionalDependencies:
+  - "@napi-rs/canvas"
+
+overrides:
+  "@hono/node-server": "2.0.11"
+  "adm-zip": "0.6.0"
+  "axios": "1.18.1"
+  "fast-uri": "3.1.4"
+  "form-data": "4.0.6"
+  "hono": "4.12.31"
+  "ip-address": "10.2.0"
+  "js-yaml@<4": "3.15.0"
+  "js-yaml@>=4 <5": "4.3.0"
+  "protobufjs": "7.6.5"
+  "qs": "6.15.2"
+  "react-router": "7.18.1"
+  "sharp": "0.35.3"
+  "tar": "7.5.21"
+  "ws": "8.21.1"
+
+patchedDependencies:
+  "app-builder-lib@26.15.3": "patches/app-builder-lib@26.15.3.patch"

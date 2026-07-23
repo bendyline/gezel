@@ -1,0 +1,122 @@
+{
+  "id": "laguna-s-2.1-118b-q6",
+  "name": "Laguna S 2.1 (118B-A8B, Q6 MLX)",
+  "description": "Poolside's Laguna S 2.1 in a calibrated oQ6e MLX quantization for native Apple Silicon inference. The model has 118B total parameters with about 8B active per token and is built for agentic coding, long-horizon software work, native tool calling, and interleaved reasoning. This MLX-only build is about 92GB on disk, measured about 90GB peak at 64K context, and targets 128GB Macs. Gezel defaults to Poolside's quality-recommended 256K context window; the underlying checkpoint can be extended to 1M context with explicit YaRN overrides.",
+  "tags": [
+    "poolside",
+    "coding",
+    "agentic",
+    "tools",
+    "reasoning",
+    "long-context",
+    "moe",
+    "large",
+    "open-weights",
+    "apple-silicon"
+  ],
+  "category": "coding",
+  "maintainer": {
+    "name": "Poolside",
+    "url": "https://huggingface.co/poolside/Laguna-S-2.1"
+  },
+  "version": "1.0.0",
+  "updatedAt": "2026-07-22T00:00:00Z",
+  "license": "OpenMDW-1.1",
+  "licenseClass": "open",
+  "licenseShortName": "OpenMDW 1.1",
+  "licenseUrl": "https://huggingface.co/poolside/Laguna-S-2.1/blob/main/LICENSE.md",
+  "parameterSize": "118B",
+  "approxSizeBytes": 92000000000,
+  "supportsTools": true,
+  "contextWindow": 262144,
+  "upstream": "https://huggingface.co/poolside/Laguna-S-2.1",
+  "style": {
+    "family": "other",
+    "reasoningFormat": "think",
+    "toolCallFormat": "function-call"
+  },
+  "behaviors": [
+    "reasoning.strip-think-tags",
+    "prompt.private-reasoning-guidance",
+    "fabrication.detect-past-tense-no-tools",
+    "turn.preamble-folding",
+    "turn.ramble-detection",
+    "tools.mlx-grammar"
+  ],
+  "tuning": {
+    "sampling": {
+      "temperature": 0.7,
+      "topP": 0.95,
+      "maxTokens": 8192
+    },
+    "samplingWhenThinking": {
+      "temperature": 0.7,
+      "topP": 0.95
+    },
+    "reasoning": {
+      "enableThinking": true,
+      "thinkingBudget": 4096
+    },
+    "profiles": {
+      "thinking-general": {
+        "sampling": {
+          "temperature": 0.7,
+          "topP": 0.95,
+          "maxTokens": 12288
+        },
+        "reasoning": {
+          "enableThinking": true,
+          "thinkingBudget": 4096
+        }
+      },
+      "thinking-coding": {
+        "sampling": {
+          "temperature": 0.6,
+          "topP": 0.95,
+          "maxTokens": 16384
+        },
+        "reasoning": {
+          "enableThinking": true,
+          "thinkingBudget": 6144
+        }
+      },
+      "thinking-precise": {
+        "sampling": {
+          "temperature": 0.4,
+          "topP": 0.9,
+          "seed": 0,
+          "maxTokens": 6144
+        },
+        "reasoning": {
+          "enableThinking": true,
+          "thinkingBudget": 4096
+        }
+      },
+      "instruct": {
+        "sampling": {
+          "temperature": 0.7,
+          "topP": 0.95,
+          "maxTokens": 4096
+        },
+        "reasoning": {
+          "enableThinking": false
+        }
+      },
+      "creative": {
+        "sampling": {
+          "temperature": 1.0,
+          "topP": 0.95,
+          "maxTokens": 8192
+        },
+        "reasoning": {
+          "enableThinking": false
+        }
+      }
+    }
+  },
+  "mlx": {
+    "huggingfaceRepo": "mlx-community/Laguna-S-2.1-oQ6e",
+    "quantization": "oQ6e",
+    "residentBytes": 99000000000
+  }
+}

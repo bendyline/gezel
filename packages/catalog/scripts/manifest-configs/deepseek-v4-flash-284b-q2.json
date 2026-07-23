@@ -1,0 +1,37 @@
+{
+  "id": "deepseek-v4-flash-284b-q2",
+  "name": "DeepSeek V4 Flash (IQ2_XXS)",
+  "description": "antirez's 2-bit community GGUF of DeepSeek V4 Flash — the 284B-parameter Mixture-of-Experts (~13B active per token) with 1M-token context and Compressed Sparse Attention. The routed experts are crushed to IQ2_XXS / Q2_K while attention projections, shared experts, router, embeddings, and output head stay at Q8_0 / F16, landing the whole model in ~81 GB — runnable on 128 GB-class machines versus ~156 GB for the native FP4 build. Note: these quants were produced for antirez's `ds4` inference engine; whether they load on stock llama.cpp depends on its DeepSeek-V4 support.",
+  "tags": ["deepseek", "reasoning", "moe", "tools", "2-bit", "iq2", "long-context", "large"],
+  "category": "reasoning",
+  "maintainer": {
+    "name": "antirez",
+    "url": "https://huggingface.co/antirez/deepseek-v4-gguf"
+  },
+  "version": "1.0.0",
+  "updatedAt": "2026-06-02T00:00:00Z",
+  "license": "MIT",
+  "parameterSize": "284B",
+  "approxSizeBytes": 86720111200,
+  "supportsTools": true,
+  "contextWindow": 1000000,
+  "upstream": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash",
+  "style": {
+    "family": "deepseek",
+    "reasoningFormat": "think",
+    "toolCallFormat": "function-call"
+  },
+  "behaviors": [
+    "reasoning.strip-think-tags",
+    "prompt.private-reasoning-guidance",
+    "prompt.tool-cookbook-condensed",
+    "mcp.compact-tool-schemas",
+    "fabrication.detect-past-tense-no-tools",
+    "turn.preamble-folding"
+  ],
+  "llamaCpp": {
+    "huggingfaceRepo": "antirez/deepseek-v4-gguf",
+    "filename": "DeepSeek-V4-Flash-IQ2XXS-w2Q2K-AProjQ8-SExpQ8-OutQ8-chat-v2.gguf",
+    "quantization": "IQ2_XXS"
+  }
+}

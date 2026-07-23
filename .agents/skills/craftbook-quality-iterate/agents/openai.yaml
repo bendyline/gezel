@@ -1,0 +1,4 @@
+interface:
+  display_name: "Craftbook Quality Iterate"
+  short_description: "Improve craftbooks from eval evidence"
+  default_prompt: "Use $craftbook-quality-iterate to inspect a craftbook eval run and propose quality fixes."

@@ -1,0 +1,279 @@
+---
+name: eval-run
+description: Run gezel eval suites (core scorecard, smoke, extended deep-dives) or single scenarios end-to-end on this device, then produce a postmortem with a fixed 0-10 rubric and a positives/negatives report. Use when the user says "run an eval", "kick off a benchmark", names a scenario or suite, or asks to evaluate a model.
+allowed-tools: Bash, Read, Write, Edit, AskUserQuestion
+---
+
+> **Content lives in `../gilde`.** Catalog data (model manifests, craftbooks,
+> role templates) moved to the sibling [bendyline/gilde](https://github.com/bendyline/gilde)
+> repo. Before any loop that edits content, run `pnpm link:gilde` so the
+> daemon, tests, and evals resolve your checkout instead of the pinned
+> `@bendyline/gilde` package; refresh generated indexes with
+> `pnpm --filter @bendyline/gezel-catalog build-index`. When the loop
+> lands: PR the gilde changes, publish, bump the pin in
+> `packages/catalog/package.json` (+ its `minimumReleaseAgeExclude` entry
+> in `pnpm-workspace.yaml`), then `pnpm unlink:gilde`.
+
+
+# eval-run
+
+Closes the loop on gezel evaluations: pre-flight → run → score → report → strategic-check.
+
+## Phase 0 — Pre-flight
+
+1. **Resolve target.** **Default to the core suite** — `pnpm eval:all --suite core` (the standardized 11-scenario model scorecard; see "Suites" below). Phrases like "run an eval" / "kick off a benchmark" / "evaluate this model" with no scenario named all mean the core suite. Escalate or narrow only on explicit signal:
+   - a named scenario ("run tictactoe", "kick off petshop") → that single scenario via `pnpm eval:run`;
+   - a named suite ("run the smoke suite", "coding deep-dive") → `--suite <id>`;
+   - an explicit "everything" / "full matrix" / "all scenarios" → bare `pnpm eval:all` (the full registry, including generated craftbook scenarios — much larger and slower than core; confirm with `--list` and warn the user about wall-clock before starting);
+   - a weakness surfaced by a core run → offer the matching `extended-*` suite as the follow-up.
+
+   Default model: `gemma4-e4b`; honor any model the user named.
+
+### Suites — the standardized units of evaluation
+
+Defined in [evals/src/suites.ts](../../../evals/src/suites.ts) (membership pinned by `suites.test.ts`); list live with `pnpm eval:all --list`.
+
+| Suite | Scenarios | Use it when |
+|---|---|---|
+| `core` | 11 — the 3 frozen anchors (`tictactoe`, `petshop`, `tankcombat`) + 8 diverse axes (`schema-migration`, `failing-tests-spec`, `symptom-debug`, `data-wrangle`, `incident-postmortem`, `ops-runbook-anomaly`, `plan-and-estimate`, `conflict-synthesis`) | **The default.** "Evaluate this model", model bumps, engine bumps, framework-health checks. Hermetic, comparable across time. |
+| `smoke` | 3 fast probes | Quick pulse before/after a risky change; never a scorecard. |
+| `extended-coding` | 9 | Core shows a coding weakness, or the change targets codegen/tooling. |
+| `extended-grounding` | 6 | Grounding/precision/constraint-following weakness. |
+| `extended-retrieval` | 4 | Tool-routing or index-leverage work (pairs with `ab-index`). |
+| `headroom` | 2 hard probes | Separating frontier-class from medium-class execution; NOT expected to pass 100%; `squisq-review` needs network. |
+
+The anchors alone are no longer a sufficient model eval — current models mostly saturate them; they stay in core purely for longitudinal comparability. Suite membership changes are deliberate acts (they break scorecard comparability): grow an extended suite freely, but promote into `core` only when an axis has proven to differentiate models and is missing there.
+
+2. **Probe binaries.** On Linux/macOS, check that `native/build/<platform>[-variant]/llama-server` exists for the target. Skip for `--engine mlx`.
+
+   ```bash
+   ls native/build/$(uname -m | sed 's/x86_64/x64/;s/aarch64/arm64/') 2>/dev/null
+   ```
+
+3. **Probe warm-cache state.** `ls ~/.gezel-eval-cache/engines/llama-cpp/models/<modelId>/`. If missing: ask the user whether to symlink from `~/.gezel-dev` (if that install exists) or download fresh. The harness's `ensureWarmModel` handles the download path automatically; the symlink saves 5-10 GB of disk + minutes per first-run.
+
+4. **SDXL preflight (petshop only).** `ls ~/.gezel-eval-cache/engines/sd-cpp/models/sdxl-base-1.0/`. First-time download is ~7 GB, ~10 min. Warn the user before kicking off if missing.
+
+## Phase 1 — Run
+
+Single trial:
+```bash
+pnpm eval:run <scenario> --model <id> --timeout <Nm> [--llm-judge]
+```
+
+Suite (the standard path) or ad-hoc matrix (cross-scenario × N):
+```bash
+pnpm eval:all --count <N> --suite <core|smoke|extended-*|headroom>
+pnpm eval:all --count <N> --scenarios <comma,list>   # ad-hoc; mutually exclusive with --suite
+```
+
+`--llm-judge` opt-in: after the trial, sends the final HTML artifact +
+the original prompt to Claude Haiku (or GPT-5 mini fallback) for a
+qualitative read on visual quality, functional completeness, code
+quality, and polish. Output lands at `<runDir>/llm-judge.json` and is
+surfaced in the postmortem as a parallel "qualitative" section — it
+does NOT change the composite capability score. Costs ~5¢ per call;
+silently skipped when no `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` in env.
+
+Runtime layer (no flag — runs automatically when the sniff says ok):
+Playwright opens the produced HTML, asserts DOM behavior. For
+tic-tac-toe: 9 cells exist + clicking a cell marks it. For tank-combat:
+canvas/svg present, no page errors, keyboard input wired. If runtime
+asserts fail, the trial keeps polling (the model may iterate); the
+sniff alone is not sufficient anymore.
+
+**Always run with `run_in_background: true`**. Scenarios take 10–45 minutes. Tail key events from the trial log every ~2 minutes:
+
+```bash
+ls -td evals/runs/<scenario>-* | head -1 | xargs -I{} tail -20 {}/log.txt
+```
+
+Useful tail filters during the run:
+- `grep -E "\[scenario\]|\[poll\] (terminal|timeout)|FAIL|trial\] meester"` — tracks file states + outcome
+- `grep "\[auto-answer\]"` — tracks question-answering interventions (each one is signal that the gezel was confused)
+
+### Throughput-invariance — let trials run to completion
+
+The eval measures **capability**, which is invariant to decode speed: a trial reaches the same pass/fail at 3 t/s or 300 t/s, just over different wall-clock. So **never treat slow decode as a failure and never tune for speed** — don't pin GPU clocks, don't lower token budgets to "fit" a ceiling, don't watch the clock. A serial matrix can take many hours at low t/s, and that is fine. A trial should fail only when it **stops making progress**, never because it ran out of clock while still advancing.
+
+- **Runs are serial by default** (`eval:all` uses `--parallel 1`; scenarios run sequentially). Keep it that way — never pass `--parallel >1`, which reintroduces GPU contention and makes per-trial decode speed (and thus wall-clock) inconsistent across the matrix.
+- **The progress watchdogs are the real terminators**, not the wall-clock ceiling: the count-based retry-loop ("N re-writes without sniff movement") is throughput-invariant and is the signal you want doing the killing; the no-progress watchdog (45 min) is the backstop for genuine hangs.
+- **Wall-clock ceilings are generous backstops** (the anchored game scenarios are 2 h; `DEFAULT_MAX_DURATION_MS` is 8 h). They should essentially never fire. If a trial *does* end on `hit hard ceiling (maxDuration)` while `[poll]` was still showing progress, that's a low-t/s harness artifact — bump `--timeout` and re-run; do not score it as a capability fail (see Phase 2).
+
+## Phase 2 — Score (objective)
+
+The skill scores via a **fixed 0–10 rubric applied to observable facts**, never freeform judgment. Generate the facts:
+
+```bash
+pnpm --filter @bendyline/gezel-evals exec tsx src/bin/score-trial.ts <runDir>
+```
+
+This produces a `TrialFacts` JSON object. Apply the rubric below using ONLY fields from that object. Each axis score must cite the specific field that drove it.
+
+### The fixed rubric (weighted composite, max 10)
+
+| Axis | Weight | Source fields | 0 → 10 mapping |
+|---|---|---|---|
+| **Task completion** | 40% | `outcome.success`, `outcome.failureMode`, `sniff.latest.failReason`, `sniff.latest.signals` | 0 = timeout with `failReason` containing "no inline `<script>`" or "does not parse"; 3 = timeout but sniff score ≥ half of max; 6 = `done` but `success: false`; 10 = `success: true`. |
+| **Output quality** | 25% | `sniff.latest.score` / `sniff.latest.scoreMax` (or scenario max), `sniff.latest.signals`, `artifacts.htmlFiles[*].finalBytes`, `artifacts.imageFiles[]` incl. `.real` (image-gate scenarios: `tool-routing-image`, `petshop`) | 0 = no artifact / `failReason` flags parse error / "no script tag"; 5 = artifact exists, half signals fire, no critical sniff fail; 10 = every signal fires AND files are realistic size (≥4 KB HTML for game scenarios; PNG ≥ 50 KB for petshop). **Floor: when `outcome.success: true`, never score this axis below 5** — a passing gate means the deliverable met the scenario's own bar, even when `sniff.latest` is null. |
+| **Process efficiency** | 20% | `outcome.budgetUsedFraction`, `toolUse.totalToolCalls`, `timing.timeToFirstArtifactMs`, `outcome.durationMs` | 0 = `budgetUsedFraction` ≥ 1.0 AND `totalToolCalls` ≥ 30; 5 = `budgetUsedFraction` 0.5-0.9 OR `totalToolCalls` 20-30; 10 = `budgetUsedFraction` ≤ 0.5 AND `totalToolCalls` ≤ 10. |
+| **Behavior soundness** | 15% | `toolUse.redFlags[]`, `team.missingExpectedRoles[]`, `autoAnswer.events[*].chose` | 0 = ≥1 red-flag pattern fires OR a missing expected role; 5 = no red flags, expected roles present, but ≥3 auto-answer interventions (the team needed lots of guidance); 10 = no red flags, no missing roles, ≤1 auto-answer intervention. |
+
+**Compute the composite** as `0.4*completion + 0.25*quality + 0.2*efficiency + 0.15*behavior`. Round to one decimal.
+
+**Don't let an empty HTML sniff zero out the quality axis (the §6 / §9.2 sniff-blind artifact).** `sniff.latest` is null only when a scenario's gate isn't the HTML sniff — it does NOT mean "no deliverable." Score those from the gate that actually ran:
+- **Image-gate scenarios** (`tool-routing-image`, `petshop`): read `artifacts.imageFiles[]`. An asset with `real: true` (the scenario's own `(real)` verdict) is a clean pass → quality 8-10 by size (PNG ≥ 50 KB → 10); `real: false` (too small) → treat as a failed gate. `real` absent means the gate never graded that file — fall back to bytes.
+- **Custom-criteria scenarios** (`stale-workspace-rescue`): `sniff.latest` now carries the mission-criteria checklist (`score`/`scoreMax`/`signals`) — score `score / scoreMax` exactly as you would HTML sniff signals.
+
+If after all that `sniff.latest` is still null but `outcome.success: true`, apply the floor (≥ 5) and cite which gate passed (`outcome.reason`).
+
+**Distinguish harness-artifact timeouts from real failures BEFORE scoring.** Read `outcome.failureMode` + reason: a `timeout` whose reason is "hit hard ceiling (maxDuration)" while the `[poll]` trail showed continued progress is a **wall-clock artifact at low decode speed**, not a capability result — re-run with a larger `--timeout` and do not score it as a fail. Only **progress-based** terminations are genuine capability signals: `model-stuck` / retry-loop ("N re-writes without sniff movement") / "no real progress for Ns" (the model was advancing nowhere). When in doubt, the count-based retry-loop reason is always real; a bare maxDuration ceiling is always suspect. (See "Throughput-invariance" in Phase 1 — capability is invariant to t/s; never let the clock decide a verdict.)
+
+**Bands** (frame: every band asks "what do we change so this scores higher next time?"):
+- **≥ 8** — `ship-ready`. The model + framework combo lands the scenario cleanly. Lock it in as a smoke test, then look for one tactical or strategic tweak that would push it from 8 → 10 (e.g. fewer tool calls, fewer auto-answer interventions). Do NOT chase "faster t/s" — throughput is not a capability axis (see Phase 1).
+- **5 – 7.9** — `needs-tuning`. Artifact exists with real structure, but didn't close. **The fix is tactical** — temperature, max_tokens, prompt nudges, role-tool-filter, salvage layer — not "use a bigger model." A medium-tier local model SHOULD be able to do these scenarios; if it can't, the framework, prompts, or tuning need to absorb the gap.
+- **≤ 4.9** — `framework-gap`. The model is producing very little usable output, OR a red flag fires, OR an expected role is missing. **This is a framework or tuning bug**, not a model ceiling. Look at red flags + missing roles + the salvage layer first. (See the petshop run for an example: composite ~3.2 because `image-generator` role was missing from `ask_specialist` — fixing the framework lifted that scenario by 5+ points.)
+
+**Hard rule — never use "model capability" as the answer.** The anchored scenarios (`tictactoe`, `petshop`, `tankcombat`) are deliberately scoped to be within reach of medium-tier local models. If a 26B-class model can't pass `tictactoe`, the answer is *never* "try a 70B model" — the answer is *always* "what specifically should we tune or fix in the framework so a medium model passes?" Stronger models are last-resort signal, not a recommendation.
+
+## Phase 3 — Report
+
+Write a markdown postmortem to `<runDir>/postmortem.md`. Structure:
+
+```markdown
+# Trial postmortem — <scenarioId> / <modelId>
+
+**Composite: X.X / 10** (band: ship-ready | needs-tuning | framework-gap)
+**Outcome: success | timeout | crash | interrupted** (duration: Mm Ss; budget used: NN%)
+
+## Score breakdown
+
+| Axis | Score | Why |
+|---|---|---|
+| Task completion (40%) | X / 10 | <cite specific facts> |
+| Output quality (25%) | X / 10 | <cite specific facts> |
+| Process efficiency (20%) | X / 10 | <cite specific facts> |
+| Behavior soundness (15%) | X / 10 | <cite specific facts> |
+
+## Performance (deliberately separate from the capability rubric — see below)
+
+| Metric | Value | Source |
+|---|---|---|
+| Peak RSS | XXX MB | `perf.process.peakRssMb` |
+| Peak GPU util | XX% | `perf.gpu.peakUtilPercent` or `n/a` |
+| Peak GPU mem | XXX / YYY MB | `perf.gpu.peakMemUsedMb` / `memTotalMb` |
+| Mean tokens/sec | XX.X | `perf.derived.meanTokensPerSec` or `n/a` |
+| Total tokens | input + output | `perf.usage.totalInputTokens` + `totalOutputTokens` |
+| Host | <CPU model>, <RAM>GB, <GPU model> | `host.cpuModel`, `host.totalRamGb`, `host.gpuModel` |
+| Framework | <engine> via <binary> | `host.framework`, `host.frameworkBinary` |
+
+## Qualitative judge (when --llm-judge ran)
+
+When `judge` is present in the facts, surface it as advisory — kept
+separate from the capability composite (different question entirely).
+
+| Axis | Score | Source |
+|---|---|---|
+| Visual quality | N / 10 | `judge.scoreAxes.visualQuality` |
+| Functional completeness | N / 10 | `judge.scoreAxes.functionalCompleteness` |
+| Code quality | N / 10 | `judge.scoreAxes.codeQuality` |
+| Polish | N / 10 | `judge.scoreAxes.polish` |
+| **Mean (judge)** | **N.N / 10** | `judge.meanScore` |
+
+Judge said: *"<judge.justification verbatim>"* — `judge.judgeProvider/judge.judgeModel`
+
+## Positives
+- <observation grounded in the facts, with the field name in parens>
+
+## Negatives
+- <observation grounded in the facts, with the field name in parens>
+
+## Tactical fixes (parameter + prompt tuning)
+*Always present — even on a 10.0 trial. Suggest at least one concrete tweak.*
+- **Sampling**: e.g. lower `tuning.sampling.temperature` from 1.0 → 0.7 in `../gilde/data/chat-models/<family>/<id>/manifest.json` because the model fell into special-token loops at high temp (cite the daemon.log line that justifies it).
+- **Token budgets**: e.g. bump `tuning.sampling.maxTokens` 16k → 32k for write-heavy scenarios when the model stalls mid-`write_artifact`.
+- **Repetition**: e.g. increase `repetition_penalty` / `repetition_context` to break n-gram loops.
+- **Prompt nudges**: e.g. add/strengthen a model-profile behavior or tuning rule in [packages/service/src/model-profile/](../../../packages/service/src/model-profile/) so this family of model receives a clearer "act now, don't narrate" instruction. Cite the existing block you'd edit.
+- **Reasoning budget**: e.g. constrain `<|channel|>thought` length when prose-overrun is observed.
+
+Each suggestion must (a) name the specific file/field to change, (b) propose a specific value, (c) name the trial-fact field that justifies the change. No "try tweaking parameters" — be concrete enough that another engineer could merge it without re-reading the postmortem.
+
+## Strategic fixes (framework changes)
+*Always present — even on a 10.0 trial. Suggest at least one structural improvement worth measuring.*
+- **Team composition**: e.g. fold Voorman + Builder into a single role for `<scenario>`-scale work, or split a too-broad Builder into Drafter + Polisher. Cite `team.totalGezelsCreated` + observed coordination overhead.
+- **Multimodal/single-gezel approaches**: when scenario complexity is low, recommend a flatter team. When it's high, recommend a multimodal gezel rather than separate text + image roles.
+- **Toolset ergonomics**: e.g. simplify the `write_artifact` API surface, add a `replace_section` mode so the model doesn't re-emit the full file, expose a `validate_html` tool so the model can self-check before declaring done. Cite the tool-use field (e.g. `toolUse.byTool.writeFile: 3` re-writes of the same artifact).
+- **Craftbook / about.md**: tighten the role's about so it discourages observed anti-patterns (e.g. Builder thinking-then-stalling). Reference `../gilde/data/gezel-templates/<role>/about.md`.
+- **Craftbook gating & crafting** *(a primary lever — reach for it before "the model can't")*: a craftbook is itself tunable framework, in two ways. Its **crafting** — the phase/step structure, the `suggestedRole` per phase, the ordering, the step `prompt`s, and the `advanceWhen` triggers — is what keeps a weak model on-plot. Its **gating** — a step's static `gate` checks evaluated by the *runtime* (`evaluateGate` in [packages/service/src/tasks/gate-eval.ts](../../../packages/service/src/tasks/gate-eval.ts), authored in the book manifest at `../gilde/data/craftbook-templates/<book>/versions/<v>/manifest.json`) — is what carries a model that builds a sub-par deliverable but can't grade-and-route it: the runtime loops it back with a concrete, named gap and no model turn. When a trial shows a model stalling at an evaluate gate, under-delivering then declaring done, or spinning without a quality bar, the fix is usually a **tighter built-in gate** or a **better-crafted recipe** — not a bigger model. The gate gallery already maps the user's examples (game → `totalMinBytes ≥5KB + html-game`; site → `cssMinBytes + fileCount` images).
+  - **⚠ Anti-overtuning rule (load-bearing):** author gates and steps against the *genuine quality bar for the task CLASS*, never against the eval scenario's specific success signals. A gate that hard-codes `contains "tank"` because the tankcombat sniff scores tank-vocabulary is **overfit** — it would pass only the one game the harness expects and helps no real user. Good gates encode what makes *any* deliverable of that class good ("a real arcade game has a render surface, a game loop, and is non-trivial in size"). The test before you add a check: *would this make a different-but-equally-good deliverable of the same class succeed, and would it help a real user who asked for this class of thing?* If it only moves this scenario's sniff, it belongs in the eval's success-check, not the craftbook. Mirroring an anchored scenario's sniff inside a craftbook is the same sin as tuning sampling to pass it — see the anchored-scenario rule in Phase 4.
+- **Salvage layer**: extend [packages/service/src/chat/manager.ts](../../../packages/service/src/chat/manager.ts) prose-salvage to recognize a new tool-call shape the model emits as freeform text. Cite the daemon.log salvage trace if observed.
+- **Role-tool-filter**: if a missing role / wrong-tool pattern fired, point at [packages/service/src/chat/role-tool-filter.ts](../../../packages/service/src/chat/role-tool-filter.ts).
+- **Runtime + sniff coverage**: only when the assertion is incorrectly catching a working artifact (not when the model legitimately failed).
+
+Each suggestion must name the specific file or module to change. If a hypothesis isn't concrete enough to point at a file, it isn't strategic enough — move it to a fresh-thinking note, not the postmortem.
+
+## Recommended next experiment
+*One sentence: a specific, testable hypothesis with the change, the expected effect, and how to measure it.* E.g. "Set `gemma4-26b` `tuning.sampling.temperature` to 0.5, re-run `tictactoe × 3`, expect composite ≥ 7.0 and the runtime `click-marks-a-cell` assertion to pass on all 3."
+
+## Raw facts
+<paste the score-trial.ts output, or a path to it>
+```
+
+### Performance vs capability — keep them separate
+
+The performance metrics intentionally **don't** feed into the composite
+score. A run that scores 9/10 on capability at 2 t/s on a slow CPU is
+strategically very different from a run that scores 9/10 at 60 t/s on a
+hot GPU — but neither is "better"; they answer different questions. The
+composite measures *can this model do this scenario*; the performance
+section measures *how does this hardware × framework × model combo
+compare*. Surface them side-by-side so the reader can correlate without
+the rubric falsely conflating them.
+
+**Citation discipline**: every claim in Positives/Negatives must cite at least one field from the `TrialFacts` JSON. Examples:
+- ✅ "The voorman never recruited an image-generator (`team.missingExpectedRoles: ['image-generator']`)."
+- ✅ "Builder tried `run_npx bin: 'generate_image'` (`toolUse.redFlags[0].pattern: 'mcp-tool-via-npx'`) — symptom of missing role-tool-filter coverage."
+- ❌ "The Meester seemed confused" — no field backs this; ungrounded.
+
+## Phase 4 — Strategic check
+
+After writing the report, compare the new score against the last 3 runs of the **same scenario** (across any model):
+
+```bash
+ls -td evals/runs/<scenario>-*/postmortem.md 2>/dev/null | head -4
+```
+
+If a regression is visible (composite is dropping across the same model, OR the same red-flag pattern keeps firing), surface that in a **separate** "Strategic note" section at the end of the postmortem — not mixed into the per-trial score. Strategic regressions are framework problems; tactical failures are per-run.
+
+The anchored-scenario rule from [docs/eval-strategy.md](../../../docs/eval-strategy.md): **do NOT tune `tictactoe` / `petshop` / `tankcombat` to make a struggling model pass.** But the converse is equally important and is the load-bearing frame for this skill: **do NOT recommend a stronger model as the answer.** If a medium-tier model is failing one of these scenarios, the actionable signal is always one of:
+
+1. A specific catalog/tuning change for this model family (cite the file).
+2. A specific framework change — toolset ergonomics, team composition, salvage layer, prompt block, role-tool-filter (cite the module).
+3. A specific craftbook/about.md tightening for the role that struggled (cite the file).
+4. A specific **craftbook gating/crafting** change — a tighter built-in `gate` (so the runtime loops a sub-par build back with a concrete gap) or a better-crafted step/role recipe for the *task class* the scenario represents (cite the book manifest + [gate-eval.ts](../../../packages/service/src/tasks/gate-eval.ts)). Authored to the genuine quality bar for the class — **never** to this scenario's sniff signals (that's overtuning; see the Phase 3 anti-overtuning rule).
+
+"This is a model capability ceiling, run a 70B model" is not a Phase 4 output — it's a Phase 4 *failure mode* for the postmortem. If the postmortem reaches that conclusion, the skill is producing low-value work. Push harder for a concrete framework or tuning change before accepting "the model can't" as the answer.
+
+The flip side of "craftbooks are a lever" is the **overtuning trap**: the same anchored-scenario rule that forbids tuning sampling to pass `tictactoe`/`petshop`/`tankcombat` forbids hard-coding their sniff signals into a craftbook gate. A craftbook earns its place by helping a *class* of real tasks; if a gate or step only moves one scenario's score, it is overfit and must come out. Improving a craftbook's gating/crafting is encouraged precisely because — done to the class, not the test — it lifts real users and the eval together.
+
+## Edge cases + gotchas
+
+- **First-time SDXL warm**: petshop's first run blows ~10 min on the SDXL download. Surface this in your "Phase 1 started" message so the user isn't surprised.
+- **CUDA on Linux ARM (DGX Spark, Jetson)**: the harness picks `linux-arm64-cuda/llama-server` automatically. If it doesn't exist locally, the harness falls through to CPU silently — flag this in the report if `outcome.budgetUsedFraction` is high AND CUDA was expected.
+- **Trial dir disappears**: if `<runDir>` doesn't exist when score-trial runs, the trial probably crashed on spawn. Check `daemon.log` first; that's the lifeline.
+- **No matched question for auto-answer**: ~30% of structured questions don't get their full prompt captured (argsSummary truncation). The choice text alone is usually enough context for the postmortem.
+
+## When the user asks "is this skill working?"
+
+Quickly verify against the two known runs we already have:
+
+```bash
+# Known bad — should score ~3 due to image-gen routing
+pnpm --filter @bendyline/gezel-evals exec tsx src/bin/score-trial.ts \
+    evals/runs/petshop-2026-05-16T11-29-19-191Z-nq3w | head -40
+# Known bad — should score ~2-3 due to model-output quality
+pnpm --filter @bendyline/gezel-evals exec tsx src/bin/score-trial.ts \
+    evals/runs/tankcombat-2026-05-15T23-45-58-666Z-sobc | head -40
+```
+
+If the rubric produces those bands on those runs, the skill is calibrated.

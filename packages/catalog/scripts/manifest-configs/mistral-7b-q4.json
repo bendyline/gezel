@@ -1,0 +1,42 @@
+{
+  "id": "mistral-7b-q4",
+  "name": "Mistral 7B Instruct",
+  "description": "Well-rounded 7B instruct model from Mistral AI. Good general-purpose default.",
+  "tags": ["mistral", "tools"],
+  "category": "general",
+  "maintainer": { "name": "Mistral AI", "url": "https://ollama.com/library/mistral" },
+  "version": "1.1.0",
+  "updatedAt": "2026-04-26T00:00:00Z",
+  "license": "Apache-2.0",
+  "parameterSize": "7B",
+  "approxSizeBytes": 4372812000,
+  "supportsTools": true,
+  "contextWindow": 32768,
+  "upstream": "https://ollama.com/library/mistral",
+  "style": {
+    "family": "mistral",
+    "reasoningFormat": "none",
+    "toolCallFormat": "function-call"
+  },
+  "behaviors": ["fabrication.detect-past-tense-no-tools", "mcp.compact-tool-schemas"],
+  "tuning": {
+    "engine": {
+      "llamaCpp": {
+        "chatTemplate": "{{ bos_token }}\n{% if tools %}\n{{ '[AVAILABLE_TOOLS] ' + (tools | tojson) + ' [/AVAILABLE_TOOLS]' }}\n{% endif %}\n{% for message in messages %}\n{% if message['role'] == 'system' %}\n{{ message['content'] }}\n{% elif message['role'] == 'user' %}\n{{ '[INST] ' + message['content'] + ' [/INST]' }}\n{% elif message['role'] == 'assistant' %}\n{% if message.get('tool_calls') %}\n{{ '[TOOL_CALLS] ' + (message['tool_calls'] | tojson) }}\n{% else %}\n{{ message['content'] + eos_token }}\n{% endif %}\n{% elif message['role'] == 'tool' %}\n{{ '[TOOL_RESULTS] ' + message['content'] + ' [/TOOL_RESULTS]' }}\n{% endif %}\n{% endfor %}"
+      }
+    },
+    "sampling": {
+      "maxTokens": 8192
+    }
+  },
+  "ollama": { "tag": "mistral:7b" },
+  "llamaCpp": {
+    "huggingfaceRepo": "bartowski/Mistral-7B-Instruct-v0.3-GGUF",
+    "filename": "Mistral-7B-Instruct-v0.3-Q4_K_M.gguf",
+    "quantization": "Q4_K_M"
+  },
+  "mlx": {
+    "huggingfaceRepo": "mlx-community/Mistral-7B-Instruct-v0.3-4bit",
+    "quantization": "4bit"
+  }
+}

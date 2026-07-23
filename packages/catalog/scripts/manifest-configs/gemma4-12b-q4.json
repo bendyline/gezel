@@ -1,0 +1,136 @@
+{
+  "id": "gemma4-12b-q4",
+  "name": "Gemma 4 (12B, Q4)",
+  "description": "Google's Gemma 4 at 12B parameters — an encoder-free unified multimodal model (text + image + audio + video) with native tool calling, configurable thinking, and a 256K context window. Apache-2.0 licensed.",
+  "tags": ["google", "multimodal", "vision", "audio", "tools", "agentic", "qat"],
+  "category": "general",
+  "maintainer": { "name": "Google", "url": "https://huggingface.co/google/gemma-4-12B-it" },
+  "version": "1.1.0",
+  "updatedAt": "2026-06-06T00:00:00Z",
+  "license": "Apache-2.0",
+  "recoScore": 15,
+  "parameterSize": "12B",
+  "approxSizeBytes": 6716355328,
+  "supportsTools": true,
+  "contextWindow": 256000,
+  "upstream": "https://huggingface.co/google/gemma-4-12B-it",
+  "style": {
+    "family": "gemma",
+    "reasoningFormat": "channel",
+    "toolCallFormat": "function-call"
+  },
+  "behaviors": [
+    "reasoning.strip-channel-tags",
+    "reasoning.capture-pre-tool-prose",
+    "prompt.private-reasoning-guidance",
+    "prompt.tool-cookbook-full",
+    "prompt.meester-build-prelude",
+    "fabrication.detect-past-tense-no-tools",
+    "fabrication.detect-claim-without-tool",
+    "turn.preamble-folding",
+    {
+      "id": "turn.ramble-detection",
+      "config": {
+        "coldThreshold": 6000,
+        "postActionThreshold": 1200
+      }
+    },
+    "turn.auto-acknowledge-tool-errors",
+    "turn.permission-stall",
+    { "id": "turn.continuation-budget", "config": { "count": 4 } },
+    { "id": "turn.single-tool-per-turn", "config": { "meesterOnly": true } },
+    "mcp.compact-tool-schemas",
+    "mcp.relax-required-fields",
+    "mcp.default-missing-fields",
+    "mcp.validate-ids-strict",
+    "parse.gemma-special-token",
+    "prompt.prefer-writefile-edits",
+    "prompt.terse-visible-reply"
+  ],
+  "tuning": {
+    "sampling": {
+      "temperature": 1,
+      "topP": 0.95,
+      "topK": 64,
+      "repetitionPenalty": 1.1,
+      "repetitionContext": 64,
+      "dry": { "multiplier": 0.8, "base": 1.75, "allowedLength": 2 },
+      "maxTokens": 8192
+    },
+    "reasoning": {
+      "enableThinking": true,
+      "thinkingBudget": 256
+    },
+    "profiles": {
+      "thinking-general": {
+        "sampling": {
+          "temperature": 0.8,
+          "topP": 0.95,
+          "topK": 64,
+          "repetitionPenalty": 1.1,
+          "repetitionContext": 64,
+          "dry": { "multiplier": 0.8, "base": 1.75, "allowedLength": 2 },
+          "maxTokens": 2048
+        }
+      },
+      "thinking-coding": {
+        "sampling": {
+          "temperature": 0.6,
+          "topP": 0.9,
+          "topK": 40,
+          "repetitionPenalty": 1.05,
+          "repetitionContext": 64,
+          "dry": { "multiplier": 0.8, "base": 1.75, "allowedLength": 2 },
+          "maxTokens": 2048
+        }
+      },
+      "thinking-precise": {
+        "sampling": {
+          "temperature": 0.3,
+          "topP": 0.9,
+          "topK": 20,
+          "repetitionPenalty": 1.05,
+          "repetitionContext": 64,
+          "dry": { "multiplier": 0.8, "base": 1.75, "allowedLength": 2 },
+          "maxTokens": 4096,
+          "seed": 0
+        }
+      },
+      "instruct": {
+        "sampling": {
+          "temperature": 0.7,
+          "topP": 0.95,
+          "topK": 64,
+          "repetitionPenalty": 1.1,
+          "repetitionContext": 64,
+          "dry": { "multiplier": 0.8, "base": 1.75, "allowedLength": 2 },
+          "maxTokens": 4096
+        }
+      },
+      "creative": {
+        "sampling": {
+          "temperature": 1.1,
+          "topP": 0.95,
+          "topK": 64,
+          "repetitionPenalty": 1,
+          "repetitionContext": 20,
+          "maxTokens": 8192
+        }
+      }
+    }
+  },
+  "evalHints": {
+    "sniffThresholds": {
+      "inlineJsMinBytes": 1000
+    }
+  },
+  "llamaCpp": {
+    "huggingfaceRepo": "unsloth/gemma-4-12B-it-qat-GGUF",
+    "filename": "gemma-4-12B-it-qat-UD-Q4_K_XL.gguf",
+    "quantization": "UD-Q4_K_XL"
+  },
+  "mlx": {
+    "huggingfaceRepo": "mlx-community/gemma-4-12B-it-qat-4bit",
+    "quantization": "4bit"
+  }
+}

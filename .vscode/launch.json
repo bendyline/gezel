@@ -1,0 +1,130 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Electron: Main",
+      "type": "node",
+      "request": "launch",
+      "cwd": "${workspaceFolder}/packages/app",
+      "runtimeExecutable": "${workspaceFolder}/packages/app/node_modules/.bin/electron",
+      "runtimeArgs": ["--remote-debugging-port=9223", "."],
+      "outputCapture": "std",
+      "sourceMaps": true,
+      "resolveSourceMapLocations": ["${workspaceFolder}/**", "!**/node_modules/**"],
+      "preLaunchTask": "gezel:build",
+      "env": {
+        "ELECTRON_ENABLE_LOGGING": "1"
+      }
+    },
+    {
+      "name": "Electron: Main (HTTP daemon — for VS Code chat panel)",
+      "type": "node",
+      "request": "launch",
+      "cwd": "${workspaceFolder}/packages/app",
+      "runtimeExecutable": "${workspaceFolder}/packages/app/node_modules/.bin/electron",
+      "runtimeArgs": ["--remote-debugging-port=9223", "."],
+      "outputCapture": "std",
+      "sourceMaps": true,
+      "resolveSourceMapLocations": ["${workspaceFolder}/**", "!**/node_modules/**"],
+      "preLaunchTask": "gezel:build",
+      "env": {
+        "ELECTRON_ENABLE_LOGGING": "1",
+        "GEZEL_INSECURE_TRANSPORT": "1"
+      }
+    },
+    {
+      "name": "Electron: Main (skip build)",
+      "type": "node",
+      "request": "launch",
+      "cwd": "${workspaceFolder}/packages/app",
+      "runtimeExecutable": "${workspaceFolder}/packages/app/node_modules/.bin/electron",
+      "runtimeArgs": ["--remote-debugging-port=9223", "."],
+      "outputCapture": "std",
+      "sourceMaps": true,
+      "resolveSourceMapLocations": ["${workspaceFolder}/**", "!**/node_modules/**"],
+      "env": {
+        "ELECTRON_ENABLE_LOGGING": "1"
+      }
+    },
+    {
+      "name": "Electron: Main (mock provider)",
+      "type": "node",
+      "request": "launch",
+      "cwd": "${workspaceFolder}/packages/app",
+      "runtimeExecutable": "${workspaceFolder}/packages/app/node_modules/.bin/electron",
+      "runtimeArgs": ["--remote-debugging-port=9223", "."],
+      "outputCapture": "std",
+      "sourceMaps": true,
+      "resolveSourceMapLocations": ["${workspaceFolder}/**", "!**/node_modules/**"],
+      "preLaunchTask": "gezel:build",
+      "env": {
+        "ELECTRON_ENABLE_LOGGING": "1",
+        "GEZEL_MOCK_PROVIDER": "1"
+      }
+    },
+    {
+      "name": "Electron: Renderer (attach)",
+      "type": "chrome",
+      "request": "attach",
+      "port": 9223,
+      "webRoot": "${workspaceFolder}/packages/ui",
+      "timeout": 30000,
+      "sourceMaps": true,
+      "resolveSourceMapLocations": ["${workspaceFolder}/**", "!**/node_modules/**"],
+      "urlFilter": "http://127.0.0.1:*"
+    },
+    {
+      "name": "Gezel VSCode Extension",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": ["--extensionDevelopmentPath=${workspaceFolder}/packages/vscode"],
+      "outFiles": [
+        "${workspaceFolder}/packages/vscode/dist/**/*.cjs",
+        "${workspaceFolder}/packages/vscode/dist/**/*.js"
+      ],
+      "preLaunchTask": "gezel-vscode:build",
+      "sourceMaps": true,
+      "resolveSourceMapLocations": ["${workspaceFolder}/**", "!**/node_modules/**"]
+    },
+    {
+      "name": "Gezel VSCode Extension (skip build)",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": ["--extensionDevelopmentPath=${workspaceFolder}/packages/vscode"],
+      "outFiles": [
+        "${workspaceFolder}/packages/vscode/dist/**/*.cjs",
+        "${workspaceFolder}/packages/vscode/dist/**/*.js"
+      ],
+      "sourceMaps": true,
+      "resolveSourceMapLocations": ["${workspaceFolder}/**", "!**/node_modules/**"]
+    },
+    {
+      "name": "Gezel VSCode Extension (against dev daemon)",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": ["--extensionDevelopmentPath=${workspaceFolder}/packages/vscode"],
+      "outFiles": [
+        "${workspaceFolder}/packages/vscode/dist/**/*.cjs",
+        "${workspaceFolder}/packages/vscode/dist/**/*.js"
+      ],
+      "preLaunchTask": "gezel-vscode:build",
+      "sourceMaps": true,
+      "resolveSourceMapLocations": ["${workspaceFolder}/**", "!**/node_modules/**"],
+      "env": {
+        "GEZEL_HOME": "${userHome}/.gezel-dev"
+      }
+    }
+  ],
+  "compounds": [
+    {
+      "name": "Electron: Main + Renderer",
+      "configurations": ["Electron: Main", "Electron: Renderer (attach)"],
+      "stopAll": true
+    },
+    {
+      "name": "Electron: Main + Renderer (skip build)",
+      "configurations": ["Electron: Main (skip build)", "Electron: Renderer (attach)"],
+      "stopAll": true
+    }
+  ]
+}

@@ -1,0 +1,503 @@
+#!/usr/bin/env node
+/**
+ * Pull prebuilt native engine binaries (llama-server, sd-server, …)
+ * for this machine and drop them where every consumer finds them.
+ *
+ * Usage:
+ *   node scripts/fetch-native-binaries.mjs                 # latest release, ALL variants for this platform
+ *                                                          #   (so you can flip Settings → Advanced →
+ *                                                          #   Engine backend without re-fetching)
+ *   node scripts/fetch-native-binaries.mjs --version 0.1.2 # pin to a release
+ *   node scripts/fetch-native-binaries.mjs --variant cuda  # narrow to one variant
+ *   node scripts/fetch-native-binaries.mjs --run 24887707235  # pull from a specific build-native.yml run's
+ *                                                          #   artifacts. Useful when release-native didn't
+ *                                                          #   fire, or to test a build before tagging.
+ *   node scripts/fetch-native-binaries.mjs --list          # list available variants for current platform
+ *
+ * Auth:
+ *   Tries in order: GEZEL_GITHUB_TOKEN env, GITHUB_TOKEN env, `gh auth token`.
+ *   bendyline/gezel is private, so a token with `repo` scope is required
+ *   for both the releases and the run-artifact endpoints.
+ *
+ * Where files land:
+ *   packages/app/native-bin/<platform>[-<variant>]/<binary>[.exe]
+ *
+ *   This is the canonical location for three consumers at once:
+ *     1. Dev `pnpm app` — supervisor's `nativeBinDir(mainMetaUrl)` resolves
+ *        to `<mainDir>/../native-bin`, which in dev = `packages/app/native-bin/`.
+ *     2. Local packaging (`pnpm package:win/mac/linux`) — electron-builder's
+ *        `files: native-bin/**\/*` + `asarUnpack: native-bin/**\/*` glob in
+ *        electron-builder.yml packs straight from here.
+ *     3. CI (release-electron.yml) — its staging step writes to the same
+ *        dir before invoking electron-builder, so a fresh fetch and a
+ *        fresh CI release land binaries at the same path.
+ *
+ *   This used to write to `native/build/`, which the supervisor's dev
+ *   fallback also checked but electron-builder didn't see — so a local
+ *   `pnpm package:win` after a fetch shipped an installer with no
+ *   binaries. native-bin.ts still falls back to `native/build/` for
+ *   dev workflows that build an engine via `native/engines/*\/build.sh`.
+ *
+ * Extraction shells out to system `tar` (built-in on Windows 10+,
+ * Mac, Linux) and `unzip` (Mac/Linux) / PowerShell `Expand-Archive`
+ * (Windows). No new node_modules deps needed for a root-level script.
+ */
+import { spawnSync } from 'node:child_process';
+import { constants, accessSync, createWriteStream, mkdirSync } from 'node:fs';
+import { chmod, mkdir, mkdtemp, readdir, rm } from 'node:fs/promises';
+import { setDefaultAutoSelectFamilyAttemptTimeout } from 'node:net';
+import { tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+setDefaultAutoSelectFamilyAttemptTimeout(5000);
+
+const REPO_OWNER = 'bendyline';
+const REPO_NAME = 'gezel';
+const here = dirname(fileURLToPath(import.meta.url));
+const repoRoot = resolve(here, '..');
+// See the docstring above for why this points at packages/app/native-bin/
+// rather than the older native/build/ location: it's the one path that
+// dev `pnpm app`, local `pnpm package:*`, and CI release-electron.yml
+// all consume from.
+const buildRoot = join(repoRoot, 'packages', 'app', 'native-bin');
+
+const args = parseArgs(process.argv.slice(2));
+
+async function main() {
+  if (args.help) {
+    console.log(HELP);
+    return;
+  }
+
+  const platform = detectPlatform();
+  if (!platform) {
+    console.error(`error: unsupported platform/arch: ${process.platform}/${process.arch}`);
+    process.exit(1);
+  }
+
+  const token = await resolveToken();
+  if (!token) {
+    console.error('error: no GitHub token available.');
+    console.error('  Set GEZEL_GITHUB_TOKEN, set GITHUB_TOKEN, or run `gh auth login`.');
+    console.error('  bendyline/gezel is private — fetching releases / artifacts needs auth.');
+    process.exit(1);
+  }
+
+  if (args.list) {
+    await listAvailable(token, platform);
+    return;
+  }
+
+  if (args.run) {
+    await fetchFromRun({ token, platform, runId: args.run, variant: args.variant });
+  } else {
+    await fetchFromRelease({ token, platform, version: args.version, variant: args.variant });
+  }
+}
+
+// ── Auth ───────────────────────────────────────────────────────────
+
+async function resolveToken() {
+  if (process.env.GEZEL_GITHUB_TOKEN) return process.env.GEZEL_GITHUB_TOKEN;
+  if (process.env.GITHUB_TOKEN) return process.env.GITHUB_TOKEN;
+  const gh = spawnSync('gh', ['auth', 'token'], {
+    encoding: 'utf8',
+    shell: process.platform === 'win32',
+  });
+  if (gh.status === 0) return gh.stdout.trim();
+  return null;
+}
+
+// ── Release path ───────────────────────────────────────────────────
+
+async function fetchFromRelease({ token, platform, version, variant }) {
+  let release;
+  if (version) {
+    const tag = `native-v${version.replace(/^v/, '').replace(/^native-v?/, '')}`;
+    console.log(`looking up release ${tag}…`);
+    release = await api(`/repos/${REPO_OWNER}/${REPO_NAME}/releases/tags/${tag}`, token);
+  } else {
+    console.log('looking up the latest native-v* release…');
+    // /releases/latest skips prereleases AND will surface app releases — we
+    // want the most recent native-v* specifically, so iterate.
+    const all = await api(`/repos/${REPO_OWNER}/${REPO_NAME}/releases?per_page=30`, token);
+    release = all.find((r) => r.tag_name?.startsWith('native-v'));
+    if (!release) {
+      console.error('error: no native-v* release found in the most recent 30 releases.');
+      console.error(
+        '       Either no native release exists yet, or use --run <id> to pull build-run artifacts directly.',
+      );
+      process.exit(1);
+    }
+    console.log(`  → ${release.tag_name}`);
+  }
+
+  const ext = platform.startsWith('win32') ? 'zip' : 'tar.gz';
+  const ver = release.tag_name.replace(/^native-v/, '');
+
+  // Default behavior fetches every variant for this platform so the
+  // user can flip the Settings → Advanced → Engine backend dropdown
+  // freely without re-running the script. `--variant` narrows to one.
+  const platformKeys = variant ? [pickPlatformKey(platform, variant)] : platformVariants(platform);
+
+  for (const platformKey of platformKeys) {
+    const assetName = `gezel-native-${ver}-${platformKey}.${ext}`;
+    const asset = release.assets?.find((a) => a.name === assetName);
+    if (!asset) {
+      // For default-all-variants, missing assets aren't fatal — a
+      // platform might not ship every variant in every release. Just
+      // note + skip. Explicit --variant misses are still fatal.
+      if (platformKeys.length > 1) {
+        console.warn(`  ⚠ ${assetName} not in release ${release.tag_name} — skipping`);
+        continue;
+      }
+      console.error(`error: ${assetName} not found in release ${release.tag_name}.`);
+      console.error('       Available assets:');
+      for (const a of release.assets ?? []) console.error(`         ${a.name}`);
+      process.exit(1);
+    }
+
+    const targetDir = join(buildRoot, platformKey);
+    await downloadAndExtract({
+      token,
+      url: asset.url, // API URL — needs Accept: application/octet-stream
+      accept: 'application/octet-stream',
+      name: assetName,
+      targetDir,
+      isZip: ext === 'zip',
+    });
+    console.log(`✓ ${platformKey}: extracted into ${targetDir}`);
+    await listExtracted(targetDir);
+  }
+}
+
+// ── Run-artifact path ──────────────────────────────────────────────
+
+async function fetchFromRun({ token, platform, runId, variant }) {
+  console.log(`fetching artifacts from build run ${runId}…`);
+  const { artifacts } = await api(
+    `/repos/${REPO_OWNER}/${REPO_NAME}/actions/runs/${runId}/artifacts?per_page=100`,
+    token,
+  );
+
+  // Same default-all-variants policy as the release path. build-native.yml
+  // uploads as `native-<engine>-<platform>[-<variant>]`, wrapped in a zip
+  // on the GitHub side regardless of source OS.
+  const platformKeys = variant ? [pickPlatformKey(platform, variant)] : platformVariants(platform);
+
+  let totalMatched = 0;
+  for (const platformKey of platformKeys) {
+    const matched = artifacts.filter((a) => a.name.endsWith(`-${platformKey}`));
+    if (matched.length === 0) {
+      if (platformKeys.length > 1) {
+        console.warn(`  ⚠ no artifacts ending in -${platformKey} on run ${runId} — skipping`);
+        continue;
+      }
+      console.error(`error: no artifacts ending in -${platformKey} on run ${runId}.`);
+      console.error('       Available artifacts:');
+      for (const a of artifacts) console.error(`         ${a.name} (${a.size_in_bytes} bytes)`);
+      process.exit(1);
+    }
+
+    const targetDir = join(buildRoot, platformKey);
+    await mkdir(targetDir, { recursive: true });
+    for (const art of matched) {
+      console.log(`  ${art.name}`);
+      await downloadAndExtract({
+        token,
+        url: art.archive_download_url,
+        accept: 'application/vnd.github+json',
+        name: `${art.name}.zip`,
+        targetDir,
+        isZip: true,
+      });
+    }
+    console.log(`✓ ${platformKey}: extracted into ${targetDir}`);
+    await listExtracted(targetDir);
+    totalMatched += matched.length;
+  }
+  if (totalMatched === 0) {
+    console.error(`error: no matching artifacts on run ${runId} for platform ${platform}.`);
+    process.exit(1);
+  }
+}
+
+// ── List path ──────────────────────────────────────────────────────
+
+async function listAvailable(token, platform) {
+  const releases = await api(`/repos/${REPO_OWNER}/${REPO_NAME}/releases?per_page=10`, token);
+  const native = releases.filter((r) => r.tag_name?.startsWith('native-v'));
+  if (native.length === 0) {
+    console.log('no native-v* releases published yet.');
+    return;
+  }
+  console.log(`recent native releases (host platform: ${platform}):`);
+  for (const r of native.slice(0, 5)) {
+    console.log(`  ${r.tag_name}  (${r.published_at ?? r.created_at})`);
+    const ver = r.tag_name.replace(/^native-v/, '');
+    const matching = (r.assets ?? []).filter((a) =>
+      a.name.startsWith(`gezel-native-${ver}-${platform}`),
+    );
+    for (const a of matching) {
+      console.log(`    ${a.name}  (${(a.size / 1024 / 1024).toFixed(1)} MB)`);
+    }
+  }
+}
+
+// ── Download + extract via system tools ────────────────────────────
+
+async function downloadAndExtract({ token, url, accept, name, targetDir, isZip }) {
+  const scratch = await mkdtemp(join(tmpdir(), 'gezel-native-'));
+  const archive = join(scratch, name);
+  try {
+    console.log(`    downloading ${name}…`);
+    const res = await fetch(url, {
+      redirect: 'follow',
+      headers: {
+        Accept: accept,
+        Authorization: `token ${token}`,
+        'User-Agent': 'gezel-fetch-native',
+      },
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText} from ${url}`);
+    mkdirSync(dirname(archive), { recursive: true });
+    const file = createWriteStream(archive);
+    const reader = res.body.getReader();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!file.write(value)) await new Promise((r) => file.once('drain', r));
+    }
+    await new Promise((r) => file.end(r));
+
+    await mkdir(targetDir, { recursive: true });
+    console.log(`    extracting → ${targetDir}`);
+    if (isZip) {
+      await extractZip(archive, targetDir);
+    } else {
+      await extractTarGz(archive, targetDir);
+    }
+
+    if (process.platform !== 'win32') {
+      for (const f of await readdir(targetDir)) {
+        if (!f.endsWith('.exe') && !f.endsWith('.txt')) {
+          await chmod(join(targetDir, f), 0o755);
+        }
+      }
+    }
+  } finally {
+    await rm(scratch, { recursive: true, force: true });
+  }
+}
+
+async function extractZip(archive, targetDir) {
+  // Windows 10+ ships tar.exe (it's bsdtar) which handles zip files just
+  // fine via `tar -xf`. That's strictly more reliable than PowerShell's
+  // Expand-Archive (which has historically choked on long paths and zip
+  // entries with backslashes). On Mac/Linux, system tar also handles zip.
+  // Fallback to PowerShell only if tar isn't on PATH.
+  const tar = spawnSync('tar', ['-xf', archive, '-C', targetDir], { stdio: 'inherit' });
+  if (tar.status === 0) return;
+  if (process.platform === 'win32') {
+    const ps = spawnSync(
+      'powershell',
+      [
+        '-NoProfile',
+        '-Command',
+        `Expand-Archive -LiteralPath '${archive}' -DestinationPath '${targetDir}' -Force`,
+      ],
+      { stdio: 'inherit' },
+    );
+    if (ps.status !== 0) throw new Error('extractZip: both tar and Expand-Archive failed');
+    return;
+  }
+  const unzip = spawnSync('unzip', ['-o', archive, '-d', targetDir], { stdio: 'inherit' });
+  if (unzip.status !== 0) throw new Error('extractZip: tar and unzip both failed');
+}
+
+async function extractTarGz(archive, targetDir) {
+  const tar = spawnSync('tar', ['-xzf', archive, '-C', targetDir], { stdio: 'inherit' });
+  if (tar.status !== 0) throw new Error(`extractTarGz: tar exited ${tar.status}`);
+}
+
+async function listExtracted(targetDir) {
+  try {
+    const entries = await readdir(targetDir);
+    if (entries.length === 0) return;
+    console.log('  contents:');
+    for (const e of entries) console.log(`    ${e}`);
+  } catch {
+    /* nothing to list */
+  }
+}
+
+// ── Helpers ────────────────────────────────────────────────────────
+
+async function api(path, token) {
+  const url = `https://api.github.com${path}`;
+  const res = await fetch(url, {
+    headers: {
+      Accept: 'application/vnd.github+json',
+      Authorization: `token ${token}`,
+      'User-Agent': 'gezel-fetch-native',
+      'X-GitHub-Api-Version': '2022-11-28',
+    },
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`GitHub API ${res.status} on ${path}: ${body.slice(0, 200)}`);
+  }
+  return res.json();
+}
+
+function detectPlatform() {
+  if (process.platform === 'darwin') {
+    return process.arch === 'arm64' ? 'darwin-arm64' : 'darwin-x64';
+  }
+  if (process.platform === 'linux') {
+    if (process.arch === 'x64') return 'linux-x64';
+    if (process.arch === 'arm64') return 'linux-arm64';
+  }
+  if (process.platform === 'win32' && process.arch === 'x64') return 'win32-x64';
+  return null;
+}
+
+function pickPlatformKey(platform, variant) {
+  // Mac is single-variant (Metal). Linux/Windows have cpu / vulkan / cuda
+  // variants for llama-cpp. With an explicit variant, just stamp it.
+  // Without — fall through to the host probe (matches the supervisor's
+  // own auto-detect in packages/app/src/supervisor/llama-backend.ts) so
+  // the lone-variant fetch lands in the directory the supervisor will
+  // look in. The default-all path doesn't go through here.
+  if (platform.startsWith('darwin')) return platform;
+  return `${platform}-${variant ?? autoDetectBackend(platform)}`;
+}
+
+/**
+ * Every asset key published for a given platform — used by the
+ * default fetch path so the user can flip backends via Settings →
+ * Advanced without re-fetching. Mirrors the matrix in
+ * `.github/workflows/build-native.yml`.
+ *
+ * Two shapes coexist in every platform's release set:
+ *   - **bare** (`win32-x64`, `darwin-arm64`, …) — single-variant
+ *     engines like sd-cpp and uv. Asset name has no variant suffix.
+ *   - **suffixed** (`win32-x64-cpu`, `darwin-arm64-metal`, …) —
+ *     multi-variant engines like llama-cpp.
+ *
+ * The default-all path needs to fetch BOTH so a single run lands
+ * sd-server alongside llama-server. Earlier revisions listed only
+ * the llama variants for win32/linux and only the bare key for
+ * mac, which silently dropped sd-server on Linux/Windows and
+ * llama-server on Mac.
+ */
+function platformVariants(platform) {
+  if (platform === 'darwin-arm64') return ['darwin-arm64', 'darwin-arm64-metal'];
+  if (platform === 'darwin-x64') return ['darwin-x64']; // not built today
+  if (platform === 'linux-x64') {
+    return ['linux-x64', 'linux-x64-cpu', 'linux-x64-vulkan', 'linux-x64-cuda'];
+  }
+  if (platform === 'linux-arm64') {
+    // Vulkan deliberately omitted on linux-arm64 — see the
+    // matching note in .github/workflows/build-native.yml. Add
+    // 'linux-arm64-vulkan' here when the workflow ships one.
+    return ['linux-arm64', 'linux-arm64-cpu', 'linux-arm64-cuda'];
+  }
+  if (platform === 'win32-x64') {
+    return ['win32-x64', 'win32-x64-cpu', 'win32-x64-vulkan', 'win32-x64-cuda'];
+  }
+  return [platform];
+}
+
+/**
+ * Mirror of `detectLinuxOrWin` from the supervisor's llama-backend.ts.
+ * CUDA driver → 'cuda'; Vulkan loader → 'vulkan'; else 'cpu'. Pure
+ * filesystem check; no GPU workload. Duplicated rather than imported
+ * because the supervisor module sits inside packages/app and a
+ * root-level script shouldn't depend on a built workspace package.
+ */
+function autoDetectBackend(platform) {
+  const fileExists = (p) => {
+    try {
+      accessSync(p, constants.F_OK);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  if (platform === 'win32-x64') {
+    const sys32 = process.env.SYSTEMROOT
+      ? join(process.env.SYSTEMROOT, 'System32')
+      : 'C:\\Windows\\System32';
+    if (fileExists(join(sys32, 'nvcuda.dll')) || fileExists(join(sys32, 'nvml.dll'))) {
+      console.log('  auto-detected backend: cuda (found nvcuda.dll / nvml.dll)');
+      return 'cuda';
+    }
+    if (fileExists(join(sys32, 'vulkan-1.dll'))) {
+      console.log('  auto-detected backend: vulkan (found vulkan-1.dll)');
+      return 'vulkan';
+    }
+  } else if (platform.startsWith('linux-')) {
+    const cudaPaths = [
+      '/usr/lib/x86_64-linux-gnu/libcuda.so.1',
+      '/usr/lib/aarch64-linux-gnu/libcuda.so.1',
+      '/usr/lib64/libcuda.so.1',
+      '/usr/lib/libcuda.so.1',
+      '/lib/x86_64-linux-gnu/libcuda.so.1',
+      '/lib/aarch64-linux-gnu/libcuda.so.1',
+    ];
+    if (cudaPaths.some(fileExists)) {
+      console.log('  auto-detected backend: cuda (found libcuda.so.1)');
+      return 'cuda';
+    }
+    const vkPaths = [
+      '/usr/lib/x86_64-linux-gnu/libvulkan.so.1',
+      '/usr/lib/aarch64-linux-gnu/libvulkan.so.1',
+      '/usr/lib64/libvulkan.so.1',
+      '/usr/lib/libvulkan.so.1',
+    ];
+    if (vkPaths.some(fileExists)) {
+      console.log('  auto-detected backend: vulkan (found libvulkan.so.1)');
+      return 'vulkan';
+    }
+  }
+  console.log('  auto-detected backend: cpu (no CUDA driver, no Vulkan loader)');
+  return 'cpu';
+}
+
+function parseArgs(argv) {
+  const out = { variant: null, version: null, run: null, list: false, help: false };
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === '--list') out.list = true;
+    else if (a === '--help' || a === '-h') out.help = true;
+    else if (a === '--version') out.version = argv[++i];
+    else if (a === '--variant') out.variant = argv[++i];
+    else if (a === '--run') out.run = argv[++i];
+    else if (a.startsWith('--version=')) out.version = a.slice('--version='.length);
+    else if (a.startsWith('--variant=')) out.variant = a.slice('--variant='.length);
+    else if (a.startsWith('--run=')) out.run = a.slice('--run='.length);
+  }
+  return out;
+}
+
+const HELP = `Usage: node scripts/fetch-native-binaries.mjs [options]
+
+  --version <X.Y.Z>    Pull a specific release (default: latest native-v*)
+  --variant <name>     Narrow to a single llama-cpp variant: cpu | vulkan | cuda
+                       Default: fetch ALL variants for this platform so the
+                       Settings → Advanced → Engine backend dropdown can flip
+                       between them without re-running this script.
+                       Mac always gets the single Metal variant.
+  --run <id>           Pull from a build-native.yml workflow run instead of
+                       a release. Useful when release-native didn't fire.
+  --list               Show recent releases + assets for this platform.
+  -h, --help           Show this help.
+
+Auth: GEZEL_GITHUB_TOKEN, GITHUB_TOKEN env, or \`gh auth token\`.`;
+
+main().catch((err) => {
+  console.error(err.stack ?? err.message ?? String(err));
+  process.exit(1);
+});

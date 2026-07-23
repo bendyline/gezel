@@ -1,0 +1,22 @@
+/*
+ * Loaded BEFORE the chat bundle's `chat.css` so anything we set at
+ * `:root` here is overridden by the gezel palette. Per the user's
+ * intent — "natively host gezel components as is" — we deliberately
+ * do NOT replace gezel's cream/tan/warm-brown identity with the
+ * `--vscode-*` token palette. Gezel's own `prefers-color-scheme: dark`
+ * media query and `[data-theme="*"]` overrides already track the host
+ * theme (VS Code's webview sets `body.vscode-{light,dark,high-contrast}`
+ * and the corresponding `color-scheme`).
+ *
+ * What this file IS for:
+ *   - Provide ultimate fallbacks if `chat.css` somehow fails to load
+ *     (font, base background, text color) so the panel never paints
+ *     pure white-on-white.
+ *   - Map VS Code's font-family onto a fallback chain that gezel can
+ *     extend.
+ */
+:root {
+  --bg: var(--vscode-editor-background);
+  --text: var(--vscode-foreground);
+  --font-ui: var(--vscode-font-family);
+}

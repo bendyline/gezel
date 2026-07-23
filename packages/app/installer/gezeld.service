@@ -1,0 +1,73 @@
+[Unit]
+# systemd unit for the Gezel system service. Installed to
+# /etc/systemd/system/gezeld.service by the deb/rpm afterInstall hook
+# (see installer/linux/after-install.sh).
+#
+# Runs at boot, before any user logs in. Hosts the loopback HTTP
+# service that the per-user Electron Gezel app connects to.
+Description=Gezel local-first AI service
+Documentation=https://github.com/bendyline/gezel
+After=network.target
+
+[Service]
+Type=simple
+User=gezel
+Group=gezel
+# Private-by-default daemon state. gezeld explicitly widens only runtime
+# discovery metadata needed by cross-account desktop clients.
+UMask=0077
+# ELECTRON_RUN_AS_NODE=1 turns the bundled Electron exe into a vanilla
+# Node interpreter for this child only — no UI, no Chromium. Saves the
+# ~80 MB of bundling a separate Node binary.
+Environment=ELECTRON_RUN_AS_NODE=1
+Environment=GEZEL_HOME=/var/lib/gezel
+# Service writes a scoped, non-root first-party credential to runtime/
+# auth-token with mode 0644 when this is set. The daemon root token remains
+# process-local; desktop clients receive only the credential they need.
+Environment=GEZEL_SYSTEM_SCOPE=1
+# The `gezel` system user is created with --no-create-home, so $HOME
+# defaults to /home/gezel (which doesn't exist) or /. Tools that derive
+# state paths from $HOME — pnpm's store at ~/.local/share/pnpm, npm
+# cache at ~/.npm, node's ~/.node-gyp — need a writable home. Point them
+# at the same system-scope dir we already own.
+Environment=HOME=/var/lib/gezel
+# Bundled pnpm + Node binaries. The Electron supervisor sets these in
+# its own process env for user-context launches; the system service is
+# started by systemd with a clean environment and never sees those, so
+# they have to be declared here. Both paths point at the asar-unpacked
+# binaries inside /opt/Gezel — already executable, no extraction needed.
+Environment=GEZEL_PNPM_PATH=/opt/Gezel/resources/app.asar.unpacked/dist/pnpm-bundle/pnpm
+Environment=GEZEL_NODE_PATH=/opt/Gezel/resources/app.asar.unpacked/dist/node-bundle/node
+# Static UI bundle. Lives at /opt/Gezel/resources/app.asar.unpacked/dist/ui.
+# The daemon's own findBundledUi searches relative to gezeld.js and would
+# land on `…/service/dist/ui` (wrong location — the service tree doesn't
+# include a UI subtree; UI is shipped separately), so we pin the right
+# path here. Without it the system service serves the "web UI bundle was
+# not included" placeholder.
+Environment=GEZEL_UI_DIR=/opt/Gezel/resources/app.asar.unpacked/dist/ui
+# Bundled native engines (llama.cpp variants, sd-cpp, whisper.cpp, uv)
+# live under /opt/Gezel/resources/app.asar.unpacked/native-bin/. The
+# service's native-discovery (packages/service/src/native/discover.ts)
+# reads GEZEL_NATIVE_BIN_DIR to find them. Without this systemd starts
+# the unit with a clean env, can't find any bundled binary, and
+# on-device chat throws "no local engine is available on this machine."
+Environment=GEZEL_NATIVE_BIN_DIR=/opt/Gezel/resources/app.asar.unpacked/native-bin
+WorkingDirectory=/var/lib/gezel
+# gezeld lives at /var/lib/gezel/service/dist/bin/gezeld.js — extracted
+# from the shipped tarball by installer/linux/after-install.sh at install
+# time. ProtectSystem=full keeps /opt and /usr read-only; ReadWritePaths
+# below grants writes to the daemon's data dir.
+ExecStart=/opt/Gezel/gezel /var/lib/gezel/service/dist/bin/gezeld.js
+Restart=on-failure
+RestartSec=5
+
+# Sandboxing — these are conservative defaults that work for our
+# loopback-only HTTP service.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/var/lib/gezel
+
+[Install]
+WantedBy=multi-user.target

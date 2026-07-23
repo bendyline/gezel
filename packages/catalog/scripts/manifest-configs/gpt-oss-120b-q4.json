@@ -1,0 +1,37 @@
+{
+  "id": "gpt-oss-120b-q4",
+  "name": "GPT-OSS (120B, MoE)",
+  "description": "OpenAI's open-weight 117B-parameter Mixture-of-Experts model (~5.1B active per token). Configurable reasoning effort (low/medium/high), full chain-of-thought access, and native function-calling. Frontier-class on-device reasoning for workstations and Mac Studio-class hardware — needs ~80GB of usable memory.",
+  "tags": ["openai", "tools", "reasoning", "moe", "open-weights", "large"],
+  "category": "reasoning",
+  "maintainer": { "name": "OpenAI", "url": "https://ollama.com/library/gpt-oss" },
+  "version": "1.1.0",
+  "updatedAt": "2026-05-17T00:00:00Z",
+  "license": "Apache-2.0",
+  "parameterSize": "117B",
+  "approxSizeBytes": 65000000000,
+  "supportsTools": true,
+  "contextWindow": 131072,
+  "upstream": "https://huggingface.co/openai/gpt-oss-120b",
+  "style": {
+    "family": "gpt-oss",
+    "reasoningFormat": "channel",
+    "toolCallFormat": "function-call"
+  },
+  "behaviors": [
+    "reasoning.strip-channel-tags",
+    "prompt.private-reasoning-guidance",
+    "fabrication.detect-past-tense-no-tools",
+    "turn.preamble-folding"
+  ],
+  "ollama": { "tag": "gpt-oss:120b" },
+  "llamaCpp": {
+    "huggingfaceRepo": "bartowski/openai_gpt-oss-120b-GGUF",
+    "shardsDir": "openai_gpt-oss-120b-Q4_K_M",
+    "quantization": "Q4_K_M"
+  },
+  "mlx": {
+    "huggingfaceRepo": "mlx-community/gpt-oss-120b-MXFP4-Q4",
+    "quantization": "MXFP4-Q4"
+  }
+}

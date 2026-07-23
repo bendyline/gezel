@@ -1,0 +1,602 @@
+[
+  {
+    "id": "scrape-to-structured",
+    "name": "Scrape a Site to Structured Data",
+    "description": "Turn one or more web pages into a clean, structured dataset (JSON or CSV) with a fixed schema — product listings, directory entries, articles, tables, or job posts. Scopes the exact fields and a sample-row target FIRST so extraction is verifiable, then crawls and parses each page into rows, then validates that every row matches the schema, types are coerced, required fields are non-empty, and there are no duplicates. The scope-before-scrape ordering is the point: a small model that locks the field list and one hand-written sample row extracts consistently instead of inventing keys per page.",
+    "tags": ["scraping", "web", "data", "etl", "automation"],
+    "triggers": [
+      "scrape a website",
+      "extract data from a site",
+      "turn a page into JSON",
+      "crawl and structure",
+      "pull a table from the web"
+    ],
+    "phases": [
+      {
+        "id": "scope",
+        "name": "Scope the extraction",
+        "role": "planner",
+        "summary": "lock target URLs, the field schema, and a sample row",
+        "prompt": "Define exactly what to extract before fetching anything. Step 1: list the target URL(s) or the URL pattern to crawl, and note pagination (how to reach page 2..N) if any. Step 2: define the output schema as a flat field list — for each field give a name, a type (string/number/boolean/date/url), and whether it is required. Step 3: hand-write ONE fully-populated sample row in the chosen format so the build phase has a concrete target to match. Step 4: decide output format (JSON array of objects, or CSV) and the file path. Step 5: write an acceptance-criteria checklist (e.g. 'every page in scope is fetched', 'every row has all required fields non-empty', 'numeric/date fields are typed not strings', 'no duplicate rows by the key field', 'row count is within the expected range'). Call write_task_note with the schema, the sample row, and the checklist, and also write that same content to notes/scope.md. No scraping yet.",
+        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "scrape",
+        "name": "Scrape and parse",
+        "role": "developer",
+        "summary": "fetch each page and extract rows to the schema",
+        "prompt": "Fetch each in-scope page (use the available fetch/browser capability) and parse out the fields defined in the schema. Step 1: fetch page 1, locate the repeating record container, and map each schema field to its selector/pattern. Step 2: extract every record on the page into an object keyed exactly by the schema field names — never invent or rename keys. Step 3: follow pagination and repeat until all in-scope pages are done. Step 4: coerce types as you go (parse numbers, normalize dates to ISO, absolutize relative URLs) and trim whitespace. Step 5: write all rows to the scoped output file in the chosen format and confirm it parses. Stage progress so a partial run is observable. Call write_task_note with the output path and the row count.",
+        "produces": { "path": "data.json", "kind": "json" }
+      },
+      {
+        "id": "validate",
+        "name": "Validate the dataset",
+        "role": "reviewer",
+        "summary": "schema, types, completeness, and dedup checks",
+        "prompt": "Validate the produced dataset against the locked schema and checklist. Step 1: confirm the file parses and is the chosen format. Step 2: for every row, confirm all required fields are present and non-empty and that types match (numbers are numbers, dates are ISO, urls are absolute). Step 3: check coverage — the row count is within the expected range and pages were not silently skipped. Step 4: check for duplicate rows by the key field and flag any. Step 5: spot-check 3 rows against the live source to confirm values are correct, not hallucinated. Write a PASS/FAIL line per criterion to notes/validate.md and to task notes. If anything fails, list the exact rows/fields and loop back to scrape.",
+        "produces": { "path": "notes/validate.md", "kind": "markdown-notes" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Open data.json and verify it against every acceptance criterion from notes/scope.md. Confirm it parses as valid JSON. For each row, check required fields are non-empty and types are correct (numbers typed, dates ISO, urls absolute). Verify there are no duplicate rows by the key field and the row count is in range. Spot-check 3 rows against the source. Write PASS/FAIL per criterion; on any failure, name the offending rows/fields and loop back to scrape.",
+      "loopBackTo": "scrape",
+      "deliverable": { "path": "data.json", "kind": "json" }
+    }
+  },
+  {
+    "id": "form-fill-batch",
+    "name": "Batch-Fill Forms from a Dataset",
+    "description": "Automate filling a web or PDF form once per row of an input dataset — registrations, applications, data-entry portals, mail-merge into a form. Scopes the field-to-column mapping and a per-row success signal FIRST, then builds a loop that loads each record, maps it onto the form fields, submits, and records the outcome, then verifies every row was attempted, each submission was confirmed, and failures are logged with the reason. Mapping-before-build is the wisdom: lock the column→field map and the 'submitted OK' signal so the run is idempotent, resumable, and auditable rather than a blind click-through.",
+    "tags": ["automation", "forms", "batch", "data-entry", "workflow"],
+    "triggers": [
+      "fill out forms automatically",
+      "batch form submission",
+      "mail merge into a form",
+      "auto-fill a portal",
+      "submit a form for each row"
+    ],
+    "phases": [
+      {
+        "id": "scope",
+        "name": "Scope the fill job",
+        "role": "planner",
+        "summary": "map dataset columns to form fields + success signal",
+        "prompt": "Plan the batch fill before automating anything. Step 1: identify the input dataset (path + columns) and the target form (URL or PDF) and list every fillable field with its type (text, select, checkbox, date, file). Step 2: build an explicit mapping from each dataset column to a form field, and note required form fields that have no column (these need a default or must abort the row). Step 3: define the per-row success signal — what proves a submission landed (a confirmation URL, a success banner text, a generated ID, or a saved PDF). Step 4: decide the results log shape (one row per input record with status submitted/failed/skipped and a reason/confirmation). Step 5: write an acceptance-criteria checklist ('every input row is attempted', 'each success is confirmed by the signal', 'failures logged with a reason', 'no row submitted twice', 'run is resumable from the log'). Call write_task_note with the mapping + signal + checklist and write it to notes/scope.md. No automation yet.",
+        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "build",
+        "name": "Build the fill automation",
+        "role": "developer",
+        "summary": "loop records, fill, submit, log each outcome",
+        "prompt": "Implement the batch-fill driver to the locked mapping. Step 1: load the dataset and the results log; skip any row already marked submitted so the run is resumable. Step 2: for each remaining row, populate every mapped form field by type (set text, choose selects, toggle checkboxes, attach files), applying defaults for required-but-unmapped fields. Step 3: submit, then assert the success signal from scope before recording success — never assume submission worked. Step 4: append a results-log row with status and the confirmation token or the failure reason; on error, catch it, log failed, and continue to the next row. Step 5: write the automation to a runnable code module and produce/update the results log. Call write_task_note with the module path, the log path, and counts (submitted/failed/skipped).",
+        "produces": { "path": "form_fill.py", "kind": "code-module" }
+      },
+      {
+        "id": "verify",
+        "name": "Verify the run",
+        "role": "reviewer",
+        "summary": "coverage, confirmations, and failure logging",
+        "prompt": "Verify the batch run did what scope promised. Step 1: confirm the automation runs without throwing and produces a results log. Step 2: check coverage — the log has exactly one entry per input row, none missing. Step 3: confirm every 'submitted' entry carries the success signal (confirmation token / banner / saved file) and is not just assumed. Step 4: confirm every 'failed' entry has a concrete reason and that failures did not abort the rest of the batch. Step 5: confirm idempotency — a re-run skips already-submitted rows and does not double-submit. Write PASS/FAIL per criterion to notes/verify.md and task notes; on failure, name the rows and loop back to build.",
+        "produces": { "path": "notes/verify.md", "kind": "markdown-notes" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Exercise form_fill.py against the dataset (or trace it if execution is unavailable) and verify every criterion from notes/scope.md. Confirm: one log entry per input row, each success carries the defined success signal, each failure has a reason and did not abort the batch, no row is submitted twice, and a re-run resumes from the log. Write PASS/FAIL per criterion; on any failure, name the rows and loop back to build.",
+      "loopBackTo": "build",
+      "deliverable": { "path": "form_fill.py", "kind": "code-module" }
+    }
+  },
+  {
+    "id": "monitor-and-alert",
+    "name": "Watch a Page or API and Alert",
+    "description": "Build a watcher that polls a web page or API endpoint on a schedule, detects a meaningful change or threshold breach, and fires an alert (and only alerts on real changes, not noise). Scopes the watched target, the exact change/threshold condition, and the dedup/cooldown policy FIRST, then builds the poll-diff-notify loop with persisted state, then tests it against simulated change and no-change inputs so it neither misses a real change nor spams on every poll. Condition-and-cooldown-before-build is the wisdom that separates a useful monitor from an alert-fatigue generator.",
+    "tags": ["monitoring", "alerts", "automation", "polling", "api"],
+    "triggers": [
+      "watch a page for changes",
+      "alert me when this changes",
+      "monitor an API",
+      "notify on a price drop",
+      "uptime watcher"
+    ],
+    "phases": [
+      {
+        "id": "scope",
+        "name": "Scope the monitor",
+        "role": "planner",
+        "summary": "target, change condition, dedup + cooldown policy",
+        "prompt": "Define what to watch and what counts as alert-worthy before building. Step 1: name the target (URL or API endpoint), the poll interval, and exactly which value to extract (a price, a status code, a count, a specific text region) — not the whole page. Step 2: define the change condition precisely — equality change, threshold crossing (>=, <=), or appearance/disappearance of a substring. Step 3: define the dedup/cooldown policy so you alert once per distinct change, not every poll (persist last-seen value + last-alert time; require a cooldown window). Step 4: define the alert channel and message template (what the alert says, including old→new value). Step 5: write an acceptance-criteria checklist ('extracts only the target value', 'fires exactly once on a real change', 'silent when nothing changed', 'respects the cooldown', 'persists state across runs'). Call write_task_note with the condition + policy + checklist and write it to notes/scope.md. No code yet.",
+        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "build",
+        "name": "Build the watcher",
+        "role": "developer",
+        "summary": "poll, extract, diff vs state, alert on real change",
+        "prompt": "Implement the watcher to the locked condition and policy. Step 1: load persisted state (last-seen value, last-alert timestamp) or initialize on first run. Step 2: fetch the target and extract only the scoped value, with error handling so a transient fetch failure does not crash or false-alert. Step 3: evaluate the change condition against the last-seen value; if met AND the cooldown has elapsed, format and send the alert with old→new. Step 4: always persist the new last-seen value (and last-alert time when alerting) so the next run diffs correctly. Step 5: make it runnable on the chosen interval (a script suitable for cron) and write it to a code module. Call write_task_note with the module path and how state is persisted.",
+        "produces": { "path": "monitor.py", "kind": "code-module" }
+      },
+      {
+        "id": "test",
+        "name": "Test the watcher",
+        "role": "developer",
+        "summary": "assert it alerts on change, stays silent otherwise",
+        "prompt": "Prove the watcher behaves on every case before trusting it. Step 1: write tests that feed a fixed last-seen state plus a new reading. Step 2: assert the no-change case sends NO alert. Step 3: assert a real change (or threshold crossing) sends EXACTLY ONE alert with the correct old→new values. Step 4: assert that a second identical change within the cooldown window does NOT re-alert, and that it does alert again after the window. Step 5: assert a fetch failure is handled (no crash, no false alert) and that state is persisted after each run. Put the watcher and these tests in a single code-with-tests file; run them and confirm green. Call write_task_note with the test file path and the pass count.",
+        "produces": { "path": "monitor_test.py", "kind": "code-with-tests" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Run the tests in monitor_test.py (or trace them) and verify every criterion from notes/scope.md: only the target value is extracted, a real change fires exactly one alert with old→new, no-change polls are silent, the cooldown suppresses duplicate alerts and releases after the window, fetch failures do not false-alert, and state persists across runs. Write PASS/FAIL per criterion; on any failure, name it and loop back to test.",
+      "loopBackTo": "test",
+      "deliverable": { "path": "monitor_test.py", "kind": "code-with-tests" }
+    }
+  },
+  {
+    "id": "price-tracker",
+    "name": "Track Prices Over Time",
+    "description": "Build a price tracker that records the price of one or more products/SKUs each time it runs, appending a timestamped history so you can see trends, drops, and the lowest price seen. Scopes the SKUs, the price-extraction rule, and the history-file schema FIRST, then builds the fetch-and-append routine that is idempotent per day and computes drop-from-previous and all-time-low. Schema-before-build keeps the history a clean append-only time series instead of a pile of inconsistent snapshots — the foundation any later chart or alert reads from.",
+    "tags": ["price", "tracking", "automation", "data", "time-series"],
+    "triggers": [
+      "track a price",
+      "price history tracker",
+      "watch product prices",
+      "log prices over time",
+      "price drop history"
+    ],
+    "phases": [
+      {
+        "id": "scope",
+        "name": "Scope the tracker",
+        "role": "planner",
+        "summary": "SKUs, price-extraction rule, and history schema",
+        "prompt": "Define the tracker before fetching. Step 1: list each product to track — a stable id/SKU, a label, and its URL or API. Step 2: define the price-extraction rule per source (which element/field holds the price) and the currency, and decide how to normalize (numeric, two decimals). Step 3: define the append-only history schema (e.g. CSV columns: timestamp, sku, label, price, currency, source_url) and the file path. Step 4: decide the run cadence and the idempotency rule (at most one row per sku per day — a re-run the same day updates rather than duplicates). Step 5: write an acceptance-criteria checklist ('every tracked SKU gets a row per run', 'prices are numeric and normalized', 'history is append-only and de-duplicated per day', 'drop-from-previous and all-time-low are computed', 'a failed fetch is logged, not silently dropped'). Call write_task_note with the SKU list + schema + checklist and write it to notes/scope.md. No code yet.",
+        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "build",
+        "name": "Build the tracker",
+        "role": "developer",
+        "summary": "fetch each SKU, append a row, compute drop + low",
+        "prompt": "Implement the tracker to the locked schema. Step 1: load the existing history file (or create it with the header). Step 2: for each SKU, fetch the source and extract the price with the scoped rule, normalizing to a number; on a fetch error, log it and continue (do not write a fake price). Step 3: enforce idempotency — if a row already exists for this SKU today, update it; otherwise append a new timestamped row. Step 4: for each SKU compute drop-from-previous (this price vs the prior recorded price) and the all-time-low across history, and surface those in a small summary. Step 5: write the runnable script (cron-friendly) and ensure the history file stays valid and append-only. Call write_task_note with the script path, the history path, and the per-SKU current/low summary.",
+        "produces": { "path": "price_tracker.py", "kind": "code-module" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Run price_tracker.py (or trace it) and verify every criterion from notes/scope.md against the produced history file. Confirm: each tracked SKU has a row this run, prices are numeric and normalized, the history is append-only with at most one row per SKU per day (a same-day re-run does not duplicate), drop-from-previous and all-time-low are computed correctly, and a simulated fetch failure is logged rather than written as a bogus price. Write PASS/FAIL per criterion; on any failure, name it and loop back to build.",
+      "loopBackTo": "build",
+      "deliverable": { "path": "price_tracker.py", "kind": "code-module" }
+    }
+  },
+  {
+    "id": "lead-enrichment",
+    "name": "Enrich a Leads List",
+    "description": "Take a raw leads or contacts list and enrich each row with derived and looked-up attributes — company domain, industry, size band, role seniority, normalized location, and a quality/score flag — into a clean CRM-ready file. Scopes the enrichment fields, their sources, and the dedup/normalization rules FIRST, then enriches each lead row-by-row, then verifies coverage, that nothing was fabricated when a source had no data, and that duplicates are merged. Defining 'what each field means and where it comes from' before enriching is what stops a small model from inventing plausible-but-false company data.",
+    "tags": ["leads", "enrichment", "crm", "data", "sales"],
+    "triggers": [
+      "enrich my leads",
+      "clean up a contacts list",
+      "add company info to leads",
+      "enrich a CRM export",
+      "fill in missing lead fields"
+    ],
+    "phases": [
+      {
+        "id": "scope",
+        "name": "Scope the enrichment",
+        "role": "planner",
+        "summary": "fields, sources, dedup + normalization rules",
+        "prompt": "Define enrichment before touching the list. Step 1: load the input leads file and list its existing columns. Step 2: define each enrichment field to add (e.g. company_domain, industry, employee_band, seniority, normalized_country, lead_score) with its type, its source (derive from email domain, look up via an available tool, or normalize an existing value), and an allowed-value set where applicable (industry list, seniority levels, size bands). Step 3: define the dedup key (e.g. lowercased email, or name+company) and the merge rule for duplicates. Step 4: state the no-fabrication rule explicitly — if a field cannot be sourced, leave it blank and mark a confidence/flag, never guess. Step 5: write an acceptance-criteria checklist ('every input lead present in output', 'enriched fields use only allowed values', 'unsourced fields are blank+flagged, not invented', 'duplicates merged by the dedup key', 'output is CRM-ready in the chosen format'). Call write_task_note with fields + sources + rules + checklist and write notes/scope.md. No enrichment yet.",
+        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "enrich",
+        "name": "Enrich each lead",
+        "role": "developer",
+        "summary": "derive, look up, normalize, and flag each row",
+        "prompt": "Enrich the list to the locked field spec. Step 1: dedup the input by the chosen key first, merging duplicate rows per the merge rule. Step 2: for each lead, derive the deterministic fields (e.g. company_domain from a work email, normalized_country from a location string). Step 3: for lookup fields, use the available capability and constrain outputs to the allowed-value set; when a lookup returns nothing, set the field blank and flag low confidence — do not fabricate. Step 4: compute the lead_score from the agreed signals. Step 5: write the enriched, deduped dataset to the output file in the chosen format and confirm it parses. Call write_task_note with the output path, input vs output row counts, and a per-field fill-rate.",
+        "produces": { "path": "leads_enriched.json", "kind": "json" }
+      },
+      {
+        "id": "verify",
+        "name": "Verify the enrichment",
+        "role": "reviewer",
+        "summary": "coverage, allowed values, no fabrication, dedup",
+        "prompt": "Verify the enriched dataset against scope. Step 1: confirm the file parses and every input lead survived (counting merges) — no rows silently dropped. Step 2: confirm enriched fields contain only allowed values (industries, seniority, size bands are in-set). Step 3: confirm unsourced fields are blank-and-flagged rather than guessed — spot-check 5 leads against their evidence (e.g. does the company_domain actually match the email?). Step 4: confirm duplicates were merged by the dedup key and none remain. Step 5: sanity-check the lead_score distribution is plausible. Write PASS/FAIL per criterion to notes/verify.md and task notes; on failure, name the rows/fields and loop back to enrich.",
+        "produces": { "path": "notes/verify.md", "kind": "markdown-notes" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Open leads_enriched.json and verify every criterion from notes/scope.md. Confirm it parses, every input lead is represented (accounting for merges), enriched fields use only allowed values, unsourced fields are blank+flagged rather than fabricated (spot-check 5 against evidence such as email→domain), duplicates are merged by the dedup key, and the score distribution is plausible. Write PASS/FAIL per criterion; on any failure, name the rows/fields and loop back to enrich.",
+      "loopBackTo": "enrich",
+      "deliverable": { "path": "leads_enriched.json", "kind": "json" }
+    }
+  },
+  {
+    "id": "expense-categorize",
+    "name": "Categorize Transactions",
+    "description": "Classify a list of bank/card transactions into a fixed chart-of-accounts category set, with confidence and a review queue for the uncertain ones, producing a clean categorized ledger ready for bookkeeping or tax. Locks the category taxonomy and the matching rules (merchant patterns, amount/sign heuristics) FIRST, then categorizes every transaction deterministically-first then by inference, then reviews that the taxonomy is closed, low-confidence rows are queued not force-fit, and totals reconcile to the input. Rules-before-categorize is the wisdom: a defined taxonomy plus rule precedence makes results auditable and repeatable, not a one-off guess.",
+    "tags": ["finance", "expenses", "categorization", "bookkeeping", "automation"],
+    "triggers": [
+      "categorize my transactions",
+      "sort expenses by category",
+      "clean up bank transactions",
+      "bookkeeping categorization",
+      "tag spending"
+    ],
+    "phases": [
+      {
+        "id": "rules-scope",
+        "name": "Scope the rules",
+        "role": "planner",
+        "summary": "category taxonomy + matching rules + precedence",
+        "prompt": "Define the taxonomy and rules before categorizing. Step 1: load the transactions (date, description/merchant, amount, sign) and list the columns. Step 2: define the closed category set (the chart of accounts, e.g. Income, Office, Software, Travel, Meals, Utilities, Transfers, Uncategorized) — every transaction must land in exactly one. Step 3: define matching rules with precedence: explicit merchant→category patterns first, then heuristics (sign for income vs expense, amount bands, recurring-amount detection), and an Uncategorized fallback. Step 4: define the confidence rule and the review threshold (below which a row goes to a review queue rather than being force-categorized). Step 5: write an acceptance-criteria checklist ('every transaction categorized into exactly one in-set category', 'rule precedence applied deterministically', 'low-confidence rows queued for review', 'per-category totals reconcile to the input sum', 'no category invented outside the taxonomy'). Call write_task_note with taxonomy + rules + checklist and write notes/rules-scope.md. No categorizing yet.",
+        "produces": { "path": "notes/rules-scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "categorize",
+        "name": "Categorize transactions",
+        "role": "developer",
+        "summary": "apply rules, assign category + confidence, queue doubts",
+        "prompt": "Categorize every transaction to the locked taxonomy. Step 1: for each transaction, apply the rules in precedence order — explicit merchant match first, then heuristics, then Uncategorized. Step 2: assign exactly one in-set category plus a confidence and a short reason (which rule fired). Step 3: route rows below the review threshold to a review queue flag rather than forcing a category. Step 4: produce the categorized ledger (the input columns plus category, confidence, reason, needs_review) in the chosen format. Step 5: compute per-category totals and a grand total and confirm the grand total equals the sum of the input amounts. Call write_task_note with the output path, the per-category totals, and the count of rows queued for review.",
+        "produces": { "path": "ledger.json", "kind": "json" }
+      },
+      {
+        "id": "review",
+        "name": "Review the ledger",
+        "role": "reviewer",
+        "summary": "closed taxonomy, reconciliation, review queue",
+        "prompt": "Review the categorized ledger against the rules scope. Step 1: confirm the file parses and every transaction has exactly one category drawn only from the closed taxonomy — no invented categories. Step 2: confirm rule precedence was applied — spot-check that explicit merchant matches beat heuristics. Step 3: confirm low-confidence rows are flagged needs_review rather than force-fit, and that the queue is non-empty if genuinely ambiguous rows exist. Step 4: confirm reconciliation — per-category totals sum to the grand total and the grand total equals the input sum (flag any penny drift). Step 5: spot-check 5 categorizations for correctness. Write PASS/FAIL per criterion to notes/review.md and task notes; on failure, name the rows and loop back to categorize.",
+        "produces": { "path": "notes/review.md", "kind": "markdown-notes" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Open ledger.json and verify every criterion from notes/rules-scope.md. Confirm it parses, every transaction has exactly one category from the closed taxonomy (none invented), rule precedence held (explicit merchant matches beat heuristics — spot-check), low-confidence rows are flagged for review rather than force-fit, and totals reconcile (per-category sums equal the grand total which equals the input sum). Write PASS/FAIL per criterion; on any failure, name the rows and loop back to categorize.",
+      "loopBackTo": "categorize",
+      "deliverable": { "path": "ledger.json", "kind": "json" }
+    }
+  },
+  {
+    "id": "doc-intake-pipeline",
+    "name": "Classify and Route Incoming Documents",
+    "description": "Build a document-intake pipeline that classifies each incoming file (invoice, contract, resume, receipt, ID, support ticket, other) into a fixed type set, extracts a few key fields per type, and routes it to the right destination folder with a normalized filename. Locks the document-type taxonomy, per-type extraction fields, and the routing/naming rules FIRST, then builds the classify-extract-route loop, then verifies every input file was handled, classifications are in-set with an 'other' fallback, and routing is deterministic. Taxonomy-and-routing-before-build prevents files from silently vanishing or piling into a misc bucket.",
+    "tags": ["documents", "classification", "intake", "automation", "routing"],
+    "triggers": [
+      "sort incoming documents",
+      "classify and file documents",
+      "auto-route a folder of files",
+      "document intake pipeline",
+      "organize a dump of files"
+    ],
+    "phases": [
+      {
+        "id": "scope",
+        "name": "Scope the pipeline",
+        "role": "planner",
+        "summary": "doc-type taxonomy, per-type fields, routing rules",
+        "prompt": "Define the intake contract before building. Step 1: identify the inbox/source folder and the file types present (PDF, image, docx, email). Step 2: define the closed document-type taxonomy (e.g. invoice, contract, receipt, resume, id-document, support-ticket, other) — every file lands in exactly one, with 'other' as the explicit fallback. Step 3: for each type, list the few key fields to extract (e.g. invoice → vendor, date, total, invoice_no) and the classification signals (keywords, layout cues). Step 4: define routing and naming: destination folder per type and a normalized filename template (e.g. {type}/{date}_{vendor}_{id}.pdf), plus the dedup rule for name collisions. Step 5: write an acceptance-criteria checklist ('every input file classified into exactly one in-set type', 'an other bucket exists and is used not abused', 'per-type key fields extracted', 'each file routed and renamed deterministically', 'no file lost or overwritten', 'an intake manifest logs every file with source→destination'). Call write_task_note with taxonomy + fields + routing + checklist and write notes/scope.md. No build yet.",
+        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "build",
+        "name": "Build the pipeline",
+        "role": "developer",
+        "summary": "classify, extract key fields, route + rename, log",
+        "prompt": "Implement the intake pipeline to the locked contract. Step 1: enumerate every file in the source folder. Step 2: classify each into exactly one taxonomy type using the agreed signals; when confidence is low, route to 'other' rather than guessing a specific type. Step 3: extract the per-type key fields and capture them in the manifest. Step 4: route the file to its destination folder and rename it per the template, applying the collision/dedup rule so nothing is overwritten. Step 5: append an intake-manifest row per file (source path, type, extracted fields, destination path, status) and write the manifest. Make it a runnable module and write it; confirm the manifest parses. Call write_task_note with the module path, the manifest path, and per-type counts.",
+        "produces": { "path": "intake.py", "kind": "code-module" }
+      },
+      {
+        "id": "verify",
+        "name": "Verify the pipeline",
+        "role": "reviewer",
+        "summary": "coverage, in-set types, deterministic routing",
+        "prompt": "Verify the pipeline against scope. Step 1: confirm it runs and produces an intake manifest. Step 2: check coverage — the manifest has one row per source file and the count of routed files equals the count of input files (nothing lost). Step 3: confirm every classification is an in-set type and that 'other' is used for genuinely ambiguous files but not as a dumping ground for everything. Step 4: confirm routing is deterministic and collision-safe — re-running classifies the same file identically and no destination file was overwritten. Step 5: spot-check 5 files: correct type, extracted fields match the document, filename matches the template. Write PASS/FAIL per criterion to notes/verify.md and task notes; on failure, name the files and loop back to build.",
+        "produces": { "path": "notes/verify.md", "kind": "markdown-notes" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Run intake.py (or trace it) and verify every criterion from notes/scope.md against the intake manifest. Confirm: one manifest row per source file with routed count equal to input count (no files lost or overwritten), every classification is in-set with 'other' used appropriately, per-type key fields are extracted, filenames follow the template, and routing is deterministic on re-run. Spot-check 5 files. Write PASS/FAIL per criterion; on any failure, name the files and loop back to build.",
+      "loopBackTo": "build",
+      "deliverable": { "path": "intake.py", "kind": "code-module" }
+    }
+  },
+  {
+    "id": "booking-automation",
+    "name": "Automate a Booking or Checkout Flow",
+    "description": "Automate a multi-step booking, reservation, or checkout flow end-to-end — select, fill details, choose options, confirm — with a hard dry-run/confirmation guard so it never accidentally commits a real transaction during development. Maps the step-by-step flow, the success/failure signals, and the safety guard FIRST, then builds the resilient step driver with waits and retries, then tests both the happy path and the failure/abort paths against a stub or dry-run. Mapping-the-flow-and-guard-before-build is what makes booking automation safe and reliable instead of a brittle, money-spending click bot.",
+    "tags": ["automation", "booking", "checkout", "workflow", "browser"],
+    "triggers": [
+      "automate a booking",
+      "auto-checkout flow",
+      "reserve automatically",
+      "automate a multi-step form",
+      "complete a booking for me"
+    ],
+    "phases": [
+      {
+        "id": "scope",
+        "name": "Scope the flow",
+        "role": "planner",
+        "summary": "step map, success/failure signals, safety guard",
+        "prompt": "Map the flow and its guardrails before automating. Step 1: write the ordered step map (e.g. open → search/select → enter details → choose options → review → confirm), and for each step the element to act on and the signal that the step advanced. Step 2: define the inputs the flow needs (dates, quantities, traveler/customer details, payment placeholders) and where they come from. Step 3: define the success signal (a confirmation number / page) and the failure signals (sold out, validation error, timeout) and the abort behavior for each. Step 4: define the SAFETY GUARD — a dry-run/confirm flag that, when not explicitly set, stops before the irreversible commit step and never submits a real payment; default to dry-run. Step 5: write an acceptance-criteria checklist ('every step has a verifiable advance signal', 'dry-run stops before commit and asserts readiness', 'happy path reaches confirmation when armed', 'failure signals abort cleanly with a reason', 'no real transaction in dry-run', 'flow is idempotent / re-entrant'). Call write_task_note with the step map + signals + guard + checklist and write notes/scope.md. No code yet.",
+        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "build",
+        "name": "Build the flow driver",
+        "role": "developer",
+        "summary": "drive each step with waits, retries, and the guard",
+        "prompt": "Implement the booking driver to the locked step map. Step 1: read the dry-run/confirm flag first and honor it — in dry-run, perform every step up to but NOT including the irreversible commit, then report 'ready to confirm'. Step 2: for each step, perform the action, then wait for and assert the advance signal before proceeding (explicit waits, not fixed sleeps); on a transient failure retry with backoff a bounded number of times. Step 3: on a defined failure signal (sold out / validation), abort cleanly and record the reason rather than blindly proceeding. Step 4: when armed, perform the commit step and capture the confirmation number. Step 5: write a structured run-log of each step's outcome and write the driver as a runnable module. Call write_task_note with the module path, how the guard works, and a sample dry-run log.",
+        "produces": { "path": "booking.py", "kind": "code-module" }
+      },
+      {
+        "id": "test",
+        "name": "Test the flow",
+        "role": "developer",
+        "summary": "assert happy path, failure paths, and the guard",
+        "prompt": "Prove the flow on every branch using a stub/dry-run — never a live commit. Step 1: write tests that drive the flow against a stubbed booking surface so no real transaction occurs. Step 2: assert the happy path advances through every step and reaches the confirmation signal when armed. Step 3: assert each failure signal (sold out, validation error, timeout) causes a clean abort with the right reason and does NOT proceed to commit. Step 4: assert the SAFETY GUARD — in dry-run the flow stops before the commit step and never submits, and that flag defaults to dry-run. Step 5: assert idempotency/retry — a transient failure is retried within the bound and a re-run does not double-book. Put the driver and tests in a code-with-tests file; run them and confirm green. Call write_task_note with the test path and the pass count.",
+        "produces": { "path": "booking_test.py", "kind": "code-with-tests" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Run booking_test.py (or trace it) and verify every criterion from notes/scope.md: every step asserts an advance signal, the happy path reaches confirmation when armed, each failure signal aborts cleanly with a reason and never commits, the safety guard defaults to dry-run and stops before the irreversible step, and retries/idempotency prevent double-booking. Critically confirm NO test performs a real commit. Write PASS/FAIL per criterion; on any failure, name it and loop back to test.",
+      "loopBackTo": "test",
+      "deliverable": { "path": "booking_test.py", "kind": "code-with-tests" }
+    }
+  },
+  {
+    "id": "backup-routine",
+    "name": "Scheduled Backup or Export",
+    "description": "Build a scheduled, idempotent backup/export routine that snapshots data (files, a database, or an app export) to a timestamped, optionally compressed destination, prunes old backups by a retention policy, and verifies each backup is restorable. Locks what to back up, the destination layout, the retention policy, and the integrity check FIRST, then builds the snapshot-write-verify-prune routine, then verifies a fresh backup is created, integrity-checked, and that retention deletes only what it should. Defining retention and an integrity check up front is the wisdom that turns backups from a false sense of safety into a tested recovery path.",
+    "tags": ["backup", "export", "automation", "scheduled", "ops"],
+    "triggers": [
+      "set up a backup",
+      "scheduled export",
+      "automate backups",
+      "backup my database",
+      "nightly backup routine"
+    ],
+    "phases": [
+      {
+        "id": "scope",
+        "name": "Scope the backup",
+        "role": "planner",
+        "summary": "sources, destination layout, retention, integrity check",
+        "prompt": "Define the backup contract before building. Step 1: list exactly what to back up (which directories / which database / which export endpoint) and what to exclude. Step 2: define the destination and naming layout (e.g. backups/{name}-{YYYYMMDD-HHMMSS}.tar.gz) and whether to compress and/or checksum. Step 3: define the retention policy precisely (e.g. keep last N, or keep dailies 7d + weeklies 4w) and confirm it can never delete the only/most-recent backup. Step 4: define the integrity check that proves a backup is restorable (verify the archive lists/extracts, the checksum matches, or a row-count/sentinel survives a test restore). Step 5: write an acceptance-criteria checklist ('a fresh timestamped backup is produced each run', 'backup passes the integrity check', 'retention prunes only out-of-policy backups and never the newest', 'run is idempotent and logs each backup', 'a failed source aborts with a non-zero status, no silent empty backup'). Call write_task_note with sources + layout + retention + integrity + checklist and write notes/scope.md. No code yet.",
+        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "build",
+        "name": "Build the routine",
+        "role": "developer",
+        "summary": "snapshot, write, integrity-check, prune, log",
+        "prompt": "Implement the backup routine to the locked contract. Step 1: snapshot the sources into a timestamped artifact at the destination (compress/checksum as scoped); fail loudly with a non-zero exit if a source is missing or empty rather than writing a hollow archive. Step 2: run the integrity check immediately after writing (list/extract the archive, verify the checksum) and mark the backup verified only if it passes. Step 3: apply the retention policy — compute which backups are out-of-policy and delete only those, with a hard guard that never removes the most-recent verified backup. Step 4: append a backup-log entry (timestamp, size, checksum, verified, pruned list). Step 5: write the routine as a cron-friendly runnable module. Call write_task_note with the module path, the destination layout, and how integrity + retention are enforced.",
+        "produces": { "path": "backup.sh", "kind": "code-module" }
+      },
+      {
+        "id": "verify",
+        "name": "Verify the routine",
+        "role": "reviewer",
+        "summary": "fresh backup, integrity, safe retention, idempotency",
+        "prompt": "Verify the routine against scope. Step 1: confirm a run produces a fresh timestamped backup at the destination. Step 2: confirm the integrity check actually runs and that a corrupted/empty backup would be caught (the verified flag is meaningful). Step 3: confirm retention deletes only out-of-policy backups and that the newest verified backup is protected even at the retention boundary. Step 4: confirm idempotency and failure handling — a re-run does not clobber prior backups, and a missing source causes a non-zero exit with no hollow archive written. Step 5: confirm each backup is logged. Write PASS/FAIL per criterion to notes/verify.md and task notes; on failure, name it and loop back to build.",
+        "produces": { "path": "notes/verify.md", "kind": "markdown-notes" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Run backup.sh in a scratch location (or trace it) and verify every criterion from notes/scope.md: a fresh timestamped backup is created, the integrity check runs and is meaningful, retention prunes only out-of-policy backups and never the newest verified one, a missing source aborts non-zero with no hollow archive, runs are idempotent, and each backup is logged. Write PASS/FAIL per criterion; on any failure, name it and loop back to build.",
+      "loopBackTo": "build",
+      "deliverable": { "path": "backup.sh", "kind": "code-module" }
+    }
+  },
+  {
+    "id": "data-export-migrate",
+    "name": "Migrate Data Between Tools",
+    "description": "Migrate records from a source tool/format to a destination tool/format — CRM to CRM, spreadsheet to app, JSON export to a new API — with a field mapping, value transforms, and a reconciliation that proves nothing was lost or corrupted. Locks the source→destination field map, the transform/normalization rules, and the reconciliation criteria FIRST, then builds the extract-transform-load with a dry-run preview, then verifies record counts match, key fields round-trip, and a diff report flags any mismatch. Mapping-and-reconciliation-before-load is the discipline that makes a migration trustworthy rather than a one-shot leap of faith.",
+    "tags": ["migration", "data", "etl", "export", "integration"],
+    "triggers": [
+      "migrate data between tools",
+      "move my CRM data",
+      "import an export into another app",
+      "convert and load records",
+      "migrate a spreadsheet to an app"
+    ],
+    "phases": [
+      {
+        "id": "scope",
+        "name": "Scope the migration",
+        "role": "planner",
+        "summary": "field map, transforms, reconciliation criteria",
+        "prompt": "Define the migration contract before moving data. Step 1: profile the source (format, record count, fields, key) and the destination (target schema, required fields, the key/upsert semantics). Step 2: build the source→destination field map, including fields that split/merge/rename, and list destination required-fields with no source — each needs a default or makes the record invalid. Step 3: define per-field transforms (date/format normalization, enum remapping, unit conversion) and the validation rules a destination record must satisfy. Step 4: define the reconciliation criteria — counts match (in vs out vs rejected), a chosen key set round-trips, and key totals/sums match. Step 5: write an acceptance-criteria checklist ('every source record is loaded or explicitly rejected with a reason', 'field map applied, no unmapped data dropped silently', 'transforms produce valid destination values', 'counts reconcile', 'a dry-run preview exists before any write', 'a diff report lists every mismatch'). Call write_task_note with the map + transforms + reconciliation + checklist and write notes/scope.md. No load yet.",
+        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "build",
+        "name": "Build the migration",
+        "role": "developer",
+        "summary": "extract, transform, dry-run, load, reconcile",
+        "prompt": "Implement the migration to the locked map. Step 1: extract all source records. Step 2: transform each record through the field map and transforms into a destination-shaped object; validate it, and on failure route it to a rejected list with the reason rather than dropping it. Step 3: produce a DRY-RUN preview first — the transformed records and a summary (to-load / rejected counts) — and write it before any destination write. Step 4: load into the destination using the upsert key so a re-run is idempotent (no duplicates). Step 5: run reconciliation — produce a diff report comparing source vs destination on counts and the chosen key fields, listing every mismatch — and write the migration module plus the diff report. Call write_task_note with the module path, the diff-report path, and the loaded/rejected counts.",
+        "produces": { "path": "migrate.py", "kind": "code-module" }
+      },
+      {
+        "id": "verify",
+        "name": "Verify the migration",
+        "role": "reviewer",
+        "summary": "counts reconcile, fields round-trip, diff clean",
+        "prompt": "Verify the migration against scope. Step 1: confirm the module runs and produces both a dry-run preview and a diff report. Step 2: confirm coverage — every source record is either loaded or in the rejected list with a reason; loaded + rejected equals the source count. Step 3: confirm the field map applied with no silent data loss, and that destination records pass the validation rules. Step 4: confirm reconciliation — counts match and the chosen key fields round-trip (spot-check 5 records source↔destination), and the diff report has no unexplained mismatches. Step 5: confirm idempotency — a re-run via the upsert key creates no duplicates. Write PASS/FAIL per criterion to notes/verify.md and task notes; on failure, name the records and loop back to build.",
+        "produces": { "path": "notes/verify.md", "kind": "markdown-notes" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Run migrate.py in dry-run and load modes (or trace it) and verify every criterion from notes/scope.md: a dry-run preview precedes any write, every source record is loaded or rejected-with-reason (loaded+rejected = source count), the field map applied with no silent loss, destination records validate, counts reconcile and key fields round-trip (spot-check 5), the diff report has no unexplained mismatches, and a re-run via the upsert key creates no duplicates. Write PASS/FAIL per criterion; on any failure, name the records and loop back to build.",
+      "loopBackTo": "build",
+      "deliverable": { "path": "migrate.py", "kind": "code-module" }
+    }
+  },
+  {
+    "id": "recurring-invoice-run",
+    "name": "Generate and Send Recurring Invoices",
+    "description": "Run a recurring billing batch: for each active client/subscription due this period, generate a correctly-numbered, line-itemed invoice with taxes and totals, render it, and send it — once, idempotently, with a sent-log. Locks the invoice template, the numbering scheme, the tax/total math, and the due/idempotency rules FIRST, then builds the generate-render-send batch keyed to a billing-run log, then verifies every due client was invoiced exactly once, totals are arithmetically correct, and numbers are sequential with no gaps or dupes. Locking numbering and math up front is what keeps recurring billing audit-clean instead of producing duplicate or mis-totaled invoices.",
+    "tags": ["invoicing", "billing", "finance", "automation", "recurring"],
+    "triggers": [
+      "generate recurring invoices",
+      "send monthly invoices",
+      "automate billing",
+      "invoice run",
+      "recurring invoice batch"
+    ],
+    "phases": [
+      {
+        "id": "scope",
+        "name": "Scope the invoice run",
+        "role": "planner",
+        "summary": "template, numbering, tax/total math, due + idempotency",
+        "prompt": "Define the billing contract before generating anything. Step 1: identify the client/subscription source (who is active, their rate/plan, billing cycle, tax region) and the rule for who is DUE this period. Step 2: define the invoice template fields (issuer, client, line items, quantities, unit price, subtotal, tax, total, due date) and the numbering scheme (prefix + zero-padded sequence) with the rule that numbers are sequential, unique, and gap-free. Step 3: define the math exactly — line total = qty × unit price, subtotal = sum of lines, tax = subtotal × rate (per region), total = subtotal + tax, with rounding to currency precision. Step 4: define the idempotency rule — a billing-run log keyed by client+period prevents double-invoicing and double-sending on a re-run. Step 5: write an acceptance-criteria checklist ('every due client invoiced exactly once', 'invoice numbers sequential/unique/gap-free', 'all totals arithmetically correct to currency precision', 'each invoice rendered and sent once', 'a re-run sends nothing already sent', 'a sent-log records client, number, amount, timestamp'). Call write_task_note with template + numbering + math + rules + checklist and write notes/scope.md. No generation yet.",
+        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "build",
+        "name": "Build the invoice run",
+        "role": "developer",
+        "summary": "select due, number, compute, render, send, log",
+        "prompt": "Implement the billing batch to the locked contract. Step 1: load the billing-run log and select clients DUE this period who are not already invoiced for it. Step 2: assign the next sequential invoice number (atomic against the log so no two invoices share a number and there are no gaps). Step 3: compute line totals, subtotal, region tax, and total with correct currency rounding; never eyeball the math. Step 4: render each invoice to the deliverable format and send it via the available channel, recording success before marking sent. Step 5: append a sent-log row per invoice (client, number, period, amount, timestamp, status) and write the batch as a runnable module; on a per-client failure, log it and continue. Call write_task_note with the module path, the sent-log path, and counts (invoiced/sent/failed).",
+        "produces": { "path": "invoice_run.py", "kind": "code-module" }
+      },
+      {
+        "id": "verify",
+        "name": "Verify the run",
+        "role": "reviewer",
+        "summary": "once-per-client, correct math, gap-free numbering",
+        "prompt": "Verify the billing run against scope. Step 1: confirm the module runs and produces a sent-log. Step 2: confirm every DUE client was invoiced exactly once and no not-due client was billed. Step 3: confirm invoice numbers are sequential, unique, and gap-free across the run and continuous with prior runs. Step 4: re-derive the math on 3 invoices by hand (line totals, subtotal, tax, total, rounding) and confirm it matches. Step 5: confirm idempotency — a re-run sends nothing already in the sent-log — and that per-client send failures were logged without aborting the batch. Write PASS/FAIL per criterion to notes/verify.md and task notes; on failure, name the invoices and loop back to build.",
+        "produces": { "path": "notes/verify.md", "kind": "markdown-notes" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Run invoice_run.py (or trace it) and verify every criterion from notes/scope.md: every due client invoiced exactly once (no not-due client billed), invoice numbers sequential/unique/gap-free and continuous with prior runs, totals arithmetically correct (re-derive 3 invoices by hand including tax and rounding), each invoice sent once with a re-run sending nothing already in the sent-log, and per-client failures logged without aborting. Write PASS/FAIL per criterion; on any failure, name the invoices and loop back to build.",
+      "loopBackTo": "build",
+      "deliverable": { "path": "invoice_run.py", "kind": "code-module" }
+    }
+  },
+  {
+    "id": "onboarding-checklist",
+    "name": "Generate an Onboarding Checklist",
+    "description": "Produce a clear, role-specific onboarding checklist for a new hire, customer, or user — grouped by phase (before day one, week one, first 30 days), with each item owned, actionable, and verifiable. Scopes the audience, the phases, and a 'good item' rule FIRST so the checklist is complete and non-overlapping, then writes the actual checklist as a clean markdown document with grouped, owner-tagged, checkbox items. Scoping the phases and item-quality bar before writing is what turns a vague to-do dump into a sequenced, accountable onboarding plan.",
+    "tags": ["onboarding", "checklist", "hr", "process", "document"],
+    "triggers": [
+      "create an onboarding checklist",
+      "new hire checklist",
+      "customer onboarding steps",
+      "onboarding plan",
+      "first 30 days checklist"
+    ],
+    "phases": [
+      {
+        "id": "scope",
+        "name": "Scope the checklist",
+        "role": "planner",
+        "summary": "audience, phases, owners, and the good-item rule",
+        "prompt": "Define the checklist before writing it. Step 1: pin the audience and context (which role/customer type, team or product, and any tools/accounts/access they will need). Step 2: choose the phase grouping (e.g. Before Day One, Day One, Week One, First 30 Days) and what each phase is meant to achieve. Step 3: define the owner set (who is responsible for each kind of item — IT, manager, the person themselves, buddy) so every item can be tagged. Step 4: define the 'good item' rule — each item is a single concrete action, has an owner, has a done-signal (how you know it's complete), and items do not overlap or leave gaps. Step 5: write an acceptance-criteria checklist ('grouped into the chosen phases in order', 'every item is one actionable step with an owner', 'every item has a verifiable done-signal', 'no duplicate or overlapping items', 'access/tooling and a day-one welcome are covered', 'rendered as checkbox items'). Call write_task_note with the audience + phases + owners + rule + checklist and write notes/scope.md. No checklist content yet.",
+        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "write",
+        "name": "Write the checklist",
+        "role": "copywriter",
+        "summary": "produce the grouped, owner-tagged checklist doc",
+        "prompt": "Write the onboarding checklist to the locked scope. Step 1: open with a one-line purpose and who it's for. Step 2: create a section header per phase in order. Step 3: under each phase, write items as markdown checkboxes ('- [ ] '), each a single concrete action, prefixed or suffixed with its owner (e.g. '(IT)' / '(Manager)' / '(You)') and a short done-signal where it adds clarity. Step 4: ensure coverage — accounts/access provisioning, equipment, key intro meetings, required training, a day-one welcome, and 30-day check-in are all present, with no duplicate or overlapping items. Step 5: keep wording tight and imperative ('Send', 'Grant', 'Schedule'); write the document to the deliverable path. Call write_task_note with the document path and the item count per phase.",
+        "produces": { "path": "onboarding-checklist.md", "kind": "markdown-doc" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Open onboarding-checklist.md and verify every criterion from notes/scope.md: items are grouped into the chosen phases in order, every item is a single actionable step rendered as a checkbox with an owner tag and a verifiable done-signal, there are no duplicate or overlapping items, and coverage includes access/tooling, a day-one welcome, key meetings, training, and a 30-day check-in. Write PASS/FAIL per criterion; on any failure, name the gap and loop back to write.",
+      "loopBackTo": "write",
+      "deliverable": { "path": "onboarding-checklist.md", "kind": "markdown-doc" }
+    }
+  },
+  {
+    "id": "receipt-ocr-ledger",
+    "name": "Receipts to Expense Ledger",
+    "description": "Turn a folder of receipt photos/PDFs into a clean expense ledger: OCR each receipt, extract vendor, date, line items, tax, and total, assign an expense category, and reconcile that each extracted total matches its line items. Locks the per-receipt field schema, the category set, and the math/reconciliation rules FIRST, then OCRs and extracts each receipt into rows, then verifies every receipt was processed, totals reconcile, currencies/dates are normalized, and low-confidence reads are flagged for review. Defining the schema and the total-equals-line-items check before extraction is what keeps an expense ledger trustworthy for reimbursement or tax.",
+    "tags": ["receipts", "ocr", "expenses", "finance", "data"],
+    "triggers": [
+      "scan my receipts",
+      "receipts to a spreadsheet",
+      "extract receipt totals",
+      "expense report from receipts",
+      "OCR receipts into a ledger"
+    ],
+    "phases": [
+      {
+        "id": "scope",
+        "name": "Scope the ledger",
+        "role": "planner",
+        "summary": "per-receipt schema, categories, reconciliation rules",
+        "prompt": "Define the ledger contract before reading receipts. Step 1: identify the receipts folder and the file types (jpg, png, pdf). Step 2: define the per-receipt schema (file, vendor, date, currency, line items[{desc, amount}], subtotal, tax, total, category, confidence, needs_review). Step 3: define the closed expense-category set (e.g. Meals, Travel, Supplies, Software, Other) — every receipt gets exactly one. Step 4: define the math/reconciliation rule — sum(line items) + tax should equal total within a small tolerance; a mismatch sets needs_review. Step 5: define normalization (dates → ISO, amounts numeric to two decimals, a single output currency or a currency column) and the confidence threshold below which a row is flagged. Step 6: write an acceptance-criteria checklist ('every receipt file produces a row', 'amounts numeric and dates ISO', 'total reconciles to line items + tax within tolerance else flagged', 'category is in-set', 'low-confidence reads flagged for review', 'a grand total across receipts is reported'). Call write_task_note with schema + categories + rules + checklist and write notes/scope.md. No OCR yet.",
+        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "extract",
+        "name": "OCR and extract",
+        "role": "developer",
+        "summary": "read each receipt, extract fields, categorize, reconcile",
+        "prompt": "Process every receipt into a ledger row to the locked schema. Step 1: list the folder and, for each receipt, use the available OCR/vision capability to read the text. Step 2: extract vendor, date, line items, subtotal, tax, and total; normalize dates to ISO and amounts to numbers. Step 3: assign exactly one in-set category from the vendor/items. Step 4: reconcile — check sum(line items)+tax ≈ total within tolerance; on mismatch or low OCR confidence, set needs_review with a note rather than silently trusting it. Step 5: write all rows to the output file (JSON), confirm it parses, and compute a grand total across receipts. Do not skip any receipt; if one is unreadable, still emit a row flagged needs_review. Call write_task_note with the output path, the receipt count, and how many are flagged.",
+        "produces": { "path": "ledger.json", "kind": "json" }
+      },
+      {
+        "id": "verify",
+        "name": "Verify the ledger",
+        "role": "reviewer",
+        "summary": "coverage, reconciliation, normalization, review flags",
+        "prompt": "Verify the ledger against scope. Step 1: confirm the file parses and there is one row per receipt file in the folder — none skipped. Step 2: confirm amounts are numeric to two decimals and dates are ISO. Step 3: confirm reconciliation ran — rows where line items + tax do not match the total within tolerance are flagged needs_review, and clean rows actually balance (re-check 3 by hand). Step 4: confirm categories are all in-set and low-confidence/unreadable receipts are flagged rather than silently accepted. Step 5: confirm the grand total equals the sum of the row totals. Write PASS/FAIL per criterion to notes/verify.md and task notes; on failure, name the receipts and loop back to extract.",
+        "produces": { "path": "notes/verify.md", "kind": "markdown-notes" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Open ledger.json and verify every criterion from notes/scope.md: one row per receipt file (none skipped, unreadable ones flagged), amounts numeric to two decimals and dates ISO, reconciliation flags rows where line items + tax do not match the total within tolerance while clean rows balance (re-check 3 by hand), categories all in-set, low-confidence reads flagged, and the grand total equals the sum of row totals. Write PASS/FAIL per criterion; on any failure, name the receipts and loop back to extract.",
+      "loopBackTo": "extract",
+      "deliverable": { "path": "ledger.json", "kind": "json" }
+    }
+  },
+  {
+    "id": "subscription-audit",
+    "name": "Audit Recurring Subscriptions",
+    "description": "Audit a set of transactions or a vendor list to find every recurring subscription, normalize each to a monthly cost, surface duplicates, price hikes, and zombie/unused services, and produce a prioritized cancel/keep recommendation report. Locks the recurrence-detection rule, the normalization (to monthly), and the recommendation criteria FIRST, then detects and analyzes the recurring charges, then writes a clear report whose every recommendation is backed by the evidence in the data. Defining what counts as 'recurring' and how to rank cancel candidates before analyzing is what makes the audit actionable rather than a list of guesses.",
+    "tags": ["subscriptions", "finance", "audit", "spend", "report"],
+    "triggers": [
+      "audit my subscriptions",
+      "find recurring charges",
+      "cancel unused subscriptions",
+      "subscription spend report",
+      "where is my money going"
+    ],
+    "phases": [
+      {
+        "id": "scope",
+        "name": "Scope the audit",
+        "role": "data-analyst",
+        "summary": "recurrence rule, monthly normalization, recommendation criteria",
+        "prompt": "Define the audit method before analyzing. Step 1: identify the input (a transactions file, or a list of services with amount + cadence) and its columns. Step 2: define the recurrence-detection rule — what makes a charge a subscription (same/near merchant recurring at a regular interval: monthly/quarterly/annual, within an amount tolerance). Step 3: define normalization to a comparable monthly cost (annual ÷ 12, quarterly ÷ 3) so everything is apples-to-apples, and the total monthly and annual run-rate. Step 4: define the flags and recommendation criteria — duplicate/overlapping services, a price increase vs the prior occurrence, and 'zombie' candidates (high cost and/or low apparent usage) — and how to rank cancel candidates (e.g. by annual cost × redundancy). Step 5: write an acceptance-criteria checklist ('every recurring charge detected and listed', 'each normalized to monthly correctly', 'duplicates and price hikes flagged with evidence', 'a ranked cancel/keep recommendation per subscription', 'monthly and annual totals reported', 'no recommendation without supporting data'). Call write_task_note with the rule + normalization + criteria + checklist and write notes/scope.md. No analysis yet.",
+        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "analyze",
+        "name": "Detect and analyze",
+        "role": "data-analyst",
+        "summary": "find recurring charges, normalize, flag, rank",
+        "prompt": "Analyze the input to the locked rule. Step 1: group transactions by normalized merchant and detect recurring series matching the cadence + amount-tolerance rule. Step 2: for each detected subscription, record name, cadence, last amount, normalized monthly cost, and first/last seen. Step 3: compute flags from the evidence — duplicates/overlaps (two services in the same category), price increases (this amount > prior occurrence), and zombie candidates per the criteria. Step 4: rank cancel candidates by the agreed scoring and compute the total monthly and annual run-rate plus the potential savings if the cancel candidates are dropped. Step 5: write the structured findings (the per-subscription table + totals + flags) to a notes file so the report phase has clean inputs. Call write_task_note with the subscription count, the monthly/annual totals, and the top cancel candidates.",
+        "produces": { "path": "notes/analyze.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "report",
+        "name": "Write the report",
+        "role": "copywriter",
+        "summary": "evidence-backed cancel/keep recommendation report",
+        "prompt": "Write the subscription audit report from the analysis. Step 1: open with a headline summary — total monthly spend, annual run-rate, and the potential savings. Step 2: include a clear table of every detected subscription: name, cadence, monthly-normalized cost, annual cost, and any flags (duplicate, price hike, zombie). Step 3: give a prioritized recommendations section — cancel/keep/review per subscription, ordered by impact, each with a one-line rationale tied to the evidence (cost, redundancy, price change). Step 4: ensure every recommendation traces to a fact in the analysis — no unsupported claims. Step 5: close with the total savings if the recommended cancels are actioned. Write the report as a markdown report with section headers. Call write_task_note with the report path and the headline savings figure.",
+        "produces": { "path": "report.md", "kind": "markdown-report" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Open report.md (and notes/analyze.md) and verify every criterion from notes/scope.md: every recurring charge is detected and listed, each is normalized to a monthly cost correctly (re-check 2 conversions), duplicates and price hikes are flagged with evidence, every cancel/keep recommendation is ranked by impact and backed by a fact in the data, and monthly + annual totals plus potential savings are reported. Confirm no recommendation lacks supporting evidence. Write PASS/FAIL per criterion; on any failure, name the gap and loop back to report.",
+      "loopBackTo": "report",
+      "deliverable": { "path": "report.md", "kind": "markdown-report" }
+    }
+  }
+]

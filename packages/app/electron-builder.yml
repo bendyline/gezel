@@ -1,0 +1,315 @@
+appId: com.bendyline.gezel
+productName: Gezel
+copyright: Copyright © 2026 Bendyline LLC
+
+# Override the default artifact-name template (which uses the package
+# name verbatim). Our package.json name is `@bendyline/gezel-app` —
+# the `@bendyline/` scope prefix gets interpreted as a directory by
+# fpm/dpkg, so the .deb build dies with "Parent directory does not
+# exist: dist/installers/@bendyline". Substituting ${productName}
+# ("Gezel") sidesteps the problem and gives users an installer file
+# named after the app, not the npm package.
+artifactName: ${productName}-${version}-${arch}.${ext}
+
+directories:
+  output: dist/installers
+  buildResources: assets
+
+# A generated, hash-manifested legal bundle. Keeping this outside app.asar
+# makes notices readable after installation and lets release CI extract each
+# finished installer and verify the exact bytes under resources/licenses/.
+extraResources:
+  - from: dist/licenses
+    to: licenses
+
+# Portable local-model bundles. electron-builder writes the platform-specific
+# registration (Windows ProgID, macOS document type, Linux MIME association),
+# while main.ts handles first-instance, second-instance, and macOS open-file
+# delivery through the same scan-before-confirm flow.
+fileAssociations:
+  - ext: gezmodel
+    name: Gezel Model Bundle
+    description: Portable Gezel local AI model
+    role: Editor
+
+# The shipped service bundle ships as a single gzipped tarball plus a small
+# JSON sidecar (`{version, sha256, sizeBytes, fileCount}`) instead of as
+# ~100k loose files. NSIS extracting one big file vs. 100k tiny ones is
+# orders of magnitude faster (the difference between a ~30-minute Windows
+# install and a few seconds, since Defender real-time-scans each extracted
+# file synchronously). The Electron shell extracts the tarball into
+# `~/.gezel/service/` on first launch via `extract-service-bundle.js`.
+#
+# The pnpm bundle (pinned binary for scheduled-job installs) and the node
+# bundle (pinned Node.js runtime for the sandbox runner + Copilot login)
+# stay loose — each is a small handful of files and they don't trigger
+# the same Defender-per-file overhead.
+#
+# `native-bin/<platform>/` holds the per-platform native engine binaries
+# (stable-diffusion.cpp today; whisper.cpp / piper later) produced by
+# `.github/workflows/build-native.yml` and bundled by
+# `native/scripts/bundle.sh`. ~40 large files — same shape as above; loose
+# is fine.
+files:
+  - dist/main.js
+  - dist/main.js.map
+  - dist/preload.cjs
+  - dist/extract-service-bundle.js
+  - dist/extract-service-bundle.js.map
+  - dist/service-bundle.tar.gz
+  - dist/service-bundle.meta.json
+  - dist/pnpm-bundle/**/*
+  - dist/node-bundle/**/*
+  - dist/ui/**/*
+  - native-bin/**/*
+  - assets/icon.png
+  - assets/icon.ico
+  # macOS menu-bar (tray) template icon + its @2x HiDPI variant, read by
+  # the main process via nativeImage.createFromPath (see src/tray.ts).
+  # Windows/Linux derive their tray icon from icon.png above.
+  - assets/trayTemplate.png
+  - assets/trayTemplate@2x.png
+  # Five indeterminate activity frames. The main process cycles these only
+  # while a chat turn is live; each base PNG picks up its @2x sibling.
+  - assets/trayWorking*Template*.png
+  - assets/splash.html
+  # The splash document references `./gezellogo.png` from the same
+  # folder. Without listing it here electron-builder leaves the image
+  # out of app.asar, the splash loads, and the <img> renders as a
+  # broken-image icon for the ~2-3s window before the real UI paints.
+  - assets/gezellogo.png
+  - '!**/node_modules/*/{CHANGELOG.md,README.md,README,readme.md,readme}'
+  - '!**/node_modules/*/{test,__tests__,tests,powered-test,example,examples}'
+  - '!**/node_modules/*.d.ts'
+  - '!**/node_modules/.bin'
+  # @napi-rs/canvas comes in as a transitive optionalDependency of
+  # pdfjs-dist (via @bendyline/squisq-editor-react). pdfjs-dist
+  # branches at runtime on `isNodeJS` and uses the DOM canvas in
+  # browser-like contexts — which is what the Electron renderer is.
+  # The Node-side canvas factory is dead code for us; nothing ever
+  # calls `require("@napi-rs/canvas")`. Excluding it strips ~7 MB
+  # per linux/win installer and silences the "dependency not found
+  # on disk" warning for the platform-specific sibling tarballs that
+  # pnpm only partially installs (optionalDependencies pattern).
+  # `@napi-rs/keyring` is a real runtime dep (secrets/keyring-store.ts)
+  # — the patterns below target `canvas` specifically.
+  - '!**/node_modules/@napi-rs/canvas/**'
+  - '!**/node_modules/@napi-rs/canvas-*/**'
+
+# `dist/ui/` is asar-unpacked because Hono inside the spawned daemon (a
+# plain Node child of the supervisor — no Electron fs patches) reads
+# `index.html` and chunks via plain `fs.readFile`. Asar reads only work
+# from the Electron main process; everything else needs a real file.
+#
+# The service-bundle tarball + meta sidecar are asar-unpacked because the
+# install-time `extract-service-bundle.js` CLI reads them via plain
+# `fs.readFile` (it runs as a child Node process, not inside Electron's
+# patched fs). Same reason the loose tree was unpacked before.
+#
+# `extract-service-bundle.js` is also asar-unpacked because the NSIS
+# install hook invokes it through `Gezel.exe` with ELECTRON_RUN_AS_NODE=1.
+# RUN_AS_NODE mode strips Electron's fs patches, so a path inside `app.asar`
+# would fail to resolve. Keeping the CLI as a real file on disk sidesteps
+# every "does asar work here?" question.
+asarUnpack:
+  # main.js, preload.cjs, and package.json are asar-unpacked to work
+  # around an electron-builder 26.x packing bug that drops the first ~13
+  # bytes from package.json during rewrite, shifting every subsequent
+  # file's offset in the asar manifest. The asar's `dist/main.js` ends up
+  # corrupted (starts with ` = Object.defineProperty;` instead of
+  # `var __defProp = …`) and Electron crashes silently with exit code 1.
+  # Unpacking these forces Electron's fs to read them from disk, bypassing
+  # the corrupted asar window entirely. Delete the four entries below when
+  # electron-builder fixes the underlying bug.
+  - dist/main.js
+  - dist/main.js.map
+  - dist/preload.cjs
+  - package.json
+  - dist/extract-service-bundle.js
+  - dist/extract-service-bundle.js.map
+  - dist/service-bundle.tar.gz
+  - dist/service-bundle.meta.json
+  - dist/pnpm-bundle/**/*
+  - dist/node-bundle/**/*
+  - dist/ui/**/*
+  - native-bin/**/*
+
+# afterPack: workaround for an electron-builder 26.x asar packing bug that
+# shifts file offsets in the asar manifest by ~13 bytes (the leading chars
+# of the rewritten package.json get dropped, every later file reads from
+# the wrong window, and the Electron main process exits silently with code
+# 1 because main.js is corrupted). The hook re-extracts the asar,
+# overwrites the affected files from canonical source, and repacks via
+# `@electron/asar.createPackage`. Delete once electron-builder ships a fix.
+afterPack: scripts/fix-asar.cjs
+
+# electron-builder's built-in @electron/notarize integration notarizes both
+# the signed .app and the final .pkg when APPLE_ID,
+# APPLE_APP_SPECIFIC_PASSWORD, and APPLE_TEAM_ID are present. A custom
+# afterSign hook only sees the .app and would leave the installer package
+# itself unnotarized.
+
+# `electron-updater` consults this at runtime to find releases. The
+# release workflow runs with `--publish never` and uploads artifacts via
+# softprops/action-gh-release instead, so this block only feeds the
+# autoUpdater check on the client. Repo must be public so unauthenticated
+# clients can read the releases API.
+publish:
+  provider: github
+  owner: bendyline
+  repo: gezel
+
+# ── Windows ─────────────────────────────────────────────────────────────
+# NSIS installer with Azure Trusted Signing (Authenticode). Local developer
+# builds may be unsigned; the production release workflow rejects missing
+# credentials before packaging and verifies the final signatures.
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: assets/icon.ico
+  executableName: gezel
+  # Signing options moved under signtoolOptions in electron-builder 26.
+  signtoolOptions:
+    publisherName: 'Bendyline LLC'
+    sign: scripts/sign.cjs
+    signingHashAlgorithms:
+      - sha256
+  # nssm.exe sits next to the Electron exe in $INSTDIR
+  # (C:\Program Files\Gezel\nssm.exe) so the NSIS hooks can invoke it
+  # directly. The binary is vendored, sha-pinned, at installer/nssm/ —
+  # see installer/nssm/README.md for provenance and the bump procedure.
+  extraFiles:
+    - from: installer/nssm/nssm.exe
+      to: nssm.exe
+
+nsis:
+  # Per-machine install (Program Files), elevates UAC at install time.
+  # The installer's customInstall hook in installer/nsis-hooks.nsh uses the
+  # elevation to register gezeld as a Windows Service via NSSM, with
+  # system-scope state in C:\ProgramData\Gezel\.
+  oneClick: false
+  perMachine: true
+  allowElevation: true
+  allowToChangeInstallationDirectory: false
+  installerIcon: assets/icon.ico
+  uninstallerIcon: assets/icon.ico
+  installerHeaderIcon: assets/icon.ico
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  license: EULA.txt
+  # NSIS macros that install/uninstall the GezelService via NSSM.
+  include: installer/nsis-hooks.nsh
+  # Enables electron-updater to pull delta packages on Windows — much
+  # smaller downloads for users on slow connections.
+  differentialPackage: true
+
+# ── macOS ───────────────────────────────────────────────────────────────
+# PKG installer on Apple Silicon only. Intel Mac (x64) was dropped from
+# the release matrix — Apple's own support is wrapping up and on-device
+# first-run routes Intel users to Copilot/OpenAI anyway. PKG is required
+# so the postinstall script can register a LaunchDaemon (DMG
+# drag-installs can't elevate). The Developer ID Installer certificate
+# signs the PKG; the standard Developer ID Application cert signs the
+# .app inside it. electron-builder's built-in notarization covers both the
+# .app and final .pkg, gated on APPLE_ID/APP_SPECIFIC_PASSWORD/TEAM_ID.
+mac:
+  target:
+    - target: pkg
+      arch:
+        - arm64
+  icon: assets/icon.icns
+  category: public.app-category.productivity
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: entitlements.mac.plist
+  entitlementsInherit: entitlements.mac.plist
+  # Ship the LaunchDaemon plist + uninstall.sh inside the .app bundle
+  # so the postinstall script can find them at known paths under
+  # /Applications/Gezel.app/Contents/Resources/.
+  extraResources:
+    - from: installer/com.bendyline.gezeld.plist
+      to: com.bendyline.gezeld.plist
+    - from: installer/uninstall.sh
+      to: uninstall.sh
+
+pkg:
+  # Standard PKG settings for an admin-level system install.
+  installLocation: /Applications
+  allowAnywhere: false
+  allowCurrentUserHome: false
+  # The postinstall script registers the LaunchDaemon. electron-builder
+  # finds `preinstall`, `postinstall` files in this directory and wraps
+  # them into the PKG payload.
+  #
+  # IMPORTANT: this path is resolved by electron-builder via
+  # `path.resolve(directories.buildResources, pkg.scripts)` — i.e.
+  # relative to `assets/`, not the package root. Without the `../` the
+  # scripts dir is looked up at `assets/installer/macos-pkg-scripts/`
+  # (which doesn't exist), electron-builder silently produces a PKG with
+  # no Scripts payload, the LaunchDaemon never gets installed, and the
+  # Electron supervisor falls through to spawning gezeld as the logged-in
+  # user — defeating the system-service design.
+  scripts: ../installer/macos-pkg-scripts
+  # EULA shown as the "License" step in macOS Installer.app before
+  # install proceeds — user must Agree. Same file as the Windows NSIS
+  # license step (see `nsis.license` above). Path is resolved relative
+  # to `directories.buildResources` (= `assets/`), so the `../` walks
+  # up to packages/app/EULA.txt — same pattern as `pkg.scripts` above.
+  # Installer.app accepts .txt / .rtf / .html.
+  license: ../EULA.txt
+
+# ── Linux ───────────────────────────────────────────────────────────────
+# .deb + .rpm so the post-install hook can register a systemd system
+# unit. AppImage was dropped — it can't install services on first run
+# (no install hook), and shipping two install models would confuse users.
+# Both formats install to /opt/Gezel/ by default.
+linux:
+  target:
+    - target: deb
+      arch:
+        - x64
+        - arm64
+    - target: rpm
+      arch:
+        - x64
+        - arm64
+  icon: assets/icon.png
+  category: Office
+  synopsis: Local-first team of AI gezels
+  description: Assemble a crew of named AI agents that live on your disk.
+  # The systemd unit file ships into /opt/Gezel/gezeld.service so the
+  # afterInstall script can copy it into /etc/systemd/system/ as root.
+  extraFiles:
+    - from: installer/gezeld.service
+      to: gezeld.service
+
+deb:
+  afterInstall: installer/linux/after-install.sh
+  afterRemove: installer/linux/after-remove.sh
+  # Depends on systemd being present — virtually all modern desktop
+  # distros use it. List explicitly so package managers refuse to
+  # install on init-system-other systems instead of silently failing.
+  depends:
+    - libgtk-3-0
+    - libnotify4
+    - libnss3
+    - libxss1
+    - libxtst6
+    - xdg-utils
+    - libatspi2.0-0
+    - libuuid1
+    - libsecret-1-0
+    - systemd
+
+rpm:
+  afterInstall: installer/linux/after-install.sh
+  afterRemove: installer/linux/after-remove.sh
+  depends:
+    - libnotify
+    - libgtk-3-0
+    - libXScrnSaver
+    - libXtst
+    - libuuid
+    - systemd

@@ -1,0 +1,46 @@
+Gezel -- End User License Agreement
+
+Copyright (c) 2026 Bendyline LLC. All rights reserved.
+
+Gezel is licensed to you under the MIT License (full text below). By installing or using Gezel, you agree to the terms of that license and acknowledge the Additional Notes section in this document.
+
+------------------------------------------------------------------------
+Additional Notes
+
+1. What Gezel does
+
+Gezel is a free, open-source, local-first app for working with AI. All gezel definitions, chat sessions with local AI, project files, and memories are stored on your computer. 
+
+When using the application, Bendyline LLC does not collect, store, or transmit your data. Gezel does faciliate the use of third-party software and connections at your direction, and these are subject to their respective terms.
+
+Because Gezel is local-first by design, what you do with your gezels is your own - we have no view into it, and that's intentional.
+
+Gezel is still in very early preview. Consider using it on a device separate from your valued work or personal data.
+
+A note from us: nobody knows yet what the long-term personal and societal consequences of deep AI use - or of building para-social relationships with AI - will be. AI can be genuinely useful, and we hope Gezel helps you do great things with it. But AI is also very good at shaping how you feel - please use it thoughtfully, and look after your own wellbeing.
+
+2. Third-party model providers
+
+Gezel routes chat messages to the language-model provider you configure (GitHub Copilot, OpenAI, or others). When you use one, your messages are sent to that provider over the public internet, subject to their terms and privacy policy. Bendyline LLC is not a party to that relationship.
+
+While Gezel can work with cloud AI providers like OpenAI or Anthropic, it may use cloud AI in an inefficient or unbounded manner. If you connect Gezel to your cloud accounts, please make sure you have appropriate budget limits turned on.
+
+3. Auto-update
+
+Gezel checks for updates on launch by querying public GitHub release metadata. No personal data is sent in this check. You can disable auto-update by editing your settings.
+
+4. No warranty
+
+Gezel is provided "as is" without warranty of any kind. See the MIT license below for the full disclaimer.
+
+------------------------------------------------------------------------
+
+MIT License
+
+Copyright (c) 2026 Bendyline LLC
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.

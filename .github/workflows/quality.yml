@@ -1,0 +1,90 @@
+name: Quality
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '24'
+  PNPM_VERSION: '11.15.1'
+  # The UI production bundle includes Monaco and Squisq's diagram/media
+  # workers. Vite needs more than Node's default ~2 GiB heap to transform it.
+  NODE_OPTIONS: '--max-old-space-size=4096'
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    name: Build, lint, typecheck, and unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@008330803749db0355799c700092d9a85fd074e9 # v6.0.9
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - name: Reject local workspace links
+        run: pnpm check:local-links
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - name: Run all unit suites (stability pass 1 of 3)
+        run: pnpm test
+      - name: Repeat UI and service suites (stability pass 2 of 3)
+        run: pnpm -r --filter @bendyline/gezel-ui --filter @bendyline/gezel-service run test
+      - name: Repeat UI and service suites (stability pass 3 of 3)
+        run: pnpm -r --filter @bendyline/gezel-ui --filter @bendyline/gezel-service run test
+      - name: Enforce test-surface coverage floors
+        run: pnpm test:coverage
+      - name: Preserve coverage inventory
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0 # v7.0.1
+        with:
+          name: test-surface-coverage
+          path: artifacts/test-surface-coverage.json
+          # The coverage command is the authoritative check. If an earlier
+          # step fails, do not add a second, misleading artifact failure.
+          if-no-files-found: ignore
+          retention-days: 30
+
+  web-smoke:
+    name: Browser smoke E2E
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@008330803749db0355799c700092d9a85fd074e9 # v6.0.9
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - name: Reject local workspace links
+        run: pnpm check:local-links
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: Install Chromium
+        run: pnpm --filter @bendyline/gezel-app exec playwright install --with-deps chromium
+      - name: Exercise shell and write flows
+        run: pnpm --filter @bendyline/gezel-app exec playwright test --config playwright.web.config.ts shell.spec.ts write-flow.spec.ts --reporter=line --retries=0 --repeat-each=3 --workers=1
+      - name: Preserve failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0 # v7.0.1
+        with:
+          name: web-smoke-diagnostics
+          path: |
+            packages/app/test-results/
+            packages/app/playwright-report/
+          if-no-files-found: ignore
+          retention-days: 14

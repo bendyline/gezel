@@ -1,0 +1,123 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "gezel:build",
+      "type": "process",
+      "command": "/usr/local/bin/corepack",
+      "args": ["pnpm", "build"],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": ["$tsc"],
+      "presentation": {
+        "reveal": "silent",
+        "panel": "dedicated",
+        "clear": true
+      },
+      "group": "build"
+    },
+    {
+      "label": "gezel:dev",
+      "type": "process",
+      "command": "/usr/local/bin/corepack",
+      "args": ["pnpm", "dev"],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "isBackground": true,
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      }
+    },
+    {
+      "label": "gezel:typecheck",
+      "type": "process",
+      "command": "/usr/local/bin/corepack",
+      "args": ["pnpm", "typecheck"],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": ["$tsc"],
+      "group": "test"
+    },
+    {
+      "label": "gezel:test",
+      "type": "process",
+      "command": "/usr/local/bin/corepack",
+      "args": ["pnpm", "test"],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "group": "test"
+    },
+    {
+      "label": "gezel-ui:build-embedded",
+      "type": "shell",
+      "command": "pnpm --filter @bendyline/gezel-ui build:embedded",
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "env": {
+          "NODE_OPTIONS": "--max-old-space-size=8192"
+        }
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "silent",
+        "panel": "dedicated",
+        "clear": true
+      },
+      "group": "build"
+    },
+    {
+      "label": "gezel-vscode:build",
+      "type": "shell",
+      "command": "pnpm --filter @bendyline/gezel-vscode build",
+      "dependsOn": ["gezel-ui:build-embedded"],
+      "dependsOrder": "sequence",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": ["$tsc"],
+      "presentation": {
+        "reveal": "silent",
+        "panel": "dedicated",
+        "clear": true
+      },
+      "group": "build"
+    },
+    {
+      "label": "gezel-vscode:dev",
+      "type": "shell",
+      "command": "pnpm --filter @bendyline/gezel-vscode dev",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "isBackground": true,
+      "problemMatcher": {
+        "owner": "tsup",
+        "pattern": [
+          {
+            "regexp": "^([^\\s].*)\\((\\d+|\\d+,\\d+|\\d+,\\d+,\\d+,\\d+)\\):\\s+(error|warning|info)\\s+(TS\\d+)\\s*:\\s*(.*)$",
+            "file": 1,
+            "location": 2,
+            "severity": 3,
+            "code": 4,
+            "message": 5
+          }
+        ],
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": "Build start",
+          "endsPattern": "Build success"
+        }
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      }
+    }
+  ]
+}

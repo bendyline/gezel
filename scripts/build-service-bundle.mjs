@@ -1,0 +1,287 @@
+#!/usr/bin/env node
+/**
+ * Build the relocatable gezel service bundle.
+ *
+ * Output layout (after this script runs):
+ *
+ *   packages/app/dist/service-bundle/         (intermediate, kept for inspection)
+ *     package.json         — the service's package.json, workspace: refs resolved
+ *     dist/                — pre-built service ESM (dist/index.js, dist/bin/gezeld.js)
+ *     node_modules/        — real, non-symlinked deps (incl. native binaries)
+ *
+ *   packages/app/dist/service-bundle.tar.gz   — shippable archive
+ *   packages/app/dist/service-bundle.meta.json — { version, sha256, sizeBytes, fileCount }
+ *
+ * Electron packaging asar-unpacks the tarball + meta (one file each) instead
+ * of 30k+ loose files — the install-time difference on Windows with Defender
+ * is enormous (a 30-minute NSIS extraction collapses to seconds). The Electron
+ * shell extracts the tarball into the user's `~/.gezel/service/` on first
+ * launch (and into the system service home at install time).
+ *
+ * Per-platform note: `pnpm deploy --prod` only resolves the optional
+ * dependencies that match the current OS/arch. Building on macOS arm64
+ * produces a macOS-arm64 bundle. A production CI pipeline will need
+ * per-platform build jobs.
+ *
+ * Environment controls:
+ *   GEZEL_SKIP_SERVICE_BUNDLE=1   — skip entirely (dev-mode fast iteration)
+ *   GEZEL_BUNDLE_TARGET=<path>    — override default output path (loose tree)
+ *   GEZEL_SKIP_BUNDLE_ARCHIVE=1   — skip the tar/meta emission (dev iteration)
+ */
+import { execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { createReadStream, existsSync, rmSync, statSync } from 'node:fs';
+import { readFile, readdir, readlink, unlink, writeFile } from 'node:fs/promises';
+import { basename, dirname, join, relative, resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { promisify } from 'node:util';
+
+const exec = promisify(execFile);
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const repoRoot = resolve(__dirname, '..');
+const defaultTarget = join(repoRoot, 'packages', 'app', 'dist', 'service-bundle');
+const target = process.env.GEZEL_BUNDLE_TARGET
+  ? resolve(process.env.GEZEL_BUNDLE_TARGET)
+  : defaultTarget;
+const archivePath = `${target}.tar.gz`;
+const metaPath = `${target}.meta.json`;
+
+if (process.env.GEZEL_SKIP_SERVICE_BUNDLE === '1') {
+  console.log('[build-service-bundle] skipped (GEZEL_SKIP_SERVICE_BUNDLE=1)');
+  process.exit(0);
+}
+
+async function main() {
+  console.log(`[build-service-bundle] target: ${target}`);
+
+  // pnpm deploy refuses to run into a non-empty directory. Wipe the target
+  // first so repeat builds are deterministic.
+  if (existsSync(target)) {
+    console.log('[build-service-bundle] clearing existing bundle dir');
+    rmSync(target, { recursive: true, force: true });
+  }
+
+  const args = [
+    '--filter',
+    '@bendyline/gezel-service',
+    'deploy',
+    '--prod',
+    // pnpm v10+ requires either `inject-workspace-packages=true` on the
+    // workspace or `--legacy` on the deploy. `--legacy` keeps our workspace
+    // config untouched (which would otherwise subtly change how sibling
+    // packages resolve during `pnpm dev`).
+    '--legacy',
+    // Force a flat hoisted node_modules — no symlinks, no .pnpm/<pkg>/...
+    // virtual store. Required for Windows: when the tarball is extracted on
+    // a filesystem that can't create symlinks without privilege (vanilla
+    // user account), pnpm's default symlinked layout collapses into broken
+    // path copies and Node's resolver fails to find transitive deps of
+    // workspace packages (gray-matter via @bendyline/gezel was the canary).
+    // The flat tree is ~10% larger on disk but extracts identically on
+    // every OS. See:
+    //   ~/.gezel/service/node_modules/@bendyline/gezel  on Linux: symlink
+    //   ~/.gezel/service/node_modules/@bendyline/gezel  on Windows: real dir
+    // hoisted=true eliminates this skew at source.
+    '--node-linker=hoisted',
+    // The app-builder-lib patch targets an electron-builder dep that only
+    // exists in packages/app's graph — a service-only deploy legitimately
+    // never applies it, and pnpm's strict default turns that into a fatal
+    // ERR_PNPM_UNUSED_PATCH. Scoped to this command so ordinary installs
+    // keep the strict check (which catches genuinely stale patches).
+    '--config.allow-unused-patches=true',
+    target,
+  ];
+  console.log(`[build-service-bundle] pnpm ${args.join(' ')}`);
+  const { stdout, stderr } = await exec('pnpm', args, {
+    cwd: repoRoot,
+    env: process.env,
+    maxBuffer: 64 * 1024 * 1024,
+    // Windows: pnpm on PATH is `pnpm.cmd` (a shim). Node's child_process
+    // can't launch a .cmd without going through cmd.exe — without this
+    // the spawn fails with ENOENT even though `pnpm` works fine in the
+    // shell. Same fix as packages/service/src/packages/pnpm.ts and
+    // system-toolsets/bootstrap.ts. Args are 100% internally constructed
+    // (no user input touching the shell), so injection isn't a concern.
+    shell: process.platform === 'win32',
+  });
+  if (stdout.trim()) process.stdout.write(stdout);
+  if (stderr.trim()) process.stderr.write(stderr);
+
+  const gezeldBin = join(target, 'dist', 'bin', 'gezeld.js');
+  if (!existsSync(gezeldBin)) {
+    throw new Error(
+      `[build-service-bundle] expected ${gezeldBin} after deploy; pnpm deploy likely failed`,
+    );
+  }
+
+  // The catalog CONTENT is the transitive registry dep @bendyline/gilde.
+  // Nothing imports its data at module-load time, so the import-check
+  // below cannot catch it going missing — a silent miss ships an app
+  // with an empty catalog (no models, templates, or craftbooks). Assert
+  // the data tree made it into the deploy graph explicitly.
+  const gildeIndex = join(
+    target,
+    'node_modules',
+    '@bendyline',
+    'gilde',
+    'data',
+    'chat-models',
+    'index.json',
+  );
+  if (!existsSync(gildeIndex)) {
+    throw new Error(
+      `[build-service-bundle] expected ${gildeIndex} after deploy; the @bendyline/gilde content package did not ride into the bundle (empty catalog in production). If @bendyline/gilde is currently link:ed (pnpm link:gilde), unlink first — pnpm deploy does not materialize link: deps, so bundles must build against the registry pin.`,
+    );
+  }
+
+  // `pnpm deploy --legacy` leaves a few bookkeeping symlinks under
+  // `.pnpm/node_modules/` that point back up to the workspace source (e.g.
+  // the deployed package itself re-linked to `packages/service/`). Nothing
+  // in the runtime dep graph follows them — but electron-builder's
+  // recursive copy does, so we prune anything that escapes the bundle.
+  await pruneEscapingSymlinks(target);
+
+  console.log('[build-service-bundle] verifying the bundle imports cleanly');
+  // Importing the service module resolves the whole dep graph, including
+  // native modules. We spawn a throwaway node process, let it import
+  // `index.js` (which exports `startService` without *calling* it — so no
+  // port binding), then exit. This is ~1s and catches a huge class of
+  // packaging bugs that `--check` misses.
+  //
+  // Use pathToFileURL to convert the absolute path to a file:// URL.
+  // Node's ESM loader on Windows rejects bare absolute paths (`D:\…`)
+  // because `D:` is parsed as the URL scheme. file:// works on every
+  // platform.
+  const indexPath = join(target, 'dist', 'index.js');
+  const indexUrl = pathToFileURL(indexPath).href;
+  await exec(
+    process.execPath,
+    ['--input-type=module', '-e', `await import(${JSON.stringify(indexUrl)});`],
+    { cwd: target, maxBuffer: 16 * 1024 * 1024 },
+  );
+
+  if (process.env.GEZEL_SKIP_BUNDLE_ARCHIVE === '1') {
+    console.log('[build-service-bundle] ✓ bundle ready (archive skipped)');
+    return;
+  }
+
+  await emitArchive(target, archivePath);
+  await emitMeta(target, archivePath, metaPath);
+  console.log('[build-service-bundle] ✓ bundle ready');
+}
+
+/**
+ * Pack the tree at `src` into a gzipped tarball at `archivePath`.
+ *
+ * Why shell out to the system `tar` binary instead of using the `tar` npm
+ * package: zero new dep at the script's resolution root, and `tar.exe`
+ * ships with Windows 10 1803+ as libarchive bsdtar.
+ *
+ * Windows quirk: when the build runs from git-bash, PATH has git-bash's
+ * GNU tar ahead of System32's bsdtar. GNU tar interprets `C:\...` paths as
+ * remote rsync-style specs (`host:path`) and fails with "Cannot connect to
+ * C: resolve failed". Hardcoding the System32 path on win32 sidesteps it.
+ */
+async function emitArchive(src, archivePath) {
+  if (existsSync(archivePath)) rmSync(archivePath, { force: true });
+  console.log(`[build-service-bundle] archiving → ${basename(archivePath)}`);
+  const t0 = Date.now();
+  const tarBin =
+    process.platform === 'win32'
+      ? join(process.env.WINDIR ?? 'C:\\Windows', 'System32', 'tar.exe')
+      : 'tar';
+  await exec(tarBin, ['-czf', archivePath, '-C', src, '.'], {
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  const dt = ((Date.now() - t0) / 1000).toFixed(1);
+  const sz = statSync(archivePath).size;
+  console.log(`[build-service-bundle] archived ${(sz / 1024 / 1024).toFixed(1)} MB in ${dt}s`);
+}
+
+/**
+ * Write the meta sidecar — small (< 1 KB) so the supervisor can read
+ * `{ version, sha256 }` cheaply at startup without untarring just to
+ * decide whether to extract.
+ */
+async function emitMeta(src, archivePath, metaPath) {
+  const pkg = JSON.parse(await readFile(join(src, 'package.json'), 'utf8'));
+  if (typeof pkg.version !== 'string') {
+    throw new Error('[build-service-bundle] service package.json missing version');
+  }
+  const sha256 = await hashFile(archivePath);
+  const sizeBytes = statSync(archivePath).size;
+  const fileCount = await countFiles(src);
+  const meta = {
+    version: pkg.version,
+    sha256,
+    sizeBytes,
+    fileCount,
+  };
+  await writeFile(metaPath, `${JSON.stringify(meta, null, 2)}\n`);
+  console.log(
+    `[build-service-bundle] meta: v${meta.version} sha256=${sha256.slice(0, 12)}… files=${fileCount}`,
+  );
+}
+
+function hashFile(path) {
+  return new Promise((resolveHash, rejectHash) => {
+    const hash = createHash('sha256');
+    const stream = createReadStream(path);
+    stream.on('data', (chunk) => hash.update(chunk));
+    stream.on('end', () => resolveHash(hash.digest('hex')));
+    stream.on('error', rejectHash);
+  });
+}
+
+async function countFiles(root) {
+  let n = 0;
+  async function walk(dir) {
+    let entries;
+    try {
+      entries = await readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      const p = join(dir, e.name);
+      if (e.isDirectory()) await walk(p);
+      else if (e.isFile() || e.isSymbolicLink()) n += 1;
+    }
+  }
+  await walk(root);
+  return n;
+}
+
+async function pruneEscapingSymlinks(root) {
+  let removed = 0;
+  async function walk(dir) {
+    let entries;
+    try {
+      entries = await readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      const p = join(dir, e.name);
+      if (e.isSymbolicLink()) {
+        const targetRaw = await readlink(p);
+        const resolved = resolve(dirname(p), targetRaw);
+        const rel = relative(root, resolved);
+        if (rel.startsWith('..') || rel === '') {
+          await unlink(p);
+          removed += 1;
+        }
+      } else if (e.isDirectory()) {
+        await walk(p);
+      }
+    }
+  }
+  await walk(root);
+  if (removed > 0) console.log(`[build-service-bundle] pruned ${removed} escaping symlink(s)`);
+}
+
+main().catch((err) => {
+  console.error('[build-service-bundle] failed:', err.message ?? err);
+  process.exit(1);
+});

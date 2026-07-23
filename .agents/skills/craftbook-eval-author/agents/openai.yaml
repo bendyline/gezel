@@ -1,0 +1,4 @@
+interface:
+  display_name: "Craftbook Eval Author"
+  short_description: "Create fixture-backed craftbook evals"
+  default_prompt: "Use $craftbook-eval-author to design and implement a new craftbook eval."

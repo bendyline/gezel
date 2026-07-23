@@ -1,0 +1,322 @@
+/**
+ * MLX cache adapter — talks to our wrapped `gezel_mlx_server.py`.
+ *
+ * The wrapped server preserves prompt-cache state across requests when a
+ * `cache_id` is supplied. This adapter:
+ *
+ *   - Allocates a stable `cache_id` per gezel sessionId. The mapping
+ *     is the cache key from the engine's perspective, so two sessions
+ *     never collide and one session always reuses its own cache.
+ *   - Augments each `/v1/chat/completions` request body with that id
+ *     plus, when known, a `prefix_cache_id` derived from a hash of the
+ *     gezel's stable system prompt. The server uses prefix_cache_id as
+ *     a fallback seed when the per-session cache_id misses — so a brand-
+ *     new session for an existing gezel inherits the warmed prefix
+ *     instead of cold-prefilling 2 KB of system prompt.
+ *   - Calls `DELETE /v1/cache/{id}` on `evict` (controller-driven LRU
+ *     or chat-manager invalidation hook).
+ *   - Polls `GET /v1/cache/stats` on `reportUsage` so the controller
+ *     reconciles its tracked usage against engine reality.
+ *   - Calls `POST /v1/cache/warm` on `warm` — pre-prefill when the user
+ *     opens a chat. With `persist=true`, the warmed entry is also
+ *     written to disk so subsequent supervisor boots / new sessions
+ *     find it ready.
+ */
+
+import { createHash } from 'node:crypto';
+
+import type {
+  CacheWarmMessage,
+  EngineCacheAdapter,
+  EngineCacheUsage,
+  SystemPromptLayers,
+} from '../../cache/adapter.js';
+
+/**
+ * Bytes-per-token estimate for MLX KV cache, used only as a fallback
+ * when the wrapped server's `est_bytes` is missing. Matches the
+ * Python side's _BYTES_PER_TOKEN — keep in sync.
+ */
+const ESTIMATED_BYTES_PER_TOKEN = 100 * 1024;
+
+export interface MlxCacheAdapterOptions {
+  /**
+   * URL of the wrapped MLX server. Resolved lazily on each call so a
+   * supervisor-restart-with-new-port stays correct without re-creating
+   * the adapter.
+   */
+  resolveBaseUrl: () => Promise<string | null>;
+  /** Test seam — defaults to the global fetch. */
+  fetchImpl?: typeof fetch;
+  /**
+   * Serializes engine-touching requests with chat completions. Cache
+   * warming performs model prefill too; letting it run beside a chat
+   * stream can starve the stream pre-first-byte on large MLX models.
+   */
+  runExclusive?: <T>(label: string, work: () => Promise<T>) => Promise<T>;
+}
+
+/**
+ * Compute a stable id used for cross-session prefix sharing. The hash
+ * input is the verbatim system prompt text — when the gezel's about,
+ * the project context, or the tools block change, the hash changes and
+ * a new prefix file gets created on next warm. Old prefix files become
+ * orphaned and are pruned by the engine's disk-LRU eventually.
+ *
+ * Truncated to 16 hex chars (64 bits) — collision probability over a
+ * lifetime of installs is negligible at this scale and the shorter id
+ * is friendlier in logs.
+ */
+export function gezelPrefixId(systemPrompt: string): string {
+  const hex = createHash('sha256').update(systemPrompt, 'utf8').digest('hex');
+  return `prefix-${hex.slice(0, 16)}`;
+}
+
+/**
+ * Layered prefix ids (flag `layeredPrefixCache`). Distinct `gp` / `gezel`
+ * namespaces, most-specific first. `gp` (full stable system) is the
+ * workhorse — shared across sessions of the same model+gezel+project;
+ * `gezel` (identity-only prefix) is shared across projects of the gezel.
+ * The server tries them longest-first and seeds `gp` from the first real
+ * session save, so the shared prefix carries the engine-templated tools.
+ */
+export function gezelLayerPrefixIds(layers: SystemPromptLayers): { gp: string; gezel: string } {
+  const h = (s: string) => createHash('sha256').update(s, 'utf8').digest('hex').slice(0, 16);
+  return { gp: `prefix-gp-${h(layers.project)}`, gezel: `prefix-gezel-${h(layers.gezel)}` };
+}
+
+export class MlxCacheAdapter implements EngineCacheAdapter {
+  readonly providerName = 'mlx' as const;
+  private readonly resolveBaseUrl: MlxCacheAdapterOptions['resolveBaseUrl'];
+  private readonly fetchImpl: typeof fetch;
+  private readonly runExclusive: NonNullable<MlxCacheAdapterOptions['runExclusive']>;
+  /**
+   * Map of sessionId → stable per-gezel prefix id. Populated on
+   * `setSessionPrefix(sessionId, systemPrompt)` and consulted by
+   * `buildRequestExtras` to attach `prefix_cache_id` to each request.
+   * Prefix id changes (system-prompt drift) just overwrite the entry —
+   * no migration needed; the next request carries the new id and the
+   * engine treats the old one as orphaned.
+   */
+  private readonly sessionPrefix = new Map<string, string>();
+  /**
+   * Per-session LAYERED prefix ids (flag ON), ordered most-specific-first
+   * (`[gp, gezel]`). `buildRequestExtras` sends them as `prefix_cache_ids`;
+   * the server tries them longest-first on a per-session miss.
+   */
+  private readonly sessionLayerPrefixIds = new Map<string, string[]>();
+  /** Tracks which prefixes we've already warmed in this process so
+   *  back-to-back session opens don't issue redundant warm requests. */
+  private readonly warmedPrefixes = new Set<string>();
+
+  constructor(opts: MlxCacheAdapterOptions = { resolveBaseUrl: async () => null }) {
+    this.resolveBaseUrl = opts.resolveBaseUrl;
+    this.fetchImpl = opts.fetchImpl ?? fetch;
+    this.runExclusive = opts.runExclusive ?? (async (_label, work) => work());
+  }
+
+  /**
+   * Tell the adapter which gezel-prefix id this session belongs to.
+   * Called by the chat manager when it hydrates a session — sees the
+   * stable system prompt for the session's (gezel, project) pair and
+   * derives the hash via {@link gezelPrefixId}. Idempotent; same
+   * (sessionId, systemPrompt) → same prefixId → same map state.
+   */
+  setSessionPrefix(sessionId: string, systemPrompt: string): string {
+    const prefixId = gezelPrefixId(systemPrompt);
+    this.sessionPrefix.set(sessionId, prefixId);
+    return prefixId;
+  }
+
+  /**
+   * Async session prep matching the cross-engine `prepareForSend` shape.
+   * Registers the session's prefix mapping and warms the prefix so
+   * subsequent sessions for the same gezel can inherit it on miss.
+   * Idempotent — repeated calls are a no-op past the first thanks to
+   * `warmedPrefixes`.
+   */
+  async prepareForSend(
+    sessionId: string,
+    systemPrompt?: string,
+    layers?: SystemPromptLayers,
+  ): Promise<void> {
+    if (layers) {
+      // Layered mode: register the [gp, gezel] ids the server will try
+      // longest-first. We do NOT system-only-warm the prefix here — the
+      // server seeds the shared `gp` prefix from the first real session
+      // save, so the inherited prefix carries the engine-templated tools
+      // (a system-only warm would strand them). Mirrors the llama-cpp
+      // disk-prefix path that the A/B proved out.
+      const { gp, gezel } = gezelLayerPrefixIds(layers);
+      this.sessionLayerPrefixIds.set(sessionId, [gp, gezel]);
+      this.sessionPrefix.set(sessionId, gp);
+      return;
+    }
+    if (!systemPrompt) return;
+    const prefixId = this.setSessionPrefix(sessionId, systemPrompt);
+    await this.warmPrefix(prefixId, systemPrompt);
+  }
+
+  buildRequestExtras(sessionId: string): Record<string, unknown> {
+    // The engine accepts `cache_id` as an extension field; absent the
+    // field, it behaves like upstream mlx_vlm.server (cache cleared
+    // every request). We always set it so cache reuse engages.
+    const extras: Record<string, unknown> = { cache_id: sessionId };
+    const layered = this.sessionLayerPrefixIds.get(sessionId);
+    if (layered && layered.length > 0) {
+      extras.prefix_cache_ids = layered;
+      // Back-compat for older engine builds that only read the singular.
+      extras.prefix_cache_id = layered[0];
+      return extras;
+    }
+    const prefixId = this.sessionPrefix.get(sessionId);
+    if (prefixId) extras.prefix_cache_id = prefixId;
+    return extras;
+  }
+
+  async evict(sessionIds: readonly string[]): Promise<void> {
+    const baseUrl = await this.resolveBaseUrl().catch(() => null);
+    if (!baseUrl) return;
+    // Forget local prefix mapping on evict — the controller is signaling
+    // this session is gone. Keep `warmedPrefixes` though: other sessions
+    // sharing the same prefix still benefit from "already warmed" state.
+    for (const id of sessionIds) {
+      this.sessionPrefix.delete(id);
+      this.sessionLayerPrefixIds.delete(id);
+    }
+    // Fire deletes in parallel — they're idempotent and small.
+    await Promise.all(
+      sessionIds.map(async (id) => {
+        try {
+          await this.fetchImpl(`${baseUrl}/v1/cache/${encodeURIComponent(id)}`, {
+            method: 'DELETE',
+          });
+        } catch {
+          // Eviction is best-effort; the controller already removed
+          // its tracking, and the engine will eventually evict via
+          // its own LRU when memory pressure grows.
+        }
+      }),
+    );
+  }
+
+  async reportUsage(): Promise<readonly EngineCacheUsage[]> {
+    const baseUrl = await this.resolveBaseUrl().catch(() => null);
+    if (!baseUrl) return [];
+    let res: Response;
+    try {
+      res = await this.fetchImpl(`${baseUrl}/v1/cache/stats`);
+    } catch {
+      return [];
+    }
+    if (!res.ok) return [];
+    let payload: unknown;
+    try {
+      payload = await res.json();
+    } catch {
+      return [];
+    }
+    if (!Array.isArray(payload)) return [];
+
+    const usage: EngineCacheUsage[] = [];
+    for (const entry of payload) {
+      if (!entry || typeof entry !== 'object') continue;
+      const e = entry as Record<string, unknown>;
+      const cacheId = e.cache_id;
+      const tokenCount = e.token_count;
+      const estBytes = e.est_bytes;
+      const lastUsedTs = e.last_used_ts;
+      if (typeof cacheId !== 'string' || typeof tokenCount !== 'number') continue;
+      usage.push({
+        sessionId: cacheId,
+        tokenCount,
+        estBytes: typeof estBytes === 'number' ? estBytes : tokenCount * ESTIMATED_BYTES_PER_TOKEN,
+        // Server reports as Unix seconds; convert to epoch ms for the
+        // controller's clock.
+        lastUsedAt: typeof lastUsedTs === 'number' ? Math.round(lastUsedTs * 1000) : Date.now(),
+      });
+    }
+    return usage;
+  }
+
+  async warm(sessionId: string, messages: readonly CacheWarmMessage[]): Promise<void> {
+    const baseUrl = await this.resolveBaseUrl().catch(() => null);
+    if (!baseUrl) return;
+    await this.runExclusive(`cache-warm:${sessionId}`, async () => {
+      try {
+        await this.fetchImpl(`${baseUrl}/v1/cache/warm`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            cache_id: sessionId,
+            messages: messages.map((m) => ({ role: m.role, content: m.content ?? '' })),
+          }),
+        });
+      } catch {
+        // Warming is best-effort. The next real send will prefill cold.
+      }
+    });
+  }
+
+  /**
+   * Persist every in-memory cache entry to disk without evicting them.
+   * Called by the supervisor's Stage-1 idle-freeze hook so a long
+   * idle window doesn't risk losing warm state to a SIGKILL between
+   * Stage 1 (freeze) and Stage 2 (full SIGTERM). The wrapped server
+   * handles the actual save loop via `/admin/flush`.
+   */
+  async flushAll(): Promise<void> {
+    const baseUrl = await this.resolveBaseUrl().catch(() => null);
+    if (!baseUrl) return;
+    try {
+      await this.fetchImpl(`${baseUrl}/admin/flush`, { method: 'POST' });
+    } catch {
+      // Best-effort. The server's own SIGTERM handler is the
+      // belt-and-braces fallback even if this round-trip fails.
+    }
+  }
+
+  /**
+   * Pre-warm a per-gezel prefix entry. Called fire-and-forget on session
+   * open — the first session for a given gezel pays the prefill cost
+   * once and writes the entry to disk; subsequent sessions for the same
+   * gezel inherit the warm prefix without paying again.
+   *
+   * Idempotent across a single process lifetime — repeated calls for
+   * the same prefixId are a no-op locally (the engine itself short-
+   * circuits when its own in-memory entry already matches the prompt
+   * tokens, but skipping the round-trip saves a few ms and one log
+   * line per session open).
+   */
+  async warmPrefix(prefixId: string, systemPrompt: string): Promise<void> {
+    if (this.warmedPrefixes.has(prefixId)) return;
+    const baseUrl = await this.resolveBaseUrl().catch(() => null);
+    if (!baseUrl) return;
+    await this.runExclusive(`cache-prefix:${prefixId}`, async () => {
+      if (this.warmedPrefixes.has(prefixId)) return;
+      try {
+        await this.fetchImpl(`${baseUrl}/v1/cache/warm`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            cache_id: prefixId,
+            // The "system" role gives the model the same context it'll
+            // see at chat time; we don't follow with a user message
+            // because we just want the system-prompt prefill state.
+            // mlx_vlm.apply_chat_template tolerates a system-only
+            // sequence and produces a deterministic prefix.
+            messages: [{ role: 'system', content: systemPrompt }],
+            // Critical: persist=true writes the warmed entry to disk so
+            // sibling sessions opened after this process restart still
+            // benefit. Without persist the prefix would only live in
+            // this process's memory.
+            persist: true,
+          }),
+        });
+        this.warmedPrefixes.add(prefixId);
+      } catch {
+        // Best-effort — first turn just pays cold prefill cost.
+      }
+    });
+  }
+}

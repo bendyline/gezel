@@ -1,0 +1,544 @@
+[
+  {
+    "id": "inbox-triage",
+    "name": "Inbox Triage & Reply Drafts",
+    "description": "Triage a batch of incoming emails or messages into priority buckets and draft replies for the ones that need them. Locks the triage rules and bucket taxonomy FIRST (urgent / needs-reply / FYI / archive, plus the criteria for each and a reply policy), then classifies every message deterministically against those rules, then a copywriter drafts on-voice replies only for the messages flagged needs-reply. The rules-before-triage ordering is what stops a small model from inventing ad-hoc categories and gives the reviewer something to grade. Use for inbox zero, support-queue triage, email sorting, message prioritization, and auto-drafting responses.",
+    "tags": ["email", "triage", "inbox", "automation", "comms"],
+    "triggers": [
+      "triage my inbox",
+      "sort these emails",
+      "draft replies",
+      "inbox zero",
+      "prioritize my messages"
+    ],
+    "phases": [
+      {
+        "id": "rules-scope",
+        "name": "Rules scope",
+        "role": "planner",
+        "summary": "lock the bucket taxonomy + triage rules + reply policy",
+        "prompt": "Define the triage system BEFORE touching any message. (1) Lock a small bucket taxonomy — exactly four: Urgent (needs action today), Needs-reply (a response is expected but not urgent), FYI (read-and-keep, no reply), Archive (no action). (2) Write 1-2 plain-language rules per bucket so classification is reproducible (e.g. 'Urgent = sender is a customer AND message contains a deadline within 48h OR the word \"blocked\"'). (3) Set a reply policy: which buckets get drafted (Urgent + Needs-reply), the target length (2-4 sentences), the voice, and any auto-close phrasing. (4) Decide the output schema: a markdown table with columns sender, subject, bucket, one-line reason, reply-needed (Y/N). Good looks like rules a different person could apply and reach the same buckets. Write an acceptance-criteria checklist ('every message lands in exactly one bucket', 'every Urgent/Needs-reply item has a drafted reply', 'no message is dropped', 'each classification cites the rule that fired') and the rules/schema to notes/rules-scope.md via write_task_note AND to the produces path.",
+        "produces": { "path": "notes/rules-scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "triage",
+        "name": "Triage",
+        "role": "developer",
+        "summary": "classify every message against the locked rules",
+        "prompt": "Read the message corpus (inbox export, pasted threads, or the connected mail tool). For EACH message, apply the locked rules and record: sender, subject/snippet, the assigned bucket, a one-line reason that names the rule that fired, and reply-needed Y/N. Process every message — do not sample or skip. Keep classification mechanical: when two rules could fire, the highest-severity bucket wins (Urgent > Needs-reply > FYI > Archive). Write the full classification table to notes/triage.md via write_task_note. Stage it incrementally so progress is observable, and end with a count line (N messages, M urgent, K needs-reply).",
+        "produces": { "path": "notes/triage.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "draft",
+        "name": "Draft replies",
+        "role": "copywriter",
+        "summary": "write on-voice replies for the flagged messages",
+        "prompt": "Write a reply for EVERY message flagged reply-needed=Y in the triage table — and only those. Each draft: a clear subject (Re: …), a greeting, 2-4 sentences that directly answer or acknowledge the message and state the next step, and an on-voice sign-off matching the locked reply policy. Do not invent facts, commitments, or dates not present in the source thread; where information is missing, write a placeholder in [brackets] the user can fill. Assemble all drafts into a single drafts.md, one section per message keyed by sender + subject, with the original snippet quoted above each draft for context. On a loop-back, fix only the replies the reviewer flagged. Write the path and a count (drafts written vs replies needed) to notes via write_task_note.",
+        "produces": { "path": "drafts.md", "kind": "markdown-doc" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "QA the triage and drafts against the locked criteria. (1) Open notes/triage.md and confirm every message in the corpus appears exactly once — count rows vs source messages; FAIL on any drop or duplicate. (2) Spot-check 3-4 classifications against the rules: does the cited rule actually fire for that message? (3) Open drafts.md and confirm there is a draft for every reply-needed=Y row and none for the others. (4) Read 2-3 drafts: do they answer the actual message, stay on-voice, invent no facts/dates, and bracket missing info rather than fabricating it? (5) Confirm bucket precedence was applied (no message double-bucketed). Write PASS/FAIL with the specific failing items per criterion.",
+      "loopBackTo": "draft",
+      "deliverable": { "path": "drafts.md", "kind": "markdown-doc" }
+    }
+  },
+  {
+    "id": "status-report",
+    "name": "Recurring Status Report",
+    "description": "Produce a recurring (weekly/biweekly) status report by gathering signals from the team's tools and writing a tight, skimmable update for stakeholders. Scopes the report template and the exact data sources FIRST (sections, audience, reporting window, RAG/health convention), then a developer gathers the raw signals from issue trackers, PRs, metrics, and notes into a facts file, then a copywriter writes the polished report strictly from those gathered facts. Scoping the template before gathering is what keeps every recurring issue consistent and prevents the model from padding with prose. Use for weekly status updates, sprint reports, project health reports, stakeholder updates, and exec summaries.",
+    "tags": ["status", "report", "reporting", "weekly", "comms"],
+    "triggers": [
+      "weekly status report",
+      "project update",
+      "sprint report",
+      "status update",
+      "stakeholder report"
+    ],
+    "phases": [
+      {
+        "id": "scope",
+        "name": "Scope the report",
+        "role": "planner",
+        "summary": "lock the template, sources, window, and health convention",
+        "prompt": "Define the report contract BEFORE gathering anything. (1) Lock the section template — e.g. Headline / Health (RAG: Green-Amber-Red with the rule for each color) / Shipped this period / In progress / Blockers & risks / Next period / Metrics. (2) Name the EXACT data sources for each section (which repo, which board, which metric dashboard, which notes file) so gathering is unambiguous. (3) Set the reporting window (the date range this issue covers) and the audience (exec vs team — drives length and jargon). (4) Set length targets per section (e.g. Blockers ≤ 3 bullets). Write an acceptance-criteria checklist ('every section from the template is present', 'health has a justifying one-liner', 'every claim traces to a gathered fact', 'covers only the reporting window', 'skimmable in under two minutes') plus the template + source map to notes/scope.md via write_task_note AND the produces path.",
+        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "gather",
+        "name": "Gather signals",
+        "role": "developer",
+        "summary": "pull raw facts from each named source into a facts file",
+        "prompt": "Collect the raw material for each section from the sources named in scope. For each source pull the items inside the reporting window only: merged PRs / closed issues (shipped), open in-progress items, anything labelled blocked or at-risk, and the current value (and prior value if available) for each tracked metric. Record everything as a flat, attributed list in notes/gather.md — one bullet per fact, each tagged with its source and the template section it feeds — NOT prose. Do not editorialize or summarize here; capturing accurate raw facts is the whole job. If a source is empty or unreachable, note that explicitly rather than guessing. Write the facts file via write_task_note and end with a per-section fact count.",
+        "produces": { "path": "notes/gather.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "write",
+        "name": "Write the report",
+        "role": "copywriter",
+        "summary": "compose the polished report from gathered facts",
+        "prompt": "Write report.md following the locked template exactly, using ONLY facts from notes/gather.md. Lead with a one-sentence headline and the health RAG plus its justifying one-liner. Turn the gathered bullets into tight, scannable prose — short bullets over paragraphs, numbers where they exist, and a stated next step for every blocker. Respect the per-section length caps; cut, don't pad. Every claim must trace to a gathered fact — invent nothing. End with the Next-period section as concrete intended outcomes. On a loop-back, fix only the sections the reviewer flagged. Write the report path and a confirmation that all template sections are present to notes via write_task_note.",
+        "produces": { "path": "report.md", "kind": "markdown-doc" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "QA report.md against the locked criteria. (1) Confirm every template section from notes/scope.md is present and in order; FAIL on any missing section. (2) Confirm the health RAG has a justifying one-liner consistent with the gathered blockers/metrics. (3) Trace 4-5 specific claims back to notes/gather.md; FAIL any claim with no supporting fact. (4) Check the window: nothing reported outside the locked date range. (5) Check skimmability and length caps — short bullets, no padding, readable in under two minutes. Write PASS/FAIL per criterion with the specific offending lines.",
+      "loopBackTo": "write",
+      "deliverable": { "path": "report.md", "kind": "markdown-doc" }
+    }
+  },
+  {
+    "id": "standup-summary",
+    "name": "Standup / Team Update Summary",
+    "description": "Condense a pile of raw team updates (standup messages, async check-ins, channel dumps) into one clean summary grouped by person or workstream, surfacing blockers and decisions. Scopes the grouping axis and summary shape FIRST (by-person vs by-project, what counts as a blocker, the yesterday/today/blockers frame), then a copywriter compresses every raw update into that frame without dropping anyone. The scope-first step prevents a 4B model from rambling and guarantees blockers get their own callout section instead of being buried. Use for daily standup summaries, async update rollups, team check-in digests, and turning Slack threads into a readable recap.",
+    "tags": ["standup", "summary", "team", "async", "comms"],
+    "triggers": [
+      "summarize standup",
+      "team update summary",
+      "async check-in rollup",
+      "standup recap",
+      "summarize these updates"
+    ],
+    "phases": [
+      {
+        "id": "scope",
+        "name": "Scope the summary",
+        "role": "planner",
+        "summary": "lock the grouping axis, frame, and blocker definition",
+        "prompt": "Decide the summary's shape before compressing anything. (1) Pick the grouping axis — by person or by workstream/project — based on the raw input. (2) Lock the per-item frame (default: Yesterday / Today / Blockers, or Done / Doing / Blocked). (3) Define what counts as a blocker (an explicit ask, a dependency on someone, the words blocked/stuck/waiting) so blockers can be lifted into a dedicated top section. (4) Decide a Decisions callout if the updates contain any. Write an acceptance-criteria checklist ('every contributor/workstream from the input appears', 'each item uses the locked frame', 'all blockers are also collected into one top Blockers section', 'no raw update is dropped', 'one line per update item') plus the grouping + frame to notes/scope.md via write_task_note AND the produces path. No summarizing yet.",
+        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "summarize",
+        "name": "Summarize",
+        "role": "copywriter",
+        "summary": "compress every update into the locked frame",
+        "prompt": "Write summary.md from the raw updates using the locked grouping and frame. (1) Open with a 'Blockers & asks' section that lifts EVERY blocker (per the locked definition) to the top, each tagged with who is blocked and who they need. (2) Then one block per person/workstream in the locked frame, one tight line per item — strip filler, keep the signal (what shipped, what's next, hard numbers). (3) Add a Decisions section only if the input contains decisions. Include every contributor from the input even if their update was thin (write '(no update)'). Invent nothing; if an item is ambiguous, keep it verbatim-ish rather than guessing. On a loop-back, fix only the flagged blocks. Write the path and a count (contributors covered, blockers surfaced) to notes via write_task_note.",
+        "produces": { "path": "summary.md", "kind": "markdown-doc" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "QA summary.md against the locked criteria. (1) Cross-check the contributor/workstream list against the raw input — every one present? FAIL on any drop. (2) Confirm a top Blockers section exists and that every blocker matching the locked definition appears there, attributed. (3) Confirm each item uses the locked frame and is one tight line (no paragraphs). (4) Spot-check 3 items against the raw input for accuracy and no fabrication. (5) Confirm Decisions appears iff the input had decisions. Write PASS/FAIL per criterion with the specific gaps.",
+      "loopBackTo": "summarize",
+      "deliverable": { "path": "summary.md", "kind": "markdown-doc" }
+    }
+  },
+  {
+    "id": "calendar-brief",
+    "name": "Daily Calendar & Prep Brief",
+    "description": "Assemble a morning brief from the day's calendar: a chronological agenda with per-meeting prep notes, conflicts flagged, and a short focus-time/priorities summary. Scopes the brief layout and prep rules FIRST (which meetings need prep, what prep means, how to flag conflicts and back-to-backs), then a developer pulls the day's events and assembles the brief deterministically against those rules. The scope-first ordering ensures the brief always flags double-bookings and attaches the right context (attendees, agenda, links) instead of just dumping a raw event list. Use for daily agenda briefs, meeting prep, morning planning, schedule rundowns, and turning a calendar into an actionable day plan.",
+    "tags": ["calendar", "brief", "agenda", "planning", "comms"],
+    "triggers": [
+      "daily brief",
+      "what's on my calendar",
+      "meeting prep",
+      "morning agenda",
+      "today's schedule"
+    ],
+    "phases": [
+      {
+        "id": "scope",
+        "name": "Scope the brief",
+        "role": "planner",
+        "summary": "lock the layout, prep rules, and conflict flags",
+        "prompt": "Define the brief format before pulling events. (1) Lock the layout — At-a-glance (count of meetings, total meeting hours, first/last event), Agenda (chronological, with time, title, attendees, location/link), Prep (per-meeting context), Conflicts & gaps, Focus/priorities. (2) Set the prep rule: which meetings get prep notes (e.g. external attendees, no agenda attached, or >30 min) and what a prep note contains (purpose in one line, attendees, the doc/link, one suggested talking point). (3) Define conflict detection: overlapping events flagged RED, three+ back-to-backs flagged as a fatigue risk, and gaps ≥ 60 min surfaced as focus blocks. (4) Set the day/timezone. Write an acceptance-criteria checklist ('every event for the day appears in time order', 'overlaps are flagged', 'every meeting meeting the prep rule has a prep note', 'focus gaps surfaced', 'at-a-glance totals are correct') plus the layout + rules to notes/scope.md via write_task_note AND the produces path.",
+        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "assemble",
+        "name": "Assemble the brief",
+        "role": "developer",
+        "summary": "pull the day's events and build the brief to the rules",
+        "prompt": "Build brief.md for the target day using the locked layout and rules. (1) Pull the day's events (from the connected calendar tool or a pasted agenda); sort strictly by start time. (2) Compute the at-a-glance totals (meeting count, summed meeting hours, first start, last end). (3) Render the chronological agenda with time range, title, attendees, and location/link per event. (4) For each event meeting the prep rule, write its prep note (purpose, attendees, link, one talking point) — invent no facts; bracket anything the calendar doesn't provide. (5) Scan for overlaps (flag RED), 3+ back-to-backs (fatigue note), and ≥60-min gaps (focus blocks) and list them in Conflicts & gaps. (6) Close with a 3-item priorities line. On a loop-back fix only the flagged parts. Write the brief via write_task_note and the path + event count to notes.",
+        "produces": { "path": "brief.md", "kind": "markdown-doc" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "QA brief.md against the locked criteria. (1) Confirm every event for the day is present and strictly time-ordered; FAIL on any missing or out-of-order event. (2) Recompute the at-a-glance totals from the agenda and confirm they match. (3) Confirm every meeting matching the prep rule has a prep note with the required fields, and that no facts were invented (placeholders bracketed). (4) Verify conflict detection: any two overlapping events flagged, back-to-back runs noted, ≥60-min gaps surfaced as focus blocks. (5) Confirm the priorities line is present. Write PASS/FAIL per criterion with specifics.",
+      "loopBackTo": "assemble",
+      "deliverable": { "path": "brief.md", "kind": "markdown-doc" }
+    }
+  },
+  {
+    "id": "alert-rules",
+    "name": "Monitoring Alert Rules",
+    "description": "Author a set of monitoring/alerting rules as a deployable config (Prometheus alerting rules, Grafana/Alertmanager YAML, or a CloudWatch-style spec): the right signals, thresholds, severities, for-durations, and routing labels. Scopes the SLOs and alert philosophy FIRST (what to alert on, symptom-vs-cause, thresholds and burn windows, severity ladder, noise budget), then a developer writes the rules config to that spec, then a reviewer validates for completeness, dedupe, and anti-flapping. Scoping thresholds and severities before writing YAML is what produces actionable, low-noise alerts instead of a wall of CPU-over-80% pages. Use for alerting rules, Prometheus alerts, SLO monitoring, on-call paging rules, and reducing alert fatigue.",
+    "tags": ["monitoring", "alerting", "ops", "yaml", "sre"],
+    "triggers": [
+      "write alert rules",
+      "prometheus alerts",
+      "monitoring rules",
+      "set up alerting",
+      "SLO alerts"
+    ],
+    "phases": [
+      {
+        "id": "scope",
+        "name": "Scope the alerts",
+        "role": "planner",
+        "summary": "lock signals, thresholds, severities, and routing",
+        "prompt": "Define the alerting philosophy before writing config. (1) List the services/SLOs to cover and, for each, the symptom-level signals that matter (latency p99, error rate, saturation, availability) — prefer alerting on user-facing symptoms over raw causes. (2) For every signal lock a threshold, an evaluation/for-duration (to suppress transient spikes), and a severity from a fixed ladder (page = wake someone, ticket = next business day, info = dashboard-only). (3) Define routing labels (team/service/severity) and which severities page. (4) State a noise budget (e.g. no more than N page-level rules) and require a runbook link annotation on every page-level alert. (5) Pick the output format (Prometheus alerting-rules YAML by default). Write an acceptance-criteria checklist ('every SLO has at least one symptom alert', 'every alert has expr + for + severity + summary + runbook annotation', 'no duplicate/overlapping alerts', 'page-level alerts within the noise budget', 'config is valid YAML for the target system') plus the table of signals/thresholds to notes/scope.md via write_task_note AND the produces path. No YAML yet.",
+        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "build",
+        "name": "Build the rules",
+        "role": "developer",
+        "summary": "write the alerting-rules config to the locked spec",
+        "prompt": "Write alerts.yaml as a valid alerting-rules config for the target system using the locked signals. For EACH alert author: a clear alert name, the metric expression (expr) implementing the threshold, a for: duration (non-zero, to suppress flapping), labels (severity + routing), and annotations (a one-line summary with templated context, a description, and a runbook_url for page-level alerts). Group related alerts. Keep thresholds and for-durations exactly as scoped. Ensure the file parses as YAML and matches the target's schema (e.g. groups[].rules[].alert/expr/for/labels/annotations for Prometheus). Cover every scoped SLO with at least one symptom-level alert, add no alerts that weren't scoped, avoid duplicate/overlapping rules, and do not exceed the page-level noise budget. On a loop-back fix only the flagged rules. Write the path and an alert count (by severity) to notes via write_task_note.",
+        "produces": { "path": "alerts.yaml", "kind": "yaml-spec" }
+      }
+    ],
+    "evaluate": {
+      "role": "reviewer",
+      "prompt": "Validate alerts.yaml against every locked criterion. (1) Parse the YAML — invalid YAML or non-conformance to the target system's rule schema (e.g. groups[].rules[]) is an immediate FAIL. (2) Confirm every scoped SLO is covered by at least one symptom-level alert; FAIL on any missing SLO. (3) Check each alert carries expr, a non-zero for: duration, a severity from the ladder, routing labels, a summary, and — for page-level alerts — a runbook_url annotation. (4) Scan for duplicate or overlapping rules (two firing on the same condition) and flag them. (5) Confirm page-level alerts stay within the noise budget, and sanity-check 2-3 thresholds and for-durations against the scope. Write PASS/FAIL per criterion with the specific offending rule names.",
+      "loopBackTo": "build",
+      "deliverable": { "path": "alerts.yaml", "kind": "yaml-spec" }
+    }
+  },
+  {
+    "id": "notification-router",
+    "name": "Notification Router",
+    "description": "Build an event-to-channel notification router: a small module that takes incoming events and routes each to the right destination (Slack channel, email, PagerDuty, webhook) based on type, severity, and quiet-hours rules — with dedupe, throttling, and a fallback channel. Scopes the routing matrix and policy FIRST (event taxonomy, channel map, severity→destination rules, dedupe key, rate limits, fallback), then a developer implements the router module to that matrix, then writes tests covering each routing branch. Scoping the matrix before coding is what guarantees every event type has a defined destination and that critical events can never be silently dropped. Use for notification routing, alert fan-out, event dispatch, webhook routing, and on-call/Slack notification systems.",
+    "tags": ["notifications", "routing", "events", "code", "ops"],
+    "triggers": [
+      "notification router",
+      "route events to channels",
+      "alert fan-out",
+      "event dispatch",
+      "send notifications to slack"
+    ],
+    "phases": [
+      {
+        "id": "scope",
+        "name": "Scope the router",
+        "role": "planner",
+        "summary": "lock the routing matrix, dedupe, throttle, and fallback",
+        "prompt": "Define the routing contract before coding. (1) Enumerate the event taxonomy (the event types/shapes the router accepts) and the available destination channels. (2) Build the routing matrix: for each (event type × severity) pair, the destination channel(s) — make it total so no input is undefined. (3) Define the dedupe key (which fields identify a duplicate within a window) and the suppression window. (4) Set per-channel rate limits/throttling and a quiet-hours rule (and which severities override quiet hours). (5) Define a fallback channel for events that match no rule, so nothing is dropped silently, and the behavior on a destination send failure (retry/fallback). (6) Pick the language and the function signature, e.g. route(event) -> Destination[]. Write an acceptance-criteria checklist ('every (type,severity) maps to a destination', 'unmatched events hit the fallback, never dropped', 'duplicates within the window are suppressed', 'rate limits enforced', 'critical severity overrides quiet hours', 'pure routing logic is unit-testable without live channels') plus the matrix to notes/scope.md via write_task_note AND the produces path.",
+        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "build",
+        "name": "Build the router",
+        "role": "developer",
+        "summary": "implement the router module to the matrix",
+        "prompt": "Implement the router as a single module (e.g. router.ts/router.py) realizing the locked matrix. Separate PURE routing logic — route(event) returning the destination list — from any side-effecting send, so routing is testable in isolation. Implement: matrix lookup with the fallback for unmatched events, dedupe via the locked key + window (an in-memory recent-key set is fine), per-channel throttling, and the quiet-hours rule with the critical-severity override. Validate/normalize inbound events and reject malformed ones explicitly. Never let an event with no matching rule vanish — it goes to fallback. Add brief doc comments mapping code back to matrix rows. On a loop-back fix only the flagged behavior. Write the module path and the implemented signature to notes via write_task_note.",
+        "produces": { "path": "router.ts", "kind": "code-module" }
+      },
+      {
+        "id": "test",
+        "name": "Test the router",
+        "role": "developer",
+        "summary": "cover every routing branch with assertions",
+        "prompt": "Write router.test.ts exercising the router's pure logic. Cover, with explicit assertions: (1) a representative event for each (type,severity) row resolves to the matrix's destination; (2) an unmatched event routes to the fallback and is NOT dropped; (3) a duplicate within the window is suppressed and the same key after the window is allowed; (4) throttling blocks the N+1th send to a channel in the window; (5) a critical event during quiet hours still routes, a non-critical one is held; (6) a malformed event is rejected. Use the test runner's describe/it/expect (or equivalent assert). Tests must run without live channels. On a loop-back add the missing cases. Write the test path and the branch-coverage list to notes via write_task_note.",
+        "produces": { "path": "router.test.ts", "kind": "code-with-tests" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "QA the router against the locked criteria. (1) Run the test suite (or trace it) — every test must pass; a failing/empty suite is FAIL. (2) Confirm tests exist for each matrix row, the fallback path, dedupe (hit and post-window allow), throttling, the quiet-hours + critical-override behavior, and malformed-event rejection. (3) Read router.ts: is routing pure and side-effect-free, is the matrix total, can an unmatched event ever be silently dropped (must be NO)? (4) Spot-check 2 matrix rows in code against notes/scope.md. Write PASS/FAIL per criterion with the gaps.",
+      "loopBackTo": "build",
+      "deliverable": { "path": "router.test.ts", "kind": "code-with-tests" }
+    }
+  },
+  {
+    "id": "meeting-notes-to-actions",
+    "name": "Meeting Notes to Action Items",
+    "description": "Convert raw meeting notes or a transcript into a clean, assigned action-item list with owners, due dates, and the decisions that drove them. Extracts the actions and decisions FIRST (every commitment, ask, and decision lifted verbatim-ish into a structured list with source quotes), then a planner assigns owners and due dates and prioritizes — separating extraction from assignment so nothing said in the meeting is lost before triage. The extract-then-assign ordering is what stops a small model from silently dropping commitments or inventing owners. Use for meeting follow-ups, action-item extraction, turning transcripts into to-dos, decision logs, and post-meeting recaps.",
+    "tags": ["meeting", "actions", "tasks", "transcript", "comms"],
+    "triggers": [
+      "meeting notes to action items",
+      "extract action items",
+      "meeting follow-up",
+      "turn transcript into tasks",
+      "post-meeting recap"
+    ],
+    "phases": [
+      {
+        "id": "extract",
+        "name": "Extract actions & decisions",
+        "role": "developer",
+        "summary": "lift every commitment, ask, and decision with source quotes",
+        "prompt": "Read the meeting notes/transcript end to end and extract — do not yet assign or prioritize. (1) Pull EVERY action item: anything phrased as a commitment, follow-up, ask, or 'someone should…'. For each, capture the action verbatim-ish, any owner/date mentioned, and the source quote it came from. (2) Pull every DECISION (a choice the group landed on) and every OPEN QUESTION left unresolved, each with its source quote. (3) Lock the output schema for the next phase: action | owner | due | priority | source-quote. Be exhaustive — recall matters more than precision here; a borderline item is kept, not dropped. Write an acceptance-criteria checklist ('every commitment in the notes is captured', 'each action cites a source quote', 'decisions and open questions separated from actions', 'no owner/date invented beyond what the notes state') plus the raw extracted lists to notes/extract.md via write_task_note AND the produces path.",
+        "produces": { "path": "notes/extract.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "assign",
+        "name": "Assign & prioritize",
+        "role": "planner",
+        "summary": "set owners, due dates, and priority into the final list",
+        "prompt": "Turn the extracted items into actions.md, the deliverable. (1) Render a table: Action | Owner | Due | Priority | Source. (2) Assign the owner stated in the notes; where the notes name no owner, write 'UNASSIGNED — [proposed: name]' rather than guessing silently. (3) Set due dates from the notes; where none exists, leave 'TBD' (do not fabricate dates). (4) Assign priority (P1/P2/P3) using a stated, simple rule (P1 = explicit deadline or blocker, else P2, nice-to-haves P3) and note the rule at the top. (5) Below the table add a Decisions section and an Open questions section from the extraction. Every extracted action must appear — none dropped in triage. On a loop-back fix only the flagged rows. Write the path and a count (actions, unassigned, decisions) to notes via write_task_note.",
+        "produces": { "path": "actions.md", "kind": "markdown-doc" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "QA actions.md against the locked criteria. (1) Cross-check every action in notes/extract.md against the final table — all present? FAIL on any dropped commitment. (2) Confirm each row has a source reference and that no owner or due date was invented beyond what the notes state (unstated owners marked UNASSIGNED, unstated dates TBD). (3) Confirm Decisions and Open-questions sections exist and match the extraction. (4) Confirm the priority rule is stated and applied consistently on 2-3 rows. (5) Re-scan the original notes for any commitment the extraction missed. Write PASS/FAIL per criterion with the specific items.",
+      "loopBackTo": "assign",
+      "deliverable": { "path": "actions.md", "kind": "markdown-doc" }
+    }
+  },
+  {
+    "id": "weekly-review",
+    "name": "Personal / Team Weekly Review",
+    "description": "Assemble a reflective weekly review that pulls the week's done-list, metrics, and open loops into a structured retrospective with wins, misses, lessons, and next-week priorities. Scopes the review template and the inputs FIRST (the GTD-style sections, what data feeds each, the carry-over rule for unfinished items), then a copywriter writes the honest, concise review against that template. The scope-first ordering keeps the review consistent week over week and ensures open loops are carried forward rather than forgotten. Use for weekly reviews, personal retrospectives, GTD weekly review, end-of-week wrap-ups, and team retros.",
+    "tags": ["review", "retrospective", "weekly", "productivity", "comms"],
+    "triggers": [
+      "weekly review",
+      "personal retro",
+      "end of week wrap-up",
+      "GTD weekly review",
+      "team retrospective"
+    ],
+    "phases": [
+      {
+        "id": "scope",
+        "name": "Scope the review",
+        "role": "planner",
+        "summary": "lock the template, inputs, and carry-over rule",
+        "prompt": "Define the review structure before writing. (1) Lock the section template — This week's wins / Misses & what slipped / Metrics & progress / Lessons learned / Open loops carried forward / Next week's top 3 priorities. (2) Name the inputs feeding each section (completed tasks, the prior review's priorities, tracked metrics, notes/journal). (3) Lock the carry-over rule: every item that was a priority last week and is still open MUST appear in Open loops and be explicitly resolved or re-prioritized — nothing silently dropped. (4) Set tone (honest, concise, first-person or team) and the reporting week. Write an acceptance-criteria checklist ('every template section present', 'wins and misses both populated honestly', 'last week\\'s open priorities each accounted for', 'next week is exactly three concrete priorities', 'grounded in real inputs, not generic') plus the template + input map to notes/scope.md via write_task_note AND the produces path.",
+        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "assemble",
+        "name": "Assemble the review",
+        "role": "copywriter",
+        "summary": "write the honest, grounded review to the template",
+        "prompt": "Write review.md following the locked template, grounded in the named inputs. (1) Wins: specific, completed things — names and numbers, not vibes. (2) Misses & slipped: honest, with a one-line why each. (3) Metrics & progress: this-week values vs prior where available. (4) Lessons learned: 2-4 concrete takeaways tied to the wins/misses. (5) Open loops: apply the carry-over rule — list every still-open prior priority and mark it resolved, dropped (with reason), or carried. (6) Next week: EXACTLY three concrete, outcome-shaped priorities. Keep it tight and skimmable; invent no accomplishments. On a loop-back fix only the flagged sections. Write the path and a confirmation that all sections + the three priorities are present to notes via write_task_note.",
+        "produces": { "path": "review.md", "kind": "markdown-doc" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "QA review.md against the locked criteria. (1) Confirm every template section is present and in order. (2) Confirm wins and misses are both populated with specific, non-generic items grounded in the inputs. (3) Apply the carry-over check: every open priority from last week's inputs is accounted for in Open loops (resolved/dropped/carried) — FAIL on any silent drop. (4) Confirm Next week is exactly three concrete priorities. (5) Spot-check 2-3 wins/metrics against the inputs for honesty. Write PASS/FAIL per criterion with specifics.",
+      "loopBackTo": "assemble",
+      "deliverable": { "path": "review.md", "kind": "markdown-doc" }
+    }
+  },
+  {
+    "id": "escalation-playbook",
+    "name": "On-Call Escalation Playbook",
+    "description": "Author an on-call escalation playbook: the severity ladder, who-to-page-when escalation tiers with timeouts, communication cadence to stakeholders, and the step-by-step actions for each severity. Scopes the severity definitions and escalation policy FIRST (SEV levels with concrete examples, tier timeouts, roles, comms channels and cadence), then a copywriter writes the playbook in clear, do-this-now imperative steps, then a reviewer validates it for completeness and that no severity dead-ends without an escalation path. Scoping the SEV ladder and timeouts before writing prose is what makes the playbook unambiguous at 3am. Use for on-call runbooks, incident escalation policy, paging tiers, severity ladders, and SRE escalation procedures.",
+    "tags": ["oncall", "escalation", "incident", "playbook", "sre"],
+    "triggers": [
+      "escalation playbook",
+      "on-call escalation",
+      "paging tiers",
+      "severity ladder",
+      "incident escalation policy"
+    ],
+    "phases": [
+      {
+        "id": "scope",
+        "name": "Scope the policy",
+        "role": "planner",
+        "summary": "lock SEV levels, escalation tiers, timeouts, and comms",
+        "prompt": "Define the escalation policy before writing prose. (1) Lock a severity ladder (e.g. SEV1 critical/total outage, SEV2 major degradation, SEV3 minor) with a concrete example and an impact definition for each. (2) For each SEV, define the escalation tiers: who is paged first, the timeout before escalating to the next tier (e.g. 'no ack in 10 min → page secondary; 20 min → page EM'), and the final backstop. (3) Define the incident roles (Incident Commander, Comms lead, Scribe) and when each is invoked. (4) Lock the stakeholder communication cadence per SEV (channel + update frequency, e.g. SEV1 = status page + every 30 min). Write an acceptance-criteria checklist ('every SEV has impact definition + example', 'every SEV has a full escalation tier chain with timeouts ending in a backstop', 'roles defined and triggered per SEV', 'comms cadence specified per SEV', 'no SEV dead-ends without escalation') plus the ladder/tier tables to notes/scope.md via write_task_note AND the produces path. No prose playbook yet.",
+        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "write",
+        "name": "Write the playbook",
+        "role": "copywriter",
+        "summary": "write do-this-now steps for each severity",
+        "prompt": "Write playbook.md from the locked policy as a 3am-readable runbook. (1) Open with the severity ladder table (SEV, impact, example) and a one-paragraph 'how to use this'. (2) For EACH severity, write a numbered, imperative step list — Detect & declare → Assign roles → Mitigate → Escalate (with the exact tier timeouts) → Communicate (channel + cadence) → Stand down. Use second-person commands ('Page the primary on-call. If no ack in 10 minutes, page the secondary.'). (3) Include the escalation tier chain inline for each SEV with the timeouts spelled out, ending in a backstop with no dead-end (a tier that escalates to nobody). (4) Add a Communications section with templated stakeholder update snippets per SEV. (5) End with a post-incident handoff/postmortem trigger. No ambiguity, no prose digressions — every line is an action or a fact. On a loop-back fix only the flagged sections. Write the path to notes via write_task_note.",
+        "produces": { "path": "playbook.md", "kind": "markdown-doc" }
+      }
+    ],
+    "evaluate": {
+      "role": "reviewer",
+      "prompt": "Validate playbook.md against every locked criterion. (1) Confirm every SEV from the scope has impact definition, example, and its own complete imperative step list (declare → roles → mitigate → escalate → communicate → stand down). (2) Trace each SEV's escalation chain end-to-end: are the tier timeouts present and does the chain end in a backstop with no dead-end (a tier that escalates to nobody)? FAIL if any SEV dead-ends. (3) Confirm roles are defined and their trigger points stated per SEV, and the per-SEV comms cadence + channels + templated update snippets exist. (4) Read 2 step lists for ambiguity — a tired on-call must be able to follow them literally. Write PASS/FAIL per criterion with the specific gaps.",
+      "loopBackTo": "write",
+      "deliverable": { "path": "playbook.md", "kind": "markdown-doc" }
+    }
+  },
+  {
+    "id": "digest-from-feeds",
+    "name": "RSS / Feed Digest",
+    "description": "Build a recurring digest from RSS/Atom feeds or news sources: fetch the latest items in the window, dedupe and cluster by topic, then write a scannable digest with one-line takes and source links. Scopes the feed list and digest format FIRST (which feeds, the time window, topic sections, item cap, ranking signal), then a developer fetches and normalizes the feed items into a deduped item list, then a copywriter writes the curated digest from those items only. Scoping sources and the window before fetching is what keeps the digest fresh, deduped, and within length instead of an unranked firehose. Use for RSS digests, news roundups, feed summaries, content curation, and recurring reading digests.",
+    "tags": ["rss", "feeds", "digest", "news", "comms"],
+    "triggers": [
+      "rss digest",
+      "news roundup",
+      "feed summary",
+      "summarize these feeds",
+      "curated reading digest"
+    ],
+    "phases": [
+      {
+        "id": "source-scope",
+        "name": "Source scope",
+        "role": "planner",
+        "summary": "lock the feeds, window, sections, and item cap",
+        "prompt": "Define the digest contract before fetching. (1) Lock the feed/source list (the RSS/Atom URLs or named sources). (2) Set the time window (only items published within it) and the topic sections the digest groups into. (3) Set a per-section item cap and an overall cap, plus a ranking signal for which items make the cut (recency, source weight, or keyword relevance to a stated interest). (4) Define the per-item format: a tight one-line take + a source link + publish date. (5) Define the dedupe rule (same story across feeds collapses to one, by URL or title similarity). Write an acceptance-criteria checklist ('only items within the window', 'duplicates across feeds collapsed', 'each item has a working source link + date', 'per-section and overall caps respected', 'every item traces to a fetched feed item — nothing invented', 'scannable in under two minutes') plus the source list + format to notes/source-scope.md via write_task_note AND the produces path.",
+        "produces": { "path": "notes/source-scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "gather",
+        "name": "Gather feed items",
+        "role": "developer",
+        "summary": "fetch, normalize, dedupe items into an item list",
+        "prompt": "Fetch and normalize the feeds into notes/gather.md. (1) Retrieve each feed (via the fetch/web tool); parse out item title, link, publish date, and a short excerpt. (2) Drop items outside the locked window. (3) Apply the dedupe rule — collapse the same story appearing in multiple feeds to a single entry, keeping the best source link. (4) Tag each surviving item with its target section and a ranking score per the locked signal. (5) Sort within each section by the ranking signal and keep within the caps; record the dropped count. Capture this as a structured, attributed list — title, link, date, section, score — NOT prose, and verify every link is a real URL from the feed. If a feed is unreachable, note it explicitly. Write the item list via write_task_note and end with per-section counts.",
+        "produces": { "path": "notes/gather.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "write",
+        "name": "Write the digest",
+        "role": "copywriter",
+        "summary": "compose the curated digest from gathered items",
+        "prompt": "Write digest.md from notes/gather.md only. (1) Open with a one-line 'what mattered' summary of the period. (2) One section per topic in the locked order; under each, the capped items as a one-line take + linked title + date. Each take is a genuine, specific summary of the item — not a restated headline, not invented detail. (3) Respect the per-section and overall caps; if a section has no in-window items, omit it. (4) Keep the whole thing skimmable in under two minutes. Use only items present in the gather file with their real links — invent nothing. On a loop-back fix only the flagged sections. Write the path and item count to notes via write_task_note.",
+        "produces": { "path": "digest.md", "kind": "markdown-doc" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "QA digest.md against the locked criteria. (1) Confirm every item appears in notes/gather.md with a real source link and an in-window date; FAIL on any invented item or out-of-window entry. (2) Confirm duplicates across feeds were collapsed (no two entries for the same story). (3) Confirm per-section and overall caps are respected. (4) Read 3 one-line takes — are they real summaries of the linked item, not just the headline echoed, and accurate? (5) Confirm it is genuinely scannable. Write PASS/FAIL per criterion with specifics.",
+      "loopBackTo": "write",
+      "deliverable": { "path": "digest.md", "kind": "markdown-doc" }
+    }
+  },
+  {
+    "id": "crm-update-batch",
+    "sourceDiscipline": "Source discipline:\n- Extract only contacts, accounts, emails, statuses, tasks, activities, and source quotes present in the provided notes or locked schema.\n- Preserve the locked import header exactly. Do not split schema fields into extra columns such as first_name, last_name, title, old_value, or new_value; put the attribute name in `field_name` and its value in `field_value`.\n- Treat object names, field names, and picklist values as case-sensitive when the target CRM/import schema gives exact values.\n- For CSV imports, keep empty placeholders as adjacent commas so every row has the same number of cells as the header.\n- When the schema has many optional cells, draft row shapes against the header before extraction and verify the cell count on each output row.\n- When a contact lacks the match key, flag it as UNMATCHED instead of creating a placeholder email, guessed ID, or new account.\n- If the locked schema explicitly needs separate Contact, Account, Activity, or Task rows, split each seeded note into supported rows. Do not add optional object rows just to pad the batch.",
+    "disciplinePlacement": "in-description",
+    "name": "Bulk CRM Update from Notes",
+    "description": "Turn unstructured notes (call logs, meeting recaps, email threads) into a batch of structured CRM updates: per-contact field changes, activity logs, and next-step tasks as a validated import file. Scopes the CRM field schema and extraction rules FIRST (which objects/fields, allowed picklist values, the match-or-create key, required fields), then a developer extracts and maps every note into rows against that schema, then a reviewer validates the batch for schema-conformance and that no update mutates a field without evidence in the source. Scoping the schema before extraction is what makes the import load cleanly and prevents fabricated field values. Use for CRM data entry, bulk contact updates, importing notes into Salesforce/HubSpot, activity logging, and turning call notes into pipeline updates.",
+    "tags": ["crm", "data-entry", "import", "automation", "ops"],
+    "triggers": [
+      "update crm from notes",
+      "bulk crm update",
+      "import notes into salesforce",
+      "log activities to hubspot",
+      "turn call notes into crm records"
+    ],
+    "phases": [
+      {
+        "id": "scope",
+        "name": "Scope the schema",
+        "role": "planner",
+        "summary": "lock the CRM fields, picklists, match key, and rules",
+        "prompt": "Define the import contract before extracting. (1) Identify the CRM objects to touch (Contact, Account, Opportunity, Activity) and the EXACT fields per object you will update, with their types. (2) Lock allowed values for any picklist/enum field (stage, status, lead source) — extractions must map to these, never free text. (3) Define the match-or-create key (e.g. match Contact by email; if absent, flag for review rather than create blindly). (4) List required fields per row and the output format (CSV with a header, or the CRM's import schema). (5) Lock the evidence rule: every field change must be justified by a quote from the source note. Write an acceptance-criteria checklist ('every row conforms to the field schema and types', 'picklist fields use only allowed values', 'each changed field cites a source quote', 'unmatched contacts flagged not silently created', 'required fields populated', 'file parses as valid CSV/import format') plus the schema + picklists to notes/scope.md via write_task_note AND the produces path.",
+        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "build",
+        "name": "Build the batch",
+        "role": "developer",
+        "summary": "extract and map notes into schema-conformant rows",
+        "prompt": "Produce updates.csv (or the locked import format) by mapping the notes to the schema. (1) Read each note and identify the contact/account it concerns; resolve via the match key, flagging UNMATCHED in a status column rather than fabricating an ID. (2) Extract field updates ONLY where the note gives evidence; normalize every picklist value to an allowed option from scope (drop, don't invent, if no clean mapping). (3) Emit an Activity/log row per note capturing the interaction (type, date, summary) and a next-step task row if the note implies one. (4) Add a source-quote column on each row pointing at the justifying text. (5) Ensure required fields are present and the file parses cleanly (proper header, consistent column count, quoting/escaping). Touch no field the notes don't support. On a loop-back fix only the flagged rows. Write the path and row counts (updates, activities, tasks, unmatched) to notes via write_task_note.",
+        "produces": { "path": "updates.csv", "kind": "data-file" }
+      }
+    ],
+    "evaluate": {
+      "role": "reviewer",
+      "prompt": "Validate updates.csv against every locked criterion. (1) Parse the CSV — malformed structure, a missing header, or ragged rows (inconsistent column count) is an immediate FAIL. (2) Confirm every field value conforms to its type and that picklist columns contain only allowed values from notes/scope.md. (3) Confirm required fields are populated on every row and that unmatched contacts are flagged in the status column, not given fabricated IDs. (4) Trace 4-5 field changes to their source-quote column — any change with no supporting quote is a FAIL for fabrication. (5) Confirm Activity/task rows exist where the notes implied them. Write PASS/FAIL per criterion with the specific offending rows.",
+      "loopBackTo": "build",
+      "deliverable": { "path": "updates.csv", "kind": "data-file" }
+    }
+  },
+  {
+    "id": "oncall-handoff",
+    "name": "On-Call Shift Handoff",
+    "description": "Produce a clean end-of-shift on-call handoff: open incidents and their state, watch-items and known-flapping alerts, deferred actions, and anything the next on-call must do in the first hour. Scopes the handoff template and the carry-over rule FIRST (sections, what counts as an open item, the must-not-drop list), then a developer gathers the shift's signals (active incidents, recent pages, deferred follow-ups) and assembles the handoff so the incoming engineer can pick up cold. Scoping the template and carry-over rule before assembling is what guarantees no live incident or hot watch-item is dropped at the shift boundary. Use for on-call handoffs, shift handover notes, pager handoff, SRE shift change, and end-of-shift summaries.",
+    "tags": ["oncall", "handoff", "incident", "ops", "sre"],
+    "triggers": [
+      "on-call handoff",
+      "shift handover",
+      "pager handoff",
+      "end of shift summary",
+      "oncall handover notes"
+    ],
+    "phases": [
+      {
+        "id": "scope",
+        "name": "Scope the handoff",
+        "role": "planner",
+        "summary": "lock the template and the no-drop carry-over rule",
+        "prompt": "Define the handoff structure before gathering. (1) Lock the section template — Open incidents (state, severity, owner, last action, next step) / Watch items & flapping alerts / Deferred follow-ups / First-hour actions for the next on-call / Quiet-but-noteworthy. (2) Name the inputs (active incident tracker, the shift's page history, deferred TODOs, monitoring dashboard). (3) Lock the carry-over rule: any incident that is not fully resolved AND any alert that fired more than once this shift MUST appear with an explicit state — nothing dropped at the boundary. (4) Define the urgency tag set for first-hour actions. Write an acceptance-criteria checklist ('every unresolved incident listed with state + next step', 'every repeat/flapping alert surfaced', 'first-hour actions are concrete and tagged', 'next on-call can act with zero verbal context', 'nothing live dropped') plus the template + input map to notes/scope.md via write_task_note AND the produces path. No handoff doc yet.",
+        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "assemble",
+        "name": "Assemble the handoff",
+        "role": "developer",
+        "summary": "gather shift signals and build the handoff doc",
+        "prompt": "Build handoff.md for the shift using the locked template and inputs. (1) Pull active/unresolved incidents; for each write severity, current state, owner, the last action taken, and the explicit next step. (2) Pull this shift's page history; surface any alert that fired more than once as a watch/flapping item with a one-line 'why' and whether it's safe to ignore. (3) List deferred follow-ups that didn't get done. (4) Write the First-hour actions section as concrete, tagged commands ('Check the DB replica lag — it was climbing at end of shift; runbook: <link>'). (5) Apply the carry-over rule strictly — bracket anything you can't confirm rather than omitting it. The next on-call must be able to take the pager cold from this doc alone. On a loop-back fix only the flagged sections. Write the path and counts (open incidents, watch items) to notes via write_task_note.",
+        "produces": { "path": "handoff.md", "kind": "markdown-doc" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "QA handoff.md against the locked criteria. (1) Confirm every template section is present. (2) Apply the carry-over check against the inputs: every unresolved incident appears with state + next step, and every alert that fired 2+ times this shift is surfaced — FAIL on any drop. (3) Read the First-hour actions: are they concrete, tagged, and actionable with zero verbal context? (4) Spot-check 2 incident entries for an explicit next step (not just a status). (5) Confirm unconfirmed items are bracketed, not omitted. Write PASS/FAIL per criterion with the specific gaps.",
+      "loopBackTo": "assemble",
+      "deliverable": { "path": "handoff.md", "kind": "markdown-doc" }
+    }
+  },
+  {
+    "id": "incident-comms-templates",
+    "name": "Incident Communication Templates",
+    "description": "Author a reusable set of incident communication templates: status-page posts and stakeholder update messages for each phase of an incident (Investigating, Identified, Monitoring, Resolved) across severities, with fill-in variables and a cadence guide. Scopes the audiences, phases, and tone rules FIRST (who reads each channel, the phase ladder, what may and may not be said, the variable set), then a copywriter writes the on-brand templates with bracketed placeholders, then a reviewer checks coverage, tone, and that no template over-promises or leaks blame. Scoping audiences and phases before drafting is what produces calm, honest, copy-paste-ready updates instead of ad-hoc panic posts. Use for incident comms, status page templates, customer incident updates, outage communication, and stakeholder messaging during an incident.",
+    "tags": ["incident", "comms", "templates", "status-page", "ops"],
+    "triggers": [
+      "incident communication templates",
+      "status page templates",
+      "outage update messages",
+      "customer incident comms",
+      "stakeholder update templates"
+    ],
+    "phases": [
+      {
+        "id": "scope",
+        "name": "Scope the comms",
+        "role": "planner",
+        "summary": "lock audiences, phases, variables, and tone rules",
+        "prompt": "Define the comms framework before drafting. (1) Lock the audiences/channels (public status page, affected-customer email, internal stakeholders) and what level of detail each receives. (2) Lock the incident phase ladder — Investigating → Identified → Monitoring → Resolved — and which severities trigger external comms. (3) Define the tone rules: calm, factual, no speculation, no premature root-cause, no blame, acknowledge impact and give a next-update time — and a do-not-say list. (4) Define the variable set every template uses ([service], [impact], [start_time], [next_update_eta], [workaround]). (5) Set the update cadence per severity. Write an acceptance-criteria checklist ('a template exists for every (audience × phase) that applies', 'each template uses the locked variables with brackets', 'every external template states impact + a next-update time', 'tone follows the rules and the do-not-say list', 'no template asserts root cause before Identified') plus the matrix + variables + tone rules to notes/scope.md via write_task_note AND the produces path. No templates yet.",
+        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "write",
+        "name": "Write the templates",
+        "role": "copywriter",
+        "summary": "draft on-brand templates with bracketed variables",
+        "prompt": "Write templates.md covering the locked (audience × phase) matrix — a template for every applicable cell. For each cell write a ready-to-send template: a clear subject/headline, a body in the locked tone using the bracketed variables, an explicit impact statement, and a next-update time (where the phase isn't Resolved). (1) Investigating templates acknowledge the issue and impact WITHOUT asserting cause. (2) Identified templates state what's wrong in plain language and the fix direction. (3) Monitoring templates say a fix is applied and they're watching. (4) Resolved templates confirm resolution, give a brief plain-language summary, and (for stakeholders) point to a forthcoming postmortem. Group by audience, then phase; add a short cadence guide at the top. Keep every template copy-paste-ready — only the [variables] need filling. Obey the do-not-say list and never over-promise a fix time as a guarantee. On a loop-back fix only the flagged templates. Write the path and a coverage count to notes via write_task_note.",
+        "produces": { "path": "templates.md", "kind": "markdown-doc" }
+      }
+    ],
+    "evaluate": {
+      "role": "reviewer",
+      "prompt": "Validate templates.md against every locked criterion. (1) Build the (audience × phase) matrix from notes/scope.md and confirm a template exists for every applicable cell — any missing cell is FAIL. (2) Confirm each template uses the locked bracketed variables and that external templates state impact and a next-update time. (3) Read 3 templates for tone — calm, factual, no blame, no speculation — and confirm the do-not-say list isn't violated. (4) Confirm no Investigating template asserts a root cause and no template over-promises a fix time as a guarantee. (5) Confirm Resolved templates include a plain-language summary and (for stakeholders) a postmortem pointer, and that a cadence guide is present. Write PASS/FAIL per criterion with the specific templates at fault.",
+      "loopBackTo": "write",
+      "deliverable": { "path": "templates.md", "kind": "markdown-doc" }
+    }
+  },
+  {
+    "id": "broadcast-announcement",
+    "name": "Multi-Channel Broadcast Announcement",
+    "description": "Adapt a single announcement (launch, policy change, maintenance window, org news) into channel-tailored variants — email, Slack/Teams post, status-page note, and a short SMS/push — that carry one consistent core message at the right length and tone for each surface. Scopes the core message and the per-channel constraints FIRST (the single source of truth, the CTA, character/format limits and tone per channel, the must-include facts), then a copywriter writes every variant from that locked core so nothing contradicts across channels. Scoping the core before adapting is what keeps the facts, dates, and CTA identical everywhere while the voice fits each surface. Use for announcements, multi-channel comms, launch messaging, maintenance notices, and broadcasting one message everywhere.",
+    "tags": ["announcement", "broadcast", "comms", "multichannel", "messaging"],
+    "triggers": [
+      "multi-channel announcement",
+      "broadcast a message",
+      "launch announcement",
+      "maintenance notice",
+      "announce this everywhere"
+    ],
+    "phases": [
+      {
+        "id": "scope",
+        "name": "Scope the message",
+        "role": "planner",
+        "summary": "lock the core message, CTA, and per-channel constraints",
+        "prompt": "Define the announcement's single source of truth before writing variants. (1) Write the CORE message: the one thing being announced, the must-include facts (what, when/effective date, who's affected, why), and the single CTA. (2) Lock the channel list and each channel's constraints: email (subject + ~150 words, formal-friendly), Slack/Teams (~60 words, conversational, threaded details), status-page note (~40 words, neutral/factual), SMS/push (≤160 chars, urgent-but-calm, link only). (3) State the tone per channel and any compliance/do-not-say constraints. Write an acceptance-criteria checklist ('a variant exists for every channel', 'the core facts/dates/CTA are identical across all variants', 'each variant respects its length/format limit', 'each variant matches its channel tone', 'no variant contradicts another') plus the core message + per-channel constraint table to notes/scope.md via write_task_note AND the produces path. No variants yet.",
+        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "write",
+        "name": "Write the variants",
+        "role": "copywriter",
+        "summary": "adapt the core into channel-tailored variants",
+        "prompt": "Write announcement.md with one labeled section per channel, all derived from the locked core. (1) Email: a subject line plus a ~150-word body covering all must-include facts and the CTA, formal-friendly. (2) Slack/Teams: ~60 conversational words with the headline + CTA and a note that details follow. (3) Status-page: ~40 neutral, factual words stating what/when/impact. (4) SMS/push: ≤160 characters, the essential fact + CTA link, calm. Keep the facts, the effective date, and the CTA WORD-FOR-WORD consistent (where the medium allows) across every variant — only length and voice change. Stay within each length limit; count characters for SMS. Invent no facts beyond the core. On a loop-back fix only the flagged variants. Write the path and the per-channel lengths to notes via write_task_note.",
+        "produces": { "path": "announcement.md", "kind": "markdown-doc" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "QA announcement.md against the locked criteria. (1) Confirm a variant exists for every channel in scope. (2) Cross-check the core facts, the effective date, and the CTA across all variants — any contradiction or drifted date/CTA is FAIL. (3) Check each variant against its length/format limit (count the SMS characters, ~word counts for the others). (4) Read each for channel-appropriate tone. (5) Confirm no fact was invented beyond the locked core. Write PASS/FAIL per criterion with the specific variants at fault.",
+      "loopBackTo": "write",
+      "deliverable": { "path": "announcement.md", "kind": "markdown-doc" }
+    }
+  }
+]

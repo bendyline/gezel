@@ -1,0 +1,459 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  OllamaProvider,
+  type ToolCallEntry,
+  buildLoopBailMessage,
+  detectRepeatCall,
+  heuristicNumCtx,
+  stableArgsKey,
+} from './ollama.js';
+import type { TurnUsage } from './types.js';
+
+/**
+ * Build a mock `fetch` that matches URLs by substring and returns canned
+ * responses. Each URL can resolve to either a static JSON body or a
+ * ReadableStream of NDJSON chunks. Unhandled URLs reject loudly.
+ */
+function stubFetch(handlers: Record<string, () => Response | Promise<Response>>): typeof fetch {
+  return (async (input: Parameters<typeof fetch>[0]) => {
+    const url = typeof input === 'string' ? input : input.toString();
+    for (const [pattern, fn] of Object.entries(handlers)) {
+      if (url.includes(pattern)) return fn();
+    }
+    throw new Error(`[test-fetch] no handler for ${url}`);
+  }) as typeof fetch;
+}
+
+function ndjsonResponse(lines: unknown[]): Response {
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream<Uint8Array>({
+    start(ctrl) {
+      for (const line of lines) {
+        ctrl.enqueue(encoder.encode(`${JSON.stringify(line)}\n`));
+      }
+      ctrl.close();
+    },
+  });
+  return new Response(stream, {
+    status: 200,
+    headers: { 'Content-Type': 'application/x-ndjson' },
+  });
+}
+
+let originalFetch: typeof fetch;
+
+beforeEach(() => {
+  originalFetch = globalThis.fetch;
+});
+
+afterEach(() => {
+  globalThis.fetch = originalFetch;
+  vi.restoreAllMocks();
+});
+
+describe('OllamaProvider.listModels', () => {
+  it('maps /api/tags into ModelInfo[] with family-based tool support', async () => {
+    globalThis.fetch = stubFetch({
+      '/api/tags': () =>
+        new Response(
+          JSON.stringify({
+            models: [
+              { name: 'llama3.2', details: { parameter_size: '3B' } },
+              { name: 'qwen2.5:7b', details: { parameter_size: '7B' } },
+              { name: 'phi3:mini', details: { parameter_size: '3.8B' } },
+            ],
+          }),
+          { status: 200 },
+        ),
+    });
+
+    const provider = new OllamaProvider({ baseUrl: 'http://ollama.test' });
+    const models = await provider.listModels();
+    expect(models).toHaveLength(3);
+    const byId = new Map(models.map((m) => [m.id, m]));
+    expect(byId.get('llama3.2')?.supportsTools).toBe(true);
+    expect(byId.get('llama3.2')?.parameterSize).toBe('3B');
+    expect(byId.get('qwen2.5:7b')?.supportsTools).toBe(true);
+    // phi3 isn't on the tool-capable allowlist.
+    expect(byId.get('phi3:mini')?.supportsTools).toBe(false);
+  });
+});
+
+describe('OllamaProvider chat turn', () => {
+  it('streams deltas and returns the full concatenated text', async () => {
+    globalThis.fetch = stubFetch({
+      '/api/tags': () => new Response(JSON.stringify({ models: [] }), { status: 200 }),
+      '/api/chat': () =>
+        ndjsonResponse([
+          { message: { role: 'assistant', content: 'Hello' } },
+          { message: { role: 'assistant', content: ' there' } },
+          {
+            message: { role: 'assistant', content: '!' },
+            done: true,
+            prompt_eval_count: 9,
+            eval_count: 3,
+          },
+        ]),
+    });
+
+    const provider = new OllamaProvider({ baseUrl: 'http://ollama.test' });
+    const session = await provider.createSession({
+      systemMessage: 'You are a test.',
+      model: 'llama3.2',
+    });
+    const deltas: string[] = [];
+    session.onDelta((c) => deltas.push(c));
+    const usage: Array<{ inputTokens: number; outputTokens: number }> = [];
+    session.onUsage((u) =>
+      usage.push({ inputTokens: u.inputTokens, outputTokens: u.outputTokens }),
+    );
+
+    const reply = await session.sendAndWait('hi');
+    expect(reply).toBe('Hello there!');
+    expect(deltas).toEqual(['Hello', ' there', '!']);
+    expect(usage).toEqual([{ inputTokens: 9, outputTokens: 3 }]);
+  });
+
+  it('populates TurnUsage.contextUtilization with prompt_eval_count vs num_ctx', async () => {
+    globalThis.fetch = stubFetch({
+      '/api/tags': () => new Response(JSON.stringify({ models: [] }), { status: 200 }),
+      '/api/chat': () =>
+        ndjsonResponse([
+          {
+            message: { role: 'assistant', content: 'ok' },
+            done: true,
+            prompt_eval_count: 1234,
+            eval_count: 5,
+          },
+        ]),
+    });
+
+    const provider = new OllamaProvider({ baseUrl: 'http://ollama.test' });
+    const session = await provider.createSession({
+      systemMessage: 'sys',
+      model: 'llama3.2',
+      numCtx: 4096,
+    });
+    const usage: TurnUsage[] = [];
+    session.onUsage((u) => usage.push(u));
+
+    await session.sendAndWait('hi');
+    expect(usage).toHaveLength(1);
+    expect(usage[0]?.contextUtilization).toEqual({ used: 1234, limit: 4096 });
+  });
+
+  it('logs a truncation-likely warning when prompt_eval_count ≥ 95% of num_ctx', async () => {
+    globalThis.fetch = stubFetch({
+      '/api/tags': () => new Response(JSON.stringify({ models: [] }), { status: 200 }),
+      '/api/chat': () =>
+        ndjsonResponse([
+          {
+            message: { role: 'assistant', content: 'ok' },
+            done: true,
+            // 3900 / 4096 ≈ 95.2% — just over the threshold.
+            prompt_eval_count: 3900,
+            eval_count: 1,
+          },
+        ]),
+    });
+
+    const warnSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    const provider = new OllamaProvider({ baseUrl: 'http://ollama.test' });
+    const session = await provider.createSession({
+      systemMessage: 'sys',
+      model: 'llama3.2',
+      numCtx: 4096,
+    });
+
+    await session.sendAndWait('hi');
+    const truncWarn = warnSpy.mock.calls.find((args) =>
+      args.some((a) => typeof a === 'string' && a.includes('context truncation likely')),
+    );
+    expect(truncWarn).toBeTruthy();
+    expect(truncWarn?.[0]).toMatch(/3900\/4096/);
+  });
+
+  it('aborts the fetch when the caller-supplied signal fires', async () => {
+    // Fetch that resolves to a stream which only closes when the
+    // fetch signal fires. ollama's sendAndWait must wire the
+    // external signal into the fetch call so user-initiated cancel
+    // propagates through; without that wire the stream hangs, the
+    // reader loop never exits, and the test trips the 5s timeout.
+    globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.includes('/api/tags')) {
+        return new Response(JSON.stringify({ models: [] }), { status: 200 });
+      }
+      let streamCtrl: ReadableStreamDefaultController<Uint8Array> | undefined;
+      const stream = new ReadableStream<Uint8Array>({
+        start(c) {
+          streamCtrl = c;
+        },
+      });
+      const abortStream = () => {
+        streamCtrl?.error(new DOMException('aborted', 'AbortError'));
+      };
+      if (init?.signal) {
+        if (init.signal.aborted) abortStream();
+        else init.signal.addEventListener('abort', abortStream, { once: true });
+      }
+      return new Response(stream, { status: 200 });
+    }) as typeof fetch;
+
+    const provider = new OllamaProvider({ baseUrl: 'http://ollama.test' });
+    const session = await provider.createSession({
+      systemMessage: 'You are a test.',
+      model: 'llama3.2',
+    });
+
+    const ctrl = new AbortController();
+    const pending = session.sendAndWait('hi', {
+      queue: { lane: 'interactive', signal: ctrl.signal },
+    });
+    // Let the fetch start + stream reader attach before aborting.
+    await new Promise<void>((r) => setTimeout(r, 10));
+    ctrl.abort();
+    await expect(pending).rejects.toThrow(/turn cancelled by caller/);
+  });
+});
+
+describe('OllamaSession num_ctx wiring', () => {
+  it('sends the caller-supplied num_ctx via options.num_ctx', async () => {
+    const chatBodies: unknown[] = [];
+    globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.includes('/api/tags')) {
+        return new Response(JSON.stringify({ models: [] }), { status: 200 });
+      }
+      if (url.includes('/api/chat')) {
+        if (init?.body) chatBodies.push(JSON.parse(init.body as string));
+        return ndjsonResponse([{ message: { role: 'assistant', content: 'ok' }, done: true }]);
+      }
+      throw new Error(`[test-fetch] no handler for ${url}`);
+    }) as typeof fetch;
+
+    const provider = new OllamaProvider({ baseUrl: 'http://ollama.test' });
+    const session = await provider.createSession({
+      systemMessage: 'SYS',
+      model: 'llama3.2',
+      numCtx: 16384,
+    });
+    await session.sendAndWait('hi');
+
+    expect(chatBodies).toHaveLength(1);
+    const body = chatBodies[0] as { options?: Record<string, number> };
+    expect(body.options?.num_ctx).toBe(16384);
+  });
+
+  it('falls back to the parameter-size heuristic when num_ctx is not pinned', async () => {
+    const chatBodies: unknown[] = [];
+    globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.includes('/api/tags')) {
+        return new Response(
+          JSON.stringify({
+            models: [{ name: 'tiny-model', details: { parameter_size: '3B' } }],
+          }),
+          { status: 200 },
+        );
+      }
+      if (url.includes('/api/chat')) {
+        if (init?.body) chatBodies.push(JSON.parse(init.body as string));
+        return ndjsonResponse([{ message: { role: 'assistant', content: 'ok' }, done: true }]);
+      }
+      throw new Error(`[test-fetch] no handler for ${url}`);
+    }) as typeof fetch;
+
+    const provider = new OllamaProvider({ baseUrl: 'http://ollama.test' });
+    const session = await provider.createSession({
+      systemMessage: 'SYS',
+      model: 'tiny-model',
+    });
+    await session.sendAndWait('hi');
+
+    const body = chatBodies[0] as { options?: Record<string, number> };
+    expect(body.options?.num_ctx).toBe(16384);
+  });
+});
+
+describe('heuristicNumCtx', () => {
+  it('maps parameter-size strings onto tiered defaults', () => {
+    expect(heuristicNumCtx(undefined)).toBe(32768);
+    expect(heuristicNumCtx('1B')).toBe(16384);
+    expect(heuristicNumCtx('3B')).toBe(16384);
+    expect(heuristicNumCtx('7B')).toBe(32768);
+    expect(heuristicNumCtx('13B')).toBe(32768);
+    expect(heuristicNumCtx('30B')).toBe(65536);
+    expect(heuristicNumCtx('70B')).toBe(65536);
+  });
+});
+
+describe('OllamaSession priorMessages seeding', () => {
+  it('passes the seeded transcript + new user message to /api/chat', async () => {
+    const chatBodies: unknown[] = [];
+    globalThis.fetch = stubFetch({
+      '/api/tags': () => new Response(JSON.stringify({ models: [] }), { status: 200 }),
+      '/api/chat': async () =>
+        ndjsonResponse([{ message: { role: 'assistant', content: 'ok' }, done: true }]),
+    });
+    // Spy on fetch to inspect the body of /api/chat calls.
+    const originalStub = globalThis.fetch;
+    globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.includes('/api/chat') && init?.body) {
+        chatBodies.push(JSON.parse(init.body as string));
+      }
+      return originalStub(input, init);
+    }) as typeof fetch;
+
+    const provider = new OllamaProvider({ baseUrl: 'http://ollama.test' });
+    const session = await provider.createSession({
+      systemMessage: 'SYS',
+      model: 'llama3.2',
+      priorMessages: [
+        { role: 'user', content: 'earlier user turn' },
+        { role: 'assistant', content: 'earlier reply' },
+      ],
+    });
+    await session.sendAndWait('current question');
+
+    expect(chatBodies).toHaveLength(1);
+    const body = chatBodies[0] as { messages: Array<{ role: string; content: string }> };
+    expect(body.messages.map((m) => [m.role, m.content])).toEqual([
+      ['system', 'SYS'],
+      ['user', 'earlier user turn'],
+      ['assistant', 'earlier reply'],
+      ['user', 'current question'],
+    ]);
+  });
+});
+
+describe('ollama tool-loop bail', () => {
+  const entry = (name: string, args: unknown): ToolCallEntry => ({
+    name,
+    argsKey: stableArgsKey(args),
+    argsRaw: args,
+  });
+
+  it('detectRepeatCall returns null for diverse, legitimate exploration', () => {
+    const log: ToolCallEntry[] = [
+      entry('readdir', { path: 'src' }),
+      entry('readFile', { path: 'src/a.ts' }),
+      entry('readFile', { path: 'src/b.ts' }),
+      entry('readFile', { path: 'src/c.ts' }),
+      entry('stat', { path: 'src/d.ts' }),
+    ];
+    expect(detectRepeatCall(log)).toBeNull();
+  });
+
+  it('detectRepeatCall fires when the same (name, args) pair appears 3 times in a row', () => {
+    const log: ToolCallEntry[] = [
+      entry('readdir', { path: 'src' }),
+      entry('readFile', { path: 'src/a.ts' }),
+      entry('readFile', { path: 'src/a.ts' }),
+      entry('readFile', { path: 'src/a.ts' }),
+    ];
+    const hit = detectRepeatCall(log);
+    expect(hit).not.toBeNull();
+    expect(hit?.name).toBe('readFile');
+    expect(hit?.count).toBe(3);
+  });
+
+  it('detectRepeatCall does NOT fire on spaced-out cumulative repeats', () => {
+    // Developer-style exploration pass: same ref is re-read after each
+    // state change. That's legitimate context refresh, not a stuck loop.
+    const log: ToolCallEntry[] = [
+      entry('list_artifacts', {}),
+      entry('list_tasks', {}),
+      entry('read_task_notes', { ref: 'saint-louis-trip/1' }),
+      entry('get_task', { ref: 'saint-louis-trip/2' }),
+      entry('search_memory', { query: 'saint louis' }),
+      entry('read_task_notes', { ref: 'saint-louis-trip/1' }),
+      entry('write_task_note', { text: 'breakdown' }),
+      entry('get_task', { ref: 'saint-louis-trip/1' }),
+      entry('advance_task_step', { ref: 'saint-louis-trip/1' }),
+      entry('list_tasks', { status: 'active' }),
+      entry('ask_user_question', { question: 'what next?' }),
+      entry('advance_task_step', { ref: 'saint-louis-trip/1' }),
+      entry('ask_user_question', { question: 'what work?' }),
+      entry('read_task_notes', { ref: 'saint-louis-trip/1' }),
+    ];
+    expect(detectRepeatCall(log)).toBeNull();
+  });
+
+  it('detectRepeatCall treats different args as distinct', () => {
+    const log: ToolCallEntry[] = [
+      entry('readFile', { path: 'src/a.ts' }),
+      entry('readFile', { path: 'src/b.ts' }),
+      entry('readFile', { path: 'src/c.ts' }),
+    ];
+    expect(detectRepeatCall(log)).toBeNull();
+  });
+
+  it('detectRepeatCall fires only on the tail — prior diverse work is fine', () => {
+    // Long legitimate run, then the model falls into a spin at the end.
+    const log: ToolCallEntry[] = [
+      entry('list_tasks', {}),
+      entry('read_task_notes', { ref: 'a' }),
+      entry('readFile', { path: 'x' }),
+      entry('readdir', { path: 'y' }),
+      entry('readdir', { path: 'y' }),
+      entry('readdir', { path: 'y' }),
+    ];
+    const hit = detectRepeatCall(log);
+    expect(hit?.name).toBe('readdir');
+  });
+
+  it('buildLoopBailMessage (cap) names the reason and lists top tools in non-debug mode', () => {
+    const callLog: ToolCallEntry[] = [
+      entry('readFile', { path: 'a' }),
+      entry('readFile', { path: 'b' }),
+      entry('readdir', { path: 'src' }),
+    ];
+    const msg = buildLoopBailMessage({ reason: 'cap', callLog, debugOn: false });
+    expect(msg).toContain('96 tool-call rounds');
+    expect(msg).toContain('readFile ×2');
+    expect(msg).toContain('readdir ×1');
+    expect(msg).not.toContain('Sequence:');
+  });
+
+  it('buildLoopBailMessage (repeat) names the looped tool', () => {
+    const callLog: ToolCallEntry[] = [
+      entry('readFile', { path: 'a' }),
+      entry('readFile', { path: 'a' }),
+      entry('readFile', { path: 'a' }),
+    ];
+    const msg = buildLoopBailMessage({
+      reason: 'repeat',
+      callLog,
+      debugOn: false,
+      repeat: {
+        name: 'readFile',
+        argsKey: stableArgsKey({ path: 'a' }),
+        argsRaw: { path: 'a' },
+        count: 3,
+      },
+    });
+    expect(msg).toContain('`readFile`');
+    expect(msg).toContain('3× in a row');
+  });
+
+  it('buildLoopBailMessage in debug mode appends an ordered sequence', () => {
+    const callLog: ToolCallEntry[] = [
+      entry('readdir', { path: 'src' }),
+      entry('readFile', { path: 'src/a.ts' }),
+    ];
+    const msg = buildLoopBailMessage({ reason: 'cap', callLog, debugOn: true });
+    expect(msg).toContain('Sequence:');
+    expect(msg).toContain('1. readdir({"path":"src"})');
+    expect(msg).toContain('2. readFile({"path":"src/a.ts"})');
+  });
+
+  it('buildLoopBailMessage in debug mode clips a runaway sequence', () => {
+    const callLog: ToolCallEntry[] = Array.from({ length: 60 }, (_, i) =>
+      entry('readFile', { path: `f${i}.ts` }),
+    );
+    const msg = buildLoopBailMessage({ reason: 'cap', callLog, debugOn: true });
+    expect(msg).toContain('…(20 more)');
+  });
+});

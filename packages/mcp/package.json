@@ -1,0 +1,44 @@
+{
+  "name": "@bendyline/gezel-mcp",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Gezel MCP server — gives agents access to memory, workspace, artifacts, and tools.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "bin": {
+    "gezel-mcp": "./dist/server.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./lint-contracts": {
+      "types": "./dist/lint-contracts.d.ts",
+      "import": "./dist/lint-contracts.js"
+    },
+    "./dist/server.js": "./dist/server.js",
+    "./package.json": "./package.json"
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist .turbo",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@bendyline/gezel": "workspace:*",
+    "@bendyline/gezel-client": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "typescript": "^6.0.3",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "tsup": "^8.5.1",
+    "vitest": "^4.1.10"
+  }
+}

@@ -1,0 +1,71 @@
+{
+  "$schema": "https://biomejs.dev/schemas/1.9.4/schema.json",
+  "vcs": {
+    "enabled": false,
+    "clientKind": "git",
+    "useIgnoreFile": true
+  },
+  "files": {
+    "ignoreUnknown": true,
+    "ignore": [
+      "**/dist/**",
+      "**/dist-embedded/**",
+      "**/dist-e2e/**",
+      "**/node_modules/**",
+      "**/.cache/**",
+      "**/.turbo/**",
+      "**/out/**",
+      "**/coverage/**",
+      "**/.claude/**",
+      "**/test-results/**",
+      "**/playwright-report/**",
+      "**/ux-screenshots/**",
+      "**/.import-state/runs/**",
+      "**/.import-cache/**",
+      "evals/runs/**",
+      "reports/**",
+      "runs/**",
+      "**/.upstream/**",
+      "**/.vscode-test/**",
+      "temp/**",
+      "packages/catalog/scripts/harvested-auth/**",
+      "packages/eval-viewer/src/data/runs-index.json"
+    ]
+  },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 100,
+    "lineEnding": "lf"
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "recommended": true,
+      "style": {
+        "noNonNullAssertion": "off",
+        "useImportType": "error"
+      },
+      "suspicious": {
+        "noExplicitAny": "warn"
+      },
+      "correctness": {
+        "useExhaustiveDependencies": "warn"
+      },
+      "a11y": {
+        "noLabelWithoutControl": "off"
+      },
+      "performance": {
+        "noDelete": "off"
+      }
+    }
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "single",
+      "semicolons": "always",
+      "trailingCommas": "all"
+    }
+  }
+}

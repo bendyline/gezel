@@ -1,0 +1,405 @@
+[
+  {
+    "id": "practice-exam",
+    "name": "Practice Exam",
+    "description": "Take the exam before the exam: a timed, self-scoring practice paper blueprinted from the deck — weighted toward what the review record says is weak — with an answer key that explains, not just grades. Locks the blueprint FIRST — topic coverage, weak-spot weighting from the deck's boxes and miss counts, timing, honest scoring — then builds the interactive exam page, then writes the key. Use for practice exams, mock tests, 'test me before the test', timed practice papers, and exam-week dress rehearsals.",
+    "tags": ["study", "exam", "flashcards", "interactive", "practice"],
+    "triggers": [
+      "build me a practice exam",
+      "practice test from the deck",
+      "mock exam before the test",
+      "timed practice paper",
+      "test me before the exam"
+    ],
+    "phases": [
+      {
+        "id": "scope",
+        "name": "Blueprint the exam",
+        "role": "studiemaat",
+        "summary": "deck picture, weak-spot weighting, timing and scoring rules",
+        "prompt": "Blueprint the exam before writing a single question. Step 1: read deck.json from the workspace — every card with its front, back, box, and got-it/missed stats — and note the exam date or occasion from the owner's ask. Step 2: name the deck's topics (group the cards by theme) and the weak spots with numbers as evidence: cards sitting in box 1, and cards missed as often as they were got. Step 3: lock the blueprint — how many questions, coverage across every topic, weak material weighted roughly double, the time limit, and the scoring rule (points per question, what score means ready). Step 4: write an acceptance-criteria checklist ('every topic represented', 'weak cards get the extra weight the blueprint promises', 'every question comes from a deck card — nothing invented', 'the timer and scoring actually work', 'the key explains every answer'). Call write_task_note with the topic list + weak-spot count + checklist and write notes/scope.md.",
+        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "author",
+        "name": "Build the exam page",
+        "role": "developer",
+        "summary": "timed, self-scoring exam.html built from the deck",
+        "prompt": "Build the exam as one self-contained page at exam.html. Step 1: write the questions from the blueprint — every question grounded in a deck card (the card's fact, come at from a testing angle), weak cards weighted as the blueprint says, order shuffled so topics interleave. Step 2: make it takeable — a visible countdown timer from the blueprint's limit, one clear control per question, and a submit control that ends the attempt. Step 3: make the scoring honest — on submit, grade against the built-in key, show the score and which questions were missed, and never inflate; an exam that always says full marks is broken. Step 4: keep it one file — inline styles and script, no external requests — and check the script actually parses before completing. Call write_task_note with the question count per topic and the time limit.",
+        "produces": {
+          "path": "exam.html",
+          "kind": "html-page",
+          "minBytes": 2500,
+          "extraChecks": [
+            { "kind": "cssMinBytes", "bytes": 650, "file": "exam.html" },
+            { "kind": "jsParses", "file": "exam.html" },
+            {
+              "kind": "contains",
+              "file": "exam.html",
+              "pattern": "score|submit",
+              "flags": "i",
+              "label": "self-scoring controls"
+            }
+          ]
+        }
+      },
+      {
+        "id": "key",
+        "name": "Write the answer key",
+        "role": "copywriter",
+        "summary": "per-question explanations that teach, not just grade",
+        "prompt": "Write the answer key at notes/answer-key.md. Step 1: one entry per exam question — the right answer, then a plain-words explanation of WHY it is right, sized for someone reviewing the night before. Step 2: name which deck card each question leans on, so a missed question points straight back to the card to re-study. Step 3: for the weak-spot questions, add the one memory hook or contrast that makes the fact stick. Step 4: keep the tone encouraging — the key exists to close gaps, not to scold. Call write_task_note with the entry count and the key path.",
+        "produces": { "path": "notes/answer-key.md", "kind": "markdown-notes", "minBytes": 800 }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Open exam.html, notes/answer-key.md, and deck.json and verify every criterion from notes/scope.md: count the questions per topic against the blueprint — every topic covered and the weak material actually carrying the promised extra weight; spot-check three questions against the deck — each must trace to a real card, an invented fact is the classic failure; walk the page's logic — the timer counts down from the blueprint's limit and submit grades honestly against the key; and confirm the key explains every answer and points back to its card. Write PASS/FAIL per criterion; on any failure, name the question or topic and loop back to author.",
+      "loopBackTo": "author"
+    }
+  },
+  {
+    "id": "weak-spot-drill",
+    "name": "Weak-Spot Drill",
+    "description": "Stop practicing what you already know: read the review record, name the actual weak spots with the numbers as evidence, and build a short targeted drill plus the follow-up schedule that closes them. Locks the ranked weak list FIRST — from the deck's boxes and miss counts, not vibes — then builds the drill page around only that material, then writes the plan that says when the spot counts as closed. Use for targeted practice, 'I keep missing the same ones', closing weak spots, drilling trouble topics, and study sessions that skip what already sticks.",
+    "tags": ["study", "drill", "flashcards", "practice", "interactive"],
+    "triggers": [
+      "drill my weak spots",
+      "i keep missing the same ones",
+      "targeted practice from the results",
+      "what am i weakest on",
+      "make me a drill"
+    ],
+    "phases": [
+      {
+        "id": "scope",
+        "name": "Rank the weak spots",
+        "role": "studiemaat",
+        "summary": "weak spots named from the record, with the numbers as evidence",
+        "prompt": "Find the real weak spots before building anything. Step 1: read deck.json from the workspace — every card's box and its got-it/missed stats are the review record. Step 2: rank the weakness with evidence — cards stuck in box 1, cards missed as often as got, and the themes those cards cluster into; write each weak spot with its numbers ('irregular verbs: 5 of 6 cards in box 1, 11 misses against 4 got-its'), never a hunch. Step 3: lock the drill rules — only ranked weak material goes in, ten to fifteen items, each item coming at the card's idea from a fresh angle rather than repeating the card verbatim. Step 4: write an acceptance-criteria checklist ('every drill item traces to a ranked weak card', 'no item drills material the record says is strong', 'the drill checks answers on the spot', 'the follow-up plan says when each spot counts as closed'). Call write_task_note with the ranked list + checklist and write notes/scope.md.",
+        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "drill",
+        "name": "Build the drill",
+        "role": "developer",
+        "summary": "short interactive drill.html over only the weak material",
+        "prompt": "Build the drill as one self-contained page at drill.html. Step 1: write the items from the ranked weak spots only — a strong card in the drill is a miss against the scope; come at each weak idea from a new angle (reversed prompt, a fill-in, a which-of-these) instead of re-showing the card. Step 2: make it interactive — the taker answers item by item, gets told right or wrong on the spot with the correct answer shown, and sees a simple tally at the end. Step 3: keep the tone warm — a drill on weak material stings enough already; the feedback should coach, not scold. Step 4: one file, inline styles and script, and check the script parses before completing. Call write_task_note with the item count and which weak spots each item targets.",
+        "produces": {
+          "path": "drill.html",
+          "kind": "html-page",
+          "minBytes": 2000,
+          "extraChecks": [
+            { "kind": "cssMinBytes", "bytes": 400, "file": "drill.html" },
+            { "kind": "jsParses", "file": "drill.html" }
+          ]
+        }
+      },
+      {
+        "id": "plan",
+        "name": "Write the follow-up plan",
+        "role": "coach",
+        "summary": "the schedule that closes each weak spot",
+        "prompt": "Write the follow-up at report.md. Step 1: restate the ranked weak spots with their numbers — the report should make sense to someone who never saw the scope notes. Step 2: give the schedule — when to run the drill again, which cards to put back into review through the project's study capabilities, and the spacing between passes. Step 3: define closed — the concrete signal (a clean drill run, the cards climbing out of box 1) that says a spot no longer needs drilling. Step 4: end with one encouraging, honest line about the trend. Keep it under a page. Write report.md and call write_task_note with the report path and the next review date.",
+        "produces": { "path": "report.md", "kind": "markdown-report", "minBytes": 800 }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Open drill.html, report.md, and deck.json and verify every criterion from notes/scope.md: every drill item traces to a ranked weak card — spot-check each against the record, an item drilling strong material means the drill is padding, and a generic quiz over the whole deck is the classic failure; the drill checks answers on the spot; the report restates the weak spots with their numbers, schedules the re-runs and re-reviews, and defines when each spot counts as closed. Write PASS/FAIL per criterion; on any failure, name the item or spot and loop back to drill.",
+      "loopBackTo": "drill"
+    }
+  },
+  {
+    "id": "juice-pass",
+    "name": "Juice Pass",
+    "description": "Make the game feel alive without breaking it: feedback on every player action — hit-flash, screenshake, sound hooks, particles, score pops — added with restraint and verified playable after every change. Locks the juice checklist FIRST — every player action gets visible feedback, effects stay tasteful, nothing regresses — then edits the game in place, re-checking that it still runs and still ends. Use for 'the game feels dead', game feel passes, adding screenshake and particles, polishing an arcade game, and making hits feel like hits.",
+    "tags": ["game", "arcade", "juice", "polish", "web"],
+    "triggers": [
+      "give the game some juice",
+      "the game feels dead",
+      "add screenshake and particles",
+      "game feel pass",
+      "make the hits feel better"
+    ],
+    "phases": [
+      {
+        "id": "scope",
+        "name": "Write the juice checklist",
+        "role": "spellenmaker",
+        "summary": "every player action listed with the feedback it deserves",
+        "prompt": "Read the game before touching it. Step 1: open index.html from the workspace and trace the play loop — every player action (move, shoot, hit, get hit, pick up, score, die, restart) and what feedback each currently gives; a working game with silent, flashless actions is exactly what this pass fixes. Step 2: write the juice checklist — for each action, the visible feedback it will get (flash, shake, particle burst, score pop, easing) and the sound hook where one fits. Step 3: lock the restraint rules — effects are short and purposeful, no strobing or seizure bait, the game's readability never drops, and nothing regresses: the game must still start, play, end, and restart exactly as before. Step 4: write an acceptance-criteria checklist ('every listed action has visible feedback', 'effects restrained and readable', 'the script still parses and the loop still runs', 'game over and restart still work'). Call write_task_note with the action count + checklist and write notes/scope.md.",
+        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "implement",
+        "name": "Add the juice",
+        "role": "developer",
+        "summary": "edit the game in place, one effect at a time, never breaking it",
+        "prompt": "Work through the checklist by editing index.html in place. Step 1: add the effects one action at a time — hit-flash on damage, a brief screenshake on impacts, particles where things break or land, a score pop when points arrive, sound hooks through the page's own audio where the checklist calls for them. Step 2: after each addition, re-read the script for errors — a juicy game that no longer runs is a failed pass, and the gate will send it back. Step 3: keep the restraint rules — short effects, no strobes, the player can always read the field. Step 4: play the loop end to end in your head against the code: start, action feedback, game over, restart — confirm nothing regressed. Call write_task_note with the effects added per action.",
+        "produces": { "path": "index.html", "kind": "html-game", "minBytes": 6000 }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Open index.html beside notes/scope.md and run the feel pass: walk every action on the checklist and confirm its feedback is actually wired in the code — a checklist row with no matching effect is a miss; check the restraint rules — effect durations short, nothing strobing, the field still readable; and verify nothing regressed — the script parses, the loop runs, game over still triggers, restart still resets cleanly including the score. Write PASS/FAIL per checklist row; on any failure, name the action or the regression and loop back to implement.",
+      "loopBackTo": "implement"
+    }
+  },
+  {
+    "id": "playtest-report",
+    "name": "Playtest Report",
+    "description": "Playtest like it matters: a structured pass over the mechanics, the edge inputs, and the score loop, every finding written with its repro steps — a ranked fix list, not vibes. Locks the test plan FIRST — what to try and what correct looks like — then plays through it taking notes, then writes the findings with a ranked issue table. Use for playtesting a game before sharing it, 'is the game actually solid', bug hunts on an arcade page, pre-release game QA, and turning playtest feelings into a fix list.",
+    "tags": ["game", "playtest", "qa", "review", "report"],
+    "triggers": [
+      "playtest the game",
+      "is the game solid",
+      "test the arcade game before i share it",
+      "find the bugs in the game",
+      "playtest report"
+    ],
+    "phases": [
+      {
+        "id": "scope",
+        "name": "Write the test plan",
+        "role": "reviewer",
+        "summary": "mechanics list, edge inputs, what the score loop should do",
+        "prompt": "Plan the playtest before playing a frame. Step 1: read index.html from the workspace and list the mechanics — movement, actions, collisions, scoring, lives or health, game over, restart — and how the score is kept between rounds. Step 2: write the edge-input list — keys mashed and held, action during game over, restarting mid-motion, playing again three times in a row, anything a ten-year-old with a keyboard would do in the first minute. Step 3: state what correct looks like per item — especially the score loop: what the score should read after a restart, and what should carry over versus reset. Step 4: write an acceptance-criteria checklist ('every mechanic exercised', 'every edge input tried', 'every finding has repro steps', 'findings ranked by player impact', 'the score loop gets an explicit verdict'). Call write_task_note with the plan size + checklist and write notes/scope.md.",
+        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "test",
+        "name": "Play through the plan",
+        "role": "reviewer",
+        "summary": "structured playthrough notes, observed versus expected, with repros",
+        "prompt": "Work the plan against the code and write down what actually happens. Step 1: walk each mechanic and each edge input through the game's logic, tracing the code path the input takes; record observed versus expected for every item — passes too, not just failures. Step 2: for every mismatch, write the repro then and there: the exact steps, what happens, what should happen; a finding without a repro is a rumor. Step 3: give the score loop special care — trace a full round, game over, and restart, and record exactly what the score does at each point. Step 4: write the structured notes to notes/playtest.md and call write_task_note with the pass/fail counts.",
+        "produces": { "path": "notes/playtest.md", "kind": "markdown-notes", "minBytes": 800 }
+      },
+      {
+        "id": "report",
+        "name": "Write the findings",
+        "role": "copywriter",
+        "summary": "ranked issue table, repros attached, honest verdict",
+        "prompt": "Write the playtest report at report.md. Step 1: open with the honest one-paragraph verdict — what state the game is in and whether it is ready to share. Step 2: the issue table — a Markdown table with columns Issue, Severity, and Repro, one row per finding, ranked by player impact (what ruins a session outranks what merely looks off). Step 3: under the table, give each finding its detail — the full repro steps, what happens, what should happen, and where in the code the trail leads. Step 4: state the score-loop verdict explicitly, and close with what passed cleanly so the good news is on record too. Write report.md and call write_task_note with the finding count and the top-ranked issue.",
+        "produces": {
+          "path": "report.md",
+          "kind": "markdown-report",
+          "minBytes": 1200,
+          "extraChecks": [
+            {
+              "kind": "tableShape",
+              "file": "report.md",
+              "requiredColumns": ["Issue", "Severity"],
+              "minRows": 1
+            }
+          ]
+        }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Open report.md and notes/playtest.md against notes/scope.md and verify every criterion: every mechanic and edge input from the plan appears in the notes with observed versus expected; every finding in the report carries repro steps a stranger could follow — re-trace one against the code to check it is real, a finding that does not reproduce is worse than none; the table ranks by player impact with severities that match the prose; and the score loop has its explicit verdict. Write PASS/FAIL per criterion; on any failure, name the finding or the gap and loop back to report.",
+      "loopBackTo": "report"
+    }
+  },
+  {
+    "id": "character-sheet",
+    "name": "Character Sheet",
+    "description": "Lock a character before the pages need them: reference images across the poses and expressions the story calls for, the palette and silhouette written down, and every seed and prompt persisted in a manifest — so page twelve's hero is page one's hero. Locks the character brief FIRST — silhouette, palette, expression and pose list — then generates the reference set with its manifest, then lays the contact sheet anyone can draw from. Use for character sheets, locking a character's look, reference sets before more pages, 'keep them looking the same', and building a comic's cast bible.",
+    "tags": ["comic", "character", "reference", "images", "consistency"],
+    "triggers": [
+      "make a character sheet",
+      "lock the character's look",
+      "reference images for the character",
+      "keep them looking the same",
+      "character bible page"
+    ],
+    "phases": [
+      {
+        "id": "scope",
+        "name": "Write the character brief",
+        "role": "tekenaar",
+        "summary": "silhouette, palette, expression and pose list from the story",
+        "prompt": "Pin the character down in words before a single image. Step 1: read the story notes in the workspace and the owner's ask — who this character is, what they do in the pages, and any look already established. Step 2: write the identity spec — the silhouette in one sentence (the shape you'd know in shadow), the palette as a short list of specific colors, the two or three features that make them THEM, and what they would never look like. Step 3: list the poses and expressions the pages actually need — at least four (a neutral standing turn, an action pose, and the emotional beats the story calls for). Step 4: write an acceptance-criteria checklist ('at least four references covering the pose and expression list', 'every reference recorded in the manifest with its seed and prompt', 'palette and silhouette written on the sheet', 'the manifest lists only files that really exist'). Call write_task_note with the character name + pose list + checklist and write notes/scope.md.",
+        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "generate",
+        "name": "Generate the reference set",
+        "role": "image-generator",
+        "summary": "pose and expression references, every seed and prompt persisted",
+        "prompt": "Build the reference set under characters/<name>/ (lowercase folder named for the character). Step 1: generate each reference through the project's image capabilities — one image per pose or expression on the brief's list, at least four, every one honoring the identity spec (silhouette, palette, signature features), saved as characters/<name>/ref-<pose>.png. Step 2: persist the manifest at characters/<name>/sheet.json as a top-level JSON array with EXACTLY one record per reference and exactly these fields: \"pose\" (which pose or expression it is), \"file\" (the workspace-relative path, e.g. characters/pip/ref-sit.png), \"seed\" (the seed that made it), and \"prompt\" (the full prompt used). The seeds and prompts ARE the character's reproducibility — a reference without them cannot be drawn again. Step 3: re-list the folder and check the manifest against it — every file listed exists, every image generated is listed. Call write_task_note with the reference count and the manifest path.",
+        "produces": null
+      },
+      {
+        "id": "sheet",
+        "name": "Lay the contact sheet",
+        "role": "designer",
+        "summary": "one page showing the set with palette, silhouette, and usage notes",
+        "prompt": "Lay the contact sheet at characters/<name>/sheet.html — the one page a future artist opens before drawing this character. Step 1: show every reference from the manifest with its pose label. Step 2: write the identity spec onto the sheet — the palette as labeled swatches with color values, the silhouette line, the signature features, and the never-looks-like notes. Step 3: add the usage notes — which reference anchors which kind of panel, and where the seeds and prompts live for regenerating. Step 4: keep it one self-contained file with honest styling — this page gets opened for the life of the book. Call write_task_note with the sheet path.",
+        "produces": null
+      }
+    ],
+    "evaluate": {
+      "prompt": "Open the character's folder under characters/ and verify every criterion from notes/scope.md: at least four references exist covering the brief's pose and expression list; the manifest lists every reference with its pose, file, seed, and prompt — cross-check the file paths against the actual folder listing in both directions, a manifest that lies is the classic failure; the contact sheet shows the set with the palette, silhouette, and usage notes written down; and the whole kit would let a stranger draw this character the same way next month. Write PASS/FAIL per criterion; on any failure, name the reference or the gap and loop back to generate.",
+      "loopBackTo": "generate"
+    }
+  },
+  {
+    "id": "page-spread",
+    "name": "Page Spread",
+    "description": "Produce one page spread from script to panels: beats planned, panel art generated against the character sheets — never freehand from memory — lettered and laid out as the page the reader turns to. Locks the panel plan FIRST — each panel naming the sheet references that anchor it and the caption text it carries — then generates the panels from those anchors, then assembles the lettered spread. Use for producing a comic page, 'let's do page three', panel-and-letter passes, turning a script page into art, and the per-page ritual of a whole book.",
+    "tags": ["comic", "pages", "panels", "layout", "images"],
+    "triggers": [
+      "produce the page spread",
+      "let's do the next page",
+      "panel out the script",
+      "turn the script page into panels",
+      "lay up the spread"
+    ],
+    "phases": [
+      {
+        "id": "scope",
+        "name": "Plan the panels",
+        "role": "verhalenverteller",
+        "summary": "script beats to panels, each anchored to a character sheet",
+        "prompt": "Break the page before generating a pixel. Step 1: read the page's script from the story notes and the character kits under characters/ — each character's manifest carries the references, seeds, and prompts that lock their look. Step 2: break the script into beats and assign each beat a panel — the moment, the framing, and who is in frame. Step 3: for every character in every panel, name the exact sheet reference (and its seed and prompt from the manifest) that anchors how they are drawn — a panel drawn from memory instead of the sheet is how page twelve stops matching page one. Step 4: copy the caption and balloon text for each panel verbatim from the script — the letterer changes nothing. Step 5: write an acceptance-criteria checklist ('every script beat has a panel', 'every figure anchored to a named sheet reference', 'captions and balloons verbatim from the script', 'panels read in order on the assembled page'). Call write_task_note with the panel count + checklist and write notes/scope.md.",
+        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "panels",
+        "name": "Generate the panels",
+        "role": "image-generator",
+        "summary": "panel art from the sheet anchors, never from memory",
+        "prompt": "Generate the page's panels into pages/<number>/ (the folder named for the page). Step 1: for each planned panel, build the generation prompt FROM the anchors — start from the sheet reference's persisted prompt and seed out of the character's manifest, then add the panel's moment and framing; the sheet is the source of truth for how every character looks. Step 2: generate through the project's image capabilities, at least three panels, saved as pages/<number>/panel-1.png, panel-2.png, and so on in reading order. Step 3: after each panel, check it against the plan — right characters, right moment, silhouette and palette matching the sheet; regenerate what drifted before moving on. Call write_task_note with the panel count and which sheet references anchored each.",
+        "produces": null
+      },
+      {
+        "id": "assemble",
+        "name": "Assemble the spread",
+        "role": "designer",
+        "summary": "panels laid in reading order, captions and balloons lettered",
+        "prompt": "Assemble the page at pages/<number>/spread.html. Step 1: lay the panels in reading order with honest gutters — the eye should never wonder which panel is next. Step 2: letter it — the captions and balloon text from the plan, verbatim from the script, placed with the panel they belong to, tails pointing at the speaker. Step 3: style it as a page — panel borders, gutter rhythm, type that reads at page size, all in one self-contained file. Step 4: read the finished page top to bottom once as a reader would and fix anything that stumbles. Call write_task_note with the spread path and the panel order.",
+        "produces": null
+      }
+    ],
+    "evaluate": {
+      "prompt": "Open the page folder under pages/ beside notes/scope.md, the script, and the character manifests, and verify every criterion: every script beat has its panel and the panels sit in reading order; every figure traces to the sheet reference the plan named — check the plan's anchors against the characters/ manifests, continuity is the whole point of this book; the captions and balloons on the spread match the script verbatim — a letterer who paraphrases is rewriting the author; and the assembled page reads clean top to bottom. Write PASS/FAIL per criterion; on any failure, name the panel and the gap and loop back to panels.",
+      "loopBackTo": "panels"
+    }
+  },
+  {
+    "id": "tileset-batch",
+    "name": "Tileset Batch",
+    "description": "Produce a style-locked batch of tiles and account for every one: named to the convention, sized to spec, generated against the library's style anchor, and appended to the manifest with tags — an asset library a game engine can trust, not a folder of maybes. Locks the tile list and the naming convention FIRST, then generates the batch in the house style, then writes the manifest records and the batch summary. Use for tile batches, 'we need forest tiles', growing a game's asset library, style-consistent tilesets, and keeping the asset manifest honest.",
+    "tags": ["assets", "tiles", "game", "images", "library"],
+    "triggers": [
+      "make a batch of tiles",
+      "we need more tiles for the game",
+      "tileset for the platformer",
+      "generate the tile batch",
+      "grow the asset library"
+    ],
+    "phases": [
+      {
+        "id": "scope",
+        "name": "Lock the batch",
+        "role": "assetsmid",
+        "summary": "tile list, naming convention, size spec, style anchor",
+        "prompt": "Lock the batch before generating a tile. Step 1: read assets/manifest.json from the workspace — the library's existing records — and the style notes in assets/ (the palette, tile size, outline and shading rules that make the library one family). Step 2: write the tile list from the ask — every tile the batch needs, including the unglamorous edges and corners that make a set usable, at least eight. Step 3: lock the conventions — file names as assets/tiles/tile-<terrain>-<variant>.png, the size spec from the style notes, and the tags each tile will carry. Step 4: write an acceptance-criteria checklist ('every listed tile generated at spec size in the house style', 'every file named to the convention', 'every new tile appended to the manifest with id, file, size, and tags', 'the manifest stays valid JSON and lists only files that exist'). Call write_task_note with the tile list + checklist and write notes/scope.md.",
+        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "generate",
+        "name": "Generate the tiles",
+        "role": "image-generator",
+        "summary": "the batch, named to the convention, in the house style",
+        "prompt": "Generate the batch into assets/tiles/. Step 1: work the locked tile list one tile at a time through the project's image capabilities — every prompt built from the style anchor (palette, outline, shading) so the batch reads as one hand's work, saved under the locked naming convention. Step 2: keep the set complete — the edge and corner variants from the list matter more to a level builder than another hero tile. Step 3: after generating, re-list assets/tiles/ against the tile list and fill any gap before completing. Call write_task_note with the count generated and the names.",
+        "produces": {
+          "path": "assets/tiles",
+          "kind": "image-set",
+          "extraChecks": [{ "kind": "fileCount", "ext": ["png"], "min": 8, "dir": "assets/tiles" }]
+        }
+      },
+      {
+        "id": "manifest",
+        "name": "Write the manifest records",
+        "role": "data-analyst",
+        "summary": "one record per new tile, appended, ids unique",
+        "prompt": "Account for every tile in assets/manifest.json. Step 1: append one record per new tile to the top-level JSON array, keeping the existing records untouched. Step 2: each record carries exactly these fields: \"id\" (unique, e.g. tile-grass-01), \"file\" (the workspace-relative path, e.g. assets/tiles/tile-grass-01.png), \"size\" (the pixel spec, e.g. 32x32), and \"tags\" (an array like [\"forest\", \"ground\"]) — plus \"seed\" and \"prompt\" where the generation gave you them, so a tile can be re-made in-style later. Step 3: re-read the whole file after writing — it must parse as JSON, ids must stay unique, and every recorded file must exist on disk; a manifest that lists a tile that is not there is worse than no manifest. Call write_task_note with the record count before and after.",
+        "produces": null
+      },
+      {
+        "id": "report",
+        "name": "Write the batch summary",
+        "role": "copywriter",
+        "summary": "what was made, how it is named, what the library now holds",
+        "prompt": "Write the batch summary at report.md. Step 1: the headline — how many tiles this batch added and what terrain they cover, in one plain sentence. Step 2: the batch list — each tile's id, file, and tags, one line each. Step 3: note the conventions used (naming, size, style anchor) so the next batch starts from the same page, and name anything from the ask that was skipped and why. Step 4: close with the library's new total. Keep it under a page. Write report.md and call write_task_note with the report path and the new total.",
+        "produces": { "path": "report.md", "kind": "markdown-report", "minBytes": 600 }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Open assets/manifest.json, the assets/tiles/ listing, notes/scope.md, and report.md and verify every criterion: every tile on the locked list exists at the convention name — the missing corner variant is the classic failure; every new tile has a manifest record with id, file, size, and tags, ids unique, and every recorded path resolves to a real file — check both directions; the batch reads as one style family against the anchor notes; and the report's counts match the manifest. Write PASS/FAIL per criterion; on any failure, name the tile or record and loop back to generate.",
+      "loopBackTo": "generate"
+    }
+  },
+  {
+    "id": "character-turnaround",
+    "name": "Character Turnaround",
+    "description": "Give one character the full turnaround treatment: front, side, back, and three-quarter views generated against the same style anchor, every view manifest-recorded with the seed and prompt that made it — the reference every future sprite leans on. Locks the angle list and the style anchor FIRST, then generates the views as one consistent figure, then writes the records and the summary. Use for character turnarounds, 'we need the knight from all sides', sprite reference sets, model sheets for game characters, and locking a character before animation work.",
+    "tags": ["assets", "character", "turnaround", "images", "reference"],
+    "triggers": [
+      "do a character turnaround",
+      "we need the character from all sides",
+      "model sheet for the character",
+      "turnaround for the sprite work",
+      "front side and back views"
+    ],
+    "phases": [
+      {
+        "id": "scope",
+        "name": "Lock the turnaround",
+        "role": "assetsmid",
+        "summary": "character read, angle list, style anchor, consistency rules",
+        "prompt": "Lock the turnaround before generating a view. Step 1: read the style notes in assets/ and assets/manifest.json — the palette, proportions, and outline rules the library already lives by, and any existing art of this character. Step 2: write the character read — silhouette in one sentence, the palette entries this character owns, and the two or three features every view must carry. Step 3: lock the angle list — front, side, back, and three-quarter at minimum — and the consistency rule: every view is the SAME figure at the same scale in the same style, generated from the same anchor, not four separate drawings. Step 4: write an acceptance-criteria checklist ('all four angles present at the convention names', 'the figure reads as the same character in every view', 'every view recorded in the manifest with its seed and prompt', 'the manifest stays valid and honest'). Call write_task_note with the character + angle list + checklist and write notes/scope.md.",
+        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "generate",
+        "name": "Generate the views",
+        "role": "image-generator",
+        "summary": "front, side, back, three-quarter — one figure, one style",
+        "prompt": "Generate the views into assets/characters/<name>/ (lowercase folder named for the character). Step 1: build one base prompt from the character read and the style anchor, then vary ONLY the angle per view — front, side, back, three-quarter — through the project's image capabilities, saved as assets/characters/<name>/<angle>.png. Step 2: keep the figure consistent — same proportions, same palette, same scale in frame; a back view that grew a different haircut fails the whole set. Step 3: after each view, check it against the character read and regenerate what drifted. Step 4: note every seed and prompt as you go — the manifest step persists them. Call write_task_note with the views generated and their seeds.",
+        "produces": null
+      },
+      {
+        "id": "record",
+        "name": "Record and summarize",
+        "role": "data-analyst",
+        "summary": "manifest records with seeds and prompts, plus the summary",
+        "prompt": "Write the turnaround into the library's books. Step 1: append one record per view to the top-level JSON array in assets/manifest.json, keeping existing records untouched — each with exactly these fields: \"id\" (e.g. knight-front), \"file\" (the workspace-relative path, e.g. assets/characters/knight/front.png), \"size\", \"tags\" (include the character's name and 'turnaround'), \"seed\", and \"prompt\" — the seed and prompt are the point: they are how the next sprite gets drawn in the same style. Step 2: re-read the manifest — valid JSON, ids unique, every recorded path resolving to a real file. Step 3: write report.md — the character read, the angle list with each view's file, where the seeds live, and the one thing to watch when the sprite work starts. Write report.md and call write_task_note with the view count and the manifest total.",
+        "produces": {
+          "path": "report.md",
+          "kind": "markdown-report",
+          "minBytes": 600,
+          "extraChecks": [
+            { "kind": "sniff", "file": "assets/manifest.json", "sniff": "json-valid" },
+            {
+              "kind": "recordSchema",
+              "file": "assets/manifest.json",
+              "fields": [
+                { "name": "id", "type": "nonempty" },
+                { "name": "file", "type": "nonempty" },
+                { "name": "size", "required": false },
+                { "name": "tags", "required": false },
+                { "name": "seed", "required": false },
+                { "name": "prompt", "required": false }
+              ],
+              "uniqueBy": "id"
+            }
+          ]
+        }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Open the character's folder under assets/characters/, assets/manifest.json, and report.md against notes/scope.md and verify every criterion: all four angles exist at the convention names; the views read as ONE figure — same silhouette, palette, and scale, checked against the character read, a turnaround of four different characters is the classic failure; every view's manifest record carries its seed and prompt and every recorded path resolves to a real file; and the report says where the sprite work picks up. Write PASS/FAIL per criterion; on any failure, name the view or record and loop back to generate.",
+      "loopBackTo": "generate"
+    }
+  }
+]

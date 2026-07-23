@@ -1,0 +1,239 @@
+/**
+ * Wire contract for remote model execution — the shared schema both ends of
+ * the `/v1/remote/infer` link compile against.
+ *
+ * Device A's `RemoteSession` serializes a {@link RemoteInferRequest} and reads
+ * back a stream of {@link RemoteInferFrame}s; Device B's route validates the
+ * request, runs it through its existing provider + queue, and emits the frames.
+ *
+ * Deliberately self-contained (no imports from `../types.js`): a network
+ * protocol should be versioned independently so an internal refactor can't
+ * silently change the bytes on the wire. The mapping between these wire shapes
+ * and the in-process `SessionOpts` / `ExternalToolCall` types lives in the
+ * provider/session (A) and the route (B). Bump {@link PROTOCOL_VERSION} on any
+ * breaking change; both ends negotiate via `/v1/identity` + the request field.
+ */
+
+import { z } from 'zod';
+
+/** Incremented on any breaking change to the request or frame schemas. */
+export const PROTOCOL_VERSION = 1;
+
+/** One tool definition advertised to the remote model (OpenAI `function` shape). */
+export const ExternalToolSpecWireSchema = z.object({
+  name: z.string(),
+  description: z.string().optional(),
+  parameters: z.record(z.string(), z.unknown()),
+});
+export type ExternalToolSpecWire = z.infer<typeof ExternalToolSpecWireSchema>;
+
+/** One tool call the remote model emitted (B parsed it from engine output). */
+export const ExternalToolCallWireSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  /** Raw JSON-string arguments — the local bridge on A parses these. */
+  arguments: z.string(),
+});
+export type ExternalToolCallWire = z.infer<typeof ExternalToolCallWireSchema>;
+
+/** Prior transcript entry — mirrors `SessionOpts.priorMessages`. */
+export const PriorMessageWireSchema = z.union([
+  z.object({ role: z.enum(['user', 'assistant']), content: z.string() }),
+  z.object({
+    role: z.literal('assistant'),
+    content: z.string(),
+    toolCalls: z.array(ExternalToolCallWireSchema),
+  }),
+  z.object({ role: z.literal('tool'), content: z.string(), toolCallId: z.string() }),
+]);
+export type PriorMessageWire = z.infer<typeof PriorMessageWireSchema>;
+
+/** Cumulative cache-prefix layers — mirrors `SystemPromptLayers`. */
+export const SystemPromptLayersWireSchema = z.object({
+  gezel: z.string(),
+  project: z.string(),
+});
+
+/** One inline image — mirrors `ImageAttachment`. */
+export const ImageAttachmentWireSchema = z.object({
+  base64: z.string(),
+  mimeType: z.string(),
+  filename: z.string().optional(),
+});
+
+/**
+ * Queue hints A forwards so B's `ProviderQueue` schedules the remote turn the
+ * same way it schedules a local one. `sessionId`/`gezelId` drive prompt-cache
+ * affinity; B namespaces them by the authenticated origin device before use,
+ * so A's raw ids ride here untouched. The abort signal is NOT on the wire — it
+ * becomes the request's connection lifetime on B.
+ */
+export const WireQueueHintsSchema = z.object({
+  lane: z.enum(['interactive', 'background']),
+  sessionId: z.string().optional(),
+  gezelId: z.string().optional(),
+  job: z.string().optional(),
+  affinity: z.boolean(),
+});
+export type WireQueueHints = z.infer<typeof WireQueueHintsSchema>;
+
+/**
+ * One stateless chat forward-pass. B persists none of this — A holds all
+ * session/project state and sends the full transcript each turn.
+ */
+export const RemoteInferRequestSchema = z.object({
+  protocolVersion: z.number(),
+  /** B-native model id (A already stripped the `remote:<remoteId>/` prefix). */
+  model: z.string(),
+  systemMessage: z.string(),
+  systemPromptLayers: SystemPromptLayersWireSchema.optional(),
+  volatileContext: z.string().optional(),
+  /** Current turn's user text — may be '' on a tool-result continuation. */
+  prompt: z.string(),
+  priorMessages: z.array(PriorMessageWireSchema).default([]),
+  /** A's local bridge tool schemas — B advertises them, A executes them. */
+  tools: z.array(ExternalToolSpecWireSchema).optional(),
+  attachments: z.array(ImageAttachmentWireSchema).optional(),
+  reasoningEffort: z.string().optional(),
+  /** Resolved tuning (catalog + gezel override) — B maps onto its engine body. */
+  tuning: z.record(z.string(), z.unknown()).optional(),
+  queue: WireQueueHintsSchema,
+});
+export type RemoteInferRequest = z.infer<typeof RemoteInferRequestSchema>;
+
+// ---------------------------------------------------------------------------
+// Streamed response frames (SSE `data:` payloads), discriminated on `type`.
+// ---------------------------------------------------------------------------
+
+/** Streamed text delta. */
+export const DeltaFrameSchema = z.object({ type: z.literal('delta'), text: z.string() });
+/** End-of-turn tool calls B parsed; B halts the turn and returns them to A. */
+export const ToolCallFrameSchema = z.object({
+  type: z.literal('tool_call'),
+  calls: z.array(ExternalToolCallWireSchema),
+});
+/** Token accounting + context pressure, so A keeps compaction calibrated. */
+export const UsageFrameSchema = z.object({
+  type: z.literal('usage'),
+  model: z.string(),
+  inputTokens: z.number(),
+  outputTokens: z.number(),
+  cachedInputTokens: z.number().optional(),
+  durationMs: z.number().optional(),
+  /** Tokens used vs B's context window, so A keeps compaction calibrated. */
+  contextUtilization: z.object({ used: z.number(), limit: z.number() }).optional(),
+});
+/** Captured `<think>` reasoning, so A can populate getLastTurnReasoning. */
+export const ReasoningFrameSchema = z.object({ type: z.literal('reasoning'), text: z.string() });
+/** Non-fatal warning surfaced to A's session (e.g. ramble abort). */
+export const WarningFrameSchema = z.object({ type: z.literal('warning'), message: z.string() });
+/** B says the turn is queued behind others (drives A's "queued" UI). */
+export const QueuedFrameSchema = z.object({
+  type: z.literal('queued'),
+  aheadOf: z.number().optional(),
+});
+/** Engine progress (model loading / prefill), passed through for UX. */
+export const PhaseFrameSchema = z.object({
+  type: z.literal('phase'),
+  phase: z.string(),
+  detail: z.string().optional(),
+  progress: z.number().optional(),
+});
+/** Terminal success. */
+export const DoneFrameSchema = z.object({ type: z.literal('done') });
+/** Terminal failure (model not loaded, engine error, abort). */
+export const ErrorFrameSchema = z.object({
+  type: z.literal('error'),
+  code: z.string(),
+  message: z.string(),
+});
+
+// ---------------------------------------------------------------------------
+// Model discovery — `GET /v1/remote/models`.
+// ---------------------------------------------------------------------------
+
+/** One model B will serve to paired clients, with catalog metadata A applies. */
+export const RemoteModelDescriptorSchema = z.object({
+  /** B-native `<provider>:<model>` id (A re-namespaces it as `remote:<id>/…`). */
+  id: z.string(),
+  name: z.string(),
+  modality: z.enum(['chat', 'image', 'video', 'audio-stt', 'audio-tts']),
+  contextWindow: z.number().optional(),
+  supportsTools: z.boolean().optional(),
+  supportsReasoning: z.boolean().optional(),
+  parameterSize: z.string().optional(),
+  /** Whether the engine is currently warm/resident on B. */
+  loaded: z.boolean().optional(),
+});
+export type RemoteModelDescriptor = z.infer<typeof RemoteModelDescriptorSchema>;
+
+export const RemoteModelsResponseSchema = z.object({
+  deviceId: z.string(),
+  models: z.array(RemoteModelDescriptorSchema),
+});
+export type RemoteModelsResponse = z.infer<typeof RemoteModelsResponseSchema>;
+
+/**
+ * `POST /v1/remote/image/generate` — one stateless image generation. B runs
+ * its image engine and returns the PNG bytes (base64); A persists into its own
+ * project. Inputs/outputs mirror `ImageGenerationInput`/`Output` with Buffers
+ * encoded as base64 for the wire.
+ */
+export const RemoteImageGenRequestSchema = z.object({
+  prompt: z.string(),
+  negativePrompt: z.string().optional(),
+  model: z.string().optional(),
+  width: z.number().optional(),
+  height: z.number().optional(),
+  steps: z.number().optional(),
+  seed: z.number().optional(),
+  strength: z.number().optional(),
+  inputImages: z.array(z.object({ data: z.string(), mimeType: z.string() })).optional(),
+});
+export type RemoteImageGenRequest = z.infer<typeof RemoteImageGenRequestSchema>;
+
+/** `POST /v1/remote/video/generate` — one stateless video generation. */
+export const RemoteVideoGenRequestSchema = z.object({
+  prompt: z.string(),
+  negativePrompt: z.string().optional(),
+  model: z.string().optional(),
+  width: z.number().optional(),
+  height: z.number().optional(),
+  numFrames: z.number().optional(),
+  fps: z.number().optional(),
+  steps: z.number().optional(),
+  guidanceScale: z.number().optional(),
+  seed: z.number().optional(),
+  inputImage: z.object({ data: z.string(), mimeType: z.string() }).optional(),
+});
+export type RemoteVideoGenRequest = z.infer<typeof RemoteVideoGenRequestSchema>;
+
+/** `POST /v1/remote/audio/transcribe` — speech-to-text. */
+export const RemoteTranscribeRequestSchema = z.object({
+  audio: z.object({ data: z.string(), mimeType: z.string() }),
+  model: z.string().optional(),
+  language: z.string().optional(),
+});
+export type RemoteTranscribeRequest = z.infer<typeof RemoteTranscribeRequestSchema>;
+
+/** `POST /v1/remote/audio/synthesize` — text-to-speech. */
+export const RemoteSynthesizeRequestSchema = z.object({
+  text: z.string(),
+  voice: z.string().optional(),
+  model: z.string().optional(),
+  speed: z.number().optional(),
+});
+export type RemoteSynthesizeRequest = z.infer<typeof RemoteSynthesizeRequestSchema>;
+
+export const RemoteInferFrameSchema = z.discriminatedUnion('type', [
+  DeltaFrameSchema,
+  ToolCallFrameSchema,
+  UsageFrameSchema,
+  ReasoningFrameSchema,
+  WarningFrameSchema,
+  QueuedFrameSchema,
+  PhaseFrameSchema,
+  DoneFrameSchema,
+  ErrorFrameSchema,
+]);
+export type RemoteInferFrame = z.infer<typeof RemoteInferFrameSchema>;

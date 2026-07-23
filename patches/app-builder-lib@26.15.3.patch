@@ -1,0 +1,25 @@
+diff --git a/out/targets/pkg.js b/out/targets/pkg.js
+--- a/out/targets/pkg.js
++++ b/out/targets/pkg.js
+@@ -219,15 +219,12 @@ class PkgTarget extends core_1.Target {
+         args.push("--version", pkgVersion);
+         const scriptsDir = resolveScriptsDir(this.packager.info.buildResourcesDir, options.scripts);
+         if (scriptsDir && ((_a = (await (0, builder_util_1.statOrNull)(scriptsDir))) === null || _a === void 0 ? void 0 : _a.isDirectory())) {
+-            const dirContents = (0, fs_1.readdirSync)(scriptsDir);
+-            dirContents.forEach(name => {
+-                if (name.includes("preinstall")) {
+-                    packageInfo.BundlePreInstallScriptPath = name;
+-                }
+-                else if (name.includes("postinstall")) {
+-                    packageInfo.BundlePostInstallScriptPath = name;
+-                }
+-            });
++            // Patched (gezel): upstream registers scripts via both
++            // BundlePre/PostInstallScriptPath on the component plist AND
++            // `--scripts`, so pkgbuild writes two <postinstall> entries into
++            // PackageInfo and installd runs the script twice. Drop the
++            // component-plist mutation; `--scripts` alone is sufficient and
++            // produces a single, package-scoped invocation.
+             args.push("--scripts", scriptsDir);
+         }
+         if (plistInfo.length > 0) {

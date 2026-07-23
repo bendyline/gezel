@@ -1,0 +1,36 @@
+{
+  "name": "@bendyline/gezel-cli",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The `gezel` command-line tool.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "gezel": "./dist/bin/gezel.js"
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist .turbo",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@bendyline/gezel": "workspace:*",
+    "@bendyline/gezel-app-sdk": "workspace:*",
+    "@bendyline/gezel-client": "workspace:*",
+    "@bendyline/gezel-service": "workspace:*",
+    "commander": "^15.0.0",
+    "ink": "^7.1.1",
+    "ink-text-input": "^6.0.0",
+    "react": "^19.2.8"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "@types/react": "^19.2.17",
+    "tsup": "^8.5.1",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10"
+  }
+}

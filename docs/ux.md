@@ -1,0 +1,343 @@
+# Gezel UX
+
+This document captures the UX philosophy of Gezel — what the app should feel
+like, how that translates into concrete patterns, and how new surfaces should
+be built so they land inside the same world as the rest. It complements
+[CLAUDE.md](../CLAUDE.md), which describes the runtime and code layering.
+
+The aesthetic is aspirational; today the app is functional and utilitarian.
+Read this as the direction we're heading, not a description of what's already
+on screen. Every new surface should nudge us toward it.
+
+## Feel
+
+Three words that should describe any screen:
+
+1. **Organic** — human, warm, a little imperfect. Not factory-flat. Gentle
+   curves, generous whitespace, colors pulled from wood/parchment/ink rather
+   than from a corporate palette. Transitions fade and settle rather than
+   pop.
+2. **Classic** — the app should read like a well-made tool you'd keep for
+   years, not a product surfacing the month's design trend. Typography,
+   proportion, and materials over novelty and chrome. Nothing that would
+   look dated in 2031.
+3. **Historic** — Gezel is a guild. The vocabulary (gezel, meester, voorman)
+   is Dutch apprenticeship terminology; the visuals should echo the world
+   those words come from. A guild hall, an apprentice's bench, a master's
+   ledger — not a SaaS dashboard.
+
+What this *doesn't* mean: kitsch, pastiche, or literal skeuomorphism. The one place a
+*vaguely* skeuomorphic cue is welcome is physicality on things you press:
+gezels are workers at craft tables, so controls may read as tools set into
+the bench — keys resting in trays, expressed through light and depth
+(gradients, bevels, inset shadows), never through textures or ornament. See
+[Controls: keys in trays](#controls-keys-in-trays) below. Beyond that, the
+cues stay subtle — color temperature, border weights, corner radii, the
+pacing of a transition. If a first-time user can't quite put a finger on
+*why* the app feels different, we've done it right.
+
+## What that translates into
+
+- **Color** lives in [packages/ui/src/styles.css](../packages/ui/src/styles.css)
+  as CSS variables (`--bg`, `--surface`, `--panel`, `--border`, `--text`,
+  `--text-muted`, `--accent`, `--success`, `--warning`, `--danger`). Both
+  light and dark modes are supported. When the branding pass lands, those
+  variables are the single surface to change — do not introduce hardcoded
+  hex values in components.
+- **Motion** is slow-ish and soft: ~120–160ms ease-out for overlay and
+  dialog in/out. Nothing snaps or bounces. See the `gz-overlay` /
+  `gz-dialog` keyframes for the canonical cadence; match it elsewhere.
+- **Corners** are mostly-square with small rounding, drawn from the shared
+  radius tokens: `--radius-sm` (4px) for badges and chips, `--radius-md`
+  (6px) for keys, buttons, and inputs, `--radius-lg` (10px) for trays and
+  small surfaces; panels and dialogs may go a step larger. Never perfectly
+  square; never capsule-shaped. Fully-rounded (`999px` / `50%`) is reserved
+  for true circles: dots, avatars, scrollbar thumbs, and switch knobs.
+  There are no pill buttons — a capsule-shaped control is a bug, not a
+  variant.
+- **Typography** is a two-font system — **Hanken Grotesk** (sans) for all
+  UI chrome and **PT Serif** (serif) for the editorial register. Both are
+  bundled woff2 (no CDN). The rules and the shared size scale live in
+  [Typography](#typography) below; read it before styling any text.
+- **Density** is moderate. We're not Linear-tight and not Notion-loose.
+  Line-height is comfortable; gaps between related controls are ~0.5rem.
+- **No emojis in committed UI** (repeating the rule from CLAUDE.md). The
+  ⭐ Meester badge is the single sanctioned exception.
+
+## Controls: keys in trays
+
+The standard treatment for **radio-like choice controls** — any row of
+mutually exclusive options (engagement mode, tempo, provider, type pickers,
+filter chips). The metaphor follows the app's framing of gezels as workers
+at craft tables: a group of options is a shallow **tray** routed into the
+bench, each option is a raised, mostly-square **key**, and the chosen key
+sits **pressed and latched**. The 3D is expressed through light and depth
+only — gradients a few percent apart, a 1px top highlight, an inset recess —
+never through textures.
+
+Implementation lives in exactly two places, both in
+[styles.css](../packages/ui/src/styles.css):
+
+- **Tokens** in `:root` and the three theme-override blocks:
+  `--tray-bg/-border/-shadow`, `--key-bg/-bg-hover/-border/-shadow`, and
+  `--key-pressed-bg/-border/-ink/-shadow`.
+- **The "Keys in trays" block at the end of the file** — the single CSS
+  recipe. `.gz-tray` is the group; `.gz-key` is the option
+  (`.gz-key--stacked` for label + hint); the latched state is
+  `.gz-key-active` or `aria-checked="true"`.
+
+Canonical markup (the AI engagement switch in SettingsView is the reference
+implementation):
+
+```tsx
+<div className="gz-tray" role="radiogroup" aria-label="AI engagement">
+  <button
+    type="button"
+    role="radio"
+    aria-checked={selected}
+    className={`gz-key${selected ? ' gz-key-active' : ''}`}
+  >
+    Proactive
+  </button>
+  …
+</div>
+```
+
+Rules:
+
+- **Keys are `--radius-md`; trays are `--radius-lg`** so their corners stay
+  parallel. Don't restyle keys per-surface — if a surface needs something
+  the recipe lacks, extend the recipe (and this section) instead.
+- **Bare keys (no tray) are fine for inline choices** floating inside
+  content — chat answer chips, catalog filter rows. Standing controls in
+  settings and dialog forms get the tray.
+- **Selected = pressed in, not popped out.** The latched key translates down
+  1px, takes the accent fill, and carries an inset shadow. Hover lightens
+  the raised face; mousedown previews the pressed depth.
+- **Native `<input type="radio">` stays native** in dense config forms
+  (folder scopes, engine settings) — the round dot is a true circle and
+  keeps its shape. Reach for keys when the choice is prominent enough to
+  deserve a control with physical presence.
+- **Legacy aliases:** `.provider-pill`, `.gz-type-chip`,
+  `.pending-question-choice`, and `.catalog-category` (plus their wrappers)
+  are aliased into the recipe pending markup migration. When touching one of
+  those surfaces, move it to the `gz-*` classes and delete its alias.
+- **No new fully-rounded controls.** If you're reaching for
+  `border-radius: 999px` on anything with a text label, it should almost
+  certainly be a key or a small-radius chip instead.
+
+## Typography
+
+Two typefaces, both bundled as woff2 (see
+[assets/fonts/fonts.css](../packages/ui/src/assets/fonts/fonts.css)) — no
+web-font CDN, no runtime fetch. They are exposed as CSS variables in
+[styles.css](../packages/ui/src/styles.css) `:root` and you should always
+reference the variable, never the family name:
+
+| Token             | Family             | Role                                                        |
+| ----------------- | ------------------ | ----------------------------------------------------------- |
+| `--font-ui`       | Hanken Grotesk     | The default for **everything**: chrome, controls, body, links |
+| `--font-display`  | PT Serif           | The editorial register: headings + long-form prose only     |
+
+**The one rule that keeps a surface consistent:**
+
+> **Headings carry the serif (`--font-display`); all other text — body,
+> labels, helper text, buttons, inputs, and links — is sans (`--font-ui`).**
+
+This is already wired globally: `h1`–`h6` opt into the serif, and a small
+set of long-form surfaces (chat message bodies, the Home intro card) opt in
+explicitly. Everything else inherits the sans by default. So in practice you
+almost never set `font-family` yourself. The two things to actively watch:
+
+- **Links stay sans even inside a heading.** A link styled with
+  `font: inherit` (e.g. `.home-link`) placed inside an `<h3>`/`<h4>` will
+  inherit the serif — that's a bug. Force `font-family: var(--font-ui)` on
+  the link (the settings surface does this: `.settings-panel a`).
+- **Weights: PT Serif ships only 400 and 700.** Don't ask for 500/600 on a
+  serif heading — it rounds up to the 700 face and reads as a synthesized
+  weight. Leave headings at their natural bold, or set 400 for a lighter
+  editorial look. Hanken Grotesk has 400/500/600/700, so sans text can use
+  the full range.
+
+### The size scale
+
+Dense UI chrome (settings, dialogs, panels) is where sizes sprawl. Use the
+shared `--text-*` scale instead of ad-hoc `rem`/`px` values or leaning on
+browser UA defaults (a bare `<button>` renders ~13.3px and a bare `<h3>`
+~18.7px, neither matching the body — that mismatch is most of what makes a
+panel look "off"):
+
+| Token        | Size            | Use                                            |
+| ------------ | --------------- | ---------------------------------------------- |
+| `--text-2xs` | 0.72rem (~11.5px) | Badges, pills, uppercase eyebrow labels      |
+| `--text-xs`  | 0.8rem (~12.8px)  | Helper / caption text                        |
+| `--text-sm`  | 0.85rem (~13.6px) | Dense controls, secondary body copy          |
+| `--text-md`  | 0.9rem (~14.4px)  | Default UI body                              |
+| `--text-lg`  | 1rem (16px)       | Emphasized body, dialog/panel sub-headings   |
+| `--text-xl`  | 1.1rem (~17.6px)  | Panel & dialog section headings              |
+
+Long-form editorial surfaces (chat, Home intro, markdown prose) are the
+deliberate exception — they set their own comfortable reading size (1rem+)
+and don't draw from this scale.
+
+**Reference implementation:** the `.settings-panel` typography block in
+[styles.css](../packages/ui/src/styles.css) is the canonical application —
+one scoped block that pins the panel's headings, body, controls, and links
+to the rules above so no single tab mixes a dozen font/size combos. New
+dialog and panel surfaces should follow the same shape: a small scoped
+block, sizes from the scale, `font-family` left to the global default except
+where a link needs forcing back to sans.
+
+## Foundation
+
+The UI is React + Vite with **plain CSS + CSS variables** — no Tailwind, no
+CSS-in-JS. All complex interactive controls (dialog, select, tabs, popover,
+tooltip, dropdown, alert-dialog) come from **Radix UI Primitives**,
+re-exported from [packages/ui/src/primitives/](../packages/ui/src/primitives/)
+with our `gz-*` classes pre-wired. **Never import `@radix-ui/react-*`
+directly outside the primitives layer** — always import from
+`../primitives/index.js` (or the barrel export). This keeps every surface
+one edit away from a global animation or surface tweak.
+
+What lives where:
+
+| Layer                               | Where                                                     |
+| ----------------------------------- | --------------------------------------------------------- |
+| Design tokens (colors, space, etc.) | [styles.css](../packages/ui/src/styles.css) `:root`       |
+| Overlay, dialog, tabs, select CSS   | [styles.css](../packages/ui/src/styles.css) `gz-*` blocks |
+| Headless primitives (JSX)           | [primitives/](../packages/ui/src/primitives/)             |
+| Shared behavior components          | [components/](../packages/ui/src/components/)             |
+| Top-level views                     | [views/](../packages/ui/src/views/)                       |
+
+## Patterns
+
+**Dialog vs AlertDialog.** Use `AlertDialog` only for confirmations that
+interrupt a destructive or significant action (delete a gezel, discard
+changes). Everything else — create forms, rename prompts, icon iteration,
+template pickers — is a plain `Dialog`. AlertDialogs block the user until
+they respond; Dialogs are dismissable with Escape/backdrop-click.
+
+**Select vs keys vs tab bar.** If the content panel below changes based on
+the choice, use **Tabs**. If it's one of many equivalent values (a long
+model list), use **Select**. If there are roughly 2–5 mutually exclusive
+options and the choices themselves carry the meaning (Copilot / OpenAI /
+Ollama, engagement modes, tempo), use **keys in a tray** — see
+[Controls: keys in trays](#controls-keys-in-trays). The Home + Settings
+provider switches are this pattern.
+
+**Forms.** Raw `<input>`, `<textarea>`, `<fieldset>` are fine — Radix
+doesn't ship form primitives and we don't need them. Schema-driven Squisq
+forms use the shared `GezelJsonEditor` wrapper. It keeps Squisq's built-in
+`gezellig` editorial theme, bridges its form tokens to the live Gezel palette,
+and aliases segmented choices into the keys-in-trays recipe across project,
+task, script, and settings surfaces. For autosave, debounce via
+`saveTimer = setTimeout(...)`; see
+DocumentsView or GezelsView for the established pattern. Don't reach for
+react-hook-form unless a specific form has real validation needs.
+
+**Creation flows.** New-entity dialogs (new gezel, new document, new task)
+close immediately on submit and show their result asynchronously. Never
+block the user waiting for an LLM round-trip to decorate the new entity
+(icon generation, about.md drafting) — kick it off in the background.
+
+**Gallery dialogs.** When a creation flow starts from a catalog of
+starting points (project types, craftbooks), use the shared gallery-dialog
+layout: header with title + search, a category rail on the left, a card
+gallery in the middle, and a right-hand pane holding the selection's hero
++ properties form + footer actions. The CSS skeleton is the `gz-npd-*`
+block in [styles.css](../packages/ui/src/styles.css) (named for the New
+Project dialog, its first tenant); New Task reuses it with a `gz-ntd`
+modifier for task-only pieces. New gallery surfaces should reuse the
+skeleton the same way — extend it rather than fork it. Lead the gallery
+with the curated, context-relevant subset (e.g. craftbooks recommended
+for the project's type) and keep the full catalog one rail-click away.
+
+**Loading states.** Prefer inline `muted` text ("loading models…",
+"generating…") over blocking spinners. A pulsing icon (see
+`.gezel-icon--pulse`) is the canonical "this thing is working in the
+background" signal.
+
+**Errors.** Inline, close to the thing that failed, `.error` class. Don't
+use toasts for errors. If the operation is dismissable, show the error
+until the next user action; if it blocks something, show it until the user
+fixes it.
+
+## Poppetjes: painted wooden crew
+
+Poppetjes are the app's character system, not generic avatars. Their visual
+language is small hand-painted, lathe-turned wooden figures: simple faces,
+warm asymmetric light, rounded volume, quiet grain below the paint, and stable
+silhouettes that survive icon crops. Avoid flat clip-art shading, literal wood
+texture, and glossy plastic highlights. The persistence invariants, rendering
+stack, application-crop rules, and PNG quality workflow are documented in
+[poppetje-rendering.md](poppetje-rendering.md).
+
+## Codebase map: the 1910 town
+
+The isometric codebase map is a compact town from roughly **1890–1915**, not a
+modern skyline. Its architecture should feel compatible with the guild world:
+gabled homes, shopfronts and inns, civic halls with cupolas, brick workshops,
+rail depots, and sawtooth-roofed foundries. Avoid glass towers, rooftop HVAC
+fields, neon, and contemporary office-campus forms.
+
+Architecture carries real code meaning rather than acting as random decoration:
+
+- dependency zone chooses the family — residential, commercial, civic, or
+  industrial;
+- levels become storeys, symbol count becomes facade bays and dormers, and
+  churn may add workshop stacks;
+- landmarks are clock-topped guildhalls and test files may read as
+  schoolhouses;
+- language color remains the material palette, so silhouette and color are
+  complementary signals.
+
+Within those constraints, variants derive deterministically from the file path
+through the shared map seed helpers. Never use `Math.random()` in the renderer.
+A file should keep the same recognizable building across frames, reloads, and
+machines; it should only change architectural family when its code-derived role
+changes. Small facade details belong at street zoom, roof silhouettes at
+district zoom, and the city overview stays quiet.
+
+Files with indexed findings carry a small deterministic rooftop fire and smoke
+marker at district and street zoom. Finding count increases the plume and the
+highest severity sets its intensity. At close zoom the fire may grow modestly,
+flicker, and produce a clearly billowing plume, but it must respect reduced
+motion and stop repainting when no affected building is visible. Keep the city
+overview and age lens quiet so those views continue to tell one clear story.
+
+Opening an affected file places a compact findings tray between its metadata
+and code. Each finding names the issue, severity, scanner rule, evidence, and
+source location; selecting it reveals and highlights the impacted line. “Mark
+resolved” closes the finding immediately. “Ask a developer gezel” creates a
+tracked terminal task and keeps the finding visibly in progress until that task
+finishes. The rooftop fire reflects open and in-progress findings only, so it
+goes out when the last one is resolved and relights if a later scan finds a true
+regression.
+
+Past street zoom, miniature symbol buildings may gain compact floating tags.
+These use small-radius plates with short rooftop leaders, prioritize functions
+and methods when labels collide, and appear progressively as each building gets
+large enough on screen. Keep the ordinary street view unlabeled and preserve
+hover details as the fallback for tags suppressed by density.
+
+## When in doubt
+
+If a new piece of UI is hard to build within these constraints, the answer
+is usually that either (a) the primitives layer is missing something and
+should grow, or (b) the design is fighting the app's grain and should be
+rethought. **Don't work around the primitives layer.** Extending it pays
+off everywhere; working around it erodes the consistency we're building
+toward.
+
+## Future work (not yet)
+
+These are known gaps; the branding pass will fill them in:
+
+- No icon system beyond the abstract gezel SVGs. Toolbar glyphs are mostly
+  text or emoji (to be replaced).
+- No empty-state illustrations. Today we use `placeholder` prose.
+- No motion system beyond the basic fade/settle. More deliberate
+  micro-animations will come once the visual identity is set.
+
+Don't invent these ahead of the branding pass — they're better decided
+together.

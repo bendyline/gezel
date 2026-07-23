@@ -1,0 +1,18 @@
+# stable-diffusion.cpp upstream pin.
+#
+# Format: two lines. First is a git tag (human-readable, used in
+# release notes). Second is the full 40-char commit sha (what build
+# scripts actually check out — tags move, shas don't).
+#
+# Update both together when bumping upstream.
+# Verify the commit is reachable from the tag:
+#   git -C native/engines/sd-cpp/.upstream fetch --tags
+#   git -C native/engines/sd-cpp/.upstream rev-parse <tag>^{commit}
+#
+# License: MIT (https://github.com/leejet/stable-diffusion.cpp)
+upstream=https://github.com/leejet/stable-diffusion.cpp.git
+# leejet/stable-diffusion.cpp tags every master commit as
+# `master-NNN-<shortsha>`. No semver releases — pinning to the
+# latest master-NNN tag IS the stable release.
+tag=master-782-b290693
+commit=b2906939774dc73453467215c80390404d0a2701

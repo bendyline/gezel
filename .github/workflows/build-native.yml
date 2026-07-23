@@ -1,0 +1,1014 @@
+# Build (and, on tag pushes, release) Gezel's native engine binaries.
+#
+# Triggers:
+#   - Push of a tag named `native-vX.Y.Z` (the tagged commit is what the
+#     build pipeline runs against — VERSION files inside native/engines/
+#     pin each upstream). On tag pushes, the `release` job below
+#     aggregates the matrix outputs into a GitHub Release.
+#   - Manual dispatch (handy for test runs after bumping a VERSION pin).
+#     workflow_dispatch runs DO NOT auto-release — they upload artifacts
+#     for inspection only.
+#
+# Native binaries are NOT built on every commit — that's deliberate.
+# The `release-electron.yml` pipeline downloads the latest tagged
+# native release at app-build time and bundles those artifacts into
+# the installer. Native cadence is decoupled from app cadence; bump
+# `native-vX.Y.Z` every ~2 weeks (or whenever an engine's VERSION
+# pin moves), let it bake, then point the next Electron release at it.
+#
+# Matrix shape: one job per (engine, platform, variant). Each job:
+#   1. Installs the platform/variant-specific build toolchain (Vulkan
+#      SDK, CUDA Toolkit) when needed.
+#   2. Runs the engine's build.sh / build.ps1 with LLAMA_BACKEND set
+#      so multi-variant engines emit to <platform>-<variant>/ rather
+#      than clobbering each other.
+#   3. Uploads the produced binary as
+#      `native-<engine>-<platform>[-<variant>]` for the release job
+#      below and for `release-electron.yml`.
+#
+# Produced binaries are code-signed in place when signing secrets are
+# configured (Windows Authenticode via Azure Trusted Signing; macOS
+# Developer ID) — done BEFORE the sha is computed so the release's
+# SHA256SUMS and the runtime engine resolver's signature check both see
+# the signed bytes. Without secrets (PRs, forks, dispatch test runs) they
+# ship unsigned, exactly as before. The Electron installer additionally
+# re-signs the whole app at app-build time.
+#
+# History: prior to this consolidation the release was a separate
+# `release-native.yml` workflow chained via `workflow_run`. That
+# pattern silently broke when the workflow file changed on a feature
+# branch (`workflow_run` reads the workflow definition from the
+# default branch only) — we lost the 0.1.2 release that way. Putting
+# the release as a `needs: build` job in the same workflow eliminates
+# that whole class of trigger failure.
+
+name: Build native engines
+
+permissions:
+  contents: read
+
+on:
+  push:
+    tags:
+      - 'native-v*'
+  workflow_dispatch:
+    inputs:
+      engines:
+        description: 'Comma-separated engine list (default: all)'
+        required: false
+        default: 'all'
+
+# Manual re-runs of the same tag cancel the prior in-flight run so we
+# don't fight ourselves over scarce ubuntu/macos-13 runners. Tag
+# pushes get unique groups so we never cancel a real release-bound
+# run on a different tag.
+concurrency:
+  group: build-native-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CMAKE_MIN: '3.24'
+  # Current LunarG SDK on both platforms. The tarball/installer ships the
+  # SPIRV-Headers CMake config required by ggml-vulkan, and LunarG keeps the
+  # 1.4 SDK backward-compatible with older Vulkan targets.
+  VULKAN_SDK_VERSION: '1.4.350.0'
+  VULKAN_SDK_VERSION_WINDOWS: '1.4.350.0'
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Gezel device-health helper (Windows + Linux). This is
+          # first-party source, so it does not have an upstream VERSION pin.
+          - engine: device-health
+            kind: helper
+            platform: win32-x64
+            variant: ''
+            runner: windows-latest
+            script: build.ps1
+            artifact: gezel-device-health.exe
+            needs_cuda: false
+            needs_vulkan: false
+          - engine: device-health
+            kind: helper
+            platform: linux-x64
+            variant: ''
+            runner: ubuntu-latest
+            script: build.sh
+            artifact: gezel-device-health
+            needs_cuda: false
+            needs_vulkan: false
+          - engine: device-health
+            kind: helper
+            platform: linux-arm64
+            variant: ''
+            runner: ubuntu-24.04-arm
+            script: build.sh
+            artifact: gezel-device-health
+            needs_cuda: false
+            needs_vulkan: false
+
+          # ── sd-cpp (single variant per platform) ──────────────
+          - engine: sd-cpp
+            platform: darwin-arm64
+            variant: ''
+            runner: macos-latest
+            script: build.sh
+            artifact: gezel-sd-server
+            needs_cuda: false
+            needs_vulkan: false
+          # darwin-x64 (Intel Mac) intentionally omitted — Apple's own
+          # support horizon is narrowing, the macos-13 runner pool is
+          # scarce + slow in CI, and on-device first-run routes Intel
+          # Mac users to Copilot/OpenAI by default (see
+          # `bootstrapOnDeviceFirstRun`). Users who still want a local
+          # engine on Intel Mac can build from source and drop the
+          # binary into `~/.gezel/engines/<engine>/darwin-x64/`.
+          - engine: sd-cpp
+            platform: linux-x64
+            variant: ''
+            runner: ubuntu-latest
+            script: build.sh
+            artifact: gezel-sd-server
+            needs_cuda: false
+            needs_vulkan: true
+          # linux-arm64: LunarG's Vulkan SDK has no aarch64 tarball, so
+          # this build falls through to CPU inside build.sh. Vulkan is
+          # deliberately deferred until upstream Vulkan SDK ships an
+          # arm64 tarball (or we add a shaderc-from-source step).
+          - engine: sd-cpp
+            platform: linux-arm64
+            variant: ''
+            runner: ubuntu-24.04-arm
+            script: build.sh
+            artifact: gezel-sd-server
+            needs_cuda: false
+            needs_vulkan: false
+          - engine: sd-cpp
+            platform: win32-x64
+            variant: ''
+            runner: windows-latest
+            script: build.ps1
+            artifact: gezel-sd-server.exe
+            needs_cuda: false
+            needs_vulkan: true
+
+          # ── llama-cpp (multi-variant on Linux+Windows, single
+          #    on macOS — Phase 0 spike validated all 7 combos)
+          - engine: llama-cpp
+            platform: darwin-arm64
+            variant: metal
+            runner: macos-latest
+            script: build.sh
+            artifact: gezel-llama-server
+            needs_cuda: false
+            needs_vulkan: false
+          - engine: llama-cpp
+            platform: linux-x64
+            variant: cpu
+            runner: ubuntu-latest
+            script: build.sh
+            artifact: gezel-llama-server
+            needs_cuda: false
+            needs_vulkan: false
+          - engine: llama-cpp
+            platform: linux-x64
+            variant: vulkan
+            runner: ubuntu-latest
+            script: build.sh
+            artifact: gezel-llama-server
+            needs_cuda: false
+            needs_vulkan: true
+          - engine: llama-cpp
+            platform: linux-x64
+            variant: cuda
+            runner: ubuntu-latest
+            script: build.sh
+            artifact: gezel-llama-server
+            needs_cuda: true
+            needs_vulkan: false
+            # Modern consumer x86 NVIDIA: sm_75 (RTX 20 / GTX 16 / T4, Turing),
+            # sm_86 (RTX 30 / Ampere), sm_89 (RTX 40 / Ada), sm_120 (RTX 50 /
+            # Blackwell). Each plain entry compiles native SASS + PTX, so a
+            # newer-than-listed card still runs via JIT. sm_121 (GB10) is
+            # ARM-only + needs CUDA 12.9, so it lives on the arm64 leg (below),
+            # not here. This x64 leg stays on the workflow-default CUDA 12.8
+            # (supports sm_75 through sm_120).
+            llama_cuda_arch: '75;86;89;120'
+          # linux-arm64 (Jetson, DGX Spark / Grace Hopper, Ampere
+          # Altra). CPU + CUDA only — Vulkan deferred (LunarG SDK has
+          # no aarch64 tarball; revisit when upstream ships one or
+          # when we add a shaderc-from-source step).
+          - engine: llama-cpp
+            platform: linux-arm64
+            variant: cpu
+            runner: ubuntu-24.04-arm
+            script: build.sh
+            artifact: gezel-llama-server
+            needs_cuda: false
+            needs_vulkan: false
+          - engine: llama-cpp
+            platform: linux-arm64
+            variant: cuda
+            runner: ubuntu-24.04-arm
+            script: build.sh
+            artifact: gezel-llama-server
+            needs_cuda: true
+            needs_vulkan: false
+            # GB10 / DGX Spark is sm_121. llama.cpp adds 121a-real only
+            # with CUDA 12.9+, so the ARM64 CUDA server needs the newer
+            # toolkit even though other llama-cpp CUDA legs can use 12.8.
+            # NOTE: this leg deliberately sets NO `llama_cuda_arch` — it relies
+            # on llama.cpp's own CMake default, which at 12.9 emits the exact
+            # `121a-real` form (the arch-specific `a` suffix Blackwell needs).
+            # Hand-writing "121" here risks the wrong form; the default is the
+            # proven path. Add an explicit list only if you also need to cover
+            # other arm64 CUDA GPUs (e.g. GH200 sm_90).
+            cuda_pkg: '12-9'
+          - engine: llama-cpp
+            platform: win32-x64
+            variant: cpu
+            runner: windows-latest
+            script: build.ps1
+            artifact: gezel-llama-server.exe
+            needs_cuda: false
+            needs_vulkan: false
+          - engine: llama-cpp
+            platform: win32-x64
+            variant: vulkan
+            runner: windows-latest
+            script: build.ps1
+            artifact: gezel-llama-server.exe
+            needs_cuda: false
+            needs_vulkan: true
+          # win32 CUDA pins windows-2022 (VS 2022 / MSVC 14.4x), NOT
+          # windows-latest. windows-latest moved to Visual Studio 2026
+          # (MSVC 14.51 / _MSC_VER 1951), whose toolchain crashes CUDA
+          # 12.4's front-end (`nvcc error: 'cudafe++' died with status
+          # 0xC0000005`, even with -allow-unsupported-compiler). VS 2022 is
+          # the CUDA-12.4-compatible host — the same toolchain class that
+          # built this leg green through native-v0.1.11. cpu/vulkan/cpu-only
+          # win32 legs don't touch nvcc and stay on windows-latest.
+          - engine: llama-cpp
+            platform: win32-x64
+            variant: cuda
+            runner: windows-2022
+            script: build.ps1
+            artifact: gezel-llama-server.exe
+            needs_cuda: true
+            needs_vulkan: false
+
+          # ── ds4 (DwarfStar / DeepSeek-V4) — Metal on darwin-arm64,
+          #    CUDA on Linux. GPU-only (no CPU / Vulkan / ROCm / Windows /
+          #    Intel-Mac). Single shippable backend per platform, so
+          #    variant:'' (emits to native/build/<platform>/, like sd-cpp).
+          - engine: ds4
+            platform: darwin-arm64
+            variant: ''
+            runner: macos-latest
+            script: build.sh
+            artifact: gezel-ds4-server
+            needs_cuda: false
+            needs_vulkan: false
+          # Linux CUDA: ds4's Makefile takes a SINGLE -arch (CUDA_ARCH), so a
+          # prebuilt binary targets one GPU generation. linux-x64 defaults to
+          # sm_90 (Hopper/datacenter); consumer (Ada sm_89, Blackwell
+          # sm_100/120) users should rebuild from source. The DGX Spark / GB10
+          # leg uses the 'spark' sentinel (empty -arch, matching antirez's
+          # `make cuda-spark`). darwin-x64 + win32-x64 are intentionally
+          # omitted — build.sh / build.ps1 no-op there.
+          - engine: ds4
+            platform: linux-x64
+            variant: ''
+            runner: ubuntu-latest
+            script: build.sh
+            artifact: gezel-ds4-server
+            needs_cuda: true
+            needs_vulkan: false
+            ds4_cuda_arch: 'sm_90'
+          - engine: ds4
+            platform: linux-arm64
+            variant: ''
+            runner: ubuntu-24.04-arm
+            script: build.sh
+            artifact: gezel-ds4-server
+            needs_cuda: true
+            needs_vulkan: false
+            # DGX Spark's GB10 is compute capability sm_121. The old 'spark'
+            # sentinel built with an empty -arch (matching antirez's
+            # `make cuda-spark`, which relies on nvcc auto-detecting the local
+            # GPU) — but a GPU-less CI cross-build then defaults to sm_52,
+            # which lacks the __dp4a intrinsic ds4_cuda.cu uses. Build for
+            # sm_121 explicitly. sm_121 first shipped in CUDA 12.9, so this
+            # leg overrides the toolkit to 12.9 (others stay 12.8).
+            ds4_cuda_arch: 'sm_121'
+            cuda_pkg: '12-9'
+
+          # ── whisper-cpp (single CPU variant per platform for the
+          #    narration MVP — Metal is implicit on darwin-arm64 via
+          #    the OS SDK; CUDA / Vulkan variants are deferred until
+          #    audio-chat work demands the latency improvement).
+          - engine: whisper-cpp
+            platform: darwin-arm64
+            variant: ''
+            runner: macos-latest
+            script: build.sh
+            artifact: gezel-whisper-server
+            needs_cuda: false
+            needs_vulkan: false
+          - engine: whisper-cpp
+            platform: linux-x64
+            variant: ''
+            runner: ubuntu-latest
+            script: build.sh
+            artifact: gezel-whisper-server
+            needs_cuda: false
+            needs_vulkan: false
+          - engine: whisper-cpp
+            platform: linux-arm64
+            variant: ''
+            runner: ubuntu-24.04-arm
+            script: build.sh
+            artifact: gezel-whisper-server
+            needs_cuda: false
+            needs_vulkan: false
+          - engine: whisper-cpp
+            platform: win32-x64
+            variant: ''
+            runner: windows-latest
+            script: build.ps1
+            artifact: gezel-whisper-server.exe
+            needs_cuda: false
+            needs_vulkan: false
+
+          # ── uv (precompiled download, no GPU variants) ───────
+          # Shared Python bootstrap for features that need a venv
+          # (MLX today; Whisper / Python-based MCP servers later).
+          # The build script is a download-and-verify, not a compile,
+          # so no toolchain steps fire for these jobs.
+          - engine: uv
+            platform: darwin-arm64
+            variant: ''
+            runner: macos-latest
+            script: build.sh
+            artifact: uv
+            needs_cuda: false
+            needs_vulkan: false
+          # darwin-x64 omitted — see the sd-cpp note above. uv is
+          # download-only so rebuilding for Intel Mac is cheap if we
+          # ever want to re-enable; removing the matrix row is
+          # sufficient for now.
+          - engine: uv
+            platform: linux-x64
+            variant: ''
+            runner: ubuntu-latest
+            script: build.sh
+            artifact: uv
+            needs_cuda: false
+            needs_vulkan: false
+          - engine: uv
+            platform: linux-arm64
+            variant: ''
+            runner: ubuntu-24.04-arm
+            script: build.sh
+            artifact: uv
+            needs_cuda: false
+            needs_vulkan: false
+          - engine: uv
+            platform: win32-x64
+            variant: ''
+            runner: windows-latest
+            script: build.ps1
+            artifact: uv.exe
+            needs_cuda: false
+            needs_vulkan: false
+    runs-on: ${{ matrix.runner }}
+    env:
+      # Multi-variant engines (currently only llama-cpp) read these
+      # to pick the cmake backend flag and emit to a per-variant
+      # output directory. Single-variant engines (sd-cpp) ignore
+      # them — variant is empty in the matrix entries above.
+      LLAMA_BACKEND: ${{ matrix.variant }}
+      LLAMA_BACKEND_TAG: ${{ matrix.variant != '' && '1' || '' }}
+      # ds4 linux CUDA build reads this for the nvcc -arch (its Makefile takes
+      # a single CUDA_ARCH; 'spark' = empty -arch for GB10). Empty for every
+      # non-ds4-linux job (ignored there).
+      DS4_CUDA_ARCH: ${{ matrix.ds4_cuda_arch || '' }}
+      # llama-cpp CUDA build reads this for -DCMAKE_CUDA_ARCHITECTURES. Set on
+      # the linux-x64-cuda leg to the modern-consumer set (RTX 30/40/50).
+      # Empty everywhere else → build.sh omits the flag and llama.cpp's own
+      # CMake picks its portable default (which at CUDA 12.9+ includes
+      # 121a-real for the arm64 DGX-Spark leg). Empty is CI-safe; `native`
+      # is NOT (GPU-less runners can't resolve it).
+      LLAMA_CUDA_ARCH: ${{ matrix.llama_cuda_arch || '' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # ── Preflight: skip unpinned engines with a notice ────────
+      # Engine VERSION files that still carry the all-zeros bring-up
+      # placeholder (commit=00…00) can't be fetched — upstream
+      # rightly rejects "not our ref 0000…". When that happens for
+      # an engine we don't intend to ship in this release tag, fail
+      # every job in the matrix would block the llama-cpp binaries
+      # we DO intend to ship. Soft-skip instead: read the VERSION
+      # file here and set `pinned`; every subsequent step gates on
+      # that output. A ::notice:: annotation surfaces the skip in
+      # the run summary so nobody wonders where the sd-cpp binaries
+      # went.
+      - name: Preflight — check engine is pinned
+        id: preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ matrix.kind }}" == "helper" ]]; then
+            echo "pinned=true" >> "$GITHUB_OUTPUT"
+            echo "[preflight] ${{ matrix.engine }} is first-party helper source"
+            exit 0
+          fi
+          version_file="native/engines/${{ matrix.engine }}/VERSION"
+          commit=$(grep -E '^commit=' "$version_file" | head -n1 | cut -d= -f2 | tr -d '[:space:]')
+          if [[ "$commit" =~ ^[0-9a-f]{40}$ ]] && [[ ! "$commit" =~ ^0+$ ]]; then
+            echo "pinned=true" >> "$GITHUB_OUTPUT"
+            echo "[preflight] ${{ matrix.engine }} pinned at $commit"
+          else
+            echo "pinned=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=${{ matrix.engine }} unpinned::VERSION file still has placeholder commit=$commit — skipping this job. Pin a real SHA in $version_file to build."
+          fi
+
+      # ── Vulkan SDK (Linux) ────────────────────────────────────
+      # Ubuntu's libvulkan-dev ships without glslc (the shader
+      # compiler llama.cpp requires at CMake configure time), so
+      # we use the LunarG SDK tarball — same upstream as the
+      # Windows path.
+      - name: Install Vulkan SDK (Linux)
+        if: steps.preflight.outputs.pinned == 'true' && matrix.needs_vulkan && matrix.platform == 'linux-x64'
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build \
+            libssl-dev pkg-config wget xz-utils
+          VK_VER='${{ env.VULKAN_SDK_VERSION }}'
+          wget -q -O /tmp/vulkan-sdk.tar.xz \
+            "https://sdk.lunarg.com/sdk/download/${VK_VER}/linux/vulkansdk-linux-x86_64-${VK_VER}.tar.xz"
+          mkdir -p "$HOME/vulkan-sdk"
+          tar -xJf /tmp/vulkan-sdk.tar.xz -C "$HOME/vulkan-sdk"
+          SDK_ROOT="$HOME/vulkan-sdk/${VK_VER}/x86_64"
+          test -x "$SDK_ROOT/bin/glslc"
+          echo "VULKAN_SDK=$SDK_ROOT" >> "$GITHUB_ENV"
+          echo "$SDK_ROOT/bin" >> "$GITHUB_PATH"
+          echo "LD_LIBRARY_PATH=$SDK_ROOT/lib" >> "$GITHUB_ENV"
+          echo "CMAKE_PREFIX_PATH=$SDK_ROOT" >> "$GITHUB_ENV"
+
+      # ── Vulkan SDK (Windows) ──────────────────────────────────
+      - name: Install Vulkan SDK (Windows)
+        if: steps.preflight.outputs.pinned == 'true' && matrix.needs_vulkan && matrix.platform == 'win32-x64'
+        shell: pwsh
+        run: |
+          $version = '${{ env.VULKAN_SDK_VERSION_WINDOWS }}'
+          $url = "https://sdk.lunarg.com/sdk/download/$version/windows/vulkansdk-windows-X64-$version.exe"
+          $installer = "$env:RUNNER_TEMP\vulkan-sdk.exe"
+          Invoke-WebRequest -Uri $url -OutFile $installer -UseBasicParsing
+          Start-Process -FilePath $installer -ArgumentList '--accept-licenses','--default-answer','--confirm-command','install' -Wait
+          $sdk = "C:\VulkanSDK\$version"
+          echo "VULKAN_SDK=$sdk" >> $env:GITHUB_ENV
+          echo "$sdk\Bin" >> $env:GITHUB_PATH
+
+      # ── CUDA Toolkit (Linux) ──────────────────────────────────
+      # Direct apt-install from NVIDIA's ubuntu2404 repo. Phase 0
+      # validated this — Jimver action's sub-package naming doesn't
+      # match NVIDIA's real package names, so doing it ourselves is
+      # both deterministic and one fewer external dep.
+      #
+      # x86_64 lives under the `x86_64/` repo path; arm64 (Jetson,
+      # DGX Spark, Grace Hopper, Ampere Altra) lives under `sbsa/`
+      # (Server Base System Architecture). The package names and
+      # install layout are otherwise identical.
+      - name: Install CUDA Toolkit (Linux)
+        if: steps.preflight.outputs.pinned == 'true' && matrix.needs_cuda && startsWith(matrix.platform, 'linux-')
+        run: |
+          set -euxo pipefail
+          # CUDA toolkit version is per-leg. Default 12.8; the ds4 DGX-Spark
+          # (linux-arm64) leg sets matrix.cuda_pkg=12-9 because sm_121 (GB10)
+          # support first shipped in CUDA 12.9 (12.8 stops at sm_120). `12-9`
+          # is the apt package suffix; `12.9` is the install-path form.
+          cuda_pkg="${{ matrix.cuda_pkg }}"
+          cuda_pkg="${cuda_pkg:-12-8}"
+          cuda_ver="${cuda_pkg//-/.}"
+          case "${{ matrix.platform }}" in
+            linux-x64)   cuda_arch="x86_64" ;;
+            linux-arm64) cuda_arch="sbsa" ;;
+            *) echo "unsupported linux platform for CUDA: ${{ matrix.platform }}"; exit 1 ;;
+          esac
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build wget gpg ca-certificates
+          wget -q "https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/${cuda_arch}/cuda-keyring_1.1-1_all.deb"
+          sudo dpkg -i cuda-keyring_1.1-1_all.deb
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            "cuda-nvcc-${cuda_pkg}" "cuda-cudart-dev-${cuda_pkg}" "libcublas-dev-${cuda_pkg}"
+          echo "CUDA_PATH=/usr/local/cuda-${cuda_ver}" >> "$GITHUB_ENV"
+          # ds4's Makefile invokes `$(CUDA_HOME)/bin/nvcc` directly (not PATH
+          # nvcc), and there's no guaranteed /usr/local/cuda symlink, so pin
+          # CUDA_HOME explicitly. Harmless for llama-cpp (it finds CUDA via CMake).
+          echo "CUDA_HOME=/usr/local/cuda-${cuda_ver}" >> "$GITHUB_ENV"
+          echo "/usr/local/cuda-${cuda_ver}/bin" >> "$GITHUB_PATH"
+          echo "LD_LIBRARY_PATH=/usr/local/cuda-${cuda_ver}/lib64:${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
+          "/usr/local/cuda-${cuda_ver}/bin/nvcc" --version
+
+      # ── CUDA Toolkit (Windows) ────────────────────────────────
+      # Jimver's action handles the Windows installer download +
+      # PATH wiring cleanly. Network method is faster than the
+      # full local installer download.
+      - name: Install CUDA Toolkit (Windows)
+        if: steps.preflight.outputs.pinned == 'true' && matrix.needs_cuda && matrix.platform == 'win32-x64'
+        uses: Jimver/cuda-toolkit@3d45d157f327c09c04b50ee6ccdea2d9d017ec76 # v0.2.35
+        with:
+          cuda: '12.4.1'
+          method: 'network'
+          sub-packages: '["nvcc","cudart","cublas","cublas_dev","visual_studio_integration"]'
+
+      # ── Linux CPU baseline build deps ─────────────────────────
+      # Fires for every linux-* CPU-only build (x86_64 and arm64
+      # alike). The CUDA / Vulkan steps install their own toolchains
+      # and don't need this. arm64-on-arm64 cross-compile isn't a
+      # concern — we run natively on ubuntu-24.04-arm.
+      - name: Install base build deps (Linux CPU)
+        if: steps.preflight.outputs.pinned == 'true' && startsWith(matrix.platform, 'linux-') && !matrix.needs_cuda && !matrix.needs_vulkan
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build
+
+      # macOS ships Metal + Xcode CLI tools; no extra steps needed.
+
+      # ── Build ─────────────────────────────────────────────────
+      - name: Build ${{ matrix.engine }} for ${{ matrix.platform }}${{ matrix.variant && format('-{0}', matrix.variant) }}
+        if: steps.preflight.outputs.pinned == 'true'
+        shell: bash
+        run: |
+          if [[ "${{ matrix.kind }}" == "helper" ]]; then
+            script="native/helpers/${{ matrix.engine }}/${{ matrix.script }}"
+          else
+            script="native/engines/${{ matrix.engine }}/${{ matrix.script }}"
+          fi
+          if [[ "${{ matrix.script }}" == "build.ps1" ]]; then
+            pwsh -File "$script"
+          else
+            bash "$script"
+          fi
+
+      # ── Resolve output dir for the rest of the steps ──────────
+      - name: Resolve output dir
+        if: steps.preflight.outputs.pinned == 'true'
+        id: outdir
+        shell: bash
+        run: |
+          if [[ -n "${{ matrix.variant }}" ]]; then
+            echo "dir=native/build/${{ matrix.platform }}-${{ matrix.variant }}" >> "$GITHUB_OUTPUT"
+            echo "tag=${{ matrix.platform }}-${{ matrix.variant }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "dir=native/build/${{ matrix.platform }}" >> "$GITHUB_OUTPUT"
+            echo "tag=${{ matrix.platform }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      # ── Post-build sanity ─────────────────────────────────────
+      - name: Stage native redistribution licenses
+        if: steps.preflight.outputs.pinned == 'true'
+        shell: bash
+        env:
+          REQUIRE_CUDA_EULA: ${{ matrix.needs_cuda }}
+        run: |
+          set -euo pipefail
+          args=()
+          if [[ "$REQUIRE_CUDA_EULA" == "true" ]]; then
+            args+=(--cuda)
+          fi
+          node scripts/stage-native-artifact-licenses.mjs \
+            --output "${{ steps.outdir.outputs.dir }}" "${args[@]}"
+
+      - name: Smoke test
+        if: steps.preflight.outputs.pinned == 'true'
+        shell: bash
+        run: |
+          out="${{ steps.outdir.outputs.dir }}"
+          bin="$out/${{ matrix.artifact }}"
+          test -f "$bin" || { echo "missing $bin"; exit 1; }
+          if [[ "${{ matrix.platform }}" == darwin-* ]]; then
+            file "$bin"
+          fi
+          # CUDA builds dynamically link against libcuda.so.1 (Linux) /
+          # nvcuda.dll (Windows). Those come from the NVIDIA *driver*
+          # (not the CUDA Toolkit) and are NOT redistributable — they
+          # have to be on the user's machine via the installed GPU
+          # driver. Our CI runners don't have GPUs, so the runtime
+          # smoke check would always fail with a false positive
+          # (libcuda.so.1: not found / 0xC0000135). For CUDA variants
+          # we do a loader check and ignore only the driver lib.
+          if [[ "${{ matrix.variant }}" == cuda || ( "${{ matrix.engine }}" == ds4 && "${{ matrix.platform }}" == linux-* ) ]]; then
+            echo "[smoke] CUDA variant — skipping runtime --help (no GPU driver on CI)."
+            ls -la "$bin"
+            if [[ "${{ matrix.platform }}" == linux-* ]]; then
+              echo "[smoke] ldd $bin:"
+              ldd_out="$(env -u LD_LIBRARY_PATH ldd "$bin" 2>&1 || true)"
+              printf '%s\n' "$ldd_out"
+              missing=()
+              while read -r lib; do
+                [[ -n "$lib" ]] || continue
+                # Driver-provided lib — not in the bundle by design.
+                if [[ "$lib" == "libcuda.so.1" ]]; then continue; fi
+                missing+=("$lib")
+              done < <(grep 'not found' <<<"$ldd_out" | awk '{print $1}')
+              if [[ ${#missing[@]} -gt 0 ]]; then
+                echo "::error::$bin has unresolved non-driver dependencies: ${missing[*]}"
+                exit 1
+              fi
+              echo "[smoke] all non-driver runtime dependencies resolvable"
+            fi
+          else
+            # `--help` may exit non-zero on a runner that lacks the
+            # actual GPU — we only care that the binary loads its
+            # dependencies cleanly. We tolerate non-zero exit, but we
+            # DO require the binary to produce some output: a silent
+            # exit with no stdout/stderr is what STATUS_DLL_NOT_FOUND
+            # (0xC0000135) looks like to the parent shell, and that's
+            # the regression class we want to catch in CI rather than
+            # ship to users (e.g. the libssl/libcrypto bug in 0.1.5).
+            #
+            # Use a here-string for the diagnostic head, NOT `echo … |
+            # head`: llama-server's --help is hundreds of lines, head
+            # closes the pipe after 20, echo SIGPIPEs trying to write
+            # the rest, and `set -o pipefail` (GitHub's bash default)
+            # then fails the whole pipeline. That's the bug that killed
+            # 0.1.7 — the binary worked, the smoke test killed it.
+            help_out="$("$bin" --help 2>&1 || true)"
+            head -n 20 <<<"$help_out"
+            if [[ -z "${help_out//[[:space:]]/}" ]]; then
+              echo "::error::$bin produced no --help output — likely a startup DLL load failure (0xC0000135 / dlopen). The bundle is missing a runtime dependency."
+              exit 1
+            fi
+            # Linux: verify the bundle is self-contained. ldd resolves
+            # via the binary's RPATH ($ORIGIN, set by patchelf), so it
+            # shows OUR bundled libssl.so.3 etc. rather than the system
+            # copies IF the rpath fixup worked. "not found" means the
+            # bundle would fail on a user machine without the dep —
+            # fail the build, don't ship it.
+            if [[ "${{ matrix.platform }}" == linux-* ]]; then
+              echo "[smoke] ldd $bin:"
+              ldd "$bin" || true
+              if ldd "$bin" 2>&1 | grep -q "not found"; then
+                echo "::error::$bin has unresolved dependencies — bundle is not self-contained"
+                ldd "$bin" 2>&1 | grep "not found"
+                exit 1
+              fi
+            fi
+          fi
+          # Always log the full bundle contents — diagnostic, especially
+          # when the peer-lib check below fails on an upstream version
+          # whose naming has shifted.
+          echo "[smoke] bundle contents:"
+          ls -la "$out"
+
+          # llama-cpp's per-backend code (ggml-cuda / ggml-vulkan /
+          # ggml-metal / ggml-cpu) ships as a separate shared lib that
+          # the binary dlopens at model-load time. The `--help` check
+          # above doesn't catch a missing one — we'd ship a bundle
+          # that says it's ready and dies with STATUS_DLL_NOT_FOUND
+          # (Windows) / dlopen error (Mac/Linux) on the first chat.
+          # That's the regression that broke 0.1.2 / 0.1.3.
+          #
+          # We only check the per-backend peer, NOT generic ggml /
+          # ggml-base / llama, because those names have shifted across
+          # upstream versions (the modularization landed mid-2024,
+          # earlier pins didn't have a separate ggml-base, etc.). The
+          # backend-specific peer has been stable across the relevant
+          # range.
+          #
+          # CMake naming conventions:
+          #   Windows: ggml-cuda.dll          (no `lib` prefix)
+          #   Linux:   libggml-cuda.so
+          #   macOS:   libggml-metal.dylib
+          if [[ "${{ matrix.engine }}" == llama-cpp ]]; then
+            case "${{ matrix.platform }}" in
+              win32-*)  lib_prefix=""    ; lib_ext=dll   ;;
+              darwin-*) lib_prefix="lib" ; lib_ext=dylib ;;
+              linux-*)  lib_prefix="lib" ; lib_ext=so    ;;
+            esac
+            case "${{ matrix.variant }}" in
+              cuda)   peer="${lib_prefix}ggml-cuda.${lib_ext}"   ;;
+              vulkan) peer="${lib_prefix}ggml-vulkan.${lib_ext}" ;;
+              metal)  peer="${lib_prefix}ggml-metal.${lib_ext}"  ;;
+              cpu)    peer="${lib_prefix}ggml-cpu.${lib_ext}"    ;;
+            esac
+            # Also accept versioned suffixes (e.g. libggml-cuda.so.1).
+            if ! ls "$out"/${peer}* >/dev/null 2>&1; then
+              echo "::error::missing backend peer lib ${peer} alongside ${{ matrix.artifact }} — build script likely failed to glob it from the cmake output"
+              exit 1
+            fi
+            echo "[smoke] backend peer lib ${peer} present ✓"
+          fi
+          # CUDA bundles must have cudart/cublas beside the executable
+          # so the binary works on machines without the matching toolkit.
+          if [[ "${{ matrix.variant }}" == cuda || ( "${{ matrix.engine }}" == ds4 && "${{ matrix.platform }}" == linux-* ) ]]; then
+            ls "$out" | grep -Ei 'cudart|cublas' || { echo "CUDA runtime libraries missing alongside exe"; exit 1; }
+          fi
+
+      # ── Code-sign the engine binary (gated on secrets) ────────
+      # Sign HERE — after the smoke test, before the sha is computed and
+      # the artifact uploaded — so the release's SHA256SUMS reflects the
+      # SIGNED bytes and the runtime engine resolver's signature check
+      # (engineSignaturePolicy) passes. We sign ONLY the main artifact,
+      # not the peer libs: the verifier only checks the main binary, the
+      # peer DLLs include third-party redistributables (cuBLAS) we must
+      # not re-sign, and on macOS we deliberately omit `--options runtime`
+      # so hardened-runtime library validation doesn't block the unsigned
+      # ggml-*.dylib the binary dlopens. No signing secrets configured
+      # (PRs, forks, dispatch test runs) → these steps no-op and the
+      # binary ships unsigned, exactly as before.
+      - name: Install Trusted Signing SDK (Windows)
+        if: steps.preflight.outputs.pinned == 'true' && startsWith(matrix.platform, 'win32')
+        shell: pwsh
+        env:
+          SIGNING_ENDPOINT: ${{ secrets.AZURE_CODE_SIGNING_ENDPOINT }}
+          SIGNING_ACCOUNT: ${{ secrets.AZURE_CODE_SIGNING_ACCOUNT }}
+          SIGNING_PROFILE: ${{ secrets.AZURE_CERT_PROFILE_NAME }}
+        run: |
+          if (-not $env:SIGNING_ENDPOINT) {
+            Write-Host "[sign] no AZURE_CODE_SIGNING_ENDPOINT — binary ships unsigned"
+            exit 0
+          }
+          nuget install Microsoft.Trusted.Signing.Client -Version 1.0.60 `
+            -OutputDirectory "${{ runner.temp }}\TrustedSigning"
+          $dlibDir = Get-ChildItem "${{ runner.temp }}\TrustedSigning\Microsoft.Trusted.Signing.Client.*\bin\x64" -Directory | Select-Object -First 1
+          echo "TRUSTED_SIGNING_DLIB_PATH=$($dlibDir.FullName)\Azure.CodeSigning.Dlib.dll" >> $env:GITHUB_ENV
+          $metadata = @{
+            Endpoint = "$env:SIGNING_ENDPOINT"
+            CodeSigningAccountName = "$env:SIGNING_ACCOUNT"
+            CertificateProfileName = "$env:SIGNING_PROFILE"
+          } | ConvertTo-Json
+          $metadataPath = "${{ runner.temp }}\metadata.json"
+          Set-Content -Path $metadataPath -Value $metadata
+          echo "TRUSTED_SIGNING_METADATA_PATH=$metadataPath" >> $env:GITHUB_ENV
+
+      - name: Sign Windows binary (Authenticode)
+        if: steps.preflight.outputs.pinned == 'true' && startsWith(matrix.platform, 'win32')
+        shell: pwsh
+        env:
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+        run: |
+          if (-not $env:TRUSTED_SIGNING_DLIB_PATH) {
+            Write-Host "[sign] Trusted Signing not configured — skipping (unsigned)"
+            exit 0
+          }
+          $sdkRoot = "C:\Program Files (x86)\Windows Kits\10\bin"
+          $signtool = Get-ChildItem $sdkRoot -Directory -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -like '10.*' } | Sort-Object Name -Descending |
+            ForEach-Object { Join-Path $_.FullName 'x64\signtool.exe' } |
+            Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $signtool) { $signtool = 'signtool.exe' }
+          $bin = Join-Path "${{ steps.outdir.outputs.dir }}" "${{ matrix.artifact }}"
+          Write-Host "[sign] $bin (via $signtool)"
+          & $signtool sign /v /fd SHA256 /tr http://timestamp.acs.microsoft.com /td SHA256 `
+            /dlib "$env:TRUSTED_SIGNING_DLIB_PATH" /dmdf "$env:TRUSTED_SIGNING_METADATA_PATH" "$bin"
+          if ($LASTEXITCODE -ne 0) { throw "signtool failed for $bin" }
+
+      - name: Import Apple signing certificate (macOS)
+        if: steps.preflight.outputs.pinned == 'true' && startsWith(matrix.platform, 'darwin')
+        env:
+          APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${APPLE_CERTIFICATE_P12_BASE64:-}" ]]; then
+            echo "[sign] no APPLE_CERTIFICATE_P12_BASE64 — binary ships unsigned"
+            exit 0
+          fi
+          KEYCHAIN_PATH=$RUNNER_TEMP/native-signing.keychain-db
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          echo "$APPLE_CERTIFICATE_P12_BASE64" | base64 --decode > $RUNNER_TEMP/native-cert.p12
+          security import $RUNNER_TEMP/native-cert.p12 \
+            -P "$APPLE_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH" login.keychain
+          echo "GEZEL_NATIVE_KEYCHAIN=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
+
+      - name: Codesign macOS binary (Developer ID)
+        if: steps.preflight.outputs.pinned == 'true' && startsWith(matrix.platform, 'darwin')
+        run: |
+          set -euo pipefail
+          if [[ -z "${GEZEL_NATIVE_KEYCHAIN:-}" ]]; then
+            echo "[sign] no Apple keychain set up — skipping (unsigned)"
+            exit 0
+          fi
+          bin="${{ steps.outdir.outputs.dir }}/${{ matrix.artifact }}"
+          echo "[sign] $bin"
+          codesign --force --timestamp --sign "Developer ID Application" "$bin"
+          codesign --verify --strict --verbose=2 "$bin"
+
+      - name: Tear down keychain (macOS)
+        if: always() && startsWith(matrix.platform, 'darwin')
+        run: security delete-keychain "$RUNNER_TEMP/native-signing.keychain-db" 2>/dev/null || true
+
+      # ── Upload ────────────────────────────────────────────────
+      - name: Compute sha256
+        if: steps.preflight.outputs.pinned == 'true'
+        id: hash
+        shell: bash
+        run: |
+          bin="${{ steps.outdir.outputs.dir }}/${{ matrix.artifact }}"
+          if command -v sha256sum >/dev/null 2>&1; then
+            sum=$(sha256sum "$bin" | awk '{print $1}')
+          else
+            sum=$(shasum -a 256 "$bin" | awk '{print $1}')
+          fi
+          echo "sha256=$sum" >> "$GITHUB_OUTPUT"
+          echo "sha256 for $bin: $sum"
+
+      - name: Resolve artifact name
+        if: steps.preflight.outputs.pinned == 'true'
+        id: artifactname
+        shell: bash
+        run: |
+          if [[ -n "${{ matrix.variant }}" ]]; then
+            echo "name=native-${{ matrix.engine }}-${{ matrix.platform }}-${{ matrix.variant }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=native-${{ matrix.engine }}-${{ matrix.platform }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0 # v7.0.1
+        if: steps.preflight.outputs.pinned == 'true'
+        with:
+          name: ${{ steps.artifactname.outputs.name }}
+          path: ${{ steps.outdir.outputs.dir }}/
+          retention-days: 14
+
+      - name: Upload manifest line
+        if: steps.preflight.outputs.pinned == 'true'
+        shell: bash
+        run: |
+          echo "${{ steps.hash.outputs.sha256 }}  ${{ matrix.artifact }}" \
+            > "${{ steps.outdir.outputs.dir }}/${{ matrix.engine }}.sha256"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0 # v7.0.1
+        with:
+          name: ${{ steps.artifactname.outputs.name }}-manifest
+          path: ${{ steps.outdir.outputs.dir }}/${{ matrix.engine }}.sha256
+          retention-days: 14
+
+  # ─────────────────────────────────────────────────────────────────
+  # Aggregate the per-platform artifacts into a GitHub Release.
+  #
+  # Only fires on tag pushes (`refs/tags/native-v*`). Manual
+  # workflow_dispatch runs build + upload artifacts but skip the
+  # release — same intent as the old release-native.yml's `if:`.
+  #
+  # `needs: build` waits for every matrix entry to finish (incl.
+  # any preflight-skipped ones, which exit success). If a single
+  # matrix job fails, we don't release a partial set of binaries.
+  # ─────────────────────────────────────────────────────────────────
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/native-v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      # actions/download-artifact@v4 lists + pulls the build jobs' artifacts
+      # through the (post-2025 migration) artifact service, which requires the
+      # actions:read scope. A `permissions:` block resets every unlisted scope
+      # to none, so without this the release job 403s on ListArtifacts even
+      # though the artifacts uploaded fine. (Was implicit before GitHub
+      # tightened artifact-service auth + moved runners to Node 24.)
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Default behaviour pulls every artifact uploaded by `build`
+      # in this same workflow run — no run-id juggling, no 90-day
+      # artifact-expiry concern.
+      - name: Download all native build artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: native-artifacts
+
+      - name: List artifacts
+        run: find native-artifacts -type f | sort
+
+      # ── Arrange into native/build/<platform>[-<variant>]/<binary> ──
+      # Artifact name pattern produced by the build job above:
+      #   native-<engine>-<platform>            (single-variant engines)
+      #   native-<engine>-<platform>-<variant>  (multi-variant — e.g. llama-cpp)
+      # Engine names can contain hyphens (sd-cpp, llama-cpp) so we
+      # match the trailing well-known platform/variant token rather
+      # than splitting on `-` from the left.
+      - name: Stage into native/build/
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          KNOWN_PLATFORMS=(darwin-arm64 darwin-x64 linux-x64 linux-arm64 win32-x64)
+          KNOWN_VARIANTS=(metal cuda vulkan cpu)
+          for dir in native-artifacts/native-* ; do
+            name=$(basename "$dir")
+            if [[ "$name" == *-manifest ]]; then continue; fi
+            target=""
+            for stem in "${KNOWN_PLATFORMS[@]}"; do
+              for variant in "${KNOWN_VARIANTS[@]}" ""; do
+                if [[ -n "$variant" ]]; then
+                  suffix="${stem}-${variant}"
+                else
+                  suffix="${stem}"
+                fi
+                if [[ "$name" == *-"$suffix" ]]; then
+                  engine="${name#native-}"
+                  engine="${engine%-$suffix}"
+                  target="native/build/$suffix"
+                  mkdir -p "$target"
+                  cp -R "$dir"/* "$target/"
+                  echo "staged $engine → $target"
+                  break 2
+                fi
+              done
+            done
+            if [[ -z "$target" ]]; then
+              echo "warning: artifact $name didn't match any known platform/variant suffix; skipping"
+            fi
+          done
+          find native/build -type f | sort
+
+      # ── Build tarballs per platform ───────────────────────────────
+      - name: Pack tarballs
+        id: pack
+        run: |
+          set -euo pipefail
+          tag="${{ github.ref_name }}"
+          version="${tag#native-v}"
+          mkdir -p release
+          cd native/build
+          for platform in */ ; do
+            platform="${platform%/}"
+            archive_name="gezel-native-${version}-${platform}"
+            if [[ "$platform" == win32-* ]]; then
+              (cd "$platform" && zip -r "../../../release/${archive_name}.zip" .)
+            else
+              tar -C "$platform" -czf "../../release/${archive_name}.tar.gz" .
+            fi
+          done
+          cd ../../
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          ls -la release/
+
+      - name: Generate SHA256SUMS
+        run: |
+          cd release
+          sha256sum *.tar.gz *.zip 2>/dev/null | sort > SHA256SUMS
+          cat SHA256SUMS
+
+      # ── Optional: macOS sign + notarize for standalone consumers ──
+      # Gated on APPLE_CERTIFICATE_P12_BASE64 being set. When it isn't,
+      # the standalone tarballs are shipped unsigned (Electron bundle
+      # still signs its own copy). Users who want signed standalone
+      # binaries set the same secrets the Electron release uses.
+      - name: Sign macOS binaries (if secrets present)
+        if: env.APPLE_CERTIFICATE_P12_BASE64 != ''
+        env:
+          APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
+        run: |
+          echo "standalone-sign path is documented but not yet implemented here."
+          echo "on-device: run codesign against each Mach-O under native/build/darwin-*,"
+          echo "then repack the tarball. Left commented out until there's a confirmed"
+          echo "consumer that wants standalone-signed binaries."
+
+      # ── Create / update the GitHub Release ────────────────────────
+      - name: Create Release
+        uses: softprops/action-gh-release@fe965f7af51af5f2602596916f38a38df2e33de0 # v3.0.2
+        with:
+          token: ${{ secrets.GEZEL_RELEASE_TOKEN || github.token }}
+          tag_name: ${{ github.ref_name }}
+          name: Native binaries v${{ steps.pack.outputs.version }}
+          draft: false
+          generate_release_notes: true
+          body: |
+            Prebuilt Gezel native engine binaries.
+
+            These are consumed by `.github/workflows/release-electron.yml`
+            before producing an installer — the Electron release signs
+            each binary as part of the `.app` / NSIS signing pass. They
+            are unsigned in this release; standalone consumers who need
+            signed binaries should build them themselves from this repo
+            at the tagged revision.
+
+            Each archive contains the engine binaries for one platform plus
+            `THIRD_PARTY_LICENSES/` with the pin-bound native redistribution
+            texts. CUDA archives also carry the CUDA Toolkit EULA supplied by
+            the build image. `SHA256SUMS` verifies the archives on the download
+            path.
+          files: |
+            release/*.tar.gz
+            release/*.zip
+            release/SHA256SUMS

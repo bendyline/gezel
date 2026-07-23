@@ -1,0 +1,46 @@
+{
+  "name": "@bendyline/gezel-evals",
+  "version": "0.0.0",
+  "private": true,
+  "description": "End-to-end evaluation harness — drives gezeld via GezelClient against scripted scenarios and reports success rates.",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "run": "tsx src/bin/run.ts",
+    "batch": "tsx src/bin/batch.ts",
+    "ab-grammar": "tsx src/bin/ab-grammar.ts",
+    "ab-craftbook-format": "tsx src/bin/ab-craftbook-format.ts",
+    "ab-prompt-conduct": "tsx src/bin/ab-prompt-conduct.ts",
+    "ab-index": "tsx src/bin/ab-index.ts",
+    "index-bench": "tsx src/bin/index-bench.ts",
+    "preflight": "tsx src/bin/preflight.ts",
+    "all": "tsx src/bin/all.ts",
+    "postmortems": "tsx src/bin/render-postmortems.ts",
+    "postmortems:enrich": "tsx src/bin/enrich-postmortems.ts",
+    "craftbook:coverage": "tsx src/bin/craftbook-coverage.ts",
+    "craftbook:plan": "tsx src/bin/craftbook-plan.ts",
+    "compare:scores": "tsx src/bin/compare-scores.ts",
+    "coverage:models": "tsx src/bin/model-coverage.ts",
+    "coverage:refresh": "tsx src/bin/model-coverage.ts --out runs/current-model-coverage-$(date +%F).md && tsx src/bin/compare-scores.ts --out runs/current-score-comparison-$(date +%F).md",
+    "screenshot": "tsx src/bin/screenshot.ts"
+  },
+  "dependencies": {
+    "@bendyline/gezel": "workspace:*",
+    "@bendyline/gezel-catalog": "workspace:*",
+    "@bendyline/gezel-client": "workspace:*",
+    "@bendyline/gezel-service": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "js-yaml": "5.2.1",
+    "playwright": "^1.61.1",
+    "selfsigned": "^5.5.0"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^24.13.3",
+    "tsx": "^4.23.1",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10"
+  }
+}

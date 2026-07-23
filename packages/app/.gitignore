@@ -1,0 +1,5 @@
+# Persistent cache for fetch-node / fetch-pnpm (and future fetch-* scripts).
+# Survives `tsup --clean` so we don't re-download Node / pnpm on every build;
+# the dist/ tree is rebuilt by copying from this cache. Safe to delete to
+# force a re-download.
+.cache/

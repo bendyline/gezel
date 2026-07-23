@@ -1,0 +1,34 @@
+# uv upstream pin.
+#
+# uv is distributed as **precompiled static binaries** — our build scripts
+# download the right per-platform archive from GitHub Releases rather than
+# building from source. That's why this VERSION file is different from
+# the llama-cpp / sd-cpp pattern: no upstream clone, no commit-sha-driven
+# checkout, just a tag + per-archive sha256 digests copied from Astral's
+# companion `.sha256` files alongside each release asset.
+#
+# The `commit=` field is the sha the tag points at — used by the shared
+# preflight in .github/workflows/build-native.yml to decide whether the
+# engine is pinned (non-zero sha) or skippable (all zeros).
+#
+# How to bump:
+#   1. `gh api repos/astral-sh/uv/releases/latest --jq .tag_name`
+#   2. `gh api repos/astral-sh/uv/git/refs/tags/<tag> --jq .object.sha`
+#   3. For each platform archive, curl the companion `.sha256` from
+#      `https://github.com/astral-sh/uv/releases/download/<tag>/<asset>.sha256`
+#      and copy the hex digest below.
+#   4. Run `./build.sh` locally to validate, then tag `native-vX.Y.Z`.
+#
+# License: Apache 2.0 / MIT dual (https://github.com/astral-sh/uv)
+upstream=https://github.com/astral-sh/uv
+tag=0.11.31
+commit=b7fdec626cdafcfb0d0db54d39d3d5f114aefb5c
+
+# Per-platform archive sha256 digests. Mirrors Astral's companion
+# `.sha256` files — if these drift, the build script's verification
+# fails loudly at download time.
+sha256_darwin_arm64=b2b93e82a6786f9c7cb89fd4ca0e859a147b292ae8f6f95784f9742f0efec39e
+sha256_darwin_x64=33ee6bd62b57fcd77a499deb54e4432dc1e1a2f3d34930ba987ad8b43f9c7bc7
+sha256_linux_x64=8cc1cd82d434ec565376f98bd938d4b715b5791a80ff2d3aa78821cf85091b4b
+sha256_linux_arm64=d74f23949fd07be4970f293d06ca99d87cd2a78a341c3d7b7fc0df7bc2d8a145
+sha256_win32_x64=410c2fd3126ff621c9450a21cfc200002c7540dc48d130069a8f619cdb0a811b

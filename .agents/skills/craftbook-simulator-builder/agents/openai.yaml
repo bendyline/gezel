@@ -1,0 +1,4 @@
+interface:
+  display_name: "Craftbook Simulator Builder"
+  short_description: "Build fake tools and data for evals"
+  default_prompt: "Use $craftbook-simulator-builder to add a deterministic simulator for a craftbook eval."

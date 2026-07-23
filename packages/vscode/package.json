@@ -1,0 +1,140 @@
+{
+  "name": "@bendyline/gezel-vscode",
+  "version": "0.0.0",
+  "private": true,
+  "description": "VSCode extension that hosts a gezel chat panel for the active workspace.",
+  "license": "MIT",
+  "displayName": "Gezel",
+  "publisher": "bendyline",
+  "engines": {
+    "vscode": "^1.97.0"
+  },
+  "main": "./dist/extension.cjs",
+  "files": ["dist", "resources"],
+  "activationEvents": ["onStartupFinished"],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "gezel",
+          "title": "Gezel",
+          "icon": "resources/chat.svg"
+        }
+      ]
+    },
+    "views": {
+      "gezel": [
+        {
+          "type": "webview",
+          "id": "gezel.chat",
+          "name": "Chat"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "gezel.openChat",
+        "title": "Gezel: Open Chat"
+      },
+      {
+        "command": "gezel.switchGezel",
+        "title": "Gezel: Switch Active Gezel"
+      },
+      {
+        "command": "gezel.switchFolder",
+        "title": "Gezel: Switch Workspace Folder"
+      },
+      {
+        "command": "gezel.refresh",
+        "title": "Gezel: Reconnect Daemon"
+      },
+      {
+        "command": "gezel.showLogs",
+        "title": "Gezel: Show Logs"
+      },
+      {
+        "command": "gezel.showStatus",
+        "title": "Gezel: Show Status"
+      },
+      {
+        "command": "gezel.approvePendingApp",
+        "title": "Gezel: Approve Pending App Connection"
+      },
+      {
+        "command": "gezel.resetConnection",
+        "title": "Gezel: Reset App Connection"
+      },
+      {
+        "command": "gezel.codeIntel.toggle",
+        "title": "Gezel: Toggle Code Context"
+      }
+    ],
+    "configuration": {
+      "title": "Gezel",
+      "properties": {
+        "gezel.daemonUrl": {
+          "type": "string",
+          "description": "Override daemon base URL (skip discovery). Pair with gezel.daemonToken."
+        },
+        "gezel.daemonToken": {
+          "type": "string",
+          "description": "Bearer token for the daemon. Required when gezel.daemonUrl is set."
+        },
+        "gezel.defaultGezel": {
+          "type": "string",
+          "default": "dev",
+          "description": "Name of the gezel that handles direct chat (the one you reach without @-mentioning)."
+        },
+        "gezel.spawnIfMissing": {
+          "type": "boolean",
+          "default": true,
+          "description": "Spawn gezeld if no running daemon is found. Disable to require an externally-managed daemon."
+        },
+        "gezel.languageModelProvider.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Register gezels as language models in Copilot Chat's model picker. Each gezel becomes one entry (e.g. `Gezel: Maya`). Disable to keep gezels out of the picker; the chat panel still works."
+        },
+        "gezel.codeIntel.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show per-symbol code context from gezel's index in real editors: a CodeLens above each symbol (imported-by / uses / findings / summary) and a hover with the full section. Requires the workspace to be a gezel project with a built index."
+        }
+      }
+    },
+    "languageModelChatProviders": [
+      {
+        "vendor": "gezel",
+        "displayName": "Gezel",
+        "managementCommand": "gezel.openChat"
+      }
+    ]
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist dist-e2e .turbo",
+    "test": "vitest run --passWithNoTests",
+    "build:e2e": "tsup --config tsup.e2e.config.ts",
+    "test:e2e": "pnpm run build && pnpm run build:e2e && node dist-e2e/runTests.cjs"
+  },
+  "dependencies": {
+    "@bendyline/gezel": "workspace:*",
+    "@bendyline/gezel-app-sdk": "workspace:*",
+    "@bendyline/gezel-client": "workspace:*",
+    "@bendyline/gezel-service": "workspace:*",
+    "@bendyline/gezel-ui": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^24.13.3",
+    "@types/vscode": "^1.125.0",
+    "@vscode/test-electron": "^3.0.0",
+    "glob": "^13.0.6",
+    "mocha": "^11.7.6",
+    "tsup": "^8.5.1",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10"
+  }
+}

@@ -1,0 +1,51 @@
+{
+  "id": "gemma4-26b-q4",
+  "name": "Gemma 4 (26B, MoE, Q4)",
+  "description": "Google's Gemma 4 mixture-of-experts model — 25.2B total parameters with 3.8B active per token. Multimodal with long-context agentic workflows. The full 26B has to fit in memory but only ~4B parameters fire per token, so on capable hardware it runs noticeably faster than the dense 31B at a similar memory cost — the recommended high-end on-device default.",
+  "tags": ["google", "multimodal", "vision", "tools", "mix of experts", "agentic", "qat"],
+  "category": "general",
+  "maintainer": { "name": "Google", "url": "https://huggingface.co/google/gemma-4-26B-A4B-it" },
+  "version": "1.2.0",
+  "updatedAt": "2026-06-06T00:00:00Z",
+  "license": "Apache-2.0",
+  "recoScore": 15,
+  "parameterSize": "25.2B",
+  "approxSizeBytes": 14249045120,
+  "supportsTools": true,
+  "contextWindow": 256000,
+  "upstream": "https://huggingface.co/google/gemma-4-26B-A4B-it",
+  "style": {
+    "family": "gemma",
+    "reasoningFormat": "channel",
+    "toolCallFormat": "function-call"
+  },
+  "behaviors": [
+    "reasoning.strip-channel-tags",
+    "reasoning.capture-pre-tool-prose",
+    "prompt.private-reasoning-guidance",
+    "prompt.tool-cookbook-full",
+    "prompt.meester-build-prelude",
+    "fabrication.detect-past-tense-no-tools",
+    "fabrication.detect-claim-without-tool",
+    "turn.preamble-folding",
+    {
+      "id": "turn.ramble-detection",
+      "config": { "coldThreshold": 8000, "postActionThreshold": 2000 }
+    },
+    "turn.auto-acknowledge-tool-errors",
+    { "id": "turn.continuation-budget", "config": { "count": 4 } },
+    "mcp.validate-ids-strict",
+    { "id": "turn.single-tool-per-turn", "config": { "meesterOnly": true } },
+    "parse.gemma-special-token"
+  ],
+  "ollama": { "tag": "gemma4:26b-a4b-it-qat" },
+  "llamaCpp": {
+    "huggingfaceRepo": "unsloth/gemma-4-26B-A4B-it-qat-GGUF",
+    "filename": "gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf",
+    "quantization": "UD-Q4_K_XL"
+  },
+  "mlx": {
+    "huggingfaceRepo": "mlx-community/gemma-4-26B-A4B-it-qat-nvfp4",
+    "quantization": "nvfp4"
+  }
+}

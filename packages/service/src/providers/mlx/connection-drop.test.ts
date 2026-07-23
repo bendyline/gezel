@@ -1,0 +1,35 @@
+import { describe, expect, it } from 'vitest';
+import { isMidStreamConnectionDrop } from './provider.js';
+
+describe('isMidStreamConnectionDrop', () => {
+  it('matches undici’s bare "terminated" mid-stream error', () => {
+    expect(isMidStreamConnectionDrop(new TypeError('terminated'))).toBe(true);
+  });
+
+  it('matches a terminated error whose cause is a socket error', () => {
+    const err = new TypeError('terminated');
+    (err as { cause?: unknown }).cause = Object.assign(new Error('other side closed'), {
+      code: 'UND_ERR_SOCKET',
+    });
+    expect(isMidStreamConnectionDrop(err)).toBe(true);
+  });
+
+  it('matches an ECONNRESET socket reset', () => {
+    expect(isMidStreamConnectionDrop(Object.assign(new Error('read ECONNRESET'), {}))).toBe(true);
+  });
+
+  it('does not match our own AbortError', () => {
+    const err = new Error('aborted');
+    err.name = 'AbortError';
+    expect(isMidStreamConnectionDrop(err)).toBe(false);
+  });
+
+  it('does not match an unrelated error', () => {
+    expect(isMidStreamConnectionDrop(new Error('model failed to load'))).toBe(false);
+  });
+
+  it('tolerates non-Error values', () => {
+    expect(isMidStreamConnectionDrop('terminated')).toBe(false);
+    expect(isMidStreamConnectionDrop(undefined)).toBe(false);
+  });
+});

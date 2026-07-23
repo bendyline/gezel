@@ -1,0 +1,1129 @@
+[
+  {
+    "id": "rest-api",
+    "name": "REST API Service",
+    "description": "Build a RESTful HTTP API service with resource endpoints, JSON request/response bodies, status codes, validation, and error handling. Locks the contract FIRST — resources, routes, verbs, request/response shapes, status-code map, auth, and pagination — so the implementation has a fixed target, then builds the server, then writes endpoint tests that exercise every route and error case. Covers CRUD endpoints, RESTful routing, OpenAPI-style contract, HTTP status codes, input validation, JSON serialization, and integration tests against the running handler.",
+    "tags": ["api", "rest", "http", "backend", "server"],
+    "triggers": [
+      "build a rest api",
+      "create an http api",
+      "crud endpoints",
+      "make a backend api",
+      "json api service"
+    ],
+    "phases": [
+      {
+        "id": "contract-design",
+        "name": "Contract design",
+        "role": "planner",
+        "summary": "lock resources, routes, request/response shapes, status codes",
+        "prompt": "Design the API contract before any server code. Step 1: List the resources (nouns) the API exposes and the operations on each. Step 2: For every endpoint write the exact method + path (e.g. `GET /users/:id`, `POST /users`), with no base path/version prefix unless the source brief explicitly requires one, plus the request body/query shape, the success response shape and status code, and the error responses with their status codes (400 validation, 404 missing, 409 conflict, 401/403 auth). Step 3: Decide cross-cutting rules: content-type (`application/json`), pagination scheme for list endpoints, auth mechanism (or none), and the canonical error envelope (e.g. `{ error: { code, message } }`). Step 4: Write a numbered acceptance-criteria checklist of 5-9 concrete, testable items (e.g. 'POST /users with valid body returns 201 + the created resource with an id', 'GET on a missing id returns 404 with the error envelope', 'a malformed body returns 400, never 500'). Step 5: `write_task_note` the full contract table + the checklist, and write the same to the produces path. No implementation yet.",
+        "produces": { "path": "notes/contract-design.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "build",
+        "name": "Build the service",
+        "role": "developer",
+        "summary": "implement the server to the locked contract",
+        "prompt": "Implement the API server in a single runnable source file that satisfies the contract exactly. Step 1: Wire a minimal HTTP server/router (standard library or the project's framework) with one handler per endpoint from the contract. If using Node built-ins, use a normal top-level import such as `import http from \"node:http\"` or `import { createServer } from \"node:http\"`; do not hide standard-library imports behind dynamic `await import()` inside a synchronous factory. Step 2: Parse and VALIDATE every request body/param before acting; on invalid input return the 400 error envelope, never let it reach a 500. Step 3: Return the exact status codes and response shapes the contract specifies, with `Content-Type: application/json`; after writing any auth, validation, not-found, or success response, immediately `return` so the handler cannot write headers twice. Step 4: Implement the error envelope and a catch-all so unexpected errors return a clean 500 with the envelope, not a stack trace. Use an in-memory store if no DB was specified. On a loop-back, fix only the gaps the reviewer named — do not regress passing routes. `write_task_note` the file path and which criteria now pass.",
+        "produces": { "path": "src/server.js", "kind": "code-module" }
+      },
+      {
+        "id": "test",
+        "name": "Write endpoint tests",
+        "role": "developer",
+        "summary": "test every route, status code, and error path",
+        "prompt": "Write integration tests that exercise the running handler against every acceptance criterion. Step 1: For each endpoint, assert the happy path: correct status code AND response shape. Step 2: Assert each error path the contract names — 400 on bad input, 404 on missing, 401/403 on auth, 409 on conflict. Step 3: Assert the error envelope shape is consistent across all error responses. Step 4: Include at least one round-trip test (create then read back) to prove state is wired. For self-contained Node HTTP tests, start the server on `listen(0)`, read the assigned port from `server.address().port`, use built-in `fetch`, and close the server in `finally`. Make the tests runnable and self-contained. `write_task_note` the test file path and the pass/fail count.",
+        "produces": { "path": "src/server.test.js", "kind": "code-with-tests" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Run the test suite and exercise the API. For EACH acceptance criterion: confirm the endpoint returns the documented status code and response shape, confirm every error path returns the correct code with the error envelope (and never a raw 500/stack trace on bad input), and confirm at least one create→read round-trip works. Write PASS/FAIL per criterion with the offending route on any FAIL.",
+      "loopBackTo": "build",
+      "deliverable": { "path": "src/server.js", "kind": "code-module" }
+    }
+  },
+  {
+    "id": "graphql-api",
+    "name": "GraphQL API",
+    "description": "Build a GraphQL API with a typed schema (SDL), resolvers, queries, mutations, and input validation. Designs the schema FIRST — types, fields, nullability, query/mutation operations, and the resolver-to-data mapping — because in GraphQL the schema IS the contract, then implements resolvers, then writes operation tests covering each query, mutation, and error. Covers GraphQL schema definition language, resolvers, nullable vs non-null fields, mutations, query arguments, N+1 awareness, and error handling.",
+    "tags": ["api", "graphql", "schema", "backend", "resolvers"],
+    "triggers": [
+      "build a graphql api",
+      "graphql schema and resolvers",
+      "create a graphql server",
+      "graphql endpoint"
+    ],
+    "phases": [
+      {
+        "id": "schema-design",
+        "name": "Schema design",
+        "role": "planner",
+        "summary": "lock the SDL types, queries, mutations, nullability",
+        "prompt": "Design the GraphQL schema before any resolver code — in GraphQL the schema is the contract. Step 1: Define the object types and their fields in SDL, deciding nullability (`String` vs `String!`) deliberately for each field. Step 2: Define the root `Query` operations (what can be read) and `Mutation` operations (what can be changed), with their argument types and input types. Step 3: For each operation, note which data source/store backs it and what a resolver must return. Step 4: Decide error handling: which conditions return null vs throw a typed GraphQL error, and the shape of user-facing errors. Step 5: Write a numbered acceptance-criteria checklist of 5-9 items (e.g. 'querying user(id) returns the user or null', 'createUser mutation validates input and returns the created node', 'a non-null field never resolves to null', 'invalid input yields a GraphQL error, not a crash'). `write_task_note` the SDL + checklist and write the same to the produces path. No resolvers yet.",
+        "produces": { "path": "notes/schema-design.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "build",
+        "name": "Build resolvers",
+        "role": "developer",
+        "summary": "implement the schema + resolvers",
+        "prompt": "Implement the GraphQL server in a single runnable source file. Step 1: Declare the schema exactly as designed (SDL string or schema-builder calls) — same types, fields, nullability, operations. Step 2: Write a resolver for every Query and Mutation field; resolvers must honor the declared return types and nullability. Step 3: Validate mutation inputs before mutating; on invalid input throw a typed GraphQL error with a clear message. Step 4: Use an in-memory store if no DB was specified, and make sure non-null fields are always populated. On a loop-back, fix only the named gaps without regressing working resolvers. `write_task_note` the file path and which criteria now pass.",
+        "produces": { "path": "src/schema.js", "kind": "code-module" }
+      },
+      {
+        "id": "test",
+        "name": "Write operation tests",
+        "role": "developer",
+        "summary": "test each query, mutation, and error",
+        "prompt": "Write tests that execute real GraphQL operations against the schema. Step 1: For each Query, assert the returned shape matches the SDL (including nulls where allowed). Step 2: For each Mutation, assert the happy path returns the created/updated node, then assert invalid input produces a GraphQL error rather than a crash. Step 3: Add a test proving a non-null field never resolves to null. Step 4: Add a create-then-query round-trip to prove state wiring. Make tests runnable and self-contained. `write_task_note` the test file path and pass/fail count.",
+        "produces": { "path": "src/schema.test.js", "kind": "code-with-tests" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Run the tests and execute sample operations. For EACH acceptance criterion: confirm queries return the SDL-correct shape and nullability, confirm mutations validate input and return the right node, confirm invalid input yields a typed GraphQL error (not a crash), and confirm non-null fields are never null. Write PASS/FAIL per criterion.",
+      "loopBackTo": "build",
+      "deliverable": { "path": "src/schema.js", "kind": "code-module" }
+    }
+  },
+  {
+    "id": "cli-tool",
+    "name": "Command-Line Tool",
+    "description": "Build a command-line tool with subcommands, flags, arguments, help text, and proper exit codes. Designs the CLI UX FIRST — the command surface, flags with defaults, positional args, help/usage output, and exit-code conventions — because a CLI's contract is its interface, then implements argument parsing and command logic, then writes tests for parsing, help, happy paths, and error exits. Covers argv parsing, subcommands, --flags and -short forms, --help, stdin/stdout/stderr conventions, and non-zero exit codes on error.",
+    "tags": ["cli", "command-line", "tool", "terminal", "argv"],
+    "triggers": [
+      "build a cli tool",
+      "command line tool",
+      "make a terminal command",
+      "cli with subcommands",
+      "argv parser"
+    ],
+    "phases": [
+      {
+        "id": "ux-scope",
+        "name": "CLI UX scope",
+        "role": "planner",
+        "summary": "lock the command surface, flags, args, exit codes",
+        "prompt": "Design the command-line interface before any logic — the interface IS the contract. Step 1: Enumerate the commands/subcommands and what each does. Step 2: For each, list the positional arguments (required vs optional) and the flags (`--long`, `-s` short form, type, default value, whether it takes a value). Step 3: Draft the exact `--help`/usage text the tool prints, including a one-line synopsis per command. Step 4: Define the IO and exit-code contract: what goes to stdout vs stderr, exit 0 on success, distinct non-zero codes for usage errors vs runtime errors. Step 5: Write a numbered acceptance-criteria checklist of 5-9 items (e.g. 'running with no args or --help prints usage and exits 0', 'an unknown flag prints an error to stderr and exits non-zero', 'the primary command produces the documented output'). `write_task_note` the command spec + checklist and write the same to the produces path. No implementation yet.",
+        "produces": { "path": "notes/ux-scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "build",
+        "name": "Build the CLI",
+        "role": "developer",
+        "summary": "implement parsing + command logic",
+        "prompt": "Implement the CLI in a single runnable source file with a real entry point. Step 1: Parse argv into commands, positional args, and flags exactly as scoped — support both long and short flag forms and apply defaults. Step 2: Implement each command's logic; write normal output to stdout and diagnostics/errors to stderr. Step 3: Wire `--help` (and bare invocation) to print the usage text and exit 0; on unknown command/flag or missing required arg, print a clear error to stderr and exit non-zero. Step 4: Ensure the process exits with the documented code in every path. On a loop-back, fix only the named gaps without regressing working commands. `write_task_note` the file path and which criteria now pass.",
+        "produces": { "path": "src/cli.js", "kind": "code-module" }
+      },
+      {
+        "id": "test",
+        "name": "Write CLI tests",
+        "role": "developer",
+        "summary": "test parsing, help, happy paths, error exits",
+        "prompt": "Write tests that invoke the CLI and inspect output + exit code. Step 1: Assert `--help` and bare invocation print usage and exit 0. Step 2: Assert each command's happy path produces the documented stdout and exits 0. Step 3: Assert error cases (unknown flag, missing required arg, bad value) print to stderr and exit non-zero with the right code. Step 4: Assert flag parsing handles long form, short form, and defaults. Capture stdout/stderr separately. `write_task_note` the test file path and pass/fail count.",
+        "produces": { "path": "src/cli.test.js", "kind": "code-with-tests" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Run the tests and invoke the CLI directly. For EACH acceptance criterion: confirm --help/usage works and exits 0, confirm each command's output matches the spec, confirm errors go to stderr with a non-zero exit, and confirm flag parsing (long, short, defaults) works. Write PASS/FAIL per criterion.",
+      "loopBackTo": "build",
+      "deliverable": { "path": "src/cli.js", "kind": "code-module" }
+    }
+  },
+  {
+    "id": "library-package",
+    "name": "Reusable Library Package",
+    "description": "Build a reusable library/SDK with a clean public API surface, sensible defaults, and published documentation. Designs the public API FIRST — exported functions/classes, signatures, types, error contract, and what stays internal — because a library's API is a long-lived promise, then implements it, then writes user-facing docs with installation, quickstart, and a worked example per public function. Covers public-vs-private surface, function signatures, JSDoc/typedoc, README, semantic versioning posture, and usage examples.",
+    "tags": ["library", "sdk", "package", "api", "module"],
+    "triggers": [
+      "build a library",
+      "create an sdk",
+      "make a reusable package",
+      "publish a module",
+      "library with a public api"
+    ],
+    "phases": [
+      {
+        "id": "api-design",
+        "name": "Public API design",
+        "role": "planner",
+        "summary": "lock exports, signatures, types, error contract",
+        "prompt": "Design the public API surface before implementation — it is a long-lived promise to callers. Step 1: List exactly what the library exports (functions, classes, constants) and what stays internal. Step 2: For each export, write its full signature: parameter names, types, defaults, and return type. Step 3: Define the error contract — what each function throws or returns on bad input/failure, and any shared error type. Step 4: Decide naming, module layout, and the minimal surface (resist over-exporting). Step 5: Write a numbered acceptance-criteria checklist of 5-9 items (e.g. 'every documented export exists with the documented signature', 'invalid input is rejected per the error contract', 'no internal helper leaks into the public surface'). `write_task_note` the API spec + checklist and write the same to the produces path. No implementation yet.",
+        "produces": { "path": "notes/api-design.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "build",
+        "name": "Build the library",
+        "role": "developer",
+        "summary": "implement the public API + internals",
+        "prompt": "Implement the library in a source module exporting exactly the designed surface. Step 1: Implement every public export with the locked signature and behavior; keep helpers unexported. Step 2: Validate inputs and honor the error contract precisely. Step 3: Add inline doc comments (JSDoc/TSDoc) on each public export describing params, return, and throws. Step 4: Include a few assertions or a small example to self-verify the happy paths. On a loop-back, fix only the named gaps without changing the public signatures unless the design changed. `write_task_note` the file path and which criteria now pass.",
+        "produces": { "path": "src/index.js", "kind": "code-module" }
+      },
+      {
+        "id": "docs",
+        "name": "Write the docs",
+        "role": "copywriter",
+        "summary": "README with install, quickstart, per-function examples",
+        "prompt": "Write the user-facing documentation as a README. Step 1: Open with a one-paragraph what-and-why and an install line. Step 2: Add a quickstart: the smallest runnable example that produces a result. Step 3: Document EVERY public export with its signature, a one-line description, and a short worked code example. Step 4: Add an errors/edge-cases section matching the error contract, and a versioning note. Examples must match the real signatures exactly — copy them from the API spec, do not invent parameters. `write_task_note` the README path.",
+        "produces": { "path": "README.md", "kind": "markdown-doc" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Check the library against the API spec and the docs against the library. For EACH acceptance criterion: confirm every documented export exists with the exact signature, confirm inputs are validated per the error contract, confirm no internal helper leaked, and confirm every README example matches a real signature and would run. Write PASS/FAIL per criterion. If the docs reference a function/parameter the code does not have, that is a FAIL.",
+      "loopBackTo": "build",
+      "deliverable": { "path": "src/index.js", "kind": "code-module" }
+    }
+  },
+  {
+    "id": "webhook-handler",
+    "name": "Inbound Webhook Handler",
+    "description": "Build a handler that receives inbound webhook events, verifies their authenticity, parses the payload, and dispatches by event type — idempotently and resiliently. Locks the webhook contract FIRST — the event types, payload shapes, signature-verification scheme, idempotency key, and required 2xx-fast-ack behavior — then implements verification + routing + handlers, then tests valid/invalid signatures, each event type, replays, and malformed payloads. Covers HMAC signature verification, payload parsing, event-type dispatch, idempotency/dedupe, fast 2xx acknowledgement, and retry-safe processing.",
+    "tags": ["webhook", "http", "integration", "events", "backend"],
+    "triggers": [
+      "build a webhook handler",
+      "receive webhooks",
+      "process inbound webhooks",
+      "verify webhook signatures",
+      "webhook endpoint"
+    ],
+    "phases": [
+      {
+        "id": "contract-scope",
+        "name": "Webhook contract scope",
+        "role": "planner",
+        "summary": "lock event types, payloads, signature + idempotency rules",
+        "prompt": "Define the webhook contract before any handler code. Step 1: List the event types you will receive and the payload shape of each. Step 2: Specify the authenticity check: the signature header name, the HMAC algorithm and secret source, and exactly what string is signed (raw body, timestamp, etc.). Step 3: Decide idempotency: which field is the dedupe/idempotency key and how replays are detected and ignored. Step 4: Define the response contract: ack with a fast 2xx on accepted events, the status for an invalid signature (401) and a malformed/unknown event (400), and that slow work happens AFTER the ack. Step 5: Write a numbered acceptance-criteria checklist of 5-9 items (e.g. 'a request with a bad signature is rejected 401 and not processed', 'a duplicate event id is acknowledged but processed once', 'an unknown event type returns 400/204 without crashing'). `write_task_note` the contract + checklist and write the same to the produces path.",
+        "produces": { "path": "notes/contract-scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "build",
+        "name": "Build the handler",
+        "role": "developer",
+        "summary": "implement verification, dispatch, idempotency",
+        "prompt": "Implement the webhook handler in a single runnable source file. Step 1: Capture the raw body and verify the signature exactly as scoped BEFORE parsing or trusting anything; reject with 401 on mismatch and do not process. Step 2: Parse the payload, then check the idempotency key against a seen-set/store and skip re-processing duplicates while still acking. Step 3: Dispatch by event type to a per-type handler; unknown types return the scoped status without crashing. Step 4: Acknowledge with a fast 2xx, performing any heavy work after acking (or enqueueing it). Use an in-memory dedupe store if none specified. On a loop-back, fix only the named gaps. `write_task_note` the file path and which criteria now pass.",
+        "produces": { "path": "src/webhook.js", "kind": "code-module" }
+      },
+      {
+        "id": "test",
+        "name": "Write handler tests",
+        "role": "developer",
+        "summary": "test signatures, event types, replays, malformed bodies",
+        "prompt": "Write tests that POST events to the handler. Step 1: Assert a correctly-signed event returns 2xx and dispatches to its handler. Step 2: Assert a bad/missing signature returns 401 and the event is NOT processed. Step 3: Assert sending the same event id twice processes it once but acks both. Step 4: Assert an unknown event type and a malformed body return the scoped status without throwing. Build signed payloads with the same HMAC scheme. `write_task_note` the test file path and pass/fail count.",
+        "produces": { "path": "src/webhook.test.js", "kind": "code-with-tests" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Run the tests and POST sample events. For EACH acceptance criterion: confirm valid signatures are accepted and dispatched, confirm bad signatures are rejected 401 and not processed, confirm duplicate event ids are processed exactly once, confirm unknown/malformed events fail safely, and confirm the handler acks fast. Write PASS/FAIL per criterion.",
+      "loopBackTo": "build",
+      "deliverable": { "path": "src/webhook.js", "kind": "code-module" }
+    }
+  },
+  {
+    "id": "cron-job",
+    "name": "Scheduled Batch Job",
+    "description": "Build a scheduled batch job that runs on a cadence, processes a unit of work, is safe to re-run, and reports its outcome. Scopes the job FIRST — trigger cadence, the work it does, batch/chunk size, idempotency, failure/partial-failure handling, and observable output — then implements the runnable job, then tests a clean run, an empty run, a partial-failure run, and re-run safety. Covers cron scheduling semantics, batch processing, idempotent reruns, chunking, structured logging, exit codes, and graceful partial-failure handling.",
+    "tags": ["cron", "batch", "scheduled-job", "automation", "backend"],
+    "triggers": [
+      "build a cron job",
+      "scheduled batch job",
+      "nightly job",
+      "recurring task script",
+      "batch processor"
+    ],
+    "phases": [
+      {
+        "id": "scope",
+        "name": "Scope the job",
+        "role": "planner",
+        "summary": "lock cadence, work unit, idempotency, failure handling",
+        "prompt": "Scope the batch job before coding. Step 1: State the cadence (e.g. the cron expression) and what one run is responsible for. Step 2: Define the unit of work and how items are fetched and chunked (batch size, ordering). Step 3: Decide idempotency: how a re-run avoids double-processing already-done items, and what happens if a previous run died mid-batch. Step 4: Define failure handling: does one bad item abort the run or get skipped-and-logged, the exit code on full vs partial success, and what gets logged for observability. Step 5: Write a numbered acceptance-criteria checklist of 5-9 items (e.g. 'a clean run processes all items and exits 0', 'an empty input run is a no-op that exits 0', 'a re-run does not reprocess completed items', 'a bad item is logged and skipped without aborting the batch'). `write_task_note` the scope + checklist and write the same to the produces path.",
+        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "build",
+        "name": "Build the job",
+        "role": "developer",
+        "summary": "implement the runnable batch job",
+        "prompt": "Implement the job as a single runnable script with a clear entry point. Step 1: Fetch the work items and process them in chunks of the scoped batch size. Step 2: Make it idempotent — check a done-marker/store before processing each item so re-runs skip completed work. Step 3: Handle failures per the scope (skip-and-log vs abort) and emit structured log lines (start, per-batch progress, per-item errors, summary count). Step 4: Exit 0 on full success, a non-zero code on full failure, and the scoped code on partial. Use an in-memory store/sample data if none specified. On a loop-back, fix only the named gaps. `write_task_note` the file path and which criteria now pass.",
+        "produces": { "path": "src/job.js", "kind": "code-module" }
+      },
+      {
+        "id": "test",
+        "name": "Write job tests",
+        "role": "developer",
+        "summary": "test clean, empty, partial-failure, and re-run",
+        "prompt": "Write tests that invoke the job's run function with controlled inputs. Step 1: Assert a clean run processes every item and exits 0 with a correct summary count. Step 2: Assert an empty-input run is a no-op exiting 0. Step 3: Inject one failing item and assert it is logged/skipped (or aborts) per the scope, with the right exit code. Step 4: Run twice over the same input and assert the second run skips already-done items. `write_task_note` the test file path and pass/fail count.",
+        "produces": { "path": "src/job.test.js", "kind": "code-with-tests" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Run the tests and execute the job. For EACH acceptance criterion: confirm a clean run processes all items and exits 0, confirm an empty run is a safe no-op, confirm a re-run does not reprocess completed items, confirm a bad item is handled per the scope, and confirm exit codes and log output match. Write PASS/FAIL per criterion.",
+      "loopBackTo": "build",
+      "deliverable": { "path": "src/job.js", "kind": "code-module" }
+    }
+  },
+  {
+    "id": "data-pipeline-etl",
+    "name": "ETL / Ingest Pipeline",
+    "description": "Build an extract-transform-load pipeline that ingests source data, reshapes it to a target schema, and loads it with validation at every stage. Locks the schemas FIRST — source shape, target shape, the field-by-field transform/mapping, type coercions, and the data-quality rules — then implements extract→transform→load with row-level error capture, then a reviewer validates output conformance, row counts, and reject handling. Covers ETL stages, schema mapping, type coercion, data validation, idempotent loads, dead-letter/reject rows, and reconciliation counts.",
+    "tags": ["etl", "pipeline", "data", "ingest", "transform"],
+    "triggers": [
+      "build an etl pipeline",
+      "ingest and transform data",
+      "data pipeline",
+      "load data into a target schema",
+      "etl job"
+    ],
+    "phases": [
+      {
+        "id": "schema-scope",
+        "name": "Schema scope",
+        "role": "planner",
+        "summary": "lock source/target schemas, mapping, quality rules",
+        "prompt": "Lock the schemas and mapping before writing pipeline code. Step 1: Document the SOURCE schema — fields, types, and any messiness (nulls, formats, encodings). Step 2: Document the TARGET schema the data must conform to. Step 3: Write the field-by-field transform map: which source field(s) feed each target field, the coercion/cleaning applied (trim, parse date, cast number), and the default for missing values. Step 4: Define data-quality rules and reject criteria — which rows are invalid and what happens to them (drop, dead-letter, fail run). Step 5: Write a numbered acceptance-criteria checklist of 5-9 items (e.g. 'every loaded row conforms to the target schema', 'invalid rows go to the reject sink and are counted', 'input count = loaded + rejected', 're-running does not duplicate rows'). `write_task_note` the schemas + mapping + checklist and write the same to the produces path.",
+        "produces": { "path": "notes/schema-scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "build",
+        "name": "Build the pipeline",
+        "role": "developer",
+        "summary": "implement extract → transform → load",
+        "prompt": "Implement the pipeline as three clear stages in a runnable script. Step 1 (extract): read the source data into records. Step 2 (transform): apply the locked mapping field-by-field with the specified coercions and defaults; validate each row against the quality rules. Step 3 (load): write conforming rows to the target and route failing rows to the reject sink, keeping running counts (read / loaded / rejected). Step 4: make the load idempotent (upsert or skip-seen) so re-runs do not duplicate. Emit a reconciliation summary at the end. Use sample/in-memory sources and sinks if none specified. On a loop-back, fix only the named gaps. `write_task_note` the file path and which criteria now pass.",
+        "produces": { "path": "src/pipeline.js", "kind": "code-module" }
+      },
+      {
+        "id": "validate",
+        "name": "Validate the output",
+        "role": "reviewer",
+        "summary": "check conformance, counts, and reject handling",
+        "prompt": "Validate the pipeline's output against the schema and the quality rules. Step 1: Run the pipeline on representative input including deliberately bad rows. Step 2: Confirm every loaded row conforms to the target schema exactly (fields present, types correct). Step 3: Confirm the reconciliation holds: input count equals loaded plus rejected, and rejected rows are the ones that violate the rules. Step 4: Re-run and confirm no duplicate rows appear. Write a short validation note with the counts and any conformance gaps to the produces path.",
+        "produces": { "path": "notes/validate.md", "kind": "markdown-notes" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Run the pipeline on input that includes valid and invalid rows. For EACH acceptance criterion: confirm every loaded row conforms to the target schema, confirm invalid rows are rejected and counted, confirm input = loaded + rejected, and confirm a re-run produces no duplicates. Write PASS/FAIL per criterion with the reconciliation counts.",
+      "loopBackTo": "build",
+      "deliverable": { "path": "src/pipeline.js", "kind": "code-module" }
+    }
+  },
+  {
+    "id": "schema-migration",
+    "name": "Schema / Type Migration",
+    "description": "Plan and execute a multi-file schema or type migration safely — changing a data model, type definition, or interface across the codebase while keeping everything compiling and consistent. Plans the migration FIRST — the before/after shape, every call-site and file touched, the ordering that never leaves the tree broken, and the backout — then applies the change file-by-file, then a reviewer verifies the tree still builds and nothing referencing the old shape remains. Covers find-all-references, safe edit ordering, backward-compatibility shims, codemod-style changes, and compile/test-green verification.",
+    "tags": ["migration", "refactor", "schema", "types", "codemod"],
+    "triggers": [
+      "migrate a schema",
+      "change a type everywhere",
+      "multi-file migration",
+      "rename a model across the codebase",
+      "type migration"
+    ],
+    "phases": [
+      {
+        "id": "plan",
+        "name": "Plan the migration",
+        "role": "planner",
+        "summary": "lock before/after, touched files, ordering, backout",
+        "prompt": "Plan the migration before changing a line. Step 1: Document the BEFORE shape and the exact AFTER shape (fields, types, names) of the thing being migrated. Step 2: Find every reference: search the codebase for all call-sites, definitions, and files that touch the old shape, and list them. Step 3: Decide the edit ordering that keeps the tree compiling at each step (e.g. add-new-alongside-old → migrate call-sites → remove-old), and whether a temporary compatibility shim is needed. Step 4: Note the backout/rollback approach. Step 5: Write a numbered acceptance-criteria checklist of 5-9 items (e.g. 'the project compiles after the migration', 'no reference to the old shape remains', 'existing tests still pass', 'behavior is unchanged'). `write_task_note` the plan (with the file list) + checklist and write the same to the produces path.",
+        "produces": { "path": "notes/plan.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "migrate",
+        "name": "Apply the migration",
+        "role": "developer",
+        "summary": "edit each touched file in the planned order",
+        "prompt": "Execute the migration following the planned ordering. Step 1: Apply the change file-by-file in the order that keeps the tree compiling, using the file list from the plan as a checklist. Step 2: Update every call-site to the new shape; remove the old shape (and any shim) only once nothing references it. Step 3: After each batch, confirm the project still compiles/type-checks. Step 4: Do a final search to prove no reference to the old shape remains. Capture the migration summary (files changed, references updated) to the produces path. On a loop-back, fix only the files the reviewer flagged. `write_task_note` the summary and which criteria now pass.",
+        "produces": { "path": "MIGRATION.md", "kind": "markdown-doc" }
+      },
+      {
+        "id": "verify",
+        "name": "Verify the tree",
+        "role": "reviewer",
+        "summary": "confirm it compiles, tests pass, old shape is gone",
+        "prompt": "Verify the migration is complete and clean. Step 1: Run the build/type-check and confirm it passes with no errors. Step 2: Run the existing test suite and confirm it is still green (behavior preserved). Step 3: Search the whole codebase for any lingering reference to the old shape/name and confirm there are none. Step 4: Spot-check a couple of migrated call-sites for correctness. Write a verification note with the build/test result and the search result to the produces path.",
+        "produces": { "path": "notes/verify.md", "kind": "markdown-notes" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Build the project and run the tests. For EACH acceptance criterion: confirm the project compiles/type-checks cleanly, confirm the test suite is green, confirm a codebase search finds NO reference to the old shape, and confirm behavior is unchanged. Write PASS/FAIL per criterion; any lingering old-shape reference or build break is a FAIL.",
+      "loopBackTo": "migrate",
+      "deliverable": { "path": "MIGRATION.md", "kind": "markdown-doc" }
+    }
+  },
+  {
+    "id": "refactor-module",
+    "name": "Behavior-Preserving Refactor",
+    "description": "Refactor a module to improve its structure, readability, or design WITHOUT changing observable behavior — the defining constraint is that the tests stay green throughout. Plans the refactor FIRST — the target structure, the seams to introduce, the safe step sequence, and the green-tests guardrail — then refactors in small reversible steps, then a reviewer confirms behavior is unchanged and the code is genuinely cleaner. Covers extract-function/module, dependency seams, removing duplication, naming, and test-green-as-invariant refactoring.",
+    "tags": ["refactor", "cleanup", "code-quality", "maintainability", "tests"],
+    "triggers": [
+      "refactor this module",
+      "clean up the code",
+      "improve code structure",
+      "behavior-preserving refactor",
+      "reduce duplication"
+    ],
+    "phases": [
+      {
+        "id": "plan",
+        "name": "Plan the refactor",
+        "role": "planner",
+        "summary": "lock target structure, steps, green-tests guardrail",
+        "prompt": "Plan the refactor before touching code — the prime directive is preserving behavior. Step 1: Identify the specific smells (duplication, long function, tangled responsibilities, poor names) and the target structure you want. Step 2: Confirm there is a test safety net; if coverage is thin, note the characterization tests to add FIRST so behavior is pinned before changing structure. Step 3: Break the work into small, individually-reversible steps (extract this function, introduce this seam, rename that), each of which keeps tests green. Step 4: Write a numbered acceptance-criteria checklist of 5-9 items (e.g. 'all existing tests pass before and after', 'public API/behavior is unchanged', 'the targeted duplication is gone', 'no function exceeds N lines / responsibilities are separated'). `write_task_note` the plan + checklist and write the same to the produces path.",
+        "produces": { "path": "notes/plan.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "refactor",
+        "name": "Refactor",
+        "role": "developer",
+        "summary": "apply small reversible steps, tests green throughout",
+        "prompt": "Execute the refactor in small steps, keeping the tests green the entire time. Step 1: If the plan called for characterization tests, add them first and confirm they pass against current behavior. Step 2: Apply one planned step at a time — extract, rename, dedupe, introduce a seam — and run the tests after EACH step; if a step breaks them, revert it and try smaller. Step 3: Do not change public signatures or observable behavior unless the plan explicitly says so. Step 4: Stop when the target structure is reached and the smells are gone. Write the refactor summary (what changed structurally, tests still green) to the produces path. On a loop-back, address only the reviewer's points. `write_task_note` the summary and which criteria now pass.",
+        "produces": { "path": "src/refactored.js", "kind": "code-module" }
+      },
+      {
+        "id": "verify",
+        "name": "Verify behavior preserved",
+        "role": "reviewer",
+        "summary": "confirm tests green and code is genuinely cleaner",
+        "prompt": "Verify the refactor preserved behavior and actually improved the code. Step 1: Run the full test suite and confirm it is green (this is the hard gate). Step 2: Confirm the public API/observable behavior is identical to before. Step 3: Confirm the targeted smell is actually fixed — the duplication is gone, the function is decomposed, names are clearer — not just moved around. Step 4: Confirm no behavior was sneaked in under cover of the refactor. Write a verification note with the test result and a before/after readability assessment to the produces path.",
+        "produces": { "path": "notes/verify.md", "kind": "markdown-notes" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Run the test suite. For EACH acceptance criterion: confirm ALL existing tests pass (green is mandatory), confirm public behavior is unchanged, confirm the targeted smell is genuinely fixed, and confirm no new behavior crept in. Write PASS/FAIL per criterion; a single failing test is an automatic FAIL of the whole refactor.",
+      "loopBackTo": "refactor",
+      "deliverable": { "path": "src/refactored.js", "kind": "code-module" }
+    }
+  },
+  {
+    "id": "bug-fix-tdd",
+    "name": "Reproduce-Then-Fix a Bug",
+    "description": "Fix a bug the disciplined way: first write a failing test that reproduces it, then make the smallest change that turns the test green without breaking others, then verify and guard against regression. Reproduces FIRST with a red test that captures the exact wrong behavior — because a bug you cannot reproduce you cannot prove fixed — then applies the minimal fix, then a reviewer confirms the new test passes, root cause is addressed, and the suite is green. Covers test-driven bug fixing, regression tests, minimal diffs, root-cause vs symptom, and red-green verification.",
+    "tags": ["bug-fix", "tdd", "regression-test", "debugging", "tests"],
+    "triggers": [
+      "fix this bug",
+      "reproduce and fix",
+      "tdd bug fix",
+      "write a regression test",
+      "debug and fix"
+    ],
+    "phases": [
+      {
+        "id": "reproduce",
+        "name": "Reproduce with a failing test",
+        "role": "developer",
+        "summary": "write a red test that captures the wrong behavior",
+        "prompt": "Reproduce the bug as a failing test before attempting any fix — a bug you cannot reproduce you cannot prove fixed. Step 1: Pin down the exact wrong behavior: the input, the expected output, and the actual (buggy) output. Step 2: Write a focused test that asserts the CORRECT behavior; run it and confirm it FAILS (red) for the right reason — capturing the bug, not a typo in the test. Step 3: Note your hypothesis for the root cause (not just the symptom). Step 4: Write a numbered acceptance-criteria checklist of 4-7 items (e.g. 'the new test fails before the fix and passes after', 'the root cause is addressed, not masked', 'no existing test regresses', 'the input that triggered the bug now produces the expected output'). `write_task_note` the repro + hypothesis + checklist and write the failing test to the produces path.",
+        "produces": { "path": "src/bug.test.js", "kind": "code-with-tests" }
+      },
+      {
+        "id": "fix",
+        "name": "Apply the minimal fix",
+        "role": "developer",
+        "summary": "smallest change that turns the test green",
+        "prompt": "Make the smallest change that turns the failing test green. Step 1: Address the ROOT CAUSE you identified, not just the symptom — do not special-case the one input to silence the test. Step 2: Run the new test and confirm it now passes (green). Step 3: Run the FULL suite and confirm nothing else broke; if something regressed, your fix was too broad — narrow it. Step 4: Keep the diff minimal and focused on the bug. Write the fixed source to the produces path. On a loop-back, address only the reviewer's specific concern. `write_task_note` what the root cause was, the fix, and which criteria now pass.",
+        "produces": { "path": "src/bug-fixed.js", "kind": "code-module" }
+      },
+      {
+        "id": "verify",
+        "name": "Verify the fix",
+        "role": "reviewer",
+        "summary": "confirm green, root cause fixed, no regressions",
+        "prompt": "Verify the bug is genuinely fixed. Step 1: Run the repro test and confirm it now passes. Step 2: Confirm the fix addresses the root cause rather than masking the symptom (would a nearby variant of the input also be correct now?). Step 3: Run the full suite and confirm no regressions. Step 4: Confirm the diff is minimal and scoped to the bug. Write a verification note with the test results and a root-cause-vs-symptom judgment to the produces path.",
+        "produces": { "path": "notes/verify.md", "kind": "markdown-notes" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Run the full test suite including the new repro test. For EACH acceptance criterion: confirm the repro test now PASSES (and would have failed before the fix), confirm the root cause is addressed not just masked, confirm no existing test regressed, and confirm the diff is minimal. Write PASS/FAIL per criterion.",
+      "loopBackTo": "fix",
+      "deliverable": { "path": "src/bug-fixed.js", "kind": "code-module" }
+    }
+  },
+  {
+    "id": "test-suite-backfill",
+    "name": "Test Suite Backfill",
+    "description": "Add a meaningful test suite to existing untested (or under-tested) code, prioritizing the highest-risk behavior and edge cases over vanity coverage. Scopes coverage FIRST — the public surface, the critical paths, the edge/error cases, and the target the tests must hit — then writes characterization and edge-case tests that pin real behavior and would catch real regressions. Covers test prioritization, characterization tests, edge/error-case coverage, arrange-act-assert structure, and coverage-that-matters over line-count chasing.",
+    "tags": ["tests", "coverage", "testing", "quality", "regression"],
+    "triggers": [
+      "add tests to this code",
+      "backfill tests",
+      "increase test coverage",
+      "write tests for an untested module",
+      "test this function"
+    ],
+    "phases": [
+      {
+        "id": "coverage-scope",
+        "name": "Coverage scope",
+        "role": "planner",
+        "summary": "lock the surface, critical paths, edge cases, target",
+        "prompt": "Decide WHAT to test before writing tests — coverage that matters beats line-count chasing. Step 1: Map the public surface of the code under test and what each function is supposed to do. Step 2: Rank by risk: which paths are critical/complex/most likely to break, and which are trivial. Step 3: For the high-risk paths, enumerate the cases that must be covered: happy path, boundary values, empty/null inputs, error conditions, and any tricky branches. Step 4: Set the target (the specific behaviors covered, or a coverage threshold if one was requested). Step 5: Write a numbered acceptance-criteria checklist of 5-9 items (e.g. 'every public function has at least a happy-path test', 'each error condition is asserted', 'boundary/empty inputs are covered', 'tests would fail if the behavior regressed'). `write_task_note` the test plan + checklist and write the same to the produces path.",
+        "produces": { "path": "notes/coverage-scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "write-tests",
+        "name": "Write the tests",
+        "role": "developer",
+        "summary": "characterization + edge-case tests that catch regressions",
+        "prompt": "Write the test suite to the plan. Step 1: For each public function, write a happy-path test using clear arrange-act-assert structure with meaningful assertions (assert the actual value/shape, not just 'did not throw'). Step 2: Add the edge and error cases from the plan — boundaries, empty/null, and each error condition (assert it throws/returns the right error). Step 3: Where behavior is undocumented, write characterization tests that pin the CURRENT behavior so future changes are caught. Step 4: Run the suite and confirm it passes against the real code; a test that cannot fail is worthless, so sanity-check that each would fail if behavior changed. Write the tests to the produces path. On a loop-back, add only the missing cases the reviewer named. `write_task_note` the test file path and the case count.",
+        "produces": { "path": "src/module.test.js", "kind": "code-with-tests" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Run the test suite. For EACH acceptance criterion: confirm every public function has a happy-path test with a real assertion, confirm each error condition and boundary/empty case is covered, confirm the tests pass against the current code, and judge whether the tests would actually catch a regression (not just smoke tests). Write PASS/FAIL per criterion; trivial assertions that cannot fail count as a FAIL of the coverage-that-matters criterion.",
+      "loopBackTo": "write-tests",
+      "deliverable": { "path": "src/module.test.js", "kind": "code-with-tests" }
+    }
+  },
+  {
+    "id": "perf-optimization",
+    "name": "Targeted Performance Fix",
+    "description": "Make a measured, targeted performance improvement — profile to find the real bottleneck, optimize it, then prove the speedup with before/after numbers while keeping behavior correct. Profiles FIRST and locks a measurable target, because optimizing without measuring is guessing, then applies the focused change, then a reviewer confirms the improvement is real, behavior is unchanged, and the code is not needlessly obfuscated. Covers profiling/benchmarking, hotspot identification, algorithmic vs micro optimization, before/after measurement, and correctness-preserving speedups.",
+    "tags": ["performance", "optimization", "profiling", "benchmark", "speed"],
+    "triggers": [
+      "optimize performance",
+      "make this faster",
+      "fix a slow function",
+      "profile and optimize",
+      "reduce latency"
+    ],
+    "phases": [
+      {
+        "id": "profile",
+        "name": "Profile and target",
+        "role": "developer",
+        "summary": "measure the bottleneck, lock a numeric target",
+        "prompt": "Measure before you optimize — optimizing without profiling is guessing. Step 1: Establish a representative workload/benchmark and record the BASELINE numbers (time, memory, or the relevant metric). Step 2: Profile to find where the time actually goes; identify the single biggest hotspot rather than guessing. Step 3: Form a hypothesis for WHY it is slow (algorithmic complexity, repeated work, allocation, IO) and what change should help. Step 4: Lock a measurable target (e.g. 'cut p50 latency by 2x', 'O(n^2) → O(n log n)'). Step 5: Write a numbered acceptance-criteria checklist of 4-7 items (e.g. 'the benchmark improves by the target amount', 'output is identical to baseline on the test inputs', 'the change targets the profiled hotspot', 'no new correctness regressions'). `write_task_note` the baseline numbers + hotspot + target + checklist and write the same to the produces path.",
+        "produces": { "path": "notes/profile.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "optimize",
+        "name": "Optimize the hotspot",
+        "role": "developer",
+        "summary": "apply the focused change, re-measure",
+        "prompt": "Apply the optimization to the profiled hotspot. Step 1: Make the focused change your hypothesis called for — prefer algorithmic wins (better data structure, removing repeated work, caching) over fragile micro-tweaks. Step 2: Re-run the same benchmark and record the AFTER numbers; confirm the target is hit. Step 3: Confirm output is byte-for-byte identical to baseline on the test inputs — speed that changes results is a bug. Step 4: Keep the code readable; do not obfuscate for marginal gains. Write the optimized source to the produces path. On a loop-back, address only the reviewer's concern. `write_task_note` the before/after numbers and which criteria now pass.",
+        "produces": { "path": "src/optimized.js", "kind": "code-module" }
+      },
+      {
+        "id": "verify",
+        "name": "Verify the speedup",
+        "role": "reviewer",
+        "summary": "confirm real improvement, unchanged output",
+        "prompt": "Verify the optimization is real and safe. Step 1: Re-run the benchmark and confirm the measured improvement meets the target (and is not noise — run it a few times). Step 2: Confirm output is identical to the baseline on the test inputs (correctness preserved). Step 3: Confirm the change actually addressed the profiled hotspot rather than a different spot. Step 4: Confirm the code remains readable and maintainable. Write a verification note with the before/after numbers and a correctness confirmation to the produces path.",
+        "produces": { "path": "notes/verify.md", "kind": "markdown-notes" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Run the benchmark and a correctness check. For EACH acceptance criterion: confirm the measured speedup meets the target and is reproducible (not noise), confirm output is identical to baseline on the test inputs, confirm the change targeted the profiled hotspot, and confirm no correctness regression. Write PASS/FAIL per criterion with the before/after numbers; output that changed is an automatic FAIL.",
+      "loopBackTo": "optimize",
+      "deliverable": { "path": "src/optimized.js", "kind": "code-module" }
+    }
+  },
+  {
+    "id": "type-safety-pass",
+    "name": "Type-Safety Pass",
+    "description": "Tighten the types of a module — eliminate `any`/implicit-any, add precise annotations, narrow unions, and make illegal states unrepresentable — without changing runtime behavior. Audits FIRST to inventory every loose type, unsafe cast, and missing annotation, then replaces them with precise types, then a reviewer confirms the type-checker is clean under strict settings and behavior is unchanged. Covers killing `any`, strict null checks, discriminated unions, generics, type narrowing, removing unsafe casts, and compile-clean-under-strict verification.",
+    "tags": ["types", "typescript", "type-safety", "strict", "refactor"],
+    "triggers": [
+      "tighten the types",
+      "kill any types",
+      "add type annotations",
+      "make this type-safe",
+      "fix type errors"
+    ],
+    "phases": [
+      {
+        "id": "audit",
+        "name": "Audit the types",
+        "role": "developer",
+        "summary": "inventory every any, cast, and missing annotation",
+        "prompt": "Inventory the type weaknesses before fixing them. Step 1: Search the module for every `any` (explicit and implicit), every unsafe cast (`as`, `!` non-null assertions), and every untyped parameter/return. Step 2: For each, note what the CORRECT type should be (look at the values that actually flow through). Step 3: Identify spots where a union should be narrowed or a discriminated union / generic would make illegal states unrepresentable. Step 4: Note the strict compiler settings to enable (e.g. strict, noImplicitAny, strictNullChecks). Step 5: Write a numbered acceptance-criteria checklist of 5-9 items (e.g. 'no explicit or implicit any remains', 'no unsafe casts without justification', 'the type-checker passes under strict', 'runtime behavior is unchanged'). `write_task_note` the inventory + checklist and write the same to the produces path.",
+        "produces": { "path": "notes/audit.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "fix",
+        "name": "Fix the types",
+        "role": "developer",
+        "summary": "replace loose types with precise ones",
+        "prompt": "Apply precise types from the audit. Step 1: Annotate every parameter and return; replace each `any` with the real type the values demand. Step 2: Remove unsafe casts and non-null assertions by narrowing properly (type guards, discriminated unions) instead of asserting. Step 3: Where it helps, introduce generics or union types so illegal states cannot be constructed. Step 4: Enable the strict compiler settings and resolve every resulting error — do NOT silence them with `any` or `@ts-ignore`. Step 5: Confirm runtime behavior is unchanged (this is a types-only pass). Write the typed source to the produces path. On a loop-back, address only the remaining flagged spots. `write_task_note` the count of `any`s removed and which criteria now pass.",
+        "produces": { "path": "src/typed.ts", "kind": "code-module" }
+      },
+      {
+        "id": "verify",
+        "name": "Verify type safety",
+        "role": "reviewer",
+        "summary": "confirm strict-clean and behavior unchanged",
+        "prompt": "Verify the types are genuinely tighter and nothing was swept under the rug. Step 1: Run the type-checker under the strict settings and confirm zero errors. Step 2: Search for any remaining `any`, `as`, `!`, or `@ts-ignore`/`@ts-expect-error` and confirm each remaining one is justified (or gone). Step 3: Confirm the runtime behavior is unchanged (tests still green, no logic edits disguised as type edits). Step 4: Spot-check that the new types are precise, not just `unknown`-everywhere busywork. Write a verification note with the type-check result and the residual-escape-hatch count to the produces path.",
+        "produces": { "path": "notes/verify.md", "kind": "markdown-notes" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Run the type-checker under strict settings and the test suite. For EACH acceptance criterion: confirm no explicit/implicit `any` remains, confirm unsafe casts and ignore-comments are gone or justified, confirm the type-checker is clean under strict, and confirm runtime behavior is unchanged. Write PASS/FAIL per criterion; replacing one `any` with another or using `@ts-ignore` to pass is a FAIL.",
+      "loopBackTo": "fix",
+      "deliverable": { "path": "src/typed.ts", "kind": "code-module" }
+    }
+  },
+  {
+    "id": "dockerize-app",
+    "name": "Containerize a Service",
+    "description": "Containerize an application with a production-grade Dockerfile — small, secure, reproducible, and buildable — plus the supporting files to run it. Scopes the container contract FIRST — base image, build vs runtime stages, dependencies, exposed port, entrypoint, env config, and the size/security bar — then writes the Dockerfile + .dockerignore + compose, then a reviewer confirms it builds, runs, and meets the bar. Covers multi-stage builds, slim base images, layer caching, non-root user, .dockerignore, healthchecks, EXPOSE/ENTRYPOINT, and reproducible image builds.",
+    "tags": ["docker", "container", "devops", "dockerfile", "deployment"],
+    "triggers": [
+      "dockerize this app",
+      "write a dockerfile",
+      "containerize a service",
+      "create a docker image",
+      "docker compose setup"
+    ],
+    "phases": [
+      {
+        "id": "scope",
+        "name": "Scope the container",
+        "role": "planner",
+        "summary": "lock base image, stages, port, entrypoint, bar",
+        "prompt": "Scope the container before writing the Dockerfile. Step 1: Identify the runtime (language/version) and pick a slim, pinned base image. Step 2: Decide the build strategy: a multi-stage build (build deps in one stage, copy only artifacts to a slim runtime stage) and what gets copied forward. Step 3: List the dependencies to install, the port to EXPOSE, the ENTRYPOINT/CMD, and the env vars the app needs at runtime. Step 4: Set the bar: run as a non-root user, a .dockerignore that excludes junk, a healthcheck, and a rough image-size target. Step 5: Write a numbered acceptance-criteria checklist of 5-9 items (e.g. 'docker build succeeds from a clean context', 'the container starts and serves on the exposed port', 'runs as non-root', 'final image uses a multi-stage slim base'). `write_task_note` the scope + checklist and write the same to the produces path.",
+        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "build",
+        "name": "Write the Dockerfile",
+        "role": "developer",
+        "summary": "implement the multi-stage Dockerfile + support files",
+        "prompt": "Author the containerization files to the scope. Step 1: Write a multi-stage `Dockerfile` — a build stage that installs deps and builds, then a slim runtime stage that copies only the needed artifacts. Step 2: Order layers for cache efficiency (copy manifest + install deps BEFORE copying source), pin the base image, set a non-root USER, EXPOSE the port, and define ENTRYPOINT/CMD and a HEALTHCHECK. Step 3: Write a `.dockerignore` that excludes node_modules, .git, build output, and secrets. Step 4: If a service needs orchestration, add a minimal compose/run file. Step 5: Build the image and confirm it succeeds and the container starts. Write the Dockerfile to the produces path. On a loop-back, fix only the named gaps. `write_task_note` the file paths and which criteria now pass.",
+        "produces": { "path": "Dockerfile", "kind": "code-module" }
+      },
+      {
+        "id": "verify",
+        "name": "Verify the image",
+        "role": "reviewer",
+        "summary": "confirm it builds, runs, and meets the bar",
+        "prompt": "Verify the container build. Step 1: Build the image from a clean context and confirm the build succeeds. Step 2: Run the container and confirm it starts and serves on the exposed port (hit the healthcheck/endpoint). Step 3: Confirm the bar: multi-stage slim base, non-root user, a real .dockerignore, pinned base image, and a sane final size. Step 4: Confirm no secrets or junk were baked into the image layers. Write a verification note with the build result, run check, and size to the produces path.",
+        "produces": { "path": "notes/verify.md", "kind": "markdown-notes" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Build and run the image. For EACH acceptance criterion: confirm `docker build` succeeds from a clean context, confirm the container starts and serves on the exposed port, confirm it runs as non-root with a multi-stage slim base and a .dockerignore, and confirm no secrets/junk were baked in. Write PASS/FAIL per criterion.",
+      "loopBackTo": "build",
+      "deliverable": { "path": "Dockerfile", "kind": "code-module" }
+    }
+  },
+  {
+    "id": "ci-pipeline",
+    "name": "CI Pipeline from Scratch",
+    "description": "Build a continuous-integration pipeline that installs, lints, tests, and builds on every push/PR — fast, cached, and gating merges on green. Scopes the pipeline contract FIRST — triggers, the job/stage graph, the matrix, caching strategy, and the gates — then writes the CI workflow YAML, then a reviewer validates the syntax, stage ordering, caching, and that it actually fails on a broken build. Covers CI triggers, job/stage dependencies, dependency caching, build matrices, status checks, fail-fast gating, and a valid workflow file.",
+    "tags": ["ci", "devops", "pipeline", "automation", "github-actions"],
+    "triggers": [
+      "set up ci",
+      "create a ci pipeline",
+      "github actions workflow",
+      "build a ci/cd pipeline",
+      "add automated testing on push"
+    ],
+    "phases": [
+      {
+        "id": "scope",
+        "name": "Scope the pipeline",
+        "role": "planner",
+        "summary": "lock triggers, stages, matrix, caching, gates",
+        "prompt": "Scope the CI pipeline before writing YAML. Step 1: Decide the triggers (push to which branches, pull requests, manual). Step 2: Lay out the job/stage graph: install → lint → test → build, including which stages can run in parallel and which depend on others. Step 3: Decide the matrix (e.g. OS/runtime versions) and the caching strategy (cache the dependency store keyed on the lockfile) to keep runs fast. Step 4: Define the gates: which stages must pass to mark the check green and block a merge, and fail-fast behavior. Step 5: Write a numbered acceptance-criteria checklist of 5-9 items (e.g. 'the workflow triggers on push and PR', 'dependencies are cached', 'a failing test fails the pipeline and blocks merge', 'lint/test/build run in a sensible order'). `write_task_note` the scope + checklist and write the same to the produces path.",
+        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "build",
+        "name": "Write the workflow",
+        "role": "developer",
+        "summary": "implement the CI workflow YAML",
+        "prompt": "Author the CI workflow file to the scope. Step 1: Set the triggers and the matrix exactly as scoped. Step 2: Define the jobs/stages with their dependency edges (test depends on install, etc.) and a checkout + runtime-setup step. Step 3: Add dependency caching keyed on the lockfile so repeat runs are fast. Step 4: Run lint, test, and build as gating steps so any non-zero exit fails the job. Step 5: Ensure the file is valid YAML for the target CI system and that the failing-test case would actually fail the run. Write the workflow to the produces path. On a loop-back, fix only the named gaps. `write_task_note` the file path and which criteria now pass.",
+        "produces": { "path": ".github/workflows/ci.yml", "kind": "yaml-spec" }
+      },
+      {
+        "id": "verify",
+        "name": "Verify the workflow",
+        "role": "reviewer",
+        "summary": "confirm syntax, ordering, caching, gating",
+        "prompt": "Verify the CI workflow. Step 1: Confirm the file parses as valid YAML and conforms to the target CI system's schema (lint it if a linter is available). Step 2: Confirm the triggers, matrix, and stage-dependency ordering match the scope. Step 3: Confirm caching is wired to the lockfile and the cache key is sensible. Step 4: Trace the gating logic and confirm a failing lint/test/build step would fail the run and block a merge (no `continue-on-error` masking failures). Write a verification note with the YAML-validity result and the gating trace to the produces path.",
+        "produces": { "path": "notes/verify.md", "kind": "markdown-notes" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Validate the workflow file. For EACH acceptance criterion: confirm it is valid YAML for the target CI system, confirm triggers/matrix/stage-ordering match the scope, confirm dependency caching is wired correctly, and confirm a failing test would fail the pipeline and block merge (nothing masks failures). Write PASS/FAIL per criterion.",
+      "loopBackTo": "build",
+      "deliverable": { "path": ".github/workflows/ci.yml", "kind": "yaml-spec" }
+    }
+  },
+  {
+    "id": "config-scaffold",
+    "name": "Project Config Scaffold",
+    "description": "Bootstrap a project's configuration — the tooling, linter, formatter, tsconfig/compiler, scripts, and ignore files — into a coherent, conflict-free baseline that actually works together. Scopes the config surface FIRST — every tool, its config file, the settings, and how they must agree (formatter vs linter, strict compiler) — then writes the config files and scripts, then verifies the toolchain runs clean with no conflicts. Covers linter/formatter config, compiler/tsconfig, package scripts, editorconfig, gitignore, and ensuring tools do not fight each other.",
+    "tags": ["config", "bootstrap", "tooling", "scaffold", "setup"],
+    "triggers": [
+      "scaffold project config",
+      "set up linting and formatting",
+      "bootstrap a project",
+      "create config files",
+      "tooling setup"
+    ],
+    "phases": [
+      {
+        "id": "scope",
+        "name": "Scope the config",
+        "role": "planner",
+        "summary": "lock the tools, files, settings, and agreements",
+        "prompt": "Scope the configuration before writing files. Step 1: List the tools the project needs (formatter, linter, compiler/type-checker, test runner, etc.) and the config file each one reads. Step 2: For each, decide the key settings (e.g. strict compiler, line width, rule set). Step 3: Crucially, decide how the tools must AGREE so they do not fight — e.g. the linter defers formatting to the formatter, the compiler target matches the runtime. Step 4: Decide the package scripts (lint, format, typecheck, test, build) and the ignore files (.gitignore, tool ignores, .editorconfig). Step 5: Write a numbered acceptance-criteria checklist of 5-9 items (e.g. 'every script runs without error', 'formatter and linter do not conflict', 'the type-checker passes on the scaffold', 'ignore files exclude build output and deps'). `write_task_note` the config plan + checklist and write the same to the produces path.",
+        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "build",
+        "name": "Write the config",
+        "role": "developer",
+        "summary": "create the config files + scripts to the plan",
+        "prompt": "Create the configuration files to the plan. Step 1: Write each tool's config file with the scoped settings, and the package manifest's scripts (lint/format/typecheck/test/build) wired to real commands. Step 2: Configure the linter and formatter to defer to each other so they do not conflict, and align the compiler target with the runtime. Step 3: Write the ignore files (.gitignore, tool-specific ignores, .editorconfig) excluding deps and build output. Step 4: Run each script (lint, format --check, typecheck) on the scaffold and confirm they pass without errors or conflicting complaints. Write the primary manifest/config to the produces path. On a loop-back, fix only the named conflict/gap. `write_task_note` the file paths and which criteria now pass.",
+        "produces": { "path": "package.json", "kind": "json" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Run each configured script on the scaffold. For EACH acceptance criterion: confirm lint, format-check, typecheck, and build/test scripts run without error, confirm the formatter and linter do NOT fight each other (no rule both formats and lints in conflict), confirm the type-checker passes, and confirm ignore files exclude deps/build output. Write PASS/FAIL per criterion; a formatter-vs-linter conflict is a FAIL.",
+      "loopBackTo": "build",
+      "deliverable": { "path": "package.json", "kind": "json" }
+    }
+  },
+  {
+    "id": "sdk-wrapper",
+    "name": "Typed SDK Wrapper for an External API",
+    "description": "Wrap a third-party HTTP API as a clean, typed client library — studying the real API surface first so the wrapper matches reality, not guesses. Studies the API FIRST — endpoints, auth, request/response shapes, rate limits, error formats, and pagination from the actual docs — then builds a typed client with sensible methods and error handling, then tests each method against a mocked API including auth and error paths. Covers reading API docs, typed request/response models, auth handling, retry/rate-limit awareness, pagination helpers, error mapping, and a mockable client.",
+    "tags": ["sdk", "api-client", "wrapper", "integration", "http"],
+    "triggers": [
+      "wrap an api",
+      "build an sdk client",
+      "typed api client",
+      "create a wrapper for an external api",
+      "api client library"
+    ],
+    "phases": [
+      {
+        "id": "api-study",
+        "name": "Study the API",
+        "role": "researcher",
+        "summary": "extract endpoints, auth, shapes, limits from the docs",
+        "prompt": "Study the real external API before writing a client — the wrapper must match reality, not a guess. Step 1: From the API's documentation, list the endpoints you will wrap with their methods, paths, and required params. Step 2: Capture the AUTH scheme (API key header, OAuth bearer, etc.) and how it is attached to requests. Step 3: Record the request and response JSON shapes for each endpoint, the error response format and status codes, the pagination scheme, and any rate limits. Step 4: Note quirks (snake_case fields, nullable fields, enum values). Step 5: Write a numbered acceptance-criteria checklist of 5-9 items (e.g. 'each wrapped endpoint has a typed method matching the real shape', 'auth is attached correctly', 'API errors map to a typed client error', 'pagination is handled'). `write_task_note` the API study (endpoints + shapes + auth + errors) + checklist and write the same to the produces path.",
+        "produces": { "path": "notes/api-study.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "build",
+        "name": "Build the client",
+        "role": "developer",
+        "summary": "implement the typed client to the study",
+        "prompt": "Implement the typed client to the API study. Step 1: Define request/response types matching the real shapes (including the API's casing and nullability), and a typed error type. Step 2: Write a client class/factory that takes config (base URL, credentials) and attaches auth to every request as studied. Step 3: Implement one method per wrapped endpoint with typed params and a typed return; parse responses into the typed models. Step 4: Map non-2xx responses to the typed client error (do not leak raw HTTP), and add a pagination helper and basic retry/backoff for rate limits if the API needs it. Step 5: Make the transport injectable so it can be mocked in tests. Write the client to the produces path. On a loop-back, fix only the named gaps. `write_task_note` the file path and which criteria now pass.",
+        "produces": { "path": "src/client.ts", "kind": "code-module" }
+      },
+      {
+        "id": "test",
+        "name": "Test against a mock",
+        "role": "developer",
+        "summary": "test each method, auth, errors, pagination",
+        "prompt": "Write tests against a mocked transport (no live network). Step 1: For each method, mock the API's documented success response and assert the client returns the correctly-typed parsed result. Step 2: Assert auth headers/credentials are attached to outgoing requests. Step 3: Mock error responses (4xx/5xx) and assert they surface as the typed client error, not a raw HTTP throw. Step 4: Assert the pagination helper walks multiple pages, and retry/backoff fires on a rate-limit response if implemented. `write_task_note` the test file path and pass/fail count.",
+        "produces": { "path": "src/client.test.ts", "kind": "code-with-tests" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Run the tests against the mocked API. For EACH acceptance criterion: confirm each method returns the correctly-typed result for the documented response, confirm auth is attached, confirm API errors map to a typed client error (no raw HTTP leak), and confirm pagination/retry behave. Write PASS/FAIL per criterion; a method whose types do not match the real API shape is a FAIL.",
+      "loopBackTo": "build",
+      "deliverable": { "path": "src/client.ts", "kind": "code-module" }
+    }
+  },
+  {
+    "id": "state-machine",
+    "name": "Model a Flow as a State Machine",
+    "description": "Model a stateful flow (checkout, order lifecycle, connection, wizard) as an explicit finite state machine with named states, guarded transitions, and rejected illegal moves — making impossible states impossible. Models the machine FIRST — the full state set, the events, the legal transition table, guards, and entry/exit effects — then implements a transition function that rejects illegal events, then tests every legal path and that illegal transitions are refused. Covers states/events/transitions, transition tables, guards, side-effects on entry, illegal-transition rejection, and exhaustive path testing.",
+    "tags": ["state-machine", "fsm", "modeling", "workflow", "transitions"],
+    "triggers": [
+      "model a state machine",
+      "build a finite state machine",
+      "order lifecycle states",
+      "implement a workflow as states",
+      "state transitions"
+    ],
+    "phases": [
+      {
+        "id": "model",
+        "name": "Model the machine",
+        "role": "planner",
+        "summary": "lock states, events, transition table, guards",
+        "prompt": "Model the state machine before coding — making illegal states unrepresentable is the whole value. Step 1: Enumerate the complete, finite set of STATES (including initial and terminal states). Step 2: Enumerate the EVENTS/inputs that can occur. Step 3: Write the full TRANSITION TABLE: for each (state, event) pair, the next state — and explicitly mark the pairs that are ILLEGAL (no transition). Step 4: Note any guards (conditions that must hold for a transition) and entry/exit side-effects per state. Step 5: Write a numbered acceptance-criteria checklist of 5-9 items (e.g. 'the machine starts in the initial state', 'every legal transition produces the table's next state', 'an illegal (state,event) pair is rejected, not silently ignored', 'terminal states accept no further transitions'). `write_task_note` the state diagram/table + checklist and write the same to the produces path.",
+        "produces": { "path": "notes/model.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "build",
+        "name": "Build the machine",
+        "role": "developer",
+        "summary": "implement a guarded transition function",
+        "prompt": "Implement the state machine to the model. Step 1: Represent states and events as a closed set (enum/union) so only modeled values are usable. Step 2: Encode the transition table directly and write a `transition(state, event)` function that returns the next state for legal pairs. Step 3: For illegal (state, event) pairs, REJECT explicitly (throw a typed error or return an explicit rejection) — never silently stay or fall through. Step 4: Evaluate guards before transitioning and run entry/exit effects on the relevant transitions. Step 5: Make the current state observable and start in the initial state. Write the machine to the produces path. On a loop-back, fix only the named gaps. `write_task_note` the file path and which criteria now pass.",
+        "produces": { "path": "src/machine.js", "kind": "code-module" }
+      },
+      {
+        "id": "test",
+        "name": "Test every path",
+        "role": "developer",
+        "summary": "test legal paths and illegal-transition rejection",
+        "prompt": "Write tests covering the transition table exhaustively. Step 1: Assert the machine starts in the initial state. Step 2: For every LEGAL (state, event) pair in the table, drive the machine to that state and assert the event produces the table's next state. Step 3: For representative ILLEGAL pairs, assert the machine rejects the event (throws/returns rejection) and does NOT change state. Step 4: Assert terminal states reject all further events, and that guarded transitions are blocked when the guard fails. `write_task_note` the test file path and pass/fail count.",
+        "produces": { "path": "src/machine.test.js", "kind": "code-with-tests" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Run the tests and exercise the machine. For EACH acceptance criterion: confirm it starts in the initial state, confirm every legal transition matches the table, confirm illegal (state,event) pairs are explicitly rejected without changing state, and confirm terminal states and guards behave. Write PASS/FAIL per criterion; an illegal transition that is silently ignored is a FAIL.",
+      "loopBackTo": "build",
+      "deliverable": { "path": "src/machine.js", "kind": "code-module" }
+    }
+  },
+  {
+    "id": "parser-grammar",
+    "name": "Parser / DSL for a Small Grammar",
+    "description": "Build a parser for a small domain-specific language or data format — tokenize, parse to an AST, and report clear errors on malformed input. Designs the grammar FIRST — the token set, the grammar rules (BNF-style), operator precedence, the AST node shapes, and the error strategy — then implements lexer + parser producing the AST, then tests valid inputs parse to the right AST and invalid inputs fail with useful errors. Covers tokenization/lexing, recursive-descent parsing, grammar rules, operator precedence, AST construction, and helpful parse-error messages.",
+    "tags": ["parser", "dsl", "grammar", "lexer", "ast"],
+    "triggers": [
+      "build a parser",
+      "parse a dsl",
+      "write a grammar and parser",
+      "tokenize and parse",
+      "make a mini language"
+    ],
+    "phases": [
+      {
+        "id": "grammar-design",
+        "name": "Grammar design",
+        "role": "planner",
+        "summary": "lock tokens, grammar rules, precedence, AST shapes",
+        "prompt": "Design the grammar before writing the parser. Step 1: Define the TOKEN set (literals, identifiers, operators, keywords, punctuation, whitespace handling). Step 2: Write the grammar rules in a BNF-style notation, and for any expressions, define OPERATOR PRECEDENCE and associativity explicitly. Step 3: Define the AST node shapes the parser will produce for each rule. Step 4: Decide the error strategy: what counts as a syntax error and what a good error message looks like (position + expected). Step 5: Write a numbered acceptance-criteria checklist of 5-9 items with concrete example inputs (e.g. '`1 + 2 * 3` parses with `*` bound tighter than `+`', 'a valid program produces the documented AST', 'unbalanced parens produce a clear error with a position', 'an unexpected token is reported, not swallowed'). `write_task_note` the grammar + AST shapes + examples + checklist and write the same to the produces path.",
+        "produces": { "path": "notes/grammar-design.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "build",
+        "name": "Build the parser",
+        "role": "developer",
+        "summary": "implement lexer + parser → AST",
+        "prompt": "Implement the parser to the grammar. Step 1: Write the LEXER that turns source text into a token stream per the token set, tracking positions for error messages. Step 2: Write the PARSER (recursive descent is fine) that consumes tokens and builds the AST per the grammar rules, respecting the defined operator precedence and associativity. Step 3: On malformed input, raise a clear syntax error with the position and what was expected — never silently produce a wrong AST or swallow extra tokens. Step 4: Ensure a fully-consumed valid input yields exactly the documented AST shape. Write the parser to the produces path. On a loop-back, fix only the named gaps. `write_task_note` the file path and which criteria now pass.",
+        "produces": { "path": "src/parser.js", "kind": "code-module" }
+      },
+      {
+        "id": "test",
+        "name": "Test the parser",
+        "role": "developer",
+        "summary": "test valid ASTs and useful error reporting",
+        "prompt": "Write tests from the grammar's example inputs. Step 1: For each valid example, assert the parser produces the EXACT expected AST shape. Step 2: Add precedence tests (e.g. `1 + 2 * 3`) asserting the tree groups operators correctly. Step 3: For malformed inputs (unexpected token, unbalanced delimiters, trailing garbage), assert the parser raises a syntax error that includes a position/expectation — not a generic crash or a silently-wrong AST. Step 4: Assert valid input is fully consumed. `write_task_note` the test file path and pass/fail count.",
+        "produces": { "path": "src/parser.test.js", "kind": "code-with-tests" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Run the tests and parse sample inputs. For EACH acceptance criterion: confirm valid inputs produce the documented AST, confirm operator precedence/associativity is correct, confirm malformed inputs raise clear positioned errors (not crashes or wrong ASTs), and confirm valid input is fully consumed. Write PASS/FAIL per criterion.",
+      "loopBackTo": "build",
+      "deliverable": { "path": "src/parser.js", "kind": "code-module" }
+    }
+  },
+  {
+    "id": "auth-flow",
+    "name": "Auth / Session Implementation",
+    "description": "Implement an authentication and session flow — login, session/token issuance, verification, and logout — with the security fundamentals baked in. Threat-models FIRST to lock the security requirements — credential hashing, token/session strategy, expiry, CSRF/XSS posture, and the attacks in scope — then implements registration/login/verify/logout to those requirements, then a security-minded reviewer audits for the classic auth pitfalls. Covers password hashing (bcrypt/argon2), session vs JWT, token expiry/refresh, secure cookie flags, timing-safe comparison, CSRF protection, and brute-force throttling.",
+    "tags": ["auth", "authentication", "session", "security", "login"],
+    "triggers": [
+      "implement login",
+      "build an auth flow",
+      "session handling",
+      "add authentication",
+      "jwt or session auth"
+    ],
+    "phases": [
+      {
+        "id": "threat-scope",
+        "name": "Threat scope",
+        "role": "planner",
+        "summary": "lock the security requirements and threats in scope",
+        "prompt": "Lock the security requirements before implementing auth — auth done casually is a vulnerability. Step 1: Decide the session strategy: server sessions vs JWT, where the token lives (httpOnly cookie vs header), and expiry/refresh. Step 2: Lock credential handling: passwords hashed with a strong adaptive function (bcrypt/argon2) and never stored or logged in plaintext, with timing-safe verification. Step 3: Enumerate the threats in scope and the mitigations: brute force (throttling/lockout), CSRF (token or SameSite cookie), XSS (httpOnly), session fixation (rotate on login), and enumeration (uniform error messages). Step 4: Write a numbered acceptance-criteria checklist of 6-9 items (e.g. 'passwords are hashed, never plaintext', 'wrong password and unknown user return the same error', 'sessions expire and rotate on login', 'logout invalidates the session', 'cookies are httpOnly/secure/SameSite'). `write_task_note` the requirements + threat list + checklist and write the same to the produces path.",
+        "produces": { "path": "notes/threat-scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "build",
+        "name": "Build the auth flow",
+        "role": "developer",
+        "summary": "implement register/login/verify/logout securely",
+        "prompt": "Implement the auth flow to the security requirements. Step 1: Registration — hash passwords with the chosen adaptive function and a per-user salt; never store/log plaintext. Step 2: Login — look up the user and verify with a timing-safe comparison; on success issue the session/token with expiry and set the cookie with httpOnly/secure/SameSite (rotate the session id to prevent fixation). Step 3: Use a UNIFORM error for both unknown-user and wrong-password to avoid enumeration; add basic brute-force throttling. Step 4: Verify — middleware/function that validates the session/token and rejects expired/invalid ones. Step 5: Logout — invalidate the session server-side and clear the cookie. Add CSRF protection for state-changing routes. Write the implementation to the produces path. On a loop-back, fix only the flagged issue. `write_task_note` the file path and which criteria now pass.",
+        "produces": { "path": "src/auth.js", "kind": "code-module" }
+      },
+      {
+        "id": "review",
+        "name": "Security review",
+        "role": "reviewer",
+        "summary": "audit for the classic auth pitfalls",
+        "prompt": "Audit the auth implementation against the threat scope and the classic pitfalls. Step 1: Confirm passwords are hashed with a strong adaptive function (not MD5/SHA-1/plaintext) and never logged. Step 2: Confirm login uses timing-safe comparison and that unknown-user vs wrong-password are indistinguishable (no enumeration). Step 3: Confirm sessions/tokens expire, rotate on login, and are invalidated on logout, and that cookies carry httpOnly/secure/SameSite. Step 4: Confirm CSRF protection on state-changing routes and that brute force is throttled. Step 5: Look for secrets hardcoded in source. Write an audit note listing each threat and PASS/FAIL with the specific finding to the produces path.",
+        "produces": { "path": "notes/review.md", "kind": "markdown-notes" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Exercise the auth flow and audit the code. For EACH acceptance criterion: confirm passwords are hashed (never plaintext/logged), confirm unknown-user and wrong-password return identical errors, confirm sessions expire/rotate and logout invalidates, confirm cookies are httpOnly/secure/SameSite, and confirm CSRF + brute-force protections exist. Write PASS/FAIL per criterion; plaintext passwords or user enumeration is an automatic FAIL.",
+      "loopBackTo": "build",
+      "deliverable": { "path": "src/auth.js", "kind": "code-module" }
+    }
+  },
+  {
+    "id": "feature-flag-rollout",
+    "name": "Flagged Feature Rollout",
+    "description": "Add a new feature behind a feature flag so it can ship dark, be toggled per-environment/user, and roll back instantly without a deploy. Plans the flag contract FIRST — the flag name/default, the toggle points, the on/off behavior, the targeting (env/percentage/user), and the cleanup plan — then implements the flagged code with both paths working, then a reviewer verifies both states behave and the off-state default is safe. Covers feature flags, toggle points, percentage/targeted rollout, default-off safety, dark launches, and flag-cleanup discipline.",
+    "tags": ["feature-flag", "rollout", "toggle", "release", "experiment"],
+    "triggers": [
+      "add a feature flag",
+      "ship behind a flag",
+      "feature toggle",
+      "gradual rollout",
+      "dark launch a feature"
+    ],
+    "phases": [
+      {
+        "id": "plan",
+        "name": "Plan the flag",
+        "role": "planner",
+        "summary": "lock flag name, default, toggle points, targeting",
+        "prompt": "Plan the feature flag before coding. Step 1: Name the flag and set its DEFAULT (default-off is the safe choice for new features) and where its value is read from (config/env/flag service). Step 2: Identify the toggle points in the code — exactly where the flag branches old behavior vs new. Step 3: Define the behavior in each state precisely, and the targeting strategy (all-on/off, per-environment, percentage, or specific users). Step 4: Note the rollback story (flip the flag, no deploy) and the cleanup plan (when/how the flag and the dead branch get removed later). Step 5: Write a numbered acceptance-criteria checklist of 5-9 items (e.g. 'flag-off reproduces the original behavior exactly', 'flag-on enables the new feature', 'the default is safe', 'no code path runs both branches'). `write_task_note` the flag plan + checklist and write the same to the produces path.",
+        "produces": { "path": "notes/plan.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "build",
+        "name": "Build the flagged feature",
+        "role": "developer",
+        "summary": "implement both paths behind the flag",
+        "prompt": "Implement the feature behind the flag to the plan. Step 1: Read the flag value from the agreed source with the safe default. Step 2: At each toggle point, branch cleanly: flag-OFF must reproduce the original behavior exactly (no behavior change for existing users), flag-ON enables the new feature. Step 3: Keep the flag check at the boundary so the two paths are clear and neither leaks into the other; support the targeting strategy (e.g. percentage/user check) if specified. Step 4: Ensure the new feature is reachable only when on, and that the off path is the trusted fallback. Write the implementation to the produces path. On a loop-back, fix only the named gap. `write_task_note` the file path and which criteria now pass.",
+        "produces": { "path": "src/feature.js", "kind": "code-module" }
+      },
+      {
+        "id": "verify",
+        "name": "Verify both states",
+        "role": "reviewer",
+        "summary": "confirm off=original, on=new, safe default",
+        "prompt": "Verify the flag behaves in both states. Step 1: With the flag OFF, confirm the behavior is identical to before the feature existed (existing tests still green, no surprises). Step 2: With the flag ON, confirm the new feature works as specified. Step 3: Confirm the default value is the safe one and that flipping the flag fully switches behavior with no deploy needed. Step 4: Confirm targeting (if any) routes correctly and that no path accidentally runs both branches. Write a verification note covering the off-state, on-state, and default to the produces path.",
+        "produces": { "path": "notes/verify.md", "kind": "markdown-notes" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Toggle the flag and test both states. For EACH acceptance criterion: confirm flag-OFF reproduces the original behavior exactly, confirm flag-ON enables the new feature, confirm the default is safe, confirm targeting routes correctly, and confirm no path runs both branches. Write PASS/FAIL per criterion; an off-state that changed existing behavior is a FAIL.",
+      "loopBackTo": "build",
+      "deliverable": { "path": "src/feature.js", "kind": "code-module" }
+    }
+  },
+  {
+    "id": "db-index-tuning",
+    "name": "Diagnose + Add Database Indexes",
+    "description": "Diagnose slow database queries and add the right indexes — driven by the query plan, not by hunches — then prove the speedup without harming writes. Analyzes FIRST with EXPLAIN/query plans to find the actual full scans and missing indexes, then adds the targeted indexes (right columns, right order, covering where it helps), then a reviewer confirms the plans now use the index and queries are faster. Covers EXPLAIN/query plans, full-table-scan detection, composite index column order, covering indexes, selectivity, and the write-amplification tradeoff.",
+    "tags": ["database", "indexes", "performance", "sql", "query-tuning"],
+    "triggers": [
+      "add database indexes",
+      "speed up slow queries",
+      "tune database performance",
+      "fix a slow query",
+      "explain plan and index"
+    ],
+    "phases": [
+      {
+        "id": "analyze",
+        "name": "Analyze the queries",
+        "role": "data-analyst",
+        "summary": "use query plans to find scans and missing indexes",
+        "prompt": "Diagnose with data, not hunches — index by the query plan. Step 1: Identify the slow queries and run EXPLAIN/EXPLAIN ANALYZE on each to capture the actual plan, noting full table scans, expensive sorts, and the rows examined vs returned. Step 2: For each problem query, determine the columns in WHERE/JOIN/ORDER BY that drive the scan and would benefit from an index, and the right COLUMN ORDER for a composite (most selective / equality before range). Step 3: Consider covering indexes where a query reads only a few columns. Step 4: Note the WRITE cost tradeoff so you do not over-index. Step 5: Write a numbered acceptance-criteria checklist of 5-9 items (e.g. 'each target query's plan no longer does a full table scan', 'the added index columns/order match the query predicates', 'no redundant/duplicate index is added', 'write-heavy tables are not over-indexed'). `write_task_note` the plans + proposed indexes + checklist and write the same to the produces path.",
+        "produces": { "path": "notes/analyze.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "change",
+        "name": "Add the indexes",
+        "role": "developer",
+        "summary": "write the index migration to the analysis",
+        "prompt": "Write the index changes to the analysis. Step 1: Author the CREATE INDEX statements (as a migration) with the columns and ORDER the analysis specified — composite order matters. Step 2: Add covering/included columns only where the analysis justified them; avoid duplicating an existing index's prefix. Step 3: Use concurrent/online index creation if the database supports it to avoid locking, and include the down/rollback (DROP INDEX). Step 4: Keep the change minimal — only the indexes the plans demanded, not a scattershot of indexes that bloat writes. Write the migration to the produces path. On a loop-back, adjust only the index the reviewer flagged. `write_task_note` the migration path and which criteria now pass.",
+        "produces": { "path": "migrations/add_indexes.sql", "kind": "code-module" }
+      },
+      {
+        "id": "verify",
+        "name": "Verify the plans",
+        "role": "reviewer",
+        "summary": "confirm plans use the index and queries are faster",
+        "prompt": "Verify the indexes actually help. Step 1: Re-run EXPLAIN on each target query and confirm the plan now USES the new index (index scan/seek) instead of a full table scan. Step 2: Confirm the query timing improved against the baseline. Step 3: Confirm the index column order matches the predicates and no redundant/duplicate index was created. Step 4: Sanity-check that write-heavy tables were not over-indexed (the tradeoff is acknowledged). Write a verification note with before/after plans and timings to the produces path.",
+        "produces": { "path": "notes/verify.md", "kind": "markdown-notes" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Re-run EXPLAIN on the target queries. For EACH acceptance criterion: confirm each query's plan now uses the index (no full scan), confirm timings improved over baseline, confirm the index columns/order match the predicates, and confirm no redundant index and no over-indexing of write-heavy tables. Write PASS/FAIL per criterion; an index the plan does not use is a FAIL.",
+      "loopBackTo": "change",
+      "deliverable": { "path": "migrations/add_indexes.sql", "kind": "code-module" }
+    }
+  },
+  {
+    "id": "regex-builder",
+    "name": "Build + Test a Tricky Regex",
+    "description": "Build a regular expression that matches exactly the right strings and rejects the wrong ones — specified with concrete should-match and should-NOT-match cases before a single character is written. Specs the cases FIRST — the positive examples, the tricky negative examples, edge cases, and the anchoring/flags — then builds the regex incrementally against those cases, then tests the full matrix including catastrophic-backtracking safety. Covers character classes, quantifiers, anchors, groups/captures, lookahead/behind, escaping, flags, and ReDoS-safe patterns validated by a should-match / should-not-match table.",
+    "tags": ["regex", "pattern", "validation", "string-matching", "regexp"],
+    "triggers": [
+      "build a regex",
+      "write a regular expression",
+      "match a pattern",
+      "validate with regex",
+      "tricky regex"
+    ],
+    "phases": [
+      {
+        "id": "spec",
+        "name": "Spec the cases",
+        "role": "planner",
+        "summary": "lock should-match / should-NOT-match examples",
+        "prompt": "Specify the regex by examples before writing it — a regex is only correct relative to its cases. Step 1: Describe in words exactly what should match and what should not. Step 2: Write a SHOULD-MATCH list of concrete example strings, including edge cases (boundaries, minimum/maximum, unusual-but-valid forms). Step 3: Write a SHOULD-NOT-MATCH list of tricky near-misses that a naive pattern would wrongly accept (this is where most regexes fail). Step 4: Decide anchoring (full-string vs substring), case sensitivity, and any other flags, plus whether captures are needed. Step 5: Write a numbered acceptance-criteria checklist (e.g. 'every should-match string matches', 'every should-NOT-match string is rejected', 'the pattern is anchored as specified', 'no catastrophic backtracking on adversarial input'). `write_task_note` the two case lists + flags + checklist and write the same to the produces path.",
+        "produces": { "path": "notes/spec.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "build",
+        "name": "Build the regex",
+        "role": "developer",
+        "summary": "construct the pattern against the cases",
+        "prompt": "Construct the regex incrementally against the spec. Step 1: Build the pattern piece by piece (character classes, quantifiers, groups), checking it against the should-match and should-not-match lists as you go rather than writing one big pattern blind. Step 2: Apply the specified anchors and flags, and add capture groups only where needed. Step 3: Escape special characters correctly and prefer specific classes over greedy `.*` to keep it precise. Step 4: Avoid nested/ambiguous quantifiers that cause catastrophic backtracking (ReDoS); prefer atomic/possessive or restructure if the engine supports it. Step 5: Deliver the final pattern plus a brief annotation of what each part does, written to the produces path as a small module exporting the regex and a `test(input)` helper. On a loop-back, fix only the failing cases. `write_task_note` the pattern and which criteria now pass.",
+        "produces": { "path": "src/regex.js", "kind": "code-module" }
+      },
+      {
+        "id": "test",
+        "name": "Test the matrix",
+        "role": "developer",
+        "summary": "test every match/no-match case + ReDoS safety",
+        "prompt": "Write tests covering the full case matrix. Step 1: For every should-match string, assert the regex matches. Step 2: For every should-NOT-match string, assert the regex does NOT match — this is the part that catches over-eager patterns. Step 3: Assert anchoring behaves (e.g. a valid substring inside junk is rejected if full-string anchoring was specified). Step 4: Add a ReDoS-safety check: feed an adversarial input (long repeated prefix) and assert matching completes quickly rather than hanging. `write_task_note` the test file path and pass/fail count.",
+        "produces": { "path": "src/regex.test.js", "kind": "code-with-tests" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Run the tests against the full case matrix. For EACH acceptance criterion: confirm every should-match string matches, confirm every should-NOT-match string is rejected, confirm anchoring/flags behave as specified, and confirm no catastrophic backtracking on adversarial input. Write PASS/FAIL per criterion; a single wrongly-accepted should-not-match string is a FAIL.",
+      "loopBackTo": "build",
+      "deliverable": { "path": "src/regex.js", "kind": "code-module" }
+    }
+  },
+  {
+    "id": "script-automation",
+    "name": "One-Off Automation Script",
+    "description": "Write a one-off automation script that reliably does a repetitive task — process files, call an API, transform data — with arguments, a dry-run, idempotency, and clear logging so it is safe to run. Scopes the task FIRST — inputs/outputs, side-effects, the dry-run, idempotency, and failure handling — then implements the runnable script with args and a dry-run mode, then a reviewer confirms it does the job, is safe to re-run, and fails loudly. Covers argument handling, dry-run/preview mode, idempotent side-effects, progress logging, error handling, and safe-to-rerun automation.",
+    "tags": ["automation", "script", "scripting", "tooling", "task"],
+    "triggers": [
+      "write an automation script",
+      "automate a task",
+      "one-off script",
+      "script to process files",
+      "batch automation"
+    ],
+    "phases": [
+      {
+        "id": "scope",
+        "name": "Scope the task",
+        "role": "planner",
+        "summary": "lock inputs/outputs, side-effects, dry-run, safety",
+        "prompt": "Scope the automation before coding — a script with side-effects deserves a plan. Step 1: State exactly what the script does, its INPUTS (args, files, env) and its OUTPUTS/side-effects (files written, API calls, records changed). Step 2: Decide the safety affordances: a DRY-RUN/preview mode that shows what would happen without doing it, and how the real run is confirmed. Step 3: Decide idempotency — re-running must not double-apply (skip already-done work) — and failure handling (stop vs skip-and-log, exit code). Step 4: Decide the logging: what progress and summary it prints. Step 5: Write a numbered acceptance-criteria checklist of 5-9 items (e.g. 'a dry-run makes no changes and previews the plan', 'a real run performs the task', 're-running is a safe no-op on already-done items', 'errors are logged and exit non-zero'). `write_task_note` the scope + checklist and write the same to the produces path.",
+        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "build",
+        "name": "Build the script",
+        "role": "developer",
+        "summary": "implement the runnable script with dry-run",
+        "prompt": "Implement the script to the scope as a single runnable file. Step 1: Parse the arguments (including a `--dry-run` flag) and validate inputs up front, failing fast with a clear message on bad args. Step 2: Implement the core task; in dry-run mode, LOG what each action WOULD do and make zero side-effects, while the real run performs them. Step 3: Make side-effects idempotent — check before writing/calling so a re-run skips already-done items. Step 4: Log progress per item and a final summary (done/skipped/failed counts); on error, log it clearly and exit non-zero. Write the script to the produces path. On a loop-back, fix only the named gap. `write_task_note` the file path and which criteria now pass.",
+        "produces": { "path": "src/script.js", "kind": "code-module" }
+      },
+      {
+        "id": "verify",
+        "name": "Verify the script",
+        "role": "reviewer",
+        "summary": "confirm it works, is rerun-safe, fails loudly",
+        "prompt": "Verify the automation is correct and safe. Step 1: Run it with `--dry-run` and confirm it previews actions and makes NO changes. Step 2: Run it for real on sample input and confirm it performs the task and prints a sensible summary. Step 3: Run it AGAIN and confirm the second run is a safe no-op on already-done items (idempotent). Step 4: Feed bad input/args and confirm it fails loudly with a clear message and a non-zero exit. Write a verification note covering the dry-run, real run, re-run, and error handling to the produces path.",
+        "produces": { "path": "notes/verify.md", "kind": "markdown-notes" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Run the script in dry-run, real, re-run, and error modes. For EACH acceptance criterion: confirm dry-run makes no changes and previews the plan, confirm a real run performs the task with a summary, confirm a re-run is a safe no-op on done items, and confirm bad input fails loudly with a non-zero exit. Write PASS/FAIL per criterion; a dry-run that mutates state or a non-idempotent re-run is a FAIL.",
+      "loopBackTo": "build",
+      "deliverable": { "path": "src/script.js", "kind": "code-module" }
+    }
+  },
+  {
+    "id": "grpc-service",
+    "name": "gRPC Service",
+    "description": "Build a gRPC service from a Protocol Buffers contract — define the .proto service and messages, implement the server handlers, and verify with client calls including streaming and status codes. Designs the proto contract FIRST — the service, RPC methods, request/response messages, field numbers, and the streaming kinds — because the .proto is the binding contract across languages, then implements the handlers, then tests unary/streaming calls and gRPC status codes. Covers protobuf service/message definitions, field numbering, unary vs server/client/bidi streaming, gRPC status codes, deadlines, and a client-driven test.",
+    "tags": ["grpc", "protobuf", "rpc", "api", "backend"],
+    "triggers": [
+      "build a grpc service",
+      "protobuf service and server",
+      "implement grpc handlers",
+      "create a .proto and server",
+      "rpc service"
+    ],
+    "phases": [
+      {
+        "id": "proto-design",
+        "name": "Proto contract design",
+        "role": "planner",
+        "summary": "lock the service, methods, messages, streaming kinds",
+        "prompt": "Design the Protocol Buffers contract before any server code — the .proto is the binding cross-language contract. Step 1: Define the service and its RPC METHODS, choosing the streaming kind for each (unary, server-streaming, client-streaming, bidi). Step 2: Define the request and response MESSAGE types with explicit, stable FIELD NUMBERS and correct scalar/enum/repeated types. Step 3: Decide the gRPC STATUS-CODE map: which conditions return OK, INVALID_ARGUMENT, NOT_FOUND, ALREADY_EXISTS, etc., and how errors carry detail. Step 4: Note deadlines/timeouts expectations. Step 5: Write a numbered acceptance-criteria checklist of 5-9 items (e.g. 'each RPC has the documented signature and streaming kind', 'invalid input returns INVALID_ARGUMENT not OK', 'a missing entity returns NOT_FOUND', 'field numbers are stable and unique'). `write_task_note` the proto draft + status map + checklist and write the same to the produces path.",
+        "produces": { "path": "notes/proto-design.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "build",
+        "name": "Build the service",
+        "role": "developer",
+        "summary": "write the .proto + implement the server handlers",
+        "prompt": "Implement the gRPC service to the contract. Step 1: Write the `.proto` file exactly as designed — service, methods with their streaming kinds, and messages with their field numbers. Step 2: Implement a server handler for every RPC; honor the streaming kind (stream responses for server-streaming, consume the stream for client-streaming). Step 3: Validate requests and return the correct gRPC STATUS CODE on each error condition (INVALID_ARGUMENT, NOT_FOUND, ...), never a generic UNKNOWN for an expected error. Step 4: Respect deadlines and use an in-memory store if none specified. Write the server source to the produces path (and the .proto alongside it). On a loop-back, fix only the named gaps. `write_task_note` the file paths and which criteria now pass.",
+        "produces": { "path": "src/server.js", "kind": "code-module" }
+      },
+      {
+        "id": "test",
+        "name": "Test with a client",
+        "role": "developer",
+        "summary": "test unary/streaming calls and status codes",
+        "prompt": "Write client-driven tests against the running service. Step 1: For each unary RPC, call it and assert the response message matches the proto and the status is OK. Step 2: For streaming RPCs, drive the stream and assert the sequence of messages is correct. Step 3: Trigger each error condition and assert the correct gRPC STATUS CODE comes back (INVALID_ARGUMENT on bad input, NOT_FOUND on missing), not OK or UNKNOWN. Step 4: Add a round-trip (create then fetch) to prove state wiring. `write_task_note` the test file path and pass/fail count.",
+        "produces": { "path": "src/server.test.js", "kind": "code-with-tests" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Run the tests with a gRPC client. For EACH acceptance criterion: confirm each RPC's signature/streaming kind works and unary responses match the proto, confirm streaming RPCs yield the right message sequence, confirm error conditions return the correct gRPC status code (not OK/UNKNOWN), and confirm a round-trip works. Write PASS/FAIL per criterion.",
+      "loopBackTo": "build",
+      "deliverable": { "path": "src/server.js", "kind": "code-module" }
+    }
+  },
+  {
+    "id": "message-queue-consumer",
+    "name": "Message Queue Consumer / Worker",
+    "description": "Build a queue consumer/worker that pulls messages off a queue, processes them reliably, and handles failures with retries and a dead-letter path — at-least-once delivery done right. Scopes the messaging contract FIRST — the message schema, ack/nack semantics, idempotency key, retry/backoff policy, dead-letter rules, and concurrency — then implements the consumer loop with ack-after-success and DLQ routing, then tests success, retry, poison-message, and duplicate-delivery handling. Covers queue consumers, at-least-once vs at-most-once, ack/nack, idempotent processing, retry with backoff, dead-letter queues, and poison-message isolation.",
+    "tags": ["queue", "worker", "messaging", "consumer", "backend"],
+    "triggers": [
+      "build a queue consumer",
+      "message worker",
+      "process queue messages",
+      "handle a message queue",
+      "dead letter queue worker"
+    ],
+    "phases": [
+      {
+        "id": "scope",
+        "name": "Scope the consumer",
+        "role": "planner",
+        "summary": "lock message schema, ack/retry/DLQ, idempotency",
+        "prompt": "Scope the queue consumer before coding — reliable messaging lives in the policy details. Step 1: Define the MESSAGE schema and the work each message represents. Step 2: Decide the delivery semantics and ACK strategy: ack only AFTER successful processing (at-least-once) so a crash mid-process redelivers, vs ack-on-receipt. Step 3: Define IDEMPOTENCY — the dedupe key and how processing-once is guaranteed under redelivery. Step 4: Define the failure policy: retry count and BACKOFF, and when a message is poison (route to a DEAD-LETTER queue after N attempts) rather than blocking the queue forever. Step 5: Decide concurrency/prefetch. Step 6: Write a numbered acceptance-criteria checklist of 5-9 items (e.g. 'a successful message is acked and processed once', 'a transient failure is retried with backoff', 'a poison message goes to the DLQ after N attempts', 'a duplicate delivery is processed only once'). `write_task_note` the scope + checklist and write the same to the produces path.",
+        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "build",
+        "name": "Build the consumer",
+        "role": "developer",
+        "summary": "implement the consume loop with retry + DLQ",
+        "prompt": "Implement the consumer to the scope as a runnable worker. Step 1: Pull messages and validate each against the schema. Step 2: Process, then ACK only on success; on failure NACK/requeue so the message is redelivered (at-least-once). Step 3: Make processing IDEMPOTENT — check the dedupe key before applying side-effects so redelivery/duplicates do not double-apply. Step 4: Track attempt count; retry transient failures with BACKOFF, and after the scoped max attempts route the message to the DEAD-LETTER queue instead of looping forever. Step 5: Honor the concurrency/prefetch setting and log per-message outcome. Use an in-memory queue/DLQ if none specified. Write the worker to the produces path. On a loop-back, fix only the named gap. `write_task_note` the file path and which criteria now pass.",
+        "produces": { "path": "src/consumer.js", "kind": "code-module" }
+      },
+      {
+        "id": "test",
+        "name": "Test reliability",
+        "role": "developer",
+        "summary": "test success, retry, poison-message, duplicates",
+        "prompt": "Write tests for the consumer's reliability behavior. Step 1: Assert a good message is processed exactly once and acked. Step 2: Inject a transient failure and assert the message is retried (with backoff) and eventually succeeds. Step 3: Inject a permanently-failing (poison) message and assert it lands in the DLQ after the max attempts and does NOT block the queue. Step 4: Deliver the same message id twice and assert the side-effect is applied only once (idempotency). `write_task_note` the test file path and pass/fail count.",
+        "produces": { "path": "src/consumer.test.js", "kind": "code-with-tests" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Run the tests and drive the consumer. For EACH acceptance criterion: confirm a successful message is processed once and acked, confirm a transient failure is retried with backoff, confirm a poison message reaches the DLQ after N attempts without blocking, and confirm duplicate delivery is processed only once. Write PASS/FAIL per criterion; a poison message that blocks the queue or a duplicate that double-applies is a FAIL.",
+      "loopBackTo": "build",
+      "deliverable": { "path": "src/consumer.js", "kind": "code-module" }
+    }
+  }
+]

@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!--
+    Pixel-aligned artwork for the small frames in icon.ico.
+
+    Windows commonly displays application icons at 16–24 px. Reducing the
+    textured 1024 px master directly makes the legs fuzzy and closes the
+    joinery cuts, so these shapes are deliberately simpler. Coordinates sit
+    on a four-unit grid where possible: four SVG units become one pixel in
+    the 16 px frame.
+  -->
+  <!--
+    Flat, edge-to-edge color is intentional at small sizes: rounded corners
+    and texture both spend pixels without improving recognition.
+  -->
+  <rect width="64" height="64" fill="#849577" />
+
+  <!--
+    The bench occupies x/y 8–56: exactly 12×12 pixels in the 16 px frame.
+    All coordinates land on the 16 px grid, and the vise is omitted so the
+    joinery cuts and equal-width legs remain unambiguous.
+  -->
+  <g fill="#f8f8f4" shape-rendering="crispEdges">
+    <rect x="8" y="8" width="48" height="12" />
+    <path d="M12 24h8l-4 32H8z" />
+    <path d="M44 24h8l4 32h-8z" />
+    <rect x="24" y="36" width="16" height="8" />
+  </g>
+</svg>

@@ -1,0 +1,25 @@
+# Force LF in the working tree on every platform so Biome's formatter
+# (which expects LF by default) stays clean regardless of core.autocrlf.
+* text=auto eol=lf
+
+# Binary files — never normalize.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.icns binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.wasm binary
+*.gz binary
+*.zip binary
+*.tar binary
+*.exe binary
+*.dll binary
+*.dylib binary
+*.so binary
+*.node binary
+*.gguf binary

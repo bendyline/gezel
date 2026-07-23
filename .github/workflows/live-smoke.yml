@@ -1,0 +1,110 @@
+name: Optional Live Provider and Native Smoke
+
+on:
+  schedule:
+    - cron: '41 10 * * 1'
+  workflow_dispatch:
+    inputs:
+      lane:
+        description: Smoke lane to run
+        required: true
+        default: provider
+        type: choice
+        options: [provider, native, all]
+
+env:
+  NODE_VERSION: '24'
+  PNPM_VERSION: '11.15.1'
+
+permissions:
+  contents: read
+
+jobs:
+  provider-smoke:
+    name: Live cloud-provider eval
+    if: >-
+      (github.event_name == 'schedule' && vars.GEZEL_ENABLE_LIVE_PROVIDER_SMOKE == '1') ||
+      (github.event_name == 'workflow_dispatch' && (inputs.lane == 'provider' || inputs.lane == 'all'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      LIVE_PROVIDER: ${{ vars.GEZEL_LIVE_PROVIDER || 'openai' }}
+      LIVE_MODEL: ${{ vars.GEZEL_LIVE_MODEL || 'gpt-5' }}
+      LIVE_SCENARIO: ${{ vars.GEZEL_LIVE_SCENARIO || 'tictactoe' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@008330803749db0355799c700092d9a85fd074e9 # v6.0.9
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - name: Reject local workspace links
+        run: pnpm check:local-links
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: Require the selected provider credential
+        shell: bash
+        run: |
+          case "$LIVE_PROVIDER" in
+            openai)
+              test -n "$OPENAI_API_KEY" || { echo "::error::OPENAI_API_KEY is required"; exit 1; }
+              ;;
+            anthropic)
+              test -n "$ANTHROPIC_API_KEY" || { echo "::error::ANTHROPIC_API_KEY is required"; exit 1; }
+              ;;
+            *)
+              echo "::error::Scheduled provider smoke supports openai or anthropic; got $LIVE_PROVIDER"
+              exit 1
+              ;;
+          esac
+      - name: Run one bounded live eval
+        run: pnpm eval:run -- "$LIVE_SCENARIO" --provider "$LIVE_PROVIDER" --model "$LIVE_MODEL" --timeout 15m --runs-dir artifacts/live-provider
+      - name: Preserve live eval evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0 # v7.0.1
+        with:
+          name: live-provider-smoke
+          path: artifacts/live-provider/
+          if-no-files-found: warn
+          retention-days: 14
+
+  native-smoke:
+    name: Cached native-engine preflight
+    if: >-
+      (github.event_name == 'schedule' && vars.GEZEL_ENABLE_NATIVE_SMOKE == '1') ||
+      (github.event_name == 'workflow_dispatch' && (inputs.lane == 'native' || inputs.lane == 'all'))
+    # Native weights and accelerator drivers are intentionally not downloaded
+    # onto disposable hosted runners. Register a cache-warmed runner with this label.
+    runs-on: [self-hosted, gezel-native]
+    timeout-minutes: 30
+    env:
+      NATIVE_PROVIDER: ${{ vars.GEZEL_NATIVE_PROVIDER || 'llama-cpp' }}
+      NATIVE_MODEL: ${{ vars.GEZEL_NATIVE_MODEL || 'gemma4-e4b-q8' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@008330803749db0355799c700092d9a85fd074e9 # v6.0.9
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - name: Reject local workspace links
+        run: pnpm check:local-links
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: Probe the cached native binary and model
+        shell: bash
+        run: pnpm --filter @bendyline/gezel-evals run preflight -- --provider "$NATIVE_PROVIDER" --model "$NATIVE_MODEL" --force
+      - name: Preserve native preflight evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0 # v7.0.1
+        with:
+          name: native-engine-smoke
+          path: evals/runs/
+          if-no-files-found: warn
+          retention-days: 14

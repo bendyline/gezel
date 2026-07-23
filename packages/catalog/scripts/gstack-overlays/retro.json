@@ -1,0 +1,3 @@
+{
+  "planAppend": "### Gezel adaptations\n\nGather every git dataset with the read-only `run_git` tool (log, shortlog, diff --numstat); never shell pipelines. Compute the metrics in your own analysis or via a small workspace script, and write the retro to `retro/<week>.md` in the workspace."
+}

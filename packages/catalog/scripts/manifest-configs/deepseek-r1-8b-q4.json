@@ -1,0 +1,45 @@
+{
+  "id": "deepseek-r1-8b-q4",
+  "name": "DeepSeek R1 (8B)",
+  "description": "Reasoning-tuned 8B model. Slower than a plain chat model, but thinks through its answers before replying.",
+  "tags": ["deepseek", "tools", "reasoning"],
+  "category": "reasoning",
+  "maintainer": { "name": "DeepSeek", "url": "https://ollama.com/library/deepseek-r1" },
+  "version": "1.1.0",
+  "updatedAt": "2026-04-26T00:00:00Z",
+  "license": "MIT",
+  "parameterSize": "8B",
+  "approxSizeBytes": 5200000000,
+  "supportsTools": true,
+  "contextWindow": 128000,
+  "upstream": "https://ollama.com/library/deepseek-r1",
+  "style": {
+    "family": "deepseek",
+    "reasoningFormat": "think",
+    "toolCallFormat": "function-call"
+  },
+  "behaviors": [
+    "reasoning.strip-think-tags",
+    "prompt.private-reasoning-guidance",
+    "prompt.tool-cookbook-condensed",
+    "fabrication.detect-past-tense-no-tools",
+    "turn.preamble-folding",
+    {
+      "id": "turn.ramble-detection",
+      "config": {
+        "coldThreshold": 3000,
+        "postActionThreshold": 1200
+      }
+    }
+  ],
+  "ollama": { "tag": "deepseek-r1:8b" },
+  "llamaCpp": {
+    "huggingfaceRepo": "unsloth/DeepSeek-R1-0528-Qwen3-8B-GGUF",
+    "filename": "DeepSeek-R1-0528-Qwen3-8B-Q4_K_M.gguf",
+    "quantization": "Q4_K_M"
+  },
+  "mlx": {
+    "huggingfaceRepo": "mlx-community/DeepSeek-R1-0528-Qwen3-8B-4bit",
+    "quantization": "4bit"
+  }
+}

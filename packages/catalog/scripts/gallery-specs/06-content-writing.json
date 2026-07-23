@@ -1,0 +1,670 @@
+[
+  {
+    "id": "blog-post",
+    "name": "SEO Blog Post",
+    "description": "Write a complete, SEO-aware blog post that ranks and reads well: it locks the primary keyword, search intent, target reader, and a heading-by-heading outline FIRST, then drafts the full article in a single human voice with the keyword woven naturally into the title, intro, and H2s, and finally runs an editorial pass for clarity, flow, factual accuracy, and on-page SEO. Covers blog article, SEO content, how-to guide, listicle, thought-leadership post, content marketing, and organic-traffic writing. The scope-first ordering is the point: a small model that picks the keyword and outline before drafting avoids the classic failure of a rambling post that buries its topic and never satisfies the searcher's intent.",
+    "tags": ["blog", "seo", "writing", "content", "article"],
+    "triggers": [
+      "write a blog post",
+      "seo article",
+      "write a how-to guide",
+      "create blog content",
+      "ranking article"
+    ],
+    "phases": [
+      {
+        "id": "keyword-scope",
+        "name": "Keyword & outline scope",
+        "role": "planner",
+        "summary": "lock the primary keyword, intent, reader, and H2 outline",
+        "prompt": "1) Identify the PRIMARY keyword/phrase the post targets and the matching search intent (informational, comparison, how-to, or commercial). 2) Define the target reader in one sentence (who they are, what they already know, what they want to leave with). 3) List 3-5 secondary keywords/related terms to weave in naturally. 4) Write the working title (must contain the primary keyword, ideally near the front) plus a 1-sentence meta description under 155 characters. 5) Produce a heading-by-heading outline: H1 (title), a hook intro, 4-7 H2 sections each with a one-line summary of what it covers, and a closing/CTA section. 6) Set the target word count (e.g. 1200-1600) and reading level. Write an acceptance-criteria checklist (e.g. 'primary keyword appears in title, first 100 words, and at least 2 H2s'; 'every outlined H2 is covered'; 'single consistent voice, no AI filler phrases like \"in today's fast-paced world\"'; 'ends with a clear CTA'; 'within target word count +/-15%'). Use write_task_note to record the keyword strategy, outline, and checklist, and write the same content to the produces path. No prose drafting yet.",
+        "produces": { "path": "notes/keyword-scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "draft",
+        "name": "Draft the article",
+        "role": "copywriter",
+        "summary": "write the full post to the locked outline and keyword plan",
+        "prompt": "Write the complete article to the locked outline. 1) Open with a hook intro (2-3 sentences) that names the reader's problem and previews the payoff; place the primary keyword in the first 100 words. 2) Write every outlined H2 section in full prose with concrete examples, short paragraphs (2-4 sentences), and lists where they aid scanning. 3) Weave secondary keywords in naturally — never keyword-stuff. 4) Use one consistent, specific voice; cut filler and hedging. 5) Close with the CTA section from the outline. 6) Output GitHub-flavored markdown with the H1 title at top, proper H2/H3 headers, and the meta description as an HTML comment or front-matter line at the top. Write the full post to the produces path and use write_task_note to record word count and which checklist items you believe pass.",
+        "produces": { "path": "blog-post.md", "kind": "markdown-doc" }
+      },
+      {
+        "id": "edit",
+        "name": "Editorial pass",
+        "role": "reviewer",
+        "summary": "tighten clarity, flow, accuracy, and on-page SEO",
+        "prompt": "Edit the draft in place against the checklist. 1) Read top to bottom for flow: does each section follow logically, are transitions smooth, is the voice consistent? 2) Cut every filler phrase, redundancy, and hedge; tighten long sentences. 3) Verify on-page SEO: primary keyword in title, first 100 words, and >=2 H2s; meta description present and under 155 chars; headings are descriptive. 4) Fact-check any concrete claim and flag/remove anything you cannot stand behind. 5) Confirm word count is within target and the CTA is clear. Rewrite weak passages directly rather than just commenting. Save the polished version back to the produces path and note any criteria still unmet.",
+        "produces": { "path": "blog-post.md", "kind": "markdown-doc" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Read the final blog-post.md end to end and grade against the locked checklist. Check EACH criterion and write PASS/FAIL with a one-line reason: (a) primary keyword in title, first 100 words, and >=2 H2s; (b) every outlined H2 is present and substantive; (c) single consistent voice with no AI-filler phrases; (d) meta description present and under 155 characters; (e) clear CTA at the end; (f) word count within target +/-15%; (g) no unsupported factual claims. A post that is fluent but ignores the keyword plan or drops outlined sections FAILS.",
+      "loopBackTo": "draft",
+      "deliverable": { "path": "blog-post.md", "kind": "markdown-doc" }
+    }
+  },
+  {
+    "id": "landing-copy",
+    "name": "Landing Page Copy",
+    "description": "Write conversion-focused copy for a single landing page: it first locks the offer, the one primary audience, the single desired action, and the core promise, then drafts a full message hierarchy — hero headline and subhead, value props, social proof, objection handling, and one repeated CTA — then edits ruthlessly for clarity, specificity, and persuasive flow. Covers landing page copy, sales copy, conversion copywriting, hero copy, CTA copy, and value proposition writing. Offer-first ordering matters: a small model that nails the single offer and one CTA before writing avoids the diluted page that lists ten features, hedges the promise, and offers three competing actions.",
+    "tags": ["copywriting", "landing-page", "conversion", "marketing", "sales"],
+    "triggers": [
+      "write landing page copy",
+      "conversion copy",
+      "sales page copy",
+      "write hero copy",
+      "value proposition"
+    ],
+    "phases": [
+      {
+        "id": "offer-scope",
+        "name": "Offer scope",
+        "role": "planner",
+        "summary": "lock the offer, one audience, one CTA, and the core promise",
+        "prompt": "1) State the OFFER in one sentence: the product/service and what the visitor gets. 2) Define exactly ONE primary audience and the specific pain or desire that brought them. 3) Pick the ONE primary call-to-action (e.g. 'Start free trial', 'Book a demo') — secondary CTAs are out of scope. 4) Write the core promise/value proposition in one line ('the one thing'). 5) List 3-5 concrete benefits (outcomes, not features) and the proof for each (stat, testimonial, guarantee). 6) List the top 2-3 objections a visitor will have and the rebuttal for each. Write an acceptance-criteria checklist (e.g. 'one headline states a specific outcome, not a vague slogan'; 'benefits are outcomes with proof, not feature lists'; 'exactly one CTA, repeated'; 'every objection is addressed'; 'reading level grade <=8'). Use write_task_note for the offer brief + checklist, and write the same to the produces path. No page copy yet.",
+        "produces": { "path": "notes/offer-scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "draft",
+        "name": "Draft the copy",
+        "role": "copywriter",
+        "summary": "write the full message hierarchy section by section",
+        "prompt": "Write the landing page copy as a structured document with clear section labels. 1) HERO: a specific, benefit-driven headline (no vague slogans), a supporting subhead, and the primary CTA button label. 2) VALUE PROPS: 3-5 benefit blocks, each a short header + 1-2 sentences, leading with the outcome. 3) SOCIAL PROOF: testimonial(s) or trust signals with the proof from the brief. 4) OBJECTION HANDLING: a short FAQ or reassurance block answering each objection. 5) FINAL CTA: restate the promise and repeat the single CTA. Write tight, concrete, second-person copy; cut adjectives that do not earn their place. Output markdown with the section labels as H2s. Save to the produces path and note which checklist items pass.",
+        "produces": { "path": "landing-copy.md", "kind": "markdown-doc" }
+      },
+      {
+        "id": "edit",
+        "name": "Editorial pass",
+        "role": "reviewer",
+        "summary": "sharpen specificity, persuasion, and a single clear CTA",
+        "prompt": "Edit the copy in place against the checklist. 1) Test the headline: is it a specific outcome a competitor could not also claim? If it is generic, rewrite it. 2) Convert any feature-speak into outcomes; make every benefit concrete and, where possible, quantified. 3) Confirm there is exactly ONE call-to-action and it is repeated verbatim in hero and final sections. 4) Verify each objection from the brief is answered. 5) Cut hype words, hedges, and filler; tighten to a grade-8 reading level. Rewrite weak lines directly. Save the polished copy to the produces path and note any criteria still unmet.",
+        "produces": { "path": "landing-copy.md", "kind": "markdown-doc" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Read landing-copy.md and grade against the checklist. Check EACH and write PASS/FAIL: (a) one specific, outcome-driven headline (not a vague slogan); (b) benefits are outcomes with proof, not raw feature lists; (c) exactly one CTA, repeated identically in hero and final; (d) every brief objection is addressed; (e) social proof present; (f) tight, concrete, grade-8 copy with no hype filler. Copy that reads nicely but offers competing CTAs or buries the promise FAILS.",
+      "loopBackTo": "draft",
+      "deliverable": { "path": "landing-copy.md", "kind": "markdown-doc" }
+    }
+  },
+  {
+    "id": "product-descriptions",
+    "name": "Bulk Product Descriptions",
+    "description": "Generate consistent, on-brand product descriptions in bulk from a list of products and their attributes: it first locks the brand voice, the field schema (title, short blurb, long description, bullet features, SEO meta), and a worked exemplar, then drafts every product to that exact template so the whole catalog reads as one voice. Covers ecommerce product copy, catalog descriptions, Shopify/Amazon listings, bulk SKU copywriting, and product detail pages. Locking the voice and one exemplar before the batch is the key move: it stops a small model from drifting in tone and structure across items, which is the classic failure of bulk copy.",
+    "tags": ["copywriting", "ecommerce", "product", "bulk", "catalog"],
+    "triggers": [
+      "write product descriptions",
+      "bulk product copy",
+      "ecommerce listings",
+      "shopify descriptions",
+      "catalog copy"
+    ],
+    "phases": [
+      {
+        "id": "voice-scope",
+        "name": "Voice & schema scope",
+        "role": "planner",
+        "summary": "lock brand voice, the per-product field schema, and one exemplar",
+        "prompt": "1) Define the brand voice in 3-5 adjectives plus 2 do's and 2 don'ts (e.g. 'warm, expert, concise; do use sensory detail; don't use hype superlatives'). 2) Define the per-product field schema and length limits: title (<=60 chars), short blurb (1 sentence), long description (40-80 words), 3-5 feature bullets, and an SEO meta description (<=155 chars). 3) Identify the product input (a list, CSV, or attributes) and confirm every product has the data the schema needs. 4) Write ONE fully worked exemplar for a sample product, filling every field, as the template the batch must match. Write an acceptance-criteria checklist (e.g. 'every product has all schema fields'; 'all fields within length limits'; 'consistent voice across items'; 'no invented specs not in the input'; 'titles are unique and descriptive'). Use write_task_note for the voice + schema + exemplar + checklist, and write the same to the produces path. No batch yet.",
+        "produces": { "path": "notes/voice-scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "draft",
+        "name": "Draft all descriptions",
+        "role": "copywriter",
+        "summary": "write every product to the locked template and voice",
+        "prompt": "Produce a description for EVERY product in the input, each matching the exemplar's schema and the locked voice. 1) For each product, fill every field: title, short blurb, long description, feature bullets, SEO meta. 2) Use only attributes present in the input — never invent specs, materials, or measurements. 3) Keep the voice identical across all items; vary the wording, not the tone. 4) Respect every length limit. 5) Output a single valid JSON array, one object per product, with consistent keys matching the schema (e.g. {\"sku\", \"title\", \"shortBlurb\", \"longDescription\", \"bullets\", \"seoMeta\"}). Do not skip any product. Save to the produces path and note the product count covered.",
+        "produces": { "path": "product-descriptions.json", "kind": "json" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Parse product-descriptions.json (must be valid JSON) and grade against the checklist. Check EACH and write PASS/FAIL: (a) every product from the input has an object with all schema fields populated; (b) all fields are within their length limits; (c) the voice and structure are consistent across items (spot-check 3-4); (d) no invented specs absent from the input; (e) titles are unique and descriptive. A batch that drifts in tone, skips products, or fabricates attributes FAILS — loop back to draft and name the offending SKUs.",
+      "loopBackTo": "draft",
+      "deliverable": { "path": "product-descriptions.json", "kind": "json" }
+    }
+  },
+  {
+    "id": "social-thread",
+    "name": "Social Media Thread",
+    "description": "Write a multi-post social thread (X/Twitter, LinkedIn, Threads) that hooks, delivers, and converts: it first locks the single angle/big idea, the platform and its character limits, the target reader, and the CTA, then drafts the thread as numbered posts with a scroll-stopping hook, one idea per post, and a clear close. Covers Twitter thread, LinkedIn carousel copy, viral thread, social content, thought-leadership posts, and engagement hooks. Locking one angle and the hook before writing is the point: a small model that commits to a single big idea avoids the meandering thread that tries to say five things and stops no scroll.",
+    "tags": ["social", "copywriting", "twitter", "linkedin", "thread"],
+    "triggers": [
+      "write a twitter thread",
+      "social media thread",
+      "linkedin post",
+      "viral thread",
+      "write social content"
+    ],
+    "phases": [
+      {
+        "id": "angle-scope",
+        "name": "Angle scope",
+        "role": "planner",
+        "summary": "lock the one big idea, platform limits, reader, and CTA",
+        "prompt": "1) State the ONE big idea/angle in a single sentence — the single takeaway the reader keeps. 2) Pick the platform and its constraints (e.g. X: <=280 chars/post; LinkedIn: <=3000 chars, line breaks matter). 3) Define the target reader and why this angle stops their scroll. 4) Decide the thread length (e.g. 6-10 posts) and the CTA for the final post (follow, link, reply prompt). 5) Sketch the post-by-post beat list: hook → 1 idea per post → close/CTA. Write an acceptance-criteria checklist (e.g. 'post 1 is a standalone scroll-stopping hook'; 'one idea per post'; 'every post within the char limit'; 'numbered and ordered'; 'final post has a clear CTA'; 'on a single consistent voice'). Use write_task_note for the angle + beats + checklist, and write the same to the produces path. No thread copy yet.",
+        "produces": { "path": "notes/angle-scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "draft",
+        "name": "Draft the thread",
+        "role": "copywriter",
+        "summary": "write the numbered thread to the locked angle and limits",
+        "prompt": "Write the full thread as numbered posts. 1) Post 1 is the HOOK: a standalone, curiosity- or tension-driven opener that works even if no one reads the rest — no 'a thread:' throat-clearing as the only content. 2) Each subsequent post delivers exactly one idea from the beat list, building the argument. 3) Keep every post within the platform's character limit (count characters). 4) Use a punchy, consistent voice; short lines; concrete specifics over abstractions. 5) The final post delivers the CTA. Output markdown as a numbered list where each item is one post, with a character count noted in parentheses after each. Save to the produces path and note total post count.",
+        "produces": { "path": "social-thread.md", "kind": "markdown-doc" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Read social-thread.md and grade against the checklist. Check EACH and write PASS/FAIL: (a) post 1 is a standalone, scroll-stopping hook; (b) one idea per post; (c) every post is within the platform character limit (verify the counts); (d) posts are numbered and logically ordered; (e) the final post has a clear CTA; (f) a single consistent voice throughout. A thread that exceeds the char limit on any post or has a weak/missing hook FAILS — loop back to draft and name the posts to fix.",
+      "loopBackTo": "draft",
+      "deliverable": { "path": "social-thread.md", "kind": "markdown-doc" }
+    }
+  },
+  {
+    "id": "press-release",
+    "name": "Press Release",
+    "description": "Write a professional, AP-style press release ready to send to journalists: it first locks the news angle, the five W's, the approved quote(s), and the boilerplate, then drafts the release in the standard format — dateline, inverted-pyramid lede, supporting body, quotes, boilerplate, and media contact — then a review pass enforces newsworthiness, factual accuracy, and house style. Covers press release, news announcement, PR writing, media release, product launch announcement, and corporate communications. The scope-first ordering is essential: a small model that pins the angle and quotes before drafting avoids the soft, promotional release that buries the news and no editor will run.",
+    "tags": ["pr", "press-release", "writing", "communications", "news"],
+    "triggers": [
+      "write a press release",
+      "news announcement",
+      "media release",
+      "product launch pr",
+      "press announcement"
+    ],
+    "phases": [
+      {
+        "id": "scope",
+        "name": "News scope",
+        "role": "planner",
+        "summary": "lock the angle, five W's, approved quotes, and boilerplate",
+        "prompt": "1) State the NEWS in one sentence — the actual announcement (launch, funding, partnership, milestone) and why it is newsworthy NOW. 2) Capture the five W's: who, what, when, where, why-it-matters. 3) Draft or confirm 1-2 attributable quotes (speaker name + title) that add insight, not fluff. 4) Write the company boilerplate (2-3 sentences) and the media contact line (name, email). 5) Decide the headline (active, specific, <=12 words) and subhead. Write an acceptance-criteria checklist (e.g. 'lede answers who/what/when/where in the first 1-2 sentences'; 'inverted pyramid — most important first'; 'at least one attributed quote'; 'includes dateline, boilerplate, contact, and the ### end mark'; 'factual, non-promotional tone'). Use write_task_note for the news brief + checklist, and write the same to the produces path. No release prose yet.",
+        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "draft",
+        "name": "Draft the release",
+        "role": "copywriter",
+        "summary": "write the release in standard inverted-pyramid format",
+        "prompt": "Write the press release in standard format. 1) Headline (active, specific) and an optional subhead. 2) Dateline: CITY, State, Month Day, Year — then the lede sentence answering who/what/when/where. 3) Body in inverted pyramid: most newsworthy facts first, supporting detail after, in short paragraphs. 4) Integrate the approved quote(s) with proper attribution. 5) Boilerplate paragraph ('About [Company]'). 6) Media contact block. 7) End with a centered '###'. Keep the tone factual and journalistic — report the news, do not sell it. Output as markdown. Save to the produces path and note which checklist items pass.",
+        "produces": { "path": "press-release.md", "kind": "markdown-doc" }
+      },
+      {
+        "id": "review",
+        "name": "Editorial review",
+        "role": "reviewer",
+        "summary": "enforce newsworthiness, accuracy, and AP-style format",
+        "prompt": "Review and edit the release in place against the checklist. 1) Read the lede alone: does it convey the news and answer who/what/when/where? If it buries the news, rewrite it. 2) Confirm inverted-pyramid structure — could an editor cut from the bottom and still have a coherent story? 3) Strip promotional adjectives and marketing hype; keep it factual. 4) Verify every fact, name, title, and date; flag anything unverifiable. 5) Confirm all structural elements are present: headline, dateline, quote, boilerplate, contact, ###. Rewrite weak passages directly. Save the polished release to the produces path and note any criteria still unmet.",
+        "produces": { "path": "press-release.md", "kind": "markdown-doc" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Read press-release.md and grade against the checklist. Check EACH and write PASS/FAIL: (a) the lede answers who/what/when/where in the first 1-2 sentences; (b) inverted-pyramid structure (most important first); (c) at least one properly attributed quote; (d) dateline, boilerplate, media contact, and a closing ### are all present; (e) factual, non-promotional tone with no unverified claims; (f) headline is active and specific. A release that reads like an ad or buries the news FAILS — loop back to draft.",
+      "loopBackTo": "draft",
+      "deliverable": { "path": "press-release.md", "kind": "markdown-doc" }
+    }
+  },
+  {
+    "id": "faq-from-docs",
+    "name": "FAQ from Source Docs",
+    "description": "Build a grounded FAQ page by mining real source documents for the questions users actually ask, then writing tight, accurate answers traced back to the source: it first researches the corpus to extract candidate questions, dedupes and groups them, and ranks by likely frequency, then writes clear question-and-answer pairs where every answer is supported by the docs. Covers FAQ generation, help center questions, support docs, knowledge mining, common questions, and self-service content. Mining the source before writing is the point: a small model that derives questions from the actual docs avoids inventing FAQs nobody asks and answers the docs cannot support.",
+    "tags": ["faq", "support", "documentation", "content", "knowledge-base"],
+    "triggers": [
+      "create an faq",
+      "faq from docs",
+      "generate help questions",
+      "common questions page",
+      "support faq"
+    ],
+    "phases": [
+      {
+        "id": "mine",
+        "name": "Mine the questions",
+        "role": "researcher",
+        "summary": "extract, dedupe, group, and rank candidate questions from the docs",
+        "prompt": "1) Read all source documents/files in scope. 2) Extract every implicit and explicit question the docs answer — phrase each as a real user would ask it ('How do I reset my password?'), not as a doc heading. 3) Dedupe near-identical questions and group them into 3-6 topical sections. 4) Rank questions within each section by likely frequency/importance. 5) For each kept question, note the source location (file + section/anchor) that supports the answer, so the writer can ground it. Write an acceptance-criteria checklist (e.g. 'every question is answerable from the docs'; 'questions phrased in user language'; 'grouped into clear sections'; 'no fabricated questions or answers'; 'each Q maps to a source'). Use write_task_note for the question bank with sources + checklist, and write the same to the produces path. No final answers yet.",
+        "produces": { "path": "notes/mine.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "write",
+        "name": "Write the FAQ",
+        "role": "copywriter",
+        "summary": "write grounded Q&A pairs in scannable sections",
+        "prompt": "Write the FAQ from the mined question bank. 1) Organize into the grouped sections, each with an H2 header. 2) For each question, write it as an H3 (or bold) line, then a concise answer (1-4 sentences) drawn strictly from the source docs — no speculation beyond what the docs support. 3) Where a doc has step-by-step detail, render the answer as a short numbered list. 4) Keep a consistent, plain, reassuring support voice. 5) Add a short intro line at the top and, where useful, a 'see also' link to the source doc. Output GitHub-flavored markdown. Save to the produces path and note total Q&A count and section count.",
+        "produces": { "path": "faq.md", "kind": "markdown-doc" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Read faq.md and cross-check against the mined question bank and the source docs. Check EACH criterion and write PASS/FAIL: (a) every answer is supported by the source docs (spot-check 4-5 against their cited source); (b) questions are phrased in natural user language; (c) Q&As are grouped into clear sections with headers; (d) no fabricated questions or unsupported answers; (e) answers are concise and consistently voiced. An FAQ with invented or unsupported answers FAILS — loop back to write and name the offending entries.",
+      "loopBackTo": "write",
+      "deliverable": { "path": "faq.md", "kind": "markdown-doc" }
+    }
+  },
+  {
+    "id": "doc-rewrite",
+    "name": "Documentation Rewrite",
+    "description": "Rewrite confusing existing documentation into clear, scannable, task-oriented prose without losing any technical fact: it first audits the current doc to catalog every problem — buried steps, undefined jargon, missing prerequisites, broken structure — and locks a clarity checklist, then rewrites the doc to fix exactly those issues while preserving every accurate instruction. Covers documentation rewrite, doc cleanup, clarify docs, improve README, restructure guide, and technical editing. Auditing before rewriting is the point: a small model that first inventories what is wrong rewrites with intent and preserves the facts, instead of producing a prettier doc that quietly drops a critical step.",
+    "tags": ["documentation", "rewrite", "editing", "clarity", "technical-writing"],
+    "triggers": [
+      "rewrite this documentation",
+      "clarify the docs",
+      "improve the readme",
+      "clean up this guide",
+      "restructure docs"
+    ],
+    "phases": [
+      {
+        "id": "audit",
+        "name": "Audit the doc",
+        "role": "reviewer",
+        "summary": "catalog every clarity defect and lock the fix checklist",
+        "prompt": "1) Read the existing documentation closely as a new reader would. 2) Catalog every defect with its location: undefined jargon/acronyms, missing prerequisites, steps in the wrong order or buried in prose, passive/ambiguous instructions, missing examples, broken or inconsistent structure, and anything factually unclear. 3) Extract and list the technical facts/steps that MUST be preserved verbatim in meaning (the source of truth — these cannot be lost). 4) Propose the target structure (overview → prerequisites → step-by-step → troubleshooting/reference). Write an acceptance-criteria checklist (e.g. 'every preserved fact survives the rewrite'; 'all jargon defined on first use'; 'prerequisites stated up front'; 'instructions are imperative and numbered'; 'has at least one concrete example'; 'scannable headings'). Use write_task_note for the defect list + preserved-facts list + checklist, and write the same to the produces path. No rewrite yet.",
+        "produces": { "path": "notes/audit.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "rewrite",
+        "name": "Rewrite the doc",
+        "role": "copywriter",
+        "summary": "rewrite to the target structure, fixing every audited defect",
+        "prompt": "Rewrite the documentation to the target structure, fixing each cataloged defect. 1) Open with a one-paragraph overview of what the doc helps the reader do. 2) State prerequisites/requirements up front. 3) Convert procedures into imperative, numbered steps — one action per step, expected result noted where helpful. 4) Define every acronym/jargon term on first use. 5) Preserve EVERY technical fact and step from the audit's preserved-facts list — verify none is dropped. 6) Add at least one concrete worked example and a short troubleshooting/FAQ section if relevant. 7) Use scannable H2/H3 headings, code blocks for commands, and short paragraphs. Output GitHub-flavored markdown. Save to the produces path and note which audited defects are now fixed.",
+        "produces": { "path": "rewritten-doc.md", "kind": "markdown-doc" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Read rewritten-doc.md against the audit notes and grade. Check EACH criterion and write PASS/FAIL: (a) every preserved fact/step from the audit survives (verify NONE was dropped — this is the critical check); (b) all jargon is defined on first use; (c) prerequisites are stated up front; (d) instructions are imperative and numbered; (e) at least one concrete example is present; (f) the structure is scannable with clear headings. A prettier doc that lost a critical step FAILS — loop back to rewrite and name the missing facts.",
+      "loopBackTo": "rewrite",
+      "deliverable": { "path": "rewritten-doc.md", "kind": "markdown-doc" }
+    }
+  },
+  {
+    "id": "tone-rewrite",
+    "name": "Brand Tone Rewrite",
+    "description": "Re-voice existing content to a specific brand tone while preserving every fact and the original structure: it first codifies the target voice into a concrete style guide — adjectives, do's and don'ts, banned and preferred words, sentence-length feel, point of view — then rewrites the content line by line to that voice without changing what it says. Covers tone of voice rewrite, rebranding copy, voice and tone, brand voice, re-voice content, and style adaptation. Codifying the voice into checkable rules before rewriting is the point: a small model that has explicit do/don't rules applies the tone consistently, instead of a vague 'make it friendlier' that drifts paragraph to paragraph.",
+    "tags": ["copywriting", "tone", "brand-voice", "rewrite", "style"],
+    "triggers": [
+      "rewrite in our brand tone",
+      "change the voice",
+      "re-voice this content",
+      "match brand voice",
+      "tone of voice"
+    ],
+    "phases": [
+      {
+        "id": "voice-scope",
+        "name": "Voice scope",
+        "role": "planner",
+        "summary": "codify the target tone into a concrete, checkable style guide",
+        "prompt": "1) Define the target voice in 3-5 adjectives (e.g. 'confident, warm, plain-spoken'). 2) Translate each adjective into 1-2 concrete rules (e.g. 'confident → no hedging words like maybe/perhaps'; 'plain-spoken → grade-8 reading level, no jargon'). 3) List banned words/phrases and preferred replacements. 4) Set point of view (first/second person), contraction policy, sentence-length feel, and how to handle CTAs. 5) Write or pick one before/after example sentence showing the transformation. Crucially, note what must NOT change: facts, claims, structure, and meaning. Write an acceptance-criteria checklist (e.g. 'every banned word removed'; 'POV/contractions consistent'; 'reading level on target'; 'no fact or section changed'; 'reads as one consistent voice'). Use write_task_note for the style guide + checklist, and write the same to the produces path. No rewrite yet.",
+        "produces": { "path": "notes/voice-scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "rewrite",
+        "name": "Rewrite to voice",
+        "role": "copywriter",
+        "summary": "re-voice the content to the style guide, preserving meaning",
+        "prompt": "Rewrite the content to the locked style guide. 1) Go section by section, preserving the original structure and headings exactly. 2) Apply every voice rule: remove banned words, use the specified POV and contraction policy, hit the target sentence feel and reading level. 3) Change HOW it reads, never WHAT it says — every fact, number, claim, and instruction must survive unchanged. 4) Keep the voice identical across the whole piece; no drift. 5) Output the rewritten content in the same format/markdown as the source. Save to the produces path and note which style rules you applied and confirm no facts changed.",
+        "produces": { "path": "tone-rewrite.md", "kind": "markdown-doc" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Compare tone-rewrite.md to the source and the style guide. Check EACH criterion and write PASS/FAIL: (a) every banned word/phrase is gone and preferred terms used; (b) POV, contraction policy, and reading level match the guide; (c) NO fact, number, claim, or section was changed or dropped (diff the meaning carefully — this is critical); (d) structure/headings preserved; (e) reads as one consistent voice with no drift. A rewrite that nails the tone but altered a fact FAILS — loop back to rewrite.",
+      "loopBackTo": "rewrite",
+      "deliverable": { "path": "tone-rewrite.md", "kind": "markdown-doc" }
+    }
+  },
+  {
+    "id": "localize-content",
+    "name": "Localize Content",
+    "description": "Localize and translate content into a target language and locale with cultural adaptation, not just word-for-word translation: it first scopes the target locale, glossary of do-not-translate and must-translate-consistently terms, formatting conventions (dates, currency, units), and tone register, then translates preserving meaning and structure, then a native-level review pass checks fluency, terminology consistency, and cultural fit. Covers translation, localization, i18n content, multilingual copy, translate to Spanish/French/German, and locale adaptation. Scoping the glossary and conventions before translating is the point: a small model that locks terminology and date/currency rules avoids inconsistent term translations and locale-wrong formatting that mark content as machine-translated.",
+    "tags": ["localization", "translation", "i18n", "content", "multilingual"],
+    "triggers": [
+      "translate this content",
+      "localize for spanish",
+      "i18n the copy",
+      "localize content",
+      "adapt for another locale"
+    ],
+    "phases": [
+      {
+        "id": "scope",
+        "name": "Localization scope",
+        "role": "planner",
+        "summary": "lock target locale, glossary, formatting rules, and register",
+        "prompt": "1) Confirm the target language AND locale (e.g. es-MX vs es-ES, pt-BR vs pt-PT) — they differ. 2) Build a glossary: terms that must NOT be translated (brand names, product names, code), and terms that must be translated CONSISTENTLY everywhere (with the chosen target term). 3) Specify formatting conventions for the locale: date format, number/decimal separators, currency symbol and placement, units, and quotation marks. 4) Set the tone register (formal vs informal 'you', e.g. usted vs tú; Sie vs du). 5) Note any content that should be adapted rather than literally translated (idioms, examples, cultural references). Write an acceptance-criteria checklist (e.g. 'do-not-translate terms left intact'; 'glossary terms translated consistently'; 'dates/currency/numbers in locale format'; 'register consistent'; 'structure preserved'; 'reads natively, not literally'). Use write_task_note for the locale brief + glossary + checklist, and write the same to the produces path. No translation yet.",
+        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "translate",
+        "name": "Translate",
+        "role": "copywriter",
+        "summary": "translate to the locale, applying the glossary and conventions",
+        "prompt": "Translate the content into the target locale. 1) Preserve the original structure, headings, and formatting markup exactly. 2) Leave do-not-translate terms intact; translate glossary terms with their locked target equivalents everywhere. 3) Apply the locale's date, number, currency, unit, and quotation conventions. 4) Use the specified register consistently. 5) Adapt idioms and cultural references so they read naturally to a native reader rather than translating literally. 6) Do not add, drop, or reorder content. Output in the same format as the source. Save to the produces path and note any term decisions or adaptations made.",
+        "produces": { "path": "localized.md", "kind": "markdown-doc" }
+      },
+      {
+        "id": "review",
+        "name": "Native review",
+        "role": "reviewer",
+        "summary": "check fluency, terminology consistency, and locale fit",
+        "prompt": "Review the translation as a native speaker of the target locale, editing in place. 1) Read for fluency: does it sound natural, or like translated-from-English? Fix awkward phrasings. 2) Verify glossary consistency: every glossary term uses its locked translation everywhere; do-not-translate terms are intact. 3) Confirm locale formatting: dates, numbers, currency, units, and quotes follow the convention. 4) Confirm register consistency (formal/informal). 5) Confirm meaning fidelity against the source — nothing added or lost. Fix issues directly. Save the polished translation to the produces path and note any criteria still unmet.",
+        "produces": { "path": "localized.md", "kind": "markdown-doc" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Read localized.md against the source and the glossary. Check EACH criterion and write PASS/FAIL: (a) do-not-translate terms are intact; (b) glossary terms are translated consistently throughout (spot-check repeats); (c) dates, numbers, currency, and units use the locale format; (d) register (formal/informal) is consistent; (e) structure preserved and meaning faithful; (f) reads naturally to a native speaker, not literally. A translation with inconsistent terminology or wrong-locale formatting FAILS — loop back to translate.",
+      "loopBackTo": "translate",
+      "deliverable": { "path": "localized.md", "kind": "markdown-doc" }
+    }
+  },
+  {
+    "id": "summarize-long",
+    "name": "Summarize a Long Document",
+    "description": "Distill a long document into a faithful, well-structured summary at a chosen depth: it first scopes the audience, the target length and format (TL;DR line, executive summary, or bulleted key points), and what the reader must take away, then writes the summary capturing every major point and decision in proportion, with nothing invented and nothing critical dropped. Covers summarize, TL;DR, executive summary, condense a document, key takeaways, and abstract writing. Scoping audience and depth before summarizing is the point: a small model that knows who it is for and how long it should be avoids both the bloated near-copy and the lossy summary that omits the document's actual conclusion.",
+    "tags": ["summary", "writing", "content", "tldr", "executive-summary"],
+    "triggers": [
+      "summarize this document",
+      "write a tldr",
+      "executive summary",
+      "condense this",
+      "key takeaways"
+    ],
+    "phases": [
+      {
+        "id": "scope",
+        "name": "Summary scope",
+        "role": "planner",
+        "summary": "lock audience, depth, format, and required takeaways",
+        "prompt": "1) Identify the audience and why they need the summary (decision, briefing, study). 2) Choose the format and depth: a one-line TL;DR, a 3-5 sentence executive summary, a bulleted key-points list, or a layered combination — and set a target length (e.g. <=200 words). 3) Skim the document and list its major sections/arguments and, critically, its main conclusion or recommendation (this MUST appear in the summary). 4) Decide what is in-scope vs droppable detail. Write an acceptance-criteria checklist (e.g. 'captures the document's main conclusion'; 'covers every major point in proportion to its weight'; 'within target length'; 'no claim absent from the source'; 'matches the chosen format'; 'understandable without the original'). Use write_task_note for the scope + section map + checklist, and write the same to the produces path. No summary prose yet.",
+        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "summarize",
+        "name": "Write the summary",
+        "role": "copywriter",
+        "summary": "write the faithful summary to the locked depth and format",
+        "prompt": "Write the summary to the scoped format and length. 1) Lead with the single most important point or conclusion. 2) Cover every major section/argument in proportion to its importance — do not over-weight the intro or skip the conclusion. 3) Write in your own words; do not copy long passages. 4) Include nothing not present in the source — no inference presented as the document's claim. 5) Make it stand alone: a reader who never sees the original should grasp the key content. 6) Output the chosen format in markdown (e.g. a 'TL;DR:' line then an 'Executive summary' paragraph then 'Key points' bullets, as scoped). Save to the produces path and note the final word count.",
+        "produces": { "path": "summary.md", "kind": "markdown-doc" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Read summary.md against the source and the scope. Check EACH criterion and write PASS/FAIL: (a) the document's main conclusion/recommendation is present; (b) every major point is covered in proportion (no critical section dropped); (c) within the target length; (d) no claim that is absent from or misrepresents the source; (e) matches the chosen format; (f) understandable on its own. A summary that drops the conclusion or invents claims FAILS — loop back to summarize and name the gaps.",
+      "loopBackTo": "summarize",
+      "deliverable": { "path": "summary.md", "kind": "markdown-doc" }
+    }
+  },
+  {
+    "id": "changelog-writeup",
+    "name": "Human-Readable Changelog",
+    "description": "Turn raw commit/PR history into a human-readable changelog that users actually understand: a developer first gathers and triages the merged changes since the last release into user-facing buckets (Added, Changed, Fixed, Deprecated, Removed, Security), filtering out noise like internal refactors, then a copywriter rewrites each entry in plain, benefit-oriented language with breaking changes called out. Covers changelog, release notes, what's new, version notes, and Keep a Changelog format. Gathering and triaging before writing is the point: a small model that first separates user-facing changes from internal churn avoids the changelog that lists 'bump deps' next to a breaking API change with equal weight.",
+    "tags": ["changelog", "release-notes", "writing", "developer", "versioning"],
+    "triggers": [
+      "write a changelog",
+      "generate release notes",
+      "whats new writeup",
+      "changelog from commits",
+      "version notes"
+    ],
+    "phases": [
+      {
+        "id": "gather",
+        "name": "Gather & triage changes",
+        "role": "developer",
+        "summary": "collect merged changes and bucket the user-facing ones",
+        "prompt": "1) Determine the version range (since the last tag/release). 2) Collect the merged commits/PRs in that range (use git log or the available VCS tools). 3) Triage each into a Keep-a-Changelog bucket: Added, Changed, Deprecated, Removed, Fixed, Security — or DROP if it is internal-only (refactors, test/CI tweaks, dependency bumps with no user impact). 4) Flag BREAKING changes explicitly and note any required migration step. 5) For each kept change, jot the raw description and the PR/commit reference. Write an acceptance-criteria checklist (e.g. 'every user-facing change is captured'; 'internal noise is excluded'; 'changes are bucketed correctly'; 'breaking changes flagged with migration notes'; 'version and date present'). Use write_task_note for the triaged change list + checklist, and write the same to the produces path. No prose changelog yet.",
+        "produces": { "path": "notes/gather.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "write",
+        "name": "Write the changelog",
+        "role": "copywriter",
+        "summary": "rewrite entries in plain, user-facing language",
+        "prompt": "Write the changelog from the triaged list in Keep a Changelog style. 1) Header: '## [version] - YYYY-MM-DD'. 2) Group entries under the standard H3 buckets (Added/Changed/Deprecated/Removed/Fixed/Security) — include only non-empty buckets. 3) Rewrite each entry as one plain sentence focused on what the USER can now do or what changed for them, not the implementation ('Added dark mode toggle in settings', not 'Implemented theme state reducer'). 4) Put BREAKING CHANGES in a prominent callout at the top with migration instructions. 5) Keep entries terse and parallel in structure; link PRs/issues if available. Output GitHub-flavored markdown. Save to the produces path and note bucket counts.",
+        "produces": { "path": "CHANGELOG.md", "kind": "markdown-doc" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Read CHANGELOG.md against the triaged list. Check EACH criterion and write PASS/FAIL: (a) every user-facing change from the triage is present; (b) internal noise (refactors, dep bumps, CI) is excluded; (c) entries are in the correct buckets; (d) breaking changes are prominently flagged with migration notes; (e) entries are in plain, user-focused language; (f) version header and date present. A changelog that dumps raw commit messages or buries a breaking change FAILS — loop back to write.",
+      "loopBackTo": "write",
+      "deliverable": { "path": "CHANGELOG.md", "kind": "markdown-doc" }
+    }
+  },
+  {
+    "id": "cover-letter",
+    "name": "Tailored Cover Letter",
+    "description": "Write a tailored, one-page cover letter that maps a candidate's real background to a specific job's requirements: it first scopes the role's key requirements, the company hook, and the 3-4 strongest matching proof points from the applicant's experience, then drafts a focused letter with a specific opening, evidence-backed body paragraphs, and a confident close. Covers cover letter, job application letter, motivation letter, application writing, and personalized cover letter. Scoping the role-to-experience mapping before writing is the point: a small model that picks the strongest evidence for THIS job avoids the generic, one-size-fits-all letter that could be sent anywhere and lists duties instead of proving fit.",
+    "tags": ["cover-letter", "job-application", "writing", "career", "personalized"],
+    "triggers": [
+      "write a cover letter",
+      "job application letter",
+      "tailored cover letter",
+      "application letter",
+      "motivation letter"
+    ],
+    "phases": [
+      {
+        "id": "scope",
+        "name": "Fit scope",
+        "role": "planner",
+        "summary": "map role requirements to the strongest proof points",
+        "prompt": "1) Extract the role's 3-5 KEY requirements from the job description (skills, experience, traits the employer most wants). 2) Identify a genuine hook about the company (mission, product, recent news) for the opening — generic flattery is out of scope. 3) From the candidate's background, pick the 3-4 STRONGEST matching achievements, each with a concrete, quantified result (not a duty). 4) Note the hiring manager name if known, and the target role title. 5) Decide tone (formal vs warm) to match the company. Write an acceptance-criteria checklist (e.g. 'opening names the specific role/company hook'; 'each body point proves a requirement with a concrete result'; 'no generic filler that could apply to any job'; 'one page / 250-350 words'; 'confident close with a call to interview'). Use write_task_note for the fit map + checklist, and write the same to the produces path. No letter prose yet.",
+        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "draft",
+        "name": "Draft the letter",
+        "role": "copywriter",
+        "summary": "write the tailored one-page letter to the fit map",
+        "prompt": "Write the cover letter from the fit map. 1) Salutation (named manager if known). 2) Opening paragraph: state the role and lead with the specific company hook and why the candidate is excited — concrete, not generic. 3) Body (1-2 paragraphs): for each key requirement, show the matching achievement with its quantified result, mapping experience directly to what the job needs. 4) Brief paragraph on fit/culture if relevant. 5) Confident close: reiterate value and request an interview. Keep it to one page (250-350 words), first person, active voice, no clichés ('hard worker', 'team player' without proof). Output as markdown. Save to the produces path and note the word count.",
+        "produces": { "path": "cover-letter.md", "kind": "markdown-doc" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Read cover-letter.md against the fit map and job description. Check EACH criterion and write PASS/FAIL: (a) the opening names the specific role and a genuine company hook; (b) each body point proves a job requirement with a concrete, quantified result; (c) no generic filler that could apply to any job; (d) length is one page (250-350 words); (e) confident close with an interview ask; (f) active voice, no unproven clichés. A letter that could be mailed to any employer or just lists duties FAILS — loop back to draft.",
+      "loopBackTo": "draft",
+      "deliverable": { "path": "cover-letter.md", "kind": "markdown-doc" }
+    }
+  },
+  {
+    "id": "ad-variations",
+    "name": "A/B Ad Copy Variations",
+    "description": "Generate a set of distinct, testable ad-copy variations for one offer across the angles worth A/B testing: it first locks the platform and its constraints (headline/description character limits), the offer, audience, and the distinct messaging angles to test (benefit, pain, social proof, urgency, curiosity), then drafts multiple complete variants per angle so each is a genuine test of a hypothesis rather than a trivial reword. Covers ad copy, A/B testing, Google/Facebook/LinkedIn ads, PPC copy, ad variations, and marketing experiments. Locking the angles and limits before writing is the point: a small model that commits to distinct hypotheses produces variants that actually test something, not ten near-duplicates that teach the advertiser nothing.",
+    "tags": ["advertising", "copywriting", "ab-testing", "marketing", "ppc"],
+    "triggers": [
+      "write ad copy",
+      "ab test ad variations",
+      "facebook ad copy",
+      "google ads copy",
+      "ad variations"
+    ],
+    "phases": [
+      {
+        "id": "brief",
+        "name": "Ad brief",
+        "role": "planner",
+        "summary": "lock platform limits, offer, audience, and test angles",
+        "prompt": "1) Pick the platform and its hard limits (e.g. Google RSA headlines <=30 chars and descriptions <=90 chars; Meta primary text, headline, description fields). 2) State the offer and the single primary audience. 3) Define the distinct ANGLES to test as named hypotheses (e.g. benefit-led, pain/problem-led, social-proof, urgency/scarcity, curiosity) — each a different reason the user clicks. 4) Decide how many variants per angle (e.g. 2) and the required fields per ad. 5) Note the CTA options. Write an acceptance-criteria checklist (e.g. 'every variant respects the platform char limits'; 'each angle is genuinely distinct, not a reword'; 'N variants per angle delivered'; 'every field populated'; 'one offer, consistent across variants'; 'CTA present'). Use write_task_note for the brief + angle list + checklist, and write the same to the produces path. No ad copy yet.",
+        "produces": { "path": "notes/brief.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "draft",
+        "name": "Draft the variations",
+        "role": "copywriter",
+        "summary": "write distinct, limit-respecting variants per angle",
+        "prompt": "Write the ad variations per the brief. 1) For each named angle, write the specified number of complete variants, each filling every required platform field (e.g. headline, description, primary text, CTA). 2) Make each angle genuinely distinct — a curiosity ad and a social-proof ad should read differently, not swap a synonym. 3) Strictly respect every character limit; count characters and stay under. 4) Keep the offer identical across all variants (only the angle/message changes). 5) Use punchy, concrete, scannable copy. 6) Output a single valid JSON array of objects: {\"angle\", \"variant\", \"headline\", \"description\", \"primaryText\" (if applicable), \"cta\", \"charCounts\"}. Save to the produces path and note total variant count.",
+        "produces": { "path": "ad-variations.json", "kind": "json" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Parse ad-variations.json (must be valid JSON) and grade against the checklist. Check EACH criterion and write PASS/FAIL: (a) every field of every variant respects the platform's character limits (verify charCounts against the limits); (b) each angle is genuinely distinct from the others, not a reword; (c) the specified number of variants per angle is present; (d) every required field is populated; (e) the offer is consistent across all variants; (f) each has a CTA. A set of near-duplicate variants or any that exceeds a limit FAILS — loop back to draft and name the offenders.",
+      "loopBackTo": "draft",
+      "deliverable": { "path": "ad-variations.json", "kind": "json" }
+    }
+  },
+  {
+    "id": "email-sequence",
+    "name": "Lifecycle Email Sequence",
+    "description": "Design and build a multi-email lifecycle sequence (welcome, onboarding, nurture, re-engagement) that moves a subscriber from one stage to the next: it first maps the customer journey — entry trigger, the goal of each email, send timing/cadence, and the one CTA per email — then drafts every email's subject line, preview text, and body to its single goal, then builds the sequence into a client-safe, inline-styled HTML email set ready to load into an ESP. Covers email sequence, drip campaign, welcome series, onboarding emails, nurture sequence, and lifecycle marketing. Journey-mapping before writing is the point: a small model that assigns each email one job and one CTA avoids the redundant sequence where every email says the same thing and asks for everything at once.",
+    "tags": ["email", "copywriting", "lifecycle", "drip-campaign", "marketing"],
+    "triggers": [
+      "build an email sequence",
+      "welcome email series",
+      "drip campaign",
+      "nurture sequence",
+      "onboarding emails"
+    ],
+    "phases": [
+      {
+        "id": "journey-scope",
+        "name": "Journey scope",
+        "role": "planner",
+        "summary": "map the sequence: trigger, per-email goal, cadence, one CTA each",
+        "prompt": "1) Define the sequence type and entry trigger (e.g. signed up, abandoned cart, went inactive). 2) Define the end goal (activate, convert, re-engage). 3) Lay out the emails in order — for EACH email specify: its single goal, send timing/delay (e.g. Day 0, Day 2, Day 5), the one CTA, and the key message. Each email does ONE job. 4) Note the audience and tone. Write an acceptance-criteria checklist (e.g. 'each email has exactly one goal and one CTA'; 'no two emails are redundant'; 'cadence/timing specified per email'; 'subject lines are distinct and curiosity/benefit-driven'; 'the arc progresses toward the end goal'; 'unsubscribe link present in each'). Use write_task_note for the journey map + per-email plan + checklist, and write the same to the produces path. No email copy yet.",
+        "produces": { "path": "notes/journey-scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "draft",
+        "name": "Draft the emails",
+        "role": "copywriter",
+        "summary": "write each email to its single goal and CTA",
+        "prompt": "Write every email in the sequence to its mapped goal. 1) For each email provide: subject line (<=50 chars, distinct from the others), preview/preheader text (<=90 chars), and body. 2) The body serves the email's ONE goal and drives its ONE CTA — do not cram in unrelated asks. 3) Make the sequence progress: later emails build on earlier ones, none is redundant. 4) Keep a consistent brand voice, short scannable paragraphs, and a single primary CTA button per email. 5) Record each email's send timing from the map. Save the drafted copy (with email number, timing, subject, preview, body, CTA) to the produces path as structured markdown. Note which checklist items pass.",
+        "produces": { "path": "notes/draft.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "build",
+        "name": "Build the email set",
+        "role": "developer",
+        "summary": "render the sequence to client-safe inline-styled HTML",
+        "prompt": "Build the approved copy into a deliverable, client-safe HTML email sequence in a single index.html. 1) Render each email as its own clearly separated section/block within the page (with a heading like 'Email 1 — Day 0 — subject'), so the whole sequence is previewable in one file. 2) Use email-safe HTML: inline styles only (no external CSS or <style> reliance), table-based layout where needed, web-safe fonts, and absolute links. 3) Include the subject and preview text as labeled metadata, a single prominent CTA button per email, and an unsubscribe link in each email's footer. 4) Keep it responsive at common widths. On a loop-back, fix only the named gaps. Save to the produces path (index.html) and note the email count.",
+        "produces": { "path": "index.html", "kind": "html-page" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Open index.html (render it if a browser/QA capability is available; otherwise read the source) and grade against the checklist. Check EACH criterion and write PASS/FAIL: (a) every planned email is present as a labeled section with subject + preview + body; (b) each email has exactly one CTA and one goal; (c) no two emails are redundant and the arc progresses toward the end goal; (d) subject lines are distinct and within length; (e) styles are inline/email-safe (no reliance on external CSS); (f) an unsubscribe link is present in each email. A sequence where emails are redundant or use non-email-safe CSS FAILS — loop back to build.",
+      "loopBackTo": "build",
+      "deliverable": { "path": "index.html", "kind": "html-page" }
+    }
+  },
+  {
+    "id": "knowledge-base-article",
+    "name": "Knowledge Base Article",
+    "description": "Write a support knowledge-base article that lets a user solve their problem without contacting support: it first scopes the exact user problem, the search terms they would use, prerequisites, and the success outcome, then writes a task-oriented article with a clear title, a short overview, numbered steps with expected results, screenshots/placeholders where needed, and a troubleshooting section, then a review pass verifies accuracy and self-service completeness. Covers help center article, support documentation, how-to article, KB article, self-service docs, and product help. Scoping the precise problem and search terms before writing is the point: a small model that pins the one job-to-be-done writes a findable, followable article instead of a vague overview that leaves the user still stuck.",
+    "tags": ["knowledge-base", "support", "documentation", "help-center", "how-to"],
+    "triggers": [
+      "write a knowledge base article",
+      "help center article",
+      "support how-to",
+      "kb article",
+      "self-service docs"
+    ],
+    "phases": [
+      {
+        "id": "scope",
+        "name": "Article scope",
+        "role": "planner",
+        "summary": "lock the problem, search terms, prerequisites, and success outcome",
+        "prompt": "1) State the exact user PROBLEM the article solves, phrased as the user experiences it ('I can't log in after changing my email'). 2) List the search terms/keywords a stuck user would type, so the title and intro can match them. 3) List prerequisites (account type, permissions, plan, things they need before starting). 4) Define the SUCCESS outcome — how the user knows it worked. 5) Identify where a screenshot or example would prevent confusion. 6) Note common failure points for the troubleshooting section. Write an acceptance-criteria checklist (e.g. 'title matches likely search terms'; 'prerequisites stated up front'; 'numbered steps with one action each and expected results'; 'a troubleshooting section covers common failures'; 'ends with how to confirm success'; 'a user could self-serve without contacting support'). Use write_task_note for the scope + checklist, and write the same to the produces path. No article prose yet.",
+        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "write",
+        "name": "Write the article",
+        "role": "copywriter",
+        "summary": "write the task-oriented, self-service article",
+        "prompt": "Write the KB article from the scope. 1) Title: action- and search-oriented, matching the user's likely query. 2) Short overview (1-2 sentences): what this article helps them do and who it is for. 3) Prerequisites section. 4) Numbered step-by-step instructions: one action per step, in imperative voice, with the expected result after key steps and screenshot placeholders ('![screenshot: settings page](...)') where the scope flagged them. 5) A 'How to confirm it worked' line tied to the success outcome. 6) A 'Troubleshooting' section addressing the common failure points as a short Q&A. 7) Optional 'Related articles' links. Use scannable H2/H3 headings and a plain, reassuring support voice. Output GitHub-flavored markdown. Save to the produces path and note which checklist items pass.",
+        "produces": { "path": "kb-article.md", "kind": "markdown-doc" }
+      },
+      {
+        "id": "review",
+        "name": "Accuracy & completeness review",
+        "role": "reviewer",
+        "summary": "verify the article is accurate and lets a user self-serve",
+        "prompt": "Review and edit the article in place against the checklist. 1) Walk the steps as if you were the stuck user: are they complete, in order, and each a single clear action? Fix gaps and ambiguity. 2) Verify technical accuracy of every instruction and UI reference; flag anything you cannot confirm. 3) Confirm prerequisites are up front and the success check is present. 4) Confirm the troubleshooting section covers the likely failures. 5) Confirm the title matches search intent. The bar: could a real user solve this without contacting support? If not, fix what blocks them. Save the polished article to the produces path and note any criteria still unmet.",
+        "produces": { "path": "kb-article.md", "kind": "markdown-doc" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Read kb-article.md against the scope and walk it as a stuck user. Check EACH criterion and write PASS/FAIL: (a) title matches the likely search terms; (b) prerequisites stated up front; (c) numbered steps, one action each, with expected results; (d) a troubleshooting section covers common failures; (e) a clear 'how to confirm success' step; (f) a real user could self-serve end to end without contacting support. An article that is a vague overview or leaves a step missing FAILS — loop back to write.",
+      "loopBackTo": "write",
+      "deliverable": { "path": "kb-article.md", "kind": "markdown-doc" }
+    }
+  },
+  {
+    "id": "case-study",
+    "name": "Customer Case Study",
+    "description": "Write a persuasive, evidence-backed customer success story in the classic challenge-solution-results arc: it first scopes the customer, the quantified before/after metrics, the approved customer quotes, and the single takeaway for prospects, then writes the case study with a results-forward summary, a relatable challenge, the solution narrative, and a measurable results section, then a review pass verifies every number and quote and the persuasive flow. Covers case study, customer success story, customer testimonial, success story, proof point, and B2B marketing content. Scoping the metrics and quotes before writing is the point: a small model that locks the quantified results first writes a credible story buyers trust, instead of a vague testimonial with adjectives but no proof.",
+    "tags": ["case-study", "copywriting", "marketing", "b2b", "success-story"],
+    "triggers": [
+      "write a case study",
+      "customer success story",
+      "write a success story",
+      "customer testimonial writeup",
+      "proof point story"
+    ],
+    "phases": [
+      {
+        "id": "scope",
+        "name": "Story scope",
+        "role": "planner",
+        "summary": "lock the customer, before/after metrics, quotes, and takeaway",
+        "prompt": "1) Identify the customer: who they are, their industry/size, and what makes them relatable to the target prospect. 2) Define the CHALLENGE they faced before, in their terms. 3) Capture the quantified BEFORE and AFTER metrics (e.g. '40% slower onboarding → cut to 2 days', 'support tickets down 60%') — these are the spine of the story and must be specific, not vague. 4) Collect 1-2 approved, attributable customer quotes (name + title). 5) State the single TAKEAWAY a prospect should draw. Write an acceptance-criteria checklist (e.g. 'challenge-solution-results structure'; 'at least 2 quantified result metrics'; 'every metric and quote is sourced/approved, none invented'; 'at least one attributed customer quote'; 'results-forward summary at top'; 'one clear takeaway/CTA'). Use write_task_note for the story brief + metrics + checklist, and write the same to the produces path. No case-study prose yet.",
+        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "write",
+        "name": "Write the case study",
+        "role": "copywriter",
+        "summary": "write the challenge-solution-results narrative",
+        "prompt": "Write the case study from the brief. 1) Headline + a results-forward summary box at the top (customer, the headline metric, the takeaway) so a skimmer gets the win immediately. 2) CHALLENGE section: tell the relatable before-state and what was at stake. 3) SOLUTION section: how the product/service was adopted and what changed in their workflow. 4) RESULTS section: present the quantified before/after metrics prominently (a short stat list or callouts), and weave in the customer quotes. 5) Close with the takeaway and a CTA for prospects. Use a credible, specific, third-person voice; let the numbers and quotes do the persuading. Output GitHub-flavored markdown. Save to the produces path and note which checklist items pass.",
+        "produces": { "path": "case-study.md", "kind": "markdown-doc" }
+      },
+      {
+        "id": "review",
+        "name": "Proof & flow review",
+        "role": "reviewer",
+        "summary": "verify every metric and quote and the persuasive arc",
+        "prompt": "Review and edit the case study in place against the checklist. 1) Verify EVERY metric and quote against the scope's sourced data — nothing may be invented, rounded misleadingly, or unattributed (this is the credibility check). 2) Confirm the challenge-solution-results structure reads as a clear arc and the results-forward summary is at the top. 3) Cut vague claims and adjectives that are not backed by a number or quote. 4) Confirm at least one attributed customer quote and at least two quantified results. 5) Confirm the takeaway and CTA are clear. Fix weak passages directly. Save the polished case study to the produces path and note any criteria still unmet.",
+        "produces": { "path": "case-study.md", "kind": "markdown-doc" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Read case-study.md against the scope. Check EACH criterion and write PASS/FAIL: (a) clear challenge-solution-results structure with a results-forward summary at top; (b) at least two specific, quantified result metrics; (c) every metric and quote matches the sourced data — none invented or unattributed; (d) at least one attributed customer quote; (e) one clear takeaway and CTA; (f) credible, specific voice with no unbacked adjectives. A story with vague claims and no real numbers FAILS — loop back to write.",
+      "loopBackTo": "write",
+      "deliverable": { "path": "case-study.md", "kind": "markdown-doc" }
+    }
+  },
+  {
+    "id": "seo-meta-pack",
+    "name": "SEO Metadata Pack",
+    "description": "Generate a complete on-page SEO metadata pack for a set of pages: it first scopes each page's primary keyword and search intent and the length/format rules (title tag, meta description, Open Graph, Twitter card, slug), then writes optimized, unique metadata for every page that respects pixel/character limits and front-loads the keyword, producing a structured JSON file ready to drop into a CMS or templating layer. Covers SEO metadata, meta tags, title tags, meta descriptions, Open Graph tags, social cards, and on-page SEO. Scoping the keyword and limits per page before writing is the point: a small model that fixes the rules first produces unique, limit-respecting tags across the whole set, instead of duplicate titles and descriptions that get truncated in the SERP.",
+    "tags": ["seo", "metadata", "meta-tags", "open-graph", "content"],
+    "triggers": [
+      "write seo meta tags",
+      "generate meta descriptions",
+      "title tags for pages",
+      "open graph tags",
+      "seo metadata pack"
+    ],
+    "phases": [
+      {
+        "id": "scope",
+        "name": "Metadata scope",
+        "role": "planner",
+        "summary": "lock per-page keyword/intent and the metadata field rules",
+        "prompt": "1) List the pages in scope; for EACH, identify its primary keyword/phrase and search intent in one line. 2) Lock the field schema and limits: title tag (50-60 chars, keyword near front, brand suffix policy), meta description (140-155 chars, includes keyword + a soft CTA), URL slug (lowercase, hyphenated, keyword-based), Open Graph (og:title, og:description, og:type), and Twitter card (card type, title, description). 3) Set the duplicate policy: every title and description must be UNIQUE across pages. Write an acceptance-criteria checklist (e.g. 'every page has all fields'; 'titles 50-60 chars, descriptions 140-155 chars'; 'primary keyword present and front-loaded in title'; 'no duplicate titles or descriptions across pages'; 'slugs are valid kebab-case'; 'OG/Twitter fields populated'). Use write_task_note for the per-page keyword map + field rules + checklist, and write the same to the produces path. No metadata yet.",
+        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "build",
+        "name": "Write the metadata",
+        "role": "copywriter",
+        "summary": "write unique, limit-respecting metadata for every page",
+        "prompt": "Write the metadata for EVERY page in scope to the locked schema. 1) For each page: a title tag (50-60 chars, primary keyword front-loaded, brand suffix per policy), a meta description (140-155 chars with the keyword and a soft CTA), a kebab-case slug, and the Open Graph + Twitter card fields. 2) Count characters for title and description and stay within range — do not exceed limits or they truncate in the SERP. 3) Ensure NO title and NO description is duplicated across pages. 4) Make each compelling and accurate to the page, not keyword-stuffed. 5) Output a single valid JSON array, one object per page: {\"page\", \"title\", \"titleChars\", \"metaDescription\", \"descChars\", \"slug\", \"og\": {\"title\",\"description\",\"type\"}, \"twitter\": {\"card\",\"title\",\"description\"}}. Save to the produces path and note the page count.",
+        "produces": { "path": "seo-meta.json", "kind": "json" }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Parse seo-meta.json (must be valid JSON) and grade against the checklist. Check EACH criterion and write PASS/FAIL: (a) every page in scope has an object with all fields populated; (b) titles are 50-60 chars and descriptions 140-155 chars (verify the char counts); (c) the primary keyword is present and front-loaded in each title; (d) no duplicate titles or descriptions across pages; (e) slugs are valid lowercase kebab-case; (f) OG and Twitter fields are populated. A pack with truncated, duplicate, or missing metadata FAILS — loop back to build and name the offending pages.",
+      "loopBackTo": "build",
+      "deliverable": { "path": "seo-meta.json", "kind": "json" }
+    }
+  }
+]

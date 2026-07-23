@@ -1,0 +1,18 @@
+# llama.cpp upstream pin.
+#
+# Format: two lines. First is a git tag (human-readable, used in
+# release notes). Second is the full 40-char commit sha (what build
+# scripts actually check out — tags move, shas don't).
+#
+# llama.cpp cuts a new release tag several times a day under the
+# `b####` scheme (incrementing build number). Pin to a specific `b####`
+# for reproducibility; bump by editing both lines together.
+#
+# Verify the commit is reachable from the tag:
+#   git -C native/engines/llama-cpp/.upstream fetch --tags
+#   git -C native/engines/llama-cpp/.upstream rev-parse <tag>^{commit}
+#
+# License: MIT (https://github.com/ggml-org/llama.cpp)
+upstream=https://github.com/ggml-org/llama.cpp.git
+tag=b10088
+commit=67b9b0e7f6ce45d929a4411907d3c48ec719e81c

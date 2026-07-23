@@ -1,0 +1,40 @@
+{
+  "name": "@bendyline/gezel-sdk",
+  "version": "0.0.0",
+  "private": true,
+  "description": "SDK imported by scripts running in the Gezel sandbox. Exposes the `gezel` object and `defineScript` helper.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./checks": {
+      "types": "./dist/checks.d.ts",
+      "import": "./dist/checks.js"
+    },
+    "./stores": {
+      "types": "./dist/stores.d.ts",
+      "import": "./dist/stores.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist .turbo",
+    "test": "vitest run --passWithNoTests"
+  },
+  "devDependencies": {
+    "@bendyline/gezel": "workspace:*",
+    "tsup": "^8.5.1",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10"
+  }
+}

@@ -1,0 +1,261 @@
+[
+  {
+    "id": "week-plan",
+    "name": "Plan the Week",
+    "description": "Start Monday with the week already shaped: every meeting seen, the ones needing prep flagged, the conflicts and overload called out, and real focus blocks defended — a plan you made once, on purpose, instead of a calendar you react to all week. Locks the week's events and the planning rules FIRST, then shapes the days, then writes the plan with its prep queue. Use for weekly planning, monday morning planning, 'what does my week look like', calendar reviews, and defending focus time.",
+    "tags": ["calendar", "week", "planning", "meetings", "focus", "ritual"],
+    "triggers": [
+      "plan the week",
+      "plan my week",
+      "what does my week look like",
+      "monday planning",
+      "set up the week"
+    ],
+    "phases": [
+      {
+        "id": "scope",
+        "name": "Scope the week",
+        "role": "planner",
+        "summary": "the week's events, the flags, the planning rules locked",
+        "prompt": "Define the week before shaping a single day. Step 1: read the week's events — from calendar.json in the workspace when the calendar syncs to a file, or through the project's calendar capabilities when it is wired as a live service — and read followups.json for the open follow-ups carried into this week. Step 2: sweep the events for what needs attention: meetings with no agenda or unclear purpose (they need prep), pairs that overlap or butt against each other with no gap, and days so full that real work cannot happen. Step 3: lock the planning rules — every meeting that needs prep gets flagged with what to prepare, every conflict gets named with a proposed resolution, focus blocks get placed on the emptier days, and open follow-ups land on specific days. Step 4: write an acceptance-criteria checklist ('every event this week appears in the plan', 'each prep-needed meeting is flagged with what to prepare', 'every conflict named with a proposed fix', 'focus blocks placed in real gaps', 'the load picture is honest — no day pretends to have room it lacks'). Call write_task_note with the event count + flags + checklist and write notes/scope.md. No planning yet.",
+        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "plan",
+        "name": "Shape the days",
+        "role": "planner",
+        "summary": "day-by-day plan, focus blocks placed, conflicts resolved on paper",
+        "prompt": "Shape the week day by day against the locked rules. Step 1: lay out Monday through Friday — each day's meetings in order, with the gaps visible. Step 2: place the focus blocks into the real gaps, the biggest work into the biggest gap, and mark them as commitments, not leftovers. Step 3: for each flagged meeting, note what the prep is and which earlier day the prep happens. Step 4: resolve the conflicts on paper — which meeting moves, shortens, or gets a delegate — as a concrete proposal the owner can act on with one decision each. Step 5: distribute the open follow-ups onto specific days that have room for them. Write the day-by-day plan to notes/plan.md and call write_task_note with the shape of the week in one line per day.",
+        "produces": { "path": "notes/plan.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "report",
+        "name": "Write the week plan",
+        "role": "copywriter",
+        "summary": "the Monday-morning page: days, prep queue, conflicts and calls",
+        "prompt": "Write the week plan the owner reads Monday morning. Step 1: open with the week in one honest paragraph — how heavy it is, where the crunch lands, where the room is. Step 2: the day-by-day plan — each weekday with its meetings, focus blocks, and follow-ups, readable at a glance. Step 3: the prep queue — every meeting needing prep, what to prepare, and the day the prep is scheduled. Step 4: the conflicts and calls — each overlap with its proposed fix, so resolving them is one decision each, not a puzzle. Step 5: keep it one page and warm; this is a plan made once, on purpose. Write report.md and call write_task_note with the focus-block count and the prep-queue length.",
+        "produces": { "path": "report.md", "kind": "markdown-report", "minBytes": 1500 }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Open report.md and notes/plan.md and verify every criterion from notes/scope.md: every event in the week's calendar appears in the plan (count them against the events you read), each prep-needed meeting carries a concrete prep note scheduled on an earlier day, every conflict is named with a proposed resolution, focus blocks sit in real gaps on the page, follow-ups have landed on specific days, and the load picture is honest. Write PASS/FAIL per criterion; on any failure, name the gap and loop back to report.",
+      "loopBackTo": "report"
+    }
+  },
+  {
+    "id": "meeting-prep-brief",
+    "name": "Meeting Prep Brief",
+    "description": "Walk into the meeting already warm: who's in the room, what was promised last time, what you want out of this one, and the two questions worth asking — one page, read in the elevator. Locks the target meeting and the one-page criteria FIRST, then compiles from the calendar and the prior notes, so every claim in the brief traces to something real instead of memory. Use for meeting prep, 'prep me for the meeting', pre-meeting briefs, vendor and client syncs, and walking in warm.",
+    "tags": ["calendar", "meetings", "brief", "prep", "one-page"],
+    "triggers": [
+      "prep me for the meeting",
+      "meeting prep brief",
+      "get me ready for the meeting",
+      "brief me before the meeting",
+      "what do i need for this meeting"
+    ],
+    "phases": [
+      {
+        "id": "scope",
+        "name": "Scope the meeting",
+        "role": "planner",
+        "summary": "target meeting, attendees from the record, history gathered",
+        "prompt": "Pick the meeting and gather everything before writing a word. Step 1: identify the target meeting — the one the owner names, or the next upcoming one worth prep — from calendar.json in the workspace or through the project's calendar capabilities when the calendar is wired as a live service, and pull its details: when, where, and exactly who is in the room. Step 2: gather the history — prior notes for this meeting or these people under notes/, and the open commitments made last time (who promised what, and whether it happened). Step 3: agree with the owner what they want out of this meeting — the one outcome that makes it a success. Step 4: write an acceptance-criteria checklist ('attendees listed from the calendar record, not from memory', 'every last-time commitment appears with its current status', 'the goal is stated in one sentence', 'at least two questions worth asking, ranked', 'one page — readable in the elevator'). Call write_task_note with the meeting + attendee count + checklist and write notes/scope.md.",
+        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "brief",
+        "name": "Write the brief",
+        "role": "copywriter",
+        "summary": "one page: room, goal, last time, agenda, the questions",
+        "prompt": "Write the one-page brief from what you gathered. Step 1: header — the meeting, when, and who is in the room, straight from the calendar details. Step 2: the goal — what the owner wants out of this one, in one sentence near the top. Step 3: last time — each commitment from the prior notes with its honest status: done, in motion, or silently dropped (the dropped ones are usually the real meeting). Step 4: the agenda as you would run it — short, ordered, loosely timed. Step 5: the questions — at least two worth asking, ranked, phrased ready to say out loud. Keep every claim traceable to the calendar or the notes; where the record is silent, say so rather than invent. One page. Write report.md and call write_task_note with the goal and the top question.",
+        "produces": { "path": "report.md", "kind": "markdown-report", "minBytes": 1000 }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Open report.md, the prior notes under notes/, and the calendar details and verify every criterion from notes/scope.md: every attendee in the brief matches the calendar record, every commitment listed traces to the prior notes with an honest status, the goal is one sentence, at least two ranked questions are present and phrased to ask aloud, nothing in the brief is invented — every claim has a source in the notes or the calendar — and it fits one page. Write PASS/FAIL per criterion; on any failure, name the gap and loop back to brief.",
+      "loopBackTo": "brief"
+    }
+  },
+  {
+    "id": "morning-brief",
+    "name": "Morning Topic Brief",
+    "description": "Be informed without the doomscroll: this morning's items per watched topic, each with its source named, rumor separated from reporting, and yesterday's noise skipped — five minutes that replace an hour of feeds. Locks the brief rules FIRST, then gathers from the feeds, then writes the dated brief into the archive next to the previous ones. Use for morning briefs, daily topic digests, 'what happened overnight', news catch-ups on watched topics, and staying informed without the scroll.",
+    "tags": ["news", "feeds", "brief", "morning", "topics", "digest"],
+    "triggers": [
+      "morning brief",
+      "what happened overnight",
+      "today's brief",
+      "run the morning digest",
+      "catch me up on my topics"
+    ],
+    "phases": [
+      {
+        "id": "scope",
+        "name": "Set the brief rules",
+        "role": "editor",
+        "summary": "topics read, yesterday skimmed, brief rules locked",
+        "prompt": "Set the brief's rules before touching the feeds. Step 1: read topics.json from the workspace — the topics being watched and their names — and skim the most recent brief in briefs/ so you know what yesterday already covered. Step 2: lock the brief rules — one section per topic; every item names its source, with a link when the feed gives one; an item that already appeared in yesterday's brief is skipped or explicitly marked as already covered, never re-reported as new; an item resting on a single source is flagged as rumor or unconfirmed, never stated as fact. Step 3: write an acceptance-criteria checklist ('a section for every topic in topics.json', 'every item cites its source', 'no yesterday item re-reported as new', 'single-source items flagged', 'five minutes to read, not an hour'). Call write_task_note with the topic list + checklist and write notes/scope.md. No fetching yet.",
+        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "gather",
+        "name": "Gather the morning's items",
+        "role": "researcher",
+        "summary": "fetch per topic, annotate sources, mark the cuts",
+        "prompt": "Gather this morning's items. Step 1: pull the current items for each watched topic — through the project's feed capabilities when the feeds are wired live, or from the freshest feed snapshots in the workspace. Step 2: for each topic, list every fetched item with its title, source, link, and anything the feed says about its confidence. Step 3: mark the cuts — which items are duplicates of yesterday's brief, which rest on a single source, which are noise not worth the owner's morning — and say why in a few words each. Step 4: write the full annotated item list to notes/items.md and call write_task_note with the fetched/kept/cut counts per topic.",
+        "produces": { "path": "notes/items.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "brief",
+        "name": "Write today's brief",
+        "role": "copywriter",
+        "summary": "the dated brief in the archive, sources named, rumor flagged",
+        "prompt": "Write today's brief from the gathered items. Step 1: date the brief and write it into the archive — a new file in briefs/ named for today (YYYY-MM-DD.md), next to the previous ones. Step 2: one section per topic, using the topic's name as the heading; under it, the kept items — each a sentence or two of what actually happened, with the source named and linked where the feed gave one. Step 3: keep rumor separate — a single-sourced item appears with its flag ('unconfirmed', 'single source'), never dressed as settled reporting. Step 4: where yesterday's story is still the story, one line saying nothing new beats re-reporting it. Step 5: five minutes of reading, no filler. Call write_task_note with the item count per topic and the brief's path."
+      }
+    ],
+    "evaluate": {
+      "prompt": "Open today's brief in briefs/ and notes/items.md and verify every criterion from notes/scope.md: a section for every topic in topics.json, every item citing a named source (linked where the feed gave one), no item from yesterday's brief re-reported as new, every single-sourced item carrying its rumor or unconfirmed flag, and total reading time near five minutes. Cross-check the brief's items against the gathered list — nothing in the brief that was not fetched. Write PASS/FAIL per criterion; on any failure, name the gap and loop back to brief.",
+      "loopBackTo": "brief"
+    }
+  },
+  {
+    "id": "source-quality-audit",
+    "name": "Source Quality Audit",
+    "description": "Once a month, make the reading list earn its place: score each source on what it actually delivered — accuracy, originality, noise — and keep, demote, or drop with evidence, so the brief stays sharp as the feeds drift. Locks the audit criteria FIRST, then builds the per-source scorecard from the month's briefs, then writes the verdict table with the changes to make. Use for source audits, pruning the feed list, 'the brief feels noisy', monthly reading-list reviews, and deciding which feeds to drop.",
+    "tags": ["news", "feeds", "sources", "audit", "monthly", "review"],
+    "triggers": [
+      "audit the sources",
+      "the brief feels noisy",
+      "review the reading list",
+      "which feeds should we drop",
+      "source quality audit"
+    ],
+    "phases": [
+      {
+        "id": "scope",
+        "name": "Scope the audit",
+        "role": "reviewer",
+        "summary": "roster read, evidence base gathered, verdict rules locked",
+        "prompt": "Define the audit before scoring anything. Step 1: read sources.json from the workspace — every source on the roster — and gather the month's briefs from briefs/ as the evidence base. Step 2: lock the audit criteria — every source on the roster gets a verdict; verdicts come from a fixed set (keep, demote, drop); and every verdict must cite concrete evidence from the briefs: items it delivered, corrections it caused, or the silence of never being used. Step 3: agree what each verdict means in practice — keep means earning its place, demote means probation with a named reason, drop means off the list now. Step 4: write an acceptance-criteria checklist ('every source in sources.json appears in the verdict table', 'every verdict is keep, demote, or drop', 'every verdict cites at least one concrete example or explicitly notes the source went unused', 'the report ends with the changes to make'). Call write_task_note with the source count + criteria + checklist and write notes/scope.md.",
+        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "audit",
+        "name": "Build the scorecard",
+        "role": "reviewer",
+        "summary": "per-source evidence: delivered, corrected, or silent",
+        "prompt": "Build the per-source scorecard from the month's evidence. Step 1: for each source in the roster, sweep the month's briefs and collect what it actually delivered — items attributed to it, stories it broke versus merely echoed, corrections or walk-backs it caused, and whether it appeared at all. Step 2: score each source in plain terms — accuracy (was it right), originality (was it first or just loud), and noise (how much of it was worth the owner's morning). Step 3: draft a verdict per source from the fixed set with the evidence beside it. Step 4: write the per-source scorecard with cited examples to notes/audit.md and call write_task_note with the draft verdict counts.",
+        "produces": { "path": "notes/audit.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "report",
+        "name": "Write the audit report",
+        "role": "copywriter",
+        "summary": "verdict table plus the changes to make",
+        "prompt": "Write the audit report the owner acts on. Step 1: open with the month in one honest paragraph — what the reading list did well and where the noise came from. Step 2: the verdict table — a Markdown table with columns Source, Verdict, and Why, one row per source, every verdict backed by its best evidence in a phrase. Step 3: the changes to make — which sources to drop or demote now, and what that leaves covered or exposed. Step 4: note anything worth adding to the roster to fill a gap the audit exposed. Keep it fair and specific — sources earn their place with evidence, not vibes. Write report.md and call write_task_note with the keep/demote/drop counts.",
+        "produces": {
+          "path": "report.md",
+          "kind": "markdown-report",
+          "minBytes": 1200,
+          "extraChecks": [
+            {
+              "kind": "tableShape",
+              "file": "report.md",
+              "requiredColumns": ["Source", "Verdict"],
+              "minRows": 3
+            }
+          ]
+        }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Open report.md, notes/audit.md, and the month's briefs and verify every criterion from notes/scope.md: every source in sources.json has a row in the verdict table, every verdict is keep, demote, or drop, every verdict cites at least one concrete example from the briefs (spot-check two against the brief files) or explicitly notes the source went unused, and the closing changes list matches the verdicts. Write PASS/FAIL per criterion; on any failure, name the gap and loop back to report.",
+      "loopBackTo": "report"
+    }
+  },
+  {
+    "id": "album-curate",
+    "name": "Curate an Album",
+    "description": "Turn a thousand camera-roll photos into the forty that tell the story: cull the near-duplicates, keep the keepers for honest reasons, caption what matters, and leave an album manifest the family will actually revisit. Locks the occasion and the selection criteria FIRST, then curates the manifest one moment at a time, then writes the album's short story. Use for curating an album, photo culling, 'make an album from the weekend', picking the keepers, and turning imports into albums.",
+    "tags": ["photos", "album", "curation", "captions", "family"],
+    "triggers": [
+      "curate an album",
+      "make an album from these photos",
+      "pick the keepers",
+      "cull the photos",
+      "album from the weekend"
+    ],
+    "phases": [
+      {
+        "id": "scope",
+        "name": "Scope the album",
+        "role": "archivist",
+        "summary": "occasion, size, and the selection criteria locked",
+        "prompt": "Define the album before picking a photo. Step 1: read photos/index.json from the workspace — the imported photos with their timestamps — and read any caption notes alongside them (photos/*.txt) describing what the camera saw. Step 2: confirm the occasion and size with the owner — what the album is about, roughly how many photos it should hold, and anything that must be in or out. Step 3: lock the selection criteria — near-duplicates and bursts resolve to the single best frame; every pick carries a caption and an honest reason it made the cut; the picks in order tell the occasion's story, start to end. Step 4: write an acceptance-criteria checklist ('album within the agreed size', 'every pick exists in the photo index — nothing invented', 'each duplicate cluster contributes at most one frame', 'every pick has a caption and a reason', 'the sequence reads as the story of the occasion'). Call write_task_note with the photo count + target size + checklist and write notes/scope.md.",
+        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "select",
+        "name": "Curate the manifest",
+        "role": "curator",
+        "summary": "cluster the bursts, pick the best frames, write the manifest",
+        "prompt": "Curate the album manifest. Step 1: walk the index in time order and group the near-duplicates — bursts and retakes shot seconds apart are one moment, not five photos. Step 2: from each moment worth keeping, choose the single best frame, using the caption notes where they exist to judge what the frame actually shows. Step 3: order the picks so the album tells the occasion start to end. Step 4: write the album manifest into albums/ named for the occasion — a JSON array, one record per pick with file, caption, and reason, the file spelled exactly as the index spells it. Call write_task_note with the pick count and the moments you cut."
+      },
+      {
+        "id": "report",
+        "name": "Write the album's story",
+        "role": "copywriter",
+        "summary": "the arc, the cuts worth mentioning, what to do next",
+        "prompt": "Write the album's short story for whoever opens it. Step 1: the arc — what the occasion was and how the picks carry it, in a paragraph. Step 2: the cuts worth mentioning — the burst that became one frame, the beloved-but-blurry shot that did not make it — so the family knows the culling was care, not loss. Step 3: anything the owner should re-shoot, print, or ask about. Keep it warm and short. Write report.md and call write_task_note with the album path and the pick count.",
+        "produces": { "path": "report.md", "kind": "markdown-report", "minBytes": 800 }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Open the album manifest in albums/, report.md, and photos/index.json and verify every criterion from notes/scope.md: the album is within the agreed size, every pick's file appears in the photo index exactly (spot-check several — no invented or misspelled files), no duplicate cluster contributes more than one frame (check the picks' timestamps), every record carries a nonempty caption and reason, and the order tells the story. Write PASS/FAIL per criterion; on any failure, name the gap and loop back to select.",
+      "loopBackTo": "select"
+    }
+  },
+  {
+    "id": "year-in-review",
+    "name": "Year in Review",
+    "description": "Build the year-in-review that makes someone cry the good way: every month represented or its gap acknowledged, the people balanced, the closing image chosen on purpose — the annual ritual the whole photo archive exists for. Locks the year and the coverage criteria FIRST, then curates the selection month by month, then narrates the year's thread. Use for year-in-review albums, annual photo retrospectives, 'the year in photos', December album rituals, and closing out the year's archive.",
+    "tags": ["photos", "album", "year-in-review", "annual", "curation", "ritual"],
+    "triggers": [
+      "year in review album",
+      "the year in photos",
+      "build the annual album",
+      "december photo ritual",
+      "year in review"
+    ],
+    "phases": [
+      {
+        "id": "scope",
+        "name": "Scope the year",
+        "role": "archivist",
+        "summary": "the year's months mapped, coverage criteria locked",
+        "prompt": "Define the year before picking a photo. Step 1: read photos/index.json from the workspace and establish the year under review — the span the index covers — month by month: how many photos each month holds and where the thin months are. Step 2: read the caption notes alongside the photos (photos/*.txt) and confirm with the owner who and what mattered this year — the people who should be present, the events that anchor it. Step 3: lock the coverage criteria — every month is represented by at least one pick or its gap is named honestly in the review; the people balance out across the year rather than one face filling every page; the opening and closing images are chosen on purpose, not by timestamp. Step 4: write an acceptance-criteria checklist ('every month represented or its gap acknowledged in the review', 'every pick exists in the photo index', 'people balanced across the selection', 'opener and closer chosen with stated reasons', 'the review names the year's thread'). Call write_task_note with the per-month counts + checklist and write notes/scope.md.",
+        "produces": { "path": "notes/scope.md", "kind": "markdown-notes" }
+      },
+      {
+        "id": "curate",
+        "name": "Curate the year",
+        "role": "curator",
+        "summary": "month-by-month picks, cast balanced, opener and closer chosen",
+        "prompt": "Curate the year's selection. Step 1: walk the index month by month and shortlist the frames that carry each month — the caption notes tell you what the camera saw. Step 2: balance the cast — if one person dominates the shortlist, trade near-equal frames toward the people who are missing. Step 3: choose the opener and the closer deliberately — the image that starts the year's story and the one that ends it — and note why. Step 4: write the selection manifest into albums/ named for the year (year-<yyyy>.json) — a JSON array, one record per pick with file, month, and caption, the file spelled exactly as the index spells it. Call write_task_note with the pick count per month and the opener/closer choices."
+      },
+      {
+        "id": "narrate",
+        "name": "Narrate the year",
+        "role": "copywriter",
+        "summary": "month sections, gaps named kindly, the year's thread",
+        "prompt": "Write the year's review to sit beside the album. Step 1: open with the year's thread — the sentence the whole album argues. Step 2: a short section per month — what the month held, carried by its picks' captions; where a month is thin or empty, say so plainly and kindly, because the gap is part of the year too. Step 3: close on the closing image — why it ends the year. Step 4: keep it the kind of thing someone reads aloud at the table in December. Write report.md and call write_task_note with the report path and the year's thread.",
+        "produces": { "path": "report.md", "kind": "markdown-report", "minBytes": 1500 }
+      }
+    ],
+    "evaluate": {
+      "prompt": "Open the year manifest in albums/, report.md, and photos/index.json and verify every criterion from notes/scope.md: every month of the year is represented in the manifest or its gap named in the review (check the thin months especially), every pick's file appears in the photo index exactly, the cast is balanced rather than one face throughout, the opener and closer are identified with reasons, and the review carries a month-by-month shape with the year's thread stated. Write PASS/FAIL per criterion; on any failure, name the gap and loop back to curate.",
+      "loopBackTo": "curate"
+    }
+  }
+]

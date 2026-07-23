@@ -1,0 +1,37 @@
+{
+  "id": "gpt-oss-20b-q4",
+  "name": "GPT-OSS (20B, MoE)",
+  "description": "OpenAI's open-weight 20B-parameter Mixture-of-Experts model (~3.6B active per token). Configurable reasoning effort (low/medium/high), full chain-of-thought access, and native function-calling. Lower-latency frontier-class on-device option for machines with 16GB+ memory.",
+  "tags": ["openai", "tools", "reasoning", "moe", "open-weights"],
+  "category": "reasoning",
+  "maintainer": { "name": "OpenAI", "url": "https://ollama.com/library/gpt-oss" },
+  "version": "1.1.0",
+  "updatedAt": "2026-04-26T00:00:00Z",
+  "license": "Apache-2.0",
+  "parameterSize": "20B",
+  "approxSizeBytes": 12000000000,
+  "supportsTools": true,
+  "contextWindow": 131072,
+  "upstream": "https://ollama.com/library/gpt-oss",
+  "style": {
+    "family": "gpt-oss",
+    "reasoningFormat": "channel",
+    "toolCallFormat": "function-call"
+  },
+  "behaviors": [
+    "reasoning.strip-channel-tags",
+    "prompt.private-reasoning-guidance",
+    "fabrication.detect-past-tense-no-tools",
+    "turn.preamble-folding"
+  ],
+  "ollama": { "tag": "gpt-oss:20b" },
+  "llamaCpp": {
+    "huggingfaceRepo": "bartowski/openai_gpt-oss-20b-GGUF",
+    "filename": "openai_gpt-oss-20b-Q4_K_M.gguf",
+    "quantization": "Q4_K_M"
+  },
+  "mlx": {
+    "huggingfaceRepo": "mlx-community/gpt-oss-20b-MXFP4-Q4",
+    "quantization": "MXFP4-Q4"
+  }
+}

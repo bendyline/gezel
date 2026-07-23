@@ -1,0 +1,56 @@
+{
+  "id": "gemma4-31b-q4",
+  "name": "Gemma 4 (31B)",
+  "description": "Google's flagship Gemma 4 at 30.7B parameters. Multimodal (text + image + video), 256K context, configurable thinking mode, native function-calling, 140+ languages. Frontier-tier instruction-following on device — needs 32GB+ of usable memory.",
+  "tags": ["google", "multimodal", "vision", "video", "tools", "reasoning", "large", "qat"],
+  "category": "general",
+  "maintainer": { "name": "Google", "url": "https://huggingface.co/google/gemma-4-31B-it" },
+  "version": "1.2.0",
+  "updatedAt": "2026-06-06T00:00:00Z",
+  "license": "Apache-2.0",
+  "recoScore": 15,
+  "parameterSize": "30.7B",
+  "approxSizeBytes": 17287668064,
+  "supportsTools": true,
+  "contextWindow": 256000,
+  "upstream": "https://huggingface.co/google/gemma-4-31B-it",
+  "style": {
+    "family": "gemma",
+    "reasoningFormat": "channel",
+    "toolCallFormat": "function-call"
+  },
+  "behaviors": [
+    "reasoning.strip-channel-tags",
+    "reasoning.capture-pre-tool-prose",
+    "prompt.private-reasoning-guidance",
+    "prompt.tool-cookbook-full",
+    "fabrication.detect-past-tense-no-tools",
+    "fabrication.detect-claim-without-tool",
+    "turn.preamble-folding",
+    "turn.ramble-detection",
+    "turn.auto-acknowledge-tool-errors",
+    "mcp.validate-ids-strict",
+    "parse.gemma-special-token"
+  ],
+  "tuning": {
+    "sampling": {
+      "temperature": 1,
+      "topP": 0.95,
+      "topK": 64,
+      "repetitionPenalty": 1.1,
+      "repetitionContext": 20
+    }
+  },
+  "ollama": { "tag": "gemma4:31b-it-qat" },
+  "llamaCpp": {
+    "huggingfaceRepo": "unsloth/gemma-4-31B-it-qat-GGUF",
+    "filename": "gemma-4-31B-it-qat-UD-Q4_K_XL.gguf",
+    "quantization": "UD-Q4_K_XL",
+    "residentBytes": 21030000000
+  },
+  "mlx": {
+    "huggingfaceRepo": "mlx-community/gemma-4-31b-it-4bit",
+    "quantization": "4bit",
+    "residentBytes": 23977741909
+  }
+}
