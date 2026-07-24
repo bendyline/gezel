@@ -15,7 +15,9 @@ const INTEGRATION_SUITES = [
   'src/https-integration.test.ts',
   'src/sessions-integration.test.ts',
   // ChatManager-driven suites (mock provider + MCP bridge subprocess).
+  'src/chat/keurmeester-intervention.test.ts',
   'src/chat/manager*.test.ts',
+  'src/chat/prefix-layering.test.ts',
   'src/chat/questions.test.ts',
   // HTTP route suites stand up a Hono app + service context.
   'src/http/routes/**/*.test.ts',
