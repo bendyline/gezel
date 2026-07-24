@@ -15,7 +15,7 @@
     "build:packages": "pnpm --filter @bendyline/gezel run build && pnpm -r --filter @bendyline/gezel-client --filter @bendyline/gezel-plugin-sdk --filter @bendyline/gezel-sdk --filter @bendyline/gezel-app-sdk --filter @bendyline/gezel-catalog --filter @bendyline/gezel-connectors-spectral run build && pnpm -r --filter @bendyline/gezel-mcp --filter @bendyline/gezel-ui run build && pnpm --filter @bendyline/gezel-service run build && pnpm -r --filter @bendyline/gezel-cli --filter @bendyline/gezel-app --filter @bendyline/gezel-vscode run build",
     "build:bundle": "pnpm --filter @bendyline/gezel-app run build:bundle",
     "build:node-bundle": "pnpm build && node scripts/build-node-bundle.mjs",
-    "build:packaged": "pnpm build && pnpm build:bundle && pnpm stage:licenses",
+    "build:packaged": "pnpm build && pnpm stage:licenses && pnpm build:bundle",
     "package": "pnpm build && pnpm --filter @bendyline/gezel-app run package",
     "package:mac": "pnpm build && pnpm --filter @bendyline/gezel-app run package:mac",
     "package:win": "pnpm build && pnpm --filter @bendyline/gezel-app run package:win",

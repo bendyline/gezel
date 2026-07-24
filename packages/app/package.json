@@ -19,7 +19,7 @@
   "scripts": {
     "build": "tsup",
     "build:bundle": "node ../../scripts/build-service-bundle.mjs",
-    "build:packaged": "pnpm run build && pnpm run build:bundle && node ../../scripts/stage-third-party-licenses.mjs",
+    "build:packaged": "pnpm run build && node ../../scripts/stage-third-party-licenses.mjs && pnpm run build:bundle",
     "dev": "tsup --watch",
     "start": "electron .",
     "typecheck": "tsc --noEmit",

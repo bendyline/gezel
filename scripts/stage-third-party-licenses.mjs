@@ -6,15 +6,18 @@
  * `pnpm licenses list --prod --json`; identical texts are content-addressed so
  * hundreds of MIT dependencies do not bloat installers with duplicate files.
  */
+import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { cp, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { basename, dirname, extname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 import { verifyNoticeInventory } from './check-notice.mjs';
 import { readProductionLicenseInventory } from './production-dependency-inventory.mjs';
 
+const execFileP = promisify(execFile);
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(scriptDir, '..');
 const defaultDestination = join(repoRoot, 'packages', 'app', 'dist', 'licenses');
@@ -299,6 +302,40 @@ async function stagePolicyLicenses() {
   });
 }
 
+async function ensureElectronDistribution(electronRoot, version) {
+  const chromiumLicenses = join(electronRoot, 'dist', 'LICENSES.chromium.html');
+  if (existsSync(chromiumLicenses) && (await stat(chromiumLicenses)).size > 0) return;
+
+  // pnpm deploy --prod can leave the workspace's Electron dev dependency
+  // linked while pruning the distribution downloaded by Electron's
+  // lifecycle script. Packaging still needs the distribution, and the full
+  // Chromium attribution file exists only in that archive (not in the npm
+  // package itself), so materialize the exact pinned release on demand.
+  const installer = join(electronRoot, 'install.js');
+  if (!existsSync(installer)) {
+    throw new Error(`Electron ${version} has no installer at ${installer}`);
+  }
+  console.log(
+    `[stage-third-party-licenses] Electron ${version} distribution is missing; downloading it for redistribution notices`,
+  );
+  try {
+    await execFileP(process.execPath, [installer], {
+      cwd: electronRoot,
+      env: process.env,
+      maxBuffer: 16 * 1024 * 1024,
+      windowsHide: true,
+    });
+  } catch (error) {
+    const detail = error.stderr?.trim() || error.stdout?.trim() || error.message;
+    throw new Error(`failed to download Electron ${version}: ${detail}`);
+  }
+  if (!existsSync(chromiumLicenses) || (await stat(chromiumLicenses)).size === 0) {
+    throw new Error(
+      `Electron ${version} installed without its Chromium redistribution text: ${chromiumLicenses}`,
+    );
+  }
+}
+
 async function stageBundledRuntimeLicenses(expected) {
   const appRoot = join(repoRoot, 'packages', 'app');
   const targetRoot = join(destination, 'runtimes');
@@ -322,13 +359,16 @@ async function stageBundledRuntimeLicenses(expected) {
       );
     }
   }
+  await ensureElectronDistribution(electronRoot, versions.Electron);
 
   const entries = [
     {
       name: 'Electron',
       version: versions.Electron,
       files: [
-        { source: join(electronRoot, 'dist', 'LICENSE'), target: 'electron-LICENSE.txt' },
+        // Electron's npm package carries the same pinned MIT terms even when
+        // pnpm has pruned its optional downloaded distribution.
+        { source: join(electronRoot, 'LICENSE'), target: 'electron-LICENSE.txt' },
         {
           source: join(electronRoot, 'dist', 'LICENSES.chromium.html'),
           target: 'electron-LICENSES.chromium.html',
