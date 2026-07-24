@@ -134,14 +134,16 @@ asarUnpack:
   - dist/ui/**/*
   - native-bin/**/*
 
-# afterPack: workaround for an electron-builder 26.x asar packing bug that
-# shifts file offsets in the asar manifest by ~13 bytes (the leading chars
-# of the rewritten package.json get dropped, every later file reads from
-# the wrong window, and the Electron main process exits silently with code
-# 1 because main.js is corrupted). The hook re-extracts the asar,
-# overwrites the affected files from canonical source, and repacks via
-# `@electron/asar.createPackage`. Delete once electron-builder ships a fix.
-afterPack: scripts/fix-asar.cjs
+# afterPack chains two jobs (see scripts/after-pack.cjs):
+#   1. The asar offset-bug workaround (scripts/fix-asar.cjs) — an
+#      electron-builder 26.x packing bug shifts asar manifest offsets by
+#      ~13 bytes; the hook restores the affected files from canonical
+#      source. Delete that half once electron-builder ships a fix.
+#   2. On Windows, an Authenticode sweep that signs every exe/dll in the
+#      packed payload lacking a valid signature — electron-builder's own
+#      pass never descends into extraFiles or the asar-unpacked payload
+#      (pnpm.exe, our-built engine DLLs).
+afterPack: scripts/after-pack.cjs
 
 # electron-builder's built-in @electron/notarize integration notarizes both
 # the signed .app and the final .pkg when APPLE_ID,
@@ -176,13 +178,16 @@ win:
     sign: scripts/sign.cjs
     signingHashAlgorithms:
       - sha256
-  # nssm.exe sits next to the Electron exe in $INSTDIR
-  # (C:\Program Files\Gezel\nssm.exe) so the NSIS hooks can invoke it
-  # directly. The binary is vendored, sha-pinned, at installer/nssm/ —
-  # see installer/nssm/README.md for provenance and the bump procedure.
+  # The first-party service host sits next to the Electron exe in
+  # $INSTDIR (C:\Program Files\Gezel\gezel-service-host.exe) so the NSIS
+  # hooks can register it as GezelService's ImagePath. It is built by
+  # the native pipeline (native/helpers/service-host/), arrives in
+  # native-bin/ born-signed from the native release, and the afterPack
+  # sweep leaves validly-signed files untouched — installer bytes stay
+  # identical to the release asset. Replaces the vendored NSSM wrapper.
   extraFiles:
-    - from: installer/nssm/nssm.exe
-      to: nssm.exe
+    - from: native-bin/win32-x64/gezel-service-host.exe
+      to: gezel-service-host.exe
 
 nsis:
   # Per-machine install (Program Files), elevates UAC at install time.

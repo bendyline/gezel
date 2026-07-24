@@ -112,6 +112,19 @@ jobs:
             needs_cuda: false
             needs_vulkan: false
 
+          # Gezel service host (Windows-only): first-party SCM host for
+          # gezeld, the ImagePath of GezelService. Replaces the vendored
+          # NSSM wrapper. macOS/Linux use launchd/systemd — no helper.
+          - engine: service-host
+            kind: helper
+            platform: win32-x64
+            variant: ''
+            runner: windows-latest
+            script: build.ps1
+            artifact: gezel-service-host.exe
+            needs_cuda: false
+            needs_vulkan: false
+
           # ── sd-cpp (single variant per platform) ──────────────
           - engine: sd-cpp
             platform: darwin-arm64
@@ -718,18 +731,30 @@ jobs:
             ls "$out" | grep -Ei 'cudart|cublas' || { echo "CUDA runtime libraries missing alongside exe"; exit 1; }
           fi
 
-      # ── Code-sign the engine binary (gated on secrets) ────────
+      # ── Code-sign the engine binaries (gated on secrets) ──────
       # Sign HERE — after the smoke test, before the sha is computed and
       # the artifact uploaded — so the release's SHA256SUMS reflects the
       # SIGNED bytes and the runtime engine resolver's signature check
-      # (engineSignaturePolicy) passes. We sign ONLY the main artifact,
-      # not the peer libs: the verifier only checks the main binary, the
-      # peer DLLs include third-party redistributables (cuBLAS) we must
-      # not re-sign, and on macOS we deliberately omit `--options runtime`
-      # so hardened-runtime library validation doesn't block the unsigned
-      # ggml-*.dylib the binary dlopens. No signing secrets configured
-      # (PRs, forks, dispatch test runs) → these steps no-op and the
-      # binary ships unsigned, exactly as before.
+      # (engineSignaturePolicy) passes.
+      #
+      # Windows signs ONLY the main artifact: the peer DLLs include
+      # third-party redistributables (cuBLAS/cudart, NVIDIA-signed) we
+      # must not re-sign, and our own unsigned DLLs get swept by the
+      # Electron release's afterPack hook (packages/app/scripts/
+      # after-pack.cjs) before packaging.
+      #
+      # macOS signs EVERY Mach-O in the bundle — dylib peers first, main
+      # binary last — with `--options runtime` (hardened runtime). All
+      # peers are our own builds (ggml/llama/ssl), so hardened-runtime
+      # library validation passes on same-team signatures, and the
+      # notarized Electron app can enroll these binaries untouched. A
+      # post-sign launch check re-runs the --help probe so a hardened-
+      # runtime regression (an engine that needs JIT or dyld-env
+      # entitlements) fails the job here instead of shipping.
+      #
+      # No signing secrets configured (PRs, forks, dispatch test runs)
+      # → these steps no-op and the binary ships unsigned, exactly as
+      # before.
       - name: Install Trusted Signing SDK (Windows)
         if: steps.preflight.outputs.pinned == 'true' && startsWith(matrix.platform, 'win32')
         shell: pwsh
@@ -802,7 +827,7 @@ jobs:
           security list-keychains -d user -s "$KEYCHAIN_PATH" login.keychain
           echo "GEZEL_NATIVE_KEYCHAIN=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
 
-      - name: Codesign macOS binary (Developer ID)
+      - name: Codesign macOS binaries (Developer ID)
         if: steps.preflight.outputs.pinned == 'true' && startsWith(matrix.platform, 'darwin')
         run: |
           set -euo pipefail
@@ -810,10 +835,39 @@ jobs:
             echo "[sign] no Apple keychain set up — skipping (unsigned)"
             exit 0
           fi
-          bin="${{ steps.outdir.outputs.dir }}/${{ matrix.artifact }}"
+          out="${{ steps.outdir.outputs.dir }}"
+          bin="$out/${{ matrix.artifact }}"
+
+          # Inside-out: dylib peers first, the main executable last.
+          while IFS= read -r f; do
+            [[ "$f" == "$bin" ]] && continue
+            if file -b "$f" | grep -q 'Mach-O'; then
+              echo "[sign] $f"
+              codesign --force --timestamp --options runtime \
+                --sign "Developer ID Application" "$f"
+            fi
+          done < <(find "$out" -type f)
           echo "[sign] $bin"
-          codesign --force --timestamp --sign "Developer ID Application" "$bin"
-          codesign --verify --strict --verbose=2 "$bin"
+          codesign --force --timestamp --options runtime \
+            --sign "Developer ID Application" "$bin"
+
+          while IFS= read -r f; do
+            if file -b "$f" | grep -q 'Mach-O'; then
+              codesign --verify --strict --verbose=2 "$f"
+            fi
+          done < <(find "$out" -type f)
+
+          # Hardened runtime can break an engine that needs JIT or
+          # dyld-env entitlements — re-run the launch probe so that
+          # class of regression fails HERE, not on a user machine.
+          # Same contract as the pre-sign smoke test: non-zero exit is
+          # tolerated (no GPU on the runner), silent output is not.
+          help_out="$("$bin" --help 2>&1 || true)"
+          if [[ -z "${help_out//[[:space:]]/}" ]]; then
+            echo "::error::$bin produced no --help output after hardened-runtime signing — the engine likely needs an entitlement (allow-jit / disable-library-validation). Add a per-engine entitlements plist rather than dropping --options runtime."
+            exit 1
+          fi
+          echo "[sign] post-sign launch probe OK"
 
       - name: Tear down keychain (macOS)
         if: always() && startsWith(matrix.platform, 'darwin')
@@ -889,6 +943,9 @@ jobs:
       # though the artifacts uploaded fine. (Was implicit before GitHub
       # tightened artifact-service auth + moved runners to Node 24.)
       actions: read
+      # Sigstore build-provenance attestations over the release archives.
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -972,22 +1029,26 @@ jobs:
           sha256sum *.tar.gz *.zip 2>/dev/null | sort > SHA256SUMS
           cat SHA256SUMS
 
-      # ── Optional: macOS sign + notarize for standalone consumers ──
-      # Gated on APPLE_CERTIFICATE_P12_BASE64 being set. When it isn't,
-      # the standalone tarballs are shipped unsigned (Electron bundle
-      # still signs its own copy). Users who want signed standalone
-      # binaries set the same secrets the Electron release uses.
-      - name: Sign macOS binaries (if secrets present)
-        if: env.APPLE_CERTIFICATE_P12_BASE64 != ''
-        env:
-          APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
-        run: |
-          echo "standalone-sign path is documented but not yet implemented here."
-          echo "on-device: run codesign against each Mach-O under native/build/darwin-*,"
-          echo "then repack the tarball. Left commented out until there's a confirmed"
-          echo "consumer that wants standalone-signed binaries."
+      # ── Provenance attestations ───────────────────────────────────
+      # SLSA build-provenance over the final archives + SHA256SUMS:
+      # anyone can later prove an asset came from this workflow at this
+      # commit via `gh attestation verify <file> --repo bendyline/gezel`.
+      # Attesting at draft time is correct — publish-native-release.yml
+      # only flips the draft flag and never touches assets.
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: |
+            release/*.tar.gz
+            release/*.zip
+            release/SHA256SUMS
 
       # ── Create / update the draft GitHub Release ──────────────────
+      # No signing happens in this job: the build matrix signed every
+      # binary at birth (Authenticode on Windows engine exes; Developer
+      # ID + hardened runtime on every macOS Mach-O, dylibs included),
+      # so the tarballs packed above — and the SHA256SUMS over them —
+      # already reflect signed bytes.
       - name: Create draft Release
         uses: softprops/action-gh-release@fe965f7af51af5f2602596916f38a38df2e33de0 # v3.0.2
         with:
@@ -997,20 +1058,24 @@ jobs:
           draft: true
           generate_release_notes: true
           body: |
-            Prebuilt Gezel native engine binaries.
+            Prebuilt Gezel native engine binaries, signed at birth:
+            Windows engine executables carry Bendyline Authenticode
+            signatures (Azure Trusted Signing); macOS binaries — engine
+            executables and peer dylibs — are Developer ID-signed with
+            hardened runtime. `SHA256SUMS` covers the signed bytes, and
+            build-provenance attestations are attached to every archive
+            (verify with `gh attestation verify`).
 
             These are consumed by `.github/workflows/release-electron.yml`
-            before producing an installer — the Electron release signs
-            each binary as part of the `.app` / NSIS signing pass. They
-            are unsigned in this release; standalone consumers who need
-            signed binaries should build them themselves from this repo
-            at the tagged revision.
+            when producing installers (which verifies both hashes and
+            signatures before packaging). Drafts are published via the
+            manual `publish-native-release.yml` gate, which re-verifies
+            every asset against SHA256SUMS.
 
             Each archive contains the engine binaries for one platform plus
             `THIRD_PARTY_LICENSES/` with the pin-bound native redistribution
             texts. CUDA archives also carry the CUDA Toolkit EULA supplied by
-            the build image. `SHA256SUMS` verifies the archives on the download
-            path.
+            the build image.
           files: |
             release/*.tar.gz
             release/*.zip

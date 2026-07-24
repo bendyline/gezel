@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import { chmod, cp, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { verifyBundleManifest } from './bundle-manifest.js';
 
 export interface NodeInstallOptions {
   /** User home root — binary lands at `<home>/bin/node[.exe]`. */
@@ -77,6 +78,17 @@ export async function installNodeIfNeeded(opts: NodeInstallOptions): Promise<Nod
       version: installedVersion,
       action: 'up-to-date',
     };
+  }
+
+  // Re-hash the bundled binary against the bundle's sha256.txt (written
+  // by fetch-node.mjs) before installing it. A corrupted or tampered
+  // bundle must not land in <home>/bin — fall back to system node.
+  const integrity = await verifyBundleManifest(bundleDir, [binaryName]);
+  if (!integrity.ok) {
+    logger?.warn?.(
+      `[supervisor] node bundle failed integrity check (${integrity.reason}); refusing to install — falling back to system node`,
+    );
+    return { binaryPath: null, version: null, action: 'no-bundle' };
   }
 
   await mkdir(installDir, { recursive: true });

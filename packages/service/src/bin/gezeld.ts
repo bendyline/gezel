@@ -29,6 +29,11 @@ async function main() {
   };
   process.on('SIGINT', () => void shutdown('SIGINT'));
   process.on('SIGTERM', () => void shutdown('SIGTERM'));
+  // Windows: gezel-service-host stops the GezelService child by sending
+  // CTRL_BREAK to its process group (Node surfaces it as SIGBREAK) —
+  // kill('SIGTERM') on Windows is an abrupt TerminateProcess, so this is
+  // the only graceful-stop path under the machine service.
+  process.on('SIGBREAK', () => void shutdown('SIGBREAK'));
 
   const scheme = running.cert ? 'https' : 'http';
   process.stderr.write(

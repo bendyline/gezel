@@ -24,10 +24,14 @@ native/
 │       ├── README.md
 │       └── build.{sh,ps1}
 ├── helpers/
-│   └── device-health/          # first-party Windows/Linux telemetry helper
+│   ├── device-health/          # first-party Windows/Linux telemetry helper
+│   │   ├── CMakeLists.txt
+│   │   ├── README.md
+│   │   └── build.{sh,ps1}
+│   └── service-host/           # first-party Windows service host (GezelService)
 │       ├── CMakeLists.txt
 │       ├── README.md
-│       └── build.{sh,ps1}
+│       └── build.ps1
 ├── scripts/
 │   ├── fetch-upstream.sh       # clone + pin a single engine's upstream repo
 │   └── bundle.sh               # assemble per-platform binaries into packages/app/native-bin/
@@ -46,7 +50,8 @@ Every engine and helper produces binaries under the same canonical tree:
 native/build/<platform>/
 ├── gezel-device-health[.exe]
 ├── gezel-llama-server[.exe]
-└── gezel-sd-server[.exe]
+├── gezel-sd-server[.exe]
+└── gezel-service-host.exe      # win32-x64 only
 ```
 
 Where `<platform>` is one of:
@@ -69,7 +74,7 @@ bundled helper.
 
 Today we ship **one binary per engine** — `sd-server`, later
 `whisper-server`, later `piper`. They share this directory, share the CI
-pipeline, share the signing step inside the Electron release workflow,
+pipeline, share the at-birth signing step in the native build matrix,
 and ship together inside one Electron installer. That is the
 pragmatic "uber native" — all native code in one place, one release
 surface, one signing pass.
@@ -152,15 +157,52 @@ pnpm app
 ## CI pipelines
 
 `.github/workflows/build-native.yml` matrix-builds engines and helpers,
-uploads artifacts, and aggregates tagged runs into native release archives.
-It runs on tag push (`native-vX.Y.Z`) or manual dispatch.
+uploads artifacts, and aggregates tagged runs into a **draft** native
+release. It runs on tag push (`native-vX.Y.Z`, via
+`scripts/cut-native-release.mjs`) or manual dispatch (build-only, no
+draft). Publication is an explicit manual gate:
+`.github/workflows/publish-native-release.yml` validates the draft's
+asset set, re-verifies every archive against `SHA256SUMS`, and only then
+flips it public.
+
+### Integrity model
+
+Binaries are **signed at birth** in the build matrix, immediately after
+the smoke test and before hashing/upload, so every published hash covers
+signed bytes:
+
+- **Windows** — the engine executable is Authenticode-signed via Azure
+  Trusted Signing. Peer DLLs are left alone here: third-party
+  redistributables (cuBLAS/cudart) already carry NVIDIA signatures we
+  must not replace, and our own unsigned DLLs are swept later by the
+  Electron packaging hook.
+- **macOS** — every Mach-O in the bundle (engine executable and peer
+  dylibs) is Developer ID-signed with `--options runtime` (hardened
+  runtime), dylibs first, main binary last. A post-sign `--help` probe
+  re-runs the smoke contract so a hardened-runtime regression fails the
+  job. If an engine ever needs JIT or dyld-env access, give it a
+  per-engine entitlements plist — don't drop `--options runtime`.
+- Signing steps no-op when secrets are absent (PRs, forks, dispatch
+  test builds) — those binaries ship unsigned and are refused by the
+  Electron release's verification (below).
+- The draft-release job attaches **SLSA build-provenance attestations**
+  to every archive and `SHA256SUMS`
+  (`gh attestation verify <file> --repo bendyline/gezel`).
 
 The Electron release workflow (`.github/workflows/release-electron.yml`)
-downloads the latest native release at build time, unpacks into
-`packages/app/native-bin/`, then runs electron-builder — which signs
-every binary inside the installer as part of its existing signing pass.
-No separate signing pipeline for the native binaries themselves; they
-inherit the app's cert chain.
+consumes a **published** native release via
+`scripts/fetch-native-binaries.mjs`, which verifies every archive
+against the release's `SHA256SUMS` before extraction (the `--run`
+artifact path verifies extracted engine binaries against the per-job
+`<engine>.sha256` manifests instead). The workflow then re-verifies
+code signatures on the staged binaries (`Get-AuthenticodeSignature` /
+`codesign --verify --strict`), packages with electron-builder, and on
+Windows runs the afterPack sweep
+(`packages/app/scripts/after-pack.cjs`) that signs any exe/dll in the
+payload still lacking a valid signature — covering `pnpm.exe` and
+our-built engine DLLs while leaving upstream-signed
+binaries byte-identical to the native release. Post-package
+verification asserts the full payload validates on both platforms.
 
 ## License hygiene
 

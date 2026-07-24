@@ -4,6 +4,14 @@ import { describe, expect, it } from 'vitest';
 
 const hookPath = fileURLToPath(new URL('../installer/nsis-hooks.nsh', import.meta.url));
 const hook = readFileSync(hookPath, 'utf8');
+// The service environment contract (GEZEL_SYSTEM_SCOPE, temp/profile
+// redirects) is compiled into the first-party service host rather than
+// configured by the installer — the security assertions cross-check its
+// source so the two halves cannot drift apart silently.
+const serviceHostPath = fileURLToPath(
+  new URL('../../../native/helpers/service-host/src/main.cpp', import.meta.url),
+);
+const serviceHost = readFileSync(serviceHostPath, 'utf8');
 
 function position(needle: string): number {
   const index = hook.indexOf(needle);
@@ -56,33 +64,50 @@ describe('Windows machine-service installer security', () => {
     expect(hook.match(/NT SERVICE\\\${GEZEL_SERVICE_NAME}:\(OI\)\(CI\)\(M\)/g)).toHaveLength(2);
   });
 
-  it('configures LocalService and a restricted service SID before startup', () => {
-    const install = position('install ${GEZEL_SERVICE_NAME}');
-    const disabled = hook.indexOf('config ${GEZEL_SERVICE_NAME} start= disabled', install);
-    expect(disabled).toBeGreaterThan(install);
-    const account = position('ObjectName "NT AUTHORITY\\LocalService"');
+  it('registers born-disabled LocalService and restricts the SID before startup', () => {
+    // One atomic sc.exe create: disabled AND LocalService AND a quoted
+    // ImagePath from birth — no transient LocalSystem or enabled window.
+    const createLine = commandLine('sc.exe" create ${GEZEL_SERVICE_NAME}');
+    expect(createLine).toContain('start= disabled');
+    expect(createLine).toContain('obj= "NT AUTHORITY\\LocalService"');
+    expect(createLine).toContain('binPath= "\\"$INSTDIR\\gezel-service-host.exe\\" run"');
+
+    const create = position('sc.exe" create ${GEZEL_SERVICE_NAME}');
     const restrictedSid = position('sidtype ${GEZEL_SERVICE_NAME} restricted');
     const restrictedPrivileges = position('privs ${GEZEL_SERVICE_NAME} SeChangeNotifyPrivilege');
     const firstServiceSidAcl = position('NT SERVICE\\${GEZEL_SERVICE_NAME}:(OI)(CI)(M)');
-    const environment = position('"GEZEL_SYSTEM_SCOPE=1"');
+    const enableAutostart = position('config ${GEZEL_SERVICE_NAME} start= auto');
     const start = position('start ${GEZEL_SERVICE_NAME}');
 
-    expect(disabled).toBeLessThan(account);
-    expect(account).toBeLessThan(restrictedSid);
+    expect(create).toBeLessThan(restrictedSid);
     expect(restrictedSid).toBeLessThan(restrictedPrivileges);
     expect(restrictedPrivileges).toBeLessThan(firstServiceSidAcl);
-    expect(firstServiceSidAcl).toBeLessThan(environment);
-    expect(environment).toBeLessThan(start);
-    expect(hook).not.toMatch(/ObjectName\s+"(?:NT AUTHORITY\\)?LocalSystem"/i);
+    expect(firstServiceSidAcl).toBeLessThan(enableAutostart);
+    expect(enableAutostart).toBeLessThan(start);
+    expect(hook).not.toMatch(/obj=\s+"(?:NT AUTHORITY\\)?LocalSystem"/i);
+    // The installer must never invoke a general-purpose service wrapper.
+    expect(hook).not.toMatch(/nsExec[^\n]*nssm/i);
+  });
+
+  it('compiles the service environment contract into the service host', () => {
+    expect(serviceHost).toContain('L"GEZEL_SYSTEM_SCOPE", L"1"');
+    expect(serviceHost).toContain('L"ELECTRON_RUN_AS_NODE", L"1"');
+    expect(serviceHost).toContain('{L"TEMP", home + L"\\\\tmp"}');
+    expect(serviceHost).toContain('{L"TMP", home + L"\\\\tmp"}');
+    expect(serviceHost).toContain('{L"TMPDIR", home + L"\\\\tmp"}');
+    expect(serviceHost).toContain('{L"APPDATA", home + L"\\\\appdata"}');
+    expect(serviceHost).toContain('{L"LOCALAPPDATA", home + L"\\\\localappdata"}');
+    expect(serviceHost).toContain('{L"USERPROFILE", home}');
+    expect(serviceHost).toContain('L"C:\\\\ProgramData\\\\Gezel"');
   });
 
   it('fails closed if any load-bearing identity control fails', () => {
-    const accountBlock = hook.slice(
-      position('ObjectName "NT AUTHORITY\\LocalService"'),
+    // sc create failure leaves nothing registered — skip is enough.
+    const createBlock = hook.slice(
+      position('sc.exe" create ${GEZEL_SERVICE_NAME}'),
       position('sidtype ${GEZEL_SERVICE_NAME} restricted'),
     );
-    expect(accountBlock).toContain('!insertmacro RemoveGezelService');
-    expect(accountBlock).toContain('Goto SkipNssm');
+    expect(createBlock).toContain('Goto SkipNssm');
 
     const sidTypeBlock = hook.slice(
       position('sidtype ${GEZEL_SERVICE_NAME} restricted'),
@@ -98,17 +123,17 @@ describe('Windows machine-service installer security', () => {
     expect(privilegesBlock).toContain('!insertmacro RemoveGezelService');
     expect(privilegesBlock).toContain('Goto SkipNssm');
 
-    const environmentBlock = hook.slice(
-      position('"GEZEL_SYSTEM_SCOPE=1"'),
-      position('AppStdout "${GEZEL_DATA_DIR}\\logs\\service-stdout.log"'),
+    const enableBlock = hook.slice(
+      position('config ${GEZEL_SERVICE_NAME} start= auto'),
+      position('sc.exe" start ${GEZEL_SERVICE_NAME}'),
     );
-    expect(environmentBlock).toContain('!insertmacro RemoveGezelService');
-    expect(environmentBlock).toContain('Goto SkipNssm');
+    expect(enableBlock).toContain('!insertmacro RemoveGezelService');
+    expect(enableBlock).toContain('Goto SkipNssm');
   });
 
   it('invalidates legacy runtime credentials before reinstalling', () => {
     const clear = position('!insertmacro ClearGezelRuntime');
-    const install = position('install ${GEZEL_SERVICE_NAME}');
+    const install = position('create ${GEZEL_SERVICE_NAME}');
     expect(clear).toBeLessThan(install);
     const installBody = hook.slice(
       position('!macro customInstall'),
@@ -147,24 +172,21 @@ describe('Windows machine-service installer security', () => {
 
     const installBody = hook.slice(position('!macro customInstall'));
     const absenceGate = installBody.indexOf('${If} $9 != 1060');
-    const replacement = installBody.indexOf('install ${GEZEL_SERVICE_NAME}');
+    const replacement = installBody.indexOf('create ${GEZEL_SERVICE_NAME}');
     expect(absenceGate).toBeGreaterThanOrEqual(0);
     expect(absenceGate).toBeLessThan(replacement);
   });
 
   it('keeps restricted-service temporary files below the private root', () => {
+    // The installer still creates + reparse-guards the redirect targets;
+    // the env vars pointing the service at them are compiled into the
+    // service host (asserted above).
     expect(hook).toContain('CreateDirectory "${GEZEL_DATA_DIR}\\tmp"');
     expect(hook).toContain(
       '!insertmacro RejectReparsePoint "${GEZEL_DATA_DIR}\\tmp" "Gezel temporary directory"',
     );
-    expect(hook).toContain('"TEMP=${GEZEL_DATA_DIR}\\tmp"');
-    expect(hook).toContain('"TMP=${GEZEL_DATA_DIR}\\tmp"');
-    expect(hook).toContain('"TMPDIR=${GEZEL_DATA_DIR}\\tmp"');
-    expect(hook).toContain('"USERPROFILE=${GEZEL_DATA_DIR}"');
     expect(hook).toContain('CreateDirectory "${GEZEL_DATA_DIR}\\appdata"');
     expect(hook).toContain('CreateDirectory "${GEZEL_DATA_DIR}\\localappdata"');
-    expect(hook).toContain('"APPDATA=${GEZEL_DATA_DIR}\\appdata"');
-    expect(hook).toContain('"LOCALAPPDATA=${GEZEL_DATA_DIR}\\localappdata"');
     expect(hook).not.toMatch(/S-1-5-32-545:\(OI\)\(CI\).*tmp/i);
   });
 

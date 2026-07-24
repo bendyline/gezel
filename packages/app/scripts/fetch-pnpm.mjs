@@ -251,6 +251,17 @@ async function main() {
   await copyFile(cacheLicense, distLicense);
   if (!isWindows) await chmod(distBinary, 0o755);
   await writeFile(distVersion, `${version}\n`, 'utf8');
+  // Bundle-local integrity manifest over the two load-bearing files (the
+  // launcher binary and the runtime entrypoint; the runtime tree's pin in
+  // pnpm-version.ts is tgz-level, which extracted files can't be checked
+  // against). The supervisor's extract step re-hashes against this at
+  // install time — see extract-pnpm.ts.
+  const binName = isWindows ? 'pnpm.exe' : 'pnpm';
+  const manifest = [
+    `${await sha256File(distBinary)}  ${binName}`,
+    `${await sha256File(join(distDir, 'dist', 'pnpm.mjs'))}  dist/pnpm.mjs`,
+  ];
+  await writeFile(join(distDir, 'sha256.txt'), `${manifest.join('\n')}\n`, 'utf8');
   console.log(`[fetch-pnpm] staged ${distBinary}`);
 }
 

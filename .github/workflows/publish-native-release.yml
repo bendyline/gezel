@@ -93,6 +93,53 @@ jobs:
           echo "url=$(jq -r '.html_url' <<<"$release_json")" >> "$GITHUB_OUTPUT"
           echo "Validated complete draft '$tag' with ${#expected[@]} required assets."
 
+      # The presence check above proves the draft is complete; this step
+      # proves the bytes are intact. Download every archive plus SHA256SUMS
+      # and run `sha256sum -c` — a corrupted or tampered asset fails the
+      # gate before the draft can ever be published.
+      - name: Verify asset bytes against SHA256SUMS
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GEZEL_RELEASE_TOKEN || github.token }}
+          REQUESTED_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+
+          workdir="$(mktemp -d)"
+          cd "$workdir"
+
+          # Drafts aren't addressable via `gh release download <tag>`, so
+          # resolve assets the same way the validate step did and download
+          # each by asset id.
+          release_json="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/$REQUESTED_TAG")"
+          while IFS=$'\t' read -r asset_id asset_name; do
+            case "$asset_name" in
+              gezel-native-*|SHA256SUMS)
+                echo "downloading $asset_name…"
+                gh api -H "Accept: application/octet-stream" \
+                  "repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}" \
+                  > "$asset_name"
+                ;;
+            esac
+          done < <(jq -r '.assets[] | [.id, .name] | @tsv' <<<"$release_json")
+
+          if [[ ! -s SHA256SUMS ]]; then
+            echo "::error::SHA256SUMS is missing or empty after download."
+            exit 1
+          fi
+
+          # Every downloaded archive must be listed, and every listed
+          # archive must verify. `sha256sum -c` handles the latter;
+          # check coverage explicitly for the former.
+          for f in gezel-native-*; do
+            if ! grep -q "  $f\$" SHA256SUMS; then
+              echo "::error::$f has no entry in SHA256SUMS."
+              exit 1
+            fi
+          done
+          sha256sum -c SHA256SUMS
+          echo "All $(ls gezel-native-* | wc -l) archives verified against SHA256SUMS."
+
       - name: Publish release
         shell: bash
         env:

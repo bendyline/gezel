@@ -80,22 +80,5 @@ export default defineConfig({
         throw new Error('[tsup] fetch-node failed — see output above');
       }
     }
-
-    // Same pattern for NSSM (Windows Service wrapper). The fetch script
-    // is a no-op on non-Windows builds and lands the binary at
-    // packages/app/installer/nssm/nssm.exe, picked up by
-    // electron-builder.yml's `win.extraFiles`. Without it, the NSIS
-    // install macro's `nssm install GezelService …` calls silently
-    // no-op and the system service never registers.
-    const nssmRes = spawnSync(process.execPath, ['scripts/fetch-nssm.mjs'], {
-      stdio: 'inherit',
-    });
-    if (nssmRes.status !== 0) {
-      if (process.env.GEZEL_NSSM_SKIP === '1') {
-        console.warn('[tsup] fetch-nssm skipped (GEZEL_NSSM_SKIP=1)');
-      } else {
-        throw new Error('[tsup] fetch-nssm failed — see output above');
-      }
-    }
   },
 });

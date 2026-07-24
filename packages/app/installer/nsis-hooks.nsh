@@ -1,6 +1,7 @@
 ; Gezel NSIS installer hooks
 ;
-; Registers gezeld as a machine-wide Windows service through NSSM.  The
+; Registers gezeld as a machine-wide Windows service hosted by the
+; first-party gezel-service-host (native/helpers/service-host/).  The
 ; service intentionally runs as LocalService, never LocalSystem: the daemon
 ; exposes a user-facing terminal, so its child processes must inherit a
 ; least-privileged token.
@@ -21,28 +22,28 @@
 !define GEZEL_DATA_DIR "C:\ProgramData\Gezel"
 !define GEZEL_SERVICE_TREE "${GEZEL_DATA_DIR}\service"
 !define GEZEL_INTERPRETER "$INSTDIR\Gezel.exe"
-!define GEZEL_GEZELD_JS "${GEZEL_SERVICE_TREE}\dist\bin\gezeld.js"
 !define GEZEL_EXTRACT_CLI "$INSTDIR\resources\app.asar.unpacked\dist\extract-service-bundle.js"
 !define GEZEL_BUNDLE_TARBALL "$INSTDIR\resources\app.asar.unpacked\dist\service-bundle.tar.gz"
 !define GEZEL_BUNDLE_META "$INSTDIR\resources\app.asar.unpacked\dist\service-bundle.meta.json"
-!define GEZEL_UI_DIR "$INSTDIR\resources\app.asar.unpacked\dist\ui"
-!define GEZEL_PNPM_PATH "$INSTDIR\resources\app.asar.unpacked\dist\pnpm-bundle\pnpm.exe"
-!define GEZEL_NODE_PATH "$INSTDIR\resources\app.asar.unpacked\dist\node-bundle\node.exe"
-!define GEZEL_NATIVE_BIN_DIR "$INSTDIR\resources\app.asar.unpacked\native-bin"
+; The first-party service host is GezelService's ImagePath.  It spawns
+; gezeld with the full service environment compiled in (see
+; native/helpers/service-host/src/main.cpp) — the installer no longer
+; carries the env/logging contract.  GEZEL_NSSM* are the retired NSSM
+; wrapper names; upgrades over NSSM-era installs delete the stale files
+; (their service registration is an ordinary SCM entry that
+; RemoveGezelService's sc.exe path handles).
+!define GEZEL_SERVICE_HOST "$INSTDIR\gezel-service-host.exe"
+!define GEZEL_NSSM "$INSTDIR\gezel-nssm.exe"
+!define GEZEL_NSSM_LEGACY "$INSTDIR\nssm.exe"
 
-; Stop/remove both current and legacy registrations.  sc.exe is the fallback
-; when nssm.exe is absent or damaged.  Missing-service errors are expected.
+; Stop/remove both current and legacy registrations via sc.exe.
+; Missing-service errors are expected.  NSSM-era registrations are
+; ordinary SCM services, so the same stop/delete path covers them.
 !macro RemoveGezelService
   ; Quarantine first. If deletion later fails, SCM still cannot auto-start a
   ; partially configured legacy/default-LocalSystem registration on reboot.
   nsExec::ExecToLog '"$SYSDIR\sc.exe" config ${GEZEL_SERVICE_NAME} start= disabled'
   Pop $0
-  ${If} ${FileExists} "$INSTDIR\nssm.exe"
-    nsExec::ExecToLog '"$INSTDIR\nssm.exe" stop ${GEZEL_SERVICE_NAME}'
-    Pop $0
-    nsExec::ExecToLog '"$INSTDIR\nssm.exe" remove ${GEZEL_SERVICE_NAME} confirm'
-    Pop $0
-  ${EndIf}
   nsExec::ExecToLog '"$SYSDIR\sc.exe" stop ${GEZEL_SERVICE_NAME}'
   Pop $0
   nsExec::ExecToLog '"$SYSDIR\sc.exe" delete ${GEZEL_SERVICE_NAME}'
@@ -129,11 +130,16 @@
     Goto SkipNssm
   ${EndIf}
 
-  ${IfNot} ${FileExists} "$INSTDIR\nssm.exe"
-    DetailPrint "ERROR: nssm.exe is missing; the machine service cannot be registered."
-    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel was built without nssm.exe. The machine service will not be installed; the desktop app will use its per-user fallback."
+  ${IfNot} ${FileExists} "${GEZEL_SERVICE_HOST}"
+    DetailPrint "ERROR: gezel-service-host.exe is missing; the machine service cannot be registered."
+    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel was built without gezel-service-host.exe. The machine service will not be installed; the desktop app will use its per-user fallback."
     Goto SkipNssm
   ${EndIf}
+
+  ; Upgrades over NSSM-era installs leave the old wrapper behind (its
+  ; service registration was already removed above; the files are unlocked).
+  Delete "${GEZEL_NSSM}"
+  Delete "${GEZEL_NSSM_LEGACY}"
 
   ; ProgramData permits ordinary users to create child directories.  Take
   ; trusted ownership first so a pre-created Gezel directory cannot retain an
@@ -229,35 +235,18 @@
     Goto SkipNssm
   ${EndIf}
 
-  nsExec::ExecToLog '"$INSTDIR\nssm.exe" install ${GEZEL_SERVICE_NAME} "${GEZEL_INTERPRETER}" "\"${GEZEL_GEZELD_JS}\""'
+  ; One atomic registration: born disabled AND born LocalService — no
+  ; transient LocalSystem window (NSSM's default account) ever exists.
+  ; The registration stays disabled until the SID, privilege, and ACL
+  ; controls below all succeed.  The `\"` quoting yields an ImagePath of
+  ; `"C:\...\gezel-service-host.exe" run` — quoted-with-spaces, not
+  ; hijackable via C:\Program.exe.  sc.exe requires the space after each
+  ; `option=`.
+  nsExec::ExecToLog '"$SYSDIR\sc.exe" create ${GEZEL_SERVICE_NAME} type= own start= disabled obj= "NT AUTHORITY\LocalService" DisplayName= "Gezel Service" binPath= "\"$INSTDIR\gezel-service-host.exe\" run"'
   Pop $0
   ${If} $0 != 0
-    DetailPrint "ERROR: nssm install failed (exit $0)."
+    DetailPrint "ERROR: service registration failed (sc create exit $0)."
     MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not register its machine service. The desktop app will use its per-user fallback."
-    Goto SkipNssm
-  ${EndIf}
-
-  ; NSSM creates services with permissive defaults. Stage this registration
-  ; disabled until account, SID, privilege, ACL, and environment controls all
-  ; succeed. Remove it if SCM refuses the quarantine.
-  nsExec::ExecToLog '"$SYSDIR\sc.exe" config ${GEZEL_SERVICE_NAME} start= disabled'
-  Pop $0
-  ${If} $0 != 0
-    DetailPrint "ERROR: failed to stage GezelService disabled (exit $0)."
-    !insertmacro RemoveGezelService
-    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not safely stage its machine service. The registration was removed; the desktop app will use its per-user fallback."
-    Goto SkipNssm
-  ${EndIf}
-
-  ; NSSM defaults to LocalSystem.  Override that before any start is possible.
-  ; Failure is fatal: remove the registration so it cannot be started later
-  ; with NSSM's privileged default.
-  nsExec::ExecToLog '"$INSTDIR\nssm.exe" set ${GEZEL_SERVICE_NAME} ObjectName "NT AUTHORITY\LocalService"'
-  Pop $0
-  ${If} $0 != 0
-    DetailPrint "ERROR: failed to set LocalService account (exit $0). Removing unsafe registration."
-    !insertmacro RemoveGezelService
-    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not configure its machine service with a least-privileged account. The unsafe registration was removed; the desktop app will use its per-user fallback."
     Goto SkipNssm
   ${EndIf}
 
@@ -307,11 +296,18 @@
     Goto SkipNssm
   ${EndIf}
 
-  nsExec::ExecToLog '"$INSTDIR\nssm.exe" set ${GEZEL_SERVICE_NAME} DisplayName "Gezel Service"'
+  ; The service environment (GEZEL_SYSTEM_SCOPE=1, GEZEL_HOME, temp/profile
+  ; redirects), working directory, and stdout/stderr log redirection with
+  ; rotation are all compiled into gezel-service-host — see env_overrides in
+  ; native/helpers/service-host/src/main.cpp, guarded by its --self-test.
+  ; The installer configures only the SCM-side registration.
+  nsExec::ExecToLog '"$SYSDIR\sc.exe" description ${GEZEL_SERVICE_NAME} "Local-first AI gezels service. Hosts the API and tools used by the Gezel desktop app."'
   Pop $0
-  nsExec::ExecToLog '"$INSTDIR\nssm.exe" set ${GEZEL_SERVICE_NAME} Description "Local-first AI gezels service. Hosts the API and tools used by the Gezel desktop app."'
-  Pop $0
-  nsExec::ExecToLog '"$INSTDIR\nssm.exe" set ${GEZEL_SERVICE_NAME} Start SERVICE_AUTO_START'
+
+  ; Enabling autostart is deliberately the LAST mutating step: the service
+  ; becomes startable only after every account/SID/privilege/ACL control
+  ; above succeeded.
+  nsExec::ExecToLog '"$SYSDIR\sc.exe" config ${GEZEL_SERVICE_NAME} start= auto'
   Pop $0
   ${If} $0 != 0
     DetailPrint "ERROR: failed to enable GezelService autostart (exit $0)."
@@ -319,31 +315,8 @@
     MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not enable its machine service. The registration was removed; the desktop app will use its per-user fallback."
     Goto SkipNssm
   ${EndIf}
-  nsExec::ExecToLog '"$INSTDIR\nssm.exe" set ${GEZEL_SERVICE_NAME} AppDirectory "${GEZEL_DATA_DIR}"'
-  Pop $0
 
-  ; GEZEL_SYSTEM_SCOPE is load-bearing: it tells gezeld that auth-token is a
-  ; cross-account client credential.  The Windows DACL above, not POSIX mode
-  ; bits, confines its readability to desktop users.
-  nsExec::ExecToLog '"$INSTDIR\nssm.exe" set ${GEZEL_SERVICE_NAME} AppEnvironmentExtra "ELECTRON_RUN_AS_NODE=1" "GEZEL_HOME=${GEZEL_DATA_DIR}" "GEZEL_SYSTEM_SCOPE=1" "GEZEL_UI_DIR=${GEZEL_UI_DIR}" "GEZEL_PNPM_PATH=${GEZEL_PNPM_PATH}" "GEZEL_NODE_PATH=${GEZEL_NODE_PATH}" "GEZEL_NATIVE_BIN_DIR=${GEZEL_NATIVE_BIN_DIR}" "HOME=${GEZEL_DATA_DIR}" "USERPROFILE=${GEZEL_DATA_DIR}" "APPDATA=${GEZEL_DATA_DIR}\appdata" "LOCALAPPDATA=${GEZEL_DATA_DIR}\localappdata" "TEMP=${GEZEL_DATA_DIR}\tmp" "TMP=${GEZEL_DATA_DIR}\tmp" "TMPDIR=${GEZEL_DATA_DIR}\tmp"'
-  Pop $0
-  ${If} $0 != 0
-    DetailPrint "ERROR: failed to set required service environment (exit $0)."
-    !insertmacro RemoveGezelService
-    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not configure its required machine-service environment. The registration was removed; the desktop app will use its per-user fallback."
-    Goto SkipNssm
-  ${EndIf}
-
-  nsExec::ExecToLog '"$INSTDIR\nssm.exe" set ${GEZEL_SERVICE_NAME} AppStdout "${GEZEL_DATA_DIR}\logs\service-stdout.log"'
-  Pop $0
-  nsExec::ExecToLog '"$INSTDIR\nssm.exe" set ${GEZEL_SERVICE_NAME} AppStderr "${GEZEL_DATA_DIR}\logs\service-stderr.log"'
-  Pop $0
-  nsExec::ExecToLog '"$INSTDIR\nssm.exe" set ${GEZEL_SERVICE_NAME} AppRotateFiles 1'
-  Pop $0
-  nsExec::ExecToLog '"$INSTDIR\nssm.exe" set ${GEZEL_SERVICE_NAME} AppRotateBytes 10485760'
-  Pop $0
-
-  nsExec::ExecToLog '"$INSTDIR\nssm.exe" start ${GEZEL_SERVICE_NAME}'
+  nsExec::ExecToLog '"$SYSDIR\sc.exe" start ${GEZEL_SERVICE_NAME}'
   Pop $0
   ${If} $0 != 0
     DetailPrint "WARNING: GezelService failed to start (exit $0); the desktop app will use its per-user fallback."

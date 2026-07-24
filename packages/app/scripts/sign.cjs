@@ -1,8 +1,9 @@
 /**
- * Windows code-signing hook for electron-builder.
- *
- * Called once per file that needs Authenticode signing — the `gezel.exe`
- * inside the installer payload and the NSIS installer .exe itself. We use
+ * Windows code-signing for electron-builder — the `signtoolOptions.sign`
+ * hook (called once per file electron-builder targets itself: `gezel.exe`
+ * and the NSIS installer .exe) plus the `signFile`/`isValidlySigned`
+ * helpers the afterPack sweep in `after-pack.cjs` uses to cover the rest
+ * of the payload (pnpm.exe, our-built engine DLLs). We use
  * `signtool.exe` with the Azure Trusted Signing dlib so the signing key
  * lives in a cloud HSM, not on disk.
  *
@@ -44,21 +45,36 @@ function findSignTool() {
   return 'signtool.exe';
 }
 
-exports.default = async function sign(configuration) {
+/**
+ * True when Trusted Signing is configured for this build. When false,
+ * every signing entry point below no-ops (local dev builds stay unsigned).
+ */
+function signingConfigured() {
   const dlibPath = process.env.TRUSTED_SIGNING_DLIB_PATH;
   const metadataPath = process.env.TRUSTED_SIGNING_METADATA_PATH;
+  return Boolean(dlibPath && metadataPath && existsSync(dlibPath));
+}
 
-  if (!dlibPath || !metadataPath) {
-    console.log(`[sign] skipping (no Trusted Signing SDK env): ${configuration.path}`);
-    return;
-  }
-  if (!existsSync(dlibPath)) {
-    console.log(`[sign] skipping (dlib not found at ${dlibPath}): ${configuration.path}`);
-    return;
-  }
-
+/**
+ * Does this file already carry a signature that validates under the
+ * default Authenticode policy? Used by the afterPack sweep to leave
+ * upstream-signed binaries (node.exe/OpenJS, NVIDIA redistributables,
+ * born-signed gezel-* engines) untouched.
+ */
+function isValidlySigned(filePath) {
   const signtool = findSignTool();
-  console.log(`[sign] signing ${configuration.path} with ${signtool}`);
+  try {
+    execSync(`"${signtool}" verify /pa /q "${filePath}"`, { stdio: 'pipe' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Authenticode-sign one file via signtool + the Trusted Signing dlib. */
+function signFile(filePath) {
+  const signtool = findSignTool();
+  console.log(`[sign] signing ${filePath} with ${signtool}`);
 
   const args = [
     `"${signtool}"`,
@@ -71,17 +87,29 @@ exports.default = async function sign(configuration) {
     '/td',
     'SHA256',
     '/dlib',
-    `"${dlibPath}"`,
+    `"${process.env.TRUSTED_SIGNING_DLIB_PATH}"`,
     '/dmdf',
-    `"${metadataPath}"`,
-    `"${configuration.path}"`,
+    `"${process.env.TRUSTED_SIGNING_METADATA_PATH}"`,
+    `"${filePath}"`,
   ];
 
   try {
     execSync(args.join(' '), { stdio: 'inherit' });
-    console.log(`[sign] signed ${configuration.path}`);
+    console.log(`[sign] signed ${filePath}`);
   } catch (err) {
-    console.error(`[sign] signing failed for ${configuration.path}`);
+    console.error(`[sign] signing failed for ${filePath}`);
     throw err;
   }
+}
+
+exports.signingConfigured = signingConfigured;
+exports.isValidlySigned = isValidlySigned;
+exports.signFile = signFile;
+
+exports.default = async function sign(configuration) {
+  if (!signingConfigured()) {
+    console.log(`[sign] skipping (no Trusted Signing SDK env): ${configuration.path}`);
+    return;
+  }
+  signFile(configuration.path);
 };

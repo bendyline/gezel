@@ -209,24 +209,39 @@ jobs:
           node scripts/fetch-native-binaries.mjs --version "$version"
           ls -la packages/app/native-bin/
 
+      - name: Verify Authenticode on staged native binaries
+        shell: pwsh
+        run: |
+          # The native build workflow signs every engine exe at birth
+          # (Azure Trusted Signing). fetch-native-binaries.mjs proved the
+          # bytes match SHA256SUMS; this proves those bytes carry a valid
+          # signature — a native release built without signing secrets
+          # (fork/dispatch build) must never reach a production installer.
+          $exes = Get-ChildItem 'packages/app/native-bin' -Recurse -Filter '*.exe'
+          if ($exes.Count -eq 0) { throw 'No native .exe binaries staged' }
+          foreach ($exe in $exes) {
+            $sig = Get-AuthenticodeSignature $exe.FullName
+            if ($sig.Status -ne 'Valid') {
+              throw "Unsigned/invalid native binary $($exe.FullName): $($sig.Status)"
+            }
+            Write-Host "[native] valid signature: $($exe.Name)"
+          }
+
       - name: Build + produce service bundle
         run: pnpm build:packaged
 
-      - name: Verify vendored NSSM (Windows Service wrapper)
+      - name: Verify service host staged (Windows Service host)
         shell: pwsh
         run: |
-          # nssm.exe is vendored in-repo, byte-identical to the official
-          # nssm-2.24.zip win64 binary — provenance, hash pins, and the
-          # bump procedure live in packages/app/installer/nssm/README.md.
-          # Verifying (not downloading) keeps releases off the nssm.cc
-          # availability/supply chain; a mismatch means the committed
-          # binary was swapped without an intentional bump — fail loud.
-          $dest = 'packages/app/installer/nssm/nssm.exe'
-          if (!(Test-Path $dest)) { throw "[nssm] missing $dest — the vendored binary should be committed" }
-          $hash = (Get-FileHash $dest -Algorithm SHA256).Hash
-          $expected = 'f689ee9af94b00e9e3f0bb072b34caaf207f32dcb4f5782fc9ca351df9a06c97'
-          if ($hash -ne $expected) { throw "[nssm] hash mismatch (got $hash, expected $expected)" }
-          Write-Host "[nssm] verified vendored $dest sha256=$hash"
+          # gezel-service-host is the first-party GezelService host,
+          # built + signed by the native pipeline and staged by
+          # fetch-native-binaries.mjs. electron-builder ships it via
+          # win.extraFiles; if it's missing here the installer would
+          # build fine but never register the machine service — fail
+          # loud instead of shipping a service-less installer.
+          $host_exe = 'packages/app/native-bin/win32-x64/gezel-service-host.exe'
+          if (!(Test-Path $host_exe)) { throw "[service-host] missing $host_exe — native release did not include the service host" }
+          Write-Host "[service-host] staged $host_exe"
 
       - name: Install Trusted Signing SDK
         shell: pwsh
@@ -259,15 +274,27 @@ jobs:
       - name: Verify Windows signatures
         shell: pwsh
         run: |
+          # The whole shipped payload must be validly signed: the installer
+          # and gezel.exe (electron-builder's own pass), pnpm.exe + our-built
+          # engine DLLs (the afterPack sweep in scripts/after-pack.cjs),
+          # native engine exes + gezel-service-host.exe (signed at birth),
+          # and node.exe (upstream OpenJS signature). Anything Unsigned
+          # here means the sweep regressed — fail the release.
           $installers = Get-ChildItem 'packages/app/dist/installers/*.exe'
           if ($installers.Count -eq 0) { throw 'No Windows installer produced' }
-          $application = Get-Item 'packages/app/dist/installers/win-unpacked/gezel.exe' -ErrorAction Stop
-          foreach ($executable in @($installers) + @($application)) {
+          $unpacked = 'packages/app/dist/installers/win-unpacked'
+          $payload = @(
+            Get-Item "$unpacked/gezel.exe" -ErrorAction Stop
+            Get-Item "$unpacked/gezel-service-host.exe" -ErrorAction Stop
+          )
+          $payload += Get-ChildItem "$unpacked/resources/app.asar.unpacked" -Recurse -Include '*.exe', '*.dll' -ErrorAction SilentlyContinue
+          foreach ($executable in @($installers) + $payload) {
             $signature = Get-AuthenticodeSignature $executable.FullName
             if ($signature.Status -ne 'Valid') {
-              throw "Invalid Authenticode signature for $($executable.Name): $($signature.Status)"
+              throw "Invalid Authenticode signature for $($executable.FullName): $($signature.Status)"
             }
           }
+          Write-Host "Verified $($installers.Count + $payload.Count) signed files"
 
       - name: Verify Windows installer legal payload
         shell: pwsh
@@ -327,6 +354,28 @@ jobs:
           node scripts/fetch-native-binaries.mjs --version "$version"
           ls -la packages/app/native-bin/
 
+      - name: Verify Developer ID signatures on staged native binaries
+        run: |
+          set -euo pipefail
+          # The native build workflow signs every Mach-O (engine exes and
+          # peer dylibs) at birth with the Developer ID cert. The fetch
+          # script proved bytes match SHA256SUMS; this proves the bytes
+          # are signed — an unsigned native release (built without
+          # secrets) must never reach a production installer.
+          count=0
+          while IFS= read -r bin; do
+            if file -b "$bin" | grep -q 'Mach-O'; then
+              codesign --verify --strict "$bin" \
+                || { echo "::error::unsigned/invalid native binary: $bin"; exit 1; }
+              count=$((count + 1))
+            fi
+          done < <(find packages/app/native-bin -type f)
+          if [[ "$count" -eq 0 ]]; then
+            echo "::error::no Mach-O binaries staged under packages/app/native-bin"
+            exit 1
+          fi
+          echo "verified $count signed Mach-O binaries"
+
       - name: Build + produce service bundle
         run: pnpm build:packaged
 
@@ -373,6 +422,14 @@ jobs:
           pkgutil --check-signature "$pkg"
           spctl --assess --type install --verbose=4 "$pkg"
           xcrun stapler validate "$pkg"
+
+          # Also verify the packaged .app payload directly: the deep check
+          # covers every nested Mach-O (including asar-unpacked native-bin
+          # binaries electron-builder re-signed), proving the signing pass
+          # actually swept the whole bundle, not just the outer .pkg.
+          app=$(find packages/app/dist/installers -maxdepth 2 -name '*.app' -print -quit)
+          test -n "$app"
+          codesign --verify --strict --deep --verbose=2 "$app"
 
       - name: Verify macOS installer legal payload
         run: |
@@ -500,6 +557,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      # Sigstore build-provenance attestations over the installers.
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -507,6 +567,18 @@ jobs:
 
       - name: List collected artifacts
         run: find artifacts -type f | sort
+
+      # SLSA build-provenance over the installers: users can prove an
+      # installer came from this workflow at this commit via
+      # `gh attestation verify <file> --repo bendyline/gezel`.
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: |
+            artifacts/windows-artifacts/*.exe
+            artifacts/macos-artifacts/*.pkg
+            artifacts/linux-artifacts-*/*.deb
+            artifacts/linux-artifacts-*/*.rpm
 
       - name: Refuse to modify a published release
         env:

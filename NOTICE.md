@@ -90,20 +90,6 @@ the applicable upstream license and notice material.
 `pnpm audit:licenses` encodes these as narrow reviewed exceptions. It remains
 red for any different package, version, or reported license expression.
 
-### Windows service wrapper (NSSM)
-
-The Windows installer ships the [Non-Sucking Service Manager](https://nssm.cc/)
-to register `gezeld` as the `GezelService` machine service.
-
-- **NSSM 2.24** (win64) — public domain. Vendored in-repo at
-  `packages/app/installer/nssm/nssm.exe`, byte-identical to the binary in
-  the official `nssm-2.24.zip` release (exe sha256
-  `f689ee9af94b00e9e3f0bb072b34caaf207f32dcb4f5782fc9ca351df9a06c97`).
-  The pin is enforced by the fetch script, the release workflow, and a
-  unit test; see
-  [packages/app/installer/nssm/README.md](packages/app/installer/nssm/README.md)
-  for provenance and the bump procedure.
-
 ### Vendored connector components (Prismatic)
 
 Gezel's `spectral` connector driver runs Apache-2.0

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -84,5 +85,38 @@ describe('installNodeIfNeeded', () => {
     await installNodeIfNeeded({ home, bundleDir });
     const marker = await readFile(join(home, 'bin', 'node.version'), 'utf8');
     expect(marker.trim()).toBe('24.18.0');
+  });
+
+  it('installs when the bundle sha256 manifest matches', async () => {
+    await writeBundle('24.18.0');
+    const binary = process.platform === 'win32' ? 'node.exe' : 'node';
+    const digest = createHash('sha256').update('fake-node-binary').digest('hex');
+    await writeFile(join(bundleDir, 'sha256.txt'), `${digest}  ${binary}\n`, 'utf8');
+    const res = await installNodeIfNeeded({ home, bundleDir });
+    expect(res.action).toBe('fresh-install');
+  });
+
+  it('refuses to install a bundle whose binary fails the sha256 manifest', async () => {
+    await writeBundle('24.18.0');
+    const binary = process.platform === 'win32' ? 'node.exe' : 'node';
+    const digestOfOtherBytes = createHash('sha256').update('tampered').digest('hex');
+    await writeFile(join(bundleDir, 'sha256.txt'), `${digestOfOtherBytes}  ${binary}\n`, 'utf8');
+    const warnings: string[] = [];
+    const res = await installNodeIfNeeded({
+      home,
+      bundleDir,
+      logger: { warn: (m) => warnings.push(m) },
+    });
+    expect(res.action).toBe('no-bundle');
+    expect(res.binaryPath).toBeNull();
+    expect(existsSync(join(home, 'bin', binary))).toBe(false);
+    expect(warnings.join('\n')).toContain('integrity check');
+  });
+
+  it('refuses to install when the manifest is present but missing the binary entry', async () => {
+    await writeBundle('24.18.0');
+    await writeFile(join(bundleDir, 'sha256.txt'), '\n', 'utf8');
+    const res = await installNodeIfNeeded({ home, bundleDir });
+    expect(res.action).toBe('no-bundle');
   });
 });

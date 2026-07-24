@@ -273,6 +273,13 @@ async function main() {
   await copyFile(cacheLicense, distLicense);
   if (process.platform !== 'win32') await chmod(distBinary, 0o755);
   await writeFile(distVersion, `${version}\n`, 'utf8');
+  // Bundle-local integrity manifest: hash of the STAGED binary (the unix
+  // pin in node-version.ts is the tarball's sha, which the extracted
+  // binary can't be checked against). The supervisor's extract step
+  // re-hashes against this at install time, extending the pin → download
+  // → stage chain through to ~/.gezel/bin.
+  const stagedSha = await sha256File(distBinary);
+  await writeFile(join(distDir, 'sha256.txt'), `${stagedSha}  ${info.outName}\n`, 'utf8');
   console.log(`[fetch-node] staged ${distBinary}`);
 }
 

@@ -37,7 +37,7 @@ The Windows NSIS target produces `electron-updater` metadata. The PKG-only macOS
 
 The installers register `gezeld` as a machine service:
 
-- Windows: an NSSM-wrapped `GezelService` under a restricted LocalService/service-SID identity.
+- Windows: `GezelService` hosted by the first-party `gezel-service-host` helper under a restricted LocalService/service-SID identity.
 - macOS: `com.bendyline.gezeld` as a LaunchDaemon using the `_gezeld` account.
 - Linux: `gezeld.service` under the dedicated `gezel` account, managed by systemd.
 

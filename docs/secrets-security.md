@@ -30,7 +30,7 @@ the process is running as a non-login system user.
 | Mode | OS user | Effective backend |
 |---|---|---|
 | **macOS production** (LaunchDaemon, [com.bendyline.gezeld.plist](../packages/app/installer/com.bendyline.gezeld.plist)) | `_gezeld` (no login session, `NFSHomeDirectory=/var/empty`) | **File** — `_gezeld` has no accessible keychain → probe fails |
-| **Windows production** (NSSM machine service) | restricted `LocalService` | **File** — the non-login service identity has no user Credential Manager session |
+| **Windows production** (gezel-service-host machine service) | restricted `LocalService` | **File** — the non-login service identity has no user Credential Manager session |
 | **Linux production** (systemd unit) | dedicated system user | **File** — no D-Bus user session → Secret Service unreachable |
 | **macOS embedded mode** (`GEZEL_EMBEDDED=1`, supervisor fallback) | logged-in user | **Keychain** — login.keychain |
 | **macOS local-spawn fallback** (mode 4) | logged-in user (Electron's child) | **Keychain** — login.keychain |

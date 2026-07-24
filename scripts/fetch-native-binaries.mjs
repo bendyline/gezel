@@ -44,8 +44,9 @@
  * (Windows). No new node_modules deps needed for a root-level script.
  */
 import { spawnSync } from 'node:child_process';
-import { constants, accessSync, createWriteStream, mkdirSync } from 'node:fs';
-import { chmod, mkdir, mkdtemp, readdir, rm } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { constants, accessSync, createReadStream, createWriteStream, mkdirSync } from 'node:fs';
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { setDefaultAutoSelectFamilyAttemptTimeout } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -137,6 +138,11 @@ async function fetchFromRelease({ token, platform, version, variant }) {
   const ext = platform.startsWith('win32') ? 'zip' : 'tar.gz';
   const ver = release.tag_name.replace(/^native-v/, '');
 
+  // Integrity: every archive must match the SHA256SUMS the build workflow
+  // published alongside it. A release without SHA256SUMS, or an archive
+  // missing from it, is refused outright — never extract unverified bytes.
+  const sums = await fetchSha256Sums({ token, release });
+
   // Default behavior fetches every variant for this platform so the
   // user can flip the Settings → Advanced → Engine backend dropdown
   // freely without re-running the script. `--variant` narrows to one.
@@ -159,6 +165,13 @@ async function fetchFromRelease({ token, platform, version, variant }) {
       process.exit(1);
     }
 
+    const expectedSha256 = sums.get(assetName);
+    if (!expectedSha256) {
+      console.error(`error: ${assetName} has no entry in SHA256SUMS for ${release.tag_name}.`);
+      console.error('       Refusing to extract an unverifiable archive.');
+      process.exit(1);
+    }
+
     const targetDir = join(buildRoot, platformKey);
     await downloadAndExtract({
       token,
@@ -167,6 +180,7 @@ async function fetchFromRelease({ token, platform, version, variant }) {
       name: assetName,
       targetDir,
       isZip: ext === 'zip',
+      expectedSha256,
     });
     console.log(`✓ ${platformKey}: extracted into ${targetDir}`);
     await listExtracted(targetDir);
@@ -213,6 +227,12 @@ async function fetchFromRun({ token, platform, runId, variant }) {
         targetDir,
         isZip: true,
       });
+      // GitHub re-zips run artifacts server-side, so the archive itself has
+      // no stable hash. Verify the extracted main binary against the
+      // `<artifact>-manifest` sibling the build job uploaded instead.
+      // (Manifests cover the main engine binary only, not peer libs — the
+      // release path's SHA256SUMS check is the full-coverage one.)
+      await verifyAgainstManifest({ token, artifacts, artifactName: art.name, targetDir });
     }
     console.log(`✓ ${platformKey}: extracted into ${targetDir}`);
     await listExtracted(targetDir);
@@ -246,31 +266,131 @@ async function listAvailable(token, platform) {
   }
 }
 
+// ── Integrity ──────────────────────────────────────────────────────
+
+/** Parse the release's SHA256SUMS asset into a name → hex-digest map. */
+async function fetchSha256Sums({ token, release }) {
+  const asset = release.assets?.find((a) => a.name === 'SHA256SUMS');
+  if (!asset) {
+    console.error(`error: release ${release.tag_name} has no SHA256SUMS asset.`);
+    console.error('       Refusing to fetch unverifiable archives.');
+    process.exit(1);
+  }
+  const res = await fetch(asset.url, {
+    redirect: 'follow',
+    headers: {
+      Accept: 'application/octet-stream',
+      Authorization: `token ${token}`,
+      'User-Agent': 'gezel-fetch-native',
+    },
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status} downloading SHA256SUMS`);
+  const sums = new Map();
+  for (const line of (await res.text()).split('\n')) {
+    const m = line.trim().match(/^([0-9a-f]{64})\s+\*?(.+)$/i);
+    if (m) sums.set(m[2], m[1].toLowerCase());
+  }
+  if (sums.size === 0) {
+    console.error(`error: SHA256SUMS for ${release.tag_name} parsed to zero entries.`);
+    process.exit(1);
+  }
+  return sums;
+}
+
+async function sha256File(path) {
+  const hash = createHash('sha256');
+  await new Promise((res, rej) => {
+    createReadStream(path)
+      .on('data', (c) => hash.update(c))
+      .on('end', res)
+      .on('error', rej);
+  });
+  return hash.digest('hex');
+}
+
+/**
+ * Verify extracted binaries from a run artifact against its `-manifest`
+ * sibling (`<engine>.sha256`, lines of `<hex>  <binary-name>`). The
+ * manifest is required — a run without one predates the integrity
+ * pipeline and shouldn't be consumed via this script.
+ */
+async function verifyAgainstManifest({ token, artifacts, artifactName, targetDir }) {
+  const manifest = artifacts.find((a) => a.name === `${artifactName}-manifest`);
+  if (!manifest) {
+    console.error(`error: no ${artifactName}-manifest artifact on this run.`);
+    console.error('       Refusing to trust unverifiable extracted binaries.');
+    process.exit(1);
+  }
+  const scratch = await mkdtemp(join(tmpdir(), 'gezel-native-manifest-'));
+  try {
+    const zip = join(scratch, 'manifest.zip');
+    await downloadToFile({
+      token,
+      url: manifest.archive_download_url,
+      accept: 'application/vnd.github+json',
+      dest: zip,
+    });
+    await extractZip(zip, scratch);
+    for (const entry of await readdir(scratch)) {
+      if (!entry.endsWith('.sha256')) continue;
+      const text = await readFile(join(scratch, entry), 'utf8');
+      for (const line of text.split('\n')) {
+        const m = line.trim().match(/^([0-9a-f]{64})\s+\*?(.+)$/i);
+        if (!m) continue;
+        const [, expected, binName] = m;
+        const actual = await sha256File(join(targetDir, binName));
+        if (actual !== expected.toLowerCase()) {
+          throw new Error(
+            `sha256 mismatch for ${binName} (from ${entry}): expected ${expected}, got ${actual}`,
+          );
+        }
+        console.log(`    ✓ verified ${binName}`);
+      }
+    }
+  } finally {
+    await rm(scratch, { recursive: true, force: true });
+  }
+}
+
 // ── Download + extract via system tools ────────────────────────────
 
-async function downloadAndExtract({ token, url, accept, name, targetDir, isZip }) {
+async function downloadToFile({ token, url, accept, dest }) {
+  const res = await fetch(url, {
+    redirect: 'follow',
+    headers: {
+      Accept: accept,
+      Authorization: `token ${token}`,
+      'User-Agent': 'gezel-fetch-native',
+    },
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText} from ${url}`);
+  mkdirSync(dirname(dest), { recursive: true });
+  const file = createWriteStream(dest);
+  const reader = res.body.getReader();
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (!file.write(value)) await new Promise((r) => file.once('drain', r));
+  }
+  await new Promise((r) => file.end(r));
+}
+
+async function downloadAndExtract({ token, url, accept, name, targetDir, isZip, expectedSha256 }) {
   const scratch = await mkdtemp(join(tmpdir(), 'gezel-native-'));
   const archive = join(scratch, name);
   try {
     console.log(`    downloading ${name}…`);
-    const res = await fetch(url, {
-      redirect: 'follow',
-      headers: {
-        Accept: accept,
-        Authorization: `token ${token}`,
-        'User-Agent': 'gezel-fetch-native',
-      },
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText} from ${url}`);
-    mkdirSync(dirname(archive), { recursive: true });
-    const file = createWriteStream(archive);
-    const reader = res.body.getReader();
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      if (!file.write(value)) await new Promise((r) => file.once('drain', r));
+    await downloadToFile({ token, url, accept, dest: archive });
+
+    if (expectedSha256) {
+      const actual = await sha256File(archive);
+      if (actual !== expectedSha256) {
+        throw new Error(
+          `sha256 mismatch for ${name}: expected ${expectedSha256}, got ${actual}. The downloaded archive does not match the release SHA256SUMS — refusing to extract.`,
+        );
+      }
+      console.log('    ✓ sha256 verified against SHA256SUMS');
     }
-    await new Promise((r) => file.end(r));
 
     await mkdir(targetDir, { recursive: true });
     console.log(`    extracting → ${targetDir}`);

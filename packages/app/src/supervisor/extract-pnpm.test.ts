@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -86,5 +87,41 @@ describe('installPnpmIfNeeded', () => {
     await installPnpmIfNeeded({ home, bundleDir });
     const marker = await readFile(join(home, 'bin', 'pnpm.version'), 'utf8');
     expect(marker.trim()).toBe('11.15.1');
+  });
+
+  it('installs when the bundle sha256 manifest matches', async () => {
+    await writeBundle('11.15.1');
+    const binary = process.platform === 'win32' ? 'pnpm.exe' : 'pnpm';
+    const binDigest = createHash('sha256').update('fake-pnpm-binary').digest('hex');
+    const mjsDigest = createHash('sha256').update('// fake runtime\n').digest('hex');
+    await writeFile(
+      join(bundleDir, 'sha256.txt'),
+      `${binDigest}  ${binary}\n${mjsDigest}  dist/pnpm.mjs\n`,
+      'utf8',
+    );
+    const res = await installPnpmIfNeeded({ home, bundleDir });
+    expect(res.action).toBe('fresh-install');
+  });
+
+  it('refuses to install a bundle whose files fail the sha256 manifest', async () => {
+    await writeBundle('11.15.1');
+    const binary = process.platform === 'win32' ? 'pnpm.exe' : 'pnpm';
+    const wrongDigest = createHash('sha256').update('tampered').digest('hex');
+    const mjsDigest = createHash('sha256').update('// fake runtime\n').digest('hex');
+    await writeFile(
+      join(bundleDir, 'sha256.txt'),
+      `${wrongDigest}  ${binary}\n${mjsDigest}  dist/pnpm.mjs\n`,
+      'utf8',
+    );
+    const warnings: string[] = [];
+    const res = await installPnpmIfNeeded({
+      home,
+      bundleDir,
+      logger: { warn: (m) => warnings.push(m) },
+    });
+    expect(res.action).toBe('no-bundle');
+    expect(res.binaryPath).toBeNull();
+    expect(existsSync(join(home, 'bin', 'pnpm-runtime'))).toBe(false);
+    expect(warnings.join('\n')).toContain('integrity check');
   });
 });

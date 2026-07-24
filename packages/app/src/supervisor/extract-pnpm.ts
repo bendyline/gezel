@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import { chmod, cp, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { verifyBundleManifest } from './bundle-manifest.js';
 
 export interface PnpmInstallOptions {
   /** User home root — runtime lands at `<home>/bin/pnpm-runtime/`. */
@@ -82,6 +83,18 @@ export async function installPnpmIfNeeded(opts: PnpmInstallOptions): Promise<Pnp
       version: installedVersion,
       action: 'up-to-date',
     };
+  }
+
+  // Re-hash the load-bearing bundle files against the bundle's
+  // sha256.txt (written by fetch-pnpm.mjs) before installing. A
+  // corrupted or tampered bundle must not land in <home>/bin — fall
+  // back to system pnpm.
+  const integrity = await verifyBundleManifest(bundleDir, [binaryName, 'dist/pnpm.mjs']);
+  if (!integrity.ok) {
+    logger?.warn?.(
+      `[supervisor] pnpm bundle failed integrity check (${integrity.reason}); refusing to install — falling back to system pnpm`,
+    );
+    return { binaryPath: null, version: null, action: 'no-bundle' };
   }
 
   await mkdir(installDir, { recursive: true });
