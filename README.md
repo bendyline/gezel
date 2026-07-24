@@ -8,22 +8,6 @@ Instead of starting with an anonymous chat, you meet the **Meester**: a guildmas
 
 > **Project status: early preview.** Gezel is usable, but installers, data formats, extension APIs, and model support may still change. Keep backups of important work and expect rough edges. Please [report issues](https://github.com/bendyline/gezel/issues/new).
 
-## Install
-
-Download the newest installer from [GitHub Releases](https://github.com/bendyline/gezel/releases/latest):
-
-| Platform | Supported release | Installer |
-| --- | --- | --- |
-| Windows | Windows 10/11, x64 | `Gezel-<version>-x64.exe` |
-| macOS | Apple Silicon (arm64) | `Gezel-<version>-arm64.pkg` |
-| Linux | x64 and arm64 distributions using systemd | `Gezel-<version>-<arch>.deb` or `.rpm` |
-
-The production installers require administrator access because they register `gezeld`, Gezel's background service, with the operating system. Intel Macs, Windows on Arm, AppImage, DMG, Flatpak, and Snap packages are not currently release targets.
-
-After installation, launch Gezel and follow first-run setup. You can download a compatible local model or configure a supported provider. The desktop app includes the runtimes it needs; end users do not need to install Node.js or pnpm.
-
-For installation problems, see [Support](SUPPORT.md). Maintainers should use the authoritative [release guide](RELEASE.md).
-
 ## What “local-first” means
 
 Gezel does not put a Bendyline cloud service between you and your models. The daemon, application state, projects, sessions, documents, memories, and rebuildable indexes live on the machine running Gezel. Primary state is stored in inspectable files where practical.

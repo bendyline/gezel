@@ -8,7 +8,7 @@ import { existsSync } from 'node:fs';
 import { cp, mkdir, readFile, readdir } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { verifyNoticeInventory } from './check-notice.mjs';
+import { verifyNativeNoticeInventory } from './check-notice.mjs';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(scriptDir, '..');
@@ -77,7 +77,7 @@ async function findCudaEula() {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  await verifyNoticeInventory();
+  await verifyNativeNoticeInventory();
   if (!existsSync(args.output)) throw new Error(`native output does not exist: ${args.output}`);
   const legalRoot = join(args.output, 'THIRD_PARTY_LICENSES');
   await mkdir(legalRoot, { recursive: true });

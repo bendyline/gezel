@@ -293,6 +293,11 @@ async function checkBundledRuntimes(notice) {
   return { count: Object.keys(versions).length, versions };
 }
 
+export async function verifyNativeNoticeInventory() {
+  const notice = await readFile(join(repoRoot, 'NOTICE.md'), 'utf8');
+  return checkNativeInventory(notice);
+}
+
 export async function verifyNoticeInventory() {
   const notice = await readFile(join(repoRoot, 'NOTICE.md'), 'utf8');
   const native = await checkNativeInventory(notice);

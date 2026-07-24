@@ -23,10 +23,20 @@ set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
 repo_root="$(cd "$here/../../.." && pwd)"
+src="$here/.upstream"
+cuda_float_patch="$here/patches/cuda-float-max.patch"
 
 # ── 1. Ensure upstream is cloned + pinned ──────────────────────────
+# Recover from an interrupted earlier build that applied our exact patch but
+# did not reach the EXIT cleanup below. Do this before fetch-upstream so a
+# later pin bump cannot be blocked by that ignored checkout modification.
+if [[ -d "$src/.git" ]] &&
+   ! git -C "$src" diff --quiet -- ds4_cuda.cu &&
+   git -C "$src" apply --reverse --check "$cuda_float_patch"; then
+  git -C "$src" apply --reverse "$cuda_float_patch"
+  echo "[build] removed stale ds4 CUDA FLT_MAX compatibility patch"
+fi
 "$repo_root/native/scripts/fetch-upstream.sh" ds4
-src="$here/.upstream"
 
 # ── 2. Resolve target platform ─────────────────────────────────────
 os="$(uname -s)"
@@ -57,6 +67,28 @@ case "$os" in
     exit 0
     ;;
 esac
+
+# The pinned upstream CUDA source uses FLT_MAX without including the header
+# that defines it. Apply a visible, pin-scoped patch only for the Linux build,
+# then restore the ignored upstream checkout so later pin bumps stay clean.
+cuda_float_patch_applied=false
+restore_cuda_float_patch() {
+  status=$?
+  if [[ "$cuda_float_patch_applied" == true ]] &&
+     ! git -C "$src" apply --reverse "$cuda_float_patch"; then
+    echo "[build] error: failed to restore ds4_cuda.cu after compatibility patch" >&2
+    [[ "$status" -ne 0 ]] || status=1
+  fi
+  trap - EXIT
+  exit "$status"
+}
+trap restore_cuda_float_patch EXIT
+if [[ "$platform" == linux-* ]] &&
+   ! grep -Eq '^#include <(float\.h|cfloat)>' "$src/ds4_cuda.cu"; then
+  git -C "$src" apply "$cuda_float_patch"
+  cuda_float_patch_applied=true
+  echo "[build] applied ds4 CUDA FLT_MAX compatibility patch"
+fi
 
 # ── 3. Build (make-based; one GPU backend per platform) ────────────
 make_args=(ds4-server)

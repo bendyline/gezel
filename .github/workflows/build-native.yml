@@ -464,7 +464,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential cmake ninja-build \
-            libssl-dev pkg-config wget xz-utils
+            libssl-dev libvulkan-dev pkg-config wget xz-utils
           VK_VER='${{ env.VULKAN_SDK_VERSION }}'
           wget -q -O /tmp/vulkan-sdk.tar.xz \
             "https://sdk.lunarg.com/sdk/download/${VK_VER}/linux/vulkansdk-linux-x86_64-${VK_VER}.tar.xz"
@@ -598,12 +598,14 @@ jobs:
           REQUIRE_CUDA_EULA: ${{ matrix.needs_cuda }}
         run: |
           set -euo pipefail
-          args=()
+          output="${{ steps.outdir.outputs.dir }}"
           if [[ "$REQUIRE_CUDA_EULA" == "true" ]]; then
-            args+=(--cuda)
+            node scripts/stage-native-artifact-licenses.mjs \
+              --output "$output" --cuda
+          else
+            node scripts/stage-native-artifact-licenses.mjs \
+              --output "$output"
           fi
-          node scripts/stage-native-artifact-licenses.mjs \
-            --output "${{ steps.outdir.outputs.dir }}" "${args[@]}"
 
       - name: Smoke test
         if: steps.preflight.outputs.pinned == 'true'
