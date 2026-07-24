@@ -93,7 +93,7 @@ If the answer to all three is no, don't add a scenario. The matrix has a real ma
 
 ## Reporting + history
 
-Every trial writes its `result.json` to [evals/runs/](../evals/runs/). The `/eval-run` skill produces a `postmortem.md` per trial with a 0-10 capability composite + a separate performance section. Postmortems are the unit of strategic review — read a sample after every matrix run, look for patterns (same red flag across scenarios? same auto-answer choice driving runs off course? same host beating another host on the same scenario+model?).
+Every trial writes its `result.json` to `evals/runs/`. The `/eval-run` skill produces a `postmortem.md` per trial with a 0-10 capability composite + a separate performance section. Postmortems are the unit of strategic review — read a sample after every matrix run, look for patterns (same red flag across scenarios? same auto-answer choice driving runs off course? same host beating another host on the same scenario+model?).
 
 The performance metrics deliberately **do not** feed into the composite capability score. They answer a different question. A run that scores 9/10 on capability at 2 tokens/sec on a slow CPU is strategically very different from a run that scores 9/10 at 60 t/s on a fast GPU — but neither is "better"; they answer different questions. Don't conflate them in a single score.
 

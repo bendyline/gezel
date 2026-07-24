@@ -23,6 +23,7 @@
       "**/.import-state/runs/**",
       "**/.import-cache/**",
       "evals/runs/**",
+      "artifacts/**",
       "reports/**",
       "runs/**",
       "**/.upstream/**",
