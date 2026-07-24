@@ -204,3 +204,4 @@ __pycache__/
 /runs
 /runs
 packages/catalog/scripts/harvested-auth/
+/native/helpers/service-host/.build

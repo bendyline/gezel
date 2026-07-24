@@ -43,8 +43,11 @@ gezel-service-host --help
 
 ## Build
 
-Windows: `pwsh -File build.ps1` — configures with the VS generator, runs
-the ctest self-test, and stages `native/build/win32-x64/gezel-service-host.exe`.
+Windows: `pwsh -File build.ps1` — imports the latest installed Visual Studio
+x64 developer environment, configures with Ninja, runs the ctest self-test,
+and stages `native/build/win32-x64/gezel-service-host.exe`. Install Visual
+Studio Build Tools with the **Desktop development with C++** workload and the
+**C++ CMake tools for Windows** component.
 Elsewhere (self-test only): `cmake -S . -B .build -DBUILD_TESTING=ON &&
 cmake --build .build && ctest --test-dir .build`.
 
