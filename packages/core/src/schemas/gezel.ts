@@ -629,6 +629,14 @@ export type ChatMessage = z.infer<typeof ChatMessageSchema>;
  */
 export const ChatEventSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('delta'), content: z.string() }),
+  /**
+   * Live private-reasoning tokens (ds4's think phase), streamed on their
+   * own channel so they never mix into the visible `delta` stream, the
+   * committed reply body, or the external API-compat forwarders. The UI
+   * renders them as a distinct "thinking" block that collapses into the
+   * committed message's reasoning expander once `complete` lands.
+   */
+  z.object({ type: z.literal('reasoning_delta'), content: z.string() }),
   z.object({ type: z.literal('complete'), message: ChatMessageSchema }),
   /**
    * Emitted right after the user's message is appended to the session

@@ -50,12 +50,12 @@ function recordForReplay(shared: SharedStream, envelope: ChatEventEnvelope): voi
     cached = [];
     shared.replay.set(envelope.sessionId, cached);
   }
-  if (event.type === 'delta') {
+  if (event.type === 'delta' || event.type === 'reasoning_delta') {
     const tail = cached[cached.length - 1];
-    if (tail?.event.type === 'delta') {
+    if (tail?.event.type === event.type) {
       cached[cached.length - 1] = {
         ...tail,
-        event: { type: 'delta', content: tail.event.content + event.content },
+        event: { type: event.type, content: tail.event.content + event.content },
       };
       return;
     }

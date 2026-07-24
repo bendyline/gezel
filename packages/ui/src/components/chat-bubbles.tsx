@@ -34,6 +34,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 import { api } from '../api.js';
@@ -1063,6 +1064,13 @@ export interface StreamingBubbleProps {
    */
   wirePulseCount?: number;
   /**
+   * Live private-reasoning text streaming on the model's think channel
+   * (ds4). Rendered as a distinct dimmed "thinking" block above the
+   * reply. Absent once the turn commits — the persisted message carries
+   * the same trace on `reasoning`, shown behind the collapsed expander.
+   */
+  liveReasoning?: string;
+  /**
    * Optional provider-side heartbeat label (e.g. "thinking"). When
    * set, the bubble's status line renders `{label}…` instead of the
    * generic "Thinking". Sourced from Copilot's `thinking_start`
@@ -1383,6 +1391,7 @@ export function StreamingBubble({
   onProbeOllama,
   onReEngage,
   wirePulseCount,
+  liveReasoning,
   thinkingLabel,
   thinkingProgress,
   thinkingDetail,
@@ -1678,6 +1687,13 @@ export function StreamingBubble({
           </div>
         ) : (
           <>
+            {!failed && liveReasoning && liveReasoning.trim().length > 0 && (
+              // Live think-phase stream (ds4). A dimmed block above the
+              // reply that grows token-by-token while the model reasons,
+              // then vanishes on commit — the persisted message re-renders
+              // the same trace behind the collapsed "Thinking" expander.
+              <LiveReasoning text={liveReasoning} />
+            )}
             {renderedSegments.map((seg, i) => {
               // Stable-ish key using kind + first tool-name (or
               // text-prefix). Index-only would re-mount nodes when
@@ -2549,6 +2565,32 @@ function ReasoningExpando({ reasoning }: { reasoning: string }) {
       </summary>
       <pre className="msg-reasoning-body">{trimmed}</pre>
     </details>
+  );
+}
+
+/**
+ * Live counterpart to {@link ReasoningExpando}: renders the think phase
+ * as it streams (ds4's `reasoning_content` channel), always-open and
+ * dimmed, above the reply. Auto-scrolls to the tail so the newest
+ * reasoning stays in view inside the capped-height body. Replaced by the
+ * collapsed expander once the turn commits and the slot is torn down.
+ * Plain-text on purpose — same reasoning-as-raw-trace rationale as the
+ * expander (a mid-stream trace has unbalanced markdown we don't want a
+ * render pass to swallow).
+ */
+function LiveReasoning({ text }: { text: string }) {
+  const bodyRef = useRef<HTMLPreElement>(null);
+  useEffect(() => {
+    const el = bodyRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [text]);
+  return (
+    <div className="msg-stream-reasoning" aria-label="Thinking" aria-live="polite">
+      <span className="msg-stream-reasoning-label">Thinking</span>
+      <pre className="msg-stream-reasoning-body" ref={bodyRef}>
+        {text}
+      </pre>
+    </div>
   );
 }
 

@@ -234,6 +234,46 @@ describe('LlamaCppProvider constructor', () => {
     expect(wirePulses).toBe(2);
   });
 
+  it('streams reasoning_content on the dedicated channel, never as content or a wire pulse', async () => {
+    // ds4 streams its think phase on the `reasoning_content` channel. It
+    // goes out live on `onReasoningDelta` (which the UI renders as a
+    // "thinking" block and which keeps the silence timer alive), NOT on
+    // `onDelta` (would pollute the reply + abort-salvage buffer) and NOT
+    // as a bare wire pulse (would let the "looks stalled" banner climb).
+    globalThis.fetch = (async () => {
+      return sseResponse([
+        { choices: [{ index: 0, delta: { reasoning_content: 'let me think ' } }] },
+        { choices: [{ index: 0, delta: { reasoning_content: 'about this' } }] },
+        { choices: [{ index: 0, delta: { content: 'the answer' } }] },
+        {
+          choices: [{ index: 0, finish_reason: 'stop' }],
+          usage: { prompt_tokens: 1, completion_tokens: 1 },
+        },
+        '[DONE]',
+      ]);
+    }) as typeof fetch;
+    const provider = new LlamaCppProvider({ baseUrl: 'http://llama.test' });
+    const session = await provider.createSession({ systemMessage: 'sys', model: 'ds4' });
+    let wirePulses = 0;
+    let reasoning = '';
+    const contentDeltas: string[] = [];
+    session.onWirePulse?.(() => {
+      wirePulses++;
+    });
+    session.onReasoningDelta?.((c) => {
+      reasoning += c;
+    });
+    session.onDelta((c) => {
+      contentDeltas.push(c);
+    });
+    const final = await session.sendAndWait('hello');
+    expect(reasoning).toBe('let me think about this');
+    expect(wirePulses).toBe(0);
+    // Reasoning must never leak into the visible stream or the committed reply.
+    expect(contentDeltas.join('')).toBe('the answer');
+    expect(final).toBe('the answer');
+  });
+
   it('emits wire pulse on tool_calls chunks (long structured writes read as live activity)', async () => {
     // Tool-argument streaming carries no content deltas — without a
     // pulse per tool_calls chunk, a multi-minute writeFile emission is

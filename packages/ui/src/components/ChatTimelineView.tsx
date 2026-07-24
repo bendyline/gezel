@@ -244,6 +244,14 @@ interface LiveSlot {
    */
   wirePulseCount?: number;
   /**
+   * Live private-reasoning text, accumulated from `reasoning_delta`
+   * events while the model's think phase streams. Rendered as a distinct
+   * dimmed "thinking" block above the reply; discarded when the turn
+   * commits (the persisted message carries the same trace on its
+   * `reasoning` field, rendered behind the collapsed expander instead).
+   */
+  liveReasoning?: string;
+  /**
    * Optional short label from a provider heartbeat (e.g. 'thinking'
    * during Copilot's server-side reasoning phases). Drives the
    * streaming bubble's status line so a long silent reasoning stretch
@@ -1407,6 +1415,25 @@ export function ChatTimelineView({
         delete slot.thinkingDetail;
         liveRef.current.set(sessionId, slot);
         setLiveBump((n) => n + 1);
+      } else if (event.type === 'reasoning_delta') {
+        // Live think-phase tokens (ds4's `reasoning_content` channel).
+        // Accumulate into a dimmed "thinking" block rendered above the
+        // reply; it collapses into the committed message's reasoning
+        // expander once the turn ends and this slot is replaced. Counts as
+        // real activity — resets the silence timer and clears the
+        // wire-pulse dots, so a streaming think never reads as a stall.
+        // `thinkingProgress` (the prefill bar) is definitively done once
+        // reasoning tokens flow; drop it. `thinkingLabel` stays — the
+        // status line still honestly reads "thinking…".
+        const slot = liveRef.current.get(sessionId) ?? createSlot(gezelId, projectId, sessionId);
+        slot.liveReasoning = (slot.liveReasoning ?? '') + event.content;
+        slot.lastActivityAt = Date.now();
+        delete slot.queueAhead;
+        slot.wirePulseCount = 0;
+        delete slot.thinkingProgress;
+        delete slot.thinkingDetail;
+        liveRef.current.set(sessionId, slot);
+        setLiveBump((n) => n + 1);
       } else if (event.type === 'wire_pulse') {
         // Bare framing chunk arrived from the provider — Ollama is
         // alive on the wire but the model isn't producing visible
@@ -1566,6 +1593,11 @@ export function ChatTimelineView({
           existing.lastActivityAt = Date.now();
           existing.anchorAt = bumpIso(event.message.at);
           existing.wirePulseCount = 0;
+          // Drop the live think-phase block: the just-committed message
+          // carries this iteration's reasoning on its `reasoning` field
+          // (collapsed expander). Leaving it set would double-render the
+          // trace — live block + expander — until the next delta.
+          delete existing.liveReasoning;
           delete existing.queueAhead;
           delete existing.error;
           liveRef.current.set(sessionId, existing);
@@ -2469,6 +2501,7 @@ export function ChatTimelineView({
           ? { thinkingProgress: slot.thinkingProgress }
           : {})}
         {...(slot.thinkingDetail ? { thinkingDetail: slot.thinkingDetail } : {})}
+        {...(slot.liveReasoning ? { liveReasoning: slot.liveReasoning } : {})}
         {...(slot.gpuSwapTask ? { gpuSwapTask: slot.gpuSwapTask } : {})}
         {...(slot.gpuSwapDetail ? { gpuSwapDetail: slot.gpuSwapDetail } : {})}
         {...(slot.gpuSwapPrompt ? { gpuSwapPrompt: slot.gpuSwapPrompt } : {})}

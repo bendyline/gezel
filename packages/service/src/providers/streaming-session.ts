@@ -41,6 +41,7 @@ export interface EngineStatsEvent {
 
 export abstract class StreamingSessionBase {
   private readonly deltaHandlers = new Set<(chunk: string) => void>();
+  private readonly reasoningDeltaHandlers = new Set<(chunk: string) => void>();
   private readonly usageHandlers = new Set<(usage: TurnUsage) => void>();
   private readonly wirePulseHandlers = new Set<() => void>();
   private readonly intentHandlers = new Set<(label: string) => void>();
@@ -54,6 +55,23 @@ export abstract class StreamingSessionBase {
     this.deltaHandlers.add(handler);
     return () => {
       this.deltaHandlers.delete(handler);
+    };
+  }
+
+  /**
+   * Subscribe to live private-reasoning deltas — the model's think phase
+   * streamed token-by-token as it happens (today: ds4's `reasoning_content`
+   * channel). Kept OFF the visible `onDelta` stream on purpose: reasoning
+   * must not join the committed reply body (`turnContent`) or the
+   * abort-salvage buffer, and only the UI subscribes here, so the
+   * OpenAI-/Ollama-compat forwarders never leak it into API `content`. The
+   * UI renders it as a distinct "thinking" block that collapses into the
+   * message's reasoning expander once the turn commits.
+   */
+  onReasoningDelta(handler: (chunk: string) => void): () => void {
+    this.reasoningDeltaHandlers.add(handler);
+    return () => {
+      this.reasoningDeltaHandlers.delete(handler);
     };
   }
 
@@ -159,6 +177,10 @@ export abstract class StreamingSessionBase {
 
   protected emitDelta(chunk: string): void {
     for (const h of this.deltaHandlers) h(chunk);
+  }
+
+  protected emitReasoningDelta(chunk: string): void {
+    for (const h of this.reasoningDeltaHandlers) h(chunk);
   }
 
   protected emitUsage(usage: TurnUsage): void {

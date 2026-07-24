@@ -4928,6 +4928,17 @@ export class ChatManager {
         this.telemetry.noteDelta(sessionId, chunk.length);
         this.events.publish(scope, { type: 'delta', content: chunk });
       });
+      const unsubReasoningDelta = s.onReasoningDelta?.((chunk) => {
+        // Live think-phase tokens (ds4). Deliberately kept OUT of the
+        // visible-content accumulators (`currentTurnContentText` /
+        // `currentTurnContentChars`): the committed reply body and the
+        // abort-salvage buffer must stay reasoning-free — the trace is
+        // persisted separately on `ChatMessage.reasoning`. `noteHeartbeat`
+        // bumps the liveness clock so a long think doesn't read as an idle
+        // stall, without counting as streamed visible content.
+        this.telemetry.noteHeartbeat(sessionId);
+        this.events.publish(scope, { type: 'reasoning_delta', content: chunk });
+      });
       const unsubPulse = s.onWirePulse?.(() => {
         this.telemetry.noteWirePulse(sessionId);
         this.events.publish(scope, { type: 'wire_pulse' });
@@ -5049,6 +5060,7 @@ export class ChatManager {
       });
       return () => {
         unsubDelta();
+        unsubReasoningDelta?.();
         unsubPulse?.();
         unsubIntent?.();
         unsubHeartbeat?.();

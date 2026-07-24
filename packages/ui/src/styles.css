@@ -10824,6 +10824,39 @@ button.bench-step-foot:disabled {
   overflow-y: auto;
 }
 
+/* Live think-phase stream — the always-open, dimmed counterpart to
+   `.msg-reasoning`, shown above the reply while ds4 reasons. Left-stripe
+   aside marks it as the model thinking (not the answer); it collapses
+   into the disclosure above once the turn commits. Same muted tokens as
+   the committed expander so the streaming view matches the final view. */
+.msg-stream-reasoning {
+  align-self: flex-start;
+  max-width: 100%;
+  margin: 0 0 0.5rem;
+  padding-left: 0.6rem;
+  border-left: 2px solid var(--border);
+}
+.msg-stream-reasoning-label {
+  display: block;
+  margin-bottom: 0.3rem;
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--text-muted);
+  opacity: 0.85;
+}
+.msg-stream-reasoning-body {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: inherit;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  color: var(--text-muted);
+  max-height: 14rem;
+  overflow-y: auto;
+}
+
 /* ── Project chat split layout (chat left, references right) ── */
 
 .chat-rail-body {

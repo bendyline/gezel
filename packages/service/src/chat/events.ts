@@ -249,10 +249,10 @@ export class ChatEventBus {
    */
   private recordInHistory(history: ChatEvent[], event: ChatEvent): void {
     if (event.type === 'heartbeat' || event.type === 'wire_pulse') return;
-    if (event.type === 'delta') {
+    if (event.type === 'delta' || event.type === 'reasoning_delta') {
       const tail = history[history.length - 1];
-      if (tail?.type === 'delta') {
-        history[history.length - 1] = { type: 'delta', content: tail.content + event.content };
+      if (tail?.type === event.type) {
+        history[history.length - 1] = { type: event.type, content: tail.content + event.content };
         return;
       }
     }

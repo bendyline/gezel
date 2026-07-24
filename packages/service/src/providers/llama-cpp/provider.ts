@@ -4024,6 +4024,14 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
               postReasoningReasoningChars += reasoningChunk.length;
               constrainedToolReasoningChars += reasoningChunk.length;
               turnReasoning += reasoningChunk;
+              // Stream the think phase live on its own channel. It never
+              // joins `turnContent` (the committed reply stays clean) — the
+              // UI renders it as a distinct "thinking" block that collapses
+              // into the message's reasoning expander once the turn commits.
+              // This is also what keeps the silence timer alive during a
+              // long hidden-reasoning stretch, so it never false-trips the
+              // "looks stalled" banner.
+              this.emitReasoningDelta(reasoningChunk);
             }
             // Any usable delta — visible content OR a tool-call —
             // refreshes the post-reasoning silent-stall watchdog
@@ -4150,21 +4158,25 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
             if (choice?.finish_reason) {
               finishReason = choice.finish_reason;
             }
-            // Wire pulse: bare framing chunk with no visible signal.
-            // Matches Ollama's behavior so the UI shows "engine alive
-            // but silently thinking" dots during long reasoning.
-            if (!hasContent && !hasToolCalls && !chunk.usage) {
+            // Wire pulse: a genuinely bare framing chunk — no content, no
+            // reasoning, no tool args, no usage. Matches Ollama's behavior
+            // so the UI shows "engine alive but silent" dots. Reasoning
+            // chunks are excluded (`!hasReasoning`): they carry real
+            // progress and stream live via `emitReasoningDelta` above.
+            if (!hasContent && !hasReasoning && !hasToolCalls && !chunk.usage) {
               this.emitWirePulse();
               // A reasoning chunk is NOT a bare framing chunk — it is the
-              // model legitimately thinking, and it is already bounded by
-              // CONSTRAINED_TOOL_REASONING_CHAR_LIMIT above. Counting it
-              // here killed every Gemma grammar-fallback repair turn ~32
+              // model legitimately thinking (streamed live via
+              // `emitReasoningDelta` above, which resets the UI silence
+              // timer), and it is already bounded by
+              // CONSTRAINED_TOOL_REASONING_CHAR_LIMIT. Counting it here
+              // killed every Gemma grammar-fallback repair turn ~32
               // reasoning-chunks (~130 chars) into the think phase, long
               // before the model could emit its tool call — the turn then
               // failed "no-tool-signal" 2/2 and the handoff died.
               // Wild-caught core sweep (gemma4-e4b-q8:
               // schema-migration + symptom-debug, deterministic).
-              if (constrainedToolSignalMode && !sawStructuredToolSignal && !hasReasoning) {
+              if (constrainedToolSignalMode && !sawStructuredToolSignal) {
                 constrainedToolNoSignalChunks += 1;
               }
             }
@@ -4776,7 +4788,17 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
         // reasoning expander. See {@link foldPostActionRumination}.
         // Note this runs on the FOLDED content, after `replayTurnContent`
         // was captured — the ds4 replay transcript keeps the raw bytes.
-        if (toolCalls.length === 0 && actionFiredEarlierThisTurn) {
+        // …but only when this iteration's reasoning did NOT arrive on the
+        // dedicated `reasoning_content` channel. A native-channel model
+        // (ds4) has already handed us its reasoning separately, so its
+        // visible content is the answer — folding it as "rumination" blanks
+        // a real reply and makes the turn look empty, which then trips the
+        // manager's tool-only continuation nudge (a spurious second cycle).
+        // The rumination fold is for models that leak untagged reasoning
+        // *into* the visible channel (gemma), whose `turnReasoning` is empty
+        // here — see the mutually-exclusive-channel note above. This holds
+        // regardless of whether the manifest mis-assigns the behavior.
+        if (toolCalls.length === 0 && actionFiredEarlierThisTurn && turnReasoning.length === 0) {
           const foldedPostAction = foldPostActionRumination({
             text: turnContent,
             actionFiredEarlierThisTurn: true,
