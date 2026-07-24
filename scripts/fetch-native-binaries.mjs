@@ -10,8 +10,9 @@
  *   node scripts/fetch-native-binaries.mjs --version 0.1.2 # pin to a release
  *   node scripts/fetch-native-binaries.mjs --variant cuda  # narrow to one variant
  *   node scripts/fetch-native-binaries.mjs --run 24887707235  # pull from a specific build-native.yml run's
- *                                                          #   artifacts. Useful when release-native didn't
- *                                                          #   fire, or to test a build before tagging.
+ *                                                          #   artifacts. Useful for validating a tagged build
+ *                                                          #   while its GitHub Release remains a draft, or for
+ *                                                          #   testing a workflow_dispatch build before tagging.
  *   node scripts/fetch-native-binaries.mjs --list          # list available variants for current platform
  *
  * Auth:
@@ -491,7 +492,8 @@ const HELP = `Usage: node scripts/fetch-native-binaries.mjs [options]
                        between them without re-running this script.
                        Mac always gets the single Metal variant.
   --run <id>           Pull from a build-native.yml workflow run instead of
-                       a release. Useful when release-native didn't fire.
+                       a published release. Use this to validate a draft-bound
+                       tagged build or a workflow_dispatch test build.
   --list               Show recent releases + assets for this platform.
   -h, --help           Show this help.
 

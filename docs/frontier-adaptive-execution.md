@@ -4,30 +4,30 @@
 
 ## Implementation status
 
-Built, tested, A/B-validated, and **default-on**:
+Built, tested, and **default-on**:
 - **Density switch + plumbing** — `executionDensity: auto|flat|scaffold` on `GezelConfig`; `resolveExecutionDensity` / `isSelfOrchestratingProvider` in `core/execution-density.ts`; eval `--render-mode` flag. **`auto` is the default (incl. unset):** flat for codex-cli/anthropic-cli/copilot, scaffold for local + raw-cloud (untouched). Set `executionDensity: 'scaffold'` to force the crew back (escape hatch).
 - **Flat = the existing solo path** — the meester's routing prose (`manager.ts buildInstructions`) routes concrete asks to `start_job` (solo **ambachtsman**, which already collapses the craftbook onto the one specialist). Verified end-to-end: codex with no flag now routes solo by default and passes.
-- **A/B validated** — crew scenarios: 4/4=4/4 pass, −36% tokens, faster (`evals/runs/ab-flat-codex/AB-REPORT.md`); research/review N=3: 9/9=9/9, −46% tokens overall, citation depth ≈ scaffold (`evals/runs/abN-flat-codex/AB-REPORT-N3.md`).
 - **(a) Concision nudge** — universal (the over-write-summary tendency appears in BOTH arms): an upper-bound/length-limit bullet added to the Developer + Researcher `about.md`.
-- **(b) Gate floor kept** — gates are unchanged and universal across densities; the A/B showed the gate compensates for the missing Reviewer role in flat (flat still passed concision checks via the gate).
+- **(b) Gate floor kept** — gates are unchanged and universal across densities, preserving an objective completion check when flat execution omits a separate Reviewer role.
 - **Optional reviewer pass** — the flat routing prose explicitly allows `start_project` (crew) for a separate review/second-opinion pass on high-stakes deliverables.
 - **Watchdog** (Component D) — self-orchestrating providers get a 20-min silence floor (`evals/src/runner.ts`).
 
-Not yet done: the collapse renderer for the **pinned-craftbook** path (moot under the embeddings-less eval; needed for the local/pinned case), and a copilot/anthropic-cli flat A/B (mechanism is identical to codex + gate-protected, but untested for those two).
+Not yet done: the collapse renderer for the **pinned-craftbook** path (needed for the local/pinned case), and broader comparative validation across self-orchestrating providers.
 
 ---
 
 (Original spec below.)
 
-## 0. Motivation & evidence
+## 0. Motivation and design rationale
 
-Two frontier baselines on the full 21-scenario suite (`evals/runs/matrix-2026-06-27T14-50-32-502Z` copilot/sonnet-4.6, `…T17-24-25-448Z` codex-cli/gpt-5.5) both scored **21/21 capability** with these provider-invariant signals:
+Self-orchestrating providers bring their own read/edit/verify loop: codex runs that loop inside
+one CLI invocation, while Copilot does so inside its SDK. Wrapping every such invocation in a
+full `meester → klerk → specialist` relay can duplicate orchestration that the provider already
+supplies. Raw local providers do not bring that loop, so the gezel scaffold remains
+load-bearing for them.
 
-- **Team overhead is structural, not model-specific:** 3.3 (copilot) ≈ 3.5 (codex) gezels/scenario — a full `meester → klerk → specialist` team for *every* task, including trivial ones (a 3-gezel team to fix one line of broken JS).
-- **Output is ~1–2% of token traffic;** the rest is orchestration/context re-transmission.
-- **Gates were inert:** ~2 rejections across 21 trials each — cheap, dormant insurance.
-- **Both providers wrap a nested self-orchestrating loop** (codex runs its whole read/edit/patch loop inside one CLI invocation; copilot inside its SDK). gezel's outer loop + team is partly redundant for them.
-- **Local contrast:** best local model (qwen3.6-35b) = 16/21; the scaffold is load-bearing there (the loop *is* the agent).
+Objective gates remain valuable at either density: they define the quality floor independently
+of whether a task is executed by one ambachtsman or a larger crew.
 
 **Thesis:** scaffold density should be **elastic**, scaled to the provider's self-orchestration and the task size — not a binary "frontier mode." Frontier/agentic providers need the **quality bar** (gates), not the **team relay** or the **step-by-step recipe**. Keep one task model across the whole capability range so a task stays portable (same definition runs on a 2B local model and on Sonnet).
 
@@ -111,11 +111,13 @@ Collapse is only faithful if the book declares its goal + acceptance criteria ex
 
 ## 5. Component C — Gates stay universal (near-zero change)
 
-No change to the gate engine (`tasks/gate-eval.ts`, `tasks/step-gate.ts`, `tasks/manager.ts` completion-gate at `:1122-1488`). The only adaptation is that in flat mode the collapsed step's completion gate is the **union** of the source steps' gates, evaluated once at the end. `maxAttempts` and pause-for-help behavior unchanged. This is the cheap-local-compute floor that stays on for every provider (it caught ~2/21 even for frontier — cheap insurance; load-bearing for local).
+No change to the gate engine (`tasks/gate-eval.ts`, `tasks/step-gate.ts`, `tasks/manager.ts` completion-gate at `:1122-1488`). The only adaptation is that in flat mode the collapsed step's completion gate is the **union** of the source steps' gates, evaluated once at the end. `maxAttempts` and pause-for-help behavior unchanged. This is the cheap-local-compute floor that stays on for every provider and remains load-bearing for local execution.
 
 ## 6. Component D — Provider-class-aware progress tolerance ✅ DONE (eval harness)
 
-Self-orchestrating providers emit gezel-visible "turns" infrequently (one long CLI/SDK invocation = ~1 turn), which trips watchdogs tuned for chatty local cadence — observed: codex tankcombat soft-stalled at 301s (the 5-min silence default), then re-ran PASS in 113s.
+Self-orchestrating providers emit gezel-visible "turns" infrequently (one long CLI/SDK invocation
+can represent an entire work loop), so watchdogs tuned for chatty local cadence need a
+provider-aware silence window.
 
 **Implemented (eval harness):**
 - `isSelfOrchestratingProvider(p)` in `evals/src/providers.ts` — codex-cli / anthropic-cli / copilot (a finer cut than `categorizeProvider`: copilot is `cloud-sdk` but self-orchestrates; raw `anthropic`/`openai` do not).

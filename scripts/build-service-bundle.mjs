@@ -93,18 +93,38 @@ async function main() {
     target,
   ];
   console.log(`[build-service-bundle] pnpm ${args.join(' ')}`);
-  const { stdout, stderr } = await exec('pnpm', args, {
-    cwd: repoRoot,
-    env: process.env,
-    maxBuffer: 64 * 1024 * 1024,
-    // Windows: pnpm on PATH is `pnpm.cmd` (a shim). Node's child_process
-    // can't launch a .cmd without going through cmd.exe — without this
-    // the spawn fails with ENOENT even though `pnpm` works fine in the
-    // shell. Same fix as packages/service/src/packages/pnpm.ts and
-    // system-toolsets/bootstrap.ts. Args are 100% internally constructed
-    // (no user input touching the shell), so injection isn't a concern.
-    shell: process.platform === 'win32',
-  });
+  // `pnpm deploy --prod --node-linker=hoisted` rewrites this workspace-private
+  // state file with `dev: false`, `nodeLinker: hoisted`, and
+  // `filteredInstall: true`, even though the deployed virtual store itself
+  // lives under `target`. The next ordinary pnpm command then trusts that
+  // stale state and prunes the checkout's development dependencies. Preserve
+  // the caller's workspace state so bundle validation is side-effect free.
+  const workspaceStatePath = join(repoRoot, 'node_modules', '.pnpm-workspace-state-v1.json');
+  const workspaceStateBefore = existsSync(workspaceStatePath)
+    ? await readFile(workspaceStatePath)
+    : null;
+  let stdout = '';
+  let stderr = '';
+  try {
+    ({ stdout, stderr } = await exec('pnpm', args, {
+      cwd: repoRoot,
+      env: process.env,
+      maxBuffer: 64 * 1024 * 1024,
+      // Windows: pnpm on PATH is `pnpm.cmd` (a shim). Node's child_process
+      // can't launch a .cmd without going through cmd.exe — without this
+      // the spawn fails with ENOENT even though `pnpm` works fine in the
+      // shell. Same fix as packages/service/src/packages/pnpm.ts and
+      // system-toolsets/bootstrap.ts. Args are 100% internally constructed
+      // (no user input touching the shell), so injection isn't a concern.
+      shell: process.platform === 'win32',
+    }));
+  } finally {
+    if (workspaceStateBefore) {
+      await writeFile(workspaceStatePath, workspaceStateBefore);
+    } else if (existsSync(workspaceStatePath)) {
+      await unlink(workspaceStatePath);
+    }
+  }
   if (stdout.trim()) process.stdout.write(stdout);
   if (stderr.trim()) process.stderr.write(stderr);
 

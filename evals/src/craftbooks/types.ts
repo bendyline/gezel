@@ -143,7 +143,6 @@ export interface CraftbookEvalSpec {
   coverage: {
     status: Exclude<CraftbookEvalCoverageStatus, 'missing'>;
     localModels?: string[];
-    lastRun?: string;
     notes?: string;
   };
   qualityFocus: string[];

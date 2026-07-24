@@ -30,8 +30,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T08-11-20-440Z/craftbook-ab-test-readout/craftbook-ab-test-readout-gemma4-e4b-q8-2026-06-28T08-11-20-443Z-b2h6',
       notes:
         'Validated locally with gemma4-e4b-q8. The run read the experiment brief and aggregate CSV, repaired a too-short first readout, and passed hypothesis, decision-rule, metric, confidence, guardrail, and no-ship recommendation gates. Needs a numeric oracle for p-value/CI correctness.',
     },
@@ -41,8 +39,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T10-08-28-480Z/craftbook-accessibility-retrofit/craftbook-accessibility-retrofit-gemma4-e4b-q8-2026-06-28T10-08-28-483Z-fqwj',
       notes:
         'Validated locally with gemma4-e4b-q8; generated smoke spec passed 6 deterministic checks.',
     },
@@ -52,8 +48,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T09-06-20-806Z/craftbook-ad-variations/craftbook-ad-variations-gemma4-e4b-q8-2026-06-28T09-06-20-808Z-gvsa',
       notes:
         'Validated locally with gemma4-e4b-q8; JSON artifact passed validity and content gates in one write.',
     },
@@ -63,7 +57,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun: 'evals/runs/craftbook-alert-rules-gemma4-e4b-q8-2026-06-28T06-57-27-270Z-ek2h',
       notes:
         'Validated locally with gemma4-e4b-q8 after adding an eval-only Prometheus YAML parser/schema check, source-read enforcement, page-noise budget, routing labels, required runbooks, and anti-cause-alert gates.',
     },
@@ -75,8 +68,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T10-08-28-480Z/craftbook-alt-text-pass/craftbook-alt-text-pass-gemma4-e4b-q8-2026-06-28T10-10-48-931Z-u8db',
       notes:
         'Validated locally with gemma4-e4b-q8; generated smoke spec passed 6 deterministic checks.',
     },
@@ -86,8 +77,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T07-02-46-567Z/craftbook-annotated-bibliography/craftbook-annotated-bibliography-gemma4-e4b-q8-2026-06-28T07-02-46-570Z-sczb',
       notes:
         'Validated locally with gemma4-e4b-q8. The direct-worker run read the seeded source cards, wrote a six-entry bibliography in one pass, and passed all source coverage, structure, and anti-invention gates. Needs a citation-style linter for stronger formatting validation.',
     },
@@ -105,8 +94,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T07-02-46-567Z/craftbook-anomaly-scan/craftbook-anomaly-scan-gemma4-e4b-q8-2026-06-28T07-04-56-867Z-5625',
       notes:
         'Validated locally with gemma4-e4b-q8. The run produced both report.md and data/anomalies.json, passed JSON validity plus row-id/threshold/severity gates, and required no user intervention. Needs a custom numeric oracle to recompute expected anomaly rows.',
     },
@@ -126,8 +113,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T10-08-28-480Z/craftbook-audio-ad-spot/craftbook-audio-ad-spot-gemma4-e4b-q8-2026-06-28T10-12-03-408Z-5z2j',
       notes:
         'Validated locally with gemma4-e4b-q8; generated media smoke spec passed 5 deterministic checks.',
     },
@@ -137,8 +122,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T10-08-28-480Z/craftbook-audio-highlight-reel/craftbook-audio-highlight-reel-gemma4-e4b-q8-2026-06-28T10-13-02-679Z-ik8b',
       notes:
         'Validated locally with gemma4-e4b-q8; generated media smoke spec passed 5 deterministic checks.',
     },
@@ -148,8 +131,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T09-09-31-261Z/craftbook-auth-flow/craftbook-auth-flow-gemma4-e4b-q8-2026-06-28T09-09-31-263Z-5tnp',
       notes:
         'Validated locally with gemma4-e4b-q8; auth module and security review passed deterministic code/content gates.',
     },
@@ -159,8 +140,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T07-02-46-567Z/craftbook-backup-routine/craftbook-backup-routine-gemma4-e4b-q8-2026-06-28T07-08-03-999Z-ytju',
       notes:
         'Validated locally with gemma4-e4b-q8. The run read the retention brief, wrote backup.sh in one pass, and passed static gates for shell guardrails, archive/checksum, retention, logging, and missing-source failure behavior. Needs a project-local fixture runner that executes the script twice and checks retention/idempotency.',
     },
@@ -172,8 +151,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T07-41-29-980Z/craftbook-blog-post/craftbook-blog-post-gemma4-e4b-q8-2026-06-28T07-41-29-983Z-dpme',
       notes:
         'Validated locally with gemma4-e4b-q8. The direct-worker run read the seeded brief, wrote blog-post.md in one pass, and passed SEO metadata, structure, source-fact, checklist, and CTA gates. Needs stronger word-count and keyword-position checks.',
     },
@@ -183,8 +160,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T08-11-20-440Z/craftbook-board-deck/craftbook-board-deck-gemma4-e4b-q8-2026-06-28T08-19-38-061Z-8sj3',
       notes:
         'Validated locally with gemma4-e4b-q8. The run read the seeded board brief, wrote a 10.9 KB board deck in one pass, and passed section, KPI/financial, risk/ask, slide-control, CSS, and JS-parse gates. Needs runtime slide navigation and screenshot density checks.',
     },
@@ -196,8 +171,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T10-08-28-480Z/craftbook-board-game-web/craftbook-board-game-web-gemma4-e4b-q8-2026-06-28T10-14-17-263Z-em4q',
       notes:
         'Validated locally with gemma4-e4b-q8; generated game smoke spec passed 7 deterministic checks.',
     },
@@ -209,8 +182,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T10-08-28-480Z/craftbook-booking-automation/craftbook-booking-automation-gemma4-e4b-q8-2026-06-28T10-15-57-092Z-mfgh',
       notes:
         'Validated locally with gemma4-e4b-q8; generated external-automation smoke spec passed 6 deterministic checks.',
     },
@@ -220,8 +191,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T08-11-20-440Z/craftbook-branding-website/craftbook-branding-website-gemma4-e4b-q8-2026-06-28T08-24-22-265Z-ieut',
       notes:
         'Validated locally with gemma4-e4b-q8. The direct-worker run wrote a complete Lumina Ledger marketing page in one write and passed HTML/CSS, brand, CTA, pricing/fit, palette, and footer gates. Needs a seeded brand brief plus visual/runtime review.',
     },
@@ -233,8 +202,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/craftbook-broadcast-announcement-gemma4-e4b-q8-2026-06-28T07-36-25-489Z-dqrm',
       notes:
         'Validated locally with gemma4-e4b-q8 after the generic adapter stopped mirroring workspace fixtures into artifacts and installed workspace read/write toolsets for direct workers. The final run read the source brief, wrote channel variants, and passed consistency plus forbidden-claim gates. Needs a length checker for SMS/email word budgets.',
     },
@@ -252,8 +219,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T10-08-28-480Z/craftbook-bug-fix-tdd/craftbook-bug-fix-tdd-gemma4-e4b-q8-2026-06-28T10-16-46-230Z-8cc1',
       notes:
         'Validated locally with gemma4-e4b-q8; generated code smoke spec passed 7 deterministic checks.',
     },
@@ -263,8 +228,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/batch-2026-06-28T08-59-31-631Z/craftbook-build-loop-gemma4-e4b-q8-2026-06-28T08-59-31-634Z-y7n8',
       notes:
         'Validated locally with gemma4-e4b-q8. The direct-worker run wrote an 8.6 KB self-contained checklist timer, then added criteria notes, and passed all 10 HTML/CSS/JS/content/task-note gates. Needs Playwright runtime checks.',
     },
@@ -274,8 +237,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T07-02-46-567Z/craftbook-calendar-brief/craftbook-calendar-brief-gemma4-e4b-q8-2026-06-28T07-25-16-228Z-khio',
       notes:
         'Validated locally with gemma4-e4b-q8. The direct-worker run read the fixed agenda, wrote brief.md in one pass, and passed event coverage, conflict, prep, and focus-gap gates. Needs a time-window oracle for exact overlap and meeting-hour calculations.',
     },
@@ -287,8 +248,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T09-09-31-261Z/craftbook-canvas-generative-art/craftbook-canvas-generative-art-gemma4-e4b-q8-2026-06-28T09-11-11-198Z-a3wr',
       notes:
         'Validated locally with gemma4-e4b-q8; self-contained canvas page passed HTML/CSS/JS gates.',
     },
@@ -306,8 +265,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T07-41-29-980Z/craftbook-case-study/craftbook-case-study-gemma4-e4b-q8-2026-06-28T07-53-07-038Z-p2vn',
       notes:
         'Validated locally with gemma4-e4b-q8. The run read the customer notes, repaired a too-short first draft, and passed challenge/solution/results, metric, quote, CTA, and anti-hype gates. Needs a quote/metric source-matching checker.',
     },
@@ -317,8 +274,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T08-11-20-440Z/craftbook-case-study-writeup/craftbook-case-study-writeup-gemma4-e4b-q8-2026-06-28T08-16-33-641Z-mqj6',
       notes:
         'Validated locally with gemma4-e4b-q8. The run read the seeded story facts, wrote a complete HTML proof asset in one pass, and passed challenge/solution/results, metric, quote, CTA, brand, CSS, and JS-parse gates. Needs screenshot review for visual proof-asset quality.',
     },
@@ -328,8 +283,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T07-41-29-980Z/craftbook-changelog-cut/craftbook-changelog-cut-gemma4-e4b-q8-2026-06-28T07-55-22-509Z-ewt8',
       notes:
         'Validated locally with gemma4-e4b-q8. The run repaired the changelog to preserve the 2.3.1 block, add the 2.4.0 release block, remove internal-only PR #831, and meet the final size/structure gates. Needs an append-only diff checker for unchanged previous blocks.',
     },
@@ -341,8 +294,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/batch-2026-06-28T00-30-19-871Z/craftbook-changelog-writeup-gemma4-e4b-q8-2026-06-28T00-30-19-873Z-mfiw',
       notes:
         'Validated locally after generic direct-worker setup began stamping expectedDeliverable and MCP write_artifact/write_document exact-path calls were redirected to workspace writes. Now includes a negative no-internal-noise gate.',
     },
@@ -354,8 +305,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T08-11-20-440Z/craftbook-chart-pack/craftbook-chart-pack-gemma4-e4b-q8-2026-06-28T08-17-58-252Z-7k0r',
       notes:
         'Validated locally with gemma4-e4b-q8. The run read the seeded CSV, wrote a 7.8 KB chart-pack HTML page in one pass, and passed topic, queue/day, data-value, chart-affordance, CSS, and JS-parse gates. Needs runtime pixel/DOM assertions that charts actually render.',
     },
@@ -365,8 +314,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T10-19-25-194Z/craftbook-chrome-extension/craftbook-chrome-extension-gemma4-e4b-q8-2026-06-28T10-19-25-197Z-2s49',
       notes:
         'Validated locally with gemma4-e4b-q8; generated HTML smoke spec passed 6 deterministic checks after classifier routing was fixed.',
     },
@@ -376,8 +323,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T10-19-25-194Z/craftbook-ci-pipeline/craftbook-ci-pipeline-gemma4-e4b-q8-2026-06-28T10-21-15-179Z-ahqq',
       notes:
         'Validated locally with gemma4-e4b-q8; generated external-automation smoke spec passed 6 deterministic checks.',
     },
@@ -387,7 +332,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun: 'evals/runs/craftbook-citation-audit-gemma4-e4b-q8-2026-06-28T04-38-05-343Z-axs5',
       notes:
         'Validated on gemma4-e4b-q8 after tightening the prompt/template against invented claims and prioritizing semantic repair feedback before byte-count repair. Generic seeded-corpus scenario with explicit verdict windows, uncited Finance-claim coverage, invented-claim rejection, and a small-corpus byte floor that does not reward padding. Needs exact pair-count assertions.',
     },
@@ -399,8 +343,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T09-09-31-261Z/craftbook-cli-tool/craftbook-cli-tool-gemma4-e4b-q8-2026-06-28T09-12-35-899Z-vg95',
       notes:
         'Validated locally with gemma4-e4b-q8; CLI source and companion test file passed deterministic gates.',
     },
@@ -410,8 +352,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T07-41-29-980Z/craftbook-cohort-analysis/craftbook-cohort-analysis-gemma4-e4b-q8-2026-06-28T07-57-42-864Z-c5kg',
       notes:
         'Validated locally with gemma4-e4b-q8. Exact JSON-path assertions caught invented W22 users, W21 W2 nulling, and estimated incomplete W22 W2 retention before the repair loop produced a correct readout and cohorts.json. Needs a reusable retention-matrix oracle and better secondary-deliverable feedback targeting.',
     },
@@ -429,8 +369,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T07-41-29-980Z/craftbook-comparison-matrix/craftbook-comparison-matrix-gemma4-e4b-q8-2026-06-28T07-43-30-140Z-l5bx',
       notes:
         'Validated locally with gemma4-e4b-q8. The run read the seeded option facts, produced a large self-contained HTML comparison page in one write, and passed static CSS/JS/content/recommendation/sort-affordance gates. Needs Playwright checks for actual sort behavior and score correctness.',
     },
@@ -440,8 +378,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T08-11-20-440Z/craftbook-competitive-analysis/craftbook-competitive-analysis-gemma4-e4b-q8-2026-06-28T08-13-40-989Z-0c3s',
       notes:
         'Validated locally with gemma4-e4b-q8. The run read the seeded competitor corpus, wrote analysis.md in one pass, and passed product, dimension, matrix, citation, gap/recommendation, and no-unknown gates. Needs a custom completeness checker for every row x dimension cell.',
     },
@@ -453,8 +389,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T09-09-31-261Z/craftbook-config-scaffold/craftbook-config-scaffold-gemma4-e4b-q8-2026-06-28T09-17-06-271Z-vb0e',
       notes:
         'Validated locally with gemma4-e4b-q8; package scaffold passed JSON validity and package-content gates.',
     },
@@ -464,8 +398,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/craftbook-content-accuracy-review-gemma4-e4b-q8-2026-06-28T04-43-24-996Z-8fjy',
       notes:
         'Validated on gemma4-e4b-q8 with per-claim verdict windows, exact contradiction gates, invented-claim rejection, and a calibrated byte floor that accepts complete first-pass reports. Needs a claim-count checker.',
     },
@@ -475,8 +407,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T08-11-20-440Z/craftbook-content-deck/craftbook-content-deck-gemma4-e4b-q8-2026-06-28T08-21-28-011Z-tg4r',
       notes:
         'Validated locally with gemma4-e4b-q8. The run read the seeded field notes, wrote an 11 KB HTML slide deck in one pass, and passed source-fact, deck-structure, takeaways, CSS, JS-parse, and navigation-affordance gates. Needs browser navigation assertions.',
     },
@@ -486,8 +416,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T07-41-29-980Z/craftbook-contract-template/craftbook-contract-template-gemma4-e4b-q8-2026-06-28T08-00-48-878Z-tztx',
       notes:
         'Validated locally with gemma4-e4b-q8. The run read the deal brief, wrote contract.md in one pass, and passed disclaimer, placeholder, clause, lawyer-review, and signature-block gates. Needs clause-structure and placeholder exhaustiveness checks.',
     },
@@ -497,8 +425,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T07-41-29-980Z/craftbook-copy-review/craftbook-copy-review-gemma4-e4b-q8-2026-06-28T07-49-06-698Z-25zr',
       notes:
         'Validated locally with gemma4-e4b-q8. The run read the seeded bad copy, wrote a review plus revised draft, and used a targeted repair nudge to add the missing clean revised-copy section. Needs a negative check for removed hype phrases.',
     },
@@ -508,8 +434,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T08-11-20-440Z/craftbook-corpus-email-digest/craftbook-corpus-email-digest-gemma4-e4b-q8-2026-06-28T08-23-28-100Z-vxvj',
       notes:
         'Validated locally with gemma4-e4b-q8. The run read all three corpus files, wrote digest.html in one pass, and passed subject, section, citation, fact, CSS, and no-invention gates. Needs stricter per-source attribution and no-hallucination checks.',
     },
@@ -519,7 +443,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun: 'evals/runs/craftbook-corpus-synthesis-gemma4-e4b-q8-2026-06-28T05-13-11-345Z-lhru',
       notes:
         'Validated on gemma4-e4b-q8 after lowering the byte floor to avoid padding pressure and adding seeded-fact, source-id, anti-file-summary, and invented-operational-detail gates. Gate wording now accepts both "30 days" and "30-day" for the West warehouse pilot fact.',
     },
@@ -529,8 +452,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T07-41-29-980Z/craftbook-cover-letter/craftbook-cover-letter-gemma4-e4b-q8-2026-06-28T07-51-22-102Z-tyf9',
       notes:
         'Validated locally with gemma4-e4b-q8. The run read both job and resume-note sources, wrote cover-letter.md in one pass, and passed candidate, company, role, proof-point, company-hook, and anti-generic gates. Needs a length checker and generic-filler negative checks.',
     },
@@ -540,7 +461,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun: 'evals/runs/craftbook-crm-update-batch-gemma4-e4b-q8-2026-06-28T05-56-01-528Z-1wag',
       notes:
         'Validated on gemma4-e4b-q8 after adding source-read enforcement, CSV shape diagnostics, per-note source gates, and a narrower Contact/Activity/Task schema. Prior false positives/failures showed a high byte floor caused invented contacts/accounts, that the schema needed explicit case-sensitive object types, allowed field names, and empty-column guidance, and that forcing optional Account rows created noise without measuring the core contact/activity/task batch.',
     },
@@ -552,8 +472,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T10-19-25-194Z/craftbook-cron-job/craftbook-cron-job-gemma4-e4b-q8-2026-06-28T10-22-09-388Z-txcp',
       notes:
         'Validated locally with gemma4-e4b-q8; generated data smoke spec passed 6 deterministic checks.',
     },
@@ -563,8 +481,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/batch-2026-06-28T09-23-22-843Z/craftbook-csv-transformer-gemma4-e4b-q8-2026-06-28T09-23-22-845Z-bco2',
       notes:
         'Validated locally with gemma4-e4b-q8; CSV transform passed parser shape and normalized-row gates after accepting valid quoted fields.',
     },
@@ -574,8 +490,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T07-41-29-980Z/craftbook-dashboard-spec/craftbook-dashboard-spec-gemma4-e4b-q8-2026-06-28T07-47-01-513Z-l07c',
       notes:
         'Validated locally with gemma4-e4b-q8. The run read the support-ops brief, wrote dashboard-spec.md in one pass, and passed audience, decision, question, widget, metric, filter, cadence, hierarchy, and acceptance-criteria gates. Needs a structural parser for exactly five answerable questions.',
     },
@@ -585,7 +499,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun: 'evals/runs/craftbook-data-dictionary-gemma4-e4b-q8-2026-06-28T03-04-28-904Z-nper',
       notes:
         'Validated locally with gemma4-e4b-q8 after tightening groundedness gates for invented operational context. The final artifact used observed CSV values and avoided the rejected lifecycle/currency/fee/fulfillment claims.',
     },
@@ -595,8 +508,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T10-19-25-194Z/craftbook-data-export-migrate/craftbook-data-export-migrate-gemma4-e4b-q8-2026-06-28T10-23-08-725Z-jord',
       notes:
         'Validated locally with gemma4-e4b-q8; generated data smoke spec passed 6 deterministic checks.',
     },
@@ -606,8 +517,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T10-19-25-194Z/craftbook-data-join-merge/craftbook-data-join-merge-gemma4-e4b-q8-2026-06-28T10-23-57-832Z-05lg',
       notes:
         'Validated locally with gemma4-e4b-q8; generated data smoke spec passed 6 deterministic checks.',
     },
@@ -617,8 +526,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T10-19-25-194Z/craftbook-data-pipeline-etl/craftbook-data-pipeline-etl-gemma4-e4b-q8-2026-06-28T10-25-02-264Z-35w6',
       notes:
         'Validated locally with gemma4-e4b-q8; generated external-automation smoke spec passed 6 deterministic checks.',
     },
@@ -628,8 +535,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/craftbook-data-quality-audit-gemma4-e4b-q8-2026-06-28T03-35-55-975Z-b0w5',
       notes:
         'Validated locally with gemma4-e4b-q8 after adding an explicit rule fixture, exact JSON scalar gates, anti-hallucination gates, and secondary-deliverable repair targeting. Needs a property checker that recomputes pass rates instead of regex-checking the output.',
     },
@@ -639,8 +544,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/batch-2026-06-28T00-36-45-726Z/craftbook-data-to-report-gemma4-e4b-q8-2026-06-28T00-36-45-729Z-jalr',
       notes:
         'Validated locally with gemma4-e4b-q8 using direct readFile/writeFile on the seeded CSV/report path. Still needs computed-value assertions.',
     },
@@ -650,8 +553,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T09-19-51-322Z/craftbook-data-viz-page/craftbook-data-viz-page-gemma4-e4b-q8-2026-06-28T09-21-15-867Z-wb6j',
       notes:
         'Validated locally with gemma4-e4b-q8; chart page passed source-read, HTML/CSS/JS, legend, insight, and data-grounding gates.',
     },
@@ -663,8 +564,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T13-49-09-962Z/data-wrangle/data-wrangle-gemma4-e4b-q8-2026-06-28T13-56-39-025Z-1cr2',
       notes:
         'Validated locally with gemma4-e4b-q8. The hand-authored data-wrangle scenario passed all 11 JSON/normalization/golden-record checks against seeded messy CSV fixtures. It still should record craftbook invocation attribution.',
     },
@@ -674,8 +573,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T10-19-25-194Z/craftbook-db-index-tuning/craftbook-db-index-tuning-gemma4-e4b-q8-2026-06-28T10-25-56-557Z-jh5a',
       notes:
         'Validated locally with gemma4-e4b-q8; generated data smoke spec passed 6 deterministic checks.',
     },
@@ -705,8 +602,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T08-11-20-440Z/craftbook-deploy-checklist/craftbook-deploy-checklist-gemma4-e4b-q8-2026-06-28T08-14-40-229Z-rkyt',
       notes:
         'Validated locally with gemma4-e4b-q8. The run read both release context and deploy evidence, wrote deploy-checklist.md in one pass, and passed gate/evidence, missing-secret, rollback, observability, on-call, and NO-GO recommendation gates. Needs a fake CLI harness to verify models actually execute commands instead of reading canned evidence.',
     },
@@ -718,8 +613,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T07-41-29-980Z/craftbook-design-review/craftbook-design-review-gemma4-e4b-q8-2026-06-28T08-02-43-936Z-ac8g',
       notes:
         'Validated locally with gemma4-e4b-q8. The run read the seeded dashboard markup, wrote design-review.md in one pass, and passed concrete finding, state-coverage, element-reference, value-specificity, and no-vague-filler gates. Needs screenshot/Playwright assertions to validate visual claims.',
     },
@@ -739,8 +632,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T10-19-25-194Z/craftbook-diagram-from-text/craftbook-diagram-from-text-gemma4-e4b-q8-2026-06-28T10-26-45-683Z-289e',
       notes:
         'Validated locally with gemma4-e4b-q8; generated HTML smoke spec passed 6 deterministic checks.',
     },
@@ -750,8 +641,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T10-19-25-194Z/craftbook-digest-from-feeds/craftbook-digest-from-feeds-gemma4-e4b-q8-2026-06-28T10-28-05-197Z-evf5',
       notes:
         'Validated locally with gemma4-e4b-q8; generated external-automation smoke spec passed 6 deterministic checks.',
     },
@@ -761,8 +650,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T10-19-25-194Z/craftbook-doc-intake-pipeline/craftbook-doc-intake-pipeline-gemma4-e4b-q8-2026-06-28T10-29-04-419Z-cfn5',
       notes:
         'Validated locally with gemma4-e4b-q8; generated data smoke spec passed 6 deterministic checks.',
     },
@@ -772,8 +659,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T10-19-25-194Z/craftbook-doc-rewrite/craftbook-doc-rewrite-gemma4-e4b-q8-2026-06-28T10-30-13-879Z-plen',
       notes:
         'Validated locally with gemma4-e4b-q8; generated external-automation smoke spec passed 6 deterministic checks.',
     },
@@ -783,8 +668,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T10-19-25-194Z/craftbook-dockerize-app/craftbook-dockerize-app-gemma4-e4b-q8-2026-06-28T10-31-18-168Z-63zd',
       notes:
         'Validated locally with gemma4-e4b-q8; generated code smoke spec passed 7 deterministic checks.',
     },
@@ -794,8 +677,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T10-19-25-194Z/craftbook-docs-site/craftbook-docs-site-gemma4-e4b-q8-2026-06-28T10-32-17-445Z-2ogl',
       notes:
         'Validated locally with gemma4-e4b-q8; generated HTML smoke spec passed 6 deterministic checks.',
     },
@@ -813,8 +694,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T11-04-27-019Z/craftbook-due-diligence-brief/craftbook-due-diligence-brief-gemma4-e4b-q8-2026-06-28T11-04-27-022Z-jz2i',
       notes:
         'Validated locally with gemma4-e4b-q8; generated corpus smoke spec passed 8 deterministic checks after classifier routing was fixed.',
     },
@@ -824,8 +703,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T10-37-13-449Z/craftbook-ebook-compile/craftbook-ebook-compile-gemma4-e4b-q8-2026-06-28T10-38-12-798Z-t3ji',
       notes:
         'Validated locally with gemma4-e4b-q8; generated HTML smoke spec passed 6 deterministic checks.',
     },
@@ -835,8 +712,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T10-37-13-449Z/craftbook-email-sequence/craftbook-email-sequence-gemma4-e4b-q8-2026-06-28T10-39-52-658Z-2s1r',
       notes:
         'Validated locally with gemma4-e4b-q8; generated HTML smoke spec passed 6 deterministic checks.',
     },
@@ -846,8 +721,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T10-37-13-449Z/craftbook-email-template/craftbook-email-template-gemma4-e4b-q8-2026-06-28T10-41-52-826Z-1goy',
       notes:
         'Validated locally with gemma4-e4b-q8; generated HTML smoke spec passed 6 deterministic checks.',
     },
@@ -865,8 +738,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T11-04-27-019Z/craftbook-escalation-playbook/craftbook-escalation-playbook-gemma4-e4b-q8-2026-06-28T11-05-11-102Z-7iui',
       notes:
         'Validated locally with gemma4-e4b-q8; generated corpus smoke spec passed 8 deterministic checks after classifier routing was fixed.',
     },
@@ -876,8 +747,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T10-37-13-449Z/craftbook-evidence-brief/craftbook-evidence-brief-gemma4-e4b-q8-2026-06-28T10-45-17-506Z-1deo',
       notes:
         'Validated locally with gemma4-e4b-q8; generated corpus smoke spec passed 8 deterministic checks.',
     },
@@ -895,8 +764,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T10-37-13-449Z/craftbook-expense-categorize/craftbook-expense-categorize-gemma4-e4b-q8-2026-06-28T10-46-01-554Z-dh6n',
       notes:
         'Validated locally with gemma4-e4b-q8; generated data smoke spec passed 6 deterministic checks.',
     },
@@ -906,8 +773,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T11-04-27-019Z/craftbook-fact-check/craftbook-fact-check-gemma4-e4b-q8-2026-06-28T11-05-55-173Z-tytk',
       notes:
         'Validated locally with gemma4-e4b-q8; generated corpus smoke spec passed 8 deterministic checks after classifier routing was fixed.',
     },
@@ -917,8 +782,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T11-04-27-019Z/craftbook-faq-from-docs/craftbook-faq-from-docs-gemma4-e4b-q8-2026-06-28T11-06-39-217Z-oaxf',
       notes:
         'Validated locally with gemma4-e4b-q8; generated corpus smoke spec passed 8 deterministic checks after classifier routing was fixed.',
     },
@@ -928,8 +791,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T10-37-13-449Z/craftbook-favicon-set/craftbook-favicon-set-gemma4-e4b-q8-2026-06-28T10-49-19-761Z-s5u0',
       notes:
         'Validated locally with gemma4-e4b-q8; generated media smoke spec passed 5 deterministic checks.',
     },
@@ -939,8 +800,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T11-04-27-019Z/craftbook-feature-flag-release/craftbook-feature-flag-release-gemma4-e4b-q8-2026-06-28T11-07-23-267Z-frjr',
       notes:
         'Validated locally with gemma4-e4b-q8; generated external-automation smoke spec passed 6 deterministic checks after classifier routing was fixed.',
     },
@@ -950,8 +809,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T10-37-13-449Z/craftbook-feature-flag-rollout/craftbook-feature-flag-rollout-gemma4-e4b-q8-2026-06-28T10-52-04-025Z-bxnt',
       notes:
         'Validated locally with gemma4-e4b-q8; generated external-automation smoke spec passed 6 deterministic checks.',
     },
@@ -961,8 +818,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T10-37-13-449Z/craftbook-feedback-widget/craftbook-feedback-widget-gemma4-e4b-q8-2026-06-28T10-52-58-233Z-ew6k',
       notes:
         'Validated locally with gemma4-e4b-q8; generated HTML smoke spec passed 6 deterministic checks.',
     },
@@ -972,8 +827,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T10-37-13-449Z/craftbook-folder-to-audio/craftbook-folder-to-audio-gemma4-e4b-q8-2026-06-28T10-54-53-288Z-owg9',
       notes:
         'Validated locally with gemma4-e4b-q8; generated media smoke spec passed 5 deterministic checks.',
     },
@@ -983,8 +836,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T11-04-27-019Z/craftbook-forecast-model/craftbook-forecast-model-gemma4-e4b-q8-2026-06-28T11-08-17-542Z-3mg7',
       notes:
         'Validated locally with gemma4-e4b-q8; generated data smoke spec passed 6 deterministic checks after classifier routing was fixed.',
     },
@@ -994,8 +845,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T11-04-27-019Z/craftbook-form-fill-batch/craftbook-form-fill-batch-gemma4-e4b-q8-2026-06-28T11-09-27-029Z-2epo',
       notes:
         'Validated locally with gemma4-e4b-q8; generated external-automation smoke spec passed 6 deterministic checks after classifier routing was fixed.',
     },
@@ -1005,7 +854,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun: 'evals/runs/craftbook-form-wizard-gemma4-e4b-q8-2026-06-27T20-21-31-070Z-au8q',
       notes:
         'Validated with the generic direct-worker adapter on gemma4-e4b-q8. The model selected/invoked form-wizard, wrote a 15 KB self-contained index.html, and passed all 8 static gates. A later Playwright layer should actually click through the wizard.',
     },
@@ -1025,8 +873,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T10-37-13-449Z/craftbook-game-with-screens/craftbook-game-with-screens-gemma4-e4b-q8-2026-06-28T10-59-22-455Z-in01',
       notes:
         'Validated locally with gemma4-e4b-q8; generated game smoke spec passed 7 deterministic checks.',
     },
@@ -1038,8 +884,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T10-37-13-449Z/craftbook-glossary-build/craftbook-glossary-build-gemma4-e4b-q8-2026-06-28T11-01-12-421Z-ioe4',
       notes:
         'Validated locally with gemma4-e4b-q8; generated corpus smoke spec passed 8 deterministic checks.',
     },
@@ -1049,8 +893,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T11-04-27-019Z/craftbook-graphql-api/craftbook-graphql-api-gemma4-e4b-q8-2026-06-28T11-10-26-388Z-t5ls',
       notes:
         'Validated locally with gemma4-e4b-q8; generated code smoke spec passed 7 deterministic checks after classifier routing was fixed.',
     },
@@ -1060,8 +902,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T10-37-13-449Z/craftbook-grpc-service/craftbook-grpc-service-gemma4-e4b-q8-2026-06-28T11-02-40-530Z-1yh9',
       notes:
         'Validated locally with gemma4-e4b-q8; generated code smoke spec passed 7 deterministic checks.',
     },
@@ -1071,8 +911,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T11-15-42-889Z/craftbook-handbook-section/craftbook-handbook-section-gemma4-e4b-q8-2026-06-28T11-15-42-892Z-tojt',
       notes:
         'Validated locally with gemma4-e4b-q8; generated corpus smoke spec passed 8 deterministic checks after classifier routing was fixed.',
     },
@@ -1082,8 +920,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T11-15-42-889Z/craftbook-hero-image/craftbook-hero-image-gemma4-e4b-q8-2026-06-28T11-16-32-070Z-xwmo',
       notes:
         'Validated locally with gemma4-e4b-q8; generated media smoke spec passed 5 deterministic checks.',
     },
@@ -1093,8 +929,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T11-15-42-889Z/craftbook-hotfix-flow/craftbook-hotfix-flow-gemma4-e4b-q8-2026-06-28T11-17-36-428Z-h2i6',
       notes:
         'Validated locally with gemma4-e4b-q8; generated code smoke spec passed 7 deterministic checks.',
     },
@@ -1106,10 +940,8 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T12-07-40-933Z/arcade-deluxe/arcade-deluxe-gemma4-e4b-q8-2026-06-28T12-07-40-936Z-2s5a',
       notes:
-        'Validated locally with gemma4-e4b-q8 via arcade-deluxe run evals/runs/matrix-2026-06-28T12-07-40-933Z/arcade-deluxe/arcade-deluxe-gemma4-e4b-q8-2026-06-28T12-07-40-936Z-2s5a. The hand-authored grader passed sniff and six runtime assertions. A/B support exists through GEZEL_DISABLE_CRAFTBOOK_HINT.',
+        'Validated locally with gemma4-e4b-q8 against the hand-authored arcade-deluxe scenario. The grader passed sniff and six runtime assertions. A/B support exists through GEZEL_DISABLE_CRAFTBOOK_HINT.',
     },
     gaps: ['Record whether the voorman actually invoked html-arcade-game in the run summary.'],
   },
@@ -1117,8 +949,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T11-15-42-889Z/craftbook-html-puzzle-game/craftbook-html-puzzle-game-gemma4-e4b-q8-2026-06-28T11-18-56-024Z-p7gc',
       notes:
         'Validated locally with gemma4-e4b-q8; generated game smoke spec passed 7 deterministic checks.',
     },
@@ -1130,8 +960,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T11-15-42-889Z/craftbook-icon-pack/craftbook-icon-pack-gemma4-e4b-q8-2026-06-28T11-20-51-058Z-cs5n',
       notes:
         'Validated locally with gemma4-e4b-q8; generated media smoke spec passed 5 deterministic checks.',
     },
@@ -1149,8 +977,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T11-15-42-889Z/craftbook-idle-clicker-game/craftbook-idle-clicker-game-gemma4-e4b-q8-2026-06-28T11-21-50-336Z-3rgw',
       notes:
         'Validated locally with gemma4-e4b-q8; generated game smoke spec passed 7 deterministic checks.',
     },
@@ -1162,8 +988,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T11-15-42-889Z/craftbook-image-batch-edit/craftbook-image-batch-edit-gemma4-e4b-q8-2026-06-28T11-23-25-111Z-jmqt',
       notes:
         'Validated locally with gemma4-e4b-q8; generated media smoke spec passed 5 deterministic checks.',
     },
@@ -1173,8 +997,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T11-15-42-889Z/craftbook-image-dedup-cluster/craftbook-image-dedup-cluster-gemma4-e4b-q8-2026-06-28T11-24-24-420Z-6iay',
       notes:
         'Validated locally with gemma4-e4b-q8; generated media smoke spec passed 5 deterministic checks.',
     },
@@ -1184,8 +1006,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T11-15-42-889Z/craftbook-image-palette-extract/craftbook-image-palette-extract-gemma4-e4b-q8-2026-06-28T11-25-23-682Z-0on8',
       notes:
         'Validated locally with gemma4-e4b-q8; generated HTML smoke spec passed 6 deterministic checks.',
     },
@@ -1195,8 +1015,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T11-15-42-889Z/craftbook-image-seo-rename/craftbook-image-seo-rename-gemma4-e4b-q8-2026-06-28T11-26-58-507Z-4rj4',
       notes:
         'Validated locally with gemma4-e4b-q8; generated media smoke spec passed 5 deterministic checks.',
     },
@@ -1206,8 +1024,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T15-24-51-385Z/craftbook-image-set-index/craftbook-image-set-index-gemma4-e4b-q8-2026-06-28T15-27-25-431Z-sit7',
       notes:
         'Validated locally with gemma4-e4b-q8. The sidecar media descriptions produced index.json and passed all 9 filename, tag, color, text/quality-flag, and no-invented-image gates. Future work should add actual tiny image fixtures plus a vision/MCP stub.',
     },
@@ -1220,8 +1036,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T11-15-42-889Z/craftbook-inbox-triage/craftbook-inbox-triage-gemma4-e4b-q8-2026-06-28T11-28-18-031Z-3o4t',
       notes:
         'Validated locally with gemma4-e4b-q8; generated data smoke spec passed 6 deterministic checks.',
     },
@@ -1231,8 +1045,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T11-15-42-889Z/craftbook-incident-comms-templates/craftbook-incident-comms-templates-gemma4-e4b-q8-2026-06-28T11-29-07-261Z-v3r1',
       notes:
         'Validated locally with gemma4-e4b-q8; generated corpus smoke spec passed 8 deterministic checks after classifier routing was fixed.',
     },
@@ -1244,8 +1056,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T13-49-09-962Z/incident-postmortem/incident-postmortem-gemma4-e4b-q8-2026-06-28T13-54-03-358Z-8hpd',
       notes:
         'Validated locally with gemma4-e4b-q8. The hand-authored scenario passed all 7 postmortem checks after repair feedback expanded depth and action-item formatting. Needs direct linkage to the craftbook selection/invocation path.',
     },
@@ -1257,8 +1067,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T11-15-42-889Z/craftbook-interactive-quiz/craftbook-interactive-quiz-gemma4-e4b-q8-2026-06-28T11-29-51-305Z-qm1x',
       notes:
         'Validated locally with gemma4-e4b-q8; generated game smoke spec passed 7 deterministic checks.',
     },
@@ -1270,8 +1078,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T08-40-16-187Z/craftbook-investigate/craftbook-investigate-gemma4-e4b-q8-2026-06-28T08-41-45-953Z-jdxi',
       notes:
         'Validated locally with gemma4-e4b-q8. The run read package.json, lib/paginate.mjs, and accept.mjs, wrote durable investigation notes through the workspace note fallback, and passed all 8 root-cause gates without requiring a code edit.',
     },
@@ -1283,8 +1089,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T11-15-42-889Z/craftbook-investigate-root-cause/craftbook-investigate-root-cause-gemma4-e4b-q8-2026-06-28T11-31-36-310Z-8i6g',
       notes:
         'Validated locally with gemma4-e4b-q8; generated corpus smoke spec passed 8 deterministic checks after classifier routing was fixed.',
     },
@@ -1294,8 +1098,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T11-15-42-889Z/craftbook-invoice-generator/craftbook-invoice-generator-gemma4-e4b-q8-2026-06-28T11-32-25-411Z-mstd',
       notes:
         'Validated locally with gemma4-e4b-q8; generated HTML smoke spec passed 6 deterministic checks.',
     },
@@ -1305,7 +1107,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'implemented',
       localModels: ['gemma4-e4b-q8'],
-      lastRun: 'evals/runs/craftbook-invoice-run-gemma4-e4b-q8-2026-07-20T17-06-07-090Z-m7jq',
       notes:
         'Declarative-fanout spawn host, run as a real craftbook task. The framework path is proven end-to-end: the task is created from the book and its entry step dispatches to the worker (daemon.log: "[tasks] entry dispatched: fieldnote-studio-office/1 step scope"), and the fanout trigger + spawnChild dispatch are covered by fanout.integration + manager unit tests. NOT passing on the local small model: gemma4-e4b-q8 (tier small, 8B) reflex-loops read_task_notes on the entry step — 13 tool calls, all read_task_notes, zero readFile/writeFile — and exhausts its repair budget before writing notes/billables.json, so no children spawn. The harness classifies this itself (result.json failureClass: "model", failureMode: "model-stuck"). Even the repeat-tracker\'s strongest "do NOT call read_task_notes again" nudge did not break the loop, so it is a small-model capability floor, not a prompt-completeness or framework gap. Per the anti-overtuning doctrine the bar is a medium model; validate the live PASS there rather than overtuning the small-model path.',
     },
@@ -1318,8 +1119,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T11-15-42-889Z/craftbook-knowledge-base-article/craftbook-knowledge-base-article-gemma4-e4b-q8-2026-06-28T11-34-00-159Z-y9cg',
       notes:
         'Validated locally with gemma4-e4b-q8; generated corpus smoke spec passed 8 deterministic checks after classifier routing was fixed.',
     },
@@ -1329,8 +1128,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T11-15-42-889Z/craftbook-kpi-scorecard/craftbook-kpi-scorecard-gemma4-e4b-q8-2026-06-28T11-34-44-194Z-0dd2',
       notes:
         'Validated locally with gemma4-e4b-q8; generated HTML smoke spec passed 6 deterministic checks.',
     },
@@ -1340,8 +1137,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T11-15-42-889Z/craftbook-landing-copy/craftbook-landing-copy-gemma4-e4b-q8-2026-06-28T11-36-29-200Z-y4v7',
       notes:
         'Validated locally with gemma4-e4b-q8; generated corpus smoke spec passed 8 deterministic checks after classifier routing was fixed.',
     },
@@ -1351,8 +1146,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T11-15-42-889Z/craftbook-landing-page/craftbook-landing-page-gemma4-e4b-q8-2026-06-28T11-37-18-344Z-h807',
       notes:
         'Validated locally with gemma4-e4b-q8; generated HTML smoke spec passed 6 deterministic checks.',
     },
@@ -1362,8 +1155,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T11-15-42-889Z/craftbook-lead-enrichment/craftbook-lead-enrichment-gemma4-e4b-q8-2026-06-28T11-39-18-461Z-e4xd',
       notes:
         'Validated locally with gemma4-e4b-q8; generated data smoke spec passed 6 deterministic checks.',
     },
@@ -1373,8 +1164,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T11-43-16-832Z/craftbook-library-package/craftbook-library-package-gemma4-e4b-q8-2026-06-28T11-43-16-835Z-rfbf',
       notes:
         'Validated locally with gemma4-e4b-q8; generated code smoke spec passed 7 deterministic checks.',
     },
@@ -1384,8 +1173,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T11-43-16-832Z/craftbook-literature-review/craftbook-literature-review-gemma4-e4b-q8-2026-06-28T11-44-11-149Z-j2y3',
       notes:
         'Validated locally with gemma4-e4b-q8; generated corpus smoke spec passed 8 deterministic checks.',
     },
@@ -1395,8 +1182,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T11-43-16-832Z/craftbook-live-browser-qa/craftbook-live-browser-qa-gemma4-e4b-q8-2026-06-28T11-45-00-305Z-5ie0',
       notes:
         'Validated locally with gemma4-e4b-q8; generated external-automation smoke spec passed 6 deterministic checks.',
     },
@@ -1406,8 +1191,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T11-43-16-832Z/craftbook-localize-content/craftbook-localize-content-gemma4-e4b-q8-2026-06-28T11-45-54-526Z-vz0k',
       notes:
         'Validated locally with gemma4-e4b-q8; generated corpus smoke spec passed 8 deterministic checks.',
     },
@@ -1417,8 +1200,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T11-43-16-832Z/craftbook-logo-set/craftbook-logo-set-gemma4-e4b-q8-2026-06-28T11-46-43-641Z-qfc1',
       notes:
         'Validated locally with gemma4-e4b-q8; generated media smoke spec passed 5 deterministic checks.',
     },
@@ -1428,7 +1209,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun: 'evals/runs/craftbook-market-scan-gemma4-e4b-q8-2026-06-28T04-17-58-887Z-m5x2',
       notes:
         'Validated locally with gemma4-e4b-q8 after adding an explicit boundary source id, invalid-citation checks, and unsupported forecast/maturity-claim gates. The final run repaired projected-growth language before passing.',
     },
@@ -1440,8 +1220,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T11-43-16-832Z/craftbook-meeting-minutes/craftbook-meeting-minutes-gemma4-e4b-q8-2026-06-28T11-47-42-912Z-yfkd',
       notes:
         'Validated locally with gemma4-e4b-q8; generated corpus smoke spec passed 8 deterministic checks.',
     },
@@ -1451,8 +1229,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T11-43-16-832Z/craftbook-meeting-notes-to-actions/craftbook-meeting-notes-to-actions-gemma4-e4b-q8-2026-06-28T11-48-26-975Z-0mcf',
       notes:
         'Validated locally with gemma4-e4b-q8; generated corpus smoke spec passed 8 deterministic checks.',
     },
@@ -1462,8 +1238,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T11-43-16-832Z/craftbook-meeting-summary-audio/craftbook-meeting-summary-audio-gemma4-e4b-q8-2026-06-28T11-49-11-109Z-10an',
       notes:
         'Validated locally with gemma4-e4b-q8; generated media smoke spec passed 5 deterministic checks.',
     },
@@ -1473,8 +1247,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T11-43-16-832Z/craftbook-message-queue-consumer/craftbook-message-queue-consumer-gemma4-e4b-q8-2026-06-28T11-50-15-424Z-143j',
       notes:
         'Validated locally with gemma4-e4b-q8; generated code smoke spec passed 7 deterministic checks.',
     },
@@ -1484,8 +1256,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T11-43-16-832Z/craftbook-micro-game-jam/craftbook-micro-game-jam-gemma4-e4b-q8-2026-06-28T11-51-29-874Z-5rw4',
       notes:
         'Validated locally with gemma4-e4b-q8; generated game smoke spec passed 7 deterministic checks.',
     },
@@ -1505,8 +1275,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T11-43-16-832Z/craftbook-monitor-and-alert/craftbook-monitor-and-alert-gemma4-e4b-q8-2026-06-28T11-53-40-269Z-pyif',
       notes:
         'Validated locally with gemma4-e4b-q8; generated external-automation smoke spec passed 6 deterministic checks.',
     },
@@ -1524,8 +1292,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T11-43-16-832Z/craftbook-moodboard/craftbook-moodboard-gemma4-e4b-q8-2026-06-28T11-54-34-479Z-vjg2',
       notes:
         'Validated locally with gemma4-e4b-q8; generated media smoke spec passed 5 deterministic checks.',
     },
@@ -1535,8 +1301,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T11-43-16-832Z/craftbook-music-metadata-tag/craftbook-music-metadata-tag-gemma4-e4b-q8-2026-06-28T11-55-38-810Z-zh14',
       notes:
         'Validated locally with gemma4-e4b-q8; generated media smoke spec passed 5 deterministic checks.',
     },
@@ -1546,8 +1310,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T11-43-16-832Z/craftbook-narrated-slideshow/craftbook-narrated-slideshow-gemma4-e4b-q8-2026-06-28T11-56-48-206Z-lfhq',
       notes:
         'Validated locally with gemma4-e4b-q8; generated media smoke spec passed 5 deterministic checks.',
     },
@@ -1557,8 +1319,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T11-43-16-832Z/craftbook-newsletter-issue/craftbook-newsletter-issue-gemma4-e4b-q8-2026-06-28T11-58-02-690Z-plwr',
       notes:
         'Validated locally with gemma4-e4b-q8; generated corpus smoke spec passed 8 deterministic checks.',
     },
@@ -1568,8 +1328,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T11-43-16-832Z/craftbook-notification-router/craftbook-notification-router-gemma4-e4b-q8-2026-06-28T11-58-46-865Z-l8v8',
       notes:
         'Validated locally with gemma4-e4b-q8; generated external-automation smoke spec passed 6 deterministic checks.',
     },
@@ -1579,8 +1337,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T11-43-16-832Z/craftbook-ocr-extract/craftbook-ocr-extract-gemma4-e4b-q8-2026-06-28T11-59-51-248Z-4y2t',
       notes:
         'Validated locally with gemma4-e4b-q8; generated media smoke spec passed 5 deterministic checks.',
     },
@@ -1598,8 +1354,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/batch-2026-06-28T15-33-41-603Z/craftbook-office-hours-gemma4-e4b-q8-2026-06-28T15-33-41-606Z-esyw',
       notes:
         'Validated locally with gemma4-e4b-q8. The deterministic scripted-answer fixture produced scope.md and passed all 9 challenge/reframe/locked-scope gates after relaxing the gate to accept hyphenated Out-of-Scope wording. Future work should intercept ask_user_question directly.',
     },
@@ -1612,8 +1366,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T11-43-16-832Z/craftbook-onboarding-checklist/craftbook-onboarding-checklist-gemma4-e4b-q8-2026-06-28T12-00-45-456Z-q2x8',
       notes:
         'Validated locally with gemma4-e4b-q8; generated corpus smoke spec passed 8 deterministic checks.',
     },
@@ -1623,8 +1375,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T11-43-16-832Z/craftbook-onboarding-flow/craftbook-onboarding-flow-gemma4-e4b-q8-2026-06-28T12-01-29-517Z-50c9',
       notes:
         'Validated locally with gemma4-e4b-q8; generated HTML smoke spec passed 6 deterministic checks.',
     },
@@ -1634,8 +1384,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T11-43-16-832Z/craftbook-oncall-handoff/craftbook-oncall-handoff-gemma4-e4b-q8-2026-06-28T12-03-09-382Z-ub1r',
       notes:
         'Validated locally with gemma4-e4b-q8; generated corpus smoke spec passed 8 deterministic checks.',
     },
@@ -1645,8 +1393,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T12-07-40-933Z/craftbook-one-pager/craftbook-one-pager-gemma4-e4b-q8-2026-06-28T12-20-06-151Z-00ds',
       notes:
         'Validated locally with gemma4-e4b-q8; generated corpus smoke spec passed 8 deterministic checks.',
     },
@@ -1664,8 +1410,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T12-07-40-933Z/craftbook-parser-grammar/craftbook-parser-grammar-gemma4-e4b-q8-2026-06-28T12-20-50-219Z-zzic',
       notes:
         'Validated locally with gemma4-e4b-q8; generated code smoke spec passed 7 deterministic checks.',
     },
@@ -1675,8 +1419,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T12-07-40-933Z/craftbook-perf-audit/craftbook-perf-audit-gemma4-e4b-q8-2026-06-28T12-21-59-599Z-si89',
       notes:
         'Validated locally with gemma4-e4b-q8; generated external-automation smoke spec passed 6 deterministic checks.',
     },
@@ -1686,8 +1428,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T12-07-40-933Z/craftbook-perf-optimization/craftbook-perf-optimization-gemma4-e4b-q8-2026-06-28T12-22-53-778Z-8ny9',
       notes:
         'Validated locally with gemma4-e4b-q8; generated code smoke spec passed 7 deterministic checks after missing-deliverable feedback.',
     },
@@ -1697,8 +1437,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T12-07-40-933Z/craftbook-photo-cull/craftbook-photo-cull-gemma4-e4b-q8-2026-06-28T12-26-45-406Z-h9b7',
       notes:
         'Validated locally with gemma4-e4b-q8; generated media smoke spec passed 5 deterministic checks.',
     },
@@ -1708,8 +1446,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T12-07-40-933Z/craftbook-physics-toy/craftbook-physics-toy-gemma4-e4b-q8-2026-06-28T12-27-44-627Z-nyqe',
       notes:
         'Validated locally with gemma4-e4b-q8; generated game smoke spec passed 7 deterministic checks.',
     },
@@ -1721,8 +1457,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T12-07-40-933Z/craftbook-pitch-deck/craftbook-pitch-deck-gemma4-e4b-q8-2026-06-28T12-29-24-519Z-6xgx',
       notes:
         'Validated locally with gemma4-e4b-q8; generated HTML smoke spec passed 6 deterministic checks.',
     },
@@ -1732,8 +1466,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/batch-2026-06-28T20-50-55-706Z/craftbook-plan-gemma4-e4b-q8-2026-06-28T20-50-55-709Z-1et1',
       notes:
         'Validated locally with gemma4-e4b-q8. Earlier trials created the draft, outcomes, and verification step but looped on set_task_status instead of set_step_deliverable. Framework fixes now translate impossible draft statuses, detect false deliverable-gate claims, enable Gemma failed-tool recovery, and let set_task_status safely attach inferred index.html gates while leaving the draft in review state. The passing run reached all 5 task-graph checks.',
     },
@@ -1743,8 +1475,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T12-07-40-933Z/craftbook-podcast-chaptering/craftbook-podcast-chaptering-gemma4-e4b-q8-2026-06-28T12-30-59-329Z-j9j3',
       notes:
         'Validated locally with gemma4-e4b-q8; generated media smoke spec passed 5 deterministic checks after metadata/accessibility repair feedback.',
     },
@@ -1754,8 +1484,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T12-07-40-933Z/craftbook-portfolio-site/craftbook-portfolio-site-gemma4-e4b-q8-2026-06-28T12-33-24-886Z-vlyj',
       notes:
         'Validated locally with gemma4-e4b-q8; generated HTML smoke spec passed 6 deterministic checks.',
     },
@@ -1789,7 +1517,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun: 'evals/runs/craftbook-press-release-gemma4-e4b-q8-2026-06-28T03-52-13-888Z-ujzf',
       notes:
         'Validated locally with gemma4-e4b-q8 after unsupported-claim gate tightening and byte-floor calibration. The final run repaired dateline/closing, unsupported efficiency/proof wording, and produced a complete source-grounded release.',
     },
@@ -1802,8 +1529,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T15-24-51-385Z/craftbook-price-tracker/craftbook-price-tracker-gemma4-e4b-q8-2026-06-28T15-29-03-670Z-8fh5',
       notes:
         'Validated locally with gemma4-e4b-q8. The deterministic day-1/day-2 product feeds produced tracker.mjs, price-history.json, and run-log.md and passed all 18 script, history, low-price, idempotency, normalization, and error-log gates after repair cycles for history depth and run-log detail. Future work should run the generated script twice against a fake HTTP server.',
     },
@@ -1815,8 +1540,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T12-07-40-933Z/craftbook-pricing-page/craftbook-pricing-page-gemma4-e4b-q8-2026-06-28T12-35-19-905Z-kz6w',
       notes:
         'Validated locally with gemma4-e4b-q8; generated HTML smoke spec passed 6 deterministic checks.',
     },
@@ -1826,8 +1549,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T12-07-40-933Z/craftbook-product-descriptions/craftbook-product-descriptions-gemma4-e4b-q8-2026-06-28T12-37-09-855Z-50sf',
       notes:
         'Validated locally with gemma4-e4b-q8; generated corpus smoke spec passed 8 deterministic checks.',
     },
@@ -1837,8 +1558,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T12-07-40-933Z/craftbook-proposal-sow/craftbook-proposal-sow-gemma4-e4b-q8-2026-06-28T12-37-53-893Z-iqdb',
       notes:
         'Validated locally with gemma4-e4b-q8; generated corpus smoke spec passed 8 deterministic checks.',
     },
@@ -1849,10 +1568,8 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T12-07-40-933Z/squisq-review/squisq-review-gemma4-e4b-q8-2026-06-28T12-38-43-040Z-2djo',
       notes:
-        'Validated locally with gemma4-e4b-q8 via squisq-review run evals/runs/matrix-2026-06-28T12-07-40-933Z/squisq-review/squisq-review-gemma4-e4b-q8-2026-06-28T12-38-43-040Z-2djo. The hand-authored review grader passed with grounded sections and 11 source citations. A future fake GitHub/MCP harness should exercise pull-request-review directly.',
+        'Validated locally with gemma4-e4b-q8 against the hand-authored squisq-review scenario. The review grader passed with grounded sections and 11 source citations. A future fake GitHub/MCP harness should exercise pull-request-review directly.',
     },
     gaps: [
       'Replace task-equivalent link with fake GitHub PR simulator for direct craftbook validation.',
@@ -1862,8 +1579,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T12-07-40-933Z/craftbook-pwa-offline/craftbook-pwa-offline-gemma4-e4b-q8-2026-06-28T12-40-49-280Z-owti',
       notes:
         'Validated locally with gemma4-e4b-q8; generated HTML smoke spec passed 6 deterministic checks.',
     },
@@ -1873,8 +1588,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T15-24-51-385Z/craftbook-qa/craftbook-qa-gemma4-e4b-q8-2026-06-28T15-26-26-154Z-gah9',
       notes:
         'Validated locally with gemma4-e4b-q8. The fixture-site brief produced qa-report.md and passed all 9 smoke, golden-path, edge-case, seeded-defect, repro, triage, and no-clean-pass gates. Future work should add a real loopback HTTP/Playwright simulator.',
     },
@@ -1887,8 +1600,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T12-07-40-933Z/craftbook-reading-list/craftbook-reading-list-gemma4-e4b-q8-2026-06-28T12-42-29-138Z-7sna',
       notes:
         'Validated locally with gemma4-e4b-q8; generated corpus smoke spec passed 8 deterministic checks.',
     },
@@ -1898,8 +1609,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T12-07-40-933Z/craftbook-receipt-ocr-ledger/craftbook-receipt-ocr-ledger-gemma4-e4b-q8-2026-06-28T12-43-18-323Z-2f77',
       notes:
         'Validated locally with gemma4-e4b-q8; generated data smoke spec passed 6 deterministic checks after exact-total repair feedback.',
     },
@@ -1909,8 +1618,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T12-07-40-933Z/craftbook-recurring-invoice-run/craftbook-recurring-invoice-run-gemma4-e4b-q8-2026-06-28T12-44-22-743Z-avui',
       notes:
         'Validated locally with gemma4-e4b-q8; generated data smoke spec passed 6 deterministic checks after exact-total repair feedback.',
     },
@@ -1920,8 +1627,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T12-07-40-933Z/craftbook-refactor-module/craftbook-refactor-module-gemma4-e4b-q8-2026-06-28T12-45-32-278Z-2daj',
       notes:
         'Validated locally with gemma4-e4b-q8; generated code smoke spec passed 7 deterministic checks.',
     },
@@ -1931,8 +1636,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T12-50-29-457Z/craftbook-regex-builder/craftbook-regex-builder-gemma4-e4b-q8-2026-06-28T12-50-29-460Z-p7r6',
       notes:
         'Validated locally with gemma4-e4b-q8; generated code smoke spec passed 7 deterministic checks after classifier routing was fixed.',
     },
@@ -1942,8 +1645,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/craftbook-release-announcement-gemma4-e4b-q8-2026-06-28T04-04-18-039Z-qmws',
       notes:
         'Validated locally with gemma4-e4b-q8 after calibrating the byte floor and adding no-emoji/no-hype grounded-claim gates. The final run repaired emoji, "smarter", and "seamless" wording before passing.',
     },
@@ -1955,8 +1656,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/batch-2026-06-28T00-49-32-195Z/craftbook-release-notes-gemma4-e4b-q8-2026-06-28T00-49-32-197Z-774u',
       notes:
         'Validated locally with gemma4-e4b-q8. The notContains gate caught leaked internal/CI/dependency noise twice before the repair loop produced a clean public release note.',
     },
@@ -1966,8 +1665,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T12-50-29-457Z/craftbook-release-pipeline-ci/craftbook-release-pipeline-ci-gemma4-e4b-q8-2026-06-28T12-51-28-761Z-ijox',
       notes:
         'Validated locally with gemma4-e4b-q8; generated external-automation smoke spec passed 6 deterministic checks.',
     },
@@ -1977,8 +1674,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T12-50-29-457Z/craftbook-release-readiness-review/craftbook-release-readiness-review-gemma4-e4b-q8-2026-06-28T12-52-23-049Z-vlb7',
       notes:
         'Validated locally with gemma4-e4b-q8; generated corpus smoke spec passed 8 deterministic checks after classifier routing was fixed.',
     },
@@ -1988,8 +1683,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T12-50-29-457Z/craftbook-report-pdf/craftbook-report-pdf-gemma4-e4b-q8-2026-06-28T12-53-07-211Z-a3nv',
       notes:
         'Validated locally with gemma4-e4b-q8; generated HTML smoke spec passed 6 deterministic checks as the local stand-in for formatted PDF output.',
     },
@@ -1999,8 +1692,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T12-50-29-457Z/craftbook-research-report/craftbook-research-report-gemma4-e4b-q8-2026-06-28T12-54-47-192Z-f1m1',
       notes:
         'Validated locally with gemma4-e4b-q8; generated corpus smoke spec passed 8 deterministic checks after classifier routing was fixed.',
     },
@@ -2018,8 +1709,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/batch-2026-06-28T21-05-58-416Z/craftbook-rest-api-gemma4-e4b-q8-2026-06-28T21-05-58-418Z-qfu0',
       notes:
         'Validated locally with gemma4-e4b-q8. The deterministic fixture-backed harness seeds a bookstore API brief, requires offline OpenAPI/server/contract-test/README deliverables, and executes `node contract-test.mjs` against the generated local server. Trial history improved from path-prefix, import-shape, dynamic node:http import, duplicate declaration, assigned-port, POST options, expected 4xx, placeholder, and double-response failures to a 58/58 pass after adding targeted repair hints and clarifying that server.mjs may use top-level node:http while contract-test.mjs must use global fetch.',
     },
@@ -2029,8 +1718,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T12-50-29-457Z/craftbook-resume-cv/craftbook-resume-cv-gemma4-e4b-q8-2026-06-28T12-55-36-317Z-wodt',
       notes:
         'Validated locally with gemma4-e4b-q8; generated HTML smoke spec passed 6 deterministic checks.',
     },
@@ -2040,8 +1727,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T08-40-16-187Z/craftbook-reviewer-loop/craftbook-reviewer-loop-gemma4-e4b-q8-2026-06-28T08-40-16-190Z-405n',
       notes:
         'Validated locally with gemma4-e4b-q8. The direct-worker run read the seeded pilot notes, wrote a source-grounded brief, recovered through task-note and size repair nudges, and passed all 13 deterministic gates. Needs a stronger first-draft-vs-revision delta assertion.',
     },
@@ -2053,8 +1738,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T12-50-29-457Z/craftbook-rollback-plan/craftbook-rollback-plan-gemma4-e4b-q8-2026-06-28T12-57-31-386Z-t2l3',
       notes:
         'Validated locally with gemma4-e4b-q8; generated external-automation smoke spec passed 6 deterministic checks.',
     },
@@ -2072,8 +1755,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T08-11-20-440Z/craftbook-runbook/craftbook-runbook-gemma4-e4b-q8-2026-06-28T08-15-34-384Z-dq7n',
       notes:
         'Validated locally with gemma4-e4b-q8. The run read the seeded incident brief, wrote runbook.md in one pass, and passed use/not-use, prerequisites, command, verification, rollback, escalation, warning, and no-placeholder gates. Needs a procedural simulator that can execute/check commands against fake queue state.',
     },
@@ -2085,8 +1766,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T13-49-09-962Z/schema-migration/schema-migration-gemma4-e4b-q8-2026-06-28T13-49-09-964Z-vrjp',
       notes:
         'Validated locally with gemma4-e4b-q8. The hand-authored scenario reached all 7 migration signals, including clean tsc, after targeted compiler repair feedback. Next step is to add explicit craftbook-invocation attribution.',
     },
@@ -2098,8 +1777,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T12-50-29-457Z/craftbook-scrape-to-structured/craftbook-scrape-to-structured-gemma4-e4b-q8-2026-06-28T12-58-30-639Z-d5c1',
       notes:
         'Validated locally with gemma4-e4b-q8; generated external-automation smoke spec passed 6 deterministic checks.',
     },
@@ -2109,8 +1786,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T12-50-29-457Z/craftbook-script-automation/craftbook-script-automation-gemma4-e4b-q8-2026-06-28T12-59-24-802Z-hwbg',
       notes:
         'Validated locally with gemma4-e4b-q8; generated external-automation smoke spec passed 6 deterministic checks.',
     },
@@ -2121,8 +1796,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/batch-2026-06-28T14-15-57-432Z/fictional-sdk-gemma4-e4b-q8-2026-06-28T14-15-57-435Z-tqao',
       notes:
         'Validated locally with gemma4-e4b-q8. The hand-authored fictional-sdk simulator passed all 5 checks, including untouched fixtures and a green run.mjs behavioral verifier. Needs explicit sdk-wrapper craftbook invocation attribution.',
     },
@@ -2148,8 +1821,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T12-50-29-457Z/craftbook-seo-meta-pack/craftbook-seo-meta-pack-gemma4-e4b-q8-2026-06-28T13-01-08-151Z-smx8',
       notes:
         'Validated locally with gemma4-e4b-q8; generated HTML smoke spec passed 6 deterministic checks.',
     },
@@ -2159,8 +1830,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T15-24-51-385Z/craftbook-ship/craftbook-ship-gemma4-e4b-q8-2026-06-28T15-31-44-393Z-wvkw',
       notes:
         'Validated locally with gemma4-e4b-q8. The fake GitHub/CI/test fixtures produced ship-report.md and fake-pr.json and passed all 11 preflight, local-test, fake-PR, fake-CI, stop-condition, and no-real-remote gates. Future work should replace the fixtures with a real fake MCP server and executable test CLI.',
     },
@@ -2172,8 +1841,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T12-50-29-457Z/craftbook-social-thread/craftbook-social-thread-gemma4-e4b-q8-2026-06-28T13-03-23-525Z-62gb',
       notes:
         'Validated locally with gemma4-e4b-q8; generated corpus smoke spec passed 8 deterministic checks.',
     },
@@ -2183,8 +1850,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T12-50-29-457Z/craftbook-spa-dashboard/craftbook-spa-dashboard-gemma4-e4b-q8-2026-06-28T13-04-12-664Z-7jde',
       notes:
         'Validated locally with gemma4-e4b-q8; generated HTML smoke spec passed 6 deterministic checks.',
     },
@@ -2202,8 +1867,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T12-50-29-457Z/craftbook-spec-doc/craftbook-spec-doc-gemma4-e4b-q8-2026-06-28T13-06-07-772Z-xrj1',
       notes:
         'Validated locally with gemma4-e4b-q8; generated data smoke spec passed 6 deterministic checks.',
     },
@@ -2213,8 +1876,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T12-50-29-457Z/craftbook-spreadsheet-model/craftbook-spreadsheet-model-gemma4-e4b-q8-2026-06-28T13-06-51-835Z-s38k',
       notes:
         'Validated locally with gemma4-e4b-q8; generated data smoke spec passed 6 deterministic checks after classifier routing was fixed.',
     },
@@ -2224,8 +1885,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/batch-2026-06-28T13-14-46-783Z/craftbook-sprite-sheet-gemma4-e4b-q8-2026-06-28T13-14-46-786Z-hk7v',
       notes:
         'Validated locally with gemma4-e4b-q8; generated media smoke spec passed 5 deterministic checks after tightening media JSON prompt validation.',
     },
@@ -2235,8 +1894,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T12-50-29-457Z/craftbook-sql-analysis/craftbook-sql-analysis-gemma4-e4b-q8-2026-06-28T13-09-46-211Z-h9n4',
       notes:
         'Validated locally with gemma4-e4b-q8; generated data smoke spec passed 6 deterministic checks after exact-total repair feedback.',
     },
@@ -2246,8 +1903,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T12-50-29-457Z/craftbook-standup-summary/craftbook-standup-summary-gemma4-e4b-q8-2026-06-28T13-10-55-728Z-cqk9',
       notes:
         'Validated locally with gemma4-e4b-q8; generated corpus smoke spec passed 8 deterministic checks.',
     },
@@ -2257,8 +1912,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T12-50-29-457Z/craftbook-state-machine/craftbook-state-machine-gemma4-e4b-q8-2026-06-28T13-11-34-718Z-q6d7',
       notes:
         'Validated locally with gemma4-e4b-q8; generated code smoke spec passed 7 deterministic checks after classifier routing was fixed.',
     },
@@ -2268,8 +1921,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T12-50-29-457Z/craftbook-status-report/craftbook-status-report-gemma4-e4b-q8-2026-06-28T13-12-44-142Z-frkz',
       notes:
         'Validated locally with gemma4-e4b-q8; generated corpus smoke spec passed 8 deterministic checks after classifier routing was fixed.',
     },
@@ -2279,8 +1930,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T13-18-01-946Z/craftbook-subscription-audit/craftbook-subscription-audit-gemma4-e4b-q8-2026-06-28T13-18-01-949Z-ta8e',
       notes:
         'Validated locally with gemma4-e4b-q8; generated data smoke spec passed 6 deterministic checks.',
     },
@@ -2290,8 +1939,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T13-18-01-946Z/craftbook-subtitle-generator/craftbook-subtitle-generator-gemma4-e4b-q8-2026-06-28T13-18-46-127Z-k2jt',
       notes:
         'Validated locally with gemma4-e4b-q8; generated media smoke spec passed 5 deterministic checks.',
     },
@@ -2301,8 +1948,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T13-18-01-946Z/craftbook-summarize-long/craftbook-summarize-long-gemma4-e4b-q8-2026-06-28T13-19-55-512Z-oxye',
       notes:
         'Validated locally with gemma4-e4b-q8; generated corpus smoke spec passed 8 deterministic checks.',
     },
@@ -2312,8 +1957,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T13-18-01-946Z/craftbook-survey-analysis/craftbook-survey-analysis-gemma4-e4b-q8-2026-06-28T13-20-39-653Z-h3rh',
       notes:
         'Validated locally with gemma4-e4b-q8; generated data smoke spec passed 6 deterministic checks.',
     },
@@ -2323,8 +1966,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T13-18-01-946Z/craftbook-svg-animation/craftbook-svg-animation-gemma4-e4b-q8-2026-06-28T13-21-23-798Z-4c29',
       notes:
         'Validated locally with gemma4-e4b-q8; generated HTML smoke spec passed 6 deterministic checks.',
     },
@@ -2360,8 +2001,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T13-18-01-946Z/craftbook-test-suite-backfill/craftbook-test-suite-backfill-gemma4-e4b-q8-2026-06-28T13-24-13-276Z-qkzo',
       notes:
         'Validated locally with gemma4-e4b-q8; generated code smoke spec passed 7 deterministic checks.',
     },
@@ -2371,8 +2010,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T13-18-01-946Z/craftbook-threat-model/craftbook-threat-model-gemma4-e4b-q8-2026-06-28T13-25-53-231Z-bqsk',
       notes:
         'Validated locally with gemma4-e4b-q8; generated corpus smoke spec passed 8 deterministic checks after classifier routing was fixed.',
     },
@@ -2382,8 +2019,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T13-18-01-946Z/craftbook-thumbnail-generator/craftbook-thumbnail-generator-gemma4-e4b-q8-2026-06-28T13-26-42-337Z-ey03',
       notes:
         'Validated locally with gemma4-e4b-q8; generated media smoke spec passed 5 deterministic checks.',
     },
@@ -2393,8 +2028,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T13-18-01-946Z/craftbook-tone-rewrite/craftbook-tone-rewrite-gemma4-e4b-q8-2026-06-28T13-27-36-529Z-w9nw',
       notes:
         'Validated locally with gemma4-e4b-q8; generated corpus smoke spec passed 8 deterministic checks.',
     },
@@ -2404,8 +2037,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/batch-2026-06-28T13-44-56-145Z/craftbook-topic-explainer-gemma4-e4b-q8-2026-06-28T13-44-56-148Z-m3cq',
       notes:
         'Validated locally with gemma4-e4b-q8; generated corpus smoke spec passed 8 deterministic checks after relaxing the 18-SKU grounding gate to allow natural modifiers.',
     },
@@ -2415,8 +2046,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T13-18-01-946Z/craftbook-transcribe-audio/craftbook-transcribe-audio-gemma4-e4b-q8-2026-06-28T13-29-50-270Z-mxny',
       notes:
         'Validated locally with gemma4-e4b-q8; generated media smoke spec passed 5 deterministic checks.',
     },
@@ -2426,8 +2055,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T13-18-01-946Z/craftbook-type-safety-pass/craftbook-type-safety-pass-gemma4-e4b-q8-2026-06-28T13-30-54-613Z-tt7r',
       notes:
         'Validated locally with gemma4-e4b-q8; generated code smoke spec passed 7 deterministic checks.',
     },
@@ -2437,8 +2064,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T13-18-01-946Z/craftbook-version-bump/craftbook-version-bump-gemma4-e4b-q8-2026-06-28T13-31-58-972Z-rcef',
       notes:
         'Validated locally with gemma4-e4b-q8; generated code smoke spec passed 7 deterministic checks after classifier routing was fixed.',
     },
@@ -2448,8 +2073,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T13-18-01-946Z/craftbook-video-storyboard/craftbook-video-storyboard-gemma4-e4b-q8-2026-06-28T13-33-48-930Z-b84b',
       notes:
         'Validated locally with gemma4-e4b-q8; generated media smoke spec passed 5 deterministic checks.',
     },
@@ -2467,8 +2090,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T13-18-01-946Z/craftbook-voiceover-script/craftbook-voiceover-script-gemma4-e4b-q8-2026-06-28T13-34-53-231Z-tbc3',
       notes:
         'Validated locally with gemma4-e4b-q8; generated media smoke spec passed 5 deterministic checks after media JSON repair feedback.',
     },
@@ -2478,8 +2099,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T13-18-01-946Z/craftbook-web-app-crud/craftbook-web-app-crud-gemma4-e4b-q8-2026-06-28T13-37-18-802Z-c89v',
       notes:
         'Validated locally with gemma4-e4b-q8; generated HTML smoke spec passed 6 deterministic checks.',
     },
@@ -2489,8 +2108,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T13-18-01-946Z/craftbook-web-component/craftbook-web-component-gemma4-e4b-q8-2026-06-28T13-39-23-884Z-0hvm',
       notes:
         'Validated locally with gemma4-e4b-q8; generated HTML smoke spec passed 6 deterministic checks.',
     },
@@ -2500,8 +2117,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T13-18-01-946Z/craftbook-webhook-handler/craftbook-webhook-handler-gemma4-e4b-q8-2026-06-28T13-40-48-534Z-ecwu',
       notes:
         'Validated locally with gemma4-e4b-q8; generated external-automation smoke spec passed 6 deterministic checks.',
     },
@@ -2527,8 +2142,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T13-18-01-946Z/craftbook-weekly-review/craftbook-weekly-review-gemma4-e4b-q8-2026-06-28T13-41-47-802Z-d2vb',
       notes:
         'Validated locally with gemma4-e4b-q8; generated corpus smoke spec passed 8 deterministic checks after classifier routing was fixed.',
     },
@@ -2538,8 +2151,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T13-18-01-946Z/craftbook-whitepaper/craftbook-whitepaper-gemma4-e4b-q8-2026-06-28T13-42-31-851Z-ycnu',
       notes:
         'Validated locally with gemma4-e4b-q8; generated corpus smoke spec passed 8 deterministic checks after classifier routing was fixed.',
     },
@@ -2549,8 +2160,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
-      lastRun:
-        'evals/runs/matrix-2026-06-28T13-18-01-946Z/craftbook-youtube-chapters-seo/craftbook-youtube-chapters-seo-gemma4-e4b-q8-2026-06-28T13-43-15-892Z-f3og',
       notes:
         'Validated locally with gemma4-e4b-q8; generated media smoke spec passed 5 deterministic checks.',
     },

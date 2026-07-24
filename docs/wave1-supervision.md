@@ -1,6 +1,6 @@
 # Wave 1 supervision report — July 2026
 
-Wave 1 of the project-type catalog ([strategy paper](project-type-catalog-strategy-2026-07.md))
+Wave 1 of the project-type catalog ([strategy paper](project-type-catalog.md))
 is built and supervised: **11 new bundled project types** across five categories, joining
 Flashcards (shipped in Phase 1a, filling the Study Buddy slot) to complete the first-ship
 dozen. This report records what was verified, how, and the gaps left deliberately open.

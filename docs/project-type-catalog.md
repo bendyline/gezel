@@ -822,7 +822,7 @@ flywheel.
 **Wave 1 — compose from what exists** (no new platform work; hand-written stores
 as language-trainer does today). **Shipped July 2026** — all twelve below are
 bundled, tested (`wave1.test.ts`), and supervised; see
-[wave1-supervision-2026-07.md](wave1-supervision-2026-07.md). A first-ship dozen
+[wave1-supervision.md](wave1-supervision.md). A first-ship dozen
 chosen for category breadth, including three types each to light `home`,
 `money`, and `events`:
 

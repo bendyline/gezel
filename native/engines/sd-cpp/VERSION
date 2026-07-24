@@ -14,5 +14,5 @@ upstream=https://github.com/leejet/stable-diffusion.cpp.git
 # leejet/stable-diffusion.cpp tags every master commit as
 # `master-NNN-<shortsha>`. No semver releases — pinning to the
 # latest master-NNN tag IS the stable release.
-tag=master-782-b290693
-commit=b2906939774dc73453467215c80390404d0a2701
+tag=master-789-5114672
+commit=5114672c482012d77d24bbd09eae86b53c48256b

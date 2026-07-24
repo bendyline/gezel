@@ -163,7 +163,7 @@ jobs:
         run: pnpm audit:licenses
       - name: Preserve supply-chain inventory
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0 # v7.0.1
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: supply-chain
           path: artifacts/gezel.cdx.json
@@ -277,7 +277,7 @@ jobs:
           node scripts/verify-installer-licenses.mjs $installer.FullName
           if ($LASTEXITCODE -ne 0) { throw 'Windows installer legal-payload verification failed' }
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0 # v7.0.1
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: windows-artifacts
           path: |
@@ -386,7 +386,7 @@ jobs:
         run: |
           security delete-keychain "$RUNNER_TEMP/app-signing.keychain-db" 2>/dev/null || true
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0 # v7.0.1
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: macos-artifacts
           path: |
@@ -478,7 +478,7 @@ jobs:
           done
           [[ "$found" == "1" ]]
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0 # v7.0.1
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           # arch suffix prevents the two matrix entries from clobbering
           # each other's uploads. The release job's glob below

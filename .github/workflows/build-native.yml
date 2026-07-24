@@ -1,20 +1,21 @@
-# Build (and, on tag pushes, release) Gezel's native engine binaries.
+# Build (and, on tag pushes, draft) Gezel's native engine binaries.
 #
 # Triggers:
 #   - Push of a tag named `native-vX.Y.Z` (the tagged commit is what the
 #     build pipeline runs against — VERSION files inside native/engines/
-#     pin each upstream). On tag pushes, the `release` job below
-#     aggregates the matrix outputs into a GitHub Release.
+#     pin each upstream). On tag pushes, the `draft_release` job below
+#     aggregates the matrix outputs into a draft GitHub Release.
 #   - Manual dispatch (handy for test runs after bumping a VERSION pin).
-#     workflow_dispatch runs DO NOT auto-release — they upload artifacts
-#     for inspection only.
+#     workflow_dispatch runs DO NOT create a draft — they upload
+#     artifacts for inspection only.
 #
 # Native binaries are NOT built on every commit — that's deliberate.
-# The `release-electron.yml` pipeline downloads the latest tagged
-# native release at app-build time and bundles those artifacts into
-# the installer. Native cadence is decoupled from app cadence; bump
-# `native-vX.Y.Z` every ~2 weeks (or whenever an engine's VERSION
-# pin moves), let it bake, then point the next Electron release at it.
+# After a tagged build is validated, publish its draft manually through
+# `publish-native-release.yml`. Only then can `release-electron.yml`
+# discover it as the latest native release and bundle those artifacts
+# into the installer. Native cadence is decoupled from app cadence;
+# bump `native-vX.Y.Z` every ~2 weeks (or whenever an engine's VERSION
+# pin moves), let it bake, then publish it for the next Electron release.
 #
 # Matrix shape: one job per (engine, platform, variant). Each job:
 #   1. Installs the platform/variant-specific build toolchain (Vulkan
@@ -23,8 +24,8 @@
 #      so multi-variant engines emit to <platform>-<variant>/ rather
 #      than clobbering each other.
 #   3. Uploads the produced binary as
-#      `native-<engine>-<platform>[-<variant>]` for the release job
-#      below and for `release-electron.yml`.
+#      `native-<engine>-<platform>[-<variant>]` for the draft-release
+#      job below and for pre-publication validation.
 #
 # Produced binaries are code-signed in place when signing secrets are
 # configured (Windows Authenticode via Azure Trusted Signing; macOS
@@ -34,13 +35,14 @@
 # ship unsigned, exactly as before. The Electron installer additionally
 # re-signs the whole app at app-build time.
 #
-# History: prior to this consolidation the release was a separate
+# History: prior to this consolidation release assembly was a separate
 # `release-native.yml` workflow chained via `workflow_run`. That
 # pattern silently broke when the workflow file changed on a feature
 # branch (`workflow_run` reads the workflow definition from the
 # default branch only) — we lost the 0.1.2 release that way. Putting
-# the release as a `needs: build` job in the same workflow eliminates
-# that whole class of trigger failure.
+# draft assembly as a `needs: build` job in the same workflow eliminates
+# that whole class of trigger failure. Publication is a separate,
+# deliberately manual `workflow_dispatch` after the draft is validated.
 
 name: Build native engines
 
@@ -843,7 +845,7 @@ jobs:
             echo "name=native-${{ matrix.engine }}-${{ matrix.platform }}" >> "$GITHUB_OUTPUT"
           fi
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0 # v7.0.1
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: steps.preflight.outputs.pinned == 'true'
         with:
           name: ${{ steps.artifactname.outputs.name }}
@@ -856,24 +858,25 @@ jobs:
         run: |
           echo "${{ steps.hash.outputs.sha256 }}  ${{ matrix.artifact }}" \
             > "${{ steps.outdir.outputs.dir }}/${{ matrix.engine }}.sha256"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0 # v7.0.1
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ steps.artifactname.outputs.name }}-manifest
           path: ${{ steps.outdir.outputs.dir }}/${{ matrix.engine }}.sha256
           retention-days: 14
 
   # ─────────────────────────────────────────────────────────────────
-  # Aggregate the per-platform artifacts into a GitHub Release.
+  # Aggregate the per-platform artifacts into a draft GitHub Release.
   #
   # Only fires on tag pushes (`refs/tags/native-v*`). Manual
-  # workflow_dispatch runs build + upload artifacts but skip the
-  # release — same intent as the old release-native.yml's `if:`.
+  # workflow_dispatch runs build + upload artifacts but skip draft
+  # creation — same intent as the old release-native.yml's `if:`.
   #
   # `needs: build` waits for every matrix entry to finish (incl.
   # any preflight-skipped ones, which exit success). If a single
-  # matrix job fails, we don't release a partial set of binaries.
+  # matrix job fails, we don't create a partial draft.
   # ─────────────────────────────────────────────────────────────────
-  release:
+  draft_release:
+    name: Assemble draft native release
     needs: build
     if: startsWith(github.ref, 'refs/tags/native-v')
     runs-on: ubuntu-latest
@@ -882,7 +885,7 @@ jobs:
       # actions/download-artifact@v4 lists + pulls the build jobs' artifacts
       # through the (post-2025 migration) artifact service, which requires the
       # actions:read scope. A `permissions:` block resets every unlisted scope
-      # to none, so without this the release job 403s on ListArtifacts even
+      # to none, so without this draft-release job 403s on ListArtifacts even
       # though the artifacts uploaded fine. (Was implicit before GitHub
       # tightened artifact-service auth + moved runners to Node 24.)
       actions: read
@@ -984,14 +987,14 @@ jobs:
           echo "then repack the tarball. Left commented out until there's a confirmed"
           echo "consumer that wants standalone-signed binaries."
 
-      # ── Create / update the GitHub Release ────────────────────────
-      - name: Create Release
+      # ── Create / update the draft GitHub Release ──────────────────
+      - name: Create draft Release
         uses: softprops/action-gh-release@fe965f7af51af5f2602596916f38a38df2e33de0 # v3.0.2
         with:
           token: ${{ secrets.GEZEL_RELEASE_TOKEN || github.token }}
           tag_name: ${{ github.ref_name }}
           name: Native binaries v${{ steps.pack.outputs.version }}
-          draft: false
+          draft: true
           generate_release_notes: true
           body: |
             Prebuilt Gezel native engine binaries.

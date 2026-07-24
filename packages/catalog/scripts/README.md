@@ -19,9 +19,11 @@ Zod schemas. The flow for any content change:
    `minimumReleaseAgeExclude` entry in `pnpm-workspace.yaml`, then
    `pnpm unlink:gilde`.
 
-Operator state (`.import-state/`, `.import-cache/`) stays in this repo;
-only content moves. The slug map is content-coupled and moves only if the
-importer itself ever relocates.
+Durable importer state (`.import-state/import-watermark.json` and
+`.import-state/import-slug-map.json`) stays in this repo; only content moves.
+The slug map is content-coupled and moves only if the importer itself ever
+relocates. Per-run diagnostics and the recomputable `.import-cache/` remain
+local and untracked.
 
 ## `import-mcp-registry.ts`
 
@@ -90,17 +92,18 @@ GITHUB_TOKEN=ghp_xxx pnpm --filter @bendyline/gezel-catalog import-mcp-registry 
 
 ```
 packages/catalog/scripts/
-├── .import-state/                 (committed — small files)
+├── .import-state/
 │   ├── import-watermark.json      latest publishedAt processed
 │   ├── import-slug-map.json       upstream name → assigned gezel id
-│   └── runs/{ISO}.json            per-run summary + rejections
+│   └── runs/{ISO}.json            local, gitignored summary + rejections
 └── .import-cache/                 (gitignored — cheap to recompute)
     ├── npm/{pkg@ver}.json         tarball sha256 + entry path
     └── license/{owner__repo}.json GitHub license lookup, 30-day TTL
 ```
 
-The slug map and watermark are committed so re-runs across machines
-stay consistent and ids never reshuffle.
+The slug map and watermark are committed so re-runs across machines stay
+consistent and ids never reshuffle. Run summaries are local diagnostics and
+must not be committed.
 
 ## `run-gilde-build-index.mjs`
 

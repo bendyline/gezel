@@ -424,14 +424,24 @@ elif [[ "$os" == "Darwin" ]]; then
       if [[ -f "$out_dir/$base" && "$dep" != "@rpath/$base" ]]; then
         install_name_tool -change "$dep" "@rpath/$base" "$target"
       fi
-    done < <(otool -L "$target" | awk 'NR>1 && /^\s/{print $1}')
+    done < <(otool -L "$target" | awk 'NR>1 && /^[[:space:]]/{print $1}')
   }
   rewrite_macho "$out_dir/$server_name"
   shopt -s nullglob
   for dylib in "$out_dir"/*.dylib; do
     rewrite_macho "$dylib"
   done
+  # Apple Silicon linkers add an ad-hoc signature automatically.
+  # install_name_tool invalidates it, and macOS then kills the binary
+  # before main() with exit 137. Re-sign concrete Mach-O files after
+  # all load-command edits; release CI may replace these ad-hoc
+  # signatures with Developer ID signatures later.
+  for dylib in "$out_dir"/*.dylib; do
+    [[ -L "$dylib" ]] && continue
+    codesign --force --sign - "$dylib"
+  done
   shopt -u nullglob
+  codesign --force --sign - "$out_dir/$server_name"
   echo "[build] install_name_tool fixup complete on $server_name + bundled dylibs"
 fi
 

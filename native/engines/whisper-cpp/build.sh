@@ -187,14 +187,23 @@ elif [[ "$os" == "Darwin" ]]; then
       if [[ -f "$out_dir/$base" && "$dep" != "@rpath/$base" ]]; then
         install_name_tool -change "$dep" "@rpath/$base" "$target"
       fi
-    done < <(otool -L "$target" | awk 'NR>1 && /^\s/{print $1}')
+    done < <(otool -L "$target" | awk 'NR>1 && /^[[:space:]]/{print $1}')
   }
   rewrite_macho "$out_dir/$server_name"
   shopt -s nullglob
   for dylib in "$out_dir"/*.dylib; do
     rewrite_macho "$dylib"
   done
+  # install_name_tool invalidates the linker-added ad-hoc signature
+  # on Apple Silicon. Re-sign concrete Mach-O files after relocation
+  # so local and unsigned CI artifacts remain executable; release CI
+  # may replace these with Developer ID signatures later.
+  for dylib in "$out_dir"/*.dylib; do
+    [[ -L "$dylib" ]] && continue
+    codesign --force --sign - "$dylib"
+  done
   shopt -u nullglob
+  codesign --force --sign - "$out_dir/$server_name"
 fi
 
 echo "[build] installed: $out_dir/$server_name"

@@ -119,7 +119,7 @@ Persisted user state uses **gezels/**, never **agents/**. Repository-only metada
 | `packages/vscode` | VSCode extension that surfaces gezel features inside the editor. |
 | `evals` (top-level, **not** under `packages/`) | End-to-end evaluation harness. Drives `gezeld` via `GezelClient` against scripted scenarios and reports success rates. Registered in `pnpm-workspace.yaml`; invoked via root `pnpm eval:run` / `pnpm eval:batch`. |
 
-Build order (enforced in root `package.json` script): `core` → `client` / `plugin-sdk` / `sdk` / `catalog` (parallel) → `mcp` → `service` → `ui` → `cli` / `app` (parallel). The MCP depends on `client`; the service depends on all of them and resolves `@bendyline/gezel-mcp/dist/server.js` at runtime — this subpath is **explicitly exported** from the mcp package's `package.json` for a reason (see "Gotchas" below).
+Build order (enforced in root `package.json` script): `core` → `client` / `plugin-sdk` / `sdk` / `catalog` (parallel) → `mcp` → `service` → `ui` → `cli` / `app` / `vscode` (parallel). The MCP depends on `client`; the service depends on all of them and resolves `@bendyline/gezel-mcp/dist/server.js` at runtime — this subpath is **explicitly exported** from the mcp package's `package.json` for a reason (see "Gotchas" below).
 
 ## The three-repo catalog architecture
 

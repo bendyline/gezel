@@ -2,8 +2,8 @@
   "schemaVersion": 1,
   "engines": {
     "ds4": {
-      "tag": "main-2026-07-20",
-      "commit": "efdadd41e20134af4f3381e1ed90e96fe4faef6f",
+      "tag": "main-2026-07-23",
+      "commit": "0a7ad776b9068348e6cb09df8cafa9cadd285298",
       "files": [
         "LICENSE-ds4-MIT.txt",
         "LICENSE-ds4-rax-BSD-3-Clause.txt",
@@ -11,18 +11,18 @@
       ]
     },
     "llama-cpp": {
-      "tag": "b10088",
-      "commit": "67b9b0e7f6ce45d929a4411907d3c48ec719e81c",
+      "tag": "b10099",
+      "commit": "1a064ab0921238c1daa397d6f4a900ef33884de2",
       "files": ["LICENSE-ggml-MIT.txt", "LICENSE-OpenSSL-APACHE.txt"]
     },
     "sd-cpp": {
-      "tag": "master-782-b290693",
-      "commit": "b2906939774dc73453467215c80390404d0a2701",
+      "tag": "master-789-5114672",
+      "commit": "5114672c482012d77d24bbd09eae86b53c48256b",
       "files": ["LICENSE-stable-diffusion-cpp-MIT.txt"]
     },
     "uv": {
-      "tag": "0.11.31",
-      "commit": "b7fdec626cdafcfb0d0db54d39d3d5f114aefb5c",
+      "tag": "0.11.32",
+      "commit": "3010295ae7ff572de459987ad70db315a62ecd61",
       "files": ["LICENSE-uv-APACHE.txt", "LICENSE-uv-MIT.txt"]
     },
     "whisper-cpp": {

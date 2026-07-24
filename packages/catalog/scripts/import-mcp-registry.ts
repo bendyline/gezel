@@ -24,7 +24,7 @@
  *   - State (watermark + slug map) lives in
  *     `packages/catalog/scripts/.import-state/`.
  *   - HTTP-fetch caches in `packages/catalog/scripts/.import-cache/`.
- *   - Per-run summary in `.import-state/runs/{ISO}.json`.
+ *   - Gitignored per-run summary in `.import-state/runs/{ISO}.json`.
  */
 
 import { join } from 'node:path';

@@ -1,0 +1,120 @@
+# Publish a fully built native release draft.
+#
+# Tagged builds create drafts in build-native.yml. This workflow is the
+# explicit production gate: it verifies the requested draft has the complete
+# platform archive set plus SHA256SUMS, then publishes it without rebuilding
+# or changing assets.
+
+name: Publish native release
+run-name: Publish ${{ inputs.tag }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Draft tag to publish (native-vX.Y.Z)'
+        required: true
+        type: string
+      confirm:
+        description: 'Publish this draft as a production release'
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-native-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish validated native draft
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate requested draft
+        id: release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GEZEL_RELEASE_TOKEN || github.token }}
+          REQUESTED_TAG: ${{ inputs.tag }}
+          CONFIRMED: ${{ inputs.confirm }}
+        run: |
+          set -euo pipefail
+
+          tag="$REQUESTED_TAG"
+          if [[ "$CONFIRMED" != "true" ]]; then
+            echo "::error::Publication was not explicitly confirmed."
+            exit 1
+          fi
+          if [[ ! "$tag" =~ ^native-v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$ ]]; then
+            echo "::error::Invalid native release tag '$tag'. Expected native-vX.Y.Z."
+            exit 1
+          fi
+
+          release_json="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/$tag")"
+          if [[ "$(jq -r '.draft' <<<"$release_json")" != "true" ]]; then
+            echo "::error::Release '$tag' is not a draft; refusing to publish it again."
+            exit 1
+          fi
+          version="${tag#native-v}"
+          expected=(
+            "gezel-native-${version}-win32-x64.zip"
+            "gezel-native-${version}-win32-x64-cpu.zip"
+            "gezel-native-${version}-win32-x64-vulkan.zip"
+            "gezel-native-${version}-win32-x64-cuda.zip"
+            "gezel-native-${version}-darwin-arm64.tar.gz"
+            "gezel-native-${version}-darwin-arm64-metal.tar.gz"
+            "gezel-native-${version}-linux-x64.tar.gz"
+            "gezel-native-${version}-linux-x64-cpu.tar.gz"
+            "gezel-native-${version}-linux-x64-vulkan.tar.gz"
+            "gezel-native-${version}-linux-x64-cuda.tar.gz"
+            "gezel-native-${version}-linux-arm64.tar.gz"
+            "gezel-native-${version}-linux-arm64-cpu.tar.gz"
+            "gezel-native-${version}-linux-arm64-cuda.tar.gz"
+            "SHA256SUMS"
+          )
+
+          missing=()
+          for asset in "${expected[@]}"; do
+            if ! jq -e --arg asset "$asset" \
+              '.assets[] | select(.name == $asset)' \
+              >/dev/null <<<"$release_json"; then
+              missing+=("$asset")
+            fi
+          done
+          if [[ "${#missing[@]}" -gt 0 ]]; then
+            echo "::error::Draft '$tag' is missing required assets: ${missing[*]}"
+            exit 1
+          fi
+
+          echo "id=$(jq -r '.id' <<<"$release_json")" >> "$GITHUB_OUTPUT"
+          echo "url=$(jq -r '.html_url' <<<"$release_json")" >> "$GITHUB_OUTPUT"
+          echo "Validated complete draft '$tag' with ${#expected[@]} required assets."
+
+      - name: Publish release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GEZEL_RELEASE_TOKEN || github.token }}
+          RELEASE_ID: ${{ steps.release.outputs.id }}
+          RELEASE_URL: ${{ steps.release.outputs.url }}
+          REQUESTED_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+
+          published_json="$(
+            gh api \
+              --method PATCH \
+              "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" \
+              -F draft=false
+          )"
+          if [[ "$(jq -r '.draft' <<<"$published_json")" != "false" ]]; then
+            echo "::error::GitHub did not publish release id $RELEASE_ID."
+            exit 1
+          fi
+
+          echo "Published $REQUESTED_TAG: $RELEASE_URL"
+          echo "## Native release published" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "[$REQUESTED_TAG]($RELEASE_URL)" >> "$GITHUB_STEP_SUMMARY"

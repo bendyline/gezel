@@ -6,7 +6,7 @@ allowed-tools: Bash, Read, Write, Edit, AskUserQuestion
 
 # native-bump
 
-Updates the upstream versions gezel pins for its native engines, drives a CI build, and validates the result: **pick versions → bump pins → build in CI → triage → fetch + eval.**
+Updates the upstream versions gezel pins for its native engines, drives a CI build, and validates the result: **pick versions → bump pins → build in CI → draft → fetch + eval → publish manually.**
 
 ## Architecture (read once)
 
@@ -67,13 +67,23 @@ For each engine the user named (or all, if they said "update the native binaries
 
 ## Phase 2 — Trigger the build *(user drives git)*
 
-Two paths — ask the user which (default: **test build first, then release**):
+Two paths — ask the user which (default: **test build first, then draft release**):
 
-- **Release** (publishes a `native-v*` GitHub release): the user runs
+- **Draft release** (builds a `native-v*` tag and creates a draft GitHub release): the user runs
   ```bash
   node scripts/cut-native-release.mjs <X.Y.Z>   # validates semver>latest, on main, clean, up-to-date; tags + pushes
   ```
 - **Test build** (artifacts only, no release): `gh workflow run build-native.yml` (optionally `-f engines=llama-cpp`). Fetch its output with `--run <id>` in Phase 4 before committing to a release.
+
+Publishing is always a separate manual decision after validation:
+```bash
+gh workflow run publish-native-release.yml \
+  -f tag=native-v<X.Y.Z> \
+  -f confirm=true
+```
+The publish workflow refuses missing/non-draft releases, malformed native tags,
+and drafts without the complete production platform archive set plus
+`SHA256SUMS`.
 
 **⚠ Dispatch race — verify the SHA.** `gh workflow run` right after a push can build the *pre-push* commit. Before watching:
 ```bash
@@ -91,7 +101,7 @@ gh run watch <id> --interval 30 || true
 gh run view <id> --json jobs --jq '.jobs[] | select(.conclusion!="success") | {name,conclusion}'
 ```
 
-**Release gating: `release` has `needs: build`.** ANY red matrix leg skips the whole release. So one broken platform blocks everything — you must get every leg green (or drop that leg from the matrix) to publish.
+**Draft gating: `draft_release` has `needs: build`.** ANY red matrix leg skips draft creation. So one broken platform blocks everything — you must get every leg green (or drop that leg from the matrix) before a releasable draft exists.
 
 **Runner-image drift is the usual cause — not gezel code.** The failure catalog + where the fixes live (`.github/workflows/build-native.yml` `env:` + `matrix:`):
 
@@ -109,10 +119,10 @@ gh run view <id> --json jobs --jq '.jobs[] | select(.conclusion!="success") | {n
 
 ## Phase 4 — Fetch + eval
 
-1. **Fetch the built binaries** into `packages/app/native-bin/<platform>[-<variant>]/` (where dev `pnpm app`, packaging, and the eval harness all read):
+1. **Fetch the built binaries** into `packages/app/native-bin/<platform>[-<variant>]/` (where dev `pnpm app`, packaging, and the eval harness all read). Before the draft is published, fetch from its workflow run:
    ```bash
-   node scripts/fetch-native-binaries.mjs                 # latest release, all variants for this platform
-   node scripts/fetch-native-binaries.mjs --run <id>      # from a workflow_dispatch build (pre-release)
+   node scripts/fetch-native-binaries.mjs --run <id>      # from a tagged or workflow_dispatch build (pre-release)
+   node scripts/fetch-native-binaries.mjs                 # latest published release, all variants for this platform
    node scripts/fetch-native-binaries.mjs --version 0.1.X # a specific release
    ```
    Needs a `repo`-scoped token (`GEZEL_GITHUB_TOKEN` / `GITHUB_TOKEN` / `gh auth token`) — the repo is private.
@@ -124,6 +134,8 @@ gh run view <id> --json jobs --jq '.jobs[] | select(.conclusion!="success") | {n
 
 3. **Eval it** — invoke the **`/eval-run`** skill against `--provider llama-cpp` (not MLX) to confirm capability didn't regress. A version bump should be capability-neutral: composite flat, only t/s moves. Score with the eval-run rubric.
 
+4. **Publish the validated draft manually** with `publish-native-release.yml`.
+
 ---
 
 ## Critical files
@@ -133,6 +145,7 @@ gh run view <id> --json jobs --jq '.jobs[] | select(.conclusion!="success") | {n
 | Upstream pins (tag + commit; uv + 5 sha256) | `native/engines/<engine>/VERSION` |
 | llama cache-bust constant (**sync on every llama bump**) | `packages/core/src/native/llama-engine-version.ts` |
 | CI matrix + version-pin env (runner-drift fixes) | `.github/workflows/build-native.yml` |
+| Manual production publication gate | `.github/workflows/publish-native-release.yml` |
 | Cut a release (tag + push) — *user runs* | `scripts/cut-native-release.mjs` |
 | Fetch built binaries locally | `scripts/fetch-native-binaries.mjs` |
 | Build scripts (rarely touched) | `native/engines/<engine>/build.{sh,ps1}` |
@@ -143,6 +156,7 @@ gh run view <id> --json jobs --jq '.jobs[] | select(.conclusion!="success") | {n
 - [ ] uv: all **5** sha256 digests refreshed.
 - [ ] Left git to the user (commit / push / `cut-native-release.mjs`).
 - [ ] Verified the workflow ran against the **intended commit** (dispatch race).
-- [ ] Every matrix leg green — remember `release` needs ALL of them.
+- [ ] Every matrix leg green — remember `draft_release` needs ALL of them.
 - [ ] Fetched + ran `--version` + eval'd via `/eval-run` (llama-cpp provider).
+- [ ] Draft stayed private during validation, then was published explicitly through `publish-native-release.yml`.
 - [ ] Engine-specific: ds4 can't yet load some hybrid MoE (e.g. qwen-agentworld crashes on load) — an upstream engine gap, not a bump error.

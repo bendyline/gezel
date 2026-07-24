@@ -24,6 +24,8 @@ test.beforeAll(async () => {
       // Force the supervisor into embedded mode for speed. The spawn path
       // has its own dedicated spec.
       GEZEL_EMBEDDED: '1',
+      // Keep the smoke hermetic and independent of developer credentials.
+      GEZEL_MOCK_PROVIDER: '1',
       // Skip the on-device first-run download (Gemma 4 E4B is ~5 GB) and
       // the system-toolset bootstrap (Chromium tarball). Without this the
       // UI parks on the first-run install wizard and the regular nav
