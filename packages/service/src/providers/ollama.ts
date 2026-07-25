@@ -932,7 +932,10 @@ class OllamaSession extends StreamingSessionBase implements LLMSession {
               profileHasBehavior(this.deps.profile, 'turn.preamble-folding') ||
               leaksUntaggedReasoning(this.deps.model),
           })
-        : new RambleDetector({ threshold: 6000, enabled: false });
+        : // Repetition guard is safe on any local model (fires only on
+          // degenerate low-novelty loops); arm it even without the
+          // length-cap opt-in. See RambleDetector.
+          new RambleDetector({ threshold: 6000, enabled: false, repetitionGuardEnabled: true });
       try {
         for await (const line of readNdjson(res.body)) {
           const chunk = line as OllamaChatChunk;

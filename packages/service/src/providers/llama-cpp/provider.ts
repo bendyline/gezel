@@ -3960,7 +3960,12 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
                 profileHasBehavior(this.deps.profile, 'turn.preamble-folding') ||
                 leaksUntaggedReasoning(this.deps.model),
             })
-          : new RambleDetector({ threshold: 6000, enabled: false });
+          : // No length-cap opt-in for this model, but the repetition
+            // guard is safe to run on any local model (it fires only on
+            // degenerate low-novelty loops, never on legitimate prose) —
+            // it is the sole protection a non-verbose model like ds4 gets
+            // against a runaway repetition loop. See RambleDetector.
+            new RambleDetector({ threshold: 6000, enabled: false, repetitionGuardEnabled: true });
         let rambleAborted = false;
         let immediateWriteTextAborted = false;
         let scenarioRepairTextAborted = false;

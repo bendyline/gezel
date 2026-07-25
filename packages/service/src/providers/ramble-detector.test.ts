@@ -597,5 +597,58 @@ describe('RambleDetector', () => {
       expect(d.observeContent(LOOP)).toBe(false);
       expect(d.firedOnRepetition).toBe(false);
     });
+
+    describe('repetition-guard-only mode (length caps off)', () => {
+      // The ds4 shape: a non-verbose model with the length caps disabled
+      // (`enabled: false`) still gets loop protection via the independent
+      // `repetitionGuardEnabled` gate.
+      it('fires on a circling monologue even with the length caps off', () => {
+        const d = new RambleDetector({
+          threshold: 6000,
+          enabled: false,
+          repetitionGuardEnabled: true,
+        });
+        expect(d.observeContent(circling)).toBe(true);
+        expect(d.firedOnRepetition).toBe(true);
+      });
+
+      it('does NOT apply length caps in guard-only mode — long varied prose passes', () => {
+        const d = new RambleDetector({
+          threshold: 200,
+          enabled: false,
+          repetitionGuardEnabled: true,
+        });
+        // 10 KB of unique sentences: far past the 200-char cold cap, but
+        // the caps are off in guard-only mode and novelty is high, so no
+        // abort. This is the whole point — a legitimate long answer on a
+        // non-verbose model is not guillotined.
+        const varied = Array.from(
+          { length: 200 },
+          (_, i) => `Point ${i}: value ${(i * 17) % 89} observed in window ${i % 11}.`,
+        ).join(' ');
+        expect(varied.length).toBeGreaterThan(6000);
+        expect(d.observeContent(varied)).toBe(false);
+        expect(d.hasAborted).toBe(false);
+      });
+
+      it('is still a full no-op when BOTH gates are off', () => {
+        const d = new RambleDetector({
+          threshold: 200,
+          enabled: false,
+          repetitionGuardEnabled: false,
+        });
+        expect(d.observeContent(circling)).toBe(false);
+        expect(d.observeContent('x'.repeat(10_000))).toBe(false);
+        expect(d.hasAborted).toBe(false);
+      });
+
+      it('defaults `repetitionGuardEnabled` to `enabled` (disabled stays fully off)', () => {
+        // Back-compat: a detector constructed `enabled: false` with no
+        // explicit guard flag remains a no-op, exactly as before.
+        const d = new RambleDetector({ threshold: 200, enabled: false });
+        expect(d.observeContent(circling)).toBe(false);
+        expect(d.hasAborted).toBe(false);
+      });
+    });
   });
 });

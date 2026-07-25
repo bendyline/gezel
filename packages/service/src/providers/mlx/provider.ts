@@ -1616,7 +1616,10 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
                 profileHasBehavior(this.deps.profile, 'turn.preamble-folding') ||
                 leaksUntaggedReasoning(this.deps.model),
             })
-          : new RambleDetector({ threshold: 6000, enabled: false });
+          : // Repetition guard is safe on any local model (fires only on
+            // degenerate low-novelty loops); arm it even without the
+            // length-cap opt-in. See RambleDetector.
+            new RambleDetector({ threshold: 6000, enabled: false, repetitionGuardEnabled: true });
         let rambleAborted = false;
         // Drop chat-template tool-call markers (Gemma 3+ leaks
         // `<|tool_call|>...<tool_call|>` token text into the content

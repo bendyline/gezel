@@ -72,11 +72,29 @@ export interface RambleDetectorOpts {
    */
   insideCallThreshold?: number;
   /**
-   * Master gate. When false, the detector becomes a no-op — used to
-   * disable on non-verbose families where prose-only responses are
-   * expected.
+   * Master gate for the LENGTH caps (cold / post-action / inside-call).
+   * When false, those caps become a no-op — used to disable on
+   * non-verbose families where a long, legitimate prose answer would
+   * otherwise trip the ~6 KB cold cap.
    */
   enabled: boolean;
+  /**
+   * Independent gate for the repetition guard (trigram-novelty loop
+   * detection). Unlike the length caps, the guard fires ONLY on
+   * genuinely degenerate repetition — the same phrases re-emitted below
+   * {@link repetitionMinNovelty} over a full window — which no
+   * legitimate answer produces. That makes it safe to arm even where the
+   * length caps are off, so it is gated separately from {@link enabled}.
+   *
+   * Defaults to {@link enabled} (verbose-family models already ran both).
+   * Set true on a non-verbose model to catch a repetition loop without
+   * the length caps — wild-caught (ds4 `deepseek-v4-flash-284b-q2`,
+   * voorman "Ikari Warriors"): a q2 quant at ~60 KB context opened a
+   * DeepSeek tool-call block, fell into prose, and re-emitted the same
+   * diagnosis past 4000 tokens with no close and no guard, because the
+   * whole detector was a no-op for a non-verbose (length-cap-off) family.
+   */
+  repetitionGuardEnabled?: boolean;
   /**
    * The model leaks its chain-of-thought as UNTAGGED visible prose
    * (not wrapped in `<think>` / `<|channel>`). For these models the
@@ -190,6 +208,12 @@ export class RambleDetector {
    */
   private readonly insideCallThreshold: number;
   private readonly enabled: boolean;
+  /**
+   * Independent gate for the repetition guard. See
+   * {@link RambleDetectorOpts.repetitionGuardEnabled}. When true the
+   * guard runs even if {@link enabled} (the length caps) is false.
+   */
+  private readonly repetitionGuardEnabled: boolean;
   /** Trailing-prose window (chars) the repetition guard measures over. */
   private readonly repetitionWindow: number;
   /** Novelty floor; the guard fires below it. 0 disables the guard. */
@@ -295,6 +319,7 @@ export class RambleDetector {
       opts.postActionThreshold ?? Math.max(500, Math.floor(opts.threshold / 4));
     this.insideCallThreshold = opts.insideCallThreshold ?? Math.max(32_000, opts.threshold * 5);
     this.enabled = opts.enabled;
+    this.repetitionGuardEnabled = opts.repetitionGuardEnabled ?? opts.enabled;
     this.repetitionWindow = opts.repetitionWindow ?? DEFAULT_REPETITION_WINDOW;
     this.repetitionMinNovelty = opts.repetitionMinNovelty ?? DEFAULT_REPETITION_MIN_NOVELTY;
   }
@@ -330,7 +355,7 @@ export class RambleDetector {
    * mode (tighter threshold). Idempotent.
    */
   recordStructuredAction(currentTurnLength: number): void {
-    if (!this.enabled) return;
+    if (!this.active) return;
     this.lastActionAtChars = currentTurnLength;
     this.scannedUpTo = currentTurnLength;
     this.hasSeenAction = true;
@@ -343,7 +368,7 @@ export class RambleDetector {
    * calls return false (the caller is expected to abort).
    */
   observeContent(turnContent: string): boolean {
-    if (!this.enabled || this.aborted) return false;
+    if (!this.active || this.aborted) return false;
     if (turnContent.length > this.scannedUpTo) {
       // Lookback handles markup that straddles the previous boundary
       // (e.g. `<tool_` arrived last chunk, `call>` arrives now).
@@ -501,6 +526,7 @@ export class RambleDetector {
     // 2× cold budget the model circled four hypotheses for ~12 KB and
     // only aborted on length; this catches it at ~one window.
     if (
+      this.repetitionGuardEnabled &&
       this.repetitionMinNovelty > 0 &&
       !this.insideUnclosedCall &&
       !this.insideReasoning &&
@@ -536,17 +562,32 @@ export class RambleDetector {
     //     between tool calls.
     //   - Cold (no tools yet, just prose): the looser `threshold`
     //     (~6000). Long pre-tool monologues abort here.
-    const effectiveThreshold =
-      this.insideUnclosedCall || this.insideReasoning || this.insideFencedCode
-        ? this.insideCallThreshold
-        : this.hasSeenAction
-          ? this.postActionThreshold
-          : this.coldThreshold;
-    if (proseSinceAction >= effectiveThreshold) {
-      this.aborted = true;
-      return true;
+    // Length caps are the verbose-family surface: a legitimate long
+    // prose answer on a non-verbose model can exceed the cold cap, so
+    // they stay gated on `enabled`. The repetition guard above is the
+    // only protection a repetition-guard-only detector applies.
+    if (this.enabled) {
+      const effectiveThreshold =
+        this.insideUnclosedCall || this.insideReasoning || this.insideFencedCode
+          ? this.insideCallThreshold
+          : this.hasSeenAction
+            ? this.postActionThreshold
+            : this.coldThreshold;
+      if (proseSinceAction >= effectiveThreshold) {
+        this.aborted = true;
+        return true;
+      }
     }
     return false;
+  }
+
+  /**
+   * True when EITHER gate is live — the detector does real work. When
+   * both are off it is a full no-op (the early return in
+   * {@link observeContent} / {@link recordStructuredAction}).
+   */
+  private get active(): boolean {
+    return this.enabled || this.repetitionGuardEnabled;
   }
 
   /**

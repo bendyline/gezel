@@ -50,6 +50,12 @@ jobs:
       - run: pnpm build
       - run: pnpm typecheck
       - run: pnpm lint
+      - name: Install Chromium
+        # The evals suite (run by `pnpm test`) launches a real headless
+        # chromium for its runtime-validation scenarios (petshop, tictactoe,
+        # codebase-evolution). Same playwright version as the app package, so
+        # this populates the shared ~/.cache/ms-playwright the evals import uses.
+        run: pnpm --filter @bendyline/gezel-evals exec playwright install --with-deps chromium
       - name: Run all unit suites (stability pass 1 of 3)
         run: pnpm test
       - name: Repeat UI and service suites (stability passes 2 and 3)
