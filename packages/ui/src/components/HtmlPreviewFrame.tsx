@@ -149,8 +149,12 @@ export function HtmlPreviewFrame({
     void request
       .then((lease) => {
         if (cancelled) return;
+        // The in-app iframe stays on the same-origin HTTPS URL — a plain-HTTP
+        // src would be blocked as mixed content. `onUrlReady` (external-browser
+        // "open in browser") prefers the plain-HTTP URL when the daemon offers
+        // one, so the system browser doesn't hit the self-signed-cert warning.
         setSrc(lease.url);
-        onUrlReady?.(lease.url);
+        onUrlReady?.(lease.browserUrl ?? lease.url);
       })
       .catch((err) => {
         if (cancelled) return;

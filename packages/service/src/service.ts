@@ -48,8 +48,9 @@ import { createGrantManager, parseAutoApproveAppIds } from './grants/manager.js'
 import { GrowthEngine } from './growth/engine.js';
 import { type LoopbackCert, generateLoopbackCert } from './http/cert.js';
 import type { ServiceContext } from './http/context.js';
+import { PreviewCapabilityStore } from './http/preview-capability.js';
 import { buildRemoteApp } from './http/remote-server.js';
-import { type UnexpectedHttpErrorHandler, buildApp } from './http/server.js';
+import { type UnexpectedHttpErrorHandler, buildApp, buildPreviewApp } from './http/server.js';
 import { createTokenStore } from './http/token-store.js';
 import { ContentIndex } from './index-store/content-index.js';
 import { IndexEnrichmentManager } from './index-store/enrichment-manager.js';
@@ -1529,7 +1530,20 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     requestRestart: opts.onRestartRequested,
   };
 
-  const app = buildApp(context, { onUnexpectedHttpError: opts.onUnexpectedHttpError });
+  // When the main transport is HTTPS (the default), a self-signed loopback
+  // cert makes external browsers reject preview URLs. We serve the same
+  // capability-authenticated `/preview` route on a separate plain-HTTP
+  // listener so "open in browser" gets a clean, warning-free URL. The mint
+  // endpoint reads the listener's origin lazily (it binds below, after the
+  // main app is built). No second listener when the whole transport is
+  // already plain HTTP — the existing same-origin URL works there.
+  const previewCapabilities = new PreviewCapabilityStore();
+  const previewBrowser = { origin: null as string | null };
+  const app = buildApp(context, {
+    onUnexpectedHttpError: opts.onUnexpectedHttpError,
+    previewCapabilities,
+    previewBrowserOrigin: () => previewBrowser.origin,
+  });
   const remoteApp = buildRemoteApp(context);
   remoteFetchRef.value = remoteApp.fetch.bind(remoteApp);
 
@@ -1601,6 +1615,35 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     log.info(`[service] serving HTTPS+HTTP/2 on 127.0.0.1:${port} (TLS 1.3)`);
   } else {
     log.info(`[service] serving HTTP/1.1 on 127.0.0.1:${port}`);
+  }
+
+  // Plain-HTTP preview sidecar (only when the main transport is TLS). Serves
+  // the capability-gated `/preview` route on its own ephemeral loopback port
+  // so external browsers open previews without the self-signed-cert warning.
+  let previewServer: ServerType | null = null;
+  if (cert) {
+    const previewApp = buildPreviewApp(context, previewCapabilities, {
+      onUnexpectedHttpError: opts.onUnexpectedHttpError,
+    });
+    try {
+      const bound = await new Promise<{ server: ServerType; port: number }>((resolve, reject) => {
+        const s = serve({ fetch: previewApp.fetch, port: 0, hostname: '127.0.0.1' }, (info) =>
+          resolve({ server: s, port: info.port }),
+        );
+        s.on('error', reject);
+      });
+      previewServer = bound.server;
+      previewBrowser.origin = `http://127.0.0.1:${bound.port}`;
+      log.info(`[service] serving preview (HTTP) on 127.0.0.1:${bound.port}`);
+    } catch (err) {
+      // Non-fatal: previews still work in-app over the pinned-cert HTTPS
+      // iframe; only the external-browser convenience is lost.
+      log.warn(
+        `[service] preview HTTP listener failed to bind; open-in-browser will use the TLS URL: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
   }
 
   boundPort = port;
@@ -1805,6 +1848,20 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
       await channels.stop();
       await remoteServing.stop();
       await closePairedRemoteFetches(remotes);
+      if (previewServer) {
+        await new Promise<void>((resolve) => {
+          let settled = false;
+          const finish = () => {
+            if (settled) return;
+            settled = true;
+            resolve();
+          };
+          previewServer?.close(() => finish());
+          const s = previewServer as unknown as { closeAllConnections?: () => void };
+          s.closeAllConnections?.();
+          setTimeout(finish, 2_000).unref();
+        });
+      }
       // Initiate graceful close, but don't block forever waiting for
       // SSE streams to wind down. Active streams hold the server open
       // until each handler's keepalive loop notices the disconnect —

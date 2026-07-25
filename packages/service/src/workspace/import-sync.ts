@@ -39,6 +39,16 @@ export interface ImportSyncDeps {
 /** The gezel-template instantiated as a project's voorman when none can be promoted. */
 const VOORMAN_TEMPLATE_ID = 'voorman';
 
+export interface EnsureVoormanResult {
+  /**
+   * A freshly-minted voorman gezel, set only when {@link ensureProjectVoorman}
+   * had to create one (no roster member to promote and no existing voorman to
+   * reuse). Lets the HTTP creation path / index scan announce it on the global
+   * SSE stream so the sidebar + Gezellen roster fold it in.
+   */
+  createdGezel?: { id: string; name: string };
+}
+
 /**
  * Idempotently reconcile a project's workspace conventions into the
  * project-local store:
@@ -218,22 +228,26 @@ async function mergeInstructionIntoAbout(
  * it's safe even when the workspace isn't writable. Best-effort — never
  * throws.
  */
-export async function ensureProjectVoorman(deps: ImportSyncDeps, projectId: string): Promise<void> {
+export async function ensureProjectVoorman(
+  deps: ImportSyncDeps,
+  projectId: string,
+): Promise<EnsureVoormanResult> {
   const { store, catalog } = deps;
-  if (!projectId || projectId === 'default') return;
+  if (!projectId || projectId === 'default') return {};
   const project = await store.getProject(projectId).catch(() => null);
-  if (!project) return;
-  if (project.voormanAutoAssignedAt) return; // already ensured once — respect the user's choice
+  if (!project) return {};
+  if (project.voormanAutoAssignedAt) return {}; // already ensured once — respect the user's choice
 
-  // A voorman is already set (by the user or the Meester). Record that
-  // we've ensured one so a later manual clear isn't fought on the next scan.
+  // A voorman is already set (by the user, the Meester, or a project type
+  // whose crew nominates one). Record that we've ensured one so a later
+  // manual clear isn't fought on the next scan.
   if (project.voormanGezelId) {
     await store
       .updateProject(projectId, { voormanAutoAssignedAt: nowIso() })
       .catch((err) =>
         log.warn(`[import-sync] ${projectId}: voorman mark failed: ${describe(err)}`),
       );
-    return;
+    return {};
   }
 
   // 1. Promote an existing project-member gezel when there is one.
@@ -245,7 +259,7 @@ export async function ensureProjectVoorman(deps: ImportSyncDeps, projectId: stri
       .catch((err) =>
         log.warn(`[import-sync] ${projectId}: voorman promote failed: ${describe(err)}`),
       );
-    return;
+    return {};
   }
 
   // Solo projects (games, the chat room) never get a separate recruited
@@ -253,28 +267,57 @@ export async function ensureProjectVoorman(deps: ImportSyncDeps, projectId: stri
   // was nobody to promote above, leave the voorman unset rather than
   // minting a voorman-template gezel that shows up as a confusing second
   // "person" alongside the game's own gezel (the checkers Damspeler).
-  if (project.mode === 'solo') return;
+  if (project.mode === 'solo') return {};
 
-  // 2. Nobody to promote — recruit a fresh voorman from the template.
+  // 2. Reuse an existing voorman gezel from anywhere in the install rather
+  // than minting a duplicate — one "Voorman" character can foreman several
+  // blank projects (mirrors the leanProfile reuse pattern for solo types).
+  const existing = await findExistingVoorman(store).catch(() => null);
+  if (existing) {
+    await store
+      .updateProject(projectId, { voormanGezelId: existing, voormanAutoAssignedAt: nowIso() })
+      .then(() => log.info(`[import-sync] ${projectId}: reused existing voorman ${existing}`))
+      .catch((err) =>
+        log.warn(`[import-sync] ${projectId}: voorman reuse failed: ${describe(err)}`),
+      );
+    return {};
+  }
+
+  // 3. Nobody to promote or reuse — recruit a fresh voorman from the template.
   const recruited = await recruitVoorman(store, catalog).catch((err) => {
     log.warn(`[import-sync] ${projectId}: voorman recruit failed: ${describe(err)}`);
     return null;
   });
-  if (!recruited) return; // template missing / create failed — retry on a later scan
+  if (!recruited) return {}; // template missing / create failed — retry on a later scan
   await store
-    .updateProject(projectId, { voormanGezelId: recruited, voormanAutoAssignedAt: nowIso() })
-    .then(() => log.info(`[import-sync] ${projectId}: recruited ${recruited} as voorman`))
+    .updateProject(projectId, { voormanGezelId: recruited.id, voormanAutoAssignedAt: nowIso() })
+    .then(() => log.info(`[import-sync] ${projectId}: recruited ${recruited.id} as voorman`))
     .catch((err) =>
       log.warn(`[import-sync] ${projectId}: voorman assign failed: ${describe(err)}`),
     );
+  return { createdGezel: recruited };
+}
+
+/**
+ * Find an existing global gezel instantiated from the `voorman` template, so a
+ * new project can reuse it instead of minting a duplicate foreman. Returns the
+ * first match's id (stable listGezels ordering), or null when none exists yet.
+ */
+async function findExistingVoorman(store: Store): Promise<string | null> {
+  const gezels = await store.listGezels().catch(() => []);
+  const match = gezels.find((g) => g.templateId === VOORMAN_TEMPLATE_ID);
+  return match?.id ?? null;
 }
 
 /**
  * Instantiate a fresh global gezel from the `voorman` template with a
  * randomly-drawn name/gender — mirrors `start_project`'s recruit step.
- * Returns the new gezel id, or null when the template can't be resolved.
+ * Returns the new gezel's id + name, or null when the template can't be resolved.
  */
-async function recruitVoorman(store: Store, catalog: CatalogService): Promise<string | null> {
+async function recruitVoorman(
+  store: Store,
+  catalog: CatalogService,
+): Promise<{ id: string; name: string } | null> {
   const detail = await catalog.get('gezel-template', VOORMAN_TEMPLATE_ID).catch(() => null);
   if (!detail || detail.manifest.kind !== 'gezel-template') return null;
   const { name, gender } = pickRandomNameWithGender();
@@ -286,7 +329,7 @@ async function recruitVoorman(store: Store, catalog: CatalogService): Promise<st
     templateId: VOORMAN_TEMPLATE_ID,
     templateVersion: detail.manifest.version,
   });
-  return created.id;
+  return { id: created.id, name: created.name };
 }
 
 /**

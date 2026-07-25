@@ -6608,34 +6608,6 @@ button {
   background: rgba(127, 127, 127, 0.1);
 }
 
-/* Compact amber "writes enabled" pill — replaces the old full-width
-   permissions banner. Click jumps to the project Settings tab's "Recent
-   workspace changes" log. */
-.project-writes-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-  background: rgba(176, 114, 76, 0.1);
-  border: 1px solid rgba(176, 114, 76, 0.35);
-  border-radius: 4px;
-  padding: 0.15rem 0.55rem;
-  font: inherit;
-  font-size: 0.8rem;
-  color: var(--accent);
-  cursor: pointer;
-  /* Match the index chip / status select nudge so the row reads as one line. */
-  transform: translateY(-4px);
-}
-
-.project-writes-chip:hover {
-  background: rgba(176, 114, 76, 0.18);
-  border-color: var(--accent);
-}
-
-.project-writes-chip-icon {
-  line-height: 1;
-}
-
 /* Super-lockdown: a calm, neutral-toned sibling of the writes pill. It's a
    posture indicator ("edits off"), not a warning — muted grey, not amber —
    so it informs without alarming. Clicks through to Security settings. */
@@ -8786,15 +8758,15 @@ button.bench-step-foot:disabled {
 }
 .home-workshop-tab {
   font-family: var(--font-ui);
-  font-size: 11px;
-  letter-spacing: 0.16em;
+  font-size: 10px;
+  letter-spacing: 0.11em;
   text-transform: uppercase;
   font-weight: 500;
   color: var(--ink-3);
   background: transparent;
   border: 1px solid transparent;
-  border-radius: var(--radius-md);
-  padding: 5px 12px;
+  border-radius: var(--radius-sm);
+  padding: 3px 8px;
   cursor: pointer;
   white-space: nowrap;
   transition: background 0.12s, color 0.12s, border-color 0.12s;
@@ -14672,7 +14644,6 @@ a.license-button:hover {
 .gz-npd-card.active {
   border-color: var(--accent);
   background: color-mix(in srgb, var(--accent) 12%, var(--surface));
-  box-shadow: inset 3px 0 0 var(--accent);
 }
 
 .gz-npd-card:disabled {

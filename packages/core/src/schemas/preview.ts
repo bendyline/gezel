@@ -12,6 +12,14 @@ export type CreatePreviewCapabilityRequest = z.infer<typeof CreatePreviewCapabil
 export const CreatePreviewCapabilityResponseSchema = z.object({
   /** Relative daemon URL; contains only the scoped preview capability. */
   url: z.string().startsWith('/preview/'),
+  /**
+   * Absolute `http://127.0.0.1:<port>/preview/…` URL served by the daemon's
+   * plain-HTTP preview listener, for opening the preview in an external
+   * browser without the loopback-TLS self-signed-cert warning. Absent when
+   * the daemon runs the whole transport over plain HTTP already
+   * (`GEZEL_INSECURE_TRANSPORT=1`) — callers fall back to `url`.
+   */
+  browserUrl: z.string().url().optional(),
   /** Current idle-expiry. In-scope requests extend it up to an absolute cap. */
   expiresAt: z.string(),
   /** Directory subtree granted for the requested entry document. */

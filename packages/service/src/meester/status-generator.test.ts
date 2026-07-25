@@ -32,7 +32,9 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  await rm(home, { recursive: true, force: true });
+  // `maxRetries` + `retryDelay` guards against an ENOTEMPTY race: a sweep's
+  // background write can still be landing a file while rm walks the tree.
+  await rm(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 function modelOutput(overrides: Record<string, unknown> = {}): string {

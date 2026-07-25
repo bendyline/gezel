@@ -2580,6 +2580,7 @@ function ReasoningExpando({ reasoning }: { reasoning: string }) {
  */
 function LiveReasoning({ text }: { text: string }) {
   const bodyRef = useRef<HTMLPreElement>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-run to autoscroll as reasoning text streams in
   useEffect(() => {
     const el = bodyRef.current;
     if (el) el.scrollTop = el.scrollHeight;

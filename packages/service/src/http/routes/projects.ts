@@ -50,6 +50,7 @@ import { importGzlBundle, packProjectTypeBundle } from '../../project-type/gzl.j
 import { readCommandApprovals } from '../../workspace/command-approvals.js';
 import { deriveWorkspaceFile } from '../../workspace/derive.js';
 import { WorkspaceEditError, WorkspaceWriteDeniedError } from '../../workspace/errors.js';
+import { type EnsureVoormanResult, ensureProjectVoorman } from '../../workspace/import-sync.js';
 import { readJournalTail } from '../../workspace/journal.js';
 import {
   type NpmInstallPackageRequest,
@@ -106,7 +107,31 @@ export function projectRoutes(ctx: ServiceContext): Hono {
 
   app.post('/', async (c) => {
     const body = CreateProjectRequestSchema.parse(await c.req.json());
-    const project = await ctx.store.createProject(body);
+    const created = await ctx.store.createProject(body);
+    // Give the project a voorman up front (unless it's solo), so the chat
+    // pane opens on a designated lead instead of the "pick anyone → first
+    // alphabetical gezel" fallback. Reuses an existing voorman when one
+    // exists, else mints one. Runs synchronously here — the background
+    // index scan also calls this, but that's delayed, and the New Project
+    // dialog opens Chat immediately. Best-effort; never blocks creation.
+    const ensured = await ensureProjectVoorman(
+      { store: ctx.store, chat: ctx.chat, home: ctx.home, catalog: ctx.catalog },
+      created.id,
+    ).catch((err) => {
+      const message = err instanceof Error ? err.message : String(err);
+      log.warn(`[projects] ensure-voorman failed for ${created.id}: ${message}`);
+      return {} as EnsureVoormanResult;
+    });
+    if (ensured.createdGezel) {
+      ctx.chatEvents.publishGlobalEvent({
+        type: 'gezel_created',
+        gezelId: ensured.createdGezel.id,
+        name: ensured.createdGezel.name,
+      });
+    }
+    // Re-read so the response carries the freshly-set voormanGezelId; the
+    // UI selects the project from this payload and opens Chat on the lead.
+    const project = (await ctx.store.getProject(created.id)) ?? created;
     // Announce the new project on the project + global SSE streams so
     // always-mounted surfaces (the left sidebar PROJECTS list) fold it
     // in immediately. Covers every creation path — the New Project
@@ -157,7 +182,27 @@ export function projectRoutes(ctx: ServiceContext): Hono {
           name: gezel.name,
         });
       }
-      return c.json(response, 201);
+      // A project type whose crew nominates a voorman already set one; this
+      // is a no-op mark for those. For types that don't suggest a lead (and
+      // aren't solo), it promotes/reuses/mints one so Chat opens on a lead
+      // rather than the "pick anyone" fallback.
+      const ensured = await ensureProjectVoorman(
+        { store: ctx.store, chat: ctx.chat, home: ctx.home, catalog: ctx.catalog },
+        response.project.id,
+      ).catch((err) => {
+        const message = err instanceof Error ? err.message : String(err);
+        log.warn(`[projects] ensure-voorman failed for ${response.project.id}: ${message}`);
+        return {} as EnsureVoormanResult;
+      });
+      if (ensured.createdGezel) {
+        ctx.chatEvents.publishGlobalEvent({
+          type: 'gezel_created',
+          gezelId: ensured.createdGezel.id,
+          name: ensured.createdGezel.name,
+        });
+      }
+      const project = (await ctx.store.getProject(response.project.id)) ?? response.project;
+      return c.json({ ...response, project }, 201);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       if (err instanceof TypedProjectCreateError) {

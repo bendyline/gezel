@@ -418,10 +418,13 @@ jobs:
       # 121a-real for the arm64 DGX-Spark leg). Empty is CI-safe; `native`
       # is NOT (GPU-less runners can't resolve it).
       LLAMA_CUDA_ARCH: ${{ matrix.llama_cuda_arch || '' }}
+      # workflow_dispatch can target a comma-separated engine subset. Push
+      # builds always resolve this to `all`.
+      REQUESTED_ENGINES: ${{ inputs.engines || 'all' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # ── Preflight: skip unpinned engines with a notice ────────
+      # ── Preflight: filter manual runs + skip unpinned engines ─
       # Engine VERSION files that still carry the all-zeros bring-up
       # placeholder (commit=00…00) can't be fetched — upstream
       # rightly rejects "not our ref 0000…". When that happens for
@@ -437,6 +440,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          requested=$(printf '%s' "$REQUESTED_ENGINES" | tr -d '[:space:]')
+          requested="${requested:-all}"
+          requested_list=",$requested,"
+          if [[ "$requested_list" != *",all,"* && "$requested_list" != *",${{ matrix.engine }},"* ]]; then
+            echo "pinned=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=${{ matrix.engine }} not selected::Manual run requested '$REQUESTED_ENGINES' — skipping this job."
+            exit 0
+          fi
           if [[ "${{ matrix.kind }}" == "helper" ]]; then
             echo "pinned=true" >> "$GITHUB_OUTPUT"
             echo "[preflight] ${{ matrix.engine }} is first-party helper source"
@@ -655,15 +666,12 @@ jobs:
             # the regression class we want to catch in CI rather than
             # ship to users (e.g. the libssl/libcrypto bug in 0.1.5).
             #
-            # Use a here-string for the diagnostic head, NOT `echo … |
-            # head`: llama-server's --help is hundreds of lines, head
-            # closes the pipe after 20, echo SIGPIPEs trying to write
-            # the rest, and `set -o pipefail` (GitHub's bash default)
-            # then fails the whole pipeline. That's the bug that killed
-            # 0.1.7 — the binary worked, the smoke test killed it.
-            help_out="$("$bin" --help 2>&1 || true)"
-            head -n 20 <<<"$help_out"
-            if [[ -z "${help_out//[[:space:]]/}" ]]; then
+            # Keep this probe out of Bash string processing. llama-server's
+            # help is ~52 KiB, and macOS's Bash 3.2 can spend hours applying
+            # a global character-class replacement to it. The Node helper
+            # enforces a 60-second timeout, caps output, prints 20 lines, and
+            # accepts non-zero exits only when the process produced output.
+            if ! node scripts/smoke-native-help.mjs "$bin"; then
               echo "::error::$bin produced no --help output — likely a startup DLL load failure (0xC0000135 / dlopen). The bundle is missing a runtime dependency."
               exit 1
             fi
@@ -864,8 +872,7 @@ jobs:
           # class of regression fails HERE, not on a user machine.
           # Same contract as the pre-sign smoke test: non-zero exit is
           # tolerated (no GPU on the runner), silent output is not.
-          help_out="$("$bin" --help 2>&1 || true)"
-          if [[ -z "${help_out//[[:space:]]/}" ]]; then
+          if ! node scripts/smoke-native-help.mjs "$bin"; then
             echo "::error::$bin produced no --help output after hardened-runtime signing — the engine likely needs an entitlement (allow-jit / disable-library-validation). Add a per-engine entitlements plist rather than dropping --options runtime."
             exit 1
           fi

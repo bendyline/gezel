@@ -1292,7 +1292,6 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
               compact={effectiveCompact}
               allowGezelWrites={selected.allowGezelWrites}
               workingDir={selected.workingDir ?? null}
-              onReviewWrites={() => setTab('about')}
               onAllowWritesChange={(next) => {
                 // Enabling writes on a user-supplied external dir prompts the
                 // same confirmation the Settings checkbox uses; everything

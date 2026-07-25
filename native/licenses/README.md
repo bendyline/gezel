@@ -12,8 +12,10 @@ until someone performs that review.
 
 CUDA variants also redistribute NVIDIA runtime libraries. Their build jobs copy
 the CUDA Toolkit EULA supplied by the pinned toolkit into each CUDA native
-artifact as `THIRD_PARTY_LICENSES/NVIDIA-CUDA-EULA.txt`; packaging fails if a
-CUDA payload reaches the app without that file.
+artifact as `THIRD_PARTY_LICENSES/NVIDIA-CUDA-EULA.txt`. NVIDIA's minimal CI
+packages do not consistently install that file, so `native/cuda-eulas/` carries
+official, version-matched fallbacks for every CUDA minor used by the workflow.
+Packaging fails if a CUDA payload reaches the app without an EULA.
 
 The llama.cpp bundles also carry OpenSSL 3 runtime libraries on the supported
 build platforms. Their Apache-2.0 terms are part of the llama.cpp entry in the

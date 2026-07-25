@@ -108,6 +108,19 @@ export type UnexpectedHttpErrorHandler = (event: UnexpectedHttpErrorEvent) => vo
 
 interface BuildAppOptions {
   onUnexpectedHttpError?: UnexpectedHttpErrorHandler;
+  /**
+   * Preview-capability store to share with a separate plain-HTTP preview
+   * listener (see `buildPreviewApp`). Both the minting endpoint (here) and
+   * the serving route (there) must read the same store. Defaults to a fresh
+   * private store when the caller doesn't split the two apps.
+   */
+  previewCapabilities?: PreviewCapabilityStore;
+  /**
+   * Origin of the plain-HTTP preview listener, so the mint endpoint can hand
+   * back an external-browser URL that dodges the loopback-TLS cert warning.
+   * Read lazily — the preview listener binds after this app is built.
+   */
+  previewBrowserOrigin?: () => string | null;
 }
 
 function notifyUnexpectedHttpError(
@@ -178,7 +191,7 @@ export function opaqueServerErrors(
 
 export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Hono {
   const app = new Hono();
-  const previewCapabilities = new PreviewCapabilityStore();
+  const previewCapabilities = options.previewCapabilities ?? new PreviewCapabilityStore();
   const httpLog = createLogger('http');
 
   app.use('*', async (c, next) => {
@@ -405,7 +418,10 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   app.route('/api/config', configRoutes(ctx));
   app.route('/api/credentials', credentialRoutes(ctx));
   app.route('/api/memory', memoryRoutes(ctx));
-  app.route('/api/projects', previewCapabilityRoutes(ctx, previewCapabilities));
+  app.route(
+    '/api/projects',
+    previewCapabilityRoutes(ctx, previewCapabilities, options.previewBrowserOrigin ?? (() => null)),
+  );
   app.route('/api/projects', pageCheckRoutes(ctx, previewCapabilities));
   app.route('/api/projects', previewLogRoutes(ctx));
   // Interactive type pages: the first-party bridge relaying page tool
@@ -575,6 +591,42 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
       ),
     );
   }
+
+  return app;
+}
+
+/**
+ * A minimal Hono app that serves ONLY the `/preview/*` route, meant to run on
+ * a separate plain-HTTP loopback listener alongside the main HTTPS app.
+ *
+ * Why a second app and not just the main one over HTTP: the whole point of
+ * loopback TLS is to keep the bearer-gated `/api` surface off a plain-HTTP
+ * port. Preview is the one surface that doesn't rely on that transport — it's
+ * authenticated by an in-path capability token and sandboxed with its own CSP
+ * — so it's safe to expose over HTTP, letting an external browser open a
+ * preview without the self-signed-cert warning. The capability store is shared
+ * with the main app (which mints the tokens); this app only serves them.
+ */
+export function buildPreviewApp(
+  ctx: ServiceContext,
+  previewCapabilities: PreviewCapabilityStore,
+  options: BuildAppOptions = {},
+): Hono {
+  const app = new Hono();
+  const httpLog = createLogger('http-preview');
+
+  app.use('*', async (c, next) => {
+    await next();
+    c.res.headers.delete('connection');
+    c.res.headers.delete('keep-alive');
+    c.res.headers.delete('upgrade');
+    c.res.headers.delete('proxy-connection');
+    c.res.headers.delete('transfer-encoding');
+  });
+  app.use('*', opaqueServerErrors(httpLog, options.onUnexpectedHttpError));
+  app.use('*', hostGuard());
+  app.route('/preview', previewRoutes(ctx, previewCapabilities));
+  app.get('/*', (c) => c.json({ error: 'not found' }, 404));
 
   return app;
 }

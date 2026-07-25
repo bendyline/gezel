@@ -16,6 +16,13 @@ import {
 export function previewCapabilityRoutes(
   ctx: ServiceContext,
   capabilities: PreviewCapabilityStore,
+  /**
+   * Origin of the daemon's plain-HTTP preview listener (e.g.
+   * `http://127.0.0.1:41234`), or null when there is none (the whole
+   * transport is already plain HTTP). Read at request time because the
+   * preview listener binds after this router is built.
+   */
+  previewBrowserOrigin: () => string | null = () => null,
 ): Hono {
   const app = new Hono();
 
@@ -62,10 +69,12 @@ export function previewCapabilityRoutes(
     });
     const suffix = encodePreviewPath(entryPath);
     const url = `/preview/${encodeURIComponent(minted.token)}/${body.source}/${encodeURIComponent(projectId)}/${suffix}`;
+    const browserOrigin = previewBrowserOrigin();
     c.header('cache-control', 'no-store');
     return c.json(
       {
         url,
+        ...(browserOrigin ? { browserUrl: `${browserOrigin}${url}` } : {}),
         expiresAt: minted.expiresAt,
         scopePath: minted.scopePath,
       },

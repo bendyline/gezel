@@ -150,9 +150,9 @@ describe('ChatMessageSchema', () => {
 describe('ChatEventSchema', () => {
   it('discriminates by type', () => {
     expect(ChatEventSchema.parse({ type: 'delta', content: 'chunk' }).type).toBe('delta');
-    expect(
-      ChatEventSchema.parse({ type: 'reasoning_delta', content: 'thinking' }).type,
-    ).toBe('reasoning_delta');
+    expect(ChatEventSchema.parse({ type: 'reasoning_delta', content: 'thinking' }).type).toBe(
+      'reasoning_delta',
+    );
     expect(ChatEventSchema.parse({ type: 'done' }).type).toBe('done');
     expect(ChatEventSchema.parse({ type: 'error', error: 'oops' }).type).toBe('error');
     expect(

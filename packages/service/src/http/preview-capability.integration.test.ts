@@ -150,4 +150,29 @@ describe('preview capabilities (integration)', () => {
       (await httpFetch(`${baseUrl}/preview/${capability}/workspace/default/secret.txt`)).status,
     ).toBe(403);
   });
+
+  it('serves the same preview over a plain-HTTP browserUrl on a separate port', async () => {
+    // The main transport is TLS in this suite, so a browser-openable HTTP
+    // sidecar must exist and serve the identical capability-gated content
+    // without the self-signed-cert warning.
+    expect(svc.cert).toBeTruthy();
+    const minted = await mint(svc.clientToken);
+    expect(minted.status).toBe(201);
+    const lease = (await minted.json()) as { url: string; browserUrl?: string };
+    expect(lease.browserUrl).toBeTruthy();
+    const browser = new URL(lease.browserUrl as string);
+    expect(browser.protocol).toBe('http:');
+    expect(browser.hostname).toBe('127.0.0.1');
+    // Distinct listener from the TLS API server.
+    expect(Number(browser.port)).not.toBe(svc.port);
+    expect(browser.pathname + browser.search).toBe(lease.url);
+
+    // Plain fetch — no cert trust needed — reaches the same file, and the
+    // TLS API port refuses to answer the same path over http.
+    const page = await fetch(lease.browserUrl as string);
+    expect(page.status).toBe(200);
+    expect(await page.text()).toContain('CAP PREVIEW');
+    // The sidecar is preview-only: the bearer-gated API surface is absent.
+    expect((await fetch(`http://127.0.0.1:${browser.port}/api/config`)).status).toBe(404);
+  });
 });

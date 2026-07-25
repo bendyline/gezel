@@ -21,7 +21,12 @@ import { writeFileAtomic } from '../fs/atomic.js';
 import type { Store } from '../fs/store.js';
 import type { ContentIndex } from '../index-store/content-index.js';
 import { PROJECT_TYPE_MIN_SCORE, detectProjectType } from '../project-type/detect.js';
-import { type ImportSyncDeps, ensureProjectVoorman, syncProjectImports } from './import-sync.js';
+import {
+  type EnsureVoormanResult,
+  type ImportSyncDeps,
+  ensureProjectVoorman,
+  syncProjectImports,
+} from './import-sync.js';
 import {
   type TokenIndex,
   type WorkspaceFile,
@@ -472,13 +477,22 @@ export class WorkspaceIndexManager {
     }
 
     // Make sure the project has a voorman — promote a project-member gezel,
-    // or recruit a real one from the `voorman` template. Runs unconditionally
-    // and store-side only, so it's independent of the instruction/skills gate
-    // above and of workspace writability. One-time per project (guarded by
-    // `voormanAutoAssignedAt`), so this is a cheap no-op once one is set.
-    await ensureProjectVoorman(importDeps, projectId).catch((err) => {
+    // reuse an existing voorman, or recruit a real one from the `voorman`
+    // template. Runs unconditionally and store-side only, so it's independent
+    // of the instruction/skills gate above and of workspace writability.
+    // One-time per project (guarded by `voormanAutoAssignedAt`), so this is a
+    // cheap no-op once one is set.
+    const ensured = await ensureProjectVoorman(importDeps, projectId).catch((err) => {
       log.warn(`[index] ensure-voorman failed for ${projectId}: ${describe(err)}`);
+      return {} as EnsureVoormanResult;
     });
+    if (ensured.createdGezel) {
+      this.events?.publishGlobalEvent({
+        type: 'gezel_created',
+        gezelId: ensured.createdGezel.id,
+        name: ensured.createdGezel.name,
+      });
+    }
   }
 
   /**

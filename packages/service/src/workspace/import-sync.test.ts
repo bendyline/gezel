@@ -153,7 +153,7 @@ describe('ensureProjectVoorman', () => {
   it('recruits a real global voorman from the template when there is nobody to promote', async () => {
     const project = await store.createProject({ name: 'Empty' });
 
-    await ensureProjectVoorman(deps(), project.id);
+    const result = await ensureProjectVoorman(deps(), project.id);
 
     const detail = await store.getProject(project.id);
     expect(detail?.voormanGezelId).toBeTruthy();
@@ -161,6 +161,28 @@ describe('ensureProjectVoorman', () => {
     // The recruited voorman is a real GLOBAL gezel (not a project-local one).
     const global = await store.listGezels();
     expect(global.some((g) => g.id === detail?.voormanGezelId)).toBe(true);
+    // The freshly-minted gezel is reported back so the HTTP path can announce it.
+    expect(result.createdGezel?.id).toBe(detail?.voormanGezelId);
+  });
+
+  it('reuses an existing voorman gezel instead of minting a duplicate', async () => {
+    // First project mints a voorman from the template.
+    const first = await store.createProject({ name: 'First' });
+    const firstResult = await ensureProjectVoorman(deps(), first.id);
+    const voormanId = (await store.getProject(first.id))?.voormanGezelId;
+    expect(voormanId).toBeTruthy();
+    expect(firstResult.createdGezel?.id).toBe(voormanId);
+    const countAfterFirst = (await store.listGezels()).length;
+
+    // Second project reuses that same voorman — no new gezel, nothing minted.
+    const second = await store.createProject({ name: 'Second' });
+    const secondResult = await ensureProjectVoorman(deps(), second.id);
+
+    const secondDetail = await store.getProject(second.id);
+    expect(secondDetail?.voormanGezelId).toBe(voormanId);
+    expect(secondDetail?.voormanAutoAssignedAt).toBeTruthy();
+    expect(secondResult.createdGezel).toBeUndefined();
+    expect((await store.listGezels()).length).toBe(countAfterFirst);
   });
 
   it('never recruits a separate voorman for a solo project with nobody to promote', async () => {

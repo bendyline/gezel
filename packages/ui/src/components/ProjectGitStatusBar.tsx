@@ -22,14 +22,11 @@ interface Props {
   /**
    * Raw per-project write flag (tri-state; effective writability is
    * `allowGezelWrites ?? !workingDir` — see `projectWorkspaceWritable`
-   * in core). When an external working dir is writable, the bar
-   * surfaces a compact amber warning pill (replacing the old full-width
-   * banner). `workingDir` feeds the tooltip; `onReviewWrites` jumps to
-   * the writes log (project Settings → Recent workspace changes).
+   * in core). Effective writability is surfaced through the
+   * "Edits on/off" dropdown; `workingDir` feeds its tooltip.
    */
   allowGezelWrites?: boolean;
   workingDir?: string | null;
-  onReviewWrites?: () => void;
   /**
    * Flip the per-project write switch. When provided, the bar renders an
    * always-visible "Edits on/off" dropdown next to the status select.
@@ -160,7 +157,6 @@ export function ProjectGitStatusBar({
   compact = false,
   allowGezelWrites,
   workingDir,
-  onReviewWrites,
   onAllowWritesChange,
   onOpenGithub,
   status: projectStatus,
@@ -702,20 +698,6 @@ export function ProjectGitStatusBar({
             </span>
             <span className="project-lockdown-chip-label">edits off</span>
           </span>
-        )}
-        {gezelWritesOn && workingDir && (
-          <button
-            type="button"
-            className="project-writes-chip"
-            onClick={onReviewWrites}
-            title={`Gezels in this project can modify files under ${workingDir}. Click to review recent workspace changes.`}
-            aria-label={`Gezels can modify files under ${workingDir}. Review recent workspace changes.`}
-          >
-            <span className="project-writes-chip-icon" aria-hidden>
-              ⚠
-            </span>
-            <span className="project-writes-chip-label">writable</span>
-          </button>
         )}
       </div>
       {!compact && (
