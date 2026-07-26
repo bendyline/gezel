@@ -1,11 +1,18 @@
-# ds4 (DwarfStar) — DeepSeek-V4 inference engine
+# ds4 (DwarfStar) — very-large-MoE inference engine
 
 [antirez/ds4](https://github.com/antirez/ds4) is a small, from-scratch C
-inference engine purpose-built for **DeepSeek V4 Flash / PRO**. It treats SSD
-as a first-class citizen — routed MoE expert weights and KV cache stream from
-disk — so a 284B-parameter model runs on a 64 GB Mac. We vendor its
-`ds4-server` (an OpenAI-compatible HTTP server) as a first-class on-device
-engine alongside `llama-server`.
+inference engine purpose-built for a handful of very large mixture-of-experts
+models: **DeepSeek V4 Flash / PRO** and **GLM 5.2**. It treats SSD as a
+first-class citizen — routed MoE expert weights and KV cache stream from disk —
+so a 284B-parameter model runs on a 64 GB Mac. We vendor its `ds4-server` (an
+OpenAI-compatible HTTP server) as a first-class on-device engine alongside
+`llama-server`.
+
+One binary serves both families: `DS4_MODEL_FAMILY` is a runtime global set
+from the GGUF's `general.architecture` at load time (`glm-dsa` → GLM,
+otherwise DeepSeek-V4), and ds4-server renders/parses each family's own prompt
+and tool-call syntax behind the same OpenAI-shaped API. Nothing in our build or
+provider layer is family-specific.
 
 ## What we build
 
@@ -54,10 +61,26 @@ still required on the host.
 
 ## Models
 
-ds4 is **not** a general GGUF loader — it only loads antirez's DeepSeek-V4
-GGUFs (co-versioned with the engine) from
-[`antirez/deepseek-v4-gguf`](https://huggingface.co/antirez/deepseek-v4-gguf).
-The catalog entry `deepseek-v4-flash-284b-q2` carries the `ds4` source block.
+ds4 is **not** a general GGUF loader — it loads only the specific quant layouts
+its engine was built for, co-versioned with the pin in `VERSION`:
+
+| Catalog id | GGUF | Size |
+|---|---|---|
+| `deepseek-v4-flash-284b-q2` | [`antirez/deepseek-v4-gguf`](https://huggingface.co/antirez/deepseek-v4-gguf) IQ2_XXS | ~81 GiB |
+| `deepseek-v4-flash-284b-q4` | same repo, FP4 | ~153 GiB |
+| `glm-5.2-754b-q2` | [`antirez/glm-5.2-gguf`](https://huggingface.co/antirez/glm-5.2-gguf) routed IQ2_XXS | ~197 GiB |
+
+An entry is a ds4 model exactly when its manifest carries a `ds4` source block.
+
+**Not supported: split (multi-shard) GGUFs.** ds4's `model_open()` maps one
+file and the source has no `split.*` handling, so upstream's
+`download_model.sh glm-unsloth-q4` target (unsloth's 11-shard UD-Q4_K_XL, whose
+first shard is metadata-only with `n_tensors: 0`) cannot be loaded from its
+first shard the way that script's symlink implies. Only single-file GGUFs
+belong in the catalog. antirez's remaining GLM quants are single-file but far
+larger — routed Q2_K is ~244 GiB and routed Q4_K ~404 GiB — so they are left
+out until someone has hardware to validate them.
+
 Re-validate GGUF compatibility whenever bumping the pin in `VERSION`.
 
 ## Runtime notes
@@ -78,6 +101,15 @@ Re-validate GGUF compatibility whenever bumping the pin in `VERSION`.
   at 262K context. That result motivated the old 128 GiB full-residency default,
   but it was specific to Q2 and must not be generalized to the much larger Q4
   build.
+- Launch context is RAM-tiered (128K, or 256K above 192 GiB) and a model may
+  lower it via `ds4.maxLaunchCtx`. The tier assumes DeepSeek V4 Flash's small
+  resident footprint; GLM 5.2 IQ2_XXS keeps 19.6 GiB of non-routed weights
+  resident (vs ~4 GiB) and spends 89 KiB/token on MLA KV, so it caps at 64K.
+  An explicit `config.ds4NumCtx` still overrides both.
+- GLM does not support directional steering, `--power` below 100, an explicit
+  `--prefill-chunk`, or the external `--mtp` file. We pass none of these, so
+  the launch args are family-agnostic. `--glm-mtp` (experimental greedy
+  speculation) is deliberately not wired up.
 - A controlled 6,012-token GB10 benchmark measured full residency at 97.98
   prefill / 5.20 decode tok/s, versus 39.35 / 1.44 tok/s with a 64 GB expert
   cache: 2.59x faster end-to-end. The capacity broker reserves its full 96 GiB

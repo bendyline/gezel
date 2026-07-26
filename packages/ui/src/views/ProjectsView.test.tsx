@@ -313,7 +313,7 @@ describe('ProjectsView', () => {
 
     expect(screen.getByRole('tab', { name: 'Chat' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Settings' })).toBeInTheDocument();
-    for (const name of ['Overview', 'Tasks', 'Approvals', 'Workspace', 'Artifacts', 'Map']) {
+    for (const name of ['Overview', 'Tasks', 'Approvals', 'Workspace', 'Artifacts', 'Village']) {
       expect(screen.queryByRole('tab', { name })).not.toBeInTheDocument();
     }
 
@@ -351,7 +351,7 @@ describe('ProjectsView', () => {
     render(<ProjectsView forceProjectId="pj-alpha" />);
     await screen.findByTestId('project-chat');
 
-    expect(screen.getByRole('tab', { name: 'Map' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Village' })).toBeInTheDocument();
   });
 
   it('shows an error message when listProjects rejects', async () => {

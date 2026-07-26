@@ -13,7 +13,7 @@ import {
 import { parseFrontmatter } from './frontmatter.js';
 import { ensureIndexGitignore } from './gitignore.js';
 import { sha256 } from './hash.js';
-import { readImageMeta } from './image-meta.js';
+import { readImageStaticMeta } from './image-meta.js';
 import { IndexStore } from './index-store.js';
 import {
   extractCodeSymbols,
@@ -59,6 +59,27 @@ const MAX_FILES = 50_000;
  * v2: named import bindings on dependency edges.
  */
 const EXTRACTOR_VERSION = 2;
+
+/**
+ * PNG text keys worth putting in the search index, in priority order. Skips
+ * ComfyUI's `workflow`, which is a whole serialized node graph — megabytes of
+ * JSON that would swamp the FTS table without making anything findable.
+ */
+const INDEXED_PNG_TEXT_KEYS = ['parameters', 'prompt', 'Description', 'Comment', 'Title'];
+const MAX_INDEXED_PNG_TEXT = 2000;
+
+function embeddablePngText(text: Record<string, string> | undefined): string {
+  if (!text) return '';
+  const parts: string[] = [];
+  let budget = MAX_INDEXED_PNG_TEXT;
+  for (const key of INDEXED_PNG_TEXT_KEYS) {
+    const value = text[key];
+    if (!value || budget <= 0) continue;
+    parts.push(value.slice(0, budget));
+    budget -= value.length;
+  }
+  return parts.length > 0 ? ` ${parts.join(' ')}` : '';
+}
 
 export interface ContentIndexStats {
   scanned: number;
@@ -194,22 +215,36 @@ export async function indexWorkspaceContent(
       }
       stats.changed++;
       store.upsertFile(record);
-      const meta = readImageMeta(bytes);
-      if (meta) {
-        store.setMetadata(file.rel, [
-          { key: 'width', value: String(meta.width) },
-          { key: 'height', value: String(meta.height) },
-          { key: 'format', value: meta.format },
-        ]);
-      }
+      const meta = readImageStaticMeta(bytes);
+      const metaRows: Array<{ key: string; value: string }> = [
+        { key: 'format', value: meta.format },
+      ];
+      if (meta.width) metaRows.push({ key: 'width', value: String(meta.width) });
+      if (meta.height) metaRows.push({ key: 'height', value: String(meta.height) });
+      if (meta.likelyScreenshot) metaRows.push({ key: 'screenshot', value: '1' });
+      const software = meta.pngText?.Software ?? meta.exif?.software;
+      if (software) metaRows.push({ key: 'software', value: software });
+      store.setMetadata(file.rel, metaRows);
       const nameWords = file.rel
         .replace(/\.[^.]+$/, '')
         .split(/[^a-zA-Z0-9]+/)
         .filter(Boolean)
         .join(' ');
-      const dimText = meta ? ` ${meta.format} ${meta.width}x${meta.height}` : '';
+      const dimText = meta.width
+        ? ` ${meta.format} ${meta.width}x${meta.height}`
+        : ` ${meta.format}`;
+      // Generation provenance is the one piece of image text we get for free:
+      // A1111 writes `parameters`, ComfyUI writes `prompt`/`workflow`. Folding
+      // it in makes generated images findable by what they were asked to be,
+      // long before any captioning model runs.
+      const provenance = embeddablePngText(meta.pngText);
       store.putChunks(file.rel, hash, [
-        { kind: 'image', lineStart: 1, lineEnd: 1, text: `${nameWords}${dimText}` },
+        {
+          kind: 'image',
+          lineStart: 1,
+          lineEnd: 1,
+          text: `${nameWords}${dimText}${provenance}`,
+        },
       ]);
       continue;
     }

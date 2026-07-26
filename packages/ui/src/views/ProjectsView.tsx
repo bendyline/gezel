@@ -153,7 +153,7 @@ const PROJECT_TAB_VISIBILITY_OPTIONS: ReadonlyArray<{
   { key: 'approvals', label: 'Approvals' },
   { key: 'workspace', label: 'Workspace' },
   { key: 'artifacts', label: 'Artifacts' },
-  { key: 'map', label: 'Map' },
+  { key: 'map', label: 'Village' },
 ];
 
 /** Missing overrides keep each tab's historical behavior. */
@@ -197,11 +197,11 @@ function readStoredOutputFraction(): number {
  * inherits the trigger's muted → active color treatment for free.
  */
 /**
- * The "Map" tab is for codebases and other file-heavy projects. We gate it on
- * the project's auto-detected type (recomputed each content-index scan from the
- * file mix): shown for code-ish / data types and for as-yet-unclassified
- * projects, hidden for the clearly text/media creative types where a city-map
- * of files isn't useful. The map degrades gracefully (empty state) regardless.
+ * The "Village" tab is for codebases and other file-heavy projects. We gate it
+ * on the project's auto-detected type (recomputed each content-index scan from
+ * the file mix): shown for code-ish / data types and for as-yet-unclassified
+ * projects, hidden for the clearly text/media creative types where a settlement
+ * of files isn't useful. It degrades gracefully (empty state) regardless.
  */
 const NON_MAPPABLE_TYPES = new Set(['content-writing', 'media-production', 'design-prototype']);
 function isMappableProject(p: {
@@ -324,9 +324,10 @@ function tabIconShapes(tab: ProjectTab) {
     case 'map':
       return (
         <>
-          <path d="M2.6 4 L6 2.6 L10 4 L13.4 2.6 V12 L10 13.4 L6 12 L2.6 13.4 Z" />
-          <path d="M6 2.6 V12" />
-          <path d="M10 4 V13.4" />
+          <path d="M1.6 13.4 V7.2 L5.6 3.8 L9.6 7.2 V13.4" />
+          <path d="M9.6 13.4 V9 L12 6.9 L14.4 9 V13.4" />
+          <path d="M4.4 13.4 V10.2 H6.8 V13.4" />
+          <path d="M1.2 13.4 H14.8" />
         </>
       );
     case 'overview':
@@ -1392,7 +1393,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                       { value: 'mail', label: 'Mail', show: isEmailProject(selected) },
                       {
                         value: 'map',
-                        label: 'Map',
+                        label: 'Village',
                         show: projectTabIsVisible(selected, 'map'),
                       },
                       { value: 'about', label: 'Settings', show: true },

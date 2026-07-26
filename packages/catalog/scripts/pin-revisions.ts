@@ -100,14 +100,15 @@ interface PinnedFile {
 }
 
 interface SourceBlock {
-  key: 'mlx' | 'llamaCpp';
+  key: 'mlx' | 'llamaCpp' | 'ds4';
   repo: string;
   revision?: string;
   files: PinnedFile[];
 }
 
-/** Pull the pinned (path, sha256) list out of an mlx / llamaCpp block. */
-function pinnedFiles(key: 'mlx' | 'llamaCpp', src: Record<string, unknown>): PinnedFile[] {
+/** Pull the pinned (path, sha256) list out of an mlx / llamaCpp / ds4 block.
+ *  ds4's install payload is shaped exactly like llamaCpp's. */
+function pinnedFiles(key: SourceBlock['key'], src: Record<string, unknown>): PinnedFile[] {
   const out: PinnedFile[] = [];
   if (key === 'mlx') {
     for (const f of (src.files as Array<{ name: string; sha256: string }>) ?? []) {
@@ -115,7 +116,7 @@ function pinnedFiles(key: 'mlx' | 'llamaCpp', src: Record<string, unknown>): Pin
     }
     return out;
   }
-  // llamaCpp: single file, or shards[], plus an optional mmproj sidecar.
+  // llamaCpp / ds4: single file, or shards[], plus an optional mmproj sidecar.
   if (typeof src.filename === 'string' && typeof src.sha256 === 'string') {
     out.push({ path: src.filename, sha256: src.sha256 });
   }
@@ -129,7 +130,7 @@ function pinnedFiles(key: 'mlx' | 'llamaCpp', src: Record<string, unknown>): Pin
 
 function readSources(manifest: Record<string, unknown>): SourceBlock[] {
   const out: SourceBlock[] = [];
-  for (const key of ['mlx', 'llamaCpp'] as const) {
+  for (const key of ['mlx', 'llamaCpp', 'ds4'] as const) {
     const src = manifest[key] as Record<string, unknown> | undefined;
     if (!src || typeof src.huggingfaceRepo !== 'string') continue;
     out.push({

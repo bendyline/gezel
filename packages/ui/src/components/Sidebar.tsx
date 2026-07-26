@@ -89,7 +89,14 @@ const DEFAULT_GROUPS: Record<GroupId, boolean> = {
 // last). Scripts/History live here as plain links per the nav design rather
 // than under a "More" group. Benchmarks is intentionally absent — it now
 // lives behind the debug-gated "Benchmarks" tab in Settings.
-const AREA_LINKS: RecentTabArea[] = ['tasks', 'craftbooks', 'scripts', 'history', 'settings'];
+const AREA_LINKS: RecentTabArea[] = [
+  'tasks',
+  'craftbooks',
+  'scripts',
+  'history',
+  'handboek',
+  'settings',
+];
 
 // The built-in "Default" project is an always-present scratchpad, not a
 // user-created project. Hide it from the sidebar's Projects group so the
@@ -104,6 +111,7 @@ const AREA_LINK_LABELS: Record<RecentTabArea, string> = {
   craftbooks: 'Craftbooks',
   scripts: 'Scripts',
   history: 'History',
+  handboek: 'Handboek',
   benchmarks: 'Benchmarks',
   settings: 'Settings',
 };

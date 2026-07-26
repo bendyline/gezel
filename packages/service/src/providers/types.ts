@@ -654,6 +654,17 @@ export interface LLMSession {
    */
   onWirePulse?(handler: () => void): () => void;
   /**
+   * Optional: subscribe to live tool-argument chunks — the raw argument
+   * text streamed while the model builds a structured tool call
+   * (llama-cpp/MLX `delta.tool_calls[].function.arguments` fragments).
+   * A multi-minute structured `writeFile` emits no visible deltas, so
+   * this is the only channel that can show the user *what* is being
+   * generated during that stretch. Display-only. Providers whose tool
+   * calls arrive whole (Ollama) or run server-side (Copilot, OpenAI)
+   * leave it undefined.
+   */
+  onToolArgsDelta?(handler: (name: string, chunk: string) => void): () => void;
+  /**
    * Optional: subscribe to phase-announcement events. Currently only
    * `CopilotSession` emits these (SDK `assistant.intent` events from
    * the model's `report_intent` built-in tool). Providers without this

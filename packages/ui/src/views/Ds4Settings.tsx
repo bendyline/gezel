@@ -10,12 +10,13 @@ interface Props {
 }
 
 /**
- * Settings tab for DwarfStar (ds4). DwarfStar is a specialized DeepSeek-V4,
- * GPU-only on-device engine that streams a 284B MoE from SSD — so the panel
- * leads with an availability banner (it can't run on Windows / Intel macOS),
- * then explains the model-specific disk and memory costs. Low-level residency
- * controls deliberately stay out of the desktop UI: the service keeps SSD
- * streaming on by default and rejects overrides that cannot safely fit.
+ * Settings tab for DwarfStar (ds4). DwarfStar is a specialized, GPU-only
+ * on-device engine that streams very large mixture-of-experts models from SSD
+ * — so the panel leads with an availability banner (it can't run on Windows /
+ * Intel macOS), then explains the model-specific disk and memory costs. Low-
+ * level residency controls deliberately stay out of the desktop UI: the
+ * service keeps SSD streaming on by default and rejects overrides that cannot
+ * safely fit.
  */
 export function Ds4Settings({ config }: Props) {
   const availability = detectDs4Availability({ externalBaseUrl: config?.ds4BaseUrl });
@@ -25,9 +26,10 @@ export function Ds4Settings({ config }: Props) {
       <section style={{ marginBottom: '2rem' }}>
         <h3>On-device (DwarfStar - DS4)</h3>
         <p className="muted" style={{ marginTop: 0 }}>
-          DwarfStar (ds4) is an experimental inference engine built for DeepSeek V4 Flash. These
-          models are unusually large, so Gezel keeps a bounded expert cache in memory and reads
-          other experts from SSD as they are needed.
+          DwarfStar (ds4) is an experimental inference engine built for a handful of very large
+          mixture-of-experts models — DeepSeek V4 and GLM 5.2. They don't fit in memory, so Gezel
+          keeps a bounded expert cache in RAM and reads the other experts from SSD as they are
+          needed.
         </p>
 
         {/* ── Availability banner ── */}
@@ -69,11 +71,12 @@ export function Ds4Settings({ config }: Props) {
       {/* ── Catalog models ── */}
       {availability.status !== 'unavailable' && availability.status !== 'external' && (
         <section style={{ marginBottom: '2rem' }}>
-          <h4>DeepSeek V4 models</h4>
+          <h4>DwarfStar models</h4>
           <p className="muted small" style={{ marginTop: 0 }}>
-            Download antirez's DeepSeek V4 GGUFs from the catalog. Q2 is the lighter,
-            faster-starting choice; Q4 keeps more model detail but needs roughly twice the disk
-            space and a larger memory working set.
+            Download the GGUFs DwarfStar can run. Lower quantizations (Q2) start faster and need
+            less disk and memory; higher ones (Q4) keep more model detail but can need several times
+            the disk space and a larger memory working set. Check the size on each row before
+            starting — these downloads run to hundreds of gigabytes.
           </p>
           <Ds4ModelManager />
           <p className="muted small" style={{ marginTop: '1rem' }}>

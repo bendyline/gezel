@@ -54,11 +54,18 @@ export const SystemPromptLayersWireSchema = z.object({
   project: z.string(),
 });
 
-/** One inline image — mirrors `ImageAttachment`. */
+/**
+ * One inline image — mirrors `ImageAttachment`.
+ *
+ * `filename` is required to match the TS interface. It was optional here,
+ * which let a peer relay an attachment that then violated `ImageAttachment` on
+ * the receiving side. Attachments are written with a generated uuid name, so
+ * there is never a legitimate case for omitting it.
+ */
 export const ImageAttachmentWireSchema = z.object({
   base64: z.string(),
   mimeType: z.string(),
-  filename: z.string().optional(),
+  filename: z.string(),
 });
 
 /**

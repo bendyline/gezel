@@ -282,3 +282,24 @@ describe('render pipeline smoke', () => {
     expect(lensed.calls.some((c) => c.method === 'drawImage')).toBe(false);
   });
 });
+
+describe('flat renderer parity with the iso vocabulary', () => {
+  it('reads the shared architectural style, not just health.zone', () => {
+    // The two renderers disagreed for as long as the flat one re-derived its
+    // own architecture from `zone`. Hold zone fixed and vary only the urbanity
+    // band: if the flat view still draws the same roof, it is not reading the
+    // shared style and the views have drifted apart again.
+    const paint = (settlement: 'village' | 'city') => {
+      const m = model(false);
+      m.blocks = m.blocks.map((b) =>
+        b.state === 'live' && !b.phantom
+          ? { ...b, settlement, urbanity: settlement === 'village' ? 0.15 : 0.95 }
+          : b,
+      );
+      const { ctx, calls } = recordingCtx();
+      render(ctx, state(3, m));
+      return calls.map((c) => `${c.method}:${c.args.length}`).join('|');
+    };
+    expect(paint('village')).not.toBe(paint('city'));
+  });
+});

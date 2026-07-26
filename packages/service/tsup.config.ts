@@ -14,6 +14,10 @@ export default defineConfig({
     // inference runs off the Electron main thread; must exist as its own file
     // for `new Worker(...)` to resolve at runtime.
     'memory/embed-worker': 'src/memory/embed-worker.ts',
+    // Standalone subpath (`@bendyline/gezel-service/handboek`) so the CLI's
+    // static-site export can run the documentation engine without importing
+    // the whole daemon.
+    handboek: 'src/handboek/engine.ts',
   },
   format: ['esm'],
   dts: true,
@@ -71,6 +75,17 @@ export default defineConfig({
   // embedded JS string literals when invoking native commands.
   onSuccess: async () => {
     cpSync('src/providers/mlx/python', 'dist/providers/mlx/python', { recursive: true });
+    // Handboek content: the hand-curated documentation tree lives at the
+    // repo root (docs/handboek/) so humans author it next to the other
+    // docs, and ships inside the service package so the engine can serve
+    // it from any install (findHandboekContent() probes dist/handboek-content
+    // first). Unlike the UI copy below this one is a hard requirement —
+    // a service without its documentation is a packaging bug.
+    const handboekSrc = resolve(__dirname, '..', '..', 'docs', 'handboek');
+    if (!existsSync(handboekSrc)) {
+      throw new Error(`handboek content missing at ${handboekSrc} — docs/handboek must exist`);
+    }
+    cpSync(handboekSrc, 'dist/handboek-content', { recursive: true });
     // The bundled diffusers video server (`gezel_video_server.py`),
     // spawned at runtime against the user's `video` venv. Same rationale
     // as the MLX python copy above.

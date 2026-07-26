@@ -35,6 +35,7 @@ import { folderRoutes } from './routes/folders.js';
 import { gezelRoutes } from './routes/gezels.js';
 import { githubRoutes } from './routes/github.js';
 import { growthRoutes } from './routes/growth.js';
+import { handboekRoutes } from './routes/handboek.js';
 import { historyRoutes } from './routes/history.js';
 import { imageGenRoutes } from './routes/image-gen.js';
 import { imagesRoutes } from './routes/images.js';
@@ -487,6 +488,7 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   app.route('/api/meester-status', meesterStatusRoutes(ctx));
   app.route('/api/system-toolsets', systemToolsetRoutes(ctx));
   app.route('/api/history', historyRoutes(ctx));
+  app.route('/api/handboek', handboekRoutes(ctx));
   app.route('/api/channels', channelRoutes(ctx));
   app.route('/api/render', renderRoutes(ctx));
   app.route('/api/timeline', timelineRoutes(ctx));

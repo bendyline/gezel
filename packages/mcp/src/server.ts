@@ -7233,6 +7233,35 @@ server.tool(
 );
 
 server.tool(
+  'how_do_i',
+  "Consult the Handboek — gezel's built-in documentation — for meta questions about gezel itself: what a role can do, how craftbooks / projects / memory / models work, where files live, how to set something up. Ask in plain language and answer from what it returns instead of guessing.",
+  {
+    question: z
+      .string()
+      .min(2)
+      .describe('Plain-language question, e.g. "how do I give a gezel a different model?"'),
+    limit: z.number().optional().describe('Max articles to return (default 2)'),
+  },
+  async ({ question, limit }) => {
+    const res = await api.handboekHowDoI(question, { ...(limit ? { limit } : {}) });
+    if (!res.results.length) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: 'The Handboek has no matching article. Answer from your own knowledge of gezel and say so when unsure.',
+          },
+        ],
+      };
+    }
+    const text = res.results
+      .map((r) => `# ${r.title} [handboek:${r.id}]\n\n${r.markdown}`)
+      .join('\n\n---\n\n');
+    return { content: [{ type: 'text' as const, text }] };
+  },
+);
+
+server.tool(
   'search_sessions',
   'Search past chat-session transcripts across all gezels — what was actually said, not just session titles. Use to recall prior decisions, instructions, or conversations ("where did we discuss X?").',
   {

@@ -1,7 +1,14 @@
-import type { FileMapResponse, MapBuilding } from '@bendyline/gezel';
+import type { FileMapResponse, MapBlock, MapBuilding } from '@bendyline/gezel';
 import { describe, expect, it } from 'vitest';
 import type { Camera } from '../camera.js';
-import { buildingAnchorScreen, buildingsForBlock, hitTestIsoBuilding } from './geometry.js';
+import {
+  buildingAnchorScreen,
+  buildingsForBlock,
+  geometryForModel,
+  hitTestIso,
+  hitTestIsoBuilding,
+  roofHeadroom,
+} from './geometry.js';
 import { PODIUM_HISO, miniHIso, toIso, townRoofRiseIso } from './projection.js';
 
 const CAM: Camera = { scale: 1, offsetX: 0, offsetY: 0 };
@@ -22,6 +29,80 @@ function building(id: string, x: number, y: number, height: number): MapBuilding
 function model(buildings: MapBuilding[]): FileMapResponse {
   return { buildings } as Partial<FileMapResponse> as FileMapResponse;
 }
+
+function blockModel(blocks: MapBlock[]): FileMapResponse {
+  return { blocks, buildings: [] } as Partial<FileMapResponse> as FileMapResponse;
+}
+
+function liveBlock(id: string, x: number, y: number): MapBlock {
+  return {
+    id,
+    districtId: 'src',
+    rect: { x, y, w: 20, h: 16 },
+    label: id,
+    weight: 200,
+    lang: 'typescript',
+    state: 'live',
+    buildingCount: 0,
+    levels: 3,
+    health: {
+      findings: 0,
+      maxSeverity: null,
+      fanIn: 1,
+      fanOut: 1,
+      vibe: 'tidy',
+      zone: 'residential',
+    },
+  };
+}
+
+describe('geometry cache', () => {
+  it('resolves each live block’s architecture once, on the model', () => {
+    const m = blockModel([liveBlock('src/a.ts', 0, 0), liveBlock('src/b.ts', 40, 0)]);
+    const geom = geometryForModel(m);
+    expect(geom.geoms.every((g) => g.style !== undefined)).toBe(true);
+    // Memoized per payload, so a pan doesn't re-hash every visible block.
+    expect(geometryForModel(m)).toBe(geom);
+    expect(geometryForModel(m).geoms[0]!.style).toBe(geom.geoms[0]!.style);
+  });
+
+  it('leaves tombstones without a style — rubble has no building', () => {
+    const dead: MapBlock = { ...liveBlock('src/gone.ts', 0, 0), state: 'tombstoned' };
+    const geom = geometryForModel(blockModel([dead]));
+    expect(geom.geoms[0]!.style).toBeUndefined();
+    expect(geom.geoms[0]!.hIso).toBe(0);
+  });
+});
+
+describe('roofHeadroom', () => {
+  it('defaults to the ordinary roof budget', () => {
+    const geom = geometryForModel(blockModel([liveBlock('src/a.ts', 0, 0)]));
+    const g = geom.geoms[0]!;
+    expect(g.roofFactor).toBe(1);
+    expect(roofHeadroom(g, 1)).toBeCloseTo(townRoofRiseIso(g.block.rect, 1), 6);
+  });
+
+  it('scales with roofFactor so tall caps stay cullable and clickable', () => {
+    const geom = geometryForModel(blockModel([liveBlock('src/tower.ts', 0, 0)]));
+    const g = { ...geom.geoms[0]!, roofFactor: 1.6 };
+    expect(roofHeadroom(g, 1)).toBeCloseTo(townRoofRiseIso(g.block.rect, 1) * 1.6, 6);
+    // A click inside the extra headroom must still select the block.
+    const tall = geometryForModel(blockModel([liveBlock('src/tower.ts', 0, 0)]));
+    tall.geoms[0]!.roofFactor = 1.6;
+    const b = tall.geoms[0]!.block;
+    const iso = toIso(b.rect.x + b.rect.w / 2, b.rect.y + b.rect.h / 2);
+    const capV = iso.v - tall.geoms[0]!.hIso - townRoofRiseIso(b.rect, 1) * 1.4;
+    expect(hitTestIso(tall, CAM, iso.u, capV)?.id).toBe('src/tower.ts');
+  });
+
+  it('gives tombstones and phantoms no headroom', () => {
+    const dead: MapBlock = { ...liveBlock('src/gone.ts', 0, 0), state: 'tombstoned' };
+    const ghost: MapBlock = { ...liveBlock('src/new.ts', 40, 0), phantom: true };
+    const geom = geometryForModel(blockModel([dead, ghost]));
+    expect(roofHeadroom(geom.geoms[0]!, 1)).toBe(0);
+    expect(roofHeadroom(geom.geoms[1]!, 1)).toBe(0);
+  });
+});
 
 describe('buildingsForBlock', () => {
   it('groups by block and memoizes per payload', () => {

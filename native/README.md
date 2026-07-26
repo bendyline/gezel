@@ -160,10 +160,10 @@ pnpm app
 uploads artifacts, and aggregates tagged runs into a **draft** native
 release. It runs on tag push (`native-vX.Y.Z`, via
 `scripts/cut-native-release.mjs`) or manual dispatch (build-only, no
-draft). Publication is an explicit manual gate:
-`.github/workflows/publish-native-release.yml` validates the draft's
-asset set, re-verifies every archive against `SHA256SUMS`, and only then
-flips it public.
+draft). Before creating the draft, the workflow validates the exact
+production archive set and verifies every archive against `SHA256SUMS`.
+After inspecting and testing the draft, a maintainer publishes it
+directly from the GitHub Releases UI.
 
 ### Integrity model
 

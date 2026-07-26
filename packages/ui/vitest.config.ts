@@ -14,6 +14,12 @@ import { defineConfig } from 'vitest/config';
  */
 export default defineConfig({
   plugins: [react()],
+  // Mirrors vite.config.ts: with `pnpm link:squisq` active the linked
+  // checkout would otherwise load its own react 18, whose context
+  // objects react-dom 19 refuses to render (React error #130).
+  resolve: {
+    dedupe: ['react', 'react-dom'],
+  },
   test: {
     environment: 'jsdom',
     setupFiles: ['./src/test-utils/setup.ts'],

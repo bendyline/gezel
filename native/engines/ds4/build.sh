@@ -25,16 +25,30 @@ here="$(cd "$(dirname "$0")" && pwd)"
 repo_root="$(cd "$here/../../.." && pwd)"
 src="$here/.upstream"
 cuda_float_patch="$here/patches/cuda-float-max.patch"
+truncation_finish_patch="$here/patches/repaired-truncation-finish-length.patch"
+prefill_cancel_patch="$here/patches/prefill-client-cancel.patch"
 
 # ── 1. Ensure upstream is cloned + pinned ──────────────────────────
-# Recover from an interrupted earlier build that applied our exact patch but
+# Recover from an interrupted earlier build that applied our exact patches but
 # did not reach the EXIT cleanup below. Do this before fetch-upstream so a
-# later pin bump cannot be blocked by that ignored checkout modification.
+# later pin bump cannot be blocked by those ignored checkout modifications.
 if [[ -d "$src/.git" ]] &&
    ! git -C "$src" diff --quiet -- ds4_cuda.cu &&
    git -C "$src" apply --reverse --check "$cuda_float_patch"; then
   git -C "$src" apply --reverse "$cuda_float_patch"
   echo "[build] removed stale ds4 CUDA FLT_MAX compatibility patch"
+fi
+if [[ -d "$src/.git" ]] &&
+   ! git -C "$src" diff --quiet -- ds4_server.c &&
+   git -C "$src" apply --reverse --check "$truncation_finish_patch"; then
+  git -C "$src" apply --reverse "$truncation_finish_patch"
+  echo "[build] removed stale ds4 repaired-truncation finish_reason patch"
+fi
+if [[ -d "$src/.git" ]] &&
+   ! git -C "$src" diff --quiet -- ds4_server.c &&
+   git -C "$src" apply --reverse --check "$prefill_cancel_patch"; then
+  git -C "$src" apply --reverse "$prefill_cancel_patch"
+  echo "[build] removed stale ds4 prefill client-cancel patch"
 fi
 "$repo_root/native/scripts/fetch-upstream.sh" ds4
 
@@ -72,23 +86,53 @@ esac
 # that defines it. Apply a visible, pin-scoped patch only for the Linux build,
 # then restore the ignored upstream checkout so later pin bumps stay clean.
 cuda_float_patch_applied=false
-restore_cuda_float_patch() {
+truncation_finish_patch_applied=false
+prefill_cancel_patch_applied=false
+restore_patches() {
   status=$?
+  if [[ "$prefill_cancel_patch_applied" == true ]] &&
+     ! git -C "$src" apply --reverse "$prefill_cancel_patch"; then
+    echo "[build] error: failed to restore ds4_server.c after prefill client-cancel patch" >&2
+    [[ "$status" -ne 0 ]] || status=1
+  fi
   if [[ "$cuda_float_patch_applied" == true ]] &&
      ! git -C "$src" apply --reverse "$cuda_float_patch"; then
     echo "[build] error: failed to restore ds4_cuda.cu after compatibility patch" >&2
     [[ "$status" -ne 0 ]] || status=1
   fi
+  if [[ "$truncation_finish_patch_applied" == true ]] &&
+     ! git -C "$src" apply --reverse "$truncation_finish_patch"; then
+    echo "[build] error: failed to restore ds4_server.c after finish_reason patch" >&2
+    [[ "$status" -ne 0 ]] || status=1
+  fi
   trap - EXIT
   exit "$status"
 }
-trap restore_cuda_float_patch EXIT
+trap restore_patches EXIT
 if [[ "$platform" == linux-* ]] &&
    ! grep -Eq '^#include <(float\.h|cfloat)>' "$src/ds4_cuda.cu"; then
   git -C "$src" apply "$cuda_float_patch"
   cuda_float_patch_applied=true
   echo "[build] applied ds4 CUDA FLT_MAX compatibility patch"
 fi
+# Upstream promotes a tool call salvaged from a generation-cap cutoff to
+# finish_reason=tool_calls, which hides the truncation from clients. Gezel's
+# provider keys its truncated-write recovery off finish_reason=length, so
+# patch the promotion to preserve "length" for repaired truncated calls
+# (all platforms). Pin-scoped: a bump that touches these lines fails the
+# apply loudly instead of silently dropping the fix.
+git -C "$src" apply "$truncation_finish_patch"
+truncation_finish_patch_applied=true
+echo "[build] applied ds4 repaired-truncation finish_reason patch"
+
+# Upstream never arms ds4_session_set_cancel during prefill, so a turn whose
+# client already disconnected kept prefilling the whole prompt (~150s on a large
+# SSD-streamed context) before the closed socket was noticed, blocking the next
+# turn behind a zombie. Wire the socket half-close into the cooperative-cancel
+# hook so prefill unwinds at the next chunk boundary (all platforms).
+git -C "$src" apply "$prefill_cancel_patch"
+prefill_cancel_patch_applied=true
+echo "[build] applied ds4 prefill client-cancel patch"
 
 # ── 3. Build (make-based; one GPU backend per platform) ────────────
 make_args=(ds4-server)

@@ -7,6 +7,7 @@ import { DocumentDetail } from '../views/DocumentDetail.js';
 import { DocumentsView } from '../views/DocumentsView.js';
 import { GezelDetail } from '../views/GezelDetail.js';
 import { GezellenView } from '../views/GezellenView.js';
+import { HandboekView } from '../views/HandboekView.js';
 import { HistoryView } from '../views/HistoryView.js';
 import { ProjectDetailView, ProjectsView } from '../views/ProjectsView.js';
 import { ScriptEditorView } from '../views/ScriptEditorView.js';
@@ -55,6 +56,8 @@ export function TabContent({ tab }: TabContentProps) {
           return <ScriptsView />;
         case 'history':
           return <HistoryView />;
+        case 'handboek':
+          return <HandboekView />;
         case 'benchmarks':
           return <BenchmarksView />;
         case 'settings':

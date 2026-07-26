@@ -32,9 +32,10 @@ import { computeLevels, landmarkLevels, selectLandmarks } from './elevation.js';
 import { civicThreshold, computeHealth, normalizeSeverity } from './health.js';
 import { collectCodeMap } from './providers/code.js';
 import { isExcludedFromCodeMap } from './sections.js';
+import { computeUrbanity, settlementFor } from './urbanity.js';
 
 /**
- * Orchestrates one city-map build: pick the domain provider, load the prior
+ * Orchestrates one Village build: pick the domain provider, load the prior
  * persisted layout, run the stable layout engine, persist the new layout back,
  * and assemble the `MapModel` (districts + blocks + buildings + roads) the UI
  * renders. Pure-spatial work lives in the engine; this is the impure boundary
@@ -300,6 +301,22 @@ export async function buildFileMap(
     }
   }
 
+  // Urbanity is post-layout by necessity: the field samples parcel positions
+  // and local build density, both of which only exist once the engine has run.
+  // Computed unconditionally (the response always carries it); only the sticky
+  // downtown parameters are persisted, and only when persisting at all.
+  const urbanity = computeUrbanity(
+    [...result.blocks]
+      .filter(([, pl]) => pl.state !== 'tombstoned')
+      .map(([path, pl]) => ({
+        path,
+        lot: pl.lot,
+        footprint: pl.footprint,
+        importance: importanceByPath.get(path) ?? 0,
+      })),
+    { hasEdges, prior: dom?.downtown ?? null, now },
+  );
+
   if (options.persist !== false) {
     index.replaceLayout(
       domain,
@@ -328,7 +345,13 @@ export async function buildFileMap(
         updatedAt: now,
         domains: {
           ...c.domains,
-          [domain]: { layoutVersion: LAYOUT_VERSION, seededAt, anchors, journal },
+          [domain]: {
+            layoutVersion: LAYOUT_VERSION,
+            seededAt,
+            anchors,
+            journal,
+            downtown: urbanity.downtown,
+          },
         },
       }));
     }
@@ -354,6 +377,7 @@ export async function buildFileMap(
             churnCommits: churnOf(path),
           });
     const lastTouchedAt = gitMeta.get(path)?.[GIT_META_LAST_COMMIT];
+    const u = urbanity.byPath.get(path);
     blocks.push({
       id: path,
       districtId: folderOf(path),
@@ -370,6 +394,7 @@ export async function buildFileMap(
       ...(levels !== undefined ? { levels: isLandmark ? landmarkLevels(levels) : levels } : {}),
       ...(isLandmark ? { landmark: true } : {}),
       ...(lastTouchedAt !== undefined ? { lastTouchedAt } : {}),
+      ...(u !== undefined ? { urbanity: u, settlement: settlementFor(u) } : {}),
     });
     if (pl.state !== 'tombstoned' && buildingBudget > 0 && syms.length) {
       const placed = layoutBuildingsInBlock(path, pl.footprint, syms);
@@ -394,6 +419,15 @@ export async function buildFileMap(
     roads,
     streets: result.streets,
     plazas: result.plazas,
+    urbanity: {
+      center: { x: urbanity.downtown.cx, y: urbanity.downtown.cy },
+      radius: urbanity.downtown.r,
+      ceiling: urbanity.ceiling,
+      peak: urbanity.peak,
+      median: urbanity.median,
+      settlement: settlementFor(urbanity.peak),
+      fileCount: urbanity.fileCount,
+    },
     signals: { gitAvailable, churnWindowDays: GIT_CHURN_WINDOW_DAYS },
   };
 }

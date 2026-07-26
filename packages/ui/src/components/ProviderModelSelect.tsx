@@ -85,7 +85,8 @@ function providerLabelFor(provider: ProviderName): string {
       return platformLabel();
     case 'ds4':
       // Distinct from the MLX/llama.cpp "This Mac" entry — DwarfStar is a
-      // separate, DeepSeek-V4-only engine, so its models get their own row.
+      // separate engine with its own narrow model set, so its models get their
+      // own row.
       return 'DwarfStar (ds4)';
     default:
       return provider;

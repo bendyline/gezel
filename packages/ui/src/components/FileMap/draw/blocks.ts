@@ -1,7 +1,10 @@
 import type { MapBlock } from '@bendyline/gezel';
 import { rectInView } from '../camera.js';
+import type { TownStyle } from '../iso/town-style.js';
 import { ageBucket, roofColors } from '../palette.js';
 import { hash32, seeded } from '../seed.js';
+import { styleForBlock } from '../town-cache.js';
+import { bandOf, urbanityOf } from '../urbanity.js';
 import type { RenderState } from './state.js';
 import { type ScreenRect, crosshatchPattern, roundRect, screenRect } from './util.js';
 
@@ -10,8 +13,6 @@ const SHADOW_OX = 1.5;
 const SHADOW_OY = 2.5;
 /** Below this screen width a block renders flat — 3D at that size is mud. */
 const MIN_3D_PX = 6;
-/** LoC above which a block-as-building reads as an industrial complex. */
-const INDUSTRIAL_LOC = 1000;
 
 interface VisibleBlock {
   b: MapBlock;
@@ -61,13 +62,15 @@ export function drawBlocks(ctx: CanvasRenderingContext2D, s: RenderState): void 
   for (const v of vis) drawBlock(ctx, s, v);
 }
 
-/** Zone/vibe ground treatment on the lot: civic plaza, blighted earth. */
+/** Zone/vibe ground treatment on the lot: civic plaza, blighted earth, plus
+ *  the plot boundary — see `drawPlot`. */
 function drawLotGround(ctx: CanvasRenderingContext2D, s: RenderState, v: VisibleBlock): void {
   const { b } = v;
   const p = s.palette;
   if (b.state !== 'live' || b.phantom || !b.lot || !b.health) return;
   const lr = screenRect(s.cam, b.lot);
   if (lr.w < 10) return;
+  drawPlot(ctx, s, b, lr);
   const { vibe, zone, maxSeverity } = b.health;
   if (zone === 'civic') {
     ctx.fillStyle = p.sidewalk;
@@ -94,6 +97,62 @@ function drawLotGround(ctx: CanvasRenderingContext2D, s: RenderState, v: Visible
       ctx.globalAlpha = 1;
     }
   }
+}
+
+/**
+ * The plot: ground tone plus a hedge / picket / curb boundary by register.
+ *
+ * In top-down projection this is the single strongest village-versus-city
+ * signal available — stronger than anything that can be said on the buildings
+ * themselves, since silhouette is gone and only roof plan survives. Worth
+ * prioritizing accordingly.
+ */
+function drawPlot(
+  ctx: CanvasRenderingContext2D,
+  s: RenderState,
+  b: MapBlock,
+  lr: ScreenRect,
+): void {
+  const p = s.palette;
+  const u = urbanityOf(b);
+  ctx.globalAlpha = 0.4;
+  ctx.fillStyle = u < 0.25 ? p.orchard : u < 0.5 ? p.ground : p.sidewalk;
+  roundRect(ctx, lr.x, lr.y, lr.w, lr.h, 3);
+  ctx.fill();
+  ctx.globalAlpha = 1;
+
+  const band = bandOf(b);
+  if (band === 'city' && u > 0.78) return;
+  if (band === 'village') {
+    // Ticks rather than a line, so the boundary reads as planting.
+    ctx.strokeStyle = p.hedge;
+    ctx.lineWidth = 1.6;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    for (const [x0, y0, x1, y1] of [
+      [lr.x, lr.y, lr.x + lr.w, lr.y],
+      [lr.x + lr.w, lr.y, lr.x + lr.w, lr.y + lr.h],
+      [lr.x + lr.w, lr.y + lr.h, lr.x, lr.y + lr.h],
+      [lr.x, lr.y + lr.h, lr.x, lr.y],
+    ] as const) {
+      const steps = Math.max(1, Math.floor(Math.hypot(x1 - x0, y1 - y0) / 5));
+      for (let k = 0; k < steps; k++) {
+        const t0 = (k + 0.15) / steps;
+        const t1 = (k + 0.85) / steps;
+        ctx.moveTo(x0 + (x1 - x0) * t0, y0 + (y1 - y0) * t0);
+        ctx.lineTo(x0 + (x1 - x0) * t1, y0 + (y1 - y0) * t1);
+      }
+    }
+    ctx.stroke();
+    ctx.lineCap = 'butt';
+    return;
+  }
+  ctx.strokeStyle = band === 'town' ? p.fence : p.curb;
+  ctx.lineWidth = 1;
+  if (band === 'town') ctx.setLineDash([2, 2]);
+  roundRect(ctx, lr.x, lr.y, lr.w, lr.h, 3);
+  ctx.stroke();
+  ctx.setLineDash([]);
 }
 
 function drawBlock(ctx: CanvasRenderingContext2D, s: RenderState, v: VisibleBlock): void {
@@ -167,75 +226,251 @@ function drawBlock(ctx: CanvasRenderingContext2D, s: RenderState, v: VisibleBloc
   ctx.lineTo(r.x + r.w - corner, r.y + 0.5);
   ctx.stroke();
 
-  if (!s.ageLens) drawZoneRoof(ctx, s, v, r.h - wallH, colors);
+  if (!s.ageLens) drawRoofPlan(ctx, s, v, r.h - wallH, colors, styleForBlock(s.model, b));
 }
 
 /**
- * Zone → building type, told through the roof: houses get gables, shops get
- * awnings, civic hubs a dome, big files sawtooth industry. Falls back to the
- * weight-based industrial look when no health payload rides on the block.
+ * The roof in PLAN.
+ *
+ * The flat view used to re-derive its own architecture from `health.zone`,
+ * independently of the isometric vocabulary — which is exactly why the two
+ * renderers disagreed about what a given file looked like. Both now read the
+ * same resolved `TownStyle` out of the shared per-model cache, and this
+ * function's only job is to express that struct in top-down terms.
+ *
+ * Top-down, silhouette is unavailable and roof PLAN is the readable signal:
+ * a hip is a shortened ridge with four hip lines running to the corners, a
+ * mansard is an inset deck, a parapet has no ridge at all. Storeys, cornices,
+ * and stoops simply do not survive the projection and are not attempted.
  */
-function drawZoneRoof(
+function drawRoofPlan(
   ctx: CanvasRenderingContext2D,
   s: RenderState,
   v: VisibleBlock,
   roofH: number,
   colors: { roof: string; facade: string; edge: string },
+  style: TownStyle,
 ): void {
-  const { b, r } = v;
-  const zone = b.health?.zone;
-  if ((zone === 'industrial' || (!b.health && b.weight > INDUSTRIAL_LOC)) && roofH >= 12) {
+  const { r } = v;
+  if (style.roof === 'sawtooth' && roofH >= 12) {
     drawIndustrialRoof(ctx, s, v, roofH, colors.facade, colors.edge);
     return;
   }
   if (r.w < 14 || roofH < 10) return;
-  if (zone === 'residential') {
-    // gabled two-tone roof: lit and shaded halves split by a ridge line
-    const horizontal = r.w >= roofH;
+
+  const horizontal = style.ridge === 'x' ? r.w >= roofH : r.w < roofH;
+  const cx = r.x + r.w / 2;
+  const cy = r.y + roofH / 2;
+  const line = (x0: number, y0: number, x1: number, y1: number, width = 1) => {
+    ctx.strokeStyle = colors.edge;
+    ctx.lineWidth = width;
+    ctx.beginPath();
+    ctx.moveTo(x0, y0);
+    ctx.lineTo(x1, y1);
+    ctx.stroke();
+  };
+  /** Two tone halves either side of the ridge — the pitched-roof cue. */
+  const slopes = (t: number) => {
     ctx.globalAlpha = 0.22;
     if (horizontal) {
       ctx.fillStyle = colors.edge;
-      ctx.fillRect(r.x + 1, r.y + 1, r.w - 2, roofH / 2 - 1);
+      ctx.fillRect(r.x + 1, r.y + 1, r.w - 2, roofH * t - 1);
       ctx.fillStyle = colors.facade;
-      ctx.fillRect(r.x + 1, r.y + roofH / 2, r.w - 2, roofH / 2 - 1);
+      ctx.fillRect(r.x + 1, r.y + roofH * t, r.w - 2, roofH * (1 - t) - 1);
     } else {
       ctx.fillStyle = colors.edge;
-      ctx.fillRect(r.x + 1, r.y + 1, r.w / 2 - 1, roofH - 2);
+      ctx.fillRect(r.x + 1, r.y + 1, r.w * t - 1, roofH - 2);
       ctx.fillStyle = colors.facade;
-      ctx.fillRect(r.x + r.w / 2, r.y + 1, r.w / 2 - 1, roofH - 2);
+      ctx.fillRect(r.x + r.w * t, r.y + 1, r.w * (1 - t) - 1, roofH - 2);
     }
     ctx.globalAlpha = 1;
-    ctx.strokeStyle = colors.edge;
-    ctx.lineWidth = 1;
+  };
+  /** The ridge, optionally shortened to the middle fraction (hips). */
+  const ridge = (span = 1) => {
+    const m = (1 - span) / 2;
+    if (horizontal) line(r.x + 1 + (r.w - 2) * m, cy, r.x + r.w - 1 - (r.w - 2) * m, cy);
+    else line(cx, r.y + 1 + (roofH - 2) * m, cx, r.y + roofH - 1 - (roofH - 2) * m);
+  };
+  /** Four hip lines running from the ridge ends out to the corners. */
+  const hips = (span: number) => {
+    const m = (1 - span) / 2;
+    const [a, b] = horizontal
+      ? ([
+          { x: r.x + 1 + (r.w - 2) * m, y: cy },
+          { x: r.x + r.w - 1 - (r.w - 2) * m, y: cy },
+        ] as const)
+      : ([
+          { x: cx, y: r.y + 1 + (roofH - 2) * m },
+          { x: cx, y: r.y + roofH - 1 - (roofH - 2) * m },
+        ] as const);
+    line(a.x, a.y, r.x + 1, r.y + 1, 0.7);
+    line(
+      a.x,
+      a.y,
+      horizontal ? r.x + 1 : r.x + r.w - 1,
+      horizontal ? r.y + roofH - 1 : r.y + 1,
+      0.7,
+    );
+    line(b.x, b.y, r.x + r.w - 1, r.y + roofH - 1, 0.7);
+    line(
+      b.x,
+      b.y,
+      horizontal ? r.x + r.w - 1 : r.x + 1,
+      horizontal ? r.y + 1 : r.y + roofH - 1,
+      0.7,
+    );
+  };
+  /** An inset deck, lighter than the slopes around it. */
+  const deck = (inset: number) => {
+    ctx.globalAlpha = 0.3;
+    ctx.fillStyle = colors.edge;
+    ctx.fillRect(
+      r.x + r.w * inset,
+      r.y + roofH * inset,
+      r.w * (1 - inset * 2),
+      roofH * (1 - inset * 2),
+    );
+    ctx.globalAlpha = 1;
+  };
+
+  switch (style.roof) {
+    case 'gable':
+      slopes(0.5);
+      ridge();
+      break;
+    case 'catslide':
+      // Off-center ridge: one plane runs long to a lower eave.
+      slopes(0.34);
+      if (horizontal) line(r.x + 1, r.y + roofH * 0.34, r.x + r.w - 1, r.y + roofH * 0.34);
+      else line(r.x + r.w * 0.34, r.y + 1, r.x + r.w * 0.34, r.y + roofH - 1);
+      break;
+    case 'thatch': {
+      // The fat overhanging eave is the whole cue, so give it real weight.
+      slopes(0.5);
+      ridge(0.8);
+      ctx.strokeStyle = colors.facade;
+      ctx.globalAlpha = 0.5;
+      ctx.lineWidth = Math.max(2, Math.min(4, roofH * 0.16));
+      roundRect(ctx, r.x + 1.5, r.y + 1.5, r.w - 3, roofH - 3, Math.min(roofH, r.w) / 2);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+      break;
+    }
+    case 'hip':
+      slopes(0.5);
+      ridge(0.5);
+      hips(0.5);
+      break;
+    case 'half-hip':
+      slopes(0.5);
+      ridge(0.76);
+      hips(0.76);
+      break;
+    case 'shed':
+      slopes(0.82);
+      break;
+    case 'mansard':
+      deck(0.24);
+      hips(0.5);
+      break;
+    case 'parapet':
+      // No ridge at all — a flat deck behind a raised rim.
+      ctx.strokeStyle = colors.edge;
+      ctx.lineWidth = 1;
+      ctx.strokeRect(r.x + 1.5, r.y + 1.5, r.w - 3, roofH - 3);
+      deck(0.18);
+      break;
+    case 'monitor': {
+      slopes(0.5);
+      const bandH = Math.max(2, roofH * 0.22);
+      ctx.globalAlpha = 0.4;
+      ctx.fillStyle = colors.edge;
+      if (horizontal) ctx.fillRect(r.x + 2, cy - bandH / 2, r.w - 4, bandH);
+      else ctx.fillRect(cx - bandH / 2, r.y + 2, bandH, roofH - 4);
+      ctx.globalAlpha = 1;
+      ridge();
+      break;
+    }
+    case 'pyramid':
+      line(r.x + 1, r.y + 1, r.x + r.w - 1, r.y + roofH - 1, 0.8);
+      line(r.x + r.w - 1, r.y + 1, r.x + 1, r.y + roofH - 1, 0.8);
+      break;
+    case 'conical': {
+      const rad = Math.min(r.w, roofH) * 0.42;
+      ctx.strokeStyle = colors.edge;
+      ctx.lineWidth = 0.9;
+      for (const k of [1, 0.45]) {
+        ctx.beginPath();
+        ctx.arc(cx, cy, rad * k, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      break;
+    }
+    case 'barrel': {
+      ctx.strokeStyle = colors.edge;
+      ctx.lineWidth = 0.9;
+      ctx.beginPath();
+      for (const k of [0.3, 0.5, 0.7]) {
+        if (horizontal) {
+          ctx.moveTo(r.x + 2, r.y + roofH * k);
+          ctx.lineTo(r.x + r.w - 2, r.y + roofH * k);
+        } else {
+          ctx.moveTo(r.x + r.w * k, r.y + 2);
+          ctx.lineTo(r.x + r.w * k, r.y + roofH - 2);
+        }
+      }
+      ctx.stroke();
+      break;
+    }
+    default:
+      slopes(0.5);
+      ridge();
+      break;
+  }
+
+  // A terrace's party walls: strokes across the roof at the bay divisions,
+  // perpendicular to the ridge. Unmistakable in plan and nearly free.
+  //
+  // These are drawn WITHIN one block, not between neighbours — the layout
+  // always puts a street or a yard margin between blocks, so a real shared
+  // wall is impossible here. Don't try to "fix" that in the renderer.
+  if (style.band === 'city' && style.bays > 1 && r.w >= 20) {
+    ctx.strokeStyle = colors.facade;
+    ctx.globalAlpha = 0.55;
+    ctx.lineWidth = 0.7;
     ctx.beginPath();
-    if (horizontal) {
-      ctx.moveTo(r.x + 1, r.y + roofH / 2);
-      ctx.lineTo(r.x + r.w - 1, r.y + roofH / 2);
-    } else {
-      ctx.moveTo(r.x + r.w / 2, r.y + 1);
-      ctx.lineTo(r.x + r.w / 2, r.y + roofH - 1);
+    for (let i = 1; i < Math.min(5, style.bays); i++) {
+      const t = i / style.bays;
+      if (horizontal) {
+        ctx.moveTo(r.x + r.w * t, r.y + 1);
+        ctx.lineTo(r.x + r.w * t, r.y + roofH - 1);
+      } else {
+        ctx.moveTo(r.x + 1, r.y + roofH * t);
+        ctx.lineTo(r.x + r.w - 1, r.y + roofH * t);
+      }
     }
     ctx.stroke();
-  } else if (zone === 'commercial') {
-    // flat roof with a parapet edge and an awning strip facing the lane
-    ctx.strokeStyle = colors.facade;
-    ctx.globalAlpha = 0.6;
-    ctx.lineWidth = 1;
-    ctx.strokeRect(r.x + 1.5, r.y + 1.5, r.w - 3, roofH - 3);
     ctx.globalAlpha = 1;
-    const awnH = Math.min(3, roofH * 0.18);
-    ctx.fillStyle = colors.edge;
-    ctx.fillRect(r.x + 1, r.y + roofH - awnH, r.w - 2, awnH);
-  } else if (zone === 'civic') {
-    const cr = Math.min(r.w, roofH) * 0.18;
+  }
+
+  // Chimney dots and cupola circles survive the projection surprisingly well.
+  if (style.chimneys > 0 && roofH >= 12) {
+    ctx.fillStyle = s.palette.masonry;
+    for (let i = 0; i < Math.min(3, style.chimneys); i++) {
+      const t = style.chimneys === 1 ? 0.5 : 0.3 + (i / (style.chimneys - 1)) * 0.4;
+      const x = horizontal ? r.x + r.w * t : cx;
+      const y = horizontal ? cy : r.y + roofH * t;
+      ctx.fillRect(x - 1, y - 1, 2.2, 2.2);
+    }
+  }
+  if (style.cupola && roofH >= 12) {
+    const rad = Math.min(r.w, roofH) * 0.16;
     ctx.fillStyle = s.palette.domeAccent;
     ctx.beginPath();
-    ctx.arc(r.x + r.w / 2, r.y + roofH / 2, cr, 0, Math.PI * 2);
+    ctx.arc(cx, cy, rad, 0, Math.PI * 2);
     ctx.fill();
     ctx.strokeStyle = colors.facade;
     ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.arc(r.x + r.w / 2, r.y + roofH / 2, cr, 0, Math.PI * 2);
     ctx.stroke();
   }
 }

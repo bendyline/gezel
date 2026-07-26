@@ -3,6 +3,8 @@ import { PoppetjeSchema } from '../poppetje/schema.js';
 import { GezelGrowthSummarySchema } from './growth.js';
 import { ChatModelTuningSchema } from './model-tuning.js';
 import { QuestionSchema } from './question.js';
+import { MessageImageDigestSchema } from './recognition.js';
+import { SessionGpuTaskSchema } from './session-telemetry.js';
 import { TuningProfileIdSchema } from './tuning-profile-registry.js';
 
 /**
@@ -240,6 +242,16 @@ export const GezelFrontmatterSchema = z.object({
    * keeps the evidence-bearing adoption log.
    */
   traits: z.array(GezelTraitSchema).max(8).optional(),
+  /**
+   * Overrides `config.recognition.mode` for this gezel. A gezel whose job is
+   * reading screenshots sets `always`; everyone else inherits.
+   *
+   * Deliberately a single enum rather than a mirror of the config object —
+   * frontmatter is user-edited YAML, and a nested policy struct there is a
+   * support burden. Native vision is a property of the model *install*, not of
+   * the gezel, so it has no frontmatter counterpart.
+   */
+  recognition: z.enum(['auto', 'always', 'off']).optional(),
 });
 export type GezelFrontmatter = z.infer<typeof GezelFrontmatterSchema>;
 
@@ -311,6 +323,8 @@ export const GezelSummarySchema = z.object({
   poppetje: PoppetjeSchema.optional(),
   /** Mirrors `GezelFrontmatter.iconOverride`. */
   iconOverride: z.boolean().optional(),
+  /** Mirrors `GezelFrontmatter.recognition`. */
+  recognition: z.enum(['auto', 'always', 'off']).optional(),
   /**
    * Where this gezel lives. `global` (the default when absent — back-compat
    * with every gezel on disk before this field existed) is the install-wide
@@ -619,6 +633,20 @@ export const ChatMessageSchema = z.object({
       }),
     )
     .optional(),
+  /**
+   * Text descriptions of images this message embedded, for models that can't
+   * see. `content` keeps the user's literal markdown (so the thumbnail still
+   * renders and the composer can round-trip it); the digest rides alongside and
+   * is spliced into the model-visible text at send time and again on every
+   * history replay.
+   *
+   * This has to be persisted rather than injected per-turn: `priorMessages` is
+   * rebuilt from the session record for every stateless provider, so an
+   * ephemeral digest would make a turn-1 screenshot vanish by turn 5 — after a
+   * daemon restart, a provider reset, or a context-pressure rebuild — leaving
+   * the model replaying a bare `![](attachments/9f3.png)`.
+   */
+  recognizedImages: z.array(MessageImageDigestSchema).optional(),
 });
 export type ChatMessage = z.infer<typeof ChatMessageSchema>;
 
@@ -724,6 +752,18 @@ export const ChatEventSchema = z.discriminatedUnion('type', [
    * next real `delta`, `tool`, or `complete`.
    */
   z.object({ type: z.literal('wire_pulse') }),
+  /**
+   * Live tool-argument stream. Fired while the model is generating a
+   * structured tool call — most visibly a multi-minute `writeFile`
+   * whose argument tokens never appear as visible `delta`s, so without
+   * this channel the only signal is the accumulating wire-pulse count.
+   * `name` is the tool being called ('' until the name chunk arrives);
+   * `content` is the raw argument-text chunk (JSON fragments — file
+   * content mid-write). The UI accumulates these into a dimmed live
+   * "working" block (same pattern as `reasoning_delta`) and drops the
+   * block when the corresponding `tool` event lands.
+   */
+  z.object({ type: z.literal('tool_args_delta'), name: z.string(), content: z.string() }),
   /**
    * Emitted when a provider tells us it's still doing work — even though
    * no visible text/tool event has arrived. Today this is wired from
@@ -928,9 +968,9 @@ export const ChatEventSchema = z.discriminatedUnion('type', [
   }),
   /**
    * VRAM tenancy change — a non-LLM workload has taken (or released)
-   * the GPU. Today this fires only for the local image generator
-   * (sd-cpp); in the future the same event will surface STT / TTS
-   * engines that share the GPU pool.
+   * the GPU. Fires for the local image generator (sd-cpp), the video
+   * generator, and the local image-recognition engine; in the future
+   * the same event will surface STT / TTS engines that share the pool.
    *
    * The user-visible point of these events: when the chat session
    * has issued a `generate_image` tool call, the LLM is actually
@@ -957,7 +997,18 @@ export const ChatEventSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('gpu_swap'),
     state: z.enum(['started', 'progress', 'ended']),
-    task: z.enum(['image_generation', 'video_generation']),
+    /**
+     * Shared with session telemetry so a new workload can't light up the
+     * bubble while staying invisible to stall detection.
+     *
+     * `image_recognition` carries no `progress` — llama-server emits no
+     * per-step ticks for a single vision decode, and a fabricated bar reads
+     * worse than a spinner. It still has to ride this event rather than a log
+     * line, because the silence watchdog treats `gpu_swap` as an activity
+     * signal; without it a 6s vision pass trips "still working — silent for X
+     * seconds", which reads as a bug.
+     */
+    task: SessionGpuTaskSchema,
     detail: z.string().optional(),
     prompt: z.string().optional(),
     progress: z.number().min(0).max(1).optional(),

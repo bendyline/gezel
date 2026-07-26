@@ -1150,6 +1150,17 @@ export const ChatModelDs4SourceSchema = z
      * runtime decides per actual device RAM.
      */
     ssdStreaming: z.boolean().optional(),
+    /**
+     * Ceiling on the launch-time `--ctx` window, in tokens. ds4's default is
+     * RAM-tiered, which assumes DeepSeek-V4's small resident footprint; a
+     * model that keeps far more weight resident needs a smaller window so KV
+     * plus the expert cache still fit. GLM 5.2 IQ2_XXS holds 19.6 GiB of
+     * non-routed weights (vs ~4 GiB for DeepSeek V4 Flash) and spends
+     * 89 KiB/token on MLA KV, so the RAM-tiered 128K would claim 11 GiB of KV
+     * on top of an already-5x-larger fixed cost. Absent → the RAM-tiered
+     * default. An explicit `config.ds4NumCtx` always wins over this.
+     */
+    maxLaunchCtx: z.number().int().positive().optional(),
   })
   .refine(
     (v) => {

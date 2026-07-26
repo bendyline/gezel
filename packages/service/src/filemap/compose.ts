@@ -124,6 +124,12 @@ export function composeFileMapScopes(
     roads: parts.flatMap((part) => part.roads),
     streets: parts.flatMap((part) => part.streets ?? []),
     plazas: parts.flatMap((part) => part.plazas ?? []),
+    // Per-block urbanity rides the block spread untouched, which gives the
+    // right picture for free: the loosely packed Tests city reads as a village
+    // beside the denser Code city. The map-level field is Code's verbatim —
+    // Code is the untranslated half (dx = dy = 0), so its center needs no
+    // offset — falling back to Tests when there is no code at all.
+    ...((code.urbanity ?? tests.urbanity) ? { urbanity: (code.urbanity ?? tests.urbanity)! } : {}),
     ...((code.signals ?? tests.signals) ? { signals: code.signals ?? tests.signals } : {}),
   };
 }

@@ -3447,6 +3447,47 @@ export function appendTruncationHintToToolResult(
 }
 
 /**
+ * Append a recovery hint to a REJECTED write result whose generation hit
+ * the per-turn output token cap. Mirror-image of
+ * {@link appendTruncationHintToToolResult}: that helper covers the case
+ * where partial bytes landed on disk (append the tail); this one covers
+ * the case where the write was refused outright (atomic validation kept
+ * the previous file), so appending is wrong and re-emitting the full file
+ * would just truncate again at the same cap. The only strategy that
+ * converges is a sequence of smaller targeted edits.
+ *
+ * The ds4 shape of this failure: the engine salvages a tool call cut off
+ * at the generation cap ("repaired unterminated tool call") and the MCP
+ * validator rejects the half-file with a parse error, leaving the model
+ * free to burn a full cap-length rewrite per retry unless steered here.
+ *
+ * Idempotent via the stable `hit the per-turn output token cap` marker.
+ * Returns the input unchanged when:
+ *   - the tool name isn't write-shaped
+ *   - the result is NOT an `ERROR:` (the write landed; nothing to steer)
+ *   - `args.content` isn't a string (nothing was truncated)
+ */
+export function appendCapTruncationHintToRejectedWrite(
+  toolResult: string,
+  toolName: string,
+  args: Record<string, unknown>,
+  maxTokens: number | null,
+): string {
+  if (!WRITE_SHAPED_TOOL_NAMES.has(toolName)) return toolResult;
+  if (!toolResult.startsWith('ERROR:')) return toolResult;
+  if (typeof args.content !== 'string') return toolResult;
+  if (toolResult.includes('hit the per-turn output token cap')) return toolResult;
+  const path =
+    typeof args.path === 'string'
+      ? args.path
+      : typeof args.name === 'string'
+        ? args.name
+        : '(unknown path)';
+  const capLabel = maxTokens !== null ? ` (max_tokens=${maxTokens})` : '';
+  return `${toolResult}\n\n[runtime] Your \`${toolName}\` call for \`${path}\` hit the per-turn output token cap${capLabel} mid-content — the file body never finished, the write was rejected, and the file on disk is unchanged. Re-emitting the whole file WILL hit the same cap again; do not retry a full rewrite. Apply the change as a sequence of smaller targeted edits instead: \`replaceInFile(path="${path}", find="...", replace="...")\` or \`replaceLines(path="${path}", startLine=N, endLine=M, content="...")\`, using several calls if needed, each well under the cap. Do not narrate the failure — emit the first corrective edit call directly.`;
+}
+
+/**
  * Test seam: expose the write-shaped tool name set so providers and
  * tests don't redefine it inconsistently.
  */

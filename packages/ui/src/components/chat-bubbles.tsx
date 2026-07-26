@@ -1,6 +1,7 @@
 import type {
   ChatMessageToolCall,
   Question,
+  SessionGpuTask,
   ToolCallAudio,
   ToolCallImage,
   ToolCallVideo,
@@ -1071,6 +1072,16 @@ export interface StreamingBubbleProps {
    */
   liveReasoning?: string;
   /**
+   * Live tool-argument stream — the model is generating a structured
+   * tool call (typically a long `writeFile`) whose tokens never arrive
+   * as visible deltas. Rendered as a dimmed "working" block at the
+   * bottom of the bubble, near the streaming caret, showing the tool
+   * verb, the target path when one is parseable from the args head,
+   * a ticking char counter, and the streaming tail. Cleared by the
+   * parent when the real `tool` event lands.
+   */
+  liveToolArgs?: { name: string; chars: number; head: string; tail: string };
+  /**
    * Optional provider-side heartbeat label (e.g. "thinking"). When
    * set, the bubble's status line renders `{label}…` instead of the
    * generic "Thinking". Sourced from Copilot's `thinking_start`
@@ -1098,7 +1109,7 @@ export interface StreamingBubbleProps {
    * since the watchdog only applies when the chat model itself is
    * the active tenant.
    */
-  gpuSwapTask?: 'image_generation' | 'video_generation';
+  gpuSwapTask?: SessionGpuTask;
   /** Free-form detail attached to the active `gpu_swap` event. */
   gpuSwapDetail?: string;
   /**
@@ -1392,6 +1403,7 @@ export function StreamingBubble({
   onReEngage,
   wirePulseCount,
   liveReasoning,
+  liveToolArgs,
   thinkingLabel,
   thinkingProgress,
   thinkingDetail,
@@ -1747,6 +1759,13 @@ export function StreamingBubble({
             {!failed && !queued && pendingToolCalls.length > 0 && (
               <PendingToolCallsList tools={pendingToolCalls} />
             )}
+            {!failed && !queued && liveToolArgs && (
+              // The model is streaming a structured tool call — show
+              // what it's generating (tool verb + target + ticking char
+              // count + live tail) right where the user is watching the
+              // caret. Replaced by the real tool row when the call fires.
+              <LiveToolArgs args={liveToolArgs} />
+            )}
             {!failed && !queued && gpuSwapTask === 'image_generation' && gpuSwapPrompt && (
               // Show the prompt the model passed to `generate_image`
               // while sd-server is doing the work. Without this the
@@ -1762,17 +1781,37 @@ export function StreamingBubble({
             {!failed &&
               !queued &&
               !awaiting &&
+              !liveToolArgs &&
               (renderedSegments.length === 0 ||
                 renderedSegments[renderedSegments.length - 1]?.kind === 'tools') && (
                 // Suppressed while `awaiting`: the model is idle on a
                 // peer's reply, so pulsing "thinking" dots would be a
                 // lie — the dimmed bubble + "Waiting on <name>" status
-                // carry the signal instead.
+                // carry the signal instead. Also suppressed while the
+                // live tool-args block is up: that block IS the activity
+                // signal, and dots under it would read as a second,
+                // contradictory "waiting" state.
                 <div className="thinking-dots" aria-label="Thinking…">
                   <span />
                   <span />
                   <span />
                 </div>
+              )}
+            {!failed &&
+              !queued &&
+              !awaiting &&
+              wirePulseCount !== undefined &&
+              wirePulseCount > 0 && (
+                // Mirror of the header's wire-pulse counter, placed at the
+                // bottom of the body where the user is actually watching
+                // the caret blink — so "things are happening" is visible
+                // without glancing up. Same format as the header counter.
+                <span
+                  className="msg-live-inline-activity"
+                  title={`${wirePulseCount} wire pulse${wirePulseCount === 1 ? '' : 's'} since the last visible token — the engine is alive and generating`}
+                >
+                  {formatWirePulses(wirePulseCount)}
+                </span>
               )}
           </>
         )}
@@ -1822,7 +1861,7 @@ export function StreamingBubble({
                     {localEngine === 'llama-cpp'
                       ? ' First model load is slow — usually 30-60s on macOS; subsequent turns are much faster. On-device models also take a while on long reasoning or large tool outputs.'
                       : localEngine === 'ds4'
-                        ? ' DeepSeek V4 streams a very large model from disk — reading a long conversation can take a few minutes before the reply starts.'
+                        ? ' DwarfStar streams a very large model from disk — reading a long conversation can take a few minutes before the reply starts.'
                         : onProbeOllama
                           ? ' Slow local models can take a few minutes, especially for the first message, or when deep thinking is needed.'
                           : ' Long reasoning chains or large tool outputs can take a while; the turn is still running.'}
@@ -2595,6 +2634,82 @@ function LiveReasoning({ text }: { text: string }) {
   );
 }
 
+/** Friendly verb for the live tool-args block's label. */
+function toolArgsVerb(name: string): string {
+  switch (name) {
+    case 'writeFile':
+    case 'write_artifact':
+    case 'write_document':
+      return 'Writing';
+    case 'replaceInFile':
+    case 'applyPatch':
+    case 'insertAtMarker':
+      return 'Editing';
+    case '':
+      return 'Working';
+    default:
+      return 'Calling';
+  }
+}
+
+/**
+ * Pull a target path out of the head of a streaming tool-args JSON
+ * fragment ("Writing index.html" beats "Writing — writeFile"). The
+ * head is captured before the tail cap scrolls the opening away; a
+ * mid-stream fragment is not valid JSON, so this is a regex sniff,
+ * not a parse.
+ */
+function extractToolArgsPath(head: string): string | null {
+  const m = head.match(/"(?:path|file_path|filename|name)"\s*:\s*"([^"\\]+)"/);
+  return m ? m[1]! : null;
+}
+
+/**
+ * Live view of a structured tool call being generated — the "what are
+ * those tokens?" answer for the long silent stretch of a streamed
+ * `writeFile`, where argument tokens never appear as visible deltas
+ * and the only other signal is the climbing wire-pulse counter.
+ * Same dimmed-live-block pattern as {@link LiveReasoning}: always
+ * open, auto-scrolled to the tail, torn down when the real tool row
+ * replaces it. Plain-text tail on purpose — a mid-stream JSON
+ * fragment is never valid markdown.
+ */
+function LiveToolArgs({
+  args,
+}: {
+  args: { name: string; chars: number; head: string; tail: string };
+}) {
+  const bodyRef = useRef<HTMLPreElement>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-run to autoscroll as args stream in
+  useEffect(() => {
+    const el = bodyRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [args.tail]);
+  const verb = toolArgsVerb(args.name);
+  const path = extractToolArgsPath(args.head);
+  const target = path ?? (args.name.length > 0 ? args.name : null);
+  return (
+    <div className="msg-stream-toolargs" aria-live="polite">
+      <span className="msg-stream-toolargs-label">
+        {verb}
+        {target && (
+          <>
+            {' '}
+            <code className="msg-stream-toolargs-target">{target}</code>
+          </>
+        )}
+        <span className="msg-stream-toolargs-count">
+          {' '}
+          · {COMPACT_TOKEN_FMT.format(args.chars)} chars
+        </span>
+      </span>
+      <pre className="msg-stream-toolargs-body" ref={bodyRef}>
+        {args.tail}
+      </pre>
+    </div>
+  );
+}
+
 /**
  * Heuristic: pull the function name out of a salvage-failed tool-call
  * body so the empty-bubble summary can show what the model was *trying*
@@ -2749,9 +2864,14 @@ const COMPACT_TOKEN_FMT = new Intl.NumberFormat('en-US', {
 function formatImageGenLabel(
   step: number | undefined,
   totalSteps: number | undefined,
-  task: 'image_generation' | 'video_generation' = 'image_generation',
+  task: SessionGpuTask = 'image_generation',
   detail?: string,
 ): string {
+  // Recognition is a single decode with no per-step ticks, so it never has
+  // counters to show — and a fabricated bar would read worse than a spinner.
+  if (task === 'image_recognition') {
+    return detail?.trim() ? detail.trim() : 'Reading your image';
+  }
   const noun = task === 'video_generation' ? 'video' : 'image';
   if (step === undefined || totalSteps === undefined) {
     // No sampling steps yet. Video has long pre-generation phases

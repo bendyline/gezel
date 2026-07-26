@@ -256,6 +256,21 @@ export class ChatEventBus {
         return;
       }
     }
+    // Tool-argument fragments coalesce like deltas (a multi-minute
+    // structured writeFile streams thousands of them) but only within
+    // the same tool name, so a reconnecting client replays one entry
+    // per call and the live "working" block survives a mid-write reload.
+    if (event.type === 'tool_args_delta') {
+      const tail = history[history.length - 1];
+      if (tail?.type === 'tool_args_delta' && tail.name === event.name) {
+        history[history.length - 1] = {
+          type: 'tool_args_delta',
+          name: event.name,
+          content: tail.content + event.content,
+        };
+        return;
+      }
+    }
     history.push(event);
   }
 

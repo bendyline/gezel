@@ -44,6 +44,7 @@ export abstract class StreamingSessionBase {
   private readonly reasoningDeltaHandlers = new Set<(chunk: string) => void>();
   private readonly usageHandlers = new Set<(usage: TurnUsage) => void>();
   private readonly wirePulseHandlers = new Set<() => void>();
+  private readonly toolArgsDeltaHandlers = new Set<(name: string, chunk: string) => void>();
   private readonly intentHandlers = new Set<(label: string) => void>();
   private readonly heartbeatHandlers = new Set<(label: string | undefined) => void>();
   private readonly warningHandlers = new Set<(message: string) => void>();
@@ -95,6 +96,23 @@ export abstract class StreamingSessionBase {
     this.wirePulseHandlers.add(handler);
     return () => {
       this.wirePulseHandlers.delete(handler);
+    };
+  }
+
+  /**
+   * Subscribe to live tool-argument chunks — the raw argument text the
+   * model streams while building a structured tool call (llama-cpp/MLX
+   * `delta.tool_calls[].function.arguments` fragments). These tokens
+   * never appear on `onDelta`, so a multi-minute `writeFile` is
+   * otherwise invisible beyond bare wire pulses. `name` is the tool
+   * being called ('' until the name fragment has arrived). Display-only:
+   * the authoritative accumulation still happens in the provider's
+   * tool-call accumulator.
+   */
+  onToolArgsDelta(handler: (name: string, chunk: string) => void): () => void {
+    this.toolArgsDeltaHandlers.add(handler);
+    return () => {
+      this.toolArgsDeltaHandlers.delete(handler);
     };
   }
 
@@ -191,6 +209,10 @@ export abstract class StreamingSessionBase {
     for (const h of this.wirePulseHandlers) h();
   }
 
+  protected emitToolArgsDelta(name: string, chunk: string): void {
+    for (const h of this.toolArgsDeltaHandlers) h(name, chunk);
+  }
+
   protected emitIntent(label: string): void {
     for (const h of this.intentHandlers) h(label);
   }
@@ -219,6 +241,7 @@ export abstract class StreamingSessionBase {
     this.deltaHandlers.clear();
     this.usageHandlers.clear();
     this.wirePulseHandlers.clear();
+    this.toolArgsDeltaHandlers.clear();
     this.intentHandlers.clear();
     this.heartbeatHandlers.clear();
     this.warningHandlers.clear();

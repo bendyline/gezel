@@ -272,31 +272,115 @@ texture, and glossy plastic highlights. The persistence invariants, rendering
 stack, application-crop rules, and PNG quality workflow are documented in
 [poppetje-rendering.md](poppetje-rendering.md).
 
-## Codebase map: the 1910 town
+## The Village: a codebase as a settlement
 
-The isometric codebase map is a compact town from roughly **1890–1915**, not a
-modern skyline. Its architecture should feel compatible with the guild world:
-gabled homes, shopfronts and inns, civic halls with cupolas, brick workshops,
-rail depots, and sawtooth-roofed foundries. Avoid glass towers, rooftop HVAC
-fields, neon, and contemporary office-campus forms.
+The project **Village** tab (`FileMap` in code) draws a folder tree as a
+settlement from roughly **1890–1915** — never a modern skyline. Its architecture
+should feel compatible with the guild world: gabled cottages, shopfronts and
+inns, civic halls with cupolas, brick workshops, rail depots, and
+sawtooth-roofed foundries. Avoid glass towers, rooftop HVAC fields, neon, and
+contemporary office-campus forms.
 
-Architecture carries real code meaning rather than acting as random decoration:
+The goal is a place you come to **recognize**. Users navigate by "the sawtooth
+foundry next to the plaza," so a file's building is its identity, and stability
+matters more than novelty.
 
-- dependency zone chooses the family — residential, commercial, civic, or
-  industrial;
-- levels become storeys, symbol count becomes facade bays and dormers, and
-  churn may add workshop stacks;
-- landmarks are clock-topped guildhalls and test files may read as
-  schoolhouses;
-- language color remains the material palette, so silhouette and color are
-  complementary signals.
+### One map, a settlement gradient
 
-Within those constraints, variants derive deterministically from the file path
-through the shared map seed helpers. Never use `Math.random()` in the renderer.
-A file should keep the same recognizable building across frames, reloads, and
-machines; it should only change architectural family when its code-derived role
-changes. Small facade details belong at street zoom, roof silhouettes at
-district zoom, and the city overview stays quiet.
+A repository is not uniformly urban, and neither is its Village. The core —
+the files everything imports, near the map's center of mass, tightly packed —
+reads city-ish: masonry terraces, parapets, cobbles. The outskirts read
+village-ish: cottages, thatch, hedgerows, dirt lanes. The transition is an
+amorphous field, not four concentric rings, and not a per-project setting.
+
+Two fields carry it, and **the split between them is a contract**:
+
+- **`settlement`** (`hamlet | village | town | city`) is the **only** input to
+  categorical choices — archetype family table, wall and roof material, hedge
+  vs picket vs curb, dirt lane vs cobble vs macadam. Thresholds live in
+  [urbanity.ts](../packages/service/src/filemap/urbanity.ts) and nowhere else;
+  re-deriving them client-side guarantees they drift the first time policy is
+  tuned.
+- **`urbanity`** (0..1) is a **lerp parameter only** — prop density, vegetation,
+  wall hue mix, bay rhythm. Never compare it against a constant.
+
+Urbanity samples the *neighborhood*, never a block's own importance. Importance
+already drives `levels`; counting it twice would make every central file
+simultaneously tall, civic, and city-registered, and the core would collapse
+into an undifferentiated mass.
+
+### Five orthogonal signals
+
+Architecture carries real code meaning rather than acting as random decoration.
+Keep these separate:
+
+| field | question | renders as |
+|---|---|---|
+| `health.zone` | what does this file **do**? | archetype family |
+| `levels` | how important is this **file**? | storeys |
+| `landmark` | which few files are the **skyline**? | guildhall / town hall |
+| `health.vibe` | how well **kept** is it? | trees vs weeds |
+| `urbanity` | what kind of **place** is it in? | ground, materials, surroundings |
+
+Symbol count becomes facade bays and dormers; churn may add workshop stacks;
+test files read as schoolhouses in every register.
+
+### Vocabulary
+
+A 3×4 grid: four zone families crossed with three urbanity registers, each
+family table exactly three entries, index-aligned small → mid → large. So a file
+keeps its size-role slot across bands and only changes regional idiom — a
+mid-size commercial file is an `inn` in the town and a `hotel` in the city.
+
+Language hue **stays on the roof**. At 2:1 dimetric the top diamond dominates a
+building's projected area, so moving hue onto walls in the dense core would kill
+the language field exactly where the map carries the most information. Walls
+instead mix toward their material (brick, stucco, timber, stone) by however
+urban the ground is.
+
+### Stability is the constraint
+
+Variants derive deterministically from the file path through the shared map seed
+helpers. Never use `Math.random()` in the renderer. A file keeps the same
+recognizable building across frames, reloads, and machines; it changes only when
+its code-derived role changes.
+
+That makes the seed stream's *shape* load-bearing, and three rules protect it —
+they are documented in full at the top of
+[iso/town-style.ts](../packages/ui/src/components/FileMap/iso/town-style.ts) and
+pinned by `town-style.golden.test.ts`:
+
+1. Never change the length or order of a family table.
+2. The main PRNG stream is append-only.
+3. Prefer separately-salted sub-streams (`SEED_SALT`) for anything new.
+
+If the golden test fails, the change moved buildings that already exist on
+users' maps. That is the finding — not a stale fixture.
+
+### Zoom-tier budget
+
+- **City** stays quiet: flat batched diamonds and landmark beacons. No lots, no
+  hedges, no trim, no materials — a 20k-block map has to hold frame rate.
+- **District** is the roof-silhouette tier: all thirteen roof forms, secondary
+  massing, lot boundaries, urbanity street surfaces, and **cornices and string
+  courses** — two 1px lines are most of what makes a core read as masonry at the
+  zoom where windows would be sub-pixel mush.
+- **Street** gets everything: windows, shopfronts, cart doors, porticos, roof
+  furniture, yard decor.
+
+Anything drawing taller than an ordinary roof — a clock tower, a kiln cone —
+must declare `roofFactor`. Culling, hit-testing, and the issue-marker anchor all
+budget against it, and exceeding it causes pop-in on scroll and dead clicks over
+a building's own silhouette.
+
+The **flat top-down renderer reads the same `TownStyle`** and expresses it as
+roof *plan* rather than silhouette. Any new visual must be expressible as a
+field on that struct, never as renderer-local logic, or the two views drift
+apart again.
+
+The age lens overrides all of it — material, massing, trim, facade, and lot
+treatment are suppressed so one clean surface per file keeps the recency signal
+legible.
 
 Files with indexed findings carry a small deterministic rooftop fire and smoke
 marker at district and street zoom. Finding count increases the plume and the

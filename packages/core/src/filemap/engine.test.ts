@@ -213,6 +213,20 @@ describe('streets', () => {
     expect(second.streets.map(key).sort()).toEqual(first.streets.map(key).sort());
   });
 
+  it('an unchanged rebuild restamps nothing — the persist rows are identical', () => {
+    // The city file is meant to be committed, so an idle rebuild must not
+    // produce a diff. Derived nodes (streets, plates, plazas, districts) used
+    // to restamp `placedAt` every build, dirtying the journal on every tick.
+    const files = Array.from({ length: 16 }, (_, i) => file(`app/m${i % 4}/f${i}.ts`, 120));
+    const first = layoutFileMap(files, [], [], { nowIso: NOW });
+    const later = '2026-08-01T00:00:00.000Z';
+    const second = layoutFileMap(files, [], asPrior(first), { nowIso: later });
+    const id = (p: LayoutResult['persist'][number]) => `${p.nodeKind}:${p.nodeId}`;
+    const key = (rows: LayoutResult['persist']) =>
+      JSON.stringify([...rows].sort((a, b) => (id(a) < id(b) ? -1 : 1)));
+    expect(key(second.persist)).toBe(key(first.persist));
+  });
+
   it('keeps new files off the streets', () => {
     const files = Array.from({ length: 16 }, (_, i) => file(`app/m${i % 4}/f${i}.ts`, 120));
     const first = layoutFileMap(files, [], [], { nowIso: NOW });

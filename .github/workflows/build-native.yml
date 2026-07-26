@@ -10,12 +10,12 @@
 #     artifacts for inspection only.
 #
 # Native binaries are NOT built on every commit — that's deliberate.
-# After a tagged build is validated, publish its draft manually through
-# `publish-native-release.yml`. Only then can `release-electron.yml`
-# discover it as the latest native release and bundle those artifacts
-# into the installer. Native cadence is decoupled from app cadence;
-# bump `native-vX.Y.Z` every ~2 weeks (or whenever an engine's VERSION
-# pin moves), let it bake, then publish it for the next Electron release.
+# After a tagged build is validated, publish its draft manually from the
+# GitHub Releases UI. Only then can `release-electron.yml` discover it
+# as the latest native release and bundle those artifacts into the
+# installer. Native cadence is decoupled from app cadence; bump
+# `native-vX.Y.Z` every ~2 weeks (or whenever an engine's VERSION pin
+# moves), let it bake, then publish it for the next Electron release.
 #
 # Matrix shape: one job per (engine, platform, variant). Each job:
 #   1. Installs the platform/variant-specific build toolchain (Vulkan
@@ -1032,18 +1032,51 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
           ls -la release/
 
+      # Keep the completeness gate in the build that creates the draft.
+      # Publishing the finished draft is then a simple maintainer action
+      # in the GitHub Releases UI rather than a second workflow.
+      - name: Validate release archive set
+        env:
+          VERSION: ${{ steps.pack.outputs.version }}
+        run: |
+          set -euo pipefail
+          expected=(
+            "gezel-native-${VERSION}-win32-x64.zip"
+            "gezel-native-${VERSION}-win32-x64-cpu.zip"
+            "gezel-native-${VERSION}-win32-x64-vulkan.zip"
+            "gezel-native-${VERSION}-win32-x64-cuda.zip"
+            "gezel-native-${VERSION}-darwin-arm64.tar.gz"
+            "gezel-native-${VERSION}-darwin-arm64-metal.tar.gz"
+            "gezel-native-${VERSION}-linux-x64.tar.gz"
+            "gezel-native-${VERSION}-linux-x64-cpu.tar.gz"
+            "gezel-native-${VERSION}-linux-x64-vulkan.tar.gz"
+            "gezel-native-${VERSION}-linux-x64-cuda.tar.gz"
+            "gezel-native-${VERSION}-linux-arm64.tar.gz"
+            "gezel-native-${VERSION}-linux-arm64-cpu.tar.gz"
+            "gezel-native-${VERSION}-linux-arm64-cuda.tar.gz"
+          )
+          if ! diff -u \
+            <(printf '%s\n' "${expected[@]}" | sort) \
+            <(find release -maxdepth 1 -type f -printf '%f\n' | sort); then
+            echo "::error::Native draft archive set is incomplete or contains unexpected files."
+            exit 1
+          fi
+          echo "Validated ${#expected[@]} required native release archives."
+
       - name: Generate SHA256SUMS
         run: |
+          set -euo pipefail
           cd release
           sha256sum *.tar.gz *.zip 2>/dev/null | sort > SHA256SUMS
           cat SHA256SUMS
+          sha256sum -c SHA256SUMS
 
       # ── Provenance attestations ───────────────────────────────────
       # SLSA build-provenance over the final archives + SHA256SUMS:
       # anyone can later prove an asset came from this workflow at this
       # commit via `gh attestation verify <file> --repo bendyline/gezel`.
-      # Attesting at draft time is correct — publish-native-release.yml
-      # only flips the draft flag and never touches assets.
+      # Attesting at draft time is correct — publishing through GitHub's
+      # Releases UI only flips the draft flag and never touches assets.
       - name: Attest build provenance
         uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
         with:
@@ -1077,9 +1110,9 @@ jobs:
 
             These are consumed by `.github/workflows/release-electron.yml`
             when producing installers (which verifies both hashes and
-            signatures before packaging). Drafts are published via the
-            manual `publish-native-release.yml` gate, which re-verifies
-            every asset against SHA256SUMS.
+            signatures before packaging). This workflow has already
+            verified the complete platform archive set and every checksum.
+            After validation, publish this draft from the GitHub Releases UI.
 
             Each archive contains the engine binaries for one platform plus
             `THIRD_PARTY_LICENSES/` with the pin-bound native redistribution

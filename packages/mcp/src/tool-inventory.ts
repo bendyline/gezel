@@ -143,6 +143,9 @@ export const ALWAYS_REGISTERED_TOOLS = [
   'search_history',
   'search_sessions',
 
+  // Handboek (built-in documentation)
+  'how_do_i',
+
   // Images
   'render_image',
   'generate_image',

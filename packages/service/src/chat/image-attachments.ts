@@ -5,13 +5,17 @@ import type { ImageAttachment } from '../providers/types.js';
  * Extract any image refs the user embedded in their message markdown and
  * load them off disk into provider-agnostic base64 attachments.
  *
- * Two ref shapes are supported:
+ * Three ref shapes are supported:
  *   - `attachments/<filename>` — project-scoped, stored under
  *     `artifacts/attachments/`. Resolved via `readProjectAttachment`.
  *     Preferred for new chats.
  *   - `images/<filename>`      — legacy, session-scoped, stored under
  *     `artifacts/sessions/{sid}/images/`. Resolved via
  *     `readSessionImage`. Kept so archived conversations still render.
+ *   - `artifacts/<path>`       — anything under the project's artifacts
+ *     tree, which is where `generate_image` and `render_image` write. The
+ *     chat UI already renders these, so without this scope a model could
+ *     display an image it produced but never look at it on a later turn.
  *
  * Anything absolute (`http(s)://`, `data:`, `file://`) is left alone —
  * the provider decides what to do with it. Refs that can't be resolved
@@ -35,7 +39,9 @@ export async function extractImageAttachments(
     const hit =
       ref.scope === 'attachments'
         ? await store.readProjectAttachment(projectId, ref.filename)
-        : await store.readSessionImage(projectId, sessionId, ref.filename);
+        : ref.scope === 'artifacts'
+          ? await store.readProjectArtifactBinary(projectId, ref.filename)
+          : await store.readSessionImage(projectId, sessionId, ref.filename);
     if (!hit) continue;
     out.push({
       base64: hit.data.toString('base64'),
@@ -46,23 +52,25 @@ export async function extractImageAttachments(
   return out;
 }
 
+export type ImageRefScope = 'attachments' | 'images' | 'artifacts';
+
 export interface ParsedImageRef {
   /** Which folder the filename lives in on disk. */
-  scope: 'attachments' | 'images';
+  scope: ImageRefScope;
+  /** Path within the scope. May contain slashes for the `artifacts` scope. */
   filename: string;
 }
 
 /**
- * Pull every `![…](<scope>/<filename>)` markdown image reference in the
- * input where `<scope>` is `attachments` (preferred) or `images`
- * (legacy session-scoped). Permissive on the alt text, strict on the
- * path shape so we don't match unrelated links.
+ * Pull every `![…](<scope>/<path>)` markdown image reference in the input.
+ * Permissive on the alt text, strict on the path shape so we don't match
+ * unrelated links.
  */
 export function findImageRefs(markdown: string): ParsedImageRef[] {
   const out: ParsedImageRef[] = [];
-  const re = /!\[[^\]]*\]\(\s*(attachments|images)\/([^)\s]+?)\s*\)/g;
+  const re = /!\[[^\]]*\]\(\s*(attachments|images|artifacts)\/([^)\s]+?)\s*\)/g;
   for (const m of markdown.matchAll(re)) {
-    const scope = m[1] as 'attachments' | 'images';
+    const scope = m[1] as ImageRefScope;
     const filename = m[2];
     if (filename) out.push({ scope, filename });
   }

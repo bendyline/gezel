@@ -1038,7 +1038,7 @@ export function SettingsView() {
           {
             id: 'ds4' as const,
             label: 'DwarfStar',
-            title: 'Use the DwarfStar DeepSeek V4 engine for Night Shift work.',
+            title: 'Use the DwarfStar (ds4) engine for Night Shift work.',
           },
         ]
       : []),
@@ -1863,7 +1863,7 @@ export function SettingsView() {
                     type="button"
                     className={`provider-pill${provider === 'ds4' ? ' provider-pill-active' : ''}`}
                     onClick={() => void setProvider('ds4')}
-                    title="DwarfStar (ds4) — antirez's specialized DeepSeek V4 engine. Streams a 284B mixture-of-experts from disk so a frontier-class model runs on this device."
+                    title="DwarfStar (ds4) — antirez's specialized engine for very large mixture-of-experts models (DeepSeek V4, GLM 5.2). Streams the experts from disk so a frontier-class model runs on this device."
                   >
                     DwarfStar
                   </button>
@@ -2013,7 +2013,7 @@ export function SettingsView() {
                     />
                   </div>
                   <p className="muted small" style={{ marginTop: '0.75rem' }}>
-                    Download DeepSeek-V4 models and tune SSD streaming in the{' '}
+                    Download DwarfStar models and tune SSD streaming in the{' '}
                     <button
                       type="button"
                       className="home-link"

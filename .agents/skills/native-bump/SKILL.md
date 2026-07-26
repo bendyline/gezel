@@ -75,15 +75,10 @@ Two paths — ask the user which (default: **test build first, then draft releas
   ```
 - **Test build** (artifacts only, no release): `gh workflow run build-native.yml` (optionally `-f engines=llama-cpp`). Fetch its output with `--run <id>` in Phase 4 before committing to a release.
 
-Publishing is always a separate manual decision after validation:
-```bash
-gh workflow run publish-native-release.yml \
-  -f tag=native-v<X.Y.Z> \
-  -f confirm=true
-```
-The publish workflow refuses missing/non-draft releases, malformed native tags,
-and drafts without the complete production platform archive set plus
-`SHA256SUMS`.
+Publishing is always a separate manual decision after validation: open the
+draft in the GitHub Releases UI and click **Publish release**. The tagged build
+validates the complete production platform archive set and `SHA256SUMS` before
+creating the draft.
 
 **⚠ Dispatch race — verify the SHA.** `gh workflow run` right after a push can build the *pre-push* commit. Before watching:
 ```bash
@@ -134,7 +129,7 @@ gh run view <id> --json jobs --jq '.jobs[] | select(.conclusion!="success") | {n
 
 3. **Eval it** — invoke the **`/eval-run`** skill against `--provider llama-cpp` (not MLX) to confirm capability didn't regress. A version bump should be capability-neutral: composite flat, only t/s moves. Score with the eval-run rubric.
 
-4. **Publish the validated draft manually** with `publish-native-release.yml`.
+4. **Publish the validated draft manually** from the GitHub Releases UI.
 
 ---
 
@@ -145,7 +140,6 @@ gh run view <id> --json jobs --jq '.jobs[] | select(.conclusion!="success") | {n
 | Upstream pins (tag + commit; uv + 5 sha256) | `native/engines/<engine>/VERSION` |
 | llama cache-bust constant (**sync on every llama bump**) | `packages/core/src/native/llama-engine-version.ts` |
 | CI matrix + version-pin env (runner-drift fixes) | `.github/workflows/build-native.yml` |
-| Manual production publication gate | `.github/workflows/publish-native-release.yml` |
 | Cut a release (tag + push) — *user runs* | `scripts/cut-native-release.mjs` |
 | Fetch built binaries locally | `scripts/fetch-native-binaries.mjs` |
 | Build scripts (rarely touched) | `native/engines/<engine>/build.{sh,ps1}` |
@@ -158,5 +152,5 @@ gh run view <id> --json jobs --jq '.jobs[] | select(.conclusion!="success") | {n
 - [ ] Verified the workflow ran against the **intended commit** (dispatch race).
 - [ ] Every matrix leg green — remember `draft_release` needs ALL of them.
 - [ ] Fetched + ran `--version` + eval'd via `/eval-run` (llama-cpp provider).
-- [ ] Draft stayed private during validation, then was published explicitly through `publish-native-release.yml`.
+- [ ] Draft stayed private during validation, then was published explicitly through the GitHub Releases UI.
 - [ ] Engine-specific: ds4 can't yet load some hybrid MoE (e.g. qwen-agentworld crashes on load) — an upstream engine gap, not a bump error.

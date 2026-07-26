@@ -66,11 +66,33 @@ export const CityJournalNodeSchema = z.object({
 });
 export type CityJournalNode = z.infer<typeof CityJournalNodeSchema>;
 
+/**
+ * Sticky parameters of the urbanity field. Recorded like anchors: macro memory
+ * the user's mental map depends on.
+ *
+ * These are re-adopted only when the field genuinely moves (see `adoptDowntown`
+ * in the service). Recomputing them from scratch every build would let sub-ULP
+ * float drift rewrite this file on every background indexer tick — a dirty git
+ * diff, on a file explicitly designed to be committed.
+ */
+export const CityDowntownSchema = z.object({
+  /** Importance-weighted centroid, world coords, rounded to 0.1. */
+  cx: z.number(),
+  cy: z.number(),
+  /** Weighted radius of gyration, rounded to 0.1. */
+  r: z.number().positive(),
+  /** p90 of the blurred neighborhood-importance field, rounded to 3dp. */
+  impRef: z.number().min(0),
+  recordedAt: z.string(),
+});
+export type CityDowntown = z.infer<typeof CityDowntownSchema>;
+
 export const CityDomainStateSchema = z.object({
   layoutVersion: z.number().int().positive(),
   seededAt: z.string(),
   anchors: z.array(CityAnchorSchema).default([]),
   journal: z.array(CityJournalNodeSchema).default([]),
+  downtown: CityDowntownSchema.optional(),
 });
 export type CityDomainState = z.infer<typeof CityDomainStateSchema>;
 

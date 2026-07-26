@@ -3,7 +3,14 @@ import { defineConfig } from 'tsup';
 export default defineConfig({
   // The TUI is a separate entry so the default `gezel` command can lazily
   // `import('../tui/index.js')` — React/Ink only load when the TUI launches.
-  entry: { 'bin/gezel': 'src/bin/gezel.ts', 'tui/index': 'src/tui/index.tsx' },
+  // Same shape for the handboek exporter: the squisq render stack (incl.
+  // the multi-MB standalone player bundle) loads only when `gezel
+  // handboek export` actually runs.
+  entry: {
+    'bin/gezel': 'src/bin/gezel.ts',
+    'tui/index': 'src/tui/index.tsx',
+    'handboek-export': 'src/handboek-export.ts',
+  },
   format: ['esm'],
   dts: false,
   sourcemap: true,

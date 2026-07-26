@@ -583,6 +583,75 @@ describe('buildFileMap (end-to-end over a real index)', () => {
     return store;
   }
 
+  it('assigns urbanity to live blocks and reports the field on the response', async () => {
+    await seedWorkspace();
+    const store = await openIndex('index.db');
+    try {
+      await indexWorkspaceContent(store, dir);
+      const map = await buildFileMap(store, dir, { persist: true });
+
+      const live = map.blocks.filter((b) => b.state !== 'tombstoned' && !b.phantom);
+      expect(live.length).toBeGreaterThan(0);
+      for (const b of live) {
+        expect(b.urbanity, `block ${b.id} has no urbanity`).toBeDefined();
+        expect(b.settlement, `block ${b.id} has no settlement`).toBeDefined();
+        expect(b.urbanity!).toBeGreaterThanOrEqual(0);
+        expect(b.urbanity!).toBeLessThanOrEqual(1);
+      }
+      for (const b of map.blocks) {
+        if (b.state === 'tombstoned') expect(b.urbanity).toBeUndefined();
+      }
+
+      expect(map.urbanity).toBeDefined();
+      expect(map.urbanity!.fileCount).toBe(live.length);
+      expect(map.urbanity!.peak).toBe(Math.max(...live.map((b) => b.urbanity!)));
+      // A handful of files is a hamlet, never a city.
+      expect(map.urbanity!.settlement).toBe('hamlet');
+    } finally {
+      store.close();
+    }
+  });
+
+  it('rebuilding an unchanged workspace leaves urbanity and the city file untouched', async () => {
+    // The git-churn guard. The urbanity field's parameters are global
+    // normalizers recomputed each build; if they were not sticky, ordinary
+    // rebuilds would rewrite a file we ask users to commit.
+    await seedWorkspace();
+    const city = makeCityStore();
+    const store = await openIndex('index.db');
+    try {
+      await indexWorkspaceContent(store, dir);
+      const first = await buildFileMap(store, dir, {
+        persist: true,
+        cityFile: city,
+        userFacing: true,
+      });
+      const cityPath = join(dir, '.gezel', 'city.json');
+      const rawAfterFirst = await readFile(cityPath, 'utf8');
+      expect(JSON.parse(rawAfterFirst).domains.code.downtown).toBeDefined();
+
+      const second = await buildFileMap(store, dir, {
+        persist: true,
+        cityFile: city,
+        userFacing: true,
+      });
+      for (const b of first.blocks) {
+        const again = second.blocks.find((x) => x.id === b.id)!;
+        expect(again.urbanity).toBe(b.urbanity);
+        expect(again.settlement).toBe(b.settlement);
+      }
+      // `updatedAt` is stamped every build, so compare the domain state that
+      // actually describes the settlement.
+      const before = JSON.parse(rawAfterFirst).domains.code;
+      const after = JSON.parse(await readFile(cityPath, 'utf8')).domains.code;
+      expect(JSON.stringify(after.downtown)).toBe(JSON.stringify(before.downtown));
+      expect(JSON.stringify(after.journal)).toBe(JSON.stringify(before.journal));
+      expect(JSON.stringify(after.anchors)).toBe(JSON.stringify(before.anchors));
+    } finally {
+      store.close();
+    }
+  });
+
   it('recovers the whole city from the journal after index-db loss', async () => {
     await seedWorkspace();
     const city = makeCityStore();

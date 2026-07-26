@@ -334,6 +334,67 @@ describe('LlamaCppProvider constructor', () => {
     expect(wirePulses).toBe(3);
   });
 
+  it('streams tool-argument fragments on onToolArgsDelta with the tool name carried forward', async () => {
+    // The live tool-args channel is what lets the UI show *what* the
+    // model is generating during a long structured write. The name only
+    // rides the first fragment of the call — later argument-only
+    // fragments must still arrive attributed to the same tool.
+    globalThis.fetch = (async () => {
+      return sseResponse([
+        {
+          choices: [
+            {
+              index: 0,
+              delta: {
+                tool_calls: [
+                  {
+                    index: 0,
+                    id: 'call_write',
+                    type: 'function',
+                    function: { name: 'writeFile', arguments: '{"path":"a.txt",' },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+        {
+          choices: [
+            {
+              index: 0,
+              delta: {
+                tool_calls: [{ index: 0, function: { arguments: '"content":"hi"}' } }],
+              },
+            },
+          ],
+        },
+        { choices: [{ index: 0, finish_reason: 'tool_calls' }] },
+        '[DONE]',
+      ]);
+    }) as typeof fetch;
+    const provider = new LlamaCppProvider({ baseUrl: 'http://llama.test' });
+    const session = await provider.createSession({
+      systemMessage: 'sys',
+      model: 'tinyllama',
+      externalTools: [
+        {
+          name: 'writeFile',
+          description: 'Write a file.',
+          parameters: { type: 'object', additionalProperties: true },
+        },
+      ],
+    });
+    const fragments: Array<{ name: string; chunk: string }> = [];
+    session.onToolArgsDelta?.((name, chunk) => {
+      fragments.push({ name, chunk });
+    });
+    await session.sendAndWait('write the file');
+    expect(fragments).toEqual([
+      { name: 'writeFile', chunk: '{"path":"a.txt",' },
+      { name: 'writeFile', chunk: '"content":"hi"}' },
+    ]);
+  });
+
   it('emits a warning when finish_reason is "length"', async () => {
     globalThis.fetch = (async () => {
       return sseResponse([
@@ -776,6 +837,130 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     expect(bodies).toHaveLength(2);
     expect(bodies[0]?.max_tokens).toBe(4096);
     expect(toolCalls).toEqual(['writeFile', 'appendToFile']);
+  });
+
+  it('steers a cap-truncated rejected write to incremental edits (ds4 repaired-call shape)', async () => {
+    // The Rambo re-skin incident: ds4-server salvages a writeFile cut off
+    // at the generation cap ("repaired unterminated tool call"), the MCP
+    // validator rejects the half-file and preserves the previous version,
+    // and — without steering — the model burns another full cap-length
+    // rewrite per retry. The provider must append the incremental-edit
+    // hint to the rejected tool result and surface a UI warning.
+    const bodies: Array<{
+      max_tokens?: number;
+      messages?: Array<{ role: string; content?: string | null }>;
+    }> = [];
+    const toolCalls: string[] = [];
+    globalThis.fetch = (async (_input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? '{}')) as (typeof bodies)[number];
+      bodies.push(body);
+      if (bodies.length === 1) {
+        // Post-patch ds4-server shape: repaired tool call delivered with
+        // finish_reason "length" and usage exactly at the request cap.
+        return sseResponse([
+          {
+            choices: [
+              {
+                index: 0,
+                delta: {
+                  tool_calls: [
+                    {
+                      index: 0,
+                      id: 'call_big_write',
+                      type: 'function',
+                      function: {
+                        name: 'writeFile',
+                        arguments: JSON.stringify({
+                          path: 'index.html',
+                          content: '<!doctype html><html><body><script>const a = Math.sin(',
+                        }),
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+          {
+            choices: [{ index: 0, finish_reason: 'length' }],
+            usage: { prompt_tokens: 40000, completion_tokens: 8192 },
+          },
+          '[DONE]',
+        ]);
+      }
+      return sseResponse([
+        { choices: [{ index: 0, delta: { content: 'Switching to targeted edits.' } }] },
+        {
+          choices: [{ index: 0, finish_reason: 'stop' }],
+          usage: { prompt_tokens: 41000, completion_tokens: 20 },
+        },
+        '[DONE]',
+      ]);
+    }) as typeof fetch;
+
+    const provider = new LlamaCppProvider({
+      baseUrl: 'http://ds4.test',
+      includeUsageInStream: true,
+    });
+    const session = await provider.createSession({
+      systemMessage: 'sys',
+      model: 'deepseek-v4-flash-284b-q2',
+      tuning: {
+        sampling: { maxTokens: 8192 },
+        reasoning: {},
+        output: {},
+        promptTags: {},
+        wasThinking: false,
+      },
+    });
+    const internal = session as unknown as {
+      deps: {
+        bridges: {
+          isEmpty: () => boolean;
+          getOpenAITools: () => Array<{
+            name: string;
+            description: string;
+            parameters: Record<string, unknown>;
+          }>;
+          hasTool: (name: string) => boolean;
+          callTool: (name: string, args: Record<string, unknown>) => Promise<string>;
+        };
+      };
+    };
+    internal.deps.bridges = {
+      isEmpty: () => false,
+      getOpenAITools: () =>
+        ['writeFile', 'replaceInFile', 'replaceLines', 'readFile'].map((name) => ({
+          name,
+          description: `${name} tool`,
+          parameters: { type: 'object' },
+        })),
+      hasTool: () => true,
+      callTool: async (name: string) => {
+        toolCalls.push(name);
+        // The atomic-rejection shape: existing file preserved, nothing saved.
+        return (
+          "ERROR: index.html: inline <script> #1 at line 532, col 1 failed to parse: Unexpected token '}'. " +
+          'Fix the syntax error at that location and re-emit the file.\n\n' +
+          'Existing index.html was left untouched to preserve the last complete version.'
+        );
+      },
+    };
+    const warnings: string[] = [];
+    session.onWarning?.((msg) => warnings.push(msg));
+
+    await expect(
+      session.sendAndWait('Give index.html a full visual overhaul — re-skin everything.'),
+    ).resolves.toBe('Switching to targeted edits.');
+
+    expect(bodies).toHaveLength(2);
+    expect(bodies[0]?.max_tokens).toBe(8192);
+    expect(toolCalls).toEqual(['writeFile']);
+    const toolResultMessage = JSON.stringify(bodies[1]?.messages ?? []);
+    expect(toolResultMessage).toContain('hit the per-turn output token cap');
+    expect(toolResultMessage).toContain('max_tokens=8192');
+    expect(toolResultMessage).toContain('replaceInFile');
+    expect(warnings.some((w) => w.includes('output-token cap'))).toBe(true);
   });
 
   it('gate-surgical-edit turns get a low-temp patch-only surface on the first move', async () => {

@@ -225,6 +225,32 @@ async function buildLlamaCppBlock(cfg) {
   };
 }
 
+/**
+ * ds4 (DwarfStar) source block. The install payload is structurally identical
+ * to llama.cpp's (HF repo + filename/shards + sha256 + size), so it reuses that
+ * builder and then layers on the streaming/launch hints that only ds4 reads:
+ * `residentBytes`, `cacheExpertsBytes`, `ssdStreaming`, `maxLaunchCtx`.
+ *
+ * Those four are hand-measured per model, not derivable from the HF tree — a
+ * model's resident footprint is the sum of its non-routed tensors, which you
+ * read out of the GGUF, and the safe cache/context budgets follow from it. They
+ * pass through from the config verbatim.
+ */
+async function buildDs4Block(cfg) {
+  const { residentBytes, cacheExpertsBytes, ssdStreaming, maxLaunchCtx, ...installCfg } = cfg;
+  const base = await buildLlamaCppBlock(installCfg);
+  if (base.mmproj) {
+    throw new Error('ds4 config must not set `mmprojFilename` — ds4 has no multimodal path');
+  }
+  return {
+    ...base,
+    ...(residentBytes ? { residentBytes } : {}),
+    ...(cacheExpertsBytes ? { cacheExpertsBytes } : {}),
+    ...(ssdStreaming !== undefined ? { ssdStreaming } : {}),
+    ...(maxLaunchCtx ? { maxLaunchCtx } : {}),
+  };
+}
+
 async function buildMlxBlock(cfg) {
   const { huggingfaceRepo, quantization, chatTemplate, residentBytes } = cfg;
   console.log(`[hf] fetching tree for MLX source ${huggingfaceRepo}…`);
@@ -287,9 +313,9 @@ async function main() {
     if (!(k in cfg)) throw new Error(`config missing required field: ${k}`);
   }
 
-  if (!cfg.ollama && !cfg.llamaCpp && !cfg.mlx) {
+  if (!cfg.ollama && !cfg.llamaCpp && !cfg.mlx && !cfg.ds4) {
     throw new Error(
-      'config must include at least one of {ollama, llamaCpp, mlx} blocks (got none)',
+      'config must include at least one of {ollama, llamaCpp, mlx, ds4} blocks (got none)',
     );
   }
 
@@ -298,6 +324,7 @@ async function main() {
   if (cfg.ollama) providerBlocks.ollama = { tag: cfg.ollama.tag };
   if (cfg.llamaCpp) providerBlocks.llamaCpp = await buildLlamaCppBlock(cfg.llamaCpp);
   if (cfg.mlx) providerBlocks.mlx = await buildMlxBlock(cfg.mlx);
+  if (cfg.ds4) providerBlocks.ds4 = await buildDs4Block(cfg.ds4);
 
   const subdir = deriveSubdir(cfg.id);
   const outPath = resolve(GILDE_DATA_DIR, 'chat-models', subdir, cfg.id, 'manifest.json');
@@ -336,8 +363,38 @@ async function main() {
 
   await mkdir(dirname(outPath), { recursive: true });
   await writeFile(outPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
-  const blocks = ['ollama', 'llamaCpp', 'mlx'].filter((b) => Boolean(manifest[b]));
+  const blocks = ['ollama', 'llamaCpp', 'mlx', 'ds4'].filter((b) => Boolean(manifest[b]));
   console.log(`[hf] wrote ${outPath} (${blocks.join(', ')})`);
+
+  // An entry with no `versions/<v>/manifest.json` is dropped by build-index as
+  // `no-eligible-versions` — with no error, so the model just never appears.
+  // Writing it here keeps the two files in lockstep; the alternative (hand-
+  // authoring the sibling) is exactly what silently fails.
+  const versionPath = resolve(
+    GILDE_DATA_DIR,
+    'chat-models',
+    subdir,
+    cfg.id,
+    'versions',
+    manifest.version,
+    'manifest.json',
+  );
+  let existingVersion = null;
+  if (existsSync(versionPath)) {
+    existingVersion = JSON.parse(await readFile(versionPath, 'utf-8'));
+  }
+  const versionManifest = {
+    schemaVersion: 1,
+    version: manifest.version,
+    // `releasedAt` is history: an already-published version keeps its original
+    // date even when its file data is refreshed.
+    releasedAt: existingVersion?.releasedAt ?? manifest.updatedAt,
+    approxSizeBytes: manifest.approxSizeBytes,
+    ...Object.fromEntries(blocks.map((b) => [b, manifest[b]])),
+  };
+  await mkdir(dirname(versionPath), { recursive: true });
+  await writeFile(versionPath, `${JSON.stringify(versionManifest, null, 2)}\n`, 'utf-8');
+  console.log(`[hf] wrote ${versionPath}`);
 }
 
 main().catch((err) => {

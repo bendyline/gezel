@@ -5,6 +5,7 @@ import type {
   Project,
   ProviderName,
   Question,
+  SessionGpuTask,
   TerminalTimelineEntry,
   TimelineMessage,
 } from '@bendyline/gezel';
@@ -252,6 +253,16 @@ interface LiveSlot {
    */
   liveReasoning?: string;
   /**
+   * Live tool-argument stream, accumulated from `tool_args_delta`
+   * events while the model generates a structured tool call (most
+   * visibly a multi-minute `writeFile` whose tokens never arrive as
+   * deltas). `chars` is the running total; `tail` keeps only the most
+   * recent stretch (capped) for the dimmed live "working" block near
+   * the streaming caret. Cleared when the matching `tool` event lands
+   * (the real tool row supersedes it) and on `complete`.
+   */
+  liveToolArgs?: { name: string; chars: number; head: string; tail: string };
+  /**
    * Optional short label from a provider heartbeat (e.g. 'thinking'
    * during Copilot's server-side reasoning phases). Drives the
    * streaming bubble's status line so a long silent reasoning stretch
@@ -281,7 +292,7 @@ interface LiveSlot {
    * silent for X seconds" reassurance banner, which doesn't apply
    * when something else is the actual GPU tenant.
    */
-  gpuSwapTask?: 'image_generation' | 'video_generation';
+  gpuSwapTask?: SessionGpuTask;
   /** Free-form detail attached to the active `gpu_swap` event. */
   gpuSwapDetail?: string;
   /** Prompt the model passed to the image generator — shown as narrative under the status. */
@@ -1413,6 +1424,9 @@ export function ChatTimelineView({
         slot.thinkingLabel = undefined;
         delete slot.thinkingProgress;
         delete slot.thinkingDetail;
+        // Visible text resumed — whatever structured call was streaming
+        // is over (or was abandoned); drop the live tool-args block.
+        delete slot.liveToolArgs;
         liveRef.current.set(sessionId, slot);
         setLiveBump((n) => n + 1);
       } else if (event.type === 'reasoning_delta') {
@@ -1432,6 +1446,35 @@ export function ChatTimelineView({
         slot.wirePulseCount = 0;
         delete slot.thinkingProgress;
         delete slot.thinkingDetail;
+        liveRef.current.set(sessionId, slot);
+        setLiveBump((n) => n + 1);
+      } else if (event.type === 'tool_args_delta') {
+        // Live tool-argument fragments — the model is generating a
+        // structured tool call (typically writeFile content). Counts as
+        // real activity: resets the silence timer so a multi-minute
+        // write never trips the "looks stalled" banner. The wire-pulse
+        // counter deliberately KEEPS ticking (the provider pulses on the
+        // same chunks) — it stays the "things are happening" numerator
+        // shown next to the caret. Tail is capped so a 100k-char write
+        // doesn't grow the slot unbounded; the running char total keeps
+        // the full magnitude visible.
+        const TOOL_ARGS_TAIL_CAP = 2000;
+        // Head keeps the opening of the args JSON so the bubble can pull
+        // out a `"path": …` even after the tail has scrolled past it.
+        const TOOL_ARGS_HEAD_CAP = 400;
+        const slot = liveRef.current.get(sessionId) ?? createSlot(gezelId, projectId, sessionId);
+        const prev = slot.liveToolArgs;
+        const name = event.name.length > 0 ? event.name : (prev?.name ?? '');
+        const head = ((prev?.head ?? '') + event.content).slice(0, TOOL_ARGS_HEAD_CAP);
+        const tail = ((prev?.tail ?? '') + event.content).slice(-TOOL_ARGS_TAIL_CAP);
+        slot.liveToolArgs = {
+          name,
+          chars: (prev?.chars ?? 0) + event.content.length,
+          head,
+          tail,
+        };
+        slot.lastActivityAt = Date.now();
+        delete slot.queueAhead;
         liveRef.current.set(sessionId, slot);
         setLiveBump((n) => n + 1);
       } else if (event.type === 'wire_pulse') {
@@ -1550,6 +1593,8 @@ export function ChatTimelineView({
         slot.segments.push({ kind: 'tool', tool });
         slot.lastActivityAt = Date.now();
         slot.wirePulseCount = 0;
+        // The finished tool row supersedes the live tool-args block.
+        delete slot.liveToolArgs;
         // A tool call means the provider picked the turn up off the
         // queue and is actively working — drop any stale `queueAhead`
         // so the bubble stops reading "QUEUED — N AHEAD" after a
@@ -1598,6 +1643,7 @@ export function ChatTimelineView({
           // (collapsed expander). Leaving it set would double-render the
           // trace — live block + expander — until the next delta.
           delete existing.liveReasoning;
+          delete existing.liveToolArgs;
           delete existing.queueAhead;
           delete existing.error;
           liveRef.current.set(sessionId, existing);
@@ -2502,6 +2548,7 @@ export function ChatTimelineView({
           : {})}
         {...(slot.thinkingDetail ? { thinkingDetail: slot.thinkingDetail } : {})}
         {...(slot.liveReasoning ? { liveReasoning: slot.liveReasoning } : {})}
+        {...(slot.liveToolArgs ? { liveToolArgs: slot.liveToolArgs } : {})}
         {...(slot.gpuSwapTask ? { gpuSwapTask: slot.gpuSwapTask } : {})}
         {...(slot.gpuSwapDetail ? { gpuSwapDetail: slot.gpuSwapDetail } : {})}
         {...(slot.gpuSwapPrompt ? { gpuSwapPrompt: slot.gpuSwapPrompt } : {})}

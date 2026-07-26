@@ -5,9 +5,13 @@ import { api } from '../api.js';
 import { ExportModelBundleButton, ImportModelBundleButton } from './ModelBundleControls.js';
 
 /**
- * Install/list/delete the DeepSeek-V4 GGUFs ds4 can run, straight from the
- * catalog — so the model picker fetches them without a manual path. ds4
- * streams MoE experts from SSD, so device guidance uses the catalog's
+ * Install/list/delete the GGUFs ds4 can run, straight from the catalog — so
+ * the model picker fetches them without a manual path. ds4 is not a general
+ * GGUF runner: the catalog's `ds4` source block is what marks an entry as one
+ * of the DeepSeek-V4 / GLM 5.2 builds its engine supports, so this list is
+ * exactly the models carrying that block.
+ *
+ * ds4 streams MoE experts from SSD, so device guidance uses the catalog's
  * `residentBytes` (expert cache + fixed model state + runtime buffers), not the
  * much larger download size. The service now enforces the same headroom rule
  * at launch; this UI is guidance, not the only protection against memory
@@ -44,7 +48,7 @@ export function Ds4ModelManager({ onModelsChanged }: { onModelsChanged?: () => v
   // `null` = the catalog hasn't loaded yet (or a load failed). We must NOT
   // conflate that with a genuinely-empty catalog — otherwise a slow/failed
   // fetch (e.g. while a large model download saturates the daemon's I/O)
-  // renders as "No DeepSeek-V4 models in the catalog", which reads as the
+  // renders as "No DwarfStar models in the catalog", which reads as the
   // user's models silently vanishing. Only the `[]`-after-success state is a
   // real empty catalog.
   const [items, setItems] = useState<CatalogItemSummary[] | null>(null);
@@ -236,7 +240,7 @@ export function Ds4ModelManager({ onModelsChanged }: { onModelsChanged?: () => v
     return <p className="muted small">Loading models…</p>;
   }
   if (ds4Models.length === 0) {
-    return <p className="muted small">No DeepSeek-V4 models in the catalog.</p>;
+    return <p className="muted small">No DwarfStar models in the catalog.</p>;
   }
 
   const lightestResidentBytes = Math.min(
@@ -288,9 +292,10 @@ export function Ds4ModelManager({ onModelsChanged }: { onModelsChanged?: () => v
             </span>
           )
         ) : null;
-        const displayName = m.ds4.quantization
-          ? `DeepSeek V4 Flash (${m.ds4.quantization})`
-          : m.name;
+        // The catalog name already carries the quant ("GLM 5.2 (IQ2_XXS)").
+        // A hardcoded model family here silently mislabels every entry that
+        // isn't the one it was written for.
+        const displayName = m.name;
         return (
           <div
             key={m.id}

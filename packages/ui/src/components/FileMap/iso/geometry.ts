@@ -1,5 +1,6 @@
 import type { FileMapResponse, MapBlock, MapBuilding } from '@bendyline/gezel';
 import type { Camera } from '../camera.js';
+import { styleForModel } from '../town-cache.js';
 import { depthOrder } from './depth.js';
 import {
   HZ,
@@ -10,6 +11,7 @@ import {
   miniHIso,
   townRoofRiseIso,
 } from './projection.js';
+import type { TownStyle } from './town-style.js';
 
 /**
  * Per-model iso geometry: prism heights, iso AABBs, and the memoized painter
@@ -25,6 +27,17 @@ export interface BlockGeom {
   hIso: number;
   /** Iso-plane AABB including height (culling + fit). */
   aabb: { u0: number; u1: number; v0: number; v1: number };
+  /** Resolved architecture, from the shared per-model cache. Absent on
+   *  tombstones, which draw as rubble and have no building. */
+  style?: TownStyle;
+  /**
+   * Multiplier on the roof headroom above the prism. `townRoofRiseIso` is the
+   * budget culling, hit-testing, and the issue-marker anchor all assume; a
+   * clock tower or kiln cone reaching past it would pop in on scroll and leave
+   * a dead click zone over its own silhouette. Anything that draws taller than
+   * an ordinary roof declares itself here instead.
+   */
+  roofFactor: number;
 }
 
 export interface GeometryCache {
@@ -42,11 +55,20 @@ export function levelsFor(b: MapBlock): number {
 }
 
 function buildGeometry(model: FileMapResponse): GeometryCache {
+  const styles = styleForModel(model);
   const geoms: BlockGeom[] = model.blocks.map((block) => {
     const flat = block.state === 'tombstoned';
     const hWorld = flat ? 0 : heightOf(levelsFor(block));
     const hIso = hWorld * HZ;
-    return { block, hWorld, hIso, aabb: isoAabb(block.rect, hIso) };
+    const style = styles.get(block.id);
+    return {
+      block,
+      hWorld,
+      hIso,
+      aabb: isoAabb(block.rect, hIso),
+      ...(style ? { style } : {}),
+      roofFactor: style?.roofFactor ?? 1,
+    };
   });
   const order = depthOrder(
     geoms.map((g) => ({ rect: g.block.rect, u0: g.aabb.u0, u1: g.aabb.u1 })),
@@ -66,10 +88,16 @@ export function geometryForModel(model: FileMapResponse): GeometryCache {
   return built;
 }
 
+/** Roof headroom above a block's prism, including whatever its architecture
+ *  declares it needs. The single definition all three consumers share. */
+export function roofHeadroom(g: BlockGeom, scale: number): number {
+  if (g.block.state !== 'live' || g.block.phantom) return 0;
+  return townRoofRiseIso(g.block.rect, scale) * g.roofFactor;
+}
+
 /** True when a geom's projected box intersects the viewport. */
 export function geomInView(cam: Camera, g: BlockGeom, viewW: number, viewH: number): boolean {
-  const roof =
-    g.block.state === 'live' && !g.block.phantom ? townRoofRiseIso(g.block.rect, cam.scale) : 0;
+  const roof = roofHeadroom(g, cam.scale);
   const sx0 = (g.aabb.u0 - cam.offsetX) * cam.scale;
   const sx1 = (g.aabb.u1 - cam.offsetX) * cam.scale;
   const sy0 = (g.aabb.v0 - roof - cam.offsetY) * cam.scale;
@@ -146,9 +174,7 @@ export function hitTestIso(
   const v = sy / cam.scale + cam.offsetY;
   for (let i = geom.order.length - 1; i >= 0; i--) {
     const g = geom.geoms[geom.order[i]!]!;
-    const roof =
-      g.block.state === 'live' && !g.block.phantom ? townRoofRiseIso(g.block.rect, cam.scale) : 0;
-    if (hitsPrism(u, v, g.block.rect, g.hIso + roof)) return g.block;
+    if (hitsPrism(u, v, g.block.rect, g.hIso + roofHeadroom(g, cam.scale))) return g.block;
   }
   return null;
 }

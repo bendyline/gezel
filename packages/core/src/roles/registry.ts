@@ -108,6 +108,7 @@ export const ROLES: Record<RoleId, RoleDefinition> = {
       'entity-intel',
       'interaction',
       'history',
+      'handboek',
     ],
     suggestedTuningProfile: 'thinking-precise',
     gateAffinity: [],
@@ -144,6 +145,7 @@ export const ROLES: Record<RoleId, RoleDefinition> = {
       'interaction',
       'history',
       'workspace-fs-read',
+      'handboek',
     ],
     suggestedTuningProfile: 'thinking-general',
     gateAffinity: [],
@@ -170,6 +172,7 @@ export const ROLES: Record<RoleId, RoleDefinition> = {
       'entity-intel',
       'interaction',
       'web',
+      'handboek',
     ],
     suggestedTuningProfile: 'thinking-precise',
     // A review must point at real evidence — cited paths/URLs must resolve.
@@ -205,6 +208,7 @@ export const ROLES: Record<RoleId, RoleDefinition> = {
       'documents',
       'interaction',
       'web',
+      'handboek',
     ],
     suggestedTuningProfile: 'thinking-general',
     // The headline of 2.1: a researcher's outputs default to citation +
@@ -233,6 +237,7 @@ export const ROLES: Record<RoleId, RoleDefinition> = {
       'web',
       'memory',
       'interaction',
+      'handboek',
     ],
     suggestedTuningProfile: 'creative',
     // Copy lives or dies on constraints: length bands and readability.
@@ -261,6 +266,7 @@ export const ROLES: Record<RoleId, RoleDefinition> = {
       'web',
       'memory',
       'interaction',
+      'handboek',
     ],
     suggestedTuningProfile: 'creative',
     // A design page's image references must resolve to real assets.
@@ -284,6 +290,7 @@ export const ROLES: Record<RoleId, RoleDefinition> = {
       'documents',
       'memory',
       'interaction',
+      'handboek',
     ],
     gateAffinity: [std('checkImageRefsResolve')],
     defaultBooks: ['logo-set', 'icon-pack', 'hero-image', 'thumbnail-generator'],
@@ -297,7 +304,15 @@ export const ROLES: Record<RoleId, RoleDefinition> = {
     id: 'video-generator',
     label: 'Video Generator',
     summary: 'Produces short video clips via generate_video; no direct file writes.',
-    toolsetGroups: ['videos', 'tasks', 'artifacts', 'documents', 'memory', 'interaction'],
+    toolsetGroups: [
+      'videos',
+      'tasks',
+      'artifacts',
+      'documents',
+      'memory',
+      'interaction',
+      'handboek',
+    ],
     gateAffinity: [],
     defaultBooks: [],
     capabilityFloor: 'tiny',
@@ -321,6 +336,7 @@ export const ROLES: Record<RoleId, RoleDefinition> = {
       'artifacts',
       'memory',
       'interaction',
+      'handboek',
     ],
     suggestedTuningProfile: 'thinking-coding',
     // Developer gates are deliverable-specific (the build-loop supplies
@@ -347,6 +363,7 @@ export const ROLES: Record<RoleId, RoleDefinition> = {
       'memory',
       'interaction',
       'web',
+      'handboek',
     ],
     suggestedTuningProfile: 'thinking-coding',
     gateAffinity: [],
@@ -372,6 +389,7 @@ export const ROLES: Record<RoleId, RoleDefinition> = {
       'memory',
       'interaction',
       'web',
+      'handboek',
     ],
     suggestedTuningProfile: 'thinking-precise',
     // Plans are gate-graphs in prose: ordered sections, an owned,
@@ -406,6 +424,7 @@ export const DEFAULT_TOOLSET_GROUPS: readonly string[] = [
   'artifacts',
   'web',
   'interaction',
+  'handboek',
 ];
 
 /**

@@ -16,7 +16,7 @@ import '@bendyline/squisq-editor-react/styles';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { FileMap, type MapRendererKind, defaultRenderer } from '../components/FileMap/FileMap.js';
-import { townArchetypeLabel, townStyleForBlock } from '../components/FileMap/iso/town-style.js';
+import { townStyleForBlock, townStyleLabel } from '../components/FileMap/iso/town-style.js';
 import { useEffectiveTheme } from '../theme.js';
 
 const log = createLogger('filemap');
@@ -69,11 +69,11 @@ const VIBE_LABEL: Record<NonNullable<MapBlock['health']>['vibe'], string> = {
 };
 
 /**
- * The "Map" project tab: a stylized city-map of the codebase. Districts are
- * folders, blocks are files (size ∝ LoC), buildings are symbols, and roads are
- * the import graph. Pan/zoom with the mouse; click a block for details. The
- * scope toggle separates test files (their own "city") from the core code; JSON
- * is always excluded.
+ * The "Village" project tab: the codebase as a persistent 1890–1915 settlement.
+ * Districts are folders, blocks are files (size ∝ LoC), buildings are symbols,
+ * and roads are the import graph. Pan/zoom with the mouse; click a block for
+ * details. The scope toggle separates test files (their own settlement) from the
+ * core code; JSON is always excluded.
  */
 const SCOPES: Array<{ value: FileMapScope; label: string }> = [
   { value: 'core', label: 'Code' },
@@ -435,7 +435,7 @@ export function FileMapView({ projectId }: { projectId: string }) {
     <section className="filemap-view">
       <header className="filemap-header">
         <div className="filemap-title">
-          <strong>Codebase map</strong>
+          <strong>Village</strong>
           {stats && (
             <span className="filemap-stats">
               {stats.files} files · {stats.folders} neighborhoods · {stats.roads} roads ·{' '}
@@ -465,7 +465,7 @@ export function FileMapView({ projectId }: { projectId: string }) {
               ))}
             </select>
           )}
-          <fieldset className="filemap-scope" aria-label="Map scope">
+          <fieldset className="filemap-scope" aria-label="Village scope">
             {SCOPES.map((s) => (
               <button
                 key={s.value}
@@ -494,7 +494,7 @@ export function FileMapView({ projectId }: { projectId: string }) {
               type="button"
               className={renderer === 'iso' ? 'active' : ''}
               aria-pressed={renderer === 'iso'}
-              title="Isometric city view; toggle off for the flat top-down map"
+              title="Isometric village view; toggle off for the flat top-down plan"
               onClick={() =>
                 setRenderer((v) => {
                   const next = v === 'iso' ? 'flat' : 'iso';
@@ -518,15 +518,15 @@ export function FileMapView({ projectId }: { projectId: string }) {
 
       <div className="filemap-body">
         {error ? (
-          <div className="filemap-empty">Couldn’t build the map: {error}</div>
+          <div className="filemap-empty">Couldn’t build the village: {error}</div>
         ) : model && !model.indexed ? (
           <div className="filemap-empty">
-            This project hasn’t been indexed yet. The map appears once the workspace has been
+            This project hasn’t been indexed yet. The village appears once the workspace has been
             scanned.
           </div>
         ) : model && model.blocks.length === 0 && !loading ? (
           <div className="filemap-empty">
-            {scope === 'tests' ? 'No test files found.' : 'No files to map yet.'}
+            {scope === 'tests' ? 'No test files found.' : 'No files to build a village from yet.'}
           </div>
         ) : model ? (
           <>
@@ -593,7 +593,7 @@ export function FileMapView({ projectId }: { projectId: string }) {
                     {selected.lang && <span className="filemap-chip">{selected.lang}</span>}
                     {renderer === 'iso' && (
                       <span className="filemap-chip">
-                        1910 {townArchetypeLabel(townStyleForBlock(selected))}
+                        {townStyleLabel(townStyleForBlock(selected))}
                       </span>
                     )}
                     {selected.health && (
@@ -727,12 +727,12 @@ export function FileMapView({ projectId }: { projectId: string }) {
               </aside>
             ) : (
               <p className="filemap-hint filemap-hint-float">
-                Scroll to zoom, drag to pan. Each period building is a file; click one to open it.
+                Scroll to zoom, drag to pan. Each building is a file; click one to open it.
               </p>
             )}
           </>
         ) : (
-          <div className="filemap-empty">{loading ? 'Building the map…' : ''}</div>
+          <div className="filemap-empty">{loading ? 'Building the village…' : ''}</div>
         )}
       </div>
     </section>

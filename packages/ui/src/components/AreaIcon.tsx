@@ -110,4 +110,13 @@ const AREA_PATHS: Record<RecentTabArea, JSX.Element> = {
       <rect x="16" y="14" width="3" height="5" />
     </>
   ),
+  // Closed book with bookmark ribbon — the Handboek (documentation).
+  // Distinct from `craftbooks`, which draws an open two-page spread.
+  handboek: (
+    <>
+      <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+      <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+      <path d="M10 2v7l2.5-1.8L15 9V2" />
+    </>
+  ),
 };

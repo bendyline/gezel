@@ -21,6 +21,7 @@ import {
   ProjectTabVisibilitySchema,
 } from './project.js';
 import { NpmInstallApprovalDecisionSchema, QuestionSchema } from './question.js';
+import { RecognitionModeSchema } from './recognition.js';
 import { ExpectedDeliverableSchema } from './session.js';
 import { TaskRefSchema } from './task.js';
 import { TuningProfileIdSchema } from './tuning-profile-registry.js';
@@ -292,6 +293,54 @@ export const GezelConfigSchema = z.object({
       }),
     ])
     .optional(),
+  /**
+   * Image-recognition engine selection. `'llama-cpp'` (default) runs a small
+   * local vision model under its own supervisor; `'mock'` is for tests and
+   * headless flows. Distinct from `imageProvider`, which *generates* images.
+   */
+  recognitionProvider: z.enum(['llama-cpp', 'mlx', 'mock']).optional(),
+  /** Catalog id of the vision model. Falls back to the recommended entry. */
+  defaultRecognitionModel: z.string().optional(),
+  recognition: z
+    .object({
+      /**
+       *   - `'auto'` (default) — describe locally only when the chat model
+       *     genuinely can't see images.
+       *   - `'always'` — describe locally even for vision-capable models.
+       *     The cost lever: a local 4B pass is cheaper than shipping pixels
+       *     to a frontier model, and no bytes leave the machine.
+       *   - `'off'` — never run recognition.
+       */
+      mode: z.enum(['auto', 'always', 'off']).optional(),
+      modes: z.array(RecognitionModeSchema).optional(),
+      /**
+       * Beyond this, the remaining images get static metadata only. A chat
+       * turn is not a batch job — bulk work belongs in the MCP tool or the
+       * idle-gated indexer.
+       */
+      maxImagesPerTurn: z.number().int().min(1).max(16).optional(),
+      timeoutMsPerImage: z.number().int().min(5_000).optional(),
+      maxDigestChars: z.number().int().min(200).optional(),
+      /**
+       * Images above this many megapixels skip the model. llama.cpp's mtmd
+       * tiles large inputs into a token explosion, and there is no image
+       * resizer in the dependency tree to downscale first.
+       */
+      maxMegapixels: z.number().positive().optional(),
+    })
+    .optional(),
+  /**
+   * Per-model opt-in for native vision (`--mmproj` at launch), keyed by
+   * catalog id. Absent means off.
+   *
+   * Off by default because loading a projector makes llama-server 501 on slot
+   * save/restore, which latches disk-KV prefix caching off for that model
+   * process-wide — costing cached session resume on *every* text turn, image
+   * or not. Users who want image fidelity more than resume latency opt in per
+   * model; everyone else gets the recognition pre-step, which is uniform
+   * across engines including ds4.
+   */
+  nativeVision: z.record(z.string(), z.boolean()).optional(),
   /** Optional bearer token used by the webhook channel. Never stored in config.json —
    *  routed to SecretStore by the config PUT handler. */
   webhookBearerToken: z.string().optional(),
@@ -1718,6 +1767,8 @@ export const RecentTabAreaSchema = z.enum([
   // other top-level areas so users can launch + review benchmark
   // runs without leaving the app.
   'benchmarks',
+  // Built-in documentation (TOC + articles, served by /api/handboek).
+  'handboek',
 ]);
 export type RecentTabArea = z.infer<typeof RecentTabAreaSchema>;
 
@@ -1938,6 +1989,11 @@ export const UpdateGezelSettingsRequestSchema = z.object({
    * render poppetje).
    */
   iconOverride: z.boolean().nullable().optional(),
+  /**
+   * Per-gezel override of `config.recognition.mode`. `null` clears it
+   * (inherit the install default).
+   */
+  recognition: z.enum(['auto', 'always', 'off']).nullable().optional(),
 });
 export type UpdateGezelSettingsRequest = z.infer<typeof UpdateGezelSettingsRequestSchema>;
 
@@ -3728,7 +3784,7 @@ export const MapRepoResponseSchema = z.object({
 });
 export type MapRepoResponse = z.infer<typeof MapRepoResponseSchema>;
 
-// ── file-map (stylized "city map" of a folder tree) ─────────────────────────
+// ── file-map (the Village: a folder tree as a 1890–1915 settlement) ─────────
 
 /** A rectangle in map-space (arbitrary units; the renderer fits to viewport). */
 export const RectSchema = z.object({
@@ -3785,7 +3841,25 @@ export const MapBlockHealthSchema = z.object({
 });
 export type MapBlockHealth = z.infer<typeof MapBlockHealthSchema>;
 
-/** A block — a file. Size ∝ lines of code; `state` drives construction/rubble. */
+/** How urban the ground under a block is. See `MapBlockSchema.settlement`. */
+export const SettlementSchema = z.enum(['hamlet', 'village', 'town', 'city']);
+export type Settlement = z.infer<typeof SettlementSchema>;
+
+/**
+ * A block — a file. Size ∝ lines of code; `state` drives construction/rubble.
+ *
+ * Five orthogonal signals drive the renderer, each answering a different
+ * question. Keep them separate — collapsing any two makes the settlement read
+ * as one undifferentiated mass:
+ *
+ * | field              | question                                | renders as              |
+ * |--------------------|-----------------------------------------|-------------------------|
+ * | `health.zone`      | what does this file *do*?               | archetype family        |
+ * | `levels`           | how important is this *file*?           | storeys                 |
+ * | `landmark`         | which few files are the *skyline*?      | guildhall / town hall   |
+ * | `health.vibe`      | how well *kept* is it?                  | trees vs weeds          |
+ * | `urbanity`         | what kind of *place* is it standing in? | ground, materials, surroundings |
+ */
 export const MapBlockSchema = z.object({
   id: z.string(),
   districtId: z.string(),
@@ -3818,6 +3892,21 @@ export const MapBlockSchema = z.object({
   /** Last git commit touching this file (ISO). The age lens prefers this
    *  over `placedAt`. Absent when git is unavailable. */
   lastTouchedAt: z.string().optional(),
+  /** Urbanity of the ground under this parcel, 0..1 — server policy blending
+   *  downtown proximity, local build density, and NEIGHBORHOOD importance,
+   *  capped by project size. Deliberately continuous: the renderer LERPS with
+   *  it (prop density, vegetation, wall hue mix, bay rhythm) and never compares
+   *  it to a constant. Absent on tombstones, phantoms, and pre-V6 payloads.
+   *
+   *  It samples the neighborhood, never this block's own importance — that
+   *  already drives `levels`, and counting it twice makes the core an
+   *  undifferentiated wall of tall civic buildings. */
+  urbanity: z.number().min(0).max(1).optional(),
+  /** Bucketed `urbanity` — the ONLY input to categorical choices (paving,
+   *  wall/roof material, within-family archetype pick, hedge vs fence vs
+   *  curb). Thresholds live in the service; never re-derive them client-side
+   *  from `urbanity`, or they drift the first time the policy is tuned. */
+  settlement: SettlementSchema.optional(),
 });
 export type MapBlock = z.infer<typeof MapBlockSchema>;
 
@@ -3890,6 +3979,25 @@ export const MapPrOverlaySchema = z.object({
 });
 export type MapPrOverlay = z.infer<typeof MapPrOverlaySchema>;
 
+/** Map-level parameters of the urbanity field, so the renderer can do ambient
+ *  effects (haze toward downtown, traffic falloff) without re-deriving policy. */
+export const MapUrbanitySchema = z.object({
+  /** Importance-weighted downtown centroid, world coords. */
+  center: z.object({ x: z.number(), y: z.number() }),
+  /** Weighted radius of gyration — the falloff scale of the field. */
+  radius: z.number().positive(),
+  /** Project-size cap multiplied into every block's urbanity: a small repo is
+   *  uniformly rural but keeps its internal contrast shape. */
+  ceiling: z.number().min(0).max(1),
+  peak: z.number().min(0).max(1),
+  median: z.number().min(0).max(1),
+  /** The settlement's overall register, bucketed from `peak`. */
+  settlement: SettlementSchema,
+  /** Live blocks the field was computed over. */
+  fileCount: z.number().int().nonnegative(),
+});
+export type MapUrbanity = z.infer<typeof MapUrbanitySchema>;
+
 /**
  * Which slice of a code project to map. `core` is the default and excludes test
  * files (they're large, symbol-less, and drown out the real code); `tests` maps
@@ -3924,6 +4032,8 @@ export const FileMapResponseSchema = z.object({
   /** Plazas and greens (absent on pre-v5 layouts). */
   plazas: z.array(MapPlazaSchema).optional(),
   overlay: MapPrOverlaySchema.optional(),
+  /** Urbanity-field parameters (absent on pre-V6 layouts). */
+  urbanity: MapUrbanitySchema.optional(),
   /** Signal provenance for lenses/legends. */
   signals: z
     .object({

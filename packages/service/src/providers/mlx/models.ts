@@ -34,7 +34,7 @@
 
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import {
@@ -42,6 +42,7 @@ import {
   listBundleModelFiles,
   publishStagedModel,
 } from '../../models/bundle-storage.js';
+import { checkDiskSpace, describeDiskShortfall } from '../../utils/disk-space.js';
 import { downloadWithRetry } from '../../utils/download-with-retry.js';
 import { readMlxSummary } from './config-parser.js';
 
@@ -431,6 +432,16 @@ export class MlxModelManager {
       tracked.totalBytes = totalBytesAll;
       tracked.phase = 'downloading';
 
+      // Preflight free space before writing anything — see the matching check
+      // in `LlamaCppModelManager`. MLX installs write every shard into one
+      // directory, so a late ENOSPC strands the whole set.
+      const alreadyOnDisk = await mlxBytesAlreadyOnDisk(itemDir, files);
+      const space = await checkDiskSpace(itemDir, Math.max(0, totalBytesAll - alreadyOnDisk));
+      if (!space.ok) {
+        yield { type: 'error', error: describeDiskShortfall(space, manifest.name) };
+        return;
+      }
+
       // Download the shards concurrently (bounded by
       // MLX_DOWNLOAD_CONCURRENCY). Per-file resume (`.partial`), sha256
       // verification, and the atomic commit-rename below are unchanged —
@@ -789,6 +800,31 @@ export class MlxModelManager {
 
 function describeError(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+/**
+ * Bytes of a planned MLX install already on disk (finished files plus
+ * resumable `.partial` siblings), so the space preflight charges only what
+ * still has to be fetched.
+ */
+async function mlxBytesAlreadyOnDisk(
+  itemDir: string,
+  files: Array<{ name: string; sizeBytes?: number }>,
+): Promise<number> {
+  let total = 0;
+  for (const file of files) {
+    const finalPath = join(itemDir, file.name);
+    for (const candidate of [finalPath, `${finalPath}.partial`]) {
+      const size = await stat(candidate)
+        .then((st) => st.size)
+        .catch(() => 0);
+      if (size > 0) {
+        total += file.sizeBytes ? Math.min(size, file.sizeBytes) : size;
+        break;
+      }
+    }
+  }
+  return total;
 }
 
 /**

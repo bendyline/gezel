@@ -16,6 +16,10 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./handboek": {
+      "types": "./dist/handboek.d.ts",
+      "import": "./dist/handboek.js"
+    },
     "./dist/bin/gezeld.js": "./dist/bin/gezeld.js",
     "./package.json": "./package.json"
   },

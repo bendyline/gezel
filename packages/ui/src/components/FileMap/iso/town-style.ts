@@ -1,9 +1,55 @@
 import type { MapBlock, MapBuilding } from '@bendyline/gezel';
+import { type MaterialPair, materialsFor } from '../material.js';
 import { hash32, seeded } from '../seed.js';
+import { type UrbanityBand, bandOf } from '../urbanity.js';
 
-/** Architectural vocabulary for the isometric renderer. Deliberately drawn
- * from a small 1890–1915 town rather than a modern skyline. */
+/**
+ * Architectural vocabulary for the Village — a settlement from roughly
+ * **1890–1915**, never a modern skyline.
+ *
+ * The vocabulary is a 3×4 grid: four dependency-role families (the `zone`)
+ * crossed with three urbanity registers (the `settlement` band). Each family
+ * table holds exactly three entries, index-aligned small → mid → large, which
+ * buys a property worth naming: **a file keeps its size-role slot across bands
+ * and only changes regional idiom.** A mid-size commercial file is an `inn` in
+ * the town band and a `hotel` in the city band — the same building, in a
+ * different kind of place.
+ *
+ * ## Why the seed stream is fragile, and the three rules that protect it
+ *
+ * A file's building is its identity on the map; users navigate by "the sawtooth
+ * foundry by the plaza." Everything derives from one seeded PRNG stream, whose
+ * *shape* is therefore load-bearing:
+ *
+ * - **A. Never change the length or order of a family table.** `pick()` is
+ *   `items[floor(random() * len)]`, so appending a fourth member to a table
+ *   remaps every file in that family. New architecture goes in a *new* table
+ *   selected before the call — which is exactly what the band does, consuming
+ *   no extra draw.
+ * - **B. The main stream is append-only.** It runs `pick`, `bays`, then
+ *   `roofFor` / `ridgeFor` / `chimneys` / `cupola`, several of which draw
+ *   conditionally. Anything new must come strictly after the `cupola` draw.
+ * - **C. Prefer salted sub-streams (`SEED_SALT`) over the main stream.** They
+ *   are order-independent by construction, so adding a massing draw cannot
+ *   perturb material selection. This is the default for new fields, and it is
+ *   what makes rule B rarely have to carry any weight.
+ *
+ * `town-style.golden.test.ts` pins twenty real files against these rules.
+ */
+
 export type TownArchetype =
+  // village
+  | 'cottage-row'
+  | 'farmhouse'
+  | 'village-shop'
+  | 'smithy'
+  | 'market-cross'
+  | 'chapel'
+  | 'parish-hall'
+  | 'barn'
+  | 'mill'
+  | 'kiln'
+  // town
   | 'boarding-house'
   | 'cottage'
   | 'townhouse'
@@ -15,10 +61,80 @@ export type TownArchetype =
   | 'schoolhouse'
   | 'foundry'
   | 'rail-depot'
-  | 'workshop';
+  | 'workshop'
+  // city
+  | 'terrace-house'
+  | 'tenement'
+  | 'mansion-flat'
+  | 'shopfront-block'
+  | 'hotel'
+  | 'arcade'
+  | 'bank'
+  | 'institute'
+  | 'town-hall'
+  | 'warehouse'
+  | 'works'
+  | 'terminus';
 
-export type TownRoof = 'gable' | 'hip' | 'mansard' | 'sawtooth' | 'shed';
+export type TownRoof =
+  | 'gable'
+  | 'hip'
+  | 'mansard'
+  | 'sawtooth'
+  | 'shed'
+  | 'thatch'
+  | 'half-hip'
+  | 'catslide'
+  | 'parapet'
+  | 'monitor'
+  | 'pyramid'
+  | 'barrel'
+  | 'conical';
+
 export type RidgeAxis = 'x' | 'y';
+
+/** Which facade fronts the street: `eave` = ridge runs along it (terraces,
+ *  shopfronts), `gable` = the gable end faces it (cottages, chapels). */
+export type EavesFront = 'eave' | 'gable';
+
+/** Ground-floor treatment — the strongest single "what is this building for"
+ *  cue at street zoom. */
+export type GroundFloor = 'plain' | 'shopfront' | 'arcade' | 'cart-door' | 'portico';
+
+/** What sits on the ridge or apex. */
+export type RoofCap = 'none' | 'cupola' | 'bellcote' | 'clock-tower' | 'finial' | 'lantern';
+
+export type MassingKind = 'none' | 'ell' | 'setback';
+
+export interface Massing {
+  kind: MassingKind;
+  /** Normalized sub-rect within the block footprint, in [0,1]. */
+  u0: number;
+  v0: number;
+  u1: number;
+  v1: number;
+  /** Height as a fraction of the main mass. */
+  height: number;
+  /** True when the wing sits toward N/W and so paints BEFORE the main mass. */
+  behind: boolean;
+}
+
+const NO_MASSING: Massing = {
+  kind: 'none',
+  u0: 0,
+  v0: 0,
+  u1: 0,
+  v1: 0,
+  height: 0,
+  behind: false,
+};
+
+export interface TownTrim {
+  cornice: boolean;
+  parapet: boolean;
+  stringCourse: boolean;
+  quoins: boolean;
+}
 
 export interface TownStyle {
   archetype: TownArchetype;
@@ -34,12 +150,362 @@ export interface TownStyle {
   sawteeth: number;
   /** Stable seed used by small details such as lit windows and stack spacing. */
   seed: number;
+  /** The urbanity register this building was resolved in. */
+  band: UrbanityBand;
+  eaves: EavesFront;
+  ground: GroundFloor;
+  cap: RoofCap;
+  trim: TownTrim;
+  /** Wall and roof materials. Applied only outside the age lens and outside
+   *  city tier — see `prismColors`. */
+  material: MaterialPair;
+  /** Secondary mass, if any. `rect` is normalized within the block footprint
+   *  and always strictly inside it: `iso/depth.ts` sorts footprints only, so a
+   *  mass crossing into the lot margin could be occluded by a block the depth
+   *  sort believes is behind it. */
+  massing: Massing;
+  /** Roof headroom multiplier for anything that builds taller than an ordinary
+   *  roof — clock towers, kiln cones, lanterns. Culling, hit-testing, and the
+   *  issue-marker anchor all read it through `roofHeadroom`; drawing past the
+   *  declared budget causes scroll pop-in and dead clicks. Default 1. */
+  roofFactor?: number;
 }
 
-const RESIDENTIAL: readonly TownArchetype[] = ['cottage', 'townhouse', 'boarding-house'];
-const COMMERCIAL: readonly TownArchetype[] = ['corner-shop', 'inn', 'market-hall'];
-const CIVIC: readonly TownArchetype[] = ['library', 'schoolhouse', 'guildhall'];
-const INDUSTRIAL: readonly TownArchetype[] = ['workshop', 'rail-depot', 'foundry'];
+/**
+ * Salts for independent sub-streams. Every new derived field should take one
+ * rather than drawing from the main stream — see rule C. Two of these predate
+ * the grid and are kept at their original values so existing facade and roof
+ * furniture detail is unchanged.
+ */
+export const SEED_SALT = {
+  FACADE: 0xa18f35cd,
+  ROOF_FURNITURE: 0x61c88647,
+  MASSING: 0x9e3779b9,
+  MATERIAL: 0x85ebca6b,
+  TRIM: 0xc2b2ae35,
+  GROUND: 0x27d4eb2f,
+} as const;
+
+type Family = 'residential' | 'commercial' | 'civic' | 'industrial';
+
+/**
+ * Rule A in data form. The `town` row is the original vocabulary, in its
+ * original order — those three arrays must never be reordered or resized.
+ */
+const FAMILY_TABLE: Record<UrbanityBand, Record<Family, readonly TownArchetype[]>> = {
+  village: {
+    residential: ['cottage', 'cottage-row', 'farmhouse'],
+    commercial: ['village-shop', 'smithy', 'market-cross'],
+    civic: ['chapel', 'schoolhouse', 'parish-hall'],
+    industrial: ['barn', 'mill', 'kiln'],
+  },
+  town: {
+    residential: ['cottage', 'townhouse', 'boarding-house'],
+    commercial: ['corner-shop', 'inn', 'market-hall'],
+    civic: ['library', 'schoolhouse', 'guildhall'],
+    industrial: ['workshop', 'rail-depot', 'foundry'],
+  },
+  city: {
+    residential: ['terrace-house', 'tenement', 'mansion-flat'],
+    commercial: ['shopfront-block', 'hotel', 'arcade'],
+    civic: ['bank', 'institute', 'town-hall'],
+    industrial: ['warehouse', 'works', 'terminus'],
+  },
+};
+
+interface ArchetypeSpec {
+  /** Candidate roofs. A single entry consumes NO draw — see `roofFor`. */
+  roofs: readonly TownRoof[];
+  eaves: EavesFront;
+  ground: GroundFloor;
+  cap: RoofCap;
+  trim: Partial<TownTrim>;
+  /** Declared roof headroom when the cap builds past an ordinary roof. */
+  roofFactor?: number;
+}
+
+const NO_TRIM: TownTrim = { cornice: false, parapet: false, stringCourse: false, quoins: false };
+
+/**
+ * One data table instead of a switch per property. Village forms are gable-end
+ * and untrimmed; city forms are eave-end, corniced, and often parapeted — which
+ * is most of what makes the two registers read differently at district zoom.
+ */
+const ARCHETYPE_SPEC: Record<TownArchetype, ArchetypeSpec> = {
+  // ── village ──────────────────────────────────────────────────────────────
+  cottage: { roofs: ['gable'], eaves: 'gable', ground: 'plain', cap: 'none', trim: {} },
+  'cottage-row': {
+    roofs: ['thatch', 'gable'],
+    eaves: 'eave',
+    ground: 'plain',
+    cap: 'none',
+    trim: {},
+  },
+  farmhouse: {
+    roofs: ['catslide', 'half-hip'],
+    eaves: 'gable',
+    ground: 'plain',
+    cap: 'finial',
+    trim: {},
+  },
+  'village-shop': {
+    roofs: ['gable', 'catslide'],
+    eaves: 'gable',
+    ground: 'shopfront',
+    cap: 'none',
+    trim: {},
+  },
+  smithy: {
+    roofs: ['shed', 'catslide'],
+    eaves: 'eave',
+    ground: 'cart-door',
+    cap: 'none',
+    trim: {},
+  },
+  'market-cross': {
+    roofs: ['pyramid'],
+    eaves: 'gable',
+    ground: 'arcade',
+    cap: 'finial',
+    trim: {},
+  },
+  chapel: { roofs: ['gable'], eaves: 'gable', ground: 'plain', cap: 'bellcote', trim: {} },
+  'parish-hall': {
+    roofs: ['half-hip', 'gable'],
+    eaves: 'eave',
+    ground: 'plain',
+    cap: 'none',
+    trim: {},
+  },
+  barn: {
+    roofs: ['gable', 'catslide'],
+    eaves: 'gable',
+    ground: 'cart-door',
+    cap: 'none',
+    trim: {},
+  },
+  mill: { roofs: ['monitor', 'gable'], eaves: 'eave', ground: 'cart-door', cap: 'none', trim: {} },
+  kiln: {
+    roofs: ['conical'],
+    eaves: 'gable',
+    ground: 'cart-door',
+    cap: 'none',
+    trim: {},
+    roofFactor: 1.6,
+  },
+
+  // ── town (original vocabulary) ───────────────────────────────────────────
+  'boarding-house': {
+    roofs: ['hip', 'mansard'],
+    eaves: 'eave',
+    ground: 'plain',
+    cap: 'none',
+    trim: { cornice: true },
+  },
+  townhouse: {
+    roofs: ['mansard', 'gable'],
+    eaves: 'eave',
+    ground: 'plain',
+    cap: 'none',
+    trim: { cornice: true, stringCourse: true },
+  },
+  'corner-shop': {
+    roofs: ['mansard', 'gable'],
+    eaves: 'eave',
+    ground: 'shopfront',
+    cap: 'none',
+    trim: { cornice: true },
+  },
+  'market-hall': {
+    roofs: ['gable', 'hip'],
+    eaves: 'eave',
+    ground: 'arcade',
+    cap: 'none',
+    trim: { cornice: true },
+  },
+  inn: {
+    roofs: ['hip', 'mansard'],
+    eaves: 'eave',
+    ground: 'shopfront',
+    cap: 'none',
+    trim: { cornice: true },
+  },
+  guildhall: {
+    roofs: ['hip', 'mansard'],
+    eaves: 'eave',
+    ground: 'portico',
+    cap: 'cupola',
+    trim: { cornice: true, quoins: true },
+  },
+  library: {
+    roofs: ['hip', 'mansard'],
+    eaves: 'eave',
+    ground: 'portico',
+    cap: 'cupola',
+    trim: { cornice: true, quoins: true },
+  },
+  schoolhouse: { roofs: ['gable'], eaves: 'gable', ground: 'plain', cap: 'bellcote', trim: {} },
+  foundry: { roofs: ['sawtooth'], eaves: 'eave', ground: 'cart-door', cap: 'none', trim: {} },
+  'rail-depot': { roofs: ['gable'], eaves: 'eave', ground: 'arcade', cap: 'none', trim: {} },
+  workshop: { roofs: ['sawtooth'], eaves: 'eave', ground: 'cart-door', cap: 'none', trim: {} },
+
+  // ── city ─────────────────────────────────────────────────────────────────
+  'terrace-house': {
+    roofs: ['parapet', 'mansard'],
+    eaves: 'eave',
+    ground: 'plain',
+    cap: 'none',
+    trim: { cornice: true, parapet: true, stringCourse: true },
+  },
+  tenement: {
+    roofs: ['mansard', 'parapet'],
+    eaves: 'eave',
+    ground: 'plain',
+    cap: 'none',
+    trim: { cornice: true, stringCourse: true },
+  },
+  'mansion-flat': {
+    roofs: ['mansard', 'hip'],
+    eaves: 'eave',
+    ground: 'plain',
+    cap: 'none',
+    trim: { cornice: true, stringCourse: true, quoins: true },
+  },
+  'shopfront-block': {
+    roofs: ['parapet', 'mansard'],
+    eaves: 'eave',
+    ground: 'shopfront',
+    cap: 'none',
+    trim: { cornice: true, parapet: true, stringCourse: true },
+  },
+  hotel: {
+    roofs: ['mansard', 'hip'],
+    eaves: 'eave',
+    ground: 'shopfront',
+    cap: 'lantern',
+    trim: { cornice: true, stringCourse: true, quoins: true },
+    roofFactor: 1.3,
+  },
+  arcade: {
+    roofs: ['barrel', 'monitor'],
+    eaves: 'eave',
+    ground: 'arcade',
+    cap: 'none',
+    trim: { cornice: true, parapet: true },
+  },
+  bank: {
+    roofs: ['parapet', 'hip'],
+    eaves: 'eave',
+    ground: 'portico',
+    cap: 'none',
+    trim: { cornice: true, parapet: true, quoins: true },
+  },
+  institute: {
+    roofs: ['hip', 'parapet'],
+    eaves: 'eave',
+    ground: 'portico',
+    cap: 'cupola',
+    trim: { cornice: true, quoins: true },
+  },
+  'town-hall': {
+    roofs: ['hip', 'mansard'],
+    eaves: 'eave',
+    ground: 'portico',
+    cap: 'clock-tower',
+    trim: { cornice: true, quoins: true, stringCourse: true },
+    roofFactor: 1.6,
+  },
+  warehouse: {
+    roofs: ['monitor', 'gable'],
+    eaves: 'eave',
+    ground: 'cart-door',
+    cap: 'none',
+    trim: { cornice: true, parapet: true },
+  },
+  works: {
+    roofs: ['sawtooth'],
+    eaves: 'eave',
+    ground: 'cart-door',
+    cap: 'none',
+    trim: { parapet: true },
+  },
+  terminus: {
+    roofs: ['barrel', 'monitor'],
+    eaves: 'eave',
+    ground: 'arcade',
+    cap: 'none',
+    trim: { cornice: true, parapet: true },
+  },
+};
+
+/** Every archetype, with the roofs and cap it can actually draw. Exported so
+ *  tests can drive the full cross-product rather than hoping a sampled fixture
+ *  happens to reach the tall forms. */
+export function allArchetypeForms(): Array<{
+  archetype: TownArchetype;
+  roofs: readonly TownRoof[];
+  cap: RoofCap;
+  roofFactor: number;
+}> {
+  return (Object.keys(ARCHETYPE_SPEC) as TownArchetype[]).map((archetype) => {
+    const spec = ARCHETYPE_SPEC[archetype];
+    return {
+      archetype,
+      roofs: spec.roofs,
+      cap: spec.cap,
+      roofFactor: spec.roofFactor ?? 1,
+    };
+  });
+}
+
+/** Archetypes that grow a secondary mass, and which kind. */
+const MASSING_KIND: Partial<Record<TownArchetype, MassingKind>> = {
+  farmhouse: 'ell',
+  'parish-hall': 'ell',
+  barn: 'ell',
+  mill: 'ell',
+  smithy: 'ell',
+  guildhall: 'ell',
+  library: 'ell',
+  inn: 'ell',
+  'rail-depot': 'ell',
+  'mansion-flat': 'setback',
+  tenement: 'setback',
+  hotel: 'setback',
+  bank: 'setback',
+  institute: 'setback',
+  'town-hall': 'setback',
+  warehouse: 'setback',
+};
+
+/**
+ * Resolve the secondary mass from its own salted sub-stream. Kept strictly
+ * inside the footprint (see the `Massing` doc comment) and given its own draw
+ * order flag so an N/W wing paints before the main block and an S/E wing after.
+ */
+function massingFor(archetype: TownArchetype, seed: number, storeys: number): Massing {
+  const kind = MASSING_KIND[archetype];
+  if (!kind) return NO_MASSING;
+  const random = seeded(seed ^ SEED_SALT.MASSING);
+  if (kind === 'setback') {
+    // A top storey stepped in from the S and E fronts.
+    if (storeys < 3) return NO_MASSING;
+    return { kind, u0: 0.12, v0: 0.12, u1: 0.88, v1: 0.88, height: 1.22, behind: false };
+  }
+  // An ell on one of the four corners, half the footprint, one storey lower.
+  const corner = Math.floor(random() * 4);
+  const long = 0.46 + random() * 0.12;
+  const behind = corner === 0 || corner === 3;
+  const box =
+    corner === 0
+      ? { u0: 0.04, v0: 0.04, u1: 0.04 + long, v1: 0.52 }
+      : corner === 1
+        ? { u0: 0.96 - long, v0: 0.04, u1: 0.96, v1: 0.52 }
+        : corner === 2
+          ? { u0: 0.96 - long, v0: 0.48, u1: 0.96, v1: 0.96 }
+          : { u0: 0.04, v0: 0.48, u1: 0.04 + long, v1: 0.96 };
+  return { kind, ...box, height: storeys <= 1 ? 0.72 : (storeys - 1) / storeys, behind };
+}
 
 function pick<T>(items: readonly T[], random: () => number): T {
   return items[Math.min(items.length - 1, Math.floor(random() * items.length))]!;
@@ -52,38 +518,69 @@ function ridgeFor(block: Pick<MapBlock, 'rect'>, random: () => number): RidgeAxi
   return random() < 0.5 ? 'x' : 'y';
 }
 
+/**
+ * Roof for an archetype. The **zero-draw fast path is load-bearing**: five of
+ * the original town archetypes (cottage, schoolhouse, rail-depot, foundry,
+ * workshop) consumed no draw here, so turning their single roof into a weighted
+ * pick would silently reshuffle every file that has one. See rule B.
+ */
 function roofFor(archetype: TownArchetype, random: () => number): TownRoof {
-  switch (archetype) {
-    case 'cottage':
-    case 'schoolhouse':
-    case 'rail-depot':
-      return 'gable';
-    case 'townhouse':
-    case 'corner-shop':
-      return random() < 0.55 ? 'mansard' : 'gable';
-    case 'boarding-house':
-    case 'inn':
-    case 'library':
-    case 'guildhall':
-      return random() < 0.7 ? 'hip' : 'mansard';
-    case 'market-hall':
-      return random() < 0.65 ? 'gable' : 'hip';
-    case 'foundry':
-    case 'workshop':
-      return 'sawtooth';
-  }
+  const roofs = ARCHETYPE_SPEC[archetype].roofs;
+  if (roofs.length === 1) return roofs[0]!;
+  // The original two-candidate probabilities, preserved: the town archetypes
+  // that used 0.55/0.7/0.65 splits keep them via the ordering in the spec.
+  return random() < TWO_ROOF_BIAS[archetype]! ? roofs[0]! : roofs[1]!;
 }
+
+/** First-candidate probability for every multi-roof archetype. The town
+ *  entries reproduce the pre-grid constants exactly. */
+const TWO_ROOF_BIAS: Partial<Record<TownArchetype, number>> = {
+  townhouse: 0.55,
+  'corner-shop': 0.55,
+  'boarding-house': 0.7,
+  inn: 0.7,
+  library: 0.7,
+  guildhall: 0.7,
+  'market-hall': 0.65,
+  // New forms: a plain majority for the signature roof of each archetype.
+  'cottage-row': 0.6,
+  farmhouse: 0.55,
+  'village-shop': 0.65,
+  smithy: 0.6,
+  'parish-hall': 0.6,
+  barn: 0.7,
+  mill: 0.6,
+  'terrace-house': 0.6,
+  tenement: 0.55,
+  'mansion-flat': 0.6,
+  'shopfront-block': 0.65,
+  hotel: 0.6,
+  arcade: 0.7,
+  bank: 0.6,
+  institute: 0.6,
+  'town-hall': 0.6,
+  warehouse: 0.6,
+  terminus: 0.65,
+};
 
 function isTestFile(id: string): boolean {
   return /(?:^|[/_.-])(?:test|tests|spec|specs)(?:[/_.-]|$)/i.test(id);
 }
+
+/** The civic landmark of each band. */
+const LANDMARK_ARCHETYPE: Record<UrbanityBand, TownArchetype> = {
+  village: 'parish-hall',
+  town: 'guildhall',
+  city: 'town-hall',
+};
 
 /**
  * Resolve a file into a deterministic period building. The path is the seed
  * anchor; code facts select the architectural family and visible details:
  *
  * - dependency zone → residential / shopfront / civic / workshop family
- * - landmark → guildhall with a clock cupola
+ * - urbanity band → which register of that family (village / town / city)
+ * - landmark → the band's civic landmark, clock-topped in the city
  * - test path → schoolhouse (unless the file is industrial)
  * - levels → storeys, symbols → facade bays/dormers, churn → extra chimneys
  *
@@ -94,43 +591,71 @@ export function townStyleForBlock(block: MapBlock): TownStyle {
   const seed = hash32(`town-1910:v1:${block.id}`);
   const random = seeded(seed);
   const zone = block.health?.zone ?? 'residential';
+  const band = bandOf(block);
+  const table = FAMILY_TABLE[band];
+
   let archetype: TownArchetype;
-  if (block.landmark) archetype = 'guildhall';
+  if (block.landmark) archetype = LANDMARK_ARCHETYPE[band];
   else if (isTestFile(block.id) && zone !== 'industrial') archetype = 'schoolhouse';
-  else if (zone === 'commercial') archetype = pick(COMMERCIAL, random);
-  else if (zone === 'civic') archetype = pick(CIVIC, random);
-  else if (zone === 'industrial') archetype = pick(INDUSTRIAL, random);
-  else archetype = pick(RESIDENTIAL, random);
+  else archetype = pick(table[zone], random);
 
   const storeys = Math.max(1, Math.min(5, block.levels ?? 1));
   const symbolBays = Math.ceil(Math.sqrt(Math.max(1, block.buildingCount)));
-  const bays = Math.max(1, Math.min(5, symbolBays + (random() < 0.45 ? 1 : 0)));
+  const rawBays = Math.max(1, Math.min(5, symbolBays + (random() < 0.45 ? 1 : 0)));
   const isIndustrial = zone === 'industrial';
   const isCommercial = zone === 'commercial';
   const isCivic = zone === 'civic' || block.landmark === true;
   const churn = block.health?.churn ?? 0;
   const roof = roofFor(archetype, random);
+  const ridge = ridgeFor(block, random);
+  const spec = ARCHETYPE_SPEC[archetype];
+
+  // Band adjustments are POST-HOC and consume no draw (rule B): a city terrace
+  // wants a tight bay rhythm, a village cottage a sparse one.
+  const bays =
+    band === 'city'
+      ? Math.max(1, Math.min(6, Math.round(rawBays * 1.4)))
+      : band === 'village'
+        ? Math.min(3, rawBays)
+        : rawBays;
+
+  const chimneys = isIndustrial
+    ? 1 + Math.min(2, Math.floor(churn / 8) + (random() < 0.5 ? 1 : 0))
+    : archetype === 'cottage' || archetype === 'inn' || archetype === 'boarding-house'
+      ? 1 + (random() < 0.25 ? 1 : 0)
+      : 0;
+  const cupola = isCivic && (block.landmark === true || random() < 0.5);
+  // ── main stream ends here; nothing below may draw from `random` ──────────
 
   return {
     archetype,
     roof,
-    ridge: ridgeFor(block, random),
+    ridge,
     storeys,
     bays,
-    chimneys: isIndustrial
-      ? 1 + Math.min(2, Math.floor(churn / 8) + (random() < 0.5 ? 1 : 0))
-      : archetype === 'cottage' || archetype === 'inn' || archetype === 'boarding-house'
-        ? 1 + (random() < 0.25 ? 1 : 0)
-        : 0,
+    chimneys:
+      chimneys === 0 && band === 'city' && !isIndustrial && storeys >= 3
+        ? // City terraces carry stacks on the party-wall line rather than the
+          // seeded one-or-two of a cottage. Derived from bays, so no new draw.
+          Math.max(1, Math.min(3, Math.floor(bays / 2)))
+        : chimneys,
     dormers:
       roof === 'mansard' || (roof === 'gable' && storeys >= 3)
         ? Math.min(3, Math.max(1, Math.floor(bays / 2)))
         : 0,
     awning: isCommercial && archetype !== 'market-hall',
-    cupola: isCivic && (block.landmark === true || random() < 0.5),
+    cupola,
     clock: block.landmark === true,
     sawteeth: roof === 'sawtooth' ? Math.max(2, Math.min(5, bays)) : 0,
     seed,
+    band,
+    eaves: spec.eaves,
+    ground: spec.ground,
+    cap: spec.cap === 'cupola' && !cupola ? 'none' : spec.cap,
+    trim: { ...NO_TRIM, ...spec.trim },
+    material: materialsFor(seed ^ SEED_SALT.MATERIAL, band, isIndustrial),
+    massing: massingFor(archetype, seed, storeys),
+    ...(spec.roofFactor !== undefined ? { roofFactor: spec.roofFactor } : {}),
   };
 }
 
@@ -144,6 +669,7 @@ export function townStyleForSymbol(symbol: MapBuilding, parent: MapBlock): TownS
   const classLike = /class|interface|struct|enum|trait|type/.test(kind);
   const moduleLike = /module|namespace|package/.test(kind);
   const industrial = parent.health?.zone === 'industrial';
+  const band = bandOf(parent);
   const roof: TownRoof = industrial
     ? random() < 0.65
       ? 'sawtooth'
@@ -159,8 +685,10 @@ export function townStyleForSymbol(symbol: MapBuilding, parent: MapBlock): TownS
           : 'shed';
   const storeys = Math.max(1, Math.min(3, 1 + Math.round(symbol.height * 2)));
   const bays = Math.max(1, Math.min(3, Math.ceil(Math.sqrt(Math.max(1, symbol.lines ?? 1)) / 3)));
+  const archetype: TownArchetype = industrial ? 'workshop' : classLike ? 'townhouse' : 'cottage';
+  const spec = ARCHETYPE_SPEC[archetype];
   return {
-    archetype: industrial ? 'workshop' : classLike ? 'townhouse' : 'cottage',
+    archetype,
     roof,
     ridge: parent.rect.w >= parent.rect.h ? 'x' : 'y',
     storeys,
@@ -172,9 +700,23 @@ export function townStyleForSymbol(symbol: MapBuilding, parent: MapBlock): TownS
     clock: false,
     sawteeth: roof === 'sawtooth' ? 2 + (random() < 0.4 ? 1 : 0) : 0,
     seed,
+    band,
+    eaves: spec.eaves,
+    ground: 'plain',
+    cap: 'none',
+    // Minis are a few pixels across; trim would be sub-pixel noise.
+    trim: NO_TRIM,
+    material: materialsFor(seed ^ SEED_SALT.MATERIAL, band, industrial),
+    // Minis are a few pixels across; a wing would be indistinguishable noise.
+    massing: NO_MASSING,
   };
 }
 
 export function townArchetypeLabel(style: TownStyle): string {
-  return style.archetype.replace('-', ' ');
+  return style.archetype.replace(/-/g, ' ');
+}
+
+/** Human-readable register for the file inspector, e.g. "village smithy". */
+export function townStyleLabel(style: TownStyle): string {
+  return `${style.band} ${townArchetypeLabel(style)}`;
 }

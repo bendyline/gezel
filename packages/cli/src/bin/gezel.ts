@@ -509,6 +509,19 @@ skills
     if (result.persona) console.error(`persona: ${result.persona.role}`);
   });
 
+const handboek = program.command('handboek').description('The built-in documentation (Handboek)');
+
+handboek
+  .command('export')
+  .description('Render the Handboek as a static HTML site for gezel.com (no daemon)')
+  .requiredOption('--out <dir>', 'output directory')
+  .action(async (opts: { out: string }) => {
+    const { runHandboekExport } = await import('../handboek-export.js');
+    const result = await runHandboekExport({ out: opts.out });
+    console.log(`Handboek exported: ${result.pages} pages → ${result.out}`);
+    for (const id of result.skipped) console.error(`  skipped (no body): ${id}`);
+  });
+
 const task = program.command('task').description('Manage tasks');
 
 task

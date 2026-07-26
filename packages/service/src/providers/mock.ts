@@ -90,6 +90,14 @@ export class MockProvider implements LLMProvider {
    * through to the normal scripted response when empty.
    */
   private readonly externalToolCallQueue: ExternalToolCall[][] = [];
+  /**
+   * When set, the next {@link createSession} blocks — after recording its
+   * call — until the promise resolves. Lets a test park a turn inside
+   * `ensureState` (the `inflight` slot is already grabbed, but the
+   * per-turn AbortController isn't wired yet) so a `cancelInflight` can
+   * land in that setup window deterministically.
+   */
+  private createSessionGate: Promise<void> | null = null;
   private nextSessionCounter = 1;
 
   constructor(opts: { name?: Named } = {}) {
@@ -165,6 +173,20 @@ export class MockProvider implements LLMProvider {
   }
 
   /**
+   * Make the next `createSession` block (after recording its call) until
+   * the returned `release` fires. Holds a turn inside `ensureState`,
+   * before the manager wires its per-turn AbortController, so a test can
+   * exercise the cancel-before-wiring path.
+   */
+  gateNextCreateSession(): { release: () => void } {
+    let release = (): void => {};
+    this.createSessionGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    return { release };
+  }
+
+  /**
    * Script the external tool calls the next `sendAndWait` should emit
    * — used by `/v1/chat/completions` integration tests to drive the
    * tool-calling round-trip without a real model. Passing `[]` makes
@@ -196,6 +218,11 @@ export class MockProvider implements LLMProvider {
 
   async createSession(opts: SessionOpts): Promise<LLMSession> {
     this.calls.push({ kind: 'create', opts });
+    const gate = this.createSessionGate;
+    if (gate) {
+      this.createSessionGate = null;
+      await gate;
+    }
     const sessionId = opts.openaiPreviousResponseId ?? `mock-session-${this.nextSessionCounter++}`;
     const bridges = await McpBridgePool.fromSessionOpts(opts, '[mock]');
     const session = new MockSession(this, sessionId, opts, bridges);

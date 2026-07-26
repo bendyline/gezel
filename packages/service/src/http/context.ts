@@ -13,6 +13,7 @@ import type { GitHubManager } from '../github/manager.js';
 import type { GithubPrs } from '../github/prs.js';
 import type { GrantManager } from '../grants/manager.js';
 import type { GrowthEngine } from '../growth/engine.js';
+import type { HandboekEngine } from '../handboek/engine.js';
 import type { HistoryManager } from '../history/manager.js';
 import type { ContentIndex } from '../index-store/content-index.js';
 import type { GlobalIndex } from '../index-store/global-index.js';
@@ -72,6 +73,11 @@ export interface ServiceContext {
   meesterStatus: MeesterStatusGenerator;
   scriptRunner: ScriptRunner;
   catalog: CatalogService;
+  /**
+   * The built-in documentation engine (TOC + articles, personalized per
+   * render mode). Backs `/api/handboek` and the `how_do_i` MCP tool.
+   */
+  handboek: HandboekEngine;
   secrets: SecretStore;
   github: GitHubManager;
   githubPrs: GithubPrs;

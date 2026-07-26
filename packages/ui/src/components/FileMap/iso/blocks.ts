@@ -10,7 +10,15 @@ import {
 } from '../issue-marker.js';
 import { ageBucket, prismColors } from '../palette.js';
 import { hash32, seeded } from '../seed.js';
-import { type BlockGeom, buildingAnchorScreen, buildingsForBlock, geomInView } from './geometry.js';
+import { urbanityOf } from '../urbanity.js';
+import {
+  type BlockGeom,
+  buildingAnchorScreen,
+  buildingsForBlock,
+  geomInView,
+  roofHeadroom,
+} from './geometry.js';
+import { drawIsoLot } from './lots.js';
 import {
   DiamondBatcher,
   type PrismScreen,
@@ -31,7 +39,7 @@ import {
 } from './projection.js';
 import { type IsoRenderState, sp } from './state.js';
 import { drawTownBuilding } from './town-buildings.js';
-import { townStyleForBlock, townStyleForSymbol } from './town-style.js';
+import { type TownStyle, townStyleForBlock, townStyleForSymbol } from './town-style.js';
 
 /**
  * The building pass: every block drawn back-to-front as an extruded prism —
@@ -96,6 +104,9 @@ export function drawIsoBlocks(ctx: CanvasRenderingContext2D, s: IsoRenderState):
   for (const idx of s.geom.order) {
     const g = s.geom.geoms[idx]!;
     if (!geomInView(s.cam, g, s.viewW, s.viewH)) continue;
+    // The parcel goes down first, inside the depth loop, so it can never paint
+    // over a neighbour the sort placed in front of this block.
+    drawIsoLot(ctx, s, g.block);
     drawOneBlock(ctx, s, g, now);
     if (decor) {
       const list = decor.get(g.block.id);
@@ -151,7 +162,7 @@ function mainRoofAnchor(s: IsoRenderState, g: BlockGeom): { x: number; y: number
   const anchor = centerTop(s, g);
   return {
     x: anchor.x,
-    y: anchor.y - townRoofRiseIso(g.block.rect, s.cam.scale) * s.cam.scale,
+    y: anchor.y - roofHeadroom(g, s.cam.scale) * s.cam.scale,
   };
 }
 
@@ -273,8 +284,14 @@ function drawOneBlock(
   }
 
   const age = s.ageLens ? ageBucket(b.lastTouchedAt ?? b.placedAt, now) : undefined;
-  const colors = prismColors(b.lang, p, age);
-  const townStyle = townStyleForBlock(b);
+  // Material is a district-and-closer treatment: at city tier everything goes
+  // through the DiamondBatcher, which buckets by color string, so per-building
+  // materials there would multiply the bucket count for detail nobody can see.
+  const material =
+    g.style && !s.ageLens && s.tier !== 'city'
+      ? { ...g.style.material, urbanity: urbanityOf(b) }
+      : undefined;
+  const colors = prismColors(b.lang, p, age, material);
   // Gate on placed minis, not `buildingCount`: past the payload cap a
   // symbol-carrying block has no buildings and must read as a normal prism,
   // not an empty parking lot.
@@ -300,7 +317,15 @@ function drawOneBlock(
     return;
   }
 
-  drawTownBuilding(ctx, s, prism, townStyle, colors, { suppressDetails: s.ageLens === true });
+  const style = g.style ?? townStyleForBlock(b);
+  const massing = s.ageLens ? null : massingPrism(s, b, g, style);
+  // An N/W wing paints BEFORE the main mass and an S/E wing after, so the
+  // secondary volume occludes correctly against its own building.
+  if (massing?.behind) drawMassing(ctx, massing.prism, colors);
+  drawTownBuilding(ctx, s, prism, style, colors, {
+    suppressDetails: s.ageLens === true,
+  });
+  if (massing && !massing.behind) drawMassing(ctx, massing.prism, colors);
   // NW edge highlight along the top-north rim.
   ctx.strokeStyle = colors.edge;
   ctx.lineWidth = 1;
@@ -312,6 +337,52 @@ function drawOneBlock(
 }
 
 const NO_MINIS: MapBuilding[] = [];
+
+/** Below this projected width a wing is a smudge, not a wing. */
+const MIN_MASSING_PX = 26;
+
+/**
+ * Project a building's secondary mass, or null when it has none / is too small
+ * to read.
+ *
+ * The sub-rect is normalized inside the block's own footprint by construction
+ * (see `Massing`), which is what keeps `iso/depth.ts` correct: it sorts
+ * footprints, so any geometry outside the footprint could be occluded by a
+ * block the sort believes is behind this one.
+ */
+function massingPrism(
+  s: IsoRenderState,
+  b: MapBlock,
+  g: BlockGeom,
+  style: TownStyle,
+): { prism: PrismScreen; behind: boolean } | null {
+  const m = style.massing;
+  if (m.kind === 'none' || s.tier === 'city') return null;
+  const widthPx = (b.rect.w + b.rect.h) * s.cam.scale;
+  if (widthPx < MIN_MASSING_PX) return null;
+  const rect = {
+    x: b.rect.x + b.rect.w * m.u0,
+    y: b.rect.y + b.rect.h * m.v0,
+    w: b.rect.w * (m.u1 - m.u0),
+    h: b.rect.h * (m.v1 - m.v0),
+  };
+  return { prism: prismScreen(s.cam, rect, g.hIso * m.height), behind: m.behind };
+}
+
+function drawMassing(
+  ctx: CanvasRenderingContext2D,
+  prism: PrismScreen,
+  colors: { top: string; wallL: string; wallR: string; edge: string },
+): void {
+  drawPrism(ctx, prism, colors);
+  ctx.strokeStyle = colors.edge;
+  ctx.lineWidth = 0.8;
+  ctx.beginPath();
+  ctx.moveTo(prism.tw.x, prism.tw.y);
+  ctx.lineTo(prism.tn.x, prism.tn.y);
+  ctx.lineTo(prism.te.x, prism.te.y);
+  ctx.stroke();
+}
 
 function drawPodiumBuildings(
   ctx: CanvasRenderingContext2D,

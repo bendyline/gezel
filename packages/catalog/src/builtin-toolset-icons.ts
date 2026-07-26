@@ -72,6 +72,7 @@ export const BUILTIN_TOOLSET_ICONS: Record<string, string> = {
 
   // Clock + back arrow — looking back over time.
   history: `<svg ${SVG_ATTRS}><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/><path d="M12 8v4l3 2"/></svg>`,
+  handboek: `<svg ${SVG_ATTRS}><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/><path d="M10 2v7l2.5-1.8L15 9V2"/></svg>`,
 
   // Speech bubble with a question mark.
   interaction: `<svg ${SVG_ATTRS}><path d="M21 12a8 8 0 0 1-12.5 6.5L3 20l1.5-5.5A8 8 0 1 1 21 12z"/><path d="M9.5 9.5a2.5 2.5 0 0 1 5 0c0 1.5-2.5 2-2.5 3.5"/><circle cx="12" cy="16" r="0.6" fill="currentColor"/></svg>`,

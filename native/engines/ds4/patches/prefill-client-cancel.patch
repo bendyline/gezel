@@ -1,0 +1,135 @@
+diff --git a/ds4_server.c b/ds4_server.c
+index f4f563e..afaa9c9 100644
+--- a/ds4_server.c
++++ b/ds4_server.c
+@@ -10414,6 +10414,40 @@ static void log_tool_calls_summary(const char *ctx, const tool_calls *calls,
+     buf_free(&names);
+ }
+ 
++/* Non-blocking half-close probe.  A streaming client that aborted its fetch
++ * sends a FIN; recv then reports EOF (0) or ECONNRESET.  We only PEEK, so no
++ * request bytes are consumed.  EAGAIN/EWOULDBLOCK means the peer is still
++ * attached and waiting for its response. */
++static bool socket_peer_closed(int fd) {
++    if (fd < 0) return false;
++    char probe;
++    for (;;) {
++        ssize_t n = recv(fd, &probe, 1, MSG_PEEK | MSG_DONTWAIT);
++        if (n == 0) return true;
++        if (n > 0) return false;
++        if (errno == EINTR) continue;
++        if (errno == ECONNRESET || errno == ENOTCONN || errno == EPIPE) return true;
++        return false;
++    }
++}
++
++/* Cooperative-cancel hook armed on the session during prefill.
++ * ds4_session_sync() polls this at safe chunk boundaries; returning true
++ * unwinds prefill with DS4_SESSION_SYNC_INTERRUPTED instead of grinding a full
++ * prompt whose caller has already disconnected.  Without this, a cancelled turn
++ * kept the engine busy for the whole prefill (~150s on a large SSD-streamed
++ * prompt), blocking the next turn behind a zombie. */
++static bool server_prefill_cancel_cb(void *ud) {
++    server_prefill_progress *p = ud;
++    if (!p) return false;
++    if (p->stream_failed) return true;
++    if (p->stream && socket_peer_closed(p->fd)) {
++        p->stream_failed = true;
++        return true;
++    }
++    return false;
++}
++
+ static void server_progress_cb(void *ud, const char *event, int current, int total) {
+     server_prefill_progress *p = ud;
+     if (!p || !event) return;
+@@ -10737,10 +10771,12 @@ static void canonicalize_tool_checkpoint(server *s, server_slot *slot,
+         snprintf(rebuild_progress.ctx, sizeof(rebuild_progress.ctx), "%s", rebuild_ctx);
+         ds4_session_set_progress(slot->session, server_progress_cb, &rebuild_progress);
+         ds4_session_set_display_progress(slot->session, server_progress_cb, &rebuild_progress);
++        ds4_session_set_cancel(slot->session, server_prefill_cancel_cb, &rebuild_progress);
+         if (server_session_sync(s, slot, sync_prompt,
+                                 sync_err, sizeof(sync_err)) == 0) {
+             ds4_session_set_progress(slot->session, NULL, NULL);
+             ds4_session_set_display_progress(slot->session, NULL, NULL);
++            ds4_session_set_cancel(slot->session, NULL, NULL);
+             const double rebuild_sec = now_sec() - rebuild_t0;
+             if (loaded > 0) {
+                 server_log(DS4_LOG_KVCACHE,
+@@ -10760,6 +10796,7 @@ static void canonicalize_tool_checkpoint(server *s, server_slot *slot,
+         } else {
+             ds4_session_set_progress(slot->session, NULL, NULL);
+             ds4_session_set_display_progress(slot->session, NULL, NULL);
++            ds4_session_set_cancel(slot->session, NULL, NULL);
+             server_log(DS4_LOG_KVCACHE,
+                        "ds4-server: tool checkpoint rebuild failed ctx=%s request_ctx=%s source=%s cached=%d replay=%d target=%d error=\"%s\"",
+                        rebuild_ctx, ctx, source, loaded, replay_tokens,
+@@ -11170,6 +11207,7 @@ static void generate_job(server *s, server_slot *slot, job *j) {
+                req_flags);
+     ds4_session_set_progress(slot->session, server_progress_cb, &progress);
+     ds4_session_set_display_progress(slot->session, server_progress_cb, &progress);
++    ds4_session_set_cancel(slot->session, server_prefill_cancel_cb, &progress);
+ 
+     int cold_store_len = 0;
+     if (cached == 0 &&
+@@ -11202,15 +11240,24 @@ static void generate_job(server *s, server_slot *slot, job *j) {
+     {
+         ds4_tokens prefix = {0};
+         tokens_copy_prefix(&prefix, prompt_for_sync, cold_store_len);
+-        if (server_session_sync(s, slot, &prefix, err, sizeof(err)) != 0) {
++        int cold_rc = server_session_sync(s, slot, &prefix, err, sizeof(err));
++        if (cold_rc != 0) {
+             ds4_tokens_free(&prefix);
+             ds4_tokens_free(&effective_prompt);
+             ds4_session_set_progress(slot->session, NULL, NULL);
+             ds4_session_set_display_progress(slot->session, NULL, NULL);
++            ds4_session_set_cancel(slot->session, NULL, NULL);
+             kv_cache_slot_restore_suppressed(slot, suppressed_continued_last,
+                                              cold_store_len);
+             kv_cache_discard_failed_disk_entry(s, slot, disk_cache_path);
+             free(disk_cache_path);
++            if (cold_rc == DS4_SESSION_SYNC_INTERRUPTED) {
++                server_log(DS4_LOG_GENERATION,
++                           "ds4-server: %s ctx=%s%s%s prefill cancelled (client gone)",
++                           j->req.kind == REQ_CHAT ? "chat" : "completion",
++                           ctx_span, req_flags[0] ? " " : "", req_flags);
++                return;
++            }
+             trace_event(s, trace_id, "prefill failed: %s", err);
+             send_prefill_failure_response(s, j, &progress, ctx_span, req_flags, err);
+             return;
+@@ -11227,15 +11274,24 @@ static void generate_job(server *s, server_slot *slot, job *j) {
+         ds4_tokens_free(&prefix);
+     }
+ 
+-    if (server_session_sync(s, slot, prompt_for_sync,
+-                            err, sizeof(err)) != 0) {
++    int sync_rc = server_session_sync(s, slot, prompt_for_sync,
++                                      err, sizeof(err));
++    if (sync_rc != 0) {
+         ds4_tokens_free(&effective_prompt);
+         ds4_session_set_progress(slot->session, NULL, NULL);
+         ds4_session_set_display_progress(slot->session, NULL, NULL);
++        ds4_session_set_cancel(slot->session, NULL, NULL);
+         kv_cache_slot_restore_suppressed(slot, suppressed_continued_last,
+                                          cold_store_len);
+         kv_cache_discard_failed_disk_entry(s, slot, disk_cache_path);
+         free(disk_cache_path);
++        if (sync_rc == DS4_SESSION_SYNC_INTERRUPTED) {
++            server_log(DS4_LOG_GENERATION,
++                       "ds4-server: %s ctx=%s%s%s prefill cancelled (client gone)",
++                       j->req.kind == REQ_CHAT ? "chat" : "completion",
++                       ctx_span, req_flags[0] ? " " : "", req_flags);
++            return;
++        }
+         trace_event(s, trace_id, "prefill failed: %s", err);
+         send_prefill_failure_response(s, j, &progress, ctx_span, req_flags, err);
+         return;
+@@ -11248,6 +11304,7 @@ static void generate_job(server *s, server_slot *slot, job *j) {
+     if (!thinking_live_continuation) thinking_live_clear(s, slot);
+     ds4_session_set_progress(slot->session, NULL, NULL);
+     ds4_session_set_display_progress(slot->session, NULL, NULL);
++    ds4_session_set_cancel(slot->session, NULL, NULL);
+     kv_cache_maybe_store_continued(s, slot);
+     server_log(DS4_LOG_PREFILL,
+                "ds4-server: %s ctx=%s%s%s prompt done %.3fs",

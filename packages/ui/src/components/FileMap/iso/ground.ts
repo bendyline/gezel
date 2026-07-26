@@ -1,5 +1,6 @@
 import type { Rect } from '@bendyline/gezel';
 import type { Camera } from '../camera.js';
+import { districtBands } from '../urbanity.js';
 import { isoCorners } from './projection.js';
 import { type IsoRenderState, sp } from './state.js';
 
@@ -90,20 +91,41 @@ export function drawIsoGround(ctx: CanvasRenderingContext2D, s: IsoRenderState):
   // Streets, widest tier first so pavement layers read correctly.
   const streets = model.streets ?? [];
   if (streets.length > 0) {
+    // Surface by register as well as tier: a village lane is a dirt track, a
+    // town street is cobbled, a city avenue is macadam. Costs nothing per
+    // frame — the same fills, grouped into 12 `fillStyle` changes instead of 4.
+    const bands = s.tier === 'city' ? null : districtBands(model);
     const pavement = [
       palette.pavementAvenue,
       palette.pavementStreet,
       palette.pavementLane,
       palette.pavementLane,
     ];
+    const surfaceFor = (st: { tier: number; districtId: string | null }): string => {
+      if (!bands) return pavement[st.tier]!;
+      const band = st.districtId ? bands.get(st.districtId) : undefined;
+      if (band === 'village') return palette.dirtLane;
+      if (band === 'town') return palette.cobble;
+      return pavement[st.tier]!;
+    };
     for (let tier = 0; tier < 4; tier++) {
       if (s.tier === 'city' && tier > 1) break;
-      ctx.fillStyle = pavement[tier]!;
+      // Group by resolved surface so the fillStyle churn stays bounded.
+      const bySurface = new Map<string, typeof streets>();
       for (const st of streets) {
         if (st.tier !== tier) continue;
         if (!groundInView(cam, st.rect, viewW, viewH)) continue;
-        pathDiamond(ctx, cam, st.rect);
-        ctx.fill();
+        const key = surfaceFor(st);
+        const list = bySurface.get(key);
+        if (list) list.push(st);
+        else bySurface.set(key, [st]);
+      }
+      for (const [surface, list] of bySurface) {
+        ctx.fillStyle = surface;
+        for (const st of list) {
+          pathDiamond(ctx, cam, st.rect);
+          ctx.fill();
+        }
       }
     }
 

@@ -1,3 +1,4 @@
+import { type MaterialKey, applyMaterial, hsl, wallHueKeep, wallLitDelta } from './material.js';
 import { hueFromString } from './seed.js';
 
 /**
@@ -53,6 +54,15 @@ export interface CityPalette {
   /** District label plate (iso label engine). */
   labelPlate: string;
   labelPlateStroke: string;
+  /** Village ground and boundary tones — see iso/lots.ts. */
+  hedge: string;
+  fence: string;
+  orchard: string;
+  /** Street surfaces below macadam: village dirt lane, town cobble. */
+  dirtLane: string;
+  cobble: string;
+  /** Market-stall awning on a village square. */
+  stall: string;
 }
 
 export function buildPalette(dark: boolean): CityPalette {
@@ -90,6 +100,12 @@ export function buildPalette(dark: boolean): CityPalette {
         avenueDash: 'hsl(45 45% 48%)',
         labelPlate: 'hsl(228 10% 10% / 0.85)',
         labelPlateStroke: 'hsl(228 10% 34%)',
+        hedge: 'hsl(128 22% 22%)',
+        fence: 'hsl(36 16% 38%)',
+        orchard: 'hsl(120 18% 20%)',
+        dirtLane: 'hsl(32 16% 20%)',
+        cobble: 'hsl(226 7% 22%)',
+        stall: 'hsl(12 42% 42%)',
       }
     : {
         dark: false,
@@ -124,6 +140,12 @@ export function buildPalette(dark: boolean): CityPalette {
         avenueDash: 'hsl(46 40% 94%)',
         labelPlate: 'hsl(46 30% 96% / 0.88)',
         labelPlateStroke: 'hsl(44 16% 72%)',
+        hedge: 'hsl(122 26% 42%)',
+        fence: 'hsl(38 20% 62%)',
+        orchard: 'hsl(104 28% 68%)',
+        dirtLane: 'hsl(34 24% 70%)',
+        cobble: 'hsl(44 8% 74%)',
+        stall: 'hsl(10 48% 58%)',
       };
 }
 
@@ -234,12 +256,25 @@ const AGE_WALLR_LIGHT = [
   'hsl(28 25% 65%)',
 ];
 
+/** Optional material treatment for a building. Omitted ⇒ the pre-material
+ *  colors, byte for byte, which is what keeps legacy payloads and the city-tier
+ *  batcher unchanged. */
+export interface MaterialTreatment {
+  wall: MaterialKey;
+  roof: MaterialKey;
+  /** Continuous urbanity — how far the wall pulls off the language hue. */
+  urbanity: number;
+}
+
 export function prismColors(
   lang: string | null | undefined,
   p: CityPalette,
   age?: 0 | 1 | 2 | 3 | null,
+  material?: MaterialTreatment,
 ): PrismColors {
   const base = roofColors(lang, p, age);
+  // The age lens owns the whole surface: one clean color per file so its
+  // recency signal stays legible. Material is deliberately not applied here.
   if (age !== null && age !== undefined) {
     const wallR = p.dark ? AGE_WALLR_DARK[age]! : AGE_WALLR_LIGHT[age]!;
     return { top: base.roof, wallL: base.facade, wallR, edge: base.edge };
@@ -253,10 +288,29 @@ export function prismColors(
     };
   }
   const hue = roofHue(lang);
+  if (!material) {
+    return {
+      top: base.roof,
+      wallL: base.facade,
+      wallR: p.dark ? `hsl(${hue} 36% 21%)` : `hsl(${hue} 42% 44%)`,
+      edge: base.edge,
+    };
+  }
+  // Roof keeps the language hue (hueKeep 1); walls pull toward their material
+  // by however urban the ground is. `litDelta` is shared, so the roof/facade
+  // lightness delta that carries the 3D reading survives untouched.
+  const sat = p.dark ? { top: 34, wall: 36, edge: 40 } : { top: 48, wall: 42, edge: 55 };
+  const lit = p.dark
+    ? { top: 42, wallL: 28, wallR: 21, edge: 52 }
+    : { top: 70, wallL: 54, wallR: 44, edge: 80 };
+  const keep = wallHueKeep(material.urbanity);
+  // Walls take their lightness shift relative to the roof's so a light wall
+  // material can never climb into a dark roof and flatten the prism.
+  const wallLit = wallLitDelta(material.wall, material.roof);
   return {
-    top: base.roof,
-    wallL: base.facade,
-    wallR: p.dark ? `hsl(${hue} 36% 21%)` : `hsl(${hue} 42% 44%)`,
-    edge: base.edge,
+    top: hsl(applyMaterial({ h: hue, s: sat.top, l: lit.top }, material.roof, 1)),
+    wallL: hsl(applyMaterial({ h: hue, s: sat.wall, l: lit.wallL }, material.wall, keep, wallLit)),
+    wallR: hsl(applyMaterial({ h: hue, s: sat.wall, l: lit.wallR }, material.wall, keep, wallLit)),
+    edge: hsl(applyMaterial({ h: hue, s: sat.edge, l: lit.edge }, material.roof, 1)),
   };
 }

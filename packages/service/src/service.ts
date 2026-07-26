@@ -46,6 +46,8 @@ import { GitHubManager } from './github/manager.js';
 import { GithubPrs } from './github/prs.js';
 import { createGrantManager, parseAutoApproveAppIds } from './grants/manager.js';
 import { GrowthEngine } from './growth/engine.js';
+import { createDaemonDeviceInfo } from './handboek/daemon-device.js';
+import { createHandboekEngine } from './handboek/engine.js';
 import { type LoopbackCert, generateLoopbackCert } from './http/cert.js';
 import type { ServiceContext } from './http/context.js';
 import { PreviewCapabilityStore } from './http/preview-capability.js';
@@ -477,7 +479,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     catalog,
     onInstalled: scheduleInstallProbe,
   });
-  // ds4 (DwarfStar / DeepSeek-V4) GGUF storage. Reuses the llama.cpp model
+  // ds4 (DwarfStar) GGUF storage. Reuses the llama.cpp model
   // manager (ds4 GGUFs are structurally identical) pointed at `engines/ds4/`
   // and the catalog `ds4` source block. Cheap to construct on any platform;
   // the ds4 provider gates on platform/accelerator before ever using it.
@@ -1469,6 +1471,11 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     events: chatEvents,
   });
 
+  const handboek = createHandboekEngine({
+    catalog,
+    device: createDaemonDeviceInfo({ store, chat }),
+  });
+
   const context: ServiceContext = {
     home,
     store,
@@ -1485,6 +1492,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     meesterStatus,
     scriptRunner,
     catalog,
+    handboek,
     secrets,
     github,
     githubPrs,

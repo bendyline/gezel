@@ -1621,6 +1621,9 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
             // length-cap opt-in. See RambleDetector.
             new RambleDetector({ threshold: 6000, enabled: false, repetitionGuardEnabled: true });
         let rambleAborted = false;
+        // Tool name for the live tool-args channel — only the first
+        // fragment of a streamed tool call carries `function.name`.
+        let liveToolArgsName = '';
         // Drop chat-template tool-call markers (Gemma 3+ leaks
         // `<|tool_call|>...<tool_call|>` token text into the content
         // stream even though it ALSO ships a structured `tool_calls`
@@ -1750,7 +1753,15 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
               // structured writes read as live activity, not a stall.
               this.emitWirePulse();
               ramble.recordStructuredAction(turnContent.length);
-              for (const tc of delta!.tool_calls!) toolCallAccumulator.ingest(tc);
+              for (const tc of delta!.tool_calls!) {
+                toolCallAccumulator.ingest(tc);
+                // Live tool-args channel — see the llama-cpp counterpart.
+                if (tc.function?.name) liveToolArgsName = tc.function.name;
+                const argChunk = tc.function?.arguments ?? '';
+                if (tc.function?.name || argChunk.length > 0) {
+                  this.emitToolArgsDelta(liveToolArgsName, argChunk);
+                }
+              }
             }
             if (usage && promptTokens !== undefined && completionTokens !== undefined) {
               lastUsage = {

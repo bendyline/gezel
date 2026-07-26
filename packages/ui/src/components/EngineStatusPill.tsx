@@ -23,7 +23,7 @@
  * config refresh.
  */
 
-import type { ChatEventEnvelope, ProviderName } from '@bendyline/gezel';
+import type { ChatEventEnvelope, ProviderName, SessionGpuTask } from '@bendyline/gezel';
 import { CANONICAL_PROFILES, isKnownProfileId } from '@bendyline/gezel';
 import type { ConfigResponse, ProviderQueueState } from '@bendyline/gezel-client';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -730,9 +730,9 @@ function pickCurrent(turns: Map<string, LiveTurn>): LiveTurn | null {
   return newest;
 }
 
-/** One in-flight local media-engine job (image / video generation). */
+/** One in-flight local media-engine job (image / video / recognition). */
 interface MediaActivity {
-  kind: 'image' | 'video';
+  kind: 'image' | 'video' | 'recognition';
   /** Live phase/progress label, e.g. "Loading model weights…" or
    *  "Generating video — step 12/40". */
   label: string;
@@ -743,11 +743,14 @@ interface MediaActivity {
 
 /** Compose the pill label from a `gpu_swap` event. */
 function mediaLabel(event: {
-  task: 'image_generation' | 'video_generation';
+  task: SessionGpuTask;
   detail?: string;
   step?: number;
   totalSteps?: number;
 }): string {
+  if (event.task === 'image_recognition') {
+    return event.detail?.trim() ? event.detail.trim() : 'Reading image';
+  }
   const noun = event.task === 'video_generation' ? 'video' : 'image';
   if (
     typeof event.step === 'number' &&

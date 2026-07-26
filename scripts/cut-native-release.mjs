@@ -18,8 +18,8 @@ import { execSync } from 'node:child_process';
  *   5. Creates an annotated tag `native-v<version>` pointing at HEAD.
  *   6. Pushes the tag to origin — that triggers `.github/workflows/build-native.yml`
  *      which builds every matrix leg and creates a draft GitHub Release.
- *   7. Leaves publication to the explicit `publish-native-release.yml`
- *      workflow after the draft artifacts have been validated.
+ *   7. Leaves publication to the maintainer through the GitHub Releases
+ *      UI after the draft artifacts have been validated.
  *
  * Why a script and not just `git tag && git push`:
  *   The CI matrix is 8+ jobs each taking 10–30 minutes. Cheap mistakes
@@ -159,7 +159,7 @@ console.log('watch CI: https://github.com/bendyline/gezel/actions/workflows/buil
 console.log('draft release will appear at:');
 console.log(`  https://github.com/bendyline/gezel/releases/tag/${newTag}`);
 console.log('publish after validation:');
-console.log(`  gh workflow run publish-native-release.yml -f tag=${newTag} -f confirm=true`);
+console.log('  open the draft in GitHub Releases and click "Publish release"');
 
 /** Naïve semver compare. Returns -1 / 0 / 1. Treats prereleases as < release. */
 function semverCompare(a, b) {

@@ -317,6 +317,13 @@ export const BUILTIN_TOOLSETS: BuiltinToolsetGroup[] = [
     tools: ['search_history', 'search_sessions'],
   },
   {
+    id: 'handboek',
+    name: 'Handboek',
+    description:
+      "Consult gezel's built-in documentation for meta questions about gezel itself — roles, craftbooks, projects, memory, models, setup. In every role's kit so a gezel answers 'how does gezel work?' from the real docs instead of guessing.",
+    tools: ['how_do_i'],
+  },
+  {
     id: 'interaction',
     name: 'User Interaction',
     description:

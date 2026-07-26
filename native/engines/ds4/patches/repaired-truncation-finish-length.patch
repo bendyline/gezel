@@ -1,0 +1,35 @@
+diff --git a/ds4_server.c b/ds4_server.c
+index f4f563e..5c5e4c1 100644
+--- a/ds4_server.c
++++ b/ds4_server.c
+@@ -11347,6 +11347,7 @@ decode_again:
+     int completion = 0;
+     int max_tokens = j->req.max_tokens;
+     int room = ds4_session_ctx(slot->session) - ds4_session_pos(slot->session);
++    bool repaired_truncated_call = false;
+     bool saw_tool_start = false;
+     bool saw_tool_end = false;
+     bool saw_orphan_tool_end = false;
+@@ -11657,6 +11658,9 @@ decode_again:
+                 text.len = strlen(text.ptr);
+                 saw_tool_end = true;
+                 completed_truncation = true;
++                /* Only the generation-cap exit is a true truncation; a
++                 * mid-DSML stop token is model-owned and keeps its finish. */
++                repaired_truncated_call = strcmp(finish, "length") == 0;
+                 server_log(DS4_LOG_WARNING,
+                            "ds4-server: chat ctx=%s%s%s repaired unterminated tool call (%d calls recovered)",
+                            ctx_span,
+@@ -11837,7 +11841,11 @@ decode_again:
+                 apply_anthropic_stream_tool_ids(&parsed_calls, &anthropic_live);
+             assign_tool_call_ids(s, &parsed_calls, j->req.api);
+             tool_memory_remember(s, &parsed_calls);
+-            final_finish = "tool_calls";
++            /* A tool call salvaged from a generation-cap cutoff carries
++             * incomplete arguments. Keep finish_reason "length" so clients
++             * can see the truncation instead of trusting the repaired call
++             * as a normal, complete tool_calls turn. */
++            final_finish = repaired_truncated_call ? "length" : "tool_calls";
+         } else if (j->req.api == API_RESPONSES) {
+             responses_live_clear(s, slot);
+         }

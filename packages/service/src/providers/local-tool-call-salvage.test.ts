@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  appendCapTruncationHintToRejectedWrite,
   appendTruncationHintToToolResult,
   buildUnknownToolNudge,
   describeMalformation,
@@ -1387,6 +1388,106 @@ describe('appendTruncationHintToToolResult', () => {
       path: 'x.html',
       content: 'data',
     });
+    expect(twice).toBe(once);
+  });
+});
+
+describe('appendCapTruncationHintToRejectedWrite', () => {
+  const REJECTED =
+    'ERROR: index.html: inline <script> #1 at line 532, col 1 failed to parse: ' +
+    "Unexpected token '}'. Existing index.html was left untouched to preserve the last complete version.";
+
+  it('appends an incremental-edit hint to a rejected write with the cap named', () => {
+    const after = appendCapTruncationHintToRejectedWrite(
+      REJECTED,
+      'writeFile',
+      {
+        path: 'index.html',
+        content: 'A'.repeat(30000),
+      },
+      8192,
+    );
+    expect(after).not.toBe(REJECTED);
+    expect(after).toContain('hit the per-turn output token cap');
+    expect(after).toContain('max_tokens=8192');
+    expect(after).toContain('replaceInFile(path="index.html"');
+    expect(after).toContain('replaceLines(path="index.html"');
+    expect(after).toContain('do not retry a full rewrite');
+  });
+
+  it('omits the cap label when maxTokens is unknown', () => {
+    const after = appendCapTruncationHintToRejectedWrite(
+      REJECTED,
+      'writeFile',
+      {
+        path: 'index.html',
+        content: 'x',
+      },
+      null,
+    );
+    expect(after).toContain('hit the per-turn output token cap');
+    expect(after).not.toContain('max_tokens=');
+  });
+
+  it('skips successful results (nothing to steer)', () => {
+    const before = 'Wrote 16384 bytes to index.html';
+    const after = appendCapTruncationHintToRejectedWrite(
+      before,
+      'writeFile',
+      {
+        path: 'index.html',
+        content: 'data',
+      },
+      8192,
+    );
+    expect(after).toBe(before);
+  });
+
+  it('skips non-write-shaped tools', () => {
+    const before = 'ERROR: something failed';
+    const after = appendCapTruncationHintToRejectedWrite(
+      before,
+      'set_task_status',
+      {
+        ref: 'task-1',
+      },
+      8192,
+    );
+    expect(after).toBe(before);
+  });
+
+  it('skips when args carry no content string', () => {
+    const before = 'ERROR: bad call';
+    const after = appendCapTruncationHintToRejectedWrite(
+      before,
+      'writeFile',
+      {
+        path: 'index.html',
+      },
+      8192,
+    );
+    expect(after).toBe(before);
+  });
+
+  it('is idempotent — calling twice produces the same output', () => {
+    const once = appendCapTruncationHintToRejectedWrite(
+      REJECTED,
+      'writeFile',
+      {
+        path: 'index.html',
+        content: 'data',
+      },
+      8192,
+    );
+    const twice = appendCapTruncationHintToRejectedWrite(
+      once,
+      'writeFile',
+      {
+        path: 'index.html',
+        content: 'data',
+      },
+      8192,
+    );
     expect(twice).toBe(once);
   });
 });

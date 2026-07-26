@@ -8,7 +8,16 @@ import { z } from 'zod';
  * harness reads the same shape over HTTP instead of scraping daemon logs.
  */
 
-export const SessionGpuTaskSchema = z.enum(['image_generation', 'video_generation']);
+/**
+ * Non-LLM GPU workloads a session can be waiting on. Shared with the
+ * `gpu_swap` chat event's `task` field — one enum, so a new workload can't
+ * light up the bubble while staying invisible to telemetry.
+ */
+export const SessionGpuTaskSchema = z.enum([
+  'image_generation',
+  'video_generation',
+  'image_recognition',
+]);
 export type SessionGpuTask = z.infer<typeof SessionGpuTaskSchema>;
 
 export const SessionTurnTelemetrySchema = z.object({

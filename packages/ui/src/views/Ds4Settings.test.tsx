@@ -31,10 +31,13 @@ describe('Ds4Settings', () => {
     expect(
       screen.getByRole('heading', { name: 'On-device (DwarfStar - DS4)' }),
     ).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'DeepSeek V4 models' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'DwarfStar models' })).toBeInTheDocument();
     expect(screen.getByText(/engine available · metal/i)).toBeInTheDocument();
     expect(screen.getByText(/SSD streaming stays on automatically/i)).toBeInTheDocument();
-    expect(screen.getByText(/Q2 is the lighter, faster-starting choice/i)).toBeInTheDocument();
+    expect(screen.getByText(/Lower quantizations \(Q2\) start faster/i)).toBeInTheDocument();
+    // The panel names every family the engine runs, not just the first one it
+    // shipped with — ds4 also runs GLM 5.2.
+    expect(screen.getByText(/DeepSeek V4 and GLM 5\.2/i)).toBeInTheDocument();
     expect(screen.queryByText(/^Advanced/)).not.toBeInTheDocument();
     expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
     expect(screen.queryByText(/under ~96 GB/i)).not.toBeInTheDocument();

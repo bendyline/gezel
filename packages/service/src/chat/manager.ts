@@ -671,7 +671,7 @@ export interface ChatManagerOptions {
    */
   llamaCppModels?: import('../providers/llama-cpp/index.js').LlamaCppModelManager;
   /**
-   * ds4 (DeepSeek-V4) GGUF store — same role as `llamaCppModels`, a
+   * ds4 (DwarfStar) GGUF store — same role as `llamaCppModels`, a
    * `LlamaCppModelManager` constructed with `engine: 'ds4'` so it installs/
    * resolves under `engines/ds4/models` from the catalog `ds4` source block.
    */
@@ -825,6 +825,19 @@ export class ChatManager {
     string,
     { userText: string; startedAt: number; abort?: AbortController }
   >();
+  /**
+   * Sessions whose in-flight turn was cancelled during its async prologue
+   * — after {@link runSendAndDrain} grabbed the `inflight` slot but before
+   * {@link runSend} wired the per-turn `AbortController` (the ensureState /
+   * auto-recall window). There's no controller to abort yet and no
+   * provider call in flight to tear down, so the request is parked here;
+   * `runSend` consumes it the instant it wires the controller and aborts
+   * before the provider call starts. Cleared at turn teardown so a parked
+   * cancel can never leak onto a later turn. Without this, a stop pressed
+   * while the prompt was still being built was silently dropped and the
+   * turn ran to completion against a cancel the user already issued.
+   */
+  private readonly cancelBeforeAbortWired = new Set<string>();
   /**
    * Per-session FIFO queue of messages that arrived while the session
    * was already mid-turn. Before this existed, `send()` threw
@@ -1873,7 +1886,21 @@ export class ChatManager {
     // while the user waits for their cancel to actually take
     // effect. Providers that don't honor the signal (older
     // implementations) fall back to the `disconnect()` below.
+    //
+    // `entry.abort` is set only once the turn reaches its provider phase
+    // (runSend, right before `sendAndWait`). Its presence is therefore a
+    // reliable "is there a live provider call to tear down?" signal:
+    //  - wired: abort the controller and disconnect the session below.
+    //  - not wired: the turn is still in its prologue (prompt build /
+    //    auto-recall). There's nothing to abort yet, so park the cancel
+    //    — runSend honors it the instant it wires the controller — and do
+    //    NOT disconnect the live session: the setup path still holds its
+    //    `state.session` reference, and racing a `disconnect()` + null
+    //    against runSend's `const session = state.session!` capture
+    //    crashed the turn with a null session.
+    const wired = entry.abort !== undefined;
     entry.abort?.abort();
+    if (!wired) this.cancelBeforeAbortWired.add(sessionId);
     const state = this.states.get(sessionId);
     const errorEvent = {
       type: 'error' as const,
@@ -1888,7 +1915,7 @@ export class ChatManager {
       };
       this.events.publish(scope, errorEvent);
       this.events.publish(scope, doneEvent);
-      if (state.session) {
+      if (wired && state.session) {
         try {
           await state.session.disconnect();
         } catch {
@@ -4571,6 +4598,11 @@ export class ChatManager {
     // send() synchronously, and must observe the just-finished session as
     // idle rather than enqueue behind a turn that no longer exists.
     this.inflight.delete(sessionId);
+    // Drop any parked pre-wiring cancel. If the turn reached its provider
+    // phase it already consumed this; if it threw during setup (before
+    // runSend wired the controller) clearing here stops the request
+    // leaking onto the session's next turn.
+    this.cancelBeforeAbortWired.delete(sessionId);
     this.flushAfterSessionIdle(sessionId);
     this.drainNextQueued(sessionId);
   }
@@ -4899,6 +4931,15 @@ export class ChatManager {
     // their next message can start.
     const turnAbort = new AbortController();
     this.inflight.set(sessionId, { userText, startedAt: Date.now(), abort: turnAbort });
+    // Honor a stop pressed during the async prologue above (ensureState /
+    // auto-recall), before this controller existed. `cancelInflight`
+    // parked it rather than aborting a controller that wasn't wired yet;
+    // abort now so the upcoming `sendAndWait` sees an already-aborted
+    // signal and unwinds before the provider call really starts, instead
+    // of running the whole turn against a cancel the user already issued.
+    if (this.cancelBeforeAbortWired.delete(sessionId)) {
+      turnAbort.abort();
+    }
     /**
      * Subscribe to all the live-session signals we forward into the
      * event bus. Returns a single unsub that tears them all down so
@@ -4942,6 +4983,14 @@ export class ChatManager {
       const unsubPulse = s.onWirePulse?.(() => {
         this.telemetry.noteWirePulse(sessionId);
         this.events.publish(scope, { type: 'wire_pulse' });
+      });
+      const unsubToolArgs = s.onToolArgsDelta?.((name, chunk) => {
+        // Live tool-argument fragments (structured writeFile content
+        // mid-generation). Display-only — kept OUT of the visible-content
+        // accumulators like reasoning deltas, but counts as liveness so a
+        // multi-minute structured write never reads as an idle stall.
+        this.telemetry.noteHeartbeat(sessionId);
+        this.events.publish(scope, { type: 'tool_args_delta', name, content: chunk });
       });
       const unsubIntent = s.onIntent?.((label) => {
         // Drop `preparing` regardless of source. Intents persist on
@@ -5062,6 +5111,7 @@ export class ChatManager {
         unsubDelta();
         unsubReasoningDelta?.();
         unsubPulse?.();
+        unsubToolArgs?.();
         unsubIntent?.();
         unsubHeartbeat?.();
         unsubWarning?.();
@@ -14488,19 +14538,40 @@ function ensureLlamaEngineStatus(
  * actionable errors above guide the user to the right setup step.
  */
 /**
- * Build a ds4 (DwarfStar) provider for DeepSeek-V4. `ds4-server` is
- * wire-compatible with `llama-server` (OpenAI `/v1/chat/completions` SSE),
- * so this returns a {@link Ds4Provider} wrapping a {@link LlamaCppProvider}
- * pointed at either an external ds4-server (`config.ds4BaseUrl` /
- * `GEZEL_DS4_SERVER_URL`) or a supervised bundled `ds4-server`
- * (`GEZEL_DS4_SERVER_BIN`).
+ * Resolve ds4's launch `--ctx` from the device tier and the model's catalog
+ * cap.
  *
- * v1 scope: the supervised path takes an EXPLICIT GGUF
- * (`config.ds4ModelPath` / `GEZEL_DS4_MODEL`) — ds4 only loads antirez's
- * DeepSeek-V4 quants, so catalog-driven install is a follow-up. GPU-only:
- * `--metal` on darwin, `--cuda` on linux (ds4's CPU path crashes the macOS
- * kernel, so we never fall back to it). Readiness probes `GET /v1/models`
- * because ds4 has no `/health` endpoint.
+ * Precedence: an explicit `config.ds4NumCtx` is the user's word and wins
+ * outright. Otherwise the RAM tier is an upper bound that a model may lower
+ * but never raise — the tier is calibrated on DeepSeek V4 Flash's ~4 GiB of
+ * resident non-routed weights, and a model holding five times that much can't
+ * afford the same KV allocation on the same machine.
+ */
+export function resolveDs4LaunchCtx(opts: {
+  configured?: number | undefined;
+  ramTieredCtx: number;
+  catalogMaxCtx?: number | undefined;
+}): number {
+  if (opts.configured) return opts.configured;
+  if (!opts.catalogMaxCtx) return opts.ramTieredCtx;
+  return Math.min(opts.ramTieredCtx, opts.catalogMaxCtx);
+}
+
+/**
+ * Build a ds4 (DwarfStar) provider. `ds4-server` is wire-compatible with
+ * `llama-server` (OpenAI `/v1/chat/completions` SSE), so this returns a
+ * {@link Ds4Provider} wrapping a {@link LlamaCppProvider} pointed at either an
+ * external ds4-server (`config.ds4BaseUrl` / `GEZEL_DS4_SERVER_URL`) or a
+ * supervised bundled `ds4-server` (`GEZEL_DS4_SERVER_BIN`).
+ *
+ * ds4 is not a general GGUF runner: it loads the specific DeepSeek-V4 and
+ * GLM 5.2 quants its engine was built for, detecting the family at load time
+ * from the GGUF's `general.architecture`. Models reach the supervised path
+ * through the catalog's `ds4` source block, or an EXPLICIT GGUF via
+ * `config.ds4ModelPath` / `GEZEL_DS4_MODEL`. GPU-only: `--metal` on darwin,
+ * `--cuda` on linux (ds4's CPU path crashes the macOS kernel, so we never fall
+ * back to it). Readiness probes `GET /v1/models` because ds4 has no `/health`
+ * endpoint.
  */
 export async function buildDs4Provider(opts: {
   config: GezelConfig;
@@ -14521,16 +14592,20 @@ export async function buildDs4Provider(opts: {
 }): Promise<Ds4Provider> {
   const { config, affinity, home } = opts;
   const defaultModelId = opts.modelOverride?.modelId ?? config.defaultModel?.ds4;
-  // ds4/DeepSeek-V4 supports ~1M context and SSD-STREAMS its KV cache to disk,
-  // so the practical ceiling on a given box is RAM for the Metal context buffers
+  // ds4 models support ~1M context and SSD-STREAM their KV cache to disk, so
+  // the practical ceiling on a given box is RAM for the Metal context buffers
   // (~0.75 GiB at 24K, scaling with ctx) — which share RAM with the expert
   // cache. Scale ctx with device RAM, far above llama.cpp-class defaults to use
   // the engine's headline strength, but bounded so buffers + expert cache still
   // fit and the KV stays under ds4-server's ~4 GiB disk budget. A small window
   // throws away exactly what ds4 is for and overflows on large specialist
   // handoffs. (Full 1M needs a 128 GB+ box AND a raised ds4 --kv-disk-budget.)
+  //
+  // This tier assumes DeepSeek-V4's small resident footprint. A model whose
+  // non-routed weights are much larger caps it further via the catalog's
+  // `ds4.maxLaunchCtx`; see `resolveDs4LaunchCtx` below.
   const totalRamGb = (await import('node:os')).totalmem() / 1024 ** 3;
-  const numCtx = config.ds4NumCtx ?? (totalRamGb >= 192 ? 262_144 : 131_072);
+  const ramTieredCtx = totalRamGb >= 192 ? 262_144 : 131_072;
   const ds4ConstrainedToolNoSignalMs = (() => {
     const raw = process.env.GEZEL_DS4_CONSTRAINED_TOOL_NO_SIGNAL_MS;
     if (raw) {
@@ -14543,7 +14618,6 @@ export async function buildDs4Provider(opts: {
     fetchImpl: createLlamaCppPatientFetch(),
     ...(defaultModelId ? { defaultModel: defaultModelId } : {}),
     ...(affinity !== undefined ? { affinity } : {}),
-    numCtx,
     // ds4-server emits per-turn token usage only when the request asks via
     // stream_options.include_usage — opt in so usage/tok-s telemetry works.
     includeUsageInStream: true,
@@ -14580,6 +14654,9 @@ export async function buildDs4Provider(opts: {
       inner: new LlamaCppProvider({
         baseUrl: externalBaseUrl,
         disableThinkingRequestShape: 'deepseek',
+        // The external server owns its own `--ctx`; we only need a window to
+        // reason about pressure with, so the catalog cap can't apply here.
+        numCtx: config.ds4NumCtx ?? ramTieredCtx,
         ...baseProviderOpts,
       }),
     });
@@ -14617,8 +14694,8 @@ export async function buildDs4Provider(opts: {
   if (!modelPath) {
     const err = new Error(
       defaultModelId
-        ? `DwarfStar (ds4) engine: model "${defaultModelId}" isn't available locally yet — download it from Settings → DwarfStar (ds4), or set config.ds4ModelPath / GEZEL_DS4_MODEL to an antirez DeepSeek-V4 GGUF.`
-        : 'DwarfStar (ds4) engine: no DeepSeek-V4 model is available locally — download one from Settings → DwarfStar (ds4), or set config.ds4ModelPath / GEZEL_DS4_MODEL. DwarfStar is not a general GGUF runner.',
+        ? `DwarfStar (ds4) engine: model "${defaultModelId}" isn't available locally yet — download it from Settings → DwarfStar (ds4), or set config.ds4ModelPath / GEZEL_DS4_MODEL to a GGUF DwarfStar supports.`
+        : 'DwarfStar (ds4) engine: no DwarfStar model is available locally — download one from Settings → DwarfStar (ds4), or set config.ds4ModelPath / GEZEL_DS4_MODEL. DwarfStar is not a general GGUF runner; it runs the specific DeepSeek-V4 and GLM 5.2 builds its engine supports.',
     );
     (err as Error & { isActionable: boolean }).isActionable = true;
     throw err;
@@ -14640,6 +14717,18 @@ export async function buildDs4Provider(opts: {
     modelSizeBytes = await statDs4Model(modelPath)
       .then((st) => st.size)
       .catch(() => undefined);
+  }
+
+  const numCtx = resolveDs4LaunchCtx({
+    configured: config.ds4NumCtx,
+    ramTieredCtx,
+    catalogMaxCtx: ds4Source?.maxLaunchCtx,
+  });
+  if (numCtx !== (config.ds4NumCtx ?? ramTieredCtx)) {
+    log.info(
+      `[ds4] ${effectiveModelId ?? basename(modelPath)} caps launch context at ${numCtx} ` +
+        `(device tier would allow ${ramTieredCtx})`,
+    );
   }
 
   // Streaming is the safe default. A stale/manual `false` is honored only
@@ -14669,7 +14758,7 @@ export async function buildDs4Provider(opts: {
   });
   if (ssdStreaming && !cachePlan.safe) {
     const err = new Error(
-      `DwarfStar (ds4) engine: ${effectiveModelId ?? 'the selected model'} cannot keep a safe minimum expert cache while preserving memory for the operating system. Choose the smaller DeepSeek model in DwarfStar.`,
+      `DwarfStar (ds4) engine: ${effectiveModelId ?? 'the selected model'} cannot keep a safe minimum expert cache while preserving memory for the operating system. Choose a lighter model in Settings → DwarfStar (ds4).`,
     );
     (err as Error & { isActionable: boolean }).isActionable = true;
     throw err;
@@ -15233,6 +15322,10 @@ export async function buildLlamaCppProvider(opts: {
   // on long Builder generations (tankcombat regression).
   const llamaIdleMs = config.localEngineIdleTimeoutMs ?? 30 * 60 * 1000;
   const llamaFreezeMs = Math.floor(llamaIdleMs / 2);
+  // Per-model native-vision opt-in. Absent means off — see the `--mmproj`
+  // block below for why this isn't simply "the projector is on disk".
+  const nativeVisionEnabled =
+    !!modelCatalogInfo?.mmprojPath && config.nativeVision?.[modelCatalogInfo.id] === true;
   // Startup timeout: 180s covers a 7B–30B model's CUDA warmup on
   // typical hardware. Frontier-tier 100B+ MoE models on unified-memory
   // boxes (DGX Spark, M-series Macs) routinely take 4–6 minutes for
@@ -15361,12 +15454,19 @@ export async function buildLlamaCppProvider(opts: {
             // Unset → flag omitted, default parsing unchanged.
             reasoningFormat: process.env.GEZEL_LLAMA_REASONING_FORMAT?.trim() || undefined,
           }),
-          // Multimodal projector sidecar — present only when the
-          // catalog source declared `mmproj` and the installer fetched
-          // it alongside the GGUF weights. Without this flag the model
-          // loads text-only even if the underlying weights support
-          // vision / audio / video.
-          ...(modelCatalogInfo?.mmprojPath ? ['--mmproj', modelCatalogInfo.mmprojPath] : []),
+          // Multimodal projector sidecar. Present only when the catalog
+          // source declared `mmproj`, the installer fetched it, AND the user
+          // opted this model into native vision.
+          //
+          // The opt-in exists because loading a projector makes llama-server
+          // return 501 on slot save/restore, which latches disk-KV prefix
+          // caching off for the whole process (see cache-adapter's
+          // `slotActionsUnsupported`). That costs cached session resume on
+          // every text turn, image or not — so it has to be a choice, not a
+          // side effect of installing a model that happens to ship one.
+          ...(nativeVisionEnabled && modelCatalogInfo?.mmprojPath
+            ? ['--mmproj', modelCatalogInfo.mmprojPath]
+            : []),
           // Cap chain-of-thought length per the catalog's tuning.
           // Without this, llama-server runs `reasoning-budget=-1`
           // (Int32.MAX) and some models think themselves into silence.
@@ -15403,6 +15503,10 @@ export async function buildLlamaCppProvider(opts: {
         }
       : {}),
     ...baseProviderOpts,
+    // Same value that decides `--mmproj` above, so the wire shape and the
+    // launch flag can never disagree: typed image parts are only emitted for
+    // a server that was actually started with a projector.
+    visionEnabled: nativeVisionEnabled,
     // Supervised slot count (RAM/KV-sized above) overrides the external
     // default; drives the queue, `--parallel`, and (via
     // `provider.queue.concurrency`) the cache adapter's slotCount.

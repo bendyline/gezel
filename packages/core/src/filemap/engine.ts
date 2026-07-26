@@ -333,12 +333,21 @@ export function layoutFileMap(
   const priorStreets: PriorNode[] = [];
   const priorPlates: PriorNode[] = [];
   const priorPlazas: PriorNode[] = [];
+  // Derived nodes (streets, plates, plazas, districts) keep their original
+  // first-seen timestamp instead of restamping `now` every build. Restamping
+  // rewrites the journal on every rebuild, which puts a dirty diff in
+  // `.gezel/city.json` — a file we explicitly ask users to commit — even when
+  // nothing about the settlement changed.
+  const priorPlacedAt = new Map<string, string>();
   for (const p of prior) {
+    if (p.placedAt) priorPlacedAt.set(`${p.nodeKind}:${p.nodeId}`, p.placedAt);
     if (p.nodeKind === 'block') priorBlocks.set(p.nodeId, p);
     else if (p.nodeKind === 'street') priorStreets.push(p);
     else if (p.nodeKind === 'plate') priorPlates.push(p);
     else if (p.nodeKind === 'plaza') priorPlazas.push(p);
   }
+  const placedAtFor = (kind: string, id: string): string =>
+    priorPlacedAt.get(`${kind}:${id}`) ?? now;
 
   const liveByPath = new Map(files.map((f) => [f.path, f] as const));
   const liveSet = new Set(liveByPath.keys());
@@ -674,7 +683,7 @@ export function layoutFileMap(
       contentHash: null,
       rect: d.rect,
       weight: d.weight,
-      placedAt: now,
+      placedAt: placedAtFor('district', d.id),
       removedAt: null,
     });
   }
@@ -686,7 +695,7 @@ export function layoutFileMap(
       contentHash: null,
       rect: st.rect,
       weight: st.tier,
-      placedAt: now,
+      placedAt: placedAtFor('street', st.id),
       removedAt: null,
     });
   }
@@ -698,7 +707,7 @@ export function layoutFileMap(
       contentHash: null,
       rect: p.rect,
       weight: 0,
-      placedAt: now,
+      placedAt: placedAtFor('plate', p.folder),
       removedAt: null,
     });
   }
@@ -710,7 +719,7 @@ export function layoutFileMap(
       contentHash: null,
       rect: p.rect,
       weight: 0,
-      placedAt: now,
+      placedAt: placedAtFor('plaza', p.id),
       removedAt: null,
     });
   }

@@ -1154,6 +1154,7 @@ export class Store {
       icon: d.icon,
       poppetje: d.poppetje,
       iconOverride: d.iconOverride,
+      recognition: d.parsed.frontmatter.recognition,
       ...(scope ? { scope } : {}),
       updatedAt: d.updatedAt,
     };
@@ -1526,6 +1527,11 @@ export class Store {
        * `null` to clear (default: render poppetje).
        */
       iconOverride?: boolean | null;
+      /**
+       * Overrides `config.recognition.mode` for this gezel. `null` clears the
+       * override so the install default applies again.
+       */
+      recognition?: 'auto' | 'always' | 'off' | null;
     },
   ): Promise<GezelDetail> {
     const existing = await this.tryGetGezel(id);
@@ -1555,6 +1561,8 @@ export class Store {
     else if (patch.tuningProfile !== undefined) frontmatter.tuningProfile = patch.tuningProfile;
     if (patch.iconOverride === null) delete frontmatter.iconOverride;
     else if (patch.iconOverride !== undefined) frontmatter.iconOverride = patch.iconOverride;
+    if (patch.recognition === null) delete frontmatter.recognition;
+    else if (patch.recognition !== undefined) frontmatter.recognition = patch.recognition;
     const updated = { ...existing.parsed, frontmatter };
     const source = serializeGezelMarkdown(updated);
     await writeFileAtomic(join(gezelDir(this.home, id, this.external), 'gezel.md'), source);
@@ -1572,6 +1580,7 @@ export class Store {
     if (patch.tuning !== undefined) changed.push('tuning');
     if (patch.tuningProfile !== undefined) changed.push('tuningProfile');
     if (patch.iconOverride !== undefined) changed.push('iconOverride');
+    if (patch.recognition !== undefined) changed.push('recognition');
     if (changed.length > 0) {
       await this.history?.log({
         kind: 'gezel.settings.updated',
@@ -1787,6 +1796,7 @@ export class Store {
         icon,
         poppetje,
         iconOverride: parsed.frontmatter.iconOverride,
+        recognition: parsed.frontmatter.recognition,
         traits: parsed.frontmatter.traits,
         ...(growth ? { growth } : {}),
         ...(opts.scope ? { scope: opts.scope } : {}),

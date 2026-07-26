@@ -30,7 +30,7 @@
  */
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { createReadStream, existsSync, rmSync, statSync } from 'node:fs';
+import { createReadStream, existsSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { readFile, readdir, readlink, unlink, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -106,18 +106,20 @@ async function main() {
   let stdout = '';
   let stderr = '';
   try {
-    ({ stdout, stderr } = await exec('pnpm', args, {
-      cwd: repoRoot,
-      env: process.env,
-      maxBuffer: 64 * 1024 * 1024,
-      // Windows: pnpm on PATH is `pnpm.cmd` (a shim). Node's child_process
-      // can't launch a .cmd without going through cmd.exe — without this
-      // the spawn fails with ENOENT even though `pnpm` works fine in the
-      // shell. Same fix as packages/service/src/packages/pnpm.ts and
-      // system-toolsets/bootstrap.ts. Args are 100% internally constructed
-      // (no user input touching the shell), so injection isn't a concern.
-      shell: process.platform === 'win32',
-    }));
+    ({ stdout, stderr } = await withoutLocalLinkOverrides(() =>
+      exec('pnpm', args, {
+        cwd: repoRoot,
+        env: process.env,
+        maxBuffer: 64 * 1024 * 1024,
+        // Windows: pnpm on PATH is `pnpm.cmd` (a shim). Node's child_process
+        // can't launch a .cmd without going through cmd.exe — without this
+        // the spawn fails with ENOENT even though `pnpm` works fine in the
+        // shell. Same fix as packages/service/src/packages/pnpm.ts and
+        // system-toolsets/bootstrap.ts. Args are 100% internally constructed
+        // (no user input touching the shell), so injection isn't a concern.
+        shell: process.platform === 'win32',
+      }),
+    ));
   } finally {
     if (workspaceStateBefore) {
       await writeFile(workspaceStatePath, workspaceStateBefore);
@@ -151,7 +153,7 @@ async function main() {
   );
   if (!existsSync(gildeIndex)) {
     throw new Error(
-      `[build-service-bundle] expected ${gildeIndex} after deploy; the @bendyline/gilde content package did not ride into the bundle (empty catalog in production). If @bendyline/gilde is currently link:ed (pnpm link:gilde), unlink first — pnpm deploy does not materialize link: deps, so bundles must build against the registry pin.`,
+      `[build-service-bundle] expected ${gildeIndex} after deploy; the @bendyline/gilde content package did not ride into the bundle (empty catalog in production). Bundles always build against the registry pin — pnpm deploy cannot materialize a link: dep — so check that the pinned @bendyline/gilde version resolves and still ships data/.`,
     );
   }
 
@@ -271,6 +273,64 @@ async function countFiles(root) {
   }
   await walk(root);
   return n;
+}
+
+/**
+ * Run `fn` with any local `link:` overrides for our sibling checkouts
+ * (squisq, gilde) temporarily lifted out of `pnpm-workspace.yaml`.
+ *
+ * `pnpm deploy` cannot materialize a `link:` dep — it lands as a symlink
+ * pointing outside the bundle, `pruneEscapingSymlinks` (correctly) removes it,
+ * and the import check dies with ERR_MODULE_NOT_FOUND on `@bendyline/squisq`.
+ * Linked development is a supported workflow, so rather than refusing to build,
+ * deploy against the registry pins the package.json files already carry. That
+ * is also what has to ship: the bundle is a release artifact and must match a
+ * clean checkout. The linked sources still back every other step of the gate.
+ */
+async function withoutLocalLinkOverrides(fn) {
+  const workspacePath = join(repoRoot, 'pnpm-workspace.yaml');
+  if (!existsSync(workspacePath)) return fn();
+
+  const original = await readFile(workspacePath, 'utf8');
+  const dropped = [];
+  const patched = original
+    .split('\n')
+    .filter((line) => {
+      const match = /^\s{2}["']?(@bendyline\/(?:squisq|gilde)[^"':]*)["']?:\s*["']?link:/.exec(
+        line,
+      );
+      if (!match) return true;
+      dropped.push(match[1]);
+      return false;
+    })
+    .join('\n');
+  if (dropped.length === 0) return fn();
+
+  console.log(
+    `[build-service-bundle] local link override(s) in use: ${dropped.join(', ')} — deploying against the registry pins instead; changes in those checkouts are NOT in this bundle`,
+  );
+
+  const restore = () => {
+    try {
+      writeFileSync(workspacePath, original);
+    } catch {}
+  };
+  const onSignal = (signal) => {
+    restore();
+    process.kill(process.pid, signal);
+  };
+  await writeFile(workspacePath, patched);
+  process.on('exit', restore);
+  process.once('SIGINT', onSignal);
+  process.once('SIGTERM', onSignal);
+  try {
+    return await fn();
+  } finally {
+    restore();
+    process.off('exit', restore);
+    process.off('SIGINT', onSignal);
+    process.off('SIGTERM', onSignal);
+  }
 }
 
 async function pruneEscapingSymlinks(root) {

@@ -60,6 +60,23 @@ function recordForReplay(shared: SharedStream, envelope: ChatEventEnvelope): voi
       return;
     }
   }
+  // Same coalescing rule the service bus applies: tool-argument
+  // fragments merge within one call (same tool name) so a long
+  // structured write costs one replay slot instead of thousands.
+  if (event.type === 'tool_args_delta') {
+    const tail = cached[cached.length - 1];
+    if (tail?.event.type === 'tool_args_delta' && tail.event.name === event.name) {
+      cached[cached.length - 1] = {
+        ...tail,
+        event: {
+          type: 'tool_args_delta',
+          name: event.name,
+          content: tail.event.content + event.content,
+        },
+      };
+      return;
+    }
+  }
   cached.push(envelope);
   if (cached.length > REPLAY_CAP) cached.splice(0, cached.length - REPLAY_CAP);
 }

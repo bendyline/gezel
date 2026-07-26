@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { securityPolicyForLevel } from '@bendyline/gezel';
 import { CatalogService } from '@bendyline/gezel-catalog';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Store } from '../fs/store.js';
 import type { MemoryManager } from '../memory/manager.js';
 import { PreviewLogBuffer } from '../preview-log/buffer.js';
@@ -337,10 +337,19 @@ describe('ChatManager — send + persistence', () => {
     const pending = manager.send(session.id, 'go').catch(() => {
       /* cancel surfaces as error/done events, not a rejection here */
     });
-    for (let i = 0; i < 200; i++) {
-      if (mock.calls.some((c) => c.kind === 'send')) break;
-      await new Promise<void>((r) => setTimeout(r, 10));
-    }
+    // Wait until the provider turn is genuinely in flight before
+    // cancelling. The `send` call is recorded at the top of
+    // `MockSession.sendAndWait`, which runs only AFTER the manager has
+    // wired this turn's `AbortController`. Cancelling before that point
+    // installs a fresh, never-aborted controller and hangs the mock's
+    // `streamThenHang` forever. A fixed 200×10ms poll used to give up
+    // after ~2s and cancel anyway — which flaked into a 10s timeout on a
+    // loaded CI runner where throttled `setTimeout` starved the poll
+    // before setup finished. Wait for the real signal instead.
+    await vi.waitFor(() => expect(mock.calls.some((c) => c.kind === 'send')).toBe(true), {
+      timeout: 5000,
+      interval: 10,
+    });
 
     await manager.cancelInflight(session.id);
     await pending;
@@ -351,7 +360,50 @@ describe('ChatManager — send + persistence', () => {
     expect(aborted.role).toBe('assistant');
     expect(aborted.synthetic).toBe('turn-aborted');
     expect(aborted.content).toBe('Partial answer the user already saw');
-  });
+  }, 20_000);
+
+  it('honors a stop pressed during setup, before the turn wires its abort signal', async () => {
+    // A user who hits stop while the prompt is still being built — the
+    // ensureState / auto-recall prologue that runs before the per-turn
+    // AbortController exists — used to have their cancel silently dropped:
+    // cancelInflight found no controller to abort, and the turn then wired
+    // a fresh one and ran to completion. cancelInflight now parks the
+    // request and runSend aborts the instant it wires the controller, so
+    // the turn unwinds into a `turn-aborted` message instead of ignoring
+    // the stop. Regression guard: without the parking, `scriptStreamThenHang`
+    // has no abort to unwind on and this test hangs to its timeout.
+    const session = await manager.createSession({ gezelId: 'ada' });
+    // Park the turn inside ensureState's provider.createSession — the
+    // inflight slot is held but no AbortController is wired yet.
+    const gate = mock.gateNextCreateSession();
+    mock.scriptStreamThenHang('streamed before the cancel');
+
+    const pending = manager.send(session.id, 'go').catch(() => {
+      /* cancel surfaces as error/done events, not a rejection here */
+    });
+    // Wait until the send is genuinely blocked in createSession (the
+    // pre-wiring window). manager.createSession above only writes the
+    // record — this is the first provider createSession.
+    await vi.waitFor(() => expect(mock.calls.some((c) => c.kind === 'create')).toBe(true), {
+      timeout: 5000,
+      interval: 10,
+    });
+
+    await manager.cancelInflight(session.id);
+    // Let setup finish. The turn must abort on its wired-then-parked
+    // signal rather than deliver the scripted reply.
+    gate.release();
+    await pending;
+
+    const disk = await store.getSession('ada', session.id);
+    expect(disk).not.toBeNull();
+    const last = disk!.messages.at(-1)!;
+    expect(last.role).toBe('assistant');
+    expect(last.synthetic).toBe('turn-aborted');
+    // No non-synthetic assistant reply was ever committed — the cancel
+    // took effect instead of the turn running through to a real answer.
+    expect(disk!.messages.filter((m) => m.role === 'assistant' && !m.synthetic)).toHaveLength(0);
+  }, 20_000);
 });
 
 describe('buildContinuationNudge', () => {

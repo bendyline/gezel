@@ -45,6 +45,7 @@ import {
 } from '../direct-file-work-prompt.js';
 import type { GpuArbiter } from '../gpu-arbiter.js';
 import {
+  appendCapTruncationHintToRejectedWrite,
   appendTruncationHintToToolResult,
   findClaudeInvokeToolCallSpans,
   findGemmaNativeToolCallSpans,
@@ -357,8 +358,69 @@ export interface ChatMessage {
    * the cached path instead of a minutes-long full-tail re-prefill.
    */
   reasoning_content?: string;
-  /** Base64 image attachments for vision-capable models (MVP: ignored unless model supports it). */
-  images?: string[];
+  /**
+   * Images the user attached to this turn. Held in their decoded form rather
+   * than pre-serialized so the in-memory history stays plain-string `content`
+   * — every compaction, replay, and reasoning-strip path reads `.content` as
+   * text. {@link toWireMessages} converts these at the request boundary.
+   */
+  attachments?: ImageAttachment[];
+}
+
+/** OpenAI-compatible typed content, which is what llama-server actually reads. */
+type WireContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string } };
+
+interface WireMessage extends Omit<ChatMessage, 'content' | 'attachments'> {
+  content: string | null | WireContentPart[];
+}
+
+/**
+ * Expand attached images into typed content parts.
+ *
+ * This replaced an Ollama-shaped `images: string[]` field that llama-server
+ * silently ignored — so no local model could see a pasted screenshot even when
+ * launched with `--mmproj`, and the two catalog models that do ship a
+ * projector were paying its prompt-cache cost for nothing.
+ *
+ * Messages without attachments are returned BY REFERENCE, not copied. The
+ * per-turn nudge logic appends to `userMsg.content` in place after the request
+ * body has been assembled, relying on the body holding the same objects as
+ * `this.messages` — copying here silently dropped every nudge.
+ */
+export function toWireMessages(messages: ReadonlyArray<ChatMessage>): WireMessage[] {
+  return messages.map((m) => {
+    if (!m.attachments) return m;
+    if (m.attachments.length === 0) {
+      const { attachments: _empty, ...rest } = m;
+      return rest;
+    }
+    const { attachments, content, ...rest } = m;
+    return {
+      ...rest,
+      content: [
+        { type: 'text' as const, text: content ?? '' },
+        ...attachments.map((a) => ({
+          type: 'image_url' as const,
+          image_url: { url: `data:${a.mimeType};base64,${a.base64}` },
+        })),
+      ],
+    };
+  });
+}
+
+/**
+ * Apply {@link toWireMessages} at serialization time.
+ *
+ * Deliberately called inside `JSON.stringify(...)` rather than when the body
+ * is built: everything between those two points may still mutate the message
+ * list in place.
+ */
+function withWireMessages(body: Record<string, unknown>): Record<string, unknown> {
+  const messages = body.messages as ChatMessage[] | undefined;
+  if (!messages?.some((m) => m.attachments?.length)) return body;
+  return { ...body, messages: toWireMessages(messages) };
 }
 
 interface ChatCompletionTool {
@@ -1442,6 +1504,16 @@ export class LlamaCppProvider implements LLMProvider {
    * SSD-streamed prefill speeds).
    */
   private readonly replayReasoningContent: boolean;
+  /**
+   * Whether this engine was launched with `--mmproj`, i.e. whether the server
+   * can actually decode an image. Gates the typed-content message shape:
+   * sending image parts to a text-only server just inflates the prompt with
+   * base64 the model can't interpret.
+   *
+   * Sourced from the installed model's projector path plus the user's
+   * per-model opt-in, resolved in `buildLlamaCppProvider`.
+   */
+  private readonly visionEnabled: boolean;
   private readonly disableThinkingRequestShape: DisableThinkingRequestShape;
   /** Engine batch width; see the `batchMaxConcurrency` constructor opt. */
   private readonly batchMaxConcurrency: number;
@@ -1558,6 +1630,8 @@ export class LlamaCppProvider implements LLMProvider {
     includeUsageInStream?: boolean;
     /** See {@link LlamaCppProvider.replayReasoningContent}. Default false. */
     replayReasoningContent?: boolean;
+    /** See {@link LlamaCppProvider.visionEnabled}. Default false. */
+    visionEnabled?: boolean;
     /**
      * Request fields used when constrained local turns need thinking disabled.
      * llama-server honors chat_template_kwargs.enable_thinking; ds4-server
@@ -1660,6 +1734,7 @@ export class LlamaCppProvider implements LLMProvider {
     this.numCtx = opts.numCtx ?? DEFAULT_NUM_CTX;
     this.includeUsageInStream = opts.includeUsageInStream ?? false;
     this.replayReasoningContent = opts.replayReasoningContent ?? false;
+    this.visionEnabled = opts.visionEnabled ?? false;
     this.disableThinkingRequestShape = opts.disableThinkingRequestShape ?? 'chat-template';
     this.classifyLine = opts.classifyLine ?? classifyStartupLine;
     // 5-minute defaults match Ollama. Generous enough to cover a 30B
@@ -1837,6 +1912,7 @@ export class LlamaCppProvider implements LLMProvider {
       numCtx: this.numCtx,
       includeUsageInStream: this.includeUsageInStream,
       replayReasoningContent: this.replayReasoningContent,
+      visionEnabled: this.visionEnabled,
       disableThinkingRequestShape: this.disableThinkingRequestShape,
       systemMessage: opts.systemMessage,
       ...(opts.systemPromptLayers ? { systemPromptLayers: opts.systemPromptLayers } : {}),
@@ -2061,6 +2137,8 @@ interface LlamaCppSessionDeps {
   includeUsageInStream?: boolean;
   /** Echo per-turn `reasoning_content` on committed assistant messages (ds4 opt-in). */
   replayReasoningContent?: boolean;
+  /** See {@link LlamaCppProvider.visionEnabled}. */
+  visionEnabled?: boolean;
   /** See {@link LlamaCppProvider.disableThinkingRequestShape}. */
   disableThinkingRequestShape: DisableThinkingRequestShape;
   /**
@@ -2380,7 +2458,7 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
     const res = await this.deps.fetchImpl(`${baseUrl}/v1/chat/completions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+      body: JSON.stringify(withWireMessages(body)),
       // An SSD-streamed 284B model legitimately prefills for minutes.
       signal: AbortSignal.timeout(opts?.timeoutMs ?? 10 * 60_000),
     });
@@ -2510,9 +2588,17 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
     const deadline = Date.now() + totalTimeoutMs;
     const start = Date.now();
 
+    // Images only ride along when the server has a projector loaded. Otherwise
+    // the chat layer has already replaced them with a text digest, and base64
+    // sent to a blind server just burns context on bytes it discards.
+    const attachments = opts?.attachments ?? [];
     const userMsg: ChatMessage = { role: 'user', content: prompt };
-    if (opts?.attachments && opts.attachments.length > 0) {
-      userMsg.images = opts.attachments.map((a: ImageAttachment) => a.base64);
+    if (attachments.length > 0) {
+      if (this.deps.visionEnabled) userMsg.attachments = [...attachments];
+      else
+        log.debug(
+          `[llama-cpp] dropping ${attachments.length} image attachment(s) — engine has no vision projector loaded`,
+        );
     }
     // Mark where the current turn starts so mid-loop compaction can
     // tell "compact this" (everything before) from "preserve verbatim"
@@ -3738,7 +3824,7 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
           res = await this.deps.fetchImpl(`${baseUrl}/v1/chat/completions`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body),
+            body: JSON.stringify(withWireMessages(body)),
             signal: ctrl.signal,
           });
         } catch (err) {
@@ -3967,6 +4053,9 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
             // against a runaway repetition loop. See RambleDetector.
             new RambleDetector({ threshold: 6000, enabled: false, repetitionGuardEnabled: true });
         let rambleAborted = false;
+        // Tool name for the live tool-args channel — only the first
+        // fragment of a streamed tool call carries `function.name`.
+        let liveToolArgsName = '';
         let immediateWriteTextAborted = false;
         let scenarioRepairTextAborted = false;
         let existingSourceEditTextAborted = false;
@@ -4138,7 +4227,19 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
               // (and looks stalled to the UI + stall watchdogs).
               this.emitWirePulse();
               ramble.recordStructuredAction(turnContent.length);
-              for (const tc of delta!.tool_calls!) toolCallAccumulator.ingest(tc);
+              for (const tc of delta!.tool_calls!) {
+                toolCallAccumulator.ingest(tc);
+                // Live tool-args channel: stream the argument fragments so
+                // the UI can show *what* the model is writing during a long
+                // structured call (see onToolArgsDelta). The name only
+                // rides the first fragment of each call — remember it so
+                // later argument-only fragments stay attributed.
+                if (tc.function?.name) liveToolArgsName = tc.function.name;
+                const argChunk = tc.function?.arguments ?? '';
+                if (tc.function?.name || argChunk.length > 0) {
+                  this.emitToolArgsDelta(liveToolArgsName, argChunk);
+                }
+              }
               if (
                 immediateFileWriteTurn &&
                 !immediateWriteStructuredAborted &&
@@ -5378,6 +5479,30 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
               const bytes = typeof args.content === 'string' ? args.content.length : 0;
               log.info(
                 `[llama-cpp] auto-continuation hint appended to tool=${call.function.name} id=${call.id} path=${path} bytes=${bytes}`,
+              );
+            }
+          }
+          // The partial-bytes hint above deliberately skips ERROR results.
+          // When the write was REJECTED because generation hit the output
+          // cap (ds4 repairs the cut-off call and the validator refuses the
+          // half-file), the model's instinct is a full rewrite — which hits
+          // the same cap again. Steer it to targeted edits instead, unless
+          // the MCP layer already saved the draft for append-based recovery.
+          if (failedWriteHitOutputLimit && !recoverableImmediateWriteError) {
+            const before = output.length;
+            output = appendCapTruncationHintToRejectedWrite(
+              output,
+              call.function.name,
+              args,
+              requestMaxTokens,
+            );
+            if (output.length !== before) {
+              const path = typeof args.path === 'string' ? args.path : '(unknown)';
+              log.info(
+                `[llama-cpp] cap-truncated rejected write — incremental-edit hint appended tool=${call.function.name} id=${call.id} path=${path} max_tokens=${requestMaxTokens ?? 'unset'}`,
+              );
+              this.emitWarning(
+                `The model hit its output-token cap mid-writeFile (${path}); the write was rejected and it was steered to incremental edits instead of a full rewrite.`,
               );
             }
           }

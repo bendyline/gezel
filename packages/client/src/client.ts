@@ -137,6 +137,11 @@ import type {
   GrepArtifactRequest,
   GrepArtifactResponse,
   GzelBundleManifest,
+  HandboekArticle,
+  HandboekHowDoIResponse,
+  HandboekNarrationResponse,
+  HandboekRenderMode,
+  HandboekToc,
   HealthResponse,
   InsertAtMarkerInProjectWorkspaceFileRequest,
   InstallPackageRequest,
@@ -4750,6 +4755,50 @@ export class GezelClient {
       undefined,
       opts.signal,
     );
+  }
+
+  getHandboekToc(): Promise<HandboekToc> {
+    return this.request('GET', '/api/handboek/toc');
+  }
+
+  getHandboekArticle(
+    id: string,
+    opts: { mode?: HandboekRenderMode } = {},
+  ): Promise<HandboekArticle> {
+    const qs = opts.mode ? `?mode=${opts.mode}` : '';
+    const encoded = id.split('/').map(encodeURIComponent).join('/');
+    return this.request('GET', `/api/handboek/article/${encoded}${qs}`);
+  }
+
+  /**
+   * Per-block narration manifest for a handboek article. 409s when the
+   * TTS engine isn't installed/healthy — gate on `getAudioEngineStatus`
+   * first.
+   */
+  getHandboekNarration(
+    id: string,
+    opts: { voice?: string } = {},
+  ): Promise<HandboekNarrationResponse> {
+    const qs = opts.voice ? `?voice=${encodeURIComponent(opts.voice)}` : '';
+    const encoded = id.split('/').map(encodeURIComponent).join('/');
+    return this.request('GET', `/api/handboek/narration/article/${encoded}${qs}`);
+  }
+
+  /** Best-matching handboek articles for a plain-language question, agent-tailored. */
+  handboekHowDoI(question: string, opts: { limit?: number } = {}): Promise<HandboekHowDoIResponse> {
+    const params = new URLSearchParams({ q: question });
+    if (opts.limit) params.set('limit', String(opts.limit));
+    return this.request('GET', `/api/handboek/how-do-i?${params.toString()}`);
+  }
+
+  /** Narration segment WAV — same bearer-in-fetch pattern as the artifact blobs. */
+  async fetchHandboekNarrationAudio(hash: string): Promise<Blob> {
+    const url = `${this.baseUrl}/api/handboek/narration/audio/${hash}`;
+    const res = await this.fetchImpl(url, {
+      headers: { Authorization: `Bearer ${this.token}` },
+    });
+    if (!res.ok) throw new Error(`narration fetch failed: ${res.status}`);
+    return res.blob();
   }
 
   listDocuments(

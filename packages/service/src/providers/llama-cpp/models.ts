@@ -34,7 +34,7 @@
 
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import {
@@ -43,6 +43,7 @@ import {
   publishStagedModel,
   safeBundleModelPath,
 } from '../../models/bundle-storage.js';
+import { checkDiskSpace, describeDiskShortfall } from '../../utils/disk-space.js';
 import { downloadWithRetry } from '../../utils/download-with-retry.js';
 import { readGgufSummary } from './gguf-metadata.js';
 
@@ -533,6 +534,17 @@ export class LlamaCppModelManager {
     tracked.totalBytes = totalPlanned;
     let bytesCompleted = 0;
 
+    // Preflight the disk before writing a byte. ds4 GGUFs run to 200+ GiB, so
+    // discovering ENOSPC at 95% costs hours and leaves a `.partial` occupying
+    // the disk it just filled. Only the bytes still missing are charged, so a
+    // resumed install isn't refused for space it already holds.
+    const remainingBytes = Math.max(0, totalPlanned - (await bytesAlreadyOnDisk(itemDir, plan)));
+    const space = await checkDiskSpace(itemDir, remainingBytes);
+    if (!space.ok) {
+      yield { type: 'error', error: describeDiskShortfall(space, manifest.name) };
+      return;
+    }
+
     for (let i = 0; i < plan.length; i++) {
       const entry = plan[i];
       if (!entry) continue;
@@ -806,6 +818,31 @@ function planDownloads(src: {
     });
   }
   return out;
+}
+
+/**
+ * Bytes of a planned install that are already on disk — completed files from
+ * an earlier attempt plus any resumable `.partial`. The disk preflight charges
+ * only the remainder, so retrying a 200 GiB download that's 90% done isn't
+ * refused for space it is already holding.
+ */
+async function bytesAlreadyOnDisk(itemDir: string, plan: DownloadPlanEntry[]): Promise<number> {
+  let total = 0;
+  for (const entry of plan) {
+    const destPath = join(itemDir, entry.destFilename);
+    for (const candidate of [destPath, `${destPath}.partial`]) {
+      const size = await stat(candidate)
+        .then((st) => st.size)
+        .catch(() => 0);
+      // A finished file and its leftover `.partial` can coexist; count the
+      // larger one only, never both.
+      if (size > 0) {
+        total += Math.min(size, entry.sizeBytes);
+        break;
+      }
+    }
+  }
+  return total;
 }
 
 /**
