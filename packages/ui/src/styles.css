@@ -11396,6 +11396,16 @@ body.chat-rail-resizing webview {
   flex-direction: column;
   min-height: 0;
   min-width: 0;
+  /* Own stacking context so the overlays inside (`.chat-sticky-header`
+     at 5, `.thinking-tool-detail-preview` at 20) are ordered against
+     each other and the bubbles they cover — not against the app shell.
+     Without this the viewport is `position: relative` with `z-index:
+     auto`, so the sticky header's 5 landed in the ROOT stack and beat
+     `.app-header`'s 2, painting over the titlebar's engine/queue
+     popovers. Everything that legitimately needs to escape the
+     timeline (Radix `.gz-popover`, tooltips, dialogs) is portaled to
+     body and unaffected. */
+  z-index: 0;
   /* Left inset applied to a thread's reply column (rail + gutter).
      Declared here — not on `.timeline-thread-replies` — because the
      sticky context header lives outside the timeline's content box

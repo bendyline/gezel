@@ -19,7 +19,7 @@ function health(overrides: Partial<DeviceHealth>): DeviceHealth {
 }
 
 describe('engine pill device health', () => {
-  it('renders the hottest temperature and smallest thermal margin', () => {
+  it('reports the hottest temperature and smallest thermal margin in the detail line', () => {
     expect(
       presentDeviceHealth(
         health({
@@ -30,9 +30,32 @@ describe('engine pill device health', () => {
         }),
       ),
     ).toEqual({
-      inline: '82°C',
+      inline: null,
       detail: 'Healthy · 82°C · 6°C thermal margin',
       tone: 'normal',
+    });
+  });
+
+  it('keeps a cool machine out of the pill entirely', () => {
+    expect(
+      presentDeviceHealth(
+        health({ readings: [{ vendor: 'nvidia', deviceId: '0', temperatureC: 49 }] }),
+      ),
+    ).toMatchObject({ inline: null, tone: 'normal' });
+  });
+
+  it('shows the state word without degrees when warm', () => {
+    expect(
+      presentDeviceHealth(
+        health({
+          state: 'warm',
+          readings: [{ vendor: 'nvidia', deviceId: '0', temperatureC: 100, thermalMarginC: 3 }],
+        }),
+      ),
+    ).toEqual({
+      inline: 'Warm',
+      detail: 'Warm · 100°C · 3°C thermal margin',
+      tone: 'warning',
     });
   });
 
