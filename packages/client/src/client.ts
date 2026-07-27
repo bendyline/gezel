@@ -3345,12 +3345,13 @@ export class GezelClient {
 
   listProjectTimeline(
     projectId: string,
-    opts?: { limit?: number; before?: string; gezelId?: string },
+    opts?: { limit?: number; before?: string; gezelId?: string; taskRef?: string },
   ): Promise<ListTimelineResponse> {
     const params = new URLSearchParams();
     if (opts?.limit != null) params.set('limit', String(opts.limit));
     if (opts?.before) params.set('before', opts.before);
     if (opts?.gezelId) params.set('gezel', opts.gezelId);
+    if (opts?.taskRef) params.set('task', opts.taskRef);
     const qs = params.toString() ? `?${params.toString()}` : '';
     return this.request('GET', `/api/projects/${encodeURIComponent(projectId)}/timeline${qs}`);
   }

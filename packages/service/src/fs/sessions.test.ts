@@ -80,6 +80,82 @@ describe('Store session CRUD', () => {
     expect(onDisk?.messages.find((m) => m.hidden)?.content).toContain('[Checkers page]');
   });
 
+  it('listTimeline scoped to a taskRef drops unrelated sessions in the project', async () => {
+    await store.writeSession(
+      sessionFixture({
+        id: 'sess-task',
+        taskRef: 'molen-internal/1',
+        projectId: 'molen-internal',
+        messages: [
+          { role: 'user', content: 'about the contract review', at: '2026-04-14T10:00:00Z' },
+        ],
+      }),
+    );
+    await store.writeSession(
+      sessionFixture({
+        id: 'sess-other-task',
+        taskRef: 'molen-internal/2',
+        projectId: 'molen-internal',
+        messages: [{ role: 'user', content: 'about a different task', at: '2026-04-14T10:00:01Z' }],
+      }),
+    );
+    await store.writeSession(
+      sessionFixture({
+        id: 'sess-unscoped',
+        projectId: 'molen-internal',
+        messages: [
+          { role: 'user', content: 'general project check-in', at: '2026-04-14T10:00:02Z' },
+        ],
+      }),
+    );
+
+    const scoped = await store.listTimeline({
+      projectId: 'molen-internal',
+      taskRef: 'molen-internal/1',
+      limit: 50,
+    });
+    expect(scoped.messages.map((m) => m.content)).toEqual(['about the contract review']);
+
+    const unscoped = await store.listTimeline({ projectId: 'molen-internal', limit: 50 });
+    expect(unscoped.messages).toHaveLength(3);
+  });
+
+  it('listTimeline scoped to a taskRef keeps handoff sessions from other gezels', async () => {
+    await store.createGezel({ name: 'Boz', role: 'Writer' });
+    await store.writeSession(
+      sessionFixture({
+        id: 'sess-ada',
+        gezelId: 'ada',
+        taskRef: 'molen-internal/1',
+        projectId: 'molen-internal',
+        createdAt: '2026-04-14T10:00:00Z',
+        messages: [{ role: 'user', content: 'scope the review', at: '2026-04-14T10:00:00Z' }],
+      }),
+    );
+    await store.writeSession(
+      sessionFixture({
+        id: 'sess-boz',
+        gezelId: 'boz',
+        taskRef: 'molen-internal/1',
+        projectId: 'molen-internal',
+        createdAt: '2026-04-14T11:00:00Z',
+        messages: [{ role: 'user', content: 'write the report', at: '2026-04-14T11:00:00Z' }],
+      }),
+    );
+
+    const scoped = await store.listTimeline({
+      projectId: 'molen-internal',
+      taskRef: 'molen-internal/1',
+      limit: 50,
+    });
+    expect(scoped.messages.map((m) => m.gezelId)).toEqual(['ada', 'boz']);
+    // Handoff lineage still resolves inside the narrowed scope.
+    expect(scoped.messages.find((m) => m.gezelId === 'boz')?.handoffFrom).toEqual({
+      gezelId: 'ada',
+      sessionId: 'sess-ada',
+    });
+  });
+
   it('findSessionById locates across gezels', async () => {
     await store.createGezel({ name: 'Boz', role: 'Writer' });
     await store.writeSession(sessionFixture({ id: 'A', gezelId: 'ada' }));

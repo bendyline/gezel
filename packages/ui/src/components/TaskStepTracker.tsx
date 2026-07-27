@@ -73,12 +73,17 @@ export function TaskStepTracker({
   const showFigures = useShowPoppetjes();
   const terminal = taskStatus === 'complete' || taskStatus === 'canceled';
 
-  // Who applies when a step sets no assignee of its own: task default, then a
-  // bare craftbook suggestion. Used both for display and the "inherit" label.
+  // Who applies when a step sets no assignee of its own: the gezel its
+  // `suggestedRole` resolved into, then the task default. That order matches
+  // the handoff paths — `onStepActivated` reads the step's own binding and
+  // never the task assignee — so the tracker can't show one name while a
+  // different gezel actually holds the step. Used for display and the
+  // "inherit" label both.
   const inheritedNameFor = (step: TaskCraftbookStep): string | undefined => {
     const inh: TaskAssignee | null =
+      (step.suggestedGezelId ? { kind: 'gezel', gezelId: step.suggestedGezelId } : null) ??
       taskAssignee ??
-      (step.suggestedGezelId ? { kind: 'gezel', gezelId: step.suggestedGezelId } : null);
+      null;
     if (inh?.kind === 'user') return 'you';
     if (inh?.kind === 'gezel') return gezels.find((g) => g.id === inh.gezelId)?.name;
     return undefined;
@@ -88,8 +93,9 @@ export function TaskStepTracker({
     const status = stepStatus(step, activeStepId, terminal);
     const assignee: TaskAssignee | null =
       step.assignee ??
+      (step.suggestedGezelId ? { kind: 'gezel', gezelId: step.suggestedGezelId } : null) ??
       taskAssignee ??
-      (step.suggestedGezelId ? { kind: 'gezel', gezelId: step.suggestedGezelId } : null);
+      null;
 
     let name: string | undefined;
     let role: string | undefined;

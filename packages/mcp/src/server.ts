@@ -6414,7 +6414,13 @@ server.tool(
         "The voorman's approach. Usually omitted at creation and filled in later via update_task once the " +
           'work has been scoped. Distinct from per-step notes (the progress log) — this is the plan.',
       ),
-    assignee: assigneeArg(),
+    assignee: assigneeArg()
+      .optional()
+      .describe(
+        'Who owns the task. OMIT this when the craftbook or steps name a role per step — the owner then ' +
+          "mirrors whoever the entry step's role resolves to, which is the gezel actually doing the work. " +
+          'Naming someone here just pins an owner the per-step roles override anyway.',
+      ),
     craftbookId: z
       .string()
       .optional()
@@ -6482,7 +6488,7 @@ server.tool(
         title,
         description,
         ...(plan ? { plan } : {}),
-        assignee: assigneeFromArg(assignee),
+        ...(assignee ? { assignee: assigneeFromArg(assignee) } : {}),
         ...(craftbookId ? { craftbookId } : {}),
         ...(craftbookVersion ? { craftbookVersion } : {}),
         ...(steps && steps.length > 0 ? { steps: steps.map(blueprintToStep) } : {}),

@@ -31,6 +31,7 @@ export async function buildTimeline(
   opts: {
     projectId?: string;
     gezelId?: string;
+    taskRef?: string;
     rawLimit?: string;
     before?: string;
   },
@@ -39,6 +40,7 @@ export async function buildTimeline(
   const result = await ctx.store.listTimeline({
     ...(opts.projectId ? { projectId: opts.projectId } : {}),
     ...(opts.gezelId ? { gezelId: opts.gezelId } : {}),
+    ...(opts.taskRef ? { taskRef: opts.taskRef } : {}),
     limit,
     ...(opts.before ? { before: opts.before } : {}),
   });

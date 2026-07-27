@@ -559,7 +559,7 @@ export function TaskDetail({
       <div
         className={`task-bench-row${
           selectedStepId !== null || tab === 'task' ? ' has-docked-panel' : ''
-        }`}
+        }${selectedStepId !== null ? ' has-selected-step' : ''}`}
       >
         <div className="task-tab-rail" role="tablist" aria-label="Task view">
           <button

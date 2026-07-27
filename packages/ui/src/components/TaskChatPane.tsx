@@ -11,9 +11,13 @@ import { SessionSwitcher } from './SessionSwitcher.js';
  * task-scoped sessions — including ones spun up by `advance_task_step`
  * handoffs — show up in the switcher.
  *
- * The project timeline below is still project-wide (interleaved with any
- * other sessions in the project) — the scoping bite is on the session
- * switcher and the composer, not the visible history.
+ * The history below is scoped the same way: `taskRef` filters the
+ * timeline to this task's sessions server-side, and the live SSE stream
+ * to the matching allowlist. It used to be project-wide, which read as a
+ * bug — the header names one task while the transcript showed every
+ * conversation in the project, and clicking an unrelated message
+ * retargeted the composer at a session that had nothing to do with the
+ * task.
  */
 export function TaskChatPane({ task, gezels }: { task: Task; gezels: GezelSummary[] }) {
   const assigneeGezelId = task.assignee.kind === 'gezel' ? task.assignee.gezelId : undefined;
@@ -55,6 +59,7 @@ export function TaskChatPane({ task, gezels }: { task: Task; gezels: GezelSummar
     <div className="task-detail-chat">
       <ProjectTimeline
         projectId={task.projectId}
+        taskRef={task.ref}
         activeSessionId={sessionId || undefined}
         onFocusSession={(sid, gid) => {
           if (gid === targetGezel.id) setSessionId(sid);

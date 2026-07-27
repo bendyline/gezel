@@ -709,6 +709,7 @@ export function projectRoutes(ctx: ServiceContext): Hono {
       rawLimit: c.req.query('limit'),
       before: c.req.query('before'),
       gezelId: c.req.query('gezel'),
+      taskRef: c.req.query('task'),
     });
     return c.json(response);
   });

@@ -301,6 +301,17 @@ export const TaskSchema = z.object({
   outcomes: z.array(OutcomeSchema).optional(),
   status: TaskStatusSchema,
   assignee: TaskAssigneeSchema,
+  /**
+   * The assignee was derived, not chosen — it mirrors whoever the ENTRY
+   * step's `suggestedRole` resolved to. Set when a task is created
+   * without a named assignee; cleared the moment anyone pins one.
+   *
+   * A draft carries the flag with an interim `{kind:'user'}` assignee:
+   * drafts resolve no roles (that would create gezels for a task that
+   * may never run), so `activate()` is the first moment a concrete
+   * specialist exists to point at.
+   */
+  assigneeAuto: z.boolean().optional(),
   craftbook: TaskCraftbookSchema,
   spawnsCraftbook: TaskCraftbookSchema.optional(),
   sourceCraftbookIds: z.array(TaskCraftbookSourceSchema).optional(),
@@ -373,7 +384,14 @@ export const CreateTaskRequestSchema = z
     description: z.string().min(40),
     plan: z.string().optional(),
     outcomes: z.array(OutcomeSchema).optional(),
-    assignee: TaskAssigneeSchema,
+    /**
+     * Who owns the task. Omit it on a craftbook whose entry step names a
+     * `suggestedRole` and the resolved specialist becomes the assignee —
+     * naming one here would only be an arbitrary pick that the role
+     * resolution overrides at step level anyway. Falls back to the user
+     * when nothing resolves. See `TaskSchema.assigneeAuto`.
+     */
+    assignee: TaskAssigneeSchema.optional(),
     /**
      * Initial status. Defaults to 'active'. Pass 'draft' to create an
      * inert task (e.g. a plan being authored) that won't tick or dispatch

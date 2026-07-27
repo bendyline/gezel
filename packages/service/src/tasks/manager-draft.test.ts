@@ -123,4 +123,35 @@ describe('TaskManager — draft + activate', () => {
     expect(live.status).toBe('active');
     expect(live.craftbook.steps[0]?.attemptCount).toBe(1);
   });
+
+  // The New Task dialog's craftbook path — creates a draft, fires later.
+  it('a draft created without an assignee takes the entry-step role on activate', async () => {
+    tasks.setRoleResolver(async (role) => ({ gezelId: `${role}-id` }));
+    const draft = await tasks.create('website', {
+      title: 'Review the contract',
+      status: 'draft',
+      steps: [{ name: 'Scope the review', suggestedRole: 'reviewer' }],
+    });
+    // Inert: no role resolved yet, so the owner is a placeholder.
+    expect(draft.assignee).toEqual({ kind: 'user' });
+    expect(draft.assigneeAuto).toBe(true);
+    expect(draft.craftbook.steps[0]?.suggestedGezelId).toBeUndefined();
+
+    const live = await tasks.activate('website', draft.num, { force: true });
+    expect(live.craftbook.steps[0]?.suggestedGezelId).toBe('reviewer-id');
+    expect(live.assignee).toEqual({ kind: 'gezel', gezelId: 'reviewer-id' });
+  });
+
+  it('activate leaves a hand-pinned draft assignee alone', async () => {
+    tasks.setRoleResolver(async (role) => ({ gezelId: `${role}-id` }));
+    const draft = await tasks.create('website', {
+      title: 'Review the contract',
+      status: 'draft',
+      assignee: { kind: 'gezel', gezelId: 'magnus' },
+      steps: [{ name: 'Scope the review', suggestedRole: 'reviewer' }],
+    });
+    const live = await tasks.activate('website', draft.num, { force: true });
+    expect(live.assignee).toEqual({ kind: 'gezel', gezelId: 'magnus' });
+    expect(live.craftbook.steps[0]?.suggestedGezelId).toBe('reviewer-id');
+  });
 });

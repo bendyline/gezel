@@ -7869,19 +7869,13 @@ button.bench-step-foot:disabled {
    and the peg glyph — deliberately NOT a card fill/border, so it doesn't read
    like the selected tab. It sits on the rail like any other pending step. */
 
-/* Viewing a station that isn't the live one: quiet underline + faint card
-   so selection reads without competing with the in-hand highlight. */
+/* Viewing a station that isn't the live one: a quiet underline so selection
+   reads without competing with the in-hand highlight. (The card itself is
+   the shared selected-foot rule below.) */
 .bench-step.selected:not(.status-active) .bench-step-name {
   text-decoration: underline;
   text-underline-offset: 3px;
   text-decoration-thickness: 1.5px;
-}
-
-.bench-step.selected:not(.status-active) .bench-step-foot {
-  margin-top: calc(var(--bench-rail-h) + 0.35rem);
-  padding: 0.35rem 0.5rem;
-  background: var(--surface);
-  border-radius: 8px;
 }
 
 /* Selected step = the active tab for the editor panel below. Its foot turns
@@ -7889,9 +7883,16 @@ button.bench-step-foot:disabled {
    bottom corners, no bottom border, and a raised z-index so the panel's top
    border is hidden beneath it. Wins over the active / selected foot rules
    above (equal-or-higher specificity, later in source), so it applies whether
-   or not this is also the live (active) step. */
+   or not this is also the live (active) step.
+
+   The margin backs off by exactly the card's block padding + top border
+   (0.4rem + 1px), so the step's number/name/status land on the SAME line as
+   its unselected neighbours' — the card grows downward around the text
+   rather than pushing it down. Keep that relationship if you retune the
+   padding: the card's downward growth is also what
+   `.task-bench-row.has-selected-step .task-tab-rail` compensates for. */
 .step-bench .bench-step.selected .bench-step-foot {
-  margin-top: calc(var(--bench-rail-h) + 0.3rem);
+  margin-top: calc(var(--bench-rail-h) + 0.1rem - 1px);
   padding: 0.4rem 0.6rem;
   background: var(--panel, var(--surface));
   border: 1px solid var(--border);
@@ -8036,6 +8037,17 @@ button.bench-step-foot:disabled {
   flex-direction: row;
   gap: 0.4rem;
   padding: 0;
+}
+
+/* Selecting a step makes the bench taller: that step's foot grows into a
+   card whose block padding hangs BELOW the step labels (see
+   `.step-bench .bench-step.selected .bench-step-foot`). A bottom-anchored
+   rail would ride that growth down and the Task/Chat labels would drop out
+   of the step-label band they're meant to sit in. Lift the rail by exactly
+   the card's downward growth (its 0.4rem bottom padding) so the labels hold
+   their line whichever tab or step is showing. */
+.task-bench-row.has-selected-step .task-tab-rail {
+  margin-bottom: 0.4rem;
 }
 
 .task-tab-btn {
@@ -9836,7 +9848,13 @@ button.bench-step-foot:disabled {
   color: var(--text);
 }
 
+/* The off-roster key. Sits in the chip row, so it matches chip height and
+   radius; muted until it holds someone, at which point it renders as a
+   full chip (`.project-chat-more-active`) and only keeps the caret. */
 .project-chat-more {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
   padding: 0.35rem 0.55rem;
   background: var(--surface);
   color: var(--text-muted);
@@ -9844,6 +9862,66 @@ button.bench-step-foot:disabled {
   border-radius: var(--radius-sm);
   font-size: var(--text-xs);
   cursor: pointer;
+}
+
+.project-chat-more:hover {
+  border-color: var(--accent);
+}
+
+.project-chat-more-active {
+  gap: 0.5rem;
+}
+
+.project-chat-more-caret {
+  color: var(--text-muted);
+  font-size: var(--text-2xs);
+  line-height: 1;
+}
+
+.gz-popover.project-chat-more-popover {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  width: 19rem;
+  padding: 0.5rem;
+}
+
+.project-chat-more-label {
+  padding: 0 0.15rem;
+  color: var(--text-muted);
+  font-size: var(--text-2xs);
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.project-chat-more-search {
+  width: 100%;
+  padding: 0.3rem 0.45rem;
+  font-size: var(--text-sm);
+}
+
+.project-chat-more-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  /* Roughly six chips before it scrolls — long enough to browse a crew,
+     short enough that the popover never runs off the roster row. */
+  max-height: 19rem;
+  overflow-y: auto;
+}
+
+/* Inside the popover the chips are a menu, not a wrapping row: full width,
+   left-aligned, so names and roles line up as one column. */
+.project-chat-more-list .project-chat-chip {
+  width: 100%;
+  justify-content: flex-start;
+  text-align: left;
+}
+
+.project-chat-more-empty {
+  margin: 0;
+  padding: 0.35rem 0.15rem;
 }
 
 /* ── Thinking indicator (chat surfaces) ── */
@@ -13565,8 +13643,12 @@ a.license-button:hover {
   cursor: not-allowed;
 }
 
+/* Holds the SVG caret. inline-flex (not inline) so the glyph box has no
+   baseline descender under it — otherwise the triangle sits high in the
+   trigger and reads as off-centre even though it's symmetric. */
 .gz-select-icon {
-  font-size: 1rem;
+  display: inline-flex;
+  align-items: center;
   line-height: 1;
   opacity: 1;
   margin-left: auto;

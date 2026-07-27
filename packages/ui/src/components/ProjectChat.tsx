@@ -3,7 +3,7 @@ import { displayName } from '@bendyline/gezel';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { crewLeadLabelLower } from '../labels.js';
-import { Select } from '../primitives/index.js';
+import { Popover } from '../primitives/index.js';
 import { ChatComposer, queueComposerPrefill } from './ChatComposer.js';
 import { ChatReferences } from './ChatReferences.js';
 import { FolderTreeSwitcher } from './FolderTreeSwitcher.js';
@@ -248,27 +248,12 @@ export function ProjectChat({
             )}
 
             {otherGezels.length > 0 && (
-              <Select.Root
-                value={
-                  primaryRoster.some((r) => r.gezel.id === selectedId) ? '__MORE__' : selectedId
-                }
-                onValueChange={(v) => {
-                  if (v && v !== '__MORE__') setSelectedId(v);
-                }}
-              >
-                <Select.Trigger className="project-chat-more">
-                  <Select.Value placeholder="More gezels…" />
-                </Select.Trigger>
-                <Select.Content>
-                  <Select.Item value="__MORE__">More gezels…</Select.Item>
-                  {otherGezels.map((g) => (
-                    <Select.Item key={g.id} value={g.id}>
-                      {g.name}
-                      {g.role ? ` — ${g.role}` : ''}
-                    </Select.Item>
-                  ))}
-                </Select.Content>
-              </Select.Root>
+              <MoreGezels
+                gezels={otherGezels}
+                selectedId={selectedId}
+                roleBasedNameOnlyMode={roleBasedNameOnlyMode}
+                onSelect={setSelectedId}
+              />
             )}
           </>
         )}
@@ -284,6 +269,142 @@ export function ProjectChat({
         />
       )}
     </div>
+  );
+}
+
+/**
+ * The "More gezels…" key — everyone not on the project's roster, reachable
+ * ad hoc. A popover of the same face-bearing chips the roster row uses, not
+ * a text `Select`: the old dropdown had to carry its own trigger label as a
+ * sentinel option ("More gezels…" listed alongside real people), which read
+ * as a selectable gezel. A popover has a trigger that is not an option, so
+ * the list is people and nothing else.
+ */
+function MoreGezels({
+  gezels,
+  selectedId,
+  roleBasedNameOnlyMode,
+  onSelect,
+}: {
+  gezels: GezelSummary[];
+  selectedId: string;
+  roleBasedNameOnlyMode: boolean;
+  onSelect: (gezelId: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+
+  const named = useMemo(
+    () =>
+      gezels.map((g) => ({
+        gezel: g,
+        rendered: displayName(
+          { name: g.name, roleBasedName: g.roleBasedName },
+          roleBasedNameOnlyMode,
+        ),
+      })),
+    [gezels, roleBasedNameOnlyMode],
+  );
+
+  const active = named.find((n) => n.gezel.id === selectedId) ?? null;
+
+  // Search only earns its space once the list stops being scannable at a
+  // glance; below that it's a box between the user and four faces.
+  const searchable = named.length > 8;
+  const q = query.trim().toLowerCase();
+  const shown =
+    searchable && q
+      ? named.filter(
+          (n) =>
+            n.rendered.toLowerCase().includes(q) || (n.gezel.role ?? '').toLowerCase().includes(q),
+        )
+      : named;
+
+  return (
+    <Popover.Root
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        if (!next) setQuery('');
+      }}
+    >
+      <Popover.Trigger asChild>
+        <button
+          type="button"
+          className={
+            active
+              ? 'project-chat-chip project-chat-chip-active project-chat-more-active'
+              : 'project-chat-more'
+          }
+          title={
+            active
+              ? `${active.rendered} — pulled in from outside this project's team`
+              : 'Bring in a gezel from outside this team'
+          }
+        >
+          {active ? (
+            <>
+              <GezelIcon
+                svg={active.gezel.icon ?? null}
+                poppetje={active.gezel.poppetje}
+                iconOverride={active.gezel.iconOverride}
+                name={active.rendered}
+                size={26}
+              />
+              <span className="project-chat-chip-text">
+                <span className="project-chat-chip-name">{active.rendered}</span>
+                {active.gezel.role && (
+                  <span className="project-chat-chip-tag">{active.gezel.role}</span>
+                )}
+              </span>
+            </>
+          ) : (
+            <span>More gezels…</span>
+          )}
+          <span className="project-chat-more-caret" aria-hidden>
+            ▾
+          </span>
+        </button>
+      </Popover.Trigger>
+      <Popover.Content className="project-chat-more-popover" align="start">
+        <span className="project-chat-more-label">Bring someone else in</span>
+        {searchable && (
+          <input
+            className="project-chat-more-search"
+            type="search"
+            value={query}
+            placeholder="Search by name or role"
+            onChange={(e) => setQuery(e.target.value)}
+          />
+        )}
+        <div className="project-chat-more-list">
+          {shown.map(({ gezel, rendered }) => (
+            <button
+              key={gezel.id}
+              type="button"
+              className={`project-chat-chip${gezel.id === selectedId ? ' project-chat-chip-active' : ''}`}
+              onClick={() => {
+                onSelect(gezel.id);
+                setOpen(false);
+              }}
+            >
+              <GezelIcon
+                svg={gezel.icon ?? null}
+                poppetje={gezel.poppetje}
+                iconOverride={gezel.iconOverride}
+                name={rendered}
+                size={26}
+              />
+              <span className="project-chat-chip-text">
+                <span className="project-chat-chip-name">{rendered}</span>
+                {gezel.role && <span className="project-chat-chip-tag">{gezel.role}</span>}
+              </span>
+            </button>
+          ))}
+          {shown.length === 0 && <p className="muted small project-chat-more-empty">No matches.</p>}
+        </div>
+      </Popover.Content>
+    </Popover.Root>
   );
 }
 

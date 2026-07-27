@@ -4082,10 +4082,15 @@ export class Store {
    * `handoffFrom` is set on rows whose parent session was created from a
    * `startHandoffSession` call: the previous session in the same project
    * sharing the same `taskRef` but with a different `gezelId`.
+   *
+   * `taskRef` narrows the scope to one task's sessions — what the Task
+   * detail's Chat tab uses so its history matches the task in its header
+   * instead of showing every conversation in the project.
    */
   async listTimeline(opts: {
     projectId?: string;
     gezelId?: string;
+    taskRef?: string;
     limit: number;
     before?: string;
     includeArchived?: boolean;
@@ -4113,6 +4118,11 @@ export class Store {
         const session = await this.readSessionFile(join(dir, file), `${gezelId}/${file}`);
         if (!session) continue;
         if (opts.projectId && session.projectId !== opts.projectId) continue;
+        // Task scoping is exact-match on the session's pinned `taskRef`,
+        // which keeps handoff sessions (spawned by `advance_task_step`
+        // under the same ref but a different gezel) in view while
+        // dropping every unrelated conversation in the project.
+        if (opts.taskRef && session.taskRef !== opts.taskRef) continue;
         if (!includeArchived && session.archived) continue;
         sessions.push(session);
       }

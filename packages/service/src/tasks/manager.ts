@@ -268,6 +268,27 @@ export type TaskSettledHook = (ctx: {
 export type RoleResolver = (role: string, projectId: string) => Promise<{ gezelId: string } | null>;
 
 /**
+ * The gezel a step is bound to on its OWN terms — an explicit assignee,
+ * else the gezel its `suggestedRole` resolved into. Deliberately does not
+ * consult the task-level assignee: this is the function that feeds it.
+ *
+ * Mirrors the precedence the handoff paths use (`onStepActivated` reads
+ * the step binding, never the task assignee), so a derived task owner and
+ * the gezel actually holding the step can't disagree.
+ */
+function stepOwnAssignee(
+  craftbook: { steps: TaskCraftbookStep[] },
+  stepId: string | undefined,
+): TaskAssignee | null {
+  if (!stepId) return null;
+  const step = craftbook.steps.find((s) => s.id === stepId);
+  if (!step) return null;
+  if (step.assignee) return step.assignee;
+  if (step.suggestedGezelId) return { kind: 'gezel', gezelId: step.suggestedGezelId };
+  return null;
+}
+
+/**
  * Maximum number of steps that can auto-advance in a single
  * `completeStep` call chain. Protects against a script whose
  * `autoAdvanceOnSuccess` (or branch predicate) fires every time but
@@ -660,6 +681,16 @@ export class TaskManager {
       await this.maybeResolveStepRole(craftbook, activeStepId, projectId);
     }
 
+    // No assignee named: mirror the entry step's binding, so the owner is
+    // the gezel actually holding step 1 rather than an arbitrary roster
+    // pick that every role-annotated step would override anyway. Only the
+    // ENTRY step feeds this — re-pointing the owner at each step's
+    // specialist as the task advances would churn the owner column for no
+    // one's benefit. A draft resolved nothing above; `activate()` restamps.
+    const assigneeAuto = input.assignee === undefined;
+    const assignee: TaskAssignee = input.assignee ??
+      stepOwnAssignee(craftbook, activeStepId) ?? { kind: 'user' };
+
     const task: Task = {
       projectId,
       num,
@@ -669,7 +700,8 @@ export class TaskManager {
       ...(input.plan ? { plan: input.plan } : {}),
       ...(input.outcomes && input.outcomes.length > 0 ? { outcomes: input.outcomes } : {}),
       status: isDraft ? 'draft' : 'active',
-      assignee: input.assignee,
+      assignee,
+      ...(assigneeAuto ? { assigneeAuto: true } : {}),
       craftbook,
       ...(spawnsCraftbook ? { spawnsCraftbook } : {}),
       ...(sources.length > 0 ? { sourceCraftbookIds: sources } : {}),
@@ -787,6 +819,8 @@ export class TaskManager {
     }
     if (patch.assignee !== undefined) {
       next.assignee = patch.assignee;
+      // Pinned by hand — stop mirroring the entry step.
+      delete next.assigneeAuto;
       changed.push('assignee');
     }
     if (patch.cron !== undefined) {
@@ -971,6 +1005,13 @@ export class TaskManager {
       updatedAt: now,
     };
     await this.maybeResolveStepRole(next.craftbook, entry, projectId);
+    // A draft created without a named owner has been carrying an interim
+    // `{kind:'user'}` assignee — the entry step's role only just resolved,
+    // so this is the first point a real specialist exists to point at.
+    if (next.assigneeAuto) {
+      const derived = stepOwnAssignee(next.craftbook, entry);
+      if (derived) next.assignee = derived;
+    }
     await this.store.writeTask(next);
     await this.reactivateProject(projectId);
     await this.history?.log({

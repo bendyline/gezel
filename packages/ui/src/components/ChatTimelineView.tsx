@@ -418,6 +418,26 @@ export interface ChatTimelineViewProps {
    * (ProjectTimeline).
    */
   inflightScope?: { projectId?: string; gezelId?: string };
+  /**
+   * Session allowlist. When set, only rows and live turns belonging to
+   * one of these sessions render.
+   *
+   * Needed because the SSE channel a caller subscribes to is always the
+   * *coarser* scope (project or gezel) and chat envelopes carry no
+   * `taskRef` — so a task-scoped timeline whose initial fetch was
+   * filtered server-side would still have unrelated sessions stream in
+   * live. `inflightScope` can't express this: the filter is a property
+   * of the session, not of the (project, gezel) pair.
+   */
+  scopedSessionIds?: ReadonlySet<string>;
+  /**
+   * Fired when `scopedSessionIds` is set and an event arrives for a
+   * session that isn't in it. The owner refetches the scope's session
+   * list — this is how a handoff session spawned mid-turn (by
+   * `advance_task_step`, under the same task but a different gezel)
+   * joins the allowlist without a reload.
+   */
+  onUnknownSession?: (sessionId: string) => void;
 }
 
 /**
@@ -449,8 +469,19 @@ export function ChatTimelineView({
   onTerminalWorkingDirChanged,
   showProjectName,
   inflightScope,
+  scopedSessionIds,
+  onUnknownSession,
 }: ChatTimelineViewProps) {
   const roleBasedNameOnlyMode = useRoleBasedNameOnlyMode();
+  // Live refs — the envelope stream effect captures `handleEnvelope`
+  // once per scope and does not re-subscribe when the allowlist grows
+  // (a handoff session joining it must not tear down the SSE
+  // connection mid-turn). Reading through refs keeps the guard current
+  // inside that long-lived closure.
+  const scopedSessionIdsRef = useRef(scopedSessionIds);
+  scopedSessionIdsRef.current = scopedSessionIds;
+  const onUnknownSessionRef = useRef(onUnknownSession);
+  onUnknownSessionRef.current = onUnknownSession;
   const narrateAssistantReplies = useNarrateAssistantReplies();
   // Live ref so the `complete` event handler reads the current value
   // without the streaming `useEffect` re-subscribing whenever the
@@ -715,6 +746,12 @@ export function ChatTimelineView({
           if (cancelled) return;
           for (const entry of inflight.inflight) {
             if (liveRef.current.has(entry.sessionId)) continue;
+            // Same allowlist as the envelope guard — otherwise a turn
+            // running in an unrelated session would seed a thinking-dots
+            // bubble into a task-scoped timeline on every mount.
+            if (scopedSessionIdsRef.current && !scopedSessionIdsRef.current.has(entry.sessionId)) {
+              continue;
+            }
             const lastForSession = findLastForSession(res.messages, entry.sessionId);
             liveRef.current.set(entry.sessionId, {
               gezelId: entry.gezelId,
@@ -758,6 +795,9 @@ export function ChatTimelineView({
           const q = await api.getQueueStatus();
           if (cancelled) return;
           for (const sess of q.sessions) {
+            if (scopedSessionIdsRef.current && !scopedSessionIdsRef.current.has(sess.sessionId)) {
+              continue;
+            }
             queuedRef.current.set(
               sess.sessionId,
               sess.entries.map((e) => ({
@@ -1225,6 +1265,11 @@ export function ChatTimelineView({
     return subscribeOptimisticUserMessages((message) => {
       if (inflightProjectId !== undefined && message.projectId !== inflightProjectId) return;
       if (inflightGezelId !== undefined && message.gezelId !== inflightGezelId) return;
+      // The composer publishes this only after `sendToChatSession`
+      // resolves, so a session it just created has long since reached
+      // the allowlist via `onSessionCreated`.
+      if (scopedSessionIdsRef.current && !scopedSessionIdsRef.current.has(message.sessionId))
+        return;
       const sentAtMs = Date.parse(message.at);
       setMessages((prev) => {
         const alreadyPresent = prev.some((m) => {
@@ -1284,6 +1329,18 @@ export function ChatTimelineView({
       // live, and any future delivery path.
       if (inflightProjectId !== undefined && projectId !== inflightProjectId) return;
       if (inflightGezelId !== undefined && gezelId !== inflightGezelId) return;
+      // Session allowlist (task-scoped surfaces). An unknown session is
+      // reported up so the owner can refetch — a handoff session created
+      // mid-turn is legitimately in scope and just isn't in the set yet.
+      // We still drop *this* event: letting it through would leak the
+      // unrelated-session case the allowlist exists to prevent. The
+      // refetch lands within a round-trip and `refreshLatest` reconciles
+      // anything the gap swallowed.
+      const allowlist = scopedSessionIdsRef.current;
+      if (allowlist && !allowlist.has(sessionId)) {
+        onUnknownSessionRef.current?.(sessionId);
+        return;
+      }
       // If a live event mentions a gezel we haven't seen (newly created
       // mid-session by the Meester, etc.), refetch the roster so the
       // bubble author label and session divider resolve to a real name

@@ -27,6 +27,12 @@ import {
 } from './new-task-meta.js';
 
 /**
+ * Sentinel for "let the entry step's role decide". Sends no assignee, so
+ * the service stamps whoever the role resolved into.
+ */
+const AUTO_ASSIGNEE = '__auto';
+
+/**
  * Modal for creating a new task, mirroring the New Project dialog's
  * gallery layout: a category rail, a card gallery whose star section is
  * the craftbooks recommended for this project, and a right-hand pane
@@ -150,6 +156,17 @@ export function NewTaskDialog({
     ? (books.find((b) => b.manifest.id === selectedBookId) ?? null)
     : null;
 
+  // The role the entry step names, if any. A craftbook that names one
+  // picks its own owner — the role resolves to a specialist when the
+  // task fires and that gezel becomes the assignee, so there is nothing
+  // for the user to decide here.
+  const entryRole: string | null = (() => {
+    if (!selectedBook) return null;
+    const m = selectedBook.manifest;
+    const entry = m.steps.find((s) => s.id === m.entryStepId) ?? m.steps[0];
+    return entry?.suggestedRole ?? null;
+  })();
+
   const selectGeneral = useCallback(() => {
     setSelectedBookId(null);
     setParams({});
@@ -173,14 +190,18 @@ export function NewTaskDialog({
     [titleTouched, assigneeTouched, gezels],
   );
 
-  // The concrete assignee: explicit pick, else first gezel on the
-  // roster, else the user. Firing hands the entry step to this gezel
-  // (unless a step-level role overrides it).
-  const resolvedAssigneeSel = assigneeSel || gezels[0]?.id || '__user';
-  const assignee: TaskAssignee =
-    resolvedAssigneeSel === '__user'
-      ? { kind: 'user' }
-      : { kind: 'gezel', gezelId: resolvedAssigneeSel };
+  // An explicit pick always wins. Otherwise a role-annotated craftbook
+  // defers (`null` — we send no assignee and the service mirrors the
+  // entry step's resolved specialist), and everything else falls back to
+  // the first gezel on the roster.
+  const resolvedAssigneeSel =
+    assigneeSel || (entryRole ? AUTO_ASSIGNEE : (gezels[0]?.id ?? '__user'));
+  const assignee: TaskAssignee | null =
+    resolvedAssigneeSel === AUTO_ASSIGNEE
+      ? null
+      : resolvedAssigneeSel === '__user'
+        ? { kind: 'user' }
+        : { kind: 'gezel', gezelId: resolvedAssigneeSel };
 
   const lenses = useMemo(() => taskLensesFor(books), [books]);
   const normalizedQuery = query.trim().toLowerCase();
@@ -281,7 +302,7 @@ export function NewTaskDialog({
             ...(selectedBook.item.sourceId
               ? { craftbookSourceId: selectedBook.item.sourceId }
               : {}),
-            assignee,
+            ...(assignee ? { assignee } : {}),
             status: 'draft',
             ...(Object.keys(stringified).length > 0 ? { craftbookParams: stringified } : {}),
           });
@@ -333,7 +354,7 @@ export function NewTaskDialog({
           title: t,
           description: description.trim(),
           steps,
-          assignee,
+          ...(assignee ? { assignee } : {}),
           // Drafts cannot host a schedule — a cron task must be active to
           // tick, and it is the schedule (not creation) that starts work.
           ...(cronExpr
@@ -474,9 +495,6 @@ export function NewTaskDialog({
                             glyph={craftbookGlyph(b.manifest)}
                             {...(b.item.iconSvg ? { iconSvg: b.item.iconSvg } : {})}
                             {...(b.item.logoUrl ? { logoUrl: b.item.logoUrl } : {})}
-                            {...((missingToolsets[b.manifest.id]?.length ?? 0) > 0
-                              ? { badge: 'Needs setup' }
-                              : {})}
                             suggested={suggestedIds.has(b.manifest.id)}
                             index={index + 1}
                             active={b.manifest.id === selectedBookId}
@@ -671,6 +689,11 @@ export function NewTaskDialog({
                           <Select.Value />
                         </Select.Trigger>
                         <Select.Content>
+                          {entryRole && (
+                            <Select.Item value={AUTO_ASSIGNEE}>
+                              Auto — the {entryRole} for step 1
+                            </Select.Item>
+                          )}
                           {gezels.map((g) => (
                             <Select.Item key={g.id} value={g.id}>
                               {g.name}
@@ -680,10 +703,18 @@ export function NewTaskDialog({
                           <Select.Item value="__user">Me (no gezel)</Select.Item>
                         </Select.Content>
                       </Select.Root>
-                      {selectedBook && (
+                      {resolvedAssigneeSel === AUTO_ASSIGNEE ? (
                         <small className="muted">
-                          Steps that name a role pick their own specialist when the task fires.
+                          Every step picks its own specialist by role when the task fires. Step 1
+                          goes to the {entryRole}, and whoever that turns out to be owns the task.
                         </small>
+                      ) : (
+                        selectedBook && (
+                          <small className="muted">
+                            Steps that name a role pick their own specialist when the task fires —
+                            this only covers steps that name none.
+                          </small>
+                        )
                       )}
                       {resolvedAssigneeSel === '__user' && (
                         <small className="muted">
@@ -759,7 +790,6 @@ function GalleryCard({
   label,
   description,
   active,
-  badge,
   iconSvg,
   logoUrl,
   glyph,
@@ -770,7 +800,6 @@ function GalleryCard({
   label: string;
   description: string;
   active: boolean;
-  badge?: string;
   iconSvg?: string;
   logoUrl?: string;
   glyph: Parameters<typeof ProjectGlyph>[0]['glyph'];
@@ -804,11 +833,6 @@ function GalleryCard({
       </span>
       <span className="gz-npd-card-name">{label}</span>
       <span className="gz-npd-card-description">{description}</span>
-      {badge && (
-        <span className="gz-npd-card-badge" aria-hidden="true">
-          {badge}
-        </span>
-      )}
     </button>
   );
 }

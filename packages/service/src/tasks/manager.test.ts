@@ -800,3 +800,78 @@ describe('TaskManager — suggestedRole auto-assignment', () => {
     expect(task.craftbook.steps[0]!.suggestedGezelId).toBeUndefined();
   });
 });
+
+describe('TaskManager — derived assignee', () => {
+  it('mirrors the entry step role when no assignee is named', async () => {
+    tasks.setRoleResolver(async () => ({ gezelId: 'reviewer-jane' }));
+    const task = await tasks.create('website', {
+      title: 'Review PR',
+      steps: [{ name: 'Load PR', suggestedRole: 'reviewer' }],
+    });
+    expect(task.assignee).toEqual({ kind: 'gezel', gezelId: 'reviewer-jane' });
+    expect(task.assigneeAuto).toBe(true);
+  });
+
+  it('respects an explicitly named assignee over the entry step role', async () => {
+    tasks.setRoleResolver(async () => ({ gezelId: 'reviewer-jane' }));
+    const task = await tasks.create('website', {
+      title: 'Review PR',
+      assignee: { kind: 'gezel', gezelId: 'magnus' },
+      steps: [{ name: 'Load PR', suggestedRole: 'reviewer' }],
+    });
+    expect(task.assignee).toEqual({ kind: 'gezel', gezelId: 'magnus' });
+    expect(task.assigneeAuto).toBeUndefined();
+    // The step still resolves its own role — the pin is task-level only.
+    expect(task.craftbook.steps[0]!.suggestedGezelId).toBe('reviewer-jane');
+  });
+
+  it("mirrors the entry step's explicit assignee when no role is named", async () => {
+    const task = await tasks.create('website', {
+      title: 'Review PR',
+      steps: [{ name: 'Load PR', assignee: { kind: 'gezel', gezelId: 'breno' } }],
+    });
+    expect(task.assignee).toEqual({ kind: 'gezel', gezelId: 'breno' });
+  });
+
+  it('falls back to the user when nothing resolves', async () => {
+    tasks.setRoleResolver(async () => null);
+    const task = await tasks.create('website', {
+      title: 'Review PR',
+      steps: [{ name: 'Load PR', suggestedRole: 'reviewer' }],
+    });
+    expect(task.assignee).toEqual({ kind: 'user' });
+    expect(task.assigneeAuto).toBe(true);
+  });
+
+  it('stops mirroring once someone pins an assignee by hand', async () => {
+    tasks.setRoleResolver(async () => ({ gezelId: 'reviewer-jane' }));
+    const task = await tasks.create('website', {
+      title: 'Review PR',
+      steps: [{ name: 'Load PR', suggestedRole: 'reviewer' }],
+    });
+    expect(task.assigneeAuto).toBe(true);
+    const pinned = await tasks.setAssignee('website', task.num, {
+      kind: 'gezel',
+      gezelId: 'magnus',
+    });
+    expect(pinned.assignee).toEqual({ kind: 'gezel', gezelId: 'magnus' });
+    expect(pinned.assigneeAuto).toBeUndefined();
+  });
+
+  it('keeps the entry-step owner as the task advances', async () => {
+    tasks.setRoleResolver(async (role) => ({ gezelId: `${role}-id` }));
+    const task = await tasks.create('website', {
+      title: 'Review then ship',
+      steps: [
+        { id: 'review', name: 'Review', suggestedRole: 'reviewer' },
+        { id: 'ship', name: 'Ship', suggestedRole: 'developer' },
+      ],
+      entryStepId: 'review',
+    });
+    expect(task.assignee).toEqual({ kind: 'gezel', gezelId: 'reviewer-id' });
+    const advanced = await tasks.completeStep('website', task.num, 'review');
+    // Step 2 has its own specialist; the task owner does not churn.
+    expect(advanced.craftbook.steps[1]!.suggestedGezelId).toBe('developer-id');
+    expect(advanced.assignee).toEqual({ kind: 'gezel', gezelId: 'reviewer-id' });
+  });
+});

@@ -269,6 +269,92 @@ describe('NewTaskDialog', () => {
     });
   });
 
+  it('defers the assignee to the entry step role rather than pinning a gezel', async () => {
+    vi.mocked(api.createTask).mockResolvedValue({
+      ref: 'pj-alpha/4',
+      projectId: 'pj-alpha',
+      num: 4,
+    } as Task);
+    renderDialog();
+    await waitFor(() => {
+      expect(screen.getByText('Recommended for Web App')).toBeInTheDocument();
+    });
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('radio', { name: 'Code Review' }));
+    // The copy names the role instead of asking the user to choose.
+    expect(await screen.findByText(/Step 1 goes to the developer/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Create task' }));
+
+    await waitFor(() => {
+      expect(api.createTask).toHaveBeenCalled();
+    });
+    // No assignee at all — the service stamps whoever "developer" resolves to.
+    expect(vi.mocked(api.createTask).mock.calls[0]?.[1]).not.toHaveProperty('assignee');
+  });
+
+  it('sends an explicit pick that overrides the entry step role', async () => {
+    vi.mocked(api.createTask).mockResolvedValue({
+      ref: 'pj-alpha/5',
+      projectId: 'pj-alpha',
+      num: 5,
+    } as Task);
+    renderDialog();
+    await waitFor(() => {
+      expect(screen.getByText('Recommended for Web App')).toBeInTheDocument();
+    });
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('radio', { name: 'Code Review' }));
+    // [0] is the project picker; [1] is "Assign to".
+    await user.selectOptions(
+      screen.getAllByTestId('mock-select')[1] as HTMLSelectElement,
+      'gz-maya',
+    );
+    await user.click(screen.getByRole('button', { name: 'Create task' }));
+
+    await waitFor(() => {
+      expect(api.createTask).toHaveBeenCalledWith(
+        'pj-alpha',
+        expect.objectContaining({ assignee: { kind: 'gezel', gezelId: 'gz-maya' } }),
+      );
+    });
+  });
+
+  it('falls back to the roster default for a craftbook whose entry step names no role', async () => {
+    vi.mocked(api.listProjectCraftbooks).mockResolvedValue({
+      items: [
+        bookItem('blog-post', 'Blog Post', {
+          steps: [{ id: 'build', name: 'Build' }],
+          entryStepId: 'build',
+        }),
+      ],
+      missingToolsets: {},
+      projectType: null,
+      suggestedIds: [],
+    } as never);
+    vi.mocked(api.createTask).mockResolvedValue({
+      ref: 'pj-alpha/6',
+      projectId: 'pj-alpha',
+      num: 6,
+    } as Task);
+    renderDialog();
+    await waitFor(() => {
+      expect(screen.getByRole('radio', { name: 'Blog Post' })).toBeInTheDocument();
+    });
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('radio', { name: 'Blog Post' }));
+    await user.click(screen.getByRole('button', { name: 'Create task' }));
+
+    await waitFor(() => {
+      expect(api.createTask).toHaveBeenCalledWith(
+        'pj-alpha',
+        expect.objectContaining({ assignee: { kind: 'gezel', gezelId: 'gz-maya' } }),
+      );
+    });
+  });
+
   it('blocks creation while a craftbook still needs toolset setup', async () => {
     vi.mocked(api.listProjectCraftbooks).mockResolvedValue({
       items: [bookItem('code-review', 'Code Review')],
