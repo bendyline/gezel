@@ -1,12 +1,13 @@
 import type { Project } from '@bendyline/gezel';
-import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { useState } from 'react';
 import { api } from '../api.js';
+import { DropdownMenu } from '../primitives/index.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
 
 /**
- * Per-project "⋯" actions menu. Currently exposes a single destructive
- * action — Delete — behind a confirmation dialog.
+ * Per-project "⋯" actions menu. Exposes "Clear error indicator" when the
+ * project is carrying a failed turn, plus the destructive Delete action
+ * behind a confirmation dialog.
  *
  * Deletion is deliberately conservative about the user's files: the default
  * only removes the project record, leaving the workspace + artifacts on disk.
@@ -17,10 +18,17 @@ import { ConfirmDialog } from './ConfirmDialog.js';
  */
 export function ProjectActionsMenu({
   project,
+  hasError = false,
   onDeleted,
   align = 'end',
 }: {
   project: Pick<Project, 'id' | 'name' | 'workingDir' | 'github'>;
+  /**
+   * Whether the project currently shows the red failed-turn indicator.
+   * Gates the "Clear error indicator" item so the menu never offers a
+   * dead action. Callers that don't track poisoned state leave it unset.
+   */
+  hasError?: boolean;
   onDeleted?: (projectId: string) => void;
   align?: 'start' | 'center' | 'end';
 }) {
@@ -55,6 +63,22 @@ export function ProjectActionsMenu({
     }
   };
 
+  // Clearing is project-wide on purpose: one engine crash poisons several
+  // of a project's sessions, so per-session clearing would leave the
+  // indicator up after the user just dismissed it. Same call the chat
+  // banner's "Continue" makes.
+  const clearErrors = async () => {
+    try {
+      await api.clearProjectErrors(project.id);
+      window.dispatchEvent(
+        new CustomEvent('gezel:session-error-cleared', { detail: { projectId: project.id } }),
+      );
+    } catch {
+      // Nothing to surface from a dropdown that's already closed — the
+      // indicator simply stays up and the user can retry.
+    }
+  };
+
   return (
     <>
       <DropdownMenu.Root>
@@ -75,6 +99,16 @@ export function ProjectActionsMenu({
         </DropdownMenu.Trigger>
         <DropdownMenu.Portal>
           <DropdownMenu.Content className="app-nav-menu" sideOffset={4} align={align}>
+            {hasError && (
+              <DropdownMenu.Item
+                className="app-nav-menu-item"
+                onSelect={() => {
+                  void clearErrors();
+                }}
+              >
+                Clear error indicator
+              </DropdownMenu.Item>
+            )}
             <DropdownMenu.Item
               className="app-nav-menu-item danger"
               disabled={isDefault}

@@ -7,6 +7,10 @@
  * prompt is linted against the exact post-filter roster advertised that turn.
  *
  * Run:
+ *   pnpm test:extended
+ *   pnpm test:extended -- --json
+ *
+ * Focused alias:
  *   pnpm lint:prompts
  *   pnpm lint:prompts -- --json
  */

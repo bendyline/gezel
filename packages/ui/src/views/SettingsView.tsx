@@ -31,6 +31,7 @@ import { ChannelsSettings } from './ChannelsSettings.js';
 import { Ds4Settings } from './Ds4Settings.js';
 import { FoldersSettings } from './FoldersSettings.js';
 import { ImageEngineSettings } from './ImageEngineSettings.js';
+import { ImageRecognitionSettings } from './ImageRecognitionSettings.js';
 import { LlamaCppSettings } from './LlamaCppSettings.js';
 import { MlxSettings } from './MlxSettings.js';
 import { OllamaSettings, TimeoutRow } from './OllamaSettings.js';
@@ -57,6 +58,7 @@ type SectionId =
   | 'workloads'
   | 'imageEngine'
   | 'videoEngine'
+  | 'imageRecognition'
   | 'audio'
   | 'webSearch'
   | 'channels'
@@ -115,6 +117,7 @@ function buildSections(platform: string | undefined): SettingsSection[] {
     { id: 'workloads', label: 'Workloads', groupHeader: 'workloads' },
     { id: 'imageEngine', label: 'Image generation', group: 'workloads' },
     { id: 'videoEngine', label: 'Video generation', group: 'workloads' },
+    { id: 'imageRecognition', label: 'Image recognition', group: 'workloads' },
     { id: 'audio', label: 'Audio', group: 'workloads' },
     { id: 'webSearch', label: 'Web search', group: 'workloads' },
     { id: 'channels', label: 'Channels' },
@@ -1076,6 +1079,7 @@ export function SettingsView() {
     activeSectionGroup === 'ai' ||
     section === 'imageEngine' ||
     section === 'videoEngine' ||
+    section === 'imageRecognition' ||
     section === 'audio' ||
     section === 'webSearch' ||
     section === 'channels';
@@ -2940,6 +2944,12 @@ export function SettingsView() {
         {section === 'videoEngine' && (
           <section>
             <VideoEngineSettings />
+          </section>
+        )}
+
+        {section === 'imageRecognition' && (
+          <section>
+            <ImageRecognitionSettings />
           </section>
         )}
 

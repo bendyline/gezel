@@ -96,22 +96,18 @@ jobs:
             exit 1
           fi
 
-          expected=(
-            "gezel-native-${version}-win32-x64.zip"
-            "gezel-native-${version}-win32-x64-cpu.zip"
-            "gezel-native-${version}-win32-x64-vulkan.zip"
-            "gezel-native-${version}-win32-x64-cuda.zip"
-            "gezel-native-${version}-darwin-arm64.tar.gz"
-            "gezel-native-${version}-darwin-arm64-metal.tar.gz"
-            "gezel-native-${version}-linux-x64.tar.gz"
-            "gezel-native-${version}-linux-x64-cpu.tar.gz"
-            "gezel-native-${version}-linux-x64-vulkan.tar.gz"
-            "gezel-native-${version}-linux-x64-cuda.tar.gz"
-            "gezel-native-${version}-linux-arm64.tar.gz"
-            "gezel-native-${version}-linux-arm64-cpu.tar.gz"
-            "gezel-native-${version}-linux-arm64-cuda.tar.gz"
-            'SHA256SUMS'
-          )
+          # Derived from scripts/native-payload.mjs, the same table
+          # build-native.yml packs against — so a variant added to the
+          # native pipeline can't be silently omitted from the installer.
+          expected=()
+          while read -r key; do
+            [[ -n "$key" ]] || continue
+            case "$key" in
+              win32-*) expected+=("gezel-native-${version}-${key}.zip") ;;
+              *)       expected+=("gezel-native-${version}-${key}.tar.gz") ;;
+            esac
+          done < <(node scripts/check-native-payload.mjs --list-keys)
+          expected+=('SHA256SUMS')
           missing=0
           for name in "${expected[@]}"; do
             if ! jq -e --arg name "$name" '.assets[] | select(.name == $name)' <<<"$release" >/dev/null; then
@@ -208,6 +204,15 @@ jobs:
           version="${NATIVE_TAG#native-v}"
           node scripts/fetch-native-binaries.mjs --version "$version"
           ls -la packages/app/native-bin/
+
+      - name: Verify staged native payload is complete
+        shell: bash
+        # The preflight proved every archive exists; this proves this
+        # host's archives unpacked into the engine binaries the installer
+        # is supposed to carry. Missing-asset handling in the fetch script
+        # is warn-and-skip by design (a platform need not ship every
+        # variant), so without this a partial stage would package quietly.
+        run: node scripts/check-native-payload.mjs --root packages/app/native-bin
 
       - name: Verify Authenticode on staged native binaries
         shell: pwsh
@@ -353,6 +358,9 @@ jobs:
           version="${NATIVE_TAG#native-v}"
           node scripts/fetch-native-binaries.mjs --version "$version"
           ls -la packages/app/native-bin/
+
+      - name: Verify staged native payload is complete
+        run: node scripts/check-native-payload.mjs --root packages/app/native-bin
 
       - name: Verify Developer ID signatures on staged native binaries
         run: |
@@ -506,6 +514,9 @@ jobs:
           version="${NATIVE_TAG#native-v}"
           node scripts/fetch-native-binaries.mjs --version "$version"
           ls -la packages/app/native-bin/
+
+      - name: Verify staged native payload is complete
+        run: node scripts/check-native-payload.mjs --root packages/app/native-bin
 
       - name: Build + produce service bundle
         run: pnpm build:packaged

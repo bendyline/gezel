@@ -74,16 +74,30 @@ The job imports the certificate into a temporary keychain. Electron Builder sign
 
 `GEZEL_RELEASE_TOKEN` is only needed when the draft is created in a repository other than the one running the workflow. Otherwise the workflow uses `github.token`. A mirror requires a fine-grained token with **Contents: write** on that repository and a corresponding workflow `repository:` change.
 
+## Cut the native release first
+
+The Electron workflow does **not** build native engines and does **not** consume a draft. It downloads assets from an already-published `native-vX.Y.Z` release, so that release is a hard prerequisite. Native cadence is deliberately decoupled from app cadence — reuse the current published native release unless an engine pin moved.
+
+When you do need a new one:
+
+1. Optionally rehearse first: **Actions → Build native engines → Run workflow** builds every matrix leg and uploads artifacts but creates no draft. Pull a leg's output locally with `node scripts/fetch-native-binaries.mjs --run <run-id>` to validate before spending a tag.
+2. `node scripts/cut-native-release.mjs <version>` validates the version, branch, and tree, then pushes the `native-vX.Y.Z` tag. The tag push is what triggers the matrix plus the `draft_release` job.
+3. The draft job gates itself: every platform archive must be present, each archive must contain the engine binaries [`scripts/native-payload.mjs`](scripts/native-payload.mjs) declares for that platform key, and `SHA256SUMS` must verify. Build-provenance attestations are attached at draft time.
+4. Validate the draft. `node scripts/fetch-native-binaries.mjs --version <version>` stages it into `packages/app/native-bin/` for local smoke testing.
+5. **Publish the draft from the GitHub Releases UI.** Until you do, the Electron workflow's preflight rejects the tag with "still a draft".
+
+A failed leg produces no draft at all, so an absent release usually means a red `Build native engines` run — check that before assuming the tag never fired.
+
 ## Cut a release
 
-1. Publish a complete native-engine release from the commit you intend to ship. Its tag must be `native-vX.Y.Z` and it must contain every asset checked by the Electron workflow preflight.
+1. Publish a complete native-engine release from the commit you intend to ship, as above. Its tag must be `native-vX.Y.Z` and it must contain every asset checked by the Electron workflow preflight.
 2. Confirm all required signing and notarization secrets are configured.
 3. Open **Actions → Release Electron App → Run workflow**.
 4. Select the source ref and enter the exact published `nativeTag`. There is no “draft” checkbox: draft creation is mandatory.
 5. Wait for the workflow to complete. It runs these gates in order:
    - preflight validates credentials, the native tag, and all native release assets;
    - quality builds the workspace, typechecks, lints, runs unit plus browser/Electron E2E tests, generates the SBOM, audits vulnerabilities, and audits licenses;
-   - Windows, macOS, and the two-entry Linux architecture matrix stage the same native release and build platform artifacts;
+   - Windows, macOS, and the two-entry Linux architecture matrix stage the same native release, verify the staged engine payload is complete for that host, and build platform artifacts;
    - platform verification checks Windows signatures and macOS signing/notarization;
    - the release job collects every artifact and creates or updates only a draft `v<version>` release.
 6. Open the draft release. Confirm the six installers, Windows/macOS update metadata, blockmaps, SBOM, generated notes, tag, and target commit.

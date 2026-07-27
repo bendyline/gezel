@@ -62,6 +62,7 @@ import { globalTaskRoutes, projectTaskRoutes } from './routes/project-tasks.js';
 import { projectRoutes } from './routes/projects.js';
 import { questionRoutes } from './routes/questions.js';
 import { queueRoutes } from './routes/queues.js';
+import { recognitionRoutes } from './routes/recognition.js';
 import { remotesRoutes } from './routes/remotes.js';
 import { renderRoutes } from './routes/render.js';
 import { globalScriptRoutes } from './routes/scripts-global.js';
@@ -474,6 +475,7 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   app.route('/api/image-gen', imageGenRoutes(ctx));
   app.route('/api/video-gen', videoGenRoutes(ctx));
   app.route('/api/audio', audioRoutes(ctx));
+  app.route('/api/recognition', recognitionRoutes(ctx));
   app.route('/api/catalog', catalogRoutes(ctx));
   app.route('/api/toolset', toolsetConfigRoutes(ctx));
   app.route('/api/sessions', sessionRoutes(ctx));

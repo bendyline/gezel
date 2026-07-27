@@ -293,6 +293,15 @@ import type { DeviceHealthStatusSnapshot } from '@bendyline/gezel/native';
 import {
   AudioModelPullEventSchema,
   ImageModelPullEventSchema,
+  type ImageRecognition,
+  type ImageStaticMeta,
+  type ListInstalledRecognitionModelsResponse,
+  type ListRecognitionCatalogResponse,
+  type RecognitionHealth,
+  type RecognitionMode,
+  type RecognitionPullEvent,
+  RecognitionPullEventSchema,
+  type RecognitionRequest,
   VideoModelPullEventSchema,
 } from '@bendyline/gezel/schemas';
 import { z } from 'zod';
@@ -1057,6 +1066,21 @@ export interface ConfigResponse {
    * long-running and GPU-monopolizing.
    */
   videoGenerationConfirmation?: 'always-allow' | 'ask' | { mode: 'snooze'; until: string };
+  /** Active image-recognition engine; undefined → 'llama-cpp'. */
+  recognitionProvider?: 'llama-cpp' | 'mlx' | 'mock';
+  /** Catalog id of the vision model used for image recognition. */
+  defaultRecognitionModel?: string;
+  /** Image-recognition policy. See `GezelConfigSchema.recognition`. */
+  recognition?: {
+    mode?: 'auto' | 'always' | 'off';
+    modes?: RecognitionMode[];
+    maxImagesPerTurn?: number;
+    timeoutMsPerImage?: number;
+    maxDigestChars?: number;
+    maxMegapixels?: number;
+  };
+  /** Per-model native-vision opt-in, keyed by catalog id. Absent → off. */
+  nativeVision?: Record<string, boolean>;
   /** Remote model execution: serving this device's models to paired clients. */
   remoteServing?: {
     enabled?: boolean;
@@ -2772,6 +2796,68 @@ export class GezelClient {
       onEvent,
       isTerminal: (event) => event.type === 'done' || event.type === 'error',
       label: 'Audio model pull stream',
+    });
+  }
+
+  /** Image-recognition readiness. Never spawns the engine. */
+  getRecognitionHealth(): Promise<RecognitionHealth> {
+    return this.request('GET', '/api/recognition/health');
+  }
+
+  listRecognitionCatalog(): Promise<ListRecognitionCatalogResponse> {
+    return this.request('GET', '/api/recognition/catalog');
+  }
+
+  listInstalledRecognitionModels(): Promise<ListInstalledRecognitionModelsResponse> {
+    return this.request('GET', '/api/recognition/models');
+  }
+
+  deleteRecognitionModel(id: string): Promise<{ ok: true }> {
+    return this.request('DELETE', `/api/recognition/models/${encodeURIComponent(id)}`);
+  }
+
+  clearRecognitionCache(): Promise<{ ok: true }> {
+    return this.request('POST', '/api/recognition/cache/clear');
+  }
+
+  /** Describe / OCR / extract from one image. */
+  describeImage(
+    body: RecognitionRequest,
+    opts?: { projectId?: string },
+  ): Promise<ImageRecognition> {
+    const qs = opts?.projectId ? `?project=${encodeURIComponent(opts.projectId)}` : '';
+    return this.request('POST', `/api/recognition/describe${qs}`, body);
+  }
+
+  /**
+   * Deterministic image file metadata — no model runs. `includeLocation`
+   * surfaces GPS coordinates, which every other path withholds.
+   */
+  readImageMetadata(
+    body: RecognitionRequest & { includeLocation?: boolean },
+    opts?: { projectId?: string },
+  ): Promise<ImageStaticMeta> {
+    const qs = opts?.projectId ? `?project=${encodeURIComponent(opts.projectId)}` : '';
+    return this.request('POST', `/api/recognition/metadata${qs}`, body);
+  }
+
+  /** Pull a vision model. Same SSE shape as `pullAudioModel`. */
+  async pullRecognitionModel(
+    id: string,
+    onEvent: (event: RecognitionPullEvent) => void,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    await consumeApiSseJson({
+      ...MODEL_DOWNLOAD_SSE_POLICY,
+      url: `${this.baseUrl}/api/recognition/models/${encodeURIComponent(id)}/pull`,
+      method: 'POST',
+      headers: { Authorization: `Bearer ${this.token}` },
+      signal,
+      fetch: this.fetchImpl,
+      schema: RecognitionPullEventSchema,
+      onEvent,
+      isTerminal: (event) => event.type === 'done' || event.type === 'error',
+      label: 'Recognition model pull stream',
     });
   }
 

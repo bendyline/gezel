@@ -7869,9 +7869,7 @@ describe('LlamaCppSession graceful context-overflow handling', () => {
           controller.enqueue(
             encoder.encode('data: {"choices":[{"delta":{"role":"assistant"}}]}\n\n'),
           );
-          controller.enqueue(
-            encoder.encode('data: {"choices":[{"delta":{}}]}\n\n'),
-          );
+          controller.enqueue(encoder.encode('data: {"choices":[{"delta":{}}]}\n\n'));
           // Then a real token, then finish.
           controller.enqueue(
             encoder.encode('data: {"choices":[{"delta":{"content":"hello"}}]}\n\n'),
@@ -7933,9 +7931,7 @@ describe('LlamaCppSession graceful context-overflow handling', () => {
       const stream = new ReadableStream<Uint8Array>({
         async start(controller) {
           controller.enqueue(
-            encoder.encode(
-              'data: {"choices":[{"delta":{"reasoning_content":"thinking..."}}]}\n\n',
-            ),
+            encoder.encode('data: {"choices":[{"delta":{"reasoning_content":"thinking..."}}]}\n\n'),
           );
           controller.enqueue(
             encoder.encode(
@@ -8052,7 +8048,7 @@ describe('LlamaCppSession graceful context-overflow handling', () => {
     expect(internal.currentTurnStartIdx).toBe(2);
   });
 
-  it('condenses THIS turn\'s older tool results — the blind spot prior-fold cannot reach', async () => {
+  it("condenses THIS turn's older tool results — the blind spot prior-fold cannot reach", async () => {
     // The in-turn overflow shape: no prior transcript to fold (msgs=1),
     // so `maybeCompactMidLoop` returns false and the manager's force-fit
     // sees nothing in `record.messages` either. Only this layer can free

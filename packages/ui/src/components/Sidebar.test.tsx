@@ -17,6 +17,7 @@ vi.mock('./FileTree.js', () => ({
 
 const { Sidebar } = await import('./Sidebar.js');
 const { api } = await import('../api.js');
+const { consumeFocusSessionError } = await import('./pending-focus-session-error.js');
 
 const PROJECTS: Project[] = [
   { id: 'p1', name: 'Alpha' } as Project,
@@ -192,7 +193,7 @@ describe('Sidebar', () => {
     ).toBeInTheDocument();
     // p4 is poisoned + active → poisoned beats working.
     expect(
-      screen.getByRole('button', { name: /Delta: last turn failed — open the chat to retry/ }),
+      screen.getByRole('button', { name: /Delta: last turn failed — go to it in the chat/ }),
     ).toBeInTheDocument();
     // p2 is only working → animated thinking indicator.
     expect(screen.getByRole('button', { name: /Beta: a gezel is working/ })).toBeInTheDocument();
@@ -217,6 +218,78 @@ describe('Sidebar', () => {
     await screen.findByText('Alpha');
     fireEvent.click(screen.getByRole('button', { name: /Resolve 1 pending question in Alpha/ }));
     expect(await screen.findByRole('dialog')).toBeInTheDocument();
+  });
+
+  it('jumps to the failed turn when the error indicator is clicked', async () => {
+    vi.mocked(api.listProjects).mockResolvedValue({
+      projects: [{ id: 'p1', name: 'Alpha' } as Project],
+    } as never);
+    const onSelect = vi.fn();
+    const onOpenProject = vi.fn();
+    const onFocusError = vi.fn();
+    window.addEventListener('gezel:open-project', onOpenProject);
+    window.addEventListener('gezel:focus-session-error', onFocusError);
+    render(
+      <Sidebar
+        selection={null}
+        onSelect={onSelect}
+        onOpenArea={vi.fn()}
+        poisonedProjects={new Map([['p1', { sessionId: 's1', gezelId: 'g1', error: 'boom' }]])}
+      />,
+    );
+    await screen.findByText('Alpha');
+
+    fireEvent.click(screen.getByRole('button', { name: /Alpha: last turn failed/ }));
+
+    // Selects the project, flips it to the Chat tab, and points the
+    // timeline at the session whose turn failed.
+    expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ kind: 'project', id: 'p1' }));
+    expect(onOpenProject).toHaveBeenCalled();
+    const focus = onFocusError.mock.calls[0]?.[0] as CustomEvent<{
+      projectId: string;
+      sessionId: string;
+    }>;
+    expect(focus.detail).toEqual({ projectId: 'p1', sessionId: 's1' });
+    // The queued intent covers the case where the project's timeline
+    // isn't mounted yet to hear that event.
+    expect(consumeFocusSessionError('p1')).toEqual({ projectId: 'p1', sessionId: 's1' });
+
+    window.removeEventListener('gezel:open-project', onOpenProject);
+    window.removeEventListener('gezel:focus-session-error', onFocusError);
+  });
+
+  it('offers "Clear error indicator" only for a project carrying a failed turn', async () => {
+    vi.mocked(api.listProjects).mockResolvedValue({
+      projects: [{ id: 'p1', name: 'Alpha' } as Project, { id: 'p2', name: 'Beta' } as Project],
+    } as never);
+    render(
+      <Sidebar
+        selection={null}
+        onSelect={vi.fn()}
+        onOpenArea={vi.fn()}
+        poisonedProjects={new Map([['p1', { sessionId: 's1', gezelId: 'g1', error: 'boom' }]])}
+      />,
+    );
+    await screen.findByText('Alpha');
+
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Actions for Alpha' }), {
+      button: 0,
+      ctrlKey: false,
+    });
+    expect(
+      await screen.findByRole('menuitem', { name: 'Clear error indicator' }),
+    ).toBeInTheDocument();
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
+    await waitFor(() =>
+      expect(screen.queryByRole('menuitem', { name: 'Clear error indicator' })).toBeNull(),
+    );
+
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Actions for Beta' }), {
+      button: 0,
+      ctrlKey: false,
+    });
+    await screen.findByRole('menuitem', { name: 'Delete project…' });
+    expect(screen.queryByRole('menuitem', { name: 'Clear error indicator' })).toBeNull();
   });
 
   it('opens an area via the top-level link', async () => {

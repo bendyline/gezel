@@ -19,6 +19,7 @@ import { NewPathDialog } from './NewPathDialog.js';
 import { ProjectActionsMenu } from './ProjectActionsMenu.js';
 import { ProjectQuestionsDialog } from './ProjectQuestionsDialog.js';
 import { type CreateKind, requestCreate } from './nav-intents.js';
+import { queueFocusSessionError } from './pending-focus-session-error.js';
 import { tabKey, toRecentTab } from './recent-tabs.js';
 import { useIsFirstRun } from './useIsFirstRun.js';
 import { useRoleBasedNameOnlyMode } from './useRoleBasedNameOnlyMode.js';
@@ -528,6 +529,12 @@ export function Sidebar({
                         className="project-row-poisoned"
                         onClick={(e) => {
                           e.stopPropagation();
+                          // Queue first: the project's timeline may not be
+                          // mounted yet, so it can't hear the live event below.
+                          queueFocusSessionError({
+                            projectId: p.id,
+                            sessionId: poisoned.sessionId,
+                          });
                           select();
                           // Land on the Chat tab (where the "last turn failed"
                           // banner lives) even if the project is already open on
@@ -535,9 +542,16 @@ export function Sidebar({
                           window.dispatchEvent(
                             new CustomEvent('gezel:open-project', { detail: { projectId: p.id } }),
                           );
+                          // Live event for the already-open case (no remount):
+                          // scroll the timeline to the turn that failed.
+                          window.dispatchEvent(
+                            new CustomEvent('gezel:focus-session-error', {
+                              detail: { projectId: p.id, sessionId: poisoned.sessionId },
+                            }),
+                          );
                         }}
-                        title={`Last turn failed: ${poisoned.error} — open to retry`}
-                        aria-label={`${p.name}: last turn failed — open the chat to retry`}
+                        title={`Last turn failed: ${poisoned.error} — go to it in the chat`}
+                        aria-label={`${p.name}: last turn failed — go to it in the chat`}
                       >
                         <span className="project-row-poisoned-glyph" aria-hidden="true">
                           !
@@ -566,7 +580,11 @@ export function Sidebar({
                       />
                     )}
                   </span>
-                  <ProjectActionsMenu project={p} onDeleted={() => void refreshProjects()} />
+                  <ProjectActionsMenu
+                    project={p}
+                    hasError={!!poisoned}
+                    onDeleted={() => void refreshProjects()}
+                  />
                 </li>
               );
             })

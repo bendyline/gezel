@@ -152,8 +152,7 @@ describe('computeToolBudgetChars', () => {
     expect(budget).toBeGreaterThan(15_000);
     // …but the emitted chars, read at the dense ratio, must fit the
     // tokens actually remaining under the working ceiling.
-    const remainingTokens =
-      Math.floor(32_768 * 0.75) - Math.ceil(preToolChars / 3.2) - 512;
+    const remainingTokens = Math.floor(32_768 * 0.75) - Math.ceil(preToolChars / 3.2) - 512;
     expect(Math.ceil(budget / 2.8)).toBeLessThanOrEqual(remainingTokens);
     // capToolOutput enforces its own ceiling (MAX_TOOL_OUTPUT_CHARS),
     // so the slice returned to the model is bounded even when the

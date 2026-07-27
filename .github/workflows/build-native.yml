@@ -921,7 +921,12 @@ jobs:
         run: |
           echo "${{ steps.hash.outputs.sha256 }}  ${{ matrix.artifact }}" \
             > "${{ steps.outdir.outputs.dir }}/${{ matrix.engine }}.sha256"
+      # Gated on `pinned` like every other step: without it a skipped leg
+      # uploads under the empty artifact name `-manifest` from an absolute
+      # path outside the workspace, which is at best a confusing warning
+      # and at worst a name collision between skipped legs.
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: steps.preflight.outputs.pinned == 'true'
         with:
           name: ${{ steps.artifactname.outputs.name }}-manifest
           path: ${{ steps.outdir.outputs.dir }}/${{ matrix.engine }}.sha256
@@ -1010,6 +1015,15 @@ jobs:
           done
           find native/build -type f | sort
 
+      # The archive-set gate below proves every *container* exists; this
+      # proves each one has contents. `needs: build` only guarantees no
+      # matrix leg FAILED — a leg whose engine VERSION still holds the
+      # all-zeros placeholder is preflight-skipped, exits success, and
+      # uploads nothing. Without this the release would ship, say, a
+      # linux-x64 archive with no gezel-ds4-server in it.
+      - name: Verify staged engine binaries
+        run: node scripts/check-native-payload.mjs --root native/build --all
+
       # ── Build tarballs per platform ───────────────────────────────
       - name: Pack tarballs
         id: pack
@@ -1040,21 +1054,17 @@ jobs:
           VERSION: ${{ steps.pack.outputs.version }}
         run: |
           set -euo pipefail
-          expected=(
-            "gezel-native-${VERSION}-win32-x64.zip"
-            "gezel-native-${VERSION}-win32-x64-cpu.zip"
-            "gezel-native-${VERSION}-win32-x64-vulkan.zip"
-            "gezel-native-${VERSION}-win32-x64-cuda.zip"
-            "gezel-native-${VERSION}-darwin-arm64.tar.gz"
-            "gezel-native-${VERSION}-darwin-arm64-metal.tar.gz"
-            "gezel-native-${VERSION}-linux-x64.tar.gz"
-            "gezel-native-${VERSION}-linux-x64-cpu.tar.gz"
-            "gezel-native-${VERSION}-linux-x64-vulkan.tar.gz"
-            "gezel-native-${VERSION}-linux-x64-cuda.tar.gz"
-            "gezel-native-${VERSION}-linux-arm64.tar.gz"
-            "gezel-native-${VERSION}-linux-arm64-cpu.tar.gz"
-            "gezel-native-${VERSION}-linux-arm64-cuda.tar.gz"
-          )
+          # Archive names are derived from scripts/native-payload.mjs — the
+          # same table the build matrix, the fetch script, and the Electron
+          # preflight read. Add a variant there, not here.
+          expected=()
+          while read -r key; do
+            [[ -n "$key" ]] || continue
+            case "$key" in
+              win32-*) expected+=("gezel-native-${VERSION}-${key}.zip") ;;
+              *)       expected+=("gezel-native-${VERSION}-${key}.tar.gz") ;;
+            esac
+          done < <(node scripts/check-native-payload.mjs --list-keys)
           if ! diff -u \
             <(printf '%s\n' "${expected[@]}" | sort) \
             <(find release -maxdepth 1 -type f -printf '%f\n' | sort); then

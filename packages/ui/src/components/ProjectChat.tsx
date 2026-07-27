@@ -1,6 +1,6 @@
 import type { GezelSummary, ProjectDetail, Task } from '@bendyline/gezel';
 import { displayName } from '@bendyline/gezel';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { crewLeadLabelLower } from '../labels.js';
 import { Select } from '../primitives/index.js';
@@ -377,6 +377,14 @@ function ProjectChatBody({
     [project.id],
   );
 
+  // A session the timeline asked us to focus while ALSO switching gezel
+  // (clicking a session divider, or the sidebar's failed-turn indicator
+  // landing on another gezel's chat). The reset effect below fires right
+  // after the parent swaps the chip and would otherwise wipe the session
+  // we were just asked to open, quietly starting a fresh conversation
+  // instead of resuming the one the user navigated to.
+  const focusedSessionRef = useRef<string | null>(null);
+
   // Reset session selection when the user switches gezel OR project. The
   // session id is scoped to a (gezel, project) pair; keeping it stable
   // across a project switch would send the next message to whichever
@@ -384,7 +392,9 @@ function ProjectChatBody({
   // up in this chat" look like a timeline issue.
   // biome-ignore lint/correctness/useExhaustiveDependencies: (selectedGezel.id, project.id) is the reset trigger.
   useEffect(() => {
-    setSessionId('');
+    const focused = focusedSessionRef.current;
+    focusedSessionRef.current = null;
+    setSessionId(focused ?? '');
   }, [selectedGezel.id, project.id]);
 
   // Pick a role-aware empty-composer prompt once per (gezel, project)
@@ -422,7 +432,10 @@ function ProjectChatBody({
             projectId={project.id}
             activeSessionId={sessionId || undefined}
             onFocusSession={(sid, gid) => {
-              if (gid !== selectedGezel.id) onSelectGezel(gid);
+              if (gid !== selectedGezel.id) {
+                focusedSessionRef.current = sid;
+                onSelectGezel(gid);
+              }
               setSessionId(sid);
             }}
             onToolActivity={onToolActivity}

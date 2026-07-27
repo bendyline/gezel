@@ -44,38 +44,64 @@ contains helpers that are generic across engines.
 
 ## Delivery shape (per platform)
 
-Every engine and helper produces binaries under the same canonical tree:
+Every engine and helper emits into the same canonical tree, keyed by
+platform and — for engines that ship more than one GPU backend — variant:
 
 ```
-native/build/<platform>/
-├── gezel-device-health[.exe]
-├── gezel-llama-server[.exe]
+native/build/<platform>/            # single-backend engines + helpers
+├── gezel-device-health[.exe]       # win32-x64, linux-x64, linux-arm64
+├── gezel-service-host.exe          # win32-x64 only
 ├── gezel-sd-server[.exe]
-└── gezel-service-host.exe      # win32-x64 only
+├── gezel-whisper-server[.exe]
+├── gezel-ds4-server                # darwin-arm64 + linux-* (GPU-only)
+├── uv[.exe]
+└── THIRD_PARTY_LICENSES/           # staged per artifact before upload
+
+native/build/<platform>-<variant>/  # multi-backend engines (llama-cpp)
+├── gezel-llama-server[.exe]
+├── libggml-<variant>.<so|dylib|dll>   # dlopened at model load
+└── THIRD_PARTY_LICENSES/
 ```
 
 Where `<platform>` is one of:
 
 - `darwin-arm64` — Apple Silicon Mac
-- `darwin-x64` — Intel Mac
 - `linux-x64`
 - `linux-arm64` — Jetson, DGX Spark / Grace Hopper, Ampere Altra, Raspberry Pi 5 64-bit, etc.
 - `win32-x64`
 
-The Electron installer picks these up via `extraResources` in
-`packages/app/electron-builder.yml` and lands them at
-`<AppResources>/native/<platform>/` so the Electron main process can
-resolve them without path magic at runtime. The Electron main exports
-resolved paths through `GEZEL_*_BIN` variables. In particular,
-`GEZEL_DEVICE_HEALTH_BIN` points the service's device safety probe at the
-bundled helper.
+and `<variant>` is `metal` (macOS), or `cpu` / `vulkan` / `cuda`
+(Windows and Linux; no `vulkan` on `linux-arm64` — LunarG ships no
+aarch64 SDK tarball). Intel Mac (`darwin-x64`) is not built: on-device
+first-run routes those users to Copilot/OpenAI.
+
+**Which binaries a given platform key must contain is a contract, not a
+convention** — it lives in [`scripts/native-payload.mjs`](../scripts/native-payload.mjs)
+and is enforced by `scripts/check-native-payload.mjs` on both sides of the
+handoff (the tagged native build before it packs archives, the Electron
+release after it stages them). Add an engine to the build matrix and to
+that table in the same change, or the tagged build fails loudly instead of
+shipping an installer with a hole in it.
+
+`scripts/fetch-native-binaries.mjs` pulls the published archives into
+`packages/app/native-bin/<platform>[-<variant>]/`, which is the one path
+that dev `pnpm app`, local `pnpm package:*`, and the release workflow all
+consume. electron-builder ships that tree through its `files:` +
+`asarUnpack:` globs, so at runtime it lands at
+`<AppResources>/app.asar.unpacked/native-bin/<platform>[-<variant>]/`.
+The Electron main process resolves it via
+[`nativeBinDir`](../packages/app/src/supervisor/native-bin.ts) and exports
+absolute paths to the service through `GEZEL_NATIVE_BIN_DIR`,
+`GEZEL_LLAMA_SERVER_BIN`, `GEZEL_SD_SERVER_BIN`, `GEZEL_WHISPER_SERVER_BIN`,
+`GEZEL_DS4_SERVER_BIN`, `GEZEL_UV_BIN`, and `GEZEL_DEVICE_HEALTH_BIN` (the
+last points the service's device safety probe at the bundled helper).
 
 ## "Uber dll" aspiration
 
-Today we ship **one binary per engine** — `sd-server`, later
-`whisper-server`, later `piper`. They share this directory, share the CI
-pipeline, share the at-birth signing step in the native build matrix,
-and ship together inside one Electron installer. That is the
+Today we ship **one binary per engine** — `llama-server`, `sd-server`,
+`whisper-server`, `ds4-server`, later `piper`. They share this directory,
+share the CI pipeline, share the at-birth signing step in the native build
+matrix, and ship together inside one Electron installer. That is the
 pragmatic "uber native" — all native code in one place, one release
 surface, one signing pass.
 

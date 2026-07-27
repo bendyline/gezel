@@ -145,9 +145,18 @@ describe('file checks', () => {
     const png = (kb: number): Uint8Array => {
       const body = new Uint8Array(Math.max(1024, kb * 1024));
       body.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 0);
-      body.set([...'IHDR'].map((c) => c.charCodeAt(0)), 12);
-      body.set([...'IDAT'].map((c) => c.charCodeAt(0)), 40);
-      body.set([...'IEND'].map((c) => c.charCodeAt(0)), 80);
+      body.set(
+        [...'IHDR'].map((c) => c.charCodeAt(0)),
+        12,
+      );
+      body.set(
+        [...'IDAT'].map((c) => c.charCodeAt(0)),
+        40,
+      );
+      body.set(
+        [...'IEND'].map((c) => c.charCodeAt(0)),
+        80,
+      );
       return body;
     };
     const bytesByPath: Record<string, Uint8Array> = {
@@ -172,9 +181,9 @@ describe('file checks', () => {
       true,
     );
     // Vector assets are text by nature and must pass through unverified.
-    expect(
-      (await fileCountByExt(w, ['svg'], 1, undefined, { verifyImageBytes: true })).ok,
-    ).toBe(true);
+    expect((await fileCountByExt(w, ['svg'], 1, undefined, { verifyImageBytes: true })).ok).toBe(
+      true,
+    );
   });
 
   it('fileCountByExt refuses rather than degrades when the surface serves no bytes', async () => {

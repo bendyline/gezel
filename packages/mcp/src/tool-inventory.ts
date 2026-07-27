@@ -149,6 +149,8 @@ export const ALWAYS_REGISTERED_TOOLS = [
   // Images
   'render_image',
   'generate_image',
+  'describe_image',
+  'read_image_metadata',
 
   // Video
   'generate_video',

@@ -1,7 +1,82 @@
+import { type GezelConfig, createLogger } from '@bendyline/gezel';
 import { Hono } from 'hono';
+import type { SSEStreamingApi } from 'hono/streaming';
 import { streamSSE } from 'hono/streaming';
+import type { InstallEvent } from '../../providers/llama-cpp/models.js';
+import { decideAutoInstall } from '../../providers/recognition/auto-install.js';
 import type { ServiceContext } from '../context.js';
 import { invalidateModelsCache } from './models.js';
+
+const log = createLogger('llama-cpp');
+
+/**
+ * Pull an image reader alongside a chat model that can't see images, and
+ * report its progress on the same stream.
+ *
+ * A failure here is logged and surfaced as a `companion` error, never as an
+ * install failure: the chat model the user actually asked for is already on
+ * disk and working.
+ */
+async function streamCompanionRecognition(
+  ctx: ServiceContext,
+  catalogId: string,
+  config: GezelConfig | null,
+  stream: SSEStreamingApi,
+): Promise<void> {
+  if (!config) return;
+  let decision: Awaited<ReturnType<typeof decideAutoInstall>> = null;
+  try {
+    decision = await decideAutoInstall({
+      home: ctx.home,
+      config,
+      catalogId,
+      llamaCppModels: ctx.llamaCppModels,
+      recognition: ctx.recognition,
+    });
+  } catch (err) {
+    log.warn(`image-reader auto-install check failed: ${String(err)}`);
+    return;
+  }
+  if (!decision) return;
+
+  const { entry } = decision;
+  log.info(`auto-installing image reader ${entry.id} — ${decision.reason}`);
+  const send = (extra: Partial<Extract<InstallEvent, { type: 'companion' }>>) =>
+    stream.writeSSE({
+      data: JSON.stringify({
+        type: 'companion',
+        kind: 'image-recognition',
+        id: entry.id,
+        name: entry.name,
+        bytesWritten: 0,
+        totalBytes: entry.approxSizeBytes,
+        ...extra,
+      }),
+    });
+
+  try {
+    await send({});
+    const provider = await ctx.recognition.current();
+    for await (const event of provider.pullModel(entry.id, entry.spec)) {
+      if (event.type === 'progress') {
+        await send({
+          bytesWritten: event.bytesWritten,
+          totalBytes: event.totalBytes ?? entry.approxSizeBytes,
+        });
+      } else if (event.type === 'error') {
+        await send({ error: event.error });
+        return;
+      }
+    }
+    await send({ bytesWritten: entry.approxSizeBytes });
+    // The engine picks up the newly-installed weights on its next start.
+    await ctx.recognition.reset();
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    log.warn(`image-reader auto-install failed: ${message}`);
+    await send({ error: message }).catch(() => {});
+  }
+}
 
 /**
  * llama.cpp local model management — install / list / delete GGUF
@@ -47,14 +122,35 @@ export function llamaCppRoutes(ctx: ServiceContext): Hono {
     const skipShaRaw = c.req.query('skipSha');
     const skipSha =
       skipShaRaw != null && skipShaRaw !== '' && skipShaRaw !== '0' && skipShaRaw !== 'false';
+    // Only fetch the vision projector when the user has opted this model into
+    // native image support. Re-running the install after flipping the toggle
+    // picks up just the missing file — completed files are skipped.
+    const config = await ctx.store.readConfig().catch(() => null);
+    const includeMmproj = config?.nativeVision?.[catalogId] === true;
     return streamSSE(c, async (stream) => {
       try {
-        for await (const event of ctx.llamaCppModels.install(catalogId, { skipSha })) {
+        // The chat model's own `done` is held back until any companion pull
+        // finishes — the UI treats `done` as terminal and would close the
+        // stream while the image reader was still downloading.
+        let finished: InstallEvent | null = null;
+        for await (const event of ctx.llamaCppModels.install(catalogId, {
+          skipSha,
+          includeMmproj,
+        })) {
+          if (event.type === 'done') {
+            finished = event;
+            continue;
+          }
           await stream.writeSSE({ data: JSON.stringify(event) });
         }
         // listModels caches per-provider results — bust the llama-cpp
         // entry so the next /api/models call picks up the new install.
         invalidateModelsCache('llama-cpp');
+
+        if (finished) {
+          await streamCompanionRecognition(ctx, catalogId, config, stream);
+          await stream.writeSSE({ data: JSON.stringify(finished) });
+        }
       } catch (err) {
         await stream.writeSSE({
           data: JSON.stringify({

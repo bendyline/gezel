@@ -35,6 +35,24 @@ const INTEGRATION_SUITES = [
 ];
 
 /**
+ * Three times in five days (2026-07-22, -25, -26) a fork died with "Worker
+ * exited unexpectedly" AFTER its own tests had passed. All three macOS crash
+ * reports have the same shape: the main thread is inside node:sqlite
+ * committing the content index (vec0.dylib loaded, no ONNX anywhere), while a
+ * V8Worker thread aborts with a fatal OOM in `Zone::Expand` under
+ * `ExecuteTurboshaftWasmCompilation` — V8 optimizing a hot web-tree-sitter
+ * grammar in the background. Grammar wasm has enormous single functions (the
+ * generated parse tables), and one Turboshaft compilation zone for them can
+ * outgrow what the allocator hands back under full-suite pressure. Liftoff,
+ * the baseline tier, never builds that graph, and grammar parse speed is
+ * irrelevant to tests — so pin wasm to baseline in workers. Production keeps
+ * tier-up. Guarded by src/test-pool.test.ts. Vitest 4 removed
+ * `poolOptions` — this is the top-level `execArgv`, set per project because a
+ * root-level one does not reach the workers.
+ */
+const WORKER_EXEC_ARGV = ['--no-wasm-tier-up'];
+
+/**
  * Embedding defaults for tests:
  *
  * - `GEZEL_EMBED_MODEL`: production defaults to bge-small-en-v1.5 (~130 MB),
@@ -67,6 +85,7 @@ export default defineConfig({
           name: 'integration',
           include: INTEGRATION_SUITES,
           pool: 'forks',
+          execArgv: WORKER_EXEC_ARGV,
           // Keep integration files sequential while retaining the shared
           // project-level worker cap required for parallel project groups.
           fileParallelism: false,
@@ -82,6 +101,7 @@ export default defineConfig({
           include: ['src/**/*.test.ts'],
           exclude: INTEGRATION_SUITES,
           pool: 'forks',
+          execArgv: WORKER_EXEC_ARGV,
           // Bound unit + integration workers to avoid oversubscribing hosts.
           maxWorkers: 8,
         },

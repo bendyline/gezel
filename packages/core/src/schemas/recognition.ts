@@ -165,3 +165,46 @@ export const RecognitionHealthSchema = z.object({
   detail: z.string().optional(),
 });
 export type RecognitionHealth = z.infer<typeof RecognitionHealthSchema>;
+
+export const RecognitionPullEventSchema = z.union([
+  z.object({
+    type: z.literal('progress'),
+    bytesWritten: z.number().int().nonnegative(),
+    totalBytes: z.number().int().nonnegative().optional(),
+  }),
+  z.object({ type: z.literal('error'), error: z.string() }),
+  z.object({ type: z.literal('done'), id: z.string() }),
+]);
+export type RecognitionPullEvent = z.infer<typeof RecognitionPullEventSchema>;
+
+export const RecognitionCatalogEntrySchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string(),
+  license: z.string(),
+  approxSizeBytes: z.number().int().nonnegative(),
+  recoScore: z.number(),
+});
+export type RecognitionCatalogEntry = z.infer<typeof RecognitionCatalogEntrySchema>;
+
+export const ListRecognitionCatalogResponseSchema = z.object({
+  models: z.array(RecognitionCatalogEntrySchema),
+});
+export type ListRecognitionCatalogResponse = z.infer<typeof ListRecognitionCatalogResponseSchema>;
+
+export const InstalledRecognitionModelSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  approxSizeBytes: z.number().int().nonnegative(),
+  installedAt: z.string(),
+  weightsPath: z.string().optional(),
+  mmprojPath: z.string().optional(),
+});
+export type InstalledRecognitionModel = z.infer<typeof InstalledRecognitionModelSchema>;
+
+export const ListInstalledRecognitionModelsResponseSchema = z.object({
+  models: z.array(InstalledRecognitionModelSchema),
+});
+export type ListInstalledRecognitionModelsResponse = z.infer<
+  typeof ListInstalledRecognitionModelsResponseSchema
+>;

@@ -109,11 +109,26 @@ export function readImageMeta(buf: Buffer): ImageMeta | null {
 const MAX_TEXT_KEYS = 32;
 const MAX_TEXT_VALUE_CHARS = 4096;
 
+export interface ReadImageStaticMetaOptions {
+  /**
+   * Include GPS coordinates in the result.
+   *
+   * Off everywhere except the explicit `read_image_metadata` MCP tool, whose
+   * invocation lands in the history log. The chat digest path must never set
+   * this: a pasted phone photo carries the user's location, and that digest
+   * can be forwarded to a cloud provider.
+   */
+  includeLocation?: boolean;
+}
+
 /**
  * Full static metadata. Always succeeds — an unrecognised format still yields
  * `format: 'unknown'` plus byte length and hash.
  */
-export function readImageStaticMeta(buf: Buffer): ImageStaticMeta {
+export function readImageStaticMeta(
+  buf: Buffer,
+  opts?: ReadImageStaticMetaOptions,
+): ImageStaticMeta {
   const dims = readImageMeta(buf);
   const meta: ImageStaticMeta = {
     format: dims?.format ?? (looksLikeSvg(buf) ? 'svg' : 'unknown'),
@@ -132,10 +147,13 @@ export function readImageStaticMeta(buf: Buffer): ImageStaticMeta {
     const exif = readJpegExif(buf);
     if (exif) {
       if (Object.keys(exif.exif).length > 0) meta.exif = exif.exif;
-      // Parsed but withheld. See ImageStaticMetaSchema's doc comment: the
-      // digest can be forwarded to a cloud provider, and the user pasted a
-      // photo to ask a question, not to disclose where they were.
-      if (exif.gps) meta.gpsRedacted = true;
+      // Parsed but withheld by default. See ImageStaticMetaSchema's doc
+      // comment: the digest can be forwarded to a cloud provider, and the user
+      // pasted a photo to ask a question, not to disclose where they were.
+      if (exif.gps) {
+        if (opts?.includeLocation) meta.gps = exif.gps;
+        else meta.gpsRedacted = true;
+      }
     }
   }
 

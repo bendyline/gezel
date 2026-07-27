@@ -22,7 +22,7 @@ import { api } from '../api.js';
  * this view and does not hide or interrupt those long downloads.
  */
 
-type ModalityKey = 'image' | 'stt' | 'tts' | 'video';
+type ModalityKey = 'image' | 'stt' | 'tts' | 'video' | 'recognition';
 
 /** Loose superset of the three pull-event shapes (image/video/audio). */
 interface PullEvent {
@@ -216,6 +216,8 @@ export function RecommendedMediaDownloads({ config }: { config: ConfigResponse |
           ttsInst,
           imgPulls,
           vidPulls,
+          recogCat,
+          recogInst,
         ] = await Promise.all([
           api.getMemoryProfile(),
           api.listCatalogItems('image-model'),
@@ -227,6 +229,8 @@ export function RecommendedMediaDownloads({ config }: { config: ConfigResponse |
           api.listInstalledTtsModels().catch(() => empty),
           api.listActiveImagePulls().catch(() => ({ pulls: [] })),
           api.listActiveVideoPulls().catch(() => ({ pulls: [] })),
+          api.listRecognitionCatalog().catch(() => ({ models: [] })),
+          api.listInstalledRecognitionModels().catch(() => empty),
         ]);
         if (cancelled) return;
         const device: RecoDevice = {
@@ -256,6 +260,21 @@ export function RecommendedMediaDownloads({ config }: { config: ConfigResponse |
                   },
                 }
               : {}),
+          });
+        }
+        // Image *reading*, distinct from the image *generation* row above.
+        // Highest reco score that the device can hold.
+        const reader = [...recogCat.models]
+          .filter((m) => !m.approxSizeBytes || m.approxSizeBytes <= device.usableBytes * 0.5)
+          .sort((a, b) => b.recoScore - a.recoScore)[0];
+        if (reader) {
+          out.push({
+            key: 'recognition',
+            what: 'image reading',
+            name: reader.name,
+            sizeBytes: reader.approxSizeBytes,
+            installed: hasId(recogInst, reader.id),
+            start: (cb, sig) => api.pullRecognitionModel(reader.id, cb, sig),
           });
         }
         const stt = pickAudio(audioCat.stt as AudioModel[]);

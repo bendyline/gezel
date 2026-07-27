@@ -300,8 +300,14 @@ export const BUILTIN_TOOLSETS: BuiltinToolsetGroup[] = [
     id: 'images',
     name: 'Image Tools',
     description:
-      'Render charts/diagrams, read existing images, and generate new images via the configured image model.',
-    tools: ['render_image', 'read_image_as_base64', 'generate_image'],
+      'Render charts/diagrams, read and describe existing images, and generate new images via the configured image model.',
+    tools: [
+      'render_image',
+      'read_image_as_base64',
+      'generate_image',
+      'describe_image',
+      'read_image_metadata',
+    ],
   },
   {
     id: 'videos',

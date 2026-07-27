@@ -51,6 +51,7 @@ import { setDefaultAutoSelectFamilyAttemptTimeout } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { detectPlatform, platformVariants } from './native-payload.mjs';
 
 setDefaultAutoSelectFamilyAttemptTimeout(5000);
 
@@ -147,6 +148,7 @@ async function fetchFromRelease({ token, platform, version, variant }) {
   // user can flip the Settings → Advanced → Engine backend dropdown
   // freely without re-running the script. `--variant` narrows to one.
   const platformKeys = variant ? [pickPlatformKey(platform, variant)] : platformVariants(platform);
+  requireKeys(platformKeys, platform);
 
   for (const platformKey of platformKeys) {
     const assetName = `gezel-native-${ver}-${platformKey}.${ext}`;
@@ -200,6 +202,7 @@ async function fetchFromRun({ token, platform, runId, variant }) {
   // uploads as `native-<engine>-<platform>[-<variant>]`, wrapped in a zip
   // on the GitHub side regardless of source OS.
   const platformKeys = variant ? [pickPlatformKey(platform, variant)] : platformVariants(platform);
+  requireKeys(platformKeys, platform);
 
   let totalMatched = 0;
   for (const platformKey of platformKeys) {
@@ -472,16 +475,16 @@ async function api(path, token) {
   return res.json();
 }
 
-function detectPlatform() {
-  if (process.platform === 'darwin') {
-    return process.arch === 'arm64' ? 'darwin-arm64' : 'darwin-x64';
-  }
-  if (process.platform === 'linux') {
-    if (process.arch === 'x64') return 'linux-x64';
-    if (process.arch === 'arm64') return 'linux-arm64';
-  }
-  if (process.platform === 'win32' && process.arch === 'x64') return 'win32-x64';
-  return null;
+/**
+ * `platformVariants` returns an empty list for a platform the native
+ * pipeline doesn't publish (darwin-x64, win32-arm64). An empty fetch loop
+ * would exit 0 having downloaded nothing — say so instead.
+ */
+function requireKeys(platformKeys, platform) {
+  if (platformKeys.length > 0) return;
+  console.error(`error: no native binaries are published for ${platform}.`);
+  console.error('       See the matrix in .github/workflows/build-native.yml.');
+  process.exit(1);
 }
 
 function pickPlatformKey(platform, variant) {
@@ -493,42 +496,6 @@ function pickPlatformKey(platform, variant) {
   // look in. The default-all path doesn't go through here.
   if (platform.startsWith('darwin')) return platform;
   return `${platform}-${variant ?? autoDetectBackend(platform)}`;
-}
-
-/**
- * Every asset key published for a given platform — used by the
- * default fetch path so the user can flip backends via Settings →
- * Advanced without re-fetching. Mirrors the matrix in
- * `.github/workflows/build-native.yml`.
- *
- * Two shapes coexist in every platform's release set:
- *   - **bare** (`win32-x64`, `darwin-arm64`, …) — single-variant
- *     engines like sd-cpp and uv. Asset name has no variant suffix.
- *   - **suffixed** (`win32-x64-cpu`, `darwin-arm64-metal`, …) —
- *     multi-variant engines like llama-cpp.
- *
- * The default-all path needs to fetch BOTH so a single run lands
- * sd-server alongside llama-server. Earlier revisions listed only
- * the llama variants for win32/linux and only the bare key for
- * mac, which silently dropped sd-server on Linux/Windows and
- * llama-server on Mac.
- */
-function platformVariants(platform) {
-  if (platform === 'darwin-arm64') return ['darwin-arm64', 'darwin-arm64-metal'];
-  if (platform === 'darwin-x64') return ['darwin-x64']; // not built today
-  if (platform === 'linux-x64') {
-    return ['linux-x64', 'linux-x64-cpu', 'linux-x64-vulkan', 'linux-x64-cuda'];
-  }
-  if (platform === 'linux-arm64') {
-    // Vulkan deliberately omitted on linux-arm64 — see the
-    // matching note in .github/workflows/build-native.yml. Add
-    // 'linux-arm64-vulkan' here when the workflow ships one.
-    return ['linux-arm64', 'linux-arm64-cpu', 'linux-arm64-cuda'];
-  }
-  if (platform === 'win32-x64') {
-    return ['win32-x64', 'win32-x64-cpu', 'win32-x64-vulkan', 'win32-x64-cuda'];
-  }
-  return [platform];
 }
 
 /**

@@ -23,7 +23,7 @@
     "dev": "tsup --watch",
     "start": "electron .",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --passWithNoTests",
+    "test": "vitest run --passWithNoTests && node --test ../../scripts/native-payload.test.mjs",
     "test:e2e": "playwright test --reporter=line",
     "test:e2e:web": "playwright test --config playwright.web.config.ts --reporter=line",
     "package": "pnpm run build:packaged && electron-builder --publish never",

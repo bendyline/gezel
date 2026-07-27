@@ -392,6 +392,12 @@ export function configRoutes(ctx: ServiceContext): Hono {
     if (videoResetFields.some((f) => body[f] !== undefined)) {
       await ctx.videoProvider.reset();
     }
+    // Recognition reset: a model or engine change has to tear down the
+    // running vision server, which holds the old weights open. Policy-only
+    // edits (`recognition.mode`) are read per-turn and need no rebuild.
+    if (body.recognitionProvider !== undefined || body.defaultRecognitionModel !== undefined) {
+      await ctx.recognition.reset(body.defaultRecognitionModel);
+    }
     // If channel config or webhook credentials changed, rebuild live
     // channel instances so the next send picks up the new state.
     const channelCredChanged = changedCredentials.some(

@@ -3306,6 +3306,36 @@ button {
   text-decoration: none;
 }
 
+/* Transient ring on the row a navigation landed on — the sidebar's
+   failed-turn indicator scrolls the timeline here, and without a cue the
+   jump reads as "the chat moved on its own". Settles on its own; the class
+   is removed by the timeline after the animation. */
+.timeline-focus-flash {
+  animation: timeline-focus-flash 2s ease-out 1;
+}
+
+@keyframes timeline-focus-flash {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--danger) 60%, transparent);
+  }
+  15% {
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--danger) 60%, transparent);
+  }
+  70% {
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--danger) 35%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .timeline-focus-flash {
+    animation: none;
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 45%, transparent);
+  }
+}
+
 .tree-reveal-btn {
   font-size: 0.75rem;
   padding: 0.2rem 0.4rem;

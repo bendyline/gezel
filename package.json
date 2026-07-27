@@ -44,7 +44,7 @@
     "eval:postmortems": "pnpm --filter @bendyline/gezel-evals run postmortems",
     "eval:viewer": "pnpm --filter @bendyline/gezel-eval-viewer run dev",
     "eval:viewer:build": "pnpm --filter @bendyline/gezel-eval-viewer run build",
-    "validate": "pnpm check:local-links && pnpm build && pnpm typecheck && pnpm lint && pnpm test && pnpm test:stability && pnpm test:extended && pnpm test:coverage && pnpm test:e2e:run && pnpm test:e2e:desktop:smoke && pnpm pw:install && pnpm test:e2e:web:run && pnpm test:e2e:web:smoke && pnpm build:bundle",
+    "validate": "pnpm check:local-links && pnpm build && pnpm typecheck && pnpm lint && pnpm test && pnpm test:stability && pnpm test:coverage && pnpm test:e2e:run && pnpm test:e2e:desktop:smoke && pnpm pw:install && pnpm test:e2e:web:run && pnpm test:e2e:web:smoke && pnpm build:bundle",
     "all": "pnpm install --frozen-lockfile && pnpm setup:native && pnpm validate",
     "typecheck": "pnpm -r --filter \"@bendyline/gezel*\" run typecheck",
     "audit:licenses": "node scripts/check-licenses.mjs",

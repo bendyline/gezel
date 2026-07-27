@@ -28,9 +28,34 @@ export async function extractImageAttachments(
   sessionId: string,
   markdown: string,
 ): Promise<ImageAttachment[]> {
+  return (await extractResolvedImages(store, projectId, sessionId, markdown)).map(
+    (r) => r.attachment,
+  );
+}
+
+/** One resolved image, keyed by the markdown ref it came from. */
+export interface ResolvedImage {
+  /** `<scope>/<path>` exactly as it appears in the message body. */
+  ref: string;
+  attachment: ImageAttachment;
+  bytes: Buffer;
+}
+
+/**
+ * Same resolution as {@link extractImageAttachments}, but keeps the original
+ * ref and the decoded bytes. The recognition path needs the ref to key its
+ * digest onto the right image, and the raw bytes to hash and to feed the
+ * vision engine without a base64 round-trip.
+ */
+export async function extractResolvedImages(
+  store: Store,
+  projectId: string,
+  sessionId: string,
+  markdown: string,
+): Promise<ResolvedImage[]> {
   const refs = findImageRefs(markdown);
   if (refs.length === 0) return [];
-  const out: ImageAttachment[] = [];
+  const out: ResolvedImage[] = [];
   const seen = new Set<string>();
   for (const ref of refs) {
     const key = `${ref.scope}:${ref.filename}`;
@@ -44,9 +69,13 @@ export async function extractImageAttachments(
           : await store.readSessionImage(projectId, sessionId, ref.filename);
     if (!hit) continue;
     out.push({
-      base64: hit.data.toString('base64'),
-      mimeType: hit.mimeType,
-      filename: ref.filename,
+      ref: `${ref.scope}/${ref.filename}`,
+      bytes: hit.data,
+      attachment: {
+        base64: hit.data.toString('base64'),
+        mimeType: hit.mimeType,
+        filename: ref.filename,
+      },
     });
   }
   return out;

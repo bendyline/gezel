@@ -658,7 +658,7 @@ describe('LlamaCppModelManager.install', () => {
     expect(onDiskFirst.byteLength).toBe(firstShard.byteLength);
   });
 
-  it('downloads the mmproj sidecar and records mmprojPath on the installed model', async () => {
+  it('downloads the mmproj sidecar and records mmprojPath when native vision is opted in', async () => {
     const weights = buildGguf({
       arch: 'nemotron_h',
       contextLength: 131072,
@@ -715,7 +715,7 @@ describe('LlamaCppModelManager.install', () => {
       });
     }) as typeof fetch;
     const mgr = new LlamaCppModelManager({ home, catalog, fetchImpl });
-    const events = await drain(mgr.install('mm-test'));
+    const events = await drain(mgr.install('mm-test', { includeMmproj: true }));
     const done = events.find((e) => e.type === 'done');
     expect(done, JSON.stringify(events)).toBeDefined();
 
@@ -734,6 +734,76 @@ describe('LlamaCppModelManager.install', () => {
     const installed = await mgr.listInstalled();
     expect(installed).toHaveLength(1);
     expect(installed[0]?.mmprojPath).toBe(join(dir, 'mmproj-BF16.gguf'));
+  });
+
+  // Default OFF is the load-bearing half. Loading a projector makes
+  // llama-server 501 on slot save/restore, which latches disk-KV prefix
+  // caching off for that model process-wide — a cost paid on every text turn.
+  // Installing a model that merely *ships* a projector must not opt the user
+  // into that silently.
+  it('skips the mmproj sidecar by default so prompt caching survives', async () => {
+    const weights = buildGguf({
+      arch: 'nemotron_h',
+      contextLength: 131072,
+      fileType: 15,
+      chatTemplate: '{%- if tools %}tools{%- endif %}',
+    });
+    const mmproj = Buffer.from('MMPROJ-PROJECTOR-WEIGHTS', 'utf8');
+    const catalog = fakeCatalog(
+      new Map<string, ChatModelManifest>([
+        [
+          'mm-default',
+          {
+            schemaVersion: 1,
+            kind: 'chat-model',
+            id: 'mm-default',
+            name: 'Multimodal Default',
+            description: 'fixture',
+            tags: [],
+            maintainer: { name: 'Test' },
+            version: '1.0.0',
+            releasedAt: '2026-04-22T00:00:00Z',
+            availableVersions: ['1.0.0'],
+            parameterSize: '30B',
+            approxSizeBytes: weights.byteLength,
+            supportsTools: true,
+            llamaCpp: {
+              huggingfaceRepo: 'test-org/multimodal-GGUF',
+              filename: 'model-Q4_K_M.gguf',
+              sha256: sha256Hex(weights),
+              approxSizeBytes: weights.byteLength,
+              quantization: 'Q4_K_M',
+              mmproj: {
+                filename: 'mmproj-BF16.gguf',
+                sha256: sha256Hex(mmproj),
+                sizeBytes: mmproj.byteLength,
+              },
+            },
+          } as ChatModelManifest,
+        ],
+      ]),
+    );
+    const requested: string[] = [];
+    const fetchImpl = (async (input: string | URL) => {
+      const href = typeof input === 'string' ? input : input.toString();
+      requested.push(href);
+      return new Response(weights, {
+        status: 200,
+        headers: { 'content-length': String(weights.byteLength) },
+      });
+    }) as typeof fetch;
+    const mgr = new LlamaCppModelManager({ home, catalog, fetchImpl });
+    await drain(mgr.install('mm-default'));
+
+    expect(requested.some((u) => u.includes('mmproj'))).toBe(false);
+    const dir = join(home, 'engines', 'llama-cpp', 'models', 'mm-default');
+    const onDisk = JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf8'));
+    expect(onDisk.weightsFilename).toBe('model-Q4_K_M.gguf');
+    expect(onDisk.mmprojFilename).toBeUndefined();
+    // Without a projector path the capability resolver keeps the model on the
+    // recognition path, which is exactly right.
+    const installed = await mgr.listInstalled();
+    expect(installed[0]?.mmprojPath).toBeUndefined();
   });
 
   it('fails the sharded install loudly when a shard sha256 does not match', async () => {

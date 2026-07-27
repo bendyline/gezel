@@ -112,6 +112,25 @@ export type InstallEvent =
     }
   | { type: 'verifying' }
   | { type: 'extracting-metadata' }
+  /**
+   * A second model being pulled alongside the requested one — today only the
+   * image reader, fetched automatically when the chat model can't see images.
+   *
+   * Its own event arm rather than folding the bytes into `progress`, because
+   * the user is entitled to know a further 3 GB is being downloaded and what
+   * for. `done` is withheld until this finishes, so the UI's terminal handler
+   * doesn't close the stream halfway through.
+   */
+  | {
+      type: 'companion';
+      kind: 'image-recognition';
+      id: string;
+      name: string;
+      bytesWritten: number;
+      totalBytes: number;
+      /** Set when the companion pull failed. The primary install still stands. */
+      error?: string;
+    }
   /** Final success event. `warning` is set when the GGUF lacks a chat_template. */
   | { type: 'done'; id: string; warning?: string }
   /**
@@ -447,8 +466,12 @@ export class LlamaCppModelManager {
    * only after sha256 verification passes. Failed installs leave the
    * previous weights untouched.
    */
-  async *install(catalogId: string, options?: { skipSha?: boolean }): AsyncIterable<InstallEvent> {
+  async *install(
+    catalogId: string,
+    options?: { skipSha?: boolean; includeMmproj?: boolean },
+  ): AsyncIterable<InstallEvent> {
     const skipSha = options?.skipSha === true;
+    const includeMmproj = options?.includeMmproj === true;
     if (!isSafeId(catalogId)) {
       yield { type: 'error', error: `unsafe catalog id: ${catalogId}` };
       return;
@@ -492,7 +515,7 @@ export class LlamaCppModelManager {
         return;
       }
       tracked.totalBytes = installSrc.approxSizeBytes;
-      yield* this.runInstall(catalogId, manifest, tracked, skipSha);
+      yield* this.runInstall(catalogId, manifest, tracked, skipSha, includeMmproj);
     } finally {
       this.activeInstalls.delete(catalogId);
     }
@@ -512,6 +535,7 @@ export class LlamaCppModelManager {
     },
     tracked: ActiveInstallSnapshot,
     skipSha: boolean,
+    includeMmproj: boolean,
   ): AsyncIterable<InstallEvent> {
     const src = this.srcBlock(manifest);
     if (!src) {
@@ -521,7 +545,7 @@ export class LlamaCppModelManager {
     const itemDir = join(this.modelsRoot, catalogId);
     await mkdir(itemDir, { recursive: true });
 
-    const plan = planDownloads(src);
+    const plan = planDownloads(src, includeMmproj);
     if (plan.length === 0) {
       yield {
         type: 'error',
@@ -779,13 +803,23 @@ function describeError(err: unknown): string {
  * lands as `foo-00001-of-NNN.gguf` next to its siblings — llama-server
  * needs them all in the same directory to auto-discover splits).
  */
-function planDownloads(src: {
-  filename?: string;
-  sha256?: string;
-  approxSizeBytes: number;
-  shards?: Array<{ name: string; sha256: string; sizeBytes: number }>;
-  mmproj?: { filename: string; sha256: string; sizeBytes: number };
-}): DownloadPlanEntry[] {
+function planDownloads(
+  src: {
+    filename?: string;
+    sha256?: string;
+    approxSizeBytes: number;
+    shards?: Array<{ name: string; sha256: string; sizeBytes: number }>;
+    mmproj?: { filename: string; sha256: string; sizeBytes: number };
+  },
+  /**
+   * Whether to also fetch the vision projector. Off by default even when the
+   * catalog declares one: loading an mmproj makes llama-server 501 on slot
+   * save/restore, which latches disk-KV prefix caching off for that model
+   * process-wide. Paying that on every text turn is a choice the user makes
+   * per model, not a side effect of installing something that ships one.
+   */
+  includeMmproj = false,
+): DownloadPlanEntry[] {
   const out: DownloadPlanEntry[] = [];
   if (src.shards && src.shards.length > 0) {
     src.shards.forEach((shard, i) => {
@@ -808,7 +842,7 @@ function planDownloads(src: {
   } else {
     return [];
   }
-  if (src.mmproj) {
+  if (src.mmproj && includeMmproj) {
     out.push({
       repoPath: src.mmproj.filename,
       destFilename: basename(src.mmproj.filename),

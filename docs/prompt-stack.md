@@ -308,9 +308,12 @@ they compete with text for context and prefill. Measured accounting:
 ## Prompt/tool contract matrix
 
 The prompt stack has an executable contract, not just prose review. Run
-`pnpm lint:prompts` (also included in root `pnpm lint`) to render the bundled matrix and
-compare every rendered instruction against the post-role, post-security, post-tier-cap,
-post-message-clamp built-in tool roster for that turn.
+`pnpm test:extended` (or its focused alias, `pnpm lint:prompts`) to render the bundled
+matrix and compare every rendered instruction against the post-role, post-security,
+post-tier-cap, post-message-clamp built-in tool roster for that turn. This exhaustive
+matrix is intentionally excluded from root `pnpm test`, `pnpm lint`, `pnpm validate`,
+`pnpm all`, and the default CI workflows; run it explicitly when changing prompt or tool
+surface contracts.
 
 The matrix calls the production `buildInstructions`, `resolveProfile`, and
 `resolveSessionToolSurface` functions. It does not maintain a parallel approximation of

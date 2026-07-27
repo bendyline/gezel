@@ -31,6 +31,7 @@ import {
   type OptimisticUserMessage,
   subscribeOptimisticUserMessages,
 } from './chat-optimistic-events.js';
+import { consumeFocusSessionError } from './pending-focus-session-error.js';
 import { buildTimelineThreads } from './timeline-threads.js';
 import { useNarrateAssistantReplies } from './useNarrateAssistantReplies.js';
 import { useRoleBasedNameOnlyMode } from './useRoleBasedNameOnlyMode.js';
@@ -52,6 +53,23 @@ const RECENT_THRESHOLD_MS = 24 * 60 * 60 * 1000;
 const LATE_REPLY_GAP_MS = 3 * 60 * 1000;
 const SCROLL_NEAR_BOTTOM_PX = 80;
 const SCROLL_NEAR_TOP_PX = 80;
+/** How long the flash ring stays on a row a navigation jumped to. */
+const FOCUS_FLASH_MS = 2000;
+/**
+ * How long a "jump to this session's failed turn" request keeps retrying
+ * across renders while the timeline's first page loads. Past this, the
+ * session's rows almost certainly aren't in the loaded window at all.
+ */
+const FOCUS_RETRY_WINDOW_MS = 8000;
+
+/**
+ * Quote a value for use inside a `[attr="…"]` selector. `CSS.escape`
+ * isn't available in every environment we render in (jsdom, older
+ * webviews), and session ids are opaque strings we don't control.
+ */
+function cssAttrValue(value: string): string {
+  return value.replace(/["\\]/g, '\\$&');
+}
 // A terminal "session" is a run of commands inside one
 // `(project, workingDir)` thread with no gap longer than this. The
 // gap is measured terminal-to-terminal within the same thread —
@@ -1983,6 +2001,101 @@ export function ChatTimelineView({
   }, [rows, pinnedToBottom]);
 
   /**
+   * Scroll to a session's failed-turn banner (falling back to that
+   * session's last rendered bubble when the banner isn't in the DOM —
+   * a cleared error, or a session whose rows haven't loaded yet) and
+   * flash it. Returns false when there's nothing to land on, so the
+   * caller can retry after the next batch of rows renders.
+   *
+   * Unpins the timeline first: without that, the very next streaming
+   * delta or SSE row would yank the viewport back to the bottom and
+   * undo the jump the user just asked for.
+   */
+  const focusSessionError = useCallback(
+    (sessionId: string): boolean => {
+      const el = scrollRef.current;
+      if (!el) return false;
+      const escaped = cssAttrValue(sessionId);
+      const banner = el.querySelector<HTMLElement>(`[data-session-error="${escaped}"]`);
+      const bubbles = el.querySelectorAll<HTMLElement>(`[data-session-id="${escaped}"]`);
+      const target = banner ?? bubbles[bubbles.length - 1] ?? null;
+      if (!target) return false;
+      setPinnedToBottom(false);
+      // jsdom (and some webviews) don't implement scrollIntoView — the
+      // flash + composer focus below still carry the interaction there.
+      if (typeof target.scrollIntoView === 'function') target.scrollIntoView({ block: 'center' });
+      target.classList.add('timeline-focus-flash');
+      window.setTimeout(() => target.classList.remove('timeline-focus-flash'), FOCUS_FLASH_MS);
+      // Point the composer at the failed session too, so the user's next
+      // message (or the banner's Continue) resumes THAT conversation
+      // rather than whichever one the roster happened to select.
+      const owner = messagesRef.current.find((m) => m.sessionId === sessionId);
+      if (owner) onFocusSession?.(sessionId, owner.gezelId, owner.projectId);
+      return true;
+    },
+    [onFocusSession],
+  );
+
+  /**
+   * Pending focus request: `{ sessionId, until }`. The timeline loads
+   * asynchronously, so the target row usually isn't in the DOM when the
+   * request arrives — we retry on each subsequent render until it is, or
+   * until the deadline passes (session too old to be in the first page).
+   */
+  const focusRequestRef = useRef<{ sessionId: string; until: number } | null>(null);
+  const [focusNonce, setFocusNonce] = useState(0);
+  const requestFocusSessionError = useCallback((sessionId: string) => {
+    focusRequestRef.current = { sessionId, until: Date.now() + FOCUS_RETRY_WINDOW_MS };
+    setFocusNonce((n) => n + 1);
+  }, []);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: rows/focusNonce are retry triggers — a fresh render is when the target may finally exist.
+  useEffect(() => {
+    const req = focusRequestRef.current;
+    if (!req) return;
+    if (Date.now() > req.until) {
+      focusRequestRef.current = null;
+      return;
+    }
+    if (focusSessionError(req.sessionId)) focusRequestRef.current = null;
+  }, [rows, focusNonce, focusSessionError]);
+
+  // Live "jump to the failed turn" event — the already-open-project case.
+  // Also drains the mailbox so the queued intent can't re-fire later.
+  useEffect(() => {
+    const onFocusError = (e: Event) => {
+      const detail = (e as CustomEvent<{ projectId?: string; sessionId?: string }>).detail;
+      if (!detail?.sessionId) return;
+      // Only the timeline scoped to that project responds — the global
+      // (Meester) timeline shouldn't jump around because a project row
+      // was clicked in the sidebar.
+      if (detail.projectId !== inflightProjectId) return;
+      if (inflightProjectId) consumeFocusSessionError(inflightProjectId);
+      requestFocusSessionError(detail.sessionId);
+    };
+    window.addEventListener('gezel:focus-session-error', onFocusError);
+    return () => window.removeEventListener('gezel:focus-session-error', onFocusError);
+  }, [inflightProjectId, requestFocusSessionError]);
+
+  // Queued intent — the remount case (the sidebar indicator opened a
+  // project whose timeline wasn't mounted yet to hear the live event).
+  //
+  // Only drop a pending request when the project genuinely changed: this
+  // effect runs twice per mount under StrictMode, and clearing
+  // unconditionally would throw away the request the first invocation
+  // just took out of the (now-empty) mailbox.
+  const focusScopeRef = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (focusScopeRef.current !== inflightProjectId) {
+      focusScopeRef.current = inflightProjectId;
+      focusRequestRef.current = null;
+    }
+    if (!inflightProjectId) return;
+    const intent = consumeFocusSessionError(inflightProjectId);
+    if (intent) requestFocusSessionError(intent.sessionId);
+  }, [inflightProjectId, requestFocusSessionError]);
+
+  /**
    * Find which message bubble is currently scrolled past the top of
    * the viewport and which user message in the same session is the
    * most recent one above the band — drives the sticky context
@@ -2307,7 +2420,13 @@ export function ChatTimelineView({
   const els: React.ReactNode[] = [];
   const emitSessionErrorBanner = (sid: string, error: string, projectId: string | null) => {
     els.push(
-      <div key={`session-error:${sid}`} className="timeline-session-error-banner">
+      <div
+        key={`session-error:${sid}`}
+        className="timeline-session-error-banner"
+        // Scroll target for the sidebar's failed-turn indicator — see
+        // `focusSessionError` above.
+        data-session-error={sid}
+      >
         ✗ Last turn failed: {error}
         {isModelUnavailableError(error) && (
           <>

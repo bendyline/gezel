@@ -52,6 +52,7 @@ import {
   tierAtLeast,
   validateScriptInput,
 } from '@bendyline/gezel';
+import type { MessageImageDigest } from '@bendyline/gezel';
 import {
   BUILTIN_TOOLSETS,
   BUILTIN_TOOL_TO_GROUP,
@@ -200,6 +201,8 @@ import {
   formatPromptToolContractFinding,
   lintPromptToolContract,
 } from './prompt-tool-contract.js';
+import { spliceIntoText } from './recognition-splice.js';
+import { type TurnImageLimits, resolveTurnImages } from './resolve-turn-images.js';
 import {
   claudeBuiltinsToAllow,
   claudeBuiltinsToDisallow,
@@ -233,6 +236,7 @@ import {
 import { extractReferencedTasks } from './task-references.js';
 import { type AvailableToolInfo, renderAvailableToolsBlock } from './tools-block.js';
 import { UsageTracker } from './usage.js';
+import type { RecognitionMode } from './vision-capability.js';
 import { renderWorkspaceGestalt } from './workspace-gestalt.js';
 
 const DEFAULT_PROJECT_ID = 'default';
@@ -671,6 +675,11 @@ export interface ChatManagerOptions {
    */
   llamaCppModels?: import('../providers/llama-cpp/index.js').LlamaCppModelManager;
   /**
+   * Local image-recognition engine. When absent, images destined for a
+   * model that can't see degrade to file details only — never to silence.
+   */
+  recognition?: import('../providers/recognition/manager.js').RecognitionManager;
+  /**
    * ds4 (DwarfStar) GGUF store — same role as `llamaCppModels`, a
    * `LlamaCppModelManager` constructed with `engine: 'ds4'` so it installs/
    * resolves under `engines/ds4/models` from the catalog `ds4` source block.
@@ -1027,6 +1036,8 @@ export class ChatManager {
   private readonly catalog: CatalogService;
   private readonly secrets: SecretStore;
   private readonly llamaCppModels?: import('../providers/llama-cpp/index.js').LlamaCppModelManager;
+  private readonly recognition?: import('../providers/recognition/manager.js').RecognitionManager;
+  private recognitionLimits: Partial<TurnImageLimits> = {};
   private readonly ds4Models?: import('../providers/llama-cpp/index.js').LlamaCppModelManager;
   private readonly mlxModels?: import('../providers/mlx/index.js').MlxModelManager;
   private readonly uvRuntime?: import('../python/uv-runtime.js').UvRuntime;
@@ -1076,6 +1087,7 @@ export class ChatManager {
     this.catalog = opts.catalog;
     this.secrets = opts.secrets;
     if (opts.llamaCppModels) this.llamaCppModels = opts.llamaCppModels;
+    if (opts.recognition) this.recognition = opts.recognition;
     if (opts.ds4Models) this.ds4Models = opts.ds4Models;
     if (opts.mlxModels) this.mlxModels = opts.mlxModels;
     if (opts.uvRuntime) this.uvRuntime = opts.uvRuntime;
@@ -5129,25 +5141,63 @@ export class ChatManager {
     let liveSession = session;
     let liveUnsub = subscribeLive(session);
 
-    // Resolve any images the user embedded (`![...](images/…)`) into raw
-    // base64 + mime so providers can pass them natively as vision input.
-    // Extracted once per turn and only attached on the first sendAndWait
-    // call — continuation nudges don't need to re-ship the bytes.
+    // Resolve any images the user embedded (`![...](attachments/…)`).
+    //
+    // Models that can genuinely decode images get the raw bytes, attached
+    // once on the first sendAndWait — continuation nudges don't re-ship them.
+    // Everything else (ds4 structurally, any local model without a loaded
+    // projector, the CLI-backed providers) gets a text description produced by
+    // the local recognition engine, which is persisted on the message so it
+    // survives replay. Before this, base64 was shipped blind: ds4-server
+    // discarded megabytes per turn and then answered confidently about an
+    // image it never saw.
     let pendingAttachments: ImageAttachment[] = [];
+    let pendingDigests: MessageImageDigest[] = [];
+    let pendingImageWarnings: string[] = [];
     try {
-      pendingAttachments = await extractImageAttachments(
-        this.store,
-        state.record.projectId,
+      const resolved = await resolveTurnImages({
+        store: this.store,
+        projectId: state.record.projectId,
         sessionId,
-        userText,
-      );
-      if (pendingAttachments.length > 0) {
-        log.info(
-          `attaching ${pendingAttachments.length} image${pendingAttachments.length === 1 ? '' : 's'} to the turn`,
-        );
-      }
+        markdown: userText,
+        provider: state.record.providerName,
+        ...(await this.resolveTurnVisionContext(state)),
+        ...(this.recognition ? { recognition: this.recognition } : {}),
+        mode: await this.resolveRecognitionMode(state),
+        limits: this.recognitionLimits,
+        onRecognitionPhase: (phase) => {
+          // Rides `gpu_swap` rather than a log line: the silence watchdog
+          // treats these as activity, so without it a multi-second vision
+          // pass trips a bogus "still working — silent for X seconds".
+          this.events.publish(scope, {
+            type: 'gpu_swap',
+            state: phase,
+            task: 'image_recognition',
+            ...(phase === 'started' ? { detail: 'Reading your image' } : {}),
+          });
+        },
+      });
+      pendingAttachments = resolved.attachments;
+      pendingDigests = resolved.digests;
+      pendingImageWarnings = resolved.warnings;
     } catch (err) {
-      log.warn('image-attachment extraction failed:', err);
+      log.warn('image resolution failed:', err);
+    }
+
+    // Persist the digests onto the user message that was already written, so
+    // they replay on every later turn. A second write is cheap next to the
+    // recognition pass that produced them.
+    if (pendingDigests.length > 0) {
+      userMessage.recognizedImages = pendingDigests;
+      if (pendingImageWarnings.length > 0) {
+        userMessage.warnings = [...(userMessage.warnings ?? []), ...pendingImageWarnings];
+      }
+      try {
+        await this.store.writeSession(state.record);
+        this.events.publish(scope, { type: 'user_message', message: userMessage });
+      } catch (err) {
+        log.warn('failed to persist image digests:', err);
+      }
     }
 
     try {
@@ -5158,7 +5208,11 @@ export class ChatManager {
       // is NOT pushed to record.messages or surfaced via user_message —
       // it's invisible to the user, just a kick to the model.
       let lastAssistantMessage: ChatMessage | null = null;
-      let promptForTurn = userText;
+      // Image digests ride the user message, never the system prompt — a
+      // changing system block churns the stable-prefix KV cache local engines
+      // depend on. Spliced identically here and in the history rebuild so a
+      // restart doesn't invalidate the cached prefix.
+      let promptForTurn = spliceIntoText(userText, pendingDigests);
       // Fail-fast budget (F3.1): a genuine USER message (no `from`) means the
       // human is engaged, so reset the task's unattended-spend accumulator —
       // a long interactive conversation must never trip. Autonomous sends
@@ -5177,7 +5231,10 @@ export class ChatManager {
       // here without manager.ts changes.
       const preludeForTurn = await this.resolveUserPromptPrelude(state, userText);
       if (preludeForTurn) {
-        promptForTurn = `${preludeForTurn.text}\n\n${userText}`;
+        // Prepend onto `promptForTurn`, NOT `userText` — the latter silently
+        // discarded anything already spliced in above (image digests today,
+        // whatever lands at that seam tomorrow) whenever a behavior fired.
+        promptForTurn = `${preludeForTurn.text}\n\n${promptForTurn}`;
         log.info(
           `session ${sessionId}: behavior ${preludeForTurn.behaviorId} fired — prepending prelude`,
         );
@@ -9094,6 +9151,49 @@ export class ChatManager {
    * Step-6 Gemma behaviors that re-prompt (single-tool-per-turn,
    * etc.) ride this same path without further manager.ts changes.
    */
+  /**
+   * Effective image-scanning policy: per-gezel frontmatter wins over the
+   * install default. `auto` (the default) means "describe only when the model
+   * genuinely can't see" — which is what makes ds4 work without a
+   * ds4-specific rule anywhere.
+   */
+  private async resolveRecognitionMode(state: LiveSessionState): Promise<RecognitionMode> {
+    const perGezel = state.record.gezelId
+      ? await this.store
+          .getGezel(state.record.gezelId)
+          .then((g) => g?.parsed.frontmatter.recognition)
+          .catch(() => undefined)
+      : undefined;
+    if (perGezel) return perGezel;
+    const cfg = await this.store.readConfig().catch(() => null);
+    return cfg?.recognition?.mode ?? 'auto';
+  }
+
+  /**
+   * Whether THIS session's engine can decode images, from the same two facts
+   * that decide `--mmproj` on the llama-server command line. A model whose
+   * server was launched without the flag is blind no matter what its weights
+   * could do — so the launch config, not the catalog tag, is the source.
+   */
+  private async resolveTurnVisionContext(
+    state: LiveSessionState,
+  ): Promise<{ modelId?: string; mmprojPath?: string; nativeVisionEnabled?: boolean }> {
+    const modelId = state.record.model ?? undefined;
+    if (!modelId || !this.llamaCppModels) return modelId ? { modelId } : {};
+    try {
+      const resolved = await this.llamaCppModels.resolveModel(modelId);
+      const cfg = await this.store.readConfig().catch(() => null);
+      const enabled = cfg?.nativeVision?.[modelId] === true;
+      return {
+        modelId,
+        ...(resolved?.mmprojPath ? { mmprojPath: resolved.mmprojPath } : {}),
+        ...(enabled ? { nativeVisionEnabled: true } : {}),
+      };
+    } catch {
+      return { modelId };
+    }
+  }
+
   private async resolveUserPromptPrelude(
     state: LiveSessionState,
     userText: string,
@@ -10710,9 +10810,16 @@ export class ChatManager {
           //      shipped still have raw markup baked into `content`;
           //      this is the read-time cleanup that retroactively hides
           //      it from the model without rewriting on-disk records.
-          // User messages pass through unchanged — they're literal
-          // input from the human or another gezel.
-          content: m.role === 'assistant' ? stripReasoningTags(m.content) : m.content,
+          // User messages carry their literal input, plus any image digests
+          // spliced back in. Without this, a screenshot pasted on turn 1
+          // replays as a bare `![](attachments/9f3.png)` after a daemon
+          // restart or a context rebuild — the model loses the image it was
+          // answering about. Byte-identical to the live send's splice, so the
+          // cached prefix still matches.
+          content:
+            m.role === 'assistant'
+              ? stripReasoningTags(m.content)
+              : spliceIntoText(m.content, m.recognizedImages),
         }));
     }
     const historyManager = this.historyManager;

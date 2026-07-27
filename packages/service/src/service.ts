@@ -78,6 +78,7 @@ import { ImageProviderManager } from './providers/image/manager.js';
 import { ImageModelPullRegistry } from './providers/image/pull-registry.js';
 import { LlamaCppModelManager } from './providers/llama-cpp/index.js';
 import { MLX_VENV_NAME, MlxModelManager, mlxVenvPackages } from './providers/mlx/index.js';
+import { RecognitionManager } from './providers/recognition/manager.js';
 import type { LLMProvider } from './providers/types.js';
 import { VideoProviderManager } from './providers/video/manager.js';
 import { VideoModelPullRegistry } from './providers/video/pull-registry.js';
@@ -602,6 +603,13 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   // the HTTP intake route and ChatManager's drain-on-send.
   const previewLog = new PreviewLogBuffer();
 
+  // Image recognition. Built before ChatManager because the chat turn needs
+  // it to describe images for models that can't see them.
+  const recognition = new RecognitionManager({
+    home,
+    ...(bootConfig.defaultRecognitionModel ? { modelId: bootConfig.defaultRecognitionModel } : {}),
+  });
+
   const chat = new ChatManager({
     store,
     events: chatEvents,
@@ -621,6 +629,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     llamaCppModels,
     ds4Models,
     mlxModels,
+    recognition,
     uvRuntime,
     mlxRuntimeStatus,
     debug,
@@ -1506,6 +1515,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     videoPulls,
     engineBinaries,
     stt,
+    recognition,
     tts,
     llamaCppModels,
     ds4Models,

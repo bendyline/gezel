@@ -237,6 +237,23 @@ describe('readImageStaticMeta', () => {
     expect(JSON.stringify(meta.exif)).not.toMatch(/lat|lon|gps/i);
   });
 
+  // The other half of the invariant: coordinates ARE readable, but only for a
+  // caller that asked for them explicitly. That path is the
+  // `read_image_metadata` MCP tool, whose invocation is audited.
+  it('returns GPS only when the caller explicitly opts in', () => {
+    const jpeg = jpegWithExif({
+      make: 'Apple',
+      gps: { lat: [52, 22, 12], lon: [4, 53, 42] },
+    });
+    const withLocation = readImageStaticMeta(jpeg, { includeLocation: true });
+    expect(withLocation.gps?.lat).toBeCloseTo(52.37, 1);
+    expect(withLocation.gps?.lon).toBeCloseTo(-4.895, 2);
+    expect(withLocation.gpsRedacted).toBeUndefined();
+
+    // Anything that forgets the flag gets the safe default.
+    expect(readImageStaticMeta(jpeg).gps).toBeUndefined();
+  });
+
   it('flags a wide PNG with no camera provenance as a likely screenshot', () => {
     expect(readImageStaticMeta(png(2560, 1440)).likelyScreenshot).toBe(true);
   });

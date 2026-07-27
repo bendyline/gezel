@@ -262,6 +262,19 @@ use toasts for errors. If the operation is dismissable, show the error
 until the next user action; if it blocks something, show it until the user
 fixes it.
 
+**Status indicators take you to the thing.** A signal in the nav (the
+sidebar's per-project needs-input `?`, failed-turn `!`, working dots) is a
+button, and clicking it lands on the exact spot the signal is about — not
+just the parent screen. When a signal can also be dismissed, put the
+dismissal in that entity's `⋯` menu (e.g. "Clear error indicator"), gated
+so the item only appears while there's something to clear.
+
+**Landing cues.** When navigation scrolls a surface to a specific row
+rather than the top or bottom of it, flash the row so the jump doesn't read
+as the view moving on its own: add `.timeline-focus-flash` (a ~2s ring that
+fades, no-motion variant included) and remove it once it settles. Never
+leave a permanent highlight behind — the ring is a cue, not a selection.
+
 ## Poppetjes: painted wooden crew
 
 Poppetjes are the app's character system, not generic avatars. Their visual

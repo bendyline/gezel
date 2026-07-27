@@ -45,11 +45,13 @@ fileAssociations:
 # stay loose — each is a small handful of files and they don't trigger
 # the same Defender-per-file overhead.
 #
-# `native-bin/<platform>/` holds the per-platform native engine binaries
-# (stable-diffusion.cpp today; whisper.cpp / piper later) produced by
-# `.github/workflows/build-native.yml` and bundled by
-# `native/scripts/bundle.sh`. ~40 large files — same shape as above; loose
-# is fine.
+# `native-bin/<platform>[-<variant>]/` holds the per-platform native engine
+# binaries (llama.cpp, stable-diffusion.cpp, whisper.cpp, ds4, plus the uv
+# runtime and the device-health / service-host helpers) produced by
+# `.github/workflows/build-native.yml` and staged by
+# `scripts/fetch-native-binaries.mjs`. The per-platform contents are the
+# contract in `scripts/native-payload.mjs`. ~40 large files — same shape as
+# above; loose is fine.
 files:
   - dist/main.js
   - dist/main.js.map
@@ -192,8 +194,10 @@ win:
 nsis:
   # Per-machine install (Program Files), elevates UAC at install time.
   # The installer's customInstall hook in installer/nsis-hooks.nsh uses the
-  # elevation to register gezeld as a Windows Service via NSSM, with
-  # system-scope state in C:\ProgramData\Gezel\.
+  # elevation to register gezeld as the GezelService Windows Service —
+  # hosted by the first-party gezel-service-host.exe above, under a
+  # restricted LocalService identity — with system-scope state in
+  # C:\ProgramData\Gezel\.
   oneClick: false
   perMachine: true
   allowElevation: true
@@ -204,7 +208,8 @@ nsis:
   createDesktopShortcut: true
   createStartMenuShortcut: true
   license: EULA.txt
-  # NSIS macros that install/uninstall the GezelService via NSSM.
+  # NSIS macros that install/uninstall GezelService via sc.exe, and clean
+  # up the retired NSSM wrapper left behind by NSSM-era installs.
   include: installer/nsis-hooks.nsh
   # Enables electron-updater to pull delta packages on Windows — much
   # smaller downloads for users on slow connections.

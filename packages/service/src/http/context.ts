@@ -30,6 +30,7 @@ import type { ImageProviderManager } from '../providers/image/manager.js';
 import type { ImageModelPullRegistry } from '../providers/image/pull-registry.js';
 import type { LlamaCppModelManager } from '../providers/llama-cpp/index.js';
 import type { MlxModelManager } from '../providers/mlx/index.js';
+import type { RecognitionManager } from '../providers/recognition/manager.js';
 import type { VideoProviderManager } from '../providers/video/manager.js';
 import type { VideoModelPullRegistry } from '../providers/video/pull-registry.js';
 import type { MlxRuntimeStatusBus } from '../python/mlx-runtime-status-bus.js';
@@ -127,6 +128,11 @@ export interface ServiceContext {
    * provider (Kokoro / mock).
    */
   tts: TextToSpeechProviderManager;
+  /**
+   * Image-recognition manager. Owns the local vision engine plus the
+   * content-hash result cache. Same lazy-build / reset shape as `stt`.
+   */
+  recognition: RecognitionManager;
   /**
    * Cross-engine GPU coordinator. Decides whether the local LLM and
    * the local image generator coexist or take turns; surfaces a
