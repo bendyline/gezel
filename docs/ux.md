@@ -264,6 +264,18 @@ skeleton the same way — extend it rather than fork it. Lead the gallery
 with the curated, context-relevant subset (e.g. craftbooks recommended
 for the project's type) and keep the full catalog one rail-click away.
 
+**Catalog artwork: Workshop Marks.** Craftbook thumbnails are quiet square
+still-lifes drawn from a circa-1905–1915 bindery and small-letterpress material
+language: laid rag paper, woven bookcloth, lightly printed charcoal ink, and
+dull oxidized brass. They use the Gezel parchment/charcoal palette with one
+muted category accent, one dominant job-specific artifact, and at most one or
+two supporting tools. The historical cue stays in material and construction,
+not decoration: no sepia wash, distress, wax seals, ornate flourishes,
+steampunk, medieval props, or nostalgic clutter. Source art is 512×512 WebP
+and must remain recognizable in the 44px gallery crop. Catalog image renderers
+must replace missing or failed assets with the surface's category glyph or
+initial; never expose the browser's native broken-image placeholder.
+
 **Embedded Handboek pages.** When a surface needs explanatory copy that
 also belongs in the documentation, don't hardcode the prose — embed the
 Handboek article (`LinearDocView`/`DocPlayer` + `createHandboekMediaProvider`,

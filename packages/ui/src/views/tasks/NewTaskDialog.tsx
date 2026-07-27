@@ -10,6 +10,7 @@ import type {
 import type { SquisqAnnotatedSchema } from '@bendyline/squisq';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../../api.js';
+import { CatalogArtwork } from '../../components/CatalogArtwork.js';
 import { CraftbookToolsetSetup } from '../../components/CraftbookToolsetSetup.js';
 import { GezelJsonEditor } from '../../components/GezelJsonEditor.js';
 import { Dialog, Select } from '../../primitives/index.js';
@@ -528,17 +529,18 @@ export function NewTaskDialog({
                   {selectedBook ? (
                     <div className="gz-npd-hero">
                       <div className="gz-npd-hero-art" aria-hidden="true">
-                        {selectedBook.item.iconSvg ? (
-                          <span
-                            className="gz-npd-hero-art-svg"
-                            // biome-ignore lint/security/noDangerouslySetInnerHtml: catalog icon SVGs are server-sanitized before delivery.
-                            dangerouslySetInnerHTML={{ __html: selectedBook.item.iconSvg }}
-                          />
-                        ) : selectedBook.item.logoUrl ? (
-                          <img src={selectedBook.item.logoUrl} alt="" />
-                        ) : (
-                          <ProjectGlyph glyph={craftbookGlyph(selectedBook.manifest)} size={34} />
-                        )}
+                        <CatalogArtwork
+                          {...(selectedBook.item.iconSvg
+                            ? { iconSvg: selectedBook.item.iconSvg }
+                            : {})}
+                          {...(selectedBook.item.logoUrl
+                            ? { logoUrl: selectedBook.item.logoUrl }
+                            : {})}
+                          svgClassName="gz-npd-hero-art-svg"
+                          fallback={
+                            <ProjectGlyph glyph={craftbookGlyph(selectedBook.manifest)} size={34} />
+                          }
+                        />
                       </div>
                       <p className="gz-npd-hero-eyebrow">
                         Craftbook
@@ -819,17 +821,12 @@ function GalleryCard({
       style={{ '--card-i': Math.min(index, 11) } as React.CSSProperties}
     >
       <span className="gz-npd-card-mark" aria-hidden="true">
-        {iconSvg ? (
-          <span
-            className="gz-npd-card-mark-svg"
-            // biome-ignore lint/security/noDangerouslySetInnerHtml: catalog icon SVGs are server-sanitized before delivery.
-            dangerouslySetInnerHTML={{ __html: iconSvg }}
-          />
-        ) : logoUrl ? (
-          <img src={logoUrl} alt="" />
-        ) : (
-          <ProjectGlyph glyph={glyph} size={22} />
-        )}
+        <CatalogArtwork
+          {...(iconSvg ? { iconSvg } : {})}
+          {...(logoUrl ? { logoUrl } : {})}
+          svgClassName="gz-npd-card-mark-svg"
+          fallback={<ProjectGlyph glyph={glyph} size={22} />}
+        />
       </span>
       <span className="gz-npd-card-name">{label}</span>
       <span className="gz-npd-card-description">{description}</span>

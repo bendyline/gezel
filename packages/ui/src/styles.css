@@ -12340,17 +12340,18 @@ button.timeline-session-divider-continuing::before {
   background: var(--surface-3, var(--surface-2, transparent));
 }
 
-/* "needs setup" pill on a craftbook row whose required toolsets aren't
-   installed yet — clicking the row opens the inline install flow. */
+/* Quiet setup marker on a craftbook row whose required toolsets aren't
+   installed yet. Keep the row's title/aria-label explicit; the repeated
+   visual marker stays secondary so a long list does not become a warning
+   wall. Clicking the row opens the inline install flow. */
 .commands-panel-badge {
   margin-left: 0.4rem;
-  padding: 0.05rem 0.4rem;
+  padding: 0.05rem 0.3rem;
+  border: 1px solid color-mix(in srgb, var(--text-muted) 35%, transparent);
   border-radius: var(--radius-sm);
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.02em;
-  background: var(--warning-bg, rgba(220, 150, 30, 0.18));
-  color: var(--warning-fg, rgb(180, 110, 10));
+  font-weight: 500;
+  background: transparent;
+  color: var(--text-muted);
 }
 
 .craftbook-toolset-setup {

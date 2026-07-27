@@ -1,5 +1,6 @@
 import type { CatalogItemSummary } from '@bendyline/gezel';
 import { initialPoppetjeForGezel } from '@bendyline/gezel';
+import { CatalogArtwork } from '../../components/CatalogArtwork.js';
 import { Poppetje } from '../../poppetje/index.js';
 import {
   ProjectGlyph,
@@ -75,17 +76,14 @@ export function NewProjectPaneHero({ selection }: { selection: PaneSelection }) 
   return (
     <div className="gz-npd-hero">
       <div className="gz-npd-hero-art" aria-hidden="true">
-        {isCatalog && selection.item.iconSvg ? (
-          <span
-            className="gz-npd-hero-art-svg"
-            // biome-ignore lint/security/noDangerouslySetInnerHtml: catalog icon SVGs are server-sanitized before delivery.
-            dangerouslySetInnerHTML={{ __html: selection.item.iconSvg }}
-          />
-        ) : isCatalog && selection.item.logoUrl ? (
-          <img src={selection.item.logoUrl} alt="" />
-        ) : (
-          <ProjectGlyph glyph={isCatalog ? category.glyph : selection.kind.glyph} size={34} />
-        )}
+        <CatalogArtwork
+          {...(isCatalog && selection.item.iconSvg ? { iconSvg: selection.item.iconSvg } : {})}
+          {...(isCatalog && selection.item.logoUrl ? { logoUrl: selection.item.logoUrl } : {})}
+          svgClassName="gz-npd-hero-art-svg"
+          fallback={
+            <ProjectGlyph glyph={isCatalog ? category.glyph : selection.kind.glyph} size={34} />
+          }
+        />
       </div>
       <p className="gz-npd-hero-eyebrow">{category.label}</p>
       <h4 className="gz-npd-hero-name">{name}</h4>

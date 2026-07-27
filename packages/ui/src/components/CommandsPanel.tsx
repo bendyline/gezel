@@ -317,7 +317,7 @@ export function CommandsPanel({ projectId, onStageCommand }: Props) {
       >
         <span className="commands-panel-item-name">
           {m.name}
-          {missing.length > 0 && <span className="commands-panel-badge small"> needs setup</span>}
+          {missing.length > 0 && <span className="commands-panel-badge small">setup</span>}
         </span>
         {m.description && (
           <span className="commands-panel-item-desc muted small">{m.description}</span>

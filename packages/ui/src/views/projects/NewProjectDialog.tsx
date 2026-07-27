@@ -9,6 +9,7 @@ import { GezelApiError } from '@bendyline/gezel-client';
 import type { SquisqAnnotatedSchema } from '@bendyline/squisq';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../../api.js';
+import { CatalogArtwork } from '../../components/CatalogArtwork.js';
 import { GezelJsonEditor } from '../../components/GezelJsonEditor.js';
 import { GithubSignInChip } from '../../components/GithubSignInChip.js';
 import { connectMailboxOAuth } from '../../components/mail-link.js';
@@ -59,17 +60,12 @@ function TypeCard({
       style={{ '--card-i': Math.min(index, 11) } as React.CSSProperties}
     >
       <span className="gz-npd-card-mark" aria-hidden="true">
-        {iconSvg ? (
-          <span
-            className="gz-npd-card-mark-svg"
-            // biome-ignore lint/security/noDangerouslySetInnerHtml: catalog icon SVGs are server-sanitized before delivery.
-            dangerouslySetInnerHTML={{ __html: iconSvg }}
-          />
-        ) : logoUrl ? (
-          <img src={logoUrl} alt="" />
-        ) : (
-          <ProjectGlyph glyph={glyph ?? 'dots'} size={22} />
-        )}
+        <CatalogArtwork
+          {...(iconSvg ? { iconSvg } : {})}
+          {...(logoUrl ? { logoUrl } : {})}
+          svgClassName="gz-npd-card-mark-svg"
+          fallback={<ProjectGlyph glyph={glyph ?? 'dots'} size={22} />}
+        />
       </span>
       <span className="gz-npd-card-name">{label}</span>
       <span className="gz-npd-card-description">{description}</span>

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
 import { Tooltip } from '../primitives/index.js';
 import { sanitizeCatalogSvg } from '../sanitize-catalog-svg.js';
+import { CatalogArtwork } from './CatalogArtwork.js';
 
 /**
  * Shared catalog browser. Given a `kind`, loads items via the catalog
@@ -45,20 +46,18 @@ const TOOLSET_CATEGORY_ORDER: ToolsetCategory[] = [
 
 function CatalogItemLogo({ item }: { item: CatalogItemSummary }) {
   const safeSvg = item.iconSvg ? sanitizeCatalogSvg(item.iconSvg) : null;
-  if (safeSvg) {
-    return (
-      <img
-        className="catalog-item-logo catalog-item-logo-svg"
-        src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(safeSvg)}`}
-        alt=""
-      />
-    );
-  }
-  if (item.logoUrl) return <img className="catalog-item-logo" src={item.logoUrl} alt="" />;
   return (
-    <div className="catalog-item-logo catalog-item-logo-placeholder">
-      {item.manifest.name.slice(0, 1)}
-    </div>
+    <CatalogArtwork
+      logoUrl={
+        safeSvg ? `data:image/svg+xml;charset=utf-8,${encodeURIComponent(safeSvg)}` : item.logoUrl
+      }
+      imageClassName={`catalog-item-logo${safeSvg ? ' catalog-item-logo-svg' : ''}`}
+      fallback={
+        <div className="catalog-item-logo catalog-item-logo-placeholder">
+          {item.manifest.name.slice(0, 1)}
+        </div>
+      }
+    />
   );
 }
 
