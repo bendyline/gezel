@@ -308,7 +308,22 @@ export function HandboekView() {
                 data-testid="handboek-doc"
                 onClickCapture={onDocClickCapture}
               >
-                <LinearDocView doc={doc} theme={gezelChatTheme} imageDisplayMode="inline" />
+                {/* No synthesized cover. LinearDocView's default builds a
+                    full-bleed hero out of `doc.startBlock`, which for these
+                    articles means the pane restates the title the header
+                    right above it already shows, and — because the leading
+                    figure lives in that block's contents — renders the
+                    article's image once stranded in the hero band and again
+                    in the body. `.handboek-pane-header` is this view's
+                    title treatment; the body starts at the prose.
+                    Video mode keeps its cover — a title slide is the
+                    right opening frame there. */}
+                <LinearDocView
+                  doc={doc}
+                  theme={gezelChatTheme}
+                  imageDisplayMode="inline"
+                  showCover={false}
+                />
               </div>
             ) : (
               <div className="handboek-player" data-testid="handboek-player">

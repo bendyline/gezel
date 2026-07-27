@@ -22,14 +22,21 @@ export function presentDeviceHealth(health: DeviceHealth): {
 
   switch (health.state) {
     case 'healthy':
+      // Nothing to say in the pill: a cool machine is the expected case, and
+      // a running temperature there is noise the user has to re-read every
+      // glance. The popover's Machine health row keeps the number for anyone
+      // who wants it.
       return {
-        inline: temperatureText || 'Healthy',
+        inline: null,
         detail: `Healthy${metrics ? ` · ${metrics}` : ''}`,
         tone: 'normal',
       };
     case 'warm':
+      // State word only — same reasoning as `healthy`. "Warm" is the signal;
+      // the exact degrees belong in the popover next to the thermal margin,
+      // where they have context.
       return {
-        inline: temperatureText ? `Warm ${temperatureText}` : 'Warm',
+        inline: 'Warm',
         detail: `Warm${metrics ? ` · ${metrics}` : ''}`,
         tone: 'warning',
       };
