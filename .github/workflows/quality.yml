@@ -58,8 +58,6 @@ jobs:
         run: pnpm --filter @bendyline/gezel-evals exec playwright install --with-deps chromium
       - name: Run all unit suites (stability pass 1 of 3)
         run: pnpm test
-      - name: Repeat UI and service suites (stability passes 2 and 3)
-        run: pnpm test:stability
       - name: Enforce test-surface coverage floors
         run: pnpm test:coverage
       - name: Preserve coverage inventory
@@ -72,6 +70,36 @@ jobs:
           # step fails, do not add a second, misleading artifact failure.
           if-no-files-found: ignore
           retention-days: 30
+
+  stability:
+    name: Test stability (UI and service repeats)
+    needs: workflow-policy
+    runs-on: ubuntu-latest
+    # Passes 2 and 3 run here rather than tailing the `unit` job. Sequentially
+    # the three passes reached ~30 min and were cancelled at that ceiling on
+    # 2026-07-27; split, neither job exceeds ~20 min of wall clock.
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@008330803749db0355799c700092d9a85fd074e9 # v6.0.9
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - name: Reject local workspace links
+        run: pnpm check:local-links
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: Install Chromium
+        # The service suite's page-check tests gate a real-browser block on
+        # the shared ~/.cache/ms-playwright existing (see runner.test.ts).
+        # Without this the repeat passes would silently skip tests that pass 1
+        # runs, which is precisely the flake this job exists to catch.
+        run: pnpm --filter @bendyline/gezel-app exec playwright install --with-deps chromium
+      - name: Repeat UI and service suites (stability passes 2 and 3)
+        run: pnpm test:stability
 
   packaged-bundle:
     name: Packaged service-bundle smoke

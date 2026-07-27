@@ -2,7 +2,7 @@ import type { HandboekFigure } from '@bendyline/gezel';
 import type { MediaEntry, MediaProvider } from '@bendyline/squisq';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import gezelMarkUrl from '../../assets/gezellogo.png';
+import gezelMarkUrl from '../../assets/gezel-mark.png';
 import { Poppetje, type PoppetjeVariant } from '../../poppetje/index.js';
 
 /**
