@@ -57,7 +57,10 @@ jobs:
         # this populates the shared ~/.cache/ms-playwright the evals import uses.
         run: pnpm --filter @bendyline/gezel-evals exec playwright install --with-deps chromium
       - name: Run all unit suites (stability pass 1 of 3)
-        run: pnpm test
+        # test:ci, not test — the CI runner has 4 vCPUs, and pnpm otherwise
+        # runs several package suites at once, each with its own worker pool.
+        # Serialising the packages keeps fixed test timeouts meaningful.
+        run: pnpm test:ci
       - name: Enforce test-surface coverage floors
         run: pnpm test:coverage
       - name: Preserve coverage inventory
@@ -75,10 +78,12 @@ jobs:
     name: Test stability (UI and service repeats)
     needs: workflow-policy
     runs-on: ubuntu-latest
-    # Passes 2 and 3 run here rather than tailing the `unit` job. Sequentially
-    # the three passes reached ~30 min and were cancelled at that ceiling on
-    # 2026-07-27; split, neither job exceeds ~20 min of wall clock.
-    timeout-minutes: 30
+    # Passes 2 and 3 run here rather than tailing the `unit` job, which
+    # reached ~30 min sequentially and was cancelled at that ceiling on
+    # 2026-07-27. The two repeats then ran ui+service concurrently in 19.7
+    # min; serialising them (see test:stability) trades roughly 4 min of wall
+    # clock for timings that do not depend on what else shares the 4 vCPUs.
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: pnpm/action-setup@008330803749db0355799c700092d9a85fd074e9 # v6.0.9

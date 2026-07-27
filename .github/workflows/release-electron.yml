@@ -144,7 +144,9 @@ jobs:
       - name: Lint
         run: pnpm lint
       - name: Test
-        run: pnpm test
+        # test:ci, not test — same 4-vCPU runner as the Quality workflow, and
+        # the same contention that starved fixed test timeouts there.
+        run: pnpm test:ci
       - name: Install Chromium for browser E2E
         run: pnpm --filter @bendyline/gezel-app exec playwright install --with-deps chromium
       - name: Full browser E2E
@@ -163,7 +165,11 @@ jobs:
         with:
           name: supply-chain
           path: artifacts/gezel.cdx.json
-          if-no-files-found: error
+          # `pnpm audit:sbom` writes this file and the audit gates below read
+          # it, so a green run cannot reach here without it. Erroring only
+          # fired when an earlier step had already failed, stacking a second
+          # misleading failure on top of the real one.
+          if-no-files-found: ignore
           retention-days: 30
 
   # ── Windows ───────────────────────────────────────────────────────────

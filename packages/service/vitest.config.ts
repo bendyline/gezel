@@ -1,6 +1,14 @@
-import { homedir } from 'node:os';
+import { availableParallelism, homedir } from 'node:os';
 import { join } from 'node:path';
 import { defineConfig } from 'vitest/config';
+
+/**
+ * A flat worker cap tuned on an 18-core workstation is 2x oversubscription
+ * on a 4-vCPU GitHub runner, which starved fixed test timeouts badly enough
+ * to redden eight consecutive main builds in July 2026 (a different test
+ * each time). Scale to the host instead, and never drop below 2.
+ */
+const MAX_WORKERS = Math.max(2, Math.min(8, availableParallelism()));
 
 /**
  * A large slice of the service tests stand up a real moving part: an
@@ -73,7 +81,7 @@ export default defineConfig({
     // workers; running 17 forks on an 18-core workstation can make a worker
     // exit after otherwise-successful tests. Keep enough parallelism for a
     // quick run without multiplying those process trees without bound.
-    maxWorkers: 8,
+    maxWorkers: MAX_WORKERS,
     env: {
       GEZEL_EMBED_MODEL: 'Xenova/all-MiniLM-L6-v2',
       GEZEL_HF_CACHE_DIR: join(homedir(), '.cache', 'gezel-test-hf'),
@@ -103,7 +111,7 @@ export default defineConfig({
           pool: 'forks',
           execArgv: WORKER_EXEC_ARGV,
           // Bound unit + integration workers to avoid oversubscribing hosts.
-          maxWorkers: 8,
+          maxWorkers: MAX_WORKERS,
         },
       },
     ],

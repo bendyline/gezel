@@ -78,7 +78,11 @@ afterAll(async () => {
   if (gezelHome) await rm(gezelHome, { recursive: true, force: true });
 });
 
-describe('gezeld cross-process integration', () => {
+// Every case here crosses a process boundary, and the CLI-entry cases shell
+// out twice with a 15s `execFile` budget each — more than vitest's 5s default
+// allows, so a loaded runner timed the suite out rather than failing an
+// assertion. Match the budget to the work the tests actually do.
+describe('gezeld cross-process integration', { timeout: 30_000 }, () => {
   it('writes runtime files that readRuntime can parse', async () => {
     const runtime = await readRuntime(gezelHome);
     expect(runtime).not.toBeNull();

@@ -338,7 +338,8 @@ No rotation in MVP; explicit events are small and even a year of heavy use stays
 - `pnpm build:bundle` — build the relocatable service bundle via `pnpm deploy --prod`. Output at `packages/app/dist/service-bundle/`. Needed before packaging a distributable.
 - `pnpm build:packaged` — shortcut: `build` + `build:bundle`.
 - `pnpm typecheck` — runs `tsc --noEmit` across every package.
-- `pnpm test` — Vitest across core, service, plugin-sdk, client, mcp, ui, app. ~1.5s.
+- `pnpm test` — Vitest across every gezel package. ~3m45s on an 18-core workstation, ~12 min on CI. The service suite is ~90% of that on its own; scope to one package (`pnpm --filter @bendyline/gezel-ui run test`) while iterating.
+- `pnpm test:ci` — same suites, one package at a time. What CI runs: the 4-vCPU runner cannot absorb several package worker pools at once, and the contention starves fixed test timeouts. Use locally only to reproduce a CI-only timing failure.
 - `pnpm test:e2e` — Playwright Electron suite. ~25s.
 - `pnpm app` — build then launch the Electron shell (embedded mode by default).
 - `pnpm dev` — watch-mode build across every gezel package.
