@@ -56,10 +56,14 @@ describe('ProjectGithubView', () => {
     await waitFor(() => {
       expect(screen.getByTestId('changes-view')).toBeInTheDocument();
     });
-    const changesTab = screen
-      .getAllByRole('tab')
-      .find((el) => el.getAttribute('data-value') === 'changes');
-    expect(changesTab?.textContent).toContain('2');
+    // The tabs render before the status fetch resolves, so the badge only
+    // shows up a tick later — poll for it rather than reading it once.
+    await waitFor(() => {
+      const changesTab = screen
+        .getAllByRole('tab')
+        .find((el) => el.getAttribute('data-value') === 'changes');
+      expect(changesTab?.textContent).toContain('2');
+    });
   });
 
   it('switches between Timeline and Pull requests', async () => {
