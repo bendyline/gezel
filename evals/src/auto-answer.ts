@@ -152,7 +152,11 @@ export function npmInstallAutoDecisions(
   if ((intent as { kind?: unknown }).kind !== 'npm-install-approval') return null;
   const packages = (intent as { packages?: unknown }).packages;
   if (!Array.isArray(packages) || packages.length === 0) return null;
-  const evalSafePackages = new Set(['csv-parse', 'csv-parser', 'date-fns']);
+  // Decline everything: trials are hermetic (local faked data only), and
+  // an install here would hit the real npm registry mid-trial. The daemon
+  // side enforces the same policy via GEZEL_NPM_INSTALL_OFFLINE (set in
+  // spawn.ts); this branch only fires for stray pre-existing approval
+  // questions and keeps the two layers consistent.
   const decisions: Array<{ package: string; version: string; decision: 'install' | 'decline' }> =
     [];
   for (const pkg of packages) {
@@ -160,11 +164,7 @@ export function npmInstallAutoDecisions(
     const name = (pkg as { package?: unknown }).package;
     const version = (pkg as { version?: unknown }).version;
     if (typeof name !== 'string' || typeof version !== 'string') continue;
-    decisions.push({
-      package: name,
-      version,
-      decision: evalSafePackages.has(name) ? 'install' : 'decline',
-    });
+    decisions.push({ package: name, version, decision: 'decline' });
   }
   return decisions.length > 0 ? decisions : null;
 }

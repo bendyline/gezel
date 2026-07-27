@@ -212,6 +212,22 @@ export async function requestNpmInstalls(
     return { results: [] };
   }
 
+  // Hermetic-mode kill switch: decline every install — including the
+  // shipped allowlist, which normally installs with no approval question.
+  // The eval harness sets this so trials never reach the npm registry;
+  // the reason text steers the model toward built-ins instead of retry.
+  if (process.env.GEZEL_NPM_INSTALL_OFFLINE === '1') {
+    return {
+      results: requested.map((req) => ({
+        kind: 'declined' as const,
+        package: req.package,
+        version: req.version,
+        reason:
+          'Package installs are disabled in this environment (offline mode). Do not retry npm_install; write dependency-free code using Node built-ins (fs, path, readline, JSON) instead.',
+      })),
+    };
+  }
+
   const projectAllow = await readProjectAllowlist(opts.home, opts.projectId);
   const pendingApprovals = await loadPendingApprovalIndex(opts.store, opts.projectId);
 

@@ -183,21 +183,22 @@ describe('pickAutoAnswerChoice', () => {
     expect(permissionToProceedAutoAnswerText('Which visual style should I use?')).toBeNull();
   });
 
-  it('installs a narrow eval-safe npm package set', () => {
+  it('declines every npm package — trials are hermetic and never reach the registry', () => {
+    // The daemon side enforces the same policy via GEZEL_NPM_INSTALL_OFFLINE
+    // (spawn.ts); this decline-all keeps stray pre-existing approval
+    // questions consistent with it. Formerly a narrow eval-safe allowlist
+    // (csv-parse/csv-parser/date-fns) — removed 2026-07-24: a mid-trial
+    // registry fetch is both a hermeticity leak and a flake source.
     expect(
       npmInstallAutoDecisions({
         kind: 'npm-install-approval',
         packages: [
           { package: 'csv-parse', version: 'latest' },
-          { package: 'csv-parser', version: 'latest' },
-          { package: 'date-fns', version: 'latest' },
           { package: 'left-pad', version: 'latest' },
         ],
       }),
     ).toEqual([
-      { package: 'csv-parse', version: 'latest', decision: 'install' },
-      { package: 'csv-parser', version: 'latest', decision: 'install' },
-      { package: 'date-fns', version: 'latest', decision: 'install' },
+      { package: 'csv-parse', version: 'latest', decision: 'decline' },
       { package: 'left-pad', version: 'latest', decision: 'decline' },
     ]);
   });

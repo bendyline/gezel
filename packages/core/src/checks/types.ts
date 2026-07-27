@@ -20,6 +20,16 @@ export interface WorkspaceLike {
   read(file: string): Promise<string | null>;
   /** Relative paths of all files (for count/scan checks). */
   list(): Promise<string[]>;
+  /**
+   * Raw bytes (relative path), or null if absent. OPTIONAL: only the
+   * surfaces that can serve bytes implement it, and only the checks that
+   * genuinely need bytes (image-signature validation) call it. Text
+   * checks must keep using `read` — decoding binary through `read`
+   * is lossy, which is precisely why an extension-only image count was
+   * gameable with text stubs. A check that requires bytes must degrade
+   * explicitly when this is absent rather than silently passing.
+   */
+  readBytes?(file: string): Promise<Uint8Array | null>;
 }
 
 export interface CheckResult {

@@ -4574,7 +4574,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
       session.sendAndWait(
         'Please read notes/source.txt and produce the output file out/summary.md as markdown.',
       ),
-    ).rejects.toThrow(/no first byte/i);
+    ).rejects.toThrow(/no generated tokens/i);
 
     expect(fetchAborted).toBe(true);
     expect(wroteFile).toBe(false);
@@ -4778,7 +4778,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
       session.sendAndWait(
         '[Deliverable expected as a FILE at `out/customers.json`. Your first assistant action should be the tool call `writeFile({ path, content })`; draft inside the tool argument, not in chat.]',
       ),
-    ).rejects.toThrow(/no first byte/i);
+    ).rejects.toThrow(/no generated tokens/i);
 
     expect(fetchAborted).toBe(true);
     expect(wroteFile).toBe(false);
@@ -7852,6 +7852,136 @@ describe('LlamaCppSession graceful context-overflow handling', () => {
     expect((caught as unknown as { isActionable?: boolean })?.isActionable).toBe(true);
   });
 
+  it('keeps the prefill budget while only framing pulses arrive, then switches to the streaming budget', async () => {
+    // Regression: llama-server emits framing pulses (no delta content)
+    // before it has decoded anything. The watchdog used to treat the
+    // first such pulse as "generation started" and rearm with
+    // `streamingIdleMs` — which false-kills a long prefill whenever the
+    // streaming budget is the TIGHTER of the two, exactly the eval
+    // harness's config (120s streaming vs 600s prefill). Wild-caught in
+    // the 2026-07-25 craftbook matrix: 57 aborts, all "0 chars in 120s",
+    // all on long repair-loop prompts, all 13 trials lost.
+    const encoder = new TextEncoder();
+    globalThis.fetch = (async () => {
+      const stream = new ReadableStream<Uint8Array>({
+        async start(controller) {
+          // Two bare framing pulses — wire alive, nothing decoded yet.
+          controller.enqueue(
+            encoder.encode('data: {"choices":[{"delta":{"role":"assistant"}}]}\n\n'),
+          );
+          controller.enqueue(
+            encoder.encode('data: {"choices":[{"delta":{}}]}\n\n'),
+          );
+          // Then a real token, then finish.
+          controller.enqueue(
+            encoder.encode('data: {"choices":[{"delta":{"content":"hello"}}]}\n\n'),
+          );
+          controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+          controller.close();
+        },
+      });
+      return new Response(stream, {
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream' },
+      });
+    }) as typeof fetch;
+
+    const timeouts: number[] = [];
+    const realSetTimeout = globalThis.setTimeout;
+    // Record every watchdog budget the provider arms. The idle timer is
+    // the only long-lived timeout this path sets.
+    globalThis.setTimeout = ((fn: (...a: unknown[]) => void, ms?: number, ...rest: unknown[]) => {
+      if (typeof ms === 'number' && ms >= 1_000) timeouts.push(ms);
+      return realSetTimeout(fn, ms, ...rest);
+    }) as typeof globalThis.setTimeout;
+
+    try {
+      const provider = new LlamaCppProvider({
+        baseUrl: 'http://llama.test',
+        streamingIdleMs: 120_000,
+        preFirstByteIdleMs: 600_000,
+      });
+      const session = await provider.createSession({ systemMessage: 'sys' });
+      const out = await session.sendAndWait('hi');
+      expect(out).toContain('hello');
+    } finally {
+      globalThis.setTimeout = realSetTimeout;
+    }
+
+    // Discriminating counts, not mere presence: the initial arm plus BOTH
+    // framing pulses must use the prefill budget, and only the real
+    // content delta may arm the streaming one. Under the old behavior
+    // these invert (1× prefill, 3× streaming), which is the false-kill.
+    const prefillArms = timeouts.filter((ms) => ms === 600_000).length;
+    const streamingArms = timeouts.filter((ms) => ms === 120_000).length;
+    // Initial arm + both framing pulses (+ the content chunk's own arm,
+    // which fires before the chunk is inspected and is then promoted).
+    expect(prefillArms).toBeGreaterThanOrEqual(3);
+    expect(streamingArms).toBeGreaterThanOrEqual(1);
+    // And the streaming budget must arm only after every prefill arm.
+    expect(timeouts.lastIndexOf(600_000)).toBeLessThan(timeouts.indexOf(120_000));
+  });
+
+  it('keeps the generous budget while only private reasoning streams (nothing to salvage)', async () => {
+    // Wild-caught: e4b streams hundreds of reasoning chunks with zero visible
+    // content, then pauses. Under the tightened eval budget that pause killed
+    // the turn — and because `turnContent` was empty there was nothing to
+    // salvage, so the early abort bought nothing. Measured: 3 books went
+    // 0/3 → 3/3 (15 idle aborts → 0) once the budget stopped applying here.
+    const encoder = new TextEncoder();
+    globalThis.fetch = (async () => {
+      const stream = new ReadableStream<Uint8Array>({
+        async start(controller) {
+          controller.enqueue(
+            encoder.encode(
+              'data: {"choices":[{"delta":{"reasoning_content":"thinking..."}}]}\n\n',
+            ),
+          );
+          controller.enqueue(
+            encoder.encode(
+              'data: {"choices":[{"delta":{"reasoning_content":"still thinking..."}}]}\n\n',
+            ),
+          );
+          controller.enqueue(
+            encoder.encode('data: {"choices":[{"delta":{"content":"answer"}}]}\n\n'),
+          );
+          controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+          controller.close();
+        },
+      });
+      return new Response(stream, {
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream' },
+      });
+    }) as typeof fetch;
+
+    const timeouts: number[] = [];
+    const realSetTimeout = globalThis.setTimeout;
+    globalThis.setTimeout = ((fn: (...a: unknown[]) => void, ms?: number, ...rest: unknown[]) => {
+      if (typeof ms === 'number' && ms >= 1_000) timeouts.push(ms);
+      return realSetTimeout(fn, ms, ...rest);
+    }) as typeof globalThis.setTimeout;
+
+    try {
+      const provider = new LlamaCppProvider({
+        baseUrl: 'http://llama.test',
+        streamingIdleMs: 120_000,
+        preFirstByteIdleMs: 600_000,
+      });
+      const session = await provider.createSession({ systemMessage: 'sys' });
+      await session.sendAndWait('hi');
+    } finally {
+      globalThis.setTimeout = realSetTimeout;
+    }
+
+    // Both reasoning chunks must have armed the GENEROUS budget — the tight
+    // one may only appear from the visible-content delta onward.
+    const firstTight = timeouts.indexOf(120_000);
+    const generousBeforeTight = timeouts.slice(0, firstTight).filter((ms) => ms === 600_000).length;
+    expect(firstTight).toBeGreaterThan(-1);
+    expect(generousBeforeTight).toBeGreaterThanOrEqual(3);
+  });
+
   it('mid-loop compaction fires when in-memory transcript crosses ~70% of numCtx', async () => {
     // Build a session with prior messages totaling ~80% of numCtx,
     // then exercise the private maybeCompactMidLoop helper directly
@@ -7920,6 +8050,70 @@ describe('LlamaCppSession graceful context-overflow handling', () => {
     // currentTurnStartIdx now points at index 2 (the user msg, after
     // [system, synthesis]).
     expect(internal.currentTurnStartIdx).toBe(2);
+  });
+
+  it('condenses THIS turn\'s older tool results — the blind spot prior-fold cannot reach', async () => {
+    // The in-turn overflow shape: no prior transcript to fold (msgs=1),
+    // so `maybeCompactMidLoop` returns false and the manager's force-fit
+    // sees nothing in `record.messages` either. Only this layer can free
+    // room. Wild-caught: 4 craftbooks overflowing by 111-919 tokens.
+    const provider = new LlamaCppProvider({ baseUrl: 'http://llama.test', numCtx: 2_000 });
+    const session = await provider.createSession({ systemMessage: 'sys' });
+    const internal = session as unknown as {
+      currentTurnStartIdx: number;
+      messages: Array<{ role: string; content: string; tool_call_id?: string }>;
+      condenseInTurnToolResults: () => number;
+    };
+    internal.currentTurnStartIdx = internal.messages.length;
+    internal.messages.push({ role: 'user', content: 'do the thing' });
+    // Four bulky in-turn tool results — the accumulated loop.
+    for (let i = 0; i < 4; i++) {
+      internal.messages.push({ role: 'assistant', content: '' });
+      internal.messages.push({
+        role: 'tool',
+        content: `RESULT-${i} ${'x'.repeat(3_000)}`,
+        tool_call_id: `call-${i}`,
+      });
+    }
+    const before = internal.messages.length;
+    const reclaimed = internal.condenseInTurnToolResults();
+
+    expect(reclaimed).toBeGreaterThan(0);
+    // Structure is preserved exactly — pairing must survive or the chat
+    // template breaks.
+    expect(internal.messages).toHaveLength(before);
+    expect(internal.messages.filter((m) => m.role === 'tool')).toHaveLength(4);
+    expect(internal.messages.filter((m) => m.tool_call_id).map((m) => m.tool_call_id)).toEqual([
+      'call-0',
+      'call-1',
+      'call-2',
+      'call-3',
+    ]);
+    // The two NEWEST results stay verbatim (the model needs its latest
+    // observation); older ones shrink.
+    const toolMsgs = internal.messages.filter((m) => m.role === 'tool');
+    expect(toolMsgs[0]!.content.length).toBeLessThan(3_000);
+    expect(toolMsgs[2]!.content).toContain('x'.repeat(3_000));
+    expect(toolMsgs[3]!.content).toContain('x'.repeat(3_000));
+    // The user message that opened the turn is never touched.
+    expect(internal.messages[internal.currentTurnStartIdx]!.content).toBe('do the thing');
+  });
+
+  it('in-turn condensation reports 0 when there is nothing safely shrinkable', async () => {
+    // Honest "this layer cannot help" signal: with only short results (or
+    // only the protected newest ones), the caller must fall through to the
+    // actionable error rather than spin.
+    const provider = new LlamaCppProvider({ baseUrl: 'http://llama.test', numCtx: 100 });
+    const session = await provider.createSession({ systemMessage: 'sys' });
+    const internal = session as unknown as {
+      currentTurnStartIdx: number;
+      messages: Array<{ role: string; content: string }>;
+      condenseInTurnToolResults: () => number;
+    };
+    internal.currentTurnStartIdx = internal.messages.length;
+    internal.messages.push({ role: 'user', content: 'go' });
+    internal.messages.push({ role: 'tool', content: 'tiny' });
+    expect(internal.condenseInTurnToolResults()).toBe(0);
   });
 
   it('mid-loop compaction does NOT fire below the threshold', async () => {
@@ -8103,7 +8297,7 @@ describe('LlamaCppSession graceful context-overflow handling', () => {
     // session's `await sendAndWait` hung indefinitely and the engine
     // pill stayed at "Preparing" forever. Post-fix, the watchdog
     // aborts after `preFirstByteIdleMs` and the session throws a
-    // clear "no first byte" error so the runtime can publish `done`.
+    // clear "no generated tokens" error so the runtime can publish `done`.
     globalThis.fetch = (async (
       _input: Parameters<typeof fetch>[0],
       init?: Parameters<typeof fetch>[1],
@@ -8135,7 +8329,7 @@ describe('LlamaCppSession graceful context-overflow handling', () => {
       streamingIdleMs: 60_000,
     });
     const session = await provider.createSession({ systemMessage: 'sys' });
-    await expect(session.sendAndWait('hi')).rejects.toThrow(/no first byte/i);
+    await expect(session.sendAndWait('hi')).rejects.toThrow(/no generated tokens/i);
   });
 
   it('salvages partial output when the model goes silent after streaming some content', async () => {

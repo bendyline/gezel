@@ -80,6 +80,13 @@ export async function spawnTrialDaemon(opts: SpawnTrialDaemonOptions): Promise<T
     // Setting this env keeps the trial home tools-free, which is
     // what the scenarios want anyway.
     GEZEL_SKIP_SYSTEM_BOOTSTRAP: '1',
+    // Hermetic trials: never reach the npm registry from an eval step.
+    // Declines EVERY npm_install (including the shipped no-approval
+    // allowlist) with a built-ins steer; see workspace/npm.ts. Evals
+    // must run on local faked data only — a registry fetch mid-trial
+    // is both a hermeticity leak and a flake source (registry outages
+    // would read as model failures).
+    GEZEL_NPM_INSTALL_OFFLINE: '1',
     // Force file-backed secret store. The default
     // `OS keychain` path tries to write the per-launch eval auth
     // token into the user's macOS keychain, which on a locked /

@@ -130,7 +130,64 @@ describe('file checks', () => {
     expect(count.matched).toHaveLength(2);
     const scoped = await fileCountByExt(w, ['png'], 2, 'img');
     expect(scoped.ok).toBe(false);
-    expect(scoped.detail).toBe('found 1 png file(s), need ≥ 2');
+    // The directory is named in the verdict so a repairing model (and the
+    // repair-loop's target picker) knows WHERE the missing files go.
+    expect(scoped.detail).toBe(
+      'found 1 png file(s) in img/, need ≥ 2 — create the missing png file(s) under img/.',
+    );
+  });
+
+  it('fileCountByExt with verifyImageBytes rejects text stubs and counts real images', async () => {
+    // The gameable case this closes: raster books ask for N .png files and
+    // a model satisfies the count by writing text placeholders with image
+    // names (wild-caught, tileset-batch: "placeholder" bytes in
+    // tile-stone-01.png cleared an extension-only count).
+    const png = (kb: number): Uint8Array => {
+      const body = new Uint8Array(Math.max(1024, kb * 1024));
+      body.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 0);
+      body.set([...'IHDR'].map((c) => c.charCodeAt(0)), 12);
+      body.set([...'IDAT'].map((c) => c.charCodeAt(0)), 40);
+      body.set([...'IEND'].map((c) => c.charCodeAt(0)), 80);
+      return body;
+    };
+    const bytesByPath: Record<string, Uint8Array> = {
+      'tiles/real-1.png': png(2),
+      'tiles/real-2.png': png(2),
+      'tiles/stub.png': new TextEncoder().encode('placeholder'),
+      'tiles/diagram.svg': new TextEncoder().encode('<svg/>'),
+    };
+    const w: WorkspaceLike = {
+      read: async (f) => (f in bytesByPath ? 'x' : null),
+      list: async () => Object.keys(bytesByPath),
+      readBytes: async (f) => bytesByPath[f] ?? null,
+    };
+    // Extension-only: the stub counts, so 3 pngs "exist".
+    expect((await fileCountByExt(w, ['png'], 3)).ok).toBe(true);
+    // Byte-verified: only the two real ones count.
+    const verified = await fileCountByExt(w, ['png'], 3, undefined, { verifyImageBytes: true });
+    expect(verified.ok).toBe(false);
+    expect(verified.matched).toEqual(['tiles/real-1.png', 'tiles/real-2.png']);
+    expect(verified.detail).toContain('placeholder/text bytes does not count');
+    expect((await fileCountByExt(w, ['png'], 2, undefined, { verifyImageBytes: true })).ok).toBe(
+      true,
+    );
+    // Vector assets are text by nature and must pass through unverified.
+    expect(
+      (await fileCountByExt(w, ['svg'], 1, undefined, { verifyImageBytes: true })).ok,
+    ).toBe(true);
+  });
+
+  it('fileCountByExt refuses rather than degrades when the surface serves no bytes', async () => {
+    // Failing closed matters: silently ignoring `verifyImageBytes` on a
+    // text-only workspace view would restore the exact gameable behavior
+    // the flag exists to remove.
+    const textOnly: WorkspaceLike = {
+      read: async () => 'x',
+      list: async () => ['a.png', 'b.png', 'c.png'],
+    };
+    const r = await fileCountByExt(textOnly, ['png'], 2, undefined, { verifyImageBytes: true });
+    expect(r.ok).toBe(false);
+    expect(r.detail).toContain('cannot verify image bytes');
   });
 
   it('cssMinBytes sums inline style + linked local stylesheets', async () => {
@@ -701,6 +758,58 @@ describe('valuesSubsetOf (transform value conservation)', () => {
     const r = valuesSubsetOf('A-001 A-001 A-001', sources, { pattern: ID });
     expect(r.checked).toBe(1);
     expect(valuesSubsetOf('x', sources, { pattern: '(' }).ok).toBe(false);
+  });
+
+  // Membership is value-level: the output-shaped pattern must NOT be
+  // required to match inside the sources. Four wild-caught shapes from the
+  // 2026-07-24 craftbook matrix, where the old pattern-level allowed-set
+  // came back empty and every grounded value was misflagged as invented.
+  it('grounds values whose source encoding differs from the output syntax (JSON key rename)', () => {
+    const r = valuesSubsetOf(
+      '[{"clip":"c01-intro"},{"clip":"c04-demo"}]',
+      ['{"clips":[{"id":"c01-intro","file":"a.mp4"},{"id":"c04-demo","file":"b.mp4"}]}'],
+      { pattern: String.raw`"clip"\s*:\s*"([^"]+)"` },
+    );
+    expect(r.ok).toBe(true);
+    expect(r.invented).toEqual([]);
+  });
+
+  it('grounds salutation names against a roster that never says Dear', () => {
+    const r = valuesSubsetOf(
+      'Dear Ruth,\n…\nDear Tomas,\n…\nDear Zephyrine,',
+      ['{"people":[{"name":"Ruth Okafor"},{"name":"Tomas Herrera"}]}'],
+      { pattern: String.raw`Dear\s+([A-Z][A-Za-z'-]+)` },
+    );
+    expect(r.ok).toBe(false);
+    expect(r.invented).toEqual(['Zephyrine']);
+    expect(r.checked).toBe(3);
+  });
+
+  it('grounds quoted timecodes against bracketed source timestamps', () => {
+    const r = valuesSubsetOf(
+      '{"clips":[{"timecode":"00:02:10"},{"timecode":"00:19:44"}]}',
+      ['# tape\n[00:02:10] intro begins\n[00:19:44] the demo'],
+      { pattern: String.raw`"(\d{2}:\d{2}:\d{2})"` },
+    );
+    expect(r.ok).toBe(true);
+  });
+
+  it('still catches true fabrication under value-level membership', () => {
+    const r = valuesSubsetOf(
+      '[{"clip":"c01-intro"},{"clip":"c99-invented"}]',
+      ['{"clips":[{"id":"c01-intro"}]}'],
+      { pattern: String.raw`"clip"\s*:\s*"([^"]+)"` },
+    );
+    expect(r.ok).toBe(false);
+    expect(r.invented).toEqual(['c99-invented']);
+  });
+
+  it('honors the i flag for case-insensitive membership', () => {
+    const r = valuesSubsetOf('ref RUTH', ['roster: Ruth Okafor'], {
+      pattern: String.raw`ref\s+([A-Za-z]+)`,
+      flags: 'i',
+    });
+    expect(r.ok).toBe(true);
   });
 });
 

@@ -166,6 +166,7 @@ import { intoWorkspaceRelative, resolveInside, safeJoin } from './safe-paths.js'
 import {
   findHtmlPages,
   listDirEntries,
+  safeReadBinaryFile,
   safeReadTextFile,
   safeResolveRead,
   walkDir,
@@ -3371,6 +3372,16 @@ export class Store {
   async readProjectWorkspaceFile(id: string, filePath: string): Promise<string | null> {
     const base = await this.projectWorkspaceDir(id);
     return safeReadTextFile(base, intoWorkspaceRelative(base, filePath));
+  }
+
+  /**
+   * Byte-exact workspace read, same containment fence as the text path.
+   * Needed by image-signature gate checks (`fileCount.verifyImageBytes`):
+   * decoding a PNG through UTF-8 destroys the magic bytes it must inspect.
+   */
+  async readProjectWorkspaceBinary(id: string, filePath: string): Promise<Uint8Array | null> {
+    const base = await this.projectWorkspaceDir(id);
+    return safeReadBinaryFile(base, intoWorkspaceRelative(base, filePath));
   }
 
   /**

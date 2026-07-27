@@ -72,7 +72,9 @@ async function evaluateOne(
       return result.ok ? null : result.detail;
     }
     case 'fileCount': {
-      const result = await fileCountByExt(ws, check.ext, check.min, check.dir);
+      const result = await fileCountByExt(ws, check.ext, check.min, check.dir, {
+        ...(check.verifyImageBytes ? { verifyImageBytes: true } : {}),
+      });
       return result.ok ? null : result.detail;
     }
     case 'cssMinBytes': {

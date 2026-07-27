@@ -308,9 +308,20 @@ const CONTEXT_WORKING_RATIO = 0.75;
  * slicing.
  *
  *   usableTokens   = numCtx × 0.75
- *   transcriptTok  = promptChars / 4                (approx)
- *   remainingTok   = usableTokens − transcriptTok
- *   budgetChars    = remainingTok × 4
+ *   transcriptTok  = promptChars / 3.2              (dense-leaning)
+ *   remainingTok   = usableTokens − transcriptTok − 512 (reserve)
+ *   budgetChars    = remainingTok × 2.8
+ *
+ * The two ratios are deliberately ASYMMETRIC and conservative. The old
+ * symmetric `/4 … ×4` pair assumed 4 chars/token on both sides; dense
+ * tool output (catalog JSON, listings) runs ~2.6–3.0 chars/token, so
+ * the estimator under-counted the transcript AND over-sized the result
+ * budget — the "truncated" payload then overflowed n_ctx by a few
+ * hundred tokens and the send died with context-overflow (wild-caught
+ * on 4 books in the 2026-07-24 craftbook matrix, overshoots of
+ * 111–919 tokens on a 65,536 window). The fixed 512-token reserve
+ * absorbs message framing and chat-template overhead the char
+ * estimator never sees.
  *
  * Shared by llama-cpp and Ollama providers so they compute the cap
  * identically. Copilot / OpenAI manage history server- or SDK-side;
@@ -318,9 +329,9 @@ const CONTEXT_WORKING_RATIO = 0.75;
  */
 export function computeToolBudgetChars(numCtx: number, promptChars: number): number {
   const usableTokens = Math.floor(numCtx * CONTEXT_WORKING_RATIO);
-  const transcriptTokens = Math.ceil(promptChars / 4);
-  const remainingTokens = Math.max(0, usableTokens - transcriptTokens);
-  return remainingTokens * 4;
+  const transcriptTokens = Math.ceil(promptChars / 3.2);
+  const remainingTokens = Math.max(0, usableTokens - transcriptTokens - 512);
+  return Math.floor(remainingTokens * 2.8);
 }
 
 /**

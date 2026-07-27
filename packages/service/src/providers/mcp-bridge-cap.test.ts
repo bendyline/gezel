@@ -96,13 +96,30 @@ describe('capToolOutput', () => {
 });
 
 describe('computeToolBudgetChars', () => {
-  it('reserves 25% of numCtx for the assistant response and next turn', () => {
-    // Empty transcript, 32K ctx → 75% × 32_768 tokens × 4 chars/token
-    // = 98_304 chars of headroom. The bridge will clamp to
-    // MAX_TOOL_OUTPUT_CHARS (80_000) on slice; we return raw so
-    // the adaptive semantics stay visible for other callers.
+  it('reserves 25% of numCtx plus a fixed framing reserve, at dense-text char ratios', () => {
+    // Empty transcript, 32K ctx → (75% × 32_768 − 512 reserve) tokens
+    // × 2.8 chars/token. The ratios are deliberately conservative for
+    // dense tool output (~2.6–3.0 chars/token) — the old symmetric ×4
+    // budget overflowed n_ctx by a few hundred tokens on dense catalog
+    // dumps (2026-07-24 craftbook matrix). The bridge still clamps to
+    // MAX_TOOL_OUTPUT_CHARS (80_000) on slice.
     const budget = computeToolBudgetChars(32_768, 0);
-    expect(budget).toBe(Math.floor(32_768 * 0.75) * 4);
+    expect(budget).toBe(Math.floor((Math.floor(32_768 * 0.75) - 512) * 2.8));
+  });
+
+  it('sizes the emitted budget so dense output fits the reserved tokens', () => {
+    // The wild-caught failure: remaining ≈ 4K tokens, old budget emitted
+    // remaining×4 chars of dense JSON (~2.8 chars/tok ≈ 1.43× the room).
+    // New budget must emit no more chars than remaining tokens can hold
+    // at the dense ratio.
+    const numCtx = 65_536;
+    const promptChars = 120_000; // ~37.5K dense-leaning tokens per /3.2
+    const budget = computeToolBudgetChars(numCtx, promptChars);
+    const remainingTokens = Math.floor(numCtx * 0.75) - Math.ceil(promptChars / 3.2) - 512;
+    expect(remainingTokens).toBeGreaterThan(0);
+    expect(Math.ceil(budget / 2.8)).toBeLessThanOrEqual(remainingTokens);
+    // And a transcript past the working ceiling clamps to zero, never negative.
+    expect(computeToolBudgetChars(numCtx, 200_000)).toBe(0);
   });
 
   it('shrinks as the transcript grows', () => {
@@ -125,16 +142,19 @@ describe('computeToolBudgetChars', () => {
   it('yields a workable budget for the weather.com overflow case', () => {
     // Post-Layer-1 shape: same model, but effectiveNumCtx is now
     // 32K (catalog-aware), and the transcript heading into the
-    // fetch_url call is ~12K tokens (system + recall + history).
-    // Adaptive budget should reserve plenty of room for the tool
-    // result *without* blowing the window.
-    const preToolChars = 12_000 * 4; // 12K tokens → ~48K chars
+    // fetch_url call is ~48K chars (system + recall + history).
+    // Adaptive budget should reserve real room for the tool result
+    // *without* blowing the window — even if that result is dense
+    // (~2.8 chars/token) text.
+    const preToolChars = 48_000;
     const budget = computeToolBudgetChars(32_768, preToolChars);
-    // 32K × 0.75 = 24_576 usable tokens; 12K already consumed →
-    // ~12_576 remaining tokens → ~50_304 chars of headroom.
-    const budgetTokens = budget / 4;
-    expect(budgetTokens).toBeGreaterThan(10_000);
-    expect(budgetTokens).toBeLessThan(32_768 - 12_000);
+    // A workable budget: enough for a rich page extraction…
+    expect(budget).toBeGreaterThan(15_000);
+    // …but the emitted chars, read at the dense ratio, must fit the
+    // tokens actually remaining under the working ceiling.
+    const remainingTokens =
+      Math.floor(32_768 * 0.75) - Math.ceil(preToolChars / 3.2) - 512;
+    expect(Math.ceil(budget / 2.8)).toBeLessThanOrEqual(remainingTokens);
     // capToolOutput enforces its own ceiling (MAX_TOOL_OUTPUT_CHARS),
     // so the slice returned to the model is bounded even when the
     // raw budget exceeds it.

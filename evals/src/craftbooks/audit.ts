@@ -96,7 +96,15 @@ export function auditCraftbookTemplate(
       issue('fail', 'gate.malformed', 'Step gate does not parse as a known gate shape.', step.id),
     );
   }
-  for (const step of advanceWhenSteps.filter((s) => !s.gate)) {
+  // A fan-out parent is exempt: its job is to SPAWN, and the deliverable
+  // the warning wants gated is produced by the children it spawns. Gating
+  // the parent on that output deadlocks the fan-out — the gate rejects, no
+  // children are ever spawned, and nothing can ever satisfy it. Wild-caught
+  // by `fanout.integration.test.ts` after this warning was taken at face
+  // value on invoice-run's `draft` step (3 expected children → 0).
+  for (const step of advanceWhenSteps.filter(
+    (s) => !s.gate && !(s as { spawnFanout?: unknown }).spawnFanout,
+  )) {
     issues.push(
       issue(
         'warn',

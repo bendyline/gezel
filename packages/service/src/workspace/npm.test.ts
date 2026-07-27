@@ -136,3 +136,39 @@ describe('requestNpmInstalls — approval question publishing', () => {
     expect(result.results[0]?.kind).toBe('pending-approval');
   });
 });
+
+describe('requestNpmInstalls — GEZEL_NPM_INSTALL_OFFLINE', () => {
+  afterEach(() => {
+    delete process.env.GEZEL_NPM_INSTALL_OFFLINE;
+  });
+
+  it('declines even shipped-allowlist packages without touching pnpm or asking questions', async () => {
+    process.env.GEZEL_NPM_INSTALL_OFFLINE = '1';
+    const events: ChatEventEnvelope[] = [];
+    const chatEvents = new ChatEventBus();
+    chatEvents.subscribeProject('test-project', (envelope) => {
+      events.push(envelope);
+    });
+
+    const result = await requestNpmInstalls({
+      store,
+      home,
+      projectId: 'test-project',
+      packages: [
+        { package: 'zod', version: '^3' },
+        { package: 'some-non-allowlisted-pkg', version: '^1.0.0' },
+      ],
+      gezelId: 'linnea',
+      sessionId: 'sess-abc',
+      chatEvents,
+    });
+
+    expect(result.results).toHaveLength(2);
+    for (const outcome of result.results) {
+      expect(outcome.kind).toBe('declined');
+      if (outcome.kind === 'declined') expect(outcome.reason).toMatch(/offline mode/);
+    }
+    expect(vi.mocked(runPnpm)).not.toHaveBeenCalled();
+    expect(events.filter((e) => e.event.type === 'question_asked')).toHaveLength(0);
+  });
+});

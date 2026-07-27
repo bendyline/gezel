@@ -940,12 +940,46 @@ function isExecutableFailure(failure: string): boolean {
   return /\bdid not pass when run with node\b/.test(failure);
 }
 
-function prioritizeRepairFailures(failures: readonly string[]): string[] {
+/**
+ * Within the semantic bucket, structural TOTALS (record-count floors,
+ * value-conservation counts, file-count floors) outrank per-record field
+ * misses. Per-record failures are a treadmill: each nudge headlines a
+ * different record ("record 4 is missing caption" → record 5 → record 6)
+ * and the model chases them one at a time while the binding gap — two
+ * whole records were dropped — never leads. Wild-caught: album-curate
+ * (gemma4-e4b, 2026-07-25 matrix) grew the file 4 polls in a row adding
+ * captions while the count stayed 8/10 to trial death.
+ */
+function isStructuralTotalFailure(failure: string): boolean {
+  return (
+    /\b\d+ record\(s\), need ≥ \d+/.test(failure) ||
+    /output carries \d+ value\(s\)/.test(failure) ||
+    /value\(s\) in the output appear in no source/.test(failure) ||
+    /\bfound \d+ [^,]* file\(s\)/.test(failure)
+  );
+}
+
+function isPerRecordFieldFailure(failure: string): boolean {
+  return /\brecord \d+ (?:is missing|has unexpected)/.test(failure);
+}
+
+function orderSemanticFailures(semantic: readonly string[]): string[] {
+  const structural = semantic.filter(isStructuralTotalFailure);
+  const perRecord = semantic.filter(
+    (failure) => !isStructuralTotalFailure(failure) && isPerRecordFieldFailure(failure),
+  );
+  const rest = semantic.filter(
+    (failure) => !isStructuralTotalFailure(failure) && !isPerRecordFieldFailure(failure),
+  );
+  return [...structural, ...rest, ...perRecord];
+}
+
+export function prioritizeRepairFailures(failures: readonly string[]): string[] {
   if (failures.length <= 1) return [...failures];
   const severeMinBytesFailures = failures.filter(isSevereMinBytesFailure);
   const executableFailures = failures.filter(isExecutableFailure);
-  const semanticFailures = failures.filter(
-    (failure) => !isMinBytesFailure(failure) && !isExecutableFailure(failure),
+  const semanticFailures = orderSemanticFailures(
+    failures.filter((failure) => !isMinBytesFailure(failure) && !isExecutableFailure(failure)),
   );
   const otherMinBytesFailures = failures.filter(
     (failure) => isMinBytesFailure(failure) && !isSevereMinBytesFailure(failure),
@@ -1060,6 +1094,14 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
     suggestedTrials: 1,
     ...(judge ? { judge } : {}),
     ...(spec.mocks && spec.mocks.length > 0 ? { mockServices: spec.mocks } : {}),
+    // Books whose deterministic success needs raster files must declare an
+    // image model, exactly like petshop/tool-routing-image. This is what
+    // arms the runner's whole image path — resolve/require sd-server, warm
+    // or link local weights, configure the trial daemon. Without it the
+    // harness installs the images TOOLSET but never provisions the ENGINE,
+    // and the trial runs unwinnable-by-design while the failure books as
+    // "model" (wild-caught: page-spread, tileset-batch, 2026-07-24 matrix).
+    ...(directWorkerNeedsImageToolset(spec) ? { defaultImageModelId: 'sdxl-lightning-4step' } : {}),
     skipInitialPrompt: !!spec.setup?.worker,
     async setup(ctx) {
       const projectId = await ensureProject(ctx, spec);

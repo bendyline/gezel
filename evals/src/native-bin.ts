@@ -112,6 +112,20 @@ export function resolveLlamaBinary(): ResolvedBinary {
       }
     }
   }
+  // Variant-less fallback, mirroring the supervisor's native-bin.ts: on
+  // platforms with a single shippable backend (macOS Metal), the local
+  // `native/engines/llama-cpp/build.sh` stages into `<root>/<platform>/`
+  // with no `-<backend>` suffix. Without this probe, a dev-built engine
+  // resolves in the app but not in evals.
+  for (const root of roots) {
+    for (const exe of exeCandidates('llama-server')) {
+      const path = join(root, platformKey(), exe);
+      tried.push(path);
+      if (!existsSync(path)) continue;
+      if (binaryLaunches(path)) return { path, variant: null };
+      tried[tried.length - 1] = `${path} (exists but failed to launch — skipped)`;
+    }
+  }
   const summary = tried.join('\n  ');
   throw new Error(
     `No llama-server binary found. Tried:\n  ${summary}\nBuild the engine into native/build/, install the Gezel desktop app, or set GEZEL_LLAMA_SERVER_BIN / pass --llama-bin.`,

@@ -70,7 +70,7 @@ import {
   stripXmlTagToolCallsFromText,
 } from '../local-tool-call-salvage.js';
 import { McpBridgePool } from '../mcp-bridge-pool.js';
-import { computeToolBudgetChars } from '../mcp-bridge.js';
+import { capToolOutput, computeToolBudgetChars } from '../mcp-bridge.js';
 import type { NativeEngineSupervisor } from '../native/supervisor.js';
 import { isSseComment, readSseEvents } from '../openai-compatible/sse.js';
 import { ProviderQueue, defaultAmbientQuietMs, runInQueue } from '../queue.js';
@@ -2583,6 +2583,73 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
     return true;
   }
 
+  /**
+   * Shrink THIS turn's accumulated tool results in place.
+   *
+   * The blind spot `maybeCompactMidLoop` cannot cover: it folds only
+   * `[1, currentTurnStartIdx)` — the prior turns — and the manager's
+   * force-fit works on `record.messages`, which never contains the
+   * in-flight turn. So when a long tool loop overflows the window inside
+   * a single turn, both recovery layers report "nothing to remove"
+   * (`removed=0 nope`) and the identical over-budget request is re-sent
+   * until the turn dies. Wild-caught on 4 craftbooks in the 2026-07-24
+   * matrix, each overshooting by only 111–919 tokens.
+   *
+   * Structure is never touched — only `content` strings of `role:'tool'`
+   * messages — so assistant/tool `tool_call_id` pairing stays valid and
+   * the chat template still renders. Oldest results shrink first and the
+   * newest `KEEP_INTACT` stay whole: the model needs the most recent
+   * observation verbatim to take its next step, while a 40-turn-old
+   * directory listing is safely summarizable.
+   *
+   * Returns the number of chars reclaimed (0 when there was nothing to
+   * shrink, which is the honest "this layer can't help" signal).
+   */
+  private condenseInTurnToolResults(): number {
+    const KEEP_INTACT = 2;
+    const MIN_SHRINKABLE = 400;
+    const FLOOR_CHARS = 200;
+    const targetChars = Math.floor(this.deps.numCtx * MID_LOOP_COMPACT_RATIO * 4);
+    let estimated = this.estimatePromptChars();
+    if (estimated <= targetChars) return 0;
+
+    const shrinkable: number[] = [];
+    for (let i = this.currentTurnStartIdx; i < this.messages.length; i++) {
+      const m = this.messages[i]!;
+      if (m.role !== 'tool') continue;
+      if (typeof m.content !== 'string' || m.content.length < MIN_SHRINKABLE) continue;
+      shrinkable.push(i);
+    }
+    // Newest results are load-bearing; drop them from the candidate set.
+    const candidates = shrinkable.slice(0, Math.max(0, shrinkable.length - KEEP_INTACT));
+    if (candidates.length === 0) return 0;
+
+    let reclaimed = 0;
+    for (const idx of candidates) {
+      if (estimated <= targetChars) break;
+      const m = this.messages[idx]!;
+      const before = (m.content as string).length;
+      // capToolOutput keeps head+tail and stamps a visible truncation
+      // footer, so the model can tell "this was long" from "this was
+      // empty" — the same contract the bridge applies on the way in.
+      const condensed = capToolOutput(m.content as string, FLOOR_CHARS);
+      if (condensed.length >= before) continue;
+      m.content = condensed;
+      const saved = before - condensed.length;
+      reclaimed += saved;
+      estimated -= saved;
+    }
+    if (reclaimed > 0) {
+      log.info(
+        `[llama-cpp] in-turn condensation reclaimed ${reclaimed} chars across ${candidates.length} tool result(s) (kept the newest ${KEEP_INTACT} intact)`,
+      );
+      this.emitWarning(
+        'Condensed this turn’s older tool output to stay inside the context window. The most recent results are untouched.',
+      );
+    }
+    return reclaimed;
+  }
+
   private async sendAndWaitInner(prompt: string, opts?: SendAndWaitOpts): Promise<string> {
     const totalTimeoutMs = opts?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     const deadline = Date.now() + totalTimeoutMs;
@@ -3540,10 +3607,43 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
         // truncated tool-call JSON that left the runtime's
         // `await sendAndWait` pending) would keep the engine pill at
         // "Preparing" indefinitely with no `done` event. Reset on
-        // every chunk via `resetIdle()` below; first reset switches
-        // `idlePhase` to 'streaming' so the abort message can say
-        // which budget fired. Mirrors the Ollama implementation.
+        // every chunk via `resetIdle()` below.
+        //
+        // "Is the wire alive" and "which budget applies" are DIFFERENT
+        // questions, and conflating them false-kills long prefills.
+        // llama-server emits framing pulses before it has decoded
+        // anything; those prove the server hasn't wedged (so they must
+        // rearm the timer) but they do NOT mean generation started. The
+        // budget therefore keys off `generationStarted` — set only when a
+        // content / reasoning / tool-call delta actually arrives — so a
+        // still-prefilling turn keeps the generous `preFirstByteIdleMs`
+        // (600s, explicitly sized for KV-cold prefill) instead of the
+        // between-tokens `streamingIdleMs`. The old code flipped to the
+        // streaming budget on the first pulse of any kind, which is only
+        // safe while streaming is the more generous of the two — false
+        // whenever an operator or the eval harness tightens it
+        // (`GEZEL_LLAMA_CPP_STREAMING_IDLE_MS=120000` in evals/src/spawn.ts).
+        // Wild-caught in the 2026-07-25 craftbook matrix: 57 aborts across
+        // 13 trials, every one reporting "0 chars in 120s", every one on a
+        // long repair-loop prompt, and all 13 trials lost.
+        // The tight streaming budget earns its keep ONLY when there is
+        // buffered visible content to salvage: the idle abort commits that
+        // buffer as the assistant turn (see the `turnContent.length > 0`
+        // salvage branch), which is why the eval harness tightens it — to
+        // fire before its own retry-loop kills the trial. A turn that has
+        // streamed only PRIVATE REASONING has nothing to commit, so an
+        // early abort is pure loss: it destroys a turn the model was still
+        // working on. Such a turn is budgeted like prefill — "the model has
+        // produced nothing usable yet" is one concept, whether it is still
+        // reading the prompt or still thinking. The hard per-turn timeout
+        // remains the backstop for a genuinely wedged engine.
+        //
+        // Measured: 3 books that failed 0/3 with 15 idle aborts under the
+        // 120s streaming budget passed 3/3 with zero aborts at 300s; every
+        // one of those aborts had `received 0 chars` — reasoning-only turns.
         const { streamingIdleMs, preFirstByteIdleMs } = this.deps;
+        let generationStarted = false;
+        let sawVisibleContent = false;
         let idleTimer = setTimeout(() => {
           abortKind = 'idle';
           ctrl.abort();
@@ -3747,7 +3847,6 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
         let chunksSincePulse = 0;
         let totalChunksThisTurn = 0;
         const resetIdle = () => {
-          idlePhase = 'streaming';
           const now = Date.now();
           if (firstByteAt === null) firstByteAt = now;
           lastChunkAt = now;
@@ -3756,10 +3855,27 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
             lastMarkUsedAt = now;
           }
           clearTimeout(idleTimer);
-          idleTimer = setTimeout(() => {
-            abortKind = 'idle';
-            ctrl.abort();
-          }, streamingIdleMs);
+          idleTimer = setTimeout(
+            () => {
+              abortKind = 'idle';
+              ctrl.abort();
+            },
+            // Tight budget only once there is something salvageable.
+            generationStarted && sawVisibleContent ? streamingIdleMs : preFirstByteIdleMs,
+          );
+        };
+        /**
+         * Promote the turn out of prefill: the model has emitted a real
+         * token (visible content, private reasoning, or a tool-call
+         * fragment), so the between-tokens budget now applies. Rearms
+         * immediately so the tighter budget takes effect on this chunk
+         * rather than one chunk late.
+         */
+        const markGenerationStarted = () => {
+          if (generationStarted) return;
+          generationStarted = true;
+          idlePhase = 'streaming';
+          resetIdle();
         };
         let constrainedToolSignalTimer: NodeJS.Timeout | null = null;
         let constrainedToolSignalAborted = false;
@@ -3860,7 +3976,7 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
               // narrows fast when triaging hung turns.
               if (idlePhase === 'pre-first-byte') {
                 throw new Error(
-                  `[llama-cpp] no first byte after ${Math.round(preFirstByteIdleMs / 1000)}s; aborting (model likely still loading, or prompt prefill failed). Try retrying; if it persists, the engine may need a restart.`,
+                  `[llama-cpp] no generated tokens after ${Math.round(preFirstByteIdleMs / 1000)}s; aborting (model likely still loading, or prompt prefill never finished${firstByteAt !== null ? ' — the wire was alive, but only framing pulses arrived' : ''}). Try retrying with a shorter prompt; if it persists, the engine may need a restart.`,
                 );
               }
               const sinceFirstByte =
@@ -3930,6 +4046,11 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
             // never recovers.
             const recovered = await this.maybeCompactMidLoop({ force: true });
             if (recovered) continue;
+            // Tier 2: the prior transcript had nothing foldable (a long
+            // tool loop inside ONE turn is the common shape), so shrink
+            // this turn's own older tool results instead. This is the
+            // only layer that can see them — see condenseInTurnToolResults.
+            if (this.condenseInTurnToolResults() > 0) continue;
             const err = new Error(
               `On-device model ran out of working memory: ${overflow.promptTokens.toLocaleString('en-US')} tokens needed but only ${overflow.nCtx.toLocaleString('en-US')} available. Try asking a narrower question, or ask me to search for a specific piece of info rather than fetching a whole page.`,
             );
@@ -3971,6 +4092,11 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
               // freshly compacted transcript.
               continue;
             }
+            // Same second tier as the overflow branch: a mid-string
+            // argument cut-off IS context pressure, and when the squeeze
+            // came from this turn's own tool loop the prior-fold has
+            // nothing to give.
+            if (this.condenseInTurnToolResults() > 0) continue;
             this.emitWarning(
               'The on-device model started a tool call but its arguments got cut off mid-string before it could finish — usually means the prompt + history filled the context window. Try a shorter follow-up message, or raise `llamaCppNumCtx` in Settings → On-device → Advanced.',
             );
@@ -4099,6 +4225,24 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
             // budget only once the model has actually begun decoding visible
             // or private reasoning. The separate pre-first-byte watchdog
             // continues to catch a genuinely wedged prefill.
+            // Any real token ends prefill and hands the turn to the
+            // between-tokens idle budget (see `markGenerationStarted`).
+            if (hasContent || hasReasoning || hasToolCalls) {
+              markGenerationStarted();
+            }
+            // ONLY visible content licenses the tight budget, because
+            // `turnContent` is exactly what the idle-abort salvage branch
+            // commits. Streaming tool-call ARGUMENTS look like progress but
+            // land in the accumulator, not `turnContent` — promoting on them
+            // re-creates the same unsalvageable early kill this rule exists
+            // to prevent (wild-caught: form-fill-batch stalled 5× mid
+            // immediate-write args, argChars=1178, turnContent=0). Wedged
+            // tool-call streams stay covered by the constrained-tool
+            // no-signal watchdog and the hard per-turn timeout.
+            if (hasContent && !sawVisibleContent) {
+              sawVisibleContent = true;
+              resetIdle();
+            }
             if (!hasToolCalls && (hasContent || hasReasoning)) {
               armConstrainedToolSignalTimer();
             }
@@ -4481,7 +4625,7 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
               // returned 200 + a stream that went silent).
               if (idlePhase === 'pre-first-byte') {
                 throw new Error(
-                  `[llama-cpp] no first byte after ${Math.round(preFirstByteIdleMs / 1000)}s; aborting (model likely still loading, or prompt prefill failed). Try retrying; if it persists, the engine may need a restart.`,
+                  `[llama-cpp] no generated tokens after ${Math.round(preFirstByteIdleMs / 1000)}s; aborting (model likely still loading, or prompt prefill never finished${firstByteAt !== null ? ' — the wire was alive, but only framing pulses arrived' : ''}). Try retrying with a shorter prompt; if it persists, the engine may need a restart.`,
                 );
               }
               const sinceFirstByte =

@@ -1502,7 +1502,11 @@ export class ChatManager {
         (await this.store.listProjectWorkspaceRecursive(projectId).catch(() => []))
           .filter((e) => !e.isDirectory)
           .map((e) => e.path),
+      // Byte reader for image-signature checks (fileCount.verifyImageBytes).
+      readBytes: (f) => this.store.readProjectWorkspaceBinary(projectId, f).catch(() => null),
       readArtifact: (f) => this.store.readProjectArtifact(projectId, f).catch(() => null),
+      readArtifactBytes: async (f) =>
+        (await this.store.readProjectArtifactBinary(projectId, f).catch(() => null))?.data ?? null,
       listArtifacts: async () =>
         (await this.store.listProjectArtifactsRecursive(projectId).catch(() => []))
           .filter((e) => !e.isDirectory)

@@ -65,12 +65,22 @@ export const GateCheckSchema = z.discriminatedUnion('kind', [
     files: z.array(z.string().min(1)).min(1),
     bytes: z.number().int().positive(),
   }),
-  /** At least `min` workspace files with one of `ext` exist (e.g. ≥3 images). */
+  /**
+   * At least `min` workspace files with one of `ext` exist (e.g. ≥3 images).
+   * `verifyImageBytes` additionally requires each raster candidate
+   * (png/jpg/jpeg/gif/webp) to carry real image bytes — magic signature
+   * plus a 1 KiB floor — so a text placeholder named `panel-1.png` stops
+   * counting. Set it on any gate whose deliverable is an actual rendered
+   * image; leave it off for listings that legitimately include vector or
+   * stub assets. The check fails loudly rather than degrading when the
+   * evaluating surface cannot read bytes.
+   */
   z.object({
     kind: z.literal('fileCount'),
     ext: z.array(z.string().min(1)).min(1),
     min: z.number().int().positive(),
     dir: z.string().optional(),
+    verifyImageBytes: z.boolean().optional(),
   }),
   /** Inline `<style>` + linked `.css` in `file` (default index.html) clears `bytes`. */
   z.object({

@@ -28,6 +28,7 @@ export function workspaceFromClient(
   projectId: string,
 ): CraftbookEvalWorkspace {
   const readCache = new Map<string, Promise<string | null>>();
+  const bytesCache = new Map<string, Promise<Uint8Array | null>>();
   let listCache: Promise<string[]> | undefined;
   return {
     async read(file: string): Promise<string | null> {
@@ -57,6 +58,24 @@ export function workspaceFromClient(
         })();
       }
       return listCache;
+    },
+    // Byte-exact read for image-signature checks. Deliberately NOT sharing
+    // `readCache` — that cache holds UTF-8 decoded text, and decoding a PNG
+    // through `.text()` destroys the magic bytes the check inspects.
+    async readBytes(file: string): Promise<Uint8Array | null> {
+      let cached = bytesCache.get(file);
+      if (!cached) {
+        cached = (async () => {
+          try {
+            const blob = await client.fetchProjectWorkspaceBlob(projectId, file);
+            return new Uint8Array(await blob.arrayBuffer());
+          } catch {
+            return null;
+          }
+        })();
+        bytesCache.set(file, cached);
+      }
+      return cached;
     },
   };
 }

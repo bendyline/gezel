@@ -289,7 +289,20 @@ export function valuesSubsetOf(
     }
     return out;
   };
-  const allowed = new Set(sourceTexts.flatMap(extract));
+  // Membership is VALUE-level, not pattern-level. The pattern's job is to
+  // find the claims in the OUTPUT; the sources only need to CONTAIN each
+  // value verbatim. Running the output-shaped pattern over the sources
+  // (the old behavior) silently produced an empty allowed-set whenever
+  // the source encodes values differently — `"id": "c01-intro"` vs the
+  // output's `"clip": "c01-intro"`, `[00:02:10]` vs `"00:02:10"`, a name
+  // roster with no `Dear` — and then flagged every genuinely-grounded
+  // value as invented (wild-caught across 4 craftbook evals, 2026-07-24).
+  const caseInsensitive = flags.includes('i');
+  const sourceHaystacks = sourceTexts.map((t) => (caseInsensitive ? t.toLowerCase() : t));
+  const appearsInSources = (value: string): boolean => {
+    const needle = caseInsensitive ? value.toLowerCase() : value;
+    return sourceHaystacks.some((t) => t.includes(needle));
+  };
   const seen = new Set<string>();
   const invented: string[] = [];
   let checked = 0;
@@ -297,7 +310,7 @@ export function valuesSubsetOf(
     if (seen.has(v)) continue;
     seen.add(v);
     checked += 1;
-    if (!allowed.has(v)) invented.push(v);
+    if (!appearsInSources(v)) invented.push(v);
   }
   const min = spec.minMatches ?? 0;
   if (checked < min) {

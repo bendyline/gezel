@@ -1207,6 +1207,27 @@ server.tool(
     }
     const htmlQualityRejection = rejectHtmlWithScriptOutsideScriptTag(path, normalizedContent);
     if (htmlQualityRejection) {
+      // Same first-draft escape hatch as the syntax gate above. A hard
+      // refusal that saves NOTHING deadlocks writeFile-only sessions at a
+      // 0-byte deliverable (wild-caught: game-with-screens, 5 identical
+      // refusals then turn-abort with an empty workspace). Overwrites keep
+      // the refusal — the existing complete file is worth protecting — but
+      // a first draft is strictly better on disk, flaws and all, where the
+      // model can readFile + patch and the runtime repair loop can engage.
+      const partial = await tryPersistFirstWritePartial(path, normalizedContent);
+      if (partial.saved) {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text:
+                `${htmlQualityRejection}\n\nFlawed first draft ${path} was saved anyway so you can continue with ` +
+                `readFile({ path: "${path}" }) and surgical replaceInFile(...) repairs instead of starting over.`,
+            },
+          ],
+          isError: true,
+        };
+      }
       return { content: [{ type: 'text' as const, text: htmlQualityRejection }], isError: true };
     }
     try {
@@ -3397,22 +3418,65 @@ server.tool(
 
 server.tool(
   'list_craftbooks',
-  'List craftbook templates ("procedures") available to invoke — bundled, user-authored (local), and project-local ones (auto-imported from the project\'s .claude/skills, AGENTS.md, etc.). Each craftbook is a structured recipe of steps (some with onEnter/onExit scripts and branch routing) — call invoke_craftbook with the id to spawn a task from it.',
-  {},
-  async () => {
+  'List craftbook templates ("procedures") available to invoke — bundled, user-authored (local), and project-local ones (auto-imported from the project\'s .claude/skills, AGENTS.md, etc.). Large catalogs return compact id lines — pass `filter` to search names/descriptions, or (better) call suggest_craftbook with the job-to-be-done for a ranked shortlist. Call invoke_craftbook with an id to spawn a task from it.',
+  {
+    filter: z
+      .string()
+      .optional()
+      .describe(
+        'Case-insensitive substring matched against id, name, and description. Matching books come back with full descriptions.',
+      ),
+  },
+  async ({ filter }) => {
     const res = await api.listCraftbooks({ source: 'all', projectId });
     if (!res.craftbooks.length) {
       return { content: [{ type: 'text' as const, text: 'No craftbook templates available.' }] };
     }
-    const listing = res.craftbooks
-      .map((m) => {
-        const desc = m.description ? ` — ${m.description}` : '';
-        return `• ${m.name} (id: ${m.id}) [${m.source}, ${m.stepCount} step(s)]${desc}`;
-      })
-      .join('\n');
+    // The full catalog with descriptions is ~180KB — repeated calls were
+    // the #1 context-overflow source in the 2026-07-24 craftbook matrix
+    // (models re-list instead of using suggest_craftbook, and the dump
+    // out-sizes any per-call truncation budget). Compact by design: rich
+    // lines only for a filtered (or small) set, id lines otherwise, and a
+    // hard byte clamp as the backstop.
+    const needle = filter?.trim().toLowerCase();
+    const books = needle
+      ? res.craftbooks.filter((m) =>
+          `${m.id}\n${m.name}\n${m.description ?? ''}`.toLowerCase().includes(needle),
+        )
+      : res.craftbooks;
+    if (!books.length) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `No craftbook matched filter "${filter}". Try suggest_craftbook with the job-to-be-done for a ranked shortlist.`,
+          },
+        ],
+      };
+    }
+    const RICH_LISTING_MAX = 60;
+    const rich = books.length <= RICH_LISTING_MAX;
+    const lines = books.map((m) => {
+      if (!rich) return `• ${m.id} — ${m.name} [${m.source}]`;
+      const desc = m.description ? ` — ${clampText(m.description, 240)}` : '';
+      return `• ${m.name} (id: ${m.id}) [${m.source}, ${m.stepCount} step(s)]${desc}`;
+    });
+    const header = rich
+      ? `${books.length} craftbook(s)${needle ? ` matching "${filter}"` : ''}:`
+      : `${books.length} craftbooks — descriptions omitted at this size. Use suggest_craftbook(query) for a ranked shortlist, or list_craftbooks({ filter }) to search. Do not re-list the full catalog.`;
+    let listing = `${header}\n${lines.join('\n')}`;
+    const HARD_CAP_CHARS = 24_000;
+    if (listing.length > HARD_CAP_CHARS) {
+      listing = `${listing.slice(0, HARD_CAP_CHARS)}\n… truncated. Use filter or suggest_craftbook.`;
+    }
     return { content: [{ type: 'text' as const, text: listing }] };
   },
 );
+
+function clampText(text: string, max: number): string {
+  const clean = text.replace(/\s+/g, ' ').trim();
+  return clean.length <= max ? clean : `${clean.slice(0, max - 1)}…`;
+}
 
 server.tool(
   'suggest_craftbook',

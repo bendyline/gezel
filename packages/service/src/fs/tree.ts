@@ -131,3 +131,21 @@ export async function safeReadTextFile(base: string, filePath: string): Promise<
     return null;
   }
 }
+
+/**
+ * Byte-exact sibling of {@link safeReadTextFile}, behind the same
+ * containment fence. For consumers that must not UTF-8 round-trip —
+ * image-signature checks read magic bytes, which text decoding mangles.
+ */
+export async function safeReadBinaryFile(
+  base: string,
+  filePath: string,
+): Promise<Uint8Array | null> {
+  const full = await safeResolveRead(base, filePath);
+  if (!full) return null;
+  try {
+    return new Uint8Array(await readFile(full));
+  } catch {
+    return null;
+  }
+}

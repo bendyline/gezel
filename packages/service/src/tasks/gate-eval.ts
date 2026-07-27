@@ -42,6 +42,8 @@ import { runStepSniff } from '../chat/step-sniff.js';
 export type GateWorkspaceReader = WorkspaceLike & {
   readArtifact?: (file: string) => Promise<string | null>;
   listArtifacts?: () => Promise<string[]>;
+  /** Artifact-tree sibling of `WorkspaceLike.readBytes` (image-signature checks). */
+  readArtifactBytes?: (file: string) => Promise<Uint8Array | null>;
 };
 
 /**
@@ -273,7 +275,14 @@ async function evalCheckInner(
   // the wrong tree.
   const usesArtifact = (c as { artifact?: boolean }).artifact === true;
   const reader: WorkspaceLike = usesArtifact
-    ? { read: ws.readArtifact ?? (async () => null), list: ws.listArtifacts ?? (async () => []) }
+    ? {
+        read: ws.readArtifact ?? (async () => null),
+        list: ws.listArtifacts ?? (async () => []),
+        // Carry the byte reader across the artifact swap; without it a
+        // `verifyImageBytes` check on an artifact deliverable would report
+        // "no binary reads" even though the surface supports them.
+        ...(ws.readArtifactBytes ? { readBytes: ws.readArtifactBytes.bind(ws) } : {}),
+      }
     : ws;
   switch (c.kind) {
     case 'minBytes': {
@@ -285,7 +294,9 @@ async function evalCheckInner(
       return { ok: r.ok, detail: r.detail };
     }
     case 'fileCount': {
-      const r = await fileCountByExt(reader, c.ext, c.min, c.dir);
+      const r = await fileCountByExt(reader, c.ext, c.min, c.dir, {
+        ...(c.verifyImageBytes ? { verifyImageBytes: true } : {}),
+      });
       const matched = (r as { matched?: string[] }).matched;
       return {
         ok: r.ok,

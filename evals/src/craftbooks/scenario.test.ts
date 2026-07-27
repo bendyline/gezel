@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { EvalContext } from '../types.ts';
-import { craftbookScenarioFromSpec } from './scenario.ts';
+import { craftbookScenarioFromSpec, prioritizeRepairFailures } from './scenario.ts';
 import type { CraftbookEvalSpec } from './types.ts';
 
 function directWorkerSpec(): CraftbookEvalSpec {
@@ -1715,5 +1715,31 @@ ${'Detailed supporting analysis.\n'.repeat(22)}`;
     } finally {
       nowSpy.mockRestore();
     }
+  });
+});
+
+describe('prioritizeRepairFailures — structural totals outrank per-record treadmills', () => {
+  it('leads with count/conservation floors, demotes per-record field misses', () => {
+    const failures = [
+      'albums/lake-weekend.json: record 4 is missing required field "caption"',
+      'albums/lake-weekend.json: 8 record(s), need ≥ 10',
+      'albums/lake-weekend.json: output carries 8 value(s) matching /(IMG_\\d{4}\\.jpg)/, need ≥ 10 — the transform must preserve the source values, not drop them.',
+      'report.md is missing required content: the cull is explained',
+    ];
+    const ordered = prioritizeRepairFailures(failures);
+    expect(ordered[0]).toContain('8 record(s), need ≥ 10');
+    expect(ordered[1]).toContain('output carries 8 value(s)');
+    expect(ordered[ordered.length - 1]).toContain('record 4 is missing');
+  });
+
+  it('keeps executable failures ahead of structural totals', () => {
+    const failures = [
+      'albums/x.json: record 2 is missing required field "caption"',
+      'albums/x.json: 8 record(s), need ≥ 10',
+      'checks/verify.mjs did not pass when run with node: exit=1',
+    ];
+    const ordered = prioritizeRepairFailures(failures);
+    expect(ordered[0]).toContain('did not pass when run with node');
+    expect(ordered[1]).toContain('8 record(s), need ≥ 10');
   });
 });
