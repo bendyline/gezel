@@ -55,6 +55,7 @@ export const MACROS: Record<string, MacroFn> = {
   'toolset-groups': toolsetGroups,
   'craftbook-steps': craftbookSteps,
   'craftbook-list': craftbookList,
+  'device-hardware': deviceHardware,
   'installed-models': installedModels,
   'project-type-composition': projectTypeComposition,
 };
@@ -443,6 +444,20 @@ async function craftbookList(attrs: Record<string, string>, ctx: MacroContext): 
     return `| [${b.name}](craftbook/${b.id}) | ${firstSentence}. |`;
   });
   return ['| Craftbook | What it does |', '| --- | --- |', ...rows].join('\n');
+}
+
+/** `::handboek-device-hardware` — this device's local-model capacity. */
+async function deviceHardware(_attrs: Record<string, string>, ctx: MacroContext): Promise<string> {
+  if (ctx.mode === 'site') {
+    return 'Gezel classifies each device as tiny, small, medium, or large from the memory available to local models. Open this page in the app to see the current device.';
+  }
+  const hardware = await ctx.device.currentHardware();
+  if (!hardware) return 'Hardware details are not available for this device.';
+  return [
+    '| Current hardware | Local-model tier |',
+    '| --- | --- |',
+    `| ${hardware.description} | **${hardware.tier}** |`,
+  ].join('\n');
 }
 
 /** `::handboek-installed-models` — what's on this device, by tier. */

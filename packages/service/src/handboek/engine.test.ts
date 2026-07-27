@@ -20,6 +20,11 @@ const device: HandboekDeviceInfo = {
       tier: 'medium',
     },
   ],
+  currentHardware: async () => ({
+    description:
+      'Apple Silicon unified memory: 64.0 GB total, with about 38.4 GB available for local models.',
+    tier: 'large',
+  }),
 };
 
 const catalog: HandboekCatalog = {

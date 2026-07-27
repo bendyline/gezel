@@ -77,7 +77,12 @@ export function drawTownBuilding(
   // Trim runs one tier wider than the rest of the facade: a cornice is two
   // 1px lines, and it is most of what makes a core read as masonry at the zoom
   // where windows would be sub-pixel mush.
-  if (!options.suppressDetails && !compact && prism.te.x - prism.tw.x >= MIN_TRIM_PX) {
+  //
+  // Gated on projected width alone, NOT on `compact`. A symbol mini that is 60px
+  // across earns its cornice exactly as a file building does; excluding minis
+  // wholesale is what left symbol campuses — the bulk of any real codebase —
+  // as untrimmed boxes.
+  if (!options.suppressDetails && prism.te.x - prism.tw.x >= MIN_TRIM_PX) {
     drawTrim(ctx, s, prism, style, colors);
   }
 
@@ -519,8 +524,8 @@ function drawFacadeDetails(
   compact: boolean,
 ): void {
   const random = seeded(style.seed ^ SEED_SALT.FACADE);
-  const rows = Math.max(1, Math.min(compact ? 2 : 3, style.storeys));
-  const bays = Math.max(1, Math.min(compact ? 2 : 4, style.bays));
+  const rows = Math.max(1, Math.min(3, style.storeys));
+  const bays = Math.max(1, Math.min(compact ? 3 : 4, style.bays));
   const windowColor = () => (random() < 0.24 ? s.palette.windowLit : s.palette.window);
 
   drawWallWindows(ctx, p.tw, p.ts, p.gw, p.gs, rows, bays, windowColor);
@@ -727,7 +732,7 @@ function drawRoofFurniture(
     drawStack(ctx, x, at.y, Math.max(1.5, 2.7 * scale), Math.max(4, 7 * scale), s.palette.masonry);
   }
 
-  if (style.cupola && (!compact || style.clock) && style.cap !== 'clock-tower') {
+  if (style.cupola && style.cap !== 'clock-tower') {
     const width = fit(Math.min(13, (p.te.x - p.tw.x) * 0.15), CAP_HEIGHT.cupola);
     if (width >= 3) drawCupola(ctx, ridge.apex.x, ridge.apex.y, width, style.clock, s);
   }
@@ -735,7 +740,7 @@ function drawRoofFurniture(
   switch (style.cap) {
     case 'bellcote': {
       const size = fit(7 * scale, CAP_HEIGHT.bellcote);
-      if (!compact && size >= 2.5) drawBellcote(ctx, ridge.a, size, s);
+      if (size >= 2.5) drawBellcote(ctx, ridge.a, size, s);
       break;
     }
     case 'finial': {
@@ -750,14 +755,14 @@ function drawRoofFurniture(
     }
     case 'lantern': {
       const width = fit(8 * scale, CAP_HEIGHT.lantern);
-      if (!compact && width >= 3) drawLantern(ctx, ridge.apex, width, s);
+      if (width >= 3) drawLantern(ctx, ridge.apex, width, s);
       break;
     }
     default:
       break;
   }
 
-  if (style.dormers > 0 && !compact && p.te.x - p.tw.x >= 28) {
+  if (style.dormers > 0 && p.te.x - p.tw.x >= 28) {
     const count = Math.min(3, style.dormers);
     for (let i = 0; i < count; i++) {
       // Dormers sit on the slope: partway down from the ridge toward the eave.

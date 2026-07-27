@@ -9776,25 +9776,30 @@ button.bench-step-foot:disabled {
   min-height: 0;
 }
 
+/* Chips are name-over-role, so the row stretches rather than centres: a
+   gezel with no role recorded is a one-line chip that still has to stand
+   the same height as its two-line neighbours. */
 .project-chat-roster {
   display: flex;
   flex-wrap: wrap;
   gap: 0.4rem;
-  align-items: center;
-  padding-top: 0.6rem;
+  align-items: stretch;
+  /* Match the chat timeline's left content gutter so the first gezel key
+     lines up with the bubbles below without tightening the row's right edge. */
+  padding: 0.6rem 0 0 0.75rem;
 }
 
 .project-chat-chip {
   display: flex;
   align-items: center;
-  gap: 0.4rem;
+  gap: 0.5rem;
   padding: 0.3rem 0.6rem;
   background: transparent;
   color: var(--text);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
-  font-size: 0.85rem;
+  font-size: var(--text-sm);
 }
 
 .project-chat-chip:hover {
@@ -9806,30 +9811,38 @@ button.bench-step-foot:disabled {
   border-color: var(--accent, #b0724c);
 }
 
+.project-chat-chip-text {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.05rem;
+  line-height: 1.25;
+}
+
 .project-chat-chip-name {
   font-weight: 500;
 }
 
+/* The role reads as a subtitle under the name, not as a badge beside it —
+   so no plate, no fill. (The plate it used to carry was 8px-rounded on
+   ~13px-tall text, i.e. a capsule, which docs/ux.md rules out.) */
 .project-chat-chip-tag {
-  font-size: 0.7rem;
-  color: var(--muted);
-  padding: 0.05rem 0.4rem;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.05);
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+  white-space: nowrap;
 }
 
 .project-chat-chip-active .project-chat-chip-tag {
   color: var(--text);
-  background: rgba(255, 255, 255, 0.08);
 }
 
 .project-chat-more {
   padding: 0.35rem 0.55rem;
   background: var(--surface);
-  color: var(--muted);
+  color: var(--text-muted);
   border: 1px solid var(--border);
-  border-radius: 4px;
-  font-size: 0.8rem;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
   cursor: pointer;
 }
 
@@ -11825,6 +11838,64 @@ button.timeline-session-divider-continuing::before {
   background: rgba(243, 237, 224, 0.06);
   color: var(--text);
   border-color: var(--accent);
+}
+
+.chat-rail-section-tab-menu {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+}
+
+.chat-rail-section-tab-chevron {
+  flex: 0 0 auto;
+  transition: transform 140ms ease-out;
+}
+
+.chat-rail-section-tab-menu[data-state="open"] .chat-rail-section-tab-chevron {
+  transform: rotate(180deg);
+}
+
+.chat-rail-task-menu {
+  min-width: 13rem;
+  max-width: min(24rem, calc(100vw - 2rem));
+}
+
+.chat-rail-task-menu-item {
+  min-width: 0;
+}
+
+.chat-rail-task-menu-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 0.8rem;
+  flex: 0 0 0.8rem;
+  color: var(--accent);
+}
+
+.chat-rail-task-menu-ref {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: transparent;
+  padding: 0;
+  font-size: var(--text-xs);
+}
+
+.chat-rail-task-menu-scope {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: var(--text-2xs);
+  font-weight: 400;
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-rail-section-tab-chevron {
+    transition: none;
+  }
 }
 
 .chat-rail-viewer-wrap {

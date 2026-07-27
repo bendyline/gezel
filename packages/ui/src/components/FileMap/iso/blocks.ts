@@ -289,7 +289,11 @@ function drawOneBlock(
   // materials there would multiply the bucket count for detail nobody can see.
   const material =
     g.style && !s.ageLens && s.tier !== 'city'
-      ? { ...g.style.material, urbanity: urbanityOf(b) }
+      ? {
+          ...g.style.material,
+          urbanity: urbanityOf(b),
+          variance: ((g.style.seed >>> 8) % 200) / 100 - 1,
+        }
       : undefined;
   const colors = prismColors(b.lang, p, age, material);
   // Gate on placed minis, not `buildingCount`: past the payload cap a
@@ -415,8 +419,21 @@ function drawPodiumBuildings(
       symbolStyle.cupola = true;
       symbolStyle.clock = true;
     }
+    // Each mini gets its OWN material and tone, rather than sharing the parent
+    // block's single color object. A campus is a street of separate buildings;
+    // painting them all one color made a file read as one extruded slab, which
+    // is especially stark in a single-language repo where every roof shares a
+    // hue anyway.
+    const miniColors =
+      s.ageLens || s.tier === 'city'
+        ? colors
+        : prismColors(parent.lang, s.palette, undefined, {
+            ...symbolStyle.material,
+            urbanity: urbanityOf(parent),
+            variance: ((symbolStyle.seed >>> 8) % 200) / 100 - 1,
+          });
     ctx.globalAlpha = 0.5 + 0.45 * bld.height;
-    drawTownBuilding(ctx, s, lifted, symbolStyle, colors, {
+    drawTownBuilding(ctx, s, lifted, symbolStyle, miniColors, {
       compact: true,
       suppressDetails: s.ageLens === true,
     });

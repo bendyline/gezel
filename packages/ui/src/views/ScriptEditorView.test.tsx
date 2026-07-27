@@ -53,7 +53,7 @@ vi.mock('../components/script-editor/ScriptEditorTabs.js', async () => {
   return { ScriptEditorTabs };
 });
 
-const { ScriptEditorView } = await import('./ScriptEditorView.js');
+const { ScriptEditorView, __clearAllScriptDrafts } = await import('./ScriptEditorView.js');
 const { api } = await import('../api.js');
 
 const META: ScriptMeta = {
@@ -86,7 +86,9 @@ describe('ScriptEditorView', () => {
       metaOk: true,
       diagnostics: [],
     } as never);
-    // Stale draft state can leak between tests via module scope.
+    // Stale draft state can leak between tests via module scope — the
+    // in-memory map survives localStorage.clear() and outlives the DOM.
+    __clearAllScriptDrafts();
     window.localStorage.clear();
   });
 
@@ -122,6 +124,27 @@ describe('ScriptEditorView', () => {
     await waitFor(() => {
       expect(screen.queryByText('● Unsaved')).not.toBeInTheDocument();
     });
+  });
+
+  it('does not resurrect the draft when the debounced mirror write fires after a save', async () => {
+    const view = render(<ScriptEditorView projectId="pj-1" scriptName="summarize" />);
+    const editor = await screen.findByLabelText('code');
+    fireEvent.change(editor, { target: { value: `${SOURCE}// more\n` } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => {
+      expect(screen.queryByText('● Unsaved')).not.toBeInTheDocument();
+    });
+
+    // Past the 500ms draft-mirror debounce: a timer left running by the
+    // save would write the buffer back and the next open would claim to
+    // have restored changes that are already on disk.
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    view.unmount();
+
+    render(<ScriptEditorView projectId="pj-1" scriptName="summarize" />);
+    await screen.findByLabelText('code');
+    expect(screen.queryByText(/Restored your unsaved changes/)).not.toBeInTheDocument();
+    expect(window.localStorage.getItem('gezel:script-draft:pj-1/summarize')).toBeNull();
   });
 
   it('shows the conflict banner with both resolutions on a conflicted save', async () => {

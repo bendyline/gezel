@@ -19,7 +19,13 @@ import { type HandboekCatalog, expandMacros } from './macros.js';
 export type { CuratedArticle } from './content.js';
 export { HANDBOEK_AREAS, HANDBOEK_AREA_TITLES, findHandboekContent } from './content.js';
 export { siteDeviceInfo } from './device.js';
-export type { HandboekDeviceInfo, HandboekGezelInfo, HandboekModelInfo } from './device.js';
+export type {
+  HandboekDeviceInfo,
+  HandboekGezelInfo,
+  HandboekHardwareInfo,
+  HandboekHardwareTier,
+  HandboekModelInfo,
+} from './device.js';
 export { MACROS, expandMacros, parseAttrs } from './macros.js';
 export type { HandboekCatalog } from './macros.js';
 

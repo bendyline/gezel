@@ -21,6 +21,11 @@ function stubDevice(gezels: HandboekGezelInfo[], meesterId?: string): HandboekDe
         tier: 'medium',
       },
     ],
+    currentHardware: async () => ({
+      description:
+        'Apple Silicon unified memory: 64.0 GB total, with about 38.4 GB available for local models.',
+      tier: 'large',
+    }),
   };
 }
 
@@ -231,6 +236,15 @@ describe('data macros', () => {
     expect(app.markdown).toContain('| Qwen 27B | llama-cpp | 27B | medium |');
     const site = await expandMacros('::handboek-installed-models', { ...ctx('site') });
     expect(site.markdown).not.toContain('Qwen');
+  });
+
+  it('device-hardware describes the current hardware and capacity tier', async () => {
+    const app = await expandMacros('::handboek-device-hardware', { ...ctx('app') });
+    expect(app.markdown).toContain('Apple Silicon unified memory: 64.0 GB total');
+    expect(app.markdown).toContain('| **large** |');
+    const site = await expandMacros('::handboek-device-hardware', { ...ctx('site') });
+    expect(site.markdown).not.toContain('64.0 GB');
+    expect(site.markdown).toContain('Open this page in the app');
   });
 });
 

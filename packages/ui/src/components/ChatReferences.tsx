@@ -16,6 +16,7 @@ import {
   useState,
 } from 'react';
 import { api } from '../api.js';
+import { DropdownMenu } from '../primitives/index.js';
 import { useEffectiveTheme } from '../theme.js';
 import { CommandsPanel } from './CommandsPanel.js';
 import { HtmlPreviewFrame } from './HtmlPreviewFrame.js';
@@ -515,19 +516,32 @@ export function ChatReferences({
       <aside className="chat-rail-side">
         {hasSide && (
           <div className="chat-rail-side-inner">
-            {[hasTasks, hasReferences, hasCommands].filter(Boolean).length > 1 && (
+            {([hasTasks, hasReferences, hasCommands].filter(Boolean).length > 1 ||
+              orderedTasks.length > 1) && (
               <div className="chat-rail-section-tabs" role="tablist">
-                {hasTasks && (
-                  <button
-                    type="button"
-                    role="tab"
-                    className={`chat-rail-section-tab${activeTab === 'tasks' ? ' is-active' : ''}`}
-                    aria-selected={activeTab === 'tasks'}
-                    onClick={() => setActiveTab('tasks')}
-                  >
-                    Task{orderedTasks.length > 1 ? 's' : ''}
-                  </button>
-                )}
+                {hasTasks &&
+                  (orderedTasks.length > 1 ? (
+                    <TaskTabMenu
+                      tasks={orderedTasks}
+                      activeRef={effectiveTaskRef}
+                      selected={activeTab === 'tasks'}
+                      onOpen={() => setActiveTab('tasks')}
+                      onSelect={(ref) => {
+                        setActiveTaskRef(ref);
+                        setActiveTab('tasks');
+                      }}
+                    />
+                  ) : (
+                    <button
+                      type="button"
+                      role="tab"
+                      className={`chat-rail-section-tab${activeTab === 'tasks' ? ' is-active' : ''}`}
+                      aria-selected={activeTab === 'tasks'}
+                      onClick={() => setActiveTab('tasks')}
+                    >
+                      Task
+                    </button>
+                  ))}
                 {hasCommands && (
                   <button
                     type="button"
@@ -555,7 +569,7 @@ export function ChatReferences({
               </div>
             )}
             {activeTab === 'tasks' && hasTasks && effectiveTaskRef && (
-              <div className="chat-rail-section-body chat-rail-section-body-row">
+              <div className="chat-rail-section-body">
                 <div className="chat-rail-viewer-wrap">
                   <TaskRailCard
                     key={effectiveTaskRef}
@@ -567,13 +581,6 @@ export function ChatReferences({
                     }
                   />
                 </div>
-                {orderedTasks.length > 1 && (
-                  <TaskTabs
-                    tasks={orderedTasks}
-                    activeRef={effectiveTaskRef}
-                    onSelect={setActiveTaskRef}
-                  />
-                )}
               </div>
             )}
             {activeTab === 'references' && effectiveActive && (
@@ -690,32 +697,91 @@ function TaskRailCard({
   );
 }
 
-function TaskTabs({
+function TaskTabMenu({
   tasks,
   activeRef,
+  selected,
+  onOpen,
   onSelect,
 }: {
   tasks: TaskRef[];
   activeRef: string | null;
+  selected: boolean;
+  onOpen: () => void;
   onSelect: (ref: string) => void;
 }) {
   return (
-    <nav className="chat-rail-tabs" aria-label="Tasks">
-      {tasks.map((t) => (
+    <DropdownMenu.Root
+      onOpenChange={(open) => {
+        if (open) onOpen();
+      }}
+    >
+      <DropdownMenu.Trigger asChild>
         <button
-          key={t.ref}
           type="button"
-          className={`chat-rail-tab${t.ref === activeRef ? ' chat-rail-tab-active' : ''}`}
-          onClick={() => onSelect(t.ref)}
-          title={t.scoped ? `${t.ref} (this session's task)` : t.ref}
+          role="tab"
+          className={`chat-rail-section-tab chat-rail-section-tab-menu${
+            selected ? ' is-active' : ''
+          }`}
+          aria-selected={selected}
         >
-          <span className="chat-rail-tab-label">
-            {t.scoped ? '📌 ' : ''}
-            {t.ref}
-          </span>
+          <span>Tasks</span>
+          <svg
+            className="chat-rail-section-tab-chevron"
+            width="12"
+            height="12"
+            viewBox="0 0 12 12"
+            fill="none"
+            aria-hidden="true"
+          >
+            <path
+              d="m3 4.5 3 3 3-3"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
         </button>
-      ))}
-    </nav>
+      </DropdownMenu.Trigger>
+      <DropdownMenu.Portal>
+        <DropdownMenu.Content
+          className="app-nav-menu chat-rail-task-menu"
+          sideOffset={4}
+          align="start"
+          aria-label="Choose task"
+        >
+          {tasks.map((task) => {
+            const active = task.ref === activeRef;
+            return (
+              <DropdownMenu.Item
+                key={task.ref}
+                className={`app-nav-menu-item chat-rail-task-menu-item${active ? ' active' : ''}`}
+                aria-current={active ? 'true' : undefined}
+                onSelect={() => onSelect(task.ref)}
+                title={task.scoped ? `${task.ref} (this session's task)` : task.ref}
+              >
+                <span className="chat-rail-task-menu-check" aria-hidden="true">
+                  {active && (
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                      <path
+                        d="m2.25 6.25 2.25 2.25 5.25-5.25"
+                        stroke="currentColor"
+                        strokeWidth="1.6"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  )}
+                </span>
+                <code className="chat-rail-task-menu-ref">{task.ref}</code>
+                {task.scoped && <span className="chat-rail-task-menu-scope">This session</span>}
+              </DropdownMenu.Item>
+            );
+          })}
+        </DropdownMenu.Content>
+      </DropdownMenu.Portal>
+    </DropdownMenu.Root>
   );
 }
 

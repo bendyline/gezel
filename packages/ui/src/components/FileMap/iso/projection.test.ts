@@ -39,10 +39,18 @@ describe('iso projection', () => {
   });
 
   it('keeps period roof rise stable in screen space and caps close-zoom detail', () => {
+    // Pitch is 0.13 of the top span, up from 0.105: shallow roofs read as
+    // modern flat-roofed boxes, and a steeper pitch is what makes a silhouette
+    // read as 1890–1915.
     const rect = { x: 0, y: 0, w: 30, h: 20 };
-    expect(townRoofRiseIso(rect, 1)).toBeCloseTo(5.25);
+    expect(townRoofRiseIso(rect, 1)).toBeCloseTo(6.5);
     expect(townRoofRiseIso(rect, 8) * 8).toBe(16);
-    expect(townRoofRiseIso(rect, 8, true) * 8).toBe(7);
+    // The compact ceiling (symbol minis) is 13, up from 7. Most files in a real
+    // codebase carry symbols, so nearly every building on screen goes through
+    // this branch — capping it at 7 flattened the whole settlement into boxes.
+    expect(townRoofRiseIso(rect, 8, true) * 8).toBe(13);
+    // Minis stay subordinate to their parent block at the same footprint.
+    expect(townRoofRiseIso(rect, 8, true)).toBeLessThan(townRoofRiseIso(rect, 8));
   });
 
   describe('hitsPrism', () => {

@@ -247,6 +247,11 @@ export interface PrismColors {
   edge: string;
 }
 
+/** Lightness points a building may drift from its neighbours. Big enough to
+ *  separate a terrace, small enough that a language field still reads as one
+ *  color at district zoom. */
+const TONE_JITTER = 5;
+
 // SE-wall rows for the age ramp: the facade rows dropped ~7% lightness.
 const AGE_WALLR_DARK = ['hsl(28 92% 37%)', 'hsl(28 70% 28%)', 'hsl(28 42% 21%)', 'hsl(28 16% 16%)'];
 const AGE_WALLR_LIGHT = [
@@ -264,6 +269,15 @@ export interface MaterialTreatment {
   roof: MaterialKey;
   /** Continuous urbanity — how far the wall pulls off the language hue. */
   urbanity: number;
+  /**
+   * Per-building tonal jitter in [-1, 1], shifting lightness a few points.
+   *
+   * A single-language repository resolves to a single roof hue, so a street of
+   * neighbours would otherwise be one flat color and read as one extruded mass
+   * rather than as separate buildings. This is what separates them, without
+   * lying about the language signal — the hue is untouched.
+   */
+  variance?: number;
 }
 
 export function prismColors(
@@ -307,10 +321,17 @@ export function prismColors(
   // Walls take their lightness shift relative to the roof's so a light wall
   // material can never climb into a dark roof and flatten the prism.
   const wallLit = wallLitDelta(material.wall, material.roof);
+  // The jitter is applied EQUALLY to every surface, so it separates neighbours
+  // without touching the roof/facade delta that carries the 3D reading.
+  const j = Math.max(-1, Math.min(1, material.variance ?? 0)) * TONE_JITTER;
   return {
-    top: hsl(applyMaterial({ h: hue, s: sat.top, l: lit.top }, material.roof, 1)),
-    wallL: hsl(applyMaterial({ h: hue, s: sat.wall, l: lit.wallL }, material.wall, keep, wallLit)),
-    wallR: hsl(applyMaterial({ h: hue, s: sat.wall, l: lit.wallR }, material.wall, keep, wallLit)),
-    edge: hsl(applyMaterial({ h: hue, s: sat.edge, l: lit.edge }, material.roof, 1)),
+    top: hsl(applyMaterial({ h: hue, s: sat.top, l: lit.top + j }, material.roof, 1)),
+    wallL: hsl(
+      applyMaterial({ h: hue, s: sat.wall, l: lit.wallL + j }, material.wall, keep, wallLit),
+    ),
+    wallR: hsl(
+      applyMaterial({ h: hue, s: sat.wall, l: lit.wallR + j }, material.wall, keep, wallLit),
+    ),
+    edge: hsl(applyMaterial({ h: hue, s: sat.edge, l: lit.edge + j }, material.roof, 1)),
   };
 }

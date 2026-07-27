@@ -66,6 +66,11 @@ function clearDraft(key: string): void {
   }
 }
 
+/** Test-only: the module-scope map outlives any single test's DOM. */
+export function __clearAllScriptDrafts(): void {
+  scriptDrafts.clear();
+}
+
 /**
  * Client-side mirror of the provenance markers (see service
  * scripts/install.ts) so detaching — deleting the first line — takes
@@ -191,6 +196,31 @@ export function ScriptEditorView({ projectId, scriptName, scope }: ScriptEditorV
   const [fixingCapability, setFixingCapability] = useState(false);
 
   const localDraftTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingDraft = useRef<string | null>(null);
+
+  // Clearing a draft has to cancel the debounced mirror write too: saving
+  // (or reloading from disk) within the 500ms window would otherwise let
+  // the timer resurrect the draft we just dropped, and the tab reopens
+  // claiming to have restored unsaved changes that were already saved.
+  const dropDraft = useCallback(() => {
+    if (localDraftTimer.current) clearTimeout(localDraftTimer.current);
+    localDraftTimer.current = null;
+    pendingDraft.current = null;
+    clearDraft(draftKey);
+  }, [draftKey]);
+
+  // Unmount is a tab switch, not a discard — flush the pending mirror
+  // write rather than dropping it.
+  useEffect(() => {
+    return () => {
+      if (!localDraftTimer.current) return;
+      clearTimeout(localDraftTimer.current);
+      localDraftTimer.current = null;
+      const source = pendingDraft.current;
+      pendingDraft.current = null;
+      if (source !== null) writeDraft(draftKey, source);
+    };
+  }, [draftKey]);
 
   // ── Load ────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -261,14 +291,19 @@ export function ScriptEditorView({ projectId, scriptName, scope }: ScriptEditorV
       const isDirty = source !== lastSavedRef.current;
       setDirty(isDirty);
       if (!isDirty) {
-        clearDraft(draftKey);
+        dropDraft();
         return;
       }
       scriptDrafts.set(draftKey, source);
+      pendingDraft.current = source;
       if (localDraftTimer.current) clearTimeout(localDraftTimer.current);
-      localDraftTimer.current = setTimeout(() => writeDraft(draftKey, source), 500);
+      localDraftTimer.current = setTimeout(() => {
+        localDraftTimer.current = null;
+        pendingDraft.current = null;
+        writeDraft(draftKey, source);
+      }, 500);
     },
-    [draftKey],
+    [draftKey, dropDraft],
   );
 
   // ── Save ────────────────────────────────────────────────────────────
@@ -293,7 +328,7 @@ export function ScriptEditorView({ projectId, scriptName, scope }: ScriptEditorV
         setData({ ...data, source, hash: res.hash });
         setDirty(false);
         setRestoredDraft(false);
-        clearDraft(draftKey);
+        dropDraft();
         setConflict(null);
         setMetaOk(res.metaOk);
         if (res.meta) {
@@ -311,7 +346,7 @@ export function ScriptEditorView({ projectId, scriptName, scope }: ScriptEditorV
         setSaving(false);
       }
     },
-    [data, draftKey, projectId, scriptName, scope],
+    [data, dropDraft, projectId, scriptName, scope],
   );
 
   // ── Conflict: file changed on disk ──────────────────────────────────
@@ -322,10 +357,10 @@ export function ScriptEditorView({ projectId, scriptName, scope }: ScriptEditorV
     editorRef.current?.setValue(conflict.currentSource);
     setDirty(false);
     setRestoredDraft(false);
-    clearDraft(draftKey);
+    dropDraft();
     setProvenance(parseProvenance(conflict.currentSource));
     setConflict(null);
-  }, [conflict, data, draftKey]);
+  }, [conflict, data, dropDraft]);
 
   const overwriteDisk = useCallback(() => {
     if (!conflict) return;
@@ -333,12 +368,12 @@ export function ScriptEditorView({ projectId, scriptName, scope }: ScriptEditorV
   }, [conflict, save]);
 
   const discardDraft = useCallback(() => {
-    clearDraft(draftKey);
+    dropDraft();
     editorRef.current?.setValue(lastSavedRef.current);
     setData((d) => (d ? { ...d, source: lastSavedRef.current } : d));
     setDirty(false);
     setRestoredDraft(false);
-  }, [draftKey]);
+  }, [dropDraft]);
 
   // Window-focus revalidation: someone may have edited the file in
   // another editor while the app was backgrounded. Clean buffer →
@@ -379,7 +414,7 @@ export function ScriptEditorView({ projectId, scriptName, scope }: ScriptEditorV
         attempt === 0 ? `${scriptName}-custom` : `${scriptName}-custom-${attempt + 1}`;
       try {
         await api.createProjectScript(projectId, { name: candidate, source: body });
-        clearDraft(draftKey);
+        dropDraft();
         window.dispatchEvent(
           new CustomEvent('gezel:open-tab', {
             detail: { kind: 'script', projectId, name: candidate, activate: true },
@@ -393,7 +428,7 @@ export function ScriptEditorView({ projectId, scriptName, scope }: ScriptEditorV
       }
     }
     setSaveError('could not find a free name for the copy');
-  }, [data, draftKey, projectId, scriptName]);
+  }, [data, dropDraft, projectId, scriptName]);
 
   // ── Test runs ───────────────────────────────────────────────────────
   const runOnce = useCallback(async () => {

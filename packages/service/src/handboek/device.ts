@@ -23,10 +23,20 @@ export interface HandboekModelInfo {
   tier: ModelTier;
 }
 
+export type HandboekHardwareTier = Exclude<ModelTier, 'cloud'>;
+
+export interface HandboekHardwareInfo {
+  /** Plain-language description of the memory/GPU resources used by local models. */
+  description: string;
+  /** Largest local-model tier this device's usable memory budget supports. */
+  tier: HandboekHardwareTier;
+}
+
 export interface HandboekDeviceInfo {
   listGezels(): Promise<HandboekGezelInfo[]>;
   meesterGezelId(): Promise<string | null>;
   listInstalledModels(): Promise<HandboekModelInfo[]>;
+  currentHardware(): Promise<HandboekHardwareInfo | null>;
 }
 
 /** Device info for `site`/`agent-less` contexts: nothing personal to tell. */
@@ -34,4 +44,5 @@ export const siteDeviceInfo: HandboekDeviceInfo = {
   listGezels: async () => [],
   meesterGezelId: async () => null,
   listInstalledModels: async () => [],
+  currentHardware: async () => null,
 };

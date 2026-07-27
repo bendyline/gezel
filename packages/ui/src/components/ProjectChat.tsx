@@ -188,10 +188,12 @@ export function ProjectChat({
                 poppetje={soloLead.poppetje}
                 iconOverride={soloLead.iconOverride}
                 name={soloLeadName}
-                size={20}
+                size={26}
               />
-              <span className="project-chat-chip-name">{soloLeadName}</span>
-              <span className="project-chat-chip-tag">{`⭐ ${crewLeadLabelLower(project)}`}</span>
+              <span className="project-chat-chip-text">
+                <span className="project-chat-chip-name">{soloLeadName}</span>
+                <span className="project-chat-chip-tag">{`⭐ ${crewLeadLabelLower(project)}`}</span>
+              </span>
             </button>
           ) : (
             <p className="muted small" style={{ margin: 0 }}>
@@ -212,6 +214,11 @@ export function ProjectChat({
                   { name: gezel.name, roleBasedName: gezel.roleBasedName },
                   roleBasedNameOnlyMode,
                 );
+                // Second line of the chip. The lead's standing in the project
+                // outranks their job title — a voorman who is also a Developer
+                // reads as the voorman here, and their role is one hover away
+                // in the title attribute.
+                const subtitle = tag === 'voorman' ? `⭐ ${leadLabel}` : gezel.role;
                 return (
                   <button
                     key={gezel.id}
@@ -220,7 +227,7 @@ export function ProjectChat({
                     onClick={() => setSelectedId(gezel.id)}
                     title={
                       tag === 'voorman'
-                        ? `${rendered} — ${leadLabel} of this ${project.mode === 'solo' ? 'job' : 'project'}`
+                        ? `${rendered} — ${leadLabel} of this ${project.mode === 'solo' ? 'job' : 'project'}${gezel.role ? ` · ${gezel.role}` : ''}`
                         : `${rendered} — on this ${project.mode === 'solo' ? 'job' : 'project'}'s team`
                     }
                   >
@@ -229,12 +236,12 @@ export function ProjectChat({
                       poppetje={gezel.poppetje}
                       iconOverride={gezel.iconOverride}
                       name={rendered}
-                      size={20}
+                      size={26}
                     />
-                    <span className="project-chat-chip-name">{rendered}</span>
-                    {tag === 'voorman' && (
-                      <span className="project-chat-chip-tag">{`⭐ ${leadLabel}`}</span>
-                    )}
+                    <span className="project-chat-chip-text">
+                      <span className="project-chat-chip-name">{rendered}</span>
+                      {subtitle && <span className="project-chat-chip-tag">{subtitle}</span>}
+                    </span>
                   </button>
                 );
               })

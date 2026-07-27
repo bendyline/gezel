@@ -61,7 +61,11 @@ export function miniHIso(height: number): number {
 export function townRoofRiseIso(r: Rect, scale: number, compact = false): number {
   const safeScale = Math.max(0.001, scale);
   const topSpanPx = (r.w + r.h) * safeScale;
-  const risePx = Math.max(compact ? 1.5 : 2.5, Math.min(compact ? 7 : 16, topSpanPx * 0.105));
+  // The compact ceiling is for symbol minis. It used to be 7px, which flattened
+  // every building in a symbol campus into a box with a token lid — and since
+  // most files carry symbols, that was most of the settlement. 13 gives a mini
+  // real pitch while still reading as subordinate to its parent block.
+  const risePx = Math.max(compact ? 1.5 : 2.5, Math.min(compact ? 13 : 16, topSpanPx * 0.13));
   return risePx / safeScale;
 }
 

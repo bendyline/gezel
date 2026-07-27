@@ -670,45 +670,70 @@ export function townStyleForSymbol(symbol: MapBuilding, parent: MapBlock): TownS
   const moduleLike = /module|namespace|package/.test(kind);
   const industrial = parent.health?.zone === 'industrial';
   const band = bandOf(parent);
-  const roof: TownRoof = industrial
-    ? random() < 0.65
-      ? 'sawtooth'
-      : 'shed'
+
+  // Symbol minis get the SAME vocabulary as file buildings, not a reduced one.
+  // In a codebase where most files carry symbols, these campuses are the
+  // overwhelming majority of what a user actually sees — giving them three
+  // archetypes while files got thirty-four made the whole settlement read as
+  // rows of identical sheds.
+  //
+  // Symbol kind picks the family, so a campus is a legible little street:
+  // classes and structs are the dwellings, functions and methods the shopfronts
+  // that call on them, modules the civic buildings. An industrial parent
+  // overrides everything — a foundry yard is sheds all the way down.
+  const family: Family = industrial
+    ? 'industrial'
     : moduleLike
-      ? 'mansard'
+      ? 'civic'
       : classLike
-        ? random() < 0.55
-          ? 'hip'
-          : 'gable'
-        : random() < 0.7
-          ? 'gable'
-          : 'shed';
+        ? 'residential'
+        : 'commercial';
+  // The slot within the family comes from the symbol's SIZE, not from a coin.
+  // Family tables are ordered small → mid → large, so a one-line helper is a
+  // corner shop and a 300-line orchestrator is the market hall — which reads
+  // correctly and, just as importantly, stops the large forms from flooding a
+  // yard. Uniform picking put seven market crosses in one file.
+  const table = FAMILY_TABLE[band][family];
+  const slot = symbol.height < 0.4 ? 0 : symbol.height < 0.72 ? 1 : 2;
+  const archetype = table[Math.min(table.length - 1, slot)]!;
+  const roof = roofFor(archetype, random);
   const storeys = Math.max(1, Math.min(3, 1 + Math.round(symbol.height * 2)));
   const bays = Math.max(1, Math.min(3, Math.ceil(Math.sqrt(Math.max(1, symbol.lines ?? 1)) / 3)));
-  const archetype: TownArchetype = industrial ? 'workshop' : classLike ? 'townhouse' : 'cottage';
   const spec = ARCHETYPE_SPEC[archetype];
+  // A tower on a mini would be absurd; everything else in the cap vocabulary
+  // reads fine at campus scale, and the draw path already sizes caps to the
+  // headroom they are given.
+  const cap: RoofCap = spec.cap === 'clock-tower' ? 'cupola' : spec.cap;
   return {
     archetype,
     roof,
-    ridge: parent.rect.w >= parent.rect.h ? 'x' : 'y',
+    // Per-symbol, not the parent's. Sharing one ridge axis across a campus
+    // pointed every roof the same way, which is most of why a file read as one
+    // extruded mass rather than a row of separate buildings.
+    ridge: ridgeFor(symbol, random),
     storeys,
     bays,
-    chimneys: industrial && random() < 0.55 ? 1 : 0,
+    chimneys:
+      industrial || archetype === 'cottage' || archetype === 'farmhouse' || archetype === 'inn'
+        ? 1 + (random() < 0.3 ? 1 : 0)
+        : 0,
     dormers: roof === 'mansard' && symbol.height > 0.55 ? 1 : 0,
     awning: parent.health?.zone === 'commercial' && !classLike,
-    cupola: parent.landmark === true && moduleLike,
+    cupola: cap === 'cupola',
     clock: false,
     sawteeth: roof === 'sawtooth' ? 2 + (random() < 0.4 ? 1 : 0) : 0,
     seed,
     band,
     eaves: spec.eaves,
-    ground: 'plain',
-    cap: 'none',
-    // Minis are a few pixels across; trim would be sub-pixel noise.
-    trim: NO_TRIM,
+    ground: spec.ground,
+    cap,
+    // Trim is gated on projected width at draw time, so a mini that is big
+    // enough on screen earns its cornice and a tiny one silently skips it.
+    trim: { ...NO_TRIM, ...spec.trim },
     material: materialsFor(seed ^ SEED_SALT.MATERIAL, band, industrial),
-    // Minis are a few pixels across; a wing would be indistinguishable noise.
+    // A wing inside a symbol footprint would be indistinguishable noise.
     massing: NO_MASSING,
+    ...(spec.roofFactor !== undefined ? { roofFactor: spec.roofFactor } : {}),
   };
 }
 

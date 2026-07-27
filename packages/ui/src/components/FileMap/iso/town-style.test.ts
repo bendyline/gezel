@@ -195,7 +195,9 @@ describe('1910 town styles', () => {
     };
     const style = townStyleForSymbol(symbol, block());
     expect(townStyleForSymbol(symbol, block())).toEqual(style);
-    expect(style.archetype).toBe('workshop');
+    // Industrial parent, and at height 0.8 this is a large symbol — so the
+    // biggest form in the industrial family rather than the smallest.
+    expect(style.archetype).toBe('foundry');
     expect(['sawtooth', 'shed']).toContain(style.roof);
     expect(style.storeys).toBe(3);
   });
@@ -254,5 +256,110 @@ describe('massing', () => {
       }),
     );
     if (style.massing.kind === 'setback') throw new Error('setback on a one-storey building');
+  });
+});
+
+describe('symbol campuses', () => {
+  // Near-square, matching what `layoutBuildingsInBlock` actually emits
+  // (aspect 0.88..1.14). `ridgeFor` short-circuits on aspect beyond ±18%, so a
+  // fixed oblong fixture would test the aspect rule rather than the seed.
+  const symbol = (id: string, kind: string, w = 8): MapBuilding => ({
+    id,
+    blockId: 'src/a.ts',
+    rect: { x: 0, y: 0, w, h: w },
+    height: 0.6,
+    lines: 60,
+    label: id,
+    kind,
+  });
+
+  it('uses the full vocabulary, not a reduced pool', () => {
+    // The original miss: files got 34 archetypes while symbol minis kept 3.
+    // In a real codebase most files carry symbols, so the campuses ARE the
+    // settlement — a reduced pool there makes the whole map read as identical
+    // sheds no matter how rich the file-level vocabulary is.
+    const seen = new Set<string>();
+    for (const settlement of ['village', 'town', 'city'] as const) {
+      const parent = block({ settlement, health: { ...block().health!, zone: 'residential' } });
+      for (let i = 0; i < 60; i++) {
+        for (const kind of ['class', 'function', 'method', 'interface', 'module']) {
+          // Sweep sizes: the slot within a family comes from symbol height, so
+          // a fixed-size fixture would only ever reach one column of the grid.
+          for (const height of [0.2, 0.55, 0.9]) {
+            const b = { ...symbol(`s${i}:${kind}`, kind), height };
+            seen.add(townStyleForSymbol(b, parent).archetype);
+          }
+        }
+      }
+    }
+    // 3 bands x 3 reachable families x 3 size slots.
+    expect(seen.size).toBeGreaterThanOrEqual(20);
+  });
+
+  it('varies ridge axis within one campus', () => {
+    // Every mini used to inherit the parent's ridge, so a whole file's worth of
+    // roofs pointed the same way and the campus read as one extruded slab.
+    const parent = block();
+    const axes = new Set(
+      Array.from(
+        { length: 40 },
+        (_, i) => townStyleForSymbol(symbol(`sym${i}`, 'function'), parent).ridge,
+      ),
+    );
+    expect(axes.size).toBe(2);
+  });
+
+  it('scales the archetype with the symbol, small to large', () => {
+    // A one-line helper is a corner shop; a 300-line orchestrator is the market
+    // hall. Uniform picking put seven market crosses in a single village yard.
+    const parent = block({ health: { ...block().health!, zone: 'commercial' } });
+    const at = (height: number) =>
+      townStyleForSymbol({ ...symbol('s', 'function'), height }, parent).archetype;
+    const COM = ['corner-shop', 'inn', 'market-hall'];
+    expect(COM.indexOf(at(0.1))).toBeLessThan(COM.indexOf(at(0.6)));
+    expect(COM.indexOf(at(0.6))).toBeLessThan(COM.indexOf(at(0.95)));
+  });
+
+  it('maps symbol kind to a legible family', () => {
+    const parent = block({ health: { ...block().health!, zone: 'residential' } });
+    const RES = ['cottage', 'townhouse', 'boarding-house'];
+    const COM = ['corner-shop', 'inn', 'market-hall'];
+    const CIV = ['library', 'schoolhouse', 'guildhall'];
+    expect(RES).toContain(townStyleForSymbol(symbol('c', 'class'), parent).archetype);
+    expect(COM).toContain(townStyleForSymbol(symbol('f', 'function'), parent).archetype);
+    expect(CIV).toContain(townStyleForSymbol(symbol('m', 'module'), parent).archetype);
+  });
+
+  it('keeps an industrial parent’s yard industrial regardless of symbol kind', () => {
+    const parent = block({ health: { ...block().health!, zone: 'industrial' } });
+    const IND = ['workshop', 'rail-depot', 'foundry'];
+    for (const kind of ['class', 'function', 'module']) {
+      expect(IND).toContain(townStyleForSymbol(symbol(`i:${kind}`, kind), parent).archetype);
+    }
+  });
+
+  it('gives minis trim and a ground floor to earn at close zoom', () => {
+    // Gating these off `compact` rather than projected width left every symbol
+    // building an untrimmed box even when it was 60px across on screen.
+    const parent = block({
+      settlement: 'city',
+      health: { ...block().health!, zone: 'commercial' },
+    });
+    const styles = Array.from({ length: 30 }, (_, i) =>
+      townStyleForSymbol(symbol(`s${i}`, 'function'), parent),
+    );
+    expect(styles.some((s) => s.trim.cornice)).toBe(true);
+    expect(styles.some((s) => s.ground !== 'plain')).toBe(true);
+  });
+
+  it('never puts a clock tower on a symbol', () => {
+    const parent = block({
+      settlement: 'city',
+      landmark: true,
+      health: { ...block().health!, zone: 'civic' },
+    });
+    for (let i = 0; i < 40; i++) {
+      expect(townStyleForSymbol(symbol(`s${i}`, 'module'), parent).cap).not.toBe('clock-tower');
+    }
   });
 });
