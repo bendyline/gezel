@@ -477,6 +477,17 @@ elif [[ "$os" == "Darwin" ]]; then
   rewrite_macho() {
     local target="$1"
     install_name_tool -add_rpath "@loader_path" "$target" 2>/dev/null || true
+    # CMake also bakes the .upstream build dir into LC_RPATH — on CI an
+    # absolute /Users/runner/… path, i.e. the build host's filesystem
+    # layout fingerprinted into a shipping binary (native-v0.1.19 shipped
+    # with it, visible to anyone running `otool -l`). @loader_path above
+    # reaches every bundled peer, so absolute entries buy nothing: delete
+    # them, keep @-relative ones. Backstopped by the workflow's
+    # "Assert no absolute rpaths (macOS)" step.
+    while read -r rp; do
+      [[ "$rp" == @* ]] && continue
+      install_name_tool -delete_rpath "$rp" "$target" 2>/dev/null || true
+    done < <(otool -l "$target" | awk '/cmd LC_RPATH/{p=1} p && $1 == "path" {print $2; p=0}')
     # otool prints absolute paths; we rewrite any whose basename
     # matches a file we just bundled.
     while read -r dep; do

@@ -56,7 +56,7 @@ import {
 import { chmod, mkdir, mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { setDefaultAutoSelectFamilyAttemptTimeout } from 'node:net';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { detectPlatform, platformVariants } from './native-payload.mjs';
 
@@ -126,7 +126,23 @@ async function fetchFromRelease({ token, platform, version, variant }) {
   if (version) {
     const tag = `native-v${version.replace(/^v/, '').replace(/^native-v?/, '')}`;
     console.log(`looking up release ${tag}…`);
-    release = await api(`/repos/${REPO_OWNER}/${REPO_NAME}/releases/tags/${tag}`, token);
+    try {
+      release = await api(`/repos/${REPO_OWNER}/${REPO_NAME}/releases/tags/${tag}`, token);
+    } catch (err) {
+      if (err?.status !== 404) throw err;
+      // /releases/tags/ never returns draft releases even when the git tag
+      // exists. The list endpoint DOES include drafts for a token with push
+      // access, so fall back to it before giving up — this is how a draft
+      // gets validated by version prior to publishing.
+      const all = await api(`/repos/${REPO_OWNER}/${REPO_NAME}/releases?per_page=100`, token);
+      release = all.find((r) => r.tag_name === tag);
+      if (!release) {
+        console.error(`error: no release tagged ${tag} (drafts included).`);
+        console.error('       For an unreleased build, use --run <workflow-run-id> instead.');
+        process.exit(1);
+      }
+      if (release.draft) console.log(`  → ${tag} is a draft release`);
+    }
   } else {
     console.log('looking up the latest native-v* release…');
     // /releases/latest skips prereleases AND will surface app releases — we
@@ -182,6 +198,12 @@ async function fetchFromRelease({ token, platform, version, variant }) {
     }
 
     const targetDir = join(buildRoot, platformKey);
+    // Start from an empty key dir: extraction merges into whatever is
+    // already there, so leftovers from an older release survive a re-fetch
+    // (pre-0.1.19 fetches left OpenSSL DLLs beside the 0.1.19 payload —
+    // stale files mask dependency regressions in local testing and a local
+    // electron-builder run would sweep-sign them).
+    await rm(targetDir, { recursive: true, force: true });
     await downloadAndExtract({
       token,
       url: asset.url, // API URL — needs Accept: application/octet-stream
@@ -226,6 +248,9 @@ async function fetchFromRun({ token, platform, runId, variant }) {
     }
 
     const targetDir = join(buildRoot, platformKey);
+    // Once per key, before the artifact loop — several engines merge into
+    // one bare key here, so cleaning inside the loop would drop them.
+    await rm(targetDir, { recursive: true, force: true });
     await mkdir(targetDir, { recursive: true });
     for (const art of matched) {
       console.log(`  ${art.name}`);
@@ -456,8 +481,18 @@ async function extractZip(archive, targetDir) {
   // Expand-Archive (which has historically choked on long paths and zip
   // entries with backslashes). On Mac/Linux, system tar also handles zip.
   // Fallback to PowerShell only if tar isn't on PATH.
-  const tar = spawnSync('tar', ['-xf', archive, '-C', targetDir], { stdio: 'inherit' });
+  //
+  // Hold tar's stderr rather than streaming it: under Git Bash, `tar` is
+  // MSYS GNU tar, which cannot auto-detect zip ("This does not look like
+  // a tar archive") — expected chatter when a fallback is about to
+  // succeed, alarming mid-fetch noise otherwise. Surface it only when
+  // every extractor fails.
+  const tar = spawnSync('tar', tarExtractArgs(['-xf'], archive, targetDir), {
+    stdio: ['ignore', 'inherit', 'pipe'],
+    cwd: dirname(archive),
+  });
   if (tar.status === 0) return;
+  const tarStderr = String(tar.stderr ?? '').trim();
   if (process.platform === 'win32') {
     const ps = spawnSync(
       'powershell',
@@ -468,16 +503,35 @@ async function extractZip(archive, targetDir) {
       ],
       { stdio: 'inherit' },
     );
-    if (ps.status !== 0) throw new Error('extractZip: both tar and Expand-Archive failed');
+    if (ps.status !== 0) {
+      throw new Error(`extractZip: both tar and Expand-Archive failed. tar stderr: ${tarStderr}`);
+    }
     return;
   }
   const unzip = spawnSync('unzip', ['-o', archive, '-d', targetDir], { stdio: 'inherit' });
-  if (unzip.status !== 0) throw new Error('extractZip: tar and unzip both failed');
+  if (unzip.status !== 0) {
+    throw new Error(`extractZip: tar and unzip both failed. tar stderr: ${tarStderr}`);
+  }
 }
 
 async function extractTarGz(archive, targetDir) {
-  const tar = spawnSync('tar', ['-xzf', archive, '-C', targetDir], { stdio: 'inherit' });
+  const tar = spawnSync('tar', tarExtractArgs(['-xzf'], archive, targetDir), {
+    stdio: 'inherit',
+    cwd: dirname(archive),
+  });
   if (tar.status !== 0) throw new Error(`extractTarGz: tar exited ${tar.status}`);
+}
+
+/**
+ * Build tar args that survive every tar on PATH. Under Git Bash, `tar` is
+ * MSYS GNU tar, which parses the colon in `C:\…` as a remote-host prefix
+ * ("Cannot connect to C: resolve failed") — that only applies to the
+ * archive (-f) argument, so pass it RELATIVE and let the caller set
+ * cwd = dirname(archive). Forward slashes on -C keep both GNU tar and
+ * bsdtar (cmd/PowerShell, macOS, Linux) happy.
+ */
+function tarExtractArgs(flags, archive, targetDir) {
+  return [...flags, basename(archive), '-C', targetDir.replaceAll('\\', '/')];
 }
 
 async function listExtracted(targetDir) {
@@ -505,7 +559,9 @@ async function api(path, token) {
   });
   if (!res.ok) {
     const body = await res.text().catch(() => '');
-    throw new Error(`GitHub API ${res.status} on ${path}: ${body.slice(0, 200)}`);
+    const err = new Error(`GitHub API ${res.status} on ${path}: ${body.slice(0, 200)}`);
+    err.status = res.status;
+    throw err;
   }
   return res.json();
 }
@@ -607,7 +663,8 @@ function parseArgs(argv) {
 
 const HELP = `Usage: node scripts/fetch-native-binaries.mjs [options]
 
-  --version <X.Y.Z>    Pull a specific release (default: latest native-v*)
+  --version <X.Y.Z>    Pull a specific release (default: latest native-v*).
+                       Draft releases resolve too when the token has push access.
   --variant <name>     Narrow to a single llama-cpp variant: cpu | vulkan | cuda
                        Default: fetch ALL variants for this platform so the
                        Settings → Advanced → Engine backend dropdown can flip

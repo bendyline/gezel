@@ -905,6 +905,37 @@ jobs:
           fi
           echo "[floor] within declared limits (GLIBC ${LINUX_MAX_GLIBC}, GLIBCXX ${LINUX_MAX_GLIBCXX})"
 
+      # ── macOS rpath hygiene ───────────────────────────────────────
+      # The darwin build scripts delete the absolute LC_RPATH CMake bakes
+      # in (the .upstream build dir — a /Users/runner/… CI path, i.e. a
+      # build-host fingerprint visible to anyone running `otool -l`;
+      # native-v0.1.19 shipped with it). That fixup is `|| true`-lenient,
+      # so assert here that no absolute entry survived — same pattern as
+      # the OpenMP and glibc-floor guards: CI is the only place this can
+      # fail loudly before it ships.
+      - name: Assert no absolute rpaths (macOS)
+        if: steps.preflight.outputs.pinned == 'true' && startsWith(matrix.platform, 'darwin')
+        shell: bash
+        run: |
+          set -uo pipefail
+          out="${{ steps.outdir.outputs.dir }}"
+          bad=0
+          for f in "$out"/*; do
+            [[ -f "$f" && ! -L "$f" ]] || continue
+            file -b "$f" 2>/dev/null | grep -q Mach-O || continue
+            while read -r rp; do
+              if [[ "$rp" == /* ]]; then
+                echo "::error::$(basename "$f") carries absolute LC_RPATH $rp — build-host path leaked into a shipping binary"
+                bad=1
+              fi
+            done < <(otool -l "$f" | awk '/cmd LC_RPATH/{p=1} p && $1 == "path" {print $2; p=0}')
+          done
+          if (( bad )); then
+            echo "::error::Strip absolute rpaths in the engine build script (rewrite_macho's -delete_rpath pass) rather than exempting them here."
+            exit 1
+          fi
+          echo "[rpath] no absolute LC_RPATH entries in $out"
+
       # ── Code-sign the engine binaries (gated on secrets) ──────
       # Sign HERE — after the smoke test, before the sha is computed and
       # the artifact uploaded — so the release's SHA256SUMS reflects the

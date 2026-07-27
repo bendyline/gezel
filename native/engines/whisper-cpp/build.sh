@@ -251,6 +251,15 @@ elif [[ "$os" == "Darwin" ]]; then
   rewrite_macho() {
     local target="$1"
     install_name_tool -add_rpath "@loader_path" "$target" 2>/dev/null || true
+    # Delete the absolute LC_RPATH CMake baked in (the .upstream build
+    # dir — on CI a /Users/runner/… path leaked into a shipping binary;
+    # native-v0.1.19 shipped with it). @loader_path covers every bundled
+    # peer. Backstopped by the workflow's "Assert no absolute rpaths
+    # (macOS)" step.
+    while read -r rp; do
+      [[ "$rp" == @* ]] && continue
+      install_name_tool -delete_rpath "$rp" "$target" 2>/dev/null || true
+    done < <(otool -l "$target" | awk '/cmd LC_RPATH/{p=1} p && $1 == "path" {print $2; p=0}')
     while read -r dep; do
       base=$(basename "$dep")
       if [[ -f "$out_dir/$base" && "$dep" != "@rpath/$base" ]]; then
