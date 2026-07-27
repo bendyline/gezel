@@ -127,6 +127,42 @@ jobs:
       - name: Build and import the packaged service bundle
         run: pnpm build:bundle
 
+  supply-chain:
+    name: Supply-chain audit
+    needs: workflow-policy
+    runs-on: ubuntu-latest
+    # No build needed — the inventory reads node_modules, not dist output.
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@008330803749db0355799c700092d9a85fd074e9 # v6.0.9
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - name: Reject local workspace links
+        run: pnpm check:local-links
+      - run: pnpm install --frozen-lockfile
+      - name: Generate production SBOM
+        run: pnpm audit:sbom
+      - name: Production dependency vulnerability gate
+        # Runs here as well as in the release workflow so a new advisory
+        # lands on the PR that introduces the dependency, rather than
+        # surfacing for the first time as a blocked release.
+        run: pnpm audit:vulnerabilities
+      - name: Dependency license policy gate
+        run: pnpm audit:licenses
+      - name: Preserve supply-chain inventory
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: supply-chain
+          path: artifacts/gezel.cdx.json
+          if-no-files-found: ignore
+          retention-days: 30
+
   web-smoke:
     name: Browser smoke E2E
     needs: workflow-policy

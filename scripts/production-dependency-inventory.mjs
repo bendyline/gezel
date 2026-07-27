@@ -26,9 +26,31 @@ function runPnpm(args) {
   });
 }
 
+/**
+ * Workspace projects whose dependencies never reach a user. Every gezel
+ * package is private, so "production" means the Electron installer and the
+ * VSCode extension — not the eval harness or its local result viewer.
+ *
+ * Without this, the eval tooling's own dependencies were audited as if they
+ * shipped: a July 2026 release was blocked by advisories against js-yaml 5.x
+ * (only `evals` pulls it; the shipped 3.15.0/4.3.0 are outside the advisory
+ * range) and react-router (only `eval-viewer` pulls it at all).
+ *
+ * Deliberately an exclusion list, not an allowlist of shipping packages: if
+ * this list goes stale, a new dev tool gets audited unnecessarily. The
+ * inverse mistake would silently stop auditing something we ship.
+ */
+const NON_SHIPPING_PROJECTS = ['@bendyline/gezel-evals', '@bendyline/gezel-eval-viewer'];
+
 /** Read pnpm's exact production package/version/license inventory. */
 export function readProductionLicenseInventory() {
-  const raw = runPnpm(['licenses', 'list', '--prod', '--json']);
+  const raw = runPnpm([
+    'licenses',
+    'list',
+    '--prod',
+    '--json',
+    ...NON_SHIPPING_PROJECTS.map((name) => `--filter=!${name}`),
+  ]);
   const inventory = JSON.parse(raw);
   if (!inventory || typeof inventory !== 'object' || Array.isArray(inventory)) {
     throw new Error('pnpm returned an invalid production dependency inventory');
