@@ -235,13 +235,23 @@ export function discoverNativeBinaries(input: DiscoverInput): DiscoverResult {
   }
 
   // ── Variant-less binaries (ds4-server / sd-server / whisper-server / uv) ────────
-  // ds4-server is variant-aware in principle (Metal vs CUDA) but ships exactly
-  // ONE variant per supported platform (Metal on darwin-arm64, CUDA on
-  // linux-x64/arm64; nothing on darwin-x64 / win32), so — unlike llama-server,
-  // which probes among multiple same-platform backends — there's no runtime
-  // choice to make and it resolves directly under `<dir>/<platformKey>/ds4-server`.
+  // ds4-server ships exactly ONE build per supported platform (Metal on
+  // darwin-arm64, CUDA on linux-x64/arm64; nothing on darwin-x64 / win32), so
+  // — unlike llama-server, which probes among multiple same-platform backends
+  // — there is no runtime choice to make. It is still not always in the bare
+  // key: on Linux it lives under `<platformKey>-cuda`, co-located with
+  // llama-server's CUDA build so the two share one copy of the NVIDIA
+  // redistributables rather than shipping 828 MB of them twice (see
+  // scripts/native-payload.mjs). macOS keeps it in the bare key.
+  //
+  // `subdirFor` encodes that. The lookup below then falls back to the bare
+  // key, the same way the llama-server branch above falls back from its
+  // variant directory — so a native-bin tree staged BEFORE the move (ds4 in
+  // the bare key) still resolves and an in-place upgrade doesn't lose ds4.
   // On unsupported platforms the binary is simply absent → 'not-found' → the
   // provider's actionable error / the UI availability probe hides ds4.
+  const subdirFor = (name: NativeBinaryName): string =>
+    name === 'ds4-server' && platform === 'linux' ? `${platformKey}-cuda` : platformKey;
   for (const { name, envVar } of [
     { name: 'ds4-server' as const, envVar: 'GEZEL_DS4_SERVER_BIN' },
     { name: 'sd-server' as const, envVar: 'GEZEL_SD_SERVER_BIN' },
@@ -257,7 +267,12 @@ export function discoverNativeBinaries(input: DiscoverInput): DiscoverResult {
       binaries.push({ name, source: 'no-native-bin-dir' });
       continue;
     }
-    const bin = resolveNativeBinaryUnder(dir, name, platformKey, platform, fileExists);
+    const subdir = subdirFor(name);
+    const bin =
+      resolveNativeBinaryUnder(dir, name, subdir, platform, fileExists) ??
+      (subdir === platformKey
+        ? null
+        : resolveNativeBinaryUnder(dir, name, platformKey, platform, fileExists));
     if (bin) {
       process.env[envVar] = bin;
       binaries.push({ name, source: 'discovered', path: bin });

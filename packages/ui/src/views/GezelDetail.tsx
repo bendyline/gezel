@@ -33,6 +33,7 @@ import { EffortPicker } from '../components/ModelPicker.js';
 import { PromoteToTabButton } from '../components/PromoteToTabButton.js';
 import { ProviderModelSelect } from '../components/ProviderModelSelect.js';
 import { ToolsetsEditor } from '../components/ToolsetsEditor.js';
+import { normalizeMarkdownBaseline } from '../components/markdown-baseline.js';
 import { useSerializedAutosave } from '../hooks/useSerializedAutosave.js';
 import { type ItemSlot, Poppetje, PoppetjeItem } from '../poppetje/index.js';
 import { Dialog, Select, Tabs } from '../primitives/index.js';
@@ -98,7 +99,12 @@ export function GezelDetail({ gezelId, standalone = false, onDeleted }: GezelDet
       try {
         const detail = await api.getGezel(gezelId);
         if (cancelled) return;
-        const effective = { ...detail, about: aboutAutosave.hydrate(detail.about) };
+        // about.md feeds a Squisq editor — baseline on its canonical form so
+        // opening the tab never reads as an edit (see markdown-baseline.ts).
+        const effective = {
+          ...detail,
+          about: aboutAutosave.hydrate(normalizeMarkdownBaseline(detail.about)),
+        };
         selectedRef.current = effective;
         setSelected(effective);
       } catch (err) {

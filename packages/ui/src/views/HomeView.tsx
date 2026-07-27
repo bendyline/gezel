@@ -4,7 +4,6 @@ import type { ProviderName } from '@bendyline/gezel';
 import type { ConfigResponse } from '@bendyline/gezel-client';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
-import gezelLogoUrl from '../assets/gezellogo.png';
 import gezelLogotypeUrl from '../assets/gezellogotype.png';
 import { FirstRunInstallBanner } from '../components/FirstRunInstallBanner.js';
 import { RecommendedMediaDownloads } from '../components/RecommendedMediaDownloads.js';
@@ -12,6 +11,7 @@ import { useRoleBasedNameOnlyMode } from '../components/useRoleBasedNameOnlyMode
 import { SECURITY_LEVEL_PRESETS } from '../security-levels.js';
 import { requestSettingsSection } from '../settings-nav.js';
 import { HomeWorkshop } from './home/HomeWorkshop.js';
+import { IntroHandboekArticle } from './home/IntroHandboekArticle.js';
 
 type Provider = ProviderName;
 
@@ -516,18 +516,27 @@ function SecurityLevelSection({
 }) {
   const active = SECURITY_LEVEL_PRESETS.find((l) => l.id === level);
   return (
-    <section className="setup-section">
+    // The engagement-mode-<level> class carries the posture-semantic latch
+    // colors (sealed green / open amber) — same treatment as Settings.
+    <section className={`setup-section${level ? ` engagement-mode-${level}` : ''}`}>
       <h3>Security &amp; compliance</h3>
       <p className="muted" style={{ marginTop: 0 }}>
         How much should gezels be allowed to do? Pick a starting posture — you can fine-tune every
         capability later in Settings → Security &amp; Compliance.
       </p>
-      <div className="engagement-mode-switch">
+      <div
+        className="engagement-mode-switch gz-tray"
+        role="radiogroup"
+        aria-label="Security posture"
+      >
         {SECURITY_LEVEL_PRESETS.map((l) => (
           <button
             key={l.id}
             type="button"
-            className={`engagement-mode-pill${level === l.id ? ' engagement-mode-pill-active' : ''}`}
+            // biome-ignore lint/a11y/useSemanticElements: WAI-ARIA radiogroup of key buttons; a native <input type="radio"> can't carry the keys-in-trays treatment.
+            role="radio"
+            aria-checked={level === l.id}
+            className={`gz-key${level === l.id ? ' gz-key-active' : ''}`}
             onClick={() => void onChange(l.id)}
           >
             {l.label}
@@ -535,7 +544,7 @@ function SecurityLevelSection({
           </button>
         ))}
       </div>
-      <p className="engagement-mode-description">
+      <p className="engagement-mode-description" aria-live="polite">
         {active
           ? active.description
           : 'No level chosen yet — Lockdown (★) is a good default for most people.'}
@@ -597,12 +606,10 @@ function IntroSection({
   }
   return (
     <section className="home-intro">
-      <img src={gezelLogoUrl} alt="" className="home-intro-mark" aria-hidden />
       <div className="home-intro-body">
         <header>
           <h2>
             <img src={gezelLogotypeUrl} alt="gezel" className="home-intro-logotype" />
-            is Dutch for a companion journeyman.
           </h2>
           <button
             type="button"
@@ -614,19 +621,10 @@ function IntroSection({
             <span aria-hidden>▴</span>
           </button>
         </header>
-        <p>
-          A <strong>gezel</strong> is an AI-powered teammate who works for you. Each gezel has a
-          role, a personality, a set of tools, and its own story that shapes how it thinks. They
-          learn and get better over time as you work with them. Working with your{' '}
-          <strong>meester</strong> gezel, you assemble a crew, hand them work, and they collaborate
-          — passing tasks between each other, keeping notes on what they've done, and picking up
-          where the last one left off.
-        </p>
-        <p>
-          Your first conversations will be with a <em>meester</em> gezel, who acts as your
-          concierge. They will create projects and bring on specialized additional gezellen to
-          fulfill roles based on your requests. You can also just chat with them :)
-        </p>
+        {/* The intro copy lives in the Handboek's "What is gezel?" article
+            (docs/handboek/conceptual/welcome.md) — embedded here as a live
+            page so the first-run pitch and the documentation never drift. */}
+        <IntroHandboekArticle />
         {loading ? null : isConfigured ? (
           <p>
             Get started with <strong>{meesterName ?? 'your Meester'}</strong>, your meester, who

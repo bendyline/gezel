@@ -12,9 +12,27 @@
  * commit that lands here for the dropped customization details.
  */
 
+import { LIGHT_SURFACE, type SurfaceScheme } from '@bendyline/squisq';
 import { type Theme, resolveTheme } from '@bendyline/squisq/schemas';
 
 export const GEZEL_CHAT_THEME_ID = 'gezellig';
+
+// Light-mode reading surface: 75% of the way from Squisq's stark `#ffffff`
+// `LIGHT_SURFACE.background` toward the gezel app's `--panel` canvas
+// (`#f3eddf`). A pure midpoint still read too stark against the cream
+// chrome — pushed further toward canvas so the prose sits on warm paper.
+// `backgroundLight` follows the same 75/25 lerp against
+// `LIGHT_SURFACE.backgroundLight` (`#f5f5f5`) so inset code-block tints
+// stay subtly distinct from the surface. Text colors carry over from
+// `LIGHT_SURFACE`. Shared by chat bubbles and the Home intro's embedded
+// Handboek page so gezel's light reading surfaces never drift apart.
+export const GEZEL_LIGHT_SURFACE: SurfaceScheme = {
+  id: 'gezel-chat-light',
+  background: '#f6f1e7',
+  backgroundLight: '#f4efe5',
+  text: LIGHT_SURFACE.text,
+  textMuted: LIGHT_SURFACE.textMuted,
+};
 
 /**
  * Keep the gezellig palette and typography without its decorative page

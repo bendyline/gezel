@@ -543,7 +543,7 @@ export function TaskDetail({
               <Select.Value />
             </Select.Trigger>
             <Select.Content>
-              <Select.Item value="__user">→ user</Select.Item>
+              <Select.Item value="__user">→ You</Select.Item>
               {gezels.map((g) => (
                 <Select.Item key={g.id} value={g.id}>
                   → {g.name}
@@ -680,6 +680,7 @@ export function TaskDetail({
               <EditorShell
                 key={`composer-${composerKey}`}
                 initialMarkdown=""
+                placeholder="Write a note — paste markdown, drag in media, or just start typing."
                 onChange={(source) => {
                   composerDraft.current = source;
                 }}

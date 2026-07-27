@@ -89,7 +89,14 @@ export function HealthStrip({ label }: { label?: string } = {}) {
   return (
     <div className="home-env-checks">
       {label && <span className="home-env-label">{label}</span>}
-      <StatusPill ok={daemonOk} label={`Gezel service v${health?.version ?? '?'}`} />
+      <StatusPill
+        ok={daemonOk}
+        label={
+          health?.version && health.version !== '0.0.0'
+            ? `Gezel service v${health.version}`
+            : 'Gezel service · dev build'
+        }
+      />
       <StatusPill ok={nodeOk} label={`Node ${health?.nodeVersion ?? 'unknown'}`} />
       {health?.platform && <StatusPill ok label={`${humanPlatform(health.platform)} platform`} />}
       {systemStatus && (

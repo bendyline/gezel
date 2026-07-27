@@ -189,10 +189,15 @@ export function Sidebar({
   // Until setup is done, the home tab reads "Get started" instead of "Home".
   const firstRun = useIsFirstRun();
   const meester = gezels.find((gezel) => gezel.id === meesterGezelId);
-  const homeLabel = firstRun
+  const meesterName = meester ? displayName(meester, roleBasedNameOnly) : '';
+  // "Home" carries the weight; the meester's name rides along muted. The
+  // old dash-paren form ("Home - (Meester Ada Lovela…") truncated into
+  // punctuation soup.
+  const homeLabel = firstRun ? 'Get started' : meesterName ? `Home · ${meesterName}` : 'Home';
+  const homeTitle = firstRun
     ? 'Get started'
-    : meester
-      ? `Home - (Meester ${displayName(meester, roleBasedNameOnly)})`
+    : meesterName
+      ? `Home — your meester, ${meesterName}`
       : 'Home';
   // "Scripts" is a power-user surface — gated behind Settings → About →
   // Advanced → "Show advanced features".
@@ -453,13 +458,21 @@ export function Sidebar({
           type="button"
           className={`app-sidebar-item app-sidebar-item-root app-sidebar-home${selection === null ? ' active' : ''}`}
           onClick={() => onSelect(null)}
-          title={homeLabel}
+          title={homeTitle}
           data-testid="sidebar-meester"
         >
           <span className="app-sidebar-item-icon">
             <HomeIcon />
           </span>
-          <span className="app-sidebar-item-label">{homeLabel}</span>
+          <span className="app-sidebar-item-label">
+            {firstRun || !meesterName ? (
+              homeLabel
+            ) : (
+              <>
+                Home <span className="app-sidebar-home-meester">· {meesterName}</span>
+              </>
+            )}
+          </span>
         </button>
 
         {/* Projects */}

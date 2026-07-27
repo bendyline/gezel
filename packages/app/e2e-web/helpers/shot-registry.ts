@@ -20,7 +20,8 @@ export type ShotArea =
   | 'documents'
   | 'history'
   | 'settings'
-  | 'dialogs';
+  | 'dialogs'
+  | 'handboek';
 
 export const SHOT_REGISTRY: Record<ShotArea, string[]> = {
   shell: [
@@ -40,7 +41,17 @@ export const SHOT_REGISTRY: Record<ShotArea, string[]> = {
     'assistant-bubble',
     'references-pane',
   ],
-  projects: ['ide-chat', 'ide-tasks', 'ide-workspace', 'ide-artifacts', 'ide-about', 'ide-compact'],
+  projects: [
+    'ide-chat',
+    'ide-tasks',
+    'ide-workspace',
+    'ide-artifacts',
+    'ide-about',
+    'ide-compact',
+    'ide-overview',
+    'ide-approvals',
+    'ide-village',
+  ],
   gezels: ['list', 'detail', 'growth', 'memories'],
   tasks: ['list', 'detail', 'step-tracker', 'step-panel', 'new-dialog', 'new-dialog-craftbook'],
   craftbooks: ['list', 'editor'],
@@ -60,6 +71,7 @@ export const SHOT_REGISTRY: Record<ShotArea, string[]> = {
     'provider-ds4',
   ],
   dialogs: ['create-gezel', 'create-project'],
+  handboek: ['home'],
 };
 
 /** Zero-padded 1-based index of `name` within its area; throws if unregistered. */

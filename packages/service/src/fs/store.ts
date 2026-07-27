@@ -2627,11 +2627,17 @@ export class Store {
       });
     }
     if (patch.voormanGezelId !== undefined) {
+      // The summary names the gezel — their id is a slug that reads as
+      // plumbing in the History view; ids stay in `details`.
+      const voormanName = patch.voormanGezelId
+        ? ((await this.getGezel(patch.voormanGezelId).catch(() => null))?.name ??
+          patch.voormanGezelId)
+        : null;
       await this.history?.log({
         kind: 'project.voorman.changed',
         projectId: id,
-        summary: patch.voormanGezelId
-          ? `Set voorman of "${detail.name}" to ${patch.voormanGezelId}`
+        summary: voormanName
+          ? `Set voorman of "${detail.name}" to ${voormanName}`
           : `Cleared voorman of "${detail.name}"`,
         details: {
           previousVoormanGezelId: meta.voormanGezelId,

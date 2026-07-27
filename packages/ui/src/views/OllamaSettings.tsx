@@ -216,9 +216,9 @@ export function OllamaSettings({ config, onConfigChanged }: Props) {
       <div className="ollama-section">
         <h4>Context window</h4>
         <p className="muted small" style={{ marginTop: 0 }}>
-          Ollama's default <code>num_ctx</code> is small (2048–4096) and silently drops older
-          messages when it overflows. Gezel picks a parameter-size aware default (4k for ≤3B, 8k for
-          7B+, 16k for 30B+). Override here to force a specific value for every session.
+          How much of the conversation the model can keep in mind at once. Ollama's own default is
+          small and silently forgets older messages; Gezel picks a sensible size for each model. Set
+          a value here to force one for every session (Ollama's <code>num_ctx</code>).
         </p>
         <div className="new-row">
           <input
@@ -242,10 +242,9 @@ export function OllamaSettings({ config, onConfigChanged }: Props) {
       <div className="ollama-section">
         <h4>Response budget</h4>
         <p className="muted small" style={{ marginTop: 0 }}>
-          Cap on tokens the model can generate per turn (<code>num_predict</code>). Ollama's own
-          default (128) is far too small for real chat — the model can spend it all on silent
-          reasoning and emit nothing visible. Gezel defaults to 4096; bump higher if you see
-          warnings about replies being truncated at the cap.
+          How much the model may write in a single reply. Ollama's own limit is so low that answers
+          can get cut off before a word appears — Gezel raises it to a comfortable length. Raise it
+          further if long replies get cut short (Ollama's <code>num_predict</code>).
         </p>
         <div className="new-row">
           <input
@@ -278,8 +277,8 @@ export function OllamaSettings({ config, onConfigChanged }: Props) {
         <h4>Timeouts</h4>
         <p className="muted small" style={{ marginTop: 0 }}>
           Local models on consumer hardware can take minutes for one turn — these caps decide when
-          we give up. Two of them watch for *silence* (reset on activity); the third is a hard
-          ceiling that ticks down regardless. Leave blank to use the defaults.
+          we give up. Two of them watch for <em>silence</em> (reset on activity); the third is a
+          hard ceiling that ticks down regardless. Leave blank to use the defaults.
         </p>
         <TimeoutRow
           label="Pre-first-byte cap"
@@ -378,8 +377,9 @@ function OllamaStatusLine({ status }: { status: StatusState }) {
     );
   }
   return (
-    <p className="error small">
-      ✗ Couldn't reach <code>{status.baseUrl ?? '(no URL)'}</code>: {status.error}
+    <p className="error small" title={status.error}>
+      Ollama isn't running at <code>{status.baseUrl ?? 'the configured address'}</code> — press
+      Start Ollama above to launch it.
     </p>
   );
 }

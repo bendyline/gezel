@@ -94,7 +94,7 @@ describe('CraftbookEditor', () => {
 
     expect(await screen.findByRole('heading', { name: 'Review changes' })).toBeInTheDocument();
     expect(screen.queryByLabelText('Craftbook name')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Fork to edit' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Copy to edit' }));
 
     await waitFor(() => expect(api.createCraftbook).toHaveBeenCalled());
     expect((openTab.mock.calls[0]?.[0] as CustomEvent).detail).toMatchObject({

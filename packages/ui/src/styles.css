@@ -137,6 +137,17 @@
   --scrollbar-thumb: rgba(176, 114, 76, 0.42);
   --scrollbar-thumb-hover: rgba(176, 114, 76, 0.62);
   --scrollbar-track: rgba(176, 114, 76, 0.08);
+
+  /* Alias for the palette's muted text. Dozens of rules reference
+     `var(--muted, <fallback>)`; without this alias every one silently
+     used its fallback — including a near-invisible translucent white on
+     the Documents empty state. The indirection resolves per theme. */
+  --muted: var(--text-muted);
+
+  /* Native form controls (checkboxes, radios, ranges, progress) pick up
+     the terracotta accent instead of the UA's default blue — inherited
+     everywhere, re-resolved per theme through the variable. */
+  accent-color: var(--accent);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -344,9 +355,12 @@ h6 {
   font-family: var(--font-display);
 }
 
+/* The intro card's own prose keeps the editorial register; scoped to
+   direct children so the embedded Handboek page (.home-intro-page) keeps
+   squisq's typography. */
 .home-intro,
-.home-intro p,
-.home-intro strong,
+.home-intro-body > p,
+.home-intro-body > p strong,
 .msg-body,
 .msg-body-rich,
 /* Titlebar nav (the Questions toggle) keeps the editorial register to
@@ -1597,7 +1611,7 @@ html.embedded-chat #root {
   flex-direction: column;
 }
 .documents-detail .placeholder {
-  color: var(--muted, rgba(255, 255, 255, 0.55));
+  color: var(--text-muted);
   padding: 1rem;
   font-size: 0.9rem;
 }
@@ -1611,10 +1625,32 @@ html.embedded-chat #root {
   height: 100%;
   min-height: 0;
   display: flex;
+  flex-direction: column;
 }
 .document-detail .editor-wrap {
   flex: 1;
   min-height: 0;
+}
+
+/* Slim header above the editor: the document's on-disk path (local-first —
+   users should always be able to see where the file lives) on the left,
+   the autosave status chip on the right. Replaces the old floating
+   `<output class="status">` that rendered clipped beside the editor. */
+.document-detail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.25rem 0.6rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+.document-detail-path {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 /* Standalone document tab: TabContent mounts `.document-detail` directly
    inside `.app-main`, so its `1rem 1.25rem` padding shows as a margin
@@ -1671,6 +1707,51 @@ html.embedded-chat #root {
 .squisq-editor-shell[data-theme="dark"] .squisq-status-ok,
 .squisq-editor-shell .squisq-status-ok {
   color: var(--titlebar-ink, #f3ede0);
+}
+
+/* Squisq editor → gezel palette bridge. The editor's chrome accents are
+   `var(--squisq-accent…, <indigo>)` fallback chains — defining the tokens
+   on the shell root swaps the whole indigo family for the terracotta
+   accent wherever an EditorShell is mounted (documents, project briefs,
+   chat composer, script editors). Same seam idea as the GezelJsonEditor
+   form bridge at the end of this file. */
+.squisq-editor-shell {
+  --squisq-accent: var(--accent);
+  --squisq-accent-hover: var(--accent-hover);
+  --squisq-outline-accent: var(--accent);
+}
+
+/* The block-outline panel hardcodes cool greys (#dcd8d0 panel, #f3f4f6
+   hover) rather than reading tokens — repaint it with the gezel surface
+   family so the editor's left rail reads as part of the app, not an
+   embedded foreign product. */
+.squisq-editor-shell .squisq-outline {
+  /* The outline <aside> itself carries `--squisq-outline-accent: <blue>`
+     as an INLINE style, so this same-element declaration needs
+     `!important` to win — the same reason the GezelJsonEditor bridge at
+     the end of this file uses it. */
+  --squisq-outline-accent: var(--accent) !important;
+  background: var(--surface);
+  color: var(--text);
+}
+.squisq-editor-shell .squisq-outline-row:hover,
+.squisq-editor-shell
+  .squisq-outline-row-wrap:hover
+  .squisq-outline-row:not(.squisq-outline-row--current) {
+  background: color-mix(in oklch, var(--accent) 10%, transparent);
+}
+.squisq-editor-shell
+  .squisq-outline-row-wrap:has(.squisq-outline-row--current)
+  .squisq-outline-row-actions {
+  background: color-mix(in oklch, var(--accent) 14%, var(--surface));
+}
+.squisq-editor-shell[data-theme="dark"] .squisq-outline {
+  background: var(--panel);
+}
+.squisq-editor-shell[data-theme="dark"]
+  .squisq-outline-row-wrap:has(.squisq-outline-row--current)
+  .squisq-outline-row-actions {
+  background: color-mix(in oklch, var(--accent) 26%, var(--panel));
 }
 
 /* Dropdown that collects the less-frequent top-nav destinations
@@ -1984,6 +2065,13 @@ html.embedded-chat #root {
 
 .app-sidebar-home .app-sidebar-item-label {
   transform: translateX(-2px);
+}
+
+/* The meester's name rides along the Home label, muted so "Home" keeps
+   the weight and a long name truncates as prose, not punctuation. */
+.app-sidebar-home-meester {
+  color: var(--text-muted);
+  font-weight: 400;
 }
 
 .app-sidebar-item-label {
@@ -2716,6 +2804,22 @@ button {
   cursor: pointer;
 }
 
+/* Action hierarchy over the filled default above. A pair of bare buttons
+   renders as two primaries — give the quieter sibling `.secondary` and
+   destructive actions `.danger` so "Set as entry | Delete" never reads
+   as equal weight. */
+button.secondary {
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+
+button.danger {
+  background: var(--danger-bg);
+  color: var(--danger);
+  border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent);
+}
+
 .editor {
   width: 100%;
   min-height: 70vh;
@@ -2880,6 +2984,58 @@ button {
 
 .project-doc-editor-title {
   margin: 0 0 0.25rem;
+}
+
+/* Title row of a doc editor: heading left, autosave status chip right. */
+.project-doc-editor-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+/* Autosave status as a small chip, not a sentence suffix. Idle renders
+   nothing (`:empty`) so a freshly opened editor shows no status at all. */
+.autosave-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 0.14rem 0.5rem;
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+}
+
+.autosave-chip:empty {
+  display: none;
+}
+
+.autosave-chip-dirty {
+  color: var(--warning);
+  background: var(--warning-bg);
+}
+
+.autosave-chip-saving {
+  color: var(--text-muted);
+  background: var(--surface);
+}
+
+.autosave-chip-saved {
+  color: var(--success);
+  background: var(--success-bg);
+}
+
+.autosave-chip-error {
+  color: var(--danger);
+  background: var(--danger-bg);
+}
+
+.autosave-chip-error .link-btn {
+  text-transform: none;
+  letter-spacing: normal;
 }
 
 .project-about-section {
@@ -4200,9 +4356,24 @@ button {
    16px font-size inline on its content; override with !important (same
    pattern as the surface override above) so a font's `scale` factor can
    normalize visual size across typefaces. `--gezel-font-scale` is set on
-   `.msg-body-rendered` by the bubble; absent/1 → 16px (unchanged). */
+   `.msg-body-rendered` by the bubble; absent/1 → 16px (unchanged).
+
+   The font-family override keeps the chat register consistent: plain
+   `.msg-body` text is the editorial serif, but LinearDocView inlines a
+   system-ui stack on its content, flipping rendered assistant prose to
+   sans. `--gezel-chat-font` (set inline by the bubble when the gezel has
+   a custom chat font) still wins through the fallback chain. */
 .msg-body-rendered .squisq-linear-content {
   font-size: calc(16px * var(--gezel-font-scale, 1)) !important;
+  font-family: var(--gezel-chat-font, var(--font-display)) !important;
+}
+
+/* Chat replies are a conversation, not a centered document: Squisq's
+   page layout gives each section an auto-centered 740px reading measure,
+   which floats short replies ~150px off the bubble's left edge. Keep the
+   measure, drop the centering, so text aligns with the author row. */
+.msg-body-rendered .squisq-page-section-inner {
+  margin-inline: 0 !important;
 }
 
 .msg-user {
@@ -6839,9 +7010,9 @@ button {
 
 .history-kind {
   flex: 0 0 auto;
-  font-weight: 500;
-  color: var(--muted);
-  min-width: 9rem;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  white-space: nowrap;
 }
 
 .history-summary {
@@ -6849,6 +7020,7 @@ button {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-weight: 500;
 }
 
 .history-meta {
@@ -9038,20 +9210,68 @@ button.bench-step-foot:disabled {
   padding: 1.25rem 1.5rem;
 }
 
-.home-intro-mark {
-  flex-shrink: 0;
-  width: 64px;
-  height: auto;
-  display: block;
-  margin: 8px 14px 0;
-  user-select: none;
-  -webkit-user-drag: none;
-  pointer-events: none;
-}
-
 .home-intro-body {
   flex: 1;
   min-width: 0;
+}
+
+/* The intro body is the "What is gezel?" Handboek article embedded as a
+   live page: a row of controls (Open in Handboek + the Document/Video
+   tray), then the page itself — a cream sheet resting on the sage card. */
+.home-intro-article-controls {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0.35rem 0 0.6rem;
+}
+
+.home-intro-page {
+  background: var(--surface);
+  color: var(--text);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--surface-shadow);
+  overflow: hidden;
+}
+
+.home-intro-doc {
+  max-height: 26rem;
+  overflow-y: auto;
+  padding: 0.5rem 1.5rem 1rem;
+}
+
+/* Keep the embedded page's reading measure book-like, matching
+   .handboek-doc. */
+.home-intro-doc > * {
+  max-width: 52rem;
+  margin: 0 auto;
+}
+
+/* Squisq's LinearDocView sizes its pages against a full-height viewer;
+   inside the intro card the article should flow at natural content
+   height instead (same override as `.msg-body-rendered`). */
+.home-intro-doc .squisq-linear {
+  height: auto;
+  overflow: visible;
+}
+
+.home-intro-player {
+  height: 24rem;
+  display: flex;
+  padding: 0.75rem;
+}
+
+.home-intro-player > * {
+  flex: 1;
+  min-height: 0;
+}
+
+/* The carved-g brand mark inside the article ships at figure resolution;
+   in document views it reads as a small editorial mark, not a hero. */
+.home-intro-doc img[alt="gezel-mark"],
+.handboek-doc img[alt="gezel-mark"] {
+  max-height: 150px;
+  width: auto;
 }
 
 .home-intro h2 {
@@ -9124,7 +9344,10 @@ button.bench-step-foot:disabled {
   background: rgba(243, 237, 224, 0.06);
 }
 
-.home-intro p {
+/* Scoped to the card's own prose (the setup call-to-action under the
+   embedded page) — the embedded Handboek article inside
+   .home-intro-page styles its own text via the squisq theme. */
+.home-intro-body > p {
   margin: 0.9rem 0;
   color: var(--titlebar-ink);
   max-width: 800px;
@@ -9132,7 +9355,7 @@ button.bench-step-foot:disabled {
   hyphens: auto;
 }
 
-.home-intro strong {
+.home-intro-body > p strong {
   /* Keep emphasis visible on the sage field without blaring. */
   color: #ffffff;
   font-weight: 600;
@@ -12851,12 +13074,12 @@ button.timeline-session-divider-continuing::before {
   margin-top: 1rem;
 }
 
+/* Section headings match the sibling provider tabs' register — title
+   case serif, not the uppercase eyebrow treatment this panel used to
+   carry alone. */
 .provider-card .ollama-settings > .ollama-section > h4 {
   margin-top: 0;
-  font-size: 0.9rem;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--muted);
+  font-size: var(--text-xl);
 }
 
 /* ── CatalogBrowser (shared between Ollama models, gezel templates, toolsets) ── */
@@ -14441,6 +14664,24 @@ a.license-button:hover {
   background: linear-gradient(to bottom, #a83326, #c0392b);
   border-color: #7f2820;
   color: #fff2ef;
+}
+
+/* Security posture: the latched key wears the posture's meaning — sealed
+   green for Super Lockdown, open amber for Unrestricted. Lockdown and
+   Custom keep the standard accent latch. Same idea as the "Off" emergency
+   red above: only the extremes of the spectrum recolor, so the state
+   reads at a glance without turning the tray into a rainbow. Fixed inks
+   (not vars) because these fills hold on both themes, like the red. */
+.engagement-mode-super-lockdown .gz-key-active {
+  background: linear-gradient(to bottom, #48603f, #55724c);
+  border-color: #3a5233;
+  color: #edf3e6;
+}
+
+.engagement-mode-free .gz-key-active {
+  background: linear-gradient(to bottom, #a87e22, #bb9132);
+  border-color: #8a671b;
+  color: #2b2007;
 }
 
 .engagement-mode-description {
@@ -19716,6 +19957,18 @@ button.linklike {
   cursor: not-allowed;
   transform: none;
   box-shadow: none;
+}
+
+/* A key that reports a derived state rather than offering a choice (the
+   security posture's "Custom", reached by editing individual capability
+   switches): it sits latched at full strength while refusing interaction.
+   Pair with `disabled` + `aria-checked="true"` on a `.gz-key-active` key.
+   Placed after the disabled rule so the latch survives it. */
+.gz-key-state:where(:disabled) {
+  opacity: 1;
+  cursor: default;
+  transform: translateY(1px);
+  box-shadow: var(--key-pressed-shadow);
 }
 
 .gz-key:focus-visible,

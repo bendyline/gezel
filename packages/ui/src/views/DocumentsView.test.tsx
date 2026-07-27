@@ -158,7 +158,9 @@ describe('DocumentsView', () => {
     await waitFor(() => {
       expect(screen.getByTestId('file-tree')).toBeInTheDocument();
     });
-    expect(screen.getByText('guidelines/coding.md')).toBeInTheDocument();
+    // getAllByText: the first file auto-selects, so its path renders in the
+    // tree row AND the detail pane.
+    expect(screen.getAllByText('guidelines/coding.md').length).toBeGreaterThan(0);
     expect(screen.getByText('mission.md')).toBeInTheDocument();
   });
 

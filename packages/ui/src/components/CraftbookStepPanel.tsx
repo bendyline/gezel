@@ -123,7 +123,9 @@ export function CraftbookStepPanel({
       patch({ [field]: next.length > 0 ? next : null } as UpdateTaskStepRequest);
     return (
       <div className="step-script-row">
-        <span className="step-script-moment muted small">on {moment}</span>
+        <span className="step-script-moment muted small">
+          {moment === 'enter' ? 'when it starts' : 'when it finishes'}
+        </span>
         {refs.length === 0 && readOnly && <span className="muted small">—</span>}
         {refs.map((ref, i) => (
           <span key={`${ref.scope ?? 'craftbook'}:${ref.name}:${i}`} className="step-script-chip">
@@ -194,6 +196,7 @@ export function CraftbookStepPanel({
           <div className="task-step-panel-actions">
             <button
               type="button"
+              className="secondary"
               onClick={() => void onSetEntry(step.id)}
               disabled={busy || isEntry}
               title="Make this the craftbook's entry step"
@@ -202,6 +205,7 @@ export function CraftbookStepPanel({
             </button>
             <button
               type="button"
+              className="danger"
               onClick={() => void onRemove(step.id)}
               disabled={busy || steps.length <= 1}
               title={steps.length <= 1 ? 'A craftbook needs at least one step' : 'Delete this step'}
@@ -252,7 +256,7 @@ export function CraftbookStepPanel({
             </Select.Trigger>
             <Select.Content>
               <Select.Item value="__none">— by role —</Select.Item>
-              <Select.Item value="__user">→ user</Select.Item>
+              <Select.Item value="__user">→ You</Select.Item>
               {gezels.map((g) => (
                 <Select.Item key={g.id} value={g.id}>
                   → {g.name}

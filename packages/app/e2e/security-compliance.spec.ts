@@ -85,12 +85,12 @@ test.describe('Security & Compliance — first run', () => {
     // is a substring of "Super Lockdown", so an unanchored regex is
     // ambiguous under Playwright strict mode.
     for (const label of ['Super Lockdown', 'Lockdown', 'Unrestricted']) {
-      await expect(page.getByRole('button', { name: new RegExp(`^${label}`) })).toBeVisible();
+      await expect(page.getByRole('radio', { name: new RegExp(`^${label}`) })).toBeVisible();
     }
     await shot(page, 'sec-01-firstrun.png');
 
     // Pick Super Lockdown → it becomes active and the blurb updates.
-    await page.getByRole('button', { name: /^Super Lockdown/ }).click();
+    await page.getByRole('radio', { name: /^Super Lockdown/ }).click();
     await page.waitForTimeout(500);
     await expect(page.getByText(/Nothing leaves your machine/i)).toBeVisible();
     await shot(page, 'sec-02-firstrun-super-lockdown.png');
@@ -137,7 +137,7 @@ test.describe('Security & Compliance — settings panel', () => {
       timeout: 10000,
     });
     for (const label of ['Super Lockdown', 'Lockdown', 'Unrestricted']) {
-      await expect(page.getByRole('button', { name: new RegExp(`^${label}`) })).toBeVisible();
+      await expect(page.getByRole('radio', { name: new RegExp(`^${label}`) })).toBeVisible();
     }
     await expect(page.getByText('Edit files', { exact: true })).toBeVisible();
     await expect(page.getByText('External chat providers', { exact: true })).toBeVisible();
@@ -145,7 +145,7 @@ test.describe('Security & Compliance — settings panel', () => {
     await shot(page, 'sec-03-settings-panel.png');
 
     // Select Lockdown preset, then flip a single toggle → level "Custom".
-    await page.getByRole('button', { name: /^Lockdown/ }).click();
+    await page.getByRole('radio', { name: /^Lockdown/ }).click();
     await page.waitForTimeout(500);
     await shot(page, 'sec-04-settings-lockdown.png');
 
@@ -157,7 +157,7 @@ test.describe('Security & Compliance — settings panel', () => {
       .getByRole('checkbox');
     await editFiles.click();
     await page.waitForTimeout(600);
-    await expect(page.getByRole('button', { name: /^Custom/ })).toBeVisible({ timeout: 5000 });
+    await expect(page.getByRole('radio', { name: /^Custom/ })).toBeVisible({ timeout: 5000 });
     await shot(page, 'sec-05-settings-custom.png');
   });
 });

@@ -236,7 +236,20 @@ export function GezellenView() {
                         </span>
                       )}
                     </span>
-                    {a.role && <span className="gezel-row-role">{a.role}</span>}
+                    {(a.id === meesterId || a.role) && (
+                      <span className="gezel-row-role">
+                        {a.id === meesterId
+                          ? // The designation beats the job title: with the star
+                            // one hover away, the subtitle is what actually tells
+                            // a scanning eye who the meester IS — otherwise a
+                            // roster can show a role-titled "Meester" on someone
+                            // who no longer holds the designation.
+                            a.role && a.role !== 'Meester'
+                            ? `Meester · ${a.role}`
+                            : 'Meester'
+                          : a.role}
+                      </span>
+                    )}
                   </span>
                 </button>
                 <GezelActionsMenu gezel={a} compact />

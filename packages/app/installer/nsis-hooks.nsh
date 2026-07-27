@@ -120,7 +120,64 @@
   ${EndIf}
 !macroend
 
+; Ensure the Microsoft Visual C++ 2015-2022 Redistributable is present.
+;
+; Every native engine we ship (ggml-base.dll, ggml-cpu.dll, llama.dll,
+; whisper.dll, and the gezel-*-server.exe binaries) imports MSVCP140.dll,
+; VCRUNTIME140.dll and VCRUNTIME140_1.dll.  Those are not Windows
+; components; without the redistributable the loader fails each DLL before
+; main(), so local models never start and the only symptom is a chat that
+; won't answer.  Nothing guaranteed it before native-v0.1.18.
+;
+; Central deployment (running Microsoft's installer) rather than copying the
+; DLLs next to the binaries: both are licensed, but a centrally installed
+; runtime is serviced by Windows Update, while app-local copies freeze at
+; build time.  Staged by packages/app/scripts/stage-vc-redist.mjs, which
+; only accepts a Microsoft-signed binary from the build host's Visual Studio.
+;
+; This is best-effort by design.  Gezel's cloud providers work fine without
+; a CRT, so a redist hiccup must not fail the whole install — it warns and
+; continues, and only local-model support is affected.
+!macro InstallVCRedist
+  ; The runtimes key lives in the native 64-bit view; the installer is 32-bit.
+  SetRegView 64
+  ReadRegDWORD $0 HKLM "SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64" "Installed"
+  SetRegView 32
+  ${If} $0 == 1
+    DetailPrint "Microsoft Visual C++ runtime already present."
+  ${Else}
+!if /FileExists "${PROJECT_DIR}\dist\vc-redist\vc_redist.x64.exe"
+    DetailPrint "Installing the Microsoft Visual C++ runtime (required by local model engines)..."
+    ; $PLUGINSDIR is a temp dir NSIS deletes on exit, so the 25 MB payload
+    ; does not linger under Program Files after the install completes.
+    ; SetOutPath rather than File /oname= — /oname with a variable is not
+    ; portable across NSIS versions. Restore $OUTDIR afterwards so later
+    ; steps in customInstall still resolve relative paths under $INSTDIR.
+    InitPluginsDir
+    SetOutPath "$PLUGINSDIR"
+    File "${PROJECT_DIR}\dist\vc-redist\vc_redist.x64.exe"
+    SetOutPath "$INSTDIR"
+    ExecWait '"$PLUGINSDIR\vc_redist.x64.exe" /install /quiet /norestart' $0
+    ; 0 = installed, 1638 = a newer runtime is already present, 3010 = ok
+    ; but a reboot is pending. All three mean the CRT is usable.
+    ${If} $0 == 0
+    ${OrIf} $0 == 1638
+    ${OrIf} $0 == 3010
+      DetailPrint "Microsoft Visual C++ runtime ready (exit $0)."
+    ${Else}
+      DetailPrint "WARNING: the Visual C++ runtime installer returned $0."
+      MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not install the Microsoft Visual C++ runtime (error $0). Gezel will still run, but local AI models may fail to start until you install the 'Microsoft Visual C++ 2015-2022 Redistributable (x64)'."
+    ${EndIf}
+!else
+    !warning "vc_redist.x64.exe was not staged - the installer will not provision the Visual C++ runtime. Run packages/app/scripts/stage-vc-redist.mjs before packaging (release CI sets GEZEL_VCREDIST_REQUIRED=1)."
+    DetailPrint "Visual C++ runtime not bundled with this build; skipping."
+!endif
+  ${EndIf}
+!macroend
+
 !macro customInstall
+  !insertmacro InstallVCRedist
+
   DetailPrint "Installing least-privileged GezelService..."
 
   !insertmacro RemoveGezelService

@@ -658,7 +658,7 @@ export function NewTaskDialog({
                     {!selectedBook && (
                       <>
                         <label>
-                          Description <span className="muted">(40+ chars)</span>
+                          Description <span className="muted">· a sentence or two</span>
                           <textarea
                             value={description}
                             onChange={(e) => setDescription(e.target.value)}

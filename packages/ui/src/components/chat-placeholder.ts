@@ -106,22 +106,34 @@ export function pickChatPlaceholder(args: Args): string {
   if (args.fixedFunctionTool) {
     const pool = GENERATOR_VARIANTS[args.fixedFunctionTool] ?? GENERATOR_GENERIC;
     const pick = pool[Math.floor(Math.random() * pool.length)];
-    return pick ? pick(gezelName) : GENERATOR_GENERIC[0]!(gezelName);
+    return sentenceCase(pick ? pick(gezelName) : GENERATOR_GENERIC[0]!(gezelName));
   }
   // ~15% chance to serve a quirky universal variant, regardless of role.
   if (Math.random() < 0.15) {
     const q = QUIRKY_UNIVERSAL[Math.floor(Math.random() * QUIRKY_UNIVERSAL.length)];
-    if (q) return q(gezelName);
+    if (q) return sentenceCase(q(gezelName));
   }
   if (role === 'meester') {
     const pick = MEESTER_VARIANTS[Math.floor(Math.random() * MEESTER_VARIANTS.length)];
-    return pick ? pick(gezelName) : `Talk with ${gezelName}.`;
+    return sentenceCase(pick ? pick(gezelName) : `Talk with ${gezelName}.`);
   }
   if (role === 'voorman') {
     const project = args.projectName ?? 'this project';
     const pick = VOORMAN_VARIANTS[Math.floor(Math.random() * VOORMAN_VARIANTS.length)];
-    return pick ? pick(gezelName, project) : `Talk with ${gezelName} about ${project}.`;
+    return sentenceCase(
+      pick ? pick(gezelName, project) : `Talk with ${gezelName} about ${project}.`,
+    );
   }
   const pick = OTHER_VARIANTS[Math.floor(Math.random() * OTHER_VARIANTS.length)];
-  return pick ? pick(gezelName) : `Talk with ${gezelName}.`;
+  return sentenceCase(pick ? pick(gezelName) : `Talk with ${gezelName}.`);
+}
+
+/**
+ * Placeholders are sentences, and several templates open with the gezel's
+ * name — which can be a lowercase fallback like "your meester". Capitalize
+ * the first character so the sentence never starts lowercase, wherever the
+ * name lands in the template.
+ */
+function sentenceCase(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1);
 }

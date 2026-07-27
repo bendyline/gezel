@@ -114,6 +114,18 @@ Rules:
 - **Selected = pressed in, not popped out.** The latched key translates down
   1px, takes the accent fill, and carries an inset shadow. Hover lightens
   the raised face; mousedown previews the pressed depth.
+- **Derived states may sit latched but inert.** When a group can enter a
+  state the user doesn't pick directly (the security posture's "Custom",
+  reached by editing individual capability switches), render it as a
+  `gz-key gz-key-active gz-key-state` button with `disabled` +
+  `aria-checked="true"` — the `.gz-key-state` extension keeps the pressed
+  treatment at full strength while the key refuses interaction.
+- **Only a spectrum's extremes may recolor the latch.** The pressed face
+  defaults to the accent. When a group is a spectrum with meaningful ends,
+  the end keys may override it — the AI engagement "Off" latches
+  danger-red (emergency stop), the security posture latches sealed-green
+  on Super Lockdown and open-amber on Unrestricted. Middle options keep
+  the accent; never give every key its own color.
 - **Native `<input type="radio">` stays native** in dense config forms
   (folder scopes, engine settings) — the round dot is a true circle and
   keeps its shape. Reach for keys when the choice is prominent enough to
@@ -252,6 +264,15 @@ skeleton the same way — extend it rather than fork it. Lead the gallery
 with the curated, context-relevant subset (e.g. craftbooks recommended
 for the project's type) and keep the full catalog one rail-click away.
 
+**Embedded Handboek pages.** When a surface needs explanatory copy that
+also belongs in the documentation, don't hardcode the prose — embed the
+Handboek article (`LinearDocView`/`DocPlayer` + `createHandboekMediaProvider`,
+with the shared `GEZEL_LIGHT_SURFACE` overlay in light mode) so the pitch and
+the docs never drift. The Home first-run intro's "What is gezel?" embed
+(`IntroHandboekArticle`) is the reference implementation: a cream page
+resting on the card, a Document/Video key tray, and an "Open in Handboek →"
+link that lands on the same article.
+
 **Loading states.** Prefer inline `muted` text ("loading models…",
 "generating…") over blocking spinners. A pulsing icon (see
 `.gezel-icon--pulse`) is the canonical "this thing is working in the
@@ -369,6 +390,24 @@ pinned by `town-style.golden.test.ts`:
 
 If the golden test fails, the change moved buildings that already exist on
 users' maps. That is the finding — not a stale fixture.
+
+### The village file is committed, so it must not churn
+
+Placement memory lives in `.gezel/village.json` — anchors, user overrides, and
+the journal that can rebuild the whole settlement after index loss. Users are
+asked to commit it, which makes one property non-negotiable: **a rebuild that
+changes nothing must produce no diff.**
+
+Timestamps are the natural enemy of that. The file therefore records a timestamp
+only where the app reads one back — a block's first placement (the age lens) and
+its removal (tombstone pruning). Both change only when a file is genuinely added
+or deleted, which is a real change and belongs in the diff. There is deliberately
+no `updatedAt`, no `seededAt`, and no `recordedAt`; derived geometry (streets,
+plates, plazas) carries no timestamp at all. Don't add one back "for debugging" —
+it puts a dirty working tree in front of every user on every indexer tick.
+
+The same reasoning is why the urbanity field's parameters are sticky rather than
+recomputed (see [urbanity.ts](../packages/service/src/filemap/urbanity.ts)).
 
 ### Zoom-tier budget
 

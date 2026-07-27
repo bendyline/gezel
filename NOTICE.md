@@ -139,7 +139,7 @@ their pin-bound manifest live in [`native/licenses/`](native/licenses/).
 | **stable-diffusion.cpp** (`sd-server`) | tag `master-789-5114672` | MIT | [leejet/stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp) |
 | **whisper.cpp** (`whisper-server`) | tag `v1.9.1` | MIT | [ggml-org/whisper.cpp](https://github.com/ggml-org/whisper.cpp) |
 | **uv** (precompiled binary, not built from source) | tag `0.11.32` | Apache-2.0 OR MIT | [astral-sh/uv](https://github.com/astral-sh/uv) |
-| **OpenSSL 3 runtime libraries** (bundled beside llama.cpp) | build-platform version | Apache-2.0 | [openssl/openssl](https://github.com/openssl/openssl) |
+| **Vulkan loader** (`libvulkan.so.1`, bundled beside stable-diffusion.cpp on `linux-x64`) | build-platform version | Apache-2.0 | [KhronosGroup/Vulkan-Loader](https://github.com/KhronosGroup/Vulkan-Loader) |
 
 The `ggml` compute library is vendored as a submodule of both
 llama.cpp and whisper.cpp and is compiled into the shared libraries

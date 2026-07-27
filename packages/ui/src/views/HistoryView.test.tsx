@@ -86,11 +86,14 @@ describe('HistoryView', () => {
     render(<HistoryView />);
 
     await waitFor(() => {
-      expect(screen.getByText(/Created gezel Maya/)).toBeInTheDocument();
+      // getAllByText: the newest entry auto-selects, so its summary also
+      // appears in the detail pane.
+      expect(screen.getAllByText(/Created gezel Maya/).length).toBeGreaterThan(0);
     });
 
     // Event row shows the kind, summary, and chips for project + gezel.
-    expect(screen.getByText(/📜 gezel\.created/)).toBeInTheDocument();
+    const kindEls = screen.getAllByText('Gezel created');
+    expect(kindEls.some((el) => el.className.includes('history-kind'))).toBe(true);
     expect(screen.getAllByText('Maya').length).toBeGreaterThanOrEqual(1);
 
     // Session row uses its own renderer with msg count and activity.
@@ -191,7 +194,7 @@ describe('HistoryView', () => {
     await waitFor(() => {
       expect(screen.queryByText(/event entry/)).not.toBeInTheDocument();
     });
-    expect(screen.getByText(/session entry/)).toBeInTheDocument();
+    expect(screen.getAllByText(/session entry/).length).toBeGreaterThan(0);
   });
 
   it('hides the project filter when a projectId prop is provided (embedded mode)', async () => {

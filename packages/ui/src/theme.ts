@@ -79,7 +79,23 @@ function systemTheme(): EffectiveTheme {
   return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
 }
 
+/**
+ * The `data-theme` attribute on <html> is what the stylesheet actually
+ * renders. When it's stamped, it must win over localStorage/media-query
+ * resolution — otherwise any caller that sets the attribute without also
+ * updating the pref store (boot scripts, tests, devtools) splits the app
+ * into dark CSS with light React-side surfaces (Squisq editors, chat
+ * bubble schemes). Absent attribute = follow the system preference.
+ */
+function attributeTheme(): EffectiveTheme | null {
+  if (typeof document === 'undefined') return null;
+  const t = document.documentElement.getAttribute('data-theme');
+  return t === 'light' || t === 'dark' ? t : null;
+}
+
 function resolveEffective(): EffectiveTheme {
+  const stamped = attributeTheme();
+  if (stamped) return stamped;
   const pref = getThemePref();
   return pref === 'system' ? systemTheme() : pref;
 }
@@ -95,9 +111,18 @@ export function useEffectiveTheme(): EffectiveTheme {
       window.addEventListener(CHANGE_EVENT, onChange);
       const mql = window.matchMedia('(prefers-color-scheme: dark)');
       mql.addEventListener('change', onChange);
+      // Re-render when data-theme is stamped directly — the attribute is
+      // authoritative (see attributeTheme) and not every setter dispatches
+      // the CHANGE_EVENT.
+      const observer = new MutationObserver(onChange);
+      observer.observe(document.documentElement, {
+        attributes: true,
+        attributeFilter: ['data-theme'],
+      });
       return () => {
         window.removeEventListener(CHANGE_EVENT, onChange);
         mql.removeEventListener('change', onChange);
+        observer.disconnect();
       };
     },
     resolveEffective,

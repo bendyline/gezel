@@ -48,7 +48,7 @@ function toUpdateBody(book: Craftbook) {
  * The craftbook editor — the design-mode sibling of `TaskDetail`. Header +
  * shared StepTracker (reorderable, no lifecycle status) + per-step panel +
  * an AI-assist tab. Local craftbooks are editable; bundled/project books
- * render read-only with a "Fork to edit" affordance (the PATCH route
+ * render read-only with a "Copy to edit" affordance (the PATCH route
  * refuses non-local books anyway).
  */
 export function CraftbookEditor({ craftbookId, source, onChanged }: CraftbookEditorProps) {
@@ -219,7 +219,7 @@ export function CraftbookEditor({ craftbookId, source, onChanged }: CraftbookEdi
           <span className={`task-badge task-badge-${resolvedSource}`}>{resolvedSource}</span>
           {readOnly && (
             <button type="button" className="primary" onClick={() => void fork()} disabled={busy}>
-              Fork to edit
+              Copy to edit
             </button>
           )}
         </div>

@@ -69,6 +69,10 @@ cmake is not on PATH. Install it before running this script:
 # -- 2. Configure + build ------------------------------------------
 $cmakeFlags = @(
   '-DCMAKE_BUILD_TYPE=Release',
+  # Drops the unbundled VCOMP140.DLL import ggml's default OPENMP=ON
+  # bakes into ggml-base.dll + ggml-cpu.dll. See the longer note in
+  # native/engines/llama-cpp/build.sh.
+  '-DGGML_OPENMP=OFF',
   '-DWHISPER_BUILD_SERVER=ON',
   '-DWHISPER_BUILD_TESTS=OFF',
   '-DWHISPER_BUILD_EXAMPLES=ON'

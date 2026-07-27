@@ -192,7 +192,6 @@ describe('packTownRoot geometry', () => {
     const paths = town.anchors.map((a) => a.path).sort();
     expect(paths).toEqual(['docs', 'evals', 'packages']);
     for (const a of town.anchors) {
-      expect(a.recordedAt).toBe(NOW);
       expect(regionOf(a.cx, a.cy)).toBeDefined();
     }
     // Re-seed with the recorded anchors: they are echoed verbatim.
@@ -329,13 +328,16 @@ describe('deriveAnchorsFromPrior', () => {
       placedAt: null,
       removedAt: null,
     });
-    const anchors = deriveAnchorsFromPrior(
-      [mk('left/a.ts', 0, 0), mk('left/b.ts', 10, 20), mk('right/c.ts', 500, 500)],
-      NOW,
-    );
+    const anchors = deriveAnchorsFromPrior([
+      mk('left/a.ts', 0, 0),
+      mk('left/b.ts', 10, 20),
+      mk('right/c.ts', 500, 500),
+    ]);
     const byPath = new Map(anchors.map((a) => [a.path, a]));
     expect(byPath.get('left')?.region).toBe('NW');
     expect(byPath.get('right')?.region).toBe('SE');
-    expect(anchors.every((a) => a.recordedAt === NOW)).toBe(true);
+    // Anchors carry no timestamp: they are macro memory, not provenance, and a
+    // recordedAt on each would dirty the committed village file on every build.
+    expect(anchors.every((a) => !('recordedAt' in a))).toBe(true);
   });
 });

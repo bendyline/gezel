@@ -94,7 +94,11 @@ export function drawTownBuilding(
     // from the block's width — makes the roofFactor contract structural: a cap
     // physically cannot paint past the budget culling and hit-testing assume.
     const budgetPx = roofPx * (style.roofFactor ?? 1);
-    const capHeadroom = Math.max(0, budgetPx - (prism.tn.y - ridge.apex.y));
+    // Measured from the HIGHEST mount point, not the apex: a bellcote and a
+    // finial sit on `ridge.a`, which on a gable stands above the midpoint the
+    // apex reports. Budgeting against the apex let those caps overrun.
+    const mountY = Math.min(ridge.a.y, ridge.b.y, ridge.apex.y);
+    const capHeadroom = Math.max(0, budgetPx - (prism.tn.y - mountY));
     drawRoofFurniture(ctx, s, prism, style, ridge, roofPx, capHeadroom, compact);
   }
 }
@@ -516,6 +520,20 @@ function drawConicalRoof(
   return { a: apex, b: apex, apex };
 }
 
+/** Projected wall width below which the fine facade layer stops resolving. */
+const MIN_FINE_PX = 34;
+
+/**
+ * One visible wall, as the four corners `wallPatch` interpolates between.
+ * Only the S and E walls face the camera; the others are never painted.
+ */
+interface WallQuad {
+  ta: ScreenPt;
+  tb: ScreenPt;
+  ga: ScreenPt;
+  gb: ScreenPt;
+}
+
 function drawFacadeDetails(
   ctx: CanvasRenderingContext2D,
   s: IsoRenderState,
@@ -526,10 +544,20 @@ function drawFacadeDetails(
   const random = seeded(style.seed ^ SEED_SALT.FACADE);
   const rows = Math.max(1, Math.min(3, style.storeys));
   const bays = Math.max(1, Math.min(compact ? 3 : 4, style.bays));
-  const windowColor = () => (random() < 0.24 ? s.palette.windowLit : s.palette.window);
+  const widthPx = p.te.x - p.tw.x;
+  const fine = widthPx >= MIN_FINE_PX;
 
-  drawWallWindows(ctx, p.tw, p.ts, p.gw, p.gs, rows, bays, windowColor);
-  drawWallWindows(ctx, p.ts, p.te, p.gs, p.ge, rows, Math.max(1, bays - 1), windowColor);
+  const walls: Array<{ q: WallQuad; bays: number }> = [
+    { q: { ta: p.tw, tb: p.ts, ga: p.gw, gb: p.gs }, bays },
+    { q: { ta: p.ts, tb: p.te, ga: p.gs, gb: p.ge }, bays: Math.max(1, bays - 1) },
+  ];
+
+  for (const { q, bays: n } of walls) {
+    drawWallStructure(ctx, s, q, style, fine, n);
+    drawWallWindows(ctx, q, rows, n, fine, () =>
+      random() < 0.24 ? s.palette.windowLit : s.palette.window,
+    );
+  }
 
   drawGroundFloor(ctx, s, p, style);
 
@@ -684,16 +712,100 @@ export function drawTrim(
   }
 }
 
+/**
+ * The wall itself, before anything is put in it: plinth, eaves fascia, storey
+ * bands, bay pilasters, and half-timber framing.
+ *
+ * This layer is what turns a flat quad into a building. Without it a facade is
+ * a colored box with window slits punched in, and the only thing separating one
+ * building from the next is whether its lights happen to be on — which is
+ * exactly how the settlement read before.
+ *
+ * Everything is expressed in wall-relative UV, so it scales with the building
+ * instead of sitting at a fixed pixel size.
+ */
+function drawWallStructure(
+  ctx: CanvasRenderingContext2D,
+  s: IsoRenderState,
+  w: WallQuad,
+  style: TownStyle,
+  fine: boolean,
+  bays: number,
+): void {
+  const patch = (u0: number, u1: number, v0: number, v1: number) =>
+    wallPatch(w.ta, w.tb, w.ga, w.gb, u0, u1, v0, v1);
+
+  // Plinth: the building meets the ground on a base course rather than just
+  // stopping. Reads at any size and is the cheapest grounding cue there is.
+  ctx.globalAlpha = 0.5;
+  fillQuad(ctx, s.palette.masonry, ...patch(0, 1, 0.93, 1));
+  ctx.globalAlpha = 1;
+
+  // Eaves fascia: a light band at the wall head, separating wall from roof.
+  ctx.globalAlpha = 0.45;
+  fillQuad(ctx, s.palette.sidewalk, ...patch(0, 1, 0.02, 0.07));
+  ctx.globalAlpha = 1;
+
+  if (!fine) return;
+
+  // Pilasters on the bay divisions give a facade vertical rhythm. Urban
+  // buildings articulate; village ones only board their corners.
+  const urban = style.band !== 'village';
+  ctx.globalAlpha = 0.3;
+  if (urban && bays > 1) {
+    for (let i = 1; i < bays; i++) {
+      const u = 0.09 + (0.82 * i) / bays;
+      fillQuad(ctx, s.palette.sidewalk, ...patch(u - 0.012, u + 0.012, 0.07, 0.93));
+    }
+  }
+  // Corner boards / quoin strips at both ends of every wall.
+  fillQuad(ctx, s.palette.sidewalk, ...patch(0, 0.035, 0.07, 0.93));
+  fillQuad(ctx, s.palette.sidewalk, ...patch(0.965, 1, 0.07, 0.93));
+  ctx.globalAlpha = 1;
+
+  // Half-timbering: the village signature, and genuinely period. A rail and a
+  // few posts, not a texture fill — structure drawn as structure.
+  if (style.material.wall === 'timber') {
+    ctx.strokeStyle = s.palette.masonry;
+    ctx.globalAlpha = 0.55;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    const rail = 0.5;
+    const a = patch(0.03, 0.03, rail, rail)[0];
+    const b = patch(0.97, 0.97, rail, rail)[0];
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    for (let i = 0; i <= bays; i++) {
+      const u = 0.06 + (0.88 * i) / Math.max(1, bays);
+      const t0 = patch(u, u, 0.08, 0.08)[0];
+      const t1 = patch(u, u, 0.92, 0.92)[0];
+      ctx.moveTo(t0.x, t0.y);
+      ctx.lineTo(t1.x, t1.y);
+    }
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+}
+
+/**
+ * Windows with a lintel over and a sill under, plus glazing bars once they are
+ * large enough to resolve.
+ *
+ * A bare rectangle reads as a slit; the same rectangle with a sill line under
+ * it reads as a window, and that one extra quad is most of the difference
+ * between "box with stripes" and "building".
+ */
 function drawWallWindows(
   ctx: CanvasRenderingContext2D,
-  topA: ScreenPt,
-  topB: ScreenPt,
-  groundA: ScreenPt,
-  groundB: ScreenPt,
+  w: WallQuad,
   rows: number,
   bays: number,
+  fine: boolean,
   color: () => string,
 ): void {
+  const patch = (u0: number, u1: number, v0: number, v1: number) =>
+    wallPatch(w.ta, w.tb, w.ga, w.gb, u0, u1, v0, v1);
+
   for (let row = 0; row < rows; row++) {
     const band = 0.72 / rows;
     const v0 = 0.12 + row * band;
@@ -702,10 +814,47 @@ function drawWallWindows(
       const span = 0.82 / bays;
       const u0 = 0.09 + bay * span + span * 0.2;
       const u1 = 0.09 + (bay + 1) * span - span * 0.2;
-      fillQuad(ctx, color(), ...wallPatch(topA, topB, groundA, groundB, u0, u1, v0, v1));
+      const glass = color();
+
+      if (fine) {
+        // Lintel above and sill below, the sill oversailing the reveal a little
+        // so it catches as a shadow line.
+        ctx.globalAlpha = 0.55;
+        fillQuad(ctx, LINTEL, ...patch(u0 - 0.008, u1 + 0.008, v0 - 0.022, v0));
+        ctx.globalAlpha = 0.8;
+        fillQuad(ctx, SILL, ...patch(u0 - 0.016, u1 + 0.016, v1, v1 + 0.022));
+        ctx.globalAlpha = 1;
+      }
+
+      fillQuad(ctx, glass, ...patch(u0, u1, v0, v1));
+
+      if (fine) {
+        // Glazing bars: one mullion, one transom. Turns a pane into a sash.
+        ctx.strokeStyle = LINTEL;
+        ctx.globalAlpha = 0.5;
+        ctx.lineWidth = 0.7;
+        ctx.beginPath();
+        const um = (u0 + u1) / 2;
+        const mt = patch(um, um, v0, v0)[0];
+        const mb = patch(um, um, v1, v1)[0];
+        ctx.moveTo(mt.x, mt.y);
+        ctx.lineTo(mb.x, mb.y);
+        const vt = v0 + (v1 - v0) * 0.42;
+        const tl = patch(u0, u0, vt, vt)[0];
+        const tr = patch(u1, u1, vt, vt)[0];
+        ctx.moveTo(tl.x, tl.y);
+        ctx.lineTo(tr.x, tr.y);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+      }
     }
   }
 }
+
+/** Stone dressings around an opening. Neutral on purpose — a sill is stone in
+ *  every register, and tinting it per language would fight the roof field. */
+const SILL = '#cfc6b4';
+const LINTEL = '#3a342c';
 
 function drawRoofFurniture(
   ctx: CanvasRenderingContext2D,
@@ -718,7 +867,14 @@ function drawRoofFurniture(
   compact: boolean,
 ): void {
   const random = seeded(style.seed ^ SEED_SALT.ROOF_FURNITURE);
-  const scale = compact ? 0.65 : 1;
+  const widthPx = p.te.x - p.tw.x;
+  /**
+   * Furniture is sized as a FRACTION OF THE BUILDING, not in fixed screen
+   * pixels. The old constants (a 2.7x7px stack) meant a chimney stayed a speck
+   * however far you zoomed in — so at street zoom, where chimneys are exactly
+   * the detail that says "1900s", every roof was bare.
+   */
+  const unit = Math.max(2, widthPx * (compact ? 0.055 : 0.07));
   /** Largest cap of total height `heightPerUnit × u` that still fits. */
   const fit = (want: number, heightPerUnit: number): number =>
     Math.max(0, Math.min(want, capHeadroom / heightPerUnit));
@@ -728,23 +884,23 @@ function drawRoofFurniture(
   for (let i = 0; i < style.chimneys; i++) {
     const t = style.chimneys === 1 ? 0.5 : 0.27 + (i / (style.chimneys - 1)) * 0.46;
     const at = lerp(ridge.a, ridge.b, t);
-    const x = at.x + (random() - 0.5) * 2;
-    drawStack(ctx, x, at.y, Math.max(1.5, 2.7 * scale), Math.max(4, 7 * scale), s.palette.masonry);
+    const x = at.x + (random() - 0.5) * unit * 0.6;
+    drawStack(ctx, x, at.y, unit, unit * 2.4, s.palette.masonry);
   }
 
   if (style.cupola && style.cap !== 'clock-tower') {
-    const width = fit(Math.min(13, (p.te.x - p.tw.x) * 0.15), CAP_HEIGHT.cupola);
+    const width = fit(widthPx * 0.15, CAP_HEIGHT.cupola);
     if (width >= 3) drawCupola(ctx, ridge.apex.x, ridge.apex.y, width, style.clock, s);
   }
 
   switch (style.cap) {
     case 'bellcote': {
-      const size = fit(7 * scale, CAP_HEIGHT.bellcote);
+      const size = fit(unit * 2, CAP_HEIGHT.bellcote);
       if (size >= 2.5) drawBellcote(ctx, ridge.a, size, s);
       break;
     }
     case 'finial': {
-      const size = fit(6 * scale, CAP_HEIGHT.finial);
+      const size = fit(unit * 1.8, CAP_HEIGHT.finial);
       if (size >= 2) drawFinial(ctx, ridge.a, size, s.palette.masonry);
       break;
     }
@@ -754,7 +910,7 @@ function drawRoofFurniture(
       break;
     }
     case 'lantern': {
-      const width = fit(8 * scale, CAP_HEIGHT.lantern);
+      const width = fit(unit * 2.2, CAP_HEIGHT.lantern);
       if (width >= 3) drawLantern(ctx, ridge.apex, width, s);
       break;
     }
@@ -762,13 +918,17 @@ function drawRoofFurniture(
       break;
   }
 
-  if (style.dormers > 0 && p.te.x - p.tw.x >= 28) {
+  if (style.dormers > 0 && widthPx >= 28) {
     const count = Math.min(3, style.dormers);
     for (let i = 0; i < count; i++) {
       // Dormers sit on the slope: partway down from the ridge toward the eave.
       const at = lerp(ridge.a, ridge.b, count === 1 ? 0.5 : 0.25 + (i / (count - 1)) * 0.5);
       const y = at.y + roofRise * 0.45;
-      drawDormer(ctx, at.x, y, s.palette.window, s.palette.masonry);
+      // A dormer sits ON the slope and never breaks the ridge line, so its
+      // size is bounded by the pitch it is set into, not just by the building
+      // width. That is both the architecture and the roof-budget contract.
+      const size = Math.min(unit * 0.9, roofRise * 0.28);
+      if (size >= 2.4) drawDormer(ctx, at.x, y, size, s.palette.window, s.palette.masonry);
     }
   }
 }
@@ -949,12 +1109,21 @@ function drawDormer(
   ctx: CanvasRenderingContext2D,
   x: number,
   y: number,
+  size: number,
   windowColor: string,
   trim: string,
 ): void {
+  const w = Math.max(2.4, size);
+  const h = w * 0.94;
   ctx.fillStyle = windowColor;
-  ctx.fillRect(x - 1.7, y - 3, 3.4, 3.2);
-  fillTriangle(ctx, trim, { x: x - 2.4, y: y - 3 }, { x, y: y - 5.2 }, { x: x + 2.4, y: y - 3 });
+  ctx.fillRect(x - w / 2, y - h, w, h);
+  fillTriangle(
+    ctx,
+    trim,
+    { x: x - w * 0.72, y: y - h },
+    { x, y: y - h - w * 0.66 },
+    { x: x + w * 0.72, y: y - h },
+  );
 }
 
 function wallPatch(

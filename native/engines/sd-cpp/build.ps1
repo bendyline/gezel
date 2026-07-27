@@ -118,6 +118,10 @@ $platform = 'win32-x64'
 $backend = if ($env:SD_BACKEND) { $env:SD_BACKEND } else { 'vulkan' }
 $cmakeFlags = @(
   '-DCMAKE_BUILD_TYPE=Release',
+  # Drops the unbundled VCOMP140.DLL import ggml's default OPENMP=ON
+  # bakes into ggml-base.dll + ggml-cpu.dll and into sd-server.exe
+  # itself. See the longer note in native/engines/llama-cpp/build.sh.
+  '-DGGML_OPENMP=OFF',
   # stable-diffusion.cpp's generated translation unit exceeds COFF's default
   # section count on current MSVC. /bigobj raises that object-file limit.
   '-DCMAKE_CXX_FLAGS=/bigobj',

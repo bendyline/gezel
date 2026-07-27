@@ -2,6 +2,7 @@ import type { HandboekFigure } from '@bendyline/gezel';
 import type { MediaEntry, MediaProvider } from '@bendyline/squisq';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import gezelMarkUrl from '../../assets/gezellogo.png';
 import { Poppetje, type PoppetjeVariant } from '../../poppetje/index.js';
 
 /**
@@ -17,6 +18,19 @@ import { Poppetje, type PoppetjeVariant } from '../../poppetje/index.js';
  */
 const FIGURE_RE = /^poppetje\/(.+)\.(full|headshot|icon)\.svg$/;
 
+/**
+ * Brand images referenced by curated articles as `../assets/<name>`
+ * (file-relative, so the markdown reads on GitHub and passes the repo
+ * link checker) — the same paths the static-site export serves by
+ * copying the content tree's `assets/` folder. In-app they resolve to
+ * the already-bundled originals so no HTTP round-trip (or new service
+ * route) is needed. Keyed content-root-relative; leading `../` segments
+ * are stripped before lookup, mirroring the exporter's rewrite.
+ */
+const BUNDLED_ASSETS: Record<string, string> = {
+  'assets/gezel-mark.png': gezelMarkUrl,
+};
+
 export function createHandboekMediaProvider(figures: HandboekFigure[]): MediaProvider {
   const byPath = new Map(figures.map((f) => [f.path, f]));
   const blobUrlCache = new Map<string, string>();
@@ -27,6 +41,8 @@ export function createHandboekMediaProvider(figures: HandboekFigure[]): MediaPro
     },
 
     async resolveUrl(relPath: string): Promise<string> {
+      const bundled = BUNDLED_ASSETS[relPath.replace(/^(\.\.?\/)+/, '')];
+      if (bundled) return bundled;
       const cached = blobUrlCache.get(relPath);
       if (cached) return cached;
       const m = FIGURE_RE.exec(relPath);

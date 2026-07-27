@@ -13,7 +13,7 @@ interface Selection {
 const SOURCE_GROUPS: Array<{ source: Source; label: string; hint: string }> = [
   { source: 'local', label: 'My craftbooks', hint: 'editable' },
   { source: 'project', label: 'Project', hint: 'read-only' },
-  { source: 'bundled', label: 'Gilde catalog', hint: 'read-only — fork to edit' },
+  { source: 'bundled', label: 'Gilde catalog', hint: 'read-only — copy to edit' },
 ];
 
 export function CraftbooksView() {
@@ -51,6 +51,17 @@ export function CraftbooksView() {
     setCreating(false);
     setSelected({ id, source });
   }, []);
+
+  // Land on a craftbook instead of an empty editor pane: prefer the user's
+  // own books, then the catalog, in list order. Never stomps an existing
+  // selection.
+  useEffect(() => {
+    if (selected || craftbooks.length === 0) return;
+    const first =
+      SOURCE_GROUPS.map((g) => craftbooks.find((c) => c.source === g.source)).find(Boolean) ??
+      craftbooks[0];
+    if (first) setSelected({ id: first.id, source: first.source });
+  }, [selected, craftbooks]);
 
   const onCreated = useCallback(
     async (id: string) => {
@@ -109,13 +120,13 @@ export function CraftbooksView() {
                         onClick={() => open(c.id, c.source)}
                       >
                         <span className="task-row-body">
+                          <span className="task-title">{c.name}</span>
                           <span className="task-row-meta">
                             <span className="task-ref">{c.id}</span>
                             <span className="task-assignee">
                               {c.stepCount} step{c.stepCount === 1 ? '' : 's'}
                             </span>
                           </span>
-                          <span className="task-title">{c.name}</span>
                         </span>
                       </button>
                     </li>
@@ -139,8 +150,8 @@ export function CraftbooksView() {
             />
           ) : (
             <p className="placeholder">
-              Select a craftbook to edit it, or start a new one. Gilde books open read-only — fork
-              to make your own.
+              Select a craftbook to edit it, or start a new one. Gilde books open read-only — make a
+              copy to edit them.
             </p>
           )}
         </section>

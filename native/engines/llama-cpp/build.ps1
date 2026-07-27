@@ -65,15 +65,25 @@ if ($backend -eq 'auto') {
 
 $cmakeFlags = @(
   '-DCMAKE_BUILD_TYPE=Release',
+  # ggml defaults GGML_OPENMP=ON, which makes ggml-base.dll and
+  # ggml-cpu.dll import VCOMP140.DLL - part of the MSVC redistributable,
+  # which we do not ship. ggml's native threadpool covers the OFF path.
+  # See the longer note in native/engines/llama-cpp/build.sh.
+  '-DGGML_OPENMP=OFF',
   '-DLLAMA_BUILD_SERVER=ON',
   '-DLLAMA_BUILD_TESTS=OFF',
   '-DLLAMA_BUILD_EXAMPLES=OFF',
-  '-DLLAMA_CURL=OFF'
-  # Note: -DLLAMA_SERVER_SSL=OFF was tried here but b8892 ignores it
-  # (CMake warns "Manually-specified variables were not used by the
-  # project") - find_package(OpenSSL) runs unconditionally. We bundle
-  # the OpenSSL runtime DLLs after the build instead. See the
-  # libssl/libcrypto block below.
+  '-DLLAMA_CURL=OFF',
+  # No OpenSSL. This gates cpp-httplib's CPPHTTPLIB_OPENSSL_SUPPORT -
+  # llama-server terminating TLS itself - which gezel never uses: the
+  # engine is spawned on loopback and spoken to over plain HTTP.
+  #
+  # The old `-DLLAMA_SERVER_SSL=OFF` note here was about b8892, which
+  # ignored that flag and linked OpenSSL unconditionally; the workaround
+  # was to copy libssl/libcrypto out of the build host's Git for Windows
+  # MinGW tree. b10099 has a real option, so we turn it off and ship no
+  # OpenSSL at all rather than redistributing an unpinned MSYS2 build.
+  '-DLLAMA_OPENSSL=OFF'
 )
 switch ($backend) {
   'cuda'   { $cmakeFlags += '-DGGML_CUDA=ON' }
@@ -188,44 +198,14 @@ if ($backend -eq 'cuda') {
   }
 }
 
-# Bundle OpenSSL DLLs (libssl-3-x64.dll, libcrypto-3-x64.dll). At b8892,
-# llama.cpp's tools/server/CMakeLists.txt calls `find_package(OpenSSL)`
-# unconditionally - `-DLLAMA_SERVER_SSL=OFF` is silently ignored (CMake
-# logs "Manually-specified variables were not used by the project:
-# LLAMA_SERVER_SSL"). So the binary statically links libssl/libcrypto
-# whether we want it to or not, and on Windows the loader exits
-# 0xC0000135 (DLL_NOT_FOUND) before main() if those DLLs aren't on the
-# search path. On Linux/macOS the binary picks them up from system
-# libs (libssl.so.3 in /usr/lib/x86_64-linux-gnu/) so no bundling is
-# needed there. Windows-only.
-#
-# Source dirs: Git for Windows ships them at C:\Program Files\Git\
-# mingw64\bin (CI runner has Git installed). Other common spots are
-# the standalone OpenSSL-Win64 installer and vcpkg.
-$opensslDlls = @('libssl-3-x64.dll', 'libcrypto-3-x64.dll')
-$opensslSearchDirs = @(
-  'C:\Program Files\Git\mingw64\bin',
-  'C:\Program Files\OpenSSL\bin',
-  'C:\Program Files\OpenSSL-Win64\bin',
-  "$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\bin"
-)
-foreach ($dll in $opensslDlls) {
-  $found = $null
-  foreach ($dir in $opensslSearchDirs) {
-    if ($dir -and (Test-Path (Join-Path $dir $dll))) {
-      $found = Join-Path $dir $dll
-      break
-    }
-  }
-  if ($found) {
-    Copy-Item $found (Join-Path $outDir $dll) -Force
-    Write-Host "[build] bundled OpenSSL DLL: $dll (from $found)"
-  } else {
-    throw "[build] required DLL $dll not found in any of: $($opensslSearchDirs -join ', '). " +
-          "llama-server at b8892 statically depends on OpenSSL; the bundle will fail to load on " +
-          "machines without it. Install Git for Windows or OpenSSL-Win64 on the build host."
-  }
-}
+# OpenSSL: not linked, not bundled. There used to be a block here that
+# copied libssl-3-x64.dll / libcrypto-3-x64.dll out of the build host's
+# Git for Windows MinGW tree, because b8892 linked OpenSSL unconditionally
+# and the loader would exit 0xC0000135 without them. That shipped an
+# unpinned MSYS2 build of a TLS library, frozen until the next native
+# release. b10099 has a real `LLAMA_OPENSSL` option, set OFF above, so
+# there is nothing to bundle. Don't reinstate the scavenge — if the engine
+# ever needs to serve HTTPS, use upstream's vendored BoringSSL/LibreSSL.
 
 $hash = (Get-FileHash -Algorithm SHA256 (Join-Path $outDir $serverName)).Hash
 Write-Host "[build] installed: $(Join-Path $outDir $serverName)"

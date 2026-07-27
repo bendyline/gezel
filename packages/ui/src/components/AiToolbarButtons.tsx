@@ -17,13 +17,48 @@ interface AiToolbarButtonsProps {
 
 /**
  * Two AI-powered buttons that get injected into the Squisq editor toolbar.
- * ✨ — rewrite the selected text (or whole document if none) using the
- *      context guidance alone.
- * 🪄 — same but asks the user for a custom instruction first.
+ * Sparkle — rewrite the selected text (or whole document if none) using
+ *      the context guidance alone.
+ * Wand — same but asks the user for a custom instruction first.
  *
  * Must be rendered inside an <EditorShell/> so it can pull the live editor
  * context and operate on selections.
  */
+/* Monochrome line icons (currentColor) — the emoji glyphs the buttons
+ * used to carry rendered in full color and broke the toolbar's ink. */
+function SparkleIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path
+        d="M8 1.5 9.4 6l4.6 1.5L9.4 9 8 13.5 6.6 9 2 7.5 6.6 6 8 1.5Z"
+        stroke="currentColor"
+        strokeWidth="1.3"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M13 11.2 13.6 13l1.8.6-1.8.6L13 16"
+        stroke="currentColor"
+        strokeWidth="1.1"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function WandIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path d="m2 14 8.5-8.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+      <path
+        d="M12 1.8l.7 1.7 1.7.7-1.7.7-.7 1.7-.7-1.7-1.7-.7 1.7-.7.7-1.7Z"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 export function AiToolbarButtons({ context, subject, parentContext }: AiToolbarButtonsProps) {
   const { tiptapEditor, monacoEditor, activeView, markdownSource, replaceAll } = useEditorContext();
   const [busy, setBusy] = useState(false);
@@ -115,7 +150,7 @@ export function AiToolbarButtons({ context, subject, parentContext }: AiToolbarB
         title="AI: improve this text (selection or whole document)"
         aria-label="Improve with AI"
       >
-        {busy ? '…' : '✨'}
+        {busy ? '…' : <SparkleIcon />}
       </button>
       <button
         type="button"
@@ -125,7 +160,7 @@ export function AiToolbarButtons({ context, subject, parentContext }: AiToolbarB
         title="AI: improve with a custom instruction"
         aria-label="Improve with AI using instruction"
       >
-        🪄
+        <WandIcon />
       </button>
       {error && (
         <span className="ai-error" title={error}>

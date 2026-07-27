@@ -64,7 +64,7 @@ describe('Sidebar', () => {
     render(<Sidebar selection={null} onSelect={vi.fn()} onOpenArea={vi.fn()} />);
 
     await waitFor(() =>
-      expect(screen.getByTestId('sidebar-meester')).toHaveTextContent('Home - (Meester Maya)'),
+      expect(screen.getByTestId('sidebar-meester')).toHaveTextContent('Home · Maya'),
     );
   });
 
@@ -78,7 +78,7 @@ describe('Sidebar', () => {
     } as never);
     render(<Sidebar selection={null} onSelect={vi.fn()} onOpenArea={vi.fn()} />);
     await waitFor(() =>
-      expect(screen.getByTestId('sidebar-meester')).toHaveTextContent('Home - (Meester Maya)'),
+      expect(screen.getByTestId('sidebar-meester')).toHaveTextContent('Home · Maya'),
     );
 
     fireEvent(
@@ -89,7 +89,7 @@ describe('Sidebar', () => {
     );
 
     await waitFor(() =>
-      expect(screen.getByTestId('sidebar-meester')).toHaveTextContent('Home - (Meester Sofiya)'),
+      expect(screen.getByTestId('sidebar-meester')).toHaveTextContent('Home · Sofiya'),
     );
   });
 

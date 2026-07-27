@@ -17,6 +17,8 @@ packages do not consistently install that file, so `native/cuda-eulas/` carries
 official, version-matched fallbacks for every CUDA minor used by the workflow.
 Packaging fails if a CUDA payload reaches the app without an EULA.
 
-The llama.cpp bundles also carry OpenSSL 3 runtime libraries on the supported
-build platforms. Their Apache-2.0 terms are part of the llama.cpp entry in the
-manifest and travel with every native artifact.
+The llama.cpp bundles used to carry OpenSSL 3 runtime libraries copied from
+whatever the build host happened to have, which is why an Apache-2.0 entry sat
+under llama-cpp here. They are built with `-DLLAMA_OPENSSL=OFF` as of
+native-v0.1.19, ship no OpenSSL, and the entry is gone. Node.js embeds its own
+OpenSSL; that is covered by the Node.js row in `NOTICE.md`, not here.

@@ -16,8 +16,9 @@ import { NewScriptDialog } from './NewScriptDialog.js';
 import { ScriptInputFields, buildDefaultInputs } from './ScriptRunForm.js';
 
 /**
- * The per-step automation rows on a task step — *on enter / gate / on
- * exit* — the main door through which non-programmers meet scripts.
+ * The per-step automation rows on a task step — *when it starts / to
+ * finish / when it finishes* — the main door through which
+ * non-programmers meet scripts.
  * Everything reads as sentences: when it runs, what it's allowed to do,
  * what happens after. Each event holds an ordered LIST of parameterized
  * script refs; the gate row additionally owns the gate's settings
@@ -140,7 +141,9 @@ export function StepAutomationRow({
 }) {
   // Which ref's settings dialog is open: index into refs, or 'new'.
   const [editing, setEditing] = useState<number | 'new' | null>(null);
-  const momentLabel = moment === 'enter' ? 'on enter' : 'on exit';
+  // Human moments, not lifecycle-hook names: the rows read "when it
+  // starts — run …" / "when it finishes — run …".
+  const momentLabel = moment === 'enter' ? 'when it starts' : 'when it finishes';
 
   const commit = (next: ScriptRef[]) => {
     void onChange(next.length > 0 ? next : null);
@@ -314,7 +317,7 @@ export function StepGateRow({
     // via the craftbook editor, not this row.
     return (
       <div className="step-script-row">
-        <span className="step-script-moment muted small">gate</span>
+        <span className="step-script-moment muted small">to finish</span>
         <span className="muted small">
           legacy evaluator gate — {normalized.checks.length} check(s), max {normalized.maxAttempts}{' '}
           attempts
@@ -328,7 +331,7 @@ export function StepGateRow({
 
   return (
     <div className="step-script-row gate-row">
-      <span className="step-script-moment muted small">gate</span>
+      <span className="step-script-moment muted small">to finish</span>
 
       <div className="gate-conditions">
         {!hasAny && (

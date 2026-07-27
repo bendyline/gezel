@@ -75,6 +75,31 @@ export function ProjectChat({
       .catch(() => setTasks([]));
   }, [project.id]);
 
+  // Whose conversation was live most recently in this project. The default
+  // chip lands there so every surface agrees on arrival: the timeline's most
+  // recent thread, the thread picker, the TO: line, and the composer
+  // placeholder all point at the same gezel. A project with no threads yet
+  // falls back to the voorman — the natural first conversation.
+  // `undefined` = probe in flight (hold the default), `null` = no threads.
+  const [lastActiveGezelId, setLastActiveGezelId] = useState<string | null | undefined>(undefined);
+  useEffect(() => {
+    setLastActiveGezelId(undefined);
+    let cancelled = false;
+    api
+      .listChatSessions({ projectId: project.id })
+      .then((r) => {
+        if (cancelled) return;
+        const live = r.sessions.filter((s) => !s.archived);
+        setLastActiveGezelId(live[0]?.gezelId ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setLastActiveGezelId(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [project.id]);
+
   // Collect gezel IDs that appear as task-level or step-level assignees.
   // Strictly redundant with `project.gezelIds` for new projects (the
   // auto-add hooks fold task assignees into the roster), but kept as a
@@ -154,15 +179,22 @@ export function ProjectChat({
       )
     : '';
 
-  // Default selection: solo → the single lead; crew → voorman → first
-  // assignee → first gezel overall.
+  // Default selection: solo → the single lead; crew → the gezel holding the
+  // project's most recent thread → voorman → first assignee → first gezel
+  // overall. Crew mode waits for the recent-thread probe so the default
+  // doesn't flash the voorman and then contradict the timeline.
   useEffect(() => {
     if (selectedId) return;
-    const next = isSolo
-      ? (soloLead?.id ?? '')
-      : (primaryRoster[0]?.gezel.id ?? otherGezels[0]?.id ?? '');
+    if (isSolo) {
+      if (soloLead?.id) setSelectedId(soloLead.id);
+      return;
+    }
+    if (lastActiveGezelId === undefined) return;
+    const lastActive =
+      lastActiveGezelId && gezels.some((g) => g.id === lastActiveGezelId) ? lastActiveGezelId : '';
+    const next = lastActive || primaryRoster[0]?.gezel.id || otherGezels[0]?.id || '';
     if (next) setSelectedId(next);
-  }, [isSolo, soloLead, primaryRoster, otherGezels, selectedId]);
+  }, [isSolo, soloLead, primaryRoster, otherGezels, selectedId, lastActiveGezelId, gezels]);
 
   const selected = gezels.find((g) => g.id === selectedId);
 
@@ -425,6 +457,11 @@ function ProjectChatBody({
   // it for the (selectedGezel, project) pair; the timeline highlights it
   // as the active session; the composer posts into it.
   const [sessionId, setSessionId] = useState<string>('');
+  const roleBasedNameOnlyMode = useRoleBasedNameOnlyMode();
+  const selectedName = displayName(
+    { name: selectedGezel.name, roleBasedName: selectedGezel.roleBasedName },
+    roleBasedNameOnlyMode,
+  );
   const [sessionRefreshKey, setSessionRefreshKey] = useState(0);
   // Passive CC bundle for the next send. Populated by the @-mention
   // pivot below — when the user pivots from gezel A to gezel B, we
@@ -638,6 +675,7 @@ function ProjectChatBody({
                       gezelId={selectedGezel.id}
                       projectId={project.id}
                       sessionId={sessionId || undefined}
+                      gezelName={selectedName}
                       onSessionIdChange={(next) => setSessionId(next ?? '')}
                       refreshKey={sessionRefreshKey}
                     />

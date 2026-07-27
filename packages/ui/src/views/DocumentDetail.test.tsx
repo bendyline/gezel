@@ -129,13 +129,14 @@ describe('DocumentDetail', () => {
     screen.getByTestId('editor-emit').click();
     await vi.advanceTimersByTimeAsync(1100);
 
-    expect(await screen.findByText(/Save failed: daemon unavailable/)).toBeInTheDocument();
+    const failedChip = await screen.findByText('Save failed');
+    expect(failedChip).toHaveAttribute('title', 'daemon unavailable');
     expect(screen.getByTestId('editor-shell')).toBeInTheDocument();
 
     screen.getByRole('button', { name: 'Retry' }).click();
     await waitFor(() => expect(api.writeDocument).toHaveBeenCalledTimes(2));
     expect(api.writeDocument).toHaveBeenLastCalledWith('mission.md', 'edited content');
-    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('saved'));
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Saved'));
   });
 
   it('does not let an old-path completion affect saves for the newly selected path', async () => {

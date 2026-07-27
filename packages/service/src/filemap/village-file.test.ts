@@ -1,27 +1,27 @@
 import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { CityFile } from '@bendyline/gezel';
+import type { VillageFile } from '@bendyline/gezel';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { CityFileStore, serializeCityFile } from './city-file.js';
+import { VillageFileStore, serializeVillageFile } from './village-file.js';
 
 let dir: string;
 
 beforeEach(async () => {
-  dir = await mkdtemp(join(tmpdir(), 'gezel-cityfile-'));
+  dir = await mkdtemp(join(tmpdir(), 'gezel-villagefile-'));
 });
 afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
 });
 
 function makeStore(opts?: { noWorkspace?: boolean }): {
-  store: CityFileStore;
+  store: VillageFileStore;
   primary: string;
   fallback: string;
 } {
-  const primary = join(dir, 'ws', '.gezel', 'city.json');
-  const fallback = join(dir, 'home', 'projects', 'p1', 'city.json');
-  const store = new CityFileStore({
+  const primary = join(dir, 'ws', '.gezel', 'village.json');
+  const fallback = join(dir, 'home', 'projects', 'p1', 'village.json');
+  const store = new VillageFileStore({
     workspaceDir: opts?.noWorkspace ? null : join(dir, 'ws'),
     primaryPath: opts?.noWorkspace ? null : primary,
     fallbackPath: fallback,
@@ -29,7 +29,7 @@ function makeStore(opts?: { noWorkspace?: boolean }): {
   return { store, primary, fallback };
 }
 
-const someState = (seededAt: string): ((city: CityFile) => CityFile) => {
+const someState = (seededAt: string): ((city: VillageFile) => VillageFile) => {
   return (city) => ({
     ...city,
     domains: {
@@ -58,7 +58,7 @@ const someState = (seededAt: string): ((city: CityFile) => CityFile) => {
   });
 };
 
-describe('CityFileStore', () => {
+describe('VillageFileStore', () => {
   it('returns defaults when no file exists anywhere', async () => {
     const { store } = makeStore();
     const city = await store.read();
@@ -104,7 +104,7 @@ describe('CityFileStore', () => {
       ],
       domains: {},
     });
-    const shuffled: CityFile = {
+    const shuffled: VillageFile = {
       ...base,
       overrides: [...base.overrides].reverse(),
       domains: {
@@ -115,8 +115,8 @@ describe('CityFileStore', () => {
         },
       },
     };
-    const a = serializeCityFile(base);
-    expect(serializeCityFile(shuffled)).toBe(a);
+    const a = serializeVillageFile(base);
+    expect(serializeVillageFile(shuffled)).toBe(a);
     expect(a).toContain('1.2');
     expect(a).not.toContain('1.234');
   });
@@ -128,8 +128,8 @@ describe('CityFileStore', () => {
     const city = await store.read();
     expect(city.domains).toEqual({});
     const names = await readdir(join(dir, 'ws', '.gezel'));
-    expect(names.some((n) => n.startsWith('city.json.corrupt-'))).toBe(true);
-    expect(names.includes('city.json')).toBe(false);
+    expect(names.some((n) => n.startsWith('village.json.corrupt-'))).toBe(true);
+    expect(names.includes('village.json')).toBe(false);
   });
 
   it('treats a newer schemaVersion as read-only and never clobbers it', async () => {
@@ -159,7 +159,7 @@ describe('CityFileStore', () => {
       overrides: [],
       domains: {},
     });
-    await writeFile(fallback, serializeCityFile(state));
+    await writeFile(fallback, serializeVillageFile(state));
     const city = await store.read();
     expect(city.domains.code?.layoutVersion).toBe(5);
     // Later writes keep targeting where the file was found.
@@ -182,7 +182,7 @@ describe('CityFileStore', () => {
         overrides: [...c.overrides, { path: 'two', region: 'S' as const }],
       })),
     ]);
-    const raw = JSON.parse(await readFile(primary, 'utf8')) as CityFile;
+    const raw = JSON.parse(await readFile(primary, 'utf8')) as VillageFile;
     const paths = raw.overrides.map((o) => o.path).sort();
     expect(paths).toEqual(['one', 'two']);
   });

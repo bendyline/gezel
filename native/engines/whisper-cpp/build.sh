@@ -51,6 +51,14 @@ echo "[build] platform=$platform"
 # OS and Make small inference noticeably faster.
 cmake_flags=(
   -DCMAKE_BUILD_TYPE=Release
+  # Keep the CI checkout path out of __FILE__ assert strings; see the
+  # longer note in native/engines/llama-cpp/build.sh. Unix-only.
+  "-DCMAKE_C_FLAGS=-ffile-prefix-map=$src=whisper.cpp"
+  "-DCMAKE_CXX_FLAGS=-ffile-prefix-map=$src=whisper.cpp"
+  # Drops the unbundled libgomp.so.1 / VCOMP140.DLL load-time dependency
+  # ggml's default OPENMP=ON bakes into libggml-base + libggml-cpu. See
+  # the longer note in native/engines/llama-cpp/build.sh.
+  -DGGML_OPENMP=OFF
   -DWHISPER_BUILD_SERVER=ON
   -DWHISPER_BUILD_TESTS=OFF
   -DWHISPER_BUILD_EXAMPLES=ON
@@ -133,10 +141,19 @@ case "$os" in
   Darwin) lib_pattern=( -name '*.dylib' -o -name '*.dylib.*' ) ;;
   *)      lib_pattern=( -name '*.so' -o -name '*.so.*' ) ;;
 esac
+#
+# Prune vendored dependency trees before matching. whisper.cpp has no
+# npm-installing web UI today, so nothing strays in yet — but this sweep
+# is the same deliberately-broad shape that made llama.cpp bundle a 15 MB
+# `libvips-cpp` out of `tools/ui/ui-src/node_modules/` in native-v0.1.18.
+# Keep the two scripts in step so the next upstream that vendors a JS
+# toolchain doesn't reintroduce it here.
 lib_paths=()
 while IFS= read -r -d '' lib; do
   lib_paths+=("$lib")
-done < <(find "$build_dir" \( "${lib_pattern[@]}" \) -print0 2>/dev/null || true)
+done < <(find "$build_dir" \
+  \( -name node_modules -o -name .git \) -prune -o \
+  \( "${lib_pattern[@]}" \) -print0 2>/dev/null || true)
 if [[ ${#lib_paths[@]} -eq 0 ]]; then
   # Hard fail rather than ship a half-bundle. If upstream stops
   # building shared libs entirely (e.g. switches back to static),
@@ -164,6 +181,58 @@ for lib in "${lib_paths[@]}"; do
     echo "[build] bundled $base (from ${lib#$build_dir/})"
   fi
 done
+
+# ── 5b. Foreign-library guard ──────────────────────────────────────
+# Pruning known offenders above is not a durable fix on its own: the
+# next tree someone vendors into the build will have a different name,
+# and the failure mode is silent — the bundle just gets bigger and the
+# smoke test still passes because nothing links the stray. So require
+# every bundled library to belong to a known family. A legitimate new
+# upstream library means adding it here, in the same change.
+echo "[build] checking bundled shared libs for foreign entries"
+foreign=""
+shopt -s nullglob
+for lib in "$out_dir"/*.so "$out_dir"/*.so.* "$out_dir"/*.dylib "$out_dir"/*.dylib.*; do
+  case "$(basename "$lib")" in
+    # whisper.cpp's own outputs.
+    libwhisper*|libggml*) ;;
+    # Staged by sibling engines when a local build puts several into one
+    # platform directory. sd-cpp shares this exact out_dir and bundles
+    # libvulkan.so.1 beside its Vulkan build.
+    libssl*|libcrypto*|libcudart*|libcublas*|libllama*|libmtmd*|libvulkan*) ;;
+    *) foreign="${foreign} $(basename "$lib")" ;;
+  esac
+done
+shopt -u nullglob
+if [[ -n "$foreign" ]]; then
+  echo "[build] error: unexpected shared libraries in the bundle:${foreign}" >&2
+  echo "[build]        These matched the discovery sweep but are not engine" >&2
+  echo "[build]        outputs. If one is a genuine new upstream library, add" >&2
+  echo "[build]        it to the allowlist in this script. If it was vendored" >&2
+  echo "[build]        into the build tree by something unrelated, prune it in" >&2
+  echo "[build]        the find above." >&2
+  exit 1
+fi
+
+# ── 5c. Strip our own bundled libraries (Linux) ────────────────────
+# The server binary is stripped above; its peers were not, so they shipped
+# full .symtab. --strip-unneeded drops that and keeps .dynsym, which is what
+# the loader resolves against. Restricted to the families we compile so a
+# sibling engine's vendor library staged into this same platform directory
+# is never modified — same rule as signing.
+if [[ "$os" == "Linux" ]]; then
+  shopt -s nullglob
+  for so in "$out_dir"/*.so "$out_dir"/*.so.*; do
+    [[ -L "$so" ]] && continue
+    case "$(basename "$so")" in
+      libggml*|libwhisper*)
+        strip --strip-unneeded "$so" 2>/dev/null || true
+        ;;
+    esac
+  done
+  shopt -u nullglob
+  echo "[build] stripped bundled first-party shared libs"
+fi
 
 # ── 6. Rewrite rpath / install_names so the bundle is relocatable ──
 if [[ "$os" == "Linux" ]]; then

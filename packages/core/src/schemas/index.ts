@@ -17,7 +17,7 @@ export * from './keurmeester.js';
 export * from './meester-status.js';
 export * from './file-review.js';
 export * from './api.js';
-export * from './city-file.js';
+export * from './village-file.js';
 export * from './catalog.js';
 export * from './model-fitness.js';
 export * from './model-profile.js';

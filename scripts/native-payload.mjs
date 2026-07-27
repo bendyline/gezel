@@ -31,7 +31,17 @@
  *   - no `linux-arm64-vulkan` — LunarG ships no aarch64 SDK tarball
  *   - `gezel-device-health` is Windows + Linux only (macOS uses IOKit in-process)
  *   - `gezel-service-host` is Windows only (macOS/Linux use launchd/systemd)
- *   - `gezel-ds4-server` is GPU-only: darwin-arm64 Metal + Linux CUDA
+ *   - `gezel-ds4-server` is GPU-only: darwin-arm64 Metal + Linux CUDA. On
+ *     Linux it lives in the `-cuda` key, NOT the bare one, because it and
+ *     llama-server's CUDA build need the same NVIDIA redistributables.
+ *     Keying it separately shipped `libcublasLt.so` (717 MB) and
+ *     `libcublas.so` (111 MB) twice per arch — 828 MB of byte-identical
+ *     duplication on x64, 781 MB on arm64. Co-locating them means one copy
+ *     serves both, with no change to the `$ORIGIN` rpath and no loss of the
+ *     per-archive self-containment the runtime engine resolver depends on
+ *     (it downloads exactly one archive per request; a shared sibling
+ *     directory would have broken it). macOS ds4 is Metal and stays in the
+ *     bare `darwin-arm64` key.
  */
 export const NATIVE_PAYLOAD = Object.freeze({
   'win32-x64': [
@@ -46,25 +56,13 @@ export const NATIVE_PAYLOAD = Object.freeze({
   'win32-x64-cuda': ['gezel-llama-server'],
   'darwin-arm64': ['gezel-sd-server', 'gezel-ds4-server', 'gezel-whisper-server', 'uv'],
   'darwin-arm64-metal': ['gezel-llama-server'],
-  'linux-x64': [
-    'gezel-device-health',
-    'gezel-sd-server',
-    'gezel-ds4-server',
-    'gezel-whisper-server',
-    'uv',
-  ],
+  'linux-x64': ['gezel-device-health', 'gezel-sd-server', 'gezel-whisper-server', 'uv'],
   'linux-x64-cpu': ['gezel-llama-server'],
   'linux-x64-vulkan': ['gezel-llama-server'],
-  'linux-x64-cuda': ['gezel-llama-server'],
-  'linux-arm64': [
-    'gezel-device-health',
-    'gezel-sd-server',
-    'gezel-ds4-server',
-    'gezel-whisper-server',
-    'uv',
-  ],
+  'linux-x64-cuda': ['gezel-llama-server', 'gezel-ds4-server'],
+  'linux-arm64': ['gezel-device-health', 'gezel-sd-server', 'gezel-whisper-server', 'uv'],
   'linux-arm64-cpu': ['gezel-llama-server'],
-  'linux-arm64-cuda': ['gezel-llama-server'],
+  'linux-arm64-cuda': ['gezel-llama-server', 'gezel-ds4-server'],
 });
 
 /** Every platform key a native release publishes an archive for. */

@@ -112,12 +112,19 @@ export function SecurityComplianceSettings({
         documents keep working.
       </p>
 
-      <div className="engagement-mode-switch">
+      <div
+        className="engagement-mode-switch gz-tray"
+        role="radiogroup"
+        aria-label="Security posture"
+      >
         {LEVELS.map((l) => (
           <button
             key={l.id}
             type="button"
-            className={`engagement-mode-pill${level === l.id ? ' engagement-mode-pill-active' : ''}`}
+            // biome-ignore lint/a11y/useSemanticElements: WAI-ARIA radiogroup of key buttons; a native <input type="radio"> can't carry the keys-in-trays treatment.
+            role="radio"
+            aria-checked={level === l.id}
+            className={`gz-key${level === l.id ? ' gz-key-active' : ''}`}
             onClick={() => selectLevel(l.id)}
           >
             {l.label}
@@ -126,14 +133,17 @@ export function SecurityComplianceSettings({
         {level === 'custom' && (
           <button
             type="button"
-            className="engagement-mode-pill engagement-mode-pill-active"
+            // biome-ignore lint/a11y/useSemanticElements: the latched member of the radiogroup, reporting a derived state; inert by design.
+            role="radio"
+            aria-checked
+            className="gz-key gz-key-active gz-key-state"
             disabled
           >
             Custom
           </button>
         )}
       </div>
-      <p className="engagement-mode-description">
+      <p className="engagement-mode-description" aria-live="polite">
         {level === 'custom'
           ? 'Custom posture — individual capabilities below differ from the presets.'
           : (LEVELS.find((l) => l.id === level)?.description ?? '')}

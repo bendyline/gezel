@@ -75,6 +75,28 @@ env:
   # 1.4 SDK backward-compatible with older Vulkan targets.
   VULKAN_SDK_VERSION: '1.4.350.0'
   VULKAN_SDK_VERSION_WINDOWS: '1.4.350.0'
+  # Highest glibc / libstdc++ symbol versions our own Linux binaries are
+  # allowed to require. This is the distro floor, and it moves silently: the
+  # build inherits whatever the runner image ships, so a runner bump narrows
+  # the set of machines gezel runs on with no other signal. Declared here and
+  # asserted per build so it can only change deliberately.
+  #
+  #   GLIBC 2.31 -> Ubuntu 20.04      GLIBCXX 3.4.28 -> GCC 9
+  #   GLIBC 2.34 -> RHEL 9            GLIBCXX 3.4.29 -> GCC 11
+  #   GLIBC 2.35 -> Ubuntu 22.04 LTS  GLIBCXX 3.4.30 -> GCC 12
+  #   GLIBC 2.36 -> Debian 12         GLIBCXX 3.4.32 -> GCC 13
+  #   GLIBC 2.38 -> Ubuntu 24.04, Fedora 39
+  #
+  # Current values are the status quo, not a target. At 2.38 we exclude
+  # Ubuntu 22.04 LTS (supported to 2027), Debian 12 and RHEL 9 — and nothing
+  # in the code needs it. The whole floor is toolchain leakage from building
+  # on ubuntu-24.04: four `__isoc23_strtol`-family symbols from glibc 2.38's
+  # C23 redirects, plus one `_ZSt21ios_base_library_initv` from GCC 13's
+  # <iostream>. For comparison NVIDIA ships libcublas/libcudart against
+  # GLIBC_2.17. Lowering this means building against older glibc headers —
+  # a container or an older runner image — not changing any source.
+  LINUX_MAX_GLIBC: '2.38'
+  LINUX_MAX_GLIBCXX: '3.4.32'
 
 jobs:
   build:
@@ -132,6 +154,7 @@ jobs:
             runner: macos-latest
             script: build.sh
             artifact: gezel-sd-server
+            sd_backend: metal
             needs_cuda: false
             needs_vulkan: false
           # darwin-x64 (Intel Mac) intentionally omitted — Apple's own
@@ -147,6 +170,10 @@ jobs:
             runner: ubuntu-latest
             script: build.sh
             artifact: gezel-sd-server
+            # Vulkan-linked: `libvulkan.so.1` must be present on the user's
+            # machine or the process dies at exec, before sd.cpp can fall
+            # back to CPU. See native/engines/sd-cpp/README.md.
+            sd_backend: vulkan
             needs_cuda: false
             needs_vulkan: true
           # linux-arm64: LunarG's Vulkan SDK has no aarch64 tarball, so
@@ -159,6 +186,7 @@ jobs:
             runner: ubuntu-24.04-arm
             script: build.sh
             artifact: gezel-sd-server
+            sd_backend: cpu
             needs_cuda: false
             needs_vulkan: false
           - engine: sd-cpp
@@ -167,6 +195,9 @@ jobs:
             runner: windows-latest
             script: build.ps1
             artifact: gezel-sd-server.exe
+            # Vulkan-linked, same as linux-x64. Lower risk here: every GPU
+            # driver installs vulkan-1.dll into System32.
+            sd_backend: vulkan
             needs_cuda: false
             needs_vulkan: true
 
@@ -294,9 +325,12 @@ jobs:
           # leg uses the 'spark' sentinel (empty -arch, matching antirez's
           # `make cuda-spark`). darwin-x64 + win32-x64 are intentionally
           # omitted — build.sh / build.ps1 no-op there.
+          # variant: cuda — on Linux ds4 emits into the `-cuda` key so it
+          # shares llama-server's NVIDIA redistributables instead of shipping
+          # a second byte-identical copy. See scripts/native-payload.mjs.
           - engine: ds4
             platform: linux-x64
-            variant: ''
+            variant: cuda
             runner: ubuntu-latest
             script: build.sh
             artifact: gezel-ds4-server
@@ -305,7 +339,7 @@ jobs:
             ds4_cuda_arch: 'sm_90'
           - engine: ds4
             platform: linux-arm64
-            variant: ''
+            variant: cuda
             runner: ubuntu-24.04-arm
             script: build.sh
             artifact: gezel-ds4-server
@@ -407,6 +441,15 @@ jobs:
       # them — variant is empty in the matrix entries above.
       LLAMA_BACKEND: ${{ matrix.variant }}
       LLAMA_BACKEND_TAG: ${{ matrix.variant != '' && '1' || '' }}
+      # sd-cpp ships one binary per platform, so its backend is a property
+      # of the matrix row rather than of `variant`. Declare it explicitly:
+      # build.sh's `auto` path resolves the backend from `command -v
+      # vulkaninfo`, which silently couples the SHIPPED backend to whether
+      # the Vulkan SDK install step ran on that runner. native-v0.1.18
+      # shipped a Vulkan-linked linux-x64 sd-server that way while the
+      # script's own comment claimed the default stayed CPU. Empty on
+      # non-sd rows, which build.sh/.ps1 treat as their own default.
+      SD_BACKEND: ${{ matrix.sd_backend || '' }}
       # ds4 linux CUDA build reads this for the nvcc -arch (its Makefile takes
       # a single CUDA_ARCH; 'spark' = empty -arch for GB10). Empty for every
       # non-ds4-linux job (ignored there).
@@ -648,6 +691,15 @@ jobs:
                 [[ -n "$lib" ]] || continue
                 # Driver-provided lib — not in the bundle by design.
                 if [[ "$lib" == "libcuda.so.1" ]]; then continue; fi
+                # ds4 shares the `-cuda` key with llama-server's CUDA leg,
+                # which is the single writer of the NVIDIA redistributables
+                # (see native/engines/ds4/build.sh 5b). They are absent from
+                # THIS leg's output and appear when the draft-release job
+                # merges the two artifacts, so they cannot resolve here. The
+                # merged tree is checked instead by "Verify CUDA payload".
+                if [[ "${{ matrix.engine }}" == ds4 ]]; then
+                  case "$lib" in libcudart.so.*|libcublas.so.*|libcublasLt.so.*) continue ;; esac
+                fi
                 missing+=("$lib")
               done < <(grep 'not found' <<<"$ldd_out" | awk '{print $1}')
               if [[ ${#missing[@]} -gt 0 ]]; then
@@ -735,11 +787,123 @@ jobs:
             fi
             echo "[smoke] backend peer lib ${peer} present ✓"
           fi
-          # CUDA bundles must have cudart/cublas beside the executable
-          # so the binary works on machines without the matching toolkit.
-          if [[ "${{ matrix.variant }}" == cuda || ( "${{ matrix.engine }}" == ds4 && "${{ matrix.platform }}" == linux-* ) ]]; then
+          # CUDA bundles must have cudart/cublas beside the executable so the
+          # binary works on machines without the matching toolkit. Only the
+          # llama-cpp CUDA leg stages them — it is the single writer for the
+          # `-cuda` keys that ds4 now shares (see native-payload.mjs), so
+          # asserting it on ds4's leg would check a directory that is
+          # deliberately incomplete until the draft-release merge.
+          if [[ "${{ matrix.variant }}" == cuda && "${{ matrix.engine }}" == llama-cpp ]]; then
             ls "$out" | grep -Ei 'cudart|cublas' || { echo "CUDA runtime libraries missing alongside exe"; exit 1; }
           fi
+
+      # ── Unbundled-runtime guard ───────────────────────────────────
+      # The engines are built with -DGGML_OPENMP=OFF so nothing depends
+      # on libgomp.so.1 / VCOMP140.DLL, neither of which we ship. Assert
+      # it, because the `ldd`/`--help` checks above structurally cannot:
+      # every runner has a toolchain installed, so the dependency always
+      # resolves in CI and only fails on a user's machine. Checks the
+      # peer libs too — the OpenMP link lands in libggml-base and
+      # libggml-cpu, not in the server binary.
+      - name: Assert no unbundled runtime dependencies
+        if: steps.preflight.outputs.pinned == 'true'
+        shell: bash
+        run: |
+          set -uo pipefail
+          out="${{ steps.outdir.outputs.dir }}"
+          bad=0
+          if [[ "${{ matrix.platform }}" == win32-* ]]; then
+            # dumpbin ships with the MSVC toolchain already on the runner.
+            dumpbin="$(find '/c/Program Files/Microsoft Visual Studio' -name dumpbin.exe -path '*x64*' 2>/dev/null | head -1)"
+            if [[ -z "$dumpbin" ]]; then
+              echo "::warning::dumpbin not found — skipping VCOMP140 import check"
+              exit 0
+            fi
+            for f in "$out"/*.exe "$out"/*.dll; do
+              [[ -e "$f" ]] || continue
+              deps="$("$dumpbin" //dependents "$f" 2>/dev/null || true)"
+              if grep -qi 'VCOMP[0-9]*\.DLL' <<<"$deps"; then
+                echo "::error::$(basename "$f") imports the MSVC OpenMP runtime (VCOMP*.DLL), which is not bundled"
+                bad=1
+              fi
+              if grep -qiE 'libssl-|libcrypto-' <<<"$deps"; then
+                echo "::error::$(basename "$f") imports OpenSSL. Engines are built with -DLLAMA_OPENSSL=OFF; do not reinstate the Git-for-Windows DLL scavenge."
+                bad=1
+              fi
+            done
+          else
+            for f in "$out"/*; do
+              [[ -f "$f" && ! -L "$f" ]] || continue
+              # objdump on Linux, otool on macOS; skip non-Mach-O/ELF quietly.
+              if [[ "${{ matrix.platform }}" == darwin-* ]]; then
+                deps="$(otool -L "$f" 2>/dev/null || true)"
+              else
+                deps="$(objdump -p "$f" 2>/dev/null | awk '/NEEDED/ {print $2}' || true)"
+              fi
+              if grep -qE 'libgomp|libomp' <<<"$deps"; then
+                echo "::error::$(basename "$f") links an OpenMP runtime (libgomp/libomp), which is not bundled"
+                bad=1
+              fi
+              # -DLLAMA_OPENSSL=OFF means nothing should link OpenSSL. If it
+              # comes back we would be redistributing a TLS library scavenged
+              # from the build host again — catch it here, not at audit time.
+              if grep -qE 'libssl|libcrypto' <<<"$deps"; then
+                echo "::error::$(basename "$f") links OpenSSL. Engines are built with -DLLAMA_OPENSSL=OFF; do not reinstate build-host OpenSSL bundling."
+                bad=1
+              fi
+            done
+          fi
+          if (( bad )); then
+            echo "::error::Rebuild with -DGGML_OPENMP=OFF, or bundle the runtime and add it to NOTICE.md."
+            exit 1
+          fi
+          echo "[guard] no unbundled OpenMP runtime dependency"
+
+      # ── Linux symbol-version floor ────────────────────────────────
+      # Assert our binaries don't require newer glibc / libstdc++ symbols than
+      # LINUX_MAX_GLIBC / LINUX_MAX_GLIBCXX declare. Vendor libraries are
+      # excluded: their floor is the vendor's choice and is already lower than
+      # ours (NVIDIA targets GLIBC_2.17). Nothing else in CI notices this —
+      # the runner always satisfies whatever it just built.
+      - name: Assert Linux symbol-version floor
+        if: steps.preflight.outputs.pinned == 'true' && startsWith(matrix.platform, 'linux-')
+        shell: bash
+        run: |
+          set -uo pipefail
+          out="${{ steps.outdir.outputs.dir }}"
+          bad=0
+          highest() { # highest() <file> <prefix> -> max version, or empty
+            objdump -T "$1" 2>/dev/null \
+              | grep -oE "$2[0-9.]+" | sed "s/^$2//" | sort -uV | tail -1
+          }
+          gt() { # gt() <a> <b> -> true when a > b
+            [[ "$1" != "$2" && "$(printf '%s\n%s\n' "$1" "$2" | sort -V | tail -1)" == "$1" ]]
+          }
+          for f in "$out"/*; do
+            [[ -f "$f" && ! -L "$f" ]] || continue
+            case "$(basename "$f")" in
+              libcu*|libnv*|libvulkan*|uv) continue ;;
+            esac
+            file -b "$f" 2>/dev/null | grep -q ELF || continue
+            g=$(highest "$f" 'GLIBC_')
+            x=$(highest "$f" 'GLIBCXX_')
+            if [[ -n "$g" ]] && gt "$g" "${LINUX_MAX_GLIBC}"; then
+              echo "::error::$(basename "$f") requires GLIBC_$g, above the declared floor ${LINUX_MAX_GLIBC}"
+              objdump -T "$f" | grep "GLIBC_$g" | awk '{print "          " $NF}' | sort -u | head -20
+              bad=1
+            fi
+            if [[ -n "$x" ]] && gt "$x" "${LINUX_MAX_GLIBCXX}"; then
+              echo "::error::$(basename "$f") requires GLIBCXX_$x, above the declared floor ${LINUX_MAX_GLIBCXX}"
+              objdump -T "$f" | grep "GLIBCXX_$x" | awk '{print "          " $NF}' | sort -u | head -20
+              bad=1
+            fi
+            printf '[floor] %-38s GLIBC_%-8s GLIBCXX_%s\n' "$(basename "$f")" "${g:--}" "${x:--}"
+          done
+          if (( bad )); then
+            echo "::error::Raising the floor narrows which distros can run gezel. Either build against older glibc headers, or raise LINUX_MAX_GLIBC/LINUX_MAX_GLIBCXX deliberately and update docs/native-runtime-requirements.md."
+            exit 1
+          fi
+          echo "[floor] within declared limits (GLIBC ${LINUX_MAX_GLIBC}, GLIBCXX ${LINUX_MAX_GLIBCXX})"
 
       # ── Code-sign the engine binaries (gated on secrets) ──────
       # Sign HERE — after the smoke test, before the sha is computed and
@@ -747,11 +911,33 @@ jobs:
       # SIGNED bytes and the runtime engine resolver's signature check
       # (engineSignaturePolicy) passes.
       #
-      # Windows signs ONLY the main artifact: the peer DLLs include
-      # third-party redistributables (cuBLAS/cudart, NVIDIA-signed) we
-      # must not re-sign, and our own unsigned DLLs get swept by the
-      # Electron release's afterPack hook (packages/app/scripts/
-      # after-pack.cjs) before packaging.
+      # Policy: we sign what we compile. A signature asserts authorship and
+      # integrity, so putting Bendyline's name on NVIDIA's cuBLAS or Astral's
+      # uv would claim something we are not in a position to claim, and would
+      # rewrite bytes those vendors published under their own redistribution
+      # terms. Vendor binaries therefore ship byte-identical to their
+      # upstream release, hash-comparable against the vendor's own manifest.
+      # The authoritative list lives in
+      # packages/app/scripts/third-party-binaries.cjs, shared by the Electron
+      # afterPack sweep and the release's "Verify Windows signatures" gate.
+      #
+      # Windows signs ONLY the main artifact, and not even that when the
+      # "engine" is a prebuilt download (uv). Peer DLLs — our ggml/llama
+      # builds — are swept by the afterPack hook before packaging.
+      #
+      # For the record, since an earlier version of this comment had it
+      # backwards: the cuBLAS/cudart peers are NOT NVIDIA-signed. They arrive
+      # from developer.download.nvidia.com with no certificate table at all
+      # (checked against NVIDIA's own sha256 manifest for 12.4.1; the copies
+      # in native-v0.1.18 are byte-identical to theirs). Nothing signs them
+      # now, which is the intent.
+      #
+      # macOS is the deliberate exception and cannot follow this policy:
+      # Apple's notary service rejects any executable in the bundle that is
+      # not Developer ID signed, and the vendors ship weaker signatures than
+      # that (uv for macOS is `adhoc, linker-signed`, no team identifier).
+      # Re-signing every Mach-O there is the price of notarization, not a
+      # choice — so the macOS step below still covers third-party binaries.
       #
       # macOS signs EVERY Mach-O in the bundle — dylib peers first, main
       # binary last — with `--options runtime` (hardened runtime). All
@@ -790,8 +976,12 @@ jobs:
           Set-Content -Path $metadataPath -Value $metadata
           echo "TRUSTED_SIGNING_METADATA_PATH=$metadataPath" >> $env:GITHUB_ENV
 
+      # `matrix.engine != 'uv'`: uv is a prebuilt binary we download from
+      # Astral, not something we compile, so it ships as they published it
+      # (unsigned — verified against their 0.11.32 release). Signing what we
+      # build only; see packages/app/scripts/third-party-binaries.cjs.
       - name: Sign Windows binary (Authenticode)
-        if: steps.preflight.outputs.pinned == 'true' && startsWith(matrix.platform, 'win32')
+        if: steps.preflight.outputs.pinned == 'true' && startsWith(matrix.platform, 'win32') && matrix.engine != 'uv'
         shell: pwsh
         env:
           AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
@@ -1060,6 +1250,45 @@ jobs:
       # linux-x64 archive with no gezel-ds4-server in it.
       - name: Verify staged engine binaries
         run: node scripts/check-native-payload.mjs --root native/build --all
+
+      # ds4 and llama-server's CUDA build share the `-cuda` keys so the NVIDIA
+      # redistributables ship once rather than twice (828 MB of byte-identical
+      # duplication on x64 before this). llama's leg is the single writer, and
+      # each engine's own smoke test can only see its own artifact — this is
+      # the first point where the merged tree exists, so it is where the
+      # sharing is actually verified. A skipped or failed llama CUDA leg would
+      # otherwise yield a `-cuda` key whose ds4-server cannot start.
+      - name: Verify CUDA payload in merged -cuda keys
+        run: |
+          set -euo pipefail
+          bad=0
+          for dir in native/build/*-cuda; do
+            [[ -d "$dir" ]] || continue
+            case "$dir" in
+              *win32*) needed=(cudart64_ cublas64_ cublasLt64_) ;;
+              *)       needed=(libcudart libcublas libcublasLt) ;;
+            esac
+            for lib in "${needed[@]}"; do
+              if ! ls "$dir" | grep -qi "^${lib}"; then
+                echo "::error::$dir is missing $lib* — the CUDA redistributables are staged by the llama-cpp CUDA leg; did it run?"
+                bad=1
+              fi
+            done
+            # ds4 resolves these through $ORIGIN once merged. Prove it here
+            # rather than trusting the layout. Host-arch only: this job runs on
+            # x64, so ldd cannot introspect the linux-arm64 binary and that leg
+            # falls back to the filename presence check above.
+            if [[ "$dir" == *linux-x64-cuda && -x "$dir/gezel-ds4-server" ]]; then
+              unresolved="$(env -u LD_LIBRARY_PATH ldd "$dir/gezel-ds4-server" 2>/dev/null \
+                | grep 'not found' | awk '{print $1}' | grep -v '^libcuda\.so\.1$' || true)"
+              if [[ -n "$unresolved" ]]; then
+                echo "::error::$dir/gezel-ds4-server has unresolved deps after merge: $unresolved"
+                bad=1
+              fi
+            fi
+          done
+          if (( bad )); then exit 1; fi
+          echo "CUDA redistributables present in every -cuda key; ds4 resolves against them."
 
       # ── Build tarballs per platform ───────────────────────────────
       - name: Pack tarballs

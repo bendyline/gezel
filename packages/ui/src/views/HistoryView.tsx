@@ -32,7 +32,7 @@ const KINDS: Array<{ value: string; label: string }> = [
   { value: 'task.step.completed', label: 'Task step completed' },
   { value: 'task.tick', label: 'Task cron tick' },
   { value: 'task.canceled', label: 'Task canceled' },
-  { value: 'debug.bridge.failed', label: '🛠 Debug: MCP bridge failed to start' },
+  { value: 'debug.bridge.failed', label: 'Debug: MCP bridge failed to start' },
 ];
 
 export function HistoryView({ projectId }: { projectId?: string } = {}) {
@@ -84,6 +84,14 @@ export function HistoryView({ projectId }: { projectId?: string } = {}) {
           ? res.entries.filter((e) => e.entryType === 'session')
           : res.entries;
       setEntries(filtered);
+      // Land on the newest entry instead of an empty detail pane; never
+      // stomp a selection the user (or a deep link) already made.
+      setSelectedId((prev) => {
+        const idOf = (e: HistoryEntry) => (e.entryType === 'event' ? e.id : `session:${e.id}`);
+        if (prev && filtered.some((e) => idOf(e) === prev)) return prev;
+        const first = filtered[0];
+        return first ? idOf(first) : null;
+      });
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -258,6 +266,42 @@ export function HistoryView({ projectId }: { projectId?: string } = {}) {
   );
 }
 
+/**
+ * Human labels for event kinds. The raw dotted identifiers (`poppetje.
+ * generated`) are for `search_history` and the JSONL on disk — as a row's
+ * lead text they read as plumbing. The raw kind stays one hover away via
+ * the title attribute. Unknown kinds fall back to de-dotted words so new
+ * event types never regress to identifiers.
+ */
+const KIND_LABELS: Record<string, string> = {
+  'gezel.created': 'Gezel created',
+  'gezel.renamed': 'Gezel renamed',
+  'gezel.settings.updated': 'Gezel settings',
+  'project.created': 'Project created',
+  'project.updated': 'Project updated',
+  'project.about.updated': 'Project brief',
+  'project.mission.updated': 'Mission updated',
+  'project.voorman.changed': 'Voorman changed',
+  'project.gezel.joined': 'Joined project',
+  'icon.generated': 'Icon generated',
+  'icon.reverted': 'Icon reverted',
+  'poppetje.generated': 'Portrait carved',
+  'document.created': 'Document created',
+  'document.deleted': 'Document deleted',
+  'craftbook.created': 'Craftbook created',
+  'task.created': 'Task created',
+  'tool.called': 'Tool call',
+  'meester.changed': 'Meester changed',
+  'klerk.changed': 'Klerk changed',
+};
+
+function kindLabel(kind: string): string {
+  const known = KIND_LABELS[kind];
+  if (known) return known;
+  const words = kind.split('.').join(' ');
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
 function HistoryEventRow({
   entry,
   gezelName,
@@ -269,8 +313,10 @@ function HistoryEventRow({
 }) {
   return (
     <>
-      <span className="history-kind">📜 {entry.kind}</span>
       <span className="history-summary">{entry.summary}</span>
+      <span className="history-kind" title={entry.kind}>
+        {kindLabel(entry.kind)}
+      </span>
       <span className="history-meta">
         {projectName && <span className="history-chip">{projectName}</span>}
         {gezelName && <span className="history-chip">{gezelName}</span>}
@@ -293,10 +339,10 @@ function HistorySessionRow({
   const activity = entry.durationMs < 60_000 ? '<1m' : `${mins}m`;
   return (
     <>
-      <span className="history-kind">💬 thread</span>
       <span className="history-summary">
         {gezelName || entry.gezelId} · {entry.title} ({entry.messageCount} msgs, {activity})
       </span>
+      <span className="history-kind">Thread</span>
       <span className="history-meta">
         {projectName && <span className="history-chip">{projectName}</span>}
         <time className="history-time">{formatRelative(entry.lastActivityAt)}</time>

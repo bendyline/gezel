@@ -10,6 +10,7 @@ import {
   createDocumentsContentContainer,
   deriveContainerScope,
 } from '../components/SquisqIntegration/index.js';
+import { normalizeMarkdownBaseline } from '../components/markdown-baseline.js';
 import { useSerializedAutosave } from '../hooks/useSerializedAutosave.js';
 import { useEffectiveTheme } from '../theme.js';
 
@@ -74,7 +75,12 @@ export function DocumentDetail({ path, standalone = false }: DocumentDetailProps
       try {
         const res = await api.readDocument(path);
         if (cancelled) return;
-        setContent(autosave.hydrate(res.content));
+        // Markdown goes through the Squisq editor, which re-emits its own
+        // canonical serialization at mount — baseline on that form so mere
+        // open never reads as an edit (or rewrites the file). Non-markdown
+        // stays verbatim.
+        const baseline = isMarkdown(path) ? normalizeMarkdownBaseline(res.content) : res.content;
+        setContent(autosave.hydrate(baseline));
       } catch (err) {
         if (!cancelled) setLoadError((err as Error).message);
       }
@@ -108,23 +114,28 @@ export function DocumentDetail({ path, standalone = false }: DocumentDetailProps
 
   return (
     <section className="document-detail" data-testid="document-detail">
-      <output className="status" aria-live="polite">
-        {autosave.phase === 'dirty' && 'unsaved changes'}
-        {autosave.phase === 'saving' && 'saving…'}
-        {autosave.phase === 'saved' && 'saved'}
-        {autosave.phase === 'error' && (
-          <>
-            Save failed: {autosave.error?.message ?? 'unknown error'}{' '}
-            <button
-              type="button"
-              className="link-btn"
-              onClick={() => void autosave.retry().catch(() => {})}
-            >
-              Retry
-            </button>
-          </>
-        )}
-      </output>
+      <div className="document-detail-head">
+        <span className="document-detail-path" title={path}>
+          {path}
+        </span>
+        <output className={`autosave-chip autosave-chip-${autosave.phase}`} aria-live="polite">
+          {autosave.phase === 'dirty' && 'Unsaved changes'}
+          {autosave.phase === 'saving' && 'Saving…'}
+          {autosave.phase === 'saved' && 'Saved'}
+          {autosave.phase === 'error' && (
+            <>
+              <span title={autosave.error?.message ?? 'unknown error'}>Save failed</span>
+              <button
+                type="button"
+                className="link-btn"
+                onClick={() => void autosave.retry().catch(() => {})}
+              >
+                Retry
+              </button>
+            </>
+          )}
+        </output>
+      </div>
       <div className="editor-wrap">
         <EditorShell
           initialMarkdown={content}

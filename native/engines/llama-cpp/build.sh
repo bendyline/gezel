@@ -70,6 +70,37 @@ fi
 
 cmake_flags=(
   -DCMAKE_BUILD_TYPE=Release
+  # Rewrite the absolute checkout path baked into __FILE__ by every
+  # GGML_ASSERT/abort message, so shipped binaries say
+  # `llama.cpp/src/llama-arch.cpp` rather than
+  # `/home/runner/work/gezel/gezel/native/engines/llama-cpp/.upstream/src/...`.
+  # Cosmetic, but it is the CI layout of a private repo embedded in a
+  # user-facing artifact, and it reads better in a bug report too.
+  # Unix-only: MSVC has no equivalent, so build.ps1 does not set it.
+  # Does not cover .cu translation units — those compile under
+  # CMAKE_CUDA_FLAGS, deliberately left alone to keep nvcc out of scope.
+  "-DCMAKE_C_FLAGS=-ffile-prefix-map=$src=llama.cpp"
+  "-DCMAKE_CXX_FLAGS=-ffile-prefix-map=$src=llama.cpp"
+  # ggml defaults GGML_OPENMP=ON, which puts a hard load-time dependency
+  # on libgomp.so.1 (Linux) / VCOMP140.DLL (Windows) into libggml-base
+  # and libggml-cpu. We bundle neither, so on a host without the GCC
+  # OpenMP runtime or the MSVC redistributable the dynamic linker kills
+  # the process before main(). CI cannot see it: every runner has a
+  # toolchain installed, so ldd always resolves.
+  #
+  # ggml carries a complete native threadpool on the #ifndef
+  # GGML_USE_OPENMP path (atomic barriers, condvars, worker join), and
+  # upstream ships OPENMP=OFF presets for Android, Snapdragon and
+  # arm64-windows. macOS has always built this way because AppleClang
+  # finds no OpenMP — so OFF is a configuration we already ship and test,
+  # just not yet everywhere. Keep every platform on it.
+  -DGGML_OPENMP=OFF
+  # No OpenSSL. This gates cpp-httplib's CPPHTTPLIB_OPENSSL_SUPPORT —
+  # llama-server terminating TLS itself — which gezel never uses: the
+  # engine is spawned on loopback and spoken to over plain HTTP. Leaving
+  # it ON forced us to bundle three different unpinned, build-host-
+  # scavenged OpenSSL copies. See section 8 below.
+  -DLLAMA_OPENSSL=OFF
   -DLLAMA_BUILD_SERVER=ON
   -DLLAMA_BUILD_TESTS=OFF
   -DLLAMA_BUILD_EXAMPLES=OFF
@@ -77,11 +108,6 @@ cmake_flags=(
   # does its own model management, so turn it off to drop a runtime
   # dep and shrink the binary.
   -DLLAMA_CURL=OFF
-  # Note: -DLLAMA_SERVER_SSL=OFF was tried here but b8892 ignores it —
-  # find_package(OpenSSL) runs unconditionally and the binary picks up
-  # the system libssl.so.3 / libcrypto.so.3 dynamically. Linux/macOS
-  # both ship those as standard system libs, so no bundling needed
-  # here (Windows is the exception, handled in build.ps1).
 )
 case "$backend" in
   metal)
@@ -234,10 +260,20 @@ case "$os" in
   Darwin) lib_pattern=( -name '*.dylib' -o -name '*.dylib.*' ) ;;
   *)      lib_pattern=( -name '*.so' -o -name '*.so.*' ) ;;
 esac
+#
+# Prune vendored dependency trees before matching. llama.cpp's web UI
+# (`tools/ui/ui-src/`) npm-installs into the build directory, and
+# `@img/sharp-libvips-*` drops a 15 MB `libvips-cpp` there that matches
+# the pattern below. native-v0.1.18 shipped it in all six llama bundles:
+# ~92 MB of dead weight nothing links or dlopens, plus an undisclosed
+# LGPL dependency. The Windows script never had this because its glob is
+# scoped to the cmake output dir without -Recurse.
 lib_paths=()
 while IFS= read -r -d '' lib; do
   lib_paths+=("$lib")
-done < <(find "$build_dir" \( "${lib_pattern[@]}" \) -print0 2>/dev/null || true)
+done < <(find "$build_dir" \
+  \( -name node_modules -o -name .git \) -prune -o \
+  \( "${lib_pattern[@]}" \) -print0 2>/dev/null || true)
 if [[ ${#lib_paths[@]} -eq 0 ]]; then
   echo "[build] error: no shared libraries (.so/.dylib) found under $build_dir" >&2
   echo "[build]        llama.cpp may have changed its build output layout — update build.sh" >&2
@@ -261,6 +297,39 @@ for lib in "${lib_paths[@]}"; do
     echo "[build] bundled $base (from ${lib#$build_dir/})"
   fi
 done
+
+# ── 6a. Foreign-library guard ──────────────────────────────────────
+# Pruning known offenders above is not a durable fix on its own: the
+# next tree someone vendors into the build will have a different name,
+# and the failure mode is silent — the bundle just gets bigger and the
+# smoke test still passes because nothing links the stray. So require
+# every bundled library to belong to a known family. A legitimate new
+# upstream library means adding it here, in the same change.
+echo "[build] checking bundled shared libs for foreign entries"
+foreign=""
+shopt -s nullglob
+for lib in "$out_dir"/*.so "$out_dir"/*.so.* "$out_dir"/*.dylib "$out_dir"/*.dylib.*; do
+  case "$(basename "$lib")" in
+    # llama.cpp's own outputs.
+    libggml*|libllama*|libmtmd*) ;;
+    # Bundled separately further down, and by sibling engines when a
+    # local build stages several into one platform directory (an
+    # untagged llama build shares out_dir with sd-cpp, which bundles
+    # libvulkan.so.1, and whisper-cpp).
+    libssl*|libcrypto*|libcudart*|libcublas*|libwhisper*|libvulkan*) ;;
+    *) foreign="${foreign} $(basename "$lib")" ;;
+  esac
+done
+shopt -u nullglob
+if [[ -n "$foreign" ]]; then
+  echo "[build] error: unexpected shared libraries in the bundle:${foreign}" >&2
+  echo "[build]        These matched the discovery sweep but are not engine" >&2
+  echo "[build]        outputs. If one is a genuine new upstream library, add" >&2
+  echo "[build]        it to the allowlist in this script. If it was vendored" >&2
+  echo "[build]        into the build tree by something unrelated, prune it in" >&2
+  echo "[build]        the find above." >&2
+  exit 1
+fi
 
 # ── 6b. Version-consistency guard ──────────────────────────────────
 # Catch the mixed-generation bundle at its source: if two DIFFERENT
@@ -298,6 +367,32 @@ if [[ -n "$dup" ]]; then
 fi
 echo "[build] version-consistency guard passed"
 
+# ── 6c. Strip our own bundled libraries (Linux) ────────────────────
+# Step 5 stripped the server binary but not the peers it loads, so the
+# .so's kept full .symtab — libggml-cuda.so alone shipped ~17,900 symbols.
+# --strip-unneeded drops those while preserving .dynsym, which is what the
+# loader actually resolves against.
+#
+# Restricted to the families we compile, and run here — before section 7
+# stages NVIDIA's libcublas/libcudart — so vendor binaries are never
+# touched. Same rule as signing: we modify only what we build, so a user
+# can hash a vendor .so against the vendor's own manifest. Stripping also
+# has to precede the patchelf pass below; reordering them can corrupt the
+# sections patchelf rewrites.
+if [[ "$os" == "Linux" ]]; then
+  shopt -s nullglob
+  for so in "$out_dir"/*.so "$out_dir"/*.so.*; do
+    [[ -L "$so" ]] && continue
+    case "$(basename "$so")" in
+      libggml*|libllama*|libmtmd*)
+        strip --strip-unneeded "$so" 2>/dev/null || true
+        ;;
+    esac
+  done
+  shopt -u nullglob
+  echo "[build] stripped bundled first-party shared libs"
+fi
+
 # ── 7. Linux CUDA runtime bundling ─────────────────────────────────
 # The NVIDIA driver (`libcuda.so.1`) is supplied by the user's system,
 # but the CUDA toolkit runtime libraries must match the major version
@@ -329,63 +424,28 @@ if [[ "$os" == "Linux" && "$backend" == "cuda" ]]; then
   fi
 fi
 
-# ── 8. OpenSSL bundling ────────────────────────────────────────────
-# llama.cpp at b8892 calls find_package(OpenSSL) unconditionally —
-# `-DLLAMA_SERVER_SSL=OFF` is silently ignored — so the binary
-# statically links libssl + libcrypto whether we want it to or not.
-# We bundle them so the produced tarball is self-contained on user
-# machines that don't have OpenSSL 3 installed (modern macOS doesn't
-# ship it; minimal Linux containers may not have it).
-if [[ "$os" == "Linux" ]]; then
-  openssl_lib_dir=""
-  # Debian-style multiarch dirs come first (the libssl3 deb lands
-  # libs there on both x86_64 and arm64 Ubuntu); /usr/lib64 covers
-  # RPM-family hosts; /usr/lib is the last-resort fallback.
-  for candidate in \
-      /usr/lib/x86_64-linux-gnu \
-      /usr/lib/aarch64-linux-gnu \
-      /usr/lib64 \
-      /usr/lib; do
-    if [[ -f "$candidate/libssl.so.3" && -f "$candidate/libcrypto.so.3" ]]; then
-      openssl_lib_dir="$candidate"
-      break
-    fi
-  done
-  if [[ -z "$openssl_lib_dir" ]]; then
-    echo "[build] error: libssl.so.3 / libcrypto.so.3 not found in /usr/lib/{x86_64,aarch64}-linux-gnu, /usr/lib64, /usr/lib" >&2
-    echo "[build] install with: sudo apt-get install -y libssl3" >&2
-    exit 1
-  fi
-  for lib in libssl.so.3 libcrypto.so.3; do
-    cp -L "$openssl_lib_dir/$lib" "$out_dir/"
-    echo "[build] bundled $lib (from $openssl_lib_dir)"
-  done
-
-elif [[ "$os" == "Darwin" ]]; then
-  openssl_lib_dir=""
-  # GitHub macos-latest is Apple Silicon (Homebrew at /opt/homebrew);
-  # /usr/local/opt path covers Intel Mac dev hosts.
-  for candidate in /opt/homebrew/opt/openssl@3/lib /usr/local/opt/openssl@3/lib; do
-    if [[ -f "$candidate/libssl.3.dylib" && -f "$candidate/libcrypto.3.dylib" ]]; then
-      openssl_lib_dir="$candidate"
-      break
-    fi
-  done
-  if [[ -z "$openssl_lib_dir" ]]; then
-    echo "[build] error: libssl.3.dylib / libcrypto.3.dylib not found." >&2
-    echo "[build] install with: brew install openssl@3" >&2
-    exit 1
-  fi
-  for lib in libssl.3.dylib libcrypto.3.dylib; do
-    cp "$openssl_lib_dir/$lib" "$out_dir/"
-    chmod u+w "$out_dir/$lib"
-    # Set the dylib's own install_name to @rpath/<basename>; the
-    # rpath rewrite step below redirects loaders looking for the
-    # absolute Homebrew path here instead.
-    install_name_tool -id "@rpath/$lib" "$out_dir/$lib"
-    echo "[build] bundled $lib (from $openssl_lib_dir)"
-  done
-fi
+# ── 8. OpenSSL: not linked, not bundled ────────────────────────────
+# There used to be an OpenSSL bundling step here. At b8892 llama.cpp
+# called find_package(OpenSSL) unconditionally and ignored
+# `-DLLAMA_SERVER_SSL=OFF`, so the server linked libssl/libcrypto
+# whether we wanted it or not and the only way to ship a self-contained
+# tarball was to copy the build host's copies in beside it. That meant
+# three different unpinned OpenSSL versions across the platforms
+# (Ubuntu's on Linux, Homebrew's on macOS, Git-for-Windows' MinGW build
+# on Windows), each frozen at build time and only patchable by cutting a
+# new native release. Bad shape for a TLS library.
+#
+# b10099 has a real option — `option(LLAMA_OPENSSL "llama: use openssl
+# to support HTTPS" ON)` — so we turn it OFF in the cmake flags above
+# and ship no OpenSSL at all. What it gates is cpp-httplib's
+# CPPHTTPLIB_OPENSSL_SUPPORT, i.e. llama-server terminating TLS itself.
+# Gezel spawns the engine on loopback and speaks plain HTTP to it; the
+# daemon's own loopback TLS is a separate layer, and model downloads are
+# gezel's own fetch, not the engine's (LLAMA_CURL=OFF).
+#
+# If you ever need the engine to serve HTTPS directly, prefer upstream's
+# LLAMA_BUILD_BORINGSSL / LLAMA_BUILD_LIBRESSL (vendored, pinned, built
+# from source) over reinstating a scavenge from the build host.
 
 # ── 9. Rewrite rpath / install_names so the bundle is relocatable ──
 # After bundling, every binary + shared lib in $out_dir needs to

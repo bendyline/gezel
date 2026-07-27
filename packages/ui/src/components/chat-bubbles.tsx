@@ -7,24 +7,13 @@ import type {
   ToolCallVideo,
 } from '@bendyline/gezel';
 import { promoteBareChannelNames } from '@bendyline/gezel';
-import { LIGHT_SURFACE, type MediaProvider, type SurfaceScheme } from '@bendyline/squisq';
+import type { MediaProvider, SurfaceScheme } from '@bendyline/squisq';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 
-// Chat-bubble light surface: 75% of the way from Squisq's stark `#ffffff`
-// `LIGHT_SURFACE.background` toward the gezel app's `--panel` canvas
-// (`#f3eddf`) that fills `.msg-body-rendered`. A pure midpoint still read
-// too stark against the cream chrome — pushed further toward canvas so
-// the bubble blends as warm paper. `backgroundLight` follows the same
-// 75/25 lerp against `LIGHT_SURFACE.backgroundLight` (`#f5f5f5`) so
-// inset code-block tints stay subtly distinct from the bubble surface.
-// Text colors carry over from `LIGHT_SURFACE`.
-const CHAT_BUBBLE_LIGHT_SURFACE: SurfaceScheme = {
-  id: 'gezel-chat-light',
-  background: '#f6f1e7',
-  backgroundLight: '#f4efe5',
-  text: LIGHT_SURFACE.text,
-  textMuted: LIGHT_SURFACE.textMuted,
-};
+// Chat-bubble light surface — shared with the Home intro's embedded
+// Handboek page; the scheme and its rationale live in
+// [chat-theme.ts](./chat-theme.ts).
+const CHAT_BUBBLE_LIGHT_SURFACE: SurfaceScheme = GEZEL_LIGHT_SURFACE;
 import { LinearDocView, MediaContext } from '@bendyline/squisq-react';
 import { markdownToDoc } from '@bendyline/squisq/doc';
 import { parseMarkdown } from '@bendyline/squisq/markdown';
@@ -48,7 +37,7 @@ import { ImagePreview } from './ImagePreview.js';
 import { PendingQuestionCard } from './PendingQuestionCard.js';
 import { ToolDiffBlock } from './ToolDiffBlock.js';
 import { artifactPathFromHref, linkifyArtifactRefs } from './artifact-linkify.js';
-import { gezelChatTheme } from './chat-theme.js';
+import { GEZEL_LIGHT_SURFACE, gezelChatTheme } from './chat-theme.js';
 import {
   type PendingToolCall,
   dropExecutedPending,
@@ -68,7 +57,11 @@ function bubbleBodyStyle(fontFamily?: string, fontScale?: number): CSSProperties
   const scaled = fontScale !== undefined && fontScale !== 1;
   if (!fontFamily && !scaled) return undefined;
   return {
-    ...(fontFamily ? { fontFamily } : {}),
+    // Both channels: `fontFamily` inherits into plain `.msg-body` text,
+    // while `--gezel-chat-font` reaches Squisq-rendered content whose
+    // inline system-ui stack the stylesheet overrides (see the
+    // `.msg-body-rendered .squisq-linear-content` rule).
+    ...(fontFamily ? ({ fontFamily, '--gezel-chat-font': fontFamily } as CSSProperties) : {}),
     ...(scaled ? ({ '--gezel-font-scale': String(fontScale) } as CSSProperties) : {}),
   };
 }

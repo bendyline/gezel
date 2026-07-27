@@ -12,6 +12,27 @@ function deferred<T>() {
 }
 
 describe('SerializedAutosaveController', () => {
+  it('keeps an idle lane idle on a no-op update (editor mount emissions)', () => {
+    const save = vi.fn<(value: string) => Promise<string>>();
+    const controller = new SerializedAutosaveController({
+      resourceKey: 'document:about.md',
+      initialValue: 'original',
+      save,
+    });
+    expect(controller.getSnapshot().phase).toBe('idle');
+
+    // Editors re-emit their initial content at mount; a value equal to the
+    // baseline must neither flash "saved" (no write ever happened) nor
+    // schedule one.
+    controller.update('original');
+    expect(controller.getSnapshot()).toMatchObject({ phase: 'idle', dirty: false });
+    expect(save).not.toHaveBeenCalled();
+
+    // A real edit still dirties, and settling back after a save shows saved.
+    controller.update('edited');
+    expect(controller.getSnapshot().phase).toBe('dirty');
+  });
+
   it('serializes requests and coalesces edits made while a save is in flight', async () => {
     const first = deferred<string>();
     const second = deferred<string>();

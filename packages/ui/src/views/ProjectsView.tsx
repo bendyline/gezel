@@ -28,6 +28,7 @@ import {
   createArtifactsContentContainer,
   createDocumentLinkProvider,
 } from '../components/SquisqIntegration/index.js';
+import { normalizeMarkdownBaseline } from '../components/markdown-baseline.js';
 import { consumeCreate } from '../components/nav-intents.js';
 import { consumeOpenFile } from '../components/pending-open-file.js';
 import { useCompactLayout } from '../components/useCompactLayout.js';
@@ -2032,7 +2033,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                                 ? selected.workingDir
                                   ? 'Workspace directory is empty.'
                                   : 'No external working directory set. Use the internal workspace or set an external path under the Settings tab.'
-                                : 'No artifacts yet. Agents will store reports and outputs here.'}
+                                : 'No artifacts yet. Your gezels will store reports and outputs here.'}
                             </p>
                           )}
                           <FileTree
@@ -2670,9 +2671,14 @@ function ProjectDocEditor({
   onSave: (value: string) => Promise<unknown>;
 }) {
   const editorTheme = useEffectiveTheme();
+  // Baseline on the editor-canonical form: Squisq re-emits its own
+  // serialization of unchanged content at mount, and a raw-text baseline
+  // reads that as an edit (false "unsaved changes" + a spurious write on
+  // open). See markdown-baseline.ts.
+  const normalizedInitial = useMemo(() => normalizeMarkdownBaseline(initial), [initial]);
   const autosave = useSerializedAutosave({
     resourceKey,
-    initialValue: initial,
+    initialValue: normalizedInitial,
     save: onSave,
   });
 
@@ -2685,16 +2691,15 @@ function ProjectDocEditor({
 
   return (
     <section id={id} className="project-doc-editor project-about-anchor">
-      <h3 className="project-doc-editor-title">{label}</h3>
-      <p className="muted small" style={{ marginTop: 0, marginBottom: '0.4rem' }}>
-        {hint}{' '}
-        <output className="status" aria-live="polite">
-          {autosave.phase === 'dirty' && 'unsaved changes'}
-          {autosave.phase === 'saving' && 'saving…'}
-          {autosave.phase === 'saved' && 'saved'}
+      <div className="project-doc-editor-head">
+        <h3 className="project-doc-editor-title">{label}</h3>
+        <output className={`autosave-chip autosave-chip-${autosave.phase}`} aria-live="polite">
+          {autosave.phase === 'dirty' && 'Unsaved changes'}
+          {autosave.phase === 'saving' && 'Saving…'}
+          {autosave.phase === 'saved' && 'Saved'}
           {autosave.phase === 'error' && (
             <>
-              save failed: {autosave.error?.message ?? 'unknown error'}{' '}
+              <span title={autosave.error?.message ?? 'unknown error'}>Save failed</span>
               <button
                 type="button"
                 className="link-btn"
@@ -2705,6 +2710,9 @@ function ProjectDocEditor({
             </>
           )}
         </output>
+      </div>
+      <p className="muted small" style={{ marginTop: 0, marginBottom: '0.4rem' }}>
+        {hint}
       </p>
       <div className="editor-wrap">
         <EditorShell

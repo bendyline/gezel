@@ -546,3 +546,89 @@ describe('lots and streetscape', () => {
     );
   });
 });
+
+describe('facade richness at street zoom', () => {
+  /**
+   * Draw one building at a fixed STREET-tier zoom, varying only its footprint.
+   *
+   * Zoom can't be the variable: facade details are gated on tier, so a scale
+   * low enough to fall under the fine threshold isn't street tier at all, and
+   * the comparison would be "detailed" against "nothing drawn".
+   */
+  function opsFor(worldSide: number) {
+    const rect = { x: 0, y: 0, w: worldSide, h: worldSide * 0.8 };
+    const block: MapBlock = {
+      id: 'pkg/facade.ts',
+      districtId: 'pkg',
+      rect,
+      label: 'facade.ts',
+      weight: 400,
+      lang: 'typescript',
+      state: 'live',
+      buildingCount: 6,
+      levels: 3,
+      settlement: 'town',
+      urbanity: 0.6,
+      health: {
+        findings: 0,
+        maxSeverity: null,
+        fanIn: 3,
+        fanOut: 3,
+        vibe: 'tidy',
+        zone: 'residential',
+        importance: 0.5,
+        churn: 4,
+      },
+    };
+    const s = state(3, { ...model(false), blocks: [block] });
+    const prism = prismScreen(s.cam, rect, 5.4);
+    const { ctx, calls } = recordingCtx();
+    drawTownBuilding(ctx, s, prism, townStyleForBlock(block), prismColors('typescript', s.palette));
+    return { calls, widthPx: prism.te.x - prism.tw.x };
+  }
+
+  const count = (calls: RecordedCall[], method: string) =>
+    calls.filter((c) => c.method === method).length;
+
+  it('sizes roof furniture with the building, not in fixed pixels', () => {
+    // Chimneys and dormers were drawn at a hardcoded ~3x7px whatever the zoom,
+    // so at street zoom — where a stack against the sky is exactly the detail
+    // that reads as 1900s — every roof was effectively bare. The chimney cap's
+    // width is the cleanest probe of that.
+    const capWidth = (calls: RecordedCall[]) =>
+      Math.max(
+        0,
+        ...calls
+          .filter((c) => c.method === 'fillRect')
+          .map((c) => (typeof c.args[2] === 'number' ? (c.args[2] as number) : 0)),
+      );
+    const small = opsFor(10);
+    const big = opsFor(40);
+    expect(big.widthPx / small.widthPx).toBeCloseTo(4, 1);
+    expect(capWidth(big.calls)).toBeGreaterThan(capWidth(small.calls) * 2.5);
+  });
+
+  it('a facade carries structure, not just window rectangles', () => {
+    // The wall gets a plinth, an eaves fascia, and corner boards; every window
+    // gets a sill, a lintel, and glazing bars. Without them a building is a
+    // colored box with slits, and the only thing telling two apart is whether
+    // the lights happen to be on.
+    const bare = opsFor(6);
+    const rich = opsFor(20);
+    expect(count(rich.calls, 'fill')).toBeGreaterThan(count(bare.calls, 'fill') * 2);
+    // Glazing bars and half-timbering are strokes and appear only when fine.
+    expect(count(rich.calls, 'stroke')).toBeGreaterThan(count(bare.calls, 'stroke') * 5);
+  });
+
+  it('drops the fine layer when a building is too small to resolve it', () => {
+    // Sills and glazing bars on a 30px building are noise, not detail.
+    const tiny = opsFor(6);
+    expect(tiny.widthPx).toBeLessThan(34);
+    expect(count(tiny.calls, 'stroke')).toBeLessThanOrEqual(2);
+  });
+
+  it('gives village houses a chimney', () => {
+    const m = roofModel('village', 'residential');
+    expect(m.blocks.every((b) => townStyleForBlock(b).chimneys > 0)).toBe(true);
+  });
+});

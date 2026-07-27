@@ -71,6 +71,11 @@ vi.mock('../components/OllamaModelManager.js', () => ({
 vi.mock('../components/SessionSwitcher.js', () => ({
   SessionSwitcher: () => null,
 }));
+// The embedded "What is gezel?" Handboek page pulls in the squisq doc
+// renderers, which jsdom can't drive — it has its own test file.
+vi.mock('./home/IntroHandboekArticle.js', () => ({
+  IntroHandboekArticle: () => <div data-testid="home-intro-article">intro article</div>,
+}));
 // The standing meester figure renders a real Poppetje only when the meester
 // has poppetje data; these tests leave it null (→ GezelIcon fallback), so we
 // don't need to mock the Poppetje engine.
@@ -170,6 +175,9 @@ describe('HomeView', () => {
 
     const link = await screen.findByRole('button', { name: /Manage Chat AI Models/ });
     expect(link).toBeInTheDocument();
+    // The intro copy is the embedded Handboek article, not hardcoded prose.
+    expect(screen.getByTestId('home-intro-article')).toBeInTheDocument();
+    expect(screen.queryByText(/AI-powered teammate/)).not.toBeInTheDocument();
     // The removed model-picking experience: no "Connect an AI model provider"
     // section, no provider tabs.
     expect(screen.queryByText(/Connect an AI model provider/)).not.toBeInTheDocument();

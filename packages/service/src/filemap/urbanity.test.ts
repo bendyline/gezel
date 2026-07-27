@@ -72,13 +72,13 @@ describe('computeUrbanity', () => {
     // Uniform geometry; importance concentrated on the left column only.
     const items = grid(6, 6, 40, (c) => (c === 0 ? 1 : 0));
     const geometricCx = (5 * 40) / 2 + 12;
-    const field = computeUrbanity(items, { hasEdges: true, now: NOW });
+    const field = computeUrbanity(items, { hasEdges: true });
     expect(field.downtown.cx).toBeLessThan(geometricCx);
   });
 
   it('falls off with distance from the downtown', () => {
     const items = grid(9, 9, 40);
-    const field = computeUrbanity(items, { hasEdges: true, now: NOW });
+    const field = computeUrbanity(items, { hasEdges: true });
     const center = field.byPath.get('f/4/4.ts')!;
     const edge = field.byPath.get('f/4/8.ts')!;
     const corner = field.byPath.get('f/8/8.ts')!;
@@ -90,14 +90,14 @@ describe('computeUrbanity', () => {
     // 40 tightly packed, maximally important blocks — the best case for a
     // small repo. It must still read rural.
     const items = grid(8, 5, 26, () => 1);
-    const field = computeUrbanity(items, { hasEdges: true, now: NOW });
+    const field = computeUrbanity(items, { hasEdges: true });
     expect(field.peak).toBeLessThan(0.52);
     for (const u of field.byPath.values()) expect(settlementFor(u)).not.toBe('city');
   });
 
   it('gives a large project a city core and a village rim', () => {
     const items = grid(64, 64, 30, () => 0.5);
-    const field = computeUrbanity(items, { hasEdges: true, now: NOW });
+    const field = computeUrbanity(items, { hasEdges: true });
     expect(settlementFor(field.byPath.get('f/32/32.ts')!)).toBe('city');
     const rim = settlementFor(field.byPath.get('f/0/0.ts')!);
     expect(rim === 'village' || rim === 'hamlet').toBe(true);
@@ -106,9 +106,9 @@ describe('computeUrbanity', () => {
 
   it('is deterministic and independent of input order', () => {
     const items = grid(12, 12, 40, (c, r) => ((c * 7 + r * 3) % 11) / 10);
-    const a = computeUrbanity(items, { hasEdges: true, now: NOW });
+    const a = computeUrbanity(items, { hasEdges: true });
     const shuffled = [...items].reverse();
-    const b = computeUrbanity(shuffled, { hasEdges: true, now: NOW });
+    const b = computeUrbanity(shuffled, { hasEdges: true });
     expect([...a.byPath.entries()].sort()).toEqual([...b.byPath.entries()].sort());
     expect(a.downtown).toEqual(b.downtown);
   });
@@ -117,9 +117,9 @@ describe('computeUrbanity', () => {
     const items = grid(24, 24, 40);
     const withEdges = computeUrbanity(
       grid(24, 24, 40, () => 0.5),
-      { hasEdges: true, now: NOW },
+      { hasEdges: true },
     );
-    const without = computeUrbanity(items, { hasEdges: false, now: NOW });
+    const without = computeUrbanity(items, { hasEdges: false });
     // The graph-less map's core must land in the same band, not a step down.
     expect(settlementFor(without.peak)).toBe(settlementFor(withEdges.peak));
   });
@@ -130,7 +130,7 @@ describe('computeUrbanity', () => {
       [block('only.ts', 0, 0)],
       [block('a.ts', 5, 5), block('b.ts', 5, 5), block('c.ts', 5, 5)],
     ]) {
-      const field = computeUrbanity(items, { hasEdges: false, now: NOW });
+      const field = computeUrbanity(items, { hasEdges: false });
       expect(Number.isFinite(field.downtown.cx)).toBe(true);
       expect(Number.isFinite(field.downtown.cy)).toBe(true);
       expect(field.downtown.r).toBeGreaterThan(0);
@@ -145,67 +145,65 @@ describe('computeUrbanity', () => {
 
   it('never leaves a live block without a value', () => {
     const items = grid(10, 10, 40);
-    const field = computeUrbanity(items, { hasEdges: true, now: NOW });
+    const field = computeUrbanity(items, { hasEdges: true });
     for (const it of items) expect(field.byPath.has(it.path)).toBe(true);
     expect(field.byPath.size).toBe(items.length);
   });
 });
 
 describe('adoptDowntown', () => {
-  const prior = { cx: 100, cy: 100, r: 200, impRef: 0.4, recordedAt: '2026-01-01T00:00:00.000Z' };
+  const prior = { cx: 100, cy: 100, r: 200, impRef: 0.4 };
 
   it('keeps the prior verbatim when nothing meaningful moved', () => {
-    const fresh = { cx: 100.4, cy: 99.7, r: 203, impRef: 0.41, recordedAt: NOW };
+    const fresh = { cx: 100.4, cy: 99.7, r: 203, impRef: 0.41 };
     expect(adoptDowntown(prior, fresh, 1600)).toBe(prior);
   });
 
   it('adopts when the center moves far', () => {
-    const fresh = { cx: 600, cy: 100, r: 200, impRef: 0.4, recordedAt: NOW };
+    const fresh = { cx: 600, cy: 100, r: 200, impRef: 0.4 };
     expect(adoptDowntown(prior, fresh, 1600)).toBe(fresh);
   });
 
   it('adopts when the radius grows past the tolerance', () => {
-    const fresh = { cx: 100, cy: 100, r: 260, impRef: 0.4, recordedAt: NOW };
+    const fresh = { cx: 100, cy: 100, r: 260, impRef: 0.4 };
     expect(adoptDowntown(prior, fresh, 1600)).toBe(fresh);
   });
 
   it('adopts when the importance reference shifts', () => {
-    const fresh = { cx: 100, cy: 100, r: 200, impRef: 0.9, recordedAt: NOW };
+    const fresh = { cx: 100, cy: 100, r: 200, impRef: 0.9 };
     expect(adoptDowntown(prior, fresh, 1600)).toBe(fresh);
   });
 
   it('adopts as a unit — never a stale center with a fresh radius', () => {
-    const fresh = { cx: 600, cy: 100, r: 260, impRef: 0.9, recordedAt: NOW };
+    const fresh = { cx: 600, cy: 100, r: 260, impRef: 0.9 };
     const got = adoptDowntown(prior, fresh, 1600);
     expect(got).toEqual(fresh);
-    const kept = adoptDowntown(prior, { ...prior, recordedAt: NOW }, 1600);
+    const kept = adoptDowntown(prior, { ...prior }, 1600);
     expect(kept).toEqual(prior);
   });
 
   it('takes the fresh value when there is no prior', () => {
-    const fresh = { cx: 1, cy: 2, r: 3, impRef: 0.1, recordedAt: NOW };
+    const fresh = { cx: 1, cy: 2, r: 3, impRef: 0.1 };
     expect(adoptDowntown(null, fresh, 1600)).toBe(fresh);
     expect(adoptDowntown(undefined, fresh, 1600)).toBe(fresh);
   });
 
   it('adding one block to a settled map does not re-adopt', () => {
     const items = grid(20, 20, 40, (c, r) => ((c + r) % 5) / 4);
-    const first = computeUrbanity(items, { hasEdges: true, now: NOW });
+    const first = computeUrbanity(items, { hasEdges: true });
     const grown = computeUrbanity([...items, block('f/20/0.ts', 0, 20 * 40, 0.2)], {
       hasEdges: true,
       prior: first.downtown,
-      now: '2026-07-26T00:00:00.000Z',
     });
     expect(grown.downtown).toBe(first.downtown);
   });
 
   it('growth does not flip an existing block out of its settlement band', () => {
     const items = grid(20, 20, 40, (c, r) => ((c + r) % 5) / 4);
-    const first = computeUrbanity(items, { hasEdges: true, now: NOW });
+    const first = computeUrbanity(items, { hasEdges: true });
     const grown = computeUrbanity([...items, block('f/20/0.ts', 0, 20 * 40, 0.2)], {
       hasEdges: true,
       prior: first.downtown,
-      now: NOW,
     });
     for (const [path, before] of first.byPath) {
       expect(settlementFor(grown.byPath.get(path)!)).toBe(settlementFor(before));

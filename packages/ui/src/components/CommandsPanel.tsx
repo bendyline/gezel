@@ -412,20 +412,20 @@ export function CommandsPanel({ projectId, onStageCommand }: Props) {
           aria-label="Filter commands"
         />
         <span className="commands-panel-state muted small" title={scannedAt ?? ''}>
-          {state === 'indexing'
-            ? 'indexing…'
-            : state === 'never'
-              ? 'not indexed'
-              : state === 'stale'
-                ? 'stale'
-                : `${totalCount} cmd${totalCount === 1 ? '' : 's'}`}
+          {state === 'indexing' || state === 'never'
+            ? // "never" resolves within moments of the panel opening — both
+              // states read as one human activity, not an index status code.
+              'looking…'
+            : state === 'stale'
+              ? 'refreshing…'
+              : totalCount > 0
+                ? `${totalCount} command${totalCount === 1 ? '' : 's'}`
+                : ''}
         </span>
       </div>
       {error && <p className="commands-panel-error small">{error}</p>}
       {showLoading && (
-        <p className="commands-panel-empty muted small">
-          Looking through your workspace for commands…
-        </p>
+        <p className="commands-panel-empty muted small">Looking through your workspace…</p>
       )}
       {showEmpty && (
         <p className="commands-panel-empty muted small">

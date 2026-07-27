@@ -1,5 +1,5 @@
 import type { MapBuilding, MapDistrict, MapPlaza, MapStreet, Rect } from '../schemas/api.js';
-import type { CityAnchor } from '../schemas/city-file.js';
+import type { VillageAnchor } from '../schemas/village-file.js';
 import {
   SIDEWALK,
   appendLotInFolder,
@@ -80,7 +80,7 @@ interface SeededLayout {
   streets: StreetSeg[];
   plates: TownPlate[];
   plazas: TownPlaza[];
-  anchors: CityAnchor[];
+  anchors: VillageAnchor[];
 }
 
 /** Deterministic, non-overlapping seed for the whole city. */
@@ -336,7 +336,7 @@ export function layoutFileMap(
   // Derived nodes (streets, plates, plazas, districts) keep their original
   // first-seen timestamp instead of restamping `now` every build. Restamping
   // rewrites the journal on every rebuild, which puts a dirty diff in
-  // `.gezel/city.json` — a file we explicitly ask users to commit — even when
+  // `.gezel/village.json` — a file we explicitly ask users to commit — even when
   // nothing about the settlement changed.
   const priorPlacedAt = new Map<string, string>();
   for (const p of prior) {
@@ -361,7 +361,7 @@ export function layoutFileMap(
   let streets: MapStreet[];
   let plates: TownPlate[];
   let plazas: MapPlaza[];
-  let anchors: CityAnchor[] = [];
+  let anchors: VillageAnchor[] = [];
 
   if (priorBlocks.size === 0) {
     // FIRST BUILD: the town packer sizes every box to fit, so the seed is

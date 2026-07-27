@@ -25,6 +25,19 @@ interface SelectItemProps {
   value: string;
   children?: ReactNode;
   disabled?: boolean;
+  /** Radix's plain-text representation of a rich item row. */
+  textValue?: string;
+}
+
+/** Flatten a ReactNode to its visible text (option labels are text-only). */
+function nodeText(n: ReactNode): string {
+  if (n == null || typeof n === 'boolean') return '';
+  if (typeof n === 'string' || typeof n === 'number') return String(n);
+  if (Array.isArray(n)) return n.map(nodeText).join('');
+  if (typeof n === 'object' && 'props' in n) {
+    return nodeText((n as { props?: { children?: ReactNode } }).props?.children);
+  }
+  return '';
 }
 
 const Select = {
@@ -40,9 +53,16 @@ const Select = {
         return;
       }
       if (typeof n === 'object' && 'props' in n) {
-        const props = (n as { props?: { value?: string; children?: ReactNode } }).props;
+        const props = (
+          n as { props?: { value?: string; children?: ReactNode; textValue?: string } }
+        ).props;
         if (props && typeof props.value === 'string') {
-          options.push({ value: props.value, label: props.children ?? props.value });
+          // Prefer Radix's `textValue` for rich rows — same plain-text
+          // channel the real Select uses for typeahead.
+          options.push({
+            value: props.value,
+            label: props.textValue ?? props.children ?? props.value,
+          });
         }
         if (props?.children) walk(props.children);
       }
@@ -58,7 +78,7 @@ const Select = {
         {options.map((o, i) => (
           // eslint-disable-next-line react/no-array-index-key
           <option key={`${o.value}-${i}`} value={o.value}>
-            {typeof o.label === 'string' ? o.label : JSON.stringify(o.label)}
+            {typeof o.label === 'string' ? o.label : nodeText(o.label)}
           </option>
         ))}
       </select>

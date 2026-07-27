@@ -619,9 +619,21 @@ export function townStyleForBlock(block: MapBlock): TownStyle {
         ? Math.min(3, rawBays)
         : rawBays;
 
+  // Every village house and shop was heated by a hearth, and a stack against
+  // the sky is the most recognizable period silhouette element there is —
+  // village buildings without one read as modern sheds.
+  //
+  // Scoped to the village band on purpose: the town row is what the golden
+  // fixtures pin, and this branch consumes a draw, so widening it there would
+  // shift every downstream value.
+  const hearth =
+    archetype === 'cottage' ||
+    archetype === 'inn' ||
+    archetype === 'boarding-house' ||
+    (band === 'village' && !isCivic);
   const chimneys = isIndustrial
     ? 1 + Math.min(2, Math.floor(churn / 8) + (random() < 0.5 ? 1 : 0))
-    : archetype === 'cottage' || archetype === 'inn' || archetype === 'boarding-house'
+    : hearth
       ? 1 + (random() < 0.25 ? 1 : 0)
       : 0;
   const cupola = isCivic && (block.landmark === true || random() < 0.5);

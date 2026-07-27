@@ -21,7 +21,7 @@
  * five storeys, civic, and a landmark.
  */
 
-import type { CityDowntown, Rect, Settlement } from '@bendyline/gezel';
+import type { Rect, Settlement, VillageDowntown } from '@bendyline/gezel';
 
 export interface UrbanityInput {
   path: string;
@@ -37,14 +37,12 @@ export interface UrbanityOptions {
   /** False when the map has no resolved import edges — see WEIGHTS below. */
   hasEdges: boolean;
   /** Previously persisted field parameters, for sticky adoption. */
-  prior?: CityDowntown | null | undefined;
-  /** ISO timestamp stamped onto a freshly adopted downtown. */
-  now: string;
+  prior?: VillageDowntown | null | undefined;
 }
 
 export interface UrbanityField {
   /** The adopted parameters — possibly the prior object verbatim. */
-  downtown: CityDowntown;
+  downtown: VillageDowntown;
   ceiling: number;
   byPath: Map<string, number>;
   peak: number;
@@ -144,19 +142,19 @@ export function sizeCeiling(fileCount: number): number {
  * The adopted values are what the field is actually computed from, not just
  * what gets persisted — see `computeUrbanity`.
  *
- * `CityFileStore` skips a write only when the serialized bytes are identical,
+ * `VillageFileStore` skips a write only when the serialized bytes are identical,
  * so without this the sub-ULP centroid drift of an ordinary rebuild would
- * rewrite `.gezel/city.json` on every background indexer tick — a dirty git
+ * rewrite `.gezel/village.json` on every background indexer tick — a dirty git
  * diff in the user's repo, on a file we explicitly ask them to commit.
  *
  * All-or-nothing by design: mixing a stale center with a fresh radius would
  * produce a field that matches neither build.
  */
 export function adoptDowntown(
-  prior: CityDowntown | null | undefined,
-  fresh: CityDowntown,
+  prior: VillageDowntown | null | undefined,
+  fresh: VillageDowntown,
   mapDiagonal: number,
-): CityDowntown {
+): VillageDowntown {
   if (!prior) return fresh;
   const moved = Math.hypot(fresh.cx - prior.cx, fresh.cy - prior.cy) > MOVE_FRACTION * mapDiagonal;
   const grew = Math.abs(fresh.r - prior.r) / Math.max(1, prior.r) > RADIUS_FRACTION;
@@ -218,7 +216,7 @@ export function computeUrbanity(
   const ceiling = sizeCeiling(n);
 
   if (n === 0) {
-    const empty: CityDowntown = { cx: 0, cy: 0, r: MIN_RADIUS, impRef: 0, recordedAt: opts.now };
+    const empty: VillageDowntown = { cx: 0, cy: 0, r: MIN_RADIUS, impRef: 0 };
     return {
       downtown: adoptDowntown(opts.prior, empty, MIN_RADIUS),
       ceiling,
@@ -300,12 +298,11 @@ export function computeUrbanity(
   // p90, not max: one outlier hub shouldn't dim the whole rest of the map.
   const impRef = Math.max(IMP_REF_FLOOR, percentile(occupied, 0.9));
 
-  const fresh: CityDowntown = {
+  const fresh: VillageDowntown = {
     cx: round(cx, 1),
     cy: round(cy, 1),
     r: round(radius, 1),
     impRef: round(impRef, 3),
-    recordedAt: opts.now,
   };
   const diagonal = Math.hypot(maxX - minX, maxY - minY) || MIN_RADIUS;
 

@@ -19,9 +19,17 @@ endpoint that the supervisor probes. See
 | -------------- | ----------------------- | -------------------------------------------------- |
 | `darwin-arm64` | Metal                   | `-DSD_METAL=ON`. "Just works" on Apple Silicon.    |
 | `darwin-x64`   | CPU (AVX2 / Accelerate) | No GPU path — Metal requires Apple Silicon.        |
-| `linux-x64`    | CUDA → Vulkan → CPU     | Autodetected in that order, matching llama-cpp's build.sh. CI runners have neither nvcc nor vulkaninfo, so shipped binaries stay Vulkan/CPU. |
-| `linux-arm64`  | CUDA → Vulkan → CPU     | Same autodetect. Jetson / DGX-style hosts with the CUDA toolkit on PATH get `-DSD_CUDA=ON` automatically; Vulkan stays moot here (LunarG ships no aarch64 SDK tarball). |
-| `win32-x64`    | Vulkan (fallback: CPU)  | Broadly compatible default.                        |
+| `linux-x64`    | Vulkan                  | Ships Vulkan (`sd_backend: vulkan` in the build matrix). Local builds autodetect CUDA → Vulkan → CPU. |
+| `linux-arm64`  | CPU                     | Ships CPU (`sd_backend: cpu`) — LunarG publishes no aarch64 SDK tarball. Local builds on Jetson / DGX-style hosts with `nvcc` on PATH pick CUDA automatically. |
+| `win32-x64`    | Vulkan                  | Ships Vulkan (`sd_backend: vulkan`).                |
+
+The shipped backend is **pinned per matrix row** in
+`.github/workflows/build-native.yml`, not autodetected. `build.sh`'s
+`auto` path infers the backend from `command -v vulkaninfo`, which would
+otherwise couple the shipped artifact to whether the Vulkan SDK install
+step happened to run on that runner — native-v0.1.18 shipped a
+Vulkan-linked `linux-x64` binary that way while this table still claimed
+otherwise. Changing a shipped backend means editing the matrix.
 
 We ship **Vulkan/CPU** binaries rather than CUDA because Vulkan is
 driver-independent and ships with nearly every modern GPU. CUDA gives
@@ -31,6 +39,27 @@ hosts with `nvcc` on PATH pick CUDA automatically — this matters: the
 CPU build renders SDXL at ~35 s/step, so even a 4-step distilled
 render takes ~4 minutes and blows through chat-turn latency budgets.
 Override with `SD_BACKEND={metal,vulkan,cuda,cpu}`.
+
+## Runtime requirements
+
+The Vulkan-linked binaries (`linux-x64`, `win32-x64`) name the Vulkan
+**loader** in their dynamic-import table: `libvulkan.so.1` on Linux,
+`vulkan-1.dll` on Windows. That is a load-time dependency, not a
+`dlopen` — if the loader is absent the process dies in the dynamic
+linker before `main()`, so sd.cpp never reaches its own fallback.
+
+Everything downstream of the loader *does* degrade gracefully. With the
+loader present but no usable device, sd.cpp logs and drops to
+`Using CPU backend`; `GGML_DISABLE_VULKAN=1` forces that path
+explicitly. So the loader's presence is the single hard requirement.
+
+| Platform | Provided by | Risk |
+| --- | --- | --- |
+| `win32-x64` | Every GPU driver installs `vulkan-1.dll` into `System32` | Low |
+| `linux-x64` | The `libvulkan1` package (Debian/Ubuntu) or `vulkan-loader` (Fedora) | Present on mainstream desktop installs; **absent** on minimal/server images, some containers, and WSL without a GPU stack |
+
+CI cannot catch a missing loader: the `ldd` smoke check runs on a runner
+where the Vulkan SDK was just installed, so it always resolves there.
 
 ## Build locally
 

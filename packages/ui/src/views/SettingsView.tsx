@@ -2113,12 +2113,10 @@ export function SettingsView() {
             <section style={{ marginBottom: '2rem' }}>
               <h3>Tool filtering</h3>
               <p className="muted" style={{ marginTop: 0 }}>
-                Narrow a gezel's tool surface based on their role. Each MCP tool schema costs
-                150–300 tokens of every request — filtering shaves several KB off each turn, which
-                matters most on small local models and on Tier-1 OpenAI accounts where the full
-                surface trips per-minute token caps. Known roles (Meester, Voorman, Reviewer,
-                Copywriter, Designer, Planner) inherit a curated set of toolset groups by default;
-                per-gezel overrides live in the gezel's Toolsets tab.
+                Give each gezel only the tools their role actually needs. A smaller toolbox keeps
+                them focused and makes every reply faster and cheaper — it matters most with small
+                on-device models. Known roles (Meester, Voorman, Reviewer, Copywriter, Designer,
+                Planner) start with a sensible set; each gezel's own Toolsets tab can override it.
               </p>
               <div className="provider-switch">
                 <button
@@ -2676,9 +2674,8 @@ export function SettingsView() {
               </div>
             )}
             <p className="muted" style={{ marginTop: '0.75rem', fontSize: '0.85rem' }}>
-              The Messages API is stateless — every turn replays the full chat history. We mark the
-              system prompt and prior conversation with cache breakpoints (5-minute TTL), so input
-              cost on follow-up turns drops to roughly 0.1× base.
+              Each reply re-sends the conversation so far; Gezel marks it for Anthropic's caching,
+              so follow-up turns cost a fraction of the first.
             </p>
           </section>
         )}
@@ -3071,9 +3068,9 @@ export function SettingsView() {
               {health && (
                 <dl>
                   <dt>Version</dt>
-                  <dd>{health.version}</dd>
-                  <dt>Started at</dt>
-                  <dd>{health.startedAt}</dd>
+                  <dd>{health.version === '0.0.0' ? 'development build' : health.version}</dd>
+                  <dt>Running since</dt>
+                  <dd>{formatStartedAt(health.startedAt)}</dd>
                 </dl>
               )}
               <AutostartToggle />
@@ -3250,6 +3247,17 @@ function OllamaReasoningToggle({
   );
 }
 
+/** Human form of the daemon's start time — raw ISO reads as a dev artifact. */
+function formatStartedAt(iso: string): string {
+  try {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return iso;
+    return d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+  } catch {
+    return iso;
+  }
+}
+
 function AutostartToggle() {
   const [state, setState] = useState<
     | { kind: 'loading' }
@@ -3280,9 +3288,8 @@ function AutostartToggle() {
   if (state.kind === 'unsupported') {
     return (
       <p className="muted small">
-        Autostart is only wired up inside the Electron shell. In dev mode (non-packaged) the toggle
-        below would write OS-level unit files for real — it's hidden here to avoid surprising the
-        user.
+        Background autostart is managed from the gezel desktop app — open this page there to keep
+        the service running at login.
       </p>
     );
   }
@@ -3521,11 +3528,11 @@ function MemorySection({ config, onAutoRecallChange, onSummarizationChange }: Me
           <strong>Recall memories at the start of each new thread.</strong>
         </label>
         <p className="muted small" style={{ margin: '0.25rem 0 0 1.5rem' }}>
-          Before the first reply, semantic-search project + gezel memory for the top-N relevant hits
-          and inject them into the system prompt.
+          Before the first reply, look through project and gezel memories for the most relevant
+          notes and hand them to the model.
         </p>
         <div className="new-row" style={{ marginTop: '0.5rem', alignItems: 'center' }}>
-          <label className="muted small">Top-K hits</label>
+          <label className="muted small">Memories to recall</label>
           <input
             type="number"
             min={1}

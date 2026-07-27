@@ -61,7 +61,8 @@ describe('OllamaSettings', () => {
     render(<OllamaSettings config={BASE_CONFIG} onConfigChanged={vi.fn()} />);
 
     await waitFor(() => {
-      expect(screen.getByText(/connection refused/)).toBeInTheDocument();
+      const failLine = screen.getByTitle('connection refused');
+      expect(failLine).toHaveTextContent(/Ollama isn't running at/);
     });
     expect(screen.getByRole('button', { name: /Start Ollama/i })).toBeInTheDocument();
     expect(screen.getByTestId('ollama-manager').getAttribute('data-enabled')).toBe('false');

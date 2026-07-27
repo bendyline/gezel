@@ -191,9 +191,8 @@ describe('ProjectsView', () => {
 
     const editors = await screen.findAllByTestId('editor-emit');
     fireEvent.click(editors[0]!);
-    expect(
-      await screen.findByText(/save failed: write failed/i, {}, { timeout: 1800 }),
-    ).toBeInTheDocument();
+    const failedChip = await screen.findByText('Save failed', {}, { timeout: 1800 });
+    expect(failedChip).toHaveAttribute('title', 'write failed');
 
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
     await waitFor(() => expect(api.updateProject).toHaveBeenCalledTimes(2));
@@ -217,9 +216,8 @@ describe('ProjectsView', () => {
     fireEvent.click(screen.getByRole('tab', { name: 'Settings' }));
     const firstEditors = await screen.findAllByTestId('editor-emit');
     fireEvent.click(firstEditors[0]!);
-    expect(
-      await screen.findByText(/save failed: still offline/i, {}, { timeout: 1800 }),
-    ).toBeInTheDocument();
+    const offlineChip = await screen.findByText('Save failed', {}, { timeout: 1800 });
+    expect(offlineChip).toHaveAttribute('title', 'still offline');
     firstView.unmount();
     expect(api.updateProject).toHaveBeenCalledTimes(1);
 
@@ -232,7 +230,7 @@ describe('ProjectsView', () => {
     fireEvent.click(screen.getByRole('tab', { name: 'Settings' }));
     const restoredEditors = await screen.findAllByTestId('editor');
     expect(restoredEditors[0]).toHaveAttribute('data-initial', 'edited content');
-    expect(screen.getByText(/save failed: still offline/i)).toBeInTheDocument();
+    expect(screen.getByText('Save failed')).toHaveAttribute('title', 'still offline');
 
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
     await waitFor(() => expect(api.updateProject).toHaveBeenCalledTimes(2));

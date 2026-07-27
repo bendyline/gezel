@@ -217,20 +217,36 @@ jobs:
       - name: Verify Authenticode on staged native binaries
         shell: pwsh
         run: |
-          # The native build workflow signs every engine exe at birth
-          # (Azure Trusted Signing). fetch-native-binaries.mjs proved the
-          # bytes match SHA256SUMS; this proves those bytes carry a valid
+          # The native build workflow signs every engine exe we compile at
+          # birth (Azure Trusted Signing). fetch-native-binaries.mjs proved
+          # the bytes match SHA256SUMS; this proves those bytes carry a valid
           # signature — a native release built without signing secrets
           # (fork/dispatch build) must never reach a production installer.
+          #
+          # Vendor binaries staged alongside them are exempt by the same
+          # sign-only-what-we-compile policy the afterPack sweep uses: uv.exe
+          # is Astral's prebuilt release and ships unsigned, as they publish
+          # it. Same list, same module — see third-party-binaries.cjs.
+          $patterns = node packages/app/scripts/third-party-binaries.cjs --patterns | ConvertFrom-Json
+          if (-not $patterns) { throw 'third-party-binaries.cjs --patterns returned nothing' }
           $exes = Get-ChildItem 'packages/app/native-bin' -Recurse -Filter '*.exe'
           if ($exes.Count -eq 0) { throw 'No native .exe binaries staged' }
+          $verified = 0
           foreach ($exe in $exes) {
+            $isThirdParty = $false
+            foreach ($p in $patterns) { if ($exe.Name -imatch $p) { $isThirdParty = $true; break } }
+            if ($isThirdParty) {
+              Write-Host "[native] third-party, left unsigned by policy: $($exe.Name)"
+              continue
+            }
             $sig = Get-AuthenticodeSignature $exe.FullName
             if ($sig.Status -ne 'Valid') {
               throw "Unsigned/invalid native binary $($exe.FullName): $($sig.Status)"
             }
             Write-Host "[native] valid signature: $($exe.Name)"
+            $verified += 1
           }
+          if ($verified -eq 0) { throw 'No first-party native binaries were signature-verified' }
 
       - name: Build + produce service bundle
         run: pnpm build:packaged
@@ -269,6 +285,17 @@ jobs:
           Set-Content -Path $metadataPath -Value $metadata
           echo "TRUSTED_SIGNING_METADATA_PATH=$metadataPath" >> $env:GITHUB_ENV
 
+      # The shipped engine DLLs import MSVCP140/VCRUNTIME140 — the MSVC
+      # redistributable, which is not a Windows component. Stage Microsoft's
+      # installer so the NSIS customInstall hook can provision it; without
+      # this the DLLs fail to load on a clean machine and local models never
+      # start. REQUIRED=1 so a release fails here rather than shipping an
+      # installer that silently omits it.
+      - name: Stage Visual C++ redistributable
+        run: node packages/app/scripts/stage-vc-redist.mjs
+        env:
+          GEZEL_VCREDIST_REQUIRED: '1'
+
       - name: Package Windows installer
         run: pnpm --filter @bendyline/gezel-app exec electron-builder --win --publish never
         env:
@@ -279,12 +306,25 @@ jobs:
       - name: Verify Windows signatures
         shell: pwsh
         run: |
-          # The whole shipped payload must be validly signed: the installer
-          # and gezel.exe (electron-builder's own pass), pnpm.exe + our-built
-          # engine DLLs (the afterPack sweep in scripts/after-pack.cjs),
-          # native engine exes + gezel-service-host.exe (signed at birth),
-          # and node.exe (upstream OpenJS signature). Anything Unsigned
-          # here means the sweep regressed — fail the release.
+          # Everything we build must be validly signed: the installer and
+          # gezel.exe (electron-builder's own pass), our engine DLLs (the
+          # afterPack sweep in scripts/after-pack.cjs), and the native engine
+          # exes + gezel-service-host.exe (signed at birth). Anything
+          # Unsigned here means the sweep regressed — fail the release.
+          #
+          # Third-party binaries we redistribute verbatim are exempt: we sign
+          # what we compile, so NVIDIA's cuBLAS/cudart, uv.exe and node.exe
+          # ship exactly as their vendors released them. The exemption list
+          # comes from scripts/third-party-binaries.cjs
+          # so this gate and the sweep cannot drift apart. It is an explicit
+          # allowlist, not "ignore unsigned" — a first-party DLL that failed
+          # to get signed still fails here.
+          $patterns = node packages/app/scripts/third-party-binaries.cjs --patterns | ConvertFrom-Json
+          if (-not $patterns) { throw 'third-party-binaries.cjs --patterns returned nothing' }
+          function Test-ThirdParty([string]$name) {
+            foreach ($p in $patterns) { if ($name -imatch $p) { return $true } }
+            return $false
+          }
           $installers = Get-ChildItem 'packages/app/dist/installers/*.exe'
           if ($installers.Count -eq 0) { throw 'No Windows installer produced' }
           $unpacked = 'packages/app/dist/installers/win-unpacked'
@@ -293,13 +333,23 @@ jobs:
             Get-Item "$unpacked/gezel-service-host.exe" -ErrorAction Stop
           )
           $payload += Get-ChildItem "$unpacked/resources/app.asar.unpacked" -Recurse -Include '*.exe', '*.dll' -ErrorAction SilentlyContinue
+          $checked = 0
+          $skipped = @()
           foreach ($executable in @($installers) + $payload) {
+            if (Test-ThirdParty $executable.Name) {
+              $skipped += $executable.Name
+              continue
+            }
             $signature = Get-AuthenticodeSignature $executable.FullName
             if ($signature.Status -ne 'Valid') {
               throw "Invalid Authenticode signature for $($executable.FullName): $($signature.Status)"
             }
+            $checked += 1
           }
-          Write-Host "Verified $($installers.Count + $payload.Count) signed files"
+          Write-Host "Verified $checked signed files"
+          if ($skipped.Count -gt 0) {
+            Write-Host "Left unsigned by policy (third-party, shipped verbatim): $(($skipped | Sort-Object -Unique) -join ', ')"
+          }
 
       - name: Verify Windows installer legal payload
         shell: pwsh

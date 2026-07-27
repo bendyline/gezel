@@ -10,10 +10,10 @@ import { IndexStore } from '../index-store/index-store.js';
 import { extractImportEdges } from '../index-store/symbols.js';
 import { resolveImportEdges, resolveImportEdgesDetailed } from './affinity.js';
 import { buildFileMap } from './build.js';
-import { CityFileStore } from './city-file.js';
 import { civicThreshold, computeHealth, normalizeSeverity } from './health.js';
 import { buildPrOverlay } from './pr-overlay.js';
 import { isJsonFile, isTestFile } from './sections.js';
+import { VillageFileStore } from './village-file.js';
 
 const gitOk = await isGitInstalled();
 
@@ -565,11 +565,11 @@ describe('buildFileMap (end-to-end over a real index)', () => {
     await writeFile(join(dir, 'docs', 'readme.md'), '# readme\n\nwords\n');
   }
 
-  function makeCityStore(): CityFileStore {
-    return new CityFileStore({
+  function makeCityStore(): VillageFileStore {
+    return new VillageFileStore({
       workspaceDir: dir,
-      primaryPath: join(dir, '.gezel', 'city.json'),
-      fallbackPath: join(dir, 'fallback-home', 'city.json'),
+      primaryPath: join(dir, '.gezel', 'village.json'),
+      fallbackPath: join(dir, 'fallback-home', 'village.json'),
     });
   }
 
@@ -623,16 +623,33 @@ describe('buildFileMap (end-to-end over a real index)', () => {
       await indexWorkspaceContent(store, dir);
       const first = await buildFileMap(store, dir, {
         persist: true,
-        cityFile: city,
+        villageFile: city,
         userFacing: true,
       });
-      const cityPath = join(dir, '.gezel', 'city.json');
+      const cityPath = join(dir, '.gezel', 'village.json');
       const rawAfterFirst = await readFile(cityPath, 'utf8');
-      expect(JSON.parse(rawAfterFirst).domains.code.downtown).toBeDefined();
+      const parsed = JSON.parse(rawAfterFirst);
+      expect(parsed.domains.code.downtown).toBeDefined();
+      // No provenance timestamps anywhere: not on the file, not on a domain,
+      // not on an anchor, not on the downtown.
+      expect(parsed.updatedAt).toBeUndefined();
+      expect(parsed.domains.code.seededAt).toBeUndefined();
+      expect(parsed.domains.code.downtown.recordedAt).toBeUndefined();
+      for (const a of parsed.domains.code.anchors) expect(a.recordedAt).toBeUndefined();
+      // Derived geometry carries no timestamp; only blocks do, because only a
+      // block's placement and removal are read back (age lens, tombstone TTL).
+      const journal = parsed.domains.code.journal as Array<Record<string, unknown>>;
+      expect(journal.some((n) => n.k === 'plate' || n.k === 'street')).toBe(true);
+      for (const n of journal) {
+        if (n.k === 'block') continue;
+        expect(n.a, `${String(n.k)} ${String(n.id)} carries a timestamp`).toBeUndefined();
+        expect(n.d).toBeUndefined();
+      }
+      expect(journal.some((n) => n.k === 'block' && typeof n.a === 'string')).toBe(true);
 
       const second = await buildFileMap(store, dir, {
         persist: true,
-        cityFile: city,
+        villageFile: city,
         userFacing: true,
       });
       for (const b of first.blocks) {
@@ -640,13 +657,11 @@ describe('buildFileMap (end-to-end over a real index)', () => {
         expect(again.urbanity).toBe(b.urbanity);
         expect(again.settlement).toBe(b.settlement);
       }
-      // `updatedAt` is stamped every build, so compare the domain state that
-      // actually describes the settlement.
-      const before = JSON.parse(rawAfterFirst).domains.code;
-      const after = JSON.parse(await readFile(cityPath, 'utf8')).domains.code;
-      expect(JSON.stringify(after.downtown)).toBe(JSON.stringify(before.downtown));
-      expect(JSON.stringify(after.journal)).toBe(JSON.stringify(before.journal));
-      expect(JSON.stringify(after.anchors)).toBe(JSON.stringify(before.anchors));
+      // The whole file, byte for byte. This used to compare only the domain
+      // state because `updatedAt` was stamped on every write — which meant the
+      // committed file got a diff on every background indexer tick regardless.
+      // With provenance timestamps gone, the real guarantee is testable.
+      expect(await readFile(cityPath, 'utf8')).toBe(rawAfterFirst);
     } finally {
       store.close();
     }
@@ -661,10 +676,10 @@ describe('buildFileMap (end-to-end over a real index)', () => {
     let firstStreets: string[];
     try {
       await indexWorkspaceContent(store1, dir);
-      // user-facing build → creates .gezel/city.json with anchors + journal
+      // user-facing build → creates .gezel/village.json with anchors + journal
       const map = await buildFileMap(store1, dir, {
         persist: true,
-        cityFile: city,
+        villageFile: city,
         userFacing: true,
       });
       firstBlocks = new Map(map.blocks.map((b) => [b.id, { x: b.lot!.x, y: b.lot!.y }]));
@@ -673,7 +688,7 @@ describe('buildFileMap (end-to-end over a real index)', () => {
     } finally {
       store1.close();
     }
-    const cityRaw = JSON.parse(await readFile(join(dir, '.gezel', 'city.json'), 'utf8'));
+    const cityRaw = JSON.parse(await readFile(join(dir, '.gezel', 'village.json'), 'utf8'));
     expect(cityRaw.domains.code.layoutVersion).toBe(5);
     expect(cityRaw.domains.code.journal.length).toBeGreaterThan(0);
     expect(cityRaw.domains.code.anchors.length).toBeGreaterThan(0);
@@ -684,7 +699,7 @@ describe('buildFileMap (end-to-end over a real index)', () => {
       await indexWorkspaceContent(store2, dir);
       const rebuilt = await buildFileMap(store2, dir, {
         persist: true,
-        cityFile: city,
+        villageFile: city,
         userFacing: false,
       });
       // Coordinates survive to the journal's 0.1 rounding (a one-time,
@@ -741,13 +756,13 @@ describe('buildFileMap (end-to-end over a real index)', () => {
       const city = makeCityStore();
       const map = await buildFileMap(store, dir, {
         persist: true,
-        cityFile: city,
+        villageFile: city,
         userFacing: true,
       });
       // placedAt carried across the re-seed
       for (const b of map.blocks) expect(b.placedAt).toBe(oldPlaced);
       // anchors derived from the OLD centroids: src NW of docs
-      const cityRaw = JSON.parse(await readFile(join(dir, '.gezel', 'city.json'), 'utf8'));
+      const cityRaw = JSON.parse(await readFile(join(dir, '.gezel', 'village.json'), 'utf8'));
       const anchors = new Map(
         (cityRaw.domains.code.anchors as Array<{ path: string; region: string }>).map((a) => [
           a.path,
@@ -779,8 +794,8 @@ describe('buildFileMap (end-to-end over a real index)', () => {
     try {
       await indexWorkspaceContent(store, dir);
       const city = makeCityStore();
-      await buildFileMap(store, dir, { persist: true, cityFile: city, userFacing: false });
-      await expect(readFile(join(dir, '.gezel', 'city.json'), 'utf8')).rejects.toThrow();
+      await buildFileMap(store, dir, { persist: true, villageFile: city, userFacing: false });
+      await expect(readFile(join(dir, '.gezel', 'village.json'), 'utf8')).rejects.toThrow();
     } finally {
       store.close();
     }

@@ -1,5 +1,5 @@
 import type { MapDistrict, MapPlaza, MapStreet, Rect } from '../schemas/api.js';
-import type { CityAnchor, CityOverride } from '../schemas/city-file.js';
+import type { VillageAnchor, VillageOverride } from '../schemas/village-file.js';
 
 /**
  * Pure-layout I/O for the city-map engine. The engine knows nothing about files,
@@ -51,9 +51,9 @@ export interface LayoutOptions {
   tombstoneCutoffIso?: string;
   /** Macro placement memory: seeds honor these compass regions for top-level
    *  display districts (recorded to the city file at first seed). */
-  anchors?: CityAnchor[];
+  anchors?: VillageAnchor[];
   /** User pins from the city file (region/rect for top-level folders). */
-  overrides?: CityOverride[];
+  overrides?: VillageOverride[];
   /** @deprecated pre-street block gap; kept for placeGhostBlocks callers. */
   gap?: number;
 }
@@ -93,7 +93,7 @@ export interface LayoutResult {
   plazas: MapPlaza[];
   /** compass anchors recorded by a seed build ([] on incremental builds —
    *  the service keeps the city file's existing anchors then). */
-  anchors: CityAnchor[];
+  anchors: VillageAnchor[];
   /** the authoritative layout to write back to the store. */
   persist: PersistNode[];
 }

@@ -141,6 +141,7 @@ export function TaskStepPanel({
         <div className="task-step-panel-actions">
           <button
             type="button"
+            className="secondary"
             onClick={() => void onActivate(phase.id)}
             disabled={busy || isActive || isDone}
             title={isActive ? 'This step is already active' : 'Make this the active step'}
@@ -201,7 +202,7 @@ export function TaskStepPanel({
             </Select.Trigger>
             <Select.Content>
               <Select.Item value="__none">— inherit from task —</Select.Item>
-              <Select.Item value="__user">→ user</Select.Item>
+              <Select.Item value="__user">→ You</Select.Item>
               {gezels.map((g) => (
                 <Select.Item key={g.id} value={g.id}>
                   → {g.name}
@@ -219,7 +220,7 @@ export function TaskStepPanel({
           <MarkdownField
             key={`prompt-${phaseKey}`}
             value={phase.prompt ?? ''}
-            placeholder="Step-specific guidance the team can lean on. (Not yet auto-injected into chats — coming.)"
+            placeholder="Step-specific guidance the team can lean on."
             onCommit={(md) => {
               promptDraft.current = md;
               savePrompt();

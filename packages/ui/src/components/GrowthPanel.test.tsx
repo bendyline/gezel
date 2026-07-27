@@ -99,7 +99,7 @@ describe('GrowthPanel', () => {
     await waitFor(() => {
       expect(screen.getByText(/Growth here is earned, not simulated/)).toBeInTheDocument();
     });
-    expect(screen.getByText('Future trait slot')).toBeInTheDocument();
+    expect(screen.getByText('Trait slot · unlocks at Level 2')).toBeInTheDocument();
     expect(screen.queryByText(/reached level/)).not.toBeInTheDocument();
   });
 

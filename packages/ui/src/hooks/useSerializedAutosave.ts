@@ -101,7 +101,13 @@ export class SerializedAutosaveController<Result> {
       this.activeValue !== null
         ? 'saving'
         : value === this.acknowledged && !this.needsWrite
-          ? 'saved'
+          ? // A no-op update on a lane that never saved stays idle — editors
+            // emit their initial content at mount, and flipping to "saved"
+            // for a write that never happened flashes a false status on a
+            // freshly opened view.
+            this.phase === 'idle'
+            ? 'idle'
+            : 'saved'
           : 'dirty';
     this.emit();
 

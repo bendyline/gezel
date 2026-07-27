@@ -1,4 +1,4 @@
-import type { CityAnchor, CityOverride, CompassRegion } from '../schemas/city-file.js';
+import type { CompassRegion, VillageAnchor, VillageOverride } from '../schemas/village-file.js';
 import type { PriorNode } from './types.js';
 
 /**
@@ -43,10 +43,7 @@ function topSegment(path: string): string {
  * compass region each top-level folder's centroid occupied so the re-seed
  * preserves the user's mental map.
  */
-export function deriveAnchorsFromPrior(
-  priorBlocks: readonly PriorNode[],
-  nowIso: string,
-): CityAnchor[] {
+export function deriveAnchorsFromPrior(priorBlocks: readonly PriorNode[]): VillageAnchor[] {
   const blocks = priorBlocks.filter((p) => p.nodeKind === 'block');
   if (blocks.length === 0) return [];
   let minX = Number.POSITIVE_INFINITY;
@@ -77,11 +74,11 @@ export function deriveAnchorsFromPrior(
     acc.n += 1;
     groups.set(top, acc);
   }
-  const out: CityAnchor[] = [];
+  const out: VillageAnchor[] = [];
   for (const [path, acc] of [...groups.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
     const cx = Math.min(1, Math.max(0, (acc.sumX / acc.n - minX) / w));
     const cy = Math.min(1, Math.max(0, (acc.sumY / acc.n - minY) / h));
-    out.push({ path, region: regionOf(cx, cy), cx, cy, recordedAt: nowIso });
+    out.push({ path, region: regionOf(cx, cy), cx, cy });
   }
   return out;
 }
@@ -94,8 +91,8 @@ export function deriveAnchorsFromPrior(
  */
 export function assignRegions(
   items: ReadonlyArray<{ path: string; area: number }>,
-  anchors: readonly CityAnchor[],
-  overrides: readonly CityOverride[],
+  anchors: readonly VillageAnchor[],
+  overrides: readonly VillageOverride[],
 ): Map<string, CompassRegion> {
   const out = new Map<string, CompassRegion>();
   const load = new Map<CompassRegion, number>();

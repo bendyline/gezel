@@ -1,15 +1,15 @@
 import { mkdir, readFile, rename } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import {
-  CITY_FILE_SCHEMA_VERSION,
-  type CityFile,
-  CityFileSchema,
+  VILLAGE_FILE_SCHEMA_VERSION,
+  type VillageFile,
+  VillageFileSchema,
   createLogger,
 } from '@bendyline/gezel';
 import { writeFileAtomic } from '../fs/atomic.js';
 
 /**
- * The impure half of the city file (`.gezel/city.json`): path resolution,
+ * The impure half of the village file (`.gezel/village.json`): path resolution,
  * schema-validated reads with quarantine-on-corrupt, and a deliberately
  * cautious write policy — this file lands inside the user's repo, so:
  *
@@ -29,31 +29,31 @@ import { writeFileAtomic } from '../fs/atomic.js';
  * HTTP-build race; writes themselves are atomic.
  */
 
-const log = createLogger('filemap:city');
+const log = createLogger('filemap:village');
 
 /** Same ×10 rounding as `streetId`, so street ids survive a journal round-trip. */
 const r1 = (n: number): number => Math.round(n * 10) / 10;
 
-export interface CityFileStoreOptions {
+export interface VillageFileStoreOptions {
   /** The project's workspace dir, or null when there is none. */
   workspaceDir: string | null;
-  /** Home-local fallback path (`~/.gezel/projects/{id}/city.json`). */
+  /** Home-local fallback path (`~/.gezel/projects/{id}/village.json`). */
   fallbackPath: string;
   /** Workspace-relative primary path builder (injected to avoid a paths dep). */
   primaryPath: string | null;
 }
 
 /** Canonical ordering + rounding — the deterministic-serialization half. */
-export function canonicalizeCityFile(city: CityFile): CityFile {
+export function canonicalizeVillageFile(village: VillageFile): VillageFile {
   const byString = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
   return {
-    ...city,
-    overrides: [...city.overrides].sort((a, b) => byString(a.path, b.path)),
+    ...village,
+    overrides: [...village.overrides].sort((a, b) => byString(a.path, b.path)),
     domains: Object.fromEntries(
-      Object.keys(city.domains)
+      Object.keys(village.domains)
         .sort(byString)
         .map((domain) => {
-          const d = city.domains[domain]!;
+          const d = village.domains[domain]!;
           return [
             domain,
             {
@@ -69,11 +69,11 @@ export function canonicalizeCityFile(city: CityFile): CityFile {
   };
 }
 
-export function serializeCityFile(city: CityFile): string {
-  return `${JSON.stringify(canonicalizeCityFile(city), null, 2)}\n`;
+export function serializeVillageFile(village: VillageFile): string {
+  return `${JSON.stringify(canonicalizeVillageFile(village), null, 2)}\n`;
 }
 
-export class CityFileStore {
+export class VillageFileStore {
   private queue: Promise<unknown> = Promise.resolve();
   /** Raw content of the file as last read or written, per path. */
   private lastRaw = new Map<string, string>();
@@ -82,7 +82,7 @@ export class CityFileStore {
   /** Set when the on-disk file claims a newer schema than we understand. */
   private readOnly = false;
 
-  constructor(private readonly opts: CityFileStoreOptions) {}
+  constructor(private readonly opts: VillageFileStoreOptions) {}
 
   private candidatePaths(): string[] {
     const out: string[] = [];
@@ -98,11 +98,11 @@ export class CityFileStore {
     return next;
   }
 
-  async read(): Promise<CityFile> {
+  async read(): Promise<VillageFile> {
     return this.enqueue(() => this.readUnlocked());
   }
 
-  private async readUnlocked(): Promise<CityFile> {
+  private async readUnlocked(): Promise<VillageFile> {
     for (const path of this.candidatePaths()) {
       let raw: string;
       try {
@@ -111,12 +111,12 @@ export class CityFileStore {
         continue;
       }
       try {
-        const parsed = CityFileSchema.parse(JSON.parse(raw));
-        if (parsed.schemaVersion > CITY_FILE_SCHEMA_VERSION) {
+        const parsed = VillageFileSchema.parse(JSON.parse(raw));
+        if (parsed.schemaVersion > VILLAGE_FILE_SCHEMA_VERSION) {
           // A newer gezel owns this file — honor what we can, never write.
           this.readOnly = true;
           log.warn(
-            `city file at ${path} has schemaVersion ${parsed.schemaVersion} > ${CITY_FILE_SCHEMA_VERSION}; treating as read-only`,
+            `village file at ${path} has schemaVersion ${parsed.schemaVersion} > ${VILLAGE_FILE_SCHEMA_VERSION}; treating as read-only`,
           );
         }
         this.activePath = path;
@@ -124,13 +124,13 @@ export class CityFileStore {
         return parsed;
       } catch (err) {
         log.warn(
-          `corrupt city file at ${path} — quarantining: ${err instanceof Error ? err.message : String(err)}`,
+          `corrupt village file at ${path} — quarantining: ${err instanceof Error ? err.message : String(err)}`,
         );
         await rename(path, `${path}.corrupt-${Date.now()}`).catch(() => {});
       }
     }
     this.activePath = null;
-    return CityFileSchema.parse({});
+    return VillageFileSchema.parse({});
   }
 
   /**
@@ -141,8 +141,8 @@ export class CityFileStore {
    */
   async update(
     options: { userFacing: boolean },
-    mutate: (city: CityFile) => CityFile,
-  ): Promise<CityFile> {
+    mutate: (village: VillageFile) => VillageFile,
+  ): Promise<VillageFile> {
     return this.enqueue(async () => {
       const current = await this.readUnlocked();
       const next = mutate(current);
@@ -152,7 +152,7 @@ export class CityFileStore {
       const exists = this.activePath !== null;
       if (!exists && !options.userFacing) return next;
 
-      const serialized = serializeCityFile(next);
+      const serialized = serializeVillageFile(next);
       if (this.lastRaw.get(target) === serialized) return next;
 
       try {

@@ -156,7 +156,7 @@ describe('TaskDetail', () => {
 
     const selects = screen.getAllByTestId('mock-select');
     const assigneeSelect = selects.find(
-      (el) => within(el).queryByText(/→ user/) !== null,
+      (el) => within(el).queryByText(/→ You/) !== null,
     ) as HTMLSelectElement;
     fireEvent.change(assigneeSelect, { target: { value: '__user' } });
 

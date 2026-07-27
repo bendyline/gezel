@@ -198,13 +198,28 @@ the smoke test and before hashing/upload, so every published hash covers
 signed bytes:
 
 - **Windows** — the engine executable is Authenticode-signed via Azure
-  Trusted Signing. Peer DLLs are left alone here: third-party
-  redistributables (cuBLAS/cudart) already carry NVIDIA signatures we
-  must not replace, and our own unsigned DLLs are swept later by the
-  Electron packaging hook.
+  Trusted Signing, unless the "engine" is a prebuilt download (`uv`). Peer
+  DLLs are left alone here and swept later by the Electron packaging hook.
+
+  **We sign only what we compile.** Third-party binaries we redistribute
+  verbatim — NVIDIA's cuBLAS/cudart, `uv.exe`, `node.exe` — are skipped
+  by the sweep and exempted from the release's
+  "Verify Windows signatures" gate, both reading the same list from
+  [`packages/app/scripts/third-party-binaries.cjs`](../packages/app/scripts/third-party-binaries.cjs).
+  They ship byte-identical to their upstream release, so a user can hash
+  them against the vendor's own manifest. (Contrary to what this section
+  used to say, NVIDIA's DLLs carry **no** signature when they arrive from
+  `developer.download.nvidia.com` — so this is "leave them alone", not
+  "preserve a vendor signature", except for `node.exe`.) The exemption is
+  an explicit allowlist: a first-party DLL that failed to get signed still
+  fails the release.
 - **macOS** — every Mach-O in the bundle (engine executable and peer
   dylibs) is Developer ID-signed with `--options runtime` (hardened
-  runtime), dylibs first, main binary last. A post-sign `--help` probe
+  runtime), dylibs first, main binary last. This is the one place the
+  sign-only-what-we-compile rule cannot apply: Apple's notary service
+  rejects any executable that is not Developer ID signed, and vendors ship
+  weaker signatures than that (`uv` for macOS is `adhoc, linker-signed`
+  with no team identifier), so third-party Mach-Os get re-signed too. A post-sign `--help` probe
   re-runs the smoke contract so a hardened-runtime regression fails the
   job. If an engine ever needs JIT or dyld-env access, give it a
   per-engine entitlements plist — don't drop `--options runtime`.

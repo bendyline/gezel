@@ -21,4 +21,8 @@ ctest --test-dir "$build_dir" --output-on-failure
 mkdir -p "$output_dir"
 cp "$build_dir/gezel-device-health" "$output_dir/gezel-device-health"
 chmod +x "$output_dir/gezel-device-health"
+# Every other engine strips on Linux; this helper was the one that didn't,
+# so it shipped its .symtab. Small (~a few KB) but it is also the only
+# first-party binary still carrying build-tree symbol names.
+strip -s "$output_dir/gezel-device-health" 2>/dev/null || true
 echo "[device-health] wrote $output_dir/gezel-device-health"

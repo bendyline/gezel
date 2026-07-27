@@ -74,6 +74,17 @@ export function DocumentsView() {
     [setSelectedPath],
   );
 
+  // Land on the first document instead of an empty pane. Only when there is
+  // no (surviving) stored selection — a user's pick or a deep link wins.
+  // Uses the transient setter: an auto-pick shouldn't overwrite the
+  // persisted selection slot.
+  useEffect(() => {
+    if (entries.length === 0) return;
+    if (selectedPath && entries.some((e) => e.path === selectedPath)) return;
+    const firstFile = entries.find((e) => !e.isDirectory) ?? entries[0];
+    if (firstFile) setSelectedPathState(firstFile.path);
+  }, [entries, selectedPath]);
+
   const deleteDocument = useCallback((entry: FileEntry) => {
     setDeleteTarget(entry);
   }, []);

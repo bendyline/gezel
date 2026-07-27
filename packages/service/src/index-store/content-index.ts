@@ -35,10 +35,10 @@ import type {
 } from '@bendyline/gezel';
 import { nowIso } from '@bendyline/gezel';
 import {
-  fallbackProjectCityFile,
   fallbackProjectIndexDir,
-  projectLocalCityFile,
+  fallbackProjectVillageFile,
   projectLocalIndexDbFile,
+  projectLocalVillageFile,
 } from '@bendyline/gezel/paths';
 import {
   resolveImportEdges,
@@ -46,7 +46,7 @@ import {
   resolveSpecifier,
 } from '../filemap/affinity.js';
 import { buildFileMap } from '../filemap/build.js';
-import { CityFileStore } from '../filemap/city-file.js';
+import { VillageFileStore } from '../filemap/village-file.js';
 import { safeJoin } from '../fs/safe-paths.js';
 import type { Store } from '../fs/store.js';
 import { runSecurityScan } from '../security/scan.js';
@@ -92,22 +92,22 @@ const CTX_MAX_USES = 50;
 const CTX_MAX_USED_IN_FILE_BY = 50;
 
 export class ContentIndex {
-  /** Per-project city-file stores (they cache last-written content so
+  /** Per-project village-file stores (they cache last-written content so
    *  no-change builds skip touching the user's repo). */
-  private readonly cityStores = new Map<string, CityFileStore>();
+  private readonly cityStores = new Map<string, VillageFileStore>();
 
   constructor(
     private readonly store: Store,
     private readonly home: string,
   ) {}
 
-  private cityStoreFor(projectId: string, workspaceDir: string | null): CityFileStore {
+  private cityStoreFor(projectId: string, workspaceDir: string | null): VillageFileStore {
     let cs = this.cityStores.get(projectId);
     if (!cs) {
-      cs = new CityFileStore({
+      cs = new VillageFileStore({
         workspaceDir,
-        primaryPath: workspaceDir ? projectLocalCityFile(workspaceDir) : null,
-        fallbackPath: fallbackProjectCityFile(this.home, projectId),
+        primaryPath: workspaceDir ? projectLocalVillageFile(workspaceDir) : null,
+        fallbackPath: fallbackProjectVillageFile(this.home, projectId),
       });
       this.cityStores.set(projectId, cs);
     }
@@ -137,7 +137,7 @@ export class ContentIndex {
       try {
         await buildFileMap(opened.index, opened.workspaceDir, {
           persist: true,
-          cityFile: this.cityStoreFor(projectId, opened.workspaceDir),
+          villageFile: this.cityStoreFor(projectId, opened.workspaceDir),
           userFacing: false,
         });
       } catch {
@@ -891,7 +891,7 @@ export class ContentIndex {
       return await buildFileMap(opened.index, opened.workspaceDir, {
         scope: req.scope,
         persist: true,
-        cityFile: this.cityStoreFor(projectId, opened.workspaceDir),
+        villageFile: this.cityStoreFor(projectId, opened.workspaceDir),
         userFacing: true,
       });
     } finally {

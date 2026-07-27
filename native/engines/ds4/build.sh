@@ -175,7 +175,16 @@ fi
 echo "[build] produced: $found"
 
 # ── 4. Stage into the canonical output tree ────────────────────────
-out_dir="$repo_root/native/build/$platform"
+# On Linux ds4 is a CUDA engine, so it emits into the `-cuda` key alongside
+# llama-server's CUDA build and shares its NVIDIA redistributables — see the
+# note in scripts/native-payload.mjs. macOS ds4 is Metal and stays in the bare
+# platform key. Must agree with the workflow's `outdir` step, which derives the
+# same path from `matrix.variant`.
+if [[ "$os" == "Linux" ]]; then
+  out_dir="$repo_root/native/build/$platform-cuda"
+else
+  out_dir="$repo_root/native/build/$platform"
+fi
 mkdir -p "$out_dir"
 # Ship under a gezel- prefix (gezel-ds4-server) for process attribution while
 # preserving the ds4 / DwarfStar lineage. Only the installed file is prefixed.
@@ -185,6 +194,13 @@ chmod +x "$out_dir/$server_name"
 
 if [[ "$os" == "Linux" ]]; then
   strip -s "$out_dir/$server_name" 2>/dev/null || true
+elif [[ "$os" == "Darwin" ]]; then
+  # -S drops the debug map only, leaving the symbol table the loader needs.
+  # Without it the binary ships ~3800 STABS entries (OSO/SO/FUN records)
+  # naming object files under the CI checkout — `.upstream/ds4_server.o` and
+  # friends, which exist on no user's machine. Dead weight and a needless
+  # build-path leak. Safe here: CI codesigns after this script runs.
+  strip -S "$out_dir/$server_name" 2>/dev/null || true
 fi
 
 # ── 5. macOS: stage Metal shader sources (NOT self-contained) ──────
@@ -206,25 +222,25 @@ if [[ "$os" == "Darwin" ]]; then
   echo "[build] darwin linkage (only system frameworks; shaders load from ./metal at runtime):"
   otool -L "$out_dir/$server_name" | sed 's/^/[build]   /'
 
-# ── 5b. Linux: bundle the CUDA runtime so the tarball is portable ──
-# ds4-server dynamically links libcudart / libcublas from $CUDA_HOME.
-# Bundle them next to the binary with an $ORIGIN rpath so a user box
-# without a matching CUDA toolkit install can still run it (the NVIDIA
-# *driver* is still required, but the runtime libs travel with us).
+# ── 5b. Linux: rpath only — llama's CUDA leg owns the redistributables ──
+# ds4-server dynamically links libcudart / libcublas, and $ORIGIN still finds
+# them: this build emits into the `-cuda` key, where llama-server's CUDA leg
+# already stages libcudart / libcublas / libcublasLt from the same toolkit.
+#
+# This step used to stage its own copies from $CUDA_HOME. That is what made
+# the bare and -cuda keys each carry a full set — 828 MB of byte-identical
+# duplication per install on x64. It also staged them from a DIFFERENT path
+# than llama's leg (`$CUDA_HOME/targets/*/lib` vs llama's resolution), which
+# produced two different libcudart.so.12.8.90 builds of the same version:
+# 728,800 bytes here against 746,033 from llama. Now that both engines land
+# in one directory, two writers would make the merge order decide which
+# survives — so there is exactly one writer, and the draft-release job
+# asserts the redistributables are present in every `-cuda` key.
 elif [[ "$os" == "Linux" ]]; then
-  cuda_home="${CUDA_HOME:-/usr/local/cuda}"
   if ! command -v patchelf >/dev/null 2>&1; then
     echo "[build] installing patchelf for rpath fixup"
     sudo apt-get install -y --no-install-recommends patchelf || true
   fi
-  for libglob in libcudart libcublas libcublasLt; do
-    for cand in "$cuda_home"/targets/*/lib "$cuda_home/lib64" "$cuda_home/lib"; do
-      for so in "$cand/$libglob".so.*; do
-        [[ -e "$so" ]] || continue
-        cp -P "$so" "$out_dir/" && echo "[build] bundled $(basename "$so") (from $cand)"
-      done
-    done
-  done
   patchelf --set-rpath '$ORIGIN' "$out_dir/$server_name" 2>/dev/null || true
   echo "[build] patchelf set rpath \$ORIGIN on $server_name"
 fi

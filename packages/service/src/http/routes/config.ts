@@ -297,10 +297,16 @@ export function configRoutes(ctx: ServiceContext): Hono {
         );
       }
     }
+    // Summaries carry the gezel's NAME — the id is a slug ("ada-lovelace")
+    // that reads as plumbing in the History view; ids stay in `details`.
+    const designationName = async (id: string): Promise<string> =>
+      (await ctx.store.getGezel(id).catch(() => null))?.name ?? id;
     if (body.meesterGezelId !== undefined && body.meesterGezelId !== previous.meesterGezelId) {
       await ctx.history.log({
         kind: 'meester.changed',
-        summary: body.meesterGezelId ? `Meester set to ${body.meesterGezelId}` : 'Meester cleared',
+        summary: body.meesterGezelId
+          ? `Meester set to ${await designationName(body.meesterGezelId)}`
+          : 'Meester cleared',
         details: {
           previousGezelId: previous.meesterGezelId,
           gezelId: body.meesterGezelId,
@@ -310,7 +316,9 @@ export function configRoutes(ctx: ServiceContext): Hono {
     if (body.klerkGezelId !== undefined && body.klerkGezelId !== previous.klerkGezelId) {
       await ctx.history.log({
         kind: 'klerk.changed',
-        summary: body.klerkGezelId ? `Klerk set to ${body.klerkGezelId}` : 'Klerk cleared',
+        summary: body.klerkGezelId
+          ? `Klerk set to ${await designationName(body.klerkGezelId)}`
+          : 'Klerk cleared',
         details: {
           previousGezelId: previous.klerkGezelId,
           gezelId: body.klerkGezelId,

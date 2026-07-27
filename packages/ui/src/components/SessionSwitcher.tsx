@@ -9,6 +9,14 @@ interface Props {
   gezelId: string;
   projectId: string;
   sessionId: string | undefined;
+  /**
+   * Display name for the gezel the list is scoped to. When the switcher
+   * sits under a surface that shows OTHER conversations too (the project
+   * chat's interleaved timeline), a bare "No threads yet" reads as a
+   * contradiction beneath a visible thread — naming the scope ("No
+   * threads with Ada yet") keeps the empty state truthful.
+   */
+  gezelName?: string;
   onSessionIdChange: (next: string | undefined) => void;
   /** Bumped by the parent after a write it wants the switcher to re-read
    *  (e.g. ChatComposer's lazy-create on first send). */
@@ -42,6 +50,7 @@ export function SessionSwitcher({
   gezelId,
   projectId,
   sessionId,
+  gezelName,
   onSessionIdChange,
   refreshKey,
   taskRef,
@@ -149,6 +158,9 @@ export function SessionSwitcher({
 
   const hasSessions = sessions.length > 0;
   const activeValue = sessionId && hasSessions ? sessionId : '__NONE__';
+  const emptyLabel = gezelName
+    ? `No threads with ${gezelName} yet — a message starts one`
+    : 'No threads yet';
 
   return (
     <div className="gezel-chat-session-header">
@@ -160,7 +172,7 @@ export function SessionSwitcher({
         disabled={!hasSessions || busy}
       >
         <Select.Trigger className="gezel-chat-session-select">
-          <Select.Value placeholder={hasSessions ? 'Pick a thread' : 'No threads yet'} />
+          <Select.Value placeholder={hasSessions ? 'Pick a thread' : emptyLabel} />
         </Select.Trigger>
         <Select.Content>
           {hasSessions ? (
@@ -171,7 +183,7 @@ export function SessionSwitcher({
             ))
           ) : (
             <Select.Item value="__NONE__" disabled>
-              No threads yet
+              {emptyLabel}
             </Select.Item>
           )}
         </Select.Content>

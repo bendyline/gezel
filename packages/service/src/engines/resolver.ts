@@ -117,9 +117,17 @@ export async function* resolveEngine(
   }
   const engine = opts.engine;
   const version = stripVer(opts.version ?? effectiveEngineRelease());
-  const assetPlatformKey = opts.variant
-    ? `${platformKey}-${opts.variant}`
-    : (platformKey as string);
+  // ds4-server on Linux lives in the `-cuda` archive, sharing one copy of the
+  // NVIDIA redistributables with llama-server's CUDA build instead of shipping
+  // them twice (see scripts/native-payload.mjs). It is the engine's only Linux
+  // build, so this is a fact about where the archive is, not a backend choice
+  // the caller makes — derive it here rather than making every call site pass
+  // `variant: 'cuda'` and risk one forgetting. macOS ds4 is Metal and stays in
+  // the bare key.
+  const impliedVariant =
+    engine === 'ds4-server' && process.platform === 'linux' ? 'cuda' : undefined;
+  const variant = opts.variant ?? impliedVariant;
+  const assetPlatformKey = variant ? `${platformKey}-${variant}` : (platformKey as string);
   const isWin = process.platform === 'win32';
   const ext = isWin ? 'zip' : 'tar.gz';
   const exeExt = isWin ? '.exe' : '';
@@ -149,7 +157,7 @@ export async function* resolveEngine(
 
   // ── Fast path: already resolved + verified ──
   if (existsSync(binPath) && existsSync(sentinelPath)) {
-    stampEnv(engine, binPath, opts.variant, versionDir);
+    stampEnv(engine, binPath, variant, versionDir);
     yield { type: 'done', binPath, cached: true };
     return {
       binPath,
@@ -341,7 +349,7 @@ export async function* resolveEngine(
   );
 
   // ── 8. Stamp env so the providers (and discoverNativeBinaries) find it ──
-  stampEnv(engine, binPath, opts.variant, versionDir);
+  stampEnv(engine, binPath, variant, versionDir);
   log.info(
     `[engine-resolver] resolved ${engine} (${assetPlatformKey}) → ${binPath} [sig=${signature.status}]`,
   );

@@ -45,13 +45,23 @@ export function defaultMasks(page: Page): Locator[] {
 }
 
 /**
- * Force the UI's color theme by setting the `data-theme` attribute the app
- * reads (see ui/src/theme.ts `applyThemePref`). Direct + deterministic — no
- * config round-trip or prefers-color-scheme emulation.
+ * Force the UI's color theme through the same channel Settings uses
+ * (see ui/src/theme.ts `setThemePref`): pref in localStorage, `data-theme`
+ * on <html>, and the change event so React consumers (`useEffectiveTheme`
+ * → Squisq editor/bubble schemes) re-render. Stamping only the attribute
+ * used to leave the CSS dark while components kept rendering light — the
+ * dark gallery frames then showed a split-brain state no real toggle
+ * produces. No config round-trip or prefers-color-scheme emulation.
  */
 export async function setTheme(page: Page, theme: 'light' | 'dark'): Promise<void> {
   await page.evaluate((t) => {
+    try {
+      localStorage.setItem('gezel:theme', t);
+    } catch {
+      /* storage unavailable — attribute + event still apply the theme */
+    }
     document.documentElement.setAttribute('data-theme', t);
+    window.dispatchEvent(new CustomEvent('gezel:theme-change'));
   }, theme);
   await settle(page);
 }

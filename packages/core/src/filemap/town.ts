@@ -1,5 +1,5 @@
 import type { Rect } from '../schemas/api.js';
-import type { CityAnchor, CityOverride, CompassRegion } from '../schemas/city-file.js';
+import type { CompassRegion, VillageAnchor, VillageOverride } from '../schemas/village-file.js';
 import { assignRegions, regionCell, regionOf } from './anchors.js';
 import { packLeafStrip } from './lots.js';
 import { type CollapsedNode, PLATE_H, collapseFiles, plateRectFor } from './plates.js';
@@ -18,7 +18,7 @@ import type { LayoutFileInput } from './types.js';
  *   breathe and their silhouettes vary.
  *
  * - COMPASS MACRO at the root: top-level display districts land in a sparse
- *   3×3 grid steered by city-file anchors/overrides, with tier-0 boulevards
+ *   3×3 grid steered by village-file anchors/overrides, with tier-0 boulevards
  *   spanning the whole map between occupied grid rows/columns. Re-seeds keep
  *   `packages/` where the user remembers it.
  *
@@ -50,7 +50,7 @@ export interface TownResult {
 }
 
 export interface TownRootResult extends TownResult {
-  anchors: CityAnchor[];
+  anchors: VillageAnchor[];
 }
 
 const MAX_COLUMNS = 6;
@@ -272,8 +272,8 @@ export function packTownSubtree(files: LayoutFileInput[], folderDepth: number): 
 }
 
 export interface TownRootOptions {
-  anchors?: CityAnchor[];
-  overrides?: CityOverride[];
+  anchors?: VillageAnchor[];
+  overrides?: VillageOverride[];
   nowIso: string;
 }
 
@@ -423,13 +423,7 @@ export function packTownRoot(files: LayoutFileInput[], options: TownRootOptions)
     const c = centroidOf(child.path);
     if (!c) continue;
     const region: CompassRegion = regionByPath.get(child.path) ?? regionOf(c.cx, c.cy);
-    out.anchors.push({
-      path: child.path,
-      region,
-      cx: c.cx,
-      cy: c.cy,
-      recordedAt: options.nowIso,
-    });
+    out.anchors.push({ path: child.path, region, cx: c.cx, cy: c.cy });
   }
   out.anchors.sort((a, b) => (a.path < b.path ? -1 : 1));
   return out;

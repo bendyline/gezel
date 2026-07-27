@@ -692,13 +692,13 @@ export function fallbackProjectIndexDir(root: string, projectId: string): string
  * subtree — committing it keeps the city stable across machines and index
  * rebuilds.
  */
-export function projectLocalCityFile(workspaceDir: string): string {
-  return join(projectLocalRoot(workspaceDir), 'city.json');
+export function projectLocalVillageFile(workspaceDir: string): string {
+  return join(projectLocalRoot(workspaceDir), 'village.json');
 }
 
-/** Home-local city-file fallback (no external workingDir, or read-only repo). */
-export function fallbackProjectCityFile(root: string, projectId: string): string {
-  return join(projectLocalDir(root, projectId), 'city.json');
+/** Home-local village-file fallback (no external workingDir, or read-only repo). */
+export function fallbackProjectVillageFile(root: string, projectId: string): string {
+  return join(projectLocalDir(root, projectId), 'village.json');
 }
 
 /** `@project` about-source mapping (which instruction file feeds the prompt). */

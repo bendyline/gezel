@@ -106,7 +106,7 @@ describe('TasksView', () => {
     });
   });
 
-  it('lists tasks from the API and shows the placeholder when nothing selected', async () => {
+  it('lists tasks from the API and auto-selects the first so the pane is never empty', async () => {
     vi.mocked(api.listTasks).mockResolvedValue({
       tasks: [makeTask({ ref: 'pj-alpha/1', title: 'Bake bread' })],
     } as never);
@@ -114,7 +114,9 @@ describe('TasksView', () => {
     await waitFor(() => {
       expect(screen.getByText('Bake bread')).toBeInTheDocument();
     });
-    expect(screen.getByText(/Click a task to view it here\./)).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByText(/Click a task to view it here\./)).not.toBeInTheDocument();
+    });
   });
 
   it('clicking a task selects it and mounts TaskTabContent in the right pane', async () => {

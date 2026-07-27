@@ -157,6 +157,16 @@ export function TasksView({ projectId }: TasksViewProps = {}) {
     setTasks((prev) => prev.map((t) => (t.ref === updated.ref ? updated : t)));
   }, []);
 
+  // Land on the newest task instead of a two-thirds-empty "click a task"
+  // pane. Runs only when nothing is selected (or the stored selection no
+  // longer exists) — a deep-link or the user's own pick always wins.
+  useEffect(() => {
+    if (tasks.length === 0) return;
+    if (selectedRef && tasks.some((t) => t.ref === selectedRef)) return;
+    const first = tasks[0];
+    if (first) setSelectedRef(first.ref);
+  }, [tasks, selectedRef]);
+
   const gezelName = useMemo(() => {
     const m = new Map<string, string>();
     for (const g of gezels) m.set(g.id, g.name);
@@ -299,6 +309,7 @@ export function TasksView({ projectId }: TasksViewProps = {}) {
                         aria-label={g.parent.status}
                       />
                       <span className="task-row-body">
+                        <span className="task-title">{g.parent.title}</span>
                         <span className="task-row-meta">
                           <span className="task-ref">
                             {shortRef
@@ -315,11 +326,10 @@ export function TasksView({ projectId }: TasksViewProps = {}) {
                           )}
                           <span className="task-assignee">
                             {g.parent.assignee.kind === 'user'
-                              ? 'user'
+                              ? 'You'
                               : gezelName(g.parent.assignee.gezelId) || 'gezel'}
                           </span>
                         </span>
-                        <span className="task-title">{g.parent.title}</span>
                       </span>
                     </button>
                   </div>
@@ -338,17 +348,17 @@ export function TasksView({ projectId }: TasksViewProps = {}) {
                               aria-label={c.status}
                             />
                             <span className="task-row-body">
+                              <span className="task-title">{c.title}</span>
                               <span className="task-row-meta">
                                 <span className="task-ref">
                                   {shortRef ? (c.ref.split('/').pop() ?? c.ref) : c.ref}
                                 </span>
                                 <span className="task-assignee">
                                   {c.assignee.kind === 'user'
-                                    ? 'user'
+                                    ? 'You'
                                     : gezelName(c.assignee.gezelId) || 'gezel'}
                                 </span>
                               </span>
-                              <span className="task-title">{c.title}</span>
                             </span>
                           </button>
                         </li>

@@ -171,7 +171,7 @@ export function GrowthPanel({ gezel, onUpdated }: GrowthPanelProps) {
             each level you'll choose how they grow.
           </p>
           <div className="growth-trait-ghost" aria-hidden="true">
-            Future trait slot
+            Trait slot · unlocks at Level 2
           </div>
         </div>
       ) : (

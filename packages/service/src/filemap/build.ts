@@ -1,7 +1,5 @@
 import {
   type AffinityEdge,
-  type CityDomainState,
-  type CityJournalNode,
   type FileMapResponse,
   type FileMapScope,
   type LayoutFileInput,
@@ -12,6 +10,8 @@ import {
   type PersistNode,
   type PriorNode,
   type Rect,
+  type VillageDomainState,
+  type VillageJournalNode,
   deriveAnchorsFromPrior,
   layoutBuildingsInBlock,
   layoutFileMap,
@@ -26,13 +26,13 @@ import {
 import type { IndexStore } from '../index-store/index-store.js';
 import { importRoads } from './affinity.js';
 import { computeImportance } from './centrality.js';
-import type { CityFileStore } from './city-file.js';
 import { composeFileMapScopes } from './compose.js';
 import { computeLevels, landmarkLevels, selectLandmarks } from './elevation.js';
 import { civicThreshold, computeHealth, normalizeSeverity } from './health.js';
 import { collectCodeMap } from './providers/code.js';
 import { isExcludedFromCodeMap } from './sections.js';
 import { computeUrbanity, settlementFor } from './urbanity.js';
+import type { VillageFileStore } from './village-file.js';
 
 /**
  * Orchestrates one Village build: pick the domain provider, load the prior
@@ -73,14 +73,14 @@ export interface BuildFileMapOptions {
   persist?: boolean;
   /** The durable city file (anchors + overrides + journal). Optional so
    *  headless/test callers can run store-only. */
-  cityFile?: CityFileStore;
-  /** True when a user asked for this map (the HTTP path). Gates city-file
+  villageFile?: VillageFileStore;
+  /** True when a user asked for this map (the HTTP path). Gates village-file
    *  CREATION — background ticks only update an existing file. */
   userFacing?: boolean;
 }
 
-/** Hydrate engine prior rows from a city-file journal (index-loss recovery). */
-function journalToPrior(journal: CityJournalNode[], scope: FileMapScope): PriorNode[] {
+/** Hydrate engine prior rows from a village-file journal (index-loss recovery). */
+function journalToPrior(journal: VillageJournalNode[], scope: FileMapScope): PriorNode[] {
   return journal
     .filter((j) => !(j.k === 'block' && isExcludedFromCodeMap(j.id, scope)))
     .map((j) => ({
@@ -95,20 +95,30 @@ function journalToPrior(journal: CityJournalNode[], scope: FileMapScope): PriorN
     }));
 }
 
-/** The journal mirror of this build's persist rows (districts are derived). */
-function persistToJournal(persist: PersistNode[]): CityJournalNode[] {
-  const out: CityJournalNode[] = [];
+/**
+ * The journal mirror of this build's persist rows (districts are derived).
+ *
+ * Timestamps are emitted for BLOCKS ONLY. A block's `placedAt` drives the age
+ * lens and its `removedAt` drives tombstone pruning, so both are data. Streets,
+ * plates, and plazas have timestamps too, but nothing ever reads them — and
+ * because they are re-derived geometry, writing them meant every rebuild
+ * rewrote a third of the file for no reason. This file is meant to be
+ * committed; an unchanged rebuild must produce no diff.
+ */
+function persistToJournal(persist: PersistNode[]): VillageJournalNode[] {
+  const out: VillageJournalNode[] = [];
   for (const p of persist) {
     if (p.nodeKind === 'district') continue;
+    const isBlock = p.nodeKind === 'block';
     out.push({
       k: p.nodeKind,
       id: p.nodeId,
       r: [p.rect.x, p.rect.y, p.rect.w, p.rect.h],
       ...(p.parentId !== null ? { p: p.parentId } : {}),
       ...(p.contentHash !== null ? { h: p.contentHash } : {}),
-      ...(p.nodeKind === 'block' || p.nodeKind === 'street' ? { w: p.weight } : {}),
-      ...(p.placedAt !== null ? { a: p.placedAt } : {}),
-      ...(p.removedAt !== null ? { d: p.removedAt } : {}),
+      ...(isBlock || p.nodeKind === 'street' ? { w: p.weight } : {}),
+      ...(isBlock && p.placedAt !== null ? { a: p.placedAt } : {}),
+      ...(isBlock && p.removedAt !== null ? { d: p.removedAt } : {}),
     });
   }
   return out;
@@ -135,8 +145,8 @@ export async function buildFileMap(
   const now = nowIso();
   const cutoff = new Date(Date.now() - TOMBSTONE_TTL_MS).toISOString();
 
-  const city = options.cityFile ? await options.cityFile.read() : null;
-  const dom: CityDomainState | undefined = city?.domains[domain];
+  const city = options.villageFile ? await options.villageFile.read() : null;
+  const dom: VillageDomainState | undefined = city?.domains[domain];
 
   // ── signals (pre-layout: the engine consumes importance + landmark) ───────
   const findingsByFile = index.securityFindingCountsByFile();
@@ -202,7 +212,7 @@ export async function buildFileMap(
     ...(landmarks.has(f.path) ? { landmark: true } : {}),
   }));
 
-  // ── prior layout: sqlite first, city-file journal as the durable backup ──
+  // ── prior layout: sqlite first, village-file journal as the durable backup ──
   // A one-time clean re-seed when the layout algorithm changes: maps persisted
   // by an older engine are discarded so the current packing takes over. After
   // that, the per-domain version matches and builds are incremental/stable.
@@ -272,7 +282,6 @@ export async function buildFileMap(
               placedAt: r.placedAt,
               removedAt: r.removedAt,
             })),
-          now,
         )
     : (dom?.anchors ?? []);
 
@@ -314,7 +323,7 @@ export async function buildFileMap(
         footprint: pl.footprint,
         importance: importanceByPath.get(path) ?? 0,
       })),
-    { hasEdges, prior: dom?.downtown ?? null, now },
+    { hasEdges, prior: dom?.downtown ?? null },
   );
 
   if (options.persist !== false) {
@@ -336,18 +345,18 @@ export async function buildFileMap(
     );
     if (!sqliteVersionOk) index.setMeta(versionKey, String(LAYOUT_VERSION));
 
-    if (options.cityFile) {
+    if (options.villageFile) {
       const journal = persistToJournal(result.persist);
       const anchors = result.anchors.length > 0 ? result.anchors : (dom?.anchors ?? []);
-      const seededAt = stale || !dom ? now : dom.seededAt;
-      await options.cityFile.update({ userFacing: options.userFacing === true }, (c) => ({
+      // No `updatedAt`: stamping the write time on every build guaranteed a
+      // dirty diff on a committed file even when the village was unchanged,
+      // which defeats the whole point of committing it.
+      await options.villageFile.update({ userFacing: options.userFacing === true }, (c) => ({
         ...c,
-        updatedAt: now,
         domains: {
           ...c.domains,
           [domain]: {
             layoutVersion: LAYOUT_VERSION,
-            seededAt,
             anchors,
             journal,
             downtown: urbanity.downtown,
