@@ -118,7 +118,8 @@ describe('gezel-roster macro', () => {
     const { markdown, figures } = await expandMacros('before\n::handboek-gezel-roster\nafter', {
       ...ctx('site', device),
     });
-    expect(markdown).toBe('before\nafter');
+    // The surviving lines fold into one paragraph — see unwrap.ts.
+    expect(markdown).toBe('before after');
     expect(figures).toHaveLength(0);
   });
 
@@ -272,6 +273,6 @@ describe('expansion mechanics', () => {
       catalog: stubCatalog,
       device: throwingDevice,
     });
-    expect(markdown).toBe('a\nb');
+    expect(markdown).toBe('a b');
   });
 });

@@ -36,6 +36,11 @@ on:
 env:
   NODE_VERSION: '24'
   PNPM_VERSION: '11.15.1'
+  # Matches the Quality workflow. Node sizes its default heap from system
+  # memory, so the 16 GB Linux runners get ~4 GiB for free while the 7 GB
+  # macos-latest arm64 runner gets ~2 GiB — not enough for tsup's DTS worker
+  # over the service bundle, which died with ERR_WORKER_OUT_OF_MEMORY.
+  NODE_OPTIONS: '--max-old-space-size=4096'
 
 permissions:
   contents: read

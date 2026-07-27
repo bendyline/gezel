@@ -9267,11 +9267,25 @@ button.bench-step-foot:disabled {
 }
 
 /* The artisan-bench brand mark inside the article ships at figure resolution;
-   in document views it reads as a small editorial mark, not a hero. */
+   in document views it reads as a small editorial mark, not a hero. Width is
+   explicit rather than a max-height cap so the frame below can shrink-wrap it
+   (a height-capped `width: auto` replaced element still contributes its full
+   intrinsic width to the parent's fit-content size). */
 .home-intro-doc img[alt="gezel-mark"],
 .handboek-doc img[alt="gezel-mark"] {
-  max-height: 150px;
-  width: auto;
+  width: 150px;
+  height: auto;
+  display: block;
+}
+
+/* Squisq lays the mark out as a feature-split media column, so the framed
+   plate spans half the section while the editorial-sized mark sits at its
+   left edge. The mark carries its own painted ground — fit the plate to the
+   artwork and centre it in the column instead of framing dead space. */
+.home-intro-doc .squisq-page-media-frame:has(> img[alt="gezel-mark"]),
+.handboek-doc .squisq-page-media-frame:has(> img[alt="gezel-mark"]) {
+  width: fit-content;
+  margin-inline: auto;
 }
 
 .home-intro h2 {

@@ -182,4 +182,26 @@ describe('no surviving directives (content lint)', () => {
     }
     expect(offenders, `unexpanded handboek macros:\n${offenders.join('\n')}`).toEqual([]);
   });
+
+  it('no article renders with a hard-wrapped paragraph', async () => {
+    // squisq keeps a single newline inside a paragraph as literal text and
+    // the doc renderer honors it, so source wrapped at 80 columns shows a
+    // visible break after every line. See unwrap.ts.
+    const engine = makeEngine();
+    const toc = await engine.toc();
+    const ids = toc.areas.flatMap((a) => a.entries.map((e) => e.id));
+    const offenders: string[] = [];
+    for (const id of ids) {
+      for (const mode of ['app', 'site', 'agent'] as HandboekRenderMode[]) {
+        const article = await engine.article(id, { mode });
+        walkMarkdownTree(parseMarkdown(article!.markdown) as never, (node) => {
+          const n = node as { type: string; value?: string };
+          if (n.type === 'text' && n.value?.includes('\n')) {
+            offenders.push(`${id} (${mode}): ${n.value.split('\n')[0]}…`);
+          }
+        });
+      }
+    }
+    expect(offenders, `hard-wrapped paragraphs:\n${offenders.join('\n')}`).toEqual([]);
+  });
 });

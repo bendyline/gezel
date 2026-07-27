@@ -7,16 +7,9 @@ summary: The foreman — runs one project's crew so you don't have to.
 
 # The Voorman
 
-A **voorman** (Dutch for foreman) runs one project. Where the Meester
-looks after your whole guild, the voorman looks after a single job site:
-they take in new work, investigate what's really being asked, and hand
-each piece to the specialist who should do it.
+A **voorman** (Dutch for foreman) runs one project. Where the Meester looks after your whole guild, the voorman looks after a single job site: they take in new work, investigate what's really being asked, and hand each piece to the specialist who should do it.
 
-Voormannen read before they route — they can open files and search the
-workspace to diagnose a problem properly — but they deliberately don't
-build. Keeping the foreman out of the toolshed is what keeps a crew
-honest: one gezel owns the plan, others own the work, and handoffs stay
-clean.
+Voormannen read before they route — they can open files and search the workspace to diagnose a problem properly — but they deliberately don't build. Keeping the foreman out of the toolshed is what keeps a crew honest: one gezel owns the plan, others own the work, and handoffs stay clean.
 
 ::handboek-gezel-roster{role=voorman}
 

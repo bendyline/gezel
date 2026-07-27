@@ -107,13 +107,21 @@ async function findUnderVsRoot(root) {
  */
 function verifyMicrosoftSignature(path) {
   const script = `
+    Import-Module Microsoft.PowerShell.Security -ErrorAction Stop
     $sig = Get-AuthenticodeSignature -LiteralPath '${path.replace(/'/g, "''")}'
     if ($sig.Status -ne 'Valid') { Write-Output "INVALID:$($sig.Status)"; exit 0 }
     Write-Output "OK:$($sig.SignerCertificate.Subject)"
   `;
+  // The release workflow's default shell is pwsh 7, whose PSModulePath is
+  // inherited by this child Windows PowerShell 5.1 and can stop it autoloading
+  // its own Microsoft.PowerShell.Security. Get-AuthenticodeSignature then never
+  // runs, $sig stays null, and a perfectly good binary is rejected as
+  // "INVALID:" with an empty status. Let the host resolve its own module path.
+  const { PSModulePath: _ignored, ...env } = process.env;
   try {
     const out = execFileSync('powershell', ['-NoProfile', '-NonInteractive', '-Command', script], {
       encoding: 'utf8',
+      env,
     }).trim();
     if (!out.startsWith('OK:')) return { valid: false, detail: out };
     const subject = out.slice(3);

@@ -7,10 +7,7 @@ summary: The gezel home folder, mapped.
 
 # Where files live
 
-Everything gezel knows lives in one folder — the **gezel home** — as plain
-files. On macOS and Linux that's `~/.gezel` in your home directory (a
-machine-wide service uses a system location instead; Settings shows the active
-path).
+Everything gezel knows lives in one folder — the **gezel home** — as plain files. On macOS and Linux that's `~/.gezel` in your home directory (a machine-wide service uses a system location instead; Settings shows the active path).
 
 ```
 ~/.gezel/
@@ -35,13 +32,7 @@ path).
 ## What you can safely do
 
 - **Read anything.** It's your data; nothing breaks by looking.
-- **Back up or sync the whole folder.** Copying the folder copies your entire
-  workshop.
-- **Edit with care.** Character files (`about.md`) and documents are meant to be
-  edited — from the app or any text editor. For structured files (`config.json`,
-  sessions), prefer the app so nothing gets malformed.
+- **Back up or sync the whole folder.** Copying the folder copies your entire workshop.
+- **Edit with care.** Character files (`about.md`) and documents are meant to be edited — from the app or any text editor. For structured files (`config.json`, sessions), prefer the app so nothing gets malformed.
 
-A few subfolders are machinery rather than your data — `runtime/`, `service/`,
-`bin/`, `index/`, `logs/` hold the service's own working state and rebuildable
-caches. Leave those to gezel; deleting them is at worst an inconvenience, never
-data loss.
+A few subfolders are machinery rather than your data — `runtime/`, `service/`, `bin/`, `index/`, `logs/` hold the service's own working state and rebuildable caches. Leave those to gezel; deleting them is at worst an inconvenience, never data loss.

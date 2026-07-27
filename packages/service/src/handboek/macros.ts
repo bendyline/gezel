@@ -19,6 +19,7 @@ import {
 import { BUILTIN_TOOLSETS } from '@bendyline/gezel-catalog';
 import { computeToolAllowlist, expandToolsetGroups } from '../chat/role-tool-filter.js';
 import type { HandboekDeviceInfo, HandboekModelInfo } from './device.js';
+import { unwrapSoftBreaks } from './unwrap.js';
 
 const log = createLogger('handboek');
 
@@ -103,7 +104,7 @@ export async function expandMacros(
       log.warn(`handboek macro ::handboek-${name} failed: ${String(err)}`);
     }
   }
-  return { markdown: out.join('\n'), figures };
+  return { markdown: unwrapSoftBreaks(out.join('\n')), figures };
 }
 
 /** Parse `key=value key2="quoted value"` attribute syntax. */

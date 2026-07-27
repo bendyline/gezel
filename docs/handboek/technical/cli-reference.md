@@ -7,8 +7,7 @@ summary: Headless gezel — start the service, run one-shot work, export docs.
 
 # The gezel command line
 
-The `gezel` command drives the same service the desktop app uses — handy on
-servers, in scripts, or when you just live in a terminal.
+The `gezel` command drives the same service the desktop app uses — handy on servers, in scripts, or when you just live in a terminal.
 
 ## Everyday commands
 
@@ -35,7 +34,6 @@ gezel env skills list       importable skills
 gezel handboek export --out ./site
 ```
 
-renders the Handboek — the same articles you're reading now — as a static
-website, for publishing or offline reading.
+renders the Handboek — the same articles you're reading now — as a static website, for publishing or offline reading.
 
 Run `gezel --help` (or `--help` on any subcommand) for the full surface.

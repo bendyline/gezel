@@ -7,16 +7,9 @@ summary: Builds and fixes code, held to build-and-test gates.
 
 # The Developer
 
-The **Developer** writes and fixes code. They navigate a codebase
-through gezel's code intelligence (symbols, references, outlines — not
-just raw file reads), make surgical edits, run scripts and tests, and
-work to the gates a task defines: it isn't done until the build passes
-and the tests agree.
+The **Developer** writes and fixes code. They navigate a codebase through gezel's code intelligence (symbols, references, outlines — not just raw file reads), make surgical edits, run scripts and tests, and work to the gates a task defines: it isn't done until the build passes and the tests agree.
 
-Developers respect your boundaries: git stays yours (they work in your
-working copy but don't commit or push), and file writes go through the
-project's consent rules. For frontend work with a live browser in the
-loop, see their sibling, the [Web Developer](role-web-developer.md).
+Developers respect your boundaries: git stays yours (they work in your working copy but don't commit or push), and file writes go through the project's consent rules. For frontend work with a live browser in the loop, see their sibling, the [Web Developer](role-web-developer.md).
 
 ::handboek-gezel-roster{role=developer}
 

@@ -7,14 +7,9 @@ summary: Frontend and full-stack work with a live browser in the loop.
 
 # The Web Developer
 
-The **Web Developer** is a Developer who ships things you can click.
-Beyond the code tools, they drive a real browser: load the page they
-just changed, see what rendered, and fix what didn't — the
-look-then-fix loop that frontend work actually needs.
+The **Web Developer** is a Developer who ships things you can click. Beyond the code tools, they drive a real browser: load the page they just changed, see what rendered, and fix what didn't — the look-then-fix loop that frontend work actually needs.
 
-Use them for sites, dashboards, and web apps; pair them with a Designer
-for the visual direction and a Reviewer before anything user-facing
-goes out.
+Use them for sites, dashboards, and web apps; pair them with a Designer for the visual direction and a Reviewer before anything user-facing goes out.
 
 ::handboek-gezel-roster{role=web-developer}
 
