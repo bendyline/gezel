@@ -45,7 +45,14 @@
  */
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { constants, accessSync, createReadStream, createWriteStream, mkdirSync } from 'node:fs';
+import {
+  constants,
+  accessSync,
+  createReadStream,
+  createWriteStream,
+  existsSync,
+  mkdirSync,
+} from 'node:fs';
 import { chmod, mkdir, mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { setDefaultAutoSelectFamilyAttemptTimeout } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -229,6 +236,7 @@ async function fetchFromRun({ token, platform, runId, variant }) {
         name: `${art.name}.zip`,
         targetDir,
         isZip: true,
+        unwrapPayload: true,
       });
       // GitHub re-zips run artifacts server-side, so the archive itself has
       // no stable hash. Verify the extracted main binary against the
@@ -378,7 +386,23 @@ async function downloadToFile({ token, url, accept, dest }) {
   await new Promise((r) => file.end(r));
 }
 
-async function downloadAndExtract({ token, url, accept, name, targetDir, isZip, expectedSha256 }) {
+// A run artifact wraps the build tree in this tarball rather than uploading
+// it loose: actions/upload-artifact dereferences symlinks, which tripled
+// every SONAME chain and pushed linux-x64-cuda past GitHub's 2 GiB
+// release-asset cap. See "Pack build output" in build-native.yml. Release
+// archives are already the packed tree, so only the run path unwraps.
+const RUN_ARTIFACT_PAYLOAD = 'native-payload.tar.gz';
+
+async function downloadAndExtract({
+  token,
+  url,
+  accept,
+  name,
+  targetDir,
+  isZip,
+  expectedSha256,
+  unwrapPayload,
+}) {
   const scratch = await mkdtemp(join(tmpdir(), 'gezel-native-'));
   const archive = join(scratch, name);
   try {
@@ -401,6 +425,17 @@ async function downloadAndExtract({ token, url, accept, name, targetDir, isZip, 
       await extractZip(archive, targetDir);
     } else {
       await extractTarGz(archive, targetDir);
+    }
+
+    if (unwrapPayload) {
+      const payload = join(targetDir, RUN_ARTIFACT_PAYLOAD);
+      if (!existsSync(payload)) {
+        throw new Error(
+          `${name} contains no ${RUN_ARTIFACT_PAYLOAD} — that run predates the packed-artifact change in build-native.yml. Use --version against a release instead.`,
+        );
+      }
+      await extractTarGz(payload, targetDir);
+      await rm(payload, { force: true });
     }
 
     if (process.platform !== 'win32') {

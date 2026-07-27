@@ -908,11 +908,38 @@ jobs:
             echo "name=native-${{ matrix.engine }}-${{ matrix.platform }}" >> "$GITHUB_OUTPUT"
           fi
 
+      # Pack the tree BEFORE handing it to upload-artifact. The action has
+      # no follow-symlinks knob: it stats *through* every symlink and
+      # streams the target's bytes into the artifact zip, so each
+      # `libX.so → libX.so.N → libX.so.N.M.P` SONAME chain comes back down
+      # as three full copies. On linux-x64-cuda that inflated a 1.01 GiB
+      # tree to 2.97 GiB (libcublasLt.so is 751 MB and got tripled on its
+      # own), and the release tarball landed at 2.26 GB — past GitHub's
+      # 2 GiB per-asset cap, which only fails at UPLOAD time, an hour into
+      # the run, after the other assets are already published
+      # (native-v0.1.17). tar preserves symlinks, and a single opaque file
+      # gives upload-artifact nothing left to dereference.
+      #
+      # COPYFILE_DISABLE stops macOS bsdtar from emitting `._*` AppleDouble
+      # members for xattr'd files, which would land in the shipped bundle.
+      - name: Pack build output
+        if: steps.preflight.outputs.pinned == 'true'
+        shell: bash
+        env:
+          COPYFILE_DISABLE: '1'
+        run: |
+          set -euo pipefail
+          tar -C "${{ steps.outdir.outputs.dir }}" -czf native-payload.tar.gz .
+          ls -la native-payload.tar.gz
+
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: steps.preflight.outputs.pinned == 'true'
         with:
           name: ${{ steps.artifactname.outputs.name }}
-          path: ${{ steps.outdir.outputs.dir }}/
+          path: native-payload.tar.gz
+          # Already gzipped — a second deflate pass costs minutes on the
+          # gigabyte-scale CUDA legs and buys nothing.
+          compression-level: 0
           retention-days: 14
 
       - name: Upload manifest line
@@ -981,6 +1008,11 @@ jobs:
       # Engine names can contain hyphens (sd-cpp, llama-cpp) so we
       # match the trailing well-known platform/variant token rather
       # than splitting on `-` from the left.
+      #
+      # Each non-manifest artifact holds exactly one `native-payload.tar.gz`
+      # (see the build job's "Pack build output"). Untar rather than copy so
+      # the SONAME symlink chains stay symlinks — several engines can stage
+      # into the same platform dir, and tar merges the same way `cp -R` did.
       - name: Stage into native/build/
         run: |
           set -euo pipefail
@@ -1003,7 +1035,12 @@ jobs:
                   engine="${engine%-$suffix}"
                   target="native/build/$suffix"
                   mkdir -p "$target"
-                  cp -R "$dir"/* "$target/"
+                  payload="$dir/native-payload.tar.gz"
+                  if [[ ! -f "$payload" ]]; then
+                    echo "::error::artifact $name has no native-payload.tar.gz — its build leg's pack step didn't run"
+                    exit 1
+                  fi
+                  tar -C "$target" -xzf "$payload"
                   echo "staged $engine → $target"
                   break 2
                 fi
@@ -1013,7 +1050,7 @@ jobs:
               echo "warning: artifact $name didn't match any known platform/variant suffix; skipping"
             fi
           done
-          find native/build -type f | sort
+          find native/build ! -type d | sort
 
       # The archive-set gate below proves every *container* exists; this
       # proves each one has contents. `needs: build` only guarantees no
@@ -1045,6 +1082,34 @@ jobs:
           cd ../../
           echo "version=$version" >> "$GITHUB_OUTPUT"
           ls -la release/
+
+      # GitHub caps a single release asset at 2 GiB. Blowing it surfaces as
+      # a 422 from the upload step at the very END of a ~1h build — and
+      # softprops keeps uploading the rest, so the run leaves behind a draft
+      # whose SHA256SUMS lists an archive the release doesn't have. That's
+      # worse than a plain failure: fetch-native-binaries.mjs refuses to
+      # extract anything it can't verify, so the variant is simply dead, and
+      # the ✅ lines in the log read like a success. native-v0.1.17 hit this
+      # with linux-x64-cuda at 2,256,358,540 bytes. Fail here instead, where
+      # the message names the archive and the overshoot.
+      - name: Validate archive sizes
+        run: |
+          set -euo pipefail
+          limit=$((2 * 1024 * 1024 * 1024))
+          warn=$((limit * 3 / 4))
+          over=0
+          for f in release/*; do
+            size=$(stat -c %s "$f")
+            human=$(numfmt --to=iec-i --suffix=B "$size")
+            if (( size >= limit )); then
+              echo "::error::$(basename "$f") is $human — over GitHub's 2 GiB release-asset limit by $(numfmt --to=iec-i --suffix=B $((size - limit)))"
+              over=1
+            elif (( size >= warn )); then
+              echo "::warning::$(basename "$f") is $human — within 25% of GitHub's 2 GiB release-asset limit"
+            fi
+          done
+          if (( over )); then exit 1; fi
+          echo "All release archives are under GitHub's 2 GiB per-asset limit."
 
       # Keep the completeness gate in the build that creates the draft.
       # Publishing the finished draft is then a simple maintainer action
