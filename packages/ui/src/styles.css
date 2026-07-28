@@ -738,17 +738,15 @@ html.embedded-chat #root {
 }
 
 /* ── Unified titlebar search ──────────────────────────────────────────────
-   An in-flow flex item centered in the gap between the brand and the pill
-   cluster. `margin-left: auto` here plus the matching auto on
-   `.app-header-right` split the free space evenly, so the box sits centered
-   between the brand's right edge and the cluster's left edge — NOT over the
-   raw window center, which is what let the old `left: 50%` box drift under
-   (and cover) the queue/engine pills when the cluster grew wide. It's the
-   only header child that shrinks (`flex-shrink: 1; min-width: 0`); the brand
-   and `.app-header-right` carry `flex-shrink: 0`, so on a crowded titlebar
-   the search gives up width first and can never overlap the pills. The empty
-   auto-margin band on either side inherits the header's drag region, so both
-   flanks of the box stay draggable. */
+   An in-flow flex item anchored near the brand rather than centered in the
+   changing space between the brand and status pills. The header's 24px gap
+   plus this bounded margin leaves roughly 32–64px after the brand as the
+   window narrows and grows; on macOS that places the normal search inset at
+   about 170–200px from the window edge after the traffic-light reservation.
+   Only `.app-header-right` keeps an auto margin, so queue and engine label
+   changes no longer move the search. The search remains the only shrinkable
+   header child (`flex-shrink: 1; min-width: 0`), giving up width before it
+   could overlap the status cluster on a crowded titlebar. */
 .titlebar-search {
   flex: 0 1 clamp(180px, 30vw, 460px);
   min-width: 0;
@@ -757,7 +755,7 @@ html.embedded-chat #root {
      otherwise the white search well overlaps the first queue chip. */
   overflow: hidden;
   border-radius: 14px;
-  margin-left: auto;
+  margin-left: clamp(8px, 4vw, 40px);
   align-self: center;
   /* Positioning context for the absolutely-placed magnifier glyph (was the
      element's own `position: absolute` before it moved into flow). */

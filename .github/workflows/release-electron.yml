@@ -689,6 +689,30 @@ jobs:
           done
           [[ "$found" == "1" ]]
 
+      # electron-updater 6 ships DebUpdater/RpmUpdater and picks one by
+      # reading `resources/package-type`, which electron-builder already
+      # writes into the package. FpmTarget sets `isWriteUpdateInfo: true`, and
+      # update-info generation is deliberately independent of `--publish`
+      # ("file should be generated regardless of publish state"), so these
+      # manifests exist even though the release packages with `--publish
+      # never`. They were being generated and then dropped, because the
+      # upload below only globbed .deb/.rpm — which is why Linux had no
+      # update channel despite having a working updater.
+      #
+      # Asserted rather than assumed: upload-artifact succeeds as long as ANY
+      # pattern matches, so a missing manifest would silently ship a release
+      # with no Linux feed — exactly the bug this replaces.
+      - name: Verify Linux update metadata was generated
+        run: |
+          set -euo pipefail
+          ls -la packages/app/dist/installers/
+          if ! ls packages/app/dist/installers/latest-linux*.yml >/dev/null 2>&1; then
+            echo "::error::No latest-linux*.yml in dist/installers. electron-builder did not"
+            echo "::error::emit Linux update metadata for this target — Linux auto-update would"
+            echo "::error::ship broken. Check FpmTarget's isWriteUpdateInfo and the publish config."
+            exit 1
+          fi
+
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           # arch suffix prevents the two matrix entries from clobbering
@@ -698,12 +722,9 @@ jobs:
           path: |
             packages/app/dist/installers/*.deb
             packages/app/dist/installers/*.rpm
+            packages/app/dist/installers/latest-linux*.yml
           if-no-files-found: error
           retention-days: 7
-          # Note: electron-updater doesn't generate latest-linux.yml for
-          # deb/rpm targets (only AppImage). Linux users update via
-          # `apt upgrade gezel` / `dnf upgrade gezel`. The autoUpdater
-          # check in main.ts catches the missing manifest and logs.
 
   # ── Release ───────────────────────────────────────────────────────────
   release:
@@ -725,17 +746,33 @@ jobs:
       - name: List collected artifacts
         run: find artifacts -type f | sort
 
-      # SLSA build-provenance over the installers: users can prove an
-      # installer came from this workflow at this commit via
+      # Every asset is hard-linked into one directory before the manifest is
+      # written, so SHA256SUMS names files exactly as a user downloads them
+      # and `sha256sum -c SHA256SUMS` works against a folder of downloads.
+      # Hard links, not copies: the payload is ~7 GB and the runner disk is
+      # not. `ln` without -f is deliberate — a name collision between two
+      # platform artifacts should fail loudly here, not silently drop one.
+      - name: Stage assets and generate SHA256SUMS
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/flat
+          find artifacts -mindepth 2 -type f -exec ln {} artifacts/flat/ \;
+          cd artifacts/flat
+          find . -maxdepth 1 -type f ! -name SHA256SUMS \
+            | sed 's|^\./||' | sort | xargs sha256sum > SHA256SUMS
+          sha256sum -c SHA256SUMS
+          cat SHA256SUMS
+
+      # SLSA build-provenance over every published asset — installers plus
+      # SHA256SUMS, latest.yml, the blockmap and the SBOM. latest.yml in
+      # particular is what electron-updater trusts to decide what to
+      # download, so leaving it unattested undercut the installer coverage.
+      # Users verify any asset with
       # `gh attestation verify <file> --repo bendyline/gezel`.
       - name: Attest build provenance
         uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
         with:
-          subject-path: |
-            artifacts/windows-artifacts/*.exe
-            artifacts/macos-artifacts/*.pkg
-            artifacts/linux-artifacts-*/*.deb
-            artifacts/linux-artifacts-*/*.rpm
+          subject-path: artifacts/flat/*
 
       - name: Refuse to modify a published release
         env:
@@ -765,8 +802,8 @@ jobs:
           draft: true
           generate_release_notes: true
           fail_on_unmatched_files: true
-          files: |
-            artifacts/windows-artifacts/*
-            artifacts/macos-artifacts/*
-            artifacts/linux-artifacts-*/*
-            artifacts/supply-chain/*
+          # The staged directory, not the per-platform globs: it is the same
+          # set of files (hard links) plus SHA256SUMS, and it is exactly what
+          # was attested above, so published assets and attested subjects
+          # cannot drift apart.
+          files: artifacts/flat/*

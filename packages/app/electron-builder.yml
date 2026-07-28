@@ -9,6 +9,14 @@ copyright: Copyright © 2026 Bendyline LLC
 # exist: dist/installers/@bendyline". Substituting ${productName}
 # ("Gezel") sidesteps the problem and gives users an installer file
 # named after the app, not the npm package.
+#
+# Fallback only — each platform below overrides this to name itself
+# (`-mac-`, `-windows-`, `-linux-`). The platform word is written out
+# literally rather than via `${platform}`, which expands to the BUILD
+# HOST's process.platform (`darwin`/`win32`) — the wrong value to put in
+# a filename, and wrong outright the moment anything cross-builds.
+# `${arch}` is left alone: electron-builder already resolves it per
+# target, which is what yields `amd64` for .deb and `x86_64` for .rpm.
 artifactName: ${productName}-${version}-${arch}.${ext}
 
 directories:
@@ -168,6 +176,7 @@ publish:
 # builds may be unsigned; the production release workflow rejects missing
 # credentials before packaging and verifies the final signatures.
 win:
+  artifactName: ${productName}-${version}-windows-${arch}.${ext}
   target:
     - target: nsis
       arch:
@@ -225,6 +234,7 @@ nsis:
 # .app inside it. electron-builder's built-in notarization covers both the
 # .app and final .pkg, gated on APPLE_ID/APP_SPECIFIC_PASSWORD/TEAM_ID.
 mac:
+  artifactName: ${productName}-${version}-mac-${arch}.${ext}
   target:
     - target: pkg
       arch:
@@ -276,6 +286,14 @@ pkg:
 # (no install hook), and shipping two install models would confuse users.
 # Both formats install to /opt/Gezel/ by default.
 linux:
+  artifactName: ${productName}-${version}-linux-${arch}.${ext}
+  # Without this, electron-builder falls back to the package name and ships
+  # `/opt/Gezel/@bendylinegezel-app` plus a matching .desktop file and icon —
+  # the `@bendyline/gezel-app` scope mangled into a filename. Set here rather
+  # than at the top level on purpose: a top-level value would also rename the
+  # macOS binary from `Gezel` to `gezel` inside the signed, notarized bundle.
+  # Windows already sets its own under `win:`.
+  executableName: gezel
   target:
     - target: deb
       arch:

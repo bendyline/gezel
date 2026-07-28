@@ -119,9 +119,6 @@ importers:
       '@bendyline/gezel-client':
         specifier: workspace:*
         version: link:../client
-      '@bendyline/gezel-ui':
-        specifier: workspace:*
-        version: link:../ui
       electron-updater:
         specifier: ^6.8.9
         version: 6.8.9(supports-color@8.1.1)
@@ -132,6 +129,9 @@ importers:
       '@bendyline/gezel-service':
         specifier: workspace:*
         version: link:../service
+      '@bendyline/gezel-ui':
+        specifier: workspace:*
+        version: link:../ui
       '@electron/asar':
         specifier: ^4.2.1
         version: 4.2.1

@@ -707,15 +707,16 @@ function renderMatrixSummary(entries: TrialEntry[], roots: string[]): string {
     }
     if (experiments.length === 0) {
       experiments.push(
-        `retain the current manifest as baseline; no parse, no-artifact, intervention, or efficiency failure signal justified a tuning change`,
+        'retain the current manifest as baseline; no parse, no-artifact, intervention, or efficiency failure signal justified a tuning change',
       );
     }
-    lines.push(`- **${model}:** ${experiments.join('; ')}. Accept only cross-scenario improvements.`);
+    lines.push(
+      `- **${model}:** ${experiments.join('; ')}. Accept only cross-scenario improvements.`,
+    );
   }
   const routingSignals = entries.filter(
     (entry) =>
-      entry.facts.toolUse.redFlags.length > 0 ||
-      entry.facts.team.missingExpectedRoles.length > 0,
+      entry.facts.toolUse.redFlags.length > 0 || entry.facts.team.missingExpectedRoles.length > 0,
   ).length;
   const strategicPriorities: string[] = [];
   if (criticalOutput > 0) {

@@ -27,6 +27,26 @@ let gezelHome: string;
 let app: ElectronApplication;
 let page: Page;
 
+async function openMeesterChat() {
+  const brand = page.getByRole('button', { name: 'Meester home' });
+  await expect(brand).toBeVisible({ timeout: 20_000 });
+  await brand.click();
+  await expect(page.getByTestId('home-workshop')).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId('chat-composer')).toBeVisible({ timeout: 20_000 });
+}
+
+async function sendAndWaitForReply(message: string, replyMarker: string) {
+  const composer = page.getByTestId('chat-composer');
+  const editor = composer.locator('.squisq-wysiwyg-editor');
+  const timeline = page.getByTestId('chat-timeline');
+
+  await editor.click();
+  await editor.fill(message);
+  await editor.press('Enter');
+  await expect(timeline).toContainText(`Mock reply: ${replyMarker}`, { timeout: 15_000 });
+  await expect(composer.getByTestId('chat-send')).toBeVisible({ timeout: 15_000 });
+}
+
 test.beforeAll(async () => {
   gezelHome = await mkdtemp(join(tmpdir(), 'gezel-sticky-e2e-'));
   app = await electron.launch({
@@ -44,11 +64,13 @@ test.beforeAll(async () => {
   });
   page = await app.firstWindow();
   await page.waitForLoadState('domcontentloaded');
-  await page.waitForTimeout(2500);
-  // Home is fine — the Meester chat is the simplest surface to drive.
-  // Home is the brand mark in the status header.
-  await page.locator('.app-header-brand').click();
-  await page.waitForTimeout(800);
+});
+
+test.beforeEach(async () => {
+  // Each assertion targets the Meester conversation, so establish that
+  // surface explicitly instead of relying on whichever view was selected
+  // by the preceding test or a background navigation event.
+  await openMeesterChat();
 });
 
 test.afterAll(async () => {
@@ -62,12 +84,9 @@ test('sticky header does NOT show while the bubble header is visible', async () 
   // assistant bubble is almost — but not quite — off the top. The
   // sticky should stay hidden because the real bubble header is
   // still peeking into view.
-  const editor = page.locator('.squisq-wysiwyg-editor').first();
   for (let i = 0; i < 4; i++) {
-    await editor.click();
-    await page.keyboard.type(`Setup msg ${i + 1}: lorem ipsum dolor sit amet, ${'x'.repeat(80)}`);
-    await page.keyboard.press('Enter');
-    await page.waitForTimeout(2000);
+    const marker = `Setup msg ${i + 1}:`;
+    await sendAndWaitForReply(`${marker} lorem ipsum dolor sit amet, ${'x'.repeat(80)}`, marker);
   }
   // Position a middle assistant bubble so its top sits ~25 px BELOW
   // the timeline's visible top — header fully visible, bubble not
@@ -100,17 +119,14 @@ test('sticky header does NOT show while the bubble header is visible', async () 
 });
 
 test('sticky header aligns with chat bubbles', async () => {
-  // 8 turns × ~2s each = 16s of waitForTimeout alone, plus
-  // message-send, render, scroll, and screenshot — comfortably past
-  // Playwright's default 30s budget. Bumped to 60s with the same
-  // generosity tabs.spec.ts uses for its multi-launch flow.
+  // Eight sequential send-and-reply turns can still approach the default
+  // budget on a slow CI host, so retain the lifecycle-sized timeout even
+  // though the helper waits on UI state instead of fixed sleeps.
   test.setTimeout(60_000);
   // Send enough messages to create vertical overflow so the sticky can
   // actually trigger on scroll. Each mock reply is short; we pad the
   // user message with filler so the bubble is tall.
-  const editor = page.locator('.squisq-wysiwyg-editor').first();
   for (let i = 0; i < 8; i++) {
-    await editor.click();
     const filler = [
       `Turn ${i + 1}:`,
       'Lorem ipsum dolor sit amet, consectetur adipiscing elit.',
@@ -121,9 +137,7 @@ test('sticky header aligns with chat bubbles', async () => {
       'pariatur. Excepteur sint occaecat cupidatat non proident, sunt in',
       'culpa qui officia deserunt mollit anim id est laborum.',
     ].join(' ');
-    await page.keyboard.type(filler);
-    await page.keyboard.press('Enter');
-    await page.waitForTimeout(2000);
+    await sendAndWaitForReply(filler, `Turn ${i + 1}:`);
   }
 
   await page.screenshot({

@@ -35,6 +35,7 @@ import { readFile, readdir, readlink, unlink, writeFile } from 'node:fs/promises
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
+import { pruneForeignBinariesWithReport } from './prune-foreign-binaries.mjs';
 import { signMachOTree } from './sign-macho-tree.mjs';
 
 const exec = promisify(execFile);
@@ -164,6 +165,11 @@ async function main() {
   // in the runtime dep graph follows them — but electron-builder's
   // recursive copy does, so we prune anything that escapes the bundle.
   await pruneEscapingSymlinks(target);
+
+  // Before the import check below, not after: if this ever removes something
+  // the service actually loads, the verification spawn fails here rather than
+  // shipping a bundle that breaks on a user's machine.
+  await pruneForeignBinariesWithReport(target);
 
   console.log('[build-service-bundle] verifying the bundle imports cleanly');
   // Importing the service module resolves the whole dep graph, including

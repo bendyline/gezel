@@ -3,12 +3,17 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ProjectDetail } from '@bendyline/gezel';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Store } from '../fs/store.js';
 import type { SecretKey, SecretStore, SecretStoreBackend } from '../secrets/types.js';
 import { AmbientGithubAuth } from './ambient.js';
 import { isGitInstalled, runGit } from './git.js';
 import { GitHubManager } from './manager.js';
+
+// Each case builds a real bare remote, shared clone, worktree, and colleague
+// clone. They finish quickly in isolation, but their many git subprocesses can
+// be starved past the integration pool's 10s default during the full suite.
+vi.setConfig({ testTimeout: 30_000 });
 
 /**
  * Real-git integration tests for the changes / sync / merge surface. A

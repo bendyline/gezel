@@ -613,14 +613,14 @@ function FullApp() {
             <span aria-hidden="true"> {questionsOpen ? '▴' : '▾'}</span>
           </button>
         )}
-        {/* Unified search, centered over the drag gap. Absolutely positioned
-            so it doesn't consume flex space — the brand stays left, the pills
-            stay right, and the band on both sides of the box stays draggable. */}
+        {/* Unified search is anchored near the brand so changing status-pill
+            widths do not recenter it. It stays shrinkable in the flex row, so
+            crowded titlebars still give the pills room without overlap. */}
         <TitlebarSearch />
         {/* The empty stretch between the brand and the status cluster is the
             primary OS drag target — `.app-header-right`'s `margin-left: auto`
-            pushes the pills right, leaving the gap (and the reserved
-            window-control padding) as draggable titlebar. */}
+            pushes the pills right, leaving the remaining gap (and the
+            reserved window-control padding) as draggable titlebar. */}
         <div className="app-header-right">
           <QueueMeter />
           <BoekwachterPill />

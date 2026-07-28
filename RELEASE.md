@@ -28,14 +28,18 @@ For version `<version>`, the draft release contains:
 
 | Platform | Architectures | Production artifacts | Release security |
 | --- | --- | --- | --- |
-| Windows | x64 | `Gezel-<version>-x64.exe`, blockmap, `latest.yml` | NSIS installer and installed application are Authenticode-signed through Azure Trusted Signing |
-| macOS | Apple Silicon (arm64) | `Gezel-<version>-arm64.pkg` | Application and PKG are Developer ID signed, notarized, and stapled |
-| Linux | x64, arm64 | `Gezel-<version>-<arch>.deb` and `.rpm` | Packages are currently unsigned; repository signing is distribution-specific |
-| Supply chain | all | `gezel.cdx.json` | CycloneDX production SBOM retained with the release artifacts |
+| Windows | x64 | `Gezel-<version>-windows-x64.exe`, blockmap, `latest.yml` | NSIS installer and installed application are Authenticode-signed through Azure Trusted Signing |
+| macOS | Apple Silicon (arm64) | `Gezel-<version>-mac-arm64.pkg` | Application and PKG are Developer ID signed, notarized, and stapled |
+| Linux | x64, arm64 | `Gezel-<version>-linux-<arch>.deb` and `.rpm` | Packages are currently unsigned; repository signing is distribution-specific |
+| Supply chain | all | `gezel.cdx.json`, `SHA256SUMS` | CycloneDX production SBOM plus a checksum manifest; every asset carries a SLSA build-provenance attestation |
 
 There are six installers: one Windows EXE, one macOS PKG, and DEB/RPM packages for each Linux architecture. Gezel does not currently release a DMG, AppImage, Intel Mac build, Windows Arm build, Flatpak, or Snap.
 
-The Windows NSIS target produces `electron-updater` metadata. The PKG-only macOS target does not produce `latest-mac.yml`, and DEB/RPM builds do not produce `latest-linux.yml`; those platforms need an installer or package-repository update channel rather than GitHub updater metadata.
+Verify a download two ways. `SHA256SUMS` lists every asset under the name it downloads as, so `sha256sum -c SHA256SUMS` works against a directory holding some or all of them. For provenance rather than integrity alone, `gh attestation verify <file> --repo bendyline/gezel` proves the file came from this workflow at a specific commit — that covers every published asset, `latest.yml` and the SBOM included, not just the installers.
+
+Windows and Linux both have an `electron-updater` channel. Windows NSIS produces `latest.yml`; the DEB/RPM targets produce `latest-linux.yml` (x64) and `latest-linux-arm64.yml`, which electron-updater 6 consumes through `DebUpdater`/`RpmUpdater` — it selects one by reading `resources/package-type` from the installed tree. A Linux update installs with `dpkg -i` (or `rpm`) through `pkexec`/`sudo`, so the user sees a privilege prompt and the package's `postinst` re-runs, restarting `gezeld`.
+
+macOS is the exception: the PKG-only target produces no `latest-mac.yml`, because electron-updater can only self-update a `.zip`/`.dmg` app bundle, not a PKG that installs a LaunchDaemon. Mac users reinstall from a newer PKG.
 
 The installers register `gezeld` as a machine service:
 
@@ -134,7 +138,8 @@ pnpm audit:sbom
 Do not publish until every applicable item passes.
 
 - [ ] Check the release tag and target commit, and confirm the native tag recorded in the workflow run is the intended published native release.
-- [ ] Confirm all six installers, the Windows blockmap and `latest.yml`, and `gezel.cdx.json` are present. Confirm there is no unexpected DMG, AppImage, `latest-mac.yml`, or `latest-linux.yml`.
+- [ ] Confirm all six installers, the Windows blockmap, `latest.yml`, `latest-linux.yml`, `latest-linux-arm64.yml`, `SHA256SUMS`, and `gezel.cdx.json` are present. Confirm there is no unexpected DMG, AppImage, or `latest-mac.yml`.
+- [ ] Run `sha256sum -c SHA256SUMS` over the downloaded assets, and spot-check provenance with `gh attestation verify <file> --repo bendyline/gezel`.
 - [ ] Inspect an installed build's `resources/licenses/` directory and run the packaged-license verifier documented by the workflow; confirm `NOTICE.md`, native license texts, font license texts, and the generated dependency-license manifest are present.
 - [ ] On a clean x64 Windows 10/11 VM, install the EXE and confirm the publisher signature is valid, the app launches, and `GezelService` runs under the intended restricted identity.
 - [ ] On a clean Apple Silicon Mac, install the PKG and confirm:

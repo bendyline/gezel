@@ -41,6 +41,13 @@ export default defineConfig({
     // even when `pnpm --filter @bendyline/gezel-ui build` ran fine, because
     // electron-builder only sees `dist/`-relative paths in its files glob
     // and the UI lives at `../ui/dist/` in the workspace.
+    // `@bendyline/gezel-ui` is a devDependency ON PURPOSE, even though the UI
+    // ships. This copy is a filesystem read of the sibling package's build
+    // output — nothing here (or in src/) ever imports the package, so nothing
+    // needs it resolvable at runtime. As a production dependency it dragged
+    // its whole transitive tree (monaco, mermaid, ffmpeg, pdfjs, squisq —
+    // 20k files, ~490 MB) into app.asar of every installer, alongside the
+    // 31 MB built bundle that is what actually loads. Keep it a devDependency.
     const uiSrc = resolve(__dirname, '..', 'ui', 'dist');
     if (existsSync(uiSrc)) {
       cpSync(uiSrc, 'dist/ui', { recursive: true });
