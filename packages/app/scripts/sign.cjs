@@ -25,6 +25,8 @@ const { execSync } = require('node:child_process');
 const { existsSync, readdirSync } = require('node:fs');
 const path = require('node:path');
 
+const { isThirdPartyBinary, thirdPartySource } = require('./third-party-binaries.cjs');
+
 /**
  * Resolve `signtool.exe` from the Windows SDK. GitHub Actions runners have
  * the SDK installed but don't always add it to PATH, so we find it by
@@ -109,6 +111,19 @@ exports.signFile = signFile;
 exports.default = async function sign(configuration) {
   if (!signingConfigured()) {
     console.log(`[sign] skipping (no Trusted Signing SDK env): ${configuration.path}`);
+    return;
+  }
+  // electron-builder does descend into app.asar.unpacked and calls this hook
+  // for what it finds there — including the vendored node.exe, whose OpenJS
+  // signature we must not clobber. The afterPack sweep already skips these;
+  // without the same guard here the two passes disagree and the release's
+  // "Verify Windows signatures" gate rejects the build. One allowlist,
+  // enforced everywhere it matters.
+  if (isThirdPartyBinary(configuration.path)) {
+    console.log(
+      `[sign] left vendor binary untouched: ${path.basename(configuration.path)} ` +
+        `(${thirdPartySource(configuration.path)})`,
+    );
     return;
   }
   signFile(configuration.path);

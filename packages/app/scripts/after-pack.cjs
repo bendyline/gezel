@@ -6,9 +6,11 @@
  *
  * 2. On Windows, sweep the packed app directory and Authenticode-sign
  *    every `.exe`/`.dll` that doesn't already carry a valid signature.
- *    electron-builder's own signing pass only covers `gezel.exe` and the
- *    installer executable — it never descends into the asar-unpacked
- *    payload (our-built ggml/llama engine DLLs). Anything
+ *    electron-builder's own pass covers `gezel.exe` and the installer, and
+ *    it DOES also reach into the asar-unpacked payload — it called the sign
+ *    hook for the vendored node.exe and clobbered OpenJS's signature, which
+ *    the release's signature gate then rejected. Both passes therefore
+ *    consult the same third-party allowlist; see sign.cjs. Anything
  *    already validly signed is left byte-identical: node.exe (OpenJS),
  *    and the gezel-* engine exes plus gezel-service-host.exe signed at
  *    birth by build-native.yml — re-signing those would break the "one

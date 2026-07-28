@@ -14,8 +14,14 @@
 #     AZURE_CERT_PROFILE_NAME     — certificate profile name
 #     AZURE_TENANT_ID / AZURE_CLIENT_ID / AZURE_CLIENT_SECRET — service principal
 #   macOS (Developer ID + notarization):
-#     APPLE_CERTIFICATE_P12_BASE64 — base64-encoded .p12 export
+#     APPLE_CERTIFICATE_P12_BASE64 — base64-encoded .p12 export. Must yield a
+#                           "Developer ID Application" identity (signs the
+#                           .app) AND a "Developer ID Installer" identity
+#                           (signs the .pkg). One .p12 may carry both.
 #     APPLE_CERTIFICATE_PASSWORD   — password for the .p12
+#     APPLE_INSTALLER_CERTIFICATE_P12_BASE64 / _PASSWORD — optional second
+#                           .p12, only when the Installer identity is exported
+#                           separately rather than combined into the above
 #     APPLE_ID / APPLE_ID_PASSWORD / APPLE_TEAM_ID — notarization creds
 #   Release:
 #     GEZEL_RELEASE_TOKEN — fine-grained PAT with Contents: write on the
@@ -482,6 +488,12 @@ jobs:
         env:
           APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          # Optional second .p12 holding the "Developer ID Installer" identity.
+          # Not needed when APPLE_CERTIFICATE_P12_BASE64 already exports both
+          # identities in one file — either arrangement satisfies the assertion
+          # in the next step.
+          APPLE_INSTALLER_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_INSTALLER_CERTIFICATE_P12_BASE64 }}
+          APPLE_INSTALLER_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_INSTALLER_CERTIFICATE_PASSWORD }}
         run: |
           KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
           KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
@@ -492,8 +504,35 @@ jobs:
           security import $RUNNER_TEMP/certificate.p12 \
             -P "$APPLE_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 \
             -k "$KEYCHAIN_PATH"
+          if [ -n "${APPLE_INSTALLER_CERTIFICATE_P12_BASE64:-}" ]; then
+            echo "$APPLE_INSTALLER_CERTIFICATE_P12_BASE64" | base64 --decode > $RUNNER_TEMP/installer-certificate.p12
+            security import $RUNNER_TEMP/installer-certificate.p12 \
+              -P "$APPLE_INSTALLER_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 \
+              -k "$KEYCHAIN_PATH"
+          fi
           security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           security list-keychains -d user -s "$KEYCHAIN_PATH" login.keychain
+
+      - name: Verify both Apple signing identities are present
+        # electron-builder signs the .app with "Developer ID Application" and
+        # the .pkg with "Developer ID Installer" — two distinct certificates.
+        # When the installer one is missing it does not warn: it just emits an
+        # unsigned .pkg, and the failure surfaces ~24 min later as a notarytool
+        # rejection reading only "The binary is not signed." Fail here instead,
+        # in seconds, naming what to add.
+        run: |
+          set -euo pipefail
+          identities=$(security find-identity -v "$RUNNER_TEMP/app-signing.keychain-db")
+          for kind in 'Developer ID Application' 'Developer ID Installer'; do
+            if ! grep -q "$kind" <<<"$identities"; then
+              echo "::error::No \"$kind\" identity in the signing keychain. Export it"
+              echo "::error::from Apple Developer as .p12 and add it to the repository"
+              echo "::error::secrets — either combined into APPLE_CERTIFICATE_P12_BASE64"
+              echo "::error::or separately as APPLE_INSTALLER_CERTIFICATE_P12_BASE64."
+              exit 1
+            fi
+          done
+          echo "both Developer ID identities present"
 
       - name: Build + produce service bundle
         # Runs after the certificate import, not before: the native modules
