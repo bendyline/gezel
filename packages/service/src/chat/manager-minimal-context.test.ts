@@ -26,7 +26,7 @@ describe('buildInstructions — minimal-context mode', () => {
     project,
     workspaceFiles: ['a.ts', 'b.ts', 'c.ts'],
     availableTools: [
-      { name: 'writeFile', description: 'Write a workspace file.' },
+      { name: 'write_file', description: 'Write a workspace file.' },
       { name: 'search_code', description: 'Search the codebase.' },
     ],
   } as unknown as BuildInstructionsOptions;

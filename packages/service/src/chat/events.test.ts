@@ -166,7 +166,7 @@ describe('ChatEventBus — lossless replay history', () => {
     const scope = { sessionId: 's1', gezelId: 'ada', projectId: 'eliza' };
     bus.publish(scope, { type: 'delta', content: 'before ' });
     bus.publish(scope, { type: 'delta', content: 'tool' });
-    bus.publish(scope, { type: 'tool', name: 'writeFile', durationMs: 5, success: true });
+    bus.publish(scope, { type: 'tool', name: 'write_file', durationMs: 5, success: true });
     bus.publish(scope, { type: 'delta', content: 'after' });
 
     const seen: ChatEventEnvelope[] = [];
@@ -194,23 +194,23 @@ describe('ChatEventBus — lossless replay history', () => {
   });
 
   it('coalesces tool_args_delta runs per tool name so mid-write reloads replay one entry', () => {
-    // A multi-minute structured writeFile streams thousands of arg
+    // A multi-minute structured write_file streams thousands of arg
     // fragments. They coalesce like deltas — but only within the same
     // tool name, so two back-to-back calls stay distinct entries.
     const bus = new ChatEventBus();
     const scope = { sessionId: 's1', gezelId: 'ada', projectId: 'eliza' };
-    bus.publish(scope, { type: 'tool_args_delta', name: 'writeFile', content: '{"path":"a",' });
-    bus.publish(scope, { type: 'tool_args_delta', name: 'writeFile', content: '"content":"x"}' });
-    bus.publish(scope, { type: 'tool_args_delta', name: 'readFile', content: '{"path":"b"}' });
+    bus.publish(scope, { type: 'tool_args_delta', name: 'write_file', content: '{"path":"a",' });
+    bus.publish(scope, { type: 'tool_args_delta', name: 'write_file', content: '"content":"x"}' });
+    bus.publish(scope, { type: 'tool_args_delta', name: 'read_file', content: '{"path":"b"}' });
 
     const seen: ChatEventEnvelope[] = [];
     bus.subscribeProject('eliza', (env) => seen.push(env));
     expect(seen.map((e) => e.event.type)).toEqual(['tool_args_delta', 'tool_args_delta']);
     expect(seen[0]?.event).toMatchObject({
-      name: 'writeFile',
+      name: 'write_file',
       content: '{"path":"a","content":"x"}',
     });
-    expect(seen[1]?.event).toMatchObject({ name: 'readFile', content: '{"path":"b"}' });
+    expect(seen[1]?.event).toMatchObject({ name: 'read_file', content: '{"path":"b"}' });
   });
 
   it('a heartbeat between deltas does not break coalescing', () => {

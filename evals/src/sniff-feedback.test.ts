@@ -84,7 +84,7 @@ describe('structuralOrderRepairLine', () => {
     );
 
     expect(line).toContain('structural-order failure');
-    expect(line).toContain('one bounded `writeFile` rewrite');
+    expect(line).toContain('one bounded `write_file` rewrite');
     expect(line).toContain('Do not append');
   });
 
@@ -301,9 +301,9 @@ describe('postSniffFeedback', () => {
     expect(body.text).toContain('Replace those broken local image src values');
     expect(body.text).toContain('assets/logo.png');
     expect(body.text).toContain('assets/pets/dog_placeholder.jpg');
-    expect(body.text).toContain('Do not call `mkdir`');
+    expect(body.text).toContain('Do not call `make_dir`');
     expect(body.text).toContain(
-      'replaceInFile({ path: "index.html", search: "assets/logo.png", replace: "assets/generated/image-1213420199.png" })',
+      'replace_in_file({ path: "index.html", search: "assets/logo.png", replace: "assets/generated/image-1213420199.png" })',
     );
   });
 
@@ -379,13 +379,13 @@ describe('postSniffFeedback', () => {
     expect(body.text).toContain(
       'expectedDeliverable: { kind: "file", filePath: "assets/logo.png" }',
     );
-    expect(body.text).toContain('`mkdir` alone is not enough');
+    expect(body.text).toContain('`make_dir` alone is not enough');
     expect(body.text).not.toContain('If `assets/logo.png` exists beside this page');
 
     expect(client.sendChatMessage).toHaveBeenCalledTimes(1);
     const coordinatorBody = client.sendChatMessage.mock.calls[0]![1];
     expect(coordinatorBody.projectId).toBe('pet-shop-website');
-    expect(coordinatorBody.message).toContain('non-writeFile tool');
+    expect(coordinatorBody.message).toContain('non-write_file tool');
     expect(coordinatorBody.message).toContain('assets/logo.png');
     expect(coordinatorBody.message).not.toContain(
       'expectedDeliverable: { kind: "file", filePath: "index.html" }',
@@ -506,7 +506,7 @@ describe('postSniffFeedback', () => {
     expect(body.text).toContain('target roughly 5-7 KB');
     expect(body.text).toContain('Do not pad with comments');
     expect(body.text).toContain('Do not use `write_artifact`');
-    expect(body.text).toContain('writeFile');
+    expect(body.text).toContain('write_file');
   });
 
   it('gives tic-tac-toe structure guidance when board signals are missing', async () => {
@@ -527,7 +527,7 @@ describe('postSniffFeedback', () => {
 
     const body = client.messageGezel.mock.calls[0]![1];
     expect(body.text).toContain('TICTACTOE_FULL_REWRITE');
-    expect(body.text).toContain('Your next tool call MUST be `writeFile`');
+    expect(body.text).toContain('Your next tool call MUST be `write_file`');
     expect(body.text).toContain('tic-tac-toe page still lacks');
     expect(body.text).toContain('class="cell"');
     expect(body.text).toContain('data-cell');
@@ -560,7 +560,7 @@ describe('postSniffFeedback', () => {
 
     const body = client.messageGezel.mock.calls[0]![1];
     expect(body.text).toContain('TICTACTOE_FULL_REWRITE');
-    expect(body.text).toContain('Your next tool call MUST be `writeFile`');
+    expect(body.text).toContain('Your next tool call MUST be `write_file`');
     expect(body.text).toContain('score counters for X/O/draws');
     expect(body.text).toContain('about 1-2 KB');
     expect(body.text).toContain('Use this compact structure');
@@ -591,9 +591,11 @@ describe('postSniffFeedback', () => {
     const body = client.messageGezel.mock.calls[0]![1];
     expect(body.text).toContain('parse failure is a duplicate declaration');
     expect(body.text).toContain('remove every duplicated block');
-    expect(body.text).toContain('one clean complete file using `writeFile`');
+    expect(body.text).toContain('one clean complete file using `write_file`');
     expect(body.text).toContain('Keep exactly one declaration');
-    expect(body.text).toContain('Do not use `appendToFile`, `insertAtMarker`, or `replaceLines`');
+    expect(body.text).toContain(
+      'Do not use `append_to_file`, `insert_at_marker`, or `replace_lines`',
+    );
     expect(body.text).toContain("Identifier 'tanks' has already been declared");
     expect(body.text).not.toContain('patch the deliverable with the smallest syntax fix first');
   });
@@ -610,7 +612,7 @@ describe('postSniffFeedback', () => {
       signals: ['name', 'grid', 'click', 'win-detect'],
       score: 4,
       failReason:
-        'inline <script> opened 1x but only closed 0x — the writeFile body was truncated mid-script (no </script> ever arrived).',
+        'inline <script> opened 1x but only closed 0x — the write_file body was truncated mid-script (no </script> ever arrived).',
       missingRequiredSignals: ['js-parses', 'js-size-ok'],
     };
 
@@ -618,10 +620,10 @@ describe('postSniffFeedback', () => {
 
     const body = client.messageGezel.mock.calls[0]![1];
     expect(body.text).toContain('truncated inline `<script>` block');
-    expect(body.text).toContain('appendToFile');
+    expect(body.text).toContain('append_to_file');
     expect(body.text).toContain('</script></body></html>');
     expect(body.text).toContain('must NOT start a new `<script>`');
-    expect(body.text).not.toContain('Do not use `appendToFile`');
+    expect(body.text).not.toContain('Do not use `append_to_file`');
   });
 
   it('treats Unexpected end of input as a truncated script repair', async () => {
@@ -643,11 +645,11 @@ describe('postSniffFeedback', () => {
 
     const body = client.messageGezel.mock.calls[0]![1];
     expect(body.text).toContain('truncated inline `<script>` block');
-    expect(body.text).toContain('appendToFile');
-    expect(body.text).not.toContain('Read `index.html`, then use `replaceInFile`');
+    expect(body.text).toContain('append_to_file');
+    expect(body.text).not.toContain('Read `index.html`, then use `replace_in_file`');
   });
 
-  it('includes exact replaceInFile candidates for common parse-corrupted HTML', async () => {
+  it('includes exact replace_in_file candidates for common parse-corrupted HTML', async () => {
     const client = makeClient({
       sessions: [
         { id: 'sess-builder', gezelId: 'builder-1', lastActivityAt: '2026-06-04T05:00:00Z' },
@@ -673,15 +675,15 @@ describe('postSniffFeedback', () => {
 
     const body = client.messageGezel.mock.calls[0]![1];
     expect(body.text).toContain(
-      `replaceInFile({ path: "index.html", find: "background: #353';", replace: "background: #353;" })`,
+      `replace_in_file({ path: "index.html", find: "background: #353';", replace: "background: #353;" })`,
     );
     expect(body.text).toContain(
-      'replaceInFile({ path: "index.html", find: "requestAnimationFrame(draw));", replace: "requestAnimationFrame(draw);" })',
+      'replace_in_file({ path: "index.html", find: "requestAnimationFrame(draw));", replace: "requestAnimationFrame(draw);" })',
     );
     expect(body.text).toContain('If one matches the file you read, call it before a full rewrite');
   });
 
-  it('includes exact replaceInFile candidates for tic-tac-toe bracket typos', async () => {
+  it('includes exact replace_in_file candidates for tic-tac-toe bracket typos', async () => {
     const client = makeClient({
       sessions: [
         { id: 'sess-builder', gezelId: 'builder-1', lastActivityAt: '2026-06-04T05:00:00Z' },
@@ -703,14 +705,14 @@ describe('postSniffFeedback', () => {
 
     const body = client.messageGezel.mock.calls[0]![1];
     expect(body.text).toContain(
-      'replaceInFile({ path: "index.html", find: "board[b]]", replace: "board[b]", occurrence: "all" })',
+      'replace_in_file({ path: "index.html", find: "board[b]]", replace: "board[b]", occurrence: "all" })',
     );
     expect(body.text).toContain(
-      'replaceInFile({ path: "index.html", find: "board[c]]", replace: "board[c]", occurrence: "all" })',
+      'replace_in_file({ path: "index.html", find: "board[c]]", replace: "board[c]", occurrence: "all" })',
     );
   });
 
-  it('includes exact replaceInFile candidates for combo-index bracket typos', async () => {
+  it('includes exact replace_in_file candidates for combo-index bracket typos', async () => {
     const client = makeClient({
       sessions: [
         { id: 'sess-builder', gezelId: 'builder-1', lastActivityAt: '2026-06-04T05:00:00Z' },
@@ -732,17 +734,17 @@ describe('postSniffFeedback', () => {
 
     const body = client.messageGezel.mock.calls[0]![1];
     expect(body.text).toContain(
-      'replaceInFile({ path: "index.html", find: "board[combo[0]]]", replace: "board[combo[0]]", occurrence: "all" })',
+      'replace_in_file({ path: "index.html", find: "board[combo[0]]]", replace: "board[combo[0]]", occurrence: "all" })',
     );
     expect(body.text).toContain(
-      'replaceInFile({ path: "index.html", find: "board[combo[1]]]", replace: "board[combo[1]]", occurrence: "all" })',
+      'replace_in_file({ path: "index.html", find: "board[combo[1]]]", replace: "board[combo[1]]", occurrence: "all" })',
     );
     expect(body.text).toContain(
-      'replaceInFile({ path: "index.html", find: "board[combo[2]]]", replace: "board[combo[2]]", occurrence: "all" })',
+      'replace_in_file({ path: "index.html", find: "board[combo[2]]]", replace: "board[combo[2]]", occurrence: "all" })',
     );
   });
 
-  it('includes exact replaceInFile candidates for condition-index bracket typos', async () => {
+  it('includes exact replace_in_file candidates for condition-index bracket typos', async () => {
     const client = makeClient({
       sessions: [
         { id: 'sess-builder', gezelId: 'builder-1', lastActivityAt: '2026-06-04T05:00:00Z' },
@@ -764,13 +766,13 @@ describe('postSniffFeedback', () => {
 
     const body = client.messageGezel.mock.calls[0]![1];
     expect(body.text).toContain(
-      'replaceInFile({ path: "index.html", find: "board[condition[0]]]", replace: "board[condition[0]]", occurrence: "all" })',
+      'replace_in_file({ path: "index.html", find: "board[condition[0]]]", replace: "board[condition[0]]", occurrence: "all" })',
     );
     expect(body.text).toContain(
-      'replaceInFile({ path: "index.html", find: "board[condition[1]]]", replace: "board[condition[1]]", occurrence: "all" })',
+      'replace_in_file({ path: "index.html", find: "board[condition[1]]]", replace: "board[condition[1]]", occurrence: "all" })',
     );
     expect(body.text).toContain(
-      'replaceInFile({ path: "index.html", find: "board[condition[2]]]", replace: "board[condition[2]]", occurrence: "all" })',
+      'replace_in_file({ path: "index.html", find: "board[condition[2]]]", replace: "board[condition[2]]", occurrence: "all" })',
     );
   });
 
@@ -982,7 +984,7 @@ describe('postSniffFeedback', () => {
     // preserves the parse-repair ladder underneath the REPEAT MISS line).
     expect(client.messageGezel).toHaveBeenCalledTimes(2);
     expect(client.messageGezel.mock.calls[0]![1].text).toContain(
-      'replaceInFile({ path: "index.html", find: "requestAnimationFrame(draw));", replace: "requestAnimationFrame(draw);" })',
+      'replace_in_file({ path: "index.html", find: "requestAnimationFrame(draw));", replace: "requestAnimationFrame(draw);" })',
     );
     expect(client.messageGezel.mock.calls[1]![1].text).toContain('REPEAT MISS — attempt 2');
   });
@@ -1149,7 +1151,7 @@ describe('postMissingDeliverableFeedback', () => {
     const [target, body] = client.messageGezel.mock.calls[0]!;
     expect(target).toBe('builder-1');
     expect(body.text).toContain('complete, self-contained HTML file');
-    expect(body.text).toContain('writeFile({ path: "index.html"');
+    expect(body.text).toContain('write_file({ path: "index.html"');
     expect(body.text).toContain('Artifact-only plans');
     expect(body.text).not.toContain('full analysis so far');
   });
@@ -1174,7 +1176,7 @@ describe('postMissingDeliverableFeedback', () => {
     expect(client.messageGezel).toHaveBeenCalledTimes(1);
     const [target, body] = client.messageGezel.mock.calls[0]!;
     expect(target).toBe('dev-1');
-    expect(body.text).toContain('writeFile({ path: "index.html"');
+    expect(body.text).toContain('write_file({ path: "index.html"');
   });
 
   it('escalates missing HTML immediately when only coordination roles are active', async () => {
@@ -1224,7 +1226,7 @@ describe('postMissingDeliverableFeedback', () => {
     expect(client.messageGezel).toHaveBeenCalledTimes(1);
     const [target, body] = client.messageGezel.mock.calls[0]!;
     expect(target).toBe('dev-1');
-    expect(body.text).toContain('writeFile({ path: "index.html"');
+    expect(body.text).toContain('write_file({ path: "index.html"');
   });
 
   it('can defer missing HTML feedback when the caller requests a longer coordinator grace', async () => {
@@ -1271,7 +1273,7 @@ describe('postMissingDeliverableFeedback', () => {
     expect(body.text).toContain('No implementation specialist is active yet');
     expect(body.text).toContain('create or ensure a Developer/Builder');
     expect(body.text).toContain('expectedDeliverable: { kind: "file", filePath: "index.html" }');
-    expect(body.text).toContain('writeFile({ path: "index.html"');
+    expect(body.text).toContain('write_file({ path: "index.html"');
     expect(client.sendChatMessage).not.toHaveBeenCalled();
   });
 
@@ -1306,7 +1308,7 @@ describe('postMissingDeliverableFeedback', () => {
     expect(body.text).toContain('create or ensure a Developer/Builder');
     expect(body.text).toContain('message_gezel');
     expect(body.text).toContain('expectedDeliverable: { kind: "file", filePath: "index.html" }');
-    expect(body.text).toContain('writeFile({ path: "index.html"');
+    expect(body.text).toContain('write_file({ path: "index.html"');
     expect(client.sendChatMessage).not.toHaveBeenCalled();
   });
 
@@ -1333,7 +1335,7 @@ describe('postMissingDeliverableFeedback', () => {
     expect(body.text).toContain('No implementation specialist is active yet');
     expect(body.text).toContain('ensure_gezel');
     expect(body.text).toContain('expectedDeliverable: { kind: "file", filePath: "index.html" }');
-    expect(body.text).toContain('writeFile({ path: "index.html"');
+    expect(body.text).toContain('write_file({ path: "index.html"');
     expect(client.sendChatMessage).not.toHaveBeenCalled();
   });
 
@@ -1365,10 +1367,10 @@ describe('postMissingDeliverableFeedback', () => {
     expect(client.messageGezel).toHaveBeenCalledTimes(2);
     const [firstTarget, firstBody] = client.messageGezel.mock.calls[0]!;
     expect(firstTarget).toBe('ensured-dev-1');
-    expect(firstBody.text).toContain('writeFile({ path: "index.html"');
+    expect(firstBody.text).toContain('write_file({ path: "index.html"');
     const [secondTarget, secondBody] = client.messageGezel.mock.calls[1]!;
     expect(secondTarget).toBe('dev-1');
-    expect(secondBody.text).toContain('writeFile({ path: "index.html"');
+    expect(secondBody.text).toContain('write_file({ path: "index.html"');
     expect(client.ensureGezel).toHaveBeenCalledTimes(1);
     expect(client.sendChatMessage).not.toHaveBeenCalled();
   });
@@ -1396,7 +1398,7 @@ describe('postMissingDeliverableFeedback', () => {
     const [target, body] = client.messageGezel.mock.calls[0]!;
     expect(target).toBe('dev-1');
     expect(body.projectId).toBe('pet-shop-website');
-    expect(body.text).toContain('writeFile({ path: "index.html"');
+    expect(body.text).toContain('write_file({ path: "index.html"');
   });
 
   it('nudges a roster developer in the explicit project even before any specialist session exists', async () => {
@@ -1415,7 +1417,7 @@ describe('postMissingDeliverableFeedback', () => {
     const [target, body] = client.messageGezel.mock.calls[0]!;
     expect(target).toBe('dev-1');
     expect(body.projectId).toBe('pet-shop-website');
-    expect(body.text).toContain('writeFile({ path: "index.html"');
+    expect(body.text).toContain('write_file({ path: "index.html"');
   });
 
   it('uses explicit project scope over a specialist default-project session', async () => {
@@ -1442,7 +1444,7 @@ describe('postMissingDeliverableFeedback', () => {
     expect(target).toBe('dev-1');
     expect(body.projectId).toBe('typescript-event-pipeline');
     expect(body.expectedDeliverable).toEqual({ kind: 'file', filePath: 'src/producer.ts' });
-    expect(body.text).toContain('writeFile({ path: "src/producer.ts"');
+    expect(body.text).toContain('write_file({ path: "src/producer.ts"');
   });
 
   it('nudges a roster reviewer for a markdown deliverable in the explicit project', async () => {
@@ -1461,7 +1463,7 @@ describe('postMissingDeliverableFeedback', () => {
     const [target, body] = client.messageGezel.mock.calls[0]!;
     expect(target).toBe('reviewer-1');
     expect(body.projectId).toBe('squisq-code-review');
-    expect(body.text).toContain('writeFile({ path: "review.md"');
+    expect(body.text).toContain('write_file({ path: "review.md"');
   });
 
   it('can defer a missing markdown nudge while a reviewer has just appeared', async () => {
@@ -1491,7 +1493,7 @@ describe('postMissingDeliverableFeedback', () => {
     const [target, body] = client.messageGezel.mock.calls[0]!;
     expect(target).toBe('reviewer-1');
     expect(body.projectId).toBe('squisq-code-review');
-    expect(body.text).toContain('writeFile({ path: "review.md"');
+    expect(body.text).toContain('write_file({ path: "review.md"');
   });
 
   it('keeps project scope when ensuring a developer for a missing markdown deliverable', async () => {
@@ -1514,7 +1516,7 @@ describe('postMissingDeliverableFeedback', () => {
     const [target, body] = client.messageGezel.mock.calls[0]!;
     expect(target).toBe('ensured-dev-1');
     expect(body.projectId).toBe('squisq-code-review');
-    expect(body.text).toContain('writeFile({ path: "review.md"');
+    expect(body.text).toContain('write_file({ path: "review.md"');
     expect(client.sendChatMessage).not.toHaveBeenCalled();
   });
 
@@ -1561,7 +1563,7 @@ describe('postMissingDeliverableFeedback', () => {
     expect(body.text).toContain('wrong deliverable path or location');
     expect(body.text).toContain('plan');
     expect(body.text).toContain('artifact/library-only file');
-    expect(body.text).toContain('writeFile({ path: "review.md"');
+    expect(body.text).toContain('write_file({ path: "review.md"');
     expect(body.text).toContain('exact file `review.md`');
   });
 
@@ -1579,7 +1581,7 @@ describe('postMissingDeliverableFeedback', () => {
     expect(client.messageGezel).toHaveBeenCalledTimes(1);
     const [, body] = client.messageGezel.mock.calls[0]!;
     expect(body.text).toContain('First call fetch_repo');
-    expect(body.text).toContain('writeFile({ path: "review.md"');
+    expect(body.text).toContain('write_file({ path: "review.md"');
   });
 
   it('defers missing-deliverable feedback while the selected target is already mid-turn', async () => {
@@ -1768,7 +1770,7 @@ describe('postMissingDeliverableFeedback', () => {
     expect(body.text).toContain('source: "customer-notice.md"');
     expect(body.text).toContain('dest: "customer-notice.md"');
     expect(body.text).toContain(
-      'Do not end your turn until `copy_artifact_to_workspace` or `writeFile`',
+      'Do not end your turn until `copy_artifact_to_workspace` or `write_file`',
     );
   });
 });
@@ -1822,14 +1824,14 @@ describe('sniff escalation ladder', () => {
     expect(second).toContain(directive);
     // Stage 1 must NOT trip the immediate-write clamp.
     expect(second).not.toContain('Do not end your turn until');
-    expect(second).not.toContain('writeFile({ path:');
+    expect(second).not.toContain('write_file({ path:');
 
     // Stage 2: the full-rewrite strategy change — immediate-write trigger
     // phrases present, scenario-check header ABSENT (that header routes
     // into the patch-only repair mode which forbids whole-file rewrites).
     expect(third).toContain('GATE_FULL_REWRITE');
-    expect(third).toContain('Do not end your turn until `writeFile`');
-    expect(third).toContain('writeFile({ path: "openapi.yaml"');
+    expect(third).toContain('Do not end your turn until `write_file`');
+    expect(third).toContain('write_file({ path: "openapi.yaml"');
     expect(third).toContain(directive);
     expect(third).not.toContain('[scenario check] I looked at');
 
@@ -1949,7 +1951,7 @@ describe('sniff escalation ladder', () => {
       failReason: 'allowed-imports: remove unused UserStore import',
     });
     const directive =
-      'The function bodies already pass. Remove only the unused import with replaceInFile. Do not use writeFile.';
+      'The function bodies already pass. Remove only the unused import with replace_in_file. Do not use write_file.';
 
     for (const sourceText of ['rev-1', 'rev-2', 'rev-3']) {
       await postSniffFeedback(ctx, 'src/handlers.ts', sniff, {
@@ -1964,8 +1966,8 @@ describe('sniff escalation ladder', () => {
     expect(third).toContain('REPEAT MISS — attempt 3');
     expect(third).toContain(directive);
     expect(third).not.toContain('GATE_FULL_REWRITE');
-    expect(third).not.toContain('Do not end your turn until `writeFile`');
-    expect(third).not.toContain('writeFile({ path:');
+    expect(third).not.toContain('Do not end your turn until `write_file`');
+    expect(third).not.toContain('write_file({ path:');
 
     await postSniffFeedback(ctx, 'src/handlers.ts', sniff, {
       sourceText: 'rev-4',
@@ -2064,7 +2066,7 @@ describe('sniff escalation ladder', () => {
     expect(client.messageGezel).toHaveBeenCalledTimes(3);
   });
 
-  it('keeps explicit append-only repairs on appendToFile across escalation stages', async () => {
+  it('keeps explicit append-only repairs on append_to_file across escalation stages', async () => {
     const client = makeClient({
       sessions: [{ id: 's', gezelId: 'writer-1', lastActivityAt: '2026-06-04T05:00:00Z' }],
     });
@@ -2075,7 +2077,7 @@ describe('sniff escalation ladder', () => {
       missingRequiredSignals: ['file-present'],
     });
     const directive =
-      'Your next tool call must be `appendToFile({ path: "postmortem.md", content: "more" })`. Do not call `writeFile`, rewrite existing sections, or answer in chat first.';
+      'Your next tool call must be `append_to_file({ path: "postmortem.md", content: "more" })`. Do not call `write_file`, rewrite existing sections, or answer in chat first.';
 
     for (const sourceText of ['rev-1', 'rev-2', 'rev-3']) {
       await postSniffFeedback(ctx, 'postmortem.md', sniff, {
@@ -2094,7 +2096,7 @@ describe('sniff escalation ladder', () => {
       expect(escalated).toContain('REPEAT APPEND MISS');
       expect(escalated).toContain(directive);
       expect(escalated).not.toContain('GATE_FULL_REWRITE');
-      expect(escalated).not.toContain('using `replaceInFile` or `replaceLines`');
+      expect(escalated).not.toContain('using `replace_in_file` or `replace_lines`');
     }
   });
 
@@ -2110,8 +2112,8 @@ describe('sniff escalation ladder', () => {
     });
     const directive = [
       'INCIDENT POSTMORTEM COMBINED PATCH: fix every acceptance failure below in this same repair turn.',
-      '1. Use `replaceInFile` to repair Owner cells.',
-      '2. Use `appendToFile` to clear the size and grounding checks.',
+      '1. Use `replace_in_file` to repair Owner cells.',
+      '2. Use `append_to_file` to clear the size and grounding checks.',
       'Complete every numbered file edit before replying.',
     ].join(' ');
 
@@ -2133,7 +2135,7 @@ describe('sniff escalation ladder', () => {
       expect(escalated).toContain(directive);
       expect(escalated).not.toContain('fixes the FIRST failure');
       expect(escalated).not.toContain('GATE_FULL_REWRITE');
-      expect(escalated).not.toContain('Do not end your turn until `writeFile`');
+      expect(escalated).not.toContain('Do not end your turn until `write_file`');
     }
   });
 
@@ -2211,7 +2213,7 @@ describe('sniff escalation ladder', () => {
       snapshotRepairActions: vi.fn(async () => actionSnapshot),
     };
     const sniff = failingSniff({
-      failReason: 'source-read provenance missing successful readFile calls',
+      failReason: 'source-read provenance missing successful read_file calls',
     });
     const opts = {
       sourceText: 'byte-identical-output',

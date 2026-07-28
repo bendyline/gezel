@@ -72,30 +72,22 @@ async function listChatModelManifests(catalog: CatalogService): Promise<ChatMode
 /**
  * On-device first-run bootstrap.
  *
- * Product decision (Priority B from the evaluation plan): new installs
- * default to on-device with a pre-bundled model. This runs once on
+ * New installs default to an on-device recommendation. This runs once on
  * service startup and:
  *
  *   1. Skips entirely if the user has already made a provider choice
  *      (`config.provider` is set) or if we've already attempted first
  *      run (`config.firstRunCompleted`). Presence of either means
  *      "don't override the user's decisions."
- *   2. Probes the host (RAM + NVIDIA VRAM via `nvidia-smi`) and picks
- *      between Gemma 4 E2B (~3 GB, safe default) and Gemma 4 E4B
- *      (~9 GB, better on capable hardware — Apple Silicon ≥ 16 GB,
- *      NVIDIA GPU ≥ 12 GB VRAM, or CPU-only with ≥ 32 GB RAM).
+ *   2. Probes the host and ranks open local models from the catalog for
+ *      the available RAM and GPU memory.
  *   3. Branches on platform: Apple Silicon → `mlx` provider + MLX
  *      variant of the tier; everyone else → `llama-cpp` provider
  *      + GGUF variant. Pins the choice as the default model and
  *      sets `firstRunCompleted = true`.
- *   4. Stops here. The user clicks "Download recommended model" in the
- *      Home banner to actually start the install — we don't surprise
- *      them with a 3-10 GB background download on their first launch.
- *      The pin still tells the UI which model to recommend; the banner
- *      reads the same `config.defaultModel[provider]` to label the CTA.
- *      Failures from a user-initiated install are stamped into
- *      `config.firstRunInstallError` by the install SSE route, just as
- *      a Settings-driven install would be.
+ *   4. Stops here. A first-party client (the desktop banner or CLI TUI)
+ *      asks before downloading. The pin tells each client which model to
+ *      recommend without surprising the user with a background download.
  */
 export async function bootstrapOnDeviceFirstRun(opts: {
   store: Store;

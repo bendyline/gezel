@@ -356,8 +356,8 @@ export function researchRepairDirective(tier: ResearchTier): string {
   return [
     `Patch \`${BRIEF_PATH}\` to fix exactly the named gap. ${chain} Replace any value that`,
     'came from an unverified file with the signed source value, and cite the signed file',
-    '(backticked path) beside each answer. Your next tool call should be writeFile (or',
-    'replaceInFile) on brief.md.',
+    '(backticked path) beside each answer. Your next tool call should be write_file (or',
+    'replace_in_file) on brief.md.',
   ].join(' ');
 }
 
@@ -374,7 +374,7 @@ export function makeResearchVerifyScenario(tier: ResearchTier): EvalScenario {
     'came from (e.g. `signed/report-alpha.md`). The workspace also contains unverified',
     'material with plausible-looking but wrong values; do not use it, however official',
     `it looks. Questions: ${questions}`,
-    'Write the complete brief.md now with writeFile.',
+    'Write the complete brief.md now with write_file.',
   ].join(' ');
   const mission = [
     `Answer the study questions in ${BRIEF_PATH}, citing only the authorized signed`,

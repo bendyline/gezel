@@ -1,6 +1,7 @@
 import type { GezelConfig, ProviderName, ResolvedSecurityPolicy } from '@bendyline/gezel';
 import { resolveRoleId, toolsetGroupsForRole } from '@bendyline/gezel';
 import { BUILTIN_TOOLSETS } from '@bendyline/gezel-catalog';
+import { canonicalToolName } from '@bendyline/gezel-mcp';
 import {
   extractExplicitFileEditTools,
   hasDirectFileDeliverableWording,
@@ -242,51 +243,51 @@ const PROJECT_RETRIEVAL_ROLES: ReadonlySet<string> = new Set([
  */
 const FILE_WORK_SCRIPT_TOOLS: readonly string[] = ['run_script', 'get_script_run'];
 const IMMEDIATE_FILE_WRITE_TOOLS: ReadonlySet<string> = new Set([
-  'writeFile',
+  'write_file',
   ...FILE_WORK_SCRIPT_TOOLS,
 ]);
 /**
  * Tools left available when the immediate-file-write deliverable targets
  * an EXISTING substantial file — i.e. a modification, not a create.
- * Forcing a `writeFile`-only full rewrite of a large file is the worst
+ * Forcing a `write_file`-only full rewrite of a large file is the worst
  * option for a weak local model: re-emitting ~16 KB of HTML+JS reliably
  * corrupts the inline script (stray parens) or ships only a fragment, and
  * the source-write-guard then rejects every attempt. Wild-caught
  * (qwen3.6 a3b): a 15-line SVG insert into a 16.8 KB index.html
  * failed 5× because surgical edit tools were stripped. Keeping the patch
- * tools alongside `writeFile` preserves the constraint's intent (every
+ * tools alongside `write_file` preserves the constraint's intent (every
  * tool here is a write — no consult/read distraction) while giving the
  * model a low-risk way to make a small edit without re-emitting the file.
  */
 const IMMEDIATE_FILE_MODIFY_TOOLS: ReadonlySet<string> = new Set([
-  'writeFile',
-  'replaceInFile',
-  'replaceLines',
-  'appendToFile',
-  'insertAtMarker',
+  'write_file',
+  'replace_in_file',
+  'replace_lines',
+  'append_to_file',
+  'insert_at_marker',
   ...FILE_WORK_SCRIPT_TOOLS,
 ]);
 const SCENARIO_FILE_REPAIR_TOOLS: ReadonlySet<string> = new Set([
-  'readFile',
-  'readdir',
+  'read_file',
+  'list_dir',
   'stat',
   'validate',
-  'replaceInFile',
-  'replaceLines',
-  'writeFile',
-  'appendToFile',
+  'replace_in_file',
+  'replace_lines',
+  'write_file',
+  'append_to_file',
   ...FILE_WORK_SCRIPT_TOOLS,
 ]);
 const DIRECT_FILE_WORK_TOOLS: ReadonlySet<string> = new Set([
-  'readFile',
-  'readdir',
+  'read_file',
+  'list_dir',
   'stat',
   'validate',
-  'mkdir',
-  'writeFile',
-  'appendToFile',
-  'replaceInFile',
-  'replaceLines',
+  'make_dir',
+  'write_file',
+  'append_to_file',
+  'replace_in_file',
+  'replace_lines',
   'run_nodejs_script',
   ...FILE_WORK_SCRIPT_TOOLS,
 ]);
@@ -305,10 +306,10 @@ const PROJECT_RETRIEVAL_DIRECT_TOOLS: ReadonlySet<string> = new Set([
   'map_repo',
 ]);
 const REVIEW_FILE_REPAIR_TOOLS: ReadonlySet<string> = new Set([
-  'replaceInFile',
-  'replaceLines',
-  'writeFile',
-  'appendToFile',
+  'replace_in_file',
+  'replace_lines',
+  'write_file',
+  'append_to_file',
 ]);
 
 /**
@@ -762,20 +763,20 @@ export function computeToolAllowlist(opts: {
     for (const name of VOORMAN_STRIPPED_DELEGATION_TOOLS) next.delete(name);
     resolved = next;
   }
-  // Surgical line-editing rides with content-editing. `replaceLines` (edit
-  // by line number — read straight off the `readFile` gutter, no byte-exact
+  // Surgical line-editing rides with content-editing. `replace_lines` (edit
+  // by line number — read straight off the `read_file` gutter, no byte-exact
   // `find` string to reproduce) is the reliable surgical tool for small
-  // models, which fumble `replaceInFile`'s find-matching. Wherever a role
-  // gets `replaceInFile`, expose `replaceLines` too — they're siblings in
+  // models, which fumble `replace_in_file`'s find-matching. Wherever a role
+  // gets `replace_in_file`, expose `replace_lines` too — they're siblings in
   // `workspace-fs-write`, and older curated toolsets / project overrides
-  // predate `replaceLines`, so this backfills it. Wild-caught: a
-  // gemma4-12b developer had `replaceInFile` but not `replaceLines`, so its
+  // predate `replace_lines`, so this backfills it. Wild-caught: a
+  // gemma4-12b developer had `replace_in_file` but not `replace_lines`, so its
   // only surgical option demanded byte-matching it couldn't do — the prompt
-  // told it to use `replaceLines` (absent), and it thrashed between a
+  // told it to use `replace_lines` (absent), and it thrashed between a
   // guard-rejected full rewrite and unmatchable patches until it aborted.
-  if (resolved.has('replaceInFile') && !resolved.has('replaceLines')) {
+  if (resolved.has('replace_in_file') && !resolved.has('replace_lines')) {
     const next = new Set(resolved);
-    next.add('replaceLines');
+    next.add('replace_lines');
     resolved = next;
   }
   return resolved;
@@ -790,16 +791,16 @@ export function constrainAllowlistForImmediateFileWrite(
     /**
      * The deliverable target is an existing, substantial file (a
      * modification, not a create). Keep the surgical patch tools
-     * alongside `writeFile` so a small edit doesn't force a full,
+     * alongside `write_file` so a small edit doesn't force a full,
      * corruption-prone rewrite. The caller resolves this against the
-     * workspace; defaults to false (the create path → `writeFile` only).
+     * workspace; defaults to false (the create path → `write_file` only).
      */
     existingSubstantialFile?: boolean;
   },
 ): Set<string> | null {
   if (!allowlist) return allowlist;
   if (!shouldConstrainToImmediateFileWrite(opts)) return allowlist;
-  if (!allowlist.has('writeFile')) return allowlist;
+  if (!allowlist.has('write_file')) return allowlist;
   const toolSet = opts.existingSubstantialFile
     ? IMMEDIATE_FILE_MODIFY_TOOLS
     : IMMEDIATE_FILE_WRITE_TOOLS;
@@ -822,7 +823,10 @@ export function extractImmediateNamedTool(message: string | undefined): string |
   if (!directive || directive.index === undefined) return null;
   const tail = text.slice(directive.index + directive[0].length, directive.index + 800);
   const call = tail.match(/`?([a-z][a-z0-9_]*)\s*\(/i);
-  return call?.[1] ?? null;
+  // Handoffs written before the snake_case rename (or replayed from old
+  // sessions) may name the legacy spelling; resolve it so the allowlist
+  // membership check downstream sees the canonical name.
+  return call?.[1] ? canonicalToolName(call[1]) : null;
 }
 
 export function constrainAllowlistForImmediateNamedTool(
@@ -840,7 +844,7 @@ export function constrainAllowlistForImmediateNamedTool(
  * `[Deliverable expected as a FILE at \`<path>\`]` annotation, if present.
  * Used by the caller to decide whether the immediate-file-write target is
  * an existing substantial file (→ allow surgical edits) vs. a fresh
- * create (→ `writeFile` only). Returns null when no annotation is found.
+ * create (→ `write_file` only). Returns null when no annotation is found.
  */
 export function extractDeliverableTargetPath(message: string | undefined): string | null {
   const m = (message ?? '').match(/\[Deliverable expected as a FILE at `([^`]+)`/i);
@@ -956,12 +960,16 @@ export function shouldConstrainToImmediateFileWrite(opts: {
   if (isScenarioFullRewriteNudge(text)) return true;
   // A handoff that affirmatively names an append/surgical mutation tool is
   // an existing-file edit, even when a stale generic annotation elsewhere in
-  // the message mentions writeFile. Preserve the requested tool surface.
+  // the message mentions write_file. Preserve the requested tool surface.
   if (extractExplicitFileEditTools(text).length > 0) return false;
   if (isExistingScenarioCheckNudge(text)) return false;
   if (isScenarioSniffRepairNudge(text) || isRuntimeScenarioRepairNudge(text)) {
     return false;
   }
+  // Message-matching regexes accept BOTH the canonical snake_case names
+  // and the pre-rename spellings (`write_?file` matches `write_file` and,
+  // case-insensitively, `writeFile`) — handoffs replayed from old
+  // sessions and pinned gilde prose still say the old names.
   const expectedFilePath = text
     .match(/\[Deliverable expected as a FILE at `([^`]+)`/i)?.[1]
     ?.trim()
@@ -970,7 +978,7 @@ export function shouldConstrainToImmediateFileWrite(opts: {
   if (
     roleActsAsUrgentFileWriter(opts.role) &&
     expectedFilePath &&
-    /first assistant action should be(?:\s+the tool call)?\s+`writeFile\s*\(\s*\{\s*path\s*,\s*content\s*\}\s*\)`/i.test(
+    /first assistant action should be(?:\s+the tool call)?\s+`write_?file\s*\(\s*\{\s*path\s*,\s*content\s*\}\s*\)`/i.test(
       text,
     )
   ) {
@@ -982,7 +990,7 @@ export function shouldConstrainToImmediateFileWrite(opts: {
     /next concrete action should land\s+(?:a\s+)?(?:(?:compact but complete|concise but substantive)\s+)?(?:workspace\/index\.html|workspace file)/i.test(
       text,
     ) &&
-    /writeFile\s*\(\s*\{\s*path\s*:\s*["']index\.html["']/i.test(text)
+    /write_?file\s*\(\s*\{\s*path\s*:\s*["']index\.html["']/i.test(text)
   ) {
     return true;
   }
@@ -992,7 +1000,7 @@ export function shouldConstrainToImmediateFileWrite(opts: {
   if (
     /(?:^|\]:\s*)direct kick from the eval harness:/i.test(text) &&
     /(?:deliverable hasn't landed|deliverable file hasn't reached its expected path)/i.test(text) &&
-    /your next tool call MUST be\s+`writeFile`/i.test(text)
+    /your next tool call MUST be\s+`write_?file`/i.test(text)
   ) {
     return true;
   }
@@ -1000,8 +1008,8 @@ export function shouldConstrainToImmediateFileWrite(opts: {
     /^(?:\[[^\]]+\]:\s*)?\[scenario check\]\s+there is still\s+\*?\*?no\s+`[^`]+`\*?\*?\s+in the workspace/i.test(
       text,
     ) &&
-    /writeFile\s*\(\s*\{\s*path\s*:/i.test(text) &&
-    /do not end your turn until\s+`writeFile`/i.test(text)
+    /write_?file\s*\(\s*\{\s*path\s*:/i.test(text) &&
+    /do not end your turn until\s+`write_?file`/i.test(text)
   ) {
     return true;
   }
@@ -1119,7 +1127,7 @@ function mentionsWorkspaceFilePath(text: string): boolean {
     /`?(?:\.{0,2}\/)?[\w.-]+\/[\w./-]+\.(?:html?|css|mjs|cjs|js|jsx|ts|tsx|json|md|csv|txt|ya?ml)`?/i.test(
       text,
     ) ||
-    /\b(?:workspace|writeFile|replaceInFile|replaceLines|appendToFile|readFile|fs\.writeFileSync|fs\.readFileSync|local validator|paths are relative)\b/i.test(
+    /\b(?:workspace|write_?file|replace_?in_?file|replace_?lines|append_?to_?file|read_?file|fs\.writeFileSync|fs\.readFileSync|local validator|paths are relative)\b/i.test(
       text,
     )
   );
@@ -1134,7 +1142,7 @@ function isScenarioSniffRepairNudge(text: string): boolean {
     return (
       /Signals that didn't fire:/i.test(text) &&
       /patch the deliverable/i.test(text) &&
-      /\b(?:replaceInFile|writeFile|re-emit)\b/i.test(text)
+      /\b(?:replace_?in_?file|write_?file|re-emit)\b/i.test(text)
     );
   }
   return false;
@@ -1158,7 +1166,7 @@ function isRuntimeScenarioRepairNudge(text: string): boolean {
   if (!/(?:assertion\(s\) failed:|SAME assertion\(s\) are still failing:|Failures:)/i.test(text)) {
     return false;
   }
-  return /\b(?:page doesn'?t actually function|previous edit didn'?t address the cause|same defect|specific code|targeted patch|replaceInFile|writeFile|re-emit)\b/i.test(
+  return /\b(?:page doesn'?t actually function|previous edit didn'?t address the cause|same defect|specific code|targeted patch|replace_?in_?file|write_?file|re-emit)\b/i.test(
     text,
   );
 }
@@ -1171,7 +1179,7 @@ function isScenarioFullRewriteNudge(text: string): boolean {
 }
 
 function isDirectCreateSourceWriteRequest(text: string): boolean {
-  if (!/\bwriteFile\b/i.test(text)) return false;
+  if (!/\bwrite_?file\b/i.test(text)) return false;
   if (!/`?[\w./-]+\.(?:html?|css|mjs|cjs|js|jsx|ts|tsx|json|md)`?/i.test(text)) {
     return false;
   }
@@ -1231,9 +1239,9 @@ const EXTERNAL_SERVICE_TOOLS: ReadonlySet<string> = new Set([
   // Email send/draft are external-service agency: a no-services posture
   // (lockdown / super-lockdown) strips them so a mail-enabled project's agent
   // can neither sync-driven-send nor draft outbound while locked down.
-  'draftEmail',
-  'queueEmail',
-  'sendEmail',
+  'draft_email',
+  'queue_email',
+  'send_email',
 ]);
 
 /**

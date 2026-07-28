@@ -7,12 +7,12 @@ export interface ProvenanceToolCall {
 }
 
 const STRUCTURED_MUTATION_TOOLS = new Set([
-  'writeFile',
-  'appendToFile',
-  'replaceInFile',
-  'replaceLines',
-  'applyPatch',
-  'insertAtMarker',
+  'write_file',
+  'append_to_file',
+  'replace_in_file',
+  'replace_lines',
+  'apply_patch',
+  'insert_at_marker',
 ]);
 
 export function provenanceToolArgumentText(call: ProvenanceToolCall): string {
@@ -89,7 +89,7 @@ function shellOverwriteIndex(call: ProvenanceToolCall, path: string): number {
 
 export function provenanceToolReadsPath(call: ProvenanceToolCall, path: string): boolean {
   if (call.success !== true) return false;
-  if (call.name === 'readFile') return call.path === path;
+  if (call.name === 'read_file') return call.path === path;
   return shellReadIndex(call, path) >= 0;
 }
 

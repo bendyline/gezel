@@ -25,30 +25,30 @@ export { firstActionForKind };
 
 /** Read/inspect/write/edit — the core of every file-producing step. */
 const FILE_CORE: readonly string[] = [
-  'readFile',
-  'readdir',
+  'read_file',
+  'list_dir',
   'stat',
   'validate',
-  'writeFile',
-  'appendToFile',
-  'replaceInFile',
-  'replaceLines',
+  'write_file',
+  'append_to_file',
+  'replace_in_file',
+  'replace_lines',
 ];
 
 const KIND_ADDITIONS: Partial<Record<DeliverableKind, readonly string[]>> = {
-  'html-page': ['insertAtMarker'],
-  'html-marketing-site': ['insertAtMarker'],
-  'html-game': ['insertAtMarker'],
-  'html-multiscreen-game': ['insertAtMarker'],
-  'data-file': ['derive_file', 'run_nodejs_script', 'mkdir'],
+  'html-page': ['insert_at_marker'],
+  'html-marketing-site': ['insert_at_marker'],
+  'html-game': ['insert_at_marker'],
+  'html-multiscreen-game': ['insert_at_marker'],
+  'data-file': ['derive_file', 'run_nodejs_script', 'make_dir'],
   json: ['derive_file', 'run_nodejs_script'],
-  'code-module': ['run_nodejs_script', 'applyPatch', 'mkdir', 'rename'],
-  'code-with-tests': ['run_nodejs_script', 'applyPatch', 'mkdir', 'rename'],
+  'code-module': ['run_nodejs_script', 'apply_patch', 'make_dir', 'rename'],
+  'code-with-tests': ['run_nodejs_script', 'apply_patch', 'make_dir', 'rename'],
   // `render_image` covers deterministic diagrams/charts; `generate_image`
   // covers configured diffusion/image-model output. A fixed-function image
   // generator declares the latter, so dropping it here makes a task-scoped
   // image turn exit successfully without ever invoking its only tool.
-  'image-set': ['render_image', 'generate_image', 'mkdir'],
+  'image-set': ['render_image', 'generate_image', 'make_dir'],
   'audio-file': ['run_nodejs_script'],
 };
 
@@ -126,11 +126,11 @@ export function gateRepairToolsForKind(kind: DeliverableKind | null): ReadonlySe
   if (kind === 'data-file' || kind === 'json') {
     base.add('derive_file');
     base.add('run_nodejs_script');
-    base.add('mkdir');
+    base.add('make_dir');
   }
   if (kind === 'code-module' || kind === 'code-with-tests') {
     base.add('run_nodejs_script');
-    base.add('applyPatch');
+    base.add('apply_patch');
   }
   return base;
 }
@@ -143,15 +143,15 @@ export function gateRepairToolsForKind(kind: DeliverableKind | null): ReadonlySe
 export function capPriorityPrefixForKind(kind: DeliverableKind | null): readonly string[] {
   if (!kind) return [];
   if (kind === 'data-file' || kind === 'json') {
-    return ['derive_file', 'run_nodejs_script', 'readFile', 'writeFile', 'validate'];
+    return ['derive_file', 'run_nodejs_script', 'read_file', 'write_file', 'validate'];
   }
   if (kind === 'code-module' || kind === 'code-with-tests') {
-    return ['readFile', 'writeFile', 'replaceInFile', 'run_nodejs_script', 'validate'];
+    return ['read_file', 'write_file', 'replace_in_file', 'run_nodejs_script', 'validate'];
   }
   if (kind === 'image-set') {
-    return ['generate_image', 'render_image', 'readdir', 'writeFile'];
+    return ['generate_image', 'render_image', 'list_dir', 'write_file'];
   }
-  return ['writeFile', 'readFile', 'appendToFile', 'replaceInFile', 'validate'];
+  return ['write_file', 'read_file', 'append_to_file', 'replace_in_file', 'validate'];
 }
 
 /** Kill switch for kit narrowing (D4 feature half). */

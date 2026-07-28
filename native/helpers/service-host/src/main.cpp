@@ -81,9 +81,10 @@ std::wstring build_child_cmdline(const std::wstring& instdir, const std::wstring
 }
 
 // The service environment contract, formerly NSSM's AppEnvironmentExtra
-// in installer/nsis-hooks.nsh. GEZEL_SYSTEM_SCOPE=1 is load-bearing: it
-// tells gezeld the runtime auth-token is a cross-account client
-// credential. The TEMP/TMP overrides matter too — without them
+// in installer/nsis-hooks.nsh. GEZEL_PORT=43935 reserves the canonical
+// machine-service endpoint; CLI-owned fallback daemons use ephemeral ports.
+// GEZEL_SYSTEM_SCOPE=1 tells gezeld the runtime auth-token is a cross-account
+// client credential. The TEMP/TMP overrides matter too — without them
 // Chromium/Node temp writes land in the unwritable LocalService
 // profile.
 std::vector<EnvEntry> env_overrides(const std::wstring& instdir, const std::wstring& home) {
@@ -91,6 +92,7 @@ std::vector<EnvEntry> env_overrides(const std::wstring& instdir, const std::wstr
   return {
       {L"ELECTRON_RUN_AS_NODE", L"1"},
       {L"GEZEL_HOME", home},
+      {L"GEZEL_PORT", L"43935"},
       {L"GEZEL_SYSTEM_SCOPE", L"1"},
       {L"GEZEL_UI_DIR", unpacked + L"\\dist\\ui"},
       {L"GEZEL_PNPM_PATH", unpacked + L"\\dist\\pnpm-bundle\\bin\\pnpm.mjs"},
@@ -240,6 +242,7 @@ int self_test() {
   const std::vector<std::pair<std::wstring, std::wstring>> expected_env = {
       {L"ELECTRON_RUN_AS_NODE", L"1"},
       {L"GEZEL_HOME", L"C:\\ProgramData\\Gezel"},
+      {L"GEZEL_PORT", L"43935"},
       {L"GEZEL_SYSTEM_SCOPE", L"1"},
       {L"GEZEL_UI_DIR",
        L"C:\\Program Files\\Gezel\\resources\\app.asar.unpacked\\dist\\ui"},

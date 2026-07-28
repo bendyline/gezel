@@ -162,7 +162,7 @@ describe('buildCodexConfigToml', () => {
           enabled: true,
           required: true,
           enabledTools: ['list_tasks', 'read_task_notes'],
-          disabledTools: ['writeFile'],
+          disabledTools: ['write_file'],
           defaultToolsApprovalMode: 'auto',
           toolApprovalModes: { list_tasks: 'approve' },
         },
@@ -173,7 +173,7 @@ describe('buildCodexConfigToml', () => {
     expect(body).toContain('enabled = true');
     expect(body).toContain('required = true');
     expect(body).toContain('enabled_tools = ["list_tasks", "read_task_notes"]');
-    expect(body).toContain('disabled_tools = ["writeFile"]');
+    expect(body).toContain('disabled_tools = ["write_file"]');
     expect(body).toContain('default_tools_approval_mode = "auto"');
     expect(body).toContain('[mcp_servers.gezel.tools.list_tasks]');
     expect(body).toContain('approval_mode = "approve"');

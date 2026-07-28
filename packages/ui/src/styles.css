@@ -2642,7 +2642,8 @@ html.embedded-chat #root {
    pseudo-element fills the rail's inner padding and paints over its seam
    shadow; the square inner corners make the tab and canvas read as one
    continuous surface. Project/gezel wrappers own the treatment so their
-   status and action controls remain on the same piece of paper. */
+   status and action controls remain on the same piece of paper; document
+   navigation applies it directly to the selected tree row. */
 .app-sidebar-scroll {
   --sidebar-tab-bridge-size: calc(0.4rem + 1px);
   --sidebar-tab-border: color-mix(in srgb, var(--accent) 38%, var(--border));
@@ -11392,7 +11393,7 @@ button.bench-step-foot:disabled {
 }
 
 /* Live tool-args block — the streaming counterpart to a tool row,
-   shown while the model generates a structured call (long writeFile).
+   shown while the model generates a structured call (long write_file).
    Same dimmed left-rule treatment as .msg-stream-reasoning; the body
    is a short auto-scrolled tail of the raw args, monospace because
    it's code/JSON mid-write, not prose. */
@@ -11634,10 +11635,7 @@ body.chat-rail-resizing webview {
   /* The measured width avoids fractional-pixel drift at the right
      edge. Before measurement, derive the root-column width from the
      timeline padding and its published native scrollbar gutter. */
-  width: var(
-    --chat-sticky-width,
-    calc((100% - 1.5rem - var(--chat-timeline-sb-width, 0px)) * 0.92)
-  );
+  width: var(--chat-sticky-width, calc((100% - 1.5rem - var(--chat-timeline-sb-width, 0px)) * 0.92));
   z-index: 5;
   min-width: 0;
   /* Square top corners so the bubble scrolling underneath doesn't

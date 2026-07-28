@@ -1,4 +1,4 @@
-import type { GezelSummary } from '@bendyline/gezel';
+import type { GezelSummary, Question } from '@bendyline/gezel';
 import type { ConfigResponse, GezelClient } from '@bendyline/gezel-client/node';
 import { Box, Text, useApp, useInput, useStdout } from 'ink';
 import { type JSX, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -7,14 +7,21 @@ import { ChatFeed } from './components/ChatFeed.js';
 import { Picker, type PickerItem } from './components/Picker.js';
 import { PromptLine } from './components/PromptLine.js';
 import {
+  QUESTION_OPTION_WINDOW_SIZE,
+  QuestionPrompt,
+  questionOptionCount,
+} from './components/QuestionPrompt.js';
+import {
   type FeedRow,
   type TurnMap,
   appendNote,
   appendShellChunk,
   finalizeShellRun,
+  gezelLabel,
   reduceFeed,
   reduceTurns,
 } from './feed.js';
+import { plainPendingQuestions, updatePendingQuestion } from './question-queue.js';
 import { useProjectEvents, useTerminalEvents } from './streams.js';
 
 interface PendingInput {
@@ -72,6 +79,7 @@ export function App(props: {
   const [gezels, setGezels] = useState<GezelSummary[]>([]);
   const [projects, setProjects] = useState<ProjectRow[]>([]);
   const [tasks, setTasks] = useState<TaskRow[]>([]);
+  const [pendingQuestions, setPendingQuestions] = useState<Question[]>([]);
 
   const [projectId, setProjectId] = useState(props.initialProjectId);
   const [projectName, setProjectName] = useState(props.initialProjectName);
@@ -90,17 +98,30 @@ export function App(props: {
   const [pendingInput, setPendingInput] = useState<PendingInput | null>(null);
   const [selectedTaskRef, setSelectedTaskRef] = useState<string | null>(null);
   const [exitArmed, setExitArmed] = useState(false);
+  const pendingQuestion = pendingQuestions[0];
   const termRows = useTerminalRows();
-  const wordwheelCount = overlay === null && !pendingInput ? suggestSlashCommands(value).length : 0;
+  const wordwheelCount =
+    overlay === null && !pendingInput && !pendingQuestion ? suggestSlashCommands(value).length : 0;
   const wordwheelRows =
     wordwheelCount > 0 ? Math.min(SLASH_COMMAND_WORDWHEEL_SIZE, wordwheelCount) + 1 : 0;
-  const visibleRows = Math.max(4, termRows - 7 - wordwheelRows);
+  const questionRows = pendingQuestion
+    ? Math.min(QUESTION_OPTION_WINDOW_SIZE, Math.max(1, questionOptionCount(pendingQuestion))) + 4
+    : 0;
+  const visibleRows = Math.max(4, termRows - 7 - wordwheelRows - questionRows);
 
   // Keep terminal labels compact and task-oriented regardless of the desktop
   // UI preference. The TUI defaults to role-based names without mutating the
   // shared boring-mode setting.
   const boring = props.boring ?? true;
   const busy = turns.size > 0;
+  const activeGezel = useMemo(
+    () => gezels.find((gezel) => gezel.id === activeGezelId),
+    [gezels, activeGezelId],
+  );
+  const effectiveProvider = activeGezel?.provider ?? config?.provider;
+  const effectiveModel =
+    activeGezel?.model ??
+    (effectiveProvider ? config?.defaultModel?.[effectiveProvider] : undefined);
   const statusLabel = useMemo(() => {
     if (turns.size === 0) return undefined;
     return (
@@ -121,6 +142,10 @@ export function App(props: {
     useCallback((env) => {
       setRows((r) => reduceFeed(r, env));
       setTurns((t) => reduceTurns(t, env));
+      if (env.event.type === 'question_asked' || env.event.type === 'question_answered') {
+        const question = env.event.question;
+        setPendingQuestions((questions) => updatePendingQuestion(questions, question));
+      }
     }, []),
   );
   useTerminalEvents(
@@ -201,6 +226,24 @@ export function App(props: {
       cancelled = true;
     };
   }, []);
+
+  // Recover questions that were already waiting before this TUI connected.
+  // Live additions/removals arrive through the project SSE handler above.
+  useEffect(() => {
+    let cancelled = false;
+    setPendingQuestions([]);
+    void client
+      .listQuestions({ projectId, pending: true })
+      .then((result) => {
+        if (!cancelled) setPendingQuestions(plainPendingQuestions(result.questions));
+      })
+      .catch(() => {
+        /* non-fatal — a later question_asked event still surfaces */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [client, projectId]);
 
   // Refresh tasks for the active project. Deliberately NOT polling
   // /api/config here: that endpoint reads provider credentials from the
@@ -430,7 +473,7 @@ export function App(props: {
         }
       }
     },
-    { isActive: overlay === null },
+    { isActive: overlay === null && (!pendingQuestion || pendingInput !== null) },
   );
 
   if (status) {
@@ -465,6 +508,7 @@ export function App(props: {
             setTurns(new Map());
             setActiveRuns(new Set());
             setPendingInput(null);
+            setPendingQuestions([]);
             setSelectedTaskRef(null);
             if (activeGezelId) void ensureSession(activeGezelId, id);
           }}
@@ -513,16 +557,30 @@ export function App(props: {
           }}
         />
       ) : null}
+      {overlay === null && pendingQuestion ? (
+        <QuestionPrompt
+          key={pendingQuestion.id}
+          client={client}
+          question={pendingQuestion}
+          askerLabel={gezelLabel(pendingQuestion.gezelId, gezels, boring)}
+          active={pendingInput === null}
+          onAnswered={(question) => {
+            setPendingQuestions((questions) => updatePendingQuestion(questions, question));
+            setFocusedSessionId(question.sessionId);
+          }}
+        />
+      ) : null}
       <PromptLine
         projectName={projectName}
         gezelLabel={gezelLine}
         taskRef={activeTaskRef}
         mode={mode}
-        provider={config?.provider}
+        provider={effectiveProvider}
+        model={effectiveModel}
         busy={busy}
         statusLabel={statusLabel}
         value={value}
-        active={overlay === null}
+        active={overlay === null && (!pendingQuestion || pendingInput !== null)}
         history={history}
         pendingPrompt={pendingInput?.promptLine}
         pendingMode={pendingInput?.mode}

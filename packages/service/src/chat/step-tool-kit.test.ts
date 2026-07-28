@@ -18,8 +18,8 @@ describe('stepToolKit', () => {
     const kit = stepToolKit(expandedStep('report.md', 'markdown-report'));
     expect(kit?.kind).toBe('markdown-doc');
     expect(kit?.path).toBe('report.md');
-    expect(kit?.tools.has('writeFile')).toBe(true);
-    expect(kit?.tools.has('replaceInFile')).toBe(true);
+    expect(kit?.tools.has('write_file')).toBe(true);
+    expect(kit?.tools.has('replace_in_file')).toBe(true);
     expect(kit?.tools.has('run_nodejs_script')).toBe(false);
     expect(kit?.tools.has('render_image')).toBe(false);
   });
@@ -29,15 +29,15 @@ describe('stepToolKit', () => {
     expect(kit?.kind).toBe('data-file');
     expect(kit?.tools.has('derive_file')).toBe(true);
     expect(kit?.tools.has('run_nodejs_script')).toBe(true);
-    expect(kit?.tools.has('mkdir')).toBe(true);
+    expect(kit?.tools.has('make_dir')).toBe(true);
   });
 
-  it('html steps add insertAtMarker; code steps add patch + sandbox', () => {
-    expect(stepToolKit(expandedStep('index.html', 'html-game'))?.tools.has('insertAtMarker')).toBe(
-      true,
-    );
+  it('html steps add insert_at_marker; code steps add patch + sandbox', () => {
+    expect(
+      stepToolKit(expandedStep('index.html', 'html-game'))?.tools.has('insert_at_marker'),
+    ).toBe(true);
     const code = stepToolKit(expandedStep('src/mod.ts', 'code-module'));
-    expect(code?.tools.has('applyPatch')).toBe(true);
+    expect(code?.tools.has('apply_patch')).toBe(true);
     expect(code?.tools.has('run_nodejs_script')).toBe(true);
   });
 
@@ -84,7 +84,7 @@ describe('firstActionForKind', () => {
   it('data kinds derive; images render; docs write', () => {
     expect(firstActionForKind('data-file', 'out.csv')).toContain('derive_file');
     expect(firstActionForKind('image-set', 'assets/logo.png')).toContain('render_image');
-    expect(firstActionForKind('markdown-doc', 'doc.md')).toContain('writeFile');
+    expect(firstActionForKind('markdown-doc', 'doc.md')).toContain('write_file');
   });
 });
 
@@ -93,12 +93,12 @@ describe('gateRepairToolsForKind', () => {
     const tools = gateRepairToolsForKind('data-file');
     expect(tools.has('derive_file')).toBe(true);
     expect(tools.has('run_nodejs_script')).toBe(true);
-    expect(tools.has('replaceInFile')).toBe(true);
+    expect(tools.has('replace_in_file')).toBe(true);
   });
 
   it('doc repairs stay file-core only', () => {
     const tools = gateRepairToolsForKind('markdown-doc');
-    expect(tools.has('writeFile')).toBe(true);
+    expect(tools.has('write_file')).toBe(true);
     expect(tools.has('derive_file')).toBe(false);
   });
 });

@@ -82,7 +82,13 @@ import {
 } from './solo-loop-policy.js';
 import { validateSourceContent } from './source-validation.js';
 import { resolveTaskRef } from './task-ref.js';
-import { ALWAYS_REGISTERED_TOOLS, CONDITIONALLY_REGISTERED_TOOLS } from './tool-inventory.js';
+import {
+  ALWAYS_REGISTERED_TOOLS,
+  CONDITIONALLY_REGISTERED_TOOLS,
+  LEGACY_SPELLING_BY_CANONICAL,
+  canonicalToolName,
+  resolveToolNameSpelling,
+} from './tool-inventory.js';
 import { type FileContent, formatValidateResult, validateFile } from './validate.js';
 import { normalizeWorkspaceWriteContent } from './workspace-write-normalization.js';
 import {
@@ -157,15 +163,17 @@ function parseSessionExpectedDeliverable(raw: string | undefined) {
  * MCP `tools/list` — no per-call deny needed and no surprise if a caller
  * bypasses the session-level bridge filter.
  */
-const excludedToolNames = new Set([
-  ...(process.env.GEZEL_MCP_EXCLUDE ?? '')
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean),
-  ...(process.env.GEZEL_MCP_SCHEMA_LINT === '1'
-    ? []
-    : unavailableToolsForPlatform(process.platform)),
-]);
+const excludedToolNames = new Set(
+  [
+    ...(process.env.GEZEL_MCP_EXCLUDE ?? '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean),
+    ...(process.env.GEZEL_MCP_SCHEMA_LINT === '1'
+      ? []
+      : unavailableToolsForPlatform(process.platform)),
+  ].map(canonicalToolName),
+);
 // Compatibility handlers remain available to direct MCP clients for one
 // migration window, but ordinary model sessions should never pay their tool
 // count or schema cost. Every capability has a smaller primary replacement.
@@ -192,8 +200,66 @@ const allowedToolNames =
         allowEnv
           .split(',')
           .map((s) => s.trim())
-          .filter(Boolean),
+          .filter(Boolean)
+          .map(canonicalToolName),
       );
+// A/B lever for the snake_case naming experiment: `legacy` re-advertises the
+// pre-rename spellings from RENAMED_TOOLS. Registration filters and the alias
+// dispatch below work in canonical space, so both arms accept both spellings.
+const legacyNamingMode = process.env.GEZEL_MCP_TOOL_NAMING === 'legacy';
+
+function registeredToolRegistry(): Record<string, { inputSchema?: z.ZodType }> {
+  return (
+    server as unknown as {
+      _registeredTools: Record<string, { inputSchema?: z.ZodType }>;
+    }
+  )._registeredTools;
+}
+
+/**
+ * Resolve a requested tool name to whatever spelling is actually
+ * registered — exact hit fast-path, then the shared rename-table +
+ * case/punctuation resolution from tool-inventory.
+ */
+function resolveRegisteredToolName(requested: string): string {
+  const registry = registeredToolRegistry();
+  if (registry[requested]) return requested;
+  return resolveToolNameSpelling(requested, new Set(Object.keys(registry)));
+}
+
+/**
+ * Rewrite `tools/call` requests through {@link resolveRegisteredToolName}
+ * before the SDK's dispatch sees them. This is what keeps the legacy
+ * spellings callable without ever appearing in `tools/list` (zero prompt
+ * cost) — pinned gilde role templates teach some of them, and smaller
+ * models guess them from training priors. Reaches into the SDK's private
+ * `_requestHandlers` map (same precedent as `_registeredTools` above);
+ * inventory.test.ts pins the behavior so an SDK upgrade that moves the
+ * map fails loudly instead of silently dropping alias support.
+ */
+let aliasDispatchInstalled = false;
+function installAliasDispatchOnce(): void {
+  if (aliasDispatchInstalled) return;
+  const handlers = (
+    server.server as unknown as {
+      _requestHandlers?: Map<string, (request: unknown, extra: unknown) => unknown>;
+    }
+  )._requestHandlers;
+  const original = handlers?.get('tools/call');
+  if (!handlers || !original) return;
+  aliasDispatchInstalled = true;
+  handlers.set('tools/call', (request, extra) => {
+    const req = request as { params?: { name?: unknown } };
+    if (req?.params && typeof req.params.name === 'string') {
+      const resolved = resolveRegisteredToolName(req.params.name);
+      if (resolved !== req.params.name) {
+        return original({ ...req, params: { ...req.params, name: resolved } }, extra);
+      }
+    }
+    return original(request, extra);
+  });
+}
+
 const originalRegister = server.tool.bind(server) as (name: string, ...rest: unknown[]) => unknown;
 (server as unknown as { tool: (name: string, ...rest: unknown[]) => unknown }).tool = (
   name: string,
@@ -202,7 +268,8 @@ const originalRegister = server.tool.bind(server) as (name: string, ...rest: unk
   if (excludedToolNames.has(name) || (allowedToolNames && !allowedToolNames.has(name))) {
     return { enable: () => {}, disable: () => {}, update: () => {}, remove: () => {} };
   }
-  const registered = originalRegister(name, ...rest);
+  const advertised = legacyNamingMode ? (LEGACY_SPELLING_BY_CANONICAL[name] ?? name) : name;
+  const registered = originalRegister(advertised, ...rest);
 
   // MCP SDK's legacy `tool(name, shape, callback)` API wraps raw shapes in
   // `z.object`. With Zod 4, input-mode JSON Schema correctly advertises that
@@ -212,13 +279,9 @@ const originalRegister = server.tool.bind(server) as (name: string, ...rest: unk
   // validation aligned without rewriting every legacy registration call.
   const rawShape = rest.find(isZodRawShape);
   if (rawShape) {
-    const registry = (
-      server as unknown as {
-        _registeredTools: Record<string, { inputSchema?: z.ZodType }>;
-      }
-    )._registeredTools;
-    registry[name]!.inputSchema = z.strictObject(rawShape);
+    registeredToolRegistry()[advertised]!.inputSchema = z.strictObject(rawShape);
   }
+  installAliasDispatchOnce();
   return registered;
 };
 
@@ -337,8 +400,8 @@ async function mailApi(
 
 function registerEmailTools() {
   server.tool(
-    'draftEmail',
-    "Compose an email draft and save it for review. This does NOT send — it writes a draft file under the project's mail/_drafts/ folder. Use queueEmail to stage it and sendEmail to actually transmit (sending is restricted to allowlisted recipients).",
+    'draft_email',
+    "Compose an email draft and save it for review. This does NOT send — it writes a draft file under the project's mail/_drafts/ folder. Use queue_email to stage it and send_email to actually transmit (sending is restricted to allowlisted recipients).",
     {
       to: z.array(z.string()).describe('Recipient email addresses'),
       cc: z.array(z.string()).optional().describe('CC recipients'),
@@ -361,7 +424,7 @@ function registerEmailTools() {
         content: [
           {
             type: 'text' as const,
-            text: `Draft saved (id: ${data.draftId}) at ${data.relPath}. Review it, then call queueEmail then sendEmail.`,
+            text: `Draft saved (id: ${data.draftId}) at ${data.relPath}. Review it, then call queue_email then send_email.`,
           },
         ],
       };
@@ -369,9 +432,9 @@ function registerEmailTools() {
   );
 
   server.tool(
-    'queueEmail',
+    'queue_email',
     'Stage a saved draft for sending by moving it to the mail/_outbox/ folder. Does not transmit.',
-    { draftId: z.string().describe('The draft id returned by draftEmail') },
+    { draftId: z.string().describe('The draft id returned by draft_email') },
     async ({ draftId }) => {
       const { ok, data } = await mailApi('queue', { draftId });
       if (!ok)
@@ -385,7 +448,7 @@ function registerEmailTools() {
   );
 
   server.tool(
-    'sendEmail',
+    'send_email',
     'Transmit a drafted/queued email. The daemon enforces the project recipient allowlist (sending to a non-allowlisted address is refused) and will NOT send during night shift (the message is staged for daytime approval instead).',
     { draftId: z.string().describe('The draft id to send') },
     async ({ draftId }) => {
@@ -501,15 +564,16 @@ if (process.env.GEZEL_CONNECTORS_ENABLED === '1') {
 
 // ── Project file tools (operate on the default surface: the workspace) ──
 //
-// Names mirror Node's `fs` module so the model can lean on existing
-// knowledge. Paths are always relative to the project root. The
+// Names follow the repo-wide snake_case tool convention (the original
+// Node-`fs`-mirror spellings live on as hidden dispatch aliases via
+// RENAMED_TOOLS). Paths are always relative to the project root. The
 // artifact drawer (write_artifact / read_artifact / list_artifacts) is
 // a separate, prefixed surface — use those when saving supporting
 // material that isn't part of the shipping app.
 
 server.tool(
-  'readdir',
-  "List the files and subdirectories at a path in the project. The project root is the default — pass a subdirectory path to narrow. Mirrors Node's `fs.readdir`.",
+  'list_dir',
+  'List the files and subdirectories at a path in the project. The project root is the default — pass a subdirectory path to narrow.',
   {
     path: z.string().optional().describe('Subdirectory path to list (default: project root).'),
   },
@@ -525,8 +589,8 @@ server.tool(
 );
 
 server.tool(
-  'readFile',
-  "Read a file's contents from the project. Use this to understand code, configs, or documentation. Output is shown with `N→` line-number gutters so you can target edits by line (e.g. with `replaceLines`). **The `N→` gutter is a display aid, NOT part of the file** — never copy it into `find`/`replace` or `writeFile` content. Pass `raw: true` to get the bytes without gutters.",
+  'read_file',
+  "Read a file's contents from the project. Use this to understand code, configs, or documentation. Output is shown with `N→` line-number gutters so you can target edits by line (e.g. with `replace_lines`). **The `N→` gutter is a display aid, NOT part of the file** — never copy it into `find`/`replace` or `write_file` content. Pass `raw: true` to get the bytes without gutters.",
   {
     path: z.string().describe('File path relative to the project root.'),
     raw: z
@@ -663,7 +727,7 @@ async function loadFileForValidation(
 
 server.tool(
   'copy_artifact_to_workspace',
-  "Copy a file from the project's artifacts drawer into the workspace, preserving bytes exactly. **Use this for binaries (images, PDFs, audio) instead of `read_artifact` + `writeFile`** — the read/write round-trip goes through a JSON string and corrupts non-UTF-8 content (the petshop 4-byte logo.png case). `source` is the artifact path (e.g. `pet-shop-website/generated/image-X.png`); `dest` is where it lands in the workspace (e.g. `assets/logo.png`).",
+  "Copy a file from the project's artifacts drawer into the workspace, preserving bytes exactly. **Use this for binaries (images, PDFs, audio) instead of `read_artifact` + `write_file`** — the read/write round-trip goes through a JSON string and corrupts non-UTF-8 content (the petshop 4-byte logo.png case). `source` is the artifact path (e.g. `pet-shop-website/generated/image-X.png`); `dest` is where it lands in the workspace (e.g. `assets/logo.png`).",
   {
     source: z
       .string()
@@ -699,8 +763,8 @@ server.tool(
 
 /**
  * Prefix each line with a right-aligned 1-based line number and a `→`
- * gutter, so the model can target edits by line (`replaceLines`, or a
- * located parse error from `validate`/`writeFile`). The gutter is a
+ * gutter, so the model can target edits by line (`replace_lines`, or a
+ * located parse error from `validate`/`write_file`). The gutter is a
  * display aid only — the edit tools never see it. A trailing newline is
  * preserved without numbering a phantom final empty line.
  */
@@ -869,7 +933,7 @@ async function fetchRepoProject(input: {
     [
       `A code-review and analysis engagement for the repository at ${url}.`,
       `The source tree has been cloned at ${sourceLocation}.`,
-      'Any gezel joining this project can `readdir` + `readFile` to walk the source.',
+      'Any gezel joining this project can `list_dir` + `read_file` to walk the source.',
     ].join(' ');
   const defaultMission =
     missionObjectives ??
@@ -914,7 +978,7 @@ async function fetchRepoProject(input: {
     const refSuffix = branch ? ` (branch \`${branch}\`)` : '';
     const locationDesc = result.path
       ? `workspace/${result.path}/`
-      : 'workspace root (use `readdir` / `readFile` against unprefixed paths)';
+      : 'workspace root (use `list_dir` / `read_file` against unprefixed paths)';
     const notePrefix = note ? `${note} ` : '';
     let handoffText: string | undefined;
     if (handoffReview) {
@@ -964,7 +1028,7 @@ async function autoFetchRepoForReviewHandoff(input: { tool: string; text: string
 
 server.tool(
   'fetch_repo',
-  "Atomically: create a new project, link it to the given GitHub repo URL, and shallow-clone the repo INTO the project's workspace root. From the gezel's perspective, the workspace IS the git repo — `readFile({ path: 'package.json' })` returns the repo's package.json, `readdir({ path: '.' })` lists the repo's top-level files. No `repo/` or `gh/` subfolder. Use this when the user asks you to review, analyze, or work with the contents of a remote repo. Pass an optional `branch` to clone a specific ref (PR head, release tag). Only HTTPS/HTTP URLs are accepted (no SSH). Returns the new `projectId` — pass it to `ensure_gezel` / `message_gezel` so specialists work in the right project. Meester-only macro.",
+  "Atomically: create a new project, link it to the given GitHub repo URL, and shallow-clone the repo INTO the project's workspace root. From the gezel's perspective, the workspace IS the git repo — `read_file({ path: 'package.json' })` returns the repo's package.json, `list_dir({ path: '.' })` lists the repo's top-level files. No `repo/` or `gh/` subfolder. Use this when the user asks you to review, analyze, or work with the contents of a remote repo. Pass an optional `branch` to clone a specific ref (PR head, release tag). Only HTTPS/HTTP URLs are accepted (no SSH). Returns the new `projectId` — pass it to `ensure_gezel` / `message_gezel` so specialists work in the right project. Meester-only macro.",
   {
     url: z
       .string()
@@ -1011,7 +1075,7 @@ server.tool(
 
 server.tool(
   'fetch_diff',
-  "Atomically: create a new project, then fetch a SHA-vs-SHA (or ref-vs-ref) diff from a public git repo for a code-review engagement. Drops the unified diff at `workspace/diff.patch` AND checks out the head ref's source tree AT THE WORKSPACE ROOT — reviewers see the repo files directly (`readFile({ path: 'package.json' })` returns the head-revision package.json) plus the diff as a top-level file. Accepts branches, tags, or commit SHAs for `baseRef` / `headRef` (GitHub allows fetching reachable SHAs; unreachable SHAs error out clearly). Use this for PR reviews. Returns the new `projectId` — pass to `ensure_gezel` / `message_gezel`. Meester-only macro.",
+  "Atomically: create a new project, then fetch a SHA-vs-SHA (or ref-vs-ref) diff from a public git repo for a code-review engagement. Drops the unified diff at `workspace/diff.patch` AND checks out the head ref's source tree AT THE WORKSPACE ROOT — reviewers see the repo files directly (`read_file({ path: 'package.json' })` returns the head-revision package.json) plus the diff as a top-level file. Accepts branches, tags, or commit SHAs for `baseRef` / `headRef` (GitHub allows fetching reachable SHAs; unreachable SHAs error out clearly). Use this for PR reviews. Returns the new `projectId` — pass to `ensure_gezel` / `message_gezel`. Meester-only macro.",
   {
     url: z
       .string()
@@ -1156,15 +1220,15 @@ async function htmlRuntimeCheckSuffix(path: string): Promise<string> {
       return `\n\n[Runtime check] ${path} loaded headlessly with no runtime errors.`;
     }
     const lines = (check.errors ?? []).map((e) => `- ${e}`).join('\n');
-    return `\n\n[Runtime check] Loaded ${path} headlessly after this write; the page threw:\n${lines}\nFix the offending line(s) with replaceInFile or replaceLines — do not rewrite the whole file.`;
+    return `\n\n[Runtime check] Loaded ${path} headlessly after this write; the page threw:\n${lines}\nFix the offending line(s) with replace_in_file or replace_lines — do not rewrite the whole file.`;
   } catch {
     return '';
   }
 }
 
 server.tool(
-  'writeFile',
-  'Create or overwrite a file in the project. **This is how you write code** (or any workspace file) for the thing the user is building. Do NOT paste a code block into chat and expect the user to save it — that does nothing; call this tool with the full file body. If the user, task, or checker names a workspace deliverable path such as `index.html`, `report.md`, `analysis.md`, `src/solution.mjs`, `bug_report.md`, `docs/...`, or `packages/...`, call `writeFile` with that exact path as soon as you have enough input to write the file. Do not write a plan, artifact, draft note, chat code block, alternate filename, or `workspace/<path>` substitute. For scratch notes or analysis material that is not meant to live in the workspace, use `write_artifact` instead. Path is relative to the project root. HTML and JS/TS files are syntax-checked before write — if the inline `<script>` or source body has a parse error, overwriting an existing file is refused and the existing file is left untouched; a broken first-write HTML draft may still be saved so you can read/repair/append instead of starting over. **For binary files (images, PDFs, audio) generated by another tool into the artifacts drawer, use `copy_artifact_to_workspace` instead of read_artifact + writeFile.**',
+  'write_file',
+  'Create or overwrite a file in the project. **This is how you write code** (or any workspace file) for the thing the user is building. Do NOT paste a code block into chat and expect the user to save it — that does nothing; call this tool with the full file body. If the user, task, or checker names a workspace deliverable path such as `index.html`, `report.md`, `analysis.md`, `src/solution.mjs`, `bug_report.md`, `docs/...`, or `packages/...`, call `write_file` with that exact path as soon as you have enough input to write the file. Do not write a plan, artifact, draft note, chat code block, alternate filename, or `workspace/<path>` substitute. For scratch notes or analysis material that is not meant to live in the workspace, use `write_artifact` instead. Path is relative to the project root. HTML and JS/TS files are syntax-checked before write — if the inline `<script>` or source body has a parse error, overwriting an existing file is refused and the existing file is left untouched; a broken first-write HTML draft may still be saved so you can read/repair/append instead of starting over. **For binary files (images, PDFs, audio) generated by another tool into the artifacts drawer, use `copy_artifact_to_workspace` instead of read_artifact + write_file.**',
   {
     path: z
       .string()
@@ -1182,8 +1246,8 @@ server.tool(
         if (partial.saved) {
           const recovery =
             syntax.recoverablePartialWrite === 'truncated-html'
-              ? `appendToFile({ path: "${path}", content: "<missing tail>" })`
-              : `readFile({ path: "${path}" }) and then repair it with replaceInFile(...) or re-emit the full file`;
+              ? `append_to_file({ path: "${path}", content: "<missing tail>" })`
+              : `read_file({ path: "${path}" }) and then repair it with replace_in_file(...) or re-emit the full file`;
           return {
             content: [
               {
@@ -1229,12 +1293,12 @@ server.tool(
     const htmlQualityRejection = rejectHtmlWithScriptOutsideScriptTag(path, normalizedContent);
     if (htmlQualityRejection) {
       // Same first-draft escape hatch as the syntax gate above. A hard
-      // refusal that saves NOTHING deadlocks writeFile-only sessions at a
+      // refusal that saves NOTHING deadlocks write_file-only sessions at a
       // 0-byte deliverable (wild-caught: game-with-screens, 5 identical
       // refusals then turn-abort with an empty workspace). Overwrites keep
       // the refusal — the existing complete file is worth protecting — but
       // a first draft is strictly better on disk, flaws and all, where the
-      // model can readFile + patch and the runtime repair loop can engage.
+      // model can read_file + patch and the runtime repair loop can engage.
       const partial = await tryPersistFirstWritePartial(path, normalizedContent);
       if (partial.saved) {
         return {
@@ -1243,7 +1307,7 @@ server.tool(
               type: 'text' as const,
               text:
                 `${htmlQualityRejection}\n\nFlawed first draft ${path} was saved anyway so you can continue with ` +
-                `readFile({ path: "${path}" }) and surgical replaceInFile(...) repairs instead of starting over.`,
+                `read_file({ path: "${path}" }) and surgical replace_in_file(...) repairs instead of starting over.`,
             },
           ],
           isError: true,
@@ -1285,23 +1349,23 @@ async function rejectRegressiveWorkspaceOverwrite(
   return rejectRegressiveHtmlOverwrite(path, priorContent, nextContent);
 }
 
-// `appendToFile` — the partner primitive to `writeFile`. The model
+// `append_to_file` — the partner primitive to `write_file`. The model
 // uses it to extend a file already on disk without re-emitting the
-// whole content. Critical for the "I wrote a 1500-byte writeFile that
+// whole content. Critical for the "I wrote a 1500-byte write_file that
 // truncated mid-CSS" recovery path: rather than asking the model to
 // re-stream the entire file (which may truncate again the same way),
-// the auto-continuation hint can suggest `appendToFile` with just
+// the auto-continuation hint can suggest `append_to_file` with just
 // the missing tail.
 //
 // Implemented as a read-modify-write inside the MCP server so we don't
-// need a new HTTP route. Atomicity matches `writeFile` (same underlying
+// need a new HTTP route. Atomicity matches `write_file` (same underlying
 // `writeProjectWorkspaceFile` call); concurrent appends from two
 // gezels would clobber each other, but a single gezel resuming its own
 // truncated write is the only realistic caller.
 //
 // `create: true` lets the model use this without first calling
-// `writeFile` for the empty file — sometimes the model decides
-// mid-stream "I'll do this in two appends instead of one writeFile."
+// `write_file` for the empty file — sometimes the model decides
+// mid-stream "I'll do this in two appends instead of one write_file."
 // Default is `create: false` (refuse if missing) so we don't
 // accidentally fabricate files when the path is wrong.
 async function tryPersistFirstWritePartial(
@@ -1334,8 +1398,8 @@ async function tryPersistFirstWritePartial(
 }
 
 server.tool(
-  'appendToFile',
-  "Append text to the end of an existing file in the project. Use this to continue a `writeFile` that ran out of room — wild on local models when the first call's content exceeded the per-turn output budget. Pass the path and ONLY the missing tail (the parts of the file you haven't written yet); the existing content stays. For a brand-new file, prefer `writeFile`. Path is relative to the project root.",
+  'append_to_file',
+  "Append text to the end of an existing file in the project. Use this to continue a `write_file` that ran out of room — wild on local models when the first call's content exceeded the per-turn output budget. Pass the path and ONLY the missing tail (the parts of the file you haven't written yet); the existing content stays. For a brand-new file, prefer `write_file`. Path is relative to the project root.",
   {
     path: z.string().describe('File path relative to the project root.'),
     content: z.string().describe('Text to append to the end of the file.'),
@@ -1356,13 +1420,13 @@ server.tool(
         // Treat any read failure as "file doesn't exist." If `create`
         // is set, that's a legitimate first-write; otherwise it's an
         // error the model should know about so it can recover with
-        // `writeFile` instead.
+        // `write_file` instead.
         if (!create) {
           return {
             content: [
               {
                 type: 'text' as const,
-                text: `Cannot append to ${path}: file does not exist (${err instanceof Error ? err.message : String(err)}). Use \`writeFile\` to create it first, or pass \`create: true\` to this call.`,
+                text: `Cannot append to ${path}: file does not exist (${err instanceof Error ? err.message : String(err)}). Use \`write_file\` to create it first, or pass \`create: true\` to this call.`,
               },
             ],
             isError: true,
@@ -1406,16 +1470,16 @@ server.tool(
 
 // ── Surgical edit tools (Layer 4) ──
 //
-// `writeFile` re-emits the whole file on every change — fine for net-
+// `write_file` re-emits the whole file on every change — fine for net-
 // new content, but on a 200-line file that needs one CSS tweak it
 // burns context and risks re-truncating. These three tools let the
 // model touch existing files with a payload proportional to the
-// change, not the file size. Prefer them over `writeFile` for any
+// change, not the file size. Prefer them over `write_file` for any
 // edit to a file that's already on disk and >5KB-ish.
 
 server.tool(
-  'replaceInFile',
-  "Make a surgical edit to an existing file by replacing one literal substring with another. **Strongly preferred over `writeFile` for editing any file that already exists** — token cost is proportional to the change, not the file size, and you don't risk re-truncating a long file you already wrote correctly. `find` is matched verbatim (no regex). By default the pattern must match exactly once; pass `occurrence: 'all'` to apply blanket renames, or a 1-based index to target a specific match. Returns a unified diff so you can verify what changed. If `find` isn't unique you'll get back an `ambiguous-match` error — re-read the file and use a longer literal substring.",
+  'replace_in_file',
+  "Make a surgical edit to an existing file by replacing one literal substring with another. **Strongly preferred over `write_file` for editing any file that already exists** — token cost is proportional to the change, not the file size, and you don't risk re-truncating a long file you already wrote correctly. `find` is matched verbatim (no regex). By default the pattern must match exactly once; pass `occurrence: 'all'` to apply blanket renames, or a 1-based index to target a specific match. Returns a unified diff so you can verify what changed. If `find` isn't unique you'll get back an `ambiguous-match` error — re-read the file and use a longer literal substring.",
   {
     path: z.string().describe('File path relative to the project root.'),
     find: z
@@ -1444,7 +1508,7 @@ server.tool(
       const validationError = await rejectInvalidWorkspaceEdit(
         path,
         before.content,
-        'replaceInFile',
+        'replace_in_file',
       );
       if (validationError) {
         return {
@@ -1476,15 +1540,15 @@ server.tool(
 );
 
 server.tool(
-  'replaceLines',
-  "Replace an inclusive range of lines in an existing file with new content — the easiest surgical edit when you know *which lines* are wrong (e.g. `readFile` shows `142→` gutters, or `validate`/`writeFile` reported a parse error 'at line 142'). You just give `startLine`/`endLine` and the replacement `content`; no need to reproduce an exact `find` string or count diff coordinates. To replace one line, set `startLine === endLine`. To delete lines, pass an empty `content`. **Do NOT include the `N→` line-number gutter in `content`** — that's a display aid, not file text. Returns a unified diff of what changed.",
+  'replace_lines',
+  "Replace an inclusive range of lines in an existing file with new content — the easiest surgical edit when you know *which lines* are wrong (e.g. `read_file` shows `142→` gutters, or `validate`/`write_file` reported a parse error 'at line 142'). You just give `startLine`/`endLine` and the replacement `content`; no need to reproduce an exact `find` string or count diff coordinates. To replace one line, set `startLine === endLine`. To delete lines, pass an empty `content`. **Do NOT include the `N→` line-number gutter in `content`** — that's a display aid, not file text. Returns a unified diff of what changed.",
   {
     path: z.string().describe('File path relative to the project root.'),
     startLine: z
       .number()
       .int()
       .positive()
-      .describe('1-based first line to replace (inclusive). Read it from the readFile gutter.'),
+      .describe('1-based first line to replace (inclusive). Read it from the read_file gutter.'),
     endLine: z
       .number()
       .int()
@@ -1510,7 +1574,7 @@ server.tool(
       const validationError = await rejectInvalidWorkspaceEdit(
         path,
         before.content,
-        'replaceLines',
+        'replace_lines',
       );
       if (validationError) {
         return {
@@ -1542,7 +1606,7 @@ server.tool(
 );
 
 server.tool(
-  'applyPatch',
+  'apply_patch',
   "Apply a unified diff (git-style) to a single existing file. Use this when you have multi-region changes — additions, deletions, and edits scattered across the file. The diff must have `@@ -L,N +L,N @@` hunk headers and `-`/`+`/` ` line prefixes. One file per call: multi-file patches reject. Surrounding context is matched with fuzz factor 1 (tolerates ±1 line of whitespace drift). If a hunk doesn't apply, you'll get back the offending hunk's coordinates — re-read the file at those line numbers and emit a fresh diff. Returns the unified diff of what actually landed.",
   {
     path: z.string().describe('File path relative to the project root.'),
@@ -1562,7 +1626,7 @@ server.tool(
         ...(gezelId ? { gezelId } : {}),
         ...(sessionId ? { sessionId } : {}),
       });
-      const validationError = await rejectInvalidWorkspaceEdit(path, before.content, 'applyPatch');
+      const validationError = await rejectInvalidWorkspaceEdit(path, before.content, 'apply_patch');
       if (validationError) {
         return {
           content: [{ type: 'text' as const, text: validationError }],
@@ -1593,8 +1657,8 @@ server.tool(
 );
 
 server.tool(
-  'insertAtMarker',
-  'Insert content before or after a unique marker substring in an existing file. Use this for template-driven inserts: "add a new export inside the // EXPORTS block", "register a route inside the <!-- ROUTES --> comment". Easier to get right than `replaceInFile` when the surrounding code is dense — you just point at a stable marker. The marker must appear exactly once in the file. Returns a unified diff.',
+  'insert_at_marker',
+  'Insert content before or after a unique marker substring in an existing file. Use this for template-driven inserts: "add a new export inside the // EXPORTS block", "register a route inside the <!-- ROUTES --> comment". Easier to get right than `replace_in_file` when the surrounding code is dense — you just point at a stable marker. The marker must appear exactly once in the file. Returns a unified diff.',
   {
     path: z.string().describe('File path relative to the project root.'),
     marker: z
@@ -1621,7 +1685,7 @@ server.tool(
       const validationError = await rejectInvalidWorkspaceEdit(
         path,
         before.content,
-        'insertAtMarker',
+        'insert_at_marker',
       );
       if (validationError) {
         return {
@@ -1653,8 +1717,8 @@ server.tool(
 );
 
 server.tool(
-  'rm',
-  "Delete a file or directory from the project. For directories, pass `recursive: true`. Do NOT describe a deletion in chat — that does nothing; call this tool. Mirrors Node's `fs.rm`.",
+  'delete_path',
+  'Delete a file or directory from the project. For directories, pass `recursive: true`. Do NOT describe a deletion in chat — that does nothing; call this tool.',
   {
     path: z.string().describe('Path relative to the project root.'),
     recursive: z
@@ -1680,8 +1744,8 @@ server.tool(
 );
 
 server.tool(
-  'mkdir',
-  'Create a directory recursively in the project with `mkdir({ path })`.',
+  'make_dir',
+  'Create a directory recursively in the project with `make_dir({ path })`.',
   {
     path: z.string().describe('Directory path relative to the project root.'),
   },
@@ -1998,7 +2062,7 @@ server.tool(
 
 server.tool(
   'derive_file',
-  'Derive a data file by EXECUTING a script — the reliable way to produce json/csv/tsv outputs computed from other files (transform, normalize, dedup, convert, aggregate). Hand-typing derived rows via writeFile loses data; this tool runs your Node script in the sandbox and verifies the output landed and parses. Provide the complete script source; it executes from a scratch location (never saved into your workspace) with fs access to the project — read inputs with fs.readFileSync and write the output with fs.writeFileSync, paths relative to the workspace root. NOT for prose/reports/HTML — write those directly with writeFile. On failure you get stderr; fix the script and call again.',
+  'Derive a data file by EXECUTING a script — the reliable way to produce json/csv/tsv outputs computed from other files (transform, normalize, dedup, convert, aggregate). Hand-typing derived rows via write_file loses data; this tool runs your Node script in the sandbox and verifies the output landed and parses. Provide the complete script source; it executes from a scratch location (never saved into your workspace) with fs access to the project — read inputs with fs.readFileSync and write the output with fs.writeFileSync, paths relative to the workspace root. NOT for prose/reports/HTML — write those directly with write_file. On failure you get stderr; fix the script and call again.',
   {
     script: z
       .string()
@@ -2115,12 +2179,12 @@ function explainWriteFailure(err: unknown): string {
   if (/EISDIR|illegal operation on a directory|is a directory/i.test(message)) {
     return [
       'The target path is currently a directory, not a file. This usually happens after accidentally writing a nested path like `index.html/packages/...`.',
-      'If the directory is the mistaken deliverable path, remove it first with `rm({ path: "index.html", recursive: true })`, then call `writeFile({ path: "index.html", content: <complete file contents> })`.',
+      'If the directory is the mistaken deliverable path, remove it first with `delete_path({ path: "index.html", recursive: true })`, then call `write_file({ path: "index.html", content: <complete file contents> })`.',
       'The `recursive` field must be the boolean `true`, not the string `"true"`.',
     ].join(' ');
   }
-  // The Layer 4 surgical-edit endpoints (replaceInFile, applyPatch,
-  // insertAtMarker) already return self-explanatory messages — surface
+  // The Layer 4 surgical-edit endpoints (replace_in_file, apply_patch,
+  // insert_at_marker) already return self-explanatory messages — surface
   // them verbatim so the model can act on the next turn.
   return detailsMessage ? message : `Write failed: ${message}`;
 }
@@ -2128,7 +2192,7 @@ function explainWriteFailure(err: unknown): string {
 async function rejectInvalidWorkspaceEdit(
   path: string,
   priorContent: string,
-  toolName: 'replaceInFile' | 'applyPatch' | 'insertAtMarker' | 'replaceLines',
+  toolName: 'replace_in_file' | 'apply_patch' | 'insert_at_marker' | 'replace_lines',
 ): Promise<string | null> {
   let after: { path: string; content: string };
   try {
@@ -2160,14 +2224,14 @@ async function rejectInvalidWorkspaceEdit(
     return [
       `${toolName} was rejected because the resulting \`${path}\` failed HTML quality validation: ${htmlQualityRejection}`,
       restoreMessage,
-      'Use `writeFile` to re-emit one clean complete HTML file. For ES-module pages, keep the module script shell in HTML and put JavaScript in the referenced module files.',
+      'Use `write_file` to re-emit one clean complete HTML file. For ES-module pages, keep the module script shell in HTML and put JavaScript in the referenced module files.',
     ].join(' ');
   }
 
   return [
     `${toolName} was rejected because the resulting \`${path}\` failed source validation: ${sourceValidationMessage}`,
     restoreMessage,
-    'Use `writeFile` to re-emit one clean complete file, or re-read the file and make a smaller edit that leaves the whole file parseable.',
+    'Use `write_file` to re-emit one clean complete file, or re-read the file and make a smaller edit that leaves the whole file parseable.',
     'Do not append or insert duplicate top-level declarations, classes, or functions while repairing parse errors.',
   ].join(' ');
 }
@@ -2308,7 +2372,7 @@ async function redirectExpectedDeliverableWriteToWorkspace(
       content: [
         {
           type: 'text' as const,
-          text: `Wrote ${redirectPath} to the project workspace because this session's expected deliverable is a workspace file. Use writeFile directly next time; ${sourceTool} is for side-drawer material.`,
+          text: `Wrote ${redirectPath} to the project workspace because this session's expected deliverable is a workspace file. Use write_file directly next time; ${sourceTool} is for side-drawer material.`,
         },
       ],
     };
@@ -2323,7 +2387,7 @@ async function redirectExpectedDeliverableWriteToWorkspace(
 /**
  * Extensions that overwhelmingly belong in the workspace, not the
  * artifacts drawer. When a model tries to `write_artifact` with one of
- * these, we reject and steer it toward `writeFile` — unless it explicitly
+ * these, we reject and steer it toward `write_file` — unless it explicitly
  * passes `force: true` (rare, but legitimate: a draft HTML mock in
  * `mocks/`, a scratch `.py` experiment, etc.). See
  * `buildInstructions` in packages/service/src/chat/manager.ts for the
@@ -2484,7 +2548,7 @@ server.tool(
 
 server.tool(
   'read_artifact',
-  'Read a file from the artifacts drawer only (a report, script, or output returned by `list_artifacts` or explicitly described as an artifact). Not for workspace files shown under "Workspace files" — use `readFile` for those. Accepts a full path relative to the artifacts root ("reports/summary.md") or just a basename ("summary.md") — if exact misses, falls back to a case-insensitive basename search. Optional slice params for navigating large artifacts (e.g. `auto/browser_snapshot/...` files persisted by the outboard-storage wrapper): `lines: { start, count }` for a 1-indexed line range, `head: N` for the first N lines, `tail: N` for the last N. At most one slice param; omit all to get the full content. Result includes `totalLines` / `hasMore` so you can paginate without guessing.',
+  'Read a file from the artifacts drawer only (a report, script, or output returned by `list_artifacts` or explicitly described as an artifact). Not for workspace files shown under "Workspace files" — use `read_file` for those. Accepts a full path relative to the artifacts root ("reports/summary.md") or just a basename ("summary.md") — if exact misses, falls back to a case-insensitive basename search. Optional slice params for navigating large artifacts (e.g. `auto/browser_snapshot/...` files persisted by the outboard-storage wrapper): `lines: { start, count }` for a 1-indexed line range, `head: N` for the first N lines, `tail: N` for the last N. At most one slice param; omit all to get the full content. Result includes `totalLines` / `hasMore` so you can paginate without guessing.',
   {
     path: z
       .string()
@@ -2511,7 +2575,7 @@ server.tool(
     if (res.kind === 'missing') {
       const workspaceCollision = await workspaceCollisionForArtifactPath(clean);
       if (workspaceCollision) {
-        const tool = workspaceCollision.kind === 'dir' ? 'readdir' : 'readFile';
+        const tool = workspaceCollision.kind === 'dir' ? 'list_dir' : 'read_file';
         return {
           content: [
             {
@@ -2596,7 +2660,7 @@ server.tool(
     if (res.kind === 'missing') {
       const workspaceCollision = await workspaceCollisionForArtifactPath(clean);
       if (workspaceCollision) {
-        const tool = workspaceCollision.kind === 'dir' ? 'readdir' : 'readFile';
+        const tool = workspaceCollision.kind === 'dir' ? 'list_dir' : 'read_file';
         return {
           content: [
             {
@@ -2909,7 +2973,7 @@ server.tool(
 
 server.tool(
   'write_artifact',
-  "Create or update a file in the project's **artifacts** folder — the side drawer for supporting material (reports, plans, analysis, research, scratch notes). **NOT for the app's source code** — use `writeFile` for that. Artifacts live in a separate folder so the user can distinguish your working notes from the code/content you ship. Calls that target an existing workspace path are refused unless `force: true` is set; source-code extensions (.tsx, .css, .html, .py, …) outside the canonical `scripts/`/`tests/`/`mocks/`/`drafts/` folders are automatically redirected into the workspace with `writeFile` semantics.",
+  "Create or update a file in the project's **artifacts** folder — the side drawer for supporting material (reports, plans, analysis, research, scratch notes). **NOT for the app's source code** — use `write_file` for that. Artifacts live in a separate folder so the user can distinguish your working notes from the code/content you ship. Calls that target an existing workspace path are refused unless `force: true` is set; source-code extensions (.tsx, .css, .html, .py, …) outside the canonical `scripts/`/`tests/`/`mocks/`/`drafts/` folders are automatically redirected into the workspace with `write_file` semantics.",
   {
     path: z
       .string()
@@ -2955,7 +3019,7 @@ server.tool(
           content: [
             {
               type: 'text' as const,
-              text: `Wrote ${clean} to the project workspace. Note: write_artifact is for scratch artifacts; use writeFile directly for app/source deliverables.`,
+              text: `Wrote ${clean} to the project workspace. Note: write_artifact is for scratch artifacts; use write_file directly for app/source deliverables.`,
             },
           ],
         };
@@ -2973,14 +3037,14 @@ server.tool(
           content: [
             {
               type: 'text' as const,
-              text: `Refusing write_artifact({ path: "${clean}", ... }) because a workspace ${workspaceCollision.kind} already exists at that path. write_artifact would create a side-drawer copy, not update the project. Use writeFile if you have workspace write access, or hand off to a developer. Set force: true only if you intentionally want an artifact copy with the same path.`,
+              text: `Refusing write_artifact({ path: "${clean}", ... }) because a workspace ${workspaceCollision.kind} already exists at that path. write_artifact would create a side-drawer copy, not update the project. Use write_file if you have workspace write access, or hand off to a developer. Set force: true only if you intentionally want an artifact copy with the same path.`,
             },
           ],
           isError: true,
         };
       }
     }
-    // Syntax-check HTML/JS/TS exactly like `writeFile`. `force: true`
+    // Syntax-check HTML/JS/TS exactly like `write_file`. `force: true`
     // bypasses the check (matching the extension-guard escape hatch):
     // if the model deliberately wants to stash an in-progress/broken
     // source-code file as a scratch note, force lets it.
@@ -4518,7 +4582,7 @@ server.tool(
 
 server.tool(
   'message_gezel',
-  'Send a message to another gezel (status check, nudge, broadcast, or file handoff). This is async fire-and-forget: it drops the message into their active project session and their reply surfaces automatically in your next turn. Use this for fan-out and ambient updates; for explicit consultations where you need an inline answer before continuing, use `ask_gezel`. For substantial multi-step work, use tasks + `advance_task_step`. Do NOT just say \'I\'ll talk to Maya\' in chat; that does nothing. Call this tool. When the message asks them to produce a long-form file deliverable (a review, a report, an analysis, a written design), pass `expectedDeliverable: { kind: "file", filePath: "<path>" }` — the target will be steered to `writeFile` the deliverable and reply with just the path + a short precis, instead of pasting the full text into chat (the matrix #2 squisq-review failure mode).',
+  'Send a message to another gezel (status check, nudge, broadcast, or file handoff). This is async fire-and-forget: it drops the message into their active project session and their reply surfaces automatically in your next turn. Use this for fan-out and ambient updates; for explicit consultations where you need an inline answer before continuing, use `ask_gezel`. For substantial multi-step work, use tasks + `advance_task_step`. Do NOT just say \'I\'ll talk to Maya\' in chat; that does nothing. Call this tool. When the message asks them to produce a long-form file deliverable (a review, a report, an analysis, a written design), pass `expectedDeliverable: { kind: "file", filePath: "<path>" }` — the target will be steered to `write_file` the deliverable and reply with just the path + a short precis, instead of pasting the full text into chat (the matrix #2 squisq-review failure mode).',
   {
     gezel: z.string().describe('Target gezel id or display name'),
     message: z.string().describe('What to ask or tell them'),
@@ -4529,7 +4593,7 @@ server.tool(
         'Project id or name. Defaults to YOUR current project, which is correct ONLY when the target should work in your project. If the work belongs to a project you spun up (via `start_project` / `start_job` / `fetch_repo`) and your own session is in a different project (typical for the Meester, who lives in `Default` and talks about other projects), you MUST pass `project` — otherwise the message lands in a sibling session where the target has none of the project\'s files, tasks, mission, or memory scope, and you\'ll get a "what project are we talking about?" reply. Pass the projectId returned by the macro that created the project; if you lost it, call `list_projects` first.',
       ),
     expectedDeliverable: ExpectedDeliverableArgSchema.optional().describe(
-      "Optional deliverable-shape hint. `{ kind: 'file', filePath: 'index.html' }`, `{ kind: 'file', filePath: 'review.md' }`, or `{ kind: 'file', filePath: 'logo.png' }` swaps the target's default chat-reply framing for a file-deliverable one. Text/source paths are written with `writeFile`; image paths are rendered with `generate_image({ prompt, saveAs })`. Use this whenever the message asks for an actual workspace file; omit for normal short-message pings.",
+      "Optional deliverable-shape hint. `{ kind: 'file', filePath: 'index.html' }`, `{ kind: 'file', filePath: 'review.md' }`, or `{ kind: 'file', filePath: 'logo.png' }` swaps the target's default chat-reply framing for a file-deliverable one. Text/source paths are written with `write_file`; image paths are rendered with `generate_image({ prompt, saveAs })`. Use this whenever the message asks for an actual workspace file; omit for normal short-message pings.",
     ),
   },
   async ({ gezel, message, project, expectedDeliverable }) => {
@@ -4578,7 +4642,7 @@ function normalizeFileHandoffMessage(
     `Apply this source to \`${filePath}\` now. This is not a chat answer.`,
     '',
     `1. Read \`${filePath}\` if it exists.`,
-    `2. Create or replace \`${filePath}\` with a complete, working file using \`writeFile({ path: "${filePath}", content: <full file contents> })\` or patch it with \`replaceInFile\`.`,
+    `2. Create or replace \`${filePath}\` with a complete, working file using \`write_file({ path: "${filePath}", content: <full file contents> })\` or patch it with \`replace_in_file\`.`,
     '3. Do not paste the source back in chat and do not mark the task done until the workspace file is written.',
     '',
     'Source/prompt fragment to incorporate:',
@@ -4632,7 +4696,7 @@ server.tool(
         'Idle timeout (ms): how long the specialist may go *silent* (no streamed tokens or tool calls) before failing with reason: "timeout". It resets on every activity, so a steadily-streaming reply that takes many minutes never trips it — only a wedged session does. Not a wall-clock cap on the whole reply. Server clamps to [10000, 1800000]; default 300000, with a 900000 minimum for DS4/frontier-size local targets.',
       ),
     expectedDeliverable: ExpectedDeliverableArgSchema.optional().describe(
-      "Optional deliverable-shape hint. `{ kind: 'file', filePath: 'index.html' }`, `{ kind: 'file', filePath: 'review.md' }`, or `{ kind: 'file', filePath: 'logo.png' }` swaps the consultation's default chat-reply framing for a file-deliverable one. Text/source paths are written with `writeFile`; image paths are rendered with `generate_image({ prompt, saveAs })`. The asker is expected to verify the path.",
+      "Optional deliverable-shape hint. `{ kind: 'file', filePath: 'index.html' }`, `{ kind: 'file', filePath: 'review.md' }`, or `{ kind: 'file', filePath: 'logo.png' }` swaps the consultation's default chat-reply framing for a file-deliverable one. Text/source paths are written with `write_file`; image paths are rendered with `generate_image({ prompt, saveAs })`. The asker is expected to verify the path.",
     ),
   },
   async ({ gezel, question, project, task, step, timeoutMs, expectedDeliverable }) => {
@@ -5660,7 +5724,7 @@ async function buildRetargetedBuildLoop(
         step.prompt = `${step.prompt}\n\n**This deliverable is derived data — produce it by executing a script.** Use derive_file({ script, outputPath: "${deliverablePath}" }) with a Node script that reads the inputs via fs.readFileSync and writes the output via fs.writeFileSync (or write scripts/derive.mjs and run it with run_nodejs_script). Do not hand-type rows into ${deliverablePath} — hand-typed derived data loses records. The gate holds this step until ${deliverablePath} parses as a real data table.`;
       }
       if (isRasterImage && step.id === craftbook.entryStepId && step.prompt) {
-        step.prompt = `${step.prompt}\n\n**This deliverable is a raster image — render it with the image tool.** Call \`generate_image({ prompt, saveAs: "${deliverablePath}" })\` with a prompt faithful to the task brief. Do not call \`writeFile\` for this path, encode image bytes as text/base64, install an image package, or substitute SVG/canvas code. The gate holds this step until a real image exists at \`${deliverablePath}\`.`;
+        step.prompt = `${step.prompt}\n\n**This deliverable is a raster image — render it with the image tool.** Call \`generate_image({ prompt, saveAs: "${deliverablePath}" })\` with a prompt faithful to the task brief. Do not call \`write_file\` for this path, encode image bytes as text/base64, install an image package, or substitute SVG/canvas code. The gate holds this step until a real image exists at \`${deliverablePath}\`.`;
       }
       if (step.advanceWhen) {
         step.advanceWhen = { ...step.advanceWhen, file: deliverablePath, sniff };
@@ -7050,7 +7114,7 @@ server.tool(
                   '',
                   'Bootstrap files like package.json, tsconfig.json, and .gitignore do not count. Artifact-only plans or notes also do not count because they are not the user-facing deliverable.',
                   '',
-                  'Write the actual deliverable with `writeFile` first (for browser games/sites, usually `writeFile({ path: "index.html", content: "..." })`), or assign/message a developer to do it. Then validate or re-read the workspace file and call `set_task_status` again with verification that cites the workspace path.',
+                  'Write the actual deliverable with `write_file` first (for browser games/sites, usually `write_file({ path: "index.html", content: "..." })`), or assign/message a developer to do it. Then validate or re-read the workspace file and call `set_task_status` again with verification that cites the workspace path.',
                 ].join('\n'),
               },
             ],
@@ -7702,8 +7766,8 @@ server.tool(
       //      copy-paste snippet with NO prose around the path keeps
       //      that hallucination from creeping in.
       const workspaceLine = workspacePath
-        ? `\n\nTo display this image in HTML, copy this exact tag verbatim — do not add any prefix, do not change the filename:\n\`<img src="${workspacePath}">\`\n\nIf you are working on a website/logo task and an HTML file already exists, your next tool call should patch that HTML with this exact tag using \`replaceInFile\` or \`writeFile\`. Do not call \`generate_image\` again for the same missing image; the image asset already exists.`
-        : '\n\nNOTE: workspace copy was skipped (project has an external workingDir not approved for writes). To reference from HTML, copy the image into the workspace yourself first via `writeFile`.';
+        ? `\n\nTo display this image in HTML, copy this exact tag verbatim — do not add any prefix, do not change the filename:\n\`<img src="${workspacePath}">\`\n\nIf you are working on a website/logo task and an HTML file already exists, your next tool call should patch that HTML with this exact tag using \`replace_in_file\` or \`write_file\`. Do not call \`generate_image\` again for the same missing image; the image asset already exists.`
+        : '\n\nNOTE: workspace copy was skipped (project has an external workingDir not approved for writes). To reference from HTML, copy the image into the workspace yourself first via `write_file`.';
       const normalizedLine = normalized.note ? ` ${normalized.note}` : '';
       const summary = `Generated ${meta.widthPx}×${meta.heightPx} image with ${meta.model} (seed ${meta.seed}, ${meta.steps} steps, ${meta.durationMs}ms).${normalizedLine} The user already sees this image inline below the tool call — DO NOT embed it again as Markdown (e.g. \`![alt](artifacts/${artifactPath})\`); just refer to it by name in your reply when needed. To iterate on it, pass \`{ inputImages: [{ artifactPath: "${artifactPath}" }] }\` to a follow-up generate_image call. To read its bytes, call \`read_artifact\` with path \`${artifactPath}\`.${workspaceLine}`;
       const content: Array<
@@ -8145,7 +8209,7 @@ server.tool(
 
 server.tool(
   'outline_file',
-  "Get a file's symbol map — functions, classes, methods, interfaces, or markdown headings — each with a 1-based line range. Call this INSTEAD of readFile when you want to understand a file's shape, and BEFORE readFile on any file over ~200 lines: then readFile only the lineStart..lineEnd of the symbol you care about. Far cheaper than reading the whole file.",
+  "Get a file's symbol map — functions, classes, methods, interfaces, or markdown headings — each with a 1-based line range. Call this INSTEAD of read_file when you want to understand a file's shape, and BEFORE read_file on any file over ~200 lines: then read_file only the lineStart..lineEnd of the symbol you care about. Far cheaper than reading the whole file.",
   {
     path: z.string().min(1).describe('Workspace-relative file path, e.g. src/server.ts.'),
   },
@@ -8225,7 +8289,7 @@ server.tool(
 
 server.tool(
   'find_symbol',
-  'Find where a function/class/type is DEFINED across the workspace (go-to-definition). Returns file path + line range for each definition; follow up with read_symbol or readFile on the returned range. Use this instead of grepping for a definition.',
+  'Find where a function/class/type is DEFINED across the workspace (go-to-definition). Returns file path + line range for each definition; follow up with read_symbol or read_file on the returned range. Use this instead of grepping for a definition.',
   {
     name: z.string().min(1).describe('Exact symbol name to find.'),
     kind: z
@@ -8262,7 +8326,7 @@ server.tool(
 
 server.tool(
   'read_symbol',
-  'Read the exact source of one symbol (its definition body) without reading the whole file — one call instead of outline_file + readFile arithmetic. Pass `path` to disambiguate when the same name exists in several files.',
+  'Read the exact source of one symbol (its definition body) without reading the whole file — one call instead of outline_file + read_file arithmetic. Pass `path` to disambiguate when the same name exists in several files.',
   {
     name: z.string().min(1).describe('Symbol name to read.'),
     path: z.string().optional().describe('Workspace-relative file to look in (optional).'),
@@ -8366,7 +8430,7 @@ server.tool(
 
 server.tool(
   'search_code',
-  'Search the codebase by MEANING, not just exact text — "where is rate limiting handled?", "auth token refresh". Blends semantic vector search (over indexed summaries) with keyword search over symbols and docs. Returns ranked hits with file + line range; follow up with read_symbol or readFile on the range. Use this when you don\'t know the exact name; use find_symbol when you do.',
+  'Search the codebase by MEANING, not just exact text — "where is rate limiting handled?", "auth token refresh". Blends semantic vector search (over indexed summaries) with keyword search over symbols and docs. Returns ranked hits with file + line range; follow up with read_symbol or read_file on the range. Use this when you don\'t know the exact name; use find_symbol when you do.',
   {
     query: z.string().min(1).describe('Natural-language description or keywords.'),
     mode: z
@@ -8490,7 +8554,7 @@ server.tool(
 
 server.tool(
   'scan_findings',
-  'List static security findings from the index (built-in scanners + any OSS-tool ingestion), filterable by severity, category (injection, command-injection, xss, ssrf, path-traversal, deserialization, crypto, secret, taint-source, auth), path prefix, or source. Each finding gives file:line + a rule id — follow up with readFile on the range or trace_taint to check reachability. These are LEADS, not confirmed vulnerabilities; verify each in the code.',
+  'List static security findings from the index (built-in scanners + any OSS-tool ingestion), filterable by severity, category (injection, command-injection, xss, ssrf, path-traversal, deserialization, crypto, secret, taint-source, auth), path prefix, or source. Each finding gives file:line + a rule id — follow up with read_file on the range or trace_taint to check reachability. These are LEADS, not confirmed vulnerabilities; verify each in the code.',
   {
     severity: z.enum(['critical', 'high', 'medium', 'low', 'info']).optional(),
     category: z.string().optional().describe('e.g. injection, ssrf, secret, crypto, taint-source.'),
@@ -8875,7 +8939,7 @@ server.tool(
 
 server.tool(
   'read_doc_as_markdown',
-  'Read an office document (Word/PDF/PowerPoint/Excel) as scannable markdown. gezel converts the binary document on demand and returns its markdown — use this instead of trying to readFile a binary doc. Pass the document path (e.g. notes/spec.docx).',
+  'Read an office document (Word/PDF/PowerPoint/Excel) as scannable markdown. gezel converts the binary document on demand and returns its markdown — use this instead of trying to read_file a binary doc. Pass the document path (e.g. notes/spec.docx).',
   {
     path: z.string().min(1).describe('Workspace-relative path to the document.'),
   },

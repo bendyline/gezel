@@ -205,7 +205,7 @@ function formatNudge(
   const localImageRepairHint = report.failed.some(
     (f) => f.name === 'all-rendered-local-images-resolve',
   )
-    ? '\nFor unresolved local images, do not invent more filenames. Use `readdir` on the workspace assets directory, keep `<img src>` references only for real files that exist, and patch/remove every unresolved reference. If the page requires one generated logo, preserve that real logo and use CSS placeholders for decorative product cards instead of fake JPG/PNG paths.'
+    ? '\nFor unresolved local images, do not invent more filenames. Use `list_dir` on the workspace assets directory, keep `<img src>` references only for real files that exist, and patch/remove every unresolved reference. If the page requires one generated logo, preserve that real logo and use CSS placeholders for decorative product cards instead of fake JPG/PNG paths.'
     : '';
 
   // Escalation language. First nudge: factual, here's what failed.
@@ -223,7 +223,7 @@ function formatNudge(
   const tail = hasTicTacToeRepairHint
     ? '\nFollow the TICTACTOE_FULL_REWRITE instruction above exactly. The browser check will re-open the file after that write.'
     : attemptNum === 1
-      ? `\nThe static structure looks correct (the sniff signals all fire) but the page doesn't actually function. Read \`${filePath}\`, find the specific code that should make the failing assertion(s) pass, and patch with \`replaceInFile\` (preferred for small fixes) or re-emit with \`writeFile\`. Call \`validate({ path: "${filePath}" })\` to confirm syntactic shape before the next runtime check fires.`
+      ? `\nThe static structure looks correct (the sniff signals all fire) but the page doesn't actually function. Read \`${filePath}\`, find the specific code that should make the failing assertion(s) pass, and patch with \`replace_in_file\` (preferred for small fixes) or re-emit with \`write_file\`. Call \`validate({ path: "${filePath}" })\` to confirm syntactic shape before the next runtime check fires.`
       : attemptNum <= 3
         ? `\nYour previous edit didn't address the cause. Re-read \`${filePath}\` carefully — the failing assertion's "why" string above tells you exactly what the browser saw. The fix is almost certainly NOT another full rewrite; it's a targeted patch to the code path that should make the assertion pass. If you genuinely don't know what to change, ask the user for guidance via \`ask_user_question\` rather than guessing again.`
         : `\nDifferent rewrites with the same defect strongly suggest a misdiagnosis. Before any further edit: (1) read the failing assertion's "why" string above word-for-word, (2) open the existing file and find the SPECIFIC code that the assertion is checking, (3) write down what the code does today vs. what the assertion expects, (4) only then patch. If after that you still don't see the gap, escalate to the user with \`ask_user_question\` — the runtime check has been clear about what it wants.`;
@@ -258,10 +258,10 @@ function formatTicTacToeRuntimeRepairHint(filePath: string, report: RuntimeRepor
   return [
     '',
     'TICTACTOE_FULL_REWRITE: this page must be mechanically simple enough for the browser check to drive.',
-    `Your next tool call MUST be \`writeFile\` for \`${filePath}\`; do not call \`validate\`, \`readFile\`, \`ask_user_question\`, create another project, or delegate again before writing.`,
+    `Your next tool call MUST be \`write_file\` for \`${filePath}\`; do not call \`validate\`, \`read_file\`, \`ask_user_question\`, create another project, or delegate again before writing.`,
     'Replace the whole file with one self-contained HTML document that contains nine literal clickable elements in the HTML itself: `<button class="cell" data-cell="0"></button>` through `data-cell="8"`. Do not rely on JavaScript to create the cells.',
     'The click handler must set the clicked button text to `X` or `O` and leave it visible after the click. Keep a `board` array, toggle `currentPlayer`, check these exact win lines `[[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]]`, and update a visible status element when someone wins or the game draws.',
-    'No external scripts, no framework, no generated cells, no placeholder board. One complete `writeFile` call is the repair.',
+    'No external scripts, no framework, no generated cells, no placeholder board. One complete `write_file` call is the repair.',
   ].join('\n');
 }
 
@@ -302,7 +302,7 @@ function formatTicTacToeCellRepairHint(
 }
 
 function formatReplaceInFileCall(filePath: string, find: string, replace: string): string {
-  return `replaceInFile({ path: ${JSON.stringify(filePath)}, find: ${JSON.stringify(find)}, replace: ${JSON.stringify(replace)}, occurrence: "first" })`;
+  return `replace_in_file({ path: ${JSON.stringify(filePath)}, find: ${JSON.stringify(find)}, replace: ${JSON.stringify(replace)}, occurrence: "first" })`;
 }
 
 function formatPageErrorRepairHint(
@@ -318,7 +318,7 @@ function formatPageErrorRepairHint(
     return [
       '',
       `The page error is actionable: \`${firstUndefined}\` is undefined, and this file already contains the casing variant \`${variant}\`.`,
-      `Patch the identifier itself, not a nearby DOM line: \`replaceInFile({ path: "${filePath}", find: "${firstUndefined}", replace: "${variant}", occurrence: "all" })\`. Do not make an identity edit.`,
+      `Patch the identifier itself, not a nearby DOM line: \`replace_in_file({ path: "${filePath}", find: "${firstUndefined}", replace: "${variant}", occurrence: "all" })\`. Do not make an identity edit.`,
     ].join('\n');
   }
 
@@ -327,13 +327,13 @@ function formatPageErrorRepairHint(
     return [
       '',
       `The page error is actionable: \`${firstUndefined}\` is undefined, and this file already contains the likely intended identifier \`${likely}\`.`,
-      `Patch the typo directly: \`replaceInFile({ path: "${filePath}", find: "${firstUndefined}", replace: "${likely}", occurrence: "all" })\`. Do not make an identity edit.`,
+      `Patch the typo directly: \`replace_in_file({ path: "${filePath}", find: "${firstUndefined}", replace: "${likely}", occurrence: "all" })\`. Do not make an identity edit.`,
     ].join('\n');
   }
 
   return [
     '',
-    `The page error is actionable: \`${firstUndefined}\` is undefined. Search the file for that exact identifier and the variable/function it was meant to reference, then patch the bad identifier directly with \`replaceInFile\`. Do not patch a nearby unrelated line.`,
+    `The page error is actionable: \`${firstUndefined}\` is undefined. Search the file for that exact identifier and the variable/function it was meant to reference, then patch the bad identifier directly with \`replace_in_file\`. Do not patch a nearby unrelated line.`,
   ].join('\n');
 }
 

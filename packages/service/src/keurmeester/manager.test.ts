@@ -9,11 +9,11 @@ import { HistoryManager } from '../history/manager.js';
 import { KeurmeesterManager, parseVerdict } from './manager.js';
 
 const VALID_VERDICT_JSON = JSON.stringify({
-  diagnosis: 'The model finished reasoning but never emitted the writeFile call.',
+  diagnosis: 'The model finished reasoning but never emitted the write_file call.',
   failureClass: 'silent_stall',
   action: {
     kind: 'corrective_prompt',
-    prompt: 'Stop reading. Call writeFile for review.md now.',
+    prompt: 'Stop reading. Call write_file for review.md now.',
   },
   confidence: 'high',
 });
@@ -142,7 +142,7 @@ describe('KeurmeesterManager', () => {
 
     const result = await manager.consultChatStall(baseCtx());
     expect(result).toBeTruthy();
-    expect(result!.correctivePrompt).toContain('writeFile');
+    expect(result!.correctivePrompt).toContain('write_file');
     expect(result!.keurmeesterName).toBeTruthy();
 
     // Lazy mint: pointer now set, gezel exists with the inspector role.

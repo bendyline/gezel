@@ -115,7 +115,7 @@ export const HISTORICAL_FICTION_KICKOFF_MESSAGE = [
   'invent freely only where the sheet is silent. Do not open with "Once upon a',
   'time", "in a land far, far away", "long, long ago", or "It was a dark and',
   'stormy night" — start inside a specific moment. Write the complete story now',
-  `with writeFile to \`${STORY_PATH}\`, then refine it if needed.`,
+  `with write_file to \`${STORY_PATH}\`, then refine it if needed.`,
 ].join(' ');
 
 /**
@@ -153,8 +153,8 @@ function storyRepairDirective(failReason: string): string {
       `Patch \`${STORY_PATH}\` to weave in the missing facts named above — as lived`,
       'scene detail (a line of dialogue, an object in the room, a memory), not as',
       'an appended fact list. Keep the story consistent with every fact in',
-      `\`${FACT_SHEET_PATH}\`. Your next tool call should be writeFile (or`,
-      `replaceInFile) on \`${STORY_PATH}\`.`,
+      `\`${FACT_SHEET_PATH}\`. Your next tool call should be write_file (or`,
+      `replace_in_file) on \`${STORY_PATH}\`.`,
     ].join(' ');
   }
   return [
@@ -162,7 +162,7 @@ function storyRepairDirective(failReason: string): string {
     'words of flowing prose with a `# title` heading, at least ten substantial',
     'paragraphs, at least three spoken-dialogue passages in double quotation',
     'marks, no bullet-list or table summaries, and no stock opening phrases.',
-    `Your next tool call should be writeFile (or replaceInFile) on \`${STORY_PATH}\`.`,
+    `Your next tool call should be write_file (or replace_in_file) on \`${STORY_PATH}\`.`,
   ].join(' ');
 }
 

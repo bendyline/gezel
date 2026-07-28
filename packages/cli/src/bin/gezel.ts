@@ -20,9 +20,11 @@ import {
   applyHome,
   connectForRun,
   connectOwned,
+  findHealthySystemService,
   resolveDevHome,
   resolveRunProject,
   resolveTuiProject,
+  validateGlobals,
 } from '../connection.js';
 import { floatOpt, intOpt, resolvePromptText, saveArtifact } from '../generate.js';
 
@@ -33,10 +35,17 @@ program
   .version(GEZEL_VERSION)
   .option(
     '--connect <url>',
-    'Talk to a gezel daemon at this URL as a scoped guest (grant flow). Without it, use/host a local daemon you own.',
+    'Connect to this Gezel service (first use asks for approval in the Gezel app).',
   )
-  .option('--token <token>', 'Bearer token to use with --connect (skips the approval prompt).')
-  .option('--home <dir>', 'Gezel home directory (default: $GEZEL_HOME or ~/.gezel).')
+  .option('--token <token>', 'Bearer token for --connect (must have CLI access).')
+  .option(
+    '--standalone',
+    'Skip the Electron-installed system service and use the user-owned local runtime.',
+  )
+  .option(
+    '--home <dir>',
+    'Use this user-owned Gezel home instead of the system service (default fallback: $GEZEL_HOME or ~/.gezel).',
+  )
   .option('--project [folder]', 'For `run`: ensure this folder is the project (bare flag = cwd).');
 
 /** Global flags, read off the root program. */
@@ -44,12 +53,17 @@ const cliGlobals = (): CliGlobals => program.opts() as CliGlobals;
 
 // Apply --home before any command runs so the daemon spawn env, readRuntime,
 // and in-proc startService all resolve the same home.
-program.hook('preAction', () => applyHome(cliGlobals()));
+program.hook('preAction', () => {
+  const globals = cliGlobals();
+  validateGlobals(globals);
+  applyHome(globals);
+});
 
 // Default command: a bare `gezel` (no subcommand) launches the interactive
 // TUI bound to the current folder's project. Honors developer mode for the
-// home dir (.gezel-dev) and adopts/spawns an owned daemon. Ink/React are
-// lazily imported so the other subcommands don't pay their load cost.
+// home dir (.gezel-dev). Otherwise it prefers the Electron-installed system
+// service and falls back to a user-owned daemon. Ink/React are lazily imported
+// so the other subcommands don't pay their load cost.
 program.action(async () => {
   const globals = cliGlobals();
   resolveDevHome(globals);
@@ -93,8 +107,12 @@ program
     // Web mode serves HTTP on loopback (a browser can't trust our
     // self-signed cert) and mints a dedicated browser token. Both flow
     // to the spawned daemon as env so they apply to fresh + foreground.
-    const spawnEnv: NodeJS.ProcessEnv = { ...process.env };
-    if (port !== undefined) spawnEnv.GEZEL_PORT = String(port);
+    const spawnEnv: NodeJS.ProcessEnv = {
+      ...process.env,
+      // A CLI-owned foreground/web daemon must not reserve the canonical
+      // machine-service port unless the user explicitly asks for it.
+      GEZEL_PORT: port !== undefined ? String(port) : '0',
+    };
     if (opts.web) {
       spawnEnv.GEZEL_WEB = '1';
       spawnEnv.GEZEL_INSECURE_TRANSPORT = '1';
@@ -221,6 +239,28 @@ program
   .command('status')
   .description('Show daemon status')
   .action(async () => {
+    const globals = cliGlobals();
+    if (globals.connect) {
+      const client = await connectOwned(globals);
+      const health = await client.health();
+      console.log(
+        `gezeld explicit service port=${new URL(globals.connect).port || '(default)'} health=ok version=${health.version}`,
+      );
+      return;
+    }
+    const system = await findHealthySystemService(globals);
+    if (system) {
+      const client = new GezelClient({
+        baseUrl: system.baseUrl,
+        token: '',
+        fetch: system.fetch,
+      });
+      const health = await client.health();
+      console.log(
+        `gezeld system service port=${system.port} health=ok version=${health.version} startedAt=${health.startedAt}`,
+      );
+      return;
+    }
     const runtime = await readRuntime();
     if (!runtime) {
       console.log('gezeld is not running');
@@ -244,8 +284,19 @@ program
 
 program
   .command('stop')
-  .description('Stop the Gezel daemon')
+  .description('Stop the user-owned Gezel daemon')
   .action(async () => {
+    const globals = cliGlobals();
+    if (globals.connect) {
+      throw new CliError('gezel stop cannot stop an explicit remote service.');
+    }
+    const system = await findHealthySystemService(globals);
+    if (system) {
+      console.log(
+        `The Electron-installed system service is running on port ${system.port} and is managed by the operating system. Use --standalone to target a user-owned runtime instead.`,
+      );
+      return;
+    }
     const runtime = await readRuntime();
     if (!runtime) {
       console.log('gezeld is not running');
@@ -263,7 +314,7 @@ program
 program
   .command('run [prompt...]')
   .description('Run a prompt through a gezel and print the reply')
-  .option('-g, --gezel <ref>', 'gezel id or name (default: the meester; required with --connect)')
+  .option('-g, --gezel <ref>', 'gezel id or name (default: the meester)')
   .action(async (promptParts: string[], opts: { gezel?: string }) => {
     const prompt = (promptParts ?? []).join(' ').trim();
     if (!prompt) {
@@ -273,62 +324,39 @@ program
     }
     const conn = await connectForRun(cliGlobals());
     try {
-      if (conn.kind === 'guest') {
-        // Scoped guest: the OpenAI-compatible /v1 surface (persona + model,
-        // no tools). A guest can't resolve the host's default agent, so a
-        // gezel ref is required.
-        if (!opts.gezel) {
-          throw new CliError(
-            "--gezel <ref> is required with --connect (a guest connection can't resolve the host's default agent).",
-          );
-        }
-        const model = opts.gezel.includes(':') ? opts.gezel : `gezel:${opts.gezel}`;
-        const stream = await conn.app.chat({
-          model,
-          messages: [{ role: 'user', content: prompt }],
-          stream: true,
-        });
-        for await (const chunk of stream) {
-          const delta = chunk.choices[0]?.delta?.content;
-          if (delta) process.stdout.write(delta);
-        }
-        process.stdout.write('\n');
-      } else {
-        // Owned: the full /api agent (tools, project context).
-        const { client } = conn;
-        const gezelId = opts.gezel ?? (await client.getConfig()).meesterGezelId;
-        if (!gezelId) {
-          throw new CliError('no --gezel given and no default meester is configured.');
-        }
-        const projectId = await resolveRunProject(client, cliGlobals());
-        const session = await client.createChatSession({ gezelId, projectId });
-        await client.sendToChatSession(session.id, prompt);
-        let printed = false;
-        let errored = false;
-        for await (const ev of streamChatEvents({
-          url: client.sessionEventsUrl(session.id),
-          headers: client.authHeader(),
-          fetch: client.getFetch(),
-        })) {
-          if (ev.type === 'delta') {
-            process.stdout.write(ev.content);
-            printed = true;
-          } else if (ev.type === 'complete') {
-            // Fallback for providers that send the whole message at once.
-            if (!printed && ev.message.content) {
-              process.stdout.write(ev.message.content);
-              printed = true;
-            }
-          } else if (ev.type === 'error') {
-            console.error(`\n${ev.error}`);
-            errored = true;
-          }
-        }
-        if (printed) process.stdout.write('\n');
-        if (errored) process.exitCode = 1;
+      const { client } = conn;
+      const gezelId = opts.gezel ?? (await client.getConfig()).meesterGezelId;
+      if (!gezelId) {
+        throw new CliError('no --gezel given and no default meester is configured.');
       }
+      const projectId = await resolveRunProject(client, cliGlobals());
+      const session = await client.createChatSession({ gezelId, projectId });
+      await client.sendToChatSession(session.id, prompt);
+      let printed = false;
+      let errored = false;
+      for await (const ev of streamChatEvents({
+        url: client.sessionEventsUrl(session.id),
+        headers: client.authHeader(),
+        fetch: client.getFetch(),
+      })) {
+        if (ev.type === 'delta') {
+          process.stdout.write(ev.content);
+          printed = true;
+        } else if (ev.type === 'complete') {
+          // Fallback for providers that send the whole message at once.
+          if (!printed && ev.message.content) {
+            process.stdout.write(ev.message.content);
+            printed = true;
+          }
+        } else if (ev.type === 'error') {
+          console.error(`\n${ev.error}`);
+          errored = true;
+        }
+      }
+      if (printed) process.stdout.write('\n');
+      if (errored) process.exitCode = 1;
     } finally {
-      if (conn.kind === 'owned' && conn.stop) await conn.stop();
+      if (conn.stop) await conn.stop();
     }
   });
 
@@ -915,8 +943,13 @@ program
   .command('doctor')
   .description('Check the Gezel installation')
   .action(async () => {
+    const globals = cliGlobals();
+    const system = globals.connect ? null : await findHealthySystemService(globals);
     const runtime = await readRuntime();
     console.log(`node: ${process.version}`);
+    console.log(
+      `system service: ${system ? `healthy (${system.baseUrl})` : 'not selected or unavailable'}`,
+    );
     console.log(`runtime file: ${runtime ? 'present' : 'missing'}`);
     if (runtime) {
       console.log(`  port=${runtime.port} pid=${runtime.pid} alive=${isProcessAlive(runtime.pid)}`);

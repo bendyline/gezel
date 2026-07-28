@@ -43,6 +43,16 @@ describe('TokenStore', () => {
     expect(ids).toContain('root');
   });
 
+  it('issues the explicitly grantable CLI control scope', async () => {
+    const store = await createTokenStore({ home, rootToken: 'ROOT' });
+    const rec = await store.issue({
+      appId: 'gezel-cli',
+      appName: 'Gezel CLI',
+      scopes: ['cli'],
+    });
+    expect(store.lookup(rec.token)?.scopes).toEqual(['cli']);
+  });
+
   it('persists per-app tokens to disk and reloads them on the next open', async () => {
     const first = await createTokenStore({ home, rootToken: 'ROOT-1' });
     const issued = await first.issue({

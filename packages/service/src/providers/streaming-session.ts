@@ -103,7 +103,7 @@ export abstract class StreamingSessionBase {
    * Subscribe to live tool-argument chunks — the raw argument text the
    * model streams while building a structured tool call (llama-cpp/MLX
    * `delta.tool_calls[].function.arguments` fragments). These tokens
-   * never appear on `onDelta`, so a multi-minute `writeFile` is
+   * never appear on `onDelta`, so a multi-minute `write_file` is
    * otherwise invisible beyond bare wire pulses. `name` is the tool
    * being called ('' until the name fragment has arrived). Display-only:
    * the authoritative accumulation still happens in the provider's

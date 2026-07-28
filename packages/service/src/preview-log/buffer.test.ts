@@ -56,7 +56,7 @@ describe('formatPreviewLogPrelude', () => {
     const block = formatPreviewLogPrelude([entry()]);
     expect(block).toContain('[Live preview reported runtime errors');
     expect(block).toContain("- index.html: pageerror: Failed to execute 'addColorStop'");
-    expect(block).toContain('replaceInFile');
+    expect(block).toContain('replace_in_file');
     expect(block?.endsWith(']')).toBe(true);
   });
 

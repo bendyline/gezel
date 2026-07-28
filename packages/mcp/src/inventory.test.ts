@@ -16,9 +16,14 @@
  *   3. Conditional registration — `request_tool_permission` only appears
  *      when `GEZEL_PERMISSION_PROMPT=1`, and only then. Other gated
  *      tools follow the same pattern via `CONDITIONALLY_REGISTERED_TOOLS`.
+ *   4. Alias dispatch — legacy spellings from `RENAMED_TOOLS` stay
+ *      callable through the wrapped `tools/call` handler without ever
+ *      being registered (so they never appear in `tools/list`), and
+ *      `GEZEL_MCP_TOOL_NAMING=legacy` flips the advertised spellings.
  *
- * The `_registeredTools` field on McpServer is private but stable across
- * the SDK 1.x line — see [mcp.d.ts]. If the SDK ever moves it, this test
+ * The `_registeredTools` field on McpServer and the `_requestHandlers`
+ * map on the underlying Server are private but stable across the SDK
+ * 1.x line — see [mcp.d.ts]. If the SDK ever moves them, this test
  * gives us a single failure point to update rather than relying on each
  * tool's hand-rolled fixture.
  */
@@ -40,6 +45,21 @@ interface RegisteredTool {
 
 interface InspectableServer {
   _registeredTools: Record<string, RegisteredTool>;
+  server: {
+    _requestHandlers: Map<string, (request: unknown, extra: unknown) => Promise<unknown>>;
+  };
+}
+
+function callToolHandler(server: InspectableServer) {
+  const handler = server.server._requestHandlers.get('tools/call');
+  expect(handler, 'tools/call handler installed').toBeDefined();
+  return async (name: string, args: Record<string, unknown>): Promise<string> => {
+    const result = (await handler!(
+      { method: 'tools/call', params: { name, arguments: args } },
+      {},
+    )) as { content?: Array<{ text?: string }> };
+    return (result.content ?? []).map((c) => c.text ?? '').join(' ');
+  };
 }
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -264,15 +284,26 @@ describe('MCP tool exclusion', () => {
 
   it('GEZEL_MCP_EXCLUDE strips tools from registration', async () => {
     const server = await loadServer({
+      GEZEL_MCP_EXCLUDE: 'read_file,write_file,list_dir',
+    });
+    const registered = new Set(Object.keys(server._registeredTools));
+    expect(registered.has('read_file')).toBe(false);
+    expect(registered.has('write_file')).toBe(false);
+    expect(registered.has('list_dir')).toBe(false);
+    // Sibling tools still register.
+    expect(registered.has('stat')).toBe(true);
+    expect(registered.has('make_dir')).toBe(true);
+  });
+
+  it('GEZEL_MCP_EXCLUDE accepts legacy spellings (canonicalized matching)', async () => {
+    const server = await loadServer({
       GEZEL_MCP_EXCLUDE: 'readFile,writeFile,readdir',
     });
     const registered = new Set(Object.keys(server._registeredTools));
-    expect(registered.has('readFile')).toBe(false);
-    expect(registered.has('writeFile')).toBe(false);
-    expect(registered.has('readdir')).toBe(false);
-    // Sibling tools still register.
+    expect(registered.has('read_file')).toBe(false);
+    expect(registered.has('write_file')).toBe(false);
+    expect(registered.has('list_dir')).toBe(false);
     expect(registered.has('stat')).toBe(true);
-    expect(registered.has('mkdir')).toBe(true);
   });
 
   it('GEZEL_MCP_ALLOW restricts registration to the named tools', async () => {
@@ -282,7 +313,7 @@ describe('MCP tool exclusion', () => {
     const registered = new Set(Object.keys(server._registeredTools));
     expect(registered.has('list_tasks')).toBe(true);
     expect(registered.has('read_task_notes')).toBe(true);
-    expect(registered.has('writeFile')).toBe(false);
+    expect(registered.has('write_file')).toBe(false);
     expect(registered.has('ask_specialist')).toBe(false);
   });
 
@@ -325,12 +356,12 @@ describe('MCP tool input schemas', () => {
       invalid: { text: 'a' },
     },
     { tool: 'list_memories', valid: { scope: 'project' }, invalid: {} },
-    { tool: 'readdir', valid: { path: 'src' }, invalid: { path: 123 } },
-    { tool: 'readFile', valid: { path: 'README.md' }, invalid: {} },
-    { tool: 'writeFile', valid: { path: 'a.txt', content: 'hi' }, invalid: { path: 'a.txt' } },
+    { tool: 'list_dir', valid: { path: 'src' }, invalid: { path: 123 } },
+    { tool: 'read_file', valid: { path: 'README.md' }, invalid: {} },
+    { tool: 'write_file', valid: { path: 'a.txt', content: 'hi' }, invalid: { path: 'a.txt' } },
     { tool: 'stat', valid: { path: 'package.json' }, invalid: {} },
-    { tool: 'rm', valid: { path: 'tmp.txt' }, invalid: {} },
-    { tool: 'mkdir', valid: { path: 'newdir' }, invalid: {} },
+    { tool: 'delete_path', valid: { path: 'tmp.txt' }, invalid: {} },
+    { tool: 'make_dir', valid: { path: 'newdir' }, invalid: {} },
     {
       tool: 'rename',
       valid: { fromPath: 'a', toPath: 'b' },
@@ -392,6 +423,74 @@ describe('MCP tool input schemas', () => {
       });
     }
   }
+});
+
+describe('MCP tool name alias dispatch', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  // The tool handlers themselves hit the stubbed `fetch` and surface its
+  // error as an in-band `isError` result. The SDK ALSO reports unknown
+  // tools in-band ("Tool X not found"), so the discriminator is the
+  // result text: a dispatched alias reaches a real handler and never
+  // says "not found"; an unknown name does.
+  it('dispatches legacy spellings to the renamed tools without registering them', async () => {
+    const server = await loadServer();
+    const registered = new Set(Object.keys(server._registeredTools));
+    expect(registered.has('writeFile')).toBe(false);
+    expect(registered.has('readdir')).toBe(false);
+
+    const call = callToolHandler(server);
+    expect(await call('writeFile', { path: 'a.txt', content: 'hi' })).not.toMatch(/not found/);
+    expect(await call('readdir', { path: 'src' })).not.toMatch(/not found/);
+    expect(await call('rm', { path: 'tmp.txt' })).not.toMatch(/not found/);
+  });
+
+  it('dispatches case/punctuation variants of registered names', async () => {
+    const server = await loadServer();
+    const call = callToolHandler(server);
+    expect(await call('WriteFile', { path: 'a.txt', content: 'hi' })).not.toMatch(/not found/);
+    expect(await call('write-file', { path: 'a.txt', content: 'hi' })).not.toMatch(/not found/);
+    expect(await call('read_dir', { path: 'src' })).not.toMatch(/not found/);
+  });
+
+  it('still reports genuinely unknown tool names as not found', async () => {
+    const server = await loadServer();
+    const call = callToolHandler(server);
+    expect(await call('definitely_not_a_tool', {})).toMatch(/not found/);
+  });
+});
+
+describe('MCP legacy naming mode (GEZEL_MCP_TOOL_NAMING=legacy)', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  it('advertises the pre-rename spellings for renamed tools only', async () => {
+    const server = await loadServer({ GEZEL_MCP_TOOL_NAMING: 'legacy' });
+    const registered = new Set(Object.keys(server._registeredTools));
+    expect(registered.has('readFile')).toBe(true);
+    expect(registered.has('writeFile')).toBe(true);
+    expect(registered.has('readdir')).toBe(true);
+    expect(registered.has('read_file')).toBe(false);
+    expect(registered.has('write_file')).toBe(false);
+    expect(registered.has('list_dir')).toBe(false);
+    // Never-renamed tools keep their canonical names.
+    expect(registered.has('search_memory')).toBe(true);
+    expect(registered.has('stat')).toBe(true);
+    // 1:1 swap — the surface size is unchanged.
+    expect(registered.size).toBe(platformAvailableAlwaysRegisteredTools.length);
+  });
+
+  it('dispatches canonical spellings onto the legacy-registered tools', async () => {
+    const server = await loadServer({ GEZEL_MCP_TOOL_NAMING: 'legacy' });
+    const call = callToolHandler(server);
+    expect(await call('write_file', { path: 'a.txt', content: 'hi' })).not.toMatch(/not found/);
+    expect(await call('list_dir', { path: 'src' })).not.toMatch(/not found/);
+  });
 });
 
 describe('MCP dynamic script tools (GEZEL_SCRIPT_TOOLS)', () => {

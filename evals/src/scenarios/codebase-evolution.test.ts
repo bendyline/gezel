@@ -381,7 +381,7 @@ describe('codebase-evolution phased checks', () => {
   });
 
   it('phase 2 prompt asks for priority as stored state plus visible controls', () => {
-    expect(PHASE_2_MESSAGE).toContain('workspace `replaceInFile` or `writeFile`');
+    expect(PHASE_2_MESSAGE).toContain('workspace `replace_in_file` or `write_file`');
     expect(PHASE_2_MESSAGE).toContain('`priority` field');
     expect(PHASE_2_MESSAGE).toContain('visible priority select/input');
     expect(PHASE_2_MESSAGE).toContain('visible priority filter');
@@ -634,7 +634,7 @@ describe('codebase-evolution prompt evidence', () => {
   });
 
   it('phase 3 prompt asks for due-date state, input, summary, and date logic', () => {
-    expect(PHASE_3_MESSAGE).toContain('workspace `writeFile` edit for `index.html`');
+    expect(PHASE_3_MESSAGE).toContain('workspace `write_file` edit for `index.html`');
     expect(PHASE_3_MESSAGE).toContain('Priority is already done');
     expect(PHASE_3_MESSAGE).toContain('dueDate');
     expect(PHASE_3_MESSAGE).toContain('<input type="date" id="dueDateInput" name="dueDate">');

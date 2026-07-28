@@ -687,11 +687,12 @@ export const GezelConfigSchema = z.object({
   autoDownloadEngines: z.boolean().optional(),
   /**
    * How strictly a downloaded engine binary's code signature is enforced:
-   *   - `prefer` (default) — verify if signed, allow unsigned with a warning.
-   *   - `require` — reject anything not validly signed (flip to this once the
-   *     native release pipeline signs binaries — see build-native.yml).
-   *   - `off` — skip the check (sha256 + the source-pinned digest still gate).
-   * Unset = `prefer`.
+   *   - `require` (default) — reject anything not validly signed on
+   *     Windows/macOS. Linux remains checksum-anchored.
+   *   - `prefer` — verify if signed, allow explicitly unsigned upstream
+   *     binaries with a warning.
+   *   - `off` — skip the check (bundled archive sha256 still gates).
+   * Unset = `require`.
    */
   engineSignaturePolicy: z.enum(['off', 'prefer', 'require']).optional(),
   /**
@@ -1850,6 +1851,7 @@ export type GezelConfig = z.infer<typeof GezelConfigSchema>;
  *  key" so the on-disk read shape stays narrow. */
 export const UpdateConfigRequestSchema = GezelConfigSchema.extend({
   ollamaThink: z.boolean().nullable().optional(),
+  firstRunInstallError: z.string().nullable().optional(),
   /**
    * Direct mutation is rejected by the route — the move worker is the
    * only writer, immediately before triggering a service restart. The
@@ -3511,7 +3513,7 @@ export type FindFilesResponse = z.infer<typeof FindFilesResponseSchema>;
 
 // ── code-intel (workspace code intelligence) ────────────────────────────────
 // Every result carries 1-based inclusive line ranges so the model's next move
-// is a precise `readFile(path, { startLine, endLine })` — see the plan's
+// is a precise `read_file(path, { startLine, endLine })` — see the plan's
 // "shared result conventions".
 
 export const CodeSymbolSchema = z.object({
@@ -5214,9 +5216,9 @@ export type ProjectResponse = z.infer<typeof ProjectResponseSchema>;
 export type InstallPackageRequest = z.infer<typeof InstallPackageRequestSchema>;
 export type InstallPackageResponse = z.infer<typeof InstallPackageResponseSchema>;
 
-// ── Surgical edit tools (replaceInFile / applyPatch / insertAtMarker) ──
+// ── Surgical edit tools (replace_in_file / apply_patch / insert_at_marker) ──
 //
-// Layer 4: complement `writeFile` / `appendToFile` for files that have
+// Layer 4: complement `write_file` / `append_to_file` for files that have
 // already been written once. Token cost per edit is proportional to the
 // change, not the size of the file. Every endpoint returns a unified
 // diff alongside `ok: true` so the UI can render an inline before/after
@@ -5232,7 +5234,7 @@ export const TOOL_CALL_DIFF_MAX_BYTES = 100_000;
 /**
  * Server-side copy of a file from the project's artifacts drawer to its
  * workspace, preserving exact bytes. Models reach for this instead of
- * `read_artifact` + `writeFile` when they need to relocate a binary
+ * `read_artifact` + `write_file` when they need to relocate a binary
  * (image, PDF, audio, …) — the read+write round-trip goes through a
  * JSON string and corrupts non-UTF-8 content. The petshop
  * eval failure (4-byte `logo.png`) is the canonical case this prevents.
@@ -5390,7 +5392,7 @@ export type InsertAtMarkerInProjectWorkspaceFileRequest = z.infer<
 
 export const ReplaceLinesInProjectWorkspaceFileRequestSchema = z.object({
   path: z.string().min(1),
-  /** 1-based first line to replace (inclusive). Use the `N→` gutter from `readFile`. */
+  /** 1-based first line to replace (inclusive). Use the `N→` gutter from `read_file`. */
   startLine: z.number().int().positive(),
   /** 1-based last line to replace (inclusive). Equal to `startLine` to replace one line. */
   endLine: z.number().int().positive(),

@@ -1,19 +1,105 @@
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { NativeEngineStatusResponseSchema } from '@bendyline/gezel';
 import { Hono } from 'hono';
 import { describe, expect, it } from 'vitest';
 import { enginesRoutes } from './engines.js';
 
-function makeApp(chat: {
-  engineStatus: () => Promise<unknown>;
-  reconcileEnginePool: (provider: string, target: Record<string, number>) => Promise<void>;
-}): Hono {
+function makeApp(
+  chat: {
+    engineStatus: () => Promise<unknown>;
+    reconcileEnginePool: (provider: string, target: Record<string, number>) => Promise<void>;
+  },
+  extras: Record<string, unknown> = {},
+): Hono {
   const app = new Hono();
   // Construct just enough of ServiceContext to wire the routes.
-  const ctx = { chat } as unknown as Parameters<typeof enginesRoutes>[0];
+  const ctx = { chat, ...extras } as unknown as Parameters<typeof enginesRoutes>[0];
   app.route('/api/engines', enginesRoutes(ctx));
   return app;
 }
 
 describe('engines routes', () => {
+  it('GET /binaries/status reports the pinned release and live executable paths', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'gezel-engine-status-'));
+    const uvPath = join(dir, process.platform === 'win32' ? 'uv.exe' : 'uv');
+    const prior = process.env.GEZEL_UV_BIN;
+    await writeFile(uvPath, 'uv');
+    process.env.GEZEL_UV_BIN = uvPath;
+    try {
+      const app = makeApp({
+        engineStatus: async () => null,
+        reconcileEnginePool: async () => {},
+      });
+      const res = await app.request('/api/engines/binaries/status');
+      expect(res.status).toBe(200);
+      const body = NativeEngineStatusResponseSchema.parse(await res.json());
+      expect(body.release).toBe('0.1.19');
+      expect(body.pinned).toBe(true);
+      expect(body.engines.find((engine) => engine.name === 'uv')).toMatchObject({
+        installed: true,
+        path: uvPath,
+      });
+    } finally {
+      if (prior === undefined) delete process.env.GEZEL_UV_BIN;
+      else process.env.GEZEL_UV_BIN = prior;
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('refreshes a cached native consumer before reporting the install complete', async () => {
+    let recognitionResets = 0;
+    const app = makeApp(
+      {
+        engineStatus: async () => null,
+        reconcileEnginePool: async () => {},
+      },
+      {
+        engineBinaries: {
+          ensure: () => ({
+            key: 'llama-server:cuda',
+            snapshot: {},
+            alreadyRunning: false,
+          }),
+          get: () => ({ engine: 'llama-server' }),
+          subscribe: (
+            _key: string,
+            listener: (event: {
+              type: 'done';
+              binPath: string;
+              cached: boolean;
+            }) => void,
+          ) => {
+            queueMicrotask(() =>
+              listener({
+                type: 'done',
+                binPath: '/engines/llama-server',
+                cached: false,
+              }),
+            );
+            return () => {};
+          },
+        },
+        recognition: {
+          reset: async () => {
+            recognitionResets += 1;
+          },
+        },
+        imageProvider: { reset: async () => {} },
+        stt: { reset: async () => {} },
+      },
+    );
+
+    const res = await app.request('/api/engines/binaries/llama-server/ensure?variant=cuda', {
+      method: 'POST',
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain('"type":"done"');
+    expect(recognitionResets).toBe(1);
+  });
+
   it('GET /status returns the chat manager snapshot', async () => {
     const app = makeApp({
       engineStatus: async () => ({

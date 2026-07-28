@@ -38,7 +38,7 @@ function completeFacts(trialId: string): TrialFacts {
       timeToFirstToolCallMs: 500,
     },
     team: { totalGezelsCreated: 3, rolesCreated: ['Meester'], missingExpectedRoles: [] },
-    toolUse: { totalToolCalls: 2, byTool: { writeFile: 1 }, redFlags: [] },
+    toolUse: { totalToolCalls: 2, byTool: { write_file: 1 }, redFlags: [] },
     artifacts: { htmlFiles: [], imageFiles: [], otherFileCount: 1 },
     sniff: {
       progression: [],

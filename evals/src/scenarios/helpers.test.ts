@@ -238,7 +238,7 @@ describe('pollHtmlSniff', () => {
 
     expect(result).toEqual({ done: false });
     expect(client.messageGezel).toHaveBeenCalledTimes(1);
-    expect(client.messageGezel.mock.calls[0]![1].text).toContain('writeFile({ path: "index.html"');
+    expect(client.messageGezel.mock.calls[0]![1].text).toContain('write_file({ path: "index.html"');
   });
 
   it('mentions a near-miss plan file when no HTML deliverable exists', async () => {
@@ -276,7 +276,7 @@ describe('pollHtmlSniff', () => {
     expect(text).toContain('index_plan.md');
     expect(text).toContain('artifacts/planning/index_plan.md');
     expect(text).toContain('wrong deliverable path or location');
-    expect(text).toContain('writeFile({ path: "index.html"');
+    expect(text).toContain('write_file({ path: "index.html"');
   });
 
   it('does not post missing-deliverable feedback for empty side projects once any HTML exists', async () => {

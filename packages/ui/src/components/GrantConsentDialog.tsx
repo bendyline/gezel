@@ -115,7 +115,9 @@ export function GrantConsentDialog() {
               <p className="muted small">
                 {grant.kind === 'device'
                   ? 'Another Gezel device is asking to use models served by this computer.'
-                  : 'An application on this computer or local network is asking to connect to Gezel.'}
+                  : grant.scopes.includes('cli')
+                    ? 'The Gezel command line is asking to use this service.'
+                    : 'An application on this computer or local network is asking to connect to Gezel.'}
               </p>
               <dl className="grant-consent-details">
                 <dt>App ID</dt>
@@ -125,6 +127,15 @@ export function GrantConsentDialog() {
                 <dt>Scopes</dt>
                 <dd>{grant.scopes.join(', ')}</dd>
               </dl>
+              {grant.scopes.includes('cli') && (
+                <p className="small" role="alert">
+                  <strong>
+                    CLI access can read and change your gezels, projects, settings, models, and
+                    conversations.
+                  </strong>{' '}
+                  Approve only if you started this request from your terminal.
+                </p>
+              )}
               <p className="muted small">
                 You can revoke this any time from Settings → Connected Apps.
               </p>

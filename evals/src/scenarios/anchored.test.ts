@@ -32,10 +32,17 @@ import { ANCHORED_SCENARIOS, SCENARIOS } from './index.ts';
 // reports score=N/5.
 // Date-memorialization cleanup changed petshop comments only; the semantic
 // contract remains unchanged.
+// Tool-naming standardization re-pin: the MCP fs tools moved to snake_case
+// (`writeFile` → `write_file` etc.), which renamed tool mentions inside
+// tankcombat's prompt and petshop's success-check internals. The tasks,
+// deliverables, and pass criteria are unchanged — only the tool spellings
+// the prompts teach moved with the product surface. Longitudinal
+// comparisons across the rename should lean on the naming A/B
+// (`ab-tool-naming`) rather than treating pre/post runs as one series.
 const PINNED: Record<(typeof ANCHORED_SCENARIOS)[number], { semantic: string; source: string }> = {
   tictactoe: { semantic: 'a553e5a80e5dab9f', source: '1a0c7e9f219f96ce' },
-  petshop: { semantic: '20a5fbfb35b86f9c', source: 'dbd51d3fe29733eb' },
-  tankcombat: { semantic: 'cff1d5fbfafac7a6', source: '1e063867af5e5850' },
+  petshop: { semantic: '20a5fbfb35b86f9c', source: 'c6ae728c51d8f80c' },
+  tankcombat: { semantic: 'c247df6736d31ac8', source: '9e5d0971ddadbfd2' },
 };
 
 const here = dirname(fileURLToPath(import.meta.url));

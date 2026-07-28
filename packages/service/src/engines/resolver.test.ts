@@ -122,6 +122,11 @@ describe('resolveEngine — happy path', () => {
   it('downloads, verifies, caches, and stamps the env var', async () => {
     snapshotEnv();
     const home = await freshHome();
+    let verifyCalls = 0;
+    const countingVerifyOverride = async () => {
+      verifyCalls += 1;
+      return { result: { status: 'unsigned' as const }, accepted: true };
+    };
     try {
       const result = await resolveEngineToCompletion({
         engine: 'llama-server',
@@ -131,8 +136,9 @@ describe('resolveEngine — happy path', () => {
         githubApiBase: base,
         token: 'fixture',
         expectedSha256sumsDigest: sumsDigest,
+        expectedArchiveSha256: { [ARCHIVE_NAME]: sha(archiveBytes) },
         signaturePolicy: 'off',
-        verifyOverride,
+        verifyOverride: countingVerifyOverride,
       });
       const expectedPath = join(
         home,
@@ -158,10 +164,12 @@ describe('resolveEngine — happy path', () => {
         githubApiBase: base,
         token: 'fixture',
         expectedSha256sumsDigest: sumsDigest,
+        expectedArchiveSha256: { [ARCHIVE_NAME]: sha(archiveBytes) },
         signaturePolicy: 'off',
-        verifyOverride,
+        verifyOverride: countingVerifyOverride,
       });
       expect(again.cached).toBe(true);
+      expect(verifyCalls).toBe(2);
     } finally {
       await rm(home, { recursive: true, force: true });
     }
@@ -214,6 +222,62 @@ describe('resolveEngine — verification', () => {
     }
   });
 
+  it('rejects when SHA256SUMS disagrees with the bundled archive checksum', async () => {
+    snapshotEnv();
+    const home = await freshHome();
+    try {
+      await expect(
+        resolveEngineToCompletion({
+          engine: 'llama-server',
+          home,
+          variant: VARIANT,
+          version: VERSION,
+          githubApiBase: base,
+          token: 'fixture',
+          expectedSha256sumsDigest: sumsDigest,
+          expectedArchiveSha256: { [ARCHIVE_NAME]: 'f'.repeat(64) },
+          signaturePolicy: 'off',
+          verifyOverride,
+        }),
+      ).rejects.toThrow(/archive checksum mismatch/i);
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it('defaults first-party binaries to required publisher validation', async () => {
+    snapshotEnv();
+    const home = await freshHome();
+    let observed:
+      | {
+          policy: string;
+          expectedPublisher?: string;
+        }
+      | undefined;
+    try {
+      await resolveEngineToCompletion({
+        engine: 'llama-server',
+        home,
+        variant: VARIANT,
+        version: VERSION,
+        githubApiBase: base,
+        token: 'fixture',
+        expectedSha256sumsDigest: sumsDigest,
+        expectedArchiveSha256: { [ARCHIVE_NAME]: sha(archiveBytes) },
+        verifyOverride: async (_path, opts) => {
+          observed = opts;
+          return { result: { status: 'valid' }, accepted: true };
+        },
+      });
+      expect(observed).toMatchObject({
+        policy: 'require',
+        expectedPublisher: 'Bendyline LLC',
+      });
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
   it('rejects when signature policy rejects the binary', async () => {
     snapshotEnv();
     const home = await freshHome();
@@ -242,6 +306,27 @@ describe('resolveEngine — verification', () => {
 });
 
 describe('resolveEngine — availability gates', () => {
+  it('treats an explicit version override as unpinned unless its digest is supplied', async () => {
+    snapshotEnv();
+    const home = await freshHome();
+    try {
+      const result = await resolveEngineToCompletion({
+        engine: 'llama-server',
+        home,
+        variant: VARIANT,
+        version: VERSION,
+        githubApiBase: base,
+        token: 'fixture',
+        signaturePolicy: 'off',
+        verifyOverride,
+      });
+      expect(result.cached).toBe(false);
+      expect(existsSync(result.binPath)).toBe(true);
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
   it('refuses to download when unpinned and no override is given', async () => {
     snapshotEnv();
     const prior = process.env.GEZEL_NATIVE_ENGINE_VERSION;

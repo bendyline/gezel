@@ -444,7 +444,7 @@ export const KICKOFF_MESSAGE = [
   'that every test passes. Do not modify anything under tests/: the tests are the read-only',
   `spec, and the checker fails the task if ${TEST_PATH} changes in any way. Every requirement`,
   '(states, events, the guard, the history log, exact error messages) must be inferred from the',
-  `assertions. Edit ${MACHINE_PATH} in place via writeFile/replaceInFile — paths are relative`,
+  `assertions. Edit ${MACHINE_PATH} in place via write_file/replace_in_file — paths are relative`,
   'to the workspace root, no leading "workspace/". Do NOT run npm install or any shell',
   'command — there is no node_modules; the harness runs `vitest run` against the project',
   'plus a strict `tsc --noEmit` check automatically every few seconds and reports failing test',
@@ -771,7 +771,7 @@ const REQUIRED_SIGNALS = ['tests-untouched', 'vitest-green', 'tsc-clean'];
 export const FAILING_TESTS_REPAIR_DIRECTIVE = [
   `Before editing, re-read ${TEST_PATH} in full and then read the current ${MACHINE_PATH}.`,
   `Patch ${MACHINE_PATH} against the API the frozen tests actually call: preserve the exported factory signature and the returned object's tested fields and methods instead of inventing a different interface or extra arguments.`,
-  'Fix the first concrete Vitest or TypeScript compiler mismatch while keeping behavior that already passed; prefer replaceInFile/replaceLines for a localized correction.',
+  'Fix the first concrete Vitest or TypeScript compiler mismatch while keeping behavior that already passed; prefer replace_in_file/replace_lines for a localized correction.',
 ].join(' ');
 
 export interface FailingTestsVerdict {

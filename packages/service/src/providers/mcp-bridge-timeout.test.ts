@@ -9,6 +9,6 @@ describe('timeoutForTool', () => {
   });
 
   it('keeps ordinary tools on the default timeout', () => {
-    expect(timeoutForTool('readFile')).toBe(DEFAULT_TOOL_TIMEOUT_MS);
+    expect(timeoutForTool('read_file')).toBe(DEFAULT_TOOL_TIMEOUT_MS);
   });
 });

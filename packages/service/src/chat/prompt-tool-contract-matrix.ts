@@ -290,7 +290,7 @@ function scenariosForRole(
           role,
           deliverable: 'index.html',
           procedure:
-            'Your first assistant action must be `write_task_note({ ref, text })` with a short acceptance checklist. Then create `index.html` with `writeFile({ path, content })` and validate it.',
+            'Your first assistant action must be `write_task_note({ ref, text })` with a short acceptance checklist. Then create `index.html` with `write_file({ path, content })` and validate it.',
           onExitScript: 'verify-space-war',
         }),
         securityPolicy: normal,
@@ -462,7 +462,7 @@ export async function buildPromptContractMatrix(): Promise<PromptContractMatrixR
         const roleManifest = roleItem.manifest;
         const detail = await catalog.get('gezel-template', roleManifest.id, roleItem.sourceId);
         const about = detail?.about ?? '';
-        const canWriteWorkspace = roleToolAllowlist(roleManifest.role).has('writeFile');
+        const canWriteWorkspace = roleToolAllowlist(roleManifest.role).has('write_file');
         const delegationRole = isPureDelegationRole(roleManifest.role);
         for (const scenario of scenariosForRole(
           roleManifest.role,

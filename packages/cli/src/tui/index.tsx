@@ -1,6 +1,7 @@
 import type { GezelClient } from '@bendyline/gezel-client/node';
 import { render } from 'ink';
 import { App } from './App.js';
+import { BootstrapGate } from './components/BootstrapGate.js';
 
 export interface LaunchTuiOpts {
   client: GezelClient;
@@ -15,11 +16,13 @@ export interface LaunchTuiOpts {
  */
 export async function launchTui(opts: LaunchTuiOpts): Promise<void> {
   const instance = render(
-    <App
-      client={opts.client}
-      initialProjectId={opts.projectId}
-      initialProjectName={opts.projectName}
-    />,
+    <BootstrapGate client={opts.client}>
+      <App
+        client={opts.client}
+        initialProjectId={opts.projectId}
+        initialProjectName={opts.projectName}
+      />
+    </BootstrapGate>,
     // We own Ctrl+C (interrupt-then-exit); don't let ink exit on the first press.
     { exitOnCtrlC: false },
   );

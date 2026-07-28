@@ -70,5 +70,5 @@ export function formatPreviewLogPrelude(entries: PreviewLogEntry[]): string | nu
     .map((e) => `- ${e.path}: ${e.kind === 'error' ? 'pageerror' : e.kind}: ${e.message}`);
   const omitted = entries.length - Math.min(entries.length, MAX_PRELUDE_ERRORS);
   const omittedSuffix = omitted > 0 ? `\n(+${omitted} more)` : '';
-  return `[Live preview reported runtime errors on this project's pages since the last turn:\n${lines.join('\n')}${omittedSuffix}\nIf these relate to files you own, fix the offending lines with replaceInFile — do not rewrite whole files.]`;
+  return `[Live preview reported runtime errors on this project's pages since the last turn:\n${lines.join('\n')}${omittedSuffix}\nIf these relate to files you own, fix the offending lines with replace_in_file — do not rewrite whole files.]`;
 }

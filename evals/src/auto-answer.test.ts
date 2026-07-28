@@ -127,22 +127,22 @@ describe('pickAutoAnswerChoice', () => {
     );
 
     expect(answer).toContain('Do not wait for missionObjectives.md from me');
-    expect(answer).toContain('writeFile');
+    expect(answer).toContain('write_file');
   });
 
   it('does not trigger project-context guidance for ordinary preference questions', () => {
     expect(projectContextAutoAnswerText('Which visual style should I use?')).toBeNull();
   });
 
-  it('answers seeded workspace file deferral with readFile guidance', () => {
+  it('answers seeded workspace file deferral with read_file guidance', () => {
     const answer = workspaceFixtureAutoAnswerText(
       'Could you share the contents of facts/incident-brief.md and facts/legal-requirements.md?',
     );
 
     expect(answer).toContain('Do not wait for seeded workspace file contents from me');
     expect(answer).toContain('`facts/incident-brief.md`');
-    expect(answer).toContain('readFile');
-    expect(answer).toContain('writeFile');
+    expect(answer).toContain('read_file');
+    expect(answer).toContain('write_file');
   });
 
   it('maps pathless seeded document names to workspace files', () => {
@@ -153,7 +153,7 @@ describe('pickAutoAnswerChoice', () => {
     expect(answer).toContain('`facts/incident-brief.md`');
     expect(answer).toContain('`facts/legal-requirements.md`');
     expect(answer).toContain('`facts/voice-guide.md`');
-    expect(answer).toContain('readFile');
+    expect(answer).toContain('read_file');
   });
 
   it('does not trigger workspace fixture guidance for ordinary file instructions', () => {

@@ -105,7 +105,7 @@ describe('RambleDetector', () => {
       // Behavior change: the post-action cap now only
       // applies after a tool call has CLOSED. While the model is
       // still emitting content inside an unclosed `<function=…>`
-      // (e.g. a large writeFile body), the looser cold threshold
+      // (e.g. a large write_file body), the looser cold threshold
       // applies — see the "INSIDE an unclosed <function=…>" test
       // below for the wild-caught Qwen 3.6 27B failure this fixes.
       const d = new RambleDetector({
@@ -187,7 +187,7 @@ describe('RambleDetector', () => {
 
     it('does NOT fire while the model is INSIDE an unclosed <function=…> writing a large parameter body', () => {
       // Wild-caught Qwen 3.6 27B (MLX, tictactoe trials):
-      // Tamara emits `<function=writeFile>` and then streams 5 KB+ of
+      // Tamara emits `<function=write_file>` and then streams 5 KB+ of
       // HTML as the `content` parameter value. The previous code
       // counted the post-`<function=` body as "prose since action" and
       // aborted at the tight post-action cap (default 1500). Now the
@@ -200,7 +200,7 @@ describe('RambleDetector', () => {
         enabled: true,
       });
       const opener =
-        '<tool_call>\n<function=writeFile>\n<parameter=path>index.html</parameter>\n<parameter=content>\n';
+        '<tool_call>\n<function=write_file>\n<parameter=path>index.html</parameter>\n<parameter=content>\n';
       // 5000 chars of HTML body — way past the 1500 post-action cap,
       // still well under the 8000 cold cap. Must NOT fire while the
       // call is unclosed.
@@ -215,7 +215,7 @@ describe('RambleDetector', () => {
     });
 
     it('flips back to the tight post-action cap once </function> or </tool_call> arrives', () => {
-      // After the writeFile call closes, follow-up prose is the
+      // After the write_file call closes, follow-up prose is the
       // "planning paralysis" case that the post-action cap is built
       // for — fire fast on that.
       const d = new RambleDetector({
@@ -223,7 +223,7 @@ describe('RambleDetector', () => {
         postActionThreshold: 1500,
         enabled: true,
       });
-      const opener = '<tool_call>\n<function=writeFile>\n<parameter=content>';
+      const opener = '<tool_call>\n<function=write_file>\n<parameter=content>';
       const body = 'x'.repeat(3000); // inside call — exempt from post-action cap
       const closer = '</parameter>\n</function>\n</tool_call>';
       expect(d.observeContent(opener + body + closer)).toBe(false);
@@ -237,7 +237,7 @@ describe('RambleDetector', () => {
 
     it('persists insideUnclosedCall across scan windows that contain no markers', () => {
       // Wild-caught regression (qwen3.6 matrix, after the
-      // first open/close-span fix): the `<function=writeFile>` opener
+      // first open/close-span fix): the `<function=write_file>` opener
       // arrived in one chunk, then 1500+ chars of pure HTML body
       // streamed in subsequent chunks. The first version of the fix
       // computed `insideUnclosedCall` from per-window scan locals —
@@ -252,7 +252,7 @@ describe('RambleDetector', () => {
         enabled: true,
       });
       // Window 1: the opener arrives.
-      const w1 = '<function=writeFile>';
+      const w1 = '<function=write_file>';
       expect(d.observeContent(w1)).toBe(false);
       expect(d.isInsideUnclosedCall).toBe(true);
       // Window 2: more arrives, still no closer, no other markers.
@@ -281,7 +281,7 @@ describe('RambleDetector', () => {
         insideCallThreshold: 2000,
         enabled: true,
       });
-      const opener = '<function=writeFile>';
+      const opener = '<function=write_file>';
       // 2500 chars after the opener — over the inside-call cap (2000),
       // no closer yet. Must fire.
       expect(d.observeContent(opener + 'x'.repeat(2500))).toBe(true);
@@ -323,7 +323,7 @@ describe('RambleDetector', () => {
       // Wild-caught (qwen3.6 a3b consultation): the model
       // opened `<think>`, reasoned ~6 KB drafting the deliverable, and
       // the 6000-char cold cap fired BEFORE it closed `</think>` and
-      // emitted the writeFile call. With reasoning-span awareness the
+      // emitted the write_file call. With reasoning-span awareness the
       // unclosed `<think>` body gets the loose inside-call budget.
       const d = new RambleDetector({ threshold: 6000, enabled: true });
       const opener = '<think>';
@@ -406,7 +406,7 @@ describe('RambleDetector', () => {
     it('reproduces the wild Qwen failure: a 12 KB file chat-coded inside ```html no longer trips the cold cap', () => {
       // Wild-caught (qwen3.6 a3b consultation): the model
       // chat-coded a ~16 KB index.html inside a ```html fence instead of
-      // a writeFile body; the 12 KB doubled-cold cap guillotined it
+      // a write_file body; the 12 KB doubled-cold cap guillotined it
       // mid-file before the fence closed. With fence awareness the open
       // fence gets the loose inside-call budget.
       const d = new RambleDetector({ threshold: 6000, enabled: true, leakyReasoning: true });
@@ -509,8 +509,8 @@ describe('RambleDetector', () => {
     // words, but the trigrams repeat. This is the qwen3.6 voorman
     // failure shape: it circled the same hypotheses for ~12 KB.
     const LOOP =
-      'Let me check the task status with list_tasks and readdir. ' +
-      'I should check list_tasks and readdir to confirm the file exists. ' +
+      'Let me check the task status with list_tasks and list_dir. ' +
+      'I should check list_tasks and list_dir to confirm the file exists. ' +
       'Let me check the task status and then reply to Zephyr that it is done. ';
     const circling = LOOP.repeat(20);
 
@@ -561,7 +561,7 @@ describe('RambleDetector', () => {
 
     it('is exempt inside an unclosed tool-call body (repetitive code is fine)', () => {
       const d = new RambleDetector({ threshold: 6000, enabled: true });
-      const opener = '<function=writeFile>\n<parameter=content>\n';
+      const opener = '<function=write_file>\n<parameter=content>\n';
       // A repeated multi-identifier JS line — >8 distinct words, low
       // novelty — but it's the file body, not a planning loop.
       const body =

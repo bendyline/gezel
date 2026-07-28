@@ -11,7 +11,7 @@ import type { EvalContext, EvalScenario, SuccessCheckResult } from '../types.ts'
  * Broad-refactor probe on the pinned squisq corpus: rename a function that
  * 34 files reference, everywhere. The task is mechanically simple but wide —
  * exactly the shape where index-backed retrieval (find every reference
- * first) beats readFile-walking. Run via `ab-index` in warm vs cold arms.
+ * first) beats read_file-walking. Run via `ab-index` in warm vs cold arms.
  *
  * Grader is hermetic rg-accounting over the trial workspace via the
  * server-side `search-files` tool (no npm, no network):

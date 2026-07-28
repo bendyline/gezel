@@ -273,7 +273,7 @@ interface LiveSlot {
   /**
    * Live tool-argument stream, accumulated from `tool_args_delta`
    * events while the model generates a structured tool call (most
-   * visibly a multi-minute `writeFile` whose tokens never arrive as
+   * visibly a multi-minute `write_file` whose tokens never arrive as
    * deltas). `chars` is the running total; `tail` keeps only the most
    * recent stretch (capped) for the dimmed live "working" block near
    * the streaming caret. Cleared when the matching `tool` event lands
@@ -1525,7 +1525,7 @@ export function ChatTimelineView({
         setLiveBump((n) => n + 1);
       } else if (event.type === 'tool_args_delta') {
         // Live tool-argument fragments — the model is generating a
-        // structured tool call (typically writeFile content). Counts as
+        // structured tool call (typically write_file content). Counts as
         // real activity: resets the silence timer so a multi-minute
         // write never trips the "looks stalled" banner. The wire-pulse
         // counter deliberately KEEPS ticking (the provider pulses on the
@@ -2299,7 +2299,7 @@ export function ChatTimelineView({
     const observer = new ResizeObserver(scheduleStickyRecompute);
     observer.observe(el);
     return () => observer.disconnect();
-  }, [rows.length, scheduleStickyRecompute]);
+  }, [scheduleStickyRecompute]);
 
   // Drop the rAF on unmount so we don't leave a callback running
   // after the component is gone.

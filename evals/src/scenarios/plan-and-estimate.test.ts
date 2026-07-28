@@ -176,8 +176,8 @@ describe('plan-and-estimate role-aligned kickoff', () => {
     expect(kickoff).toContain('do not have project-workspace read or write tools');
     expect(kickoff).toContain('Do not call\n`read_document`');
     expect(kickoff).toContain('Do not ask the user');
-    expect(kickoff).not.toContain('readFile');
-    expect(kickoff).not.toContain('writeFile');
+    expect(kickoff).not.toContain('read_file');
+    expect(kickoff).not.toContain('write_file');
     expect(callLine).toBeDefined();
     expect(kickoff.match(/ask_gezel\(/g)).toHaveLength(1);
 
@@ -291,13 +291,13 @@ describe('plan-and-estimate collaboration evidence', () => {
     role: 'user',
     content:
       '[Question from Ismay]: Write plan.md.\n\n' +
-      '[Deliverable expected as a FILE at `plan.md`. Your first assistant action should be writeFile.]',
+      '[Deliverable expected as a FILE at `plan.md`. Your first assistant action should be write_file.]',
     from: { gezelId: 'ismay' },
   };
   const successfulPlanWrite = {
     role: 'assistant',
     content: 'Wrote plan.md.',
-    toolCalls: [{ name: 'writeFile', success: true, path: 'plan.md' }],
+    toolCalls: [{ name: 'write_file', success: true, path: 'plan.md' }],
   };
 
   it('requires the target to mutate plan.md in the Planner-origin handoff response', () => {
@@ -319,7 +319,7 @@ describe('plan-and-estimate collaboration evidence', () => {
         role: 'user',
         content:
           '[Message from Zephyr]: Write plan.md.\n\n' +
-          '[Deliverable expected as a FILE at `plan.md`. Your first assistant action should be writeFile.]',
+          '[Deliverable expected as a FILE at `plan.md`. Your first assistant action should be write_file.]',
         from: { gezelId: 'zephyr' },
       },
       successfulPlanWrite,

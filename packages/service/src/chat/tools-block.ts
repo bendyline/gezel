@@ -38,6 +38,7 @@
  */
 
 import { BUILTIN_TOOLSETS, BUILTIN_TOOL_TO_GROUP } from '@bendyline/gezel-catalog';
+import { canonicalToolName } from '@bendyline/gezel-mcp';
 import type { ModelTier } from './local-model-tier.js';
 
 /** Subset of `ModelInfo` we actually render. */
@@ -120,7 +121,7 @@ export interface RenderToolsBlockOptions {
    * `<function=…>` markup the salvage layer can't promote (no
    * known-tool registry to match against), and spins forever
    * narrating "let me write the files now" without ever calling
-   * `writeFile`. Wild-caught on Ada (Atari Combat Clone task).
+   * `write_file`. Wild-caught on Ada (Atari Combat Clone task).
    */
   bridgeFailed?: boolean;
 }
@@ -142,9 +143,9 @@ const PROVIDERS_WITHOUT_BRIDGE = new Set([
 ]);
 
 const WORKSPACE_SURFACE_TOOLS = new Set([
-  'readdir',
-  'readFile',
-  'writeFile',
+  'list_dir',
+  'read_file',
+  'write_file',
   'stat',
   'validate',
   'search_files',
@@ -161,14 +162,30 @@ const ARTIFACT_SURFACE_TOOLS = new Set([
 ]);
 
 function renderWorkspaceArtifactGuidance(tools: ReadonlyArray<AvailableToolInfo>): string | null {
+  // Membership checks run in canonical space so the guidance renders in
+  // the legacy A/B arm too — but the SPELLING pushed into the prompt is
+  // the advertised one, so the model is never taught a name it can't
+  // see in its function schema.
   const names = new Set(tools.map((t) => t.name));
-  const hasWorkspaceSurface = tools.some((t) => WORKSPACE_SURFACE_TOOLS.has(t.name));
-  const hasArtifactSurface = tools.some((t) => ARTIFACT_SURFACE_TOOLS.has(t.name));
+  const advertisedSpelling = (canonical: string): string | null => {
+    for (const name of names) {
+      if (name === canonical || canonicalToolName(name) === canonical) return name;
+    }
+    return null;
+  };
+  const hasWorkspaceSurface = tools.some((t) =>
+    WORKSPACE_SURFACE_TOOLS.has(canonicalToolName(t.name)),
+  );
+  const hasArtifactSurface = tools.some((t) =>
+    ARTIFACT_SURFACE_TOOLS.has(canonicalToolName(t.name)),
+  );
   if (!hasWorkspaceSurface || !hasArtifactSurface) return null;
 
   const workspaceOps: string[] = [];
-  if (names.has('readFile')) workspaceOps.push('`readFile`');
-  if (names.has('writeFile')) workspaceOps.push('`writeFile`');
+  const readSpelling = advertisedSpelling('read_file');
+  const writeSpelling = advertisedSpelling('write_file');
+  if (readSpelling) workspaceOps.push(`\`${readSpelling}\``);
+  if (writeSpelling) workspaceOps.push(`\`${writeSpelling}\``);
   const workspacePhrase =
     workspaceOps.length > 0 ? workspaceOps.join(' / ') : 'the workspace file tools';
   const artifactOps: string[] = [];
@@ -327,7 +344,8 @@ function groupTools(tools: ReadonlyArray<AvailableToolInfo>): GroupedTools[] {
   const buckets = new Map<string, AvailableToolInfo[]>();
   const others: AvailableToolInfo[] = [];
   for (const t of tools) {
-    const group = BUILTIN_TOOL_TO_GROUP.get(t.name);
+    const group =
+      BUILTIN_TOOL_TO_GROUP.get(t.name) ?? BUILTIN_TOOL_TO_GROUP.get(canonicalToolName(t.name));
     const groupId = group?.id ?? inferGroupForUnmappedTool(t.name);
     if (!groupId) {
       others.push(t);

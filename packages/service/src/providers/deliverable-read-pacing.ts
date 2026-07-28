@@ -5,8 +5,8 @@ const DEFAULT_HARD_READ_ABORT_AT = 6;
 const HARD_ABORT_OUTPUT_CHAR_LIMIT = 8_000;
 
 const READ_ONLY_TOOL_NAMES: ReadonlySet<string> = new Set([
-  'readdir',
-  'readFile',
+  'list_dir',
+  'read_file',
   'stat',
   'validate',
   'list_artifacts',
@@ -18,11 +18,11 @@ const READ_ONLY_TOOL_NAMES: ReadonlySet<string> = new Set([
 ]);
 
 const WRITE_TOOL_NAMES: ReadonlySet<string> = new Set([
-  'writeFile',
-  'appendToFile',
-  'replaceInFile',
-  'applyPatch',
-  'insertAtMarker',
+  'write_file',
+  'append_to_file',
+  'replace_in_file',
+  'apply_patch',
+  'insert_at_marker',
   'write_artifact',
   'copy_artifact_to_workspace',
 ]);
@@ -88,8 +88,8 @@ export class DeliverableReadPaceTracker {
   buildAbortMessage(providerLabel: string): string {
     const pathClause = this.targetPath ? ` \`${this.targetPath}\`` : '';
     const call = this.targetPath
-      ? `writeFile({ path: "${this.targetPath}", content: <draft from the files you already read> })`
-      : 'writeFile({ path, content })';
+      ? `write_file({ path: "${this.targetPath}", content: <draft from the files you already read> })`
+      : 'write_file({ path, content })';
     return `[${providerLabel}] aborting — this file-deliverable turn made ${this.readCount} read-only tool calls without writing the expected file${pathClause}. You have enough context to produce a first draft. Your next message MUST start with \`${call}\`; do not call another read-only tool until the file exists.`;
   }
 
@@ -114,8 +114,8 @@ export class DeliverableReadPaceTracker {
   private warningText(kind: 'soft' | 'hard'): string {
     const pathClause = this.targetPath ? ` at \`${this.targetPath}\`` : '';
     const call = this.targetPath
-      ? `writeFile({ path: "${this.targetPath}", content: <draft from the files already read> })`
-      : 'writeFile({ path, content })';
+      ? `write_file({ path: "${this.targetPath}", content: <draft from the files already read> })`
+      : 'write_file({ path, content })';
     const lead =
       kind === 'hard'
         ? '[runtime] Read budget exhausted for this file deliverable.'
@@ -138,13 +138,13 @@ function isFileDeliverableTurn(text: string): boolean {
     /\[scenario check\]\s+there is still\s+\*?\*?no\s+`[^`]+`\*?\*?\s+in the workspace/i.test(
       text,
     ) &&
-    /writeFile\s*\(\s*\{\s*path\s*:/i.test(text)
+    /write_file\s*\(\s*\{\s*path\s*:/i.test(text)
   ) {
     return true;
   }
   if (
     /Direct kick from the eval harness:/i.test(text) &&
-    /next tool call MUST be\s+`?writeFile`?/i.test(text)
+    /next tool call MUST be\s+`?write_file`?/i.test(text)
   ) {
     return true;
   }
@@ -154,7 +154,7 @@ function isFileDeliverableTurn(text: string): boolean {
 function extractTargetPath(text: string): string | undefined {
   const deliverable = text.match(/\[Deliverable expected as a FILE at `([^`]+)`/i)?.[1];
   if (deliverable) return deliverable;
-  const writeFile = text.match(/writeFile\s*\(\s*\{\s*path\s*:\s*["'`]([^"'`]+)["'`]/i)?.[1];
+  const writeFile = text.match(/write_file\s*\(\s*\{\s*path\s*:\s*["'`]([^"'`]+)["'`]/i)?.[1];
   if (writeFile) return writeFile;
   const filePath = text.match(/filePath\s*:\s*["'`]([^"'`]+)["'`]/i)?.[1];
   return filePath;

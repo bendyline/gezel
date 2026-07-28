@@ -2,7 +2,7 @@
  * Structured file validation for the `validate` MCP tool.
  *
  * Sibling to [source-validation.ts](./source-validation.ts) — but where
- * that module returns a single pass/fail string for `writeFile` to gate
+ * that module returns a single pass/fail string for `write_file` to gate
  * the write, this module returns a per-check structured result a model
  * can act on. The model calls `validate({ path })`, gets back a typed
  * list of checks (each with name, status, optional location + excerpt +
@@ -140,7 +140,7 @@ function fileNonEmptyCheck(content: FileContent): ValidateCheck {
       name: 'file-non-empty',
       message: 'file is empty (0 bytes)',
       fixHint:
-        'write the intended content with `writeFile` (or `copy_artifact_to_workspace` if the source is in the artifacts drawer).',
+        'write the intended content with `write_file` (or `copy_artifact_to_workspace` if the source is in the artifacts drawer).',
     };
   }
   return { ok: true, name: 'file-non-empty', detail: `${content.totalBytes} bytes` };
@@ -180,7 +180,7 @@ function validateHtml(_path: string, content: FileContent): ValidateCheck[] {
         ok: false,
         name: 'file-readable',
         message: 'could not read HTML as text',
-        fixHint: 'the file may be corrupted; try writing it again with `writeFile`.',
+        fixHint: 'the file may be corrupted; try writing it again with `write_file`.',
       },
     ];
   }
@@ -204,7 +204,7 @@ function validateHtml(_path: string, content: FileContent): ValidateCheck[] {
       name: 'script-tag-balanced',
       message: `${opens} <script> opening tag(s) but only ${closes} </script> closing tag(s) — the file is truncated mid-script`,
       fixHint:
-        'append the missing </script> close with `appendToFile`, or re-emit the full file with `writeFile`.',
+        'append the missing </script> close with `append_to_file`, or re-emit the full file with `write_file`.',
     });
     return checks; // script-body check would be misleading on truncated input
   } else {
@@ -249,7 +249,7 @@ function validateHtml(_path: string, content: FileContent): ValidateCheck[] {
         location: { line: fileLine, ...(col ? { col } : {}) },
         excerpt: buildExcerpt(html, fileLine, 2),
         fixHint:
-          'fix the syntax error in the inline <script> body. If the script got cut off mid-statement, use `appendToFile` to send only the missing tail.',
+          'fix the syntax error in the inline <script> body. If the script got cut off mid-statement, use `append_to_file` to send only the missing tail.',
       });
       return checks; // first parse error is the one to fix; subsequent are likely cascades
     }
@@ -329,7 +329,7 @@ function validateJsTs(path: string, content: FileContent): ValidateCheck[] {
     location: { line: line + 1, col: character + 1 },
     excerpt: buildExcerpt(content.text, line + 1, 2),
     fixHint:
-      'fix the syntax error and re-emit. If the file was cut off mid-statement, use `appendToFile` to send only the missing tail.',
+      'fix the syntax error and re-emit. If the file was cut off mid-statement, use `append_to_file` to send only the missing tail.',
   });
   return checks;
 }
@@ -412,7 +412,7 @@ function hexHead(bytes: Uint8Array, n = 8): string {
 }
 
 const BINARY_ROUND_TRIP_HINT =
-  'binary content was likely corrupted by `writeFile` (which round-trips through a JSON string and breaks non-UTF-8 bytes). Use `copy_artifact_to_workspace` instead to move generated images from the artifacts drawer.';
+  'binary content was likely corrupted by `write_file` (which round-trips through a JSON string and breaks non-UTF-8 bytes). Use `copy_artifact_to_workspace` instead to move generated images from the artifacts drawer.';
 
 function validateImage(path: string, content: FileContent): ValidateCheck[] {
   const lower = path.toLowerCase();

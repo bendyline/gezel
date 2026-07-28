@@ -63,7 +63,7 @@ Mail already does, end to end, exactly what a connector must do. Each row genera
 | Secrets | SecretStore keyed `{toolset: mail-<provider>, field: accountId}`, OAuth re-persist on refresh | SecretStore keyed by connector type + binding |
 | Write-back | `_drafts/` → `_outbox/` → `_sent/` with a deny-by-default allowlist ([mail/outbox.ts](../packages/service/src/mail/outbox.ts)) | connector **outbox** contract |
 | AI read path | **none** — the AI reads synced markdown as ordinary files | unchanged: read = files |
-| AI write path | `draftEmail` / `queueEmail` / `sendEmail` MCP tools → `/api/projects/:id/mail/*` ([mcp/server.ts](../packages/mcp/src/server.ts)) | type-declared actions, same 3-step stage/gate |
+| AI write path | `draft_email` / `queue_email` / `send_email` MCP tools → `/api/projects/:id/mail/*` ([mcp/server.ts](../packages/mcp/src/server.ts)) | type-declared actions, same 3-step stage/gate |
 | Posture gate | autonomous sync rides `resolveSecurityPolicy(cfg).allowMail` | `allowExternalServices` per source |
 
 The point of the table: **codifying connectors is mostly a refactor of a shape we've already
@@ -305,7 +305,7 @@ agent:
 - **Deny-by-default allowlist.** Sending is permitted only to addresses/domains the user
   explicitly allowlisted on the project. No allowlist → nothing transmits. The generalized
   form: every action declares a consent scope, and the daemon — not the model — enforces it.
-- **Night-shift deferral.** `sendEmail` refuses to transmit during night shift; the message
+- **Night-shift deferral.** `send_email` refuses to transmit during night shift; the message
   stays staged for daytime approval. This **is** the morning-briefing model: the night shift
   drafts and queues, the user reviews the outbox and commits in the morning. The
   [HistoryManager](../packages/service/src/history/manager.ts) audit log and the keurmeester

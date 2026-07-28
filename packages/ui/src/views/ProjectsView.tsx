@@ -1799,8 +1799,8 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                             {writesJournal.length === 0 ? (
                               <p className="muted small">
                                 No workspace mutations recorded yet. Gezels that call{' '}
-                                <code>writeFile</code>, <code>rm</code>, <code>mkdir</code>, or{' '}
-                                <code>rename</code> will show up here.
+                                <code>write_file</code>, <code>delete_path</code>,{' '}
+                                <code>make_dir</code>, or <code>rename</code> will show up here.
                               </p>
                             ) : (
                               <ul>

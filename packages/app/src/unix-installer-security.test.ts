@@ -68,6 +68,7 @@ describe('macOS machine-service filesystem security', () => {
     expect(macPostinstall).toContain('[ "$daemon_home" != "/var/empty" ]');
     expect(macPostinstall).toContain('[ "$daemon_hidden" != "1" ]');
     expect(macPlist).toMatch(/<key>Umask<\/key>\s*<integer>63<\/integer>/);
+    expect(macPlist).toMatch(/<key>GEZEL_PORT<\/key>\s*<string>43935<\/string>/);
   });
 });
 
@@ -123,5 +124,6 @@ describe('Linux machine-service filesystem security', () => {
     expect(linuxPostinstall).toContain('assert_not_symlink "$DATA_DIR/runtime"');
     expect(linuxPostinstall).toContain('assert_not_symlink "$SERVICE_TREE"');
     expect(linuxUnit).toContain('UMask=0077');
+    expect(linuxUnit).toContain('Environment=GEZEL_PORT=43935');
   });
 });

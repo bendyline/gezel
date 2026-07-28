@@ -131,7 +131,8 @@ const DEFAULT_PREFERRED_PY = '3.11';
 export class UvRuntime {
   private readonly home: string;
   private readonly venvsRoot: string;
-  private readonly bundledUvBin: string | null;
+  private readonly bundledUvBinOverride: string | null;
+  private readonly readBundledUvFromEnv: boolean;
   private readonly spawn: typeof nodeSpawn;
   private readonly exec: (
     cmd: string,
@@ -160,13 +161,8 @@ export class UvRuntime {
   constructor(opts: UvRuntimeOptions) {
     this.home = opts.home;
     this.venvsRoot = join(opts.home, 'engines', 'uv', 'venvs');
-    if (opts.bundledUvBin === null) {
-      this.bundledUvBin = null;
-    } else if (opts.bundledUvBin !== undefined) {
-      this.bundledUvBin = opts.bundledUvBin;
-    } else {
-      this.bundledUvBin = process.env.GEZEL_UV_BIN ?? null;
-    }
+    this.readBundledUvFromEnv = opts.bundledUvBin === undefined;
+    this.bundledUvBinOverride = opts.bundledUvBin ?? null;
     this.spawn = opts.spawn ?? nodeSpawn;
     const execFn = opts.exec ?? nodeExec;
     this.exec = promisify(execFn) as typeof this.exec;
@@ -297,7 +293,8 @@ export class UvRuntime {
     bundledUvAvailable: boolean;
     reason?: string;
   }> {
-    const bundledUvAvailable = this.bundledUvBin != null && existsSync(this.bundledUvBin);
+    const bundledUvBin = this.resolveBundledUvBin();
+    const bundledUvAvailable = bundledUvBin != null && existsSync(bundledUvBin);
     try {
       const probe = await this.resolveInstaller(minPythonVersion);
       const out: Awaited<ReturnType<UvRuntime['describeRuntime']>> = {
@@ -318,6 +315,14 @@ export class UvRuntime {
   }
 
   private async resolveInstaller(minPy: string): Promise<ProbedInstaller> {
+    const bundledUvBin = this.resolveBundledUvBin();
+    // A runtime download can stamp GEZEL_UV_BIN after this manager was
+    // constructed (the CLI first-run bootstrap does exactly that). Prefer the
+    // newly available pinned binary even if an earlier call cached a system
+    // fallback, so the same daemon can continue without a restart.
+    if (bundledUvBin && existsSync(bundledUvBin) && this.probed?.installerPath !== bundledUvBin) {
+      this.probed = null;
+    }
     if (this.probed) return this.probed;
 
     // ── 1. Bundled uv ────────────────────────────────────────────
@@ -326,17 +331,17 @@ export class UvRuntime {
     // "install Command Line Developer Tools" dialog just to answer
     // `--version`, even though Gezel already ships everything needed to
     // provision an isolated Python under GEZEL_HOME.
-    if (this.bundledUvBin && existsSync(this.bundledUvBin)) {
+    if (bundledUvBin && existsSync(bundledUvBin)) {
       const version = await this.probeCommandVersion(
-        `"${this.bundledUvBin}" --version`,
+        `"${bundledUvBin}" --version`,
         /uv\s+(\d[\w.+-]*)/i,
       );
       this.probed = {
         source: 'bundled-uv',
-        installerPath: this.bundledUvBin,
+        installerPath: bundledUvBin,
         ...(version ? { uvVersion: version } : {}),
       };
-      this.onLog(`[uv-runtime] using bundled uv ${version ?? '?'} at ${this.bundledUvBin}`);
+      this.onLog(`[uv-runtime] using bundled uv ${version ?? '?'} at ${bundledUvBin}`);
       return this.probed;
     }
 
@@ -374,6 +379,12 @@ export class UvRuntime {
     );
     (err as Error & { isActionable: boolean }).isActionable = true;
     throw err;
+  }
+
+  private resolveBundledUvBin(): string | null {
+    return this.readBundledUvFromEnv
+      ? (process.env.GEZEL_UV_BIN ?? null)
+      : this.bundledUvBinOverride;
   }
 
   private async createVenv(

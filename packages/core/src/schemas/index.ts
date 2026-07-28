@@ -22,6 +22,7 @@ export * from './catalog.js';
 export * from './model-fitness.js';
 export * from './model-profile.js';
 export * from './model-tuning.js';
+export * from './native-engines.js';
 export * from './tuning-profile-registry.js';
 export * from './channels.js';
 export * from './toolsets.js';

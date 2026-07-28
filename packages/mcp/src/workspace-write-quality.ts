@@ -28,7 +28,7 @@ export function rejectRegressiveHtmlOverwrite(
     `(${prior.inlineJsBytes} bytes of inline JavaScript; signals: ${[...prior.signals].join(', ')})`,
     'but the proposed replacement is weaker',
     `(${next.inlineJsBytes} bytes of inline JavaScript; signals: ${[...next.signals].join(', ') || 'none'}).`,
-    'Read the existing file and patch it with replaceInFile, or re-emit a complete version that preserves the working grid, click handling, and win/draw logic.',
+    'Read the existing file and patch it with replace_in_file, or re-emit a complete version that preserves the working grid, click handling, and win/draw logic.',
   ].join(' ');
 }
 

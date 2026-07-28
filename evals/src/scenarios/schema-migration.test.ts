@@ -767,8 +767,8 @@ describe('schemaMigrationFeedbackFor', () => {
     expect(feedback.failReason).toContain('`CreateUserInput`, `UserStore`');
     expect(feedback.failReason).toContain('Preserve the `User` import');
     expect(feedback.failReason).toContain('remove only that import specifier');
-    expect(feedback.failReason).toContain('replaceInFile or replaceLines');
-    expect(feedback.failReason).toContain('Do not use writeFile');
+    expect(feedback.failReason).toContain('replace_in_file or replace_lines');
+    expect(feedback.failReason).toContain('Do not use write_file');
     expect(feedback.failReason).not.toContain('Repair every live name call site');
   });
 
@@ -784,7 +784,7 @@ describe('schemaMigrationFeedbackFor', () => {
     expect(feedback.failReason).toContain('formatDisplayName(user: User): string');
     expect(feedback.failReason).toContain('summarizeUsersForLog(users: User[]): string');
     expect(feedback.failReason).toContain('Do not change those signatures');
-    expect(feedback.failReason).not.toContain('Rewrite src/handlers.ts completely with writeFile');
+    expect(feedback.failReason).not.toContain('Rewrite src/handlers.ts completely with write_file');
     expect(feedback.failReason).toContain('renderUserCardHtml');
     expect(feedback.failReason).toContain('summarizeUsersForLog');
     expect(feedback.failReason).toContain('actual `user.id`');
@@ -807,7 +807,7 @@ describe('schemaMigrationFeedbackFor', () => {
     expect(feedback.failReason).toContain('list(): User[]');
     expect(feedback.failReason).toContain('Do not rename or replace the class');
     expect(feedback.failReason).toContain('firstName: input.firstName');
-    expect(feedback.failReason).not.toContain('Rewrite src/store.ts with writeFile');
+    expect(feedback.failReason).not.toContain('Rewrite src/store.ts with write_file');
     expect(feedback.failReason).toContain('src/handlers.ts also remains');
   });
 

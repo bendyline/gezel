@@ -140,7 +140,7 @@ export const KICKOFF_MESSAGE = [
   '<textarea> plus Save button, localStorage persistence across reloads, a search/filter input',
   `for the notes, at least ${MIN_NOTES_BYTES} bytes of real content, and inline JavaScript with no syntax`,
   `errors). Then get it actually finished: the deliverable is the file ${NOTES_PATH} at the`,
-  'workspace root — edit it in place via writeFile/replaceInFile (paths are relative to the',
+  'workspace root — edit it in place via write_file/replace_in_file (paths are relative to the',
   'workspace root, no leading "workspace/"). The checker re-verifies the file every few seconds',
   'and reports any unmet criterion back to you via chat.',
 ].join(' ');
@@ -427,7 +427,7 @@ export function rescueRepairDirective(criteria: NotesCriteriaResult): string {
       preserve,
       'The next edit must leave one valid inline script that loads notes from localStorage and writes them back with localStorage.setItem after Save/delete.',
       'Remove malformed escaped closing tags like `</body\\>` or `</html\\>` if present.',
-      `If using writeFile, emit one complete ${NOTES_PATH} with real persistence, filtering, textarea+Save, and at least ${MIN_NOTES_BYTES} bytes of useful UI/CSS/copy.`,
+      `If using write_file, emit one complete ${NOTES_PATH} with real persistence, filtering, textarea+Save, and at least ${MIN_NOTES_BYTES} bytes of useful UI/CSS/copy.`,
     ].join(' ');
   }
 

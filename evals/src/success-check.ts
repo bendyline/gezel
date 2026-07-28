@@ -140,7 +140,7 @@ export function jsQualitySignals(
   if (closure.unclosed) {
     return {
       signals: [],
-      failReason: `inline <script> opened ${closure.opens}× but only closed ${closure.closes}× — the writeFile body was truncated mid-script (no </script> ever arrived). Use \`appendToFile\` to finish the script in a follow-up call, or re-emit a leaner version of the whole page.`,
+      failReason: `inline <script> opened ${closure.opens}× but only closed ${closure.closes}× — the write_file body was truncated mid-script (no </script> ever arrived). Use \`append_to_file\` to finish the script in a follow-up call, or re-emit a leaner version of the whole page.`,
     };
   }
   const scripts = extractInlineScripts(html);

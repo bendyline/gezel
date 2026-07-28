@@ -185,11 +185,11 @@ describe('stripVisibleToolCallMarkup', () => {
       'reasoning A',
       '</think>',
       'visible A',
-      '<tool_call><function=readFile><parameter=path>x</parameter></function></tool_call>',
+      '<tool_call><function=read_file><parameter=path>x</parameter></function></tool_call>',
       'reasoning B',
       '</think>',
       'visible B',
-      '<tool_call><function=writeFile><parameter=path>y</parameter></function></tool_call>',
+      '<tool_call><function=write_file><parameter=path>y</parameter></function></tool_call>',
       'final visible content.',
     ].join('\n');
     const out = stripVisibleToolCallMarkup(input);
@@ -308,7 +308,7 @@ describe('stripVisibleToolCallMarkup', () => {
       'analysis|',
       'The user requested a code review and fix for three identified bugs.',
       '',
-      'I will execute these three fixes using `writeFile` in a single turn.',
+      'I will execute these three fixes using `write_file` in a single turn.',
       '</|end|>',
       '',
       'Visible reply.',
@@ -325,7 +325,7 @@ describe('stripVisibleToolCallMarkup', () => {
       'analysis|',
       'The user requested a code review and fix for three identified bugs.',
       '',
-      'I will execute these three fixes using `writeFile` in a single turn.',
+      'I will execute these three fixes using `write_file` in a single turn.',
     ].join('\n');
     const out = stripVisibleToolCallMarkup(input);
     expect(out).toBe('');
@@ -404,7 +404,7 @@ describe('stripVisibleToolCallMarkup — streaming mode (hideMidStreamOpener)', 
       'analysis|',
       'The user requested a code review and fix for three identified bugs.',
       '',
-      'I will execute these three fixes using `writeFile` in a single turn.',
+      'I will execute these three fixes using `write_file` in a single turn.',
     ].join('\n');
     const out = stripVisibleToolCallMarkup(input, { hideMidStreamOpener: true });
     expect(out).toBe('');

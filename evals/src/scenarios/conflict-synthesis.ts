@@ -196,7 +196,7 @@ export const SYNTHESIS_KICKOFF_MESSAGE = [
   'Everywhere OUTSIDE that section, use only the winning values — a superseded date,',
   'budget, or name appearing in the plan itself means the reconciliation failed.',
   'Cite the source file (backticked filename) for at least six claims. Write the',
-  'complete synthesis.md now with writeFile.',
+  'complete synthesis.md now with write_file.',
 ].join(' ');
 
 function toolCallArgumentText(call: SynthesisToolCall): string {
@@ -280,7 +280,7 @@ export function checkSynthesisReadProvenance(
 
   const detail =
     missingReads.size > 0
-      ? `source-read provenance missing successful readFile call(s): ${[...missingReads].join(', ')}`
+      ? `source-read provenance missing successful read_file call(s): ${[...missingReads].join(', ')}`
       : outOfOrderReads.size > 0
         ? `source-read provenance is out of order: ${[...outOfOrderReads].join(', ')}`
         : missingRecordings.length > 0
@@ -639,11 +639,11 @@ export function synthesisRepairDirective(failReason = ''): string {
     sourceReadRequired
       ? 'SOURCE_READ_REQUIRED: the final claims are not backed by successful, ordered source reads.'
       : 'SOURCE_GROUNDED_REPAIR: repair every actionable gap listed by the scenario check.',
-    'First call readFile on memo-product.md, memo-engineering.md, finance.csv, org.md, and memo-oldplan.md.',
+    'First call read_file on memo-product.md, memo-engineering.md, finance.csv, org.md, and memo-oldplan.md.',
     `Then patch \`${SYNTHESIS_PATH}\` using only the values you observed in those files.`,
     'Bind each conflicting field to both source filenames in one Conflicts entry, state which authority controls it, keep historical values out of the other sections, and remove any date, amount, or owner not supported by a cited source.',
     'The final claim-recording mutations must occur after their corresponding reads. Do not copy factual values from this message or prior checker feedback.',
-    'Use replaceInFile or replaceLines for focused corrections; use writeFile only when several sections need a coherent grounded rewrite.',
+    'Use replace_in_file or replace_lines for focused corrections; use write_file only when several sections need a coherent grounded rewrite.',
   ].join(' ');
 }
 

@@ -155,7 +155,7 @@ describe('requireScope', () => {
 });
 
 describe('first-party and internal API scope boundaries', () => {
-  it('lets root and ui administer first-party routes, but rejects app/session scopes', async () => {
+  it('lets root and ui administer first-party routes, but rejects cli/app/session scopes', async () => {
     store = await createTokenStore({
       home,
       rootToken: 'ROOT-TOKEN',
@@ -173,6 +173,11 @@ describe('first-party and internal API scope boundaries', () => {
       appName: 'DocBlocks',
       scopes: ['openai'],
     });
+    const cli = await store.issue({
+      appId: 'gezel-cli',
+      appName: 'Gezel CLI',
+      scopes: ['cli'],
+    });
     const session = store.issueSession({
       appId: 'session:s1',
       projectId: 'p1',
@@ -188,6 +193,7 @@ describe('first-party and internal API scope boundaries', () => {
       (await guarded.request('/admin', { headers: { Authorization: `Bearer ${token}` } })).status;
     expect(await status('ROOT-TOKEN')).toBe(200);
     expect(await status('UI-TOKEN')).toBe(200);
+    expect(await status(cli.token)).toBe(403);
     expect(await status(openai.token)).toBe(403);
     expect(await status(session.token)).toBe(403);
   });
@@ -209,6 +215,11 @@ describe('first-party and internal API scope boundaries', () => {
       appId: 'docblocks',
       appName: 'DocBlocks',
       scopes: ['openai'],
+    });
+    const cli = await store.issue({
+      appId: 'gezel-cli',
+      appName: 'Gezel CLI',
+      scopes: ['cli'],
     });
     const remote = await store.issue({
       appId: 'remote-device',
@@ -238,6 +249,7 @@ describe('first-party and internal API scope boundaries', () => {
     expect((await guarded.request('/api/health')).status).toBe(200);
     expect(await status('ROOT-TOKEN')).toBe(200);
     expect(await status('UI-TOKEN')).toBe(200);
+    expect(await status(cli.token)).toBe(200);
     expect(await status(session.token)).toBe(200);
     expect(await status(openai.token)).toBe(403);
     expect(await status(remote.token)).toBe(403);

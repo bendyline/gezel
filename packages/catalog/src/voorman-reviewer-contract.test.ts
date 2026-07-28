@@ -85,6 +85,7 @@ describe('Voorman / Reviewer contract', () => {
   it('Voorman about does not instruct direct workspace writes', async () => {
     const voorman = await readLatestAbout('vo', 'voorman');
     expect(voorman).not.toContain('writeFile');
+    expect(voorman).not.toContain('write_file');
     expect(voorman).not.toMatch(/write (?:the )?file directly/i);
     expect(voorman).toContain('Single-file deliverables: one direct handoff');
     expect(voorman).toContain('Your deliverable is the brief, not the artifact');

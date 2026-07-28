@@ -5,7 +5,7 @@ import { TurnAbortError } from './turn-abort-error.js';
 describe('ToolRepeatTracker', () => {
   it('passes the first call through with count=1, no warning', () => {
     const t = new ToolRepeatTracker();
-    const r = t.recordCall('readFile', { path: 'package.json' }, 'file contents...');
+    const r = t.recordCall('read_file', { path: 'package.json' }, 'file contents...');
     expect(r.count).toBe(1);
     expect(r.shouldAbort).toBe(false);
     expect(r.output).toBe('file contents...');
@@ -13,8 +13,8 @@ describe('ToolRepeatTracker', () => {
 
   it('passes the second call through with count=2, no warning', () => {
     const t = new ToolRepeatTracker();
-    t.recordCall('readFile', { path: 'package.json' }, 'contents');
-    const r = t.recordCall('readFile', { path: 'package.json' }, 'contents');
+    t.recordCall('read_file', { path: 'package.json' }, 'contents');
+    const r = t.recordCall('read_file', { path: 'package.json' }, 'contents');
     expect(r.count).toBe(2);
     expect(r.shouldAbort).toBe(false);
     expect(r.output).toBe('contents');
@@ -36,24 +36,24 @@ describe('ToolRepeatTracker', () => {
   it('hard-aborts at the 5th same-args call', () => {
     const t = new ToolRepeatTracker();
     for (let i = 0; i < 4; i++) {
-      t.recordCall('readFile', { path: 'a.json' }, 'x');
+      t.recordCall('read_file', { path: 'a.json' }, 'x');
     }
-    const r = t.recordCall('readFile', { path: 'a.json' }, 'x');
+    const r = t.recordCall('read_file', { path: 'a.json' }, 'x');
     expect(r.count).toBe(5);
     expect(r.shouldAbort).toBe(true);
   });
 
-  it('counts repeated writeFile calls to the same path even when content changes', () => {
+  it('counts repeated write_file calls to the same path even when content changes', () => {
     const t = new ToolRepeatTracker();
-    t.recordCall('writeFile', { path: 'script.js', content: 'one' }, 'wrote');
-    t.recordCall('writeFile', { path: 'script.js', content: 'two' }, 'wrote');
-    const soft = t.recordCall('writeFile', { path: 'script.js', content: 'three' }, 'wrote');
+    t.recordCall('write_file', { path: 'script.js', content: 'one' }, 'wrote');
+    t.recordCall('write_file', { path: 'script.js', content: 'two' }, 'wrote');
+    const soft = t.recordCall('write_file', { path: 'script.js', content: 'three' }, 'wrote');
     expect(soft.count).toBe(3);
     expect(soft.output).toContain('same path `script.js` 3 times');
     expect(soft.output).toContain('Stop re-writing');
 
-    t.recordCall('writeFile', { path: 'script.js', content: 'four' }, 'wrote');
-    const hard = t.recordCall('writeFile', { path: 'script.js', content: 'five' }, 'wrote');
+    t.recordCall('write_file', { path: 'script.js', content: 'four' }, 'wrote');
+    const hard = t.recordCall('write_file', { path: 'script.js', content: 'five' }, 'wrote');
     expect(hard.count).toBe(5);
     expect(hard.shouldAbort).toBe(true);
   });
@@ -64,17 +64,17 @@ describe('ToolRepeatTracker', () => {
       'ERROR: syntax error. This write is rejected atomically; THE FILE WAS NOT WRITTEN by this call.';
 
     const firstRejected = t.recordCall(
-      'writeFile',
+      'write_file',
       { path: 'scripts/derive.mjs', content: 'const broken = ;' },
       rejected,
     );
     const correctedRejected = t.recordCall(
-      'writeFile',
+      'write_file',
       { path: 'scripts/derive.mjs', content: 'const stillBroken: string = "x";' },
       rejected,
     );
     const firstPersisted = t.recordCall(
-      'writeFile',
+      'write_file',
       { path: 'scripts/derive.mjs', content: 'const valid = "x";' },
       'Wrote scripts/derive.mjs',
     );
@@ -89,29 +89,29 @@ describe('ToolRepeatTracker', () => {
     const args = { path: 'scripts/derive.mjs', content: 'const broken = ;' };
     const rejected = 'ERROR: THE FILE WAS NOT WRITTEN by this call.';
 
-    t.recordCall('writeFile', args, rejected);
-    const soft = t.recordCall('writeFile', args, rejected);
-    const hard = t.recordCall('writeFile', args, rejected);
+    t.recordCall('write_file', args, rejected);
+    const soft = t.recordCall('write_file', args, rejected);
+    const hard = t.recordCall('write_file', args, rejected);
 
     expect(soft.count).toBe(2);
     expect(soft.output).toContain('[runtime]');
     expect(hard.shouldAbort).toBe(true);
   });
 
-  it('counts repeated replaceInFile calls to the same path even when patches change', () => {
+  it('counts repeated replace_in_file calls to the same path even when patches change', () => {
     const t = new ToolRepeatTracker();
     t.recordCall(
-      'replaceInFile',
+      'replace_in_file',
       { path: 'index.html', find: 'one', replace: 'two' },
       'ERROR: not found',
     );
     t.recordCall(
-      'replaceInFile',
+      'replace_in_file',
       { path: 'index.html', find: 'three', replace: 'four' },
       'ERROR: not found',
     );
     const soft = t.recordCall(
-      'replaceInFile',
+      'replace_in_file',
       { path: 'index.html', find: 'five', replace: 'six' },
       'ERROR: not found',
     );
@@ -120,12 +120,12 @@ describe('ToolRepeatTracker', () => {
     expect(soft.output).toContain('same path `index.html` 3 times');
 
     t.recordCall(
-      'replaceInFile',
+      'replace_in_file',
       { path: 'index.html', find: 'seven', replace: 'eight' },
       'ERROR: not found',
     );
     const hard = t.recordCall(
-      'replaceInFile',
+      'replace_in_file',
       { path: 'index.html', find: 'nine', replace: 'ten' },
       'ERROR: not found',
     );
@@ -141,9 +141,9 @@ describe('ToolRepeatTracker', () => {
     const t = new ToolRepeatTracker();
     t.recordCall('read_task_notes', { ref: 'a/3' }, 'notes');
     t.recordCall('list_artifacts', { recursive: true }, '[]');
-    t.recordCall('readdir', { path: 'src' }, '[]');
+    t.recordCall('list_dir', { path: 'src' }, '[]');
     t.recordCall('read_task_notes', { ref: 'a/3' }, 'notes');
-    t.recordCall('readFile', { path: 'package.json' }, '{}');
+    t.recordCall('read_file', { path: 'package.json' }, '{}');
     const r = t.recordCall('read_task_notes', { ref: 'a/3' }, 'notes');
     expect(r.count).toBe(3);
     expect(r.shouldAbort).toBe(false);
@@ -152,9 +152,9 @@ describe('ToolRepeatTracker', () => {
 
   it('treats different args of the same tool as separate fingerprints', () => {
     const t = new ToolRepeatTracker();
-    t.recordCall('readFile', { path: 'a.json' }, 'a');
-    t.recordCall('readFile', { path: 'a.json' }, 'a');
-    const otherFirst = t.recordCall('readFile', { path: 'b.json' }, 'b');
+    t.recordCall('read_file', { path: 'a.json' }, 'a');
+    t.recordCall('read_file', { path: 'a.json' }, 'a');
+    const otherFirst = t.recordCall('read_file', { path: 'b.json' }, 'b');
     expect(otherFirst.count).toBe(1);
     expect(otherFirst.shouldAbort).toBe(false);
   });
@@ -198,7 +198,7 @@ describe('ToolRepeatTracker', () => {
       toolName: 'read_task_notes',
       count: 5,
     });
-    expect(msg).toMatch(/write_artifact|writeFile/);
+    expect(msg).toMatch(/write_artifact|write_file/);
     expect(msg).toMatch(/Stop|MUST/);
   });
 
@@ -217,7 +217,7 @@ describe('ToolRepeatTracker', () => {
   });
 
   it('filters action-tool suggestions to what is actually registered', () => {
-    // Voorman loadout: no `writeFile`, no `write_artifact` (read-only
+    // Voorman loadout: no `write_file`, no `write_artifact` (read-only
     // workspace) — just `message_gezel`, `set_task_status`, etc.
     const msg = ToolRepeatTracker.buildAbortMessage({
       providerLabel: 'Mac AI',
@@ -233,7 +233,7 @@ describe('ToolRepeatTracker', () => {
         'ask_user_question',
       ],
     });
-    expect(msg).not.toContain('writeFile');
+    expect(msg).not.toContain('write_file');
     expect(msg).not.toContain('write_artifact');
     expect(msg).toContain('message_gezel');
     expect(msg).toContain('assign_task');
@@ -271,20 +271,20 @@ describe('ToolRepeatTracker', () => {
   it('keeps the ship-code hint when a write tool IS registered', () => {
     const msg = ToolRepeatTracker.buildAbortMessage({
       providerLabel: 'llama.cpp',
-      toolName: 'readFile',
+      toolName: 'read_file',
       count: 5,
-      registeredTools: ['readFile', 'writeFile', 'message_gezel'],
+      registeredTools: ['read_file', 'write_file', 'message_gezel'],
     });
-    expect(msg).toContain('writeFile');
+    expect(msg).toContain('write_file');
     expect(msg).toContain('full file contents');
   });
 
   it('does not present write_artifact as the ship-code path', () => {
     const msg = ToolRepeatTracker.buildAbortMessage({
       providerLabel: 'llama.cpp',
-      toolName: 'readFile',
+      toolName: 'read_file',
       count: 5,
-      registeredTools: ['readFile', 'write_artifact', 'message_gezel', 'ask_user_question'],
+      registeredTools: ['read_file', 'write_artifact', 'message_gezel', 'ask_user_question'],
     });
     expect(msg).toContain('do not use `write_artifact`');
     expect(msg).toContain('artifacts are for plans/scratch');
@@ -294,11 +294,11 @@ describe('ToolRepeatTracker', () => {
   it('routes source-file read loops without workspace write access to a developer handoff', () => {
     const msg = ToolRepeatTracker.buildAbortMessage({
       providerLabel: 'llama.cpp',
-      toolName: 'readFile',
+      toolName: 'read_file',
       args: { path: 'index.html' },
       count: 5,
       registeredTools: [
-        'readFile',
+        'read_file',
         'write_artifact',
         'message_gezel',
         'assign_task',
@@ -338,12 +338,12 @@ describe('ToolRepeatTracker', () => {
     expect(msg).toContain('message_gezel');
   });
 
-  it('also covers writeFile + replaceInFile under the write-loop branch', () => {
-    for (const tool of ['applyPatch', 'mkdir']) {
+  it('also covers write_file + replace_in_file under the write-loop branch', () => {
+    for (const tool of ['apply_patch', 'make_dir']) {
       const msg = ToolRepeatTracker.buildAbortMessage({
         providerLabel: 'llama.cpp',
         toolName: tool,
-        args: tool === 'writeFile' ? { path: 'index.html' } : undefined,
+        args: tool === 'write_file' ? { path: 'index.html' } : undefined,
         count: 5,
         registeredTools: [tool, 'message_gezel'],
       });
@@ -352,14 +352,14 @@ describe('ToolRepeatTracker', () => {
     }
   });
 
-  it('routes source writeFile + replaceInFile loops to a full-source corrective', () => {
-    for (const tool of ['writeFile', 'replaceInFile']) {
+  it('routes source write_file + replace_in_file loops to a full-source corrective', () => {
+    for (const tool of ['write_file', 'replace_in_file']) {
       const msg = ToolRepeatTracker.buildAbortMessage({
         providerLabel: 'llama.cpp',
         toolName: tool,
         args: { path: 'index.html' },
         count: 5,
-        registeredTools: [tool, 'writeFile', 'ask_user_question'],
+        registeredTools: [tool, 'write_file', 'ask_user_question'],
       });
       expect(msg, `${tool} should hit source-edit branch`).toContain(
         'entire corrected source file',
@@ -370,13 +370,13 @@ describe('ToolRepeatTracker', () => {
     }
   });
 
-  it('names the repeated writeFile path in the hard-abort message', () => {
+  it('names the repeated write_file path in the hard-abort message', () => {
     const msg = ToolRepeatTracker.buildAbortMessage({
       providerLabel: 'Mac AI',
-      toolName: 'writeFile',
+      toolName: 'write_file',
       args: { path: 'script.js', content: 'latest' },
       count: 5,
-      registeredTools: ['writeFile', 'replaceInFile', 'readFile'],
+      registeredTools: ['write_file', 'replace_in_file', 'read_file'],
     });
     expect(msg).toContain('same path `script.js` 5 times');
     expect(msg).toContain('Stop emitting fragments');
@@ -386,25 +386,25 @@ describe('ToolRepeatTracker', () => {
   it('uses a full-source corrective for repeated source edit loops', () => {
     const msg = ToolRepeatTracker.buildAbortMessage({
       providerLabel: 'llama.cpp',
-      toolName: 'replaceInFile',
+      toolName: 'replace_in_file',
       args: { path: 'index.html', find: 'bad', replace: 'good' },
       count: 5,
-      registeredTools: ['readFile', 'writeFile', 'replaceInFile', 'ask_user_question'],
+      registeredTools: ['read_file', 'write_file', 'replace_in_file', 'ask_user_question'],
     });
     expect(msg).toContain('same path `index.html` 5 times');
     expect(msg).toContain('Stop emitting fragments');
     expect(msg).toContain('entire corrected source file');
-    expect(msg).toContain('writeFile({ path, content })');
+    expect(msg).toContain('write_file({ path, content })');
     expect(msg).not.toContain('already written');
   });
 
   it('lets a named missing deliverable path take precedence over a source-edit loop', () => {
     const msg = ToolRepeatTracker.buildAbortMessage({
       providerLabel: 'llama.cpp',
-      toolName: 'replaceInFile',
+      toolName: 'replace_in_file',
       args: { path: 'server.mjs', find: 'bad', replace: 'good' },
       count: 5,
-      registeredTools: ['readFile', 'writeFile', 'replaceInFile', 'ask_user_question'],
+      registeredTools: ['read_file', 'write_file', 'replace_in_file', 'ask_user_question'],
     });
     expect(msg).toContain('different missing deliverable path');
     expect(msg).toContain('for that exact path');
@@ -420,7 +420,7 @@ describe('ToolRepeatTracker', () => {
       count: 5,
       registeredTools: [],
     });
-    expect(msg).toMatch(/write_artifact|writeFile/);
+    expect(msg).toMatch(/write_artifact|write_file/);
     expect(msg).toContain('message_gezel');
   });
 

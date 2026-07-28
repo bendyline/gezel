@@ -50,7 +50,7 @@ export const TIER_DEFAULT_BEHAVIORS: Record<ModelTier, ReadonlyArray<BehaviorEnt
   ],
   // The gestalt block pays where attention budget allows and repo
   // orientation is the bottleneck; retrieval-first steers the tiers most
-  // prone to readFile-walking. compact-tool-schemas keeps the schema
+  // prone to read_file-walking. compact-tool-schemas keeps the schema
   // tax off medium locals too (it self-gates off at large/cloud). Cloud
   // stays empty as ever.
   medium: [

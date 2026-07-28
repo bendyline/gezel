@@ -204,7 +204,7 @@ export async function resolveSessionToolSurface(
   // before the cap so the load-bearing floor protects them, and before the
   // narrowing constraints. Message-driven clamps may narrow the working
   // surface, but the completion tools are restored below so a seed that
-  // mentions `writeFile` can never hide the `write_task_note` action its
+  // mentions `write_file` can never hide the `write_task_note` action its
   // craftbook procedure requires first. Only augments a real filtered set;
   // a null allowlist already sees everything.
   if (rawAllowlist && opts.session.taskRef && opts.session.stepId) {
@@ -325,7 +325,7 @@ export async function resolveSessionToolSurface(
   if (allowlist !== allowlistBeforeSourceEdit) opts.onClamp?.('existing-source-edit');
 
   // A message-shaped clamp is subordinate to the persisted craftbook
-  // procedure. File handoffs commonly contain `writeFile` wording even when
+  // procedure. File handoffs commonly contain `write_file` wording even when
   // the active step explicitly requires `write_task_note` first. Restoring
   // the step-completion floor after every message-driven clamp keeps the
   // advertised schema consistent with that procedure while retaining the
@@ -374,11 +374,11 @@ export async function resolveSessionToolSurface(
     // carries a mutation tool — a role whose kit has no write access
     // (mis-assignment) is fixed by reassignment, not by starving.
     const MUTATION_TOOLS = [
-      'writeFile',
-      'appendToFile',
-      'replaceInFile',
-      'replaceLines',
-      'applyPatch',
+      'write_file',
+      'append_to_file',
+      'replace_in_file',
+      'replace_lines',
+      'apply_patch',
       'derive_file',
     ];
     if (MUTATION_TOOLS.some((name) => clamped.has(name))) {
@@ -450,7 +450,7 @@ const LOAD_BEARING_TOOL_CAP_ALWAYS_KEEP: ReadonlySet<string> = new Set([
   'write_task_note',
   'advance_task_step',
   'set_task_status',
-  'writeFile',
+  'write_file',
   // Delegation-role task procedures and role templates use this as the
   // name-addressed handoff escape hatch. Tiny-tier caps previously evicted
   // it from Planner while the active step still said "use message_gezel".
@@ -470,7 +470,7 @@ const LOAD_BEARING_TOOL_CAP_ALWAYS_KEEP: ReadonlySet<string> = new Set([
 // of an office-hours craftbook, but the meester role kit is `tasks-readonly`
 // (no `write_task_note` / `advance_task_step`). The nudge told her to write
 // the deliverable and advance; neither tool was on her surface, so she
-// stalled. `writeFile` is deliberately absent: a step whose deliverable is a
+// stalled. `write_file` is deliberately absent: a step whose deliverable is a
 // source file belongs to a developer — mis-assignment is fixed by
 // reassignment, not by handing a coordinator workspace-write.
 const STEP_COMPLETION_TOOLS: readonly string[] = [
@@ -550,8 +550,8 @@ const VOORMAN_TOOL_CAP_PRIORITY = [
   'craftbook_read',
   'craftbook_write',
   // Verify delegated deliverables actually landed before reporting done.
-  'readFile',
-  'readdir',
+  'read_file',
+  'list_dir',
   // Handoff briefs / scratch.
   'list_artifacts',
   'read_artifact',
@@ -577,20 +577,20 @@ const VOORMAN_TOOL_CAP_PRIORITY = [
 ] as const;
 
 const IMPLEMENTATION_TOOL_CAP_PRIORITY = [
-  'writeFile',
-  'appendToFile',
-  'replaceLines',
-  'replaceInFile',
-  'readFile',
-  'readdir',
+  'write_file',
+  'append_to_file',
+  'replace_lines',
+  'replace_in_file',
+  'read_file',
+  'list_dir',
   'stat',
   'validate',
   'run_nodejs_script',
   'derive_file',
-  'applyPatch',
-  'insertAtMarker',
-  'mkdir',
-  'rm',
+  'apply_patch',
+  'insert_at_marker',
+  'make_dir',
+  'delete_path',
   'rename',
   'list_package_scripts',
   'run_package_script',

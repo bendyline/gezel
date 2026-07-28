@@ -1980,9 +1980,9 @@ export class ChatManager {
    * True when the immediate-file-write deliverable in `message` names an
    * existing, substantial workspace file — a modification, not a create —
    * so {@link constrainAllowlistForImmediateFileWrite} keeps the surgical
-   * patch tools available instead of forcing a `writeFile`-only full
+   * patch tools available instead of forcing a `write_file`-only full
    * rewrite the model corrupts. Fresh creates (file absent, e.g. evals)
-   * and stubs stay on the `writeFile`-only path.
+   * and stubs stay on the `write_file`-only path.
    */
   private async deliverableIsExistingSubstantialFile(
     projectId: string,
@@ -2758,12 +2758,12 @@ export class ChatManager {
     // meester lives in `default`, spun up a named project for the
     // work, and forgot to pass `project: "..."` on a follow-up
     // `message_gezel`. Without this nudge, the target gets a fresh
-    // `default`-scoped session, its `readFile`/`readdir`/`stat` tools
+    // `default`-scoped session, its `read_file`/`list_dir`/`stat` tools
     // then 404 against `default/workspace/` even though the work it
     // already did lives in the named project. Wild-caught
     // (nemotron-nano tictactoe v2): rosalind→constanza, first message
     // passed project=tic-tac-toe-game; a second message omitted it,
-    // constanza got a new default-scoped session, readFile 404'd 5×,
+    // constanza got a new default-scoped session, read_file 404'd 5×,
     // FailureTracker aborted the turn.
     //
     // The "unambiguous" guard (exactly one distinct non-default
@@ -5005,7 +5005,7 @@ export class ChatManager {
         this.events.publish(scope, { type: 'wire_pulse' });
       });
       const unsubToolArgs = s.onToolArgsDelta?.((name, chunk) => {
-        // Live tool-argument fragments (structured writeFile content
+        // Live tool-argument fragments (structured write_file content
         // mid-generation). Display-only — kept OUT of the visible-content
         // accumulators like reasoning deltas, but counts as liveness so a
         // multi-minute structured write never reads as an idle stall.
@@ -5778,7 +5778,7 @@ export class ChatManager {
         // branches below, so the re-prompt the model gets next turn is
         // the most specific one. Pattern: assistant said "saved to
         // <path>" / "wrote it to <path>" / "filed at <path>" with no
-        // actual writeFile in this turn's tool calls. Matrix #2
+        // actual write_file in this turn's tool calls. Matrix #2
         // squisq-review is the load-bearing case — the
         // Reviewer pasted a long review into chat and the Meester then
         // relayed "saved the full report to `review.md`" without any
@@ -5787,11 +5787,11 @@ export class ChatManager {
         // Skip when a profile detector already produced a re-prompt
         // — that one's more context-aware. Skip when continuations are
         // exhausted (no slot left). Skip when the gezel is in a role
-        // that legitimately doesn't have writeFile (e.g. Meester) AND
+        // that legitimately doesn't have write_file (e.g. Meester) AND
         // the claim looks like a relay from a specialist rather than a
         // self-attribution; for now we trigger on any matching prose
         // since the Meester relay case is itself the bug — the role
-        // should `readFile` to verify before relaying.
+        // should `read_file` to verify before relaying.
         if (!detectorReprompt) {
           const unsaved = detectUnsavedFileClaim(
             typeof assistantMessage.content === 'string' ? assistantMessage.content : '',
@@ -5809,11 +5809,11 @@ export class ChatManager {
             // — never nag. A MODIFY claim is different: the file almost
             // always already exists, so its presence proves nothing about
             // whether THIS turn's edit landed. detectUnsavedFileClaim has
-            // already confirmed no write/replaceInFile succeeded this turn,
+            // already confirmed no write/replace_in_file succeeded this turn,
             // so a 'modified' claim is fabricated regardless of existence —
             // fire without the on-disk shortcut. Wild-caught
             // (qwen3.6 developer "Space Shooter Arcade"): "I have updated
-            // the game logic in index.html" after only a readFile; the file
+            // the game logic in index.html" after only a read_file; the file
             // existed from the create turn, so the existence check silently
             // swallowed the false claim.
             const existenceProvesClaim = unsaved.kind !== 'modified';
@@ -5824,7 +5824,7 @@ export class ChatManager {
               : null;
             if (!existenceProvesClaim || onDisk === null) {
               const availableToolNames = liveSession?.getRegisteredToolNames?.() ?? [];
-              const canWrite = availableToolNames.includes('writeFile');
+              const canWrite = availableToolNames.includes('write_file');
               log.warn(
                 `runSend#${tag} unsaved-file-claim (${unsaved.kind}): model implied ${unsaved.claimedPath} was ${unsaved.kind === 'modified' ? 'changed' : 'created'} but no write landed this turn (canWrite=${canWrite})`,
               );
@@ -5833,9 +5833,9 @@ export class ChatManager {
           }
         }
         // Chat-coded-file salvage. The model pasted a whole file into a
-        // chat code block but never called `writeFile` (no "saved to X"
+        // chat code block but never called `write_file` (no "saved to X"
         // claim, so detectUnsavedFileClaim stayed quiet). Only nudge a
-        // role that actually has writeFile — otherwise the right move is
+        // role that actually has write_file — otherwise the right move is
         // delegation, which the role's about.md already covers.
         if (!detectorReprompt) {
           const chatCoded = detectChatCodedFileWithoutWrite(
@@ -5844,12 +5844,12 @@ export class ChatManager {
           );
           if (chatCoded) {
             const availableToolNames = liveSession?.getRegisteredToolNames?.() ?? [];
-            if (availableToolNames.includes('writeFile')) {
+            if (availableToolNames.includes('write_file')) {
               const normalizedPath = chatCoded.path
                 .replace(/^\.?\/?workspace\//i, '')
                 .replace(/^\.\//, '');
               log.warn(
-                `runSend#${tag} chat-coded-file: model emitted ${chatCoded.path} as a chat code block but never called writeFile`,
+                `runSend#${tag} chat-coded-file: model emitted ${chatCoded.path} as a chat code block but never called write_file`,
               );
               detectorReprompt = buildChatCodedFileNudge(normalizedPath);
             }
@@ -5874,7 +5874,7 @@ export class ChatManager {
           );
           if (proseDeliverable) {
             const availableToolNames = liveSession?.getRegisteredToolNames?.() ?? [];
-            if (availableToolNames.includes('writeFile')) {
+            if (availableToolNames.includes('write_file')) {
               const normalizedPath = proseDeliverable.path
                 .replace(/^\.?\/?workspace\//i, '')
                 .replace(/^\.\//, '');
@@ -6552,7 +6552,7 @@ export class ChatManager {
       // message is the recovery) — but CONSECUTIVE aborts mean that
       // recovery demonstrably failed twice, which is an exhausted state
       // like any other rung. Wild-caught (bookstore-openapi,
-      // sam): `replaceLines failed 5× in a row` abort → harness-injected
+      // sam): `replace_lines failed 5× in a row` abort → harness-injected
       // recovery → file-work abort again — the ladder watched in silence.
       const previousAssistantAborted = (() => {
         // messages.at(-1) is THIS turn's just-persisted abort; find the
@@ -9696,7 +9696,7 @@ export class ChatManager {
       const isRepairMessage =
         /\bworking-image\b/i.test(text) ||
         /\bsuccess criteria\b/i.test(text) ||
-        /\breplaceInFile\b/i.test(text) ||
+        /\breplace_in_file\b/i.test(text) ||
         /\bpatch\b[\s\S]{0,160}\b(?:img|image|src)\b/i.test(text);
       if (isQueuedGezelMessage && !isRepairMessage) {
         filePath =
@@ -9806,7 +9806,7 @@ export class ChatManager {
         this.events.publish(scope, {
           type: 'warning',
           message:
-            "MCP bridge to your tools failed to start — this gezel can't run any actions this turn (no writeFile, readFile, run_script, etc.). The model has been told not to fabricate tool calls. Try restarting the service, or check Settings → On-device → MCP bridge for the underlying error.",
+            "MCP bridge to your tools failed to start — this gezel can't run any actions this turn (no write_file, read_file, run_script, etc.). The model has been told not to fabricate tool calls. Try restarting the service, or check Settings → On-device → MCP bridge for the underlying error.",
         });
         return;
       }
@@ -10653,7 +10653,7 @@ export class ChatManager {
     // path so the anti-spin corrective points at the step's onExit
     // script (`run_script({ name: '<x>' })`) rather than the generic
     // file-write candidates. Without this medium models hit the spin
-    // guard and get pointed at `writeFile` (wrong for a review step)
+    // guard and get pointed at `write_file` (wrong for a review step)
     // and either fabricate or stall again.
     if (taskContext?.step) {
       const step = taskContext.step;
@@ -11056,7 +11056,7 @@ export class ChatManager {
         // target to this template when editing in the explicit editor.
         ...(record.craftbookRef ? { GEZEL_CRAFTBOOK_ID: record.craftbookRef } : {}),
         // Only mail-enabled projects expose the email write tools, so a
-        // non-mail project's agent never sees draft/queue/sendEmail.
+        // non-mail project's agent never sees draft_email/queue_email/send_email.
         ...(project?.mail?.accounts?.length ? { GEZEL_MAIL_ENABLED: '1' } : {}),
         // Only projects with bound connectors expose draft_connector_action.
         ...(project?.connectors?.length ? { GEZEL_CONNECTORS_ENABLED: '1' } : {}),
@@ -11065,6 +11065,12 @@ export class ChatManager {
         // pipeline (script-tools.ts on both sides).
         ...(scriptToolPlan.effective.length > 0
           ? { GEZEL_SCRIPT_TOOLS: JSON.stringify(scriptToolPlan.effective) }
+          : {}),
+        // Naming-experiment passthrough: the mcp subprocess env is built
+        // from scratch, so the A/B lever must be forwarded explicitly or
+        // the legacy arm would silently register canonical names anyway.
+        ...(process.env.GEZEL_MCP_TOOL_NAMING
+          ? { GEZEL_MCP_TOOL_NAMING: process.env.GEZEL_MCP_TOOL_NAMING }
           : {}),
       };
       // Diagnostic for the recurring "game tools missing after a model
@@ -11784,7 +11790,7 @@ function clampAskTimeout(ms: number): number {
  * The raw string a provider throws when a delegate's turn aborts is
  * written in the SECOND PERSON for the delegate who is mid-turn — e.g.
  * "Stop planning. Your next message MUST start with a single tool call.
- * If `writeFile` is in your tool list, call it NOW with the full file
+ * If `write_file` is in your tool list, call it NOW with the full file
  * contents." Forwarded verbatim into the asker's `message_gezel` /
  * `ask_gezel` tool result (as it was before this helper existed), that
  * remediation is actively misleading: it reads as "YOU called this
@@ -11796,13 +11802,13 @@ function clampAskTimeout(ms: number): number {
  * delegated `index.html` to a builder (Adam) whose turn ramble-aborted.
  * She received Adam's second-person abort verbatim, mutated her valid
  * `message_gezel` args (dropped the required `gezel`, added `project`)
- * hunting a non-existent argument error, then hallucinated a `writeFile`
+ * hunting a non-existent argument error, then hallucinated a `write_file`
  * call she had no tool for and dumped the whole HTML as phantom markup —
  * exactly the anti-pattern the abort copy was trying to prevent in Adam.
  *
  * This returns an asker-facing line that attributes the failure to the
  * target and points at the orchestrator's real options, never echoing
- * delegate-facing "call writeFile NOW" remediation back to a caller who
+ * delegate-facing "call write_file NOW" remediation back to a caller who
  * merely delegated.
  */
 export function describeDelegateFailureForAsker(targetName: string, raw: string): string {
@@ -11843,36 +11849,36 @@ function formatExpectedDeliverableAnnotation(
 ): string {
   if (!deliverable || deliverable.kind !== 'file') return '';
   // On a non-writable project the recipient has no write tools, so don't
-  // tell it to call `writeFile`/`generate_image` — that's the instruction
+  // tell it to call `write_file`/`generate_image` — that's the instruction
   // that leads to a stripped-tool call and a hallucinated save. Flag the
   // block instead; the recipient's system prompt carries the fuller note.
   if (fileEditsDisabled) {
-    return '\n\n[Note: gezel file edits are turned OFF for this project, so this file deliverable cannot be written. Do not call `writeFile` or claim the file was saved — reply that it is blocked until "Allow gezels to modify the workspace directory" is enabled in Project → Settings.]';
+    return '\n\n[Note: gezel file edits are turned OFF for this project, so this file deliverable cannot be written. Do not call `write_file` or claim the file was saved — reply that it is blocked until "Allow gezels to modify the workspace directory" is enabled in Project → Settings.]';
   }
   const path = deliverable.filePath?.trim();
   const pathClause = path
     ? `at \`${path}\``
     : 'at a workspace-relative path (default: `<topic>-analysis.md`)';
   if (path && isExpectedImageDeliverablePath(path)) {
-    return `\n\n[Deliverable expected as an IMAGE FILE at \`${path}\`. Your first assistant action should be the tool call \`generate_image({ prompt, saveAs: "${path}" })\`; the image tool writes the PNG/JPG/WebP bytes to disk. Reply in chat with the path + a 2-sentence precis — do NOT call \`writeFile({ path, content })\` for binary image bytes and do NOT paste base64 or prose as the deliverable.]`;
+    return `\n\n[Deliverable expected as an IMAGE FILE at \`${path}\`. Your first assistant action should be the tool call \`generate_image({ prompt, saveAs: "${path}" })\`; the image tool writes the PNG/JPG/WebP bytes to disk. Reply in chat with the path + a 2-sentence precis — do NOT call \`write_file({ path, content })\` for binary image bytes and do NOT paste base64 or prose as the deliverable.]`;
   }
   if (path && isExpectedBinaryDocumentDeliverablePath(path)) {
-    return `\n\n[Deliverable expected as a REAL BINARY DOCUMENT at \`${path}\`. Preserve that exact format — a markdown outline or similarly named text file is not the deliverable. Use the installed document-production tools/craftbook (for PowerPoint: \`convert_document\`, visually inspect with \`preview_document\`, then persist with \`save_artifact\`). Do NOT call \`writeFile\` with prose or base64 for this binary file. If those production tools are not on your roster, reply that the exact-format deliverable is blocked instead of silently substituting another format.]`;
+    return `\n\n[Deliverable expected as a REAL BINARY DOCUMENT at \`${path}\`. Preserve that exact format — a markdown outline or similarly named text file is not the deliverable. Use the installed document-production tools/craftbook (for PowerPoint: \`convert_document\`, visually inspect with \`preview_document\`, then persist with \`save_artifact\`). Do NOT call \`write_file\` with prose or base64 for this binary file. If those production tools are not on your roster, reply that the exact-format deliverable is blocked instead of silently substituting another format.]`;
   }
   const explicitEditTools = extractExplicitFileEditTools(requestText);
   if (explicitEditTools.length > 0) {
     const formattedTools = explicitEditTools.map((tool) => `\`${tool}\``).join(' and ');
     const appendOnly =
       explicitEditTools.length === 1 &&
-      explicitEditTools[0] === 'appendToFile' &&
+      explicitEditTools[0] === 'append_to_file' &&
       isExplicitAppendOnlyRequest(requestText);
     const editInstruction = appendOnly
-      ? 'This is an append-only update of an existing file. Follow the request exactly: your first file mutation must use `appendToFile`; do not call `writeFile`, replace the existing contents, or turn the requested append into a whole-file rewrite.'
-      : `The request explicitly names the existing-file edit surface ${formattedTools}. Follow its stated tool order and fallback rules exactly; do not replace that surgical surface with generic \`writeFile\`-first creation guidance.`;
+      ? 'This is an append-only update of an existing file. Follow the request exactly: your first file mutation must use `append_to_file`; do not call `write_file`, replace the existing contents, or turn the requested append into a whole-file rewrite.'
+      : `The request explicitly names the existing-file edit surface ${formattedTools}. Follow its stated tool order and fallback rules exactly; do not replace that surgical surface with generic \`write_file\`-first creation guidance.`;
     return `\n\n[Deliverable expected as a FILE ${pathClause}. ${editInstruction} Reply in chat with the path + a 2-sentence precis — do NOT paste the full deliverable into chat.]`;
   }
   if (path && isExpectedDataDeliverablePath(path)) {
-    return `\n\n[Deliverable expected as a DERIVED DATA FILE at \`${path}\`. Do not hand-type the rows — compute them: write a small Node script that reads the input files with fs.readFileSync and writes \`${path}\` with fs.writeFileSync, then execute it. Prefer the \`derive_file\` tool ({ script, outputPath: "${path}" }); otherwise writeFile the script to scripts/derive.mjs and run it with \`run_nodejs_script\`. Reply in chat with the path + row count — do NOT paste the data into chat.]`;
+    return `\n\n[Deliverable expected as a DERIVED DATA FILE at \`${path}\`. Do not hand-type the rows — compute them: write a small Node script that reads the input files with fs.readFileSync and writes \`${path}\` with fs.writeFileSync, then execute it. Prefer the \`derive_file\` tool ({ script, outputPath: "${path}" }); otherwise write_file the script to scripts/derive.mjs and run it with \`run_nodejs_script\`. Reply in chat with the path + row count — do NOT paste the data into chat.]`;
   }
   const repairTarget = extractSingleFileSourceRepairTargetPath(requestText);
   const focusedExistingRepair =
@@ -11880,13 +11886,13 @@ function formatExpectedDeliverableAnnotation(
     repairTarget !== null &&
     normalizeExpectedDeliverablePath(path) === normalizeExpectedDeliverablePath(repairTarget);
   if (focusedExistingRepair) {
-    return `\n\n[Deliverable expected as a FILE at \`${path}\`. This is a focused repair of an existing source file, not a fresh-file create. Read \`${path}\` if its current contents are not already in context, then make the smallest concrete edit with \`replaceInFile\` or \`replaceLines\`. Preserve already-working behavior; use \`writeFile\` only if a targeted edit is explicitly rejected or the file is missing. Reply in chat with the path + a 2-sentence precis — do NOT paste the full deliverable into chat.]`;
+    return `\n\n[Deliverable expected as a FILE at \`${path}\`. This is a focused repair of an existing source file, not a fresh-file create. Read \`${path}\` if its current contents are not already in context, then make the smallest concrete edit with \`replace_in_file\` or \`replace_lines\`. Preserve already-working behavior; use \`write_file\` only if a targeted edit is explicitly rejected or the file is missing. Reply in chat with the path + a 2-sentence precis — do NOT paste the full deliverable into chat.]`;
   }
   const singleFileHtmlClause =
     path && /(?:^|\/)index\.html$/i.test(path)
       ? ' This is a single-file HTML deliverable: put CSS in `<style>` and JavaScript in one inline `<script>` inside that same HTML file. Do NOT create or rely on `script.js`, `styles.css`, external assets, a build step, or a second source file unless the asker explicitly named one.'
       : '';
-  return `\n\n[Deliverable expected as a FILE ${pathClause}. Your first assistant action should be the tool call \`writeFile({ path, content })\`; draft inside the tool argument, not in chat.${singleFileHtmlClause} Reply in chat with the path + a 2-sentence precis — do NOT paste the full deliverable into chat.]`;
+  return `\n\n[Deliverable expected as a FILE ${pathClause}. Your first assistant action should be the tool call \`write_file({ path, content })\`; draft inside the tool argument, not in chat.${singleFileHtmlClause} Reply in chat with the path + a 2-sentence precis — do NOT paste the full deliverable into chat.]`;
 }
 
 function normalizeExpectedDeliverablePath(path: string): string {
@@ -11906,10 +11912,10 @@ function isExplicitAppendOnlyRequest(requestText: string | undefined): boolean {
   const text = (requestText ?? '').trim();
   return (
     /\bappend[-\s]?only\b/i.test(text) ||
-    /\b(?:first|next)\s+(?:assistant\s+)?(?:action|tool\s+call|mutation)\s+(?:must|should)\s+(?:start\s+with|be)\s+(?:the\s+tool\s+call\s+)?`?appendToFile`?\b/i.test(
+    /\b(?:first|next)\s+(?:assistant\s+)?(?:action|tool\s+call|mutation)\s+(?:must|should)\s+(?:start\s+with|be)\s+(?:the\s+tool\s+call\s+)?`?append_to_file`?\b/i.test(
       text,
     ) ||
-    /\b(?:do\s+not|don't|must\s+not|never|avoid)\s+(?:call|use|invoke)\s+`?writeFile`?\b/i.test(
+    /\b(?:do\s+not|don't|must\s+not|never|avoid)\s+(?:call|use|invoke)\s+`?write_file`?\b/i.test(
       text,
     )
   );
@@ -11973,7 +11979,7 @@ function extractExplicitGenerateImageCall(text: string): { prompt?: string; save
 
 /**
  * Derived-data handoffs (csv/tsv/json/ndjson) get the transform-by-
- * execution steer instead of the generic "hand-write it with writeFile"
+ * execution steer instead of the generic "hand-write it with write_file"
  * instruction — hand-typed derived rows lose data (the DS4 v15 lesson).
  * Keyed on the deliverable's extension, never brief keywords, so a
  * markdown report that merely READS a CSV is untouched.
@@ -12191,7 +12197,7 @@ const TASK_BUDGET_NUDGE =
  * right thing instead of re-narrating.
  */
 export function buildDeliverableEditNudge(file: string): string {
-  return `Continue. The deliverable for this step is an edit to \`${file}\`, but no successful write to that file landed this turn — so the work is not actually done. If the fix is real, make it now: call \`replaceInFile\` (smallest change) or \`writeFile\` (full corrected file) on \`${file}\`. Do not report progress or summarize again until that edit has landed. If the change belongs in a different file, say which file and why instead.`;
+  return `Continue. The deliverable for this step is an edit to \`${file}\`, but no successful write to that file landed this turn — so the work is not actually done. If the fix is real, make it now: call \`replace_in_file\` (smallest change) or \`write_file\` (full corrected file) on \`${file}\`. Do not report progress or summarize again until that edit has landed. If the change belongs in a different file, say which file and why instead.`;
 }
 
 /**
@@ -12206,10 +12212,10 @@ export function buildGateRejectionNudge(message: string): string {
 }
 
 const INCOMPLETE_TOOL_CALL_PREFIXES = new Set([
-  'writeFile',
-  'appendToFile',
-  'replaceInFile',
-  'applyPatch',
+  'write_file',
+  'append_to_file',
+  'replace_in_file',
+  'apply_patch',
   'message_gezel',
   'ensure_gezel',
   'create_task',
@@ -12226,10 +12232,10 @@ export function buildContinuationNudge(
   if (!callName) return fallback;
   const targetPath = latestExpectedFilePath(messages);
   const example =
-    callName === 'writeFile'
+    callName === 'write_file'
       ? targetPath
-        ? `writeFile({ path: "${targetPath}", content: <full deliverable contents> })`
-        : 'writeFile({ path, content })'
+        ? `write_file({ path: "${targetPath}", content: <full deliverable contents> })`
+        : 'write_file({ path, content })'
       : `${callName}({ ...complete arguments... })`;
   return [
     `Continue. Your previous response started an incomplete tool call \`${callName}(\` and stopped before the arguments.`,
@@ -12308,7 +12314,7 @@ function latestExpectedFilePath(messages: Array<{ content?: string }>): string |
     const text = messages[i]?.content ?? '';
     const deliverable = text.match(/\[Deliverable expected as a FILE at `([^`]+)`/i)?.[1];
     if (deliverable) return deliverable;
-    const writeFile = text.match(/writeFile\s*\(\s*\{\s*path\s*:\s*["'`]([^"'`]+)["'`]/i)?.[1];
+    const writeFile = text.match(/write_file\s*\(\s*\{\s*path\s*:\s*["'`]([^"'`]+)["'`]/i)?.[1];
     if (writeFile) return writeFile;
     const filePath = text.match(/filePath\s*:\s*["'`]([^"'`]+)["'`]/i)?.[1];
     if (filePath) return filePath;
@@ -12317,13 +12323,13 @@ function latestExpectedFilePath(messages: Array<{ content?: string }>): string |
 }
 
 /**
- * Detect file-save claims that weren't backed by a `writeFile` /
- * `write_artifact` / `appendToFile` call this turn. Matches phrasings
+ * Detect file-save claims that weren't backed by a `write_file` /
+ * `write_artifact` / `append_to_file` call this turn. Matches phrasings
  * the matrix #2 squisq-review case produced ("saved the full report to
  * `review.md`", "wrote the file at <path>"), and the broader family
  * those drift toward ("filed at", "written to", "I've saved <X> to
  * <path>"). The path is captured for the re-prompt so the model can
- * either follow through (`writeFile({path:<captured>, content:<their
+ * either follow through (`write_file({path:<captured>, content:<their
  * deliverable>})`) or correct the false claim.
  *
  * Conservative pattern by design — false positives feel adversarial to
@@ -12354,7 +12360,7 @@ const SAVE_CLAIM_PATTERNS = [
 /**
  * Existence / completion claims — the family the write-verb patterns
  * above miss. Wild-caught (Space Shooter Arcade): a voorman
- * with no `writeFile` told the Meester the deliverable "is in place",
+ * with no `write_file` told the Meester the deliverable "is in place",
  * "exists", "is complete" three times — none of which match `saved/wrote/
  * filed/written to`, so the unsaved-file-claim guard never fired and the
  * false "done" stood. These are stricter than the write-verb patterns
@@ -12378,7 +12384,7 @@ const COMPLETION_CLAIM_PATTERNS = [
  * bringing a file into EXISTENCE, not editing one that's already there.
  * Wild-caught (qwen3.6 developer "Space Shooter Arcade"): asked
  * to subtract 50 points, the model read the file, reasoned out the exact
- * `replaceInFile` edit, then emitted "I have updated the game logic in
+ * `replace_in_file` edit, then emitted "I have updated the game logic in
  * `index.html`" with NO write call — the edit never landed and nothing
  * caught the false claim. Path MUST be quoted/backticked (edit language is
  * common in ordinary prose); the call site fires for these REGARDLESS of
@@ -12408,9 +12414,9 @@ export function detectUnsavedFileClaim(
 ): { claimedPath: string; kind: 'wrote' | 'exists' | 'modified' } | null {
   if (!content || content.length < 20) return null;
   // A successful file-writing call this turn excuses the prose — the
-  // model both said "saved" and actually saved. `replaceInFile` counts:
+  // model both said "saved" and actually saved. `replace_in_file` counts:
   // it's how a targeted edit lands, and a "I updated X" claim backed by a
-  // successful replaceInFile is TRUE. Failed writes do not excuse the
+  // successful replace_in_file is TRUE. Failed writes do not excuse the
   // prose: the user sees the failed tool row, so a follow-up "I saved it"
   // must be corrected or retried.
   const wroteSomething = (toolCalls ?? []).some(
@@ -12446,7 +12452,7 @@ export function detectUnsavedFileClaim(
 
 function isRecoverableSavedDraftToolCall(call: ChatMessageToolCall): boolean {
   return (
-    call.name === 'writeFile' &&
+    call.name === 'write_file' &&
     call.success === false &&
     typeof call.errorMessage === 'string' &&
     /Invalid first draft\s+\S+\s+was saved anyway so you can continue with/i.test(call.errorMessage)
@@ -12455,15 +12461,15 @@ function isRecoverableSavedDraftToolCall(call: ChatMessageToolCall): boolean {
 
 function isFileWritingEvidenceToolCall(call: ChatMessageToolCall): boolean {
   if (
-    call.name === 'writeFile' ||
+    call.name === 'write_file' ||
     call.name === 'write_artifact' ||
-    call.name === 'appendToFile' ||
-    call.name === 'replaceInFile'
+    call.name === 'append_to_file' ||
+    call.name === 'replace_in_file'
   ) {
     return true;
   }
   // CLI-backed providers expose native shell/file-edit actions instead
-  // of gezel MCP writeFile. A successful native action in the same turn
+  // of gezel MCP write_file. A successful native action in the same turn
   // is enough evidence to avoid a false "no write landed" nudge; the
   // scenario/runtime check remains the authority on whether the edit was
   // actually correct.
@@ -12482,24 +12488,24 @@ function buildUnsavedFileClaimNudge(
   canWrite: boolean,
   kind: 'wrote' | 'exists' | 'modified' = 'wrote',
 ): string {
-  // Delegator role (no `writeFile`) — the voorman/meester case. Pointing
-  // it at `writeFile` would be the very mistake that started this; point
+  // Delegator role (no `write_file`) — the voorman/meester case. Pointing
+  // it at `write_file` would be the very mistake that started this; point
   // it at delegation + verification instead.
   if (!canWrite) {
     const verb = kind === 'modified' ? 'changed' : 'created';
-    return `You implied the file at \`${claimedPath}\` was ${verb}, but you have no \`writeFile\` tool in this role — nothing has been written. Do not claim it's done. Valid next moves:\n  1. DELEGATE: use \`message_gezel\` for the Builder/Developer you assigned this task to, or first call \`ensure_gezel\` for a Builder/Developer if none exists. Include \`expectedDeliverable: { kind: "file", filePath: "${claimedPath}" }\` and ask them to make the change and reply with the path. Do not call \`ask_specialist\` for file deliverables.\n  2. Once they deliver, confirm with \`readFile\` BEFORE telling anyone it's done.\n  3. If you genuinely cannot delegate, tell the user plainly the file was NOT ${verb} and what's blocking it.\nDo not leave the false claim standing.`;
+    return `You implied the file at \`${claimedPath}\` was ${verb}, but you have no \`write_file\` tool in this role — nothing has been written. Do not claim it's done. Valid next moves:\n  1. DELEGATE: use \`message_gezel\` for the Builder/Developer you assigned this task to, or first call \`ensure_gezel\` for a Builder/Developer if none exists. Include \`expectedDeliverable: { kind: "file", filePath: "${claimedPath}" }\` and ask them to make the change and reply with the path. Do not call \`ask_specialist\` for file deliverables.\n  2. Once they deliver, confirm with \`read_file\` BEFORE telling anyone it's done.\n  3. If you genuinely cannot delegate, tell the user plainly the file was NOT ${verb} and what's blocking it.\nDo not leave the false claim standing.`;
   }
   // Modify claim — the file exists but this turn made no edit. Reading is
   // not editing; point at the patch tools, not a from-scratch write.
   if (kind === 'modified') {
-    return `You said you changed \`${claimedPath}\` (e.g. "updated"/"modified"/"applied the change"), but no successful \`writeFile\` / \`replaceInFile\` / \`appendToFile\` call landed this turn — the file on disk is UNCHANGED. Reading a file is not editing it. Valid next moves:\n  1. Apply the edit NOW: \`replaceInFile({ path: "${claimedPath}", find: <exact current snippet>, replace: <new snippet> })\` for a targeted change, or \`writeFile({ path: "${claimedPath}", content: <full corrected file> })\` for a rewrite.\n  2. If you couldn't make the change, say plainly it was NOT applied and what's blocking it.\nDo not leave the false claim standing.`;
+    return `You said you changed \`${claimedPath}\` (e.g. "updated"/"modified"/"applied the change"), but no successful \`write_file\` / \`replace_in_file\` / \`append_to_file\` call landed this turn — the file on disk is UNCHANGED. Reading a file is not editing it. Valid next moves:\n  1. Apply the edit NOW: \`replace_in_file({ path: "${claimedPath}", find: <exact current snippet>, replace: <new snippet> })\` for a targeted change, or \`write_file({ path: "${claimedPath}", content: <full corrected file> })\` for a rewrite.\n  2. If you couldn't make the change, say plainly it was NOT applied and what's blocking it.\nDo not leave the false claim standing.`;
   }
-  return `You said the file at \`${claimedPath}\` was saved, but no successful \`writeFile\` / \`write_artifact\` / \`appendToFile\` call landed this turn — the file doesn't actually exist on disk. Valid next moves:\n  1. If you have workspace write access, call \`writeFile({ path: "${claimedPath}", content: <the deliverable you described> })\` now. If you don't have the content ready, generate it in this turn and write it.\n  2. If you do not have workspace write access, hand off to a developer with the exact path and change needed.\n  3. If saving wasn't actually the right move, correct your previous statement — say plainly that the file was NOT saved and what you'll do instead.\nDo not leave the false claim standing.`;
+  return `You said the file at \`${claimedPath}\` was saved, but no successful \`write_file\` / \`write_artifact\` / \`append_to_file\` call landed this turn — the file doesn't actually exist on disk. Valid next moves:\n  1. If you have workspace write access, call \`write_file({ path: "${claimedPath}", content: <the deliverable you described> })\` now. If you don't have the content ready, generate it in this turn and write it.\n  2. If you do not have workspace write access, hand off to a developer with the exact path and change needed.\n  3. If saving wasn't actually the right move, correct your previous statement — say plainly that the file was NOT saved and what you'll do instead.\nDo not leave the false claim standing.`;
 }
 
 /**
  * Byte floor for "an existing substantial file" — above a stub, big
- * enough that a full `writeFile` rewrite is corruption-prone for a weak
+ * enough that a full `write_file` rewrite is corruption-prone for a weak
  * local model. A 15-byte placeholder stays on the write-only path; a
  * 16 KB game does not. See deliverableIsExistingSubstantialFile.
  */
@@ -12508,12 +12514,12 @@ const EXISTING_SUBSTANTIAL_FILE_BYTES = 1500;
 /** Write-shaped tool names — a successful call to any of these means the
  *  turn actually touched a file, so the chat-coded-file nudge stays quiet. */
 const CHAT_CODED_WRITE_TOOLS: ReadonlySet<string> = new Set([
-  'writeFile',
-  'appendToFile',
-  'replaceInFile',
-  'replaceLines',
-  'applyPatch',
-  'insertAtMarker',
+  'write_file',
+  'append_to_file',
+  'replace_in_file',
+  'replace_lines',
+  'apply_patch',
+  'insert_at_marker',
   'write_artifact',
 ]);
 
@@ -12527,11 +12533,11 @@ const CHAT_CODED_WRITE_TOOLS: ReadonlySet<string> = new Set([
 const CHAT_CODED_MIN_CHARS = 600;
 
 /**
- * Detect the "chat-coded a file but never called `writeFile`" failure:
+ * Detect the "chat-coded a file but never called `write_file`" failure:
  * the assistant pasted a whole file's worth of source into a fenced code
  * block in chat, but no write landed this turn. Verbose local models
  * (qwen3.6 a3b) drift into this — they "draft" the file in prose instead
- * of the `writeFile` argument, the {@link RambleDetector} now lets the
+ * of the `write_file` argument, the {@link RambleDetector} now lets the
  * block complete (fenced-code-block awareness), but the model can still
  * finish the turn without ever calling the tool. Returns the inferred
  * target path (from {@link salvageCodeBlocks}' filename hint / default-
@@ -12541,7 +12547,7 @@ const CHAT_CODED_MIN_CHARS = 600;
  * ("saved to X") with no write; this fires on the *content* itself
  * (a big code block) with no write and no claim. Gated on block size so
  * an inline illustration never trips it; the caller additionally gates
- * on `writeFile` being available so it only nudges build-capable roles.
+ * on `write_file` being available so it only nudges build-capable roles.
  */
 export function detectChatCodedFileWithoutWrite(
   content: string,
@@ -12562,9 +12568,9 @@ export function detectChatCodedFileWithoutWrite(
 }
 
 /** Re-prompt for {@link detectChatCodedFileWithoutWrite}: tell the model
- *  it drafted the file in chat and must call `writeFile` to land it. */
+ *  it drafted the file in chat and must call `write_file` to land it. */
 export function buildChatCodedFileNudge(path: string): string {
-  return `You wrote the full contents of \`${path}\` in a code block in chat, but you never called \`writeFile\` — so nothing was saved to disk. Code in a chat bubble can't run; a file on disk can. Call \`writeFile({ path: "${path}", content: <the exact contents you just wrote> })\` NOW — draft the content inside the tool argument, don't paste the file in chat again. Do not claim it's saved until that write lands.`;
+  return `You wrote the full contents of \`${path}\` in a code block in chat, but you never called \`write_file\` — so nothing was saved to disk. Code in a chat bubble can't run; a file on disk can. Call \`write_file({ path: "${path}", content: <the exact contents you just wrote> })\` NOW — draft the content inside the tool argument, don't paste the file in chat again. Do not claim it's saved until that write lands.`;
 }
 
 /**
@@ -12595,7 +12601,7 @@ function stripFencedBlocks(content: string): string {
  * {@link detectChatCodedFileWithoutWrite}: that one fires on a fenced
  * code block (a source file); this one fires on the prose document itself
  * (a postmortem, analysis, plan) that a weak local model chatters out
- * over many turns without ever calling `writeFile` / `write_artifact`.
+ * over many turns without ever calling `write_file` / `write_artifact`.
  *
  * Returns the inferred workspace path — the caller's expected-deliverable
  * path when one is in scope, else a kebab-cased `<h1-title>.md`, else
@@ -12644,7 +12650,7 @@ function inferProseDeliverablePath(prose: string, expectedPath?: string): string
 /** Re-prompt for {@link detectProseDeliverableWithoutWrite}: tell the
  *  model it wrote the report in chat and must save it to disk now. */
 export function buildProseDeliverableNudge(path: string): string {
-  return `You wrote a full report as your chat reply, but you never called a write tool — so nothing was saved to disk. A report the user can keep has to live in a file, not a chat bubble. Call \`writeFile({ path: "${path}", content: <the exact report you just wrote> })\` (or \`write_artifact\` for a project artifact) NOW — put the content inside the tool argument, don't paste the report in chat again. Do not claim it's saved until that write lands.`;
+  return `You wrote a full report as your chat reply, but you never called a write tool — so nothing was saved to disk. A report the user can keep has to live in a file, not a chat bubble. Call \`write_file({ path: "${path}", content: <the exact report you just wrote> })\` (or \`write_artifact\` for a project artifact) NOW — put the content inside the tool argument, don't paste the report in chat again. Do not claim it's saved until that write lands.`;
 }
 
 const VALIDATION_REPAIR_CHECK_PREFIX_RE = /^\[(?:runtime|scenario) check\b/i;
@@ -12679,10 +12685,10 @@ export function isValidationRepairPrompt(prompt: string): boolean {
 }
 
 const VALIDATION_REPAIR_MUTATION_TOOLS: ReadonlySet<string> = new Set([
-  'writeFile',
-  'appendToFile',
-  'replaceInFile',
-  'replaceLines',
+  'write_file',
+  'append_to_file',
+  'replace_in_file',
+  'replace_lines',
 ]);
 
 function hasSuccessfulWorkspaceMutation(
@@ -12989,8 +12995,8 @@ const VOORMAN_NOT_DONE_NUDGE =
 const READ_ONLY_MCP_TOOLS: ReadonlySet<string> = new Set([
   'search_memory',
   'list_memories',
-  'readdir',
-  'readFile',
+  'list_dir',
+  'read_file',
   'stat',
   'list_artifacts',
   'read_artifact',
@@ -13595,7 +13601,7 @@ export interface BuildInstructionsOptions {
    * Shape-of-deliverable hint persisted on the session. When
    * `kind: "file"`, the consultation-mode addendum swaps its
    * "reply in chat" guidance for a file-deliverable variant
-   * ("write the deliverable via `writeFile`, reply with the path +
+   * ("write the deliverable via `write_file`, reply with the path +
    * a 2-sentence precis"). See `ExpectedDeliverableSchema`.
    */
   expectedDeliverable?: ExpectedDeliverable;
@@ -13635,7 +13641,7 @@ export interface BuildInstructionsOptions {
    * in core). When explicitly `false` — external workingDir without the
    * `allowGezelWrites` opt-in, or a project the user set to "edits off" —
    * every role's workspace-write tools are stripped, so the prompt injects
-   * a "file edits are off" note and suppresses any "call `writeFile`"
+   * a "file edits are off" note and suppresses any "call `write_file`"
    * deliverable guidance: the voorman doesn't delegate writes and the
    * developer doesn't try (and then hallucinate a save). Undefined/true →
    * byte-identical to before. See applySecurityPolicyGates in
@@ -13740,7 +13746,7 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
   // untrusted external content (mail-enabled projects). Constant + cache-stable.
   const untrustedContentBlock = untrustedContentPresent ? UNTRUSTED_CONTENT_GUIDANCE : '';
   // A non-writable project strips workspace-write tools from every role.
-  // Inject a posture note + suppress writeFile-shaped deliverable guidance
+  // Inject a posture note + suppress write_file-shaped deliverable guidance
   // below.
   const fileEditsDisabled = workspaceWritable === false;
   const hasPlaywright = installedToolsetIds?.has('@playwright/mcp') ?? false;
@@ -13951,17 +13957,17 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
     // touch in the workspace:
     //   1. Read + write  (developer, designer, reviewer) — full prose.
     //   2. Read only     (voorman) — investigate-then-delegate prose.
-    //                     They can `readFile`/`readdir`/`find_files` to
+    //                     They can `read_file`/`list_dir`/`find_files` to
     //                     diagnose, but writes go to a developer.
     //   3. Write only    (urgent fresh-file clamp) — create directly,
     //                     without claiming the existing file was read.
     //   4. Neither       (meester, planner) — delegation-only prose.
     // Teaching a model about a tool it can't call (e.g. naming
-    // `writeFile` to a voorman) is the same about.md-vs-runtime drift
+    // `write_file` to a voorman) is the same about.md-vs-runtime drift
     // that pushes small models into fabrication; we steer the prose
     // by what's in the actual function-call schema.
-    const hasReadFile = availableTools?.some((t) => t.name === 'readFile') ?? false;
-    const hasWriteFile = availableTools?.some((t) => t.name === 'writeFile') ?? false;
+    const hasReadFile = availableTools?.some((t) => t.name === 'read_file') ?? false;
+    const hasWriteFile = availableTools?.some((t) => t.name === 'write_file') ?? false;
     const hasListArtifacts = availableTools?.some((t) => t.name === 'list_artifacts') ?? false;
     const hasReadArtifact = availableTools?.some((t) => t.name === 'read_artifact') ?? false;
     const hasWriteArtifact = availableTools?.some((t) => t.name === 'write_artifact') ?? false;
@@ -13971,16 +13977,16 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
     const hasMemoryTools = hasSearchMemory || hasSaveMemory;
     if (hasReadFile && hasWriteFile) {
       const artifactsLine = hasArtifactTools
-        ? '\n- **Artifacts** (`write_artifact` / `read_artifact` / `list_artifacts`) — a separate side drawer: plans, scratch automation, drafts, and handoff notes that are not workspace files. If a path appears in `### Workspace files`, use `readFile` / `writeFile`; do not use artifact tools for it. Conventions: `scripts/` for re-runnable Playwright/Node scripts, `tests/` for *.spec.ts you own, `reports/`/`drafts/` for narrative.\n'
+        ? '\n- **Artifacts** (`write_artifact` / `read_artifact` / `list_artifacts`) — a separate side drawer: plans, scratch automation, drafts, and handoff notes that are not workspace files. If a path appears in `### Workspace files`, use `read_file` / `write_file`; do not use artifact tools for it. Conventions: `scripts/` for re-runnable Playwright/Node scripts, `tests/` for *.spec.ts you own, `reports/`/`drafts/` for narrative.\n'
         : '\n';
       const decisionLine = hasWriteArtifact
-        ? 'Decision test: would the user ship this file at release, or does it appear in `### Workspace files`? Yes → `writeFile`. No → `write_artifact`. External `workingDir` projects: `writeFile` touches the real directory.'
-        : 'Use `writeFile` only for files the user would ship at release. External `workingDir` projects: `writeFile` touches the real directory.';
+        ? 'Decision test: would the user ship this file at release, or does it appear in `### Workspace files`? Yes → `write_file`. No → `write_artifact`. External `workingDir` projects: `write_file` touches the real directory.'
+        : 'Use `write_file` only for files the user would ship at release. External `workingDir` projects: `write_file` touches the real directory.';
       projectContext += `
 
 ### Where work belongs
 
-- **Workspace** (\`writeFile\` / \`readFile\` / \`readdir\`) — files the user ships: source, configs, assets, README, tests for their product.
+- **Workspace** (\`write_file\` / \`read_file\` / \`list_dir\`) — files the user ships: source, configs, assets, README, tests for their product.
 ${artifactsLine}
 ${decisionLine}`;
     } else if (hasReadFile) {
@@ -13991,7 +13997,7 @@ ${decisionLine}`;
 
 ### Where work belongs
 
-- **Workspace reads** (\`readFile\` / \`readdir\` / \`find_files\` / \`search_files\`) — for *investigating* the project's source, configs, and assets. Use these to confirm a bug or read a file the user is asking about. If a path appears in \`### Workspace files\`, read it with \`readFile\`, not \`read_artifact\`. You can read; you cannot write.
+- **Workspace reads** (\`read_file\` / \`list_dir\` / \`find_files\` / \`search_files\`) — for *investigating* the project's source, configs, and assets. Use these to confirm a bug or read a file the user is asking about. If a path appears in \`### Workspace files\`, read it with \`read_file\`, not \`read_artifact\`. You can read; you cannot write.
 ${artifactsLine}
 - **Workspace writes are delegated.** When a fix or change is needed, hand off to a developer with rich context: \`message_gezel({ gezel, message })\` (or \`ensure_gezel\` + \`create_task\` + \`assign_task\` if no developer exists). Don't paste source into chat — that can't be applied.`;
     } else if (hasWriteFile) {
@@ -13999,7 +14005,7 @@ ${artifactsLine}
 
 ### Where work belongs
 
-- **Workspace writes** (\`writeFile\`) — create the source or deliverable file named by the task directly in the project workspace. Put the complete contents in the tool call; do not paste the file into chat or save it as an artifact.
+- **Workspace writes** (\`write_file\`) — create the source or deliverable file named by the task directly in the project workspace. Put the complete contents in the tool call; do not paste the file into chat or save it as an artifact.
 - **Workspace reads are not available this turn.** Use the workspace listing and task context already shown here. Do not claim you inspected an existing file; if the requested work truly depends on its contents, say that read access is missing.`;
     } else {
       const artifactsLine = hasArtifactTools
@@ -14279,7 +14285,7 @@ ${artifactsLine}
           firstActionAnchor = ` First action: \`${firstActionForKind(kind, deliverablePath)}\`.`;
         }
       }
-      activeTaskAnchor = `\n\n---\n\n**You are mid-craftbook step: \`${task.task.ref}\` — "${task.task.title}"${stepLabel}.** The **Step procedure** block above contains your exact instructions for this turn — those instructions take precedence over your default \`about.md\` persona. Read the procedure, identify the FIRST tool it tells you to call, and call it. Do NOT call \`read_task_notes\` to find the procedure; it's in the prompt above. Do NOT default to \`writeFile\` if the procedure says otherwise.${onExitHint}${gateReminder}${singleActionHint}${firstActionAnchor}`;
+      activeTaskAnchor = `\n\n---\n\n**You are mid-craftbook step: \`${task.task.ref}\` — "${task.task.title}"${stepLabel}.** The **Step procedure** block above contains your exact instructions for this turn — those instructions take precedence over your default \`about.md\` persona. Read the procedure, identify the FIRST tool it tells you to call, and call it. Do NOT call \`read_task_notes\` to find the procedure; it's in the prompt above. Do NOT default to \`write_file\` if the procedure says otherwise.${onExitHint}${gateReminder}${singleActionHint}${firstActionAnchor}`;
     } else {
       const resumeAction = availableToolNameSet.has('read_task_notes')
         ? `call \`read_task_notes({ ref: "${task.task.ref}" })\` for the latest, then take the next concrete step with the tools wired this turn`
@@ -14453,7 +14459,7 @@ ${artifactsLine}
   //   - Default (kind: 'chat' or no hint): prose-in-chat is the
   //     deliverable. Right for stack recommendations, plan sketches,
   //     verification answers, sanity checks.
-  //   - File (kind: 'file', optional filePath): writeFile is the
+  //   - File (kind: 'file', optional filePath): write_file is the
   //     deliverable; chat reply is the receipt + a short precis. Right
   //     for reviews, reports, analyses, long-form research outputs.
   //
@@ -14490,7 +14496,7 @@ ${artifactsLine}
       ? ['generate_image']
       : wantsBinaryDocument
         ? ['convert_document', 'save_artifact']
-        : ['writeFile'];
+        : ['write_file'];
     const missingRequiredFileTools = requiredFileTools.filter(
       (tool) => !consultationToolNames.has(tool),
     );
@@ -14505,11 +14511,11 @@ ${artifactsLine}
     const deliverableBullet = fileDeliverableBlocked
       ? `- **You cannot write the file this turn.** The asker expected a file at ${filePathClause}, but ${fileBlockReason}. Do NOT claim you wrote it. Reply in chat that the file deliverable is blocked (${fileBlockRecovery}); give your answer as prose if that's still useful.`
       : wantsImageFile
-        ? `- **Reply with the image file path**, not prose or base64. The asker passed \`expectedDeliverable: {kind: "file"}\` for an image at ${filePathClause}. End your turn by calling \`generate_image({ prompt, saveAs: "${expectedFilePath}" })\`; the image tool writes the binary file to disk. Then reply in chat with just the path and a 2-sentence precis. Do not call \`writeFile({ path, content })\` for PNG/JPG/WebP bytes.`
+        ? `- **Reply with the image file path**, not prose or base64. The asker passed \`expectedDeliverable: {kind: "file"}\` for an image at ${filePathClause}. End your turn by calling \`generate_image({ prompt, saveAs: "${expectedFilePath}" })\`; the image tool writes the binary file to disk. Then reply in chat with just the path and a 2-sentence precis. Do not call \`write_file({ path, content })\` for PNG/JPG/WebP bytes.`
         : wantsBinaryDocument
-          ? `- **Produce the real binary document at ${filePathClause}.** A markdown source file is only an intermediate, never the deliverable. Use \`convert_document\`, inspect the rendered result with \`preview_document\` when available, then persist it with \`save_artifact\`. Do not call \`writeFile\` with prose or base64 for this path. Reply with the saved path and a 2-sentence precis.`
+          ? `- **Produce the real binary document at ${filePathClause}.** A markdown source file is only an intermediate, never the deliverable. Use \`convert_document\`, inspect the rendered result with \`preview_document\` when available, then persist it with \`save_artifact\`. Do not call \`write_file\` with prose or base64 for this path. Reply with the saved path and a 2-sentence precis.`
           : wantsFile
-            ? `- **Reply with the file**, not the contents. The asker passed \`expectedDeliverable: {kind: "file"}\` — this consultation expects a substantive written deliverable on disk at ${filePathClause}, not a wall of prose in chat. Your first assistant action should be \`writeFile({ path, content })\` (use the path the asker named when there is one); draft inside the tool argument, then reply in chat with just the path and a 2-sentence precis.${singleFileHtmlClause} The full deliverable lives on disk where the asker (and any third gezel) can \`readFile\` it.`
+            ? `- **Reply with the file**, not the contents. The asker passed \`expectedDeliverable: {kind: "file"}\` — this consultation expects a substantive written deliverable on disk at ${filePathClause}, not a wall of prose in chat. Your first assistant action should be \`write_file({ path, content })\` (use the path the asker named when there is one); draft inside the tool argument, then reply in chat with just the path and a 2-sentence precis.${singleFileHtmlClause} The full deliverable lives on disk where the asker (and any third gezel) can \`read_file\` it.`
             : '- **Reply in the chat** — the asker reads your reply directly. Write an artifact only if the answer *is* an artifact (a code sketch, a diagram). For a stack recommendation or a numbered plan, prose in the reply is better.';
     const consultationCloser = fileDeliverableBlocked
       ? 'a plain-chat reply explaining why the file deliverable is blocked'
@@ -14518,7 +14524,7 @@ ${artifactsLine}
         : wantsBinaryDocument
           ? 'the `convert_document` + `save_artifact` calls and a chat precis'
           : wantsFile
-            ? 'the `writeFile` call + chat precis'
+            ? 'the `write_file` call + chat precis'
             : 'the answer';
     consultationAddendum = `\n\n---\n\n## Consultation mode\n\nYou were invoked by another gezel via \`ask_specialist\` (or \`ask_gezel\`) to answer **one specific question**. They are parked waiting for your reply right now — your only job this turn is to **answer that question directly**.\n\n- **Don't recruit other gezels** or propose to fan out further consultations. The team-management and onward-consultation tools (\`ensure_gezel\`, \`message_gezel\`, \`ask_specialist\`, \`ask_gezel\`, \`start_project\`, …) have been intentionally removed from your roster for this turn — the asker has them, you don't. They'll handle next steps based on your answer.\n- **Don't propose a multi-step plan-as-deliverable** unless the question literally asked for one. A short, concrete answer is the deliverable.\n${deliverableBullet}\n- **Don't ask the user a clarifying question** unless the question is genuinely ambiguous. Take your best shot first; the asker can refine.\n\nEnd your turn with ${consultationCloser}.`;
   }
@@ -14541,15 +14547,15 @@ ${artifactsLine}
   // Planner) the "scaffold something" suggestion would name tools
   // they don't own — instead they should delegate or answer
   // directly. The test at manager.test.ts:2492 enforces that
-  // `\`writeFile\`` never appears in a voorman's prompt, so the
+  // `\`write_file\`` never appears in a voorman's prompt, so the
   // build-action sentence is gated on the role being able to write.
   const isFreshProject = workspaceFiles !== undefined && workspaceFiles.length <= 5;
   const workspaceWriteTools = [
-    'writeFile',
-    'appendToFile',
-    'replaceInFile',
-    'replaceLines',
-    'applyPatch',
+    'write_file',
+    'append_to_file',
+    'replace_in_file',
+    'replace_lines',
+    'apply_patch',
     'derive_file',
   ];
   const canWriteWorkspaceThisTurn = workspaceWriteTools.some((tool) =>
@@ -14571,20 +14577,20 @@ ${artifactsLine}
       ? `- **A direct chat reply or a delegation** — for opinion or recommendation questions ("what stack?", "what approach?"), answer from your own expertise. For build-shaped work, delegate to a builder gezel using ${delegationToolsThisTurn.map((tool) => `\`${tool}\``).join(' / ')}.`
       : '- **A direct chat reply** — no delegation or workspace-write tool is wired this turn. Answer from your expertise, or explain that a builder handoff is blocked; do not fabricate a tool call.'
     : canWriteWorkspaceThisTurn
-      ? `- **A write or scaffold** — use your role-appropriate workspace-write tool for source or shippable files${artifactScratchClause}. If the task implies a browser/site/app deliverable and \`writeFile\` is on your roster, land \`index.html\` before asking another Developer/Builder/Designer for advice.${imageHandoffLine}
+      ? `- **A write or scaffold** — use your role-appropriate workspace-write tool for source or shippable files${artifactScratchClause}. If the task implies a browser/site/app deliverable and \`write_file\` is on your roster, land \`index.html\` before asking another Developer/Builder/Designer for advice.${imageHandoffLine}
 - **A direct chat reply** — for opinion or recommendation questions ("what stack?", "what approach?"), answer from your own expertise. There's no workspace file or artifact to consult; that's what your domain knowledge is for.`
       : '- **A direct chat reply** — no workspace-write tool is wired this turn. If the request needs a file, explain that it is blocked instead of claiming a save.';
   // Write-posture note. On a non-writable project every role loses its
   // workspace-write tools, but the rest of the prompt (and the asker's
   // delegation) still talks as if files can be written — which is how a
-  // developer ends up calling a stripped `writeFile` and then claiming a
+  // developer ends up calling a stripped `write_file` and then claiming a
   // save that never happened. This note, in the high-attention recency
   // band, tells the WHOLE team the posture so they respond coherently:
   // the voorman stops delegating writes, the developer stops trying, and
   // someone tells the user plainly. Empty string when edits are allowed,
   // so the prompt is byte-identical in the normal case.
   const fileEditsDisabledNote = fileEditsDisabled
-    ? `\n\n---\n\n## ⚠️ File edits are OFF for this project\n\nGezel workspace writes are turned off for this project. **No gezel on this project can create or edit workspace files right now** — \`writeFile\`, \`replaceInFile\`, \`appendToFile\`, \`generate_image\`, and the other write tools are not on anyone's roster.\n\nThis turn:\n- **Do not claim you wrote, created, updated, or saved a file** — you can't, and the runtime flags the false claim.\n- **Do not delegate or hand off file-writing work** (every gezel on this project is blocked too), and don't call \`writeFile\`/\`message_gezel\` expecting a file to land.\n- If the request needs a file change, **say so plainly**: it's blocked because gezel edits are turned off for this project, and the user can re-enable them via **"Allow gezels to modify the workspace directory" in Project → Settings**. Reading, reviewing, analysis, and planning still work — do those if they move things forward.`
+    ? `\n\n---\n\n## ⚠️ File edits are OFF for this project\n\nGezel workspace writes are turned off for this project. **No gezel on this project can create or edit workspace files right now** — \`write_file\`, \`replace_in_file\`, \`append_to_file\`, \`generate_image\`, and the other write tools are not on anyone's roster.\n\nThis turn:\n- **Do not claim you wrote, created, updated, or saved a file** — you can't, and the runtime flags the false claim.\n- **Do not delegate or hand off file-writing work** (every gezel on this project is blocked too), and don't call \`write_file\`/\`message_gezel\` expecting a file to land.\n- If the request needs a file change, **say so plainly**: it's blocked because gezel edits are turned off for this project, and the user can re-enable them via **"Allow gezels to modify the workspace directory" in Project → Settings**. Reading, reviewing, analysis, and planning still work — do those if they move things forward.`
     : '';
   const freshProjectAddendum = isFreshProject
     ? `\n\n---\n\n## Fresh project — skip the survey\n\nThis workspace has only ${workspaceFiles?.length ?? 0} bootstrap file(s) (e.g. \`package.json\`, \`tsconfig.json\`). Artifacts, memories, tasks, packages, scripts, and craftbook drawers are nearly empty too on a freshly-started project. **Don't iterate** through \`list_artifacts\` / \`list_memories\` / \`list_packages\` / \`list_scripts\` / \`list_craftbooks\` / \`list_tasks\` looking for hidden state — there is none.\n\nIf you've already called a read tool this turn and got an empty / bootstrap-only result, your NEXT tool call must be either:\n\n${freshProjectAction}\n\nDo NOT loop on reads. The runtime aborts after 5 same-args read calls and the user sees a stuck-loop warning.`

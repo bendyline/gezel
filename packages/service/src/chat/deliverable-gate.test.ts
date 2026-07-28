@@ -7,7 +7,7 @@ import {
 } from './deliverable-gate.js';
 
 const write = (over: Partial<DeliverableWrite> = {}): DeliverableWrite => ({
-  name: 'writeFile',
+  name: 'write_file',
   path: 'index.html',
   success: true,
   ...over,
@@ -28,7 +28,7 @@ describe('deliverableWrittenThisTurn', () => {
   const file = 'packages/core/src/spatial/Geohash.ts';
 
   it('matches a successful write tool targeting the deliverable', () => {
-    expect(deliverableWrittenThisTurn([write({ name: 'replaceInFile', path: file })], file)).toBe(
+    expect(deliverableWrittenThisTurn([write({ name: 'replace_in_file', path: file })], file)).toBe(
       true,
     );
   });
@@ -43,7 +43,9 @@ describe('deliverableWrittenThisTurn', () => {
   });
 
   it('does not match a non-write tool (e.g. a read)', () => {
-    expect(deliverableWrittenThisTurn([write({ name: 'readFile', path: file })], file)).toBe(false);
+    expect(deliverableWrittenThisTurn([write({ name: 'read_file', path: file })], file)).toBe(
+      false,
+    );
   });
 
   it('does not match a write to a different file', () => {
@@ -61,11 +63,11 @@ describe('deliverableWrittenThisTurn', () => {
 
   it('accepts every write-shaped tool name', () => {
     for (const name of [
-      'writeFile',
-      'replaceInFile',
-      'appendToFile',
-      'applyPatch',
-      'insertAtMarker',
+      'write_file',
+      'replace_in_file',
+      'append_to_file',
+      'apply_patch',
+      'insert_at_marker',
     ]) {
       expect(deliverableWrittenThisTurn([write({ name, path: file })], file)).toBe(true);
     }
@@ -119,7 +121,7 @@ describe('evaluateDeliverableGate', () => {
       const r = evaluateDeliverableGate({
         content: existing,
         spec: { file, sniff: 'nonempty', requireChange: true },
-        writes: [{ name: 'readFile', path: file, success: true }],
+        writes: [{ name: 'read_file', path: file, success: true }],
       });
       expect(r.satisfied).toBe(false);
       expect(r.reason).toContain('requireChange');
@@ -129,7 +131,7 @@ describe('evaluateDeliverableGate', () => {
       const r = evaluateDeliverableGate({
         content: existing,
         spec: { file, sniff: 'nonempty', requireChange: true },
-        writes: [{ name: 'replaceInFile', path: file, success: true }],
+        writes: [{ name: 'replace_in_file', path: file, success: true }],
       });
       expect(r.satisfied).toBe(true);
       expect(r.reason).toContain('edited this turn');
@@ -140,7 +142,7 @@ describe('evaluateDeliverableGate', () => {
       const r = evaluateDeliverableGate({
         content: '<html><script>function f(){',
         spec: { file: 'index.html', sniff: 'html-complete', requireChange: true },
-        writes: [{ name: 'writeFile', path: 'index.html', success: true }],
+        writes: [{ name: 'write_file', path: 'index.html', success: true }],
       });
       expect(r.satisfied).toBe(false);
       expect(r.reason).toContain('html-complete');

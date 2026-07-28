@@ -767,7 +767,7 @@ const SANDBOX_PROMPT_HINT =
   '\n\nSandbox mode is active: only tools exposed via MCP are available. ' +
   'The Copilot built-ins (bash, web_fetch, view, read_file, write_file, edit_file, ' +
   'str_replace_editor, grep) are disabled — attempting them will be denied. ' +
-  'Use the gezel MCP tools (readdir, readFile, writeFile, search_files, fetch_url, etc.) instead.';
+  'Use the gezel MCP tools (list_dir, read_file, write_file, search_files, fetch_url, etc.) instead.';
 
 export function buildSandboxSystemMessage(base: string): string {
   return base + SANDBOX_PROMPT_HINT;

@@ -117,7 +117,7 @@ export interface SniffFeedbackOptions {
   /**
    * `<img src>` values currently in the failing HTML file that resolve
    * to missing local image files. These are the exact search strings a
-   * repair nudge can hand to `replaceInFile`.
+   * repair nudge can hand to `replace_in_file`.
    */
   brokenImageSrcs?: string[];
   /**
@@ -159,7 +159,7 @@ export interface SniffFeedbackOptions {
   /**
    * Defaults to the failing `filePath`, which enables direct file-write
    * repair mode for source deliverables. Set to `null` for failures that
-   * need a non-writeFile tool first, such as generating a missing image
+   * need a non-write_file tool first, such as generating a missing image
    * asset before patching HTML.
    */
   expectedDeliverable?: { kind: 'file'; filePath: string } | null;
@@ -328,7 +328,7 @@ export async function postSniffFeedback(
   } else if (revisionChanged) {
     state.lastRevisionKey = revisionKey;
   }
-  // A writeFile clamp is the wrong order when the fix needs a non-write
+  // A write_file clamp is the wrong order when the fix needs a non-write
   // tool first (source-read and generate-image flows). Keep stage 2
   // surgical for those calls, but do not cap the LOGICAL ladder at stage
   // 1: reusing its already-posted dedupe key would make attempt 4 and the
@@ -480,14 +480,15 @@ export async function postSniffFeedback(
  */
 function sniffEscalationLine(filePath: string, sniff: SniffResult, attempts: number): string {
   const missing = (sniff.missingRequiredSignals ?? []).join(', ');
-  return `REPEAT MISS — attempt ${attempts} on \`${filePath}\`: your completed repair left the exact same check failing${missing ? ` (${missing})` : ''}. Do not rewrite the whole file and do not reply that it is done. Make the smallest targeted edit that fixes the FIRST failure named below, using \`replaceInFile\` or \`replaceLines\` on the exact section the check names.`;
+  return `REPEAT MISS — attempt ${attempts} on \`${filePath}\`: your completed repair left the exact same check failing${missing ? ` (${missing})` : ''}. Do not rewrite the whole file and do not reply that it is done. Make the smallest targeted edit that fixes the FIRST failure named below, using \`replace_in_file\` or \`replace_lines\` on the exact section the check names.`;
 }
 
 function hasAppendOnlyRepairDirective(directive: string | undefined): boolean {
   const text = directive?.trim() ?? '';
+  // Legacy camelCase spellings kept so pre-rename directives still match.
   return (
-    /\bnext\s+tool\s+call\s+must\s+be\s+`?appendToFile\b/i.test(text) &&
-    /\bdo\s+not\s+call\s+`?writeFile\b/i.test(text)
+    /\bnext\s+tool\s+call\s+must\s+be\s+`?(?:append_to_file|appendToFile)\b/i.test(text) &&
+    /\bdo\s+not\s+call\s+`?(?:write_file|writeFile)\b/i.test(text)
   );
 }
 
@@ -502,7 +503,7 @@ function hasCombinedRepairDirective(directive: string | undefined): boolean {
 
 function sniffAppendEscalationLine(filePath: string, sniff: SniffResult, attempts: number): string {
   const missing = (sniff.missingRequiredSignals ?? []).join(', ');
-  return `REPEAT APPEND MISS — attempt ${attempts} on \`${filePath}\`: the previous append did not clear the same check${missing ? ` (${missing})` : ''}. Keep the existing passing content and follow the appendToFile directive below again with enough substantive headroom. Do not rewrite or replace the file, and do not reply that it is done.`;
+  return `REPEAT APPEND MISS — attempt ${attempts} on \`${filePath}\`: the previous append did not clear the same check${missing ? ` (${missing})` : ''}. Keep the existing passing content and follow the append_to_file directive below again with enough substantive headroom. Do not rewrite or replace the file, and do not reply that it is done.`;
 }
 
 function sniffCombinedEscalationLine(
@@ -517,8 +518,8 @@ function sniffCombinedEscalationLine(
 /**
  * Stage-2 message: the strategy change to ONE complete rewrite. Contract
  * with the service side (providers/llama-cpp/provider.ts:301-332): the
- * two literal trigger phrases ("Do not end your turn until `writeFile`"
- * and "writeFile({ path:") land the immediate-write clamp (writeFile-only
+ * two literal trigger phrases ("Do not end your turn until `write_file`"
+ * and "write_file({ path:") land the immediate-write clamp (write_file-only
  * surface, temp 0.2, thinking off) — and the standard `[scenario check] I
  * looked at` header must NOT appear, because that header routes the turn
  * into the patch-only scenario-repair mode which actively FORBIDS
@@ -546,7 +547,7 @@ function formatFullRewriteNudge(
     `GATE_FULL_REWRITE: ${attempts} completed repairs of \`${filePath}\` have failed this scenario check with the exact same result — targeted edits are not landing. Replace the deliverable whole.`,
     [fired, missing, failReason].filter(Boolean).join('\n'),
     directive,
-    `Do not end your turn until \`writeFile\` has rewritten \`${filePath}\` as one complete corrected version that fixes every failure above. Call writeFile({ path: "${filePath}", content: <the complete corrected file> }) as your next tool call. No planning prose, no reads first, no partial appends.`,
+    `Do not end your turn until \`write_file\` has rewritten \`${filePath}\` as one complete corrected version that fixes every failure above. Call write_file({ path: "${filePath}", content: <the complete corrected file> }) as your next tool call. No planning prose, no reads first, no partial appends.`,
   ]
     .filter(Boolean)
     .join('\n\n');
@@ -554,7 +555,7 @@ function formatFullRewriteNudge(
 
 function formatCoordinatorCopy(filePath: string, opts: SniffFeedbackOptions): string {
   if (opts.expectedDeliverable === null) {
-    return `[scenario coordinator copy] The direct implementer may be in a long turn. This repair likely needs a non-writeFile tool before the HTML patch. If you are coordinating this project and \`generate_image\` is available, generate the missing asset now (for petshop, save it as \`assets/logo.png\`), then patch \`${filePath}\` to reference it. If you need a handoff, ensure an Image Generator for \`assets/logo.png\` first, then a Builder/Developer for \`${filePath}\`. Do not only write a task note, queue a plain message, or call ask_specialist for this file.`;
+    return `[scenario coordinator copy] The direct implementer may be in a long turn. This repair likely needs a non-write_file tool before the HTML patch. If you are coordinating this project and \`generate_image\` is available, generate the missing asset now (for petshop, save it as \`assets/logo.png\`), then patch \`${filePath}\` to reference it. If you need a handoff, ensure an Image Generator for \`assets/logo.png\` first, then a Builder/Developer for \`${filePath}\`. Do not only write a task note, queue a plain message, or call ask_specialist for this file.`;
   }
   return `[scenario coordinator copy] The direct implementer may be in a long turn. If you are coordinating this project, patch the workspace file yourself now or use a file handoff: ensure a Builder/Developer gezel, then call message_gezel with expectedDeliverable: { kind: "file", filePath: "${filePath}" }. Do not only write a task note, queue a plain message, or call ask_specialist for this file.`;
 }
@@ -602,15 +603,15 @@ function formatNudge(
   const firstBrokenSrc = brokenImageSrcs[0] ?? 'assets/dog_food.jpg';
   const exactReplaceCall =
     imageSrcs.length > 0
-      ? `replaceInFile({ path: ${JSON.stringify(filePath)}, search: ${JSON.stringify(firstBrokenSrc)}, replace: ${JSON.stringify(imageSrcs[0])} })`
+      ? `replace_in_file({ path: ${JSON.stringify(filePath)}, search: ${JSON.stringify(firstBrokenSrc)}, replace: ${JSON.stringify(imageSrcs[0])} })`
       : undefined;
   const missingSignals = sniff.missingRequiredSignals ?? [];
   const workingImageRepair =
     imageSrcs.length > 0
-      ? `DO NOT call \`generate_image\` again: a real image asset already exists. EXACT PATCH: use the real workspace image src \`${imageSrcs[0]}\`. Broken image src values currently in \`${filePath}\`: ${brokenSrcList}. Replace those broken local image src values with \`${imageSrcs[0]}\`. Do not call \`mkdir\` for these paths, do not create empty asset directories, and do not create or reference \`assets/logo.png\` unless you actually write a real image file at that exact path; empty folders do not count. A valid logo tag for this file is \`<img src="${imageSrcs[0]}" alt="Pet shop logo">\`. If using a targeted patch, call \`${exactReplaceCall}\`, then repeat for each remaining broken image src, or use one \`writeFile\` for the corrected HTML. It is enough for the signal to make at least one visible \`<img>\` resolve to the real workspace file, but replacing all broken image src values is better. Other valid image src value(s) for this HTML file: ${imageSrcs.map((src) => `\`${src}\``).join(', ')}. The missing \`working-image\` signal requires a real \`<img>\` element whose \`src\` resolves from this HTML file to an image file that exists in the workspace. Placeholder comments, CSS-only backgrounds, broken image filenames, mkdir-only fixes, and chat descriptions do not count. If your tool list includes \`replaceInFile\` or \`writeFile\`, your next message must start with that tool call. If you do not have workspace write access, use a blocking file handoff: \`ensure_gezel\` for a Builder/Developer, then \`message_gezel\` with \`expectedDeliverable: { kind: "file", filePath: "${filePath}" }\` and include this exact fix; do not queue a message, call \`ask_specialist\`, or reply in prose.`
+      ? `DO NOT call \`generate_image\` again: a real image asset already exists. EXACT PATCH: use the real workspace image src \`${imageSrcs[0]}\`. Broken image src values currently in \`${filePath}\`: ${brokenSrcList}. Replace those broken local image src values with \`${imageSrcs[0]}\`. Do not call \`make_dir\` for these paths, do not create empty asset directories, and do not create or reference \`assets/logo.png\` unless you actually write a real image file at that exact path; empty folders do not count. A valid logo tag for this file is \`<img src="${imageSrcs[0]}" alt="Pet shop logo">\`. If using a targeted patch, call \`${exactReplaceCall}\`, then repeat for each remaining broken image src, or use one \`write_file\` for the corrected HTML. It is enough for the signal to make at least one visible \`<img>\` resolve to the real workspace file, but replacing all broken image src values is better. Other valid image src value(s) for this HTML file: ${imageSrcs.map((src) => `\`${src}\``).join(', ')}. The missing \`working-image\` signal requires a real \`<img>\` element whose \`src\` resolves from this HTML file to an image file that exists in the workspace. Placeholder comments, CSS-only backgrounds, broken image filenames, make_dir-only fixes, and chat descriptions do not count. If your tool list includes \`replace_in_file\` or \`write_file\`, your next message must start with that tool call. If you do not have workspace write access, use a blocking file handoff: \`ensure_gezel\` for a Builder/Developer, then \`message_gezel\` with \`expectedDeliverable: { kind: "file", filePath: "${filePath}" }\` and include this exact fix; do not queue a message, call \`ask_specialist\`, or reply in prose.`
       : missingSignals.includes('image-asset')
-        ? `No usable raster image asset exists in the project yet, so the missing \`working-image\` signal cannot be fixed by changing HTML alone. Create or generate a real workspace PNG/JPG/WebP/GIF image asset first, then reference it from \`${filePath}\`. Fast path: if \`generate_image\` is available, call \`generate_image({ prompt: "friendly pet shop logo, paw print, warm colors", saveAs: "assets/logo.png" })\`, then patch the HTML to \`<img src="assets/logo.png" alt="Pet shop logo">\`. Do not hand-write an SVG fallback, do not paste base64, and do not use CSS-only drawings; this scenario asks for an AI-generated logo image. \`mkdir\` alone is not enough; the check needs an actual raster image file and a matching \`<img src>\`. Placeholder comments, CSS-only backgrounds, external URLs, chat descriptions, and made-up filenames do not count. If your tool list includes \`generate_image\`, \`writeFile\`, or \`replaceInFile\`, your next message must start with one of those tool calls. If you do not have workspace write access, use a blocking file handoff: \`ensure_gezel\` for an image-generator, then \`message_gezel\` with \`expectedDeliverable: { kind: "file", filePath: "assets/logo.png" }\`; after the image exists, have a Builder/Developer patch \`${filePath}\`. Do not queue a message, call \`ask_specialist\`, or reply in prose.`
-        : `The missing \`working-image\` signal is concrete: the HTML must contain a real \`<img>\` element whose \`src\` resolves from this HTML file to an image file that exists in the workspace. The page already has an image asset, so connect it now. If \`assets/logo.png\` exists beside this page, patch the placeholder with \`<img src="assets/logo.png" alt="Pet shop logo">\`. Placeholder comments like \`<!-- Placeholder for logo.png -->\`, CSS-only backgrounds, artifact-only paths, and chat descriptions do not count. If your tool list includes \`replaceInFile\` or \`writeFile\`, your next message must start with that tool call. If you do not have workspace write access, use a blocking file handoff: \`ensure_gezel\` for a Builder/Developer, then \`message_gezel\` with \`expectedDeliverable: { kind: "file", filePath: "${filePath}" }\`; do not queue a message, call \`ask_specialist\`, or reply in prose.`;
+        ? `No usable raster image asset exists in the project yet, so the missing \`working-image\` signal cannot be fixed by changing HTML alone. Create or generate a real workspace PNG/JPG/WebP/GIF image asset first, then reference it from \`${filePath}\`. Fast path: if \`generate_image\` is available, call \`generate_image({ prompt: "friendly pet shop logo, paw print, warm colors", saveAs: "assets/logo.png" })\`, then patch the HTML to \`<img src="assets/logo.png" alt="Pet shop logo">\`. Do not hand-write an SVG fallback, do not paste base64, and do not use CSS-only drawings; this scenario asks for an AI-generated logo image. \`make_dir\` alone is not enough; the check needs an actual raster image file and a matching \`<img src>\`. Placeholder comments, CSS-only backgrounds, external URLs, chat descriptions, and made-up filenames do not count. If your tool list includes \`generate_image\`, \`write_file\`, or \`replace_in_file\`, your next message must start with one of those tool calls. If you do not have workspace write access, use a blocking file handoff: \`ensure_gezel\` for an image-generator, then \`message_gezel\` with \`expectedDeliverable: { kind: "file", filePath: "assets/logo.png" }\`; after the image exists, have a Builder/Developer patch \`${filePath}\`. Do not queue a message, call \`ask_specialist\`, or reply in prose.`
+        : `The missing \`working-image\` signal is concrete: the HTML must contain a real \`<img>\` element whose \`src\` resolves from this HTML file to an image file that exists in the workspace. The page already has an image asset, so connect it now. If \`assets/logo.png\` exists beside this page, patch the placeholder with \`<img src="assets/logo.png" alt="Pet shop logo">\`. Placeholder comments like \`<!-- Placeholder for logo.png -->\`, CSS-only backgrounds, artifact-only paths, and chat descriptions do not count. If your tool list includes \`replace_in_file\` or \`write_file\`, your next message must start with that tool call. If you do not have workspace write access, use a blocking file handoff: \`ensure_gezel\` for a Builder/Developer, then \`message_gezel\` with \`expectedDeliverable: { kind: "file", filePath: "${filePath}" }\`; do not queue a message, call \`ask_specialist\`, or reply in prose.`;
   const customRepair = opts.repairDirective?.trim();
   const parseRepair = isSourceParseFailure(sniff)
     ? sourceParseRepairLine(filePath, sniff.failReason, opts.sourceText)
@@ -625,13 +626,13 @@ function formatNudge(
         : isTicTacToeRewriteFailure(sniff)
           ? ticTacToeFullRewriteLine(filePath)
           : isHtmlSizeFailure(sniff)
-            ? `This is a source-file quality miss, not a one-line patch. Replace \`${filePath}\` with one complete, more substantive version using \`writeFile\`; target roughly 5-7 KB of real HTML/CSS/JS. Add actual gameplay/app behavior such as HUD details, health/lives, enemy behavior, collisions, restart/game-over state, or visual effects. Do not pad with comments or repeated no-op code. Do not use \`write_artifact\` for HTML/source deliverables; use workspace \`writeFile\` with the path relative to the workspace root. Your next assistant action should be that \`writeFile\` call, or if you lack workspace write access, make a blocking handoff to a Builder/Developer with \`expectedDeliverable: { kind: "file", filePath: "${filePath}" }\`.`
+            ? `This is a source-file quality miss, not a one-line patch. Replace \`${filePath}\` with one complete, more substantive version using \`write_file\`; target roughly 5-7 KB of real HTML/CSS/JS. Add actual gameplay/app behavior such as HUD details, health/lives, enemy behavior, collisions, restart/game-over state, or visual effects. Do not pad with comments or repeated no-op code. Do not use \`write_artifact\` for HTML/source deliverables; use workspace \`write_file\` with the path relative to the workspace root. Your next assistant action should be that \`write_file\` call, or if you lack workspace write access, make a blocking handoff to a Builder/Developer with \`expectedDeliverable: { kind: "file", filePath: "${filePath}" }\`.`
             : isWorkingImageFailure(sniff)
               ? workingImageRepair
               : [
                   'The artifact exists but the trial-level checker is waiting for the missing signals above.',
                   'Re-read the scenario prompt + mission objectives, identify what each missing signal is testing for, and patch the deliverable.',
-                  'If this is a small edit, use `replaceInFile` or `replaceLines`; otherwise use `writeFile` to re-emit the checked file.',
+                  'If this is a small edit, use `replace_in_file` or `replace_lines`; otherwise use `write_file` to re-emit the checked file.',
                   `Your next assistant action should be a file-writing tool call for \`${filePath}\`, not a prose summary saying it is fixed.`,
                   'If a signal name is unclear (e.g. `working-image` means an `<img src>` that actually resolves to a real file in the workspace — not just any `<img>` tag), think about what would make the page actually function the way the user asked for it.',
                 ].join(' ');
@@ -662,7 +663,7 @@ export function structuralOrderRepairLine(
   }
   return [
     'This is a structural-order failure, not missing-content feedback.',
-    `Read \`${filePath}\` once, then use one bounded \`writeFile\` rewrite that places the existing sections/steps in the required order.`,
+    `Read \`${filePath}\` once, then use one bounded \`write_file\` rewrite that places the existing sections/steps in the required order.`,
     'Do not append another copy of the value or heading; remove duplicates and preserve already-correct observed values.',
   ].join(' ');
 }
@@ -670,7 +671,7 @@ export function structuralOrderRepairLine(
 function ticTacToeFullRewriteLine(filePath: string): string {
   return [
     'TICTACTOE_FULL_REWRITE: this is not a planning or polish issue; the tic-tac-toe page still lacks the concrete game structure or substantive game logic the checker can run.',
-    `Your next tool call MUST be \`writeFile\` for \`${filePath}\`; do not call \`validate\`, \`readFile\`, \`ask_user_question\`, create another project, or delegate again before writing.`,
+    `Your next tool call MUST be \`write_file\` for \`${filePath}\`; do not call \`validate\`, \`read_file\`, \`ask_user_question\`, create another project, or delegate again before writing.`,
     `Replace \`${filePath}\` with one complete self-contained HTML document. Include these exact mechanical pieces: a visible title containing "Tic Tac Toe"; a status element for "X's turn" / "O's turn"; nine literal clickable \`button\` elements in the HTML with \`class="cell"\` and \`data-cell\` indexes 0-8; \`const winningLines = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];\`; \`cells.forEach((cell) => cell.addEventListener("click", handleClick))\`; win and draw detection that sets \`gameOver\`; draw detection; winning-cell highlighting; score counters for X/O/draws; and a Reset / Play Again button wired to clear the board.`,
     'The inline script must be substantive, about 1-2 KB of real state and functions. Do not pad with comments, repeated no-op code, or unused variables.',
     `Use this compact structure if you are unsure what to write: ${TICTACTOE_COPYABLE_HTML}`,
@@ -711,30 +712,30 @@ function sourceParseRepairLine(
   if (isTruncatedHtmlScriptFailure(failReason)) {
     return [
       'Because this is a truncated inline `<script>` block, finish or replace the file without adding duplicate script fragments.',
-      `First read \`${filePath}\`. If the file still ends inside the current script, use \`appendToFile\` with only the missing tail: close any open string/block, finish the current app logic, then include \`</script></body></html>\`.`,
+      `First read \`${filePath}\`. If the file still ends inside the current script, use \`append_to_file\` with only the missing tail: close any open string/block, finish the current app logic, then include \`</script></body></html>\`.`,
       'The append content must NOT start a new `<script>` tag, must NOT include placeholder text like `Hello` or `...`, and must NOT repeat the already-written declarations.',
-      `If you cannot confidently continue from the exact cutoff, call \`writeFile\` once with a shorter complete version of \`${filePath}\` that preserves the signals already firing, includes one parseable inline script, and has all closing tags.`,
+      `If you cannot confidently continue from the exact cutoff, call \`write_file\` once with a shorter complete version of \`${filePath}\` that preserves the signals already firing, includes one parseable inline script, and has all closing tags.`,
     ].join(' ');
   }
   if (isDuplicateDeclarationFailure(failReason)) {
     return [
       'Because this parse failure is a duplicate declaration, do not insert another copy of the same function, variable, test block, or verification block.',
-      `Read \`${filePath}\` once, then either remove every duplicated block with a targeted edit or replace \`${filePath}\` with one clean complete file using \`writeFile\`.`,
+      `Read \`${filePath}\` once, then either remove every duplicated block with a targeted edit or replace \`${filePath}\` with one clean complete file using \`write_file\`.`,
       'Keep exactly one declaration for the named identifier and exactly one copy of the surrounding test/feature block.',
-      'Do not use `appendToFile`, `insertAtMarker`, or `replaceLines` to add more declarations while repairing this failure.',
+      'Do not use `append_to_file`, `insert_at_marker`, or `replace_lines` to add more declarations while repairing this failure.',
     ].join(' ');
   }
   const exactRepairs = sourceText ? sourceParseRepairHints(filePath, sourceText) : [];
   const exactRepairLine =
     exactRepairs.length > 0
       ? `Exact patch candidate(s): ${exactRepairs.join(' ; ')}. If one matches the file you read, call it before a full rewrite.`
-      : 'If the parser error names an exact character, duplicate declaration, stray quote, or extra parenthesis, use one exact `replaceInFile` call for that text before attempting a full rewrite.';
+      : 'If the parser error names an exact character, duplicate declaration, stray quote, or extra parenthesis, use one exact `replace_in_file` call for that text before attempting a full rewrite.';
   return [
     'Because this is a source parse failure in an existing file, patch the deliverable with the smallest syntax fix first.',
-    `Read \`${filePath}\`, then use \`replaceInFile\` for exact bad text before trying a full \`writeFile\`.`,
-    'Whole-file `writeFile` overwrites are validated and can be refused if the re-emitted HTML still has a parse error.',
+    `Read \`${filePath}\`, then use \`replace_in_file\` for exact bad text before trying a full \`write_file\`.`,
+    'Whole-file `write_file` overwrites are validated and can be refused if the re-emitted HTML still has a parse error.',
     exactRepairLine,
-    'Do not use `appendToFile` or `insertAtMarker` to add duplicate top-level declarations, classes, or functions while repairing parse errors.',
+    'Do not use `append_to_file` or `insert_at_marker` to add duplicate top-level declarations, classes, or functions while repairing parse errors.',
   ].join(' ');
 }
 
@@ -784,7 +785,7 @@ function formatReplaceInFileCall(
   occurrence?: 'all',
 ): string {
   const occurrenceArg = occurrence ? `, occurrence: ${JSON.stringify(occurrence)}` : '';
-  return `replaceInFile({ path: ${JSON.stringify(filePath)}, find: ${JSON.stringify(find)}, replace: ${JSON.stringify(replace)}${occurrenceArg} })`;
+  return `replace_in_file({ path: ${JSON.stringify(filePath)}, find: ${JSON.stringify(find)}, replace: ${JSON.stringify(replace)}${occurrenceArg} })`;
 }
 
 function isSourceParseFailure(sniff: SniffResult): boolean {
@@ -876,7 +877,7 @@ export interface MissingDeliverableFeedbackOptions {
  * when the deliverable is still **absent** after the team has had time to
  * read its inputs — the exact failure of the qwen3.5 squisq-review
  * + incident-postmortem trials (analytical role read 10+ files, stalled, never
- * called `writeFile`; sniff sat at `rp0:rf0`). squisq-review posted no scenario
+ * called `write_file`; sniff sat at `rp0:rf0`). squisq-review posted no scenario
  * feedback at all; incident only nudged the file-EXISTS branch.
  *
  * Behavior: each call (one per absent poll) increments the absent counter.
@@ -1079,15 +1080,15 @@ function formatMissingDeliverableNudge(
     : 'Write the actual deliverable file now with the requested content.';
   const handoffHint =
     isHtml || isSourceFile(filePath)
-      ? `If your current role does not have \`writeFile\`, do not translate this into another planning, design, review, or image request. Make a blocking file handoff instead: first call \`ensure_gezel\` for a Builder/Developer, then call \`message_gezel\` for that gezel with \`expectedDeliverable: { kind: "file", filePath: "${filePath}" }\` and tell them to write \`${filePath}\` now. Do not call \`ask_specialist\` for this file deliverable.`
+      ? `If your current role does not have \`write_file\`, do not translate this into another planning, design, review, or image request. Make a blocking file handoff instead: first call \`ensure_gezel\` for a Builder/Developer, then call \`message_gezel\` for that gezel with \`expectedDeliverable: { kind: "file", filePath: "${filePath}" }\` and tell them to write \`${filePath}\` now. Do not call \`ask_specialist\` for this file deliverable.`
       : '';
   const artifactCopySource = artifactNearMissSource(filePath, nearMiss);
   const landingInstruction = artifactCopySource
-    ? `Fast path: because the near-miss is already in artifacts, land it in the workspace now with \`copy_artifact_to_workspace({ source: "${artifactCopySource}", dest: "${filePath}" })\` if that tool is available; otherwise read the artifact and call \`writeFile({ path: "${filePath}", content: <the full deliverable contents> })\`. Pass the destination path exactly as \`${filePath}\` (workspace-root-relative — NOT \`workspace/${filePath}\`).`
-    : `${deliverableHint} Stop reading/planning and write the file now: \`writeFile({ path: "${filePath}", content: <the full deliverable contents> })\`. Pass the path exactly as \`${filePath}\` (workspace-root-relative — NOT \`workspace/${filePath}\`).`;
+    ? `Fast path: because the near-miss is already in artifacts, land it in the workspace now with \`copy_artifact_to_workspace({ source: "${artifactCopySource}", dest: "${filePath}" })\` if that tool is available; otherwise read the artifact and call \`write_file({ path: "${filePath}", content: <the full deliverable contents> })\`. Pass the destination path exactly as \`${filePath}\` (workspace-root-relative — NOT \`workspace/${filePath}\`).`
+    : `${deliverableHint} Stop reading/planning and write the file now: \`write_file({ path: "${filePath}", content: <the full deliverable contents> })\`. Pass the path exactly as \`${filePath}\` (workspace-root-relative — NOT \`workspace/${filePath}\`).`;
   const landingToolPhrase = artifactCopySource
-    ? '`copy_artifact_to_workspace` or `writeFile`'
-    : '`writeFile`';
+    ? '`copy_artifact_to_workspace` or `write_file`'
+    : '`write_file`';
   const nearMissLines = nearMiss
     ? [
         `[scenario check] I did find \`${nearMiss.path}\` at \`${nearMiss.location}\`${nearMiss.bytes == null ? '' : ` (${nearMiss.bytes} bytes)`}, but that is the wrong deliverable path or location. A plan, notes file, artifact/library-only file, draft, or alternate filename does not count.`,
@@ -1113,7 +1114,7 @@ function formatMissingDeliverableNudge(
     `If \`${filePath}\` already exists by the time you read this queued message, treat this message as stale: re-read \`${filePath}\` and patch the latest concrete scenario-check failure instead of rewriting from scratch or replying in prose.`,
     ...coordinatorLines,
     '',
-    `Artifact-only plans, notes, and chat summaries do not satisfy this scenario. Write what you have, even if incomplete — a partial file that you then extend with \`replaceInFile\`/\`appendToFile\` beats nothing. Do not end your turn until ${landingToolPhrase} has landed the workspace file. If you delegated this, the work has not happened: assign it explicitly or write it yourself.`,
+    `Artifact-only plans, notes, and chat summaries do not satisfy this scenario. Write what you have, even if incomplete — a partial file that you then extend with \`replace_in_file\`/\`append_to_file\` beats nothing. Do not end your turn until ${landingToolPhrase} has landed the workspace file. If you delegated this, the work has not happened: assign it explicitly or write it yourself.`,
   ].join('\n');
 }
 

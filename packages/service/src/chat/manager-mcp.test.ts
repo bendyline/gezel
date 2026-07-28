@@ -317,7 +317,7 @@ describe('ChatManager + MCP — tool calls fire through the bridge', () => {
 
     mock.scriptToolCalls([
       {
-        name: 'writeFile',
+        name: 'write_file',
         arguments: { path: 'src/app.js', content: 'export const ok = true;\n' },
       },
     ]);
@@ -340,7 +340,7 @@ describe('ChatManager + MCP — tool calls fire through the bridge', () => {
     const toolOnlyMsg = disk!.messages.find(
       (m) => m.role === 'assistant' && m.content === '' && (m.toolCalls?.length ?? 0) > 0,
     );
-    expect(toolOnlyMsg?.toolCalls?.[0]?.name).toBe('writeFile');
+    expect(toolOnlyMsg?.toolCalls?.[0]?.name).toBe('write_file');
   }, 30_000);
 
   it('skips CLOSING_SUMMARY after repeat and escalated validation repair writes', async () => {
@@ -355,7 +355,7 @@ describe('ChatManager + MCP — tool calls fire through the bridge', () => {
       const session = await manager.createSession({ gezelId: 'ada' });
       mock.scriptToolCalls([
         {
-          name: 'writeFile',
+          name: 'write_file',
           arguments: {
             path: `validation-repair-${index}.md`,
             content: `repair ${index}\n`,
@@ -388,7 +388,7 @@ describe('ChatManager + MCP — tool calls fire through the bridge', () => {
 
     mock.scriptToolCalls([
       {
-        name: 'writeFile',
+        name: 'write_file',
         arguments: { path: 'out/customers.json', content: '[]\n' },
       },
     ]);

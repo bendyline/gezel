@@ -8,7 +8,7 @@
  * fires. Both backstops are too slow for a real user.
  *
  * Failure detection: most bridge failures are `ERROR:`-prefixed, but
- * some MCP handlers return plain teaching errors such as "replaceLines
+ * some MCP handlers return plain teaching errors such as "replace_lines
  * was rejected..." or "Write failed: fetch failed". Treat those as
  * failures too so source-edit validation loops get the same guardrails.
  *
@@ -39,7 +39,7 @@ const TRANSPORT_ABORT_AT = 2;
  * target path abort sooner than the generic limit. Unlike a malformed-args
  * error, retrying is *structurally* hopeless: the call shape is fine, the
  * PATH is the problem, so an identical retry can never succeed — and a role
- * without `writeFile` (a voorman) has no valid retry at all. The only
+ * without `write_file` (a voorman) has no valid retry at all. The only
  * correct move is to hand off. We nudge toward a handoff from the FIRST
  * refusal (below) and abort after this many, instead of burning the full
  * `hardAbortAt` budget on a doomed call. Wild-caught (qwen3.6
@@ -54,7 +54,7 @@ export interface ToolFailureTrackerOpts {
   softWarningAt?: number;
   hardAbortAt?: number;
   /**
-   * Surgical edit tools (`replaceInFile` / `insertAtMarker` / …) are on
+   * Surgical edit tools (`replace_in_file` / `insert_at_marker` / …) are on
    * the roster this turn — i.e. the deliverable is a MODIFICATION of an
    * existing file, not a fresh create. When set, a repeated source-edit
    * failure steers the model toward a targeted patch instead of the
@@ -170,11 +170,11 @@ export class ToolFailureTracker {
             : undefined;
         const output2 =
           this.surgicalEditsAvailable && !sourceFailureKind
-            ? `${output}\n\n[runtime] This is your ${ordinalSuffix(fails)} consecutive failure of \`${toolName}\` this turn. STOP re-emitting the whole file — retyping the full source keeps corrupting it. Make a TARGETED edit by LINE NUMBER: \`replaceLines({ path, startLine, endLine, content })\` — read the line range off the \`readFile\` gutter and supply ONLY the corrected lines (no \`find\` string to reproduce). If the latest user/check message names a different missing deliverable path, write that exact path next.${this.delegationAvailable ? DELEGATE_HANDOFF_HINT : ''}`
+            ? `${output}\n\n[runtime] This is your ${ordinalSuffix(fails)} consecutive failure of \`${toolName}\` this turn. STOP re-emitting the whole file — retyping the full source keeps corrupting it. Make a TARGETED edit by LINE NUMBER: \`replace_lines({ path, startLine, endLine, content })\` — read the line range off the \`read_file\` gutter and supply ONLY the corrected lines (no \`find\` string to reproduce). If the latest user/check message names a different missing deliverable path, write that exact path next.${this.delegationAvailable ? DELEGATE_HANDOFF_HINT : ''}`
             : `${output}\n\n[runtime] This is your ${ordinalSuffix(fails)} consecutive failure of \`${toolName}\` this turn. STOP retrying fragments or surgical edits.${
                 this.delegationAvailable
                   ? DELEGATE_HANDOFF_HINT
-                  : ' If the latest user/check message names a different missing deliverable path, write that exact path next. Otherwise read the current file if needed, then call `writeFile` once with the complete corrected source file: full HTML/JS/CSS from the first byte through the final closing tag.'
+                  : ' If the latest user/check message names a different missing deliverable path, write that exact path next. Otherwise read the current file if needed, then call `write_file` once with the complete corrected source file: full HTML/JS/CSS from the first byte through the final closing tag.'
               }`;
         return {
           output: output2,
@@ -222,9 +222,9 @@ export class ToolFailureTracker {
         return `[${opts.providerLabel}] aborting — \`${opts.toolName}\` failed ${opts.count} times in a row this turn. You've shown you can't land this edit. STOP editing this file yourself and hand it to a more capable model: \`delegate_meester\` (or \`delegate_voorman\`), naming the file and the exact change needed.`;
       }
       if (opts.surgicalEditsAvailable && !opts.sourceFailureKind) {
-        return `[${opts.providerLabel}] aborting — \`${opts.toolName}\` failed ${opts.count} times in a row this turn. Re-emitting the whole file keeps corrupting it. Don't rewrite the entire file — make one targeted \`replaceLines({ path, startLine, endLine, content })\` edit by line number (read the range off the \`readFile\` gutter; supply only the corrected lines). If the latest user/check message names a different missing deliverable path, write that exact path next.`;
+        return `[${opts.providerLabel}] aborting — \`${opts.toolName}\` failed ${opts.count} times in a row this turn. Re-emitting the whole file keeps corrupting it. Don't rewrite the entire file — make one targeted \`replace_lines({ path, startLine, endLine, content })\` edit by line number (read the range off the \`read_file\` gutter; supply only the corrected lines). If the latest user/check message names a different missing deliverable path, write that exact path next.`;
       }
-      return `[${opts.providerLabel}] aborting — \`${opts.toolName}\` failed ${opts.count} times in a row this turn. Stop emitting source fragments or more surgical edits. If the latest user/check message names a different missing deliverable path, write that exact path next. Otherwise your next attempt must use one complete \`writeFile({ path, content })\` call for the same file, containing the entire corrected source file from first byte through final closing tag.`;
+      return `[${opts.providerLabel}] aborting — \`${opts.toolName}\` failed ${opts.count} times in a row this turn. Stop emitting source fragments or more surgical edits. If the latest user/check message names a different missing deliverable path, write that exact path next. Otherwise your next attempt must use one complete \`write_file({ path, content })\` call for the same file, containing the entire corrected source file from first byte through final closing tag.`;
     }
     return `[${opts.providerLabel}] aborting — \`${opts.toolName}\` failed ${opts.count} times in a row this turn. The model couldn't find a working call shape; the tool result history is preserved so you can see what went wrong. Ask the gezel to try a different approach, or report the bug.`;
   }
@@ -277,7 +277,9 @@ export class ToolFailureTracker {
 }
 
 function isSourceEditFailureTool(toolName: string): boolean {
-  return toolName === 'writeFile' || toolName === 'replaceInFile' || toolName === 'replaceLines';
+  return (
+    toolName === 'write_file' || toolName === 'replace_in_file' || toolName === 'replace_lines'
+  );
 }
 
 function isFailureOutput(output: string): boolean {

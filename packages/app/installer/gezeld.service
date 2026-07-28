@@ -21,6 +21,9 @@ UMask=0077
 # ~80 MB of bundling a separate Node binary.
 Environment=ELECTRON_RUN_AS_NODE=1
 Environment=GEZEL_HOME=/var/lib/gezel
+# Reserve the canonical machine-service endpoint. User-owned CLI fallbacks use
+# runtime-discovered ephemeral ports and therefore cannot block this service.
+Environment=GEZEL_PORT=43935
 # Service writes a scoped, non-root first-party credential to runtime/
 # auth-token with mode 0644 when this is set. The daemon root token remains
 # process-local; desktop clients receive only the credential they need.

@@ -5,7 +5,7 @@ import type { McpToolWrapper } from './types.js';
 /**
  * Gezel's workspace tools already resolve paths relative to the project
  * workspace root. Local models still occasionally copy the UI/storage label
- * from a prompt and call `writeFile({ path: "workspace/index.html" })`, which
+ * from a prompt and call `write_file({ path: "workspace/index.html" })`, which
  * otherwise creates `workspace/workspace/index.html`. Strip that one
  * redundant leading label at the bridge boundary so reads, writes, and edits
  * all agree on the same shipping path.
@@ -15,17 +15,17 @@ export function normalizeWorkspaceToolPath(path: string): string {
 }
 
 const PATH_FIELDS_BY_TOOL: Readonly<Record<string, readonly string[]>> = {
-  readdir: ['path'],
-  readFile: ['path'],
+  list_dir: ['path'],
+  read_file: ['path'],
   stat: ['path'],
-  writeFile: ['path'],
-  appendToFile: ['path'],
-  replaceInFile: ['path'],
-  replaceLines: ['path'],
-  applyPatch: ['path'],
-  insertAtMarker: ['path'],
-  rm: ['path'],
-  mkdir: ['path'],
+  write_file: ['path'],
+  append_to_file: ['path'],
+  replace_in_file: ['path'],
+  replace_lines: ['path'],
+  apply_patch: ['path'],
+  insert_at_marker: ['path'],
+  delete_path: ['path'],
+  make_dir: ['path'],
   rename: ['fromPath', 'toPath'],
   run_nodejs_script: ['path'],
   derive_file: ['outputPath'],

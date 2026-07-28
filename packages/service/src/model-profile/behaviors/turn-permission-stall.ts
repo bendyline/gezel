@@ -16,9 +16,9 @@ const ACTION_REQUEST_PATTERN =
 
 const ACTION_TOOL_PREFIXES = ['write', 'replace', 'append', 'apply', 'insert', 'run', 'delegate'];
 const ACTION_TOOL_NAMES = new Set([
-  'mkdir',
+  'make_dir',
   'rename',
-  'rm',
+  'delete_path',
   'npm_install',
   'create_task',
   'assign_task',
@@ -29,7 +29,7 @@ const ACTION_TOOL_NAMES = new Set([
 function usedActionOrInvestigationTool(ctx: TurnCtx): boolean {
   return ctx.drained.some((call) => {
     if (call.name === 'ask_user_question') return false;
-    if (call.name === 'readFile' || call.name === 'readdir' || call.name === 'search_code') {
+    if (call.name === 'read_file' || call.name === 'list_dir' || call.name === 'search_code') {
       return true;
     }
     if (ACTION_TOOL_NAMES.has(call.name)) return true;
@@ -48,7 +48,7 @@ function detect(ctx: TurnCtx): NudgeVerdict | null {
     promptForNextTurn: [
       'The user already asked you to do the work. Do not ask "should I proceed" or "would you like me to" in prose.',
       'If a real human decision is required, call `ask_user_question`. Otherwise, continue now with an action tool call.',
-      'For code edits, use the current file state: read the file if line numbers are stale, then call `replaceLines` for the smallest parseable range, or `writeFile` only for a complete new/rewrite file.',
+      'For code edits, use the current file state: read the file if line numbers are stale, then call `replace_lines` for the smallest parseable range, or `write_file` only for a complete new/rewrite file.',
       'Keep visible prose short after the tool result.',
     ].join('\n'),
   };

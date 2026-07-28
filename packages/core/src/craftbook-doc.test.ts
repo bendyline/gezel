@@ -58,7 +58,7 @@ const HOOKED_DOC: CraftbookDoc = {
   hooks: [
     {
       phase: 'PreToolUse',
-      matcher: '^(rm|writeFile)$',
+      matcher: '^(delete_path|write_file)$',
       script: { name: 'checkPrices', scope: 'craftbook' },
       label: 'destructive-write check',
     },

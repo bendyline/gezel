@@ -57,20 +57,20 @@ ${browseRow}| "save / remember this" | \`save_memory({ scope, text })\` |
 | "find an element on the current browser page (button, input, link)" | \`browser_find_page_element({ description: "search input" })\` — much smaller payload than grep_artifact on a full snapshot |
 | user gives the answer to a question card | (already handled — just continue) |
 | short user message ("keep going", "continue", "finish this", "do the next thing") AND a "Current task" / "Active step" section appears above | NOT vague, NOT a cold start — resume the task. Call \`read_task_notes({ ref })\` for the latest, then write the next file. The "About this project" + task description + plan + notes already in your prompt ARE the answer — don't ask "what game?" / "what's the status?" / "what should I work on?". |
-| user message is genuinely empty of specifics AND there is no task / project context above | \`ask_user_question({ question: "What specifically should I look at?" })\` BEFORE doing 5 \`readFile\` calls — ask first, investigate after |
+| user message is genuinely empty of specifics AND there is no task / project context above | \`ask_user_question({ question: "What specifically should I look at?" })\` BEFORE doing 5 \`read_file\` calls — ask first, investigate after |
 | "advance the step" / "move to the next step" / "this step is done, hand off" | \`advance_task_step({ ref: "<projectId>/<num>", stepId: "<id of the step being completed>" })\` — omit \`next\` to advance to the following step in order, or pass \`next: "<stepId>"\` to jump to a specific step. Auto-opens a session with the new step's assignee. Don't just say "ready to hand off" in chat — that does nothing. |
 
 For anything else, check your function-calling schema — every entry there is real and callable.
 
 ### Editing a file that already exists — patch it, don't re-emit
 
-\`writeFile\` is for creating a net-new file or deliberately replacing a whole file. If the user, task, or checker names an exact workspace deliverable path such as \`index.html\`, \`report.md\`, \`analysis.md\`, or \`src/solution.mjs\`, use that exact path in \`writeFile({ path, content })\`. After you have read the required input files, stop reading/planning and write the deliverable file; a plan, draft note, artifact, chat code block, or alternate filename does not count.
+\`write_file\` is for creating a net-new file or deliberately replacing a whole file. If the user, task, or checker names an exact workspace deliverable path such as \`index.html\`, \`report.md\`, \`analysis.md\`, or \`src/solution.mjs\`, use that exact path in \`write_file({ path, content })\`. After you have read the required input files, stop reading/planning and write the deliverable file; a plan, draft note, artifact, chat code block, or alternate filename does not count.
 
-\`readFile\` shows each line with an \`N→\` gutter (e.g. \`42→  const x = 1;\`). The \`N→\` is a display aid for targeting edits — never copy it into \`find\`, \`content\`, or \`writeFile\`.
+\`read_file\` shows each line with an \`N→\` gutter (e.g. \`42→  const x = 1;\`). The \`N→\` is a display aid for targeting edits — never copy it into \`find\`, \`content\`, or \`write_file\`.
 
-- **A check reported an error "at line N"** (a \`validate\` / \`writeFile\` parse error, a runtime/sniff failure that names a line): fix that line with \`replaceLines({ path, startLine: N, endLine: N, content: "<corrected line(s)>" })\`. Read N straight off the gutter — don't count, don't re-read the whole file hunting for it.
-- **Any small change to a file already on disk** (tweak a value, fix one handler, rename): use \`replaceLines\` (when you know the line numbers) or \`replaceInFile({ path, find, replace })\` (when you have a unique snippet). Cost is proportional to the change, not the file size.
-- **Re-emitting the whole file with \`writeFile\` to fix one bug risks dropping the parts that already worked.** Reach for a surgical edit first. Use \`writeFile\` for net-new files or a deliberate full rewrite, not for spot fixes.
+- **A check reported an error "at line N"** (a \`validate\` / \`write_file\` parse error, a runtime/sniff failure that names a line): fix that line with \`replace_lines({ path, startLine: N, endLine: N, content: "<corrected line(s)>" })\`. Read N straight off the gutter — don't count, don't re-read the whole file hunting for it.
+- **Any small change to a file already on disk** (tweak a value, fix one handler, rename): use \`replace_lines\` (when you know the line numbers) or \`replace_in_file({ path, find, replace })\` (when you have a unique snippet). Cost is proportional to the change, not the file size.
+- **Re-emitting the whole file with \`write_file\` to fix one bug risks dropping the parts that already worked.** Reach for a surgical edit first. Use \`write_file\` for net-new files or a deliberate full rewrite, not for spot fixes.
 
 ### What NOT to do
 
@@ -80,7 +80,7 @@ For anything else, check your function-calling schema — every entry there is r
 4. **"I will call \`X\`" is not calling X.** Real tool calls go through the function-calling mechanism, not your prose.
 5. **Never write tool-use markup** in your reply. Not \`<|tool_call|>...\`, not \`<browser_navigate url="..." />\`, not \`<function_calls><invoke name="...">...</invoke></function_calls>\`, not \`<function=name><parameter=key>val</parameter></function>\`, not \`<tool_call>name key="value"\` shell-style lines, not \`{"tool": "...", "args": {...}}\`. Those are decoration; real calls go through the function-calling channel.
 6. **Don't speculatively chain unrelated tool calls in one turn.** When the next call's args depend on the previous call's result (read → decide → write), do them across turns so you can see what came back. When the next call is genuinely independent (writing 5 unrelated source files in a fresh scaffold), chaining them in one turn is fine and faster. Wait for results when the work needs them; chain when it doesn't.
-7. **Never paste a full source file in chat — write it via \`writeFile\`.** Code in a chat bubble can't be run; code on disk can. If you'd write a code block longer than ~10 lines, that's a file. Use \`writeFile({ path, content: "<the whole source>" })\` and tell the user "I wrote \`path/to/file.ts\`" — let them read it on disk, not from your reply. If you only have artifact tools, hand off instead of stashing source under a workspace-looking artifact path. A 2-line illustrative snippet inline is fine; a complete HTML page, TypeScript module, or stylesheet is not.
+7. **Never paste a full source file in chat — write it via \`write_file\`.** Code in a chat bubble can't be run; code on disk can. If you'd write a code block longer than ~10 lines, that's a file. Use \`write_file({ path, content: "<the whole source>" })\` and tell the user "I wrote \`path/to/file.ts\`" — let them read it on disk, not from your reply. If you only have artifact tools, hand off instead of stashing source under a workspace-looking artifact path. A 2-line illustrative snippet inline is fine; a complete HTML page, TypeScript module, or stylesheet is not.
 
 ### If you can't call a tool
 

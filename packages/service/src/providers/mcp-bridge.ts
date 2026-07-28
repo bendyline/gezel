@@ -7,6 +7,7 @@
  */
 
 import { type HookPhase, type HookResult, type HookSpec, createLogger } from '@bendyline/gezel';
+import { resolveToolNameSpelling } from '@bendyline/gezel-mcp';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
@@ -180,7 +181,7 @@ export const DEFAULT_TOOL_TIMEOUT_MS = 5 * 60 * 1000;
  *   Playwright + types) can cross the 5-min default on slow networks.
  * - `extract_archive`, `run_nodejs_script`, `run_npx`: 10 min — same shape.
  *
- * Read-only tools (`readFile`, `search_history`, etc.) inherit the
+ * Read-only tools (`read_file`, `search_history`, etc.) inherit the
  * default; clamping them tighter doesn't gain anything.
  */
 export const TOOL_TIMEOUT_MS: Record<string, number> = {
@@ -780,7 +781,10 @@ export class McpBridge {
   }
 
   hasTool(name: string): boolean {
-    return this.toolNameSet.has(name);
+    // Alternate spellings count as "has" — `callToolRich` resolves them to
+    // the advertised name at dispatch, so a caller probing with a legacy
+    // or miscased spelling must get the same answer the call itself would.
+    return this.toolNameSet.has(name) || resolveToolNameSpelling(name, this.toolNameSet) !== name;
   }
 
   /**
@@ -944,6 +948,14 @@ export class McpBridge {
     opts?: { budgetChars?: number; numCtxTokens?: number },
   ): Promise<{ text: string; images: Array<{ base64: string; mimeType: string }> }> {
     if (!this.client) throw new Error('[mcp-bridge] not started');
+    // Resolve renamed/miscased spellings to the advertised name BEFORE
+    // anything keys off it — hooks, wrappers, timeouts, the tool-call
+    // event, and the wire dispatch all see one spelling. Unknown names
+    // pass through so the server's "tool not found" error stays honest.
+    const toolName = resolveToolNameSpelling(name, this.toolNameSet);
+    if (toolName !== name) {
+      log.debug(`call_tool alias ${name} -> ${toolName}`);
+    }
     const debugOn = this.debug?.isEnabled() === true;
     if (debugOn) {
       const redactedArgs = redactObject(args, this.knownSecretValues);
@@ -955,9 +967,9 @@ export class McpBridge {
       }
       // Full args payload (with secrets stripped) so "what exactly did
       // the model send?" is answerable from the log alone.
-      log.debug(`call_tool ${name} args=${argsJson}`);
+      log.debug(`call_tool ${toolName} args=${argsJson}`);
     } else {
-      log.debug(`call_tool ${name} keys=${Object.keys(args).join(',')}`);
+      log.debug(`call_tool ${toolName} keys=${Object.keys(args).join(',')}`);
     }
     const start = Date.now();
     let errorMessage: string | undefined;
@@ -978,7 +990,7 @@ export class McpBridge {
       // error result, success=false, model sees the reason.
       let rejected: string | null = null;
       if (this.shouldEvaluateHooks()) {
-        const verdict = await this.evaluateHooks('PreToolUse', name, effectiveArgs);
+        const verdict = await this.evaluateHooks('PreToolUse', toolName, effectiveArgs);
         if (!verdict.allow) {
           rejected = verdict.reason;
         }
@@ -991,7 +1003,7 @@ export class McpBridge {
         for (const w of this.wrappers) {
           if (!w.preProcess) continue;
           try {
-            const verdict = await w.preProcess(name, effectiveArgs, this.wrapperCtx);
+            const verdict = await w.preProcess(toolName, effectiveArgs, this.wrapperCtx);
             if (verdict.kind === 'reject') {
               rejected = verdict.error;
               break;
@@ -999,7 +1011,7 @@ export class McpBridge {
             if (verdict.args) effectiveArgs = verdict.args;
           } catch (err) {
             log.warn(
-              `wrapper ${w.id} preProcess threw for ${name}; allowing call:`,
+              `wrapper ${w.id} preProcess threw for ${toolName}; allowing call:`,
               err instanceof Error ? err.message : err,
             );
           }
@@ -1009,9 +1021,9 @@ export class McpBridge {
         combined = rejected;
         isError = true;
         errorMessage = rejected;
-        log.debug(`call_tool ${name} rejected: ${rejected}`);
+        log.debug(`call_tool ${toolName} rejected: ${rejected}`);
       } else {
-        const raw = await this._invokeRaw(name, effectiveArgs);
+        const raw = await this._invokeRaw(toolName, effectiveArgs);
         combined = raw.text;
         isError = raw.isError;
         errorMessage = raw.errorMessage;
@@ -1023,7 +1035,7 @@ export class McpBridge {
             if (!w.postProcess) continue;
             try {
               const wrapped = await w.postProcess(
-                name,
+                toolName,
                 effectiveArgs,
                 { text: combined, images },
                 this.wrapperCtx,
@@ -1037,7 +1049,7 @@ export class McpBridge {
               }
             } catch (err) {
               log.warn(
-                `wrapper ${w.id} failed for ${name}; falling back:`,
+                `wrapper ${w.id} failed for ${toolName}; falling back:`,
                 err instanceof Error ? err.message : err,
               );
             }
@@ -1051,7 +1063,7 @@ export class McpBridge {
             if (!w.postProcessError) continue;
             try {
               const translated = await w.postProcessError(
-                name,
+                toolName,
                 effectiveArgs,
                 combined,
                 this.wrapperCtx,
@@ -1062,7 +1074,7 @@ export class McpBridge {
               }
             } catch (err) {
               log.warn(
-                `wrapper ${w.id} postProcessError failed for ${name}; using raw error:`,
+                `wrapper ${w.id} postProcessError failed for ${toolName}; using raw error:`,
                 err instanceof Error ? err.message : err,
               );
             }
@@ -1075,7 +1087,7 @@ export class McpBridge {
         // on it"). `ask` is treated as deny — once the call ran, we
         // can't roll it back.
         if (this.shouldEvaluateHooks()) {
-          const verdict = await this.evaluateHooks('PostToolUse', name, effectiveArgs, {
+          const verdict = await this.evaluateHooks('PostToolUse', toolName, effectiveArgs, {
             text: combined,
             isError,
           });
@@ -1083,7 +1095,7 @@ export class McpBridge {
             combined = verdict.reason;
             isError = true;
             errorMessage = verdict.reason;
-            log.debug(`call_tool ${name} post-hook denied: ${verdict.reason}`);
+            log.debug(`call_tool ${toolName} post-hook denied: ${verdict.reason}`);
           }
         }
       }
@@ -1091,7 +1103,7 @@ export class McpBridge {
       errorMessage = err instanceof Error ? err.message : String(err);
       isError = true;
       if (debugOn && err instanceof Error && err.stack) {
-        log.error(`call_tool ${name} threw:\n${err.stack}`);
+        log.error(`call_tool ${toolName} threw:\n${err.stack}`);
       }
     } finally {
       // Drain per-call wrapper state first — onCallEnd fires exactly
@@ -1106,10 +1118,10 @@ export class McpBridge {
         for (const w of this.wrappers) {
           if (!w.onCallEnd) continue;
           try {
-            await w.onCallEnd(name, effectiveArgs, this.wrapperCtx);
+            await w.onCallEnd(toolName, effectiveArgs, this.wrapperCtx);
           } catch (err) {
             log.warn(
-              `wrapper ${w.id} onCallEnd threw for ${name}; continuing:`,
+              `wrapper ${w.id} onCallEnd threw for ${toolName}; continuing:`,
               err instanceof Error ? err.message : err,
             );
           }
@@ -1147,7 +1159,7 @@ export class McpBridge {
             ? redactString(errorMessage, this.knownSecretValues)
             : undefined;
           await this.onToolCall({
-            name,
+            name: toolName,
             argKeys: Object.keys(args),
             args: redactedArgs,
             durationMs: Date.now() - start,
@@ -1165,7 +1177,7 @@ export class McpBridge {
     if (errorMessage && isError) {
       const redacted = redactString(errorMessage, this.knownSecretValues);
       if (debugOn) {
-        log.error(`call_tool ${name} error: ${redacted}`);
+        log.error(`call_tool ${toolName} error: ${redacted}`);
       }
       // Preserve the pre-existing behavior: throw if the SDK threw; return
       // an ERROR: string if the tool reported isError via the MCP result.
@@ -1173,13 +1185,13 @@ export class McpBridge {
       return { text: `ERROR: ${redacted}`, images: [] };
     }
     if (debugOn) {
-      // Tail-clamp so a giant `readdir` return doesn't flood.
+      // Tail-clamp so a giant `list_dir` return doesn't flood.
       const tail =
         combined.length > 10_000
           ? `${combined.slice(0, 10_000)}…(${combined.length - 10_000} more chars)`
           : combined;
       log.debug(
-        `call_tool ${name} ok (${Date.now() - start}ms, ${images.length} images)\n${redactString(tail, this.knownSecretValues)}`,
+        `call_tool ${toolName} ok (${Date.now() - start}ms, ${images.length} images)\n${redactString(tail, this.knownSecretValues)}`,
       );
     }
     // Redact the result before it's handed to the provider. An MCP
@@ -1200,7 +1212,7 @@ export class McpBridge {
     );
     if (capped.length !== redactedText.length) {
       log.warn(
-        `call_tool ${name} output truncated: ${redactedText.length} → ${capped.length} chars (budget=${cap})`,
+        `call_tool ${toolName} output truncated: ${redactedText.length} → ${capped.length} chars (budget=${cap})`,
       );
     }
     return { text: capped, images };

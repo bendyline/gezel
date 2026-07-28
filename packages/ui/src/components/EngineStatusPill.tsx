@@ -29,10 +29,7 @@ import type { ConfigResponse, ProviderQueueState } from '@bendyline/gezel-client
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { streamSharedAllChatEvents } from '../shared-chat-events.js';
-import {
-  type DeviceHealth,
-  presentDeviceHealth,
-} from './engine-pill-device-health.js';
+import { type DeviceHealth, presentDeviceHealth } from './engine-pill-device-health.js';
 import {
   type TurnStatsEntry,
   composeQueueStatus,

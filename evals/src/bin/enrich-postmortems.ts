@@ -292,6 +292,7 @@ function strategicFix(entry: TrialEntry): string[] {
     ];
   }
   const writeCalls =
+    // Legacy `writeFile` key kept for scoring pre-rename run dirs.
     (facts.toolUse.byTool.writeFile ?? 0) +
     (facts.toolUse.byTool.write_artifact ?? 0) +
     (facts.toolUse.byTool.write_file ?? 0);

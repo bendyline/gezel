@@ -223,9 +223,9 @@ describe('ChatManager — keurmeester intervention on nudge-budget exhaustion', 
       // First guard abort (tool-loop tracker teaching message): the
       // guard's own recovery gets its chance — no consult.
       localMock.scriptSendFailure(
-        '[llama.cpp] aborting — `replaceLines` failed 5 times in a row this turn.',
+        '[llama.cpp] aborting — `replace_lines` failed 5 times in a row this turn.',
       );
-      await expect(manager.send(session.id, 'fix the file')).rejects.toThrow(/replaceLines/);
+      await expect(manager.send(session.id, 'fix the file')).rejects.toThrow(/replace_lines/);
       await new Promise((r) => setTimeout(r, 150));
       expect(frontierMock.calls.filter((c) => c.kind === 'send')).toHaveLength(0);
 

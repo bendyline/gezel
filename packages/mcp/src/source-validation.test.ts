@@ -189,8 +189,8 @@ draw();
         expect(res.message).toMatch(/syntax error at line/);
         expect(res.message).toContain('THE FILE WAS NOT WRITTEN');
         expect(res.message).toContain('no bytes from this call were persisted');
-        expect(res.message).toContain('call `writeFile` again');
-        expect(res.message).toContain('Do not use `appendToFile`');
+        expect(res.message).toContain('call `write_file` again');
+        expect(res.message).toContain('Do not use `append_to_file`');
       }
     });
 

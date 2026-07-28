@@ -23,7 +23,7 @@ describe('buildKickoffTaskDescription', () => {
   it('build missions get the deliverable guard', () => {
     const text = buildKickoffTaskDescription(BUILD_BRIEF);
     expect(text).toContain('planning is not the deliverable');
-    expect(text).toContain('writeFile({ path: "index.html"');
+    expect(text).toContain('write_file({ path: "index.html"');
   });
 
   it('non-build missions stay plain', () => {

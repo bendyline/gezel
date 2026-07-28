@@ -95,13 +95,13 @@ async function findProbeProjectId(client: GezelClient): Promise<string | null> {
 /**
  * The probe scenario: a pre-recruited solo developer is told, in the
  * most direct terms a small model can follow, to make exactly one
- * writeFile tool call. Success = the file exists with the marker text —
+ * write_file tool call. Success = the file exists with the marker text —
  * which can only happen via a parsed, executed tool call.
  */
 export const preflightScenario: EvalScenario = {
   id: 'preflight',
   description:
-    'One-turn admission probe: a pre-recruited developer must land a single writeFile tool call.',
+    'One-turn admission probe: a pre-recruited developer must land a single write_file tool call.',
   prompt: '(unused — setup messages the probe developer directly)',
   skipInitialPrompt: true,
   // Generous ceiling so cold loads of 100B+ models still fit; the
@@ -118,7 +118,7 @@ export const preflightScenario: EvalScenario = {
         about:
           'Preflight admission probe project for the eval harness. The only work in scope is a ' +
           'single tool-driven file write; everything else is out of scope.',
-        missionObjectives: `- ${PROBE_FILE} exists in the workspace, written via the writeFile tool, containing "PREFLIGHT OK".`,
+        missionObjectives: `- ${PROBE_FILE} exists in the workspace, written via the write_file tool, containing "PREFLIGHT OK".`,
         mode: 'solo',
       });
       projectId = created.id;
@@ -129,7 +129,7 @@ export const preflightScenario: EvalScenario = {
       const created = await client.createGezel({
         name: PROBE_DEVELOPER_NAME,
         role: 'Developer',
-        about: `You are a developer on the "${PROBE_PROJECT_NAME}" project. When asked, call the writeFile tool exactly once and stop. Do not plan, do not ask questions.`,
+        about: `You are a developer on the "${PROBE_PROJECT_NAME}" project. When asked, call the write_file tool exactly once and stop. Do not plan, do not ask questions.`,
       });
       devId = created.id;
     } catch {
@@ -140,7 +140,7 @@ export const preflightScenario: EvalScenario = {
     }
     await client.addGezelToProject(projectId, devId);
     await client.sendChatMessage(devId, {
-      message: `Call the writeFile tool now to create the file \`${PROBE_FILE}\` with the content \`PREFLIGHT OK\`. Make exactly that one tool call. Do not ask questions, do not reply with prose, do not create anything else.`,
+      message: `Call the write_file tool now to create the file \`${PROBE_FILE}\` with the content \`PREFLIGHT OK\`. Make exactly that one tool call. Do not ask questions, do not reply with prose, do not create anything else.`,
       projectId,
     });
     log('[scenario:setup] preflight probe dispatched');
@@ -176,7 +176,7 @@ export const preflightScenario: EvalScenario = {
       return {
         done: true,
         success: true,
-        reason: `tool round-trip OK: ${hit.path} written via writeFile (${text.length} bytes)`,
+        reason: `tool round-trip OK: ${hit.path} written via write_file (${text.length} bytes)`,
       };
     }
     return { done: false };

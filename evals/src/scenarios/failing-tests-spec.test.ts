@@ -547,7 +547,7 @@ describe('failing-tests-spec: feedback routing', () => {
   it('grounds implementation repair in the frozen test contract without revealing its answer', () => {
     expect(FAILING_TESTS_REPAIR_DIRECTIVE).toContain(`re-read ${TEST_PATH} in full`);
     expect(FAILING_TESTS_REPAIR_DIRECTIVE).toContain('preserve the exported factory signature');
-    expect(FAILING_TESTS_REPAIR_DIRECTIVE).toContain('prefer replaceInFile/replaceLines');
+    expect(FAILING_TESTS_REPAIR_DIRECTIVE).toContain('prefer replace_in_file/replace_lines');
     expect(FAILING_TESTS_REPAIR_DIRECTIVE).not.toMatch(/cancelled|expedite|invalid transition/);
   });
 

@@ -157,7 +157,7 @@ function fillDefaults(
   toolName: string,
   args: Record<string, unknown>,
 ): Record<string, unknown> | null {
-  if (toolName === 'writeFile') {
+  if (toolName === 'write_file') {
     const filled = { ...args };
     if (
       typeof filled.content === 'string' &&

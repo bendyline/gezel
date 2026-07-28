@@ -8,7 +8,7 @@ import type { EvalContext, EvalScenario, SuccessCheckResult } from '../types.ts'
  *
  * Unlike the build scenarios, this exercises the team's ability to:
  *   1. Reach for the right tool to materialize source (`fetch_repo`).
- *   2. Walk a real, unfamiliar codebase with `readdir` + `readFile`.
+ *   2. Walk a real, unfamiliar codebase with `list_dir` + `read_file`.
  *   3. Synthesize the read into a structured markdown report.
  *
  * Strict structural signals (chosen by the user, not the default):
@@ -349,13 +349,13 @@ function squisqRepairDirective(args: {
   const minAppendChars = Math.max(3_500, extraBytes + 1_000);
   const patchInstruction =
     args.filenameCount >= 5 && args.bytes < 5_000
-      ? `The draft already cites enough real files. Do not replace it with a shorter version. Your next tool call must append at least ${minAppendChars} substantive characters to review.md with \`appendToFile({ path: "review.md", content: <additional sourced sections> })\`.`
-      : 'Rewrite the final deliverable as the workspace file with `writeFile({ path: "review.md", content: <complete review> })`, or append a substantial missing section with `appendToFile`. Do not use `write_artifact` for the shipping review.';
+      ? `The draft already cites enough real files. Do not replace it with a shorter version. Your next tool call must append at least ${minAppendChars} substantive characters to review.md with \`append_to_file({ path: "review.md", content: <additional sourced sections> })\`.`
+      : 'Rewrite the final deliverable as the workspace file with `write_file({ path: "review.md", content: <complete review> })`, or append a substantial missing section with `append_to_file`. Do not use `write_artifact` for the shipping review.';
   return [
     'SQUISQ REVIEW PATCH: the repo is already cloned in the workspace. Do not say the source is unavailable, and do not cite assumed filenames. Assumed files do not count.',
     ...(args.fabricatedExamples && args.fabricatedExamples.length > 0
       ? [
-          `These paths in your current review DO NOT EXIST and count as zero citations: ${args.fabricatedExamples.map((p) => `\`${p}\``).join(', ')}. Replace each with a real path you actually opened via readFile.`,
+          `These paths in your current review DO NOT EXIST and count as zero citations: ${args.fabricatedExamples.map((p) => `\`${p}\``).join(', ')}. Replace each with a real path you actually opened via read_file.`,
         ]
       : []),
     `Use real paths from the workspace. Known valid examples include: ${formatExamples(args.sourceExamples)}.`,
@@ -373,7 +373,7 @@ function squisqMissingReviewDirective(args: { sourceExamples?: readonly string[]
   return [
     'SQUISQ REVIEW WORKFLOW: the Squisq repo is already cloned in a project workspace. Do not call `fetch_repo` again and do not ask the user for source code.',
     'If you are the Meester and no reviewer has the work yet, your next tool call must be `ensure_gezel({ jobTitle: "Code Reviewer", whyYouNeed: "review the cloned Squisq repository and write review.md" })`; after it returns, call `message_gezel({ gezel: <returned id>, project: <this project id>, expectedDeliverable: { kind: "file", filePath: "review.md" }, message: "Write the complete Squisq architecture/code review to review.md. Include ## Architecture, ## Major issues, ## Minor issues, ## Recommendations, cite at least 5 real source paths, and make it at least 5000 bytes." })`.',
-    `If you are the reviewer/developer, write the final deliverable now with \`writeFile({ path: "review.md", content: <complete review> })\`.${examples}`,
+    `If you are the reviewer/developer, write the final deliverable now with \`write_file({ path: "review.md", content: <complete review> })\`.${examples}`,
   ].join(' ');
 }
 
@@ -481,19 +481,19 @@ export const squisqReviewScenario: EvalScenario = {
     `MANDATORY FIRST TOOL CALL: \`fetch_repo({ url: "${REPO_URL}", projectName: "${PROJECT_NAME}" })\`. Do not call \`start_project\`, \`start_job\`, or \`create_project\` first for this eval; those create an empty bootstrap project with no Squisq source and will fail the review.`,
     '',
     'Recommended workflow:',
-    `1. First, call \`fetch_repo({ url: "${REPO_URL}", projectName: "${PROJECT_NAME}" })\`. This atomically creates a new project, links it to the github URL, and shallow-clones the source AT THE WORKSPACE ROOT of that new project. The workspace IS the cloned repo — \`readdir('.')\` lists the repo's top-level files; \`readFile('package.json')\` returns the repo's package.json. The tool returns the new \`projectId\` — hold onto it.`,
+    `1. First, call \`fetch_repo({ url: "${REPO_URL}", projectName: "${PROJECT_NAME}" })\`. This atomically creates a new project, links it to the github URL, and shallow-clones the source AT THE WORKSPACE ROOT of that new project. The workspace IS the cloned repo — \`list_dir('.')\` lists the repo's top-level files; \`read_file('package.json')\` returns the repo's package.json. The tool returns the new \`projectId\` — hold onto it.`,
     '2. Once the source is in place, recruit a reviewer / developer for the new project via `ensure_gezel`, then assign the review work to them with `message_gezel` — always passing `project: <the new project id>` and `expectedDeliverable: { kind: "file", filePath: "review.md" }` so they work in the right project context and write the file instead of replying in chat. Copy the concrete reviewer handoff from the `fetch_repo` tool result instead of shortening it; it includes source paths to read first and the exact acceptance criteria.',
     '3. The recruited specialist should read 5-7 high-signal source files, then write the first `review.md` draft before doing more survey work. Do not let them spend the whole turn listing directories.',
-    "4. They write the review using `writeFile({ path: 'review.md', content: <the full review> })`. Path is workspace-root-relative — pass just `review.md`, NOT `workspace/review.md` (which would nest at workspace/workspace/review.md). The review MUST contain these section headings, in this order, each substantial:",
+    "4. They write the review using `write_file({ path: 'review.md', content: <the full review> })`. Path is workspace-root-relative — pass just `review.md`, NOT `workspace/review.md` (which would nest at workspace/workspace/review.md). The review MUST contain these section headings, in this order, each substantial:",
     '   `## Architecture` — overview of what the codebase does, top-level structure, key modules, build/runtime layout.',
     '   `## Major issues` — concrete material concerns (correctness, security, perf, maintainability).',
     '   `## Minor issues` — nits, style, typing, doc gaps.',
     '   `## Recommendations` — prioritized actionable next steps.',
-    '5. The review must cite at least 5 specific source filenames they actually read (e.g. `src/index.ts`, `package.json`). Real paths from `readdir`, not invented.',
+    '5. The review must cite at least 5 specific source filenames they actually read (e.g. `src/index.ts`, `package.json`). Real paths from `list_dir`, not invented.',
     '6. The final review must be at least 5 KB of substantive content.',
-    "7. **Pace the work.** A 45-minute budget is plenty — start writing the review with whatever you have around the 25-minute mark. Don't leave the final `writeFile` for the last 30 seconds; the review must land well before the budget is exhausted.",
+    "7. **Pace the work.** A 45-minute budget is plenty — start writing the review with whatever you have around the 25-minute mark. Don't leave the final `write_file` for the last 30 seconds; the review must land well before the budget is exhausted.",
     '',
-    'Do not paste the review into chat — write it to `review.md` (at the workspace root) using `writeFile`. The file IS the deliverable.',
+    'Do not paste the review into chat — write it to `review.md` (at the workspace root) using `write_file`. The file IS the deliverable.',
   ].join('\n'),
   // No fixed `timeoutMs` — under the progress-driven runner, the trial
   // succeeds when the deliverable lands and fails when forward progress

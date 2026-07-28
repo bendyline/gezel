@@ -80,10 +80,18 @@ export function DocumentsView() {
   // persisted selection slot.
   useEffect(() => {
     if (entries.length === 0) return;
-    if (selectedPath && entries.some((e) => e.path === selectedPath)) return;
     const firstFile = entries.find((e) => !e.isDirectory) ?? entries[0];
-    if (firstFile) setSelectedPathState(firstFile.path);
-  }, [entries, selectedPath]);
+    if (!firstFile) return;
+    setSelectedPathState((currentPath) => {
+      // This effect may have been queued before a user selection. Resolve
+      // against the latest state so the initial auto-pick cannot overwrite
+      // a click that happened while the document list was settling.
+      if (currentPath && entries.some((entry) => entry.path === currentPath)) {
+        return currentPath;
+      }
+      return firstFile.path;
+    });
+  }, [entries]);
 
   const deleteDocument = useCallback((entry: FileEntry) => {
     setDeleteTarget(entry);

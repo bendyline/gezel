@@ -3,7 +3,7 @@
  *
  * The eval harness used to fail trials on a fixed wall-clock budget,
  * which created a Parkinson's-law problem: the model would fill the
- * entire budget then writeFile in the last second, every time. The
+ * entire budget then write_file in the last second, every time. The
  * principle we're moving to is "measure forward progress, not elapsed
  * time" — a trial that's still touching the workspace and exchanging
  * messages at hour 7 should keep running, while a trial that has gone
@@ -93,12 +93,12 @@ export interface DaemonActivityCounters {
   toolCalls: number;
   /**
    * Count of `call_tool` dispatches for artifact-WRITING tools
-   * (writeFile / write_artifact / replaceInFile / appendToFile /
-   * insertAtMarker / copy_artifact_to_workspace). Distinct from the
+   * (write_file / write_artifact / replace_in_file / append_to_file /
+   * insert_at_marker / copy_artifact_to_workspace). Distinct from the
    * total `toolCalls`, which is dominated by read-only research
-   * (readFile / readdir / search_files). The retry-loop FAST path
+   * (read_file / list_dir / search_files). The retry-loop FAST path
    * ("stubborn rewriter") must gate on THIS, not the total: a team
-   * holding the sniff key while emitting 19 readFile calls is
+   * holding the sniff key while emitting 19 read_file calls is
    * researching toward its next write, not re-emitting the same
    * failing artifact — squisq-review false-killed twice
    * this way (4806B/5cit and 4088B/3cit drafts, both still being
@@ -169,7 +169,7 @@ export interface ScenarioSniffState {
 export interface ToolCallObservation {
   /** Session id the call fired on. */
   sessionId: string;
-  /** Tool name (e.g. `writeFile`, `readdir`, `fetch_repo`). */
+  /** Tool name (e.g. `write_file`, `list_dir`, `fetch_repo`). */
   tool: string;
   /** SHA-1 of the canonicalized arguments JSON, first 12 chars. */
   argsHash: string;
@@ -386,10 +386,11 @@ export function parseDaemonActivityText(text: string): DaemonActivityCounters {
   const toolCalls = (text.match(/\[mcp-bridge\] call_tool/g) ?? []).length;
   // Artifact-writing tools only — the "is the team actually re-emitting
   // the deliverable" signal the FAST retry-loop path needs (see
-  // DaemonActivityCounters.writeCalls).
+  // DaemonActivityCounters.writeCalls). Legacy camelCase spellings kept
+  // for parsing pre-rename daemon logs.
   const writeCalls = (
     text.match(
-      /\[mcp-bridge\] call_tool (?:writeFile|write_artifact|replaceInFile|appendToFile|insertAtMarker|copy_artifact_to_workspace)\b/g,
+      /\[mcp-bridge\] call_tool (?:write_file|writeFile|write_artifact|replace_in_file|replaceInFile|append_to_file|appendToFile|insert_at_marker|insertAtMarker|copy_artifact_to_workspace)\b/g,
     ) ?? []
   ).length;
   const slotUpdates = (text.match(/slot update_slots:/g) ?? []).length;

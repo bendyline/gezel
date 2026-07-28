@@ -3,3 +3,4 @@ export * from './sse.js';
 export * from './discovery.js';
 export * from './discover-or-spawn.js';
 export * from './node-tls.js';
+export * from './system-service.js';

@@ -176,8 +176,8 @@ async function setup({ client, log }: EvalContext): Promise<void> {
       'full deliverable list if needed, but do not ask for a task ref or wait for one:',
       'this kickoff message contains the complete deliverable list. Start with openapi.yaml (path it at the workspace root,',
       'just `openapi.yaml`), then server.mjs, then contract-test.mjs, then README.md.',
-      'Your first assistant action MUST be a `writeFile` tool call for `openapi.yaml`; do not draft YAML, JavaScript, or README content in chat.',
-      'For each deliverable, write the file with `writeFile` or `replaceInFile` first, then use chat only for a short status note.',
+      'Your first assistant action MUST be a `write_file` tool call for `openapi.yaml`; do not draft YAML, JavaScript, or README content in chat.',
+      'For each deliverable, write the file with `write_file` or `replace_in_file` first, then use chat only for a short status note.',
       'openapi.yaml must document ALL SIX paths — GET and POST /books, GET/PATCH/DELETE',
       '/books/{id}, and GET /authors/{id}/books — even though server.mjs implements only',
       'the three GET endpoints; the write-side paths exist in the spec with bearerAuth',
@@ -1127,7 +1127,7 @@ export function bookstoreRepairDirective(failReason: string | undefined): string
 
   if (/yaml-parses|openapi-3\.1|all-paths-present|schemas-named|auth-on-mutations/i.test(reason)) {
     return [
-      'BOOKSTORE OPENAPI REWRITE: fix openapi.yaml first. Rewrite the entire openapi.yaml with one writeFile call; do not patch YAML fragments with replaceInFile.',
+      'BOOKSTORE OPENAPI REWRITE: fix openapi.yaml first. Rewrite the entire openapi.yaml with one write_file call; do not patch YAML fragments with replace_in_file.',
       reasonLine,
       'Exact required path keys: `/books` with `get` and `post`; `/books/{id}` with `get`, `patch`, and `delete`; `/authors/{id}/books` with `get`. Do not create `/books/{id}/delete` or any child path for DELETE.',
       'A comment saying DELETE is required does not count. The YAML must contain a literal `delete:` operation nested under `/books/{id}` at the same indentation level as `get:` and `patch:`.',
@@ -1322,7 +1322,7 @@ export function bookstoreRepairDirective(failReason: string | undefined): string
   return [
     'BOOKSTORE CONTRACT PATCH: keep openapi.yaml as-is if the structural signals are passing. Patch only server.mjs and/or contract-test.mjs until `node contract-test.mjs` exits 0.',
     reasonLine,
-    'The scenario checker already ran `node contract-test.mjs`, and this message means it failed. Do not reply that you are waiting for the checker; make another writeFile/replaceInFile edit to server.mjs or contract-test.mjs now.',
+    'The scenario checker already ran `node contract-test.mjs`, and this message means it failed. Do not reply that you are waiting for the checker; make another write_file/replace_in_file edit to server.mjs or contract-test.mjs now.',
     'Because `.mjs` files are ES modules, use top-level imports such as `import { spawn } from "node:child_process";` and `import { once } from "node:events";`. Do not call `require(...)` in server.mjs or contract-test.mjs.',
     'Required server.mjs pattern: `server.listen(process.env.PORT || 0, () => { const address = server.address(); const port = typeof address === "object" && address ? address.port : Number(process.env.PORT); console.log(`listening on PORT=${port}`); });`.',
     "Required contract-test.mjs pattern: attach `server.stdout.on('data', chunk => { buffer += chunk; const match = buffer.match(/PORT=(\\d+)/); if (match) resolve(Number(match[1])); })`. Do not wait for `server.stdout.on('end')` to discover the port.",
@@ -1486,7 +1486,7 @@ export function shouldPostBookstoreMissingServerFeedback(opts: {
 export function bookstoreMissingServerDirective(): string {
   return [
     'BOOKSTORE_SERVER_MISSING_FILE: the OpenAPI structural checks are passing. The next required deliverable is `server.mjs`.',
-    'Your next assistant action MUST be `writeFile({ path: "server.mjs", content: ... })`; do not reply with a plan, do not rewrite openapi.yaml, and do not write contract-test.mjs first.',
+    'Your next assistant action MUST be `write_file({ path: "server.mjs", content: ... })`; do not reply with a plan, do not rewrite openapi.yaml, and do not write contract-test.mjs first.',
     'Write a complete dependency-free `.mjs` server using only Node built-ins. Use `node:http`, a hardcoded dataset of 5 books across 3 numeric authors, and public GET routes only.',
     'Required GET routes: `/books`, `/books/{id}`, and `/authors/{id}/books`. Mutation endpoints only need bearerAuth documentation in openapi.yaml; do not enforce bearer auth in server.mjs for GET requests.',
     'Every Book object must use exactly `id`, `title`, `authorId`, `publishedYear`, and `isbn`. List endpoints must return `{ data: Book[], pagination: { limit: number, cursor: string | null, total: number, hasMore: boolean } }`.',
@@ -1517,7 +1517,7 @@ export function shouldPostBookstoreMissingContractFeedback(opts: {
 export function bookstoreMissingContractDirective(): string {
   return [
     'BOOKSTORE_CONTRACT_MISSING_FILE: all OpenAPI structural checks are passing and server.mjs/README.md exist. The only missing deliverable is `contract-test.mjs`.',
-    'Your next assistant action MUST be `writeFile({ path: "contract-test.mjs", content: ... })`; do not reply with a plan, do not rewrite openapi.yaml, and do not edit server.mjs first.',
+    'Your next assistant action MUST be `write_file({ path: "contract-test.mjs", content: ... })`; do not reply with a plan, do not rewrite openapi.yaml, and do not edit server.mjs first.',
     'Write a complete dependency-free `.mjs` script using only Node built-ins plus global fetch: import `spawn` from `node:child_process` and optionally `once` from `node:events`; do not import undici, node-fetch, axios, `node:fetch`, js-yaml, or openapi.yaml.',
     'The script must spawn `node server.mjs`, resolve the port inside `server.stdout.on("data", ...)` when `/PORT=(\\d+)/` matches, await that port before fetches, then GET `/books`, `/books/{id}`, `/authors/{id}/books`, and GET-based 404 checks only.',
     'Use root URLs like `http://127.0.0.1:${port}/books`; do not prepend `/api/v1`. Derive an existing author id from the GET /books response before testing `/authors/${authorId}/books`.',

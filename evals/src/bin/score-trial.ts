@@ -60,7 +60,7 @@ export interface TrialFacts {
   timing: {
     startedAt: string;
     finishedAt: string;
-    /** Wall-clock ms from trial start to the first writeFile/write_artifact event we observed. */
+    /** Wall-clock ms from trial start to the first write_file/write_artifact event we observed. */
     timeToFirstArtifactMs: number | null;
     /** ms from start to the latest file-write event. */
     timeToLastArtifactWriteMs: number | null;
@@ -192,9 +192,10 @@ const RED_FLAGS: Array<{
   explanation: string;
 }> = [
   {
+    // Legacy camelCase spellings kept for scoring pre-rename run dirs.
     test: (c) =>
       c.name === 'run_npx' &&
-      /bin:\s*"(generate_image|render_image|write_artifact|writeFile|readFile|search_memory)"/i.test(
+      /bin:\s*"(generate_image|render_image|write_artifact|writeFile|write_file|readFile|read_file|search_memory)"/i.test(
         c.argsSummary ?? '',
       ),
     pattern: 'mcp-tool-via-npx',
@@ -233,10 +234,10 @@ const RED_FLAGS: Array<{
 // was the load-bearing case — the Reviewer pasted a 5965-char
 // structured review (`# Squisq Architecture and Code Review` + H2
 // subheadings) into the assistant message AND emitted 9 read-only tool calls
-// (readdir / readFile) but never called `writeFile`. The Meester then
+// (list_dir / read_file) but never called `write_file`. The Meester then
 // hallucinated "saved to review.md" without verifying. No per-call test
 // catches "model produced a long-form deliverable but sent it down the wrong
-// channel" — it's the absence of writeFile that's the smoking gun.
+// channel" — it's the absence of write_file that's the smoking gun.
 //
 // Design notes for adding more session-level red flags later:
 //   - Each test takes a session's full message list + per-session tool-call
@@ -247,6 +248,16 @@ const RED_FLAGS: Array<{
 //   - Keep the threshold conservative — the rubric weighs `redFlags` as a
 //     binary "any fired → 0 on Behavior soundness" signal in the skill, so
 //     a false positive is worse than missing a case.
+// File-writing tool names for the time-to-artifact and prose-as-deliverable
+// checks. Legacy camelCase spellings kept for scoring pre-rename run dirs.
+const FILE_WRITE_TOOLS = new Set([
+  'write_file',
+  'write_artifact',
+  'append_to_file',
+  'writeFile',
+  'appendToFile',
+]);
+
 const PROSE_AS_DELIVERABLE_MIN_CHARS = 800;
 const PROSE_AS_DELIVERABLE_MIN_H2_COUNT = 2;
 
@@ -265,7 +276,7 @@ const SESSION_RED_FLAGS: Array<{
   {
     pattern: 'prose-as-deliverable',
     explanation:
-      "Emitted a long-form structured deliverable (H1 + H2 sections, ≥800 chars) as the assistant's chat content WITHOUT a writeFile/write_artifact/appendToFile call in the same turn. Caller will see prose in chat but no file on disk; downstream gezels reading the asker's history won't find an addressable artifact. Symptom of the consultation-mode 'reply in chat' guidance overriding the deliverable shape — fix in the role's about.md (the Researcher template's 'deliverable IS a file' rule is the pattern) and use `ensure_gezel` + `message_gezel` with `expectedDeliverable: {kind:'file'}` for file deliverables.",
+      "Emitted a long-form structured deliverable (H1 + H2 sections, ≥800 chars) as the assistant's chat content WITHOUT a write_file/write_artifact/append_to_file call in the same turn. Caller will see prose in chat but no file on disk; downstream gezels reading the asker's history won't find an addressable artifact. Symptom of the consultation-mode 'reply in chat' guidance overriding the deliverable shape — fix in the role's about.md (the Researcher template's 'deliverable IS a file' rule is the pattern) and use `ensure_gezel` + `message_gezel` with `expectedDeliverable: {kind:'file'}` for file deliverables.",
     test: (msgs, _gezel) => {
       const hits: Array<{ tool: string; argsSummary: string; atTurn: number }> = [];
       msgs.forEach((msg, idx) => {
@@ -281,13 +292,11 @@ const SESSION_RED_FLAGS: Array<{
         if (!startsWithH1 || h2Matches.length < PROSE_AS_DELIVERABLE_MIN_H2_COUNT) return;
         // No file-writing call in the same assistant message.
         const calls = msg.toolCalls ?? [];
-        const wrote = calls.some(
-          (c) => c.name === 'writeFile' || c.name === 'write_artifact' || c.name === 'appendToFile',
-        );
+        const wrote = calls.some((c) => FILE_WRITE_TOOLS.has(c.name));
         if (wrote) return;
         const preview = txt.slice(0, 120).replace(/\n/g, ' ');
         hits.push({
-          tool: '(no writeFile this turn)',
+          tool: '(no write_file this turn)',
           argsSummary: `content_chars=${txt.length} h2_count=${h2Matches.length} preview="${preview}…"`,
           atTurn: idx,
         });
@@ -738,7 +747,7 @@ export function score(runDir: string): TrialFacts {
   //   `totalToolCalls: 0` as "the model did nothing."
   const byTool: Record<string, number> = {};
   const redFlags: TrialFacts['toolUse']['redFlags'] = [];
-  // Track time-to-first-artifact via writeFile/write_artifact calls.
+  // Track time-to-first-artifact via write_file/write_artifact calls.
   let firstArtifactAt: number | null = null;
   let lastArtifactAt: number | null = null;
   let firstToolCallAt: number | null = null;
@@ -787,11 +796,7 @@ export function score(runDir: string): TrialFacts {
         byTool[c.name] = (byTool[c.name] ?? 0) + 1;
         if (msg.at) noteFirstToolCall(isoToMsSince(result.startedAt, msg.at));
         // Time-to-artifact.
-        if (
-          (c.name === 'writeFile' || c.name === 'write_artifact' || c.name === 'appendToFile') &&
-          c.success !== false &&
-          msg.at
-        ) {
+        if (FILE_WRITE_TOOLS.has(c.name) && c.success !== false && msg.at) {
           const atMs = isoToMsSince(result.startedAt, msg.at);
           if (firstArtifactAt === null || atMs < firstArtifactAt) firstArtifactAt = atMs;
           if (lastArtifactAt === null || atMs > lastArtifactAt) lastArtifactAt = atMs;
@@ -836,7 +841,7 @@ export function score(runDir: string): TrialFacts {
     // Session-level red flags. These look across the message stream
     // for patterns the per-call loop can't see — most importantly
     // "model emitted a long-form deliverable as chat content without
-    // a writeFile in the same turn." Run once per session, not once
+    // a write_file in the same turn." Run once per session, not once
     // per call.
     for (const srf of SESSION_RED_FLAGS) {
       for (const hit of srf.test(sess.messages, gezelFromFilename)) {

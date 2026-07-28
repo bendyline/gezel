@@ -109,7 +109,7 @@ export const COMMS_KICKOFF_MESSAGE = [
   'include the exact sentence "No customer payment data was accessed"; give the',
   'support contact support@driftwater.example; mention the one-month service credit;',
   'and never use "guarantee", "never happen again", "100% secure", or "unhackable".',
-  'Write the complete notice now with writeFile.',
+  'Write the complete notice now with write_file.',
 ].join(' ');
 
 // ─────────────────────────────────────────────────────────────────────
@@ -189,8 +189,8 @@ export function commsRepairDirective(): string {
   return [
     `Patch \`${NOTICE_PATH}\` to fix exactly the named gap — re-read facts/incident-brief.md`,
     'and facts/legal-requirements.md for the correct numbers and required wording. Keep the',
-    'notice between 140 and 220 words. Your next tool call should be writeFile (or',
-    'replaceInFile) on customer-notice.md.',
+    'notice between 140 and 220 words. Your next tool call should be write_file (or',
+    'replace_in_file) on customer-notice.md.',
   ].join(' ');
 }
 

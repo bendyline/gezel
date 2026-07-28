@@ -3328,7 +3328,7 @@ export class Store {
    * always land in the same directory. Earlier the two paths diverged
    * when `github.checkoutDir` was set but `workingDir` wasn't — reads
    * went to the clone, writes to an empty internal directory, and the
-   * model saw `writeFile` succeed while `stat`/`readdir` reported the
+   * model saw `write_file` succeed while `stat`/`list_dir` reported the
    * file missing. Wild-caught squisq-review.
    *
    * Priority hierarchy (highest first):
@@ -3556,7 +3556,7 @@ export class Store {
     await writeFileAtomic(full, newContent);
     await appendJournalEntry(this.home, id, 'write', args.path, { content: newContent, ctx });
     const result = buildWorkspaceEditResult(args.path, oldContent, newContent);
-    await this.logWorkspaceEditHistory(id, 'replaceInFile', result, ctx);
+    await this.logWorkspaceEditHistory(id, 'replace_in_file', result, ctx);
     await this.touchProject(id);
     return result;
   }
@@ -3564,7 +3564,7 @@ export class Store {
   /**
    * Surgical edit: replace an inclusive 1-based line range with new
    * content. The model copies the line numbers straight out of a
-   * numbered `readFile` (or a located parse error) — no exact-substring
+   * numbered `read_file` (or a located parse error) — no exact-substring
    * reproduction, no diff-coordinate arithmetic. The friendliest edit
    * shape for tiny-tier models; pairs with the `N→` readFile gutter.
    * `endLine` is clamped to the file's length; `content` may be empty
@@ -3621,7 +3621,7 @@ export class Store {
     await writeFileAtomic(full, newContent);
     await appendJournalEntry(this.home, id, 'write', args.path, { content: newContent, ctx });
     const result = buildWorkspaceEditResult(args.path, oldContent, newContent);
-    await this.logWorkspaceEditHistory(id, 'replaceLines', result, ctx);
+    await this.logWorkspaceEditHistory(id, 'replace_lines', result, ctx);
     await this.touchProject(id);
     return result;
   }
@@ -3685,7 +3685,7 @@ export class Store {
     await writeFileAtomic(full, applied);
     await appendJournalEntry(this.home, id, 'write', args.path, { content: applied, ctx });
     const result = buildWorkspaceEditResult(args.path, oldContent, applied);
-    await this.logWorkspaceEditHistory(id, 'applyPatch', result, ctx);
+    await this.logWorkspaceEditHistory(id, 'apply_patch', result, ctx);
     await this.touchProject(id);
     return result;
   }
@@ -3695,7 +3695,7 @@ export class Store {
    * substring. Implemented as a single replace under the hood; the
    * model gets a tool specifically shaped for the "add a new export
    * inside the // EXPORTS block" use case where finding the right
-   * `find` string for `replaceInFile` (and rewriting it correctly)
+   * `find` string for `replace_in_file` (and rewriting it correctly)
    * isn't worth the cognitive overhead.
    */
   async insertAtMarkerInProjectWorkspaceFile(
@@ -3736,14 +3736,14 @@ export class Store {
     await writeFileAtomic(full, newContent);
     await appendJournalEntry(this.home, id, 'write', args.path, { content: newContent, ctx });
     const result = buildWorkspaceEditResult(args.path, oldContent, newContent);
-    await this.logWorkspaceEditHistory(id, 'insertAtMarker', result, ctx);
+    await this.logWorkspaceEditHistory(id, 'insert_at_marker', result, ctx);
     await this.touchProject(id);
     return result;
   }
 
   private async logWorkspaceEditHistory(
     id: string,
-    tool: 'replaceInFile' | 'applyPatch' | 'insertAtMarker' | 'replaceLines',
+    tool: 'replace_in_file' | 'apply_patch' | 'insert_at_marker' | 'replace_lines',
     result: WorkspaceEditResult,
     ctx?: JournalContext,
   ): Promise<void> {

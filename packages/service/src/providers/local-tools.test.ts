@@ -72,8 +72,8 @@ describe('MlxProvider engine request lock', () => {
   });
 });
 
-describe('MlxProvider immediate writeFile rescue tuning', () => {
-  it('turns off thinking and raises short output budgets for urgent writeFile-only turns', async () => {
+describe('MlxProvider immediate write_file rescue tuning', () => {
+  it('turns off thinking and raises short output budgets for urgent write_file-only turns', async () => {
     let capturedBody: Record<string, unknown> | null = null;
     const fetchImpl = (async (_url: string, init?: RequestInit) => {
       capturedBody = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
@@ -93,7 +93,7 @@ describe('MlxProvider immediate writeFile rescue tuning', () => {
       systemMessage: 'system',
       externalTools: [
         {
-          name: 'writeFile',
+          name: 'write_file',
           description: 'write a file',
           parameters: {
             type: 'object',
@@ -112,7 +112,7 @@ describe('MlxProvider immediate writeFile rescue tuning', () => {
     });
 
     await session.sendAndWait(
-      '[scenario check] There is still **no `index.html`** in the workspace. Do not end your turn until `writeFile` has created it.',
+      '[scenario check] There is still **no `index.html`** in the workspace. Do not end your turn until `write_file` has created it.',
       { timeoutMs: 5_000 },
     );
 
@@ -127,7 +127,7 @@ describe('MlxProvider immediate writeFile rescue tuning', () => {
     expect(messages.at(-1)?.content).not.toContain('under 250 lines');
   });
 
-  it('raises the output floor for direct file work without forcing writeFile-only rescue', async () => {
+  it('raises the output floor for direct file work without forcing write_file-only rescue', async () => {
     let capturedBody: Record<string, unknown> | null = null;
     const fetchImpl = (async (_url: string, init?: RequestInit) => {
       capturedBody = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
@@ -147,7 +147,7 @@ describe('MlxProvider immediate writeFile rescue tuning', () => {
       systemMessage: 'system',
       externalTools: [
         {
-          name: 'writeFile',
+          name: 'write_file',
           description: 'write a file',
           parameters: { type: 'object', properties: {} },
         },
@@ -208,7 +208,7 @@ describe('MlxProvider tool salvage', () => {
       systemMessage: 'system',
       externalTools: [
         {
-          name: 'writeFile',
+          name: 'write_file',
           description: 'write a file',
           parameters: {
             type: 'object',

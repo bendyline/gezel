@@ -219,7 +219,7 @@ describe('describeMalformation', () => {
     // contains gpt-oss channel markup, echoing it verbatim into the
     // corrective system message gave the model another instance of
     // its own markup to copy on the retry. Scrub before echoing.
-    const msg = describeMalformation('<|channel|>commentary<|message|>writeFile<|end|>');
+    const msg = describeMalformation('<|channel|>commentary<|message|>write_file<|end|>');
     expect(msg).not.toContain('<|channel');
     expect(msg).not.toContain('<|message');
     expect(msg).not.toContain('<|end');
@@ -415,27 +415,27 @@ search_memory(scope: "project")
   });
 });
 
-describe('findProseToolCallSpans — OpenAI-flavored writeFile shape (Gemma 4 26B wild-caught)', () => {
-  const WRITE_KNOWN = new Set(['writeFile', 'write_artifact', 'set_task_status']);
+describe('findProseToolCallSpans — OpenAI-flavored write_file shape (Gemma 4 26B wild-caught)', () => {
+  const WRITE_KNOWN = new Set(['write_file', 'write_artifact', 'set_task_status']);
 
-  it('salvages a writeFile call with properly-escaped multi-line HTML content', () => {
+  it('salvages a write_file call with properly-escaped multi-line HTML content', () => {
     // The "expected" shape: `\n` and `\"` as 2-char escape sequences.
     // This is the JSON-correct version of what the model is trying to
     // emit — and what makes it through the existing parser cleanly.
     const text =
       '```javascript\n' +
-      'writeFile({"path": "index.html", "content": "<!DOCTYPE html>\\n<html lang=\\"en\\"><body><h1>Tic-Tac-Toe</h1></body></html>"})\n' +
+      'write_file({"path": "index.html", "content": "<!DOCTYPE html>\\n<html lang=\\"en\\"><body><h1>Tic-Tac-Toe</h1></body></html>"})\n' +
       '```';
     const spans = findProseToolCallSpans(text, WRITE_KNOWN);
     expect(spans).toHaveLength(1);
-    expect(spans[0]!.name).toBe('writeFile');
+    expect(spans[0]!.name).toBe('write_file');
     expect(spans[0]!.arguments).toEqual({
       path: 'index.html',
       content: '<!DOCTYPE html>\n<html lang="en"><body><h1>Tic-Tac-Toe</h1></body></html>',
     });
   });
 
-  it('salvages a writeFile call with RAW newlines inside the content string', () => {
+  it('salvages a write_file call with RAW newlines inside the content string', () => {
     // The "imperfect" shape: model emitted real `\n` chars (not the
     // 2-char escape sequence) inside what is otherwise a JSON object.
     // Common when the model streams multi-line markdown / HTML / code
@@ -444,18 +444,18 @@ describe('findProseToolCallSpans — OpenAI-flavored writeFile shape (Gemma 4 26
     // rejected this and the call was silently lost.
     const text =
       '```javascript\n' +
-      'writeFile({"path": "index.html", "content": "<!DOCTYPE html>\n<html lang=\\"en\\">\n<body>X</body>\n</html>"})\n' +
+      'write_file({"path": "index.html", "content": "<!DOCTYPE html>\n<html lang=\\"en\\">\n<body>X</body>\n</html>"})\n' +
       '```';
     const spans = findProseToolCallSpans(text, WRITE_KNOWN);
     expect(spans).toHaveLength(1);
-    expect(spans[0]!.name).toBe('writeFile');
+    expect(spans[0]!.name).toBe('write_file');
     const c = String(spans[0]!.arguments.content);
     expect(c).toContain('<!DOCTYPE html>');
     expect(c).toContain('<html lang="en">');
     expect(c).toContain('</html>');
   });
 
-  it('salvages a writeFile call with UNESCAPED inner quotes (the wild-caught case)', () => {
+  it('salvages a write_file call with UNESCAPED inner quotes (the wild-caught case)', () => {
     // The "natural" shape: model writes HTML with real `"` chars
     // (`class="board"`) instead of `\"`. JSON.parse sees the string
     // close at the first inner `"` and chokes. The rebalanceUnescaped
@@ -464,24 +464,24 @@ describe('findProseToolCallSpans — OpenAI-flavored writeFile shape (Gemma 4 26
     // top level).
     const text =
       '```javascript\n' +
-      'writeFile({"path": "game.html", "content": "<div class="board"><span id="title">Hi</span></div>"})\n' +
+      'write_file({"path": "game.html", "content": "<div class="board"><span id="title">Hi</span></div>"})\n' +
       '```';
     const spans = findProseToolCallSpans(text, WRITE_KNOWN);
     expect(spans).toHaveLength(1);
-    expect(spans[0]!.name).toBe('writeFile');
+    expect(spans[0]!.name).toBe('write_file');
     const c = String(spans[0]!.arguments.content);
     expect(c).toContain('class="board"');
     expect(c).toContain('id="title"');
   });
 
-  it('salvages writeFile when content has BOTH raw newlines AND unescaped quotes', () => {
+  it('salvages write_file when content has BOTH raw newlines AND unescaped quotes', () => {
     // The composite of cases 2 + 3 — the actual shape Gemma 4 26B
-    // emits on long HTML writeFile calls. Tests that the two recovery
+    // emits on long HTML write_file calls. Tests that the two recovery
     // stages compose cleanly (escapeControlCharsInStrings first, then
     // rebalanceUnescapedQuotes on the result).
     const text =
       '```javascript\n' +
-      'writeFile({"path": "index.html", "content": "<!DOCTYPE html>\n<html lang="en">\n<head>\n  <title>Tic-Tac-Toe</title>\n</head>\n<body>\n  <div class="board"></div>\n</body>\n</html>"})\n' +
+      'write_file({"path": "index.html", "content": "<!DOCTYPE html>\n<html lang="en">\n<head>\n  <title>Tic-Tac-Toe</title>\n</head>\n<body>\n  <div class="board"></div>\n</body>\n</html>"})\n' +
       '```';
     const spans = findProseToolCallSpans(text, WRITE_KNOWN);
     expect(spans).toHaveLength(1);
@@ -491,11 +491,11 @@ describe('findProseToolCallSpans — OpenAI-flavored writeFile shape (Gemma 4 26
     expect(c).toContain('</html>');
   });
 
-  it('salvages writeFile that arrives without a wrapping markdown fence', () => {
+  it('salvages write_file that arrives without a wrapping markdown fence', () => {
     // Some Gemma turns drop the ```javascript wrapper and emit the
     // call as bare prose. Should still salvage.
     const text =
-      'I will write the file now: writeFile({"path": "x.txt", "content": "hello\nworld"})';
+      'I will write the file now: write_file({"path": "x.txt", "content": "hello\nworld"})';
     const spans = findProseToolCallSpans(text, WRITE_KNOWN);
     expect(spans).toHaveLength(1);
     expect(spans[0]!.arguments).toEqual({ path: 'x.txt', content: 'hello\nworld' });
@@ -504,14 +504,14 @@ describe('findProseToolCallSpans — OpenAI-flavored writeFile shape (Gemma 4 26
   it('does NOT salvage when the tool name is unknown', () => {
     // Critical safety rail — we never fabricate calls to unknown
     // tools, even when the shape parses cleanly.
-    const text = 'writeFile2({"path": "x", "content": "y"})';
+    const text = 'write_file2({"path": "x", "content": "y"})';
     expect(findProseToolCallSpans(text, WRITE_KNOWN)).toEqual([]);
   });
 
   it('does NOT salvage when content is genuinely malformed (no recoverable boundary)', () => {
     // A `{` with no matching `}` and no plausible string-close
     // boundary. Should give up, not corrupt.
-    const text = 'writeFile({"path": "x", "content": "y';
+    const text = 'write_file({"path": "x", "content": "y';
     expect(findProseToolCallSpans(text, WRITE_KNOWN)).toEqual([]);
   });
 });
@@ -1212,16 +1212,16 @@ ask_user_question({
   });
 });
 
-describe('findTruncatedProseToolCall — partial-args extraction (writeFile truncation salvage)', () => {
-  const WRITE_KNOWN = new Set(['writeFile', 'write_artifact', 'appendToFile']);
+describe('findTruncatedProseToolCall — partial-args extraction (write_file truncation salvage)', () => {
+  const WRITE_KNOWN = new Set(['write_file', 'write_artifact', 'append_to_file']);
 
   it('extracts path + partial content when content string is cut mid-stream', () => {
-    // The headline failure shape: writeFile started, content arg
+    // The headline failure shape: write_file started, content arg
     // opened, stream ended without a closing quote.
-    const text = 'writeFile({"path": "index.html", "content": "<!DOCTYPE html>\\n<html>\\n<body>';
+    const text = 'write_file({"path": "index.html", "content": "<!DOCTYPE html>\\n<html>\\n<body>';
     const tr = findTruncatedProseToolCall(text, WRITE_KNOWN);
     expect(tr).not.toBeNull();
-    expect(tr!.wanted).toBe('writeFile');
+    expect(tr!.wanted).toBe('write_file');
     expect(tr!.partialArgs.path).toBe('index.html');
     expect(typeof tr!.partialArgs.content).toBe('string');
     // The captured content should include what the model emitted
@@ -1235,7 +1235,7 @@ describe('findTruncatedProseToolCall — partial-args extraction (writeFile trun
   it('extracts complete args when only the close-paren is missing', () => {
     // Args fully balanced, just the trailing `)` never arrived.
     // Should hand back complete args (path + full content).
-    const text = 'writeFile({"path": "x.txt", "content": "hello world"}';
+    const text = 'write_file({"path": "x.txt", "content": "hello world"}';
     const tr = findTruncatedProseToolCall(text, WRITE_KNOWN);
     expect(tr).not.toBeNull();
     expect(tr!.partialArgs).toEqual({ path: 'x.txt', content: 'hello world' });
@@ -1245,7 +1245,7 @@ describe('findTruncatedProseToolCall — partial-args extraction (writeFile trun
     // Realistic Gemma streaming: real newlines inside the JSON
     // string value. extractPartialArgs walks char-by-char so raw
     // control chars don't break it.
-    const text = 'writeFile({"path": "game.html", "content": "<html>\n<body>\n<script>alert(1)';
+    const text = 'write_file({"path": "game.html", "content": "<html>\n<body>\n<script>alert(1)';
     const tr = findTruncatedProseToolCall(text, WRITE_KNOWN);
     expect(tr).not.toBeNull();
     expect(tr!.partialArgs.path).toBe('game.html');
@@ -1254,9 +1254,9 @@ describe('findTruncatedProseToolCall — partial-args extraction (writeFile trun
     expect(c).toContain('alert(1)');
   });
 
-  it('extracts JavaScript-object template-string writeFile args cut mid-content', () => {
+  it('extracts JavaScript-object template-string write_file args cut mid-content', () => {
     const text =
-      'writeFile({\n' +
+      'write_file({\n' +
       '  path: "index.html",\n' +
       '  content: `\n' +
       '<!DOCTYPE html>\n' +
@@ -1264,7 +1264,7 @@ describe('findTruncatedProseToolCall — partial-args extraction (writeFile trun
       'function checkWin() {';
     const tr = findTruncatedProseToolCall(text, WRITE_KNOWN);
     expect(tr).not.toBeNull();
-    expect(tr!.wanted).toBe('writeFile');
+    expect(tr!.wanted).toBe('write_file');
     expect(tr!.partialArgs.path).toBe('index.html');
     const c = String(tr!.partialArgs.content);
     expect(c).toContain('<!DOCTYPE html>');
@@ -1274,7 +1274,7 @@ describe('findTruncatedProseToolCall — partial-args extraction (writeFile trun
 
   it('returns empty partialArgs when args block is unparseable', () => {
     // Malformed mid-key — extractor can't recover the path.
-    const text = 'writeFile({"pa';
+    const text = 'write_file({"pa';
     const tr = findTruncatedProseToolCall(text, WRITE_KNOWN);
     expect(tr).not.toBeNull();
     expect(tr!.partialArgs).toEqual({});
@@ -1282,22 +1282,22 @@ describe('findTruncatedProseToolCall — partial-args extraction (writeFile trun
 });
 
 describe('salvageWriteShapedTruncation — shared Layer-3 helper', () => {
-  const WRITE_KNOWN = new Set(['writeFile', 'write_artifact', 'appendToFile']);
+  const WRITE_KNOWN = new Set(['write_file', 'write_artifact', 'append_to_file']);
 
-  it('synthesizes a call from a truncated prose writeFile', () => {
-    const text = 'writeFile({"path": "x.html", "content": "<!DOCTYPE html>\\n<html>';
+  it('synthesizes a call from a truncated prose write_file', () => {
+    const text = 'write_file({"path": "x.html", "content": "<!DOCTYPE html>\\n<html>';
     const result = salvageWriteShapedTruncation(text, WRITE_KNOWN, 'test-prefix');
     expect(result.synthesizedCall).not.toBeNull();
-    expect(result.synthesizedCall!.name).toBe('writeFile');
+    expect(result.synthesizedCall!.name).toBe('write_file');
     expect(result.synthesizedCall!.argsObject.path).toBe('x.html');
     expect(result.synthesizedCall!.argsObject.content).toContain('<!DOCTYPE html>');
     expect(result.synthesizedCall!.id).toBe('test-prefix-0');
-    expect(result.wanted).toBe('writeFile');
+    expect(result.wanted).toBe('write_file');
   });
 
-  it('synthesizes a call from a truncated JavaScript-object template-string writeFile', () => {
+  it('synthesizes a call from a truncated JavaScript-object template-string write_file', () => {
     const text =
-      'writeFile({\n' +
+      'write_file({\n' +
       '  path: "index.html",\n' +
       '  content: `\n' +
       '<!DOCTYPE html>\n' +
@@ -1305,13 +1305,13 @@ describe('salvageWriteShapedTruncation — shared Layer-3 helper', () => {
       'const wins = [[0,1,2]];';
     const result = salvageWriteShapedTruncation(text, WRITE_KNOWN, 'template-prefix');
     expect(result.synthesizedCall).not.toBeNull();
-    expect(result.synthesizedCall!.name).toBe('writeFile');
+    expect(result.synthesizedCall!.name).toBe('write_file');
     expect(result.synthesizedCall!.argsObject.path).toBe('index.html');
     expect(result.synthesizedCall!.argsObject.content).toContain('const wins');
     expect(result.strippedContent).toBe('');
   });
 
-  it('synthesizes a call from a truncated JSON-envelope writeFile', () => {
+  it('synthesizes a call from a truncated JSON-envelope write_file', () => {
     const text = '{"tool": "write_artifact", "args": {"path": "out.txt", "content": "hello\\nworld';
     const result = salvageWriteShapedTruncation(text, WRITE_KNOWN, 'envelope-prefix');
     expect(result.synthesizedCall).not.toBeNull();
@@ -1323,7 +1323,7 @@ describe('salvageWriteShapedTruncation — shared Layer-3 helper', () => {
   it('returns null for non-write-shaped tools', () => {
     // `set_task_status` truncation should NOT promote to a partial-
     // write salvage — its args aren't bytes to land.
-    const known = new Set(['set_task_status', 'writeFile']);
+    const known = new Set(['set_task_status', 'write_file']);
     const text = 'set_task_status({"ref": "task-1", "status": "done';
     const result = salvageWriteShapedTruncation(text, known, 'test');
     expect(result.synthesizedCall).toBeNull();
@@ -1331,31 +1331,31 @@ describe('salvageWriteShapedTruncation — shared Layer-3 helper', () => {
   });
 
   it('returns null when partial args lack path or content', () => {
-    const text = 'writeFile({"path": "x.html"'; // no content key
+    const text = 'write_file({"path": "x.html"'; // no content key
     const result = salvageWriteShapedTruncation(text, WRITE_KNOWN, 'test');
     expect(result.synthesizedCall).toBeNull();
   });
 
   it('returns the stripped content (truncated tail removed)', () => {
     const text =
-      'I will write the file now.\n```javascript\nwriteFile({"path": "x.html", "content": "<!DOCTYPE html>';
+      'I will write the file now.\n```javascript\nwrite_file({"path": "x.html", "content": "<!DOCTYPE html>';
     const result = salvageWriteShapedTruncation(text, WRITE_KNOWN, 'test');
     expect(result.synthesizedCall).not.toBeNull();
     expect(result.strippedContent).toContain('I will write the file now.');
-    expect(result.strippedContent).not.toContain('writeFile({');
+    expect(result.strippedContent).not.toContain('write_file({');
   });
 });
 
 describe('appendTruncationHintToToolResult', () => {
   it('appends a continuation hint for write-shaped tools', () => {
     const before = 'Wrote 16384 bytes to artifacts/x.html';
-    const after = appendTruncationHintToToolResult(before, 'writeFile', {
+    const after = appendTruncationHintToToolResult(before, 'write_file', {
       path: 'x.html',
       content: 'A'.repeat(16384),
     });
     expect(after).not.toBe(before);
-    expect(after).toContain('[runtime] Your `writeFile` call');
-    expect(after).toContain('appendToFile');
+    expect(after).toContain('[runtime] Your `write_file` call');
+    expect(after).toContain('append_to_file');
     expect(after).toContain('x.html');
     expect(after).toContain('16384 bytes');
   });
@@ -1371,7 +1371,7 @@ describe('appendTruncationHintToToolResult', () => {
 
   it("skips when the tool result is an ERROR (write didn't land)", () => {
     const before = 'ERROR: file path is outside workspace';
-    const after = appendTruncationHintToToolResult(before, 'writeFile', {
+    const after = appendTruncationHintToToolResult(before, 'write_file', {
       path: 'x.html',
       content: 'whatever',
     });
@@ -1400,7 +1400,7 @@ describe('appendCapTruncationHintToRejectedWrite', () => {
   it('appends an incremental-edit hint to a rejected write with the cap named', () => {
     const after = appendCapTruncationHintToRejectedWrite(
       REJECTED,
-      'writeFile',
+      'write_file',
       {
         path: 'index.html',
         content: 'A'.repeat(30000),
@@ -1410,15 +1410,15 @@ describe('appendCapTruncationHintToRejectedWrite', () => {
     expect(after).not.toBe(REJECTED);
     expect(after).toContain('hit the per-turn output token cap');
     expect(after).toContain('max_tokens=8192');
-    expect(after).toContain('replaceInFile(path="index.html"');
-    expect(after).toContain('replaceLines(path="index.html"');
+    expect(after).toContain('replace_in_file(path="index.html"');
+    expect(after).toContain('replace_lines(path="index.html"');
     expect(after).toContain('do not retry a full rewrite');
   });
 
   it('omits the cap label when maxTokens is unknown', () => {
     const after = appendCapTruncationHintToRejectedWrite(
       REJECTED,
-      'writeFile',
+      'write_file',
       {
         path: 'index.html',
         content: 'x',
@@ -1433,7 +1433,7 @@ describe('appendCapTruncationHintToRejectedWrite', () => {
     const before = 'Wrote 16384 bytes to index.html';
     const after = appendCapTruncationHintToRejectedWrite(
       before,
-      'writeFile',
+      'write_file',
       {
         path: 'index.html',
         content: 'data',
@@ -1460,7 +1460,7 @@ describe('appendCapTruncationHintToRejectedWrite', () => {
     const before = 'ERROR: bad call';
     const after = appendCapTruncationHintToRejectedWrite(
       before,
-      'writeFile',
+      'write_file',
       {
         path: 'index.html',
       },
@@ -1472,7 +1472,7 @@ describe('appendCapTruncationHintToRejectedWrite', () => {
   it('is idempotent — calling twice produces the same output', () => {
     const once = appendCapTruncationHintToRejectedWrite(
       REJECTED,
-      'writeFile',
+      'write_file',
       {
         path: 'index.html',
         content: 'data',
@@ -1481,7 +1481,7 @@ describe('appendCapTruncationHintToRejectedWrite', () => {
     );
     const twice = appendCapTruncationHintToRejectedWrite(
       once,
-      'writeFile',
+      'write_file',
       {
         path: 'index.html',
         content: 'data',
@@ -1493,13 +1493,13 @@ describe('appendCapTruncationHintToRejectedWrite', () => {
 });
 
 describe('findTruncatedJsonEnvelope — partial-args extraction', () => {
-  const WRITE_KNOWN = new Set(['writeFile', 'write_artifact', 'appendToFile']);
+  const WRITE_KNOWN = new Set(['write_file', 'write_artifact', 'append_to_file']);
 
   it('extracts args from inside an args sub-object when content is truncated', () => {
-    const text = '{"tool": "writeFile", "args": {"path": "main.js", "content": "function main()';
+    const text = '{"tool": "write_file", "args": {"path": "main.js", "content": "function main()';
     const tr = findTruncatedJsonEnvelope(text);
     expect(tr).not.toBeNull();
-    expect(tr!.wanted).toBe('writeFile');
+    expect(tr!.wanted).toBe('write_file');
     expect(tr!.partialArgs.path).toBe('main.js');
     expect(String(tr!.partialArgs.content)).toContain('function main()');
   });
@@ -1518,10 +1518,10 @@ describe('findTruncatedJsonEnvelope — partial-args extraction', () => {
   it('returns empty partialArgs when there is no args sub-object (top-level only)', () => {
     // Just a function name and nothing else useful — should NOT
     // fabricate args.
-    const text = '{"tool": "writeFile"';
+    const text = '{"tool": "write_file"';
     const tr = findTruncatedJsonEnvelope(text);
     expect(tr).not.toBeNull();
-    expect(tr!.wanted).toBe('writeFile');
+    expect(tr!.wanted).toBe('write_file');
     // Top-level extraction may pick up the name key as a string,
     // but it definitely shouldn't fabricate a path or content.
     expect(tr!.partialArgs.path).toBeUndefined();
@@ -1931,17 +1931,22 @@ describe('findHermesFunctionToolCallSpans', () => {
 
 describe('findHermesFunctionToolCallSpansLenient', () => {
   // Wild-caught Qwen 3.6 27B on MLX (tictactoe trial):
-  // streaming writeFile bodies exceeded max_tokens, so `</parameter>`
+  // streaming write_file bodies exceeded max_tokens, so `</parameter>`
   // and `</function>` never arrived. The strict parser dropped the
   // call; the lenient parser recovers it.
 
-  const KNOWN_WRITE = new Set(['writeFile', 'write_artifact', 'list_projects', 'browser_navigate']);
+  const KNOWN_WRITE = new Set([
+    'write_file',
+    'write_artifact',
+    'list_projects',
+    'browser_navigate',
+  ]);
 
-  it('recovers a writeFile call when </parameter> and </function> never arrived (truncated stream)', () => {
+  it('recovers a write_file call when </parameter> and </function> never arrived (truncated stream)', () => {
     const text =
       'Let me write the file.\n\n' +
       '<tool_call>\n' +
-      '<function=writeFile>\n' +
+      '<function=write_file>\n' +
       '<parameter=path>\n' +
       'index.html\n' +
       '</parameter>\n' +
@@ -1949,7 +1954,7 @@ describe('findHermesFunctionToolCallSpansLenient', () => {
       '<!DOCTYPE html><html><head><title>x</title></head><body>cut off mid-stream';
     const spans = findHermesFunctionToolCallSpansLenient(text, KNOWN_WRITE);
     expect(spans).toHaveLength(1);
-    expect(spans[0]!.name).toBe('writeFile');
+    expect(spans[0]!.name).toBe('write_file');
     expect(spans[0]!.arguments.path).toBe('index.html');
     expect(String(spans[0]!.arguments.content)).toContain('<!DOCTYPE html>');
     expect(String(spans[0]!.arguments.content)).toContain('cut off mid-stream');
@@ -1957,7 +1962,7 @@ describe('findHermesFunctionToolCallSpansLenient', () => {
 
   it('still works when </parameter> closers ARE present (degenerate strict case)', () => {
     const text =
-      '<function=writeFile>\n' +
+      '<function=write_file>\n' +
       '<parameter=path>index.html</parameter>\n' +
       '<parameter=content>hello</parameter>\n' +
       '</function>';
@@ -1967,10 +1972,12 @@ describe('findHermesFunctionToolCallSpansLenient', () => {
   });
 
   it('skips an open-only function with no parameters at all (no real call to salvage)', () => {
-    // An `<function=writeFile>` with NO `<parameter=...>` inside has
+    // An `<function=write_file>` with NO `<parameter=...>` inside has
     // no usable arguments — promoting it would just produce a
     // missing-required-arg error downstream.
-    expect(findHermesFunctionToolCallSpansLenient('<function=writeFile>', KNOWN_WRITE)).toEqual([]);
+    expect(findHermesFunctionToolCallSpansLenient('<function=write_file>', KNOWN_WRITE)).toEqual(
+      [],
+    );
   });
 
   it('skips unknown tool names (gating still applies)', () => {
@@ -1984,10 +1991,10 @@ describe('findHermesFunctionToolCallSpansLenient', () => {
 
   it('handles two consecutive open-only function calls without bleeding between them', () => {
     const text =
-      '<function=writeFile>\n' +
+      '<function=write_file>\n' +
       '<parameter=path>a.txt</parameter>\n' +
       '<parameter=content>FIRST\n' +
-      '<function=writeFile>\n' +
+      '<function=write_file>\n' +
       '<parameter=path>b.txt</parameter>\n' +
       '<parameter=content>SECOND';
     const spans = findHermesFunctionToolCallSpansLenient(text, KNOWN_WRITE);
@@ -2002,7 +2009,7 @@ describe('findHermesFunctionToolCallSpansLenient', () => {
     // outer closer.
     const text =
       '<tool_call>\n' +
-      '<function=writeFile>\n' +
+      '<function=write_file>\n' +
       '<parameter=path>x.html</parameter>\n' +
       '<parameter=content>hello\n' +
       '</tool_call>';
@@ -2013,7 +2020,7 @@ describe('findHermesFunctionToolCallSpansLenient', () => {
 
   it('returns empty for prose-only input without any <function= opener', () => {
     expect(
-      findHermesFunctionToolCallSpansLenient("I'll call writeFile next turn.", KNOWN_WRITE),
+      findHermesFunctionToolCallSpansLenient("I'll call write_file next turn.", KNOWN_WRITE),
     ).toEqual([]);
   });
 
@@ -2021,7 +2028,7 @@ describe('findHermesFunctionToolCallSpansLenient', () => {
 
   it('marks span.truncated = true when the last param has no </parameter> AND the function block has no closer', () => {
     const text =
-      '<function=writeFile>\n' +
+      '<function=write_file>\n' +
       '<parameter=path>index.html</parameter>\n' +
       '<parameter=content>\n' +
       '<!DOCTYPE html><html>cut off mid-stream';
@@ -2032,7 +2039,7 @@ describe('findHermesFunctionToolCallSpansLenient', () => {
 
   it('does NOT mark truncated when the call closes properly (degenerate strict case)', () => {
     const text =
-      '<function=writeFile>\n' +
+      '<function=write_file>\n' +
       '<parameter=path>x.html</parameter>\n' +
       '<parameter=content>hello</parameter>\n' +
       '</function>';
@@ -2046,7 +2053,7 @@ describe('findHermesFunctionToolCallSpansLenient', () => {
     // even if `</parameter>` was elided, the model thinks it's done.
     // Treat as a "completed" call (no auto-continuation hint needed).
     const text =
-      '<function=writeFile>\n' +
+      '<function=write_file>\n' +
       '<parameter=path>x.html</parameter>\n' +
       '<parameter=content>hello\n' +
       '</function>';
@@ -2057,11 +2064,11 @@ describe('findHermesFunctionToolCallSpansLenient', () => {
 
   it('marks only the LAST span as truncated when an earlier span closed cleanly', () => {
     const text =
-      '<function=writeFile>\n' +
+      '<function=write_file>\n' +
       '<parameter=path>a.txt</parameter>\n' +
       '<parameter=content>FIRST</parameter>\n' +
       '</function>\n' +
-      '<function=writeFile>\n' +
+      '<function=write_file>\n' +
       '<parameter=path>b.txt</parameter>\n' +
       '<parameter=content>SECOND, then truncated';
     const spans = findHermesFunctionToolCallSpansLenient(text, KNOWN_WRITE);
@@ -2225,27 +2232,27 @@ describe('extractWantedToolName / uniqueWantedToolNames', () => {
 
 describe('findUnrecognizedFunctionMarkup', () => {
   const voormanTools = new Set([
-    'readdir',
-    'readFile',
+    'list_dir',
+    'read_file',
     'message_gezel',
     'ask_specialist',
     'write_artifact',
   ]);
 
-  it('catches the `<function=writeFile>` markup a voorman emits (Laxmi case)', () => {
-    const markup = '<tool_call>\n<function=writeFile>\n<parameter=path>\nindex.html\n</parameter>';
+  it('catches the `<function=write_file>` markup a voorman emits (Laxmi case)', () => {
+    const markup = '<tool_call>\n<function=write_file>\n<parameter=path>\nindex.html\n</parameter>';
     const miss = findUnrecognizedFunctionMarkup(markup, voormanTools);
-    expect(miss?.wanted).toBe('writeFile');
+    expect(miss?.wanted).toBe('write_file');
   });
 
   it('catches the `<invoke name="X">` Claude shape', () => {
-    const miss = findUnrecognizedFunctionMarkup('<invoke name="writeFile">', voormanTools);
-    expect(miss?.wanted).toBe('writeFile');
+    const miss = findUnrecognizedFunctionMarkup('<invoke name="write_file">', voormanTools);
+    expect(miss?.wanted).toBe('write_file');
   });
 
   it('returns null when the named tool IS available (a builder)', () => {
-    const builderTools = new Set(['readFile', 'writeFile']);
-    expect(findUnrecognizedFunctionMarkup('<function=writeFile>', builderTools)).toBeNull();
+    const builderTools = new Set(['read_file', 'write_file']);
+    expect(findUnrecognizedFunctionMarkup('<function=write_file>', builderTools)).toBeNull();
   });
 
   it('returns null when the name resolves through an alias', () => {
@@ -2262,21 +2269,21 @@ describe('findUnrecognizedFunctionMarkup', () => {
 });
 
 describe('buildUnknownToolNudge', () => {
-  const voormanTools = new Set(['readFile', 'message_gezel', 'ask_specialist', 'write_artifact']);
+  const voormanTools = new Set(['read_file', 'message_gezel', 'ask_specialist', 'write_artifact']);
 
   it('routes a no-write-access role to DELEGATION, not "did you mean"', () => {
-    const nudge = buildUnknownToolNudge('writeFile', null, voormanTools);
+    const nudge = buildUnknownToolNudge('write_file', null, voormanTools);
     expect(nudge).toMatch(/DELEGATE/);
     expect(nudge).toMatch(/message_gezel/);
     expect(nudge).toMatch(/ensure_gezel/);
     expect(nudge).toMatch(/expectedDeliverable/);
     expect(nudge).toMatch(/Do not call `ask_specialist`/);
-    // Must NOT tell a writeFile-less role to call writeFile.
-    expect(nudge).not.toMatch(/call `writeFile\(/);
+    // Must NOT tell a write_file-less role to call write_file.
+    expect(nudge).not.toMatch(/call `write_file\(/);
   });
 
-  it('tells a role with neither writeFile nor delegation tools to inform the user', () => {
-    const nudge = buildUnknownToolNudge('writeFile', null, new Set(['readFile']));
+  it('tells a role with neither write_file nor delegation tools to inform the user', () => {
+    const nudge = buildUnknownToolNudge('write_file', null, new Set(['read_file']));
     expect(nudge).toMatch(/cannot create the file yourself/i);
     expect(nudge).not.toMatch(/DELEGATE/);
   });
@@ -2327,13 +2334,13 @@ describe('formatToolMenu', () => {
 });
 
 describe('findBareInvokeToolCallSpans', () => {
-  const tools = new Set(['writeFile', 'list_projects', 'create_project']);
+  const tools = new Set(['write_file', 'list_projects', 'create_project']);
 
   it('salvages the exact gemma4-e2b-q8/MLX shape', () => {
-    const text = 'invoke writeFile {\n  "path": "preflight.txt",\n  "content": "FLIGHT OK"\n}';
+    const text = 'invoke write_file {\n  "path": "preflight.txt",\n  "content": "FLIGHT OK"\n}';
     const spans = findBareInvokeToolCallSpans(text, tools);
     expect(spans).toHaveLength(1);
-    expect(spans[0]?.name).toBe('writeFile');
+    expect(spans[0]?.name).toBe('write_file');
     expect(spans[0]?.arguments).toEqual({ path: 'preflight.txt', content: 'FLIGHT OK' });
   });
 
@@ -2343,9 +2350,9 @@ describe('findBareInvokeToolCallSpans', () => {
   });
 
   it('does NOT match prose that lacks a JSON object', () => {
-    expect(findBareInvokeToolCallSpans('you can invoke writeFile to save the file', tools)).toEqual(
-      [],
-    );
+    expect(
+      findBareInvokeToolCallSpans('you can invoke write_file to save the file', tools),
+    ).toEqual([]);
   });
 
   it('does NOT match an unknown tool name', () => {
@@ -2353,13 +2360,13 @@ describe('findBareInvokeToolCallSpans', () => {
   });
 
   it('strips the salvaged span from visible content', () => {
-    const text = 'Sure! invoke writeFile {"path":"a.txt","content":"hi"} done.';
+    const text = 'Sure! invoke write_file {"path":"a.txt","content":"hi"} done.';
     const spans = findBareInvokeToolCallSpans(text, tools);
     expect(stripBareInvokeToolCallsFromText(text, spans)).toBe('Sure!  done.');
   });
 
   it('returns [] when there are no known tools', () => {
-    expect(findBareInvokeToolCallSpans('invoke writeFile {"path":"a"}', new Set())).toEqual([]);
+    expect(findBareInvokeToolCallSpans('invoke write_file {"path":"a"}', new Set())).toEqual([]);
   });
 });
 
@@ -2427,16 +2434,16 @@ describe('foldPostActionRumination', () => {
 });
 
 describe('findGlmToolCallSpans (GLM-4.5/4.6 <tool_call>NAME<arg_key>…</tool_call>)', () => {
-  const GLM_KNOWN = new Set(['writeFile', 'write_artifact', 'list_projects', 'create_task']);
+  const GLM_KNOWN = new Set(['write_file', 'write_artifact', 'list_projects', 'create_task']);
 
   it('parses the wild-caught inline laguna form (name flush against <arg_key>, no newlines)', () => {
     // Exactly what laguna-s-118b emitted in the preflight probe.
     const text =
-      '<tool_call>writeFile<arg_key>path</arg_key><arg_value>preflight.txt</arg_value>' +
+      '<tool_call>write_file<arg_key>path</arg_key><arg_value>preflight.txt</arg_value>' +
       '<arg_key>content</arg_key><arg_value>PREFLIGHT OK</arg_value></tool_call>';
     const spans = findGlmToolCallSpans(text, GLM_KNOWN);
     expect(spans).toHaveLength(1);
-    expect(spans[0]!.name).toBe('writeFile');
+    expect(spans[0]!.name).toBe('write_file');
     expect(spans[0]!.arguments).toEqual({ path: 'preflight.txt', content: 'PREFLIGHT OK' });
     expect(spans[0]!.truncated).toBeUndefined();
   });
@@ -2457,9 +2464,9 @@ describe('findGlmToolCallSpans (GLM-4.5/4.6 <tool_call>NAME<arg_key>…</tool_ca
     });
   });
 
-  it('preserves free-text values containing quotes, braces and newlines (writeFile body)', () => {
+  it('preserves free-text values containing quotes, braces and newlines (write_file body)', () => {
     const body = 'line 1\n{"json": true, "n": 2}\n<not a tag>';
-    const text = `<tool_call>writeFile<arg_key>path</arg_key><arg_value>a.txt</arg_value><arg_key>content</arg_key><arg_value>${body}</arg_value></tool_call>`;
+    const text = `<tool_call>write_file<arg_key>path</arg_key><arg_value>a.txt</arg_value><arg_key>content</arg_key><arg_value>${body}</arg_value></tool_call>`;
     const parsed = findGlmToolCallSpan(text, GLM_KNOWN);
     // Raw string content is NOT JSON-parsed — a file that happens to hold
     // JSON must land verbatim, not be coerced into an object.
@@ -2468,7 +2475,7 @@ describe('findGlmToolCallSpans (GLM-4.5/4.6 <tool_call>NAME<arg_key>…</tool_ca
 
   it('resolves punctuation/case aliases through resolveToolNameAlias', () => {
     const text = '<tool_call>WriteFile<arg_key>path</arg_key><arg_value>x</arg_value></tool_call>';
-    expect(findGlmToolCallSpan(text, GLM_KNOWN)!.name).toBe('writeFile');
+    expect(findGlmToolCallSpan(text, GLM_KNOWN)!.name).toBe('write_file');
   });
 
   it('refuses an unknown/fabricated function name (safety rail)', () => {
@@ -2478,13 +2485,13 @@ describe('findGlmToolCallSpans (GLM-4.5/4.6 <tool_call>NAME<arg_key>…</tool_ca
   });
 
   it('salvages an unterminated call, flagging truncation and keeping partial content', () => {
-    // Stream ran out mid writeFile content: no </arg_value>, no </tool_call>.
+    // Stream ran out mid write_file content: no </arg_value>, no </tool_call>.
     const text =
-      '<tool_call>writeFile<arg_key>path</arg_key><arg_value>big.md</arg_value>' +
+      '<tool_call>write_file<arg_key>path</arg_key><arg_value>big.md</arg_value>' +
       '<arg_key>content</arg_key><arg_value># Title\nfirst half of the file';
     const parsed = findGlmToolCallSpan(text, GLM_KNOWN);
     expect(parsed).not.toBeNull();
-    expect(parsed!.name).toBe('writeFile');
+    expect(parsed!.name).toBe('write_file');
     expect(parsed!.truncated).toBe(true);
     expect(parsed!.arguments.path).toBe('big.md');
     expect(parsed!.arguments.content).toBe('# Title\nfirst half of the file');
@@ -2492,22 +2499,22 @@ describe('findGlmToolCallSpans (GLM-4.5/4.6 <tool_call>NAME<arg_key>…</tool_ca
 
   it('does not fabricate a no-arg call from stray narration mentioning <tool_call>', () => {
     // An unterminated opener with no arg pairs is too weak to promote.
-    const text = 'I will now use <tool_call>writeFile to save the file for you.';
+    const text = 'I will now use <tool_call>write_file to save the file for you.';
     expect(findGlmToolCallSpans(text, GLM_KNOWN)).toHaveLength(0);
   });
 
   it('parses two back-to-back calls in one turn', () => {
     const text =
       '<tool_call>list_projects</tool_call>' +
-      '<tool_call>writeFile<arg_key>path</arg_key><arg_value>b.txt</arg_value></tool_call>';
+      '<tool_call>write_file<arg_key>path</arg_key><arg_value>b.txt</arg_value></tool_call>';
     const spans = findGlmToolCallSpans(text, GLM_KNOWN);
-    expect(spans.map((s) => s.name)).toEqual(['list_projects', 'writeFile']);
+    expect(spans.map((s) => s.name)).toEqual(['list_projects', 'write_file']);
     expect(spans[0]!.arguments).toEqual({});
   });
 
   it('strips salvaged spans out of visible content, leaving surrounding prose', () => {
     const text =
-      'Sure, saving now.\n<tool_call>writeFile<arg_key>path</arg_key><arg_value>c.txt</arg_value></tool_call>\nDone.';
+      'Sure, saving now.\n<tool_call>write_file<arg_key>path</arg_key><arg_value>c.txt</arg_value></tool_call>\nDone.';
     const spans = findGlmToolCallSpans(text, GLM_KNOWN);
     const stripped = stripGlmToolCallsFromText(text, spans);
     expect(stripped).not.toContain('<tool_call>');
@@ -2516,7 +2523,7 @@ describe('findGlmToolCallSpans (GLM-4.5/4.6 <tool_call>NAME<arg_key>…</tool_ca
   });
 
   it('returns nothing when there are no known tools', () => {
-    const text = '<tool_call>writeFile<arg_key>path</arg_key><arg_value>x</arg_value></tool_call>';
+    const text = '<tool_call>write_file<arg_key>path</arg_key><arg_value>x</arg_value></tool_call>';
     expect(findGlmToolCallSpans(text, new Set())).toHaveLength(0);
   });
 });

@@ -28,19 +28,19 @@ describe('parsePendingToolCalls', () => {
   });
 
   it('parses an in-flight block with no closing </function>', () => {
-    const text = '<function=readFile><parameter=path>src/main.ts</parameter>';
+    const text = '<function=read_file><parameter=path>src/main.ts</parameter>';
     const result = parsePendingToolCalls(text);
     expect(result).toHaveLength(1);
-    expect(result[0]!.name).toBe('readFile');
+    expect(result[0]!.name).toBe('read_file');
     expect(result[0]!.params).toEqual({ path: 'src/main.ts' });
     expect(result[0]!.complete).toBe(false);
   });
 
   it('parses a bare opener with no params yet', () => {
-    const text = 'Some prose...\n<function=writeFile>';
+    const text = 'Some prose...\n<function=write_file>';
     const result = parsePendingToolCalls(text);
     expect(result).toHaveLength(1);
-    expect(result[0]!.name).toBe('writeFile');
+    expect(result[0]!.name).toBe('write_file');
     expect(result[0]!.params).toEqual({});
     expect(result[0]!.complete).toBe(false);
   });
@@ -48,7 +48,7 @@ describe('parsePendingToolCalls', () => {
   it('parses a partial parameter value mid-stream', () => {
     // The user is watching content stream in token-by-token; the
     // <parameter=path> tag arrived but the value is still arriving.
-    const text = '<function=writeFile><parameter=path>src/game';
+    const text = '<function=write_file><parameter=path>src/game';
     const result = parsePendingToolCalls(text);
     expect(result).toHaveLength(1);
     expect(result[0]!.params).toEqual({ path: 'src/game' });
@@ -59,16 +59,16 @@ describe('parsePendingToolCalls', () => {
       'Let me check the project state.',
       '<function=read_task_notes><parameter=ref>atari/3</parameter></function>',
       '<function=read_task_notes><parameter=ref>atari/1</parameter></function>',
-      '<function=readFile><parameter=path>package.json</parameter></function>',
-      '<function=readFile><parameter=path>src/main.ts</parameter></function>',
+      '<function=read_file><parameter=path>package.json</parameter></function>',
+      '<function=read_file><parameter=path>src/main.ts</parameter></function>',
     ].join('\n');
     const result = parsePendingToolCalls(text);
     expect(result).toHaveLength(4);
     expect(result.map((r) => r.name)).toEqual([
       'read_task_notes',
       'read_task_notes',
-      'readFile',
-      'readFile',
+      'read_file',
+      'read_file',
     ]);
     expect(result[0]!.params.ref).toBe('atari/3');
     expect(result[3]!.params.path).toBe('src/main.ts');
@@ -83,8 +83,8 @@ describe('parsePendingToolCalls', () => {
 
   it('marks the last block as in-flight when several stack and the last is open', () => {
     const text = [
-      '<function=readFile><parameter=path>a.ts</parameter></function>',
-      '<function=writeFile><parameter=path>b.ts</parameter><parameter=content>partial...',
+      '<function=read_file><parameter=path>a.ts</parameter></function>',
+      '<function=write_file><parameter=path>b.ts</parameter><parameter=content>partial...',
     ].join('\n');
     const result = parsePendingToolCalls(text);
     expect(result).toHaveLength(2);
@@ -96,19 +96,19 @@ describe('parsePendingToolCalls', () => {
 
 describe('parsePendingToolCalls — Anthropic invoke shape', () => {
   it('parses a closed invoke with parameters', () => {
-    const text = `<invoke name="readFile"><parameter name="path">src/main.ts</parameter></invoke>`;
+    const text = `<invoke name="read_file"><parameter name="path">src/main.ts</parameter></invoke>`;
     const result = parsePendingToolCalls(text);
     expect(result).toHaveLength(1);
-    expect(result[0]!.name).toBe('readFile');
+    expect(result[0]!.name).toBe('read_file');
     expect(result[0]!.params).toEqual({ path: 'src/main.ts' });
     expect(result[0]!.complete).toBe(true);
   });
 
   it('parses a bare invoke opener mid-stream (no close yet)', () => {
-    const text = `<invoke name="writeFile"><parameter name="path">src/game.ts`;
+    const text = `<invoke name="write_file"><parameter name="path">src/game.ts`;
     const result = parsePendingToolCalls(text);
     expect(result).toHaveLength(1);
-    expect(result[0]!.name).toBe('writeFile');
+    expect(result[0]!.name).toBe('write_file');
     expect(result[0]!.params).toEqual({ path: 'src/game.ts' });
     expect(result[0]!.complete).toBe(false);
   });
@@ -125,8 +125,8 @@ describe('parsePendingToolCalls — Anthropic invoke shape', () => {
   it('parses multiple invokes stacked in a function_calls wrapper', () => {
     const text = [
       '<function_calls>',
-      '<invoke name="readFile"><parameter name="path">a.ts</parameter></invoke>',
-      '<invoke name="readFile"><parameter name="path">b.ts</parameter></invoke>',
+      '<invoke name="read_file"><parameter name="path">a.ts</parameter></invoke>',
+      '<invoke name="read_file"><parameter name="path">b.ts</parameter></invoke>',
       '</function_calls>',
     ].join('\n');
     const result = parsePendingToolCalls(text);
@@ -180,19 +180,19 @@ describe('parsePendingToolCalls — XML self-closing shape', () => {
 
 describe('parsePendingToolCalls — JSON envelope shape', () => {
   it('parses a `{"tool":"NAME","args":{...}}` envelope', () => {
-    const text = `Let me try this:\n\n{"tool": "readFile", "args": {"path": "src/main.ts"}}`;
+    const text = `Let me try this:\n\n{"tool": "read_file", "args": {"path": "src/main.ts"}}`;
     const result = parsePendingToolCalls(text);
     expect(result).toHaveLength(1);
-    expect(result[0]!.name).toBe('readFile');
+    expect(result[0]!.name).toBe('read_file');
     expect(result[0]!.params).toEqual({ path: 'src/main.ts' });
     expect(result[0]!.complete).toBe(true);
   });
 
   it('parses the `{"name":"NAME","arguments":{...}}` variant', () => {
-    const text = `{"name": "writeFile", "arguments": {"path": "x.ts", "content": "y"}}`;
+    const text = `{"name": "write_file", "arguments": {"path": "x.ts", "content": "y"}}`;
     const result = parsePendingToolCalls(text);
     expect(result).toHaveLength(1);
-    expect(result[0]!.name).toBe('writeFile');
+    expect(result[0]!.name).toBe('write_file');
     expect(result[0]!.params).toEqual({ path: 'x.ts', content: 'y' });
   });
 
@@ -228,19 +228,19 @@ describe('parsePendingToolCalls — mixed shapes', () => {
       'First, the Hermes form:',
       '<function=read_task_notes><parameter=ref>atari/3</parameter></function>',
       'Then Anthropic invoke:',
-      '<invoke name="readFile"><parameter name="path">a.ts</parameter></invoke>',
+      '<invoke name="read_file"><parameter name="path">a.ts</parameter></invoke>',
       'Then XML self-closing:',
       '<browser_navigate url="https://x.com" />',
       'Then JSON envelope:',
-      '{"tool": "writeFile", "args": {"path": "out.txt"}}',
+      '{"tool": "write_file", "args": {"path": "out.txt"}}',
     ].join('\n');
     const result = parsePendingToolCalls(text);
     expect(result).toHaveLength(4);
     expect(result.map((r) => r.name)).toEqual([
       'read_task_notes',
-      'readFile',
+      'read_file',
       'browser_navigate',
-      'writeFile',
+      'write_file',
     ]);
   });
 });
@@ -277,7 +277,7 @@ describe('formatPendingArgsPreview', () => {
     expect(formatPendingArgsPreview({ widget: 'square' })).toBe('widget: square');
   });
 
-  it('truncates long values so a writeFile content blob does not overflow', () => {
+  it('truncates long values so a write_file content blob does not overflow', () => {
     const long = 'a'.repeat(200);
     const out = formatPendingArgsPreview({ content: long });
     expect(out.length).toBeLessThan(100);
@@ -287,12 +287,16 @@ describe('formatPendingArgsPreview', () => {
 
 describe('dropExecutedPending', () => {
   it('returns the input unchanged when nothing has executed yet', () => {
-    const list = [pending('readFile', true), pending('writeFile', true)];
+    const list = [pending('read_file', true), pending('write_file', true)];
     expect(dropExecutedPending(list, 0)).toEqual(list);
   });
 
   it('drops the leading N complete pendings once the salvage layer fires', () => {
-    const list = [pending('readFile', true), pending('writeFile', true), pending('listDir', true)];
+    const list = [
+      pending('read_file', true),
+      pending('write_file', true),
+      pending('listDir', true),
+    ];
     expect(dropExecutedPending(list, 2).map((p) => p.name)).toEqual(['listDir']);
   });
 
@@ -305,11 +309,11 @@ describe('dropExecutedPending', () => {
 
   it('never consumes a streaming (incomplete) pending — salvage only fires on closed markup', () => {
     const list = [
-      pending('readFile', true), // already executed
-      pending('writeFile', false), // still streaming, must survive
+      pending('read_file', true), // already executed
+      pending('write_file', false), // still streaming, must survive
     ];
     const out = dropExecutedPending(list, 1);
-    expect(out.map((p) => [p.name, p.complete])).toEqual([['writeFile', false]]);
+    expect(out.map((p) => [p.name, p.complete])).toEqual([['write_file', false]]);
   });
 
   it('skips streaming entries when accounting for executed completes', () => {
@@ -319,11 +323,11 @@ describe('dropExecutedPending', () => {
     // is consumed, the streaming one survives, and the unfired
     // complete remains visible as queued.
     const list = [
-      pending('readFile', true, 0),
-      pending('writeFile', false, 100),
+      pending('read_file', true, 0),
+      pending('write_file', false, 100),
       pending('listDir', true, 200),
     ];
     const out = dropExecutedPending(list, 1);
-    expect(out.map((p) => p.name)).toEqual(['writeFile', 'listDir']);
+    expect(out.map((p) => p.name)).toEqual(['write_file', 'listDir']);
   });
 });

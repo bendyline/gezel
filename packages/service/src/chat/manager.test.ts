@@ -407,17 +407,17 @@ describe('ChatManager — send + persistence', () => {
 });
 
 describe('buildContinuationNudge', () => {
-  it('turns an incomplete writeFile prefix into a concrete complete-call nudge', () => {
-    const nudge = buildContinuationNudge('`writeFile(', [
+  it('turns an incomplete write_file prefix into a concrete complete-call nudge', () => {
+    const nudge = buildContinuationNudge('`write_file(', [
       {
         content:
-          '[Deliverable expected as a FILE at `index.html`. Your first assistant action should be the tool call `writeFile({ path, content })`.]',
+          '[Deliverable expected as a FILE at `index.html`. Your first assistant action should be the tool call `write_file({ path, content })`.]',
       },
     ]);
 
-    expect(nudge).toContain('incomplete tool call `writeFile(`');
+    expect(nudge).toContain('incomplete tool call `write_file(`');
     expect(nudge).toContain(
-      'writeFile({ path: "index.html", content: <full deliverable contents> })',
+      'write_file({ path: "index.html", content: <full deliverable contents> })',
     );
     expect(nudge).toContain('Do not narrate');
   });
@@ -621,7 +621,7 @@ describe('ChatManager — task context', () => {
           {
             name: 'Build',
             prompt:
-              'First call `write_task_note` with acceptance criteria. Then create `index.html` with `writeFile`.',
+              'First call `write_task_note` with acceptance criteria. Then create `index.html` with `write_file`.',
             advanceWhen: { file: 'index.html', minBytes: 800, sniff: 'html-game' as const },
           },
         ],
@@ -636,19 +636,19 @@ describe('ChatManager — task context', () => {
       localMock.script('Working.');
       await localManager.send(
         session.id,
-        'Build a new game at `workspace/index.html`. First pass: call `writeFile` with the complete file.',
+        'Build a new game at `workspace/index.html`. First pass: call `write_file` with the complete file.',
       );
 
       const create = localMock.calls.find((call) => call.kind === 'create');
       const allow = create!.opts!.toolAllowlist!;
-      expect(allow.has('writeFile')).toBe(true);
+      expect(allow.has('write_file')).toBe(true);
       expect(allow.has('write_task_note')).toBe(true);
       expect(allow.has('read_task_notes')).toBe(true);
       expect(allow.has('advance_task_step')).toBe(true);
-      expect(allow.has('readFile')).toBe(false);
+      expect(allow.has('read_file')).toBe(false);
 
       const system = create!.opts!.systemMessage!;
-      expect(system).toContain('**Workspace writes** (`writeFile`)');
+      expect(system).toContain('**Workspace writes** (`write_file`)');
       expect(system).toContain('**Workspace reads are not available this turn.**');
       expect(system).not.toContain('No direct file drawers are available this turn');
       expect(system).not.toContain("You don't have file-read/write tools");
@@ -1242,14 +1242,14 @@ describe('ChatManager — messageGezel (cross-gezel messaging)', () => {
     const seed = String(mayaDisk!.messages[0]?.content ?? '');
     expect(seed).toContain('Deliverable expected as a FILE at `index.html`');
     expect(seed).toContain(
-      'Your first assistant action should be the tool call `writeFile({ path, content })`',
+      'Your first assistant action should be the tool call `write_file({ path, content })`',
     );
     expect(seed).toContain('single-file HTML deliverable');
     expect(seed).toContain('put CSS in `<style>` and JavaScript in one inline `<script>`');
     expect(seed).toContain('Do NOT create or rely on `script.js`, `styles.css`');
   });
 
-  it('preserves a PPTX handoff as a binary deliverable instead of writeFile markdown', async () => {
+  it('preserves a PPTX handoff as a binary deliverable instead of write_file markdown', async () => {
     await store.createGezel({ name: 'Maya', role: 'Developer' });
     const adaSession = await manager.createSession({ gezelId: 'ada' });
     mock.script('The exact-format production surface is unavailable.');
@@ -1274,10 +1274,10 @@ describe('ChatManager — messageGezel (cross-gezel messaging)', () => {
     expect(seed).toContain('`preview_document`');
     expect(seed).toContain('`save_artifact`');
     expect(seed).toContain('blocked instead of silently substituting another format');
-    expect(seed).not.toContain('first assistant action should be the tool call `writeFile');
+    expect(seed).not.toContain('first assistant action should be the tool call `write_file');
   });
 
-  it('does not append a contradictory writeFile-first instruction to focused repair handoffs', async () => {
+  it('does not append a contradictory write_file-first instruction to focused repair handoffs', async () => {
     await store.createGezel({ name: 'Maya', role: 'Developer' });
     const adaSession = await manager.createSession({ gezelId: 'ada' });
     mock.script('I patched index.html.');
@@ -1300,11 +1300,11 @@ describe('ChatManager — messageGezel (cross-gezel messaging)', () => {
     const mayaDisk = await store.getSession('maya', res.sessionId);
     const seed = String(mayaDisk!.messages[0]?.content ?? '');
     expect(seed).toContain('focused repair of an existing source file');
-    expect(seed).toContain('`replaceInFile` or `replaceLines`');
-    expect(seed).not.toContain('first assistant action should be the tool call `writeFile');
+    expect(seed).toContain('`replace_in_file` or `replace_lines`');
+    expect(seed).not.toContain('first assistant action should be the tool call `write_file');
   });
 
-  it('preserves an exact append-only repair directive instead of injecting writeFile-first', async () => {
+  it('preserves an exact append-only repair directive instead of injecting write_file-first', async () => {
     await store.createGezel({ name: 'Maya', role: 'Researcher' });
     const adaSession = await manager.createSession({ gezelId: 'ada' });
     mock.script('I appended the requested analysis.');
@@ -1316,8 +1316,8 @@ describe('ChatManager — messageGezel (cross-gezel messaging)', () => {
       text: [
         'INCIDENT POSTMORTEM APPEND: the document already has the required structure but needs more evidence-backed substance.',
         'Append at least 1719 substantive characters so the result clears 7 KiB with headroom; do not pad.',
-        'Your next tool call must be `appendToFile({ path: "postmortem.md", content: "\\n\\n### Evidence-backed follow-up context\\n\\n<new analysis>" })`.',
-        'Do not call `writeFile`, rewrite existing sections, or answer in chat first.',
+        'Your next tool call must be `append_to_file({ path: "postmortem.md", content: "\\n\\n### Evidence-backed follow-up context\\n\\n<new analysis>" })`.',
+        'Do not call `write_file`, rewrite existing sections, or answer in chat first.',
       ].join(' '),
       expectedDeliverable: { kind: 'file', filePath: 'postmortem.md' },
     });
@@ -1330,9 +1330,9 @@ describe('ChatManager — messageGezel (cross-gezel messaging)', () => {
     const mayaDisk = await store.getSession('maya', res.sessionId);
     const seed = String(mayaDisk!.messages[0]?.content ?? '');
     expect(seed).toContain('This is an append-only update of an existing file');
-    expect(seed).toContain('your first file mutation must use `appendToFile`');
-    expect(seed).toContain('do not call `writeFile`');
-    expect(seed).not.toContain('first assistant action should be the tool call `writeFile');
+    expect(seed).toContain('your first file mutation must use `append_to_file`');
+    expect(seed).toContain('do not call `write_file`');
+    expect(seed).not.toContain('first assistant action should be the tool call `write_file');
   });
 
   it('preserves an explicitly named surgical edit surface for an existing file', async () => {
@@ -1344,7 +1344,7 @@ describe('ChatManager — messageGezel (cross-gezel messaging)', () => {
       fromGezelId: 'ada',
       fromSessionId: adaSession.id,
       toGezelIdOrName: 'maya',
-      text: 'Read `src/store.ts`, then use `replaceLines` for lines 40-44. Preserve the rest.',
+      text: 'Read `src/store.ts`, then use `replace_lines` for lines 40-44. Preserve the rest.',
       expectedDeliverable: { kind: 'file', filePath: 'src/store.ts' },
     });
 
@@ -1355,9 +1355,9 @@ describe('ChatManager — messageGezel (cross-gezel messaging)', () => {
 
     const mayaDisk = await store.getSession('maya', res.sessionId);
     const seed = String(mayaDisk!.messages[0]?.content ?? '');
-    expect(seed).toContain('existing-file edit surface `replaceLines`');
+    expect(seed).toContain('existing-file edit surface `replace_lines`');
     expect(seed).toContain('do not replace that surgical surface');
-    expect(seed).not.toContain('first assistant action should be the tool call `writeFile');
+    expect(seed).not.toContain('first assistant action should be the tool call `write_file');
   });
 
   it("defers the target send until the sender's in-flight turn is idle", async () => {
@@ -1803,7 +1803,7 @@ describe('ChatManager — messageGezel (cross-gezel messaging)', () => {
     // (in default) created `tic-tac-toe-game`, asked target to work
     // there on turn 1 (passing project=tic-tac-toe-game), then on a
     // follow-up message forgot to pass project. Without auto-routing,
-    // the target got a fresh default-scoped session whose readFile
+    // the target got a fresh default-scoped session whose read_file
     // 404'd against the work it had already done in the named project.
     await store.createProject({ name: 'Tic Tac Toe Game' });
     await store.createGezel({ name: 'Maya', role: 'Voorman' });
@@ -3769,9 +3769,9 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
   it("voorman's 'Where work belongs' section teaches read-only workspace tools and delegates writes", async () => {
     // Voormen are coordinators with `workspace-fs-read` (so they can
     // investigate a bug before delegating) but NOT `workspace-fs-write`.
-    // The orientation must mention what they CAN do (`readFile`,
+    // The orientation must mention what they CAN do (`read_file`,
     // `find_files`) so they don't ask the user to paste contents, and
-    // must NOT mention `writeFile` since they can't call it — naming
+    // must NOT mention `write_file` since they can't call it — naming
     // a tool that isn't in their function-call schema is the same
     // prompt-vs-runtime drift that pushes small models into fabrication.
     // Writes are explicitly delegated through `message_gezel`.
@@ -3792,15 +3792,15 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
     expect(sys).toContain('### Where work belongs');
     // Voorman now has read tools — name them so the model uses them
     // instead of asking "could you paste the file contents?".
-    expect(sys).toContain('`readFile`');
-    expect(sys).toContain('`readdir`');
-    // Writes still aren't theirs — naming `writeFile` would be drift.
-    expect(sys).not.toContain('`writeFile`');
+    expect(sys).toContain('`read_file`');
+    expect(sys).toContain('`list_dir`');
+    // Writes still aren't theirs — naming `write_file` would be drift.
+    expect(sys).not.toContain('`write_file`');
     // Artifacts guidance still lands — that's their actual scratch space.
     expect(sys).toContain('`write_artifact`');
     expect(sys).toContain('`read_artifact`');
     expect(sys).toContain('does not change the project');
-    expect(sys).toContain('read it with `readFile`, not `read_artifact`');
+    expect(sys).toContain('read it with `read_file`, not `read_artifact`');
     expect(sys).not.toContain('direct output lives');
     // Explicit delegation prose for writes — handoff via message_gezel.
     expect(sys).toMatch(/delegate|message_gezel/i);
@@ -3850,7 +3850,7 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
       // slashed.
       expect(allow.has('update_task')).toBe(true);
       expect(allow.has('add_task_step')).toBe(true);
-      expect(allow.has('readFile')).toBe(true);
+      expect(allow.has('read_file')).toBe(true);
       expect(allow.has('read_artifact')).toBe(true);
       expect(allow.has('message_gezel')).toBe(true);
       expect(allow.has('read_task_notes')).toBe(true);
@@ -3885,7 +3885,7 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
       expect(allow.has('validate')).toBe(true);
 
       const sys = create!.opts!.systemMessage!;
-      expect(sys).toContain('`readFile`');
+      expect(sys).toContain('`read_file`');
       expect(sys).toContain('`read_artifact`');
       expect(sys).toContain('never invent refs from the project name');
 
@@ -3938,7 +3938,7 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
       // Investigation + the broader craftbook, memory, and document kit
       // survive because medium is not count-capped.
       expect(allow.has('search_files')).toBe(true);
-      expect(allow.has('readFile')).toBe(true);
+      expect(allow.has('read_file')).toBe(true);
       // Code-intelligence is no longer in the voorman's roster:
       // symbol-level navigation is the developer's surface; she reads-to-
       // diagnose then delegates. Trims per-turn tool-schema prefill.
@@ -4000,7 +4000,7 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
   it('medium local developer cap keeps the normal implementation lane without trimming', async () => {
     // Repro from a Gemma 4 12B space-invaders repair: the prompt told the
     // developer to edit by line number, but the medium-tier implementation
-    // cap kept `replaceInFile` and trimmed `replaceLines`, forcing brittle
+    // cap kept `replace_in_file` and trimmed `replace_lines`, forcing brittle
     // byte-exact patches until the turn aborted. Keep the cap loose enough
     // that the normal implementation surface stays intact instead of
     // trimming arbitrary sibling tools.
@@ -4033,12 +4033,12 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
 
       const create = localMock.calls.find((c) => c.kind === 'create');
       const allow = create!.opts!.toolAllowlist!;
-      expect(allow.has('replaceLines')).toBe(true);
-      expect(allow.has('replaceInFile')).toBe(true);
-      expect(allow.has('writeFile')).toBe(true);
-      expect(allow.has('readFile')).toBe(true);
-      expect(allow.has('applyPatch')).toBe(true);
-      expect(allow.has('insertAtMarker')).toBe(true);
+      expect(allow.has('replace_lines')).toBe(true);
+      expect(allow.has('replace_in_file')).toBe(true);
+      expect(allow.has('write_file')).toBe(true);
+      expect(allow.has('read_file')).toBe(true);
+      expect(allow.has('apply_patch')).toBe(true);
+      expect(allow.has('insert_at_marker')).toBe(true);
       expect(allow.has('run_package_script')).toBe(true);
       expect(
         [...allow].filter(
@@ -4197,7 +4197,7 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
       const allowOrder = Array.from(allow);
       expect(allowOrder).toContain('start_job');
       expect(allow.has('message_gezel')).toBe(false);
-      expect(allow.has('writeFile')).toBe(false);
+      expect(allow.has('write_file')).toBe(false);
       expect(allow.has('write_artifact')).toBe(false);
 
       const sys = create!.opts!.systemMessage!;
@@ -4208,7 +4208,7 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
       expect(listedTools).not.toContain('`start_project`');
       expect(listedTools).toContain('`start_job`');
       expect(listedTools).not.toContain('`message_gezel`');
-      expect(listedTools).not.toContain('`writeFile`');
+      expect(listedTools).not.toContain('`write_file`');
       expect(listedTools).not.toContain('`write_artifact`');
     } finally {
       await localMgr.drainBackground();
@@ -4328,7 +4328,7 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
       expect(allow.has('ask_user_question')).toBe(false);
       expect(allow.has('ask_gezel')).toBe(false);
       expect(allow.has('ask_specialist')).toBe(false);
-      expect(allow.has('writeFile')).toBe(false);
+      expect(allow.has('write_file')).toBe(false);
       expect(allow.has('write_artifact')).toBe(false);
 
       const sys = create!.opts!.systemMessage!;
@@ -4344,7 +4344,7 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
         expect(listedTools).not.toContain('`ask_user_question`');
         expect(listedTools).not.toContain('`ask_gezel`');
         expect(listedTools).not.toContain('`ask_specialist`');
-        expect(listedTools).not.toContain('`writeFile`');
+        expect(listedTools).not.toContain('`write_file`');
         expect(listedTools).not.toContain('`write_artifact`');
       }
 
@@ -4463,10 +4463,10 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
           (t) => !t.startsWith('delegate_') && !t.startsWith('consult_') && t !== 'validate',
         ).length,
       ).toBeLessThanOrEqual(75);
-      expect(allow.has('writeFile')).toBe(true);
-      expect(allow.has('readFile')).toBe(true);
-      expect(allow.has('replaceLines')).toBe(true);
-      expect(allow.has('replaceInFile')).toBe(true);
+      expect(allow.has('write_file')).toBe(true);
+      expect(allow.has('read_file')).toBe(true);
+      expect(allow.has('replace_lines')).toBe(true);
+      expect(allow.has('replace_in_file')).toBe(true);
       expect(allow.has('start_project')).toBe(false);
       expect(allow.has('message_gezel')).toBe(false);
       expect(allow.has('generate_image')).toBe(false);
@@ -4476,7 +4476,7 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
       expect(toolsBlockStart).toBeGreaterThanOrEqual(0);
       const toolsBlock = sys.slice(toolsBlockStart);
       const listedTools = toolsBlock.slice(0, toolsBlock.indexOf('---'));
-      expect(listedTools).toContain('`writeFile`');
+      expect(listedTools).toContain('`write_file`');
       expect(listedTools).not.toContain('`start_project`');
     } finally {
       await localMgr.drainBackground();
@@ -4485,7 +4485,7 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
     }
   });
 
-  it("developer's 'Where work belongs' section keeps writeFile/readFile", async () => {
+  it("developer's 'Where work belongs' section keeps write_file/read_file", async () => {
     // Specialists with both `workspace-fs-read` and `-write` get the
     // original prose — they DO have those tools and the decision-test
     // ("would the user ship this at release?") is real guidance for them.
@@ -4503,9 +4503,9 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
     const create = mock.calls.find((c) => c.kind === 'create');
     const sys = create!.opts!.systemMessage!;
     expect(sys).toContain('### Where work belongs');
-    expect(sys).toContain('`writeFile`');
-    expect(sys).toContain('`readFile`');
-    expect(sys).toContain('`readdir`');
+    expect(sys).toContain('`write_file`');
+    expect(sys).toContain('`read_file`');
+    expect(sys).toContain('`list_dir`');
     expect(sys).toContain('If a path appears in `### Workspace files`');
     // No lockdown note when file edits are allowed (the default).
     expect(sys).not.toContain('File edits are OFF');
@@ -4514,7 +4514,7 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
   it('injects a "file edits are off" note when the project disables gezel writes', async () => {
     // A non-writable project strips every role's workspace-write tools.
     // The prompt must tell the team so the developer doesn't try a
-    // stripped `writeFile` (then hallucinate a save) — see
+    // stripped `write_file` (then hallucinate a save) — see
     // fileEditsDisabledNote.
     await store.createGezel({ name: 'Dev', role: 'developer' });
     const proj = await store.createProject({
@@ -4633,8 +4633,8 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
       // source to the artifact drawer. Lock it in under the behavior.
       const sys = await sysFor({ role: 'developer', force: true });
       expect(sys).toContain('### Where work belongs');
-      expect(sys).toContain('`writeFile`');
-      expect(sys).toContain('`readFile`');
+      expect(sys).toContain('`write_file`');
+      expect(sys).toContain('`read_file`');
     });
 
     it('condenses the GitHub block for a trimmed executor (drops PR-toolset prose)', async () => {
@@ -4664,7 +4664,7 @@ describe('describeDelegateFailureForAsker', () => {
   const RAMBLE_ABORT =
     '[Mac AI] aborting — the gezel emitted 6001 characters of prose this turn without ' +
     'calling any action tool. Stop planning. Your next message MUST start with a single ' +
-    'tool call. If shipping source or project files and `writeFile` is in your tool list, ' +
+    'tool call. If shipping source or project files and `write_file` is in your tool list, ' +
     'call it NOW with the full file contents — no preamble, no plan.';
 
   it('rewrites a ramble-abort into an asker-facing summary attributed to the target', () => {
@@ -4677,9 +4677,9 @@ describe('describeDelegateFailureForAsker', () => {
 
   it('never forwards the delegate-facing second-person remediation to the asker', () => {
     const msg = describeDelegateFailureForAsker('Adam', RAMBLE_ABORT);
-    // The coaching that caused Laxmi to thrash + fabricate a writeFile.
+    // The coaching that caused Laxmi to thrash + fabricate a write_file.
     expect(msg).not.toMatch(/call it NOW/i);
-    expect(msg).not.toMatch(/writeFile/i);
+    expect(msg).not.toMatch(/write_file/i);
     expect(msg).not.toMatch(/Your next message MUST/i);
     expect(msg).not.toMatch(/\d+ characters of prose/i);
   });
@@ -4741,10 +4741,10 @@ describe('detectUnsavedFileClaim — existence/completion claims', () => {
     ).toBeNull();
   });
 
-  it('does NOT fire when a successful writeFile landed this turn', () => {
+  it('does NOT fire when a successful write_file landed this turn', () => {
     expect(
       detectUnsavedFileClaim('`index.html` is complete and ready.', [
-        { id: '1', name: 'writeFile', success: true } as never,
+        { id: '1', name: 'write_file', success: true } as never,
       ]),
     ).toBeNull();
   });
@@ -4766,9 +4766,9 @@ describe('detectChatCodedFileWithoutWrite', () => {
     expect(r?.path).toBe('index.html');
   });
 
-  it('stays quiet when a successful writeFile already landed this turn', () => {
+  it('stays quiet when a successful write_file already landed this turn', () => {
     expect(
-      detectChatCodedFileWithoutWrite(bigHtml, [{ name: 'writeFile', success: true }]),
+      detectChatCodedFileWithoutWrite(bigHtml, [{ name: 'write_file', success: true }]),
     ).toBeNull();
   });
 
@@ -4787,22 +4787,22 @@ describe('detectChatCodedFileWithoutWrite', () => {
     expect(r?.path).toBe('index.html');
   });
 
-  it('builds a nudge naming the path and writeFile', () => {
+  it('builds a nudge naming the path and write_file', () => {
     const nudge = buildChatCodedFileNudge('index.html');
     expect(nudge).toContain('`index.html`');
-    expect(nudge).toContain('writeFile');
+    expect(nudge).toContain('write_file');
     expect(nudge).toContain('never called');
   });
 
-  it('does NOT fire when writeFile saved an invalid first draft for repair', () => {
+  it('does NOT fire when write_file saved an invalid first draft for repair', () => {
     expect(
       detectUnsavedFileClaim('I wrote `index.html` to the workspace.', [
         {
-          name: 'writeFile',
+          name: 'write_file',
           durationMs: 12,
           success: false,
           errorMessage:
-            'inline JS does not parse (Unexpected token ]).\n\nInvalid first draft index.html was saved anyway so you can continue with readFile({ path: "index.html" }) and then repair it with replaceInFile(...) instead of starting over.',
+            'inline JS does not parse (Unexpected token ]).\n\nInvalid first draft index.html was saved anyway so you can continue with read_file({ path: "index.html" }) and then repair it with replace_in_file(...) instead of starting over.',
         } as never,
       ]),
     ).toBeNull();
@@ -4814,11 +4814,11 @@ describe('detectChatCodedFileWithoutWrite', () => {
 
   // Modify/edit claims — the family save + completion patterns miss. The
   // load-bearing case (qwen3.6 developer "Space Shooter Arcade"):
-  // "I have updated the game logic in `index.html`" after only a readFile.
+  // "I have updated the game logic in `index.html`" after only a read_file.
   it('catches "I have updated the game logic in `workspace/index.html`" as kind "modified"', () => {
     const r = detectUnsavedFileClaim(
       'I have updated the game logic in `workspace/index.html`.\n\nThe file is located at `workspace/index.html`.',
-      [{ id: '1', name: 'readFile', success: true } as never],
+      [{ id: '1', name: 'read_file', success: true } as never],
     );
     expect(r).toEqual({ claimedPath: 'workspace/index.html', kind: 'modified' });
   });
@@ -4829,17 +4829,17 @@ describe('detectChatCodedFileWithoutWrite', () => {
     expect(r?.claimedPath).toBe('index.html');
   });
 
-  it('does NOT fire on a modify claim backed by a successful replaceInFile', () => {
+  it('does NOT fire on a modify claim backed by a successful replace_in_file', () => {
     expect(
       detectUnsavedFileClaim('I modified the scoring logic in `index.html`.', [
-        { id: '1', name: 'replaceInFile', success: true } as never,
+        { id: '1', name: 'replace_in_file', success: true } as never,
       ]),
     ).toBeNull();
   });
 
-  it('DOES fire on a modify claim when the replaceInFile FAILED', () => {
+  it('DOES fire on a modify claim when the replace_in_file FAILED', () => {
     const r = detectUnsavedFileClaim('I updated `index.html` with the new penalty.', [
-      { id: '1', name: 'replaceInFile', success: false } as never,
+      { id: '1', name: 'replace_in_file', success: false } as never,
     ]);
     expect(r?.kind).toBe('modified');
   });
@@ -4906,9 +4906,9 @@ describe('detectProseDeliverableWithoutWrite (L3)', () => {
     );
   });
 
-  it('stays quiet when a successful writeFile landed this turn', () => {
+  it('stays quiet when a successful write_file landed this turn', () => {
     expect(
-      detectProseDeliverableWithoutWrite(report, [{ name: 'writeFile', success: true }]),
+      detectProseDeliverableWithoutWrite(report, [{ name: 'write_file', success: true }]),
     ).toBeNull();
   });
 
@@ -4937,7 +4937,7 @@ describe('detectProseDeliverableWithoutWrite (L3)', () => {
   it('builds a nudge naming the inferred path and a write tool', () => {
     const nudge = buildProseDeliverableNudge('report.md');
     expect(nudge).toContain('report.md');
-    expect(nudge).toContain('writeFile');
+    expect(nudge).toContain('write_file');
     expect(nudge).toContain('write tool');
   });
 });
@@ -4997,7 +4997,7 @@ describe('ChatManager — modify-claim re-prompt (false "I updated X")', () => {
     // The wild-caught failure (qwen3.6 developer "Space Shooter Arcade"):
     // asked to change the scoring, the model read the file,
     // narrated the edit, and said "I have updated the game logic in
-    // `index.html`" — but never called replaceInFile/writeFile. The file
+    // `index.html`" — but never called replace_in_file/write_file. The file
     // existed from the create turn, so the old on-disk cross-check treated
     // the claim as TRUE and the false "done" stood. The fix fires the
     // re-prompt for a modify claim regardless of on-disk existence.

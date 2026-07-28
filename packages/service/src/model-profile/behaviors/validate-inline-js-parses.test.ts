@@ -6,9 +6,9 @@ import {
   detectBrokenInlineJs,
 } from './validate-inline-js-parses.js';
 
-/** A `writeFile` drained-tool-call shape, with the body embedded in argsFull. */
+/** A `write_file` drained-tool-call shape, with the body embedded in argsFull. */
 function htmlWrite(path: string, body: string, success = true): InlineJsWrite {
-  return { name: 'writeFile', success, path, argsFull: `path: ${path}\n\ncontent:\n${body}` };
+  return { name: 'write_file', success, path, argsFull: `path: ${path}\n\ncontent:\n${body}` };
 }
 
 const CLEAN =
@@ -42,9 +42,9 @@ describe('detectBrokenInlineJs', () => {
     expect(detectBrokenInlineJs([htmlWrite('index.html', BROKEN, false)]).broken).toBe(false);
   });
 
-  it('ignores surgical edits (replaceInFile carries a diff, not the whole file)', () => {
+  it('ignores surgical edits (replace_in_file carries a diff, not the whole file)', () => {
     const edit: InlineJsWrite = {
-      name: 'replaceInFile',
+      name: 'replace_in_file',
       success: true,
       path: 'index.html',
       argsFull: `path: index.html\n\nsearch:\n<script>old\n\nreplace:\n<script>${BROKEN}`,

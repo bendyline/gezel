@@ -353,6 +353,16 @@ export interface TrialOptions {
    */
   craftbookDocFormat?: 'json' | 'md';
   /**
+   * MCP tool-naming arm for this run, injected into the daemon via
+   * `GEZEL_MCP_TOOL_NAMING` (forwarded by ChatManager into the gezel-mcp
+   * subprocess env, read at MCP-server module load). `legacy` re-advertises
+   * the pre-rename spellings (`readFile`/`writeFile`/`readdir`/…); `snake`
+   * (or unset) advertises the canonical snake_case names. The entire lever
+   * for the naming A/B (`ab-tool-naming`). Dispatch aliases accept both
+   * spellings in both arms.
+   */
+  toolNaming?: 'snake' | 'legacy';
+  /**
    * Disable the idle-gated background enrichment tick in the trial daemon
    * (`GEZEL_DISABLE_BACKGROUND_ENRICH=1`). Index-arm trials drive enrichment
    * explicitly (warm) or not at all (cold); disabling the tick keeps cold

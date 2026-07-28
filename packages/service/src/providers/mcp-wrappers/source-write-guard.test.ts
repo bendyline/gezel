@@ -15,7 +15,7 @@ function ctx(
     cwd: '/tmp',
     modelTier,
     isMeester: false,
-    hasTool: (name) => name === 'readFile',
+    hasTool: (name) => name === 'read_file',
     callTool: async () => {
       if (existing === null) throw new Error('not found');
       return { text: existing, images: [] };
@@ -83,7 +83,7 @@ describe('SourceWriteGuard — same-file clobber guard (flag-gated, off by defau
     const existing = bigSource({ greatCircle: true, graceful: false });
     const rewrite = bigSource({ greatCircle: false, graceful: true });
     const verdict = await SourceWriteGuard.preProcess?.(
-      'writeFile',
+      'write_file',
       { path: 'packages/core/src/spatial/Geohash.ts', content: rewrite },
       ctx(existing),
     );
@@ -96,12 +96,12 @@ describe('SourceWriteGuard — same-file clobber guard (flag-gated, off by defau
     // path function as the OLD linear version — clobbering the great-circle fix.
     const rewrite = bigSource({ greatCircle: false, graceful: true });
     const verdict = await SourceWriteGuard.preProcess?.(
-      'writeFile',
+      'write_file',
       { path: 'packages/core/src/spatial/Geohash.ts', content: rewrite },
       ctx(existing),
     );
     expect(verdict?.kind).toBe('reject');
-    expect(verdict).toMatchObject({ error: expect.stringContaining('replaceInFile') });
+    expect(verdict).toMatchObject({ error: expect.stringContaining('replace_in_file') });
     expect(verdict).toMatchObject({ error: expect.stringContaining('Refusing to rewrite') });
   });
 
@@ -110,7 +110,7 @@ describe('SourceWriteGuard — same-file clobber guard (flag-gated, off by defau
     const rewrite = bigSource({ greatCircle: false, graceful: true });
     for (const tier of ['large', 'cloud'] as const) {
       const verdict = await SourceWriteGuard.preProcess?.(
-        'writeFile',
+        'write_file',
         { path: 'packages/core/src/spatial/Geohash.ts', content: rewrite },
         ctx(existing, tier),
       );
@@ -131,7 +131,7 @@ describe('SourceWriteGuard — same-file clobber guard (flag-gated, off by defau
       '}',
     ].join('\n');
     const verdict = await SourceWriteGuard.preProcess?.(
-      'writeFile',
+      'write_file',
       { path: 'packages/core/src/spatial/Geohash.ts', content: overhaul },
       ctx(existing),
     );
@@ -140,7 +140,7 @@ describe('SourceWriteGuard — same-file clobber guard (flag-gated, off by defau
 
   it('allows a full rewrite of a NEW file (nothing on disk)', async () => {
     const verdict = await SourceWriteGuard.preProcess?.(
-      'writeFile',
+      'write_file',
       { path: 'packages/core/src/spatial/Geohash.ts', content: bigSource({ greatCircle: true }) },
       ctx(null),
     );
@@ -150,7 +150,7 @@ describe('SourceWriteGuard — same-file clobber guard (flag-gated, off by defau
   it('allows a no-op full rewrite (identical content)', async () => {
     const same = bigSource({ greatCircle: true, graceful: false });
     const verdict = await SourceWriteGuard.preProcess?.(
-      'writeFile',
+      'write_file',
       { path: 'packages/core/src/spatial/Geohash.ts', content: same },
       ctx(same),
     );
@@ -161,7 +161,7 @@ describe('SourceWriteGuard — same-file clobber guard (flag-gated, off by defau
 describe('SourceWriteGuard', () => {
   it('rejects visibly truncated HTML writes', async () => {
     const verdict = await SourceWriteGuard.preProcess?.(
-      'writeFile',
+      'write_file',
       { path: 'index.html', content: '<!doctype html><html><head><meta charset=' },
       ctx(),
     );
@@ -175,7 +175,7 @@ describe('SourceWriteGuard', () => {
   it('rejects destructive short overwrites of source files', async () => {
     const existing = `${'<!doctype html><html><body><script>'.padEnd(500, 'x')}</script></body></html>`;
     const verdict = await SourceWriteGuard.preProcess?.(
-      'writeFile',
+      'write_file',
       { path: 'index.html', content: '<!doctype html><html><body>tiny</body></html>' },
       ctx(existing),
     );
@@ -186,13 +186,13 @@ describe('SourceWriteGuard', () => {
     });
   });
 
-  it('rejects destructive whole-file replacements made through replaceLines', async () => {
+  it('rejects destructive whole-file replacements made through replace_lines', async () => {
     const existing = [
       '// Cursor-based pagination over an in-memory list.',
       ...Array.from({ length: 31 }, (_, index) => `export const value${index} = ${index};`),
     ].join('\n');
     const verdict = await SourceWriteGuard.preProcess?.(
-      'replaceLines',
+      'replace_lines',
       {
         path: 'lib/paginate.mjs',
         startLine: 1,
@@ -208,13 +208,13 @@ describe('SourceWriteGuard', () => {
     });
   });
 
-  it('allows a short focused replaceLines edit', async () => {
+  it('allows a short focused replace_lines edit', async () => {
     const existing = [
       '// Cursor-based pagination over an in-memory list.',
       ...Array.from({ length: 31 }, (_, index) => `export const value${index} = ${index};`),
     ].join('\n');
     const verdict = await SourceWriteGuard.preProcess?.(
-      'replaceLines',
+      'replace_lines',
       {
         path: 'lib/paginate.mjs',
         startLine: 20,
@@ -227,7 +227,7 @@ describe('SourceWriteGuard', () => {
     expect(verdict?.kind).toBe('allow');
   });
 
-  it('compares short-overwrite candidates against raw existing source, not readFile gutters', async () => {
+  it('compares short-overwrite candidates against raw existing source, not read_file gutters', async () => {
     const existing = `<!doctype html><html><body><h1>Launch Board</h1><script>${Array.from(
       { length: 260 },
       (_, i) => `function helper${i}(){return ${i};}`,
@@ -244,7 +244,7 @@ describe('SourceWriteGuard', () => {
       .join('\n');
     let readArgs: unknown;
     const verdict = await SourceWriteGuard.preProcess?.(
-      'writeFile',
+      'write_file',
       { path: 'index.html', content },
       {
         ...ctx(),
@@ -306,7 +306,7 @@ describe('SourceWriteGuard', () => {
     expect(content.length).toBeLessThan(Math.floor(existing.length * 0.35));
 
     const verdict = await SourceWriteGuard.preProcess?.(
-      'writeFile',
+      'write_file',
       { path: 'index.html', content },
       ctx(existing),
     );
@@ -328,7 +328,7 @@ describe('SourceWriteGuard', () => {
     expect(content.length).toBeLessThan(existing.length * 0.5);
 
     const verdict = await SourceWriteGuard.preProcess?.(
-      'writeFile',
+      'write_file',
       { path: 'index.html', content },
       ctx(existing),
     );
@@ -344,7 +344,7 @@ describe('SourceWriteGuard', () => {
     const content =
       '<!doctype html><html><body><button id="counter">0</button><script>let count=0;document.getElementById("counter").onclick=e=>{count++;e.target.textContent=count;};</script></body></html>';
     const verdict = await SourceWriteGuard.preProcess?.(
-      'writeFile',
+      'write_file',
       { path: 'index.html', content },
       ctx(existing),
     );
@@ -385,7 +385,7 @@ export interface CreateUserInput {
     expect(content.length).toBeLessThan(existing.length * 0.4);
 
     const verdict = await SourceWriteGuard.preProcess?.(
-      'writeFile',
+      'write_file',
       { path: 'src/types.ts', content },
       ctx(existing),
     );
@@ -396,7 +396,7 @@ export interface CreateUserInput {
   it('allows complete first HTML drafts', async () => {
     const content = '<!doctype html><html><body><script>console.log("ok");</script></body></html>';
     const verdict = await SourceWriteGuard.preProcess?.(
-      'writeFile',
+      'write_file',
       { path: 'index.html', content },
       ctx(),
     );
@@ -408,7 +408,7 @@ export interface CreateUserInput {
     const content =
       '<!doctype html><html><body><script><function play() { return true; }</script></body></html>';
     const verdict = await SourceWriteGuard.preProcess?.(
-      'writeFile',
+      'write_file',
       { path: 'index.html', content },
       ctx(),
     );
@@ -426,7 +426,7 @@ export interface CreateUserInput {
     const content =
       '<!doctype html><html><body><script>function play() { // TODO fill this in }</script></body></html>';
     const verdict = await SourceWriteGuard.preProcess?.(
-      'writeFile',
+      'write_file',
       { path: 'index.html', content },
       ctx(),
     );
@@ -442,7 +442,7 @@ export interface CreateUserInput {
   it('normalizes an incomplete final html closing tag', async () => {
     const content = '<!doctype html><html><body><script>console.log("ok");</script></body></htm';
     const verdict = await SourceWriteGuard.preProcess?.(
-      'writeFile',
+      'write_file',
       { path: 'index.html', content },
       ctx(),
     );
@@ -458,7 +458,7 @@ export interface CreateUserInput {
   it('normalizes an incomplete final script closing tag', async () => {
     const content = '<div><script>console.log("ok");</scrip';
     const verdict = await SourceWriteGuard.preProcess?.(
-      'writeFile',
+      'write_file',
       { path: 'index.html', content },
       ctx(),
     );
@@ -474,7 +474,7 @@ export interface CreateUserInput {
   it('normalizes a missing html script/body/document tail', async () => {
     const content = '<!doctype html><html><body><script>console.log("ok");';
     const verdict = await SourceWriteGuard.preProcess?.(
-      'writeFile',
+      'write_file',
       { path: 'index.html', content },
       ctx(),
     );
@@ -512,7 +512,7 @@ function increment() {
 }
 document.getElementById('incr').addEventListener('click', increment);`;
     const verdict = await SourceWriteGuard.preProcess?.(
-      'writeFile',
+      'write_file',
       { path: 'index.html', content: fragment },
       ctx(existing),
     );
@@ -531,7 +531,7 @@ document.getElementById('incr').addEventListener('click', increment);`;
   it('still rejects invalid JavaScript fragments for HTML writes', async () => {
     const existing = '<!doctype html><html><body><script>console.log("ok");</script></body></html>';
     const verdict = await SourceWriteGuard.preProcess?.(
-      'writeFile',
+      'write_file',
       { path: 'index.html', content: '<script>function broken() {' },
       ctx(existing),
     );
@@ -558,7 +558,7 @@ document.getElementById('incr').addEventListener('click', increment);
 </script>
 </body></html>`;
     const verdict = await SourceWriteGuard.preProcess?.(
-      'writeFile',
+      'write_file',
       { path: 'index.html', content: '}' },
       ctx(existing),
     );
@@ -574,7 +574,7 @@ document.getElementById('incr').addEventListener('click', increment);
     const existing =
       '<!doctype html><html><body><script>function broken() { const x = ;</script></body></html>';
     const verdict = await SourceWriteGuard.preProcess?.(
-      'writeFile',
+      'write_file',
       { path: 'index.html', content: '}' },
       ctx(existing),
     );
@@ -603,7 +603,7 @@ describe('SourceWriteGuard — broken-JSON repair relaxation', () => {
   it('allows a much shorter valid-JSON rewrite when the existing .json fails JSON.parse', async () => {
     expect(brokenJson.length).toBeGreaterThan(1024);
     const verdict = await SourceWriteGuard.preProcess?.(
-      'writeFile',
+      'write_file',
       { path: 'master/assembly-log.json', content: validShortJson },
       ctx(brokenJson),
     );
@@ -626,7 +626,7 @@ describe('SourceWriteGuard — broken-JSON repair relaxation', () => {
     expect(validExisting.length).toBeGreaterThan(1024);
     expect(() => JSON.parse(validExisting)).not.toThrow();
     const verdict = await SourceWriteGuard.preProcess?.(
-      'writeFile',
+      'write_file',
       { path: 'master/assembly-log.json', content: validShortJson },
       ctx(validExisting),
     );
@@ -638,7 +638,7 @@ describe('SourceWriteGuard — broken-JSON repair relaxation', () => {
 
   it('still rejects when the replacement is itself invalid JSON (no stub escape)', async () => {
     const verdict = await SourceWriteGuard.preProcess?.(
-      'writeFile',
+      'write_file',
       { path: 'master/assembly-log.json', content: 'I will rewrite the file with valid JSON now.' },
       ctx(brokenJson),
     );
@@ -651,7 +651,7 @@ describe('SourceWriteGuard — broken-JSON repair relaxation', () => {
   it('does not extend the relaxation to non-JSON extensions', async () => {
     const brokenishJs = `${'x'.repeat(1100)} = ;`;
     const verdict = await SourceWriteGuard.preProcess?.(
-      'writeFile',
+      'write_file',
       { path: 'lib/log.js', content: 'export const log = [];' },
       ctx(brokenishJs),
     );
@@ -661,9 +661,9 @@ describe('SourceWriteGuard — broken-JSON repair relaxation', () => {
     });
   });
 
-  it('allows a whole-file replaceLines repair of a broken .json', async () => {
+  it('allows a whole-file replace_lines repair of a broken .json', async () => {
     const verdict = await SourceWriteGuard.preProcess?.(
-      'replaceLines',
+      'replace_lines',
       { path: 'master/assembly-log.json', startLine: 1, endLine: 200, content: validShortJson },
       ctx(brokenJson),
     );

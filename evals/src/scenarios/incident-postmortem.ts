@@ -761,18 +761,18 @@ export function incidentRepairDirective(
     if (needsUnsupportedCertainty) {
       const unsupportedClaims = unsupportedEvidenceClaimLabels(currentText);
       steps.push(
-        `${step++}. Use \`replaceInFile\` to remove or correct every unsupported evidence claim${unsupportedClaims.length > 0 ? `: ${unsupportedClaims.join('; ')}` : ' named by the acceptance failure'}. Keep latency duration separate from connection-pool saturation percentage, describe measured request failures without claiming total unavailability, restrict configuration facts to the PaymentGateway client shown in the diff, and state unmeasured outcomes as unknown.`,
+        `${step++}. Use \`replace_in_file\` to remove or correct every unsupported evidence claim${unsupportedClaims.length > 0 ? `: ${unsupportedClaims.join('; ')}` : ' named by the acceptance failure'}. Keep latency duration separate from connection-pool saturation percentage, describe measured request failures without claiming total unavailability, restrict configuration facts to the PaymentGateway client shown in the diff, and state unmeasured outcomes as unknown.`,
       );
     }
     if (needsActions) {
       steps.push(
-        `${step++}. Use \`replaceInFile\` to patch only \`## Action items\`. Keep at least three table rows and put an evidence-grounded person (Mira Chen, Bertha Vargas, Phil Okeke, or Anita Sayed), a concrete handle, or a specific functional team in every Owner cell. Slash-separated co-owners are allowed, but every component must be concrete. Do not invent personal names. Blank values and \`TBD\`, \`Team\`, \`Owner\`, \`Unknown\`, or \`Unassigned\` do not count.`,
+        `${step++}. Use \`replace_in_file\` to patch only \`## Action items\`. Keep at least three table rows and put an evidence-grounded person (Mira Chen, Bertha Vargas, Phil Okeke, or Anita Sayed), a concrete handle, or a specific functional team in every Owner cell. Slash-separated co-owners are allowed, but every component must be concrete. Do not invent personal names. Blank values and \`TBD\`, \`Team\`, \`Owner\`, \`Unknown\`, or \`Unassigned\` do not count.`,
       );
     }
     if (needsGrounding && !needsMinimumSize) {
       const missingFacts = missingGroundedFactLabels(currentText);
       steps.push(
-        `${step++}. Patch the smallest relevant evidence-backed section(s) with \`replaceInFile\` so these fact groups are explicit and correctly related: ${missingFacts.join('; ') || 'the fact groups named by the acceptance failure'}.`,
+        `${step++}. Patch the smallest relevant evidence-backed section(s) with \`replace_in_file\` so these fact groups are explicit and correctly related: ${missingFacts.join('; ') || 'the fact groups named by the acceptance failure'}.`,
       );
     }
     if (needsMinimumSize) {
@@ -781,11 +781,11 @@ export function incidentRepairDirective(
         ? ` The appended analysis must explicitly and correctly cover these missing fact groups: ${missingGroundedFactLabels(currentText).join('; ') || 'the fact groups named by the acceptance failure'}.`
         : '';
       steps.push(
-        `${step++}. Use \`appendToFile\` to add at least ${addBytes} substantive evidence-backed characters under one new H3, clearing 7 KiB with headroom.${groundingRequirement}`,
+        `${step++}. Use \`append_to_file\` to add at least ${addBytes} substantive evidence-backed characters under one new H3, clearing 7 KiB with headroom.${groundingRequirement}`,
       );
     } else if (needsMaximumSize) {
       steps.push(
-        `${step++}. Use targeted \`replaceInFile\` edits to remove redundant prose until the document is at most 30 KiB; preserve every grounded fact, required H2, citation, and action row.`,
+        `${step++}. Use targeted \`replace_in_file\` edits to remove redundant prose until the document is at most 30 KiB; preserve every grounded fact, required H2, citation, and action row.`,
       );
     }
 
@@ -794,7 +794,7 @@ export function incidentRepairDirective(
       'INCIDENT POSTMORTEM COMBINED PATCH: fix every acceptance failure below in this same repair turn; do not stop after the first edit.',
       `Acceptance failures: ${failureSummary}.`,
       ...steps,
-      'Do not call `writeFile` or regenerate passing sections. Complete every numbered file edit before replying in chat, and do not invent impact beyond the evidence.',
+      'Do not call `write_file` or regenerate passing sections. Complete every numbered file edit before replying in chat, and do not invent impact beyond the evidence.',
     ].join(' ');
   }
 
@@ -805,7 +805,7 @@ export function incidentRepairDirective(
       `Unsupported claim classes: ${unsupportedClaims.join('; ') || failReason}.`,
       'Keep metric relationships exact: latency is measured as a duration and connection-pool saturation as a percentage. Describe the measured partial request failure without upgrading it to total service unavailability. The diff establishes one PaymentGateway client timeout, not whole-checkout configuration topology.',
       'For unmeasured outcomes or unknown configuration scope, state that the supplied evidence does not establish the conclusion or recommend an audit instead of asserting it as fact.',
-      'Use a small `replaceInFile` edit and preserve the grounded sections, citations, and Action items table.',
+      'Use a small `replace_in_file` edit and preserve the grounded sections, citations, and Action items table.',
       'Your next assistant action must be that file edit, not chat prose.',
     ].join(' ');
   }
@@ -838,7 +838,7 @@ export function incidentRepairDirective(
       'INCIDENT POSTMORTEM PATCH: patch `postmortem.md` now; do not rewrite unrelated sections.',
       `The missing evidence citation signal needs the document to name ${missingList}.`,
       hotfixHint,
-      'Use a small `replaceInFile` edit when possible, or one complete `writeFile` only if the replacement cannot match.',
+      'Use a small `replace_in_file` edit when possible, or one complete `write_file` only if the replacement cannot match.',
       'Keep all eight required sections in order, keep the file at least 6 KB, and preserve the existing Action items table.',
       'Your next assistant action must be that file tool call, not chat prose.',
     ]
@@ -852,7 +852,7 @@ export function incidentRepairDirective(
       'Exact shape to use: `| Action | Owner | Due | Evidence |` followed by rows such as `| Add steady-state load tests for timeout/retry changes | Platform/SRE team | 2026-03-28 | timeline.md 14:46; hotfix.diff |`.',
       'Every Owner cell must name an evidence-grounded person (`Mira Chen`, `Bertha Vargas`, `Phil Okeke`, or `Anita Sayed`), a concrete handle, or a specific team such as `Platform/SRE team`, `Release engineering`, `Observability`, or `checkout-api owner`. Slash-separated co-owners are allowed only when every component is concrete. Do not invent personal names. Blank values and `TBD`, `Team`, `Owner`, `Unknown`, or `Unassigned` do not count.',
       bytes < 6 * 1024
-        ? `The current file is ${bytes}B; after the targeted Action items edit, use appendToFile({ path: "postmortem.md", content: <evidence-backed H3 analysis> }) to clear 7 KiB with headroom. Do not reply in chat between edits.`
+        ? `The current file is ${bytes}B; after the targeted Action items edit, use append_to_file({ path: "postmortem.md", content: <evidence-backed H3 analysis> }) to clear 7 KiB with headroom. Do not reply in chat between edits.`
         : '',
     ]
       .filter(Boolean)
@@ -868,7 +868,7 @@ export function incidentRepairDirective(
     return [
       'INCIDENT POSTMORTEM APPEND: the document already has the required structure but needs more evidence-backed substance.',
       `Append at least ${addBytes} substantive characters so the result clears 7 KiB with headroom; do not pad.`,
-      'Your next tool call must be `appendToFile({ path: "postmortem.md", content: "\\n\\n### Evidence-backed follow-up context\\n\\n<new analysis>" })`. Do not call `writeFile`, rewrite existing sections, or answer in chat first.',
+      'Your next tool call must be `append_to_file({ path: "postmortem.md", content: "\\n\\n### Evidence-backed follow-up context\\n\\n<new analysis>" })`. Do not call `write_file`, rewrite existing sections, or answer in chat first.',
       'In that new H3 subsection, connect the deploy and timestamps to the error/latency impact, explain the connection-pool mechanism, and state how the revert restored service, citing the supplied evidence filenames.',
       'Do not introduce a new H2 heading, duplicate the Summary, alter the existing Action items table, or claim data/security outcomes the evidence does not measure.',
     ].join(' ');
@@ -1095,7 +1095,7 @@ async function setup(ctx: EvalContext): Promise<void> {
       'Please write the postmortem for the 2026-03-14 checkout-api incident. The',
       'evidence files are in workspace/evidence/ — five files: timeline.md,',
       'metrics.csv, deploy.log, oncall-chat.txt, hotfix.diff. Read all five first',
-      '(use readFile with paths relative to the workspace root — no leading',
+      '(use read_file with paths relative to the workspace root — no leading',
       '"workspace/"). Treat every file under evidence/ as immutable read-only input:',
       'do not edit, delete, rename, append to, or overwrite those files. The only file',
       'you may mutate is postmortem.md. Then write',
@@ -1113,7 +1113,7 @@ async function setup(ctx: EvalContext): Promise<void> {
       'Cite evidence files by name inline (e.g.',
       '"deploy.log:14:32"). At least 5 distinct citations, at least 3 `HH:MM`',
       'timestamps, 6-30 KB total, blame-free tone. After the fifth evidence read',
-      'succeeds, your next tool call must be `writeFile({ path: "postmortem.md",',
+      'succeeds, your next tool call must be `write_file({ path: "postmortem.md",',
       'content: ... })`. Do not draft in chat or wait for a perfect final version;',
       'write a complete first pass, then patch it if needed.',
     ].join(' '),
@@ -1177,7 +1177,7 @@ export const incidentPostmortemScenario: EvalScenario = {
       // Read-then-never-write stall: once the Researcher has had time to
       // read the 5 evidence files, directive-nudge it to actually write
       // postmortem.md (the qwen3.5 trials read 10 files then
-      // stalled at rp0:rf0 without ever calling writeFile).
+      // stalled at rp0:rf0 without ever calling write_file).
       await postMissingDeliverableFeedback(ctx, 'postmortem.md', {
         minPolls: 18,
         repeatEvery: 18,

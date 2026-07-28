@@ -47,7 +47,7 @@ describe('RemoteSession', () => {
           { type: 'delta', text: 'Let me read it. ' },
           {
             type: 'tool_call',
-            calls: [{ id: 't1', name: 'readFile', arguments: JSON.stringify({ path: 'a.txt' }) }],
+            calls: [{ id: 't1', name: 'read_file', arguments: JSON.stringify({ path: 'a.txt' }) }],
           },
           { type: 'done' },
         ]);
@@ -67,7 +67,7 @@ describe('RemoteSession', () => {
       fetch: fetchImpl,
       queue: new ProviderQueue({ concurrency: 1 }),
       bridges: fakeBridge({
-        readFile: async (args) => {
+        read_file: async (args) => {
           toolRanWithPath = String(args.path);
           return 'contents of a.txt';
         },
@@ -103,7 +103,7 @@ describe('RemoteSession', () => {
 
     // A advertised its local bridge tools on the wire; B never executed them.
     const tools = calls[0]!.tools as Array<{ name: string }>;
-    expect(tools.map((t) => t.name)).toContain('readFile');
+    expect(tools.map((t) => t.name)).toContain('read_file');
   });
 
   it('throws when B sends an error frame', async () => {

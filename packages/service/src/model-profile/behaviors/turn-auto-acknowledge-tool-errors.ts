@@ -39,12 +39,12 @@ const ACKNOWLEDGMENT_PATTERN =
  * repair a failed write.
  */
 const WORKSPACE_FILE_MUTATION_TOOLS: ReadonlySet<string> = new Set([
-  'writeFile',
-  'appendToFile',
-  'replaceInFile',
-  'replaceLines',
-  'applyPatch',
-  'insertAtMarker',
+  'write_file',
+  'append_to_file',
+  'replace_in_file',
+  'replace_lines',
+  'apply_patch',
+  'insert_at_marker',
 ]);
 
 function buildRePrompt(failedToolNames: readonly string[]): string {
@@ -137,7 +137,7 @@ function normalizeWorkspacePath(path: string | undefined): string | null {
 
 function isRecoverableSavedDraftToolCall(call: TurnCtx['drained'][number]): boolean {
   return (
-    call.name === 'writeFile' &&
+    call.name === 'write_file' &&
     call.success === false &&
     typeof call.errorMessage === 'string' &&
     /Invalid first draft\s+\S+\s+was saved anyway so you can continue with/i.test(call.errorMessage)

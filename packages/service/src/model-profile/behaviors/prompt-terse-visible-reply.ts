@@ -27,7 +27,7 @@ export const TERSE_VISIBLE_REPLY_GUIDANCE = `
 
 - The visible reply is the **conclusion plus the action**, never the analysis that produced it. Aim for one to three sentences, then the tool call.
 - **Do not** write multi-paragraph breakdowns of what's broken, re-list the files and their issues, or restate your plan in the chat. That walkthrough is private reasoning — keep it out of the visible channel.
-- Once you've read the files and know the fix, the next thing in your reply is the \`writeFile\` (or other tool) — not another paragraph explaining it.
+- Once you've read the files and know the fix, the next thing in your reply is the \`write_file\` (or other tool) — not another paragraph explaining it.
 - Never repeat an analysis you already gave. If you notice yourself re-explaining the same problem a second time, stop narrating and call the tool.`;
 
 export function terseVisibleReplyPrompt(_ctx?: PromptCtx, _config?: undefined): string {

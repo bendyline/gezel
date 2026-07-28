@@ -31,15 +31,15 @@ const COOKBOOK_CONDENSED = `
 5. **If a previous call errored, acknowledge it.** Don't pretend it succeeded.
 6. **If a previous call SUCCEEDED, don't invent a failure.** Inverse of #5. The user sees the real tool result; claiming a 200 was a 404, or that a parseable response was "malformed", is detected as fabrication. If you couldn't make sense of the response, say so — don't promote that into a service error.
 7. **End every turn with words.** After tool calls return, write one sentence about what happened. Never end on a \`tool_use\`.
-8. **Tool result mentions an artifact path?** The full data lives there. Use \`read_artifact({ path, lines: { start, count } })\` slices or \`grep_artifact({ path, pattern })\` to navigate. If the path appears under "Workspace files", it is not an artifact path; use \`readFile\`.
-9. **Never paste a full source file in chat — write it via \`writeFile\`.** Code in a chat bubble can't be run; code on disk can. >10 lines = a file. If you only have artifact tools, hand off instead of stashing source under a workspace-looking artifact path.
-10. **Exact deliverable path means exact \`writeFile\` path.** If the task or checker names \`index.html\`, \`report.md\`, \`src/solution.mjs\`, etc., create that exact workspace file. After you read the required inputs, the next concrete action is \`writeFile({ path: "<exact path>", content: <full file> })\`, not another plan, draft, artifact, or differently named file.
-11. **Fixing an existing file? Patch it, don't re-emit.** \`readFile\` shows \`N→\` line gutters (the \`N→\` is a display aid, not file text — never copy it in). When a check reports an error "at line N", fix that line with \`replaceLines({ path, startLine: N, endLine: N, content })\`; for a unique snippet use \`replaceInFile({ path, find, replace })\`. Re-emitting the whole file with \`writeFile\` to fix one bug risks stomping the parts that already worked.`;
+8. **Tool result mentions an artifact path?** The full data lives there. Use \`read_artifact({ path, lines: { start, count } })\` slices or \`grep_artifact({ path, pattern })\` to navigate. If the path appears under "Workspace files", it is not an artifact path; use \`read_file\`.
+9. **Never paste a full source file in chat — write it via \`write_file\`.** Code in a chat bubble can't be run; code on disk can. >10 lines = a file. If you only have artifact tools, hand off instead of stashing source under a workspace-looking artifact path.
+10. **Exact deliverable path means exact \`write_file\` path.** If the task or checker names \`index.html\`, \`report.md\`, \`src/solution.mjs\`, etc., create that exact workspace file. After you read the required inputs, the next concrete action is \`write_file({ path: "<exact path>", content: <full file> })\`, not another plan, draft, artifact, or differently named file.
+11. **Fixing an existing file? Patch it, don't re-emit.** \`read_file\` shows \`N→\` line gutters (the \`N→\` is a display aid, not file text — never copy it in). When a check reports an error "at line N", fix that line with \`replace_lines({ path, startLine: N, endLine: N, content })\`; for a unique snippet use \`replace_in_file({ path, find, replace })\`. Re-emitting the whole file with \`write_file\` to fix one bug risks stomping the parts that already worked.`;
 
 export const PromptToolCookbookCondensed: Behavior = {
   id: 'prompt.tool-cookbook-condensed',
   description:
-    'Condensed anti-fabrication cookbook appended to the system prompt. For tier:small models and verbose-family large-tier models that need the past-tense + markup-not-tool-call reminders (plus exact writeFile path discipline) without the full table.',
+    'Condensed anti-fabrication cookbook appended to the system prompt. For tier:small models and verbose-family large-tier models that need the past-tense + markup-not-tool-call reminders (plus exact write_file path discipline) without the full table.',
 
   promptAppend(): string {
     return COOKBOOK_CONDENSED;

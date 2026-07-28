@@ -42,7 +42,14 @@ const SCENARIO_EXPECTED_DELEGATION_ROLES: Record<string, string[]> = {
 };
 
 const GENERIC_DELEGATION_TOOLS = new Set(['message_gezel', 'ask_gezel', 'ask_specialist']);
+// Legacy camelCase spellings kept for scoring pre-rename run dirs.
 const SELF_BUILD_TOOLS = new Set([
+  'write_file',
+  'append_to_file',
+  'replace_in_file',
+  'replace_lines',
+  'apply_patch',
+  'insert_at_marker',
   'writeFile',
   'appendToFile',
   'replaceInFile',

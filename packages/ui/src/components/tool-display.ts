@@ -10,13 +10,13 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   search_memory: 'Search memory',
   save_memory: 'Save memory',
   list_memories: 'List memories',
-  // Workspace (Node fs-shaped)
-  readdir: 'List directory',
-  readFile: 'Read file',
+  // Workspace files
+  list_dir: 'List directory',
+  read_file: 'Read file',
   stat: 'Stat path',
-  writeFile: 'Write file',
-  rm: 'Delete',
-  mkdir: 'Create directory',
+  write_file: 'Write file',
+  delete_path: 'Delete',
+  make_dir: 'Create directory',
   rename: 'Rename',
   // Artifacts
   list_artifacts: 'List artifacts',

@@ -109,36 +109,36 @@ describe('direct file-work prompt classification', () => {
     expect(extractSingleFileSourceRepairTargetPath(prompt)).toBeNull();
   });
 
-  it('does not invert an explicit no-rewrite instruction when a generic annotation mentions writeFile', () => {
+  it('does not invert an explicit no-rewrite instruction when a generic annotation mentions write_file', () => {
     const prompt =
-      'Do not rewrite the whole file. Make the smallest targeted edit with replaceInFile. ' +
-      '[Deliverable expected as a FILE at `index.html`. Your first assistant action should be the tool call `writeFile({ path, content })`.]';
+      'Do not rewrite the whole file. Make the smallest targeted edit with replace_in_file. ' +
+      '[Deliverable expected as a FILE at `index.html`. Your first assistant action should be the tool call `write_file({ path, content })`.]';
 
     expect(hasExplicitFullFileRewriteWording(prompt)).toBe(false);
   });
 
-  it('keeps an explicit append-only directive authoritative over a stale writeFile annotation', () => {
+  it('keeps an explicit append-only directive authoritative over a stale write_file annotation', () => {
     const prompt =
-      'Your next tool call must be `appendToFile({ path: "postmortem.md", content: "<new analysis>" })`. ' +
-      'Do not call `writeFile`, rewrite existing sections, or answer in chat first. ' +
-      '[Deliverable expected as a FILE at `postmortem.md`. Your first assistant action should be the tool call `writeFile({ path, content })`.]';
+      'Your next tool call must be `append_to_file({ path: "postmortem.md", content: "<new analysis>" })`. ' +
+      'Do not call `write_file`, rewrite existing sections, or answer in chat first. ' +
+      '[Deliverable expected as a FILE at `postmortem.md`. Your first assistant action should be the tool call `write_file({ path, content })`.]';
 
-    expect(extractExplicitFileEditTools(prompt)).toEqual(['appendToFile']);
+    expect(extractExplicitFileEditTools(prompt)).toEqual(['append_to_file']);
     expect(hasExplicitFullFileRewriteWording(prompt)).toBe(false);
   });
 
   it('extracts affirmative named edit tools but ignores negative mentions', () => {
     expect(
       extractExplicitFileEditTools(
-        'Use targeted `replaceLines` edits, then call insertAtMarker({ path: "index.html" }). Do not call applyPatch.',
+        'Use targeted `replace_lines` edits, then call insert_at_marker({ path: "index.html" }). Do not call apply_patch.',
       ),
-    ).toEqual(['replaceLines', 'insertAtMarker']);
+    ).toEqual(['replace_lines', 'insert_at_marker']);
   });
 
   it('still recognizes an affirmative complete rewrite request', () => {
     expect(
       hasExplicitFullFileRewriteWording(
-        'Rewrite `src/store.ts` completely with `writeFile`; your next tool call should be writeFile.',
+        'Rewrite `src/store.ts` completely with `write_file`; your next tool call should be write_file.',
       ),
     ).toBe(true);
   });

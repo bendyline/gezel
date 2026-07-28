@@ -25,16 +25,16 @@ const BUILTIN_TOOL_NAMES = Array.from(
   new Set(BUILTIN_TOOLSETS.flatMap((group) => group.tools)),
 ).sort((a, b) => b.length - a.length);
 
-const FILE_READ_TOOLS = new Set(['readFile', 'readdir', 'stat', 'search_code', 'search_files']);
+const FILE_READ_TOOLS = new Set(['read_file', 'list_dir', 'stat', 'search_code', 'search_files']);
 const FILE_WRITE_TOOLS = new Set([
-  'writeFile',
-  'appendToFile',
-  'replaceInFile',
-  'replaceLines',
-  'applyPatch',
-  'mkdir',
+  'write_file',
+  'append_to_file',
+  'replace_in_file',
+  'replace_lines',
+  'apply_patch',
+  'make_dir',
   'rename',
-  'rm',
+  'delete_path',
   'derive_file',
   'generate_image',
 ]);
@@ -126,7 +126,7 @@ export function lintPromptToolContract(args: {
       const mentionPrefix = line.slice(Math.max(0, mention.index - 48), mention.index);
       // A tool can be named as provenance or contrast inside a directive
       // aimed at a DIFFERENT tool: "use read_artifact only for
-      // list_artifacts results" / "use readFile, not read_artifact".
+      // list_artifacts results" / "use read_file, not read_artifact".
       // Those references do not tell the model to call the missing tool.
       if (/\b(?:not|without|for|from|returned by)\s*`?\s*$/i.test(mentionPrefix)) continue;
       const clause = clauseAround(line, mention.index);

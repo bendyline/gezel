@@ -201,7 +201,7 @@ export class RambleDetector {
    * Threshold applied while `insideUnclosedCall` is true. Defaults
    * to `max(32_000, 5 × threshold)` — generous enough that a real
    * tank-combat HTML (with ~8 KB of inline JS plus markup) fits
-   * inside the writeFile call without the cap firing. Tighter than
+   * inside the write_file call without the cap firing. Tighter than
    * unbounded so a TRULY runaway unclosed call still aborts before
    * the turn deadline. Override via `RambleDetectorOpts.insideCallThreshold`
    * for tests.
@@ -229,7 +229,7 @@ export class RambleDetector {
    * (`</function>` / `</tool_call>`). -1 until first seen. Used by
    * the post-action gate to distinguish "prose after a closed tool
    * call" (apply tight cap) from "content inside an unclosed call"
-   * (apply loose cap so big writeFile bodies don't fire prematurely).
+   * (apply loose cap so big write_file bodies don't fire prematurely).
    */
   private lastCloseEndAtChars = -1;
   /**
@@ -261,7 +261,7 @@ export class RambleDetector {
    * `<|channel>` tags for Gemma 4 / gpt-oss but not `<think>`). Qwen
    * opened `<think>`, reasoned ~6 KB drafting the deliverable, and the
    * cold cap fired at 6001 chars BEFORE it closed `</think>` and
-   * emitted the `writeFile` call. Treating an unclosed reasoning span
+   * emitted the `write_file` call. Treating an unclosed reasoning span
    * like an unclosed tool-call body (loose `insideCallThreshold`)
    * lets the reasoning complete; the close marker then anchors the
    * prose counter so post-reasoning narration is measured fresh.
@@ -288,7 +288,7 @@ export class RambleDetector {
    * True iff an odd number of fence markers have been seen — i.e. the
    * model is mid-fenced-code-block. Verbose models that leak UNTAGGED
    * reasoning sometimes "chat-code" a whole file inside a ```` ```lang ````
-   * fence instead of a `writeFile` body; that file is real work, not
+   * fence instead of a `write_file` body; that file is real work, not
    * ramble, so an open fence gets the loose inside-call budget exactly
    * like an unclosed tool body or reasoning span. Wild-caught
    * (qwen3.6 a3b consultation): a ~16 KB `index.html` streamed
@@ -392,7 +392,7 @@ export class RambleDetector {
       // CRITICAL: the post-action cap (typ. 1500 chars) is meant for
       // prose that follows a CLOSED tool call. When the model is
       // still INSIDE an unclosed `<function=NAME>…` writing a long
-      // parameter value (e.g. a writeFile body), the content between
+      // parameter value (e.g. a write_file body), the content between
       // open and close is part of the action itself — not prose since
       // an action. Tracking open and close markers separately lets
       // us exempt mid-tool-call content from the tight post-action
@@ -400,7 +400,7 @@ export class RambleDetector {
       // accumulating.
       //
       // Wild-caught on Qwen 3.6 27B (MLX, tictactoe trials):
-      // Tamara emits `<tool_call><function=writeFile><parameter=content>…`
+      // Tamara emits `<tool_call><function=write_file><parameter=content>…`
       // and the post-action cap fires at 1502 chars into the HTML body
       // — long before the `</function>` closer. The 5 dropped tool
       // calls per trial were the dominant failure mode.
@@ -443,15 +443,15 @@ export class RambleDetector {
       // scan windows. The first version of the open/close-span fix
       // computed `insideUnclosedCall` from the LOCAL scan results,
       // which meant a window containing no markers (i.e. pure HTML
-      // body inside a writeFile) silently reset the flag to false —
+      // body inside a write_file) silently reset the flag to false —
       // the post-action cap then fired on the body content even
       // though we were clearly still inside an unclosed `<function=`.
       // The fix: persist the most recent open position on `this` so
       // it survives scans that see only body content.
       //
       // Wild-caught (qwen3.6 matrix): every trial truncated
-      // at ~1500 chars into the writeFile body despite the prior fix
-      // — the writeFile opener arrived in one stream chunk, the
+      // at ~1500 chars into the write_file body despite the prior fix
+      // — the write_file opener arrived in one stream chunk, the
       // body streamed across many subsequent chunks, and each chunk's
       // local-only scan saw zero markers and reset the flag.
       if (lastToolOpenEnd >= 0 && lastToolOpenEnd > this.lastOpenEndAtChars) {
@@ -547,13 +547,13 @@ export class RambleDetector {
       }
     }
     // Threshold selection — three tiers, by what the model is doing:
-    //   - Inside an unclosed tool call (writeFile body, etc.): give
+    //   - Inside an unclosed tool call (write_file body, etc.): give
     //     the model a MUCH higher budget. The "prose since action"
     //     here is actually the tool-call's parameter body, which a
     //     real tank-combat game or write_artifact payload can easily
     //     run to many KB. Wild-caught (matrix): tankcombat
     //     trials capped at the 6KB cold threshold while INSIDE the
-    //     writeFile call — the script truncated, the file became a
+    //     write_file call — the script truncated, the file became a
     //     facade. Bump to 32 KB so legitimate large file writes
     //     complete; the supervisor's turn-deadline (3 min default)
     //     remains the ultimate guardrail against runaway calls.

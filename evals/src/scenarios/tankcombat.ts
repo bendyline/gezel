@@ -40,11 +40,11 @@ export const TANK_INPUT_SIGNATURE_EXPRESSION = `(() => {
 })()`;
 
 export const TANK_COMBAT_HTML_REPAIR_DIRECTIVE = [
-  'TANK_COMBAT_HTML_SHAPE: write one complete `index.html` document in a single workspace `writeFile` call.',
+  'TANK_COMBAT_HTML_SHAPE: write one complete `index.html` document in a single workspace `write_file` call.',
   'Use exactly this source shape: `<!doctype html><html><head><style>...</style></head><body>...<canvas id="game"></canvas>...<script>/* all game JavaScript here */</script></body></html>`.',
   'All JavaScript must be inside that one inline `<script>` block before `</body>`: declarations, functions, querySelector/addEventListener calls, key handlers, requestAnimationFrame game loop, projectiles, collision, score, and `window.gameState = gameState`.',
   'Do not place `const`, `let`, `var`, `function`, `querySelector`, `addEventListener`, or `requestAnimationFrame` after `</script>`, after `</body>`, or after `</html>`.',
-  'If `writeFile` is rejected for JavaScript outside a script tag, do not keep patching fragments; immediately re-emit the entire corrected HTML file from `<!doctype html>` through `</html>` with all JS inside the script block.',
+  'If `write_file` is rejected for JavaScript outside a script tag, do not keep patching fragments; immediately re-emit the entire corrected HTML file from `<!doctype html>` through `</html>` with all JS inside the script block.',
 ].join(' ');
 
 /**

@@ -259,19 +259,19 @@ describe('FabricationDetectClaimWithoutTool behavior hook', () => {
   // ── File-write fabrication ───────────────────────────────────────
   // These claims were observed in 3 of 3 timed-out tictactoe trials
   // on Gemma 4 26B MLX (eval batches). The model would
-  // narrate `index.html` completion without `writeFile` or
+  // narrate `index.html` completion without `write_file` or
   // `write_artifact` ever firing, then the eval would time out
   // waiting for an artifact that never landed.
 
-  it('catches "I have created the `index.html` file" without writeFile/write_artifact', () => {
+  it('catches "I have created the `index.html` file" without write_file/write_artifact', () => {
     const v = detectFabricatedToolClaim({
       text: 'I have created the `index.html` file containing the full Tic-Tac-Toe game.',
       firedToolNames: ['list_artifacts'],
     });
     expect(v.fabricated).toBe(true);
     expect(v.claim).toBe('wrote a file');
-    expect(v.requiredTools).toEqual(expect.arrayContaining(['writeFile', 'write_artifact']));
-    expect(v.nudge).toMatch(/writeFile|write_artifact/);
+    expect(v.requiredTools).toEqual(expect.arrayContaining(['write_file', 'write_artifact']));
+    expect(v.nudge).toMatch(/write_file|write_artifact/);
   });
 
   it('catches "I have written the `index.html` file" wording', () => {
@@ -310,25 +310,25 @@ describe('FabricationDetectClaimWithoutTool behavior hook', () => {
     expect(v.claim).toBe('wrote a file');
   });
 
-  it('does NOT fire when writeFile actually succeeded', () => {
+  it('does NOT fire when write_file actually succeeded', () => {
     const v = detectFabricatedToolClaim({
       text: 'I have created the `index.html` file.',
-      firedToolNames: ['writeFile'],
+      firedToolNames: ['write_file'],
     });
     expect(v.fabricated).toBe(false);
   });
 
-  it('does NOT fire when writeFile saved an invalid first draft for repair', () => {
+  it('does NOT fire when write_file saved an invalid first draft for repair', () => {
     const verdict = FabricationDetectClaimWithoutTool.postTurnDetector!(
       turnCtx({
         assistantContent: 'I wrote `index.html` to the workspace.',
         drained: [
           {
-            name: 'writeFile',
+            name: 'write_file',
             durationMs: 12,
             success: false,
             errorMessage:
-              'inline JS does not parse (Unexpected token ]).\n\nInvalid first draft index.html was saved anyway so you can continue with readFile({ path: "index.html" }) and then repair it with replaceInFile(...) instead of starting over.',
+              'inline JS does not parse (Unexpected token ]).\n\nInvalid first draft index.html was saved anyway so you can continue with read_file({ path: "index.html" }) and then repair it with replace_in_file(...) instead of starting over.',
           } as ChatMessageToolCall,
         ],
       }),
@@ -337,14 +337,14 @@ describe('FabricationDetectClaimWithoutTool behavior hook', () => {
     expect(verdict).toBeNull();
   });
 
-  it('does NOT fire when appendToFile actually succeeded (after a truncated writeFile)', () => {
-    // `appendToFile` is the partner primitive used to recover from a
-    // truncated `writeFile`. Once a successful append lands, "I have
+  it('does NOT fire when append_to_file actually succeeded (after a truncated write_file)', () => {
+    // `append_to_file` is the partner primitive used to recover from a
+    // truncated `write_file`. Once a successful append lands, "I have
     // written the file" is no longer a fabrication — the file IS now
     // complete.
     const v = detectFabricatedToolClaim({
       text: 'I have written the `index.html` file.',
-      firedToolNames: ['appendToFile'],
+      firedToolNames: ['append_to_file'],
     });
     expect(v.fabricated).toBe(false);
   });

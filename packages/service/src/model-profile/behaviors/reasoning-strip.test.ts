@@ -153,7 +153,7 @@ describe('ReasoningStripChannelTags', () => {
     const body = [
       'The user requested a code review and fix for three identified bugs.',
       '',
-      'I will execute these three fixes using `writeFile` in a single turn.',
+      'I will execute these three fixes using `write_file` in a single turn.',
     ].join('\n');
     const out = cap(`analysis|\n${body}\n</|end|>Visible.`, undefined as never, undefined as never);
     expect(out.visible).toBe('Visible.');

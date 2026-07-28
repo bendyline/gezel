@@ -7,6 +7,8 @@ import { readSecurityJson, writeSecurityJson } from '../fs/security-json.js';
  * The scope vocabulary the daemon recognizes.
  *   - `root`   — the daemon's own per-launch token; full `/api/*` + `/v1/*`.
  *   - `openai` — the public app scope: the OpenAI-compatible `/v1/*` surface.
+ *   - `cli`    — a user-approved Gezel CLI credential with product API access,
+ *                but no authority to administer other app grants.
  *   - `ui`     — first-party UI clients (the embedded renderer / web-UI
  *                token). Admitted to product routes, but not a daemon root
  *                credential; reserved for internal tokens.
@@ -20,17 +22,16 @@ import { readSecurityJson, writeSecurityJson } from '../fs/security-json.js';
  * `scopes` stays a `string[]` on records for forward-compat, but app
  * registration validates requests against {@link APP_GRANTABLE_SCOPES}.
  */
-export const KNOWN_SCOPES = ['root', 'openai', 'ui', 'session', 'remote-inference'] as const;
+export const KNOWN_SCOPES = ['root', 'openai', 'cli', 'ui', 'session', 'remote-inference'] as const;
 export type GezelScope = (typeof KNOWN_SCOPES)[number];
 
 /**
- * Scopes a third-party app may REQUEST via `/v1/apps/register`. Only
- * `openai` (confined to `/v1/*` by `requireScope('openai')`) and
- * `remote-inference` (confined to `/v1/remote/*`) are grantable; `root` and
- * `ui` are reserved for the daemon's own + first-party tokens. The internal
- * API guard rejects every app/device scope before route dispatch.
+ * Scopes an app may REQUEST via `/v1/apps/register`. `openai` and
+ * `remote-inference` remain narrow public surfaces. `cli` is a high-authority
+ * product-control scope that requires the same visible user approval, while
+ * `root` and `ui` remain reserved daemon-owned credentials.
  */
-export const APP_GRANTABLE_SCOPES = ['openai', 'remote-inference'] as const;
+export const APP_GRANTABLE_SCOPES = ['openai', 'remote-inference', 'cli'] as const;
 
 /** App ids owned by the daemon itself rather than the public grant flow. */
 export function isReservedTokenAppId(appId: string): boolean {
@@ -86,6 +87,8 @@ function isGrantableAppToken(input: { appId: string; scopes: readonly string[] }
  *  - `root`  — full access to every `/api/*` and `/v1/*` route.
  *  - `openai` — `/v1/chat/completions`, `/v1/embeddings`, `/v1/models`,
  *               `/v1/models/ensure`. The coarse public-app scope.
+ *  - `cli` — user-approved product API access for the Gezel command line.
+ *            It does not satisfy the root/UI-only app-administration guard.
  *
  * Future scopes (`workspace:read`, `github`, etc.) slot in alongside
  * without a migration.

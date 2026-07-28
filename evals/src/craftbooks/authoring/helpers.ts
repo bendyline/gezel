@@ -38,7 +38,7 @@ export const AUTHORING_PROJECT_PIN =
 /**
  * Steer the model onto the craftbook tool surface. The first matrix trial
  * showed the failure this prevents: the meester delegated the whole job as
- * ad-hoc file work (`delegate_builder` → bare `writeFile`s) and never
+ * ad-hoc file work (`delegate_builder` → bare `write_file`s) and never
  * touched a craftbook tool, so no reusable recipe ever existed. The A/B
  * measures whether a model can EMIT/EDIT the craftbook document — tool
  * discovery is not the variable under test, so the prompt names the

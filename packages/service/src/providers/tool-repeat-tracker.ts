@@ -6,17 +6,17 @@
  * Wild-caught failure shape (Ada on MLX, atari-combat-clone task):
  *   1. read_task_notes("atari-combat-clone/3")
  *   2. list_artifacts(recursive: true)
- *   3. readdir("src")
- *   4. readFile("package.json")
- *   5. readFile("tsconfig.json")
+ *   3. list_dir("src")
+ *   4. read_file("package.json")
+ *   5. read_file("tsconfig.json")
  *   6. list_packages()
  *   7. write_task_note(...)
  *   8. read_task_notes("atari-combat-clone/3")  ← same as #1
- *   9. readFile("package.json")                  ← same as #4
- *  10. readFile("tsconfig.json")                 ← same as #5
+ *   9. read_file("package.json")                  ← same as #4
+ *  10. read_file("tsconfig.json")                 ← same as #5
  *  11. read_task_notes("atari-combat-clone/3")  ← same as #1, third time
  *  ... (loops indefinitely emitting "Let me write all these files now"
- *       prose between reads, never actually calls writeFile)
+ *       prose between reads, never actually calls write_file)
  *
  * Why the existing trackers miss this:
  *   - Failures? Every tool call SUCCEEDS — these are healthy reads.
@@ -79,10 +79,10 @@ const ARG_KEY_NORMALIZERS: Record<string, (args: Record<string, unknown>) => unk
   // real deliverables were present, the model kept overwriting
   // `script.js` with different partial snippets, so same-args repeat
   // detection never fired and the turn ran until the broad 96-loop cap.
-  writeFile: ({ path }) => ({ path }),
+  write_file: ({ path }) => ({ path }),
   // Surgical-edit loops have the same failure shape when the model keeps
   // changing the `find` string for one file. Count those by target path.
-  replaceInFile: ({ path }) => ({ path }),
+  replace_in_file: ({ path }) => ({ path }),
 };
 
 export interface ToolRepeatTrackerOpts {
@@ -130,7 +130,7 @@ export class ToolRepeatTracker {
       const target = repeatTargetDescription(toolName, args, count);
       if (WRITE_TOOL_NAMES.has(toolName)) {
         return {
-          output: `${output}\n\n[runtime] You've called \`${toolName}\` for ${target} this turn. Stop re-writing the same target. If the latest user/check message names a different missing deliverable path, write that exact path next. Otherwise, if this file is correct, validate it or end the turn; if it is still wrong, make one focused edit with \`replaceInFile\` or one complete corrected \`writeFile\`, then stop.`,
+          output: `${output}\n\n[runtime] You've called \`${toolName}\` for ${target} this turn. Stop re-writing the same target. If the latest user/check message names a different missing deliverable path, write that exact path next. Otherwise, if this file is correct, validate it or end the turn; if it is still wrong, make one focused edit with \`replace_in_file\` or one complete corrected \`write_file\`, then stop.`,
           shouldAbort: false,
           count,
         };
@@ -157,11 +157,11 @@ export class ToolRepeatTracker {
      * Registered tool names for this session (typically
      * `bridges.getOpenAITools().map(t => t.name)`). When provided,
      * filters the action-tool suggestion list so the corrective only
-     * names tools the gezel actually has — a voorman has no `writeFile`
+     * names tools the gezel actually has — a voorman has no `write_file`
      * and a developer has no `assign_task`. Wild-caught (qwen3.6 27B
      * tankcombat voorman): the abort message suggested
      * `advance_task_phase` (which doesn't exist — the real tool is
-     * `advance_task_step`) and `writeFile` (not on the voorman's
+     * `advance_task_step`) and `write_file` (not on the voorman's
      * loadout), pointing the model at fabricated tool calls.
      *
      * Omit (or pass undefined) to fall back to the full suggestion
@@ -174,7 +174,7 @@ export class ToolRepeatTracker {
      * script name as the recommended next call. Without this medium
      * models loop on `read_task_notes` looking for the procedure
      * that's already embedded in the step manifest — the corrective
-     * then points them at `writeFile` (wrong for a review task) and
+     * then points them at `write_file` (wrong for a review task) and
      * they fabricate. Wild-caught on the review craftbook spin
      * (gemma4-26B): `read_task_notes` × 5 on a "Load PR
      * context" step whose right action was `run_script({ name:
@@ -206,7 +206,7 @@ export class ToolRepeatTracker {
     // wired this turn AND we're aborting on a read-loop (not a write
     // loop — in that case the model already wrote, telling it to write
     // again is the contradiction we're trying to avoid).
-    const hasWorkspaceWrite = suggestions.includes('writeFile');
+    const hasWorkspaceWrite = suggestions.includes('write_file');
     const hasArtifactWrite = suggestions.includes('write_artifact');
     const hasRepoIntake = suggestions.includes('fetch_repo') || suggestions.includes('fetch_diff');
     const repeatedCoordinationRead =
@@ -215,7 +215,7 @@ export class ToolRepeatTracker {
       opts.toolName === 'list_gilde';
     const sourceReadWithoutWorkspaceWrite =
       !isWriteTool &&
-      opts.toolName === 'readFile' &&
+      opts.toolName === 'read_file' &&
       !hasWorkspaceWrite &&
       looksLikeSourceFileRead(opts.args);
     const visibleSuggestions = sourceReadWithoutWorkspaceWrite
@@ -226,7 +226,7 @@ export class ToolRepeatTracker {
       .join(', ');
     const shipHint =
       hasWorkspaceWrite && !isWriteTool
-        ? ' If the task is to ship source or project files, call `writeFile` now with the full file contents — do not narrate the plan first.'
+        ? ' If the task is to ship source or project files, call `write_file` now with the full file contents — do not narrate the plan first.'
         : sourceReadWithoutWorkspaceWrite
           ? ' You do not have workspace write access in this role, so you cannot create or edit that source file yourself. Hand off to a developer with `message_gezel`/`assign_task`, or ask the user only if no writable specialist is available.'
           : hasArtifactWrite && !isWriteTool
@@ -252,7 +252,7 @@ export class ToolRepeatTracker {
     // semantically-meaningful next move is to validate, hand off, ask,
     // or accept and stop.
     if (isSourceEditToolLoop(opts.toolName, opts.args)) {
-      return `[${opts.providerLabel}] aborting — \`${opts.toolName}\` was called for ${repeatTargetDescription(opts.toolName, opts.args, opts.count)} this turn without making progress. Stop emitting fragments or more surgical edits for this file. Re-read the latest user/check message before choosing the next tool. If it names a different missing deliverable path, your next message MUST start with \`writeFile({ path, content })\` for that exact path. Otherwise, your next message MUST start with one complete \`writeFile({ path, content })\` call for this same path, containing the entire corrected source file from first byte through final closing tag. If you cannot do that, ask the user a question instead.`;
+      return `[${opts.providerLabel}] aborting — \`${opts.toolName}\` was called for ${repeatTargetDescription(opts.toolName, opts.args, opts.count)} this turn without making progress. Stop emitting fragments or more surgical edits for this file. Re-read the latest user/check message before choosing the next tool. If it names a different missing deliverable path, your next message MUST start with \`write_file({ path, content })\` for that exact path. Otherwise, your next message MUST start with one complete \`write_file({ path, content })\` call for this same path, containing the entire corrected source file from first byte through final closing tag. If you cannot do that, ask the user a question instead.`;
     }
     if (isWriteTool) {
       return `[${opts.providerLabel}] aborting — \`${opts.toolName}\` was called for ${repeatTargetDescription(opts.toolName, opts.args, opts.count)} this turn without making progress. The file is already written. Stop re-writing. Pick a DIFFERENT next action: validate what you wrote (read it back once, run it, or ask), hand off (\`message_gezel\`, \`assign_task\`, \`advance_task_step\`), accept and end the turn, or ask the user a question. Your next message MUST start with a single action-tool call from this set: ${list}.${stepHint}`;
@@ -287,7 +287,7 @@ export class ToolRepeatTracker {
 }
 
 function isSourceEditToolLoop(toolName: string, args: unknown): boolean {
-  if (toolName !== 'writeFile' && toolName !== 'replaceInFile') return false;
+  if (toolName !== 'write_file' && toolName !== 'replace_in_file') return false;
   if (!args || typeof args !== 'object' || Array.isArray(args)) return false;
   const path = (args as Record<string, unknown>).path;
   return typeof path === 'string' && /\.(?:html?|css|mjs|cjs|js|jsx|ts|tsx|json|md)$/i.test(path);
@@ -299,15 +299,15 @@ function isSourceEditToolLoop(toolName: string, args: unknown): boolean {
  * the data you need." The abort message has a different shape.
  */
 const WRITE_TOOL_NAMES: ReadonlySet<string> = new Set([
-  'writeFile',
+  'write_file',
   'write_artifact',
-  'appendToFile',
-  'replaceInFile',
-  'applyPatch',
-  'insertAtMarker',
+  'append_to_file',
+  'replace_in_file',
+  'apply_patch',
+  'insert_at_marker',
   'rename',
-  'mkdir',
-  'rm',
+  'make_dir',
+  'delete_path',
   'write_document',
   'write_task_note',
 ]);
@@ -345,7 +345,7 @@ function filterActionToolSuggestions(
   // mechanics, then escape valves (ask). Previously this list was
   // file-write + task-mechanics only — which is exactly wrong inside a
   // craftbook step whose next action is `run_script` or `github_pr_*`,
-  // and pointed gemma4-26B at fabricated `writeFile` calls when it
+  // and pointed gemma4-26B at fabricated `write_file` calls when it
   // should have been running the step's onExit script. Wild-caught on
   // the review-craftbook spin: `read_task_notes` × 5 because the
   // gezel had no good action-tool candidates surfaced.
@@ -356,7 +356,7 @@ function filterActionToolSuggestions(
     'start_job',
     'ensure_gezel',
     'write_artifact',
-    'writeFile',
+    'write_file',
     'run_script',
     'github_pr_list',
     'github_pr_view',
@@ -387,14 +387,14 @@ function filterActionToolSuggestions(
 
 function stringifyArgs(toolName: string, args: unknown, output: string): string {
   if (args == null) return '{}';
-  // An atomically rejected writeFile draft never reached disk. Count a
+  // An atomically rejected write_file draft never reached disk. Count a
   // repeated *identical* rejected draft, but do not collapse different
   // syntax-correction attempts to the path-only key used for persisted
   // overwrites. ToolFailureTracker still owns repeated failures; spending
   // the successful-write repeat budget here can abort a repair immediately
   // after the first valid source finally lands.
   const atomicallyRejectedWrite =
-    toolName === 'writeFile' &&
+    toolName === 'write_file' &&
     /(?:write is rejected atomically|THE FILE WAS NOT WRITTEN)/i.test(output);
   const normalizer = atomicallyRejectedWrite ? undefined : ARG_KEY_NORMALIZERS[toolName];
   // Only normalize when the args shape is the expected plain object;
@@ -412,7 +412,7 @@ function stringifyArgs(toolName: string, args: unknown, output: string): string 
 
 function repeatTargetDescription(toolName: string, args: unknown, count: number): string {
   if (
-    (toolName === 'writeFile' || toolName === 'replaceInFile') &&
+    (toolName === 'write_file' || toolName === 'replace_in_file') &&
     args &&
     typeof args === 'object' &&
     !Array.isArray(args) &&

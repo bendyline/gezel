@@ -55,7 +55,7 @@ describe('roleToolsetGroups', () => {
     // Trims per-turn tool-schema prefill on medium local models.
     expect(groups).not.toContain('code-intel');
     const allow = roleToolAllowlist('voorman');
-    expect(allow.has('readFile')).toBe(true); // still investigates
+    expect(allow.has('read_file')).toBe(true); // still investigates
     expect(allow.has('read_symbol')).toBe(false);
     expect(allow.has('map_repo')).toBe(false);
     expect(allow.has('find_references')).toBe(false);
@@ -127,10 +127,10 @@ describe('roleToolsetGroups', () => {
     expect(allow.has('spawn_task_instances')).toBe(false);
     expect(allow.has('read_task_notes')).toBe(true);
     // Load-bearing research surface retained.
-    expect(allow.has('writeFile')).toBe(true);
+    expect(allow.has('write_file')).toBe(true);
     expect(allow.has('write_artifact')).toBe(true);
     expect(allow.has('fetch_url')).toBe(true);
-    expect(allow.has('readFile')).toBe(true);
+    expect(allow.has('read_file')).toBe(true);
 
     // `web` + `workspace-fs-write` retained → still gets Playwright.
     expect(rolePermitsBrowserAutomation('researcher')).toBe(true);
@@ -141,8 +141,8 @@ describe('roleToolsetGroups', () => {
     expect(groups).toContain('workspace-fs-read');
     expect(groups).toContain('workspace-fs-write');
     const allow = roleToolAllowlist('copywriter');
-    expect(allow.has('readFile')).toBe(true);
-    expect(allow.has('writeFile')).toBe(true);
+    expect(allow.has('read_file')).toBe(true);
+    expect(allow.has('write_file')).toBe(true);
     expect(allow.has('write_artifact')).toBe(true);
     expect(rolePermitsBrowserAutomation('copywriter')).toBe(false);
   });
@@ -162,7 +162,7 @@ describe('roleToolsetGroups', () => {
     // generate_image is reachable from the resolved allowlist.
     const allow = roleToolAllowlist('AI Image Generation Specialist');
     expect(allow.has('generate_image')).toBe(true);
-    expect(allow.has('writeFile')).toBe(false);
+    expect(allow.has('write_file')).toBe(false);
   });
 
   it('still routes "Visual Designer" to the designer preset (not image-generator)', () => {
@@ -256,7 +256,7 @@ describe('roleToolAllowlist', () => {
     const allow = roleToolAllowlist('meester');
     expect(allow.has('list_gezels')).toBe(true);
     expect(allow.has('search_memory')).toBe(true);
-    expect(allow.has('readFile')).toBe(false);
+    expect(allow.has('read_file')).toBe(false);
     expect(allow.has('run_nodejs_script')).toBe(false);
   });
 
@@ -311,8 +311,8 @@ describe('roleToolAllowlist', () => {
 
   it('expands the developer default to include workspace-fs and code-execution', () => {
     const allow = roleToolAllowlist('developer');
-    expect(allow.has('readFile')).toBe(true);
-    expect(allow.has('writeFile')).toBe(true);
+    expect(allow.has('read_file')).toBe(true);
+    expect(allow.has('write_file')).toBe(true);
     expect(allow.has('run_nodejs_script')).toBe(true);
     expect(allow.has('list_gezels')).toBe(false);
   });
@@ -348,13 +348,13 @@ describe('computeToolAllowlist', () => {
     expect(allow!.has('web_search')).toBe(false); // no backend configured
     expect(allow!.has('wikipedia_search')).toBe(false); // cloud tier
     // The rest of the surface is unaffected.
-    expect(allow!.has('readFile')).toBe(true);
+    expect(allow!.has('read_file')).toBe(true);
     expect(allow!.has('list_gezels')).toBe(true);
   });
 
-  it('exposes replaceLines wherever replaceInFile is available (positional edit for small models)', () => {
-    // Invariant: a role that can content-edit (`replaceInFile`) can also
-    // line-edit (`replaceLines`) — the surgical tool small models can drive
+  it('exposes replace_lines wherever replace_in_file is available (positional edit for small models)', () => {
+    // Invariant: a role that can content-edit (`replace_in_file`) can also
+    // line-edit (`replace_lines`) — the surgical tool small models can drive
     // (target by line number off the gutter; no byte-exact `find`). The
     // resolver backfills it so a curated/older toolset can't ship one
     // without the other. See the augmentation at the end of the resolver.
@@ -364,8 +364,8 @@ describe('computeToolAllowlist', () => {
       provider: 'llama-cpp',
     });
     expect(allow).not.toBeNull();
-    expect(allow!.has('replaceInFile')).toBe(true);
-    expect(allow!.has('replaceLines')).toBe(true);
+    expect(allow!.has('replace_in_file')).toBe(true);
+    expect(allow!.has('replace_lines')).toBe(true);
   });
 
   it('filters for OpenAI in default ("always") mode', () => {
@@ -377,7 +377,7 @@ describe('computeToolAllowlist', () => {
     });
     expect(allow).not.toBeNull();
     expect(allow!.has('list_gezels')).toBe(true);
-    expect(allow!.has('readFile')).toBe(false);
+    expect(allow!.has('read_file')).toBe(false);
   });
 
   it('skips role-based filtering for cloud-tier providers in "small-model" mode', () => {
@@ -399,9 +399,9 @@ describe('computeToolAllowlist', () => {
       });
       expect(allow).not.toBeNull();
       // No role-narrowing: a tool outside the meester default groups
-      // (e.g. `readFile`) is still present because mode skipped
+      // (e.g. `read_file`) is still present because mode skipped
       // role-based narrowing.
-      expect(allow!.has('readFile')).toBe(true);
+      expect(allow!.has('read_file')).toBe(true);
       // wikipedia_search stripped (cloud), web_search kept (brave).
       expect(allow!.has('wikipedia_search')).toBe(false);
       expect(allow!.has('web_search')).toBe(true);
@@ -424,7 +424,7 @@ describe('computeToolAllowlist', () => {
         webSearchProvider: 'brave',
       });
       expect(allow, `${provider}/${modelId}`).not.toBeNull();
-      expect(allow!.has('readFile')).toBe(true);
+      expect(allow!.has('read_file')).toBe(true);
     }
   });
 
@@ -470,7 +470,7 @@ describe('computeToolAllowlist', () => {
         modelId: 'meta-llama/Llama-3-70B',
         securityPolicy: resolveSecurityPolicy({ securityPolicy: securityPolicyForLevel('free') }),
       });
-      expect(free!.has('writeFile')).toBe(true);
+      expect(free!.has('write_file')).toBe(true);
       expect(free!.has('run_git')).toBe(true);
     });
 
@@ -489,8 +489,8 @@ describe('computeToolAllowlist', () => {
       });
       // workspace writes survive — they are governed per project
       // (projectWorkspaceWritable), not by the global policy…
-      expect(allow!.has('writeFile')).toBe(true);
-      expect(allow!.has('replaceInFile')).toBe(true);
+      expect(allow!.has('write_file')).toBe(true);
+      expect(allow!.has('replace_in_file')).toBe(true);
       // …code execution gone…
       expect(allow!.has('run_nodejs_script')).toBe(false);
       expect(allow!.has('npm_install')).toBe(false);
@@ -499,7 +499,7 @@ describe('computeToolAllowlist', () => {
       // …external services gone…
       expect(allow!.has('web_search')).toBe(false);
       // …and read + artifacts survive (the sandbox escape hatch).
-      expect(allow!.has('readFile')).toBe(true);
+      expect(allow!.has('read_file')).toBe(true);
       expect(allow!.has('write_artifact')).toBe(true);
     });
 
@@ -512,10 +512,10 @@ describe('computeToolAllowlist', () => {
         securityPolicy: resolveSecurityPolicy({ securityPolicy: securityPolicyForLevel('free') }),
         workspaceWritable: false,
       });
-      expect(allow!.has('writeFile')).toBe(false);
-      expect(allow!.has('replaceInFile')).toBe(false);
+      expect(allow!.has('write_file')).toBe(false);
+      expect(allow!.has('replace_in_file')).toBe(false);
       // Reads and artifacts stay.
-      expect(allow!.has('readFile')).toBe(true);
+      expect(allow!.has('read_file')).toBe(true);
       expect(allow!.has('write_artifact')).toBe(true);
     });
 
@@ -527,8 +527,8 @@ describe('computeToolAllowlist', () => {
         modelId: 'meta-llama/Llama-3-70B',
         workspaceWritable: false,
       });
-      expect(allow!.has('writeFile')).toBe(false);
-      expect(allow!.has('readFile')).toBe(true);
+      expect(allow!.has('write_file')).toBe(false);
+      expect(allow!.has('read_file')).toBe(true);
     });
 
     it('lockdown keeps edits/scripts/git but not open-web services', () => {
@@ -544,7 +544,7 @@ describe('computeToolAllowlist', () => {
           securityPolicy: securityPolicyForLevel('lockdown'),
         }),
       });
-      expect(allow!.has('writeFile')).toBe(true);
+      expect(allow!.has('write_file')).toBe(true);
       expect(allow!.has('run_git')).toBe(true);
       expect(allow!.has('web_search')).toBe(false);
     });
@@ -564,7 +564,7 @@ describe('computeToolAllowlist', () => {
       // security ceiling + per-project write gate force a concrete,
       // stripped set instead.
       expect(allow).not.toBeNull();
-      expect(allow!.has('writeFile')).toBe(false);
+      expect(allow!.has('write_file')).toBe(false);
       expect(allow!.has('run_nodejs_script')).toBe(false);
     });
   });
@@ -656,8 +656,8 @@ describe('computeToolAllowlist', () => {
       toolsetsGroupOverride: ['workspace-fs-read', 'workspace-fs-write', 'images'],
     });
     expect(allow).not.toBeNull();
-    expect(allow!.has('readFile')).toBe(true);
-    expect(allow!.has('writeFile')).toBe(true);
+    expect(allow!.has('read_file')).toBe(true);
+    expect(allow!.has('write_file')).toBe(true);
     expect(allow!.has('generate_image')).toBe(true);
     expect(allow!.has('list_gezels')).toBe(false); // role default no longer applies
   });
@@ -682,8 +682,8 @@ describe('computeToolAllowlist', () => {
         webSearchProvider: 'brave',
       });
       expect(allow, role).not.toBeNull();
-      expect(allow!.has('writeFile'), role).toBe(true);
-      expect(allow!.has('readFile'), role).toBe(true);
+      expect(allow!.has('write_file'), role).toBe(true);
+      expect(allow!.has('read_file'), role).toBe(true);
       expect(allow!.has('ask_user_question'), role).toBe(true);
       expect(allow!.has('ask_specialist'), role).toBe(false);
       expect(allow!.has('ask_gezel'), role).toBe(false);
@@ -702,11 +702,11 @@ describe('computeToolAllowlist', () => {
     expect(allow!.has('ask_gezel')).toBe(true);
   });
 
-  it('constrains urgent missing-file implementer nudges to writeFile only', () => {
+  it('constrains urgent missing-file implementer nudges to write_file only', () => {
     const nudge =
       '[Message from Wren]: [scenario check] There is still **no `index.html`** in the workspace. ' +
-      'Stop reading/planning and write the file now: `writeFile({ path: "index.html", content: <the full deliverable contents> })`. ' +
-      'Do not end your turn until `writeFile` has landed the file.';
+      'Stop reading/planning and write the file now: `write_file({ path: "index.html", content: <the full deliverable contents> })`. ' +
+      'Do not end your turn until `write_file` has landed the file.';
     const allow = computeToolAllowlist({
       role: 'Builder',
       mode: 'always',
@@ -721,13 +721,13 @@ describe('computeToolAllowlist', () => {
     expect(shouldConstrainToImmediateFileWrite({ role: 'Builder', latestUserMessage: nudge })).toBe(
       true,
     );
-    expect([...constrained!]).toEqual(['writeFile', 'run_script', 'get_script_run']);
+    expect([...constrained!]).toEqual(['write_file', 'run_script', 'get_script_run']);
   });
 
-  it('constrains initial index.html deliverable handoffs to writeFile only', () => {
+  it('constrains initial index.html deliverable handoffs to write_file only', () => {
     const nudge =
       '[Deliverable expected as a FILE at `index.html`. Your first assistant action should be the tool call ' +
-      '`writeFile({ path, content })`; draft inside the tool argument, not in chat. Reply in chat with the path.]';
+      '`write_file({ path, content })`; draft inside the tool argument, not in chat. Reply in chat with the path.]';
     const allow = computeToolAllowlist({
       role: 'Developer',
       mode: 'always',
@@ -743,15 +743,38 @@ describe('computeToolAllowlist', () => {
     expect(
       shouldConstrainToImmediateFileWrite({ role: 'Developer', latestUserMessage: nudge }),
     ).toBe(true);
-    expect([...constrained!]).toEqual(['writeFile', 'run_script', 'get_script_run']);
+    expect([...constrained!]).toEqual(['write_file', 'run_script', 'get_script_run']);
   });
 
-  it('does not collapse an explicit append-only repair to writeFile-only', () => {
+  it('still recognizes pre-rename `writeFile` spellings in handoff messages', () => {
+    // Handoffs replayed from old sessions and pinned gilde prose say
+    // `writeFile`; the message-matching regexes accept both spellings.
+    const nudge =
+      '[Deliverable expected as a FILE at `index.html`. Your first assistant action should be the tool call ' +
+      '`writeFile({ path, content })`; draft inside the tool argument, not in chat. Reply in chat with the path.]';
+    expect(
+      shouldConstrainToImmediateFileWrite({ role: 'Developer', latestUserMessage: nudge }),
+    ).toBe(true);
+    const allow = computeToolAllowlist({
+      role: 'Developer',
+      mode: 'always',
+      provider: 'llama-cpp',
+      modelId: 'gemma4-12b-q4',
+      webSearchProvider: 'brave',
+    });
+    const constrained = constrainAllowlistForImmediateFileWrite(allow, {
+      role: 'Developer',
+      latestUserMessage: nudge,
+    });
+    expect([...constrained!]).toEqual(['write_file', 'run_script', 'get_script_run']);
+  });
+
+  it('does not collapse an explicit append-only repair to write_file-only', () => {
     const nudge =
       '[Message from Priya]: INCIDENT POSTMORTEM APPEND: the document already has the required structure. ' +
-      'Your next tool call must be `appendToFile({ path: "postmortem.md", content: "<new analysis>" })`. ' +
-      'Do not call `writeFile`, rewrite existing sections, or answer in chat first. ' +
-      '[Deliverable expected as a FILE at `postmortem.md`. Your first assistant action should be the tool call `writeFile({ path, content })`.]';
+      'Your next tool call must be `append_to_file({ path: "postmortem.md", content: "<new analysis>" })`. ' +
+      'Do not call `write_file`, rewrite existing sections, or answer in chat first. ' +
+      '[Deliverable expected as a FILE at `postmortem.md`. Your first assistant action should be the tool call `write_file({ path, content })`.]';
     const allow = computeToolAllowlist({
       role: 'Researcher',
       mode: 'always',
@@ -768,14 +791,14 @@ describe('computeToolAllowlist', () => {
     expect(
       shouldConstrainToImmediateFileWrite({ role: 'Researcher', latestUserMessage: nudge }),
     ).toBe(false);
-    expect(constrained!.has('appendToFile')).toBe(true);
-    expect([...constrained!]).not.toEqual(['writeFile']);
+    expect(constrained!.has('append_to_file')).toBe(true);
+    expect([...constrained!]).not.toEqual(['write_file']);
   });
 
-  it('constrains non-HTML expected file handoffs to writeFile only for implementers', () => {
+  it('constrains non-HTML expected file handoffs to write_file only for implementers', () => {
     const nudge =
       '[Deliverable expected as a FILE at `out/customers.json`. Your first assistant action should be the tool call ' +
-      '`writeFile({ path, content })`; draft inside the tool argument, not in chat. Reply in chat with the path.]';
+      '`write_file({ path, content })`; draft inside the tool argument, not in chat. Reply in chat with the path.]';
     const allow = computeToolAllowlist({
       role: 'Developer',
       mode: 'always',
@@ -791,13 +814,13 @@ describe('computeToolAllowlist', () => {
     expect(
       shouldConstrainToImmediateFileWrite({ role: 'Developer', latestUserMessage: nudge }),
     ).toBe(true);
-    expect([...constrained!]).toEqual(['writeFile', 'run_script', 'get_script_run']);
+    expect([...constrained!]).toEqual(['write_file', 'run_script', 'get_script_run']);
   });
 
-  it('constrains copywriter expected markdown handoffs to writeFile only', () => {
+  it('constrains copywriter expected markdown handoffs to write_file only', () => {
     const nudge =
       '[Deliverable expected as a FILE at `customer-notice.md`. Your first assistant action should be the tool call ' +
-      '`writeFile({ path, content })`; draft inside the tool argument, not in chat. Reply in chat with the path.]';
+      '`write_file({ path, content })`; draft inside the tool argument, not in chat. Reply in chat with the path.]';
     const allow = computeToolAllowlist({
       role: 'Copywriter',
       mode: 'always',
@@ -814,14 +837,14 @@ describe('computeToolAllowlist', () => {
       shouldConstrainToImmediateFileWrite({ role: 'Copywriter', latestUserMessage: nudge }),
     ).toBe(true);
     // Copywriter has no code-execution group, so the script ride-alongs
-    // intersect away — writeFile stays the whole surface for this role.
-    expect([...constrained!]).toEqual(['writeFile']);
+    // intersect away — write_file stays the whole surface for this role.
+    expect([...constrained!]).toEqual(['write_file']);
   });
 
   it('keeps surgical edit tools when the deliverable is an existing substantial file', () => {
     const nudge =
       '[Deliverable expected as a FILE at `workspace/index.html`. Your first assistant action should be the tool call ' +
-      '`writeFile({ path, content })`; draft inside the tool argument, not in chat.]';
+      '`write_file({ path, content })`; draft inside the tool argument, not in chat.]';
     const allow = computeToolAllowlist({
       role: 'Developer',
       mode: 'always',
@@ -835,12 +858,12 @@ describe('computeToolAllowlist', () => {
       existingSubstantialFile: true,
     });
     // Surgical patch tools survive so a small edit doesn't force a full
-    // (corruption-prone) rewrite; writeFile is still there too.
-    expect(constrained!.has('writeFile')).toBe(true);
-    expect(constrained!.has('replaceInFile')).toBe(true);
-    expect(constrained!.has('insertAtMarker')).toBe(true);
+    // (corruption-prone) rewrite; write_file is still there too.
+    expect(constrained!.has('write_file')).toBe(true);
+    expect(constrained!.has('replace_in_file')).toBe(true);
+    expect(constrained!.has('insert_at_marker')).toBe(true);
     // But it's still constrained to write tools only — no reads/consults.
-    expect(constrained!.has('readFile')).toBe(false);
+    expect(constrained!.has('read_file')).toBe(false);
     expect(constrained!.has('ask_specialist')).toBe(false);
   });
 
@@ -864,9 +887,9 @@ describe('computeToolAllowlist', () => {
     expect(shouldConstrainToDirectFileWork({ role: 'Developer', latestUserMessage: prompt })).toBe(
       true,
     );
-    expect(constrained!.has('readFile')).toBe(true);
-    expect(constrained!.has('writeFile')).toBe(true);
-    expect(constrained!.has('mkdir')).toBe(true);
+    expect(constrained!.has('read_file')).toBe(true);
+    expect(constrained!.has('write_file')).toBe(true);
+    expect(constrained!.has('make_dir')).toBe(true);
     expect(constrained!.has('run_nodejs_script')).toBe(true);
     expect(constrained!.has('message_gezel')).toBe(false);
     expect(constrained!.has('ask_specialist')).toBe(false);
@@ -892,8 +915,8 @@ describe('computeToolAllowlist', () => {
     expect(
       shouldConstrainToDirectFileWork({ role: 'Boekwachter', latestUserMessage: prompt }),
     ).toBe(true);
-    expect(constrained!.has('readFile')).toBe(true);
-    expect(constrained!.has('writeFile')).toBe(true);
+    expect(constrained!.has('read_file')).toBe(true);
+    expect(constrained!.has('write_file')).toBe(true);
     expect(constrained!.has('validate')).toBe(true);
     expect(constrained!.has('message_gezel')).toBe(false);
     expect(constrained!.has('ask_specialist')).toBe(false);
@@ -1006,7 +1029,7 @@ describe('computeToolAllowlist', () => {
   it('constrains stale single-file completion asks to a compact file-work surface', () => {
     const prompt =
       'Verify the CURRENT state against the mission yourself: read notes.html and check each criterion. ' +
-      'Then get it actually finished: the deliverable is the file notes.html at the workspace root — edit it in place via writeFile/replaceInFile.';
+      'Then get it actually finished: the deliverable is the file notes.html at the workspace root — edit it in place via write_file/replace_in_file.';
     const allow = computeToolAllowlist({
       role: 'Developer',
       mode: 'always',
@@ -1022,9 +1045,9 @@ describe('computeToolAllowlist', () => {
     expect(shouldConstrainToDirectFileWork({ role: 'Developer', latestUserMessage: prompt })).toBe(
       true,
     );
-    expect(constrained!.has('readFile')).toBe(true);
-    expect(constrained!.has('replaceInFile')).toBe(true);
-    expect(constrained!.has('writeFile')).toBe(true);
+    expect(constrained!.has('read_file')).toBe(true);
+    expect(constrained!.has('replace_in_file')).toBe(true);
+    expect(constrained!.has('write_file')).toBe(true);
     expect(constrained!.has('message_gezel')).toBe(false);
   });
 
@@ -1049,7 +1072,7 @@ describe('computeToolAllowlist', () => {
   it('constrains explicit existing-codebase source edits even when the medium-model role filter is otherwise off', () => {
     const msg =
       'Phase 2: modify the existing Launch Board codebase, do not start over. ' +
-      'Your next assistant action should be a workspace `replaceInFile` or `writeFile` edit for `index.html`, not a chat-only plan. ' +
+      'Your next assistant action should be a workspace `replace_in_file` or `write_file` edit for `index.html`, not a chat-only plan. ' +
       'Add task priority support.';
     const constrained = constrainAllowlistForExistingSourceEdit(null, {
       role: 'Developer',
@@ -1060,14 +1083,14 @@ describe('computeToolAllowlist', () => {
       true,
     );
     expect([...constrained!]).toEqual([
-      'readFile',
-      'readdir',
+      'read_file',
+      'list_dir',
       'stat',
       'validate',
-      'replaceInFile',
-      'replaceLines',
-      'writeFile',
-      'appendToFile',
+      'replace_in_file',
+      'replace_lines',
+      'write_file',
+      'append_to_file',
       'run_script',
       'get_script_run',
     ]);
@@ -1104,10 +1127,10 @@ describe('computeToolAllowlist', () => {
     expect(extractDeliverableTargetPath('no annotation here')).toBeNull();
   });
 
-  it('constrains browser-app first-move handoffs to writeFile only', () => {
+  it('constrains browser-app first-move handoffs to write_file only', () => {
     const nudge =
       '[Message from Dagny]: New job "Tic-Tac-Toe Game" - task tic-tac-toe-game/1: Create a tic-tac-toe game in a single HTML file at index.html.\n\n' +
-      'First move: create the workspace deliverable, not a design/planning phase. For browser games/sites/apps, the next concrete action should land a compact but complete workspace/index.html: writeFile({ path: "index.html", content: "..." }). Keep the first pass under ~2.5 KB / 65 lines unless the user asked for more; do not revise or debate inside the file.';
+      'First move: create the workspace deliverable, not a design/planning phase. For browser games/sites/apps, the next concrete action should land a compact but complete workspace/index.html: write_file({ path: "index.html", content: "..." }). Keep the first pass under ~2.5 KB / 65 lines unless the user asked for more; do not revise or debate inside the file.';
     const allow = computeToolAllowlist({
       role: 'Builder',
       mode: 'always',
@@ -1123,13 +1146,13 @@ describe('computeToolAllowlist', () => {
     expect(shouldConstrainToImmediateFileWrite({ role: 'Builder', latestUserMessage: nudge })).toBe(
       true,
     );
-    expect([...constrained!]).toEqual(['writeFile', 'run_script', 'get_script_run']);
+    expect([...constrained!]).toEqual(['write_file', 'run_script', 'get_script_run']);
   });
 
-  it('constrains concise workspace-file first-move handoffs to writeFile only', () => {
+  it('constrains concise workspace-file first-move handoffs to write_file only', () => {
     const nudge =
       '[Message from Imara]: New job "Tic-Tac-Toe Game" - task tic-tac-toe-game/1: Build a Tic-Tac-Toe game for two players in a single file at index.html.\n\n' +
-      'First move: create the workspace deliverable, not a design/planning phase. For browser games/sites/apps, the next concrete action should land a concise but substantive workspace file: writeFile({ path: "index.html", content: "..." }). The writeFile path is relative to the workspace root, so do not pass "workspace/index.html".';
+      'First move: create the workspace deliverable, not a design/planning phase. For browser games/sites/apps, the next concrete action should land a concise but substantive workspace file: write_file({ path: "index.html", content: "..." }). The write_file path is relative to the workspace root, so do not pass "workspace/index.html".';
     const allow = computeToolAllowlist({
       role: 'Builder',
       mode: 'always',
@@ -1145,12 +1168,12 @@ describe('computeToolAllowlist', () => {
     expect(shouldConstrainToImmediateFileWrite({ role: 'Builder', latestUserMessage: nudge })).toBe(
       true,
     );
-    expect([...constrained!]).toEqual(['writeFile', 'run_script', 'get_script_run']);
+    expect([...constrained!]).toEqual(['write_file', 'run_script', 'get_script_run']);
   });
 
-  it('constrains direct first-version source creation asks to writeFile only', () => {
+  it('constrains direct first-version source creation asks to write_file only', () => {
     const prompt =
-      'Phase 1: build the first version of the Launch Board app at `index.html`. Keep this first version monolithic: HTML, CSS, and inline JavaScript in that one file; do not create `src/` files yet. Use workspace `writeFile` paths relative to the workspace root.';
+      'Phase 1: build the first version of the Launch Board app at `index.html`. Keep this first version monolithic: HTML, CSS, and inline JavaScript in that one file; do not create `src/` files yet. Use workspace `write_file` paths relative to the workspace root.';
     const allow = computeToolAllowlist({
       role: 'Developer',
       mode: 'always',
@@ -1166,7 +1189,7 @@ describe('computeToolAllowlist', () => {
     expect(
       shouldConstrainToImmediateFileWrite({ role: 'Developer', latestUserMessage: prompt }),
     ).toBe(true);
-    expect([...constrained!]).toEqual(['writeFile', 'run_script', 'get_script_run']);
+    expect([...constrained!]).toEqual(['write_file', 'run_script', 'get_script_run']);
   });
 
   it('does not treat existing-codebase feature requests as immediate create writes', () => {
@@ -1178,10 +1201,10 @@ describe('computeToolAllowlist', () => {
     ).toBe(false);
   });
 
-  it('constrains direct eval-harness missing-file kicks to writeFile only', () => {
+  it('constrains direct eval-harness missing-file kicks to write_file only', () => {
     const nudge =
       "Direct kick from the eval harness: the deliverable hasn't landed in the project's workspace yet (`index.html`). " +
-      'Do not write more planning documents, do not ask for confirmation. Your next tool call MUST be `writeFile` creating the actual deliverable file at `index.html` in the project workspace.';
+      'Do not write more planning documents, do not ask for confirmation. Your next tool call MUST be `write_file` creating the actual deliverable file at `index.html` in the project workspace.';
     const allow = computeToolAllowlist({
       role: 'Builder',
       mode: 'always',
@@ -1197,15 +1220,15 @@ describe('computeToolAllowlist', () => {
     expect(shouldConstrainToImmediateFileWrite({ role: 'Builder', latestUserMessage: nudge })).toBe(
       true,
     );
-    expect([...constrained!]).toEqual(['writeFile', 'run_script', 'get_script_run']);
+    expect([...constrained!]).toEqual(['write_file', 'run_script', 'get_script_run']);
   });
 
   it('constrains urgent missing review deliverables for reviewer roles', () => {
     const nudge =
       '[Message from Wren]: [scenario check] There is still **no `review.md`** in the workspace.\n\n' +
       'Write the actual deliverable file now with the requested content. Stop reading/planning and write the file now: ' +
-      '`writeFile({ path: "review.md", content: <the full deliverable contents> })`.\n\n' +
-      'Do not end your turn until `writeFile` has landed the file.';
+      '`write_file({ path: "review.md", content: <the full deliverable contents> })`.\n\n' +
+      'Do not end your turn until `write_file` has landed the file.';
     const allow = computeToolAllowlist({
       role: 'Reviewer',
       mode: 'always',
@@ -1222,8 +1245,8 @@ describe('computeToolAllowlist', () => {
       shouldConstrainToImmediateFileWrite({ role: 'Reviewer', latestUserMessage: nudge }),
     ).toBe(true);
     // Reviewer has no code-execution group, so the script ride-alongs
-    // intersect away — writeFile stays the whole surface for this role.
-    expect([...constrained!]).toEqual(['writeFile']);
+    // intersect away — write_file stays the whole surface for this role.
+    expect([...constrained!]).toEqual(['write_file']);
   });
 
   it('keeps source-read tools for initial reviewer review.md handoff briefs', () => {
@@ -1250,17 +1273,17 @@ describe('computeToolAllowlist', () => {
       }),
     ).toBe(false);
     expect(constrained).toBe(allow);
-    expect(constrained!.has('readFile')).toBe(true);
-    expect(constrained!.has('readdir')).toBe(true);
-    expect(constrained!.has('writeFile')).toBe(true);
+    expect(constrained!.has('read_file')).toBe(true);
+    expect(constrained!.has('list_dir')).toBe(true);
+    expect(constrained!.has('write_file')).toBe(true);
   });
 
   it('does not constrain image-link repair nudges that quote prior missing-file context', () => {
     const repair =
       '[Message from Wren]: [scenario check] I looked at `index.html` and the success check is still missing **working-image**. ' +
       'The earlier failure said there is still **no `index.html`** in the workspace, but that is now stale. ' +
-      'Patch the `<img>` source to the real generated image and use `replaceInFile({ path: "index.html", search: "assets/generated/pet-shop-logo.png", replace: "assets/generated/image-26572039.png" })`. ' +
-      'Do not end your turn until `writeFile` has landed the file.';
+      'Patch the `<img>` source to the real generated image and use `replace_in_file({ path: "index.html", search: "assets/generated/pet-shop-logo.png", replace: "assets/generated/image-26572039.png" })`. ' +
+      'Do not end your turn until `write_file` has landed the file.';
     expect(
       shouldConstrainToImmediateFileWrite({
         role: 'Builder',
@@ -1269,15 +1292,15 @@ describe('computeToolAllowlist', () => {
     ).toBe(false);
   });
 
-  it('does not collapse source-parse repair nudges to immediate writeFile only', () => {
+  it('does not collapse source-parse repair nudges to immediate write_file only', () => {
     const repair =
       "[Message from Priya]: [scenario check] I looked at `index.html` and the success criteria aren't met yet.\n" +
       'Signals that fired: name, grid, click, win-detect, js-size-ok.\n' +
       "Signals that didn't fire: **js-parses**.\n" +
       "Specific failure: inline JS does not parse (Unexpected token ']').\n" +
       'Because this is a source parse failure in an existing file, patch the deliverable with the smallest syntax fix first. ' +
-      'Exact patch candidate(s): replaceInFile({ path: "index.html", find: "board[combo[0]]]", replace: "board[combo[0]]", occurrence: "all" }). ' +
-      'Whole-file `writeFile` overwrites are validated and can be refused if the re-emitted HTML still has a parse error.';
+      'Exact patch candidate(s): replace_in_file({ path: "index.html", find: "board[combo[0]]]", replace: "board[combo[0]]", occurrence: "all" }). ' +
+      'Whole-file `write_file` overwrites are validated and can be refused if the re-emitted HTML still has a parse error.';
     const allow = computeToolAllowlist({
       role: 'Builder',
       mode: 'always',
@@ -1300,20 +1323,20 @@ describe('computeToolAllowlist', () => {
     expect(
       shouldConstrainToScenarioFileRepair({ role: 'Builder', latestUserMessage: repair }),
     ).toBe(true);
-    expect(constrained!.has('readFile')).toBe(true);
-    expect(constrained!.has('replaceInFile')).toBe(true);
-    expect(constrained!.has('writeFile')).toBe(true);
-    expect([...constrained!]).not.toEqual(['writeFile']);
+    expect(constrained!.has('read_file')).toBe(true);
+    expect(constrained!.has('replace_in_file')).toBe(true);
+    expect(constrained!.has('write_file')).toBe(true);
+    expect([...constrained!]).not.toEqual(['write_file']);
   });
 
-  it('does not treat existing scenario checks with stale deliverable annotations as fresh writeFile creates', () => {
+  it('does not treat existing scenario checks with stale deliverable annotations as fresh write_file creates', () => {
     const repair =
       "[Message from Priya]: [scenario check] I looked at `index.html` and the success criteria aren't met yet.\n" +
       'Signals that fired: index-present, launch-board-title, status-columns.\n' +
       "Signals that didn't fire: **due-date-input**, **due-summary**, **date-logic**.\n" +
       'Specific failure: due-date-input: The add-task form must include a due date input.\n' +
       'CODEBASE_EVOLUTION_PHASE_3: patch the existing Launch Board codebase for the current phase only. Your next assistant action must edit the current `index.html`; do not reply with a plan or create a new project.\n\n' +
-      '[Deliverable expected as a FILE at `index.html`. Your first assistant action should be the tool call `writeFile({ path, content })`; draft inside the tool argument, not in chat.]';
+      '[Deliverable expected as a FILE at `index.html`. Your first assistant action should be the tool call `write_file({ path, content })`; draft inside the tool argument, not in chat.]';
     const allow = computeToolAllowlist({
       role: 'Developer',
       mode: 'always',
@@ -1336,11 +1359,11 @@ describe('computeToolAllowlist', () => {
     expect(
       shouldConstrainToScenarioFileRepair({ role: 'Developer', latestUserMessage: repair }),
     ).toBe(true);
-    expect(constrained!.has('readFile')).toBe(true);
-    expect(constrained!.has('replaceInFile')).toBe(true);
-    expect(constrained!.has('replaceLines')).toBe(true);
+    expect(constrained!.has('read_file')).toBe(true);
+    expect(constrained!.has('replace_in_file')).toBe(true);
+    expect(constrained!.has('replace_lines')).toBe(true);
     expect(constrained!.has('validate')).toBe(true);
-    expect([...constrained!]).not.toEqual(['writeFile']);
+    expect([...constrained!]).not.toEqual(['write_file']);
   });
 
   it('constrains scenario sniff repair nudges to direct file repair tools', () => {
@@ -1350,7 +1373,7 @@ describe('computeToolAllowlist', () => {
       "Signals that didn't fire: **js-size-ok**.\n" +
       'Specific failure: Add at least 2 features to flesh it out.\n' +
       'The artifact exists but the trial-level checker is waiting for the missing signals above. ' +
-      'Re-read the scenario prompt + mission objectives, identify what each missing signal is testing for, and patch the deliverable (use `replaceInFile` for small fixes, `writeFile` for re-emit).';
+      'Re-read the scenario prompt + mission objectives, identify what each missing signal is testing for, and patch the deliverable (use `replace_in_file` for small fixes, `write_file` for re-emit).';
     const allow = computeToolAllowlist({
       role: 'Builder',
       mode: 'always',
@@ -1366,9 +1389,9 @@ describe('computeToolAllowlist', () => {
     expect(
       shouldConstrainToScenarioFileRepair({ role: 'Builder', latestUserMessage: repair }),
     ).toBe(true);
-    expect(constrained!.has('readFile')).toBe(true);
-    expect(constrained!.has('replaceInFile')).toBe(true);
-    expect(constrained!.has('writeFile')).toBe(true);
+    expect(constrained!.has('read_file')).toBe(true);
+    expect(constrained!.has('replace_in_file')).toBe(true);
+    expect(constrained!.has('write_file')).toBe(true);
     expect(constrained!.has('validate')).toBe(true);
     expect(constrained!.has('message_gezel')).toBe(false);
     expect(constrained!.has('ask_specialist')).toBe(false);
@@ -1382,7 +1405,7 @@ describe('computeToolAllowlist', () => {
       "Signals that didn't fire: **file-present**.\n" +
       'Specific failure: postmortem.md is 3910B (need >= 6 KB)\n' +
       'The artifact exists but the trial-level checker is waiting for the missing signals above. ' +
-      'Re-read the scenario prompt + mission objectives, identify what each missing signal is testing for, and patch the deliverable (use `replaceInFile` for small fixes, `writeFile` for re-emit).';
+      'Re-read the scenario prompt + mission objectives, identify what each missing signal is testing for, and patch the deliverable (use `replace_in_file` for small fixes, `write_file` for re-emit).';
     const allow = computeToolAllowlist({
       role: 'Researcher',
       mode: 'always',
@@ -1398,10 +1421,10 @@ describe('computeToolAllowlist', () => {
     expect(
       shouldConstrainToScenarioFileRepair({ role: 'Researcher', latestUserMessage: repair }),
     ).toBe(true);
-    expect(constrained!.has('readFile')).toBe(true);
-    expect(constrained!.has('replaceInFile')).toBe(true);
-    expect(constrained!.has('writeFile')).toBe(true);
-    expect(constrained!.has('appendToFile')).toBe(true);
+    expect(constrained!.has('read_file')).toBe(true);
+    expect(constrained!.has('replace_in_file')).toBe(true);
+    expect(constrained!.has('write_file')).toBe(true);
+    expect(constrained!.has('append_to_file')).toBe(true);
     expect(constrained!.has('message_gezel')).toBe(false);
     expect(constrained!.has('ask_specialist')).toBe(false);
   });
@@ -1413,7 +1436,7 @@ describe('computeToolAllowlist', () => {
       'Browser console reported 1 page error(s) — first: GameState is not defined\n' +
       '(1 other assertion(s) passed: nine-cells-rendered)\n\n' +
       "The static structure looks correct (the sniff signals all fire) but the page doesn't actually function. " +
-      'Read `index.html`, find the specific code that should make the failing assertion(s) pass, and patch with `replaceInFile` (preferred for small fixes) or re-emit with `writeFile`.';
+      'Read `index.html`, find the specific code that should make the failing assertion(s) pass, and patch with `replace_in_file` (preferred for small fixes) or re-emit with `write_file`.';
     const allow = computeToolAllowlist({
       role: 'Builder',
       mode: 'always',
@@ -1429,20 +1452,20 @@ describe('computeToolAllowlist', () => {
     expect(
       shouldConstrainToScenarioFileRepair({ role: 'Builder', latestUserMessage: repair }),
     ).toBe(true);
-    expect(constrained!.has('readFile')).toBe(true);
-    expect(constrained!.has('replaceInFile')).toBe(true);
-    expect(constrained!.has('writeFile')).toBe(true);
+    expect(constrained!.has('read_file')).toBe(true);
+    expect(constrained!.has('replace_in_file')).toBe(true);
+    expect(constrained!.has('write_file')).toBe(true);
     expect(constrained!.has('validate')).toBe(true);
     expect(constrained!.has('message_gezel')).toBe(false);
     expect(constrained!.has('set_task_status')).toBe(false);
   });
 
-  it('collapses an explicit whole-file scenario repair to writeFile without unrelated tools', () => {
+  it('collapses an explicit whole-file scenario repair to write_file without unrelated tools', () => {
     const repair =
       "[Message from Dana]: [scenario check] I looked at `src/controller.ts` and the success criteria aren't met yet.\n" +
       "Signals that didn't fire: **all-call-sites-updated**.\n" +
-      'The file still has several stale field accesses. Rewrite `src/controller.ts` completely with `writeFile`. ' +
-      'The next assistant action must start with `writeFile` for the complete corrected version.';
+      'The file still has several stale field accesses. Rewrite `src/controller.ts` completely with `write_file`. ' +
+      'The next assistant action must start with `write_file` for the complete corrected version.';
     const allow = computeToolAllowlist({
       role: 'Developer',
       mode: 'always',
@@ -1465,15 +1488,15 @@ describe('computeToolAllowlist', () => {
     expect(
       shouldConstrainToScenarioFileRepair({ role: 'Developer', latestUserMessage: repair }),
     ).toBe(true);
-    expect([...constrained!]).toEqual(['writeFile', 'run_script', 'get_script_run']);
+    expect([...constrained!]).toEqual(['write_file', 'run_script', 'get_script_run']);
   });
 
   it('keeps a prepended mandatory first-write directive authoritative over patch fallback prose', () => {
     const repair =
-      '[Deliverable expected as a FILE at `src/controller.ts`. Your first assistant action should be the tool call `writeFile({ path, content })`; draft inside the tool argument.]\n' +
+      '[Deliverable expected as a FILE at `src/controller.ts`. Your first assistant action should be the tool call `write_file({ path, content })`; draft inside the tool argument.]\n' +
       "[scenario check] I looked at `src/controller.ts` and the success criteria aren't met yet. " +
       "Signals that didn't fire: **all-call-sites-updated**. " +
-      'If this is a small edit, use `replaceInFile`; otherwise use `writeFile` to re-emit the checked file. ' +
+      'If this is a small edit, use `replace_in_file`; otherwise use `write_file` to re-emit the checked file. ' +
       'Your next assistant action should be a file-writing tool call for `src/controller.ts`.';
     const allow = computeToolAllowlist({
       role: 'Developer',
@@ -1497,13 +1520,13 @@ describe('computeToolAllowlist', () => {
     expect(
       shouldConstrainToScenarioFileRepair({ role: 'Developer', latestUserMessage: repair }),
     ).toBe(true);
-    expect([...constrained!]).toEqual(['writeFile', 'run_script', 'get_script_run']);
+    expect([...constrained!]).toEqual(['write_file', 'run_script', 'get_script_run']);
   });
 
   it('constrains direct single-file source repair requests to repair tools', () => {
     const repair =
-      'Please fix the bug in `index.html` in this project. First call `readFile(path: "index.html")` to read it. ' +
-      'Then identify the JavaScript syntax error and edit the file in place via `writeFile`. Do not rewrite the file from scratch; the fix should be a single-line correction.';
+      'Please fix the bug in `index.html` in this project. First call `read_file(path: "index.html")` to read it. ' +
+      'Then identify the JavaScript syntax error and edit the file in place via `write_file`. Do not rewrite the file from scratch; the fix should be a single-line correction.';
     const allow = computeToolAllowlist({
       role: 'Developer',
       mode: 'always',
@@ -1519,9 +1542,9 @@ describe('computeToolAllowlist', () => {
     expect(
       shouldConstrainToScenarioFileRepair({ role: 'Developer', latestUserMessage: repair }),
     ).toBe(true);
-    expect(constrained!.has('readFile')).toBe(true);
-    expect(constrained!.has('replaceInFile')).toBe(true);
-    expect(constrained!.has('writeFile')).toBe(true);
+    expect(constrained!.has('read_file')).toBe(true);
+    expect(constrained!.has('replace_in_file')).toBe(true);
+    expect(constrained!.has('write_file')).toBe(true);
     expect(constrained!.has('validate')).toBe(true);
     expect(constrained!.has('message_gezel')).toBe(false);
     expect(constrained!.has('list_gezels')).toBe(false);
@@ -1550,7 +1573,7 @@ describe('computeToolAllowlist', () => {
 
   it('recognizes a small failing-acceptance defect as an existing-source repair', () => {
     const repair =
-      'Running `node accept.mjs` currently FAILS. Your job: make it pass. The defect in `lib/paginate.mjs` is small (a few lines at most) once diagnosed. Read `lib/paginate.mjs`, leave `accept.mjs` untouched, and edit files in place via writeFile/replaceInFile.';
+      'Running `node accept.mjs` currently FAILS. Your job: make it pass. The defect in `lib/paginate.mjs` is small (a few lines at most) once diagnosed. Read `lib/paginate.mjs`, leave `accept.mjs` untouched, and edit files in place via write_file/replace_in_file.';
 
     expect(
       shouldConstrainToExistingSourceEdit({ role: 'Developer', latestUserMessage: repair }),
@@ -1560,13 +1583,13 @@ describe('computeToolAllowlist', () => {
     ).toBe(true);
   });
 
-  it('collapses tic-tac-toe full runtime rewrites to writeFile only', () => {
+  it('collapses tic-tac-toe full runtime rewrites to write_file only', () => {
     const repair =
       '[Message from Priya]: [runtime check] I opened `tic-tac-toe-game/workspace/index.html` in a headless browser. 2 assertion(s) failed:\n' +
       '- **nine-cells-rendered**: only 1 cell-like elements (need >= 9)\n' +
       '- **click-marks-a-cell**: no clickable cell found to drive\n\n' +
       'TICTACTOE_FULL_REWRITE: this page must be mechanically simple enough for the browser check to drive.\n' +
-      'Your next tool call MUST be `writeFile` for `tic-tac-toe-game/workspace/index.html`; do not call `validate`, `readFile`, `ask_user_question`, create another project, or delegate again before writing.';
+      'Your next tool call MUST be `write_file` for `tic-tac-toe-game/workspace/index.html`; do not call `validate`, `read_file`, `ask_user_question`, create another project, or delegate again before writing.';
     const allow = computeToolAllowlist({
       role: 'Builder',
       mode: 'always',
@@ -1589,16 +1612,16 @@ describe('computeToolAllowlist', () => {
     expect(
       shouldConstrainToScenarioFileRepair({ role: 'Builder', latestUserMessage: repair }),
     ).toBe(true);
-    expect([...constrained!]).toEqual(['writeFile', 'run_script', 'get_script_run']);
+    expect([...constrained!]).toEqual(['write_file', 'run_script', 'get_script_run']);
   });
 
-  it('collapses tic-tac-toe full sniff rewrites to writeFile only', () => {
+  it('collapses tic-tac-toe full sniff rewrites to write_file only', () => {
     const repair =
       "[Message from Priya]: [scenario check] I looked at `index.html` and the success criteria aren't met yet.\n" +
       'Signals that fired: name, click, win-detect, js-parses.\n' +
       "Signals that didn't fire: **grid**, **js-size-ok**.\n" +
       'TICTACTOE_FULL_REWRITE: this is not a planning or polish issue; the tic-tac-toe page still lacks the concrete game structure the checker can run.\n' +
-      'Your next tool call MUST be `writeFile` for `index.html`; do not call `validate`, `readFile`, `ask_user_question`, create another project, or delegate again before writing.';
+      'Your next tool call MUST be `write_file` for `index.html`; do not call `validate`, `read_file`, `ask_user_question`, create another project, or delegate again before writing.';
     const allow = computeToolAllowlist({
       role: 'Builder',
       mode: 'always',
@@ -1621,7 +1644,7 @@ describe('computeToolAllowlist', () => {
     expect(
       shouldConstrainToScenarioFileRepair({ role: 'Builder', latestUserMessage: repair }),
     ).toBe(true);
-    expect([...constrained!]).toEqual(['writeFile', 'run_script', 'get_script_run']);
+    expect([...constrained!]).toEqual(['write_file', 'run_script', 'get_script_run']);
   });
 
   it('keeps repeated runtime repair nudges on the direct file repair surface', () => {
@@ -1647,9 +1670,9 @@ describe('computeToolAllowlist', () => {
     expect(
       shouldConstrainToScenarioFileRepair({ role: 'Builder', latestUserMessage: repair }),
     ).toBe(true);
-    expect(constrained!.has('readFile')).toBe(true);
-    expect(constrained!.has('replaceInFile')).toBe(true);
-    expect(constrained!.has('writeFile')).toBe(true);
+    expect(constrained!.has('read_file')).toBe(true);
+    expect(constrained!.has('replace_in_file')).toBe(true);
+    expect(constrained!.has('write_file')).toBe(true);
     expect(constrained!.has('message_gezel')).toBe(false);
     expect(constrained!.has('set_task_status')).toBe(false);
   });
@@ -1672,7 +1695,7 @@ describe('computeToolAllowlist', () => {
       "Signals that didn't fire: **section-architecture**, **source-citations**, **size-ok**.\n" +
       'Specific failure: missing required section(s): section-architecture.\n' +
       'The artifact exists but the trial-level checker is waiting for the missing signals above. ' +
-      'Re-read the scenario prompt + mission objectives, identify what each missing signal is testing for, and patch the deliverable (use `replaceInFile` for small fixes, `writeFile` for re-emit).';
+      'Re-read the scenario prompt + mission objectives, identify what each missing signal is testing for, and patch the deliverable (use `replace_in_file` for small fixes, `write_file` for re-emit).';
     const allow = computeToolAllowlist({
       role: 'Code Reviewer',
       mode: 'always',
@@ -1692,15 +1715,15 @@ describe('computeToolAllowlist', () => {
       }),
     ).toBe(true);
     expect([...constrained!].sort()).toEqual(
-      ['appendToFile', 'replaceInFile', 'replaceLines', 'writeFile'].sort(),
+      ['append_to_file', 'replace_in_file', 'replace_lines', 'write_file'].sort(),
     );
   });
 
   it('does not constrain coordinator roles or explicit toolset overrides for urgent file nudges', () => {
     const nudge =
       '[scenario check] There is still **no `index.html`** in the workspace. ' +
-      'writeFile({ path: "index.html", content: "..." }). ' +
-      'Do not end your turn until `writeFile` has landed the file.';
+      'write_file({ path: "index.html", content: "..." }). ' +
+      'Do not end your turn until `write_file` has landed the file.';
     expect(
       shouldConstrainToImmediateFileWrite({
         role: 'Voorman',
@@ -1718,7 +1741,7 @@ describe('computeToolAllowlist', () => {
       shouldConstrainToScenarioFileRepair({
         role: 'Builder',
         latestUserMessage:
-          "[scenario check] I looked at `index.html` and the success criteria aren't met yet. Signals that didn't fire: js-size-ok. patch the deliverable with replaceInFile.",
+          "[scenario check] I looked at `index.html` and the success criteria aren't met yet. Signals that didn't fire: js-size-ok. patch the deliverable with replace_in_file.",
         hasToolsetOverride: true,
       }),
     ).toBe(false);
@@ -1741,7 +1764,7 @@ describe('computeToolAllowlist', () => {
       projectMode: 'solo',
     });
     expect(solo).toEqual(crew);
-    expect(solo!.has('readFile')).toBe(true);
+    expect(solo!.has('read_file')).toBe(true);
     expect(solo!.has('list_gezels')).toBe(false);
   });
 
@@ -1918,7 +1941,7 @@ describe('computeToolAllowlist — git/github gating', () => {
     expect(allow!.has('github_pr_list')).toBe(false);
     expect(allow!.has('run_git')).toBe(true);
     // Non-git tools are otherwise fully present (mode 'never').
-    expect(allow!.has('readFile')).toBe(true);
+    expect(allow!.has('read_file')).toBe(true);
   });
 });
 
@@ -2336,7 +2359,7 @@ describe('role-typed delegation tools (tools.gezels-as-roles)', () => {
     expect(isRoleDelegationTool('delegate_developer')).toBe(true);
     expect(isRoleDelegationTool('consult_image_generator')).toBe(true);
     expect(isRoleDelegationTool('message_gezel')).toBe(false);
-    expect(isRoleDelegationTool('writeFile')).toBe(false);
+    expect(isRoleDelegationTool('write_file')).toBe(false);
   });
 
   it('expandToolsetGroups("role-delegation") yields the doer delegate/consult tools', () => {

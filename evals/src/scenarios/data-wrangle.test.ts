@@ -322,8 +322,8 @@ describe('data-wrangle repair feedback', () => {
     expect(directive).toContain('scripts/clean_data.mjs');
     expect(directive).toContain('fs.writeFileSync');
     expect(directive).toContain('fs.readFileSync');
-    expect(directive).toContain('line-numbered readFile output');
-    expect(directive).toContain('MCP tools like writeFile');
+    expect(directive).toContain('line-numbered read_file output');
+    expect(directive).toContain('MCP tools like write_file');
     expect(directive).toContain(`node ${DATA_WRANGLE_VALIDATOR_PATH}`);
     expect(directive).toContain('never write script source');
     expect(directive).toContain(`exactly ${EXPECTED_ROW_COUNT}`);
@@ -341,8 +341,8 @@ describe('data-wrangle repair feedback', () => {
     expect(directive).toContain('source header signup_date');
     expect(directive).toContain('preserve the id/name');
     expect(directive).toContain('fs.readFileSync/fs.writeFileSync');
-    expect(directive).toContain('line-numbered readFile output');
-    expect(directive).toContain('MCP tools like writeFile');
+    expect(directive).toContain('line-numbered read_file output');
+    expect(directive).toContain('MCP tools like write_file');
     expect(directive).toContain(`node ${DATA_WRANGLE_VALIDATOR_PATH}`);
     expect(directive).toContain('write it to scripts/clean_data.mjs');
     expect(directive).toContain('final JSON array only');
@@ -392,7 +392,7 @@ describe('data-wrangle repair feedback', () => {
     expect(directive).toContain('No CUST###');
     expect(directive).toContain('fs.readFileSync');
     expect(directive).toContain('fs.writeFileSync');
-    expect(directive).toContain('line-numbered readFile output');
+    expect(directive).toContain('line-numbered read_file output');
     expect(directive).toContain(`node ${DATA_WRANGLE_VALIDATOR_PATH}`);
     expect(directive).toContain('source header signup_date');
   });
@@ -422,8 +422,8 @@ describe('data-wrangle — required signals are satisfiable from the user-shaped
     ['emails-normalized', /lowercased and trimmed/],
     ['source id/name preservation', /preserve id and name from the kept source row/],
     ['script runtime boundary', /fs\.readfilesync[\s\S]*fs\.writefilesync/],
-    ['no MCP tool calls inside scripts', /writefile are not available inside node scripts/],
-    ['no pasted readFile markers', /line-numbered readfile output/],
+    ['no MCP tool calls inside scripts', /write_file are not available inside node scripts/],
+    ['no pasted read_file markers', /line-numbered read_file output/],
     ['validator CLI', /node tools\/check_customers\.mjs/],
     ['dates-iso', /yyyy-mm-dd/],
     ['date conventions per file', /mm\/dd\/yyyy[\s\S]*dd\.mm\.yyyy/],

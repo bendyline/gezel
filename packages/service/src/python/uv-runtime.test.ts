@@ -223,6 +223,40 @@ describe('UvRuntime — installer detection precedence', () => {
     expect(fakes.execCalls.map((call) => call.cmd)).toEqual([`"${bundled}" --version`]);
   });
 
+  it('sees a bundled uv binary installed after the runtime was constructed', async () => {
+    const prior = process.env.GEZEL_UV_BIN;
+    delete process.env.GEZEL_UV_BIN;
+    const bundled = join(home, 'late-uv');
+    const fakes = makeFakes({
+      exec: (cmd) => {
+        if (cmd.includes('late-uv')) return { stdout: 'uv 0.8.0', stderr: '' };
+        if (cmd === 'uv --version') return { stdout: 'uv 0.5.0', stderr: '' };
+        return new Error('not found');
+      },
+      spawn: () => ({ exitCode: 0 }),
+    });
+    const uv = new UvRuntime({
+      home,
+      exec: fakes.exec,
+      spawn: fakes.spawn,
+      onLog: () => {},
+    });
+    try {
+      expect((await uv.describeRuntime()).source).toBe('system-uv');
+      await writeFile(bundled, 'uv', { mode: 0o755 });
+      process.env.GEZEL_UV_BIN = bundled;
+
+      const refreshed = await uv.describeRuntime();
+
+      expect(refreshed.source).toBe('bundled-uv');
+      expect(refreshed.uvVersion).toBe('0.8.0');
+      expect(refreshed.installerPath).toBe(bundled);
+    } finally {
+      if (prior === undefined) delete process.env.GEZEL_UV_BIN;
+      else process.env.GEZEL_UV_BIN = prior;
+    }
+  });
+
   it('reports bundledUvAvailable=false when the bundled path is missing on disk', async () => {
     const fakes = makeFakes({
       exec: (cmd) => {

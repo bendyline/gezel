@@ -2,12 +2,14 @@ import { createHash } from 'node:crypto';
 import { createReadStream, existsSync } from 'node:fs';
 import { chmod, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { createLogger, nowIso } from '@bendyline/gezel';
+import { type NativeEngineResolveEvent, createLogger, nowIso } from '@bendyline/gezel';
 import { type NativeBinaryName, resolvePlatformKey } from '@bendyline/gezel/native';
 import AdmZip from 'adm-zip';
 import * as tar from 'tar';
 import { type DownloadResult, downloadWithRetry } from '../utils/download-with-retry.js';
 import {
+  NATIVE_ENGINE_ARCHIVE_SHA256,
+  NATIVE_ENGINE_MACOS_NOTARIZED,
   SHA256SUMS_DIGEST,
   effectiveEngineRelease,
   isPlaceholderDigest,
@@ -46,12 +48,7 @@ export class EngineUnavailableError extends Error {
   }
 }
 
-export type EngineResolveEvent =
-  | { type: 'progress'; bytesWritten: number; totalBytes: number }
-  | { type: 'retrying'; attempt: number; maxAttempts: number; delayMs: number; reason: string }
-  | { type: 'verifying'; what: 'sha256' | 'signature' }
-  | { type: 'done'; binPath: string; cached: boolean }
-  | { type: 'error'; error: string };
+export type EngineResolveEvent = NativeEngineResolveEvent;
 
 export interface ResolveEngineOptions {
   engine: NativeBinaryName;
@@ -60,7 +57,7 @@ export interface ResolveEngineOptions {
   variant?: string;
   /** Native release version; defaults to the source pin / `GEZEL_NATIVE_ENGINE_VERSION`. */
   version?: string;
-  /** Signature enforcement; defaults to `prefer` (binaries aren't signed yet). */
+  /** Signature enforcement; defaults to `require` for first-party binaries. */
   signaturePolicy?: SignaturePolicy;
   fetchImpl?: typeof fetch;
   signal?: AbortSignal;
@@ -69,6 +66,10 @@ export interface ResolveEngineOptions {
   token?: string | null;
   /** Override the source-pinned SHA256SUMS digest (tests). */
   expectedSha256sumsDigest?: string;
+  /** Override the source-bundled per-archive hashes (tests). */
+  expectedArchiveSha256?: Readonly<Record<string, string>>;
+  /** Override whether Gatekeeper notarization is required on macOS (tests/dev). */
+  requireMacosNotarization?: boolean;
   /** Override the GitHub API base (tests point this at a local fixture). */
   githubApiBase?: string;
   /** Override signature verification (tests — avoids spawning powershell/codesign). */
@@ -140,7 +141,39 @@ export async function* resolveEngine(
   const primaryBinaryFile = engine === 'uv' ? `uv${exeExt}` : `gezel-${engine}${exeExt}`;
   const binaryFileCandidates =
     engine === 'uv' ? [primaryBinaryFile] : [primaryBinaryFile, `${engine}${exeExt}`];
-  const policy = opts.signaturePolicy ?? 'prefer';
+  const requestedPolicy = opts.signaturePolicy ?? 'require';
+  // Astral ships uv.exe unsigned. It remains an explicit, narrow exception:
+  // source-bundled archive SHA + upstream bytes are authoritative, while an
+  // actually invalid Authenticode signature is still rejected by `prefer`.
+  const policy =
+    process.platform === 'win32' && engine === 'uv' && requestedPolicy === 'require'
+      ? 'prefer'
+      : requestedPolicy;
+  const archiveName = `gezel-native-${version}-${assetPlatformKey}.${ext}`;
+  const usesSourcePin =
+    opts.version === undefined &&
+    opts.expectedSha256sumsDigest === undefined &&
+    opts.expectedArchiveSha256 === undefined &&
+    !process.env.GEZEL_NATIVE_ENGINE_VERSION;
+  const archivePins =
+    opts.expectedArchiveSha256 ?? (usesSourcePin ? NATIVE_ENGINE_ARCHIVE_SHA256 : undefined);
+  const bundledArchiveSha = archivePins?.[archiveName]?.toLowerCase();
+  if (archivePins && !bundledArchiveSha) {
+    yield* fail(
+      `'${archiveName}' is missing from this build's bundled native checksum map — refusing to install an unpinned archive`,
+    );
+  }
+  const requireMacosNotarization =
+    opts.requireMacosNotarization ??
+    (usesSourcePin && process.platform === 'darwin' && NATIVE_ENGINE_MACOS_NOTARIZED);
+  const verifyAuthenticity = opts.verifyOverride ?? verifyCodeSignature;
+  const verifyOptions = {
+    policy,
+    ...(engine === 'uv' && process.platform === 'win32'
+      ? {}
+      : { expectedPublisher: 'Bendyline LLC' }),
+    ...(requireMacosNotarization ? { requireNotarization: true } : {}),
+  } as const;
 
   const versionDir = join(opts.home, 'engines', 'native-bin', version);
   const cacheDir = join(versionDir, assetPlatformKey);
@@ -157,23 +190,38 @@ export async function* resolveEngine(
 
   // ── Fast path: already resolved + verified ──
   if (existsSync(binPath) && existsSync(sentinelPath)) {
-    stampEnv(engine, binPath, variant, versionDir);
-    yield { type: 'done', binPath, cached: true };
-    return {
-      binPath,
-      cached: true,
-      signature: await readSentinelSignature(sentinelPath),
-      version,
-      assetPlatformKey,
-    };
+    const sentinel = await readSentinel(sentinelPath);
+    if (!bundledArchiveSha || sentinel.archiveSha?.toLowerCase() === bundledArchiveSha) {
+      const { result: signature, accepted } = await verifyAuthenticity(binPath, verifyOptions);
+      if (!accepted) {
+        yield* fail(
+          `cached engine binary failed signature policy '${policy}': ${signature.status}${signature.detail ? ` (${signature.detail})` : ''}`,
+        );
+      }
+      stampEnv(engine, binPath, variant, versionDir);
+      yield { type: 'done', binPath, cached: true };
+      return {
+        binPath,
+        cached: true,
+        signature,
+        version,
+        assetPlatformKey,
+      };
+    }
+    log.warn(
+      `[engine-resolver] cached ${archiveName} was verified against ${sentinel.archiveSha ?? 'no archive hash'}, but this build pins ${bundledArchiveSha}; replacing it`,
+    );
   }
 
   // ── Availability gates ──
-  const expectedDigest = (opts.expectedSha256sumsDigest ?? SHA256SUMS_DIGEST).toLowerCase();
+  const expectedDigest = (
+    opts.expectedSha256sumsDigest ?? (usesSourcePin ? SHA256SUMS_DIGEST : '0'.repeat(64))
+  ).toLowerCase();
   const unpinned = isPlaceholderDigest(expectedDigest);
   const hasOverride =
     opts.version !== undefined ||
     opts.expectedSha256sumsDigest !== undefined ||
+    opts.expectedArchiveSha256 !== undefined ||
     !!process.env.GEZEL_NATIVE_ENGINE_VERSION;
   if (unpinned && !hasOverride) {
     yield* fail(
@@ -192,7 +240,6 @@ export async function* resolveEngine(
 
   const baseFetch = opts.fetchImpl ?? globalThis.fetch;
   const tag = `native-v${version}`;
-  const archiveName = `gezel-native-${version}-${assetPlatformKey}.${ext}`;
 
   // ── 1. Resolve release + assets ──
   const release = await ghJson(`${apiBase}/repos/${REPO}/releases/tags/${tag}`, baseFetch, token);
@@ -223,12 +270,18 @@ export async function* resolveEngine(
     );
   }
   const sums = parseSums(sumsBytes.toString('utf8'));
-  const expectedArchiveSha = sums.get(archiveName);
-  if (!expectedArchiveSha) {
+  const manifestArchiveSha = sums.get(archiveName) ?? '';
+  if (!manifestArchiveSha) {
     yield* fail(
       `'${archiveName}' is not listed in ${tag}'s SHA256SUMS — refusing to install unverified`,
     );
   }
+  if (bundledArchiveSha && manifestArchiveSha !== bundledArchiveSha) {
+    yield* fail(
+      `archive checksum mismatch for '${archiveName}': this build pins ${bundledArchiveSha.slice(0, 16)}… but ${tag}'s SHA256SUMS lists ${manifestArchiveSha.slice(0, 16)}…. Refusing — the release may have been tampered with or re-cut.`,
+    );
+  }
+  const expectedArchiveSha = bundledArchiveSha ?? manifestArchiveSha;
 
   // ── 3. Download the archive (auth headers injected into the fetch) ──
   await mkdir(versionDir, { recursive: true });
@@ -314,12 +367,7 @@ export async function* resolveEngine(
   // ── 6. Code-signature ──
   yield { type: 'verifying', what: 'signature' };
   await stripQuarantine(tmpBin);
-  const { result: signature, accepted } = await (opts.verifyOverride ?? verifyCodeSignature)(
-    tmpBin,
-    {
-      policy,
-    },
-  );
+  const { result: signature, accepted } = await verifyAuthenticity(tmpBin, verifyOptions);
   if (!accepted) {
     await rm(tmpExtractDir, { recursive: true, force: true });
     yield* fail(
@@ -483,11 +531,19 @@ async function sha256File(path: string): Promise<string> {
   return hash.digest('hex');
 }
 
-async function readSentinelSignature(path: string): Promise<SignatureResult> {
+async function readSentinel(
+  path: string,
+): Promise<{ signature: SignatureResult; archiveSha?: string }> {
   try {
-    const j = JSON.parse(await readFile(path, 'utf8')) as { signature?: SignatureResult };
-    return j.signature ?? { status: 'unsupported' };
+    const j = JSON.parse(await readFile(path, 'utf8')) as {
+      signature?: SignatureResult;
+      archiveSha?: string;
+    };
+    return {
+      signature: j.signature ?? { status: 'unsupported' },
+      ...(j.archiveSha ? { archiveSha: j.archiveSha } : {}),
+    };
   } catch {
-    return { status: 'unsupported' };
+    return { signature: { status: 'unsupported' } };
   }
 }

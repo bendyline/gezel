@@ -1,16 +1,16 @@
 /**
- * Source-syntax validation for `writeFile` / `appendToFile` / `write_artifact`.
+ * Source-syntax validation for `write_file` / `append_to_file` / `write_artifact`.
  *
  * The gemma4-e4b matrix surfaced a class of failure where the
  * model emits a 4 KB HTML page whose inline `<script>` block has a single
  * truncation bug (missing closing brace, dangling `for` keyword) — the
  * file is otherwise complete and the page would render, but the JS
- * doesn't run. The model gets no signal: `writeFile` returns success,
+ * doesn't run. The model gets no signal: `write_file` returns success,
  * the trial timer ticks, the eventual sniff finds the broken JS, the
  * trial fails. By the time the model could re-investigate, the turn
  * budget is gone.
  *
- * Returning a parse error from `writeFile` as a tool error fixes that
+ * Returning a parse error from `write_file` as a tool error fixes that
  * loop. It's the same shape a compiler would give: "your code didn't
  * compile, here's the line." The model can then re-emit the file with
  * the fix in the next turn.
@@ -47,7 +47,7 @@
  *     skips syntax validation for non-shipping material) or wrap the
  *     incomplete bit in `/* TODO * /` etc. We'll add an override if real
  *     scenarios demand it.
- *   - **Validation runs after the merge** for `appendToFile`, against
+ *   - **Validation runs after the merge** for `append_to_file`, against
  *     the merged file body — the model's append might tail-complete a
  *     prior truncation OR break it further; both cases need the check.
  */
@@ -126,7 +126,7 @@ function validateHtmlInlineScripts(path: string, html: string): SourceValidation
   if (opens > closes) {
     return {
       ok: false,
-      message: `${path}: HTML has ${opens} <script> opening tag(s) but only ${closes} </script> closing tag(s). The script block is unterminated — the file is truncated. Re-emit the full file with a matching </script> close, or use \`appendToFile\` to send just the missing tail starting from where the previous write cut off.`,
+      message: `${path}: HTML has ${opens} <script> opening tag(s) but only ${closes} </script> closing tag(s). The script block is unterminated — the file is truncated. Re-emit the full file with a matching </script> close, or use \`append_to_file\` to send just the missing tail starting from where the previous write cut off.`,
       recoverablePartialWrite: 'truncated-html',
     };
   }
@@ -142,7 +142,7 @@ function validateHtmlInlineScripts(path: string, html: string): SourceValidation
       const where = loc ? `at line ${loc.line}, col ${loc.col}` : `(opens near line ${s.openLine})`;
       return {
         ok: false,
-        message: `${path}: inline <script> #${i + 1} ${where} failed to parse: ${parseError}. Fix the syntax error at that location and re-emit the file. If the script was truncated mid-statement, you can use \`appendToFile\` to send only the missing tail.`,
+        message: `${path}: inline <script> #${i + 1} ${where} failed to parse: ${parseError}. Fix the syntax error at that location and re-emit the file. If the script was truncated mid-statement, you can use \`append_to_file\` to send only the missing tail.`,
         recoverablePartialWrite: 'invalid-html',
       };
     }
@@ -315,7 +315,7 @@ function formatSourceDiagnostic(
 }
 
 function atomicSourceWriteRejectionRecovery(path: string): string {
-  return ` This write is rejected atomically; no bytes from this call were persisted. THE FILE WAS NOT WRITTEN by this call. Fix the syntax error and call \`writeFile\` again with the complete corrected contents for \`${path}\`. Do not use \`appendToFile\`, \`replaceInFile\`, or \`replaceLines\` against this rejected draft.`;
+  return ` This write is rejected atomically; no bytes from this call were persisted. THE FILE WAS NOT WRITTEN by this call. Fix the syntax error and call \`write_file\` again with the complete corrected contents for \`${path}\`. Do not use \`append_to_file\`, \`replace_in_file\`, or \`replace_lines\` against this rejected draft.`;
 }
 
 function findTypeScriptOnlySyntax(

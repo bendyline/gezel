@@ -11,11 +11,12 @@ const execFileAsync = promisify(execFile);
  *   - `off`     — skip the check entirely (escape hatch).
  *   - `prefer`  — verify if signed; an unsigned binary is allowed (with a
  *                 warning), but a *tampered* signature (`invalid`) is
- *                 rejected. The default while the native binaries aren't
- *                 yet code-signed in build-native.yml.
+ *                 rejected. Reserved for explicitly allowlisted upstream
+ *                 binaries that their publisher ships unsigned.
  *   - `require` — accept only `valid` signatures. (`unsupported` platforms
  *                 — Linux, which has no signing standard we use — are
  *                 accepted because sha256 is the integrity gate there.)
+ *                 Missing verification tools on Windows/macOS fail closed.
  */
 export type SignaturePolicy = 'require' | 'prefer' | 'off';
 
@@ -40,6 +41,10 @@ export interface VerifyOptions {
   policy: SignaturePolicy;
   /** Test seam — defaults to `process.platform`. */
   platform?: NodeJS.Platform;
+  /** Expected organization in the Authenticode/Developer ID identity. */
+  expectedPublisher?: string;
+  /** Require Gatekeeper to identify the binary as Notarized Developer ID. */
+  requireNotarization?: boolean;
   /** Test seam — defaults to a real `execFile` runner. */
   run?: Runner;
 }
@@ -78,12 +83,12 @@ export async function verifyCodeSignature(
   const run = opts.run ?? defaultRun;
   const result =
     platform === 'win32'
-      ? await verifyWindows(binPath, run)
+      ? await verifyWindows(binPath, run, opts.expectedPublisher)
       : platform === 'darwin'
-        ? await verifyMac(binPath, run)
+        ? await verifyMac(binPath, run, opts.expectedPublisher, opts.requireNotarization === true)
         : { status: 'unsupported' as const, detail: 'no signing standard for this platform' };
 
-  const accepted = policyAccepts(result.status, opts.policy);
+  const accepted = policyAccepts(result.status, opts.policy, platform);
   if (!accepted) {
     log.warn(
       `[engine-signature] rejected ${binPath}: status=${result.status} (${result.detail ?? ''})`,
@@ -94,14 +99,25 @@ export async function verifyCodeSignature(
   return { result, accepted };
 }
 
-function policyAccepts(status: SignatureStatus, policy: SignaturePolicy): boolean {
+function policyAccepts(
+  status: SignatureStatus,
+  policy: SignaturePolicy,
+  platform: NodeJS.Platform,
+): boolean {
   if (policy === 'off') return true;
   if (policy === 'prefer') return status !== 'invalid';
   // require
-  return status === 'valid' || status === 'unsupported';
+  return (
+    status === 'valid' ||
+    (status === 'unsupported' && platform !== 'win32' && platform !== 'darwin')
+  );
 }
 
-async function verifyWindows(binPath: string, run: Runner): Promise<SignatureResult> {
+async function verifyWindows(
+  binPath: string,
+  run: Runner,
+  expectedPublisher?: string,
+): Promise<SignatureResult> {
   // Get-AuthenticodeSignature.Status: Valid | NotSigned | HashMismatch |
   // NotTrusted | UnknownError | … . -LiteralPath avoids glob expansion;
   // single quotes are doubled to escape (paths are from our own cache).
@@ -110,27 +126,74 @@ async function verifyWindows(binPath: string, run: Runner): Promise<SignatureRes
     '-NoProfile',
     '-NonInteractive',
     '-Command',
-    `(Get-AuthenticodeSignature -LiteralPath '${escaped}').Status`,
+    `$sig = Get-AuthenticodeSignature -LiteralPath '${escaped}'; Write-Output ([string]$sig.Status); Write-Output ([string]$sig.SignerCertificate.Subject)`,
   ]);
   if (isSpawnFailure(res.code)) {
     return { status: 'unsupported', detail: `could not run powershell (${res.code})` };
   }
-  const status = res.stdout.trim();
-  if (status === 'Valid') return { status: 'valid' };
+  const [status = '', ...subjectLines] = res.stdout.trim().split(/\r?\n/);
+  const subject = subjectLines.join(' ').trim();
+  if (status === 'Valid') {
+    if (expectedPublisher && !subject.toLowerCase().includes(expectedPublisher.toLowerCase())) {
+      return {
+        status: 'invalid',
+        detail: `unexpected Authenticode publisher: ${subject || 'missing signer subject'}`,
+      };
+    }
+    return { status: 'valid', ...(subject ? { detail: subject } : {}) };
+  }
   if (status === 'NotSigned') return { status: 'unsigned' };
   return { status: 'invalid', detail: `Authenticode status: ${status || 'unknown'}` };
 }
 
-async function verifyMac(binPath: string, run: Runner): Promise<SignatureResult> {
+async function verifyMac(
+  binPath: string,
+  run: Runner,
+  expectedPublisher?: string,
+  requireNotarization = false,
+): Promise<SignatureResult> {
   // `codesign --verify` exits 0 for a valid signature, non-zero otherwise.
   const verify = await run('codesign', ['--verify', '--strict', binPath]);
   if (isSpawnFailure(verify.code)) {
     return { status: 'unsupported', detail: `could not run codesign (${verify.code})` };
   }
-  if (verify.code === 0) return { status: 'valid' };
-  // Distinguish unsigned from a bad/tampered signature.
   const info = await run('codesign', ['-dv', binPath]);
   const blob = `${info.stdout}\n${info.stderr}`.toLowerCase();
+  if (verify.code === 0) {
+    if (
+      expectedPublisher &&
+      !blob.includes(`authority=developer id application: ${expectedPublisher.toLowerCase()}`)
+    ) {
+      return {
+        status: 'invalid',
+        detail: `unexpected Developer ID authority for ${binPath}`,
+      };
+    }
+    if (requireNotarization) {
+      const assessment = await run('spctl', [
+        '--assess',
+        '--type',
+        'execute',
+        '--verbose=4',
+        binPath,
+      ]);
+      if (isSpawnFailure(assessment.code)) {
+        return {
+          status: 'unsupported',
+          detail: `could not run Gatekeeper assessment (${assessment.code})`,
+        };
+      }
+      const assessmentText = `${assessment.stdout}\n${assessment.stderr}`.toLowerCase();
+      if (assessment.code !== 0 || !assessmentText.includes('source=notarized developer id')) {
+        return {
+          status: 'invalid',
+          detail: `Gatekeeper did not confirm notarization: ${assessmentText.trim() || 'assessment failed'}`,
+        };
+      }
+    }
+    return { status: 'valid' };
+  }
+  // Distinguish unsigned from a bad/tampered signature.
   if (blob.includes('not signed at all') || blob.includes('no signature')) {
     return { status: 'unsigned' };
   }

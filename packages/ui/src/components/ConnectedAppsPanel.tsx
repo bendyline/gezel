@@ -132,8 +132,8 @@ export function ConnectedAppsPanel() {
     <section className="settings-section">
       <h2>Connected Apps</h2>
       <p className="muted small">
-        Third-party apps that have asked for access to your gezel service via the public SDK. Each
-        app is granted only the scopes it requested. Revoke any time.
+        Apps and command-line clients that have asked for access to your Gezel service. Each client
+        is granted only the scopes it requested. Revoke any time.
       </p>
 
       {error && (
@@ -156,7 +156,9 @@ export function ConnectedAppsPanel() {
                   <div className="muted small">
                     {g.kind === 'device'
                       ? 'wants to run models on this device'
-                      : `${g.appId} — wants: ${g.scopes.join(', ')}`}
+                      : g.scopes.includes('cli')
+                        ? `${g.appId} — wants command-line control of this Gezel service`
+                        : `${g.appId} — wants: ${g.scopes.join(', ')}`}
                   </div>
                 </div>
                 <div className="connected-app-actions">

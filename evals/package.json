@@ -11,6 +11,7 @@
     "run": "tsx src/bin/run.ts",
     "batch": "tsx src/bin/batch.ts",
     "ab-grammar": "tsx src/bin/ab-grammar.ts",
+    "ab-tool-naming": "tsx src/bin/ab-tool-naming.ts",
     "ab-craftbook-format": "tsx src/bin/ab-craftbook-format.ts",
     "ab-prompt-conduct": "tsx src/bin/ab-prompt-conduct.ts",
     "ab-index": "tsx src/bin/ab-index.ts",

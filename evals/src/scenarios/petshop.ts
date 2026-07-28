@@ -306,7 +306,7 @@ export const petShopScenario: EvalScenario = {
                 jobTitle: 'Image generator',
                 filePath: 'assets/logo.png',
                 message:
-                  'Generate the missing pet shop logo as a real PNG image in this project workspace. Your first action must be `generate_image({ prompt: "friendly pet shop logo, paw print, warm colors", saveAs: "assets/logo.png" })`. Do not call `writeFile`, do not paste base64, and do not create an SVG. The HTML already references `<img src="assets/logo.png" alt="Pet shop logo">`, so the acceptance check needs the actual raster file at `assets/logo.png`.',
+                  'Generate the missing pet shop logo as a real PNG image in this project workspace. Your first action must be `generate_image({ prompt: "friendly pet shop logo, paw print, warm colors", saveAs: "assets/logo.png" })`. Do not call `write_file`, do not paste base64, and do not create an SVG. The HTML already references `<img src="assets/logo.png" alt="Pet shop logo">`, so the acceptance check needs the actual raster file at `assets/logo.png`.',
               }
             : undefined,
         };

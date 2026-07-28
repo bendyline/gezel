@@ -48,17 +48,17 @@ const REFERENCE_HALT_REPORT = [
 ].join('\n');
 
 function readCall(path: string): RunbookToolCall {
-  return { name: 'readFile', success: true, path, argsFull: `path: ${path}` };
+  return { name: 'read_file', success: true, path, argsFull: `path: ${path}` };
 }
 
 function failedReadCall(path: string): RunbookToolCall {
-  return { name: 'readFile', success: false, path, argsFull: `path: ${path}` };
+  return { name: 'read_file', success: false, path, argsFull: `path: ${path}` };
 }
 
 function mutationCall(
   path: string,
   content: string,
-  name: 'writeFile' | 'appendToFile' = 'writeFile',
+  name: 'write_file' | 'append_to_file' = 'write_file',
 ): RunbookToolCall {
   return { name, success: true, path, argsFull: `content:\n${content}\npath: ${path}` };
 }
@@ -73,11 +73,11 @@ const REFERENCE_TOOL_TRACE: RunbookToolCall[] = [
   mutationCall(RUNLOG_PATH, `## STEP 1\n${TOKEN_SERVICE_COUNT}`),
   readCall('state/manifest-checksum.txt'),
   readCall('checks/expected-counts.md'),
-  mutationCall(RUNLOG_PATH, `## STEP 2\n${TOKEN_CHECKSUM}`, 'appendToFile'),
+  mutationCall(RUNLOG_PATH, `## STEP 2\n${TOKEN_CHECKSUM}`, 'append_to_file'),
   readCall('state/config.json'),
-  mutationCall(RUNLOG_PATH, `## STEP 3\n${TOKEN_CONFIG_VERSION}`, 'appendToFile'),
+  mutationCall(RUNLOG_PATH, `## STEP 3\n${TOKEN_CONFIG_VERSION}`, 'append_to_file'),
   readCall('state/backup.json'),
-  mutationCall(RUNLOG_PATH, `## STEP 4\n${TOKEN_BACKUP_STATUS}`, 'appendToFile'),
+  mutationCall(RUNLOG_PATH, `## STEP 4\n${TOKEN_BACKUP_STATUS}`, 'append_to_file'),
   mutationCall(HALT_REPORT_PATH, REFERENCE_HALT_REPORT),
 ];
 
@@ -112,8 +112,8 @@ const FROZEN_TOOL_TRACE: RunbookToolCall[] = [
   mutationCall(HALT_REPORT_PATH, 'STEP 1 Error during execution'),
   readCall('state/services.json'),
   mutationCall(RUNLOG_PATH, `## STEP 1\n${TOKEN_SERVICE_COUNT}`),
-  mutationCall(RUNLOG_PATH, `## STEP 2\n${TOKEN_CHECKSUM}`, 'appendToFile'),
-  mutationCall(RUNLOG_PATH, `## STEP 3\n${TOKEN_CONFIG_VERSION}`, 'appendToFile'),
+  mutationCall(RUNLOG_PATH, `## STEP 2\n${TOKEN_CHECKSUM}`, 'append_to_file'),
+  mutationCall(RUNLOG_PATH, `## STEP 3\n${TOKEN_CONFIG_VERSION}`, 'append_to_file'),
   readCall('state/backup.json'),
   mutationCall(RUNLOG_PATH, FROZEN_RUNLOG),
   mutationCall(HALT_REPORT_PATH, FROZEN_HALT_REPORT),
@@ -363,7 +363,7 @@ describe('ops-runbook grader', () => {
 
   it('requires explicitly successful reads rather than treating failed calls as evidence', () => {
     const failedManifestRead = REFERENCE_TOOL_TRACE.map((call) =>
-      call.name === 'readFile' && call.path === 'state/manifest-checksum.txt'
+      call.name === 'read_file' && call.path === 'state/manifest-checksum.txt'
         ? failedReadCall('state/manifest-checksum.txt')
         : call,
     );
@@ -375,7 +375,7 @@ describe('ops-runbook grader', () => {
 
   it('does not confuse a filename mentioned in write content with the mutated target', () => {
     const collidingWrite = REFERENCE_TOOL_TRACE.map((call) =>
-      call.name === 'appendToFile' && call.argsFull?.includes(TOKEN_CHECKSUM)
+      call.name === 'append_to_file' && call.argsFull?.includes(TOKEN_CHECKSUM)
         ? {
             ...call,
             path: 'review-notes.md',
@@ -412,7 +412,7 @@ describe('ops-runbook grader', () => {
       ...FROZEN_TOOL_TRACE,
       ...RUNBOOK_REQUIRED_READ_PATHS.map(readCall),
       mutationCall(RUNLOG_PATH, REFERENCE_RUNLOG),
-      mutationCall(HALT_REPORT_PATH, 'Reviewed the source files.', 'appendToFile'),
+      mutationCall(HALT_REPORT_PATH, 'Reviewed the source files.', 'append_to_file'),
     ];
     const provenance = checkRunbookReadProvenance(unrelatedAppend);
 
@@ -461,11 +461,11 @@ describe('ops-runbook grader', () => {
     const directives = [
       runbookRepairDirective('runlog.md is missing step 2'),
       runbookRepairDirective('halt-report.md must state observed backup status'),
-      runbookRepairDirective('source-read provenance missing successful readFile calls'),
+      runbookRepairDirective('source-read provenance missing successful read_file calls'),
       runbookRepairDirective(),
     ];
     for (const directive of directives) {
-      expect(directive).toContain('readFile');
+      expect(directive).toContain('read_file');
       expect(directive).not.toContain(TOKEN_CHECKSUM);
       expect(directive).not.toContain(TOKEN_CONFIG_VERSION);
       expect(directive).not.toMatch(/\bfresh\b|\bstale\b|\b71\b|\b24\b/);
@@ -476,7 +476,7 @@ describe('ops-runbook grader', () => {
 
   it('states the source-read contract in both mission and kickoff', () => {
     expect(RUNBOOK_MISSION_OBJECTIVES).toContain('Never copy a verification value');
-    expect(RUNBOOK_KICKOFF_MESSAGE).toContain('readFile({ path: "runbook.md" })');
+    expect(RUNBOOK_KICKOFF_MESSAGE).toContain('read_file({ path: "runbook.md" })');
     expect(RUNBOOK_KICKOFF_MESSAGE).toContain('values supplied by chat or checker feedback');
   });
 

@@ -8,9 +8,9 @@
 import { validateSourceContent } from './source-validation.js';
 
 export function normalizeWorkspaceWriteContent(path: string, content: string): string {
-  // `readFile` renders source with an `N→` display gutter so models can use
-  // replaceLines. Small local models occasionally copy that rendered view
-  // verbatim into a complete writeFile draft. Strip it only when EVERY line
+  // `read_file` renders source with an `N→` display gutter so models can use
+  // replace_lines. Small local models occasionally copy that rendered view
+  // verbatim into a complete write_file draft. Strip it only when EVERY line
   // carries the exact monotonically increasing 1..N sequence: that signature
   // is produced by our renderer and is unambiguous. A partial/non-sequential
   // arrow prefix is left untouched for source validation to reject normally.
@@ -36,7 +36,7 @@ export function normalizeWorkspaceWriteContent(path: string, content: string): s
 const GUTTER_SAFE_SOURCE_PATH_RE = /\.(?:html?|css|mjs|cjs|js|jsx|ts|tsx|json)$/i;
 
 /**
- * Remove a full-file copy of readFile's display-only line-number gutter.
+ * Remove a full-file copy of read_file's display-only line-number gutter.
  * Leading alignment spaces are optional because models sometimes trim the
  * first one while preserving the numeric sequence. Newline bytes and a final
  * newline are preserved exactly.

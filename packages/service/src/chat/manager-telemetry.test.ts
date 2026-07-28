@@ -66,7 +66,7 @@ describe('ChatManager session telemetry', () => {
     const session = await manager.createSession({ gezelId: 'ada' });
 
     mock.scriptToolCalls([
-      { name: 'writeFile', arguments: { path: 'notes.md', content: 'telemetry test file\n' } },
+      { name: 'write_file', arguments: { path: 'notes.md', content: 'telemetry test file\n' } },
     ]);
     mock.script('Wrote the file.');
     await manager.send(session.id, 'write notes.md please');

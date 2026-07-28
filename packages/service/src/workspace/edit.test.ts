@@ -105,7 +105,7 @@ describe('readFileForEditOrThrow', () => {
     } catch (err) {
       expect((err as WorkspaceEditError).code).toBe('file-not-found');
       expect((err as Error).message).toContain('nope.txt');
-      expect((err as Error).message).toContain('writeFile');
+      expect((err as Error).message).toContain('write_file');
     }
   });
 });

@@ -137,7 +137,7 @@ async function realpathSafe(p: string): Promise<string | null> {
  * `realpath` the given path if it exists, else walk up to the nearest
  * existing ancestor and realpath that + append the un-realpath'd tail.
  * This gives us a meaningful symlink-resolved path even for files that
- * don't exist yet (common during `writeFile`).
+ * don't exist yet (common during `write_file`).
  */
 async function realpathNearest(p: string): Promise<string | null> {
   const direct = await realpathSafe(p);

@@ -111,8 +111,8 @@ describe('McpBridge', () => {
     const tools = bridge.getOpenAITools();
     const names = tools.map((t) => t.name);
     // Spot-check the major categories.
-    expect(names).toContain('readdir');
-    expect(names).toContain('readFile');
+    expect(names).toContain('list_dir');
+    expect(names).toContain('read_file');
     expect(names).toContain('list_artifacts');
     expect(names).toContain('write_artifact');
     expect(names).toContain('list_documents');
@@ -137,8 +137,27 @@ describe('McpBridge', () => {
   });
 
   it('hasTool returns true for known names, false for bogus ones', () => {
-    expect(bridge.hasTool('readdir')).toBe(true);
+    expect(bridge.hasTool('list_dir')).toBe(true);
     expect(bridge.hasTool('definitely_not_a_tool')).toBe(false);
+  });
+
+  it('accepts legacy and miscased spellings end-to-end (alias dispatch)', async () => {
+    // Pinned gilde role prompts still teach `readFile`/`readdir`, and small
+    // models guess spellings from training priors — either must reach the
+    // renamed tool through the real gezel-mcp subprocess, while never
+    // appearing in the advertised list.
+    const advertised = new Set(bridge.getOpenAITools().map((t) => t.name));
+    expect(advertised.has('read_file')).toBe(true);
+    expect(advertised.has('readFile')).toBe(false);
+    expect(advertised.has('readdir')).toBe(false);
+
+    expect(bridge.hasTool('readFile')).toBe(true);
+    expect(bridge.hasTool('read-file')).toBe(true);
+
+    const viaLegacy = await bridge.callTool('readdir', { path: '.' });
+    expect(viaLegacy).not.toContain('not found');
+    const viaCanonical = await bridge.callTool('list_dir', { path: '.' });
+    expect(viaLegacy).toBe(viaCanonical);
   });
 
   // Static-decision hooks (the shape `buildAutoAllowHook` produces for
@@ -147,10 +166,10 @@ describe('McpBridge', () => {
   describe('static-decision craftbook hooks', () => {
     it('denies a matching tool via a static deny hook (no runner)', async () => {
       bridge.installCraftbookHooks('cb-deny', [
-        { phase: 'PreToolUse', matcher: '^readdir$', decision: 'deny', label: 'blocked for test' },
+        { phase: 'PreToolUse', matcher: '^list_dir$', decision: 'deny', label: 'blocked for test' },
       ]);
       try {
-        const out = await bridge.callTool('readdir', { path: '.' });
+        const out = await bridge.callTool('list_dir', { path: '.' });
         expect(out).toContain('blocked for test');
       } finally {
         bridge.uninstallCraftbookHooks('cb-deny');
@@ -159,10 +178,10 @@ describe('McpBridge', () => {
 
     it('lets a matching tool run via a static allow hook (no runner)', async () => {
       bridge.installCraftbookHooks('cb-allow', [
-        { phase: 'PreToolUse', matcher: '^readdir$', decision: 'allow', label: 'auto-allowed' },
+        { phase: 'PreToolUse', matcher: '^list_dir$', decision: 'allow', label: 'auto-allowed' },
       ]);
       try {
-        const out = await bridge.callTool('readdir', { path: '.' });
+        const out = await bridge.callTool('list_dir', { path: '.' });
         // An allow decision is a no-op: the call proceeds and the result
         // is the real tool output, not the hook's deny reason.
         expect(out).not.toContain('blocked by hook');
@@ -176,7 +195,7 @@ describe('McpBridge', () => {
         { phase: 'PreToolUse', matcher: '^camera_snapshot$', decision: 'deny' },
       ]);
       try {
-        const out = await bridge.callTool('readdir', { path: '.' });
+        const out = await bridge.callTool('list_dir', { path: '.' });
         expect(out).not.toContain('blocked by hook');
       } finally {
         bridge.uninstallCraftbookHooks('cb-narrow');
@@ -185,22 +204,22 @@ describe('McpBridge', () => {
 
     it('routes ask decisions through askUser: approve proceeds, decline/unset deny', async () => {
       bridge.installCraftbookHooks('cb-ask', [
-        { phase: 'PreToolUse', matcher: '^readdir$', decision: 'ask', label: 'careful check' },
+        { phase: 'PreToolUse', matcher: '^list_dir$', decision: 'ask', label: 'careful check' },
       ]);
       try {
         // No askUser wired → fail closed (guardrails must not silently pass).
         bridge.askUser = undefined;
-        const unset = await bridge.callTool('readdir', { path: '.' });
+        const unset = await bridge.callTool('list_dir', { path: '.' });
         expect(unset).toContain('cancelled by user');
 
         // User approves → the call proceeds to the real tool.
         bridge.askUser = async () => true;
-        const approved = await bridge.callTool('readdir', { path: '.' });
+        const approved = await bridge.callTool('list_dir', { path: '.' });
         expect(approved).not.toContain('cancelled by user');
 
         // User declines → deny with the cancel reason.
         bridge.askUser = async () => false;
-        const declined = await bridge.callTool('readdir', { path: '.' });
+        const declined = await bridge.callTool('list_dir', { path: '.' });
         expect(declined).toContain('cancelled by user');
       } finally {
         bridge.uninstallCraftbookHooks('cb-ask');
@@ -240,7 +259,7 @@ describe('McpBridge', () => {
   });
 
   it('steers workspace paths away from artifact tools', async () => {
-    await bridge.callTool('writeFile', {
+    await bridge.callTool('write_file', {
       path: 'surface/bug_report.md',
       content: '# Workspace report\n\nThis belongs to the project workspace.\n',
     });
@@ -248,7 +267,7 @@ describe('McpBridge', () => {
     const wrongRead = await bridge.callTool('read_artifact', { path: 'surface/bug_report.md' });
     expect(wrongRead).toMatch(/ERROR:/);
     expect(wrongRead).toContain('workspace file exists');
-    expect(wrongRead).toContain('readFile');
+    expect(wrongRead).toContain('read_file');
 
     const wrongWrite = await bridge.callTool('write_artifact', {
       path: 'surface/bug_report.md',
@@ -258,7 +277,7 @@ describe('McpBridge', () => {
     expect(wrongWrite).toContain('Refusing write_artifact');
     expect(wrongWrite).toContain('not update the project');
 
-    const readBack = await bridge.callTool('readFile', { path: 'surface/bug_report.md' });
+    const readBack = await bridge.callTool('read_file', { path: 'surface/bug_report.md' });
     expect(readBack).toContain('# Workspace report');
     expect(readBack).toContain('This belongs to the project workspace.');
   });
@@ -271,9 +290,9 @@ describe('McpBridge', () => {
 
     expect(redirected).not.toMatch(/ERROR:/);
     expect(redirected).toContain('project workspace');
-    expect(redirected).toContain('writeFile');
+    expect(redirected).toContain('write_file');
 
-    const workspaceFile = await bridge.callTool('readFile', { path: 'index.html' });
+    const workspaceFile = await bridge.callTool('read_file', { path: 'index.html' });
     expect(workspaceFile).toContain('<h1>Pet shop</h1>');
 
     const missingArtifact = await bridge.callTool('read_artifact', { path: 'index.html' });
@@ -303,7 +322,7 @@ describe('McpBridge', () => {
       expect(artifactRedirect).not.toMatch(/ERROR:/);
       expect(artifactRedirect).toContain('expected deliverable is a workspace file');
 
-      let workspaceFile = await expectedBridge.callTool('readFile', {
+      let workspaceFile = await expectedBridge.callTool('read_file', {
         path: 'reports/release-notes.md',
       });
       expect(workspaceFile).toContain('First workspace pass');
@@ -315,7 +334,7 @@ describe('McpBridge', () => {
       expect(documentRedirect).not.toMatch(/ERROR:/);
       expect(documentRedirect).toContain('expected deliverable is a workspace file');
 
-      workspaceFile = await expectedBridge.callTool('readFile', {
+      workspaceFile = await expectedBridge.callTool('read_file', {
         path: 'reports/release-notes.md',
       });
       expect(workspaceFile).toContain('Second workspace pass');
@@ -399,7 +418,7 @@ describe('McpBridge', () => {
     const [task] = await svc.context.tasks.list({ projectId });
     expect(task).toBeTruthy();
     const description = task!.description ?? '';
-    expect(description).toContain('writeFile({ path: "index.html"');
+    expect(description).toContain('write_file({ path: "index.html"');
     expect(description).toContain('not `workspace/index.html`');
     expect(description).toContain('Do not impose an artificial byte/line cap');
     expect(description).not.toContain('under ~2.5 KB');
@@ -440,7 +459,7 @@ describe('McpBridge', () => {
     expect(description).toContain(
       'Note from the meester: Start the project by delivering a single index.html file',
     );
-    expect(description).toContain('writeFile({ path: "index.html"');
+    expect(description).toContain('write_file({ path: "index.html"');
     expect(description).toContain('not `workspace/index.html`');
     expect(description).toContain('Do not impose an artificial byte/line cap');
   });
@@ -492,12 +511,12 @@ describe('McpBridge', () => {
 
     const projectId = create.match(/\(([a-z0-9-]+)\)/)![1]!;
 
-    // Solo fallback: the task description carries the writeFile guidance
+    // Solo fallback: the task description carries the write_file guidance
     // and the step carries an ENFORCED deliverable (the old notify's
     // advisory expectedDeliverable became an advanceWhen + gate).
     const [task] = await svc.context.tasks.list({ projectId });
     const description = task!.description ?? '';
-    expect(description).toContain('writeFile({ path: "index.html"');
+    expect(description).toContain('write_file({ path: "index.html"');
     expect(description).toContain('not `workspace/index.html`');
     const entryStep = task!.craftbook.steps[0]!;
     expect(entryStep.advanceWhen?.file).toBe('index.html');
@@ -652,7 +671,7 @@ describe('McpBridge', () => {
       });
 
       expect(closed).toMatch(/no shippable file/i);
-      expect(closed).toContain('writeFile');
+      expect(closed).toContain('write_file');
       expect(closed).toContain('Artifact-only plans');
 
       const listing = await bridge.callTool('list_tasks', { project: projectId });
@@ -737,7 +756,7 @@ describe('McpBridge', () => {
   });
 
   describe('copy_artifact_to_workspace (binary-safe artifact → workspace)', () => {
-    // petshop case: model called writeFile with image content
+    // petshop case: model called write_file with image content
     // as a JSON-string body, ended up with a 4-byte logo.png. This tool
     // is the binary-safe path — the bytes are copied server-side, never
     // round-trip through a JSON string.
@@ -814,7 +833,7 @@ describe('McpBridge', () => {
     // calls validate to confirm shape before set_task_status({ complete }).
     // Should produce evidence the model can cite verbatim in `verification`.
     it('validates an HTML deliverable and returns PASS with structured checks', async () => {
-      await bridge.callTool('writeFile', {
+      await bridge.callTool('write_file', {
         path: 'index.html',
         content:
           '<!DOCTYPE html><html><body><h1>Pets</h1><script>\nfunction go() { return 1; }\nconsole.log(go());\n</script></body></html>',
@@ -827,7 +846,7 @@ describe('McpBridge', () => {
 
     it('routes a 4-byte image to the copy_artifact_to_workspace hint', async () => {
       // Simulates the petshop bug shape — a "PNG" landed in
-      // the workspace via writeFile (UTF-8 round-trip), so it's
+      // the workspace via write_file (UTF-8 round-trip), so it's
       // actually just 4 ASCII bytes. The validator should catch it via
       // magic-byte mismatch and point the model at the right repair.
       const scheme = svc.cert ? 'https' : 'http';
@@ -849,7 +868,7 @@ describe('McpBridge', () => {
 
     it('returns an actionable error with line + excerpt on a JS syntax error in HTML', async () => {
       await bridge.callTool('list_projects', {}); // ensure context exists
-      // writeFile refuses HTML with broken script body, so use
+      // write_file refuses HTML with broken script body, so use
       // write_artifact (no syntax validation) to land the broken file
       // for validate to look at.
       await bridge.callTool('write_artifact', {
@@ -886,8 +905,8 @@ describe('McpBridge', () => {
     expect(result).toMatch(/ERROR:|CAUGHT:/);
   });
 
-  describe('writeFile syntax validation (HTML + JS/TS)', () => {
-    it('writeFile persists a first-write HTML draft with unparseable inline <script>', async () => {
+  describe('write_file syntax validation (HTML + JS/TS)', () => {
+    it('write_file persists a first-write HTML draft with unparseable inline <script>', async () => {
       // Mirrors the gemma4-e4b tictactoe failure mode:
       // 4 KB of valid HTML with one truncated `function` body, all
       // <script> tags balanced. Without the validator the file lands
@@ -896,14 +915,14 @@ describe('McpBridge', () => {
       // recover without re-streaming the whole file.
       const brokenHtml =
         '<!DOCTYPE html><html><body><script>\nfunction reset() {\n  board = [];\n// missing close brace\nfor (let i = 0; i < 9; i++) {}\n</script></body></html>';
-      const out = await bridge.callTool('writeFile', {
+      const out = await bridge.callTool('write_file', {
         path: 'broken.html',
         content: brokenHtml,
       });
       expect(out).toMatch(/ERROR:|inline <script>/);
       expect(out).toContain('Invalid first draft broken.html was saved');
 
-      const readBack = await bridge.callTool('readFile', { path: 'broken.html' });
+      const readBack = await bridge.callTool('read_file', { path: 'broken.html' });
       expect(readBack).toContain('function reset()');
       expect(readBack).toContain('// missing close brace');
     });
@@ -916,25 +935,25 @@ describe('McpBridge', () => {
       // still reach the server's reject/recover path (see the parse-error
       // cases below).
       const partialHtml = '<!DOCTYPE html><html><body><canvas></canvas><script>\nconst x = 1;\n';
-      const out = await bridge.callTool('writeFile', {
+      const out = await bridge.callTool('write_file', {
         path: 'partial-game.html',
         content: partialHtml,
       });
       expect(out).toMatch(/Wrote partial-game\.html/);
 
-      const readBack = await bridge.callTool('readFile', { path: 'partial-game.html' });
+      const readBack = await bridge.callTool('read_file', { path: 'partial-game.html' });
       expect(readBack).toContain('<canvas>');
       expect(readBack).toContain('const x = 1;');
       expect(readBack).toContain('</script>');
       expect(readBack).toContain('</html>');
     });
 
-    it('writeFile preserves an existing file when a replacement HTML write has a balanced script parse error', async () => {
-      await bridge.callTool('writeFile', {
+    it('write_file preserves an existing file when a replacement HTML write has a balanced script parse error', async () => {
+      await bridge.callTool('write_file', {
         path: 'keep-good-balanced.html',
         content: '<!DOCTYPE html><html><body><script>window.ok = true;</script></body></html>',
       });
-      const out = await bridge.callTool('writeFile', {
+      const out = await bridge.callTool('write_file', {
         path: 'keep-good-balanced.html',
         content:
           '<!DOCTYPE html><html><body><script>\nfunction reset() {\n  window.ok = false;\n</script></body></html>',
@@ -942,7 +961,7 @@ describe('McpBridge', () => {
       expect(out).toMatch(/ERROR:/);
       expect(out).toContain('Existing keep-good-balanced.html was left untouched');
 
-      const readBack = await bridge.callTool('readFile', { path: 'keep-good-balanced.html' });
+      const readBack = await bridge.callTool('read_file', { path: 'keep-good-balanced.html' });
       expect(readBack).toContain('window.ok = true');
       expect(readBack).not.toContain('window.ok = false');
     });
@@ -953,58 +972,58 @@ describe('McpBridge', () => {
       // shorter truncation is still refused by the destructive-overwrite
       // guard, and a balanced-but-unparseable replacement is preserved (see
       // the parse-error case above).
-      await bridge.callTool('writeFile', {
+      await bridge.callTool('write_file', {
         path: 'keep-good.html',
         content: '<!DOCTYPE html><html><body><script>window.ok = true;</script></body></html>',
       });
-      const out = await bridge.callTool('writeFile', {
+      const out = await bridge.callTool('write_file', {
         path: 'keep-good.html',
         content: '<!DOCTYPE html><html><body><script>\nwindow.ok = false;\n',
       });
       expect(out).toMatch(/Wrote keep-good\.html/);
 
-      const readBack = await bridge.callTool('readFile', { path: 'keep-good.html' });
+      const readBack = await bridge.callTool('read_file', { path: 'keep-good.html' });
       expect(readBack).toContain('window.ok = false');
       expect(readBack).toContain('</script>');
     });
 
-    it('writeFile accepts a clean HTML file', async () => {
+    it('write_file accepts a clean HTML file', async () => {
       const okHtml = '<!DOCTYPE html><html><body><script>console.log("hi");</script></body></html>';
-      const out = await bridge.callTool('writeFile', {
+      const out = await bridge.callTool('write_file', {
         path: 'good.html',
         content: okHtml,
       });
       expect(out).toMatch(/Wrote good\.html/);
     });
 
-    it('writeFile repairs recoverable Gemma HTML write artifacts before persisting', async () => {
+    it('write_file repairs recoverable Gemma HTML write artifacts before persisting', async () => {
       const recoveredHtml =
         '<!DOCTYPE html><html><body><button id="cell"></button><script>\n' +
         'document.getElementById("cell").innerTextText = "X";\n' +
         '</script></body></html>\n""",path: "index.html"';
-      const out = await bridge.callTool('writeFile', {
+      const out = await bridge.callTool('write_file', {
         path: 'recovered-gemma.html',
         content: recoveredHtml,
       });
       expect(out).toMatch(/Wrote recovered-gemma\.html/);
 
-      const readBack = await bridge.callTool('readFile', { path: 'recovered-gemma.html' });
+      const readBack = await bridge.callTool('read_file', { path: 'recovered-gemma.html' });
       expect(readBack).toContain('.innerText = "X"');
       expect(readBack).not.toContain('innerTextText');
       expect(readBack).not.toContain('""",path');
       expect(readBack.trim()).toMatch(/<\/html>$/);
     });
 
-    it('writeFile rejects a .ts file with a syntax error', async () => {
-      const out = await bridge.callTool('writeFile', {
+    it('write_file rejects a .ts file with a syntax error', async () => {
+      const out = await bridge.callTool('write_file', {
         path: 'lib.ts',
         content: 'export function f(x: number {\n  return x;\n}\n',
       });
       expect(out).toMatch(/syntax error/);
     });
 
-    it('writeFile accepts a clean .tsx file with type annotations', async () => {
-      const out = await bridge.callTool('writeFile', {
+    it('write_file accepts a clean .tsx file with type annotations', async () => {
+      const out = await bridge.callTool('write_file', {
         path: 'Hello.tsx',
         content:
           'export function Hello(props: { name: string }) { return <span>{props.name}</span>; }\n',
@@ -1013,14 +1032,14 @@ describe('McpBridge', () => {
     });
   });
 
-  // Layer 4: surgical-edit tools (replaceInFile / applyPatch /
-  // insertAtMarker). Each round-trips through the real MCP subprocess
+  // Layer 4: surgical-edit tools (replace_in_file / apply_patch /
+  // insert_at_marker). Each round-trips through the real MCP subprocess
   // and the real service, exercising path safety, atomic write, diff
   // generation, and the structuredContent passthrough.
   describe('surgical-edit tools (Layer 4)', () => {
-    it('replaceInFile rewrites a single occurrence and surfaces a unified diff via structuredContent', async () => {
+    it('replace_in_file rewrites a single occurrence and surfaces a unified diff via structuredContent', async () => {
       // Seed a file the model will edit.
-      await bridge.callTool('writeFile', {
+      await bridge.callTool('write_file', {
         path: 'layer4/notes.md',
         content: 'hello world\nfoo bar\n',
       });
@@ -1032,7 +1051,7 @@ describe('McpBridge', () => {
         captured.push({ name: info.name, structured: info.structuredContent });
       };
       try {
-        const out = await bridge.callTool('replaceInFile', {
+        const out = await bridge.callTool('replace_in_file', {
           path: 'layer4/notes.md',
           find: 'foo bar',
           replace: 'FOO BAR',
@@ -1042,11 +1061,11 @@ describe('McpBridge', () => {
         bridge.onToolCall = prior;
       }
       // The bridge's `_invokeRaw` trims its text join, so a trailing
-      // newline in the file content doesn't survive the readFile call.
+      // newline in the file content doesn't survive the read_file call.
       // Compare against the trimmed expected value to match.
-      const readBack = await bridge.callTool('readFile', { path: 'layer4/notes.md', raw: true });
+      const readBack = await bridge.callTool('read_file', { path: 'layer4/notes.md', raw: true });
       expect(readBack).toBe('hello world\nFOO BAR');
-      const event = captured.find((c) => c.name === 'replaceInFile');
+      const event = captured.find((c) => c.name === 'replace_in_file');
       expect(event?.structured).toBeDefined();
       expect(event?.structured?.diff).toMatch(/-foo bar/);
       expect(event?.structured?.diff).toMatch(/\+FOO BAR/);
@@ -1054,12 +1073,12 @@ describe('McpBridge', () => {
       expect(event?.structured?.removedLines).toBe(1);
     });
 
-    it('replaceInFile returns a clear error when the pattern matches multiple places', async () => {
-      await bridge.callTool('writeFile', {
+    it('replace_in_file returns a clear error when the pattern matches multiple places', async () => {
+      await bridge.callTool('write_file', {
         path: 'layer4/dupes.md',
         content: 'cat cat cat\n',
       });
-      const out = await bridge.callTool('replaceInFile', {
+      const out = await bridge.callTool('replace_in_file', {
         path: 'layer4/dupes.md',
         find: 'cat',
         replace: 'dog',
@@ -1068,14 +1087,14 @@ describe('McpBridge', () => {
       expect(out).toMatch(/specify occurrence/);
     });
 
-    it('replaceInFile rejects and restores edits that break inline HTML scripts', async () => {
+    it('replace_in_file rejects and restores edits that break inline HTML scripts', async () => {
       const cleanHtml = '<html><body><script>const score = 1;</script></body></html>';
-      await bridge.callTool('writeFile', {
+      await bridge.callTool('write_file', {
         path: 'layer4/replace-broken.html',
         content: cleanHtml,
       });
 
-      const out = await bridge.callTool('replaceInFile', {
+      const out = await bridge.callTool('replace_in_file', {
         path: 'layer4/replace-broken.html',
         find: 'const score = 1;',
         replace: 'const score = ;',
@@ -1083,15 +1102,15 @@ describe('McpBridge', () => {
 
       expect(out).toMatch(/ERROR:/);
       expect(out).toMatch(/failed source validation/);
-      const readBack = await bridge.callTool('readFile', {
+      const readBack = await bridge.callTool('read_file', {
         path: 'layer4/replace-broken.html',
         raw: true,
       });
       expect(readBack).toBe(cleanHtml);
     });
 
-    it('applyPatch applies a unified diff and returns the change envelope', async () => {
-      await bridge.callTool('writeFile', {
+    it('apply_patch applies a unified diff and returns the change envelope', async () => {
+      await bridge.callTool('write_file', {
         path: 'layer4/patched.txt',
         content: 'one\ntwo\nthree\n',
       });
@@ -1105,18 +1124,21 @@ describe('McpBridge', () => {
         ' three',
         '',
       ].join('\n');
-      const out = await bridge.callTool('applyPatch', {
+      const out = await bridge.callTool('apply_patch', {
         path: 'layer4/patched.txt',
         diff,
       });
       expect(out).toMatch(/Applied patch to layer4\/patched\.txt/);
-      const readBack = await bridge.callTool('readFile', { path: 'layer4/patched.txt', raw: true });
+      const readBack = await bridge.callTool('read_file', {
+        path: 'layer4/patched.txt',
+        raw: true,
+      });
       expect(readBack).toBe('one\nTWO\nthree');
     });
 
-    it('applyPatch rejects a multi-file diff with guidance', async () => {
-      await bridge.callTool('writeFile', { path: 'layer4/m1.txt', content: 'a\n' });
-      await bridge.callTool('writeFile', { path: 'layer4/m2.txt', content: 'b\n' });
+    it('apply_patch rejects a multi-file diff with guidance', async () => {
+      await bridge.callTool('write_file', { path: 'layer4/m1.txt', content: 'a\n' });
+      await bridge.callTool('write_file', { path: 'layer4/m2.txt', content: 'b\n' });
       const diff = [
         '--- a/layer4/m1.txt',
         '+++ b/layer4/m1.txt',
@@ -1130,7 +1152,7 @@ describe('McpBridge', () => {
         '+B',
         '',
       ].join('\n');
-      const out = await bridge.callTool('applyPatch', {
+      const out = await bridge.callTool('apply_patch', {
         path: 'layer4/m1.txt',
         diff,
       });
@@ -1138,8 +1160,8 @@ describe('McpBridge', () => {
       expect(out).toMatch(/one-file-per-call/);
     });
 
-    it('applyPatch rejects and restores edits that break JavaScript syntax', async () => {
-      await bridge.callTool('writeFile', {
+    it('apply_patch rejects and restores edits that break JavaScript syntax', async () => {
+      await bridge.callTool('write_file', {
         path: 'layer4/patch-broken.js',
         content: 'const score = 1;\n',
       });
@@ -1152,41 +1174,41 @@ describe('McpBridge', () => {
         '',
       ].join('\n');
 
-      const out = await bridge.callTool('applyPatch', {
+      const out = await bridge.callTool('apply_patch', {
         path: 'layer4/patch-broken.js',
         diff,
       });
 
       expect(out).toMatch(/ERROR:/);
       expect(out).toMatch(/failed source validation/);
-      const readBack = await bridge.callTool('readFile', {
+      const readBack = await bridge.callTool('read_file', {
         path: 'layer4/patch-broken.js',
         raw: true,
       });
       expect(readBack).toBe('const score = 1;');
     });
 
-    it('insertAtMarker drops content after the marker by default', async () => {
-      await bridge.callTool('writeFile', {
+    it('insert_at_marker drops content after the marker by default', async () => {
+      await bridge.callTool('write_file', {
         path: 'layer4/exports.ts',
         content: "// EXPORTS\nexport * from './a.js';\n",
       });
-      const out = await bridge.callTool('insertAtMarker', {
+      const out = await bridge.callTool('insert_at_marker', {
         path: 'layer4/exports.ts',
         marker: '// EXPORTS\n',
         content: "export * from './b.js';\n",
       });
       expect(out).toMatch(/Inserted/);
-      const readBack = await bridge.callTool('readFile', { path: 'layer4/exports.ts', raw: true });
+      const readBack = await bridge.callTool('read_file', { path: 'layer4/exports.ts', raw: true });
       expect(readBack).toBe("// EXPORTS\nexport * from './b.js';\nexport * from './a.js';");
     });
 
-    it('insertAtMarker rejects when the marker is ambiguous', async () => {
-      await bridge.callTool('writeFile', {
+    it('insert_at_marker rejects when the marker is ambiguous', async () => {
+      await bridge.callTool('write_file', {
         path: 'layer4/ambig.txt',
         content: 'X\nbody\nX\n',
       });
-      const out = await bridge.callTool('insertAtMarker', {
+      const out = await bridge.callTool('insert_at_marker', {
         path: 'layer4/ambig.txt',
         marker: 'X',
         content: 'y',
@@ -1195,14 +1217,14 @@ describe('McpBridge', () => {
       expect(out).toMatch(/longer literal substring/);
     });
 
-    it('insertAtMarker rejects and restores edits that break inline HTML scripts', async () => {
+    it('insert_at_marker rejects and restores edits that break inline HTML scripts', async () => {
       const cleanHtml = '<html><body><script>\nconst score = 1;\n</script></body></html>';
-      await bridge.callTool('writeFile', {
+      await bridge.callTool('write_file', {
         path: 'layer4/insert-broken.html',
         content: cleanHtml,
       });
 
-      const out = await bridge.callTool('insertAtMarker', {
+      const out = await bridge.callTool('insert_at_marker', {
         path: 'layer4/insert-broken.html',
         marker: '<script>\n',
         content: 'const broken = ;\n',
@@ -1210,7 +1232,7 @@ describe('McpBridge', () => {
 
       expect(out).toMatch(/ERROR:/);
       expect(out).toMatch(/failed source validation/);
-      const readBack = await bridge.callTool('readFile', {
+      const readBack = await bridge.callTool('read_file', {
         path: 'layer4/insert-broken.html',
         raw: true,
       });

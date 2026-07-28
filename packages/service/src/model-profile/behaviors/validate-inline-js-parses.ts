@@ -1,7 +1,7 @@
 /**
  * `validate.inline-js-parses` — runtime self-validation gate for the
  * single-file-web deliverable class. When a gezel's turn writes a full
- * HTML file (`writeFile` to a `*.html` path) whose inline `<script>`
+ * HTML file (`write_file` to a `*.html` path) whose inline `<script>`
  * body does NOT parse as JavaScript, fire a corrective re-prompt naming
  * the syntax error so the model fixes it within the same user turn —
  * instead of declaring the deliverable done with broken JS that never
@@ -28,8 +28,8 @@
  * `validateScriptSyntax` with the craftbook gate (`jsParses` check) and
  * the eval grader so all three agree on the verdict.
  *
- * Full-file `writeFile` only: surgical edits (`replaceInFile`,
- * `applyPatch`) carry a diff rather than the whole file, so the inline
+ * Full-file `write_file` only: surgical edits (`replace_in_file`,
+ * `apply_patch`) carry a diff rather than the whole file, so the inline
  * JS can't be reconstructed from the tool args — those are left to the
  * next full write or the craftbook gate.
  */
@@ -56,20 +56,20 @@ export interface InlineJsWrite {
   name: string;
   success: boolean;
   path?: string;
-  /** Full rendered tool args — for `writeFile` this contains the file body verbatim. */
+  /** Full rendered tool args — for `write_file` this contains the file body verbatim. */
   argsFull?: string;
 }
 
 /**
  * Find the first full HTML write this turn whose inline `<script>` body
- * doesn't parse. Runs `extractInlineScripts` over the rendered `writeFile`
+ * doesn't parse. Runs `extractInlineScripts` over the rendered `write_file`
  * args (the body is embedded verbatim, so the `<script>…</script>` regex
  * finds it through the `path:`/`content:` wrapper) and parses each via the
  * shared `validateScriptSyntax`.
  */
 export function detectBrokenInlineJs(writes: readonly InlineJsWrite[]): InlineJsParseVerdict {
   for (const w of writes) {
-    if (!w.success || w.name !== 'writeFile') continue;
+    if (!w.success || w.name !== 'write_file') continue;
     const path = w.path ?? '';
     if (!HTML_PATH_RE.test(path) || !w.argsFull) continue;
     const scripts = extractInlineScripts(w.argsFull);

@@ -184,7 +184,7 @@ const CLAIM_RULES: ReadonlyArray<ClaimRule> = [
   },
   {
     // File-write fabrication — "I have created/written the index.html
-    // file" without a `writeFile` / `write_artifact` actually firing.
+    // file" without a `write_file` / `write_artifact` actually firing.
     // Wild-caught Gemma 26B output (3 of 3 timed-out tictactoe trials):
     //   "I have created the `index.html` file containing the full Tic-Tac-Toe game"
     //   "I have written the `index.html` file containing the complete Tic-Tac-Toe game"
@@ -198,7 +198,7 @@ const CLAIM_RULES: ReadonlyArray<ClaimRule> = [
     //   (c) "single-file {…}":   common Gemma framing for an HTML app
     //
     // The required tool list covers both surfaces a gezel can write
-    // through: workspace `writeFile` (raw fs) and project-scoped
+    // through: workspace `write_file` (raw fs) and project-scoped
     // `write_artifact`. Either justifies the claim.
     pattern: new RegExp(
       String.raw`\bI(?:'ve|\s+have|\s+just|\s+already|\s+successfully|\s+now)?` +
@@ -216,11 +216,11 @@ const CLAIM_RULES: ReadonlyArray<ClaimRule> = [
         String.raw`)`,
       'i',
     ),
-    requiredTools: ['writeFile', 'write_artifact', 'appendToFile'],
+    requiredTools: ['write_file', 'write_artifact', 'append_to_file'],
     claim: 'wrote a file',
     nudge:
-      'You told the user you wrote a file, but you did not call `writeFile`, `write_artifact`, or `appendToFile` this turn. ' +
-      'Call the right one now with the actual file path and the full file contents (or just the missing tail, for `appendToFile`). ' +
+      'You told the user you wrote a file, but you did not call `write_file`, `write_artifact`, or `append_to_file` this turn. ' +
+      'Call the right one now with the actual file path and the full file contents (or just the missing tail, for `append_to_file`). ' +
       'Do not narrate completion again until the tool returns success.',
   },
   {
@@ -355,7 +355,7 @@ export const FabricationDetectClaimWithoutTool: Behavior = {
 
 function isRecoverableSavedDraftToolCall(call: TurnCtx['drained'][number]): boolean {
   return (
-    call.name === 'writeFile' &&
+    call.name === 'write_file' &&
     call.success === false &&
     typeof call.errorMessage === 'string' &&
     /Invalid first draft\s+\S+\s+was saved anyway so you can continue with/i.test(call.errorMessage)

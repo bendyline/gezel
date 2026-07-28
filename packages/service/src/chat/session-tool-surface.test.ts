@@ -137,7 +137,7 @@ describe('resolveSessionToolSurface — step-scoped sessions', () => {
     });
     expect(allowlist).not.toBeNull();
     expect([...allowlist!]).toEqual(['ask_user_question']);
-    expect(allowlist!.has('writeFile')).toBe(false);
+    expect(allowlist!.has('write_file')).toBe(false);
     expect(allowlist!.has('list_tasks')).toBe(false);
   });
 
@@ -198,7 +198,7 @@ describe('resolveSessionToolSurface — step-scoped sessions', () => {
     expect(allowlist!.has('advance_task_step')).toBe(true);
   });
 
-  it('keeps procedure-required task tools through an urgent writeFile clamp', async () => {
+  it('keeps procedure-required task tools through an urgent write_file clamp', async () => {
     const clamps: string[] = [];
     const { allowlist } = await resolveSessionToolSurface({
       ...baseOpts,
@@ -212,7 +212,7 @@ describe('resolveSessionToolSurface — step-scoped sessions', () => {
       }),
       tier: 'medium',
       latestUserMessage:
-        'Build a new game at `workspace/index.html`. First pass: call `writeFile` with the complete file.',
+        'Build a new game at `workspace/index.html`. First pass: call `write_file` with the complete file.',
       activeStep: {
         advanceWhen: { file: 'index.html', sniff: 'html-game' },
         onExit: { name: 'verify-space-war' },
@@ -228,13 +228,13 @@ describe('resolveSessionToolSurface — step-scoped sessions', () => {
 
     expect(clamps).toContain('immediate-file-write');
     expect(allowlist).not.toBeNull();
-    expect(allowlist!.has('writeFile')).toBe(true);
+    expect(allowlist!.has('write_file')).toBe(true);
     expect(allowlist!.has('read_task_notes')).toBe(true);
     expect(allowlist!.has('write_task_note')).toBe(true);
     expect(allowlist!.has('advance_task_step')).toBe(true);
     expect(allowlist!.has('set_task_status')).toBe(true);
     expect(allowlist!.has('run_script')).toBe(true);
-    expect(allowlist!.has('readFile')).toBe(false);
+    expect(allowlist!.has('read_file')).toBe(false);
   });
 });
 
@@ -270,7 +270,7 @@ describe('resolveSessionToolSurface — Meester routing precedence', () => {
       expect(allowlist?.has('suggest_craftbook')).toBe(true);
       expect(allowlist?.has('invoke_craftbook')).toBe(true);
       expect(allowlist?.has('message_gezel')).toBe(true);
-      expect(allowlist?.has('writeFile')).toBe(false);
+      expect(allowlist?.has('write_file')).toBe(false);
       expect(allowlist!.size).toBeLessThan(25);
     }
   });
@@ -394,8 +394,8 @@ describe('resolveSessionToolSurface — direct file-work retention', () => {
     });
 
     expect(allowlist).not.toBeNull();
-    expect(allowlist!.has('readFile')).toBe(true);
-    expect(allowlist!.has('writeFile')).toBe(true);
+    expect(allowlist!.has('read_file')).toBe(true);
+    expect(allowlist!.has('write_file')).toBe(true);
     expect(allowlist!.has('run_nodejs_script')).toBe(true);
     expect(allowlist!.has('message_gezel')).toBe(false);
     expect(allowlist!.has('start_project')).toBe(false);
@@ -417,10 +417,10 @@ describe('resolveSessionToolSurface — direct file-work retention', () => {
     });
 
     expect(allowlist).not.toBeNull();
-    expect(allowlist!.has('readFile')).toBe(true);
-    expect(allowlist!.has('replaceInFile')).toBe(true);
-    expect(allowlist!.has('replaceLines')).toBe(true);
-    expect(allowlist!.has('writeFile')).toBe(true);
+    expect(allowlist!.has('read_file')).toBe(true);
+    expect(allowlist!.has('replace_in_file')).toBe(true);
+    expect(allowlist!.has('replace_lines')).toBe(true);
+    expect(allowlist!.has('write_file')).toBe(true);
     expect(allowlist!.has('message_gezel')).toBe(false);
     expect(allowlist!.has('start_project')).toBe(false);
   });
@@ -468,8 +468,8 @@ describe('resolveSessionToolSurface — D4 step kit + gate-repair clamp', () => 
       activeStep: reportStep,
     });
     expect(allowlist).not.toBeNull();
-    expect(allowlist!.has('writeFile')).toBe(true);
-    expect(allowlist!.has('replaceInFile')).toBe(true);
+    expect(allowlist!.has('write_file')).toBe(true);
+    expect(allowlist!.has('replace_in_file')).toBe(true);
     // Floors survive the kit.
     expect(allowlist!.has('advance_task_step')).toBe(true);
     expect(allowlist!.has('validate')).toBe(true);
@@ -557,11 +557,11 @@ describe('resolveSessionToolSurface — D4 step kit + gate-repair clamp', () => 
     });
     expect(clamps).toContain('gate-repair');
     expect(allowlist).not.toBeNull();
-    expect(allowlist!.has('writeFile')).toBe(true);
-    expect(allowlist!.has('replaceInFile')).toBe(true);
+    expect(allowlist!.has('write_file')).toBe(true);
+    expect(allowlist!.has('replace_in_file')).toBe(true);
     // Repair surface drops everything outside file-core + floors.
-    expect(allowlist!.has('readdir')).toBe(true);
-    expect(allowlist!.has('mkdir')).toBe(false);
+    expect(allowlist!.has('list_dir')).toBe(true);
+    expect(allowlist!.has('make_dir')).toBe(false);
   });
 
   it('gateAttemptHistory alone (post-bump reset) keeps the clamp — the widen-back fix', async () => {
@@ -604,7 +604,7 @@ describe('resolveSessionToolSurface — D4 step kit + gate-repair clamp', () => 
       onClamp: (kind) => clamps.push(kind),
     });
     expect(clamps).not.toContain('gate-repair');
-    expect(allowlist!.has('writeFile')).toBe(true);
+    expect(allowlist!.has('write_file')).toBe(true);
   });
 
   it('starvation guard: a role with no mutation tool on its surface skips the clamp', async () => {
@@ -613,7 +613,7 @@ describe('resolveSessionToolSurface — D4 step kit + gate-repair clamp', () => 
       ...baseOpts,
       role: 'Meester',
       // No step scope → no STEP_COMPLETION grant; meester kit is
-      // tasks-readonly with no writeFile.
+      // tasks-readonly with no write_file.
       session: baseSession({ deliverableGatePlateau: { count: 1 } as never }),
       tier: 'medium',
       latestUserMessage: 'How are the projects doing?',

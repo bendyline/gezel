@@ -1,5 +1,4 @@
-import { createLogger } from '@bendyline/gezel';
-import type { NativeBinaryName } from '@bendyline/gezel/native';
+import { type NativeEngineName, createLogger } from '@bendyline/gezel';
 import { type EngineResolveEvent, resolveEngine } from './resolver.js';
 import type { SignaturePolicy } from './signature.js';
 
@@ -13,7 +12,7 @@ const log = createLogger('engine-registry');
  *  registry's TTL. */
 const FINISHED_TTL_MS = 8_000;
 
-export const KNOWN_ENGINES: readonly NativeBinaryName[] = [
+export const KNOWN_ENGINES: readonly NativeEngineName[] = [
   'llama-server',
   'ds4-server',
   'sd-server',
@@ -21,7 +20,7 @@ export const KNOWN_ENGINES: readonly NativeBinaryName[] = [
   'uv',
 ];
 
-export function isKnownEngine(name: string): name is NativeBinaryName {
+export function isKnownEngine(name: string): name is NativeEngineName {
   return (KNOWN_ENGINES as readonly string[]).includes(name);
 }
 
@@ -32,7 +31,7 @@ export function isKnownEngine(name: string): name is NativeBinaryName {
  */
 export interface EngineBinarySnapshot {
   key: string;
-  engine: NativeBinaryName;
+  engine: NativeEngineName;
   variant?: string;
   startedAt: string;
   bytesWritten: number;
@@ -75,12 +74,12 @@ export class EngineBinaryRegistry {
     resolveImpl?: ResolveImpl;
   }) {
     this.home = opts.home;
-    this.signaturePolicy = opts.signaturePolicy ?? 'prefer';
+    this.signaturePolicy = opts.signaturePolicy ?? 'require';
     if (opts.fetchImpl) this.fetchImpl = opts.fetchImpl;
     this.resolveImpl = opts.resolveImpl ?? resolveEngine;
   }
 
-  key(engine: NativeBinaryName, variant?: string): string {
+  key(engine: NativeEngineName, variant?: string): string {
     return `${engine}:${variant ?? 'default'}`;
   }
 
@@ -91,7 +90,7 @@ export class EngineBinaryRegistry {
    * so the caller can immediately subscribe without racing the first event.
    */
   ensure(
-    engine: NativeBinaryName,
+    engine: NativeEngineName,
     variant?: string,
   ): { key: string; snapshot: EngineBinarySnapshot; alreadyRunning: boolean } {
     const key = this.key(engine, variant);
@@ -169,7 +168,7 @@ export class EngineBinaryRegistry {
 
   private async consume(
     key: string,
-    engine: NativeBinaryName,
+    engine: NativeEngineName,
     variant: string | undefined,
     signal: AbortSignal,
   ): Promise<void> {

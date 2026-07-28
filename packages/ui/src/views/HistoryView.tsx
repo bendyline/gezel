@@ -232,8 +232,8 @@ export function HistoryView({ projectId }: { projectId?: string } = {}) {
               );
             }
             // Surface the Layer 4 diff inline when present (a
-            // `tool.called` event for replaceInFile / applyPatch /
-            // insertAtMarker carries the unified diff in its details).
+            // `tool.called` event for replace_in_file / apply_patch /
+            // insert_at_marker carries the unified diff in its details).
             // Falls back to the raw JSON dump for any event without
             // structured edit metadata.
             const details =

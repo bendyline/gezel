@@ -31,9 +31,10 @@
 # configured (Windows Authenticode via Azure Trusted Signing; macOS
 # Developer ID) — done BEFORE the sha is computed so the release's
 # SHA256SUMS and the runtime engine resolver's signature check both see
-# the signed bytes. Without secrets (PRs, forks, dispatch test runs) they
-# ship unsigned, exactly as before. The Electron installer additionally
-# re-signs the whole app at app-build time.
+# the signed bytes. PRs/forks/manual test builds may remain unsigned, but
+# a native-v* release tag fails closed unless signing and standalone macOS
+# notarization credentials are present. The Electron installer additionally
+# signs and notarizes the whole app at app-build time.
 #
 # History: prior to this consolidation release assembly was a separate
 # `release-native.yml` workflow chained via `workflow_run`. That
@@ -983,9 +984,8 @@ jobs:
       # runtime regression (an engine that needs JIT or dyld-env
       # entitlements) fails the job here instead of shipping.
       #
-      # No signing secrets configured (PRs, forks, dispatch test runs)
-      # → these steps no-op and the binary ships unsigned, exactly as
-      # before.
+      # No signing secrets configured: PRs, forks, and dispatch test runs
+      # may remain unsigned. A native-v* release tag fails closed.
       - name: Install Trusted Signing SDK (Windows)
         if: steps.preflight.outputs.pinned == 'true' && startsWith(matrix.platform, 'win32')
         shell: pwsh
@@ -995,6 +995,9 @@ jobs:
           SIGNING_PROFILE: ${{ secrets.AZURE_CERT_PROFILE_NAME }}
         run: |
           if (-not $env:SIGNING_ENDPOINT) {
+            if ($env:GITHUB_REF -like 'refs/tags/native-v*') {
+              throw '[sign] native release tags require Azure Trusted Signing credentials'
+            }
             Write-Host "[sign] no AZURE_CODE_SIGNING_ENDPOINT — binary ships unsigned"
             exit 0
           }
@@ -1047,6 +1050,10 @@ jobs:
         run: |
           set -euo pipefail
           if [[ -z "${APPLE_CERTIFICATE_P12_BASE64:-}" ]]; then
+            if [[ "$GITHUB_REF" == refs/tags/native-v* ]]; then
+              echo "::error::Native release tags require the Apple Developer ID certificate."
+              exit 1
+            fi
             echo "[sign] no APPLE_CERTIFICATE_P12_BASE64 — binary ships unsigned"
             exit 0
           fi
@@ -1102,6 +1109,45 @@ jobs:
             exit 1
           fi
           echo "[sign] post-sign launch probe OK"
+
+      - name: Notarize macOS native payload
+        if: steps.preflight.outputs.pinned == 'true' && startsWith(matrix.platform, 'darwin') && startsWith(github.ref, 'refs/tags/native-v')
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          for name in APPLE_ID APPLE_ID_PASSWORD APPLE_TEAM_ID; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "::error::Native release tags require $name for standalone payload notarization."
+              exit 1
+            fi
+          done
+
+          out="${{ steps.outdir.outputs.dir }}"
+          bin="$out/${{ matrix.artifact }}"
+          submission="$RUNNER_TEMP/native-${{ matrix.engine }}-${{ matrix.platform }}.zip"
+          result="$RUNNER_TEMP/native-notary-result.json"
+          ditto -c -k --keepParent "$out" "$submission"
+          xcrun notarytool submit "$submission" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_ID_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait \
+            --output-format json > "$result"
+          cat "$result"
+          status="$(jq -r '.status // empty' "$result")"
+          if [[ "$status" != "Accepted" ]]; then
+            echo "::error::Apple notarization returned status '$status'."
+            exit 1
+          fi
+
+          # Bare command-line binaries cannot carry a stapled ticket. A
+          # successful online Gatekeeper assessment proves Apple's notary
+          # service recognizes the exact signed code hash that will be packed.
+          spctl --assess --type execute --verbose=4 "$bin"
+          echo "[notary] standalone native payload accepted by Gatekeeper"
 
       - name: Tear down keychain (macOS)
         if: always() && startsWith(matrix.platform, 'darwin')
@@ -1446,9 +1492,11 @@ jobs:
             Windows engine executables carry Bendyline Authenticode
             signatures (Azure Trusted Signing); macOS binaries — engine
             executables and peer dylibs — are Developer ID-signed with
-            hardened runtime. `SHA256SUMS` covers the signed bytes, and
-            build-provenance attestations are attached to every archive
-            (verify with `gh attestation verify`).
+            hardened runtime and independently accepted by Apple's notary
+            service before packaging. `SHA256SUMS` covers the signed,
+            notarized code hashes, and build-provenance attestations are
+            attached to every archive (verify with
+            `gh attestation verify`).
 
             These are consumed by `.github/workflows/release-electron.yml`
             when producing installers (which verifies both hashes and

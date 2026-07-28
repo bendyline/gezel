@@ -147,7 +147,7 @@ const SYMPTOM_DEBUG_KICKOFF_MESSAGE = [
   "the acceptance script's observed output is the only spec. Read lib/paginate.mjs and",
   'reason about which cases fail and why; the underlying defect is small (a few lines at',
   'most) once correctly diagnosed. The checker fails the task if accept.mjs changes',
-  'in any way, so leave it untouched. Edit files in place via writeFile/replaceInFile —',
+  'in any way, so leave it untouched. Edit files in place via write_file/replace_in_file —',
   'paths are relative to the workspace root, no leading "workspace/". Do NOT run npm',
   'install or any shell command — there is no node_modules; the harness runs',
   '`node accept.mjs` automatically every few seconds and reports the failing CASE',
@@ -276,7 +276,7 @@ describe('LlamaCppProvider constructor', () => {
 
   it('emits wire pulse on tool_calls chunks (long structured writes read as live activity)', async () => {
     // Tool-argument streaming carries no content deltas — without a
-    // pulse per tool_calls chunk, a multi-minute writeFile emission is
+    // pulse per tool_calls chunk, a multi-minute write_file emission is
     // invisible to the manager's telemetry and looks stalled.
     globalThis.fetch = (async () => {
       return sseResponse([
@@ -290,7 +290,7 @@ describe('LlamaCppProvider constructor', () => {
                     index: 0,
                     id: 'call_write',
                     type: 'function',
-                    function: { name: 'writeFile', arguments: '{"path":"a.txt",' },
+                    function: { name: 'write_file', arguments: '{"path":"a.txt",' },
                   },
                 ],
               },
@@ -317,7 +317,7 @@ describe('LlamaCppProvider constructor', () => {
       model: 'tinyllama',
       externalTools: [
         {
-          name: 'writeFile',
+          name: 'write_file',
           description: 'Write a file.',
           parameters: { type: 'object', additionalProperties: true },
         },
@@ -351,7 +351,7 @@ describe('LlamaCppProvider constructor', () => {
                     index: 0,
                     id: 'call_write',
                     type: 'function',
-                    function: { name: 'writeFile', arguments: '{"path":"a.txt",' },
+                    function: { name: 'write_file', arguments: '{"path":"a.txt",' },
                   },
                 ],
               },
@@ -378,7 +378,7 @@ describe('LlamaCppProvider constructor', () => {
       model: 'tinyllama',
       externalTools: [
         {
-          name: 'writeFile',
+          name: 'write_file',
           description: 'Write a file.',
           parameters: { type: 'object', additionalProperties: true },
         },
@@ -390,8 +390,8 @@ describe('LlamaCppProvider constructor', () => {
     });
     await session.sendAndWait('write the file');
     expect(fragments).toEqual([
-      { name: 'writeFile', chunk: '{"path":"a.txt",' },
-      { name: 'writeFile', chunk: '"content":"hi"}' },
+      { name: 'write_file', chunk: '{"path":"a.txt",' },
+      { name: 'write_file', chunk: '"content":"hi"}' },
     ]);
   });
 
@@ -652,7 +652,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                     id: 'call_write',
                     type: 'function',
                     function: {
-                      name: 'writeFile',
+                      name: 'write_file',
                       arguments: '{"path":"index.html","content":"<!doctype html>"}',
                     },
                   },
@@ -679,7 +679,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
       },
       externalTools: [
         {
-          name: 'writeFile',
+          name: 'write_file',
           description: 'Write a file.',
           parameters: { type: 'object', additionalProperties: true },
         },
@@ -720,7 +720,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                       id: 'call_partial_write',
                       type: 'function',
                       function: {
-                        name: 'writeFile',
+                        name: 'write_file',
                         arguments: JSON.stringify({
                           path: 'index.html',
                           content:
@@ -742,8 +742,8 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
       }
 
       expect(body.tools?.map((tool) => tool.function.name).sort()).toEqual([
-        'appendToFile',
-        'writeFile',
+        'append_to_file',
+        'write_file',
       ]);
       expect(JSON.stringify(body.messages)).toContain('Invalid first draft index.html was saved');
       return sseResponse([
@@ -758,7 +758,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                     id: 'call_append_tail',
                     type: 'function',
                     function: {
-                      name: 'appendToFile',
+                      name: 'append_to_file',
                       arguments: JSON.stringify({
                         path: 'index.html',
                         content: 'k.bob);</script></body></html>',
@@ -810,20 +810,20 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     };
     internal.deps.bridges = {
       isEmpty: () => false,
-      // Mirrors the session from the debug bundle: writeFile is the only
-      // initially registered file tool. appendToFile becomes visible only
+      // Mirrors the session from the debug bundle: write_file is the only
+      // initially registered file tool. append_to_file becomes visible only
       // on the provider's recovery continuation.
       getOpenAITools: () => [
-        { name: 'writeFile', description: 'Write a file.', parameters: { type: 'object' } },
+        { name: 'write_file', description: 'Write a file.', parameters: { type: 'object' } },
       ],
-      hasTool: (name: string) => name === 'writeFile' || name === 'appendToFile',
+      hasTool: (name: string) => name === 'write_file' || name === 'append_to_file',
       callTool: async (name: string) => {
         toolCalls.push(name);
-        if (name === 'writeFile') {
+        if (name === 'write_file') {
           return (
             'ERROR: index.html: inline <script> #1 failed to parse: missing ) after argument list. ' +
             'Fix the syntax error and re-emit the file.\n\n' +
-            'Invalid first draft index.html was saved anyway so you can continue with readFile({ path: "index.html" }) and then repair it.'
+            'Invalid first draft index.html was saved anyway so you can continue with read_file({ path: "index.html" }) and then repair it.'
           );
         }
         return 'Appended 34 bytes to index.html';
@@ -836,11 +836,11 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
 
     expect(bodies).toHaveLength(2);
     expect(bodies[0]?.max_tokens).toBe(4096);
-    expect(toolCalls).toEqual(['writeFile', 'appendToFile']);
+    expect(toolCalls).toEqual(['write_file', 'append_to_file']);
   });
 
   it('steers a cap-truncated rejected write to incremental edits (ds4 repaired-call shape)', async () => {
-    // The Rambo re-skin incident: ds4-server salvages a writeFile cut off
+    // The Rambo re-skin incident: ds4-server salvages a write_file cut off
     // at the generation cap ("repaired unterminated tool call"), the MCP
     // validator rejects the half-file and preserves the previous version,
     // and — without steering — the model burns another full cap-length
@@ -869,7 +869,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                       id: 'call_big_write',
                       type: 'function',
                       function: {
-                        name: 'writeFile',
+                        name: 'write_file',
                         arguments: JSON.stringify({
                           path: 'index.html',
                           content: '<!doctype html><html><body><script>const a = Math.sin(',
@@ -930,7 +930,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     internal.deps.bridges = {
       isEmpty: () => false,
       getOpenAITools: () =>
-        ['writeFile', 'replaceInFile', 'replaceLines', 'readFile'].map((name) => ({
+        ['write_file', 'replace_in_file', 'replace_lines', 'read_file'].map((name) => ({
           name,
           description: `${name} tool`,
           parameters: { type: 'object' },
@@ -955,11 +955,11 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
 
     expect(bodies).toHaveLength(2);
     expect(bodies[0]?.max_tokens).toBe(8192);
-    expect(toolCalls).toEqual(['writeFile']);
+    expect(toolCalls).toEqual(['write_file']);
     const toolResultMessage = JSON.stringify(bodies[1]?.messages ?? []);
     expect(toolResultMessage).toContain('hit the per-turn output token cap');
     expect(toolResultMessage).toContain('max_tokens=8192');
-    expect(toolResultMessage).toContain('replaceInFile');
+    expect(toolResultMessage).toContain('replace_in_file');
     expect(warnings.some((w) => w.includes('output-token cap'))).toBe(true);
   });
 
@@ -983,7 +983,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                     id: 'call_patch',
                     type: 'function',
                     function: {
-                      name: 'replaceInFile',
+                      name: 'replace_in_file',
                       arguments: '{"path":"index.html","find":"<p>x</p>","replace":"<p>y</p>"}',
                     },
                   },
@@ -1001,16 +1001,20 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     const session = await provider.createSession({
       systemMessage: 'sys',
       model: 'tinyllama',
-      externalTools: ['writeFile', 'readFile', 'replaceInFile', 'replaceLines', 'validate'].map(
-        (name) => ({
-          name,
-          description: `${name} tool`,
-          parameters: { type: 'object', additionalProperties: true },
-        }),
-      ),
+      externalTools: [
+        'write_file',
+        'read_file',
+        'replace_in_file',
+        'replace_lines',
+        'validate',
+      ].map((name) => ({
+        name,
+        description: `${name} tool`,
+        parameters: { type: 'object', additionalProperties: true },
+      })),
     });
     await session.sendAndWait(
-      'GATE_TARGETED_EDIT: Continue. Your last edits did not move the gate — the same checks fail after each attempt. The file `index.html` EXISTS but fails exactly these checks:\n\n- index.html failed the html-game check\n\nFix the FIRST failure above with the smallest targeted edit — use replaceInFile on the exact section the check names. Do NOT recreate the file, do NOT re-read everything, and do NOT reply that you already finished.',
+      'GATE_TARGETED_EDIT: Continue. Your last edits did not move the gate — the same checks fail after each attempt. The file `index.html` EXISTS but fails exactly these checks:\n\n- index.html failed the html-game check\n\nFix the FIRST failure above with the smallest targeted edit — use replace_in_file on the exact section the check names. Do NOT recreate the file, do NOT re-read everything, and do NOT reply that you already finished.',
     );
 
     expect(bodies).toHaveLength(1);
@@ -1021,7 +1025,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     const toolNames = (body.tools as Array<{ function?: { name?: string } }>).map(
       (t) => t.function?.name,
     );
-    expect(toolNames.sort()).toEqual(['replaceInFile', 'replaceLines']);
+    expect(toolNames.sort()).toEqual(['replace_in_file', 'replace_lines']);
     const messages = body.messages as Array<{ role: string; content: string }>;
     expect(messages.at(-1)?.content).toContain('[Local-model gate patch mode:');
   });
@@ -1042,7 +1046,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                     id: 'call_write',
                     type: 'function',
                     function: {
-                      name: 'writeFile',
+                      name: 'write_file',
                       arguments: '{"path":"index.html","content":"<!doctype html>"}',
                     },
                   },
@@ -1072,7 +1076,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
       },
       externalTools: [
         {
-          name: 'writeFile',
+          name: 'write_file',
           description: 'Write a file.',
           parameters: { type: 'object', additionalProperties: true },
         },
@@ -1106,7 +1110,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                     id: 'call_write',
                     type: 'function',
                     function: {
-                      name: 'writeFile',
+                      name: 'write_file',
                       arguments: '{"path":"index.html","content":"<!doctype html>"}',
                     },
                   },
@@ -1126,7 +1130,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
       model: 'gpt-oss-20b-q4',
       externalTools: [
         {
-          name: 'writeFile',
+          name: 'write_file',
           description: 'Write a file.',
           parameters: { type: 'object', additionalProperties: true },
         },
@@ -1165,7 +1169,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                     id: 'call_patch',
                     type: 'function',
                     function: {
-                      name: 'replaceInFile',
+                      name: 'replace_in_file',
                       arguments:
                         '{"path":"index.html","find":"renderTasks();","replace":"applyPriorityFilter();\\nrenderTasks();"}',
                     },
@@ -1202,14 +1206,14 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     internal.deps.bridges = {
       isEmpty: () => false,
       getOpenAITools: () => [
-        { name: 'readFile', description: 'Read a file.', parameters: { type: 'object' } },
-        { name: 'replaceInFile', description: 'Patch a file.', parameters: { type: 'object' } },
-        { name: 'writeFile', description: 'Write a file.', parameters: { type: 'object' } },
+        { name: 'read_file', description: 'Read a file.', parameters: { type: 'object' } },
+        { name: 'replace_in_file', description: 'Patch a file.', parameters: { type: 'object' } },
+        { name: 'write_file', description: 'Write a file.', parameters: { type: 'object' } },
       ],
       hasTool: (name: string) =>
-        name === 'readFile' || name === 'replaceInFile' || name === 'writeFile',
+        name === 'read_file' || name === 'replace_in_file' || name === 'write_file',
       callTool: async (name: string, _args: Record<string, unknown>) => {
-        if (name === 'replaceInFile') {
+        if (name === 'replace_in_file') {
           patched = true;
           return 'replaced text';
         }
@@ -1219,7 +1223,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
 
     await expect(
       session.sendAndWait(
-        'Phase 2: modify the existing Launch Board codebase in `index.html`, do not start over. Use workspace `replaceInFile` or `writeFile` to add a visible priority filter while preserving the board.',
+        'Phase 2: modify the existing Launch Board codebase in `index.html`, do not start over. Use workspace `replace_in_file` or `write_file` to add a visible priority filter while preserving the board.',
       ),
     ).resolves.toBe('');
 
@@ -1338,10 +1342,10 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
       requestCount += 1;
       if (requestCount === 1) {
         expect(body.tools?.map((entry) => entry.function.name).sort()).toEqual([
-          'readFile',
-          'replaceInFile',
-          'replaceLines',
-          'writeFile',
+          'read_file',
+          'replace_in_file',
+          'replace_lines',
+          'write_file',
         ]);
         return sseResponse([
           {
@@ -1355,7 +1359,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                       id: 'call_read',
                       type: 'function',
                       function: {
-                        name: 'readFile',
+                        name: 'read_file',
                         arguments: '{"path":"lib/paginate.mjs"}',
                       },
                     },
@@ -1383,7 +1387,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                     id: 'call_patch',
                     type: 'function',
                     function: {
-                      name: 'replaceLines',
+                      name: 'replace_lines',
                       arguments:
                         '{"path":"lib/paginate.mjs","startLine":25,"endLine":25,"content":"const start = options.cursor == null ? 0 : decodeCursor(options.cursor);"}',
                     },
@@ -1420,21 +1424,21 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     internal.deps.bridges = {
       isEmpty: () => false,
       getOpenAITools: () => [
-        { name: 'readFile', description: 'Read a file.', parameters: { type: 'object' } },
-        { name: 'replaceInFile', description: 'Patch a file.', parameters: { type: 'object' } },
-        { name: 'replaceLines', description: 'Patch lines.', parameters: { type: 'object' } },
-        { name: 'writeFile', description: 'Write a file.', parameters: { type: 'object' } },
+        { name: 'read_file', description: 'Read a file.', parameters: { type: 'object' } },
+        { name: 'replace_in_file', description: 'Patch a file.', parameters: { type: 'object' } },
+        { name: 'replace_lines', description: 'Patch lines.', parameters: { type: 'object' } },
+        { name: 'write_file', description: 'Write a file.', parameters: { type: 'object' } },
       ],
       hasTool: (name: string) =>
-        name === 'readFile' ||
-        name === 'replaceInFile' ||
-        name === 'replaceLines' ||
-        name === 'writeFile',
+        name === 'read_file' ||
+        name === 'replace_in_file' ||
+        name === 'replace_lines' ||
+        name === 'write_file',
       callTool: async (name: string, _args: Record<string, unknown>) => {
-        if (name === 'readFile') {
+        if (name === 'read_file') {
           return '24→ // Resume one past the cursor position.\\n25→ const start = options.cursor == null ? 0 : decodeCursor(options.cursor) + 1;';
         }
-        if (name === 'replaceLines') {
+        if (name === 'replace_lines') {
           patched = true;
           return 'replaced lines';
         }
@@ -1447,7 +1451,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     expect(patched).toBe(true);
     expect(bodies).toHaveLength(2);
     const secondToolNames = bodies[1]?.tools?.map((entry) => entry.function.name).sort();
-    expect(secondToolNames).toEqual(['replaceInFile', 'replaceLines']);
+    expect(secondToolNames).toEqual(['replace_in_file', 'replace_lines']);
     expect(JSON.stringify(bodies[1]?.messages)).toContain('[Local-model patch mode:');
     expect(JSON.stringify(bodies[1]?.messages)).toContain('newest named requirement');
   });
@@ -1483,7 +1487,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                       id: 'call_read',
                       type: 'function',
                       function: {
-                        name: 'readFile',
+                        name: 'read_file',
                         arguments: '{"path":"index.html"}',
                       },
                     },
@@ -1524,7 +1528,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                     id: 'call_patch',
                     type: 'function',
                     function: {
-                      name: 'replaceLines',
+                      name: 'replace_lines',
                       arguments:
                         '{"path":"index.html","startLine":10,"endLine":10,"content":"<button id=\\"nextStep\\">Next step</button>"}',
                     },
@@ -1574,23 +1578,23 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     internal.deps.bridges = {
       isEmpty: () => false,
       getOpenAITools: () => [
-        { name: 'readFile', description: 'Read a file.', parameters: { type: 'object' } },
+        { name: 'read_file', description: 'Read a file.', parameters: { type: 'object' } },
         { name: 'validate', description: 'Validate a file.', parameters: { type: 'object' } },
-        { name: 'replaceInFile', description: 'Patch a file.', parameters: { type: 'object' } },
-        { name: 'replaceLines', description: 'Patch lines.', parameters: { type: 'object' } },
-        { name: 'writeFile', description: 'Write a file.', parameters: { type: 'object' } },
+        { name: 'replace_in_file', description: 'Patch a file.', parameters: { type: 'object' } },
+        { name: 'replace_lines', description: 'Patch lines.', parameters: { type: 'object' } },
+        { name: 'write_file', description: 'Write a file.', parameters: { type: 'object' } },
       ],
       hasTool: (name: string) =>
-        name === 'readFile' ||
+        name === 'read_file' ||
         name === 'validate' ||
-        name === 'replaceInFile' ||
-        name === 'replaceLines' ||
-        name === 'writeFile',
+        name === 'replace_in_file' ||
+        name === 'replace_lines' ||
+        name === 'write_file',
       callTool: async (name: string, _args: Record<string, unknown>) => {
-        if (name === 'readFile') {
+        if (name === 'read_file') {
           return '1→ <form>\\n10→ <button id="continue">Continue</button>';
         }
-        if (name === 'replaceLines') {
+        if (name === 'replace_lines') {
           patched = true;
           return 'replaced lines';
         }
@@ -1602,7 +1606,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
       session.sendAndWait(
         "[scenario check] I looked at `index.html` and the success criteria aren't met yet.\n" +
           'Signals that did not fire: missing next-step button.\n' +
-          'Exact patch candidate(s): replaceLines({ path: "index.html", startLine: 10, endLine: 10, content: "<button id=\\"nextStep\\">Next step</button>" }).',
+          'Exact patch candidate(s): replace_lines({ path: "index.html", startLine: 10, endLine: 10, content: "<button id=\\"nextStep\\">Next step</button>" }).',
       ),
     ).resolves.toBe('');
 
@@ -1615,18 +1619,18 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     expect(bodies[2]?.tool_choice).toBe('required');
     expect(bodies[2]?.chat_template_kwargs?.enable_thinking).toBe(false);
     expect(bodies[0]?.tools?.map((entry) => entry.function.name).sort()).toEqual([
-      'readFile',
-      'replaceInFile',
-      'replaceLines',
+      'read_file',
+      'replace_in_file',
+      'replace_lines',
       'validate',
     ]);
     expect(bodies[1]?.tools?.map((entry) => entry.function.name).sort()).toEqual([
-      'replaceInFile',
-      'replaceLines',
+      'replace_in_file',
+      'replace_lines',
     ]);
     expect(bodies[2]?.tools?.map((entry) => entry.function.name).sort()).toEqual([
-      'replaceInFile',
-      'replaceLines',
+      'replace_in_file',
+      'replace_lines',
     ]);
   });
 
@@ -1656,7 +1660,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                       id: 'call_read',
                       type: 'function',
                       function: {
-                        name: 'readFile',
+                        name: 'read_file',
                         arguments: '{"path":"src/store.ts"}',
                       },
                     },
@@ -1695,7 +1699,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                     id: 'call_patch',
                     type: 'function',
                     function: {
-                      name: 'replaceInFile',
+                      name: 'replace_in_file',
                       arguments:
                         '{"path":"src/store.ts","find":"user.name","replace":"`${user.firstName} ${user.lastName}`"}',
                     },
@@ -1745,19 +1749,19 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     internal.deps.bridges = {
       isEmpty: () => false,
       getOpenAITools: () => [
-        { name: 'readFile', description: 'Read a file.', parameters: { type: 'object' } },
-        { name: 'replaceInFile', description: 'Patch a file.', parameters: { type: 'object' } },
-        { name: 'replaceLines', description: 'Patch lines.', parameters: { type: 'object' } },
-        { name: 'writeFile', description: 'Write a file.', parameters: { type: 'object' } },
+        { name: 'read_file', description: 'Read a file.', parameters: { type: 'object' } },
+        { name: 'replace_in_file', description: 'Patch a file.', parameters: { type: 'object' } },
+        { name: 'replace_lines', description: 'Patch lines.', parameters: { type: 'object' } },
+        { name: 'write_file', description: 'Write a file.', parameters: { type: 'object' } },
       ],
       hasTool: (name: string) =>
-        name === 'readFile' ||
-        name === 'replaceInFile' ||
-        name === 'replaceLines' ||
-        name === 'writeFile',
+        name === 'read_file' ||
+        name === 'replace_in_file' ||
+        name === 'replace_lines' ||
+        name === 'write_file',
       callTool: async (name: string) => {
-        if (name === 'readFile') return '1→ export function display(user) { return user.name; }';
-        if (name === 'replaceInFile') {
+        if (name === 'read_file') return '1→ export function display(user) { return user.name; }';
+        if (name === 'replace_in_file') {
           patched = true;
           return 'replaced text';
         }
@@ -1780,12 +1784,12 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     expect(bodies[2]?.tool_choice).toBe('required');
     expect(bodies[2]?.chat_template_kwargs?.enable_thinking).toBe(false);
     expect(bodies[1]?.tools?.map((entry) => entry.function.name).sort()).toEqual([
-      'replaceInFile',
-      'replaceLines',
+      'replace_in_file',
+      'replace_lines',
     ]);
     expect(bodies[2]?.tools?.map((entry) => entry.function.name).sort()).toEqual([
-      'replaceInFile',
-      'replaceLines',
+      'replace_in_file',
+      'replace_lines',
     ]);
   });
 
@@ -1829,7 +1833,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                     id: 'call_patch',
                     type: 'function',
                     function: {
-                      name: 'replaceInFile',
+                      name: 'replace_in_file',
                       arguments:
                         '{"path":"index.html","find":"renderTasks();","replace":"renderTasks(filterPriority);"}',
                     },
@@ -1863,14 +1867,14 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     internal.deps.bridges = {
       isEmpty: () => false,
       getOpenAITools: () => [
-        { name: 'readFile', description: 'Read a file.', parameters: { type: 'object' } },
-        { name: 'replaceInFile', description: 'Patch a file.', parameters: { type: 'object' } },
-        { name: 'writeFile', description: 'Write a file.', parameters: { type: 'object' } },
+        { name: 'read_file', description: 'Read a file.', parameters: { type: 'object' } },
+        { name: 'replace_in_file', description: 'Patch a file.', parameters: { type: 'object' } },
+        { name: 'write_file', description: 'Write a file.', parameters: { type: 'object' } },
       ],
       hasTool: (name: string) =>
-        name === 'readFile' || name === 'replaceInFile' || name === 'writeFile',
+        name === 'read_file' || name === 'replace_in_file' || name === 'write_file',
       callTool: async (name: string, _args: Record<string, unknown>) => {
-        if (name === 'replaceInFile') {
+        if (name === 'replace_in_file') {
           patched = true;
           return 'replaced text';
         }
@@ -1880,7 +1884,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
 
     await expect(
       session.sendAndWait(
-        'Phase 2: modify the existing Launch Board codebase in `index.html`, do not start over. Use workspace `replaceInFile` or `writeFile` to add a visible priority filter while preserving the board.',
+        'Phase 2: modify the existing Launch Board codebase in `index.html`, do not start over. Use workspace `replace_in_file` or `write_file` to add a visible priority filter while preserving the board.',
       ),
     ).resolves.toBe('');
 
@@ -1943,7 +1947,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     });
   });
 
-  it('repairs malformed structured writeFile args before capturing the tool call', async () => {
+  it('repairs malformed structured write_file args before capturing the tool call', async () => {
     globalThis.fetch = (async () => {
       return sseResponse([
         {
@@ -1957,7 +1961,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                     id: 'call_write',
                     type: 'function',
                     function: {
-                      name: 'writeFile',
+                      name: 'write_file',
                       arguments:
                         '"<!DOCTYPE html>\\n<html><body><div>Player X\\\'s Turn</div><script>document.body.onclick=()=>{};</script></body></html>\\n\\"\\"\\", path: \\"index.html\\" });\\n<|channel>thought',
                     },
@@ -1981,7 +1985,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
       model: 'gemma4-12b-q4',
       externalTools: [
         {
-          name: 'writeFile',
+          name: 'write_file',
           description: 'Write a file.',
           parameters: { type: 'object', additionalProperties: true },
         },
@@ -1991,7 +1995,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     const text = await session.sendAndWait('write it');
     expect(text).toBe('');
     const call = session.capturedToolCalls?.()[0];
-    expect(call?.name).toBe('writeFile');
+    expect(call?.name).toBe('write_file');
     const args = JSON.parse(call?.arguments ?? '{}');
     expect(args.path).toBe('index.html');
     expect(args.content).toContain("<div>Player X's Turn</div>");
@@ -2001,7 +2005,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
   it('recognizes saved invalid first drafts as recoverable immediate writes', () => {
     expect(
       isRecoverableImmediateFileWriteError(
-        'ERROR: inline JS does not parse (Unexpected token ]).\n\nInvalid first draft index.html was saved anyway so you can continue with readFile({ path: "index.html" }) and then repair it with replaceInFile(...) instead of starting over.',
+        'ERROR: inline JS does not parse (Unexpected token ]).\n\nInvalid first draft index.html was saved anyway so you can continue with read_file({ path: "index.html" }) and then repair it with replace_in_file(...) instead of starting over.',
       ),
     ).toBe(true);
     expect(
@@ -2012,7 +2016,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     expect(isRecoverableImmediateFileWriteError('Wrote index.html')).toBe(false);
   });
 
-  it('only treats JSON-complete structured writeFile HTML as salvageable', () => {
+  it('only treats JSON-complete structured write_file HTML as salvageable', () => {
     const completeHtml =
       '<!DOCTYPE html>\n' +
       '<html><head><title>Tic Tac Toe</title></head><body>' +
@@ -2162,7 +2166,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                       index: 0,
                       id: 'call_read',
                       type: 'function',
-                      function: { name: 'readFile', arguments: '{"path":"src/app.js"}' },
+                      function: { name: 'read_file', arguments: '{"path":"src/app.js"}' },
                     },
                   ],
                 },
@@ -2207,7 +2211,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                       id: 'call_write',
                       type: 'function',
                       function: {
-                        name: 'writeFile',
+                        name: 'write_file',
                         arguments: '{"path":"src/app.js","content":"renderBoard();"}',
                       },
                     },
@@ -2246,12 +2250,12 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     internal.deps.bridges = {
       isEmpty: () => false,
       getOpenAITools: () => [
-        { name: 'readFile', description: 'Read a file.', parameters: { type: 'object' } },
-        { name: 'writeFile', description: 'Write a file.', parameters: { type: 'object' } },
+        { name: 'read_file', description: 'Read a file.', parameters: { type: 'object' } },
+        { name: 'write_file', description: 'Write a file.', parameters: { type: 'object' } },
       ],
-      hasTool: (name: string) => name === 'readFile' || name === 'writeFile',
+      hasTool: (name: string) => name === 'read_file' || name === 'write_file',
       callTool: async (name: string, _args: Record<string, unknown>) => {
-        if (name === 'writeFile') {
+        if (name === 'write_file') {
           wroteFile = true;
           return 'wrote file';
         }
@@ -2261,7 +2265,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
 
     await expect(
       session.sendAndWait(
-        '[runtime check] I opened `index.html` in a headless browser. 1 assertion(s) failed: seed-tasks-render. Read `index.html`, find the specific code, and patch with `replaceInFile` or `writeFile`.',
+        '[runtime check] I opened `index.html` in a headless browser. 1 assertion(s) failed: seed-tasks-render. Read `index.html`, find the specific code, and patch with `replace_in_file` or `write_file`.',
       ),
     ).resolves.toBe('');
     expect(wroteFile).toBe(true);
@@ -2290,7 +2294,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                       index: 0,
                       id: 'call_read_app',
                       type: 'function',
-                      function: { name: 'readFile', arguments: '{"path":"src/app.js"}' },
+                      function: { name: 'read_file', arguments: '{"path":"src/app.js"}' },
                     },
                   ],
                 },
@@ -2333,7 +2337,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                       index: 0,
                       id: 'call_read_state',
                       type: 'function',
-                      function: { name: 'readFile', arguments: '{"path":"src/state.js"}' },
+                      function: { name: 'read_file', arguments: '{"path":"src/state.js"}' },
                     },
                   ],
                 },
@@ -2358,7 +2362,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                       id: 'call_write',
                       type: 'function',
                       function: {
-                        name: 'writeFile',
+                        name: 'write_file',
                         arguments:
                           '{"path":"src/state.js","content":"export function loadState(){ return seedTasks(); }"}',
                       },
@@ -2398,12 +2402,12 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     internal.deps.bridges = {
       isEmpty: () => false,
       getOpenAITools: () => [
-        { name: 'readFile', description: 'Read a file.', parameters: { type: 'object' } },
-        { name: 'writeFile', description: 'Write a file.', parameters: { type: 'object' } },
+        { name: 'read_file', description: 'Read a file.', parameters: { type: 'object' } },
+        { name: 'write_file', description: 'Write a file.', parameters: { type: 'object' } },
       ],
-      hasTool: (name: string) => name === 'readFile' || name === 'writeFile',
+      hasTool: (name: string) => name === 'read_file' || name === 'write_file',
       callTool: async (name: string, args: Record<string, unknown>) => {
-        if (name === 'writeFile') {
+        if (name === 'write_file') {
           wroteFile = true;
           return 'wrote file';
         }
@@ -2415,7 +2419,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
 
     await expect(
       session.sendAndWait(
-        '[runtime check] I opened `index.html` in a headless browser. 1 assertion(s) failed: seed-tasks-render. Read `index.html`, find the specific code, and patch with `replaceInFile` or `writeFile`.',
+        '[runtime check] I opened `index.html` in a headless browser. 1 assertion(s) failed: seed-tasks-render. Read `index.html`, find the specific code, and patch with `replace_in_file` or `write_file`.',
       ),
     ).resolves.toBe('');
     expect(wroteFile).toBe(true);
@@ -2448,7 +2452,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
       requestCount += 1;
       if (requestCount <= requiredPaths.length) {
         const expectedPath = requiredPaths[requestCount - 1]!;
-        expect(body.tools?.map((tool) => tool.function.name)).toEqual(['readFile']);
+        expect(body.tools?.map((tool) => tool.function.name)).toEqual(['read_file']);
         expect(body.tools?.[0]?.function.parameters?.properties?.path?.enum).toEqual(
           requiredPaths.slice(requestCount - 1),
         );
@@ -2465,7 +2469,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                       id: `call_read_${requestCount}`,
                       type: 'function',
                       function: {
-                        name: 'readFile',
+                        name: 'read_file',
                         arguments: JSON.stringify({ path: expectedPath }),
                       },
                     },
@@ -2478,7 +2482,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
           '[DONE]',
         ]);
       }
-      expect(body.tools?.map((tool) => tool.function.name)).toEqual(['writeFile']);
+      expect(body.tools?.map((tool) => tool.function.name)).toEqual(['write_file']);
       expect(body.tool_choice).toBe('required');
       return sseResponse([
         {
@@ -2492,7 +2496,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                     id: 'call_write_synthesis',
                     type: 'function',
                     function: {
-                      name: 'writeFile',
+                      name: 'write_file',
                       arguments:
                         '{"path":"synthesis.md","content":"# Grounded synthesis\\n\\nAll claims follow the newly read sources."}',
                     },
@@ -2526,12 +2530,12 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     internal.deps.bridges = {
       isEmpty: () => false,
       getOpenAITools: () => [
-        { name: 'readFile', description: 'Read a file.', parameters: { type: 'object' } },
-        { name: 'writeFile', description: 'Write a file.', parameters: { type: 'object' } },
+        { name: 'read_file', description: 'Read a file.', parameters: { type: 'object' } },
+        { name: 'write_file', description: 'Write a file.', parameters: { type: 'object' } },
       ],
-      hasTool: (name: string) => name === 'readFile' || name === 'writeFile',
+      hasTool: (name: string) => name === 'read_file' || name === 'write_file',
       callTool: async (name: string, args: Record<string, unknown>) => {
-        if (name === 'writeFile') {
+        if (name === 'write_file') {
           wroteFile = true;
           return 'wrote synthesis.md';
         }
@@ -2543,10 +2547,10 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
       "[scenario check] I looked at `synthesis.md` and the success criteria aren't met yet.",
       'Specific failure: source-read provenance is missing.',
       'SOURCE_READ_REQUIRED: the final claims are not backed by successful, ordered source reads.',
-      'First call readFile on memo-product.md, memo-engineering.md, finance.csv, org.md, and memo-oldplan.md.',
+      'First call read_file on memo-product.md, memo-engineering.md, finance.csv, org.md, and memo-oldplan.md.',
       'Then patch `synthesis.md` using only the values you observed in those files.',
       'The final claim-recording mutations must occur after their corresponding reads.',
-      'Use replaceInFile or replaceLines for focused corrections; use writeFile only when several sections need a coherent grounded rewrite.',
+      'Use replace_in_file or replace_lines for focused corrections; use write_file only when several sections need a coherent grounded rewrite.',
     ].join(' ');
     expect(extractPrerequisiteRepairReadPaths(prompt)).toEqual(requiredPaths);
 
@@ -2576,7 +2580,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     globalThis.fetch = (async (_input: Parameters<typeof fetch>[0], init?: RequestInit) => {
       const body = JSON.parse(String(init?.body ?? '{}')) as (typeof bodies)[number];
       bodies.push(body);
-      expect(body.tools?.map((tool) => tool.function.name)).toEqual(['readFile']);
+      expect(body.tools?.map((tool) => tool.function.name)).toEqual(['read_file']);
       expect(body.tool_choice).toBe('required');
       return sseResponse([
         { choices: [{ index: 0, delta: { content: 'I will inspect the sources carefully.' } }] },
@@ -2604,10 +2608,10 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     internal.deps.bridges = {
       isEmpty: () => false,
       getOpenAITools: () => [
-        { name: 'readFile', description: 'Read a file.', parameters: { type: 'object' } },
-        { name: 'writeFile', description: 'Write a file.', parameters: { type: 'object' } },
+        { name: 'read_file', description: 'Read a file.', parameters: { type: 'object' } },
+        { name: 'write_file', description: 'Write a file.', parameters: { type: 'object' } },
       ],
-      hasTool: (name: string) => name === 'readFile' || name === 'writeFile',
+      hasTool: (name: string) => name === 'read_file' || name === 'write_file',
       callTool: async () => 'unused',
     };
 
@@ -2615,7 +2619,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
       session.sendAndWait(
         "[scenario check] I looked at `synthesis.md` and the success criteria aren't met yet. " +
           'SOURCE_READ_REQUIRED: ordered reads are missing. ' +
-          'First call readFile on memo-product.md and memo-engineering.md. ' +
+          'First call read_file on memo-product.md and memo-engineering.md. ' +
           'Then patch `synthesis.md` using only observed values.',
       ),
     ).rejects.toThrow(
@@ -2624,7 +2628,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     expect(bodies).toHaveLength(3);
   });
 
-  it('escalates repeated no-mutation scenario repair retries to writeFile only', async () => {
+  it('escalates repeated no-mutation scenario repair retries to write_file only', async () => {
     const bodies: Array<{
       messages: Array<{ role: string; content: string | null }>;
       tools?: Array<{ function: { name: string } }>;
@@ -2650,7 +2654,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                       index: 0,
                       id: 'call_read_app',
                       type: 'function',
-                      function: { name: 'readFile', arguments: '{"path":"index.html"}' },
+                      function: { name: 'read_file', arguments: '{"path":"index.html"}' },
                     },
                   ],
                 },
@@ -2676,7 +2680,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
         ]);
       }
       if (requestCount === 3) {
-        expect(body.tools?.map((tool) => tool.function.name)).toContain('readFile');
+        expect(body.tools?.map((tool) => tool.function.name)).toContain('read_file');
         expect(body.messages.at(-1)?.content).toContain('one more targeted read');
         return sseResponse([
           {
@@ -2694,10 +2698,10 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
       expect(body.messages.at(-1)?.role).toBe('user');
       expect(body.messages.at(-1)?.content).toContain('Do not read again');
       const toolNames = body.tools?.map((tool) => tool.function.name) ?? [];
-      expect(toolNames).not.toContain('readFile');
+      expect(toolNames).not.toContain('read_file');
       expect(toolNames).not.toContain('validate');
-      expect(toolNames).not.toContain('replaceInFile');
-      expect(toolNames).toEqual(['writeFile']);
+      expect(toolNames).not.toContain('replace_in_file');
+      expect(toolNames).toEqual(['write_file']);
       return sseResponse([
         {
           choices: [
@@ -2710,7 +2714,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                     id: 'call_rewrite',
                     type: 'function',
                     function: {
-                      name: 'writeFile',
+                      name: 'write_file',
                       arguments:
                         '{"path":"index.html","content":"<!doctype html><script>renderBoard();</script>"}',
                     },
@@ -2744,18 +2748,18 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     internal.deps.bridges = {
       isEmpty: () => false,
       getOpenAITools: () => [
-        { name: 'readFile', description: 'Read a file.', parameters: { type: 'object' } },
+        { name: 'read_file', description: 'Read a file.', parameters: { type: 'object' } },
         { name: 'validate', description: 'Validate a file.', parameters: { type: 'object' } },
-        { name: 'replaceInFile', description: 'Patch a file.', parameters: { type: 'object' } },
-        { name: 'writeFile', description: 'Write a file.', parameters: { type: 'object' } },
+        { name: 'replace_in_file', description: 'Patch a file.', parameters: { type: 'object' } },
+        { name: 'write_file', description: 'Write a file.', parameters: { type: 'object' } },
       ],
       hasTool: (name: string) =>
-        name === 'readFile' ||
+        name === 'read_file' ||
         name === 'validate' ||
-        name === 'replaceInFile' ||
-        name === 'writeFile',
+        name === 'replace_in_file' ||
+        name === 'write_file',
       callTool: async (name: string, _args: Record<string, unknown>) => {
-        if (name === 'writeFile') {
+        if (name === 'write_file') {
           wroteFile = true;
           return 'wrote file';
         }
@@ -2765,7 +2769,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
 
     await expect(
       session.sendAndWait(
-        "[scenario check] I looked at `index.html` and the success criteria aren't met yet. Specific failure: inline-js-parses: Inline JavaScript must parse cleanly while the app is monolithic. (missing ) after argument list). Read `index.html`, then use `replaceInFile` for exact bad text before trying a full `writeFile`.",
+        "[scenario check] I looked at `index.html` and the success criteria aren't met yet. Specific failure: inline-js-parses: Inline JavaScript must parse cleanly while the app is monolithic. (missing ) after argument list). Read `index.html`, then use `replace_in_file` for exact bad text before trying a full `write_file`.",
       ),
     ).resolves.toBe('');
     expect(wroteFile).toBe(true);
@@ -2785,7 +2789,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
       };
       bodies.push(body);
       const toolNames = body.tools?.map((entry) => entry.function.name).sort();
-      expect(toolNames).toEqual(['readFile', 'replaceInFile', 'replaceLines', 'validate']);
+      expect(toolNames).toEqual(['read_file', 'replace_in_file', 'replace_lines', 'validate']);
       expect(JSON.stringify(body.messages)).toContain('[Local-model source repair mode:');
       expect(JSON.stringify(body.messages)).toContain('newest named failing check');
       return sseResponse([
@@ -2800,7 +2804,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                     id: 'call_lines',
                     type: 'function',
                     function: {
-                      name: 'replaceLines',
+                      name: 'replace_lines',
                       arguments:
                         '{"path":"index.html","startLine":46,"endLine":46,"content":"<input id=\\"dueDateInput\\" type=\\"date\\">"}',
                     },
@@ -2834,20 +2838,20 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     internal.deps.bridges = {
       isEmpty: () => false,
       getOpenAITools: () => [
-        { name: 'readFile', description: 'Read a file.', parameters: { type: 'object' } },
+        { name: 'read_file', description: 'Read a file.', parameters: { type: 'object' } },
         { name: 'validate', description: 'Validate a file.', parameters: { type: 'object' } },
-        { name: 'replaceInFile', description: 'Patch a file.', parameters: { type: 'object' } },
-        { name: 'replaceLines', description: 'Patch lines.', parameters: { type: 'object' } },
-        { name: 'writeFile', description: 'Write a file.', parameters: { type: 'object' } },
+        { name: 'replace_in_file', description: 'Patch a file.', parameters: { type: 'object' } },
+        { name: 'replace_lines', description: 'Patch lines.', parameters: { type: 'object' } },
+        { name: 'write_file', description: 'Write a file.', parameters: { type: 'object' } },
       ],
       hasTool: (name: string) =>
-        name === 'readFile' ||
+        name === 'read_file' ||
         name === 'validate' ||
-        name === 'replaceInFile' ||
-        name === 'replaceLines' ||
-        name === 'writeFile',
+        name === 'replace_in_file' ||
+        name === 'replace_lines' ||
+        name === 'write_file',
       callTool: async (name: string, _args: Record<string, unknown>) => {
-        if (name === 'replaceLines') {
+        if (name === 'replace_lines') {
           patched = true;
           return 'replaced lines';
         }
@@ -2865,7 +2869,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     expect(bodies).toHaveLength(1);
   });
 
-  it('keeps writeFile available for JSON data deliverable repairs', async () => {
+  it('keeps write_file available for JSON data deliverable repairs', async () => {
     const bodies: Array<{
       messages: Array<{ role: string; content: string | null }>;
       tools?: Array<{ function: { name: string } }>;
@@ -2878,8 +2882,8 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
       };
       bodies.push(body);
       const toolNames = body.tools?.map((entry) => entry.function.name).sort();
-      expect(toolNames).toContain('writeFile');
-      expect(toolNames).toContain('replaceInFile');
+      expect(toolNames).toContain('write_file');
+      expect(toolNames).toContain('replace_in_file');
       expect(JSON.stringify(body.messages)).toContain('[Local-model repair mode:');
       expect(JSON.stringify(body.messages)).not.toContain('[Local-model source repair mode:');
       return sseResponse([
@@ -2894,7 +2898,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                     id: 'call_write',
                     type: 'function',
                     function: {
-                      name: 'writeFile',
+                      name: 'write_file',
                       arguments:
                         '{"path":"out/customers.json","content":"[{\\"id\\":\\"A-001\\",\\"name\\":\\"Alice\\",\\"email\\":\\"alice@example.com\\",\\"signupDate\\":\\"2025-01-01\\"}]"}',
                     },
@@ -2928,20 +2932,20 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     internal.deps.bridges = {
       isEmpty: () => false,
       getOpenAITools: () => [
-        { name: 'readFile', description: 'Read a file.', parameters: { type: 'object' } },
+        { name: 'read_file', description: 'Read a file.', parameters: { type: 'object' } },
         { name: 'validate', description: 'Validate a file.', parameters: { type: 'object' } },
-        { name: 'replaceInFile', description: 'Patch a file.', parameters: { type: 'object' } },
-        { name: 'replaceLines', description: 'Patch lines.', parameters: { type: 'object' } },
-        { name: 'writeFile', description: 'Write a file.', parameters: { type: 'object' } },
+        { name: 'replace_in_file', description: 'Patch a file.', parameters: { type: 'object' } },
+        { name: 'replace_lines', description: 'Patch lines.', parameters: { type: 'object' } },
+        { name: 'write_file', description: 'Write a file.', parameters: { type: 'object' } },
       ],
       hasTool: (name: string) =>
-        name === 'readFile' ||
+        name === 'read_file' ||
         name === 'validate' ||
-        name === 'replaceInFile' ||
-        name === 'replaceLines' ||
-        name === 'writeFile',
+        name === 'replace_in_file' ||
+        name === 'replace_lines' ||
+        name === 'write_file',
       callTool: async (name: string, _args: Record<string, unknown>) => {
-        if (name === 'writeFile') {
+        if (name === 'write_file') {
           wroteFile = true;
           return 'wrote out/customers.json';
         }
@@ -2985,7 +2989,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                     id: 'call_write',
                     type: 'function',
                     function: {
-                      name: 'writeFile',
+                      name: 'write_file',
                       arguments: '{"path":"records/attendees.csv","content":"id,email\\n"}',
                     },
                   },
@@ -3023,10 +3027,10 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     internal.deps.bridges = {
       isEmpty: () => false,
       getOpenAITools: () => [
-        { name: 'readFile', description: 'Read a file.', parameters: { type: 'object' } },
-        { name: 'writeFile', description: 'Write a file.', parameters: { type: 'object' } },
+        { name: 'read_file', description: 'Read a file.', parameters: { type: 'object' } },
+        { name: 'write_file', description: 'Write a file.', parameters: { type: 'object' } },
       ],
-      hasTool: (name: string) => name === 'readFile' || name === 'writeFile',
+      hasTool: (name: string) => name === 'read_file' || name === 'write_file',
       callTool: async () => 'Wrote records/attendees.csv',
     };
 
@@ -3036,7 +3040,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     expect(requestBody!.tool_choice).toBe('required');
     expect(requestBody!.temperature).toBe(0.2);
     expect(JSON.stringify(requestBody!.messages)).toContain('[Local-model file-work mode:');
-    const writeTool = requestBody!.tools?.find((entry) => entry.function.name === 'writeFile');
+    const writeTool = requestBody!.tools?.find((entry) => entry.function.name === 'write_file');
     expect(writeTool?.function.parameters?.properties?.path?.enum).toEqual([
       'records/attendees.csv',
     ]);
@@ -3065,7 +3069,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
         expect(body.tool_choice).toBe('required');
         expect(JSON.stringify(body.messages)).toContain('[Local-model file-work mode:');
         expect(JSON.stringify(body.messages)).toContain('[Local-model prerequisite-read mode:');
-        expect(body.tools?.map((entry) => entry.function.name)).toEqual(['readFile']);
+        expect(body.tools?.map((entry) => entry.function.name)).toEqual(['read_file']);
         return sseResponse([
           {
             choices: [
@@ -3078,7 +3082,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                       id: 'call_read_a',
                       type: 'function',
                       function: {
-                        name: 'readFile',
+                        name: 'read_file',
                         arguments: '{"path":"notes/a.txt"}',
                       },
                     },
@@ -3094,7 +3098,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
       expect(body.max_tokens).toBe(4096);
       if (requestCount === 2) {
         expect(JSON.stringify(body.messages)).not.toContain('[Local-model write-now mode:');
-        expect(body.tools?.map((entry) => entry.function.name)).toEqual(['readFile']);
+        expect(body.tools?.map((entry) => entry.function.name)).toEqual(['read_file']);
         return sseResponse([
           {
             choices: [
@@ -3107,7 +3111,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                       id: 'call_read_b',
                       type: 'function',
                       function: {
-                        name: 'readFile',
+                        name: 'read_file',
                         arguments: '{"path":"notes/b.txt"}',
                       },
                     },
@@ -3121,7 +3125,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
         ]);
       }
       expect(JSON.stringify(body.messages)).toContain('[Local-model write-now mode:');
-      expect(body.tools?.map((entry) => entry.function.name)).toEqual(['writeFile']);
+      expect(body.tools?.map((entry) => entry.function.name)).toEqual(['write_file']);
       expect(body.tool_choice).toBe('required');
       return sseResponse([
         {
@@ -3135,7 +3139,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                     id: 'call_write',
                     type: 'function',
                     function: {
-                      name: 'writeFile',
+                      name: 'write_file',
                       arguments: '{"path":"out/summary.md","content":"# Summary\\n"}',
                     },
                   },
@@ -3168,8 +3172,8 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     internal.deps.bridges = {
       isEmpty: () => false,
       getOpenAITools: () => [
-        { name: 'readFile', description: 'Read a file.', parameters: { type: 'object' } },
-        { name: 'writeFile', description: 'Write a file.', parameters: { type: 'object' } },
+        { name: 'read_file', description: 'Read a file.', parameters: { type: 'object' } },
+        { name: 'write_file', description: 'Write a file.', parameters: { type: 'object' } },
         {
           name: 'run_nodejs_script',
           description: 'Run a Node.js script.',
@@ -3177,13 +3181,13 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
         },
       ],
       hasTool: (name: string) =>
-        name === 'readFile' || name === 'writeFile' || name === 'run_nodejs_script',
+        name === 'read_file' || name === 'write_file' || name === 'run_nodejs_script',
       callTool: async (name: string, _args: Record<string, unknown>) => {
-        if (name === 'readFile') {
+        if (name === 'read_file') {
           readCount += 1;
           return 'source note';
         }
-        if (name === 'writeFile') {
+        if (name === 'write_file') {
           wroteFile = true;
           return 'wrote out/summary.md';
         }
@@ -3232,7 +3236,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                       id: 'call_read',
                       type: 'function',
                       function: {
-                        name: 'readFile',
+                        name: 'read_file',
                         arguments: '{"path":"notes/source.txt","raw":true}',
                       },
                     },
@@ -3248,7 +3252,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
       expect(JSON.stringify(body.messages)).toContain('[Local-model write-now mode:');
       if (requestCount === 2) {
         expect(JSON.stringify(body.messages)).toContain('[Local-model data-transform mode:');
-        expect(body.tools?.map((entry) => entry.function.name)).toEqual(['writeFile']);
+        expect(body.tools?.map((entry) => entry.function.name)).toEqual(['write_file']);
         expect(body.tool_choice).toBe('required');
         expect(
           (
@@ -3270,7 +3274,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                       id: 'call_script_write',
                       type: 'function',
                       function: {
-                        name: 'writeFile',
+                        name: 'write_file',
                         arguments:
                           '{"path":"scripts/clean_data.mjs","content":"import { writeFileSync } from \\"node:fs\\";\\nwriteFileSync(\\"out/customers.json\\", \\"[]\\\\n\\");\\n"}',
                       },
@@ -3332,8 +3336,8 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     internal.deps.bridges = {
       isEmpty: () => false,
       getOpenAITools: () => [
-        { name: 'readFile', description: 'Read a file.', parameters: { type: 'object' } },
-        { name: 'writeFile', description: 'Write a file.', parameters: { type: 'object' } },
+        { name: 'read_file', description: 'Read a file.', parameters: { type: 'object' } },
+        { name: 'write_file', description: 'Write a file.', parameters: { type: 'object' } },
         {
           name: 'run_nodejs_script',
           description: 'Run a Node.js script.',
@@ -3341,10 +3345,10 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
         },
       ],
       hasTool: (name: string) =>
-        name === 'readFile' || name === 'writeFile' || name === 'run_nodejs_script',
+        name === 'read_file' || name === 'write_file' || name === 'run_nodejs_script',
       callTool: async (name: string, args: Record<string, unknown>) => {
-        if (name === 'readFile') return 'id,email\\nA-001,Alice@example.com';
-        if (name === 'writeFile') {
+        if (name === 'read_file') return 'id,email\\nA-001,Alice@example.com';
+        if (name === 'write_file') {
           expect(args.path).toBe('scripts/clean_data.mjs');
           wroteScript = true;
           return 'Wrote scripts/clean_data.mjs';
@@ -3394,7 +3398,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
         expect(JSON.stringify(body.messages)).toContain('TypeScript annotations');
         expect(JSON.stringify(body.messages)).toContain('pattern must not match an empty string');
         expect(JSON.stringify(body.messages)).toContain('parent directory recursively');
-        expect(body.tools?.map((entry) => entry.function.name)).toEqual(['writeFile']);
+        expect(body.tools?.map((entry) => entry.function.name)).toEqual(['write_file']);
         expect(body.tools?.[0]?.function.parameters?.properties?.path?.enum).toEqual([
           'scripts/clean_data.mjs',
         ]);
@@ -3410,7 +3414,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                       id: 'call_script_write',
                       type: 'function',
                       function: {
-                        name: 'writeFile',
+                        name: 'write_file',
                         arguments:
                           '{"path":"scripts/clean_data.mjs","content":"import { readFileSync, writeFileSync } from \\"node:fs\\";\\nconst raw = readFileSync(\\"data/raw/customers.csv\\", \\"utf8\\");\\nwriteFileSync(\\"out/customers.json\\", JSON.stringify([{ raw }]));\\n"}',
                       },
@@ -3500,8 +3504,8 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     internal.deps.bridges = {
       isEmpty: () => false,
       getOpenAITools: () => [
-        { name: 'readFile', description: 'Read a file.', parameters: { type: 'object' } },
-        { name: 'writeFile', description: 'Write a file.', parameters: { type: 'object' } },
+        { name: 'read_file', description: 'Read a file.', parameters: { type: 'object' } },
+        { name: 'write_file', description: 'Write a file.', parameters: { type: 'object' } },
         {
           name: 'run_nodejs_script',
           description: 'Run a Node.js script.',
@@ -3509,13 +3513,13 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
         },
       ],
       hasTool: (name: string) =>
-        name === 'readFile' || name === 'writeFile' || name === 'run_nodejs_script',
+        name === 'read_file' || name === 'write_file' || name === 'run_nodejs_script',
       callTool: async (name: string, args: Record<string, unknown>) => {
-        if (name === 'readFile') {
+        if (name === 'read_file') {
           readCount += 1;
           return 'unexpected read';
         }
-        if (name === 'writeFile') {
+        if (name === 'write_file') {
           expect(args.path).toBe('scripts/clean_data.mjs');
           wroteScript = true;
           return 'Wrote scripts/clean_data.mjs';
@@ -3559,7 +3563,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
       bodies.push(body);
       requestCount += 1;
       if (requestCount === 1 || requestCount === 4) {
-        expect(body.tools?.map((entry) => entry.function.name)).toEqual(['writeFile']);
+        expect(body.tools?.map((entry) => entry.function.name)).toEqual(['write_file']);
         expect(body.tools?.[0]?.function.parameters?.properties?.path?.enum).toEqual([
           'scripts/clean_data.mjs',
         ]);
@@ -3568,7 +3572,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
           expect(latestMessage).toContain('The helper script ran and FAILED');
           expect(latestMessage).toContain('ReferenceError: require is not defined');
           expect(latestMessage).toContain('rewriting exactly `scripts/clean_data.mjs`');
-          expect(latestMessage).not.toContain('writeFile` for the output file');
+          expect(latestMessage).not.toContain('write_file` for the output file');
         }
         return sseResponse([
           {
@@ -3582,7 +3586,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                       id: requestCount === 1 ? 'call_bad_helper' : 'call_fixed_helper',
                       type: 'function',
                       function: {
-                        name: 'writeFile',
+                        name: 'write_file',
                         arguments:
                           requestCount === 1
                             ? '{"path":"scripts/clean_data.mjs","content":"const fs = require(\\"fs\\");\\nfs.writeFileSync(\\"out/customers.json\\", \\"[]\\n\\");\\n"}'
@@ -3629,7 +3633,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
         ]);
       }
       expect(requestCount).toBe(3);
-      expect(body.tools?.map((entry) => entry.function.name)).toEqual(['writeFile']);
+      expect(body.tools?.map((entry) => entry.function.name)).toEqual(['write_file']);
       expect(body.tools?.[0]?.function.parameters?.properties?.path?.enum).toEqual([
         'scripts/clean_data.mjs',
       ]);
@@ -3664,8 +3668,8 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     internal.deps.bridges = {
       isEmpty: () => false,
       getOpenAITools: () => [
-        { name: 'readFile', description: 'Read a file.', parameters: { type: 'object' } },
-        { name: 'writeFile', description: 'Write a file.', parameters: { type: 'object' } },
+        { name: 'read_file', description: 'Read a file.', parameters: { type: 'object' } },
+        { name: 'write_file', description: 'Write a file.', parameters: { type: 'object' } },
         {
           name: 'run_nodejs_script',
           description: 'Run a Node.js script.',
@@ -3673,9 +3677,9 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
         },
       ],
       hasTool: (name: string) =>
-        name === 'readFile' || name === 'writeFile' || name === 'run_nodejs_script',
+        name === 'read_file' || name === 'write_file' || name === 'run_nodejs_script',
       callTool: async (name: string, args: Record<string, unknown>) => {
-        if (name === 'writeFile') {
+        if (name === 'write_file') {
           expect(args.path).toBe('scripts/clean_data.mjs');
           helperWriteAttempts += 1;
           return 'Wrote scripts/clean_data.mjs';
@@ -3721,7 +3725,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
       requestCount += 1;
 
       if (requestCount === 1 || requestCount === 3 || requestCount === 4) {
-        expect(body.tools?.map((entry) => entry.function.name)).toEqual(['writeFile']);
+        expect(body.tools?.map((entry) => entry.function.name)).toEqual(['write_file']);
         if (requestCount === 3) {
           const messages = JSON.stringify(body.messages);
           expect(messages).toContain('This was a timeout');
@@ -3745,7 +3749,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                       id: `call_write_${requestCount}`,
                       type: 'function',
                       function: {
-                        name: 'writeFile',
+                        name: 'write_file',
                         arguments: JSON.stringify({
                           path: 'scripts/clean_data.mjs',
                           content,
@@ -3809,16 +3813,16 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     internal.deps.bridges = {
       isEmpty: () => false,
       getOpenAITools: () => [
-        { name: 'writeFile', description: 'Write a file.', parameters: { type: 'object' } },
+        { name: 'write_file', description: 'Write a file.', parameters: { type: 'object' } },
         {
           name: 'run_nodejs_script',
           description: 'Run a Node.js script.',
           parameters: { type: 'object' },
         },
       ],
-      hasTool: (name: string) => name === 'writeFile' || name === 'run_nodejs_script',
+      hasTool: (name: string) => name === 'write_file' || name === 'run_nodejs_script',
       callTool: async (name: string, args: Record<string, unknown>) => {
-        if (name === 'writeFile') {
+        if (name === 'write_file') {
           helperWriteCalls += 1;
           return `Wrote ${String(args.path)}`;
         }
@@ -3843,7 +3847,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     expect(bodies).toHaveLength(5);
   });
 
-  it('retries an atomically rejected helper with writeFile instead of reading or patching it', async () => {
+  it('retries an atomically rejected helper with write_file instead of reading or patching it', async () => {
     const bodies: Array<{
       messages: Array<{ role: string; content: string | null }>;
       tools?: Array<{
@@ -3874,7 +3878,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                       id: 'call_read',
                       type: 'function',
                       function: {
-                        name: 'readFile',
+                        name: 'read_file',
                         arguments: '{"path":"records/raw-notes.txt","raw":true}',
                       },
                     },
@@ -3888,7 +3892,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
         ]);
       }
       if (requestCount === 2) {
-        expect(body.tools?.map((entry) => entry.function.name)).toEqual(['writeFile']);
+        expect(body.tools?.map((entry) => entry.function.name)).toEqual(['write_file']);
         return sseResponse([
           {
             choices: [
@@ -3901,7 +3905,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                       id: 'call_bad_helper',
                       type: 'function',
                       function: {
-                        name: 'writeFile',
+                        name: 'write_file',
                         arguments:
                           '{"path":"scripts/clean_data.mjs","content":"import fs from \\"node:fs\\";\\nconst broken = ;\\n"}',
                       },
@@ -3918,7 +3922,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
       if (requestCount === 3) {
         expect(JSON.stringify(body.messages)).toContain('THE FILE WAS NOT WRITTEN');
         expect(JSON.stringify(body.messages)).toContain('[Local-model rejected-write recovery:');
-        expect(body.tools?.map((entry) => entry.function.name)).toEqual(['writeFile']);
+        expect(body.tools?.map((entry) => entry.function.name)).toEqual(['write_file']);
         expect(body.tool_choice).toBe('required');
         expect(body.tools?.[0]?.function.parameters?.properties?.path?.enum).toEqual([
           'scripts/clean_data.mjs',
@@ -3935,7 +3939,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                       id: 'call_fixed_helper',
                       type: 'function',
                       function: {
-                        name: 'writeFile',
+                        name: 'write_file',
                         arguments:
                           '{"path":"scripts/clean_data.mjs","content":"import fs from \\"node:fs\\";\\nfs.writeFileSync(\\"records/attendees.csv\\", \\"id,email\\\\n\\");\\n"}',
                       },
@@ -3993,11 +3997,11 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
       };
     };
     const names = new Set([
-      'readFile',
-      'writeFile',
-      'replaceInFile',
-      'replaceLines',
-      'appendToFile',
+      'read_file',
+      'write_file',
+      'replace_in_file',
+      'replace_lines',
+      'append_to_file',
       'run_nodejs_script',
     ]);
     internal.deps.bridges = {
@@ -4010,8 +4014,8 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
         })),
       hasTool: (name: string) => names.has(name),
       callTool: async (name: string) => {
-        if (name === 'readFile') return 'id,email\nA-1,Alice@example.com';
-        if (name === 'writeFile') {
+        if (name === 'read_file') return 'id,email\nA-1,Alice@example.com';
+        if (name === 'write_file') {
           helperWriteAttempts += 1;
           if (helperWriteAttempts === 1) {
             return 'ERROR: scripts/clean_data.mjs: syntax error at line 2, col 16: Expression expected. This write is rejected atomically; no bytes from this call were persisted. THE FILE WAS NOT WRITTEN by this call.';
@@ -4065,7 +4069,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                       id: 'call_read',
                       type: 'function',
                       function: {
-                        name: 'readFile',
+                        name: 'read_file',
                         arguments: '{"path":"notes/source.txt","raw":true}',
                       },
                     },
@@ -4079,7 +4083,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
         ]);
       }
       if (requestCount === 2) {
-        expect(body.tools?.map((entry) => entry.function.name)).toEqual(['writeFile']);
+        expect(body.tools?.map((entry) => entry.function.name)).toEqual(['write_file']);
         return abortableSseResponse(
           init?.signal as AbortSignal | undefined,
           Array.from({ length: 220 }, () => ({
@@ -4108,7 +4112,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                     id: 'call_write',
                     type: 'function',
                     function: {
-                      name: 'writeFile',
+                      name: 'write_file',
                       arguments: '{"path":"out/summary.md","content":"# Summary\\n"}',
                     },
                   },
@@ -4141,8 +4145,8 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     internal.deps.bridges = {
       isEmpty: () => false,
       getOpenAITools: () => [
-        { name: 'readFile', description: 'Read a file.', parameters: { type: 'object' } },
-        { name: 'writeFile', description: 'Write a file.', parameters: { type: 'object' } },
+        { name: 'read_file', description: 'Read a file.', parameters: { type: 'object' } },
+        { name: 'write_file', description: 'Write a file.', parameters: { type: 'object' } },
         {
           name: 'run_nodejs_script',
           description: 'Run a Node.js script.',
@@ -4150,10 +4154,10 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
         },
       ],
       hasTool: (name: string) =>
-        name === 'readFile' || name === 'writeFile' || name === 'run_nodejs_script',
+        name === 'read_file' || name === 'write_file' || name === 'run_nodejs_script',
       callTool: async (name: string, _args: Record<string, unknown>) => {
-        if (name === 'readFile') return 'source note';
-        if (name === 'writeFile') {
+        if (name === 'read_file') return 'source note';
+        if (name === 'write_file') {
           wroteFile = true;
           return 'Wrote out/summary.md';
         }
@@ -4205,7 +4209,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                       id: 'call_read',
                       type: 'function',
                       function: {
-                        name: 'readFile',
+                        name: 'read_file',
                         arguments: '{"path":"notes/source.txt","raw":true}',
                       },
                     },
@@ -4237,7 +4241,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                       id: 'call_write',
                       type: 'function',
                       function: {
-                        name: 'writeFile',
+                        name: 'write_file',
                         arguments: '{"path":"out/summary.md","content":"# Summary\\n"}',
                       },
                     },
@@ -4274,8 +4278,8 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     internal.deps.bridges = {
       isEmpty: () => false,
       getOpenAITools: () => [
-        { name: 'readFile', description: 'Read a file.', parameters: { type: 'object' } },
-        { name: 'writeFile', description: 'Write a file.', parameters: { type: 'object' } },
+        { name: 'read_file', description: 'Read a file.', parameters: { type: 'object' } },
+        { name: 'write_file', description: 'Write a file.', parameters: { type: 'object' } },
         {
           name: 'run_nodejs_script',
           description: 'Run a Node.js script.',
@@ -4283,10 +4287,10 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
         },
       ],
       hasTool: (name: string) =>
-        name === 'readFile' || name === 'writeFile' || name === 'run_nodejs_script',
+        name === 'read_file' || name === 'write_file' || name === 'run_nodejs_script',
       callTool: async (name: string, _args: Record<string, unknown>) => {
-        if (name === 'readFile') return 'source note';
-        if (name === 'writeFile') {
+        if (name === 'read_file') return 'source note';
+        if (name === 'write_file') {
           wroteFile = true;
           return 'Wrote out/summary.md';
         }
@@ -4337,7 +4341,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                       id: 'call_read',
                       type: 'function',
                       function: {
-                        name: 'readFile',
+                        name: 'read_file',
                         arguments: '{"path":"notes/source.txt","raw":true}',
                       },
                     },
@@ -4351,7 +4355,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
         ]);
       }
       if (requestCount === 2) {
-        expect(body.tools?.map((entry) => entry.function.name)).toEqual(['writeFile']);
+        expect(body.tools?.map((entry) => entry.function.name)).toEqual(['write_file']);
         return reasoningThenSilentUntilAbortSseResponse(
           init?.signal as AbortSignal | undefined,
           () => {
@@ -4360,7 +4364,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
         );
       }
       expect(JSON.stringify(body.messages)).toContain('no output file was written');
-      expect(body.tools?.map((entry) => entry.function.name)).toEqual(['writeFile']);
+      expect(body.tools?.map((entry) => entry.function.name)).toEqual(['write_file']);
       expect(body.tool_choice).toBe('required');
       return sseResponse([
         {
@@ -4374,7 +4378,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                     id: 'call_write',
                     type: 'function',
                     function: {
-                      name: 'writeFile',
+                      name: 'write_file',
                       arguments: '{"path":"out/summary.md","content":"# Summary\\n"}',
                     },
                   },
@@ -4410,8 +4414,8 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     internal.deps.bridges = {
       isEmpty: () => false,
       getOpenAITools: () => [
-        { name: 'readFile', description: 'Read a file.', parameters: { type: 'object' } },
-        { name: 'writeFile', description: 'Write a file.', parameters: { type: 'object' } },
+        { name: 'read_file', description: 'Read a file.', parameters: { type: 'object' } },
+        { name: 'write_file', description: 'Write a file.', parameters: { type: 'object' } },
         {
           name: 'run_nodejs_script',
           description: 'Run a Node.js script.',
@@ -4419,10 +4423,10 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
         },
       ],
       hasTool: (name: string) =>
-        name === 'readFile' || name === 'writeFile' || name === 'run_nodejs_script',
+        name === 'read_file' || name === 'write_file' || name === 'run_nodejs_script',
       callTool: async (name: string, _args: Record<string, unknown>) => {
-        if (name === 'readFile') return 'source note';
-        if (name === 'writeFile') {
+        if (name === 'read_file') return 'source note';
+        if (name === 'write_file') {
           wroteFile = true;
           return 'Wrote out/summary.md';
         }
@@ -4471,7 +4475,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                       id: 'call_read',
                       type: 'function',
                       function: {
-                        name: 'readFile',
+                        name: 'read_file',
                         arguments: '{"path":"notes/source.txt","raw":true}',
                       },
                     },
@@ -4485,7 +4489,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
         ]);
       }
       if (requestCount === 2) {
-        expect(body.tools?.map((entry) => entry.function.name)).toEqual(['writeFile']);
+        expect(body.tools?.map((entry) => entry.function.name)).toEqual(['write_file']);
         return await new Promise<Response>((_resolve, reject) => {
           const signal = init?.signal as AbortSignal | undefined;
           signal?.addEventListener(
@@ -4499,7 +4503,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
         });
       }
       expect(JSON.stringify(body.messages)).toContain('no output file was written');
-      expect(body.tools?.map((entry) => entry.function.name)).toEqual(['writeFile']);
+      expect(body.tools?.map((entry) => entry.function.name)).toEqual(['write_file']);
       expect(body.tool_choice).toBe('required');
       return sseResponse([
         {
@@ -4513,7 +4517,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                     id: 'call_write',
                     type: 'function',
                     function: {
-                      name: 'writeFile',
+                      name: 'write_file',
                       arguments: '{"path":"out/summary.md","content":"# Summary\\n"}',
                     },
                   },
@@ -4550,8 +4554,8 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     internal.deps.bridges = {
       isEmpty: () => false,
       getOpenAITools: () => [
-        { name: 'readFile', description: 'Read a file.', parameters: { type: 'object' } },
-        { name: 'writeFile', description: 'Write a file.', parameters: { type: 'object' } },
+        { name: 'read_file', description: 'Read a file.', parameters: { type: 'object' } },
+        { name: 'write_file', description: 'Write a file.', parameters: { type: 'object' } },
         {
           name: 'run_nodejs_script',
           description: 'Run a Node.js script.',
@@ -4559,10 +4563,10 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
         },
       ],
       hasTool: (name: string) =>
-        name === 'readFile' || name === 'writeFile' || name === 'run_nodejs_script',
+        name === 'read_file' || name === 'write_file' || name === 'run_nodejs_script',
       callTool: async (name: string, _args: Record<string, unknown>) => {
-        if (name === 'readFile') return 'source note';
-        if (name === 'writeFile') {
+        if (name === 'read_file') return 'source note';
+        if (name === 'write_file') {
           wroteFile = true;
           return 'Wrote out/summary.md';
         }
@@ -4581,7 +4585,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     expect(bodies).toHaveLength(2);
   });
 
-  it('aborts silent immediate writeFile turns into a corrective retry', async () => {
+  it('aborts silent immediate write_file turns into a corrective retry', async () => {
     const bodies: Array<{
       messages: Array<{ role: string; content: string | null }>;
       tools?: Array<{ function: { name: string } }>;
@@ -4598,7 +4602,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
       };
       bodies.push(body);
       requestCount += 1;
-      expect(body.tools?.map((entry) => entry.function.name)).toEqual(['writeFile']);
+      expect(body.tools?.map((entry) => entry.function.name)).toEqual(['write_file']);
       expect(body.tool_choice).toBe('required');
       if (requestCount === 1) {
         return reasoningThenSilentUntilAbortSseResponse(
@@ -4608,7 +4612,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
           },
         );
       }
-      expect(JSON.stringify(body.messages)).toContain('produced no `writeFile` tool call');
+      expect(JSON.stringify(body.messages)).toContain('produced no `write_file` tool call');
       return sseResponse([
         {
           choices: [
@@ -4621,7 +4625,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                     id: 'call_write',
                     type: 'function',
                     function: {
-                      name: 'writeFile',
+                      name: 'write_file',
                       arguments: '{"path":"out/customers.json","content":"[]\\n"}',
                     },
                   },
@@ -4657,11 +4661,11 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     internal.deps.bridges = {
       isEmpty: () => false,
       getOpenAITools: () => [
-        { name: 'writeFile', description: 'Write a file.', parameters: { type: 'object' } },
+        { name: 'write_file', description: 'Write a file.', parameters: { type: 'object' } },
       ],
-      hasTool: (name: string) => name === 'writeFile',
+      hasTool: (name: string) => name === 'write_file',
       callTool: async (name: string, _args: Record<string, unknown>) => {
-        if (name === 'writeFile') {
+        if (name === 'write_file') {
           wroteFile = true;
           return 'Wrote out/customers.json';
         }
@@ -4671,7 +4675,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
 
     await expect(
       session.sendAndWait(
-        '[Deliverable expected as a FILE at `out/customers.json`. Your first assistant action should be the tool call `writeFile({ path, content })`; draft inside the tool argument, not in chat.]',
+        '[Deliverable expected as a FILE at `out/customers.json`. Your first assistant action should be the tool call `write_file({ path, content })`; draft inside the tool argument, not in chat.]',
       ),
     ).resolves.toContain('out/customers.json');
 
@@ -4697,7 +4701,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
       };
       bodies.push(body);
       requestCount += 1;
-      expect(body.tools?.map((entry) => entry.function.name)).toEqual(['writeFile']);
+      expect(body.tools?.map((entry) => entry.function.name)).toEqual(['write_file']);
       expect(body.tool_choice).toBe('required');
       if (requestCount === 1) {
         return await new Promise<Response>((_resolve, reject) => {
@@ -4712,7 +4716,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
           );
         });
       }
-      expect(JSON.stringify(body.messages)).toContain('produced no `writeFile` tool call');
+      expect(JSON.stringify(body.messages)).toContain('produced no `write_file` tool call');
       return sseResponse([
         {
           choices: [
@@ -4725,7 +4729,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                     id: 'call_write',
                     type: 'function',
                     function: {
-                      name: 'writeFile',
+                      name: 'write_file',
                       arguments: '{"path":"out/customers.json","content":"[]\\n"}',
                     },
                   },
@@ -4762,11 +4766,11 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     internal.deps.bridges = {
       isEmpty: () => false,
       getOpenAITools: () => [
-        { name: 'writeFile', description: 'Write a file.', parameters: { type: 'object' } },
+        { name: 'write_file', description: 'Write a file.', parameters: { type: 'object' } },
       ],
-      hasTool: (name: string) => name === 'writeFile',
+      hasTool: (name: string) => name === 'write_file',
       callTool: async (name: string, _args: Record<string, unknown>) => {
-        if (name === 'writeFile') {
+        if (name === 'write_file') {
           wroteFile = true;
           return 'Wrote out/customers.json';
         }
@@ -4776,7 +4780,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
 
     await expect(
       session.sendAndWait(
-        '[Deliverable expected as a FILE at `out/customers.json`. Your first assistant action should be the tool call `writeFile({ path, content })`; draft inside the tool argument, not in chat.]',
+        '[Deliverable expected as a FILE at `out/customers.json`. Your first assistant action should be the tool call `write_file({ path, content })`; draft inside the tool argument, not in chat.]',
       ),
     ).rejects.toThrow(/no generated tokens/i);
 
@@ -4785,7 +4789,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     expect(bodies).toHaveLength(1);
   });
 
-  it('clamps urgent missing-file turns to writeFile even when the session bridge is wider', async () => {
+  it('clamps urgent missing-file turns to write_file even when the session bridge is wider', async () => {
     const bodies: Array<{
       messages: Array<{ role: string; content: string | null }>;
       tools?: Array<{ function: { name: string } }>;
@@ -4802,7 +4806,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
       };
       bodies.push(body);
       requestCount += 1;
-      expect(body.tools?.map((entry) => entry.function.name)).toEqual(['writeFile']);
+      expect(body.tools?.map((entry) => entry.function.name)).toEqual(['write_file']);
       expect(body.tool_choice).toBe('required');
       if (requestCount === 1) {
         return await new Promise<Response>((resolve, reject) => {
@@ -4822,7 +4826,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                               id: 'call_write_after_prefill',
                               type: 'function',
                               function: {
-                                name: 'writeFile',
+                                name: 'write_file',
                                 arguments: '{"path":"out/customers.json","content":"[]\\n"}',
                               },
                             },
@@ -4848,7 +4852,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
           );
         });
       }
-      expect(JSON.stringify(body.messages)).toContain('produced no `writeFile` tool call');
+      expect(JSON.stringify(body.messages)).toContain('produced no `write_file` tool call');
       return sseResponse([
         {
           choices: [
@@ -4861,7 +4865,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                     id: 'call_write',
                     type: 'function',
                     function: {
-                      name: 'writeFile',
+                      name: 'write_file',
                       arguments: '{"path":"out/customers.json","content":"[]\\n"}',
                     },
                   },
@@ -4898,8 +4902,8 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     internal.deps.bridges = {
       isEmpty: () => false,
       getOpenAITools: () => [
-        { name: 'readFile', description: 'Read a file.', parameters: { type: 'object' } },
-        { name: 'writeFile', description: 'Write a file.', parameters: { type: 'object' } },
+        { name: 'read_file', description: 'Read a file.', parameters: { type: 'object' } },
+        { name: 'write_file', description: 'Write a file.', parameters: { type: 'object' } },
         {
           name: 'run_nodejs_script',
           description: 'Run a Node.js script.',
@@ -4907,9 +4911,9 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
         },
       ],
       hasTool: (name: string) =>
-        name === 'readFile' || name === 'writeFile' || name === 'run_nodejs_script',
+        name === 'read_file' || name === 'write_file' || name === 'run_nodejs_script',
       callTool: async (name: string, _args: Record<string, unknown>) => {
-        if (name === 'writeFile') {
+        if (name === 'write_file') {
           wroteFile = true;
           return 'Wrote out/customers.json';
         }
@@ -4919,7 +4923,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
 
     await expect(
       session.sendAndWait(
-        '[scenario check] There is still **no `out/customers.json`** in the workspace. Stop reading/planning and write the file now: `writeFile({ path: "out/customers.json", content: <the full deliverable contents> })`. Do not end your turn until `writeFile` has landed the file.',
+        '[scenario check] There is still **no `out/customers.json`** in the workspace. Stop reading/planning and write the file now: `write_file({ path: "out/customers.json", content: <the full deliverable contents> })`. Do not end your turn until `write_file` has landed the file.',
       ),
     ).resolves.toContain('out/customers.json');
 
@@ -4928,7 +4932,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     expect(bodies).toHaveLength(1);
   });
 
-  it('clamps poisoned deliverable recovery turns to writeFile even when the bridge is wider', async () => {
+  it('clamps poisoned deliverable recovery turns to write_file even when the bridge is wider', async () => {
     const bodies: Array<{
       messages: Array<{ role: string; content: string | null }>;
       tools?: Array<{ function: { name: string } }>;
@@ -4942,7 +4946,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
         tool_choice?: unknown;
       };
       bodies.push(body);
-      expect(body.tools?.map((entry) => entry.function.name)).toEqual(['writeFile']);
+      expect(body.tools?.map((entry) => entry.function.name)).toEqual(['write_file']);
       expect(body.tool_choice).toBe('required');
       expect(JSON.stringify(body.messages)).toContain('[eval recovery]');
       return sseResponse([
@@ -4957,7 +4961,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                     id: 'call_write',
                     type: 'function',
                     function: {
-                      name: 'writeFile',
+                      name: 'write_file',
                       arguments: '{"path":"out/customers.json","content":"[]\\n"}',
                     },
                   },
@@ -4990,8 +4994,8 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     internal.deps.bridges = {
       isEmpty: () => false,
       getOpenAITools: () => [
-        { name: 'readFile', description: 'Read a file.', parameters: { type: 'object' } },
-        { name: 'writeFile', description: 'Write a file.', parameters: { type: 'object' } },
+        { name: 'read_file', description: 'Read a file.', parameters: { type: 'object' } },
+        { name: 'write_file', description: 'Write a file.', parameters: { type: 'object' } },
         {
           name: 'run_nodejs_script',
           description: 'Run a Node.js script.',
@@ -4999,9 +5003,9 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
         },
       ],
       hasTool: (name: string) =>
-        name === 'readFile' || name === 'writeFile' || name === 'run_nodejs_script',
+        name === 'read_file' || name === 'write_file' || name === 'run_nodejs_script',
       callTool: async (name: string, _args: Record<string, unknown>) => {
-        if (name === 'writeFile') {
+        if (name === 'write_file') {
           wroteFile = true;
           return 'Wrote out/customers.json';
         }
@@ -5016,8 +5020,8 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
           'Your previous turn aborted, so the scheduler stopped automatic follow-up for this project.',
           'Abort reason: [llama-cpp] direct file-work turn ended without a successful workspace mutation after 2 corrective nudge(s).',
           'Latest scenario check: score 0, bytes 0.',
-          'Your next tool call should write or repair the requested workspace deliverable. Prefer `writeFile` for recovery after a failed line-based edit.',
-          'Do not answer only in prose. Do not retry the same malformed `replaceLines` or `replaceInFile` call. Make one concrete workspace edit, then stop with a short status note.',
+          'Your next tool call should write or repair the requested workspace deliverable. Prefer `write_file` for recovery after a failed line-based edit.',
+          'Do not answer only in prose. Do not retry the same malformed `replace_lines` or `replace_in_file` call. Make one concrete workspace edit, then stop with a short status note.',
         ].join('\n'),
       ),
     ).resolves.toContain('out/customers.json');
@@ -5026,7 +5030,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     expect(bodies).toHaveLength(1);
   });
 
-  it('rejects wrong-path writeFile calls during target-known immediate writes', async () => {
+  it('rejects wrong-path write_file calls during target-known immediate writes', async () => {
     const bodies: Array<{
       messages: Array<{ role: string; content: string | null }>;
       tools?: Array<{ function: { name: string; parameters?: Record<string, unknown> } }>;
@@ -5043,7 +5047,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
       };
       bodies.push(body);
       requestCount += 1;
-      expect(body.tools?.map((entry) => entry.function.name)).toEqual(['writeFile']);
+      expect(body.tools?.map((entry) => entry.function.name)).toEqual(['write_file']);
       expect(body.tool_choice).toBe('required');
       const writeParams = body.tools?.[0]?.function.parameters as
         | { properties?: { path?: { enum?: string[] } } }
@@ -5062,7 +5066,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                       id: 'call_wrong',
                       type: 'function',
                       function: {
-                        name: 'writeFile',
+                        name: 'write_file',
                         arguments: '{"path":"process.mjs","content":"console.log(1)\\n"}',
                       },
                     },
@@ -5088,7 +5092,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                     id: 'call_right',
                     type: 'function',
                     function: {
-                      name: 'writeFile',
+                      name: 'write_file',
                       arguments: '{"path":"out/customers.json","content":"[]\\n"}',
                     },
                   },
@@ -5121,9 +5125,9 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     internal.deps.bridges = {
       isEmpty: () => false,
       getOpenAITools: () => [
-        { name: 'writeFile', description: 'Write a file.', parameters: { type: 'object' } },
+        { name: 'write_file', description: 'Write a file.', parameters: { type: 'object' } },
       ],
-      hasTool: (name: string) => name === 'writeFile',
+      hasTool: (name: string) => name === 'write_file',
       callTool: async (_name: string, args: Record<string, unknown>) => {
         if (args.path === 'process.mjs') wroteWrongPath = true;
         if (args.path === 'out/customers.json') {
@@ -5136,7 +5140,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
 
     await expect(
       session.sendAndWait(
-        '[scenario check] There is still **no `out/customers.json`** in the workspace. Stop reading/planning and write the file now: `writeFile({ path: "out/customers.json", content: <the full deliverable contents> })`. Do not end your turn until `writeFile` has landed the file.',
+        '[scenario check] There is still **no `out/customers.json`** in the workspace. Stop reading/planning and write the file now: `write_file({ path: "out/customers.json", content: <the full deliverable contents> })`. Do not end your turn until `write_file` has landed the file.',
       ),
     ).resolves.toContain('out/customers.json');
 
@@ -5145,7 +5149,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     expect(bodies).toHaveLength(2);
   });
 
-  it('keeps writeFile available when a scenario repair carries a mandatory first-write directive', async () => {
+  it('keeps write_file available when a scenario repair carries a mandatory first-write directive', async () => {
     const bodies: Array<{
       messages: Array<{ role: string; content: string | null }>;
       tools?: Array<{ function: { name: string } }>;
@@ -5157,7 +5161,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
         tools?: Array<{ function: { name: string } }>;
       };
       bodies.push(body);
-      expect(body.tools?.map((entry) => entry.function.name)).toEqual(['writeFile']);
+      expect(body.tools?.map((entry) => entry.function.name)).toEqual(['write_file']);
       expect(
         (
           body.tools?.[0]?.function as unknown as {
@@ -5179,7 +5183,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                     id: 'call_write',
                     type: 'function',
                     function: {
-                      name: 'writeFile',
+                      name: 'write_file',
                       arguments:
                         '{"path":"src/controller.ts","content":"export const value = 2;\\n"}',
                     },
@@ -5213,17 +5217,17 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     internal.deps.bridges = {
       isEmpty: () => false,
       getOpenAITools: () => [
-        { name: 'readFile', description: 'Read a file.', parameters: { type: 'object' } },
+        { name: 'read_file', description: 'Read a file.', parameters: { type: 'object' } },
         { name: 'validate', description: 'Validate a file.', parameters: { type: 'object' } },
-        { name: 'replaceInFile', description: 'Patch a file.', parameters: { type: 'object' } },
-        { name: 'replaceLines', description: 'Patch lines.', parameters: { type: 'object' } },
-        { name: 'writeFile', description: 'Write a file.', parameters: { type: 'object' } },
-        { name: 'appendToFile', description: 'Append a file.', parameters: { type: 'object' } },
+        { name: 'replace_in_file', description: 'Patch a file.', parameters: { type: 'object' } },
+        { name: 'replace_lines', description: 'Patch lines.', parameters: { type: 'object' } },
+        { name: 'write_file', description: 'Write a file.', parameters: { type: 'object' } },
+        { name: 'append_to_file', description: 'Append a file.', parameters: { type: 'object' } },
         { name: 'message_gezel', description: 'Delegate.', parameters: { type: 'object' } },
       ],
       hasTool: () => true,
       callTool: async (name: string, args: Record<string, unknown>) => {
-        if (name === 'writeFile' && args.path === 'src/controller.ts') {
+        if (name === 'write_file' && args.path === 'src/controller.ts') {
           wroteFile = true;
           return 'Wrote src/controller.ts';
         }
@@ -5233,9 +5237,9 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
 
     await expect(
       session.sendAndWait(
-        '[Deliverable expected as a FILE at `src/controller.ts`. Your first assistant action should be the tool call `writeFile({ path, content })`; draft inside the tool argument.]\n' +
+        '[Deliverable expected as a FILE at `src/controller.ts`. Your first assistant action should be the tool call `write_file({ path, content })`; draft inside the tool argument.]\n' +
           "[scenario check] I looked at `src/controller.ts` and the success criteria aren't met yet. Signals that didn't fire: **all-call-sites-updated**. " +
-          'If this is a small edit, use `replaceInFile`; otherwise use `writeFile` to re-emit the checked file. ' +
+          'If this is a small edit, use `replace_in_file`; otherwise use `write_file` to re-emit the checked file. ' +
           'Your next assistant action should be a file-writing tool call for `src/controller.ts`.',
       ),
     ).resolves.toBe('');
@@ -5260,9 +5264,9 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
       requestCount += 1;
       if (requestCount === 1) {
         expect(body.tools?.map((entry) => entry.function.name).sort()).toEqual([
-          'readFile',
-          'replaceInFile',
-          'replaceLines',
+          'read_file',
+          'replace_in_file',
+          'replace_lines',
           'validate',
         ]);
         expect(JSON.stringify(body.messages)).toContain('Signals that did not fire');
@@ -5278,7 +5282,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                       id: 'call_read',
                       type: 'function',
                       function: {
-                        name: 'readFile',
+                        name: 'read_file',
                         arguments: '{"path":"index.html"}',
                       },
                     },
@@ -5292,8 +5296,8 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
         ]);
       }
       expect(body.tools?.map((entry) => entry.function.name).sort()).toEqual([
-        'replaceInFile',
-        'replaceLines',
+        'replace_in_file',
+        'replace_lines',
       ]);
       expect(JSON.stringify(body.messages)).toContain('[Local-model source patch mode:');
       expect(JSON.stringify(body.messages)).toContain(
@@ -5312,7 +5316,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                     id: 'call_lines',
                     type: 'function',
                     function: {
-                      name: 'replaceLines',
+                      name: 'replace_lines',
                       arguments:
                         '{"path":"index.html","startLine":46,"endLine":46,"content":"<input id=\\"dueDateInput\\" type=\\"date\\">"}',
                     },
@@ -5346,23 +5350,23 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     internal.deps.bridges = {
       isEmpty: () => false,
       getOpenAITools: () => [
-        { name: 'readFile', description: 'Read a file.', parameters: { type: 'object' } },
+        { name: 'read_file', description: 'Read a file.', parameters: { type: 'object' } },
         { name: 'validate', description: 'Validate a file.', parameters: { type: 'object' } },
-        { name: 'replaceInFile', description: 'Patch a file.', parameters: { type: 'object' } },
-        { name: 'replaceLines', description: 'Patch lines.', parameters: { type: 'object' } },
-        { name: 'writeFile', description: 'Write a file.', parameters: { type: 'object' } },
+        { name: 'replace_in_file', description: 'Patch a file.', parameters: { type: 'object' } },
+        { name: 'replace_lines', description: 'Patch lines.', parameters: { type: 'object' } },
+        { name: 'write_file', description: 'Write a file.', parameters: { type: 'object' } },
       ],
       hasTool: (name: string) =>
-        name === 'readFile' ||
+        name === 'read_file' ||
         name === 'validate' ||
-        name === 'replaceInFile' ||
-        name === 'replaceLines' ||
-        name === 'writeFile',
+        name === 'replace_in_file' ||
+        name === 'replace_lines' ||
+        name === 'write_file',
       callTool: async (name: string, _args: Record<string, unknown>) => {
-        if (name === 'readFile') {
+        if (name === 'read_file') {
           return '1→ <form>\\n46→ <button>Add</button>';
         }
-        if (name === 'replaceLines') {
+        if (name === 'replace_lines') {
           patched = true;
           return 'replaced lines';
         }
@@ -5380,7 +5384,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     expect(bodies).toHaveLength(2);
   });
 
-  it('keeps readFile available for one dependency refresh on cross-file compiler repairs', async () => {
+  it('keeps read_file available for one dependency refresh on cross-file compiler repairs', async () => {
     const bodies: Array<{
       messages: Array<{ role: string; content: string | null }>;
       tools?: Array<{ function: { name: string } }>;
@@ -5393,7 +5397,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
       requestCount += 1;
       const names = body.tools?.map((entry) => entry.function.name).sort() ?? [];
       if (requestCount === 1) {
-        expect(names).toContain('readFile');
+        expect(names).toContain('read_file');
         return sseResponse([
           {
             choices: [
@@ -5406,7 +5410,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                       id: 'call_read_target',
                       type: 'function',
                       function: {
-                        name: 'readFile',
+                        name: 'read_file',
                         arguments: '{"path":"src/migrate.ts"}',
                       },
                     },
@@ -5420,7 +5424,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
         ]);
       }
       if (requestCount === 2) {
-        expect(names).toContain('readFile');
+        expect(names).toContain('read_file');
         expect(JSON.stringify(body.messages)).toContain('[Local-model dependency refresh:');
         return sseResponse([
           {
@@ -5434,7 +5438,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                       id: 'call_read_dependency',
                       type: 'function',
                       function: {
-                        name: 'readFile',
+                        name: 'read_file',
                         arguments: '{"path":"src/types.ts"}',
                       },
                     },
@@ -5447,7 +5451,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
           '[DONE]',
         ]);
       }
-      expect(names).toEqual(['replaceInFile', 'replaceLines']);
+      expect(names).toEqual(['replace_in_file', 'replace_lines']);
       return sseResponse([
         {
           choices: [
@@ -5460,7 +5464,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                     id: 'call_patch',
                     type: 'function',
                     function: {
-                      name: 'replaceInFile',
+                      name: 'replace_in_file',
                       arguments:
                         '{"path":"src/migrate.ts","find":"oldRecord.name","replace":"oldRecord.firstName"}',
                     },
@@ -5494,20 +5498,20 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     internal.deps.bridges = {
       isEmpty: () => false,
       getOpenAITools: () => [
-        { name: 'readFile', description: 'Read a file.', parameters: { type: 'object' } },
+        { name: 'read_file', description: 'Read a file.', parameters: { type: 'object' } },
         { name: 'validate', description: 'Validate a file.', parameters: { type: 'object' } },
-        { name: 'replaceInFile', description: 'Patch a file.', parameters: { type: 'object' } },
-        { name: 'replaceLines', description: 'Patch lines.', parameters: { type: 'object' } },
-        { name: 'writeFile', description: 'Write a file.', parameters: { type: 'object' } },
+        { name: 'replace_in_file', description: 'Patch a file.', parameters: { type: 'object' } },
+        { name: 'replace_lines', description: 'Patch lines.', parameters: { type: 'object' } },
+        { name: 'write_file', description: 'Write a file.', parameters: { type: 'object' } },
       ],
       hasTool: () => true,
       callTool: async (name: string, args: Record<string, unknown>) => {
-        if (name === 'readFile') {
+        if (name === 'read_file') {
           return args.path === 'src/types.ts'
             ? 'export type User = { id: number; firstName: string; lastName: string }'
             : 'export function migrateUser(oldRecord: LegacyUser): User { return oldRecord.name }';
         }
-        if (name === 'replaceInFile') {
+        if (name === 'replace_in_file') {
           patched = true;
           return 'replaced content';
         }
@@ -5525,7 +5529,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     expect(bodies).toHaveLength(3);
   });
 
-  it('switches a missing surgical-edit target to a path-pinned writeFile create', async () => {
+  it('switches a missing surgical-edit target to a path-pinned write_file create', async () => {
     const bodies: Array<{
       messages: Array<{ role: string; content: string | null }>;
       tools?: Array<{
@@ -5543,7 +5547,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
       requestCount += 1;
       const names = body.tools?.map((entry) => entry.function.name).sort() ?? [];
       if (requestCount === 1) {
-        expect(names).toEqual(['readFile', 'replaceInFile', 'replaceLines', 'validate']);
+        expect(names).toEqual(['read_file', 'replace_in_file', 'replace_lines', 'validate']);
         return sseResponse([
           {
             choices: [
@@ -5556,7 +5560,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                       id: 'call_missing_patch',
                       type: 'function',
                       function: {
-                        name: 'replaceLines',
+                        name: 'replace_lines',
                         arguments:
                           '{"path":"tests/migrate.test.ts","startLine":1,"endLine":1,"content":"test(\'migration\', () => {});"}',
                       },
@@ -5571,7 +5575,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
         ]);
       }
 
-      expect(names).toEqual(['writeFile']);
+      expect(names).toEqual(['write_file']);
       expect(body.tools?.[0]?.function.parameters?.properties?.path?.enum).toEqual([
         'tests/migrate.test.ts',
       ]);
@@ -5588,7 +5592,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                     id: 'call_create',
                     type: 'function',
                     function: {
-                      name: 'writeFile',
+                      name: 'write_file',
                       arguments:
                         '{"path":"tests/migrate.test.ts","content":"test(\'migration\', () => {});\\n"}',
                     },
@@ -5619,7 +5623,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
         };
       };
     };
-    const toolNames = ['readFile', 'validate', 'replaceInFile', 'replaceLines', 'writeFile'];
+    const toolNames = ['read_file', 'validate', 'replace_in_file', 'replace_lines', 'write_file'];
     internal.deps.bridges = {
       isEmpty: () => false,
       getOpenAITools: () =>
@@ -5630,10 +5634,10 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
         })),
       hasTool: (name: string) => toolNames.includes(name),
       callTool: async (name: string) => {
-        if (name === 'replaceLines') {
-          return 'ERROR: Cannot edit tests/migrate.test.ts: file does not exist (ENOENT). Use `writeFile` to create it first.';
+        if (name === 'replace_lines') {
+          return 'ERROR: Cannot edit tests/migrate.test.ts: file does not exist (ENOENT). Use `write_file` to create it first.';
         }
-        if (name === 'writeFile') {
+        if (name === 'write_file') {
           created = true;
           return 'Wrote tests/migrate.test.ts';
         }
@@ -5669,7 +5673,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
       requestCount += 1;
       const names = body.tools?.map((entry) => entry.function.name).sort() ?? [];
       if (requestCount === 1) {
-        expect(names).toEqual(['readFile', 'replaceInFile', 'replaceLines', 'writeFile']);
+        expect(names).toEqual(['read_file', 'replace_in_file', 'replace_lines', 'write_file']);
         return sseResponse([
           {
             choices: [
@@ -5682,7 +5686,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                       id: 'call_read',
                       type: 'function',
                       function: {
-                        name: 'readFile',
+                        name: 'read_file',
                         arguments: '{"path":"src/counter.ts"}',
                       },
                     },
@@ -5696,8 +5700,8 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
         ]);
       }
       if (requestCount <= 3) {
-        expect(names).toEqual(['replaceInFile', 'replaceLines']);
-        const toolName = requestCount === 2 ? 'replaceInFile' : 'replaceLines';
+        expect(names).toEqual(['replace_in_file', 'replace_lines']);
+        const toolName = requestCount === 2 ? 'replace_in_file' : 'replace_lines';
         return sseResponse([
           {
             choices: [
@@ -5712,7 +5716,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                       function: {
                         name: toolName,
                         arguments:
-                          toolName === 'replaceInFile'
+                          toolName === 'replace_in_file'
                             ? '{"path":"src/counter.ts","find":"missing","replace":"return value + 1;"}'
                             : '{"path":"src/counter.ts","startLine":99,"endLine":99,"content":"return value + 1;"}',
                       },
@@ -5726,7 +5730,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
           '[DONE]',
         ]);
       }
-      expect(names).toEqual(['writeFile']);
+      expect(names).toEqual(['write_file']);
       expect(body.tools?.[0]?.function.parameters?.properties?.path?.enum).toEqual([
         'src/counter.ts',
       ]);
@@ -5743,7 +5747,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                     id: 'call_rewrite',
                     type: 'function',
                     function: {
-                      name: 'writeFile',
+                      name: 'write_file',
                       arguments:
                         '{"path":"src/counter.ts","content":"export function next(value: number) { return value + 1; }\\n"}',
                     },
@@ -5774,7 +5778,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
         };
       };
     };
-    const names = new Set(['readFile', 'replaceInFile', 'replaceLines', 'writeFile']);
+    const names = new Set(['read_file', 'replace_in_file', 'replace_lines', 'write_file']);
     internal.deps.bridges = {
       isEmpty: () => false,
       getOpenAITools: () =>
@@ -5785,8 +5789,8 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
         })),
       hasTool: (name: string) => names.has(name),
       callTool: async (name: string) => {
-        if (name === 'readFile') return '1→ export function next(value: number) { return value; }';
-        if (name === 'writeFile') {
+        if (name === 'read_file') return '1→ export function next(value: number) { return value; }';
+        if (name === 'write_file') {
           wroteFile = true;
           return 'Wrote src/counter.ts';
         }
@@ -5818,8 +5822,8 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
       };
       bodies.push(body);
       const toolNames = body.tools?.map((entry) => entry.function.name).sort();
-      expect(toolNames).toEqual(['readFile', 'replaceInFile', 'replaceLines', 'validate']);
-      expect(toolNames).not.toContain('writeFile');
+      expect(toolNames).toEqual(['read_file', 'replace_in_file', 'replace_lines', 'validate']);
+      expect(toolNames).not.toContain('write_file');
       requestCount += 1;
       if (requestCount === 1) {
         return sseResponse([
@@ -5834,7 +5838,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                       id: 'call_patch_fail',
                       type: 'function',
                       function: {
-                        name: 'replaceInFile',
+                        name: 'replace_in_file',
                         arguments:
                           '{"path":"index.html","find":"<button>Add</button>","replace":"<input id=\\"dueDateInput\\" type=\\"date\\"><button>Add</button>"}',
                       },
@@ -5861,7 +5865,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                     id: 'call_lines',
                     type: 'function',
                     function: {
-                      name: 'replaceLines',
+                      name: 'replace_lines',
                       arguments:
                         '{"path":"index.html","startLine":46,"endLine":46,"content":"<input id=\\"dueDateInput\\" type=\\"date\\">\\n<button>Add</button>"}',
                     },
@@ -5895,23 +5899,23 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     internal.deps.bridges = {
       isEmpty: () => false,
       getOpenAITools: () => [
-        { name: 'readFile', description: 'Read a file.', parameters: { type: 'object' } },
+        { name: 'read_file', description: 'Read a file.', parameters: { type: 'object' } },
         { name: 'validate', description: 'Validate a file.', parameters: { type: 'object' } },
-        { name: 'replaceInFile', description: 'Patch a file.', parameters: { type: 'object' } },
-        { name: 'replaceLines', description: 'Patch lines.', parameters: { type: 'object' } },
-        { name: 'writeFile', description: 'Write a file.', parameters: { type: 'object' } },
+        { name: 'replace_in_file', description: 'Patch a file.', parameters: { type: 'object' } },
+        { name: 'replace_lines', description: 'Patch lines.', parameters: { type: 'object' } },
+        { name: 'write_file', description: 'Write a file.', parameters: { type: 'object' } },
       ],
       hasTool: (name: string) =>
-        name === 'readFile' ||
+        name === 'read_file' ||
         name === 'validate' ||
-        name === 'replaceInFile' ||
-        name === 'replaceLines' ||
-        name === 'writeFile',
+        name === 'replace_in_file' ||
+        name === 'replace_lines' ||
+        name === 'write_file',
       callTool: async (name: string, _args: Record<string, unknown>) => {
-        if (name === 'replaceInFile') {
+        if (name === 'replace_in_file') {
           return 'ERROR: pattern not found in index.html';
         }
-        if (name === 'replaceLines') {
+        if (name === 'replace_lines') {
           patched = true;
           return 'replaced lines';
         }
@@ -5929,7 +5933,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     expect(bodies).toHaveLength(2);
   });
 
-  it('falls back to writeFile only after repeated source patch failures', async () => {
+  it('falls back to write_file only after repeated source patch failures', async () => {
     const bodies: Array<{
       messages: Array<{ role: string; content: string | null }>;
       tools?: Array<{ function: { name: string } }>;
@@ -5945,9 +5949,9 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
       requestCount += 1;
       if (requestCount <= 2) {
         expect(body.tools?.map((entry) => entry.function.name).sort()).toEqual([
-          'readFile',
-          'replaceInFile',
-          'replaceLines',
+          'read_file',
+          'replace_in_file',
+          'replace_lines',
           'validate',
         ]);
         return sseResponse([
@@ -5962,7 +5966,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                       id: `call_patch_fail_${requestCount}`,
                       type: 'function',
                       function: {
-                        name: 'replaceInFile',
+                        name: 'replace_in_file',
                         arguments:
                           '{"path":"src/controller.ts","find":"oldValue","replace":"newValue"}',
                       },
@@ -5977,7 +5981,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
         ]);
       }
       if (requestCount === 3) {
-        expect(body.tools?.map((entry) => entry.function.name)).toEqual(['readFile']);
+        expect(body.tools?.map((entry) => entry.function.name)).toEqual(['read_file']);
         expect(
           (
             body.tools?.[0]?.function as {
@@ -5998,7 +6002,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                       id: 'call_read_before_rewrite',
                       type: 'function',
                       function: {
-                        name: 'readFile',
+                        name: 'read_file',
                         arguments: '{"path":"src/controller.ts","raw":true}',
                       },
                     },
@@ -6011,7 +6015,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
           '[DONE]',
         ]);
       }
-      expect(body.tools?.map((entry) => entry.function.name)).toEqual(['writeFile']);
+      expect(body.tools?.map((entry) => entry.function.name)).toEqual(['write_file']);
       expect(JSON.stringify(body.messages)).toContain('[Local-model source rewrite fallback:');
       return sseResponse([
         {
@@ -6025,7 +6029,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                     id: 'call_write_fallback',
                     type: 'function',
                     function: {
-                      name: 'writeFile',
+                      name: 'write_file',
                       arguments:
                         '{"path":"src/controller.ts","content":"export const newValue = 2;\\n"}',
                     },
@@ -6059,18 +6063,18 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     internal.deps.bridges = {
       isEmpty: () => false,
       getOpenAITools: () => [
-        { name: 'readFile', description: 'Read a file.', parameters: { type: 'object' } },
+        { name: 'read_file', description: 'Read a file.', parameters: { type: 'object' } },
         { name: 'validate', description: 'Validate a file.', parameters: { type: 'object' } },
-        { name: 'replaceInFile', description: 'Patch a file.', parameters: { type: 'object' } },
-        { name: 'replaceLines', description: 'Patch lines.', parameters: { type: 'object' } },
-        { name: 'writeFile', description: 'Write a file.', parameters: { type: 'object' } },
+        { name: 'replace_in_file', description: 'Patch a file.', parameters: { type: 'object' } },
+        { name: 'replace_lines', description: 'Patch lines.', parameters: { type: 'object' } },
+        { name: 'write_file', description: 'Write a file.', parameters: { type: 'object' } },
         { name: 'message_gezel', description: 'Delegate.', parameters: { type: 'object' } },
       ],
       hasTool: () => true,
       callTool: async (name: string, _args: Record<string, unknown>) => {
-        if (name === 'replaceInFile') return 'ERROR: pattern not found in src/controller.ts';
-        if (name === 'readFile') return 'export const oldValue = 1;\n';
-        if (name === 'writeFile') {
+        if (name === 'replace_in_file') return 'ERROR: pattern not found in src/controller.ts';
+        if (name === 'read_file') return 'export const oldValue = 1;\n';
+        if (name === 'write_file') {
           wroteFile = true;
           return 'Wrote src/controller.ts';
         }
@@ -6111,7 +6115,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                     id: 'call_write',
                     type: 'function',
                     function: {
-                      name: 'writeFile',
+                      name: 'write_file',
                       arguments: '{"path":"src/state.js","content":"export const tasks = [];"}',
                     },
                   },
@@ -6147,12 +6151,12 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     internal.deps.bridges = {
       isEmpty: () => false,
       getOpenAITools: () => [
-        { name: 'readFile', description: 'Read a file.', parameters: { type: 'object' } },
-        { name: 'writeFile', description: 'Write a file.', parameters: { type: 'object' } },
+        { name: 'read_file', description: 'Read a file.', parameters: { type: 'object' } },
+        { name: 'write_file', description: 'Write a file.', parameters: { type: 'object' } },
       ],
-      hasTool: (name: string) => name === 'readFile' || name === 'writeFile',
+      hasTool: (name: string) => name === 'read_file' || name === 'write_file',
       callTool: async (name: string, _args: Record<string, unknown>) => {
-        if (name === 'writeFile') {
+        if (name === 'write_file') {
           wroteFile = true;
           return 'wrote file';
         }
@@ -6162,7 +6166,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
 
     await expect(
       session.sendAndWait(
-        '[runtime check] I opened `index.html` in a headless browser. 1 assertion(s) failed: seed-tasks-render. Patch the relevant source file with `writeFile`.',
+        '[runtime check] I opened `index.html` in a headless browser. 1 assertion(s) failed: seed-tasks-render. Patch the relevant source file with `write_file`.',
       ),
     ).resolves.toBe('');
     expect(wroteFile).toBe(true);
@@ -6191,7 +6195,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                     id: 'call_write',
                     type: 'function',
                     function: {
-                      name: 'writeFile',
+                      name: 'write_file',
                       arguments:
                         '{"path":"src/app.js","content":"const title = document.getElementById(\\"title\\");"}',
                     },
@@ -6225,9 +6229,9 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     internal.deps.bridges = {
       isEmpty: () => false,
       getOpenAITools: () => [
-        { name: 'writeFile', description: 'Write a file.', parameters: { type: 'object' } },
+        { name: 'write_file', description: 'Write a file.', parameters: { type: 'object' } },
       ],
-      hasTool: (name: string) => name === 'writeFile',
+      hasTool: (name: string) => name === 'write_file',
       callTool: async () => {
         wroteFile = true;
         return 'wrote file';
@@ -6266,7 +6270,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                       id: 'call_replace',
                       type: 'function',
                       function: {
-                        name: 'replaceInFile',
+                        name: 'replace_in_file',
                         arguments:
                           '{"path":"launch-notes.md","find":"## Tasks","replace":"## Tasks\\n- Seed tasks render"}',
                       },
@@ -6284,7 +6288,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
       expect(body.messages.at(-1)?.content).toContain(
         'This repair edit did not change the workspace',
       );
-      expect(body.messages.at(-1)?.content).toContain('writeFile');
+      expect(body.messages.at(-1)?.content).toContain('write_file');
       expect(body.messages.at(-1)?.content).toContain('complete corrected source file');
       return sseResponse([
         {
@@ -6298,7 +6302,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                     id: 'call_write',
                     type: 'function',
                     function: {
-                      name: 'writeFile',
+                      name: 'write_file',
                       arguments:
                         '{"path":"launch-notes.md","content":"# Launch Notes\\n\\n## Tasks\\n- Seed tasks render"}',
                     },
@@ -6332,15 +6336,15 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     internal.deps.bridges = {
       isEmpty: () => false,
       getOpenAITools: () => [
-        { name: 'readFile', description: 'Read a file.', parameters: { type: 'object' } },
-        { name: 'replaceInFile', description: 'Patch a file.', parameters: { type: 'object' } },
-        { name: 'writeFile', description: 'Write a file.', parameters: { type: 'object' } },
+        { name: 'read_file', description: 'Read a file.', parameters: { type: 'object' } },
+        { name: 'replace_in_file', description: 'Patch a file.', parameters: { type: 'object' } },
+        { name: 'write_file', description: 'Write a file.', parameters: { type: 'object' } },
       ],
       hasTool: (name: string) =>
-        name === 'readFile' || name === 'replaceInFile' || name === 'writeFile',
+        name === 'read_file' || name === 'replace_in_file' || name === 'write_file',
       callTool: async (name: string, _args: Record<string, unknown>) => {
-        if (name === 'replaceInFile') return 'ERROR: find text not found in launch-notes.md';
-        if (name === 'writeFile') {
+        if (name === 'replace_in_file') return 'ERROR: find text not found in launch-notes.md';
+        if (name === 'write_file') {
           wroteFile = true;
           return 'wrote file';
         }
@@ -6380,7 +6384,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                       id: 'call_replace',
                       type: 'function',
                       function: {
-                        name: 'replaceInFile',
+                        name: 'replace_in_file',
                         arguments:
                           '{"path":"src/app.js","find":"const toIsoDate =","replace":"function toIsoDate"}',
                       },
@@ -6410,7 +6414,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                       index: 0,
                       id: 'call_read',
                       type: 'function',
-                      function: { name: 'readFile', arguments: '{"path":"src/app.js"}' },
+                      function: { name: 'read_file', arguments: '{"path":"src/app.js"}' },
                     },
                   ],
                 },
@@ -6441,7 +6445,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
       }
       expect(body.messages.at(-1)?.role).toBe('user');
       expect(body.messages.at(-1)?.content).toContain('Do not read again');
-      expect(body.messages.at(-1)?.content).toContain('START with `writeFile`');
+      expect(body.messages.at(-1)?.content).toContain('START with `write_file`');
       expect(body.messages.at(-1)?.content).toContain('complete corrected file contents');
       expect(body.messages.at(-1)?.content).not.toContain('one more targeted read');
       return sseResponse([
@@ -6456,7 +6460,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                     id: 'call_write',
                     type: 'function',
                     function: {
-                      name: 'writeFile',
+                      name: 'write_file',
                       arguments:
                         '{"path":"src/app.js","content":"import { toIsoDate } from \\"./state.js\\";\\nrenderBoard();"}',
                     },
@@ -6490,15 +6494,15 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     internal.deps.bridges = {
       isEmpty: () => false,
       getOpenAITools: () => [
-        { name: 'readFile', description: 'Read a file.', parameters: { type: 'object' } },
-        { name: 'replaceInFile', description: 'Patch a file.', parameters: { type: 'object' } },
-        { name: 'writeFile', description: 'Write a file.', parameters: { type: 'object' } },
+        { name: 'read_file', description: 'Read a file.', parameters: { type: 'object' } },
+        { name: 'replace_in_file', description: 'Patch a file.', parameters: { type: 'object' } },
+        { name: 'write_file', description: 'Write a file.', parameters: { type: 'object' } },
       ],
       hasTool: (name: string) =>
-        name === 'readFile' || name === 'replaceInFile' || name === 'writeFile',
+        name === 'read_file' || name === 'replace_in_file' || name === 'write_file',
       callTool: async (name: string, _args: Record<string, unknown>) => {
-        if (name === 'replaceInFile') return 'ERROR: find text not found in src/app.js';
-        if (name === 'writeFile') {
+        if (name === 'replace_in_file') return 'ERROR: find text not found in src/app.js';
+        if (name === 'write_file') {
           wroteFile = true;
           return 'wrote file';
         }
@@ -6571,7 +6575,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
                       id: 'call_write',
                       type: 'function',
                       function: {
-                        name: 'writeFile',
+                        name: 'write_file',
                         arguments: '{"path":"index.html","content":"<!doctype html>"}',
                       },
                     },
@@ -6610,9 +6614,9 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     internal.deps.bridges = {
       isEmpty: () => false,
       getOpenAITools: () => [
-        { name: 'writeFile', description: 'Write a file.', parameters: { type: 'object' } },
+        { name: 'write_file', description: 'Write a file.', parameters: { type: 'object' } },
       ],
-      hasTool: (name: string) => name === 'writeFile',
+      hasTool: (name: string) => name === 'write_file',
       callTool: async (_name: string, _args: Record<string, unknown>) => {
         wroteFile = true;
         return 'wrote file';
@@ -6621,14 +6625,14 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
 
     await expect(
       session.sendAndWait(
-        '[scenario check] I looked at `index.html` and the success criteria aren\'t met yet. Signals that didn\'t fire: **due-date-input**. Use `writeFile({ path: "index.html", content: ... })` with the corrected file.',
+        '[scenario check] I looked at `index.html` and the success criteria aren\'t met yet. Signals that didn\'t fire: **due-date-input**. Use `write_file({ path: "index.html", content: ... })` with the corrected file.',
       ),
     ).resolves.toBe('');
     expect(wroteFile).toBe(true);
     expect(bodies).toHaveLength(2);
   });
 
-  it('promotes completed revised-HTML prose with a fenced block to writeFile', async () => {
+  it('promotes completed revised-HTML prose with a fenced block to write_file', async () => {
     let requestCount = 0;
     // Initialized to `{}` (not `null`) so TS doesn't narrow it to `null`
     // at the read sites below — the only assignment is inside the
@@ -6680,9 +6684,9 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     internal.deps.bridges = {
       isEmpty: () => false,
       getOpenAITools: () => [
-        { name: 'writeFile', description: 'Write a file.', parameters: { type: 'object' } },
+        { name: 'write_file', description: 'Write a file.', parameters: { type: 'object' } },
       ],
-      hasTool: (name: string) => name === 'writeFile',
+      hasTool: (name: string) => name === 'write_file',
       callTool: async (_name: string, args: Record<string, unknown>) => {
         written = args;
         return 'wrote file';
@@ -6726,7 +6730,7 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
 });
 
 describe('reasoning_content replay (ds4 live-KV alignment)', () => {
-  /** Fake bridge with one readFile tool; mirrors the direct-edit test's injection. */
+  /** Fake bridge with one read_file tool; mirrors the direct-edit test's injection. */
   function injectReadFileBridge(session: unknown): void {
     const internal = session as {
       deps: {
@@ -6745,15 +6749,15 @@ describe('reasoning_content replay (ds4 live-KV alignment)', () => {
     internal.deps.bridges = {
       isEmpty: () => false,
       getOpenAITools: () => [
-        { name: 'readFile', description: 'Read a file.', parameters: { type: 'object' } },
+        { name: 'read_file', description: 'Read a file.', parameters: { type: 'object' } },
       ],
-      hasTool: (name: string) => name === 'readFile',
+      hasTool: (name: string) => name === 'read_file',
       callTool: async () => 'contents of notes.txt',
     };
   }
 
   /**
-   * Two-request tool turn: reasoning + readFile call, then reasoning +
+   * Two-request tool turn: reasoning + read_file call, then reasoning +
    * final prose. The SSE `reasoning_content` deltas must be echoed
    * verbatim on the committed assistant messages so ds4-server's
    * re-render (`<think>{reasoning_content}</think>` + remembered DSML)
@@ -6780,7 +6784,7 @@ describe('reasoning_content replay (ds4 live-KV alignment)', () => {
                       index: 0,
                       id: 'call_read_1',
                       type: 'function',
-                      function: { name: 'readFile', arguments: '{"path":"notes.txt"}' },
+                      function: { name: 'read_file', arguments: '{"path":"notes.txt"}' },
                     },
                   ],
                 },
@@ -7027,65 +7031,65 @@ describe('ToolCallAccumulator', () => {
     acc.ingest({
       index: 0,
       id: 'call_write',
-      function: { name: 'writeFile', arguments: '{"path":"index.html",' },
+      function: { name: 'write_file', arguments: '{"path":"index.html",' },
     });
     acc.ingest({ index: 0, function: { arguments: '"content":"<html></html>"}' } });
 
-    expect(acc.rawArgumentsForTool('writeFile')).toBe(
+    expect(acc.rawArgumentsForTool('write_file')).toBe(
       '{"path":"index.html","content":"<html></html>"}',
     );
-    expect(acc.rawArgumentsForTool('readFile')).toBeNull();
+    expect(acc.rawArgumentsForTool('read_file')).toBeNull();
   });
 });
 
 describe('scenario file repair turn detection', () => {
   const repairTools = [
-    'readFile',
-    'readdir',
+    'read_file',
+    'list_dir',
     'stat',
     'validate',
-    'replaceInFile',
-    'writeFile',
-    'appendToFile',
+    'replace_in_file',
+    'write_file',
+    'append_to_file',
   ].map(tool);
 
   it('does not classify scenario repair prompts as immediate file writes', () => {
     const prompt =
       "[scenario check] I looked at `index.html` and the success criteria aren't met yet.\n" +
       "Signals that didn't fire: **js-parses**.\n" +
-      'Exact patch candidate(s): replaceInFile({ path: "index.html", find: "board[combo[0]]]", replace: "board[combo[0]]", occurrence: "all" }). ' +
-      'Whole-file `writeFile` overwrites are validated and can be refused if the re-emitted HTML still has a parse error.';
+      'Exact patch candidate(s): replace_in_file({ path: "index.html", find: "board[combo[0]]]", replace: "board[combo[0]]", occurrence: "all" }). ' +
+      'Whole-file `write_file` overwrites are validated and can be refused if the re-emitted HTML still has a parse error.';
 
-    expect(isImmediateFileWriteTurn(prompt, [tool('writeFile')])).toBe(false);
+    expect(isImmediateFileWriteTurn(prompt, [tool('write_file')])).toBe(false);
   });
 
-  it('does not classify a future writeFile example after prerequisite reads as immediate', () => {
+  it('does not classify a future write_file example after prerequisite reads as immediate', () => {
     const prompt = [
       'Read all five evidence files before drafting the incident postmortem.',
       'Do not write until every evidence read succeeds.',
-      'After your fifth successful read, your next tool call must be writeFile({ path: "postmortem.md", content: "<complete report>" }).',
+      'After your fifth successful read, your next tool call must be write_file({ path: "postmortem.md", content: "<complete report>" }).',
     ].join('\n');
 
-    expect(isImmediateFileWriteTurn(prompt, [tool('readFile'), tool('writeFile')])).toBe(false);
+    expect(isImmediateFileWriteTurn(prompt, [tool('read_file'), tool('write_file')])).toBe(false);
   });
 
   it('classifies direct first-version source creation asks as immediate file writes', () => {
     const prompt =
-      'Phase 1: build the first version of the Launch Board app at `index.html`. Keep this first version monolithic: HTML, CSS, and inline JavaScript in that one file; do not create `src/` files yet. Use workspace `writeFile` paths relative to the workspace root.';
+      'Phase 1: build the first version of the Launch Board app at `index.html`. Keep this first version monolithic: HTML, CSS, and inline JavaScript in that one file; do not create `src/` files yet. Use workspace `write_file` paths relative to the workspace root.';
 
-    expect(isImmediateFileWriteTurn(prompt, [tool('writeFile')])).toBe(true);
+    expect(isImmediateFileWriteTurn(prompt, [tool('write_file')])).toBe(true);
   });
 
   it('does not classify existing-codebase feature requests as immediate file writes', () => {
     const prompt =
       'Phase 2: modify the existing Launch Board codebase, do not start over. Add task priority support and preserve the Phase 1 board behavior.';
 
-    expect(isImmediateFileWriteTurn(prompt, [tool('writeFile')])).toBe(false);
+    expect(isImmediateFileWriteTurn(prompt, [tool('write_file')])).toBe(false);
   });
 
   it('classifies existing source-file edit requests on the direct edit surface', () => {
     const prompt =
-      'Phase 2: modify the existing Launch Board codebase in `index.html`, do not start over. Use workspace `replaceInFile` or `writeFile` to add a visible priority filter.';
+      'Phase 2: modify the existing Launch Board codebase in `index.html`, do not start over. Use workspace `replace_in_file` or `write_file` to add a visible priority filter.';
 
     expect(isExistingSourceEditTurn(prompt, repairTools)).toBe(true);
   });
@@ -7110,12 +7114,12 @@ describe('scenario file repair turn detection', () => {
 
   it('does not classify broad tool surfaces or scenario repair prompts as existing source edits', () => {
     const prompt =
-      'Phase 2: modify the existing Launch Board codebase in `index.html`, do not start over. Use workspace `replaceInFile` or `writeFile` to add a visible priority filter.';
+      'Phase 2: modify the existing Launch Board codebase in `index.html`, do not start over. Use workspace `replace_in_file` or `write_file` to add a visible priority filter.';
 
     expect(isExistingSourceEditTurn(prompt, [...repairTools, tool('message_gezel')])).toBe(false);
     expect(
       isExistingSourceEditTurn(
-        "[scenario check] I looked at `index.html` and the success criteria aren't met yet. Use `replaceInFile`.",
+        "[scenario check] I looked at `index.html` and the success criteria aren't met yet. Use `replace_in_file`.",
         repairTools,
       ),
     ).toBe(false);
@@ -7168,15 +7172,15 @@ describe('scenario file repair turn detection', () => {
 
   it('detects direct file-work asks on the compact read/write/script surface', () => {
     const directTools = [
-      'readFile',
-      'readdir',
+      'read_file',
+      'list_dir',
       'stat',
       'validate',
-      'mkdir',
-      'writeFile',
-      'appendToFile',
-      'replaceInFile',
-      'replaceLines',
+      'make_dir',
+      'write_file',
+      'append_to_file',
+      'replace_in_file',
+      'replace_lines',
       'run_nodejs_script',
     ].map(tool);
     const prompt =
@@ -7262,24 +7266,24 @@ describe('scripted data-file start classification', () => {
 
 describe('immediate file write salvage readiness', () => {
   const prompt =
-    'First move: create the workspace deliverable. writeFile({ path: "index.html", content: "..." })';
+    'First move: create the workspace deliverable. write_file({ path: "index.html", content: "..." })';
 
   it('does not abort and salvage a short incomplete HTML first draft', () => {
-    const raw = `writeFile({ path: "index.html", content: \`\n<!DOCTYPE html>\n<html><body><script>\nconst board = document.querySelector(".board");\n${'const '.padEnd(1_250, 'x')}`;
+    const raw = `write_file({ path: "index.html", content: \`\n<!DOCTYPE html>\n<html><body><script>\nconst board = document.querySelector(".board");\n${'const '.padEnd(1_250, 'x')}`;
 
     expect(hasSalvageableImmediateFileWriteContent(raw, prompt)).toBe(false);
   });
 
   it('salvages as soon as the visible buffer contains a complete HTML document', () => {
     const raw =
-      'writeFile({ path: "index.html", content: `\n' +
+      'write_file({ path: "index.html", content: `\n' +
       '<!DOCTYPE html><html><body><button>Play</button><script>console.log("ok")</script></body></html>` })';
 
     expect(hasSalvageableImmediateFileWriteContent(raw, prompt)).toBe(true);
   });
 
   it('still aborts extremely long incomplete HTML so the model can repair', () => {
-    const raw = `writeFile({ path: "index.html", content: \`\n<!DOCTYPE html>\n<html><body><script>\nconst board = document.querySelector(".board");\n${'const '.padEnd(4_200, 'x')}`;
+    const raw = `write_file({ path: "index.html", content: \`\n<!DOCTYPE html>\n<html><body><script>\nconst board = document.querySelector(".board");\n${'const '.padEnd(4_200, 'x')}`;
 
     expect(hasSalvageableImmediateFileWriteContent(raw, prompt)).toBe(true);
   });
@@ -7305,12 +7309,12 @@ describe('scenario-repair text abort threshold', () => {
 
   it('extends the cap while inline tool-call markup is still open', () => {
     const midToolCall =
-      '<tool_call>{"name":"writeFile","arguments":{"path":"master/assembly-log.json","content":"{ \\"status\\": ';
+      '<tool_call>{"name":"write_file","arguments":{"path":"master/assembly-log.json","content":"{ \\"status\\": ';
     expect(hasInProgressFileRewritePayload(midToolCall)).toBe(true);
     const closedToolCall = `${midToolCall}\\"ok\\" }"}}</tool_call>`;
     expect(hasInProgressFileRewritePayload(closedToolCall)).toBe(false);
 
-    const midFunction = '<function=writeFile>{"path":"a.json","content":"{';
+    const midFunction = '<function=write_file>{"path":"a.json","content":"{';
     expect(hasInProgressFileRewritePayload(midFunction)).toBe(true);
     expect(hasInProgressFileRewritePayload(`${midFunction}}"}</function>`)).toBe(false);
   });
@@ -7364,12 +7368,12 @@ describe('strict alternation tool transcript fallback', () => {
 });
 
 describe('compactSuccessfulWriteToolCallForTranscript', () => {
-  it('replaces large successful writeFile content with a compact transcript marker', () => {
+  it('replaces large successful write_file content with a compact transcript marker', () => {
     const call = {
       id: 'call_1',
       type: 'function' as const,
       function: {
-        name: 'writeFile',
+        name: 'write_file',
         arguments: JSON.stringify({ path: 'index.html', content: 'x'.repeat(2_500) }),
       },
     };
@@ -7380,7 +7384,7 @@ describe('compactSuccessfulWriteToolCallForTranscript', () => {
     const compacted = JSON.parse(call.function.arguments) as { path: string; content: string };
     expect(compacted.path).toBe('index.html');
     expect(compacted.content).toContain('2500 chars were written');
-    expect(compacted.content).toContain('Use readFile');
+    expect(compacted.content).toContain('Use read_file');
     expect(compacted.content).not.toContain('x'.repeat(100));
   });
 
@@ -7389,7 +7393,7 @@ describe('compactSuccessfulWriteToolCallForTranscript', () => {
       id: 'call_1',
       type: 'function' as const,
       function: {
-        name: 'writeFile',
+        name: 'write_file',
         arguments: JSON.stringify({ path: 'index.html', content: 'short' }),
       },
     };
@@ -7397,7 +7401,7 @@ describe('compactSuccessfulWriteToolCallForTranscript', () => {
       id: 'call_2',
       type: 'function' as const,
       function: {
-        name: 'writeFile',
+        name: 'write_file',
         arguments: JSON.stringify({ path: 'index.html', content: 'x'.repeat(2_500) }),
       },
     };
@@ -7489,12 +7493,12 @@ describe('single-system-message template fallback', () => {
 });
 
 describe('malformed structured tool-call argument repair', () => {
-  const knownWriteTools = new Set(['writeFile']);
+  const knownWriteTools = new Set(['write_file']);
 
-  it('repairs Gemma raw-string writeFile args with a trailing path clause', () => {
+  it('repairs Gemma raw-string write_file args with a trailing path clause', () => {
     const raw =
       '"<!DOCTYPE html>\\n<html><body><div>Player X\'s Turn</div><script>const wins=[[0,1,2]];</script></body></html>\\n\\"\\"\\", path: \\"index.html\\" });\\n<|channel>thought\\n<channel|>';
-    const repaired = tryRepairMalformedWriteToolArguments('writeFile', raw, knownWriteTools);
+    const repaired = tryRepairMalformedWriteToolArguments('write_file', raw, knownWriteTools);
     expect(repaired?.path).toBe('index.html');
     expect(repaired?.content).toContain("<div>Player X's Turn</div>");
     expect(repaired?.content).toContain('<script>const wins');
@@ -7502,10 +7506,10 @@ describe('malformed structured tool-call argument repair', () => {
     expect(repaired?.content).not.toContain('path: "index.html"');
   });
 
-  it('defaults Gemma raw-string writeFile args to index.html when path repair captures punctuation', () => {
+  it('defaults Gemma raw-string write_file args to index.html when path repair captures punctuation', () => {
     const raw =
       '"<!DOCTYPE html>\\n<html><body><script>document.body.textContent=\\"ok\\";</script></body></html>\\n\\"\\"\\",path:';
-    const repaired = tryRepairMalformedWriteToolArguments('writeFile', raw, knownWriteTools);
+    const repaired = tryRepairMalformedWriteToolArguments('write_file', raw, knownWriteTools);
     expect(repaired?.path).toBe('index.html');
     expect(repaired?.content).toContain('<script>document.body.textContent');
   });
@@ -7513,15 +7517,15 @@ describe('malformed structured tool-call argument repair', () => {
   it('defaults Gemma raw-string HTML writes to index.html when path repair captures a product name', () => {
     const raw =
       '"<!DOCTYPE html>\\n<html><body><h1>Pet Shop</h1><script>document.body.onclick=()=>{};</script></body></html>\\n\\"\\"\\", path: \\"Premium Dog Kibble\\" });';
-    const repaired = tryRepairMalformedWriteToolArguments('writeFile', raw, knownWriteTools);
+    const repaired = tryRepairMalformedWriteToolArguments('write_file', raw, knownWriteTools);
     expect(repaired?.path).toBe('index.html');
     expect(repaired?.content).toContain('<h1>Pet Shop</h1>');
   });
 
-  it('keeps explicit HTML paths when repairing malformed writeFile args', () => {
+  it('keeps explicit HTML paths when repairing malformed write_file args', () => {
     const raw =
       '"<!DOCTYPE html>\\n<html><body><h1>Landing</h1><script>console.log(1);</script></body></html>\\n\\"\\"\\", path: \\"pages/landing.html\\" });';
-    const repaired = tryRepairMalformedWriteToolArguments('writeFile', raw, knownWriteTools);
+    const repaired = tryRepairMalformedWriteToolArguments('write_file', raw, knownWriteTools);
     expect(repaired?.path).toBe('pages/landing.html');
     expect(repaired?.content).toContain('<h1>Landing</h1>');
   });
@@ -7534,13 +7538,13 @@ describe('malformed structured tool-call argument repair', () => {
         {
           id: 'call_write',
           type: 'function',
-          function: { name: 'writeFile', arguments: raw },
+          function: { name: 'write_file', arguments: raw },
         },
       ],
       knownWriteTools,
     );
     expect(out.repaired).toHaveLength(1);
-    expect(out.repaired[0]?.name).toBe('writeFile');
+    expect(out.repaired[0]?.name).toBe('write_file');
     expect(out.repaired[0]?.path).toBe('index.html');
     expect(out.repaired[0]?.bytes).toBeGreaterThan(80);
     expect(out.sanitized).toEqual([]);
@@ -8387,7 +8391,7 @@ describe('LlamaCppSession graceful context-overflow handling', () => {
   it('does NOT abort post-reasoning while the engine is still decoding a buffered tool call', async () => {
     // The gemma4-12b stall: `peg-gemma4` buffers a native
     // tool call and emits NO SSE delta until it parses, so a large
-    // writeFile looks identical to a wedged engine. The watchdog must
+    // write_file looks identical to a wedged engine. The watchdog must
     // consult the engine's KV-cache growth (/slots) before aborting —
     // a rising cache means "still decoding," so re-arm and let the
     // buffered result land instead of false-killing a live turn.
@@ -8611,12 +8615,16 @@ describe('LlamaCppProvider pool lifecycle', () => {
 });
 
 describe('gate surgical edit turn detection (D4 gap: Theme B mode)', () => {
-  const repairTools = ['readFile', 'validate', 'replaceInFile', 'replaceLines', 'writeFile'].map(
-    tool,
-  );
+  const repairTools = [
+    'read_file',
+    'validate',
+    'replace_in_file',
+    'replace_lines',
+    'write_file',
+  ].map(tool);
   const gateNudge =
     'GATE_TARGETED_EDIT: The gate rejected `report.md` — minBytes 500 unmet (312 bytes). ' +
-    'Fix exactly what the verdict names with replaceInFile or replaceLines; do not rewrite the file.';
+    'Fix exactly what the verdict names with replace_in_file or replace_lines; do not rewrite the file.';
 
   it('fires on the escalation marker when patch tools are on the surface', () => {
     expect(isGateSurgicalEditTurn(gateNudge, repairTools)).toBe(true);
@@ -8632,14 +8640,14 @@ describe('gate surgical edit turn detection (D4 gap: Theme B mode)', () => {
     const scenarioShaped =
       "[scenario check] I looked at `report.md` and the success criteria aren't met yet.\nGATE_TARGETED_EDIT: fix it.";
     expect(isGateSurgicalEditTurn(scenarioShaped, repairTools)).toBe(false);
-    expect(isGateSurgicalEditTurn(gateNudge, [tool('writeFile')])).toBe(false);
+    expect(isGateSurgicalEditTurn(gateNudge, [tool('write_file')])).toBe(false);
   });
 
-  it('a kit-clamped (bridge-filtered) tools array still trips it when replaceInFile survives', () => {
+  it('a kit-clamped (bridge-filtered) tools array still trips it when replace_in_file survives', () => {
     // The D4 repair clamp narrows the bridge surface to the repair set;
     // the provider mode detector receives that filtered array and must
     // still engage — the fence and the mode compose.
-    const clamped = ['readFile', 'validate', 'replaceInFile', 'writeFile'].map(tool);
+    const clamped = ['read_file', 'validate', 'replace_in_file', 'write_file'].map(tool);
     expect(isGateSurgicalEditTurn(gateNudge, clamped)).toBe(true);
   });
 });

@@ -21,7 +21,7 @@ export function extractDirectFileWorkTargetPath(prompt: string | undefined): str
     /\b(?:write|produce|create|build|ship|generate|emit|consolidate|derive|extract|transform|normalize)\b[\s\S]{0,120}?`?([\w./-]+\.(?:html?|css|mjs|cjs|json|jsx|js|tsx|ts|md|csv|txt|ya?ml))`?/i
       .exec(text)?.[1]
       ?.trim() ??
-    /`?([\w./-]+\.(?:html?|css|mjs|cjs|json|jsx|js|tsx|ts|md|csv|txt|ya?ml))`?[\s\S]{0,120}?\b(?:write|produce|create|build|ship|finish|consolidate|derive|extract|transform|normalize|edit\s+it\s+in\s+place|writeFile|replaceInFile|fs\.writeFileSync)\b/i
+    /`?([\w./-]+\.(?:html?|css|mjs|cjs|json|jsx|js|tsx|ts|md|csv|txt|ya?ml))`?[\s\S]{0,120}?\b(?:write|produce|create|build|ship|finish|consolidate|derive|extract|transform|normalize|edit\s+it\s+in\s+place|write_file|replace_in_file|fs\.writeFileSync)\b/i
       .exec(text)?.[1]
       ?.trim() ??
     null
@@ -129,24 +129,24 @@ export function extractDirectFileWorkPrerequisiteReadPaths(
 }
 
 export const EXPLICIT_FILE_EDIT_TOOL_NAMES = [
-  'appendToFile',
-  'replaceInFile',
-  'replaceLines',
-  'insertAtMarker',
-  'applyPatch',
+  'append_to_file',
+  'replace_in_file',
+  'replace_lines',
+  'insert_at_marker',
+  'apply_patch',
 ] as const;
 
 export type ExplicitFileEditToolName = (typeof EXPLICIT_FILE_EDIT_TOOL_NAMES)[number];
 
 /**
  * Return the existing-file mutation tools that a request affirmatively tells
- * the recipient to use. This intentionally excludes `writeFile`: callers use
+ * the recipient to use. This intentionally excludes `write_file`: callers use
  * the result to distinguish a surgical/append directive from the generic
  * fresh-file create path.
  *
- * Tool names in negative clauses ("do not call appendToFile") do not count.
- * The positive matcher covers both prose directives ("use replaceLines") and
- * concrete call shapes ("appendToFile({ ... })").
+ * Tool names in negative clauses ("do not call append_to_file") do not count.
+ * The positive matcher covers both prose directives ("use replace_lines") and
+ * concrete call shapes ("append_to_file({ ... })").
  */
 export function extractExplicitFileEditTools(
   prompt: string | undefined,
@@ -199,7 +199,7 @@ export function extractSingleFileSourceRepairTargetPath(prompt: string | undefin
   if (boundTarget) return boundTarget;
 
   const readTarget =
-    /\bread\s+`?([\w./-]+\.(?:html?|css|mjs|cjs|js|jsx|ts|tsx|json|md))`?[\s\S]{0,240}\b(?:bug|defect|fault|few\s+lines?|in\s+place|patch|repair|replaceInFile|replaceLines|syntax\s+fix|parse\s+error)\b/i
+    /\bread\s+`?([\w./-]+\.(?:html?|css|mjs|cjs|js|jsx|ts|tsx|json|md))`?[\s\S]{0,240}\b(?:bug|defect|fault|few\s+lines?|in\s+place|patch|repair|replace_in_file|replace_lines|syntax\s+fix|parse\s+error)\b/i
       .exec(text)?.[1]
       ?.trim();
   if (!readTarget) return null;
@@ -217,7 +217,7 @@ export function extractSingleFileSourceRepairTargetPath(prompt: string | undefin
  * True for a focused repair of one already-existing source file. These asks
  * often also contain file-deliverable wording, so without this stronger
  * classification the generic direct-file mode reads the file and then
- * collapses to `writeFile` only. That is the wrong recovery shape for a
+ * collapses to `write_file` only. That is the wrong recovery shape for a
  * one-line defect: preserve the surgical patch tools after the read.
  *
  * Shared by chat-side allowlisting and local-provider mode selection so the
@@ -243,31 +243,31 @@ export function isSingleFileSourceRepairRequest(prompt: string | undefined): boo
 
 /**
  * True when the latest request explicitly asks for a complete whole-file
- * rewrite through `writeFile`. Both chat-side tool clamping and local-provider
+ * rewrite through `write_file`. Both chat-side tool clamping and local-provider
  * repair loops consume this helper so a directive cannot advertise
- * `writeFile` while the provider silently removes it.
+ * `write_file` while the provider silently removes it.
  *
  * Keep this semantic rather than marker-based: runtime checks, task gates,
  * and user-authored repair prompts can all request the same recovery shape.
- * Incidental "use writeFile to re-emit" fallback prose does not qualify — the
- * request must make the whole-file rewrite (or writeFile as the mandatory next
+ * Incidental "use write_file to re-emit" fallback prose does not qualify — the
+ * request must make the whole-file rewrite (or write_file as the mandatory next
  * call) explicit.
  */
 export function hasExplicitFullFileRewriteWording(prompt: string | undefined): boolean {
   const text = (prompt ?? '').trim();
-  if (!text || !/\bwriteFile\b/i.test(text)) return false;
+  if (!text || !/\bwrite_file\b/i.test(text)) return false;
 
   // Contradictory handoffs historically combined a precise "do not rewrite
   // the whole file" repair instruction with a generic deliverable annotation
-  // that said the first action should be writeFile. Treat the explicit
+  // that said the first action should be write_file. Treat the explicit
   // preservation instruction as authoritative. A broad full-rewrite matcher
-  // must never invert a negated phrase just because writeFile appears later in
+  // must never invert a negated phrase just because write_file appears later in
   // the prompt.
   if (
-    /\b(?:do\s+not|don't|must\s+not|never|avoid)\s+(?:call|use|invoke)\s+`?writeFile`?\b/i.test(
+    /\b(?:do\s+not|don't|must\s+not|never|avoid)\s+(?:call|use|invoke)\s+`?write_file`?\b/i.test(
       text,
     ) ||
-    /\b(?:do\s+not|don't|must\s+not|never|avoid)\s+(?:use\s+`?writeFile`?\s+to\s+)?(?:rewrite|re-emit|overwrite|replace)\s+(?:the\s+)?(?:whole|entire|complete|full)(?:[-\s]+file)?\b/i.test(
+    /\b(?:do\s+not|don't|must\s+not|never|avoid)\s+(?:use\s+`?write_file`?\s+to\s+)?(?:rewrite|re-emit|overwrite|replace)\s+(?:the\s+)?(?:whole|entire|complete|full)(?:[-\s]+file)?\b/i.test(
       text,
     )
   ) {
@@ -275,15 +275,15 @@ export function hasExplicitFullFileRewriteWording(prompt: string | undefined): b
   }
 
   const namedCompleteRewrite =
-    /\b(?:rewrite|re-emit|overwrite|replace)\s+`?[\w./-]+\.(?:html?|css|mjs|cjs|json|jsx|js|tsx|ts|md|csv|txt|ya?ml)`?(?:\s+(?:completely|entirely|in\s+full|as\s+(?:one\s+)?complete\s+(?:corrected\s+)?(?:file|version)))?[\s\S]{0,80}\b(?:with|using|via)\s+`?writeFile`?\b/i.test(
+    /\b(?:rewrite|re-emit|overwrite|replace)\s+`?[\w./-]+\.(?:html?|css|mjs|cjs|json|jsx|js|tsx|ts|md|csv|txt|ya?ml)`?(?:\s+(?:completely|entirely|in\s+full|as\s+(?:one\s+)?complete\s+(?:corrected\s+)?(?:file|version)))?[\s\S]{0,80}\b(?:with|using|via)\s+`?write_file`?\b/i.test(
       text,
     );
   if (namedCompleteRewrite) return true;
 
   const mandatoryWriteFile =
-    /\b(?:your\s+)?(?:first|next)\s+(?:assistant\s+)?(?:action|response|tool\s+call)\s+(?:must|should)\s+(?:start\s+with|be)\s+(?:the\s+tool\s+call\s+)?`?writeFile`?\b/i.test(
+    /\b(?:your\s+)?(?:first|next)\s+(?:assistant\s+)?(?:action|response|tool\s+call)\s+(?:must|should)\s+(?:start\s+with|be)\s+(?:the\s+tool\s+call\s+)?`?write_file`?\b/i.test(
       text,
-    ) || /\bdo\s+not\s+end\s+your\s+turn\s+until\s+`?writeFile`?\s+has\s+rewritten\b/i.test(text);
+    ) || /\bdo\s+not\s+end\s+your\s+turn\s+until\s+`?write_file`?\s+has\s+rewritten\b/i.test(text);
   if (!mandatoryWriteFile) return false;
 
   if (/full[_-]rewrite/i.test(text)) return true;

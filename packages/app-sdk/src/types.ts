@@ -48,9 +48,10 @@ export interface ConnectInput {
   appName: string;
   /**
    * The scope set you're asking for. For OpenAI-shaped chat /
-   * embeddings / models / ensure, request `['openai']`. Future
-   * scopes (`workspace:read`, `github`, …) opt into additional
-   * gezel-specific surfaces.
+   * embeddings / models / ensure, request `['openai']`. The first-party
+   * Gezel CLI requests `['cli']`, a high-authority internal API scope whose
+   * consent dialog explicitly warns that it can read and change product
+   * state. Third-party apps should request the narrowest available scope.
    */
   scopes: string[];
   /** Optional icon URL surfaced in the consent dialog. */

@@ -32,10 +32,10 @@ describe('humanizeToolCall — non-nerdy summaries', () => {
     expect(humanizeToolCall('create_task', { title: 'Add high-score table' })).toBe(
       'Created task “Add high-score table”',
     );
-    expect(humanizeToolCall('writeFile', { path: 'workspace/index.html' })).toBe(
+    expect(humanizeToolCall('write_file', { path: 'workspace/index.html' })).toBe(
       'Wrote workspace/index.html',
     );
-    expect(humanizeToolCall('readFile', { path: 'workspace/index.html' })).toBe(
+    expect(humanizeToolCall('read_file', { path: 'workspace/index.html' })).toBe(
       'Read workspace/index.html',
     );
     expect(humanizeToolCall('ensure_gezel', { jobTitle: 'Developer' })).toBe(

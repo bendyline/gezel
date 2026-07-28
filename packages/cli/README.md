@@ -12,6 +12,49 @@ npm install -g @bendyline/gezel-cli
 gezel
 ```
 
+On a clean machine, the TUI stays in first-time setup until you decide what to
+install. It offers the verified native toolkit first, then device-ranked model
+choices:
+
+1. The best chat model plus every recommended image, speech, reading, and video
+   helper that fits this device.
+2. The best chat model only.
+3. Other compatible chat-only models, ordered for this device.
+
+Downloads show live progress and activate inside the running daemon, so setup
+continues directly into the TUI without a restart.
+
+## Which Gezel service the CLI uses
+
+With no connection flags, the CLI follows this order:
+
+1. Use the Electron-installed machine service on port `43935` when it is
+   healthy. On first use, the terminal waits while the Gezel app asks you to
+   approve **Gezel CLI**. The resulting revocable credential is saved under
+   the user-owned `~/.gezel/cli/tokens/` directory.
+2. If the machine service is not installed or is down, adopt or start a
+   user-owned runtime using `~/.gezel`. CLI-owned runtimes use a discoverable
+   ephemeral port so they never prevent the machine service from starting.
+
+Connecting to the machine service shares its gezels, projects, settings,
+models, and conversations through the service API. The standalone fallback
+does **not** open the machine service's private data directory directly:
+machine-service state is protected for its restricted OS account, and two
+processes must not write the same file-backed state concurrently.
+
+The global overrides are:
+
+```bash
+gezel --connect https://host:43935        # explicit service; approval on first use
+gezel --connect https://host:43935 --token "$TOKEN"
+gezel --standalone                        # skip machine-service discovery
+gezel --home /path/to/another-home        # standalone with an alternate home
+```
+
+`--home` (and an explicitly set `GEZEL_HOME`) implies standalone operation.
+An explicit `--port 43935` remains available when you intentionally want a
+CLI-owned daemon on the canonical port.
+
 ## What you get with no further setup
 
 The install is pure JavaScript. Straight away you can use:
@@ -37,10 +80,20 @@ gezel native status
 ```
 
 Downloads come from this repository's `native-v*` GitHub releases and are
-verified before use: the release's `SHA256SUMS` file is checked against a
-digest baked into this package at publish time, and every archive is then
-checked against its line in that file. A tampered release cannot swap a
-binary. Nothing is fetched until you ask for it.
+verified before use. Every archive SHA256 is compiled into the published
+package; the release's `SHA256SUMS` file must both match its own compiled
+digest and agree with the selected compiled archive hash. The downloaded
+archive is then hashed against that local value.
+
+First-party Windows executables must carry a valid Bendyline Authenticode
+signature, while macOS executables must carry the expected Developer ID.
+Pins for independently notarized native releases additionally require a
+`Notarized Developer ID` Gatekeeper assessment. Linux has no equivalent
+native signing channel and remains anchored by the compiled hashes. The
+upstream `uv.exe` is an explicit unsigned exception, verified by its compiled
+archive hash. Each CLI release resolves one exact native release rather than
+following `latest`; the setup prompt shows that pinned version. Nothing is
+fetched until you ask for it.
 
 ## Commands
 
@@ -50,7 +103,7 @@ Run `gezel --help` for the full list. The most-used ones:
 |---|---|
 | `gezel` | Launch the interactive TUI |
 | `gezel run [prompt…]` | One-shot prompt, optionally `--gezel <id>` |
-| `gezel start` / `stop` / `status` | Manage the background daemon (`--web` serves the browser UI) |
+| `gezel start` / `stop` / `status` | Use or inspect the selected service; `stop` only stops a user-owned daemon (`--web` serves the browser UI) |
 | `gezel doctor` | Report on the local install |
 | `gezel agent list\|create\|show` | Manage your gezels |
 | `gezel env list\|create\|install` | Manage projects and their packages |

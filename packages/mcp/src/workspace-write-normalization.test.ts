@@ -7,7 +7,7 @@ import {
 } from './workspace-write-normalization.js';
 
 describe('normalizeWorkspaceWriteContent', () => {
-  it('removes an exact sequential readFile gutter from a complete TypeScript rewrite', () => {
+  it('removes an exact sequential read_file gutter from a complete TypeScript rewrite', () => {
     const rendered = [
       "1→type State = 'draft' | 'paid';",
       ' 2→',

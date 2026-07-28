@@ -26,6 +26,7 @@
       "artifacts/**",
       "reports/**",
       "runs/**",
+      "ship-audit/**",
       "**/.upstream/**",
       "**/.vscode-test/**",
       "temp/**",

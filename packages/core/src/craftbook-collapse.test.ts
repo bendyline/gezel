@@ -113,7 +113,7 @@ describe('collapseCraftbookForTier', () => {
   it('rewritten prompts are single-action imperatives with the gate bullets', () => {
     const result = collapseCraftbookForTier(sixStepBook(), { tier: 'tiny' });
     const draft = result.steps[0]!;
-    expect(draft.prompt).toContain('your first tool call is `writeFile({ path: "brief.md"');
+    expect(draft.prompt).toContain('your first tool call is `write_file({ path: "brief.md"');
     expect(draft.prompt).toContain('One tool call per turn');
     expect(draft.prompt).toContain('at least 400 bytes');
     expect(draft.prompt).toContain('fix exactly what the verdict names');

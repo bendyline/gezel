@@ -63,6 +63,17 @@ For each engine the user named (or all, if they said "update the native binaries
 
 5. Hand the diff to the user to commit. `native/engines/*/build.{sh,ps1}` almost never change for a version bump — only touch them if the upstream build interface moved.
 
+6. **After the native release is published, pin its complete runtime trust manifest.**
+   ```bash
+   node scripts/pin-native-release.mjs <X.Y.Z> --macos-notarized
+   ```
+   This rewrites `NATIVE_ENGINE_RELEASE`, the `SHA256SUMS` digest, every
+   per-archive SHA256, and the standalone macOS-notarization declaration in
+   `packages/service/src/engines/native-manifest.ts`. Use
+   `--macos-notarized` only for releases produced by the current tag workflow,
+   where missing signing/notary credentials fail the build and every macOS
+   payload is accepted by Apple before packaging.
+
 ---
 
 ## Phase 2 — Trigger the build *(user drives git)*
@@ -141,6 +152,8 @@ gh run view <id> --json jobs --jq '.jobs[] | select(.conclusion!="success") | {n
 | llama cache-bust constant (**sync on every llama bump**) | `packages/core/src/native/llama-engine-version.ts` |
 | CI matrix + version-pin env (runner-drift fixes) | `.github/workflows/build-native.yml` |
 | Cut a release (tag + push) — *user runs* | `scripts/cut-native-release.mjs` |
+| Pin release digest + archive hashes + notarization state | `scripts/pin-native-release.mjs` |
+| Runtime release trust manifest | `packages/service/src/engines/native-manifest.ts` |
 | Fetch built binaries locally | `scripts/fetch-native-binaries.mjs` |
 | Build scripts (rarely touched) | `native/engines/<engine>/build.{sh,ps1}` |
 
@@ -151,6 +164,8 @@ gh run view <id> --json jobs --jq '.jobs[] | select(.conclusion!="success") | {n
 - [ ] Left git to the user (commit / push / `cut-native-release.mjs`).
 - [ ] Verified the workflow ran against the **intended commit** (dispatch race).
 - [ ] Every matrix leg green — remember `draft_release` needs ALL of them.
+- [ ] Published release pinned with `pin-native-release.mjs`; all archive hashes are present.
+- [ ] `--macos-notarized` used only after the tag workflow's Apple notary gates passed.
 - [ ] Fetched + ran `--version` + eval'd via `/eval-run` (llama-cpp provider).
 - [ ] Draft stayed private during validation, then was published explicitly through the GitHub Releases UI.
 - [ ] Engine-specific: ds4 can't yet load some hybrid MoE (e.g. qwen-agentworld crashes on load) — an upstream engine gap, not a bump error.

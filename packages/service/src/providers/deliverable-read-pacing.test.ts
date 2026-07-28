@@ -12,7 +12,7 @@ describe('DeliverableReadPaceTracker', () => {
     ).toBeNull();
     expect(
       DeliverableReadPaceTracker.fromUserText(
-        '[Deliverable expected as a FILE at `review.md`. Your first assistant action should be writeFile.]',
+        '[Deliverable expected as a FILE at `review.md`. Your first assistant action should be write_file.]',
       ),
     ).toBeInstanceOf(DeliverableReadPaceTracker);
   });
@@ -24,34 +24,34 @@ describe('DeliverableReadPaceTracker', () => {
       hardAbortAt: 3,
     });
 
-    expect(tracker.recordCall('readFile', 'package').shouldAbort).toBe(false);
+    expect(tracker.recordCall('read_file', 'package').shouldAbort).toBe(false);
 
-    const warned = tracker.recordCall('readdir', 'src');
+    const warned = tracker.recordCall('list_dir', 'src');
     expect(warned.shouldAbort).toBe(false);
-    expect(warned.output).toContain('writeFile({ path: "review.md"');
+    expect(warned.output).toContain('write_file({ path: "review.md"');
 
-    const aborted = tracker.recordCall('readFile', 'index');
+    const aborted = tracker.recordCall('read_file', 'index');
     expect(aborted.shouldAbort).toBe(true);
     expect(tracker.buildAbortMessage('llama.cpp')).toContain('`review.md`');
   });
 
   it('defaults to warning on the fifth read and aborting on the sixth', () => {
     const tracker = DeliverableReadPaceTracker.fromUserText(
-      '[Deliverable expected as a FILE at `review.md`. Read source, then writeFile.]',
+      '[Deliverable expected as a FILE at `review.md`. Read source, then write_file.]',
     );
     expect(tracker).toBeInstanceOf(DeliverableReadPaceTracker);
 
     for (let i = 1; i <= 4; i++) {
-      const result = tracker!.recordCall('readFile', `file-${i}`);
+      const result = tracker!.recordCall('read_file', `file-${i}`);
       expect(result.shouldAbort).toBe(false);
       expect(result.output).not.toContain('near the read budget');
     }
 
-    const warned = tracker!.recordCall('readFile', 'file-5');
+    const warned = tracker!.recordCall('read_file', 'file-5');
     expect(warned.shouldAbort).toBe(false);
     expect(warned.output).toContain('near the read budget');
 
-    const aborted = tracker!.recordCall('readFile', 'file-6');
+    const aborted = tracker!.recordCall('read_file', 'file-6');
     expect(aborted.shouldAbort).toBe(true);
     expect(aborted.output).toContain('Read budget exhausted');
   });
@@ -63,7 +63,7 @@ describe('DeliverableReadPaceTracker', () => {
       hardAbortAt: 1,
     });
 
-    const aborted = tracker.recordCall('readFile', 'x'.repeat(20_000));
+    const aborted = tracker.recordCall('read_file', 'x'.repeat(20_000));
     expect(aborted.shouldAbort).toBe(true);
     expect(aborted.output.length).toBeLessThan(9_000);
     expect(aborted.output).toContain('Tool output truncated at 8000 characters');
@@ -77,9 +77,9 @@ describe('DeliverableReadPaceTracker', () => {
       hardAbortAt: 2,
     });
 
-    expect(tracker.recordCall('readFile', 'a').output).toContain('writeFile');
-    expect(tracker.recordCall('writeFile', 'wrote').shouldAbort).toBe(false);
-    expect(tracker.recordCall('readFile', 'b')).toEqual({
+    expect(tracker.recordCall('read_file', 'a').output).toContain('write_file');
+    expect(tracker.recordCall('write_file', 'wrote').shouldAbort).toBe(false);
+    expect(tracker.recordCall('read_file', 'b')).toEqual({
       output: 'b',
       shouldAbort: false,
       readCount: 1,
@@ -92,12 +92,12 @@ describe('DeliverableReadPaceTracker', () => {
       softWarningAt: 1,
       hardAbortAt: 1,
     });
-    tracker.recordCall('readFile', 'x');
+    tracker.recordCall('read_file', 'x');
     const err = tracker.buildAbort('llama.cpp');
     expect(err).toBeInstanceOf(TurnAbortError);
-    // model-facing keeps the label + the writeFile imperative
+    // model-facing keeps the label + the write_file imperative
     expect(err.message).toContain('[llama.cpp]');
-    expect(err.message).toContain('writeFile');
+    expect(err.message).toContain('write_file');
     // user-facing drops the label and the imperative, keeps the path hint
     expect(err.userMessage).not.toContain('[llama.cpp]');
     expect(err.userMessage).not.toMatch(/your next message/i);

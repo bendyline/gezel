@@ -105,9 +105,10 @@ export function requireFirstParty(): MiddlewareHandler {
  *
  * `bearerAuth` answers only "is this a live token?". Without this second
  * check an approved third-party `openai` token is also a live token and can
- * accidentally reach the product API. First-party clients may use the whole
- * internal surface; session tokens continue to the stricter route/ownership
- * guard in `scope-guard.ts`. Every other app/device scope is rejected here.
+ * accidentally reach the product API. First-party clients and explicitly
+ * approved `cli` credentials may use the internal surface; session tokens
+ * continue to the stricter route/ownership guard in `scope-guard.ts`. Every
+ * other app/device scope is rejected here.
  */
 export function requireInternalApiAccess(): MiddlewareHandler {
   return async (c, next) => {
@@ -118,6 +119,7 @@ export function requireInternalApiAccess(): MiddlewareHandler {
     if (
       auth.scopes.includes('root') ||
       auth.scopes.includes('ui') ||
+      auth.scopes.includes('cli') ||
       auth.scopes.includes('session')
     ) {
       return next();

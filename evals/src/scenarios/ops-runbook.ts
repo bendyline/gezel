@@ -150,7 +150,7 @@ export const RUNBOOK_MISSION_OBJECTIVES = [
 
 export const RUNBOOK_KICKOFF_MESSAGE = [
   'Please execute the quarterly maintenance runbook at runbook.md, in order.',
-  'First call `readFile({ path: "runbook.md" })`; do not write any output before that read.',
+  'First call `read_file({ path: "runbook.md" })`; do not write any output before that read.',
   'After each step, record its verification value VERBATIM in `runlog.md` under a',
   '"STEP N" heading (e.g. the "14 services" count, the manifest checksum, the config',
   'version string). Read every state/check file named by a step before recording it;',
@@ -275,7 +275,7 @@ export function checkRunbookReadProvenance(
 
   const detail =
     missingReads.size > 0
-      ? `source-read provenance missing successful readFile call(s): ${[...missingReads].join(', ')}`
+      ? `source-read provenance missing successful read_file call(s): ${[...missingReads].join(', ')}`
       : outOfOrderReads.size > 0
         ? `source-read provenance is out of order: ${[...outOfOrderReads].join(', ')}`
         : missingRecordings.length > 0
@@ -468,7 +468,7 @@ export function checkRunbookExecution(input: {
 export function runbookRepairDirective(failReason = ''): string {
   const common = [
     'Do not copy a verification value from this message or prior checker feedback.',
-    'Use workspace `readFile` on the authoritative path(s), then record only what you observed.',
+    'Use workspace `read_file` on the authoritative path(s), then record only what you observed.',
     'Do not write maintenance/step5.done or decommission-list.txt unless every precondition in runbook.md passes.',
   ];
   if (/source-read provenance/i.test(failReason)) {

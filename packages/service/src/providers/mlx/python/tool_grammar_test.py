@@ -29,11 +29,11 @@ def _tool(name, props):
     }
 
 
-# create_project + writeFile declare params; list_projects declares none.
+# create_project + write_file declare params; list_projects declares none.
 TOOLS = [
     _tool("create_project", {"name": {"type": "string"}, "description": {"type": "string"}}),
     _tool("list_projects", {}),
-    _tool("writeFile", {"path": {"type": "string"}, "content": {"type": "string"}}),
+    _tool("write_file", {"path": {"type": "string"}, "content": {"type": "string"}}),
 ]
 
 
@@ -54,7 +54,7 @@ def test_tier2_is_default_and_well_formed():
 def test_tier2_constrains_function_names_and_param_keys():
     g = tg.build_grammar_string(TOOLS, {"format": "hermes", "mode": "name-and-params"})
     # Function names appear (as branch literals).
-    assert "create_project" in g and "writeFile" in g and "list_projects" in g
+    assert "create_project" in g and "write_file" in g and "list_projects" in g
     # Declared param keys appear (as constrained key enums).
     for key in ["name", "description", "path", "content"]:
         assert key in g, key
@@ -70,7 +70,7 @@ def test_name_only_mode_is_simpler_tier1():
     # Tier 1 pins the name via a single NAME enum and does NOT branch
     # per-tool or constrain <parameter=> keys.
     assert "NAME:" in g and "fn_0" not in g
-    assert "create_project" in g and "writeFile" in g
+    assert "create_project" in g and "write_file" in g
 
 
 def test_gemma_name_only_well_formed():
@@ -85,7 +85,7 @@ def test_gemma_name_only_well_formed():
         assert marker in g, marker
     # Function names are pinned; reasoning/channel tokens are allowed in seg so
     # the grammar never blocks Gemma's thinking.
-    assert "create_project" in g and "writeFile" in g
+    assert "create_project" in g and "write_file" in g
     assert "<|channel>" in g and "<|think|>" in g
     # Requested mode is ignored for gemma — name-and-params still yields tier 1.
     assert tg.build_grammar_string(TOOLS, {"format": "gemma", "mode": "name-and-params"}) == g
@@ -104,7 +104,7 @@ def test_glm_name_only_well_formed():
     assert "<function=" not in g
     # Function names are pinned; reasoning tokens are allowed in seg so the
     # grammar never blocks GLM's <think> reasoning.
-    assert "create_project" in g and "writeFile" in g
+    assert "create_project" in g and "write_file" in g
     assert "<think>" in g
     # Requested mode is ignored for glm — name-and-params still yields tier 1.
     assert tg.build_grammar_string(TOOLS, {"format": "glm", "mode": "name-and-params"}) == g

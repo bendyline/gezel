@@ -267,7 +267,7 @@ async function setup(ctx: EvalContext): Promise<void> {
   if (!projectId) throw new Error('schema-migration setup: failed to resolve project id');
 
   // Seed the fixture files. Each write goes to the project workspace
-  // so the recruited Developer can read them via readFile(path: "src/types.ts").
+  // so the recruited Developer can read them via read_file(path: "src/types.ts").
   const seedFiles: Array<{ path: string; content: string }> = [
     { path: 'package.json', content: PKG_JSON },
     { path: 'tsconfig.json', content: TSCONFIG_JSON },
@@ -1415,7 +1415,7 @@ export function schemaMigrationFeedbackFor(
           'SCHEMA_HANDLER_IMPORT_REPAIR: all three exported handler signatures and bodies already pass every semantic subcontract. Do not rewrite or modify any function body.',
           `The only remaining handler failure is allowed-imports. Delete exactly these forbidden unused imports: ${names}. Preserve the \`User\` import and every other import.`,
           'If a forbidden name shares a named import declaration with `User`, remove only that import specifier. If it has its own import declaration, delete only that declaration.',
-          'Make one localized edit with replaceInFile or replaceLines. Do not use writeFile, do not reformat the file, and do not add replacement aliases or demo code.',
+          'Make one localized edit with replace_in_file or replace_lines. Do not use write_file, do not reformat the file, and do not add replacement aliases or demo code.',
           `Original checker failure: ${failReason}`,
         ].join(' '),
       };

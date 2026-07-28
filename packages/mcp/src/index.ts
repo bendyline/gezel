@@ -11,6 +11,11 @@
 export {
   ALWAYS_REGISTERED_TOOLS,
   CONDITIONALLY_REGISTERED_TOOLS,
+  RENAMED_TOOLS,
+  LEGACY_SPELLING_BY_CANONICAL,
+  canonicalToolName,
+  resolveToolNameSpelling,
   type AlwaysRegisteredToolName,
   type ConditionallyRegisteredToolName,
+  type LegacyToolName,
 } from './tool-inventory.js';

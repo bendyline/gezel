@@ -148,7 +148,7 @@ describe('ticTacToeContentSniff', () => {
   // strict-regex extractor sees zero scripts (no closer to anchor
   // on) — without the unclosed-script check we'd report "js=0
   // bytes" which sounds like the model just didn't try. The
-  // unclosed signal calls out the real failure: writeFile was
+  // unclosed signal calls out the real failure: write_file was
   // truncated.
   it('rejects an HTML with unclosed <script> (the dominant truncation pattern)', () => {
     const html = `
@@ -166,7 +166,7 @@ describe('ticTacToeContentSniff', () => {
     expect(result.ok).toBe(false);
     expect(result.signals).not.toContain('js-parses');
     expect(result.signals).not.toContain('js-size-ok');
-    expect(result.failReason).toMatch(/opened.*closed.*truncated.*appendToFile/);
+    expect(result.failReason).toMatch(/opened.*closed.*truncated.*append_to_file/);
   });
 
   it('rejects an HTML with truncated JS (`let|` mid-stream)', () => {

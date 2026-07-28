@@ -19,7 +19,7 @@ const CONTRACTS: ToolInputContract[] = [
     },
   },
   {
-    name: 'writeFile',
+    name: 'write_file',
     inputSchema: {
       type: 'object',
       properties: {
@@ -70,18 +70,18 @@ describe('lintPromptToolSchemaContract', () => {
 
   it('rejects positional arguments for object-shaped MCP tools', () => {
     const report = lintPromptToolSchemaContract({
-      prompt: 'Use `writeFile("index.html", html)` to save it.',
+      prompt: 'Use `write_file("index.html", html)` to save it.',
       toolContracts: CONTRACTS,
     });
 
     expect(report.errors).toMatchObject([
-      { rule: 'tool-example-argument-shape', tool: 'writeFile' },
+      { rule: 'tool-example-argument-shape', tool: 'write_file' },
     ]);
   });
 
   it('checks required and unknown object keys even when values are placeholders', () => {
     const report = lintPromptToolSchemaContract({
-      prompt: 'Call `writeFile({ filename, body })` now.',
+      prompt: 'Call `write_file({ filename, body })` now.',
       toolContracts: CONTRACTS,
     });
 
@@ -93,7 +93,7 @@ describe('lintPromptToolSchemaContract', () => {
   it('accepts symbolic values while validating their surrounding shape', () => {
     const report = lintPromptToolSchemaContract({
       prompt: [
-        'Call `writeFile({ path, content })`.',
+        'Call `write_file({ path, content })`.',
         'Then `set_task_status({ ref, status: "complete" })`.',
         'Create it with `create_task({ project, assignee: { kind: "gezel", gezelId } })`.',
       ].join('\n'),
@@ -105,7 +105,7 @@ describe('lintPromptToolSchemaContract', () => {
 
   it('accepts angle placeholders inside otherwise-valid examples', () => {
     const report = lintPromptToolSchemaContract({
-      prompt: '`writeFile({ path: "<deliverable>", content: <full_contents> })`',
+      prompt: '`write_file({ path: "<deliverable>", content: <full_contents> })`',
       toolContracts: CONTRACTS,
     });
 
@@ -114,7 +114,7 @@ describe('lintPromptToolSchemaContract', () => {
 
   it('does not reject an intentionally negative invalid-call example', () => {
     const report = lintPromptToolSchemaContract({
-      prompt: 'Do not use `writeFile("index.html")`; use the object schema instead.',
+      prompt: 'Do not use `write_file("index.html")`; use the object schema instead.',
       toolContracts: CONTRACTS,
     });
 
@@ -126,11 +126,11 @@ describe('extractToolCallStringCorpus', () => {
   it('extracts model-facing string and template bodies but ignores comments', () => {
     const entries = extractToolCallStringCorpus({
       sourceText: [
-        '// writeFile("comment-only")',
+        '// write_file("comment-only")',
         'const plain = "set_task_status({ ref: \\"p/1\\", status: \\"complete\\" })";',
-        'const dynamic = `writeFile({ path: "${path}", content })`;',
+        'const dynamic = `write_file({ path: "${path}", content })`;',
       ].join('\n'),
-      toolNames: ['set_task_status', 'writeFile'],
+      toolNames: ['set_task_status', 'write_file'],
     });
 
     expect(entries).toHaveLength(2);

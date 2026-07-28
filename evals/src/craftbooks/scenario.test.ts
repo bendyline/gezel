@@ -311,7 +311,7 @@ describe('craftbook generic scenario adapter', () => {
         id: 'session-1',
         messages: [
           {
-            toolCalls: [{ name: 'writeFile', success: true, path: 'out.md' }],
+            toolCalls: [{ name: 'write_file', success: true, path: 'out.md' }],
           },
         ],
       }),
@@ -351,7 +351,7 @@ describe('craftbook generic scenario adapter', () => {
       }),
     );
     const body = client.messageGezel.mock.calls[0]?.[1];
-    expect(body?.text).toContain('readFile({ path: "source/input.md" })');
+    expect(body?.text).toContain('read_file({ path: "source/input.md" })');
     expect(body?.expectedDeliverable).toBeUndefined();
   });
 
@@ -377,12 +377,12 @@ describe('craftbook generic scenario adapter', () => {
           {
             toolCalls: [
               {
-                name: 'readFile',
+                name: 'read_file',
                 success: true,
                 path: 'source/input.md',
                 argsFull: 'path: source/input.md',
               },
-              { name: 'writeFile', success: true, path: 'out.md' },
+              { name: 'write_file', success: true, path: 'out.md' },
             ],
           },
         ],
@@ -1008,7 +1008,7 @@ describe('craftbook generic scenario adapter', () => {
         id: 'session-developer',
         messages: [
           {
-            toolCalls: [{ name: 'writeFile', success: true, path: 'contract-test.mjs' }],
+            toolCalls: [{ name: 'write_file', success: true, path: 'contract-test.mjs' }],
           },
         ],
       }),

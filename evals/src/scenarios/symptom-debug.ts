@@ -174,7 +174,7 @@ export const KICKOFF_MESSAGE = [
   `the acceptance script's observed output is the only spec. Read ${PAGINATE_PATH} and`,
   'reason about which cases fail and why; the underlying defect is small (a few lines at',
   `most) once correctly diagnosed. The checker fails the task if ${ACCEPT_PATH} changes`,
-  'in any way, so leave it untouched. Edit files in place via writeFile/replaceInFile —',
+  'in any way, so leave it untouched. Edit files in place via write_file/replace_in_file —',
   'paths are relative to the workspace root, no leading "workspace/". Do NOT run npm',
   'install or any shell command — there is no node_modules; the harness runs',
   `\`node ${ACCEPT_PATH}\` automatically every few seconds and reports the failing CASE`,

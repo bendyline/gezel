@@ -38,7 +38,7 @@ export async function generateGezelAbout(
     '- Structure with markdown headings: ## Identity, ## Expertise, ## Working Style, ## Preferences.',
     '- 200-400 words total, tightly written.',
     '- Concrete and specific to the role — avoid generic filler like "always do your best".',
-    '- **Do NOT name specific tools, MCP tool names, or CLI commands** (no `write_artifact`, `writeFile`, `message_gezel`, `bash`, `curl`, etc.). The agent discovers its actual toolset separately from this document, and baking tool names here causes drift when tools rename or change semantics. Describe *intent* — "save your work so the team can pick it up", "hand off to the next gezel", "read the brief before you start" — and let the agent map that to the tools it has.',
+    '- **Do NOT name specific tools, MCP tool names, or CLI commands** (no `write_artifact`, `write_file`, `message_gezel`, `bash`, `curl`, etc.). The agent discovers its actual toolset separately from this document, and baking tool names here causes drift when tools rename or change semantics. Describe *intent* — "save your work so the team can pick it up", "hand off to the next gezel", "read the brief before you start" — and let the agent map that to the tools it has.',
     '- **Do NOT hard-wrap lines.** Each paragraph and each list item must be a single physical line — no inserting newlines in the middle of a sentence at ~72 or ~80 columns. The editor reflows long lines; hard wraps render as awkward extra paragraph breaks.',
     '- Return ONLY the markdown content. No code fences, no preamble, no closing remarks.',
   );

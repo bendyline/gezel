@@ -63,7 +63,7 @@ export const FANTASY_FICTION_KICKOFF_MESSAGE = [
   'double quotation marks (at least three exchanges). Do not open with "Once',
   'upon a time", "in a land far, far away", "long, long ago", or "It was a dark',
   'and stormy night" — start inside a specific moment. Write the complete story',
-  `now with writeFile to \`${STORY_PATH}\`, then refine it if needed.`,
+  `now with write_file to \`${STORY_PATH}\`, then refine it if needed.`,
 ].join(' ');
 
 const JUDGE_CONTEXT_NOTE = [
@@ -94,7 +94,7 @@ function storyRepairDirective(failReason: string): string {
       '— as dramatized story material (scenes, dialogue, consequences), not a',
       'mention. The four required elements are: a named dragon, a castle, a',
       'bargain whose price is paid on the page, and a deep-winter setting. Your',
-      `next tool call should be writeFile (or replaceInFile) on \`${STORY_PATH}\`.`,
+      `next tool call should be write_file (or replace_in_file) on \`${STORY_PATH}\`.`,
     ].join(' ');
   }
   return [
@@ -102,7 +102,7 @@ function storyRepairDirective(failReason: string): string {
     'words of flowing prose with a `# title` heading, at least ten substantial',
     'paragraphs, at least three spoken-dialogue passages in double quotation',
     'marks, no bullet-list or table summaries, and no stock opening phrases.',
-    `Your next tool call should be writeFile (or replaceInFile) on \`${STORY_PATH}\`.`,
+    `Your next tool call should be write_file (or replace_in_file) on \`${STORY_PATH}\`.`,
   ].join(' ');
 }
 

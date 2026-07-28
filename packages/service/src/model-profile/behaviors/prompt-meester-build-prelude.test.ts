@@ -56,9 +56,9 @@ describe('PromptMeesterBuildPrelude', () => {
     expect(out).toContain('start_job');
     expect(out).not.toContain('`start_project({');
     expect(out).toContain('single-file / no-build-step request');
-    expect(out).toContain('write `index.html` with `writeFile`');
+    expect(out).toContain('write `index.html` with `write_file`');
     expect(out).toContain('do not prefix `workspace/`');
-    expect(out).toContain('writeFile');
+    expect(out).toContain('write_file');
   });
 
   it('does not fire when the active gezel is not the Meester', () => {

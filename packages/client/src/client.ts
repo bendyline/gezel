@@ -181,6 +181,9 @@ import type {
   MessageGezelRequest,
   MessageGezelResponse,
   MlxRuntimeStatus,
+  NativeEngineName,
+  NativeEngineResolveEvent,
+  NativeEngineStatusResponse,
   NewCraftbookStep,
   NightShiftTasksResponse,
   OutlineFileRequest,
@@ -297,6 +300,7 @@ import {
   type ImageStaticMeta,
   type ListInstalledRecognitionModelsResponse,
   type ListRecognitionCatalogResponse,
+  NativeEngineResolveEventSchema,
   type RecognitionHealth,
   type RecognitionMode,
   type RecognitionPullEvent,
@@ -2567,6 +2571,39 @@ export class GezelClient {
   /** Live pool snapshot for the engines budget bar. */
   getEngineStatus(): Promise<EngineStatusResponse> {
     return this.request('GET', '/api/engines/status');
+  }
+
+  /** Source-pinned native release and executable availability in the daemon. */
+  getNativeEngineStatus(): Promise<NativeEngineStatusResponse> {
+    return this.request('GET', '/api/engines/binaries/status');
+  }
+
+  /**
+   * Download, verify, extract, and activate one native executable. The
+   * server-owned job survives an SSE listener disconnect; this call resolves
+   * on the terminal `done` or `error` event.
+   */
+  async ensureNativeEngine(
+    engine: NativeEngineName,
+    onEvent: (event: NativeEngineResolveEvent) => void,
+    variant?: string,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const query = variant ? `?variant=${encodeURIComponent(variant)}` : '';
+    await consumeApiSseJson({
+      ...MODEL_DOWNLOAD_SSE_POLICY,
+      url: `${this.baseUrl}/api/engines/binaries/${encodeURIComponent(engine)}/ensure${query}`,
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${this.token}`,
+      },
+      signal,
+      fetch: this.fetchImpl,
+      schema: NativeEngineResolveEventSchema,
+      onEvent,
+      isTerminal: (event) => event.type === 'done' || event.type === 'error',
+      label: `Native engine install stream for "${engine}"`,
+    });
   }
 
   /**

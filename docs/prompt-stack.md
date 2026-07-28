@@ -291,14 +291,14 @@ they compete with text for context and prefill. Measured accounting:
   `read_task_notes` (rank 26) was trimmed out from under the "resume via read_task_notes"
   prompt. Two safeguards keep the current caps from re-creating that class:
   1. **Load-bearing floor** (`LOAD_BEARING_TOOL_CAP_ALWAYS_KEEP`): `read_task_notes`,
-     `write_task_note`, `advance_task_step`, `set_task_status`, `writeFile`,
+     `write_task_note`, `advance_task_step`, `set_task_status`, `write_file`,
      `message_gezel`, and `ask_user_question` survive the cap unconditionally when
      present — a session is never trimmed below the ability to finish its step, hand off,
      or ask for the human decision the standing prompt requires. Rides alongside the
      existing `validate` + `delegate_*`/`consult_*` exemptions.
   2. **Step-completion grant**: a session actively executing a craftbook step
      (`taskRef` + `stepId`) is granted the task-progression tools regardless of role, and
-     those tools are restored after message-driven file clamps, so a `writeFile`-shaped
+     those tools are restored after message-driven file clamps, so a `write_file`-shaped
      seed cannot hide the `write_task_note` action its procedure requires first. A
      coordinator assigned a step (whose default kit is `tasks-readonly`) can still record
      notes and hand off.
@@ -382,7 +382,7 @@ the matrix validates literal call examples in rendered prompts, registered tool
 descriptions, and model-facing MCP source strings. It fails on positional calls, missing
 or unknown properties, concrete type mismatches, and invalid enum/const values.
 Identifiers and angle placeholders remain symbolic wildcards, so
-`writeFile({ path, content })` and `<full contents>` can document shape without inventing
+`write_file({ path, content })` and `<full contents>` can document shape without inventing
 fixture values; their surrounding object and required keys are still checked.
 
 The static matrix models bundled local model/backend profiles, not every third-party MCP

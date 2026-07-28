@@ -587,6 +587,6 @@ export function firstActionForKind(kind: DeliverableKind, path: string): string 
     case 'image-set':
       return `render_image({ prompt, saveAs: "${path}" })`;
     default:
-      return `writeFile({ path: "${path}", content: ... })`;
+      return `write_file({ path: "${path}", content: ... })`;
   }
 }

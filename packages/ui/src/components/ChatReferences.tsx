@@ -106,8 +106,8 @@ function classifyTool(name: string): RefKind | null {
     case 'read_document':
     case 'write_document':
       return 'document';
-    case 'readFile':
-    case 'writeFile':
+    case 'read_file':
+    case 'write_file':
       return 'workspace';
     default:
       return null;

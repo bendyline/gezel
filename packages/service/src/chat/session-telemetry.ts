@@ -16,11 +16,11 @@ import type { SessionGpuTask, SessionTelemetry } from '@bendyline/gezel';
  * rename — deleting or scaffolding is not deliverable progress.
  */
 export const FILE_MUTATION_TOOLS: ReadonlySet<string> = new Set([
-  'writeFile',
+  'write_file',
   'write_artifact',
-  'replaceInFile',
-  'appendToFile',
-  'insertAtMarker',
+  'replace_in_file',
+  'append_to_file',
+  'insert_at_marker',
   'copy_artifact_to_workspace',
 ]);
 

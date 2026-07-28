@@ -177,7 +177,7 @@ export const ChatSessionSchema = z.object({
    * `filePath` is the asker's preferred path for the deliverable;
    * specialists may write elsewhere if scenario constraints require,
    * but their chat reply MUST cite the actual path used so the asker
-   * can verify with `readFile`.
+   * can verify with `read_file`.
    *
    * Persisted on the session so follow-up turns on the same
    * consultation keep the file-deliverable framing (sibling pattern

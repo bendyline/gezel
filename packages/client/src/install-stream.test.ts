@@ -1,3 +1,4 @@
+import type { NativeEngineResolveEvent } from '@bendyline/gezel';
 import { describe, expect, it, vi } from 'vitest';
 import { GezelApiError, GezelClient, type MlxInstallEvent } from './client.js';
 
@@ -86,6 +87,24 @@ describe('installMlxModel terminal-frame handling', () => {
       client.installMlxModel('gemma4-12b-q8', (ev) => events.push(ev)),
     ).resolves.toBeUndefined();
     expect(events.at(-1)).toMatchObject({ type: 'error', error: 'sha256 mismatch' });
+  });
+});
+
+describe('ensureNativeEngine terminal-frame handling', () => {
+  it('streams verified native install progress to completion', async () => {
+    const client = makeClient(
+      streamingFetch([
+        { type: 'progress', bytesWritten: 1024, totalBytes: 4096 },
+        { type: 'verifying', what: 'sha256' },
+        { type: 'done', binPath: '/engines/llama-server', cached: false },
+      ]),
+    );
+    const events: NativeEngineResolveEvent[] = [];
+
+    await expect(
+      client.ensureNativeEngine('llama-server', (event) => events.push(event), 'cuda'),
+    ).resolves.toBeUndefined();
+    expect(events.map((event) => event.type)).toEqual(['progress', 'verifying', 'done']);
   });
 });
 

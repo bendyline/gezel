@@ -707,7 +707,7 @@ await fetch(\`http://127.0.0.1:\${port}/authors/101/books\`);
     const directive = bookstoreMissingContractDirective();
 
     expect(directive).toContain('BOOKSTORE_CONTRACT_MISSING_FILE');
-    expect(directive).toContain('MUST be `writeFile({ path: "contract-test.mjs"');
+    expect(directive).toContain('MUST be `write_file({ path: "contract-test.mjs"');
     expect(directive).toContain('global fetch');
     expect(directive).toContain('server.stdout.on("data"');
     expect(directive).toContain('GET `/books`');

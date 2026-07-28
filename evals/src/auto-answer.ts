@@ -84,7 +84,7 @@ export function repoSourceAutoAnswerText(
   const squisqHint = /\bsquisq\b/i.test(haystack)
     ? ' For Squisq specifically, call `fetch_repo({ url: "https://github.com/bendyline/squisq", projectName: "Squisq Code Review" })`.'
     : '';
-  return `Do not wait for source code from me. Use the available \`fetch_repo\` tool with the repository URL from the task prompt, then inspect the cloned workspace with \`readdir\` and \`readFile\`, and write the requested deliverable file.${squisqHint}`;
+  return `Do not wait for source code from me. Use the available \`fetch_repo\` tool with the repository URL from the task prompt, then inspect the cloned workspace with \`list_dir\` and \`read_file\`, and write the requested deliverable file.${squisqHint}`;
 }
 
 export function projectContextAutoAnswerText(
@@ -106,7 +106,7 @@ export function projectContextAutoAnswerText(
     'Do not wait for missionObjectives.md from me.',
     'Use the project context and the kickoff message already available in this conversation as the objectives.',
     'The eval task is fully specified; do not ask for missionObjectives.md again.',
-    'Continue now by writing or repairing the expected deliverable file in the workspace with `writeFile`.',
+    'Continue now by writing or repairing the expected deliverable file in the workspace with `write_file`.',
   ].join(' ');
 }
 
@@ -140,8 +140,8 @@ export function workspaceFixtureAutoAnswerText(
   return [
     `Do not wait for seeded workspace file contents from me${pathList}.`,
     'Those files already exist in the project workspace.',
-    'Use `readFile` with the workspace-relative path for each needed file, then continue.',
-    'Do not ask me to paste file contents again; write or repair the expected deliverable with `writeFile`.',
+    'Use `read_file` with the workspace-relative path for each needed file, then continue.',
+    'Do not ask me to paste file contents again; write or repair the expected deliverable with `write_file`.',
   ].join(' ');
 }
 

@@ -120,7 +120,7 @@ const MEESTER_CREW_BUILD_PRELUDE =
 
 const MEESTER_SINGLE_JOB_PRELUDE =
   '(System note for this turn: the user asked for a one-specialist deliverable. Make ONE tool call:\n' +
-  ' • `start_job({ name, about, missionObjectives, taskDescription, specialistRole })`. Use `specialistRole: "builder"` or `"developer"` for code. `taskDescription` must tell the specialist to deliver the requested file, not a plan. For source code say to write `index.html` with `writeFile` (workspace-relative path; do not prefix `workspace/`). Preserve the acceptance criteria.\n' +
+  ' • `start_job({ name, about, missionObjectives, taskDescription, specialistRole })`. Use `specialistRole: "builder"` or `"developer"` for code. `taskDescription` must tell the specialist to deliver the requested file, not a plan. For source code say to write `index.html` with `write_file` (workspace-relative path; do not prefix `workspace/`). Preserve the acceptance criteria.\n' +
   ' • Do NOT call `start_project` for this single-file / no-build-step request. Do NOT call `create_gezel`, `update_project`, `create_task`, or `message_gezel` separately — the macro handles them.\n' +
   'After the macro returns, your turn is done — tell the user which specialist is on it.)';
 

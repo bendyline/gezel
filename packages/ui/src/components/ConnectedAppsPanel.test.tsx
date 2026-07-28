@@ -35,7 +35,16 @@ describe('ConnectedAppsPanel', () => {
               lastUsedAt: Date.now(),
             },
           ],
-          grants: [],
+          grants: [
+            {
+              id: 'grant-cli',
+              appId: 'gezel-cli',
+              appName: 'Gezel CLI',
+              scopes: ['cli'],
+              status: 'pending',
+              createdAt: Date.now(),
+            },
+          ],
         }),
       }),
     );
@@ -58,5 +67,12 @@ describe('ConnectedAppsPanel', () => {
     expect(within(desktopRow!).getByText('ui')).toBeInTheDocument();
     expect(within(desktopRow!).getByText('openai')).toBeInTheDocument();
     expect(within(desktopRow!).getByLabelText('Revoke Gezel Desktop')).toBeInTheDocument();
+  });
+
+  it('describes a pending CLI grant as command-line control', async () => {
+    render(<ConnectedAppsPanel />);
+    expect(
+      await screen.findByText('gezel-cli — wants command-line control of this Gezel service'),
+    ).toBeInTheDocument();
   });
 });

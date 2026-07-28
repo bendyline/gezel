@@ -1,19 +1,21 @@
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
+import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
-import type { GezelApp } from '@bendyline/gezel-app-sdk';
 import {
+  GezelApiError,
   GezelClient,
   createTrustingFetch,
   isProcessAlive,
   readRuntime,
+  readSystemServiceEndpoint,
 } from '@bendyline/gezel-client/node';
 import { gezelPaths } from '@bendyline/gezel/paths';
 import { ensureDaemon } from './spawn-daemon.js';
 
 /** Global flags shared across commands (defined on the root program). */
 export interface CliGlobals {
-  /** Connect to a foreign daemon at this URL as a scoped guest. */
+  /** Connect to a Gezel service at this URL using an approved CLI grant. */
   connect?: string;
   /** Bearer token for `--connect` (skips the grant prompt). */
   token?: string;
@@ -21,6 +23,8 @@ export interface CliGlobals {
   home?: string;
   /** For `run`: a folder to ensure as the project, or `true` for the cwd. */
   project?: string | boolean;
+  /** Skip machine-service discovery and use the user-owned local runtime. */
+  standalone?: boolean;
 }
 
 /** A user-facing CLI failure — printed without a stack trace. */
@@ -34,6 +38,37 @@ export class CliError extends Error {
 /** Apply `--home` to the env so gezelHome()/readRuntime()/startService see it. */
 export function applyHome(globals: CliGlobals): void {
   if (globals.home) process.env.GEZEL_HOME = resolve(globals.home);
+}
+
+/** Reject global flag combinations before any command performs work. */
+export function validateGlobals(globals: CliGlobals): void {
+  if (globals.connect && globals.standalone) {
+    throw new CliError('--connect and --standalone cannot be used together.');
+  }
+  if (globals.token && !globals.connect) {
+    throw new CliError('--token requires --connect <url>.');
+  }
+  if (globals.connect) normalizeServiceUrl(globals.connect);
+}
+
+/** Normalize and validate a service URL used by `--connect`. */
+export function normalizeServiceUrl(raw: string): string {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new CliError(`Invalid --connect URL: ${raw}`);
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw new CliError('--connect must use an http:// or https:// URL.');
+  }
+  if (url.username || url.password) {
+    throw new CliError('--connect must not contain credentials; use --token instead.');
+  }
+  if (url.search || url.hash) {
+    throw new CliError('--connect must not contain a query string or fragment.');
+  }
+  return url.toString().replace(/\/+$/, '');
 }
 
 /**
@@ -57,48 +92,36 @@ export function resolveDevHome(globals: CliGlobals): void {
 }
 
 /**
- * Connection for management commands (agent/env/task): requires a daemon
- * you OWN — full `/api` via the root token. Refuses `--connect`, which is a
- * scoped guest connection that can't drive the control plane.
+ * Connection for management commands (agent/env/task): use an explicitly
+ * approved service when configured, otherwise the system service, otherwise
+ * a user-owned fallback daemon.
  */
 export async function connectOwned(globals: CliGlobals): Promise<GezelClient> {
-  if (globals.connect) {
-    throw new CliError(
-      `This command manages a daemon and isn't available over --connect (a scoped guest connection to ${globals.connect}). Run it on the host that owns the daemon, or drop --connect.`,
-    );
-  }
   applyHome(globals);
+  const preferred = await connectPreferredService(globals);
+  if (preferred) return preferred.client;
   return ensureDaemon();
 }
 
-export type RunConnection =
-  | { kind: 'owned'; client: GezelClient; baseUrl: string; stop?: () => Promise<void> }
-  | { kind: 'guest'; app: GezelApp; baseUrl: string };
+export type RunConnection = {
+  kind: 'owned';
+  client: GezelClient;
+  baseUrl: string;
+  stop?: () => Promise<void>;
+};
 
 /**
  * Connection for `gezel run`:
- *   - `--connect <url>` → scoped guest via the app-sdk grant flow (`/v1`).
- *   - else adopt a running local daemon (root `/api`),
+ *   - `--connect <url>` → explicitly authorized full CLI connection.
+ *   - else use the healthy Electron-installed machine service when available.
+ *   - else adopt a running user-local daemon,
  *   - else start the service in-process for this single turn (root `/api`),
  *     returning a `stop` to tear it down — a self-cleaning one-shot.
  */
 export async function connectForRun(globals: CliGlobals): Promise<RunConnection> {
   applyHome(globals);
-
-  if (globals.connect) {
-    const { connect } = await import('@bendyline/gezel-app-sdk');
-    const baseUrl = globals.connect;
-    const app = await connect({
-      appId: 'gezel-cli',
-      appName: 'Gezel CLI',
-      scopes: ['openai'],
-      baseUrl,
-      ...(globals.token ? { existingToken: globals.token } : {}),
-      tokenStorage: fileTokenStorage(baseUrl),
-      approvalTimeoutSec: 120,
-    });
-    return { kind: 'guest', app, baseUrl };
-  }
+  const preferred = await connectPreferredService(globals);
+  if (preferred) return { kind: 'owned', ...preferred };
 
   // Owned: adopt a live local daemon if one's running.
   const runtime = await readRuntime();
@@ -150,13 +173,235 @@ export async function connectForRun(globals: CliGlobals): Promise<RunConnection>
   return { kind: 'owned', client, baseUrl, stop };
 }
 
+const CLI_APP_ID_PREFIX = 'gezel-cli';
+const CLI_APPROVAL_TIMEOUT_SEC = 300;
+
+export interface HealthySystemService {
+  baseUrl: string;
+  fetch: typeof fetch;
+  port: number;
+  home: string;
+}
+
+/**
+ * Explicit connection/home choices always win over system-service discovery.
+ * An explicit home is necessarily standalone: a machine service owns its home
+ * and cannot be retargeted by a client flag.
+ */
+export function shouldTrySystemService(
+  globals: CliGlobals,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return (
+    !globals.connect &&
+    !globals.standalone &&
+    !globals.home &&
+    !env.GEZEL_HOME &&
+    env.GEZEL_DEV !== '1'
+  );
+}
+
+/** Find and health-check the Electron-installed machine service. */
+export async function findHealthySystemService(
+  globals: CliGlobals,
+): Promise<HealthySystemService | null> {
+  if (!shouldTrySystemService(globals)) return null;
+  const endpoint = await readSystemServiceEndpoint();
+  if (!endpoint) return null;
+  const fetchImpl = endpoint.cert ? createTrustingFetch({ cert: endpoint.cert }) : globalThis.fetch;
+  const probe = new GezelClient({
+    baseUrl: endpoint.baseUrl,
+    token: '',
+    fetch: fetchImpl,
+  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 1_500);
+  timeout.unref?.();
+  try {
+    await probe.health(controller.signal);
+    return {
+      baseUrl: endpoint.baseUrl,
+      fetch: fetchImpl,
+      port: endpoint.port,
+      home: endpoint.home,
+    };
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function connectPreferredService(
+  globals: CliGlobals,
+): Promise<{ client: GezelClient; baseUrl: string } | null> {
+  validateGlobals(globals);
+
+  if (globals.connect) {
+    const baseUrl = normalizeServiceUrl(globals.connect);
+    return {
+      client: await connectWithCliGrant({
+        baseUrl,
+        fetch: globalThis.fetch,
+        ...(globals.token ? { token: globals.token } : {}),
+      }),
+      baseUrl,
+    };
+  }
+
+  const system = await findHealthySystemService(globals);
+  if (!system) return null;
+  return {
+    client: await connectWithCliGrant({
+      baseUrl: system.baseUrl,
+      fetch: system.fetch,
+    }),
+    baseUrl: system.baseUrl,
+  };
+}
+
+async function connectWithCliGrant(input: {
+  baseUrl: string;
+  fetch: typeof fetch;
+  token?: string;
+}): Promise<GezelClient> {
+  const appId = await resolveCliAppId();
+  if (input.token) {
+    const client = buildCliClient(input.baseUrl, input.token, input.fetch);
+    await validateCliClient(client, 'The supplied --token');
+    return client;
+  }
+
+  const storage = fileTokenStorage(input.baseUrl);
+  const stored = await storage.load(appId);
+  if (stored) {
+    const client = buildCliClient(input.baseUrl, stored, input.fetch);
+    try {
+      await client.getConfig();
+      return client;
+    } catch (error) {
+      if (error instanceof GezelApiError && error.status === 401) {
+        await storage.remove(appId);
+      } else if (error instanceof GezelApiError && error.status === 403) {
+        throw new CliError(
+          'The saved Gezel CLI authorization does not have CLI access. Revoke “Gezel CLI” in Settings → Connected Apps and authorize it again.',
+        );
+      } else {
+        throw error;
+      }
+    }
+  }
+
+  console.error(
+    `Gezel CLI needs permission to use the service at ${input.baseUrl}.\nOpen the Gezel app and approve “Gezel CLI”. Waiting for approval…`,
+  );
+
+  try {
+    const { connect } = await import('@bendyline/gezel-app-sdk');
+    await connect({
+      appId,
+      appName: 'Gezel CLI',
+      scopes: ['cli'],
+      baseUrl: input.baseUrl,
+      fetch: input.fetch,
+      approvalTimeoutSec: CLI_APPROVAL_TIMEOUT_SEC,
+      tokenStorage: storage,
+    });
+  } catch (error) {
+    if (error instanceof CliError) throw error;
+    const { GezelSdkError } = await import('@bendyline/gezel-app-sdk');
+    if (error instanceof GezelSdkError) {
+      if (error.code === 'already_connected') {
+        throw new CliError(
+          'Gezel already has a CLI authorization, but this terminal no longer has its token. Revoke “Gezel CLI” in Settings → Connected Apps, then run this command again.',
+        );
+      }
+      if (error.code === 'user_denied') {
+        throw new CliError('Gezel CLI access was denied in the Gezel app.');
+      }
+      if (error.code === 'approval_timeout') {
+        throw new CliError(
+          `Timed out after ${CLI_APPROVAL_TIMEOUT_SEC / 60} minutes waiting for Gezel CLI approval.`,
+        );
+      }
+    }
+    throw new CliError(
+      `Could not authorize Gezel CLI against ${input.baseUrl}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+
+  const issuedToken = await storage.load(appId);
+  if (!issuedToken) {
+    throw new CliError('Gezel approved the CLI connection but returned no credential.');
+  }
+  const client = buildCliClient(input.baseUrl, issuedToken, input.fetch);
+  await validateCliClient(client, 'The approved Gezel CLI authorization');
+  return client;
+}
+
+/**
+ * Return a stable, non-identifying app id for this CLI installation. A unique
+ * id lets each OS user and remote machine receive its own revocable grant.
+ */
+export async function resolveCliAppId(): Promise<string> {
+  const dir = join(gezelPaths().root, 'cli');
+  const file = join(dir, 'client-id');
+  const readId = async (): Promise<string | null> => {
+    try {
+      const id = (await readFile(file, 'utf8')).trim();
+      return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)
+        ? id.toLowerCase()
+        : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const existing = await readId();
+  if (existing) return `${CLI_APP_ID_PREFIX}.${existing}`;
+
+  const created = randomUUID();
+  await mkdir(dir, { recursive: true, mode: 0o700 });
+  try {
+    await writeFile(file, `${created}\n`, {
+      encoding: 'utf8',
+      mode: 0o600,
+      flag: 'wx',
+    });
+  } catch (error) {
+    const raced = await readId();
+    if (raced) return `${CLI_APP_ID_PREFIX}.${raced}`;
+    throw error;
+  }
+  await chmod(file, 0o600).catch(() => {});
+  return `${CLI_APP_ID_PREFIX}.${created}`;
+}
+
+function buildCliClient(baseUrl: string, token: string, fetchImpl: typeof fetch): GezelClient {
+  return new GezelClient({ baseUrl, token, fetch: fetchImpl });
+}
+
+async function validateCliClient(client: GezelClient, label: string): Promise<void> {
+  try {
+    await client.getConfig();
+  } catch (error) {
+    if (error instanceof GezelApiError && (error.status === 401 || error.status === 403)) {
+      throw new CliError(
+        `${label} does not have CLI access. Revoke “Gezel CLI” in Settings → Connected Apps and authorize it again.`,
+      );
+    }
+    throw error;
+  }
+}
+
 /** Persist scoped grant tokens under `<home>/cli/tokens/<origin>.json`. */
-function fileTokenStorage(baseUrl: string): {
+export function fileTokenStorage(baseUrl: string): {
   load(appId: string): Promise<string | null>;
   save(appId: string, token: string): Promise<void>;
+  remove(appId: string): Promise<void>;
 } {
-  const safe = baseUrl.replace(/[^a-zA-Z0-9]+/g, '_');
-  const file = join(gezelPaths().root, 'cli', 'tokens', `${safe}.json`);
+  const originKey = createHash('sha256').update(baseUrl).digest('hex');
+  const file = join(gezelPaths().root, 'cli', 'tokens', `${originKey}.json`);
   const read = async (): Promise<Record<string, string>> => {
     try {
       return JSON.parse(await readFile(file, 'utf8')) as Record<string, string>;
@@ -171,8 +416,22 @@ function fileTokenStorage(baseUrl: string): {
     async save(appId, token) {
       const data = await read();
       data[appId] = token;
-      await mkdir(dirname(file), { recursive: true });
-      await writeFile(file, `${JSON.stringify(data, null, 2)}\n`, 'utf8');
+      await mkdir(dirname(file), { recursive: true, mode: 0o700 });
+      await writeFile(file, `${JSON.stringify(data, null, 2)}\n`, {
+        encoding: 'utf8',
+        mode: 0o600,
+      });
+      await chmod(file, 0o600).catch(() => {});
+    },
+    async remove(appId) {
+      const data = await read();
+      delete data[appId];
+      await mkdir(dirname(file), { recursive: true, mode: 0o700 });
+      await writeFile(file, `${JSON.stringify(data, null, 2)}\n`, {
+        encoding: 'utf8',
+        mode: 0o600,
+      });
+      await chmod(file, 0o600).catch(() => {});
     },
   };
 }

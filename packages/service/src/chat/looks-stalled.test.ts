@@ -351,8 +351,8 @@ describe('buildDeliverableEditNudge', () => {
   it('names the exact deliverable file and demands an edit', () => {
     const nudge = buildDeliverableEditNudge('packages/core/src/spatial/Geohash.ts');
     expect(nudge).toContain('packages/core/src/spatial/Geohash.ts');
-    expect(nudge).toContain('replaceInFile');
-    expect(nudge).toContain('writeFile');
+    expect(nudge).toContain('replace_in_file');
+    expect(nudge).toContain('write_file');
     expect(nudge).toContain('not actually done');
   });
 });

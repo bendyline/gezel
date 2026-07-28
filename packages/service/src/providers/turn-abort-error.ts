@@ -6,7 +6,7 @@
  * The abort has TWO distinct audiences that used to share one string:
  *
  *   1. **The model.** `message` is a direct, second-person corrective —
- *      "stop re-emitting the whole file, make one `replaceLines` edit",
+ *      "stop re-emitting the whole file, make one `replace_lines` edit",
  *      "hand off to `delegate_meester`", etc. This is the technical
  *      record: it lands on the synthetic `turn-aborted` message's
  *      `warnings` (for the session-debug bundle) and is what any upstream

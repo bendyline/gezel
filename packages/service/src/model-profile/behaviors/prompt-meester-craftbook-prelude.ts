@@ -10,7 +10,7 @@
  * qwen3.6-27b): asked point-blank to reuse or author a
  * recipe — with `suggest_craftbook` / `craftbook_write` verifiably in
  * its tool list — the meester delegated the whole job as ad-hoc
- * `writeFile` work in 3 of 4 steered trials. Per-message kickoff
+ * `write_file` work in 3 of 4 steered trials. Per-message kickoff
  * steering loses to the delegation-heavy meester persona; this
  * prelude lands in the user-prompt slot (where local-model attention
  * is highest), the same mechanism that fixed the analogous

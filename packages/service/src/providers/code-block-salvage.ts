@@ -4,7 +4,7 @@
  * Gemma-family local models (Gemma 4 26B in particular on the native MLX
  * path) sometimes respond to a coding task by writing the file contents
  * directly in the assistant turn as a fenced markdown block — instead
- * of calling `writeFile` / `write_artifact`. The ramble detector
+ * of calling `write_file` / `write_artifact`. The ramble detector
  * catches the resulting 20K-char dump and aborts, but the throw kills
  * the turn outright; the carefully-written code is discarded.
  *
@@ -19,7 +19,7 @@
  * has a recognizable language fence AND a filename can be derived
  * (from an immediately-preceding hint like "**index.html:**" or a
  * language-default like `html → index.html`), OR when an untyped fence
- * contains a plain-text `writeFile({ path, content })` call.
+ * contains a plain-text `write_file({ path, content })` call.
  */
 
 export interface SalvagedCodeBlock {
@@ -171,11 +171,11 @@ export function salvageCodeBlocks(text: string): SalvagedCodeBlock[] {
   // Overwriting a `.html` target needs a COMPLETE document. A bare
   // fragment — a `<script>` body, a JS snippet, a partial markup chunk —
   // is rejected by the source-write-guard ("Refusing to replace … with a
-  // JavaScript fragment"), so promoting it to a synthesized `writeFile`
+  // JavaScript fragment"), so promoting it to a synthesized `write_file`
   // only burns the failure-tracker budget on a guaranteed rejection.
   // Drop those; keep complete documents (and all non-HTML targets).
   // Wild-caught (qwen3.6 a3b): salvaged `<script>`-only blocks
-  // failed `writeFile(index.html)` twice, helping abort the turn at 5.
+  // failed `write_file(index.html)` twice, helping abort the turn at 5.
   return blocks.filter(
     (b) => !/\.html?$/i.test(b.filename) || /<!doctype html|<html[\s>]/i.test(b.content),
   );
@@ -265,7 +265,7 @@ function contentLooksLikeLang(content: string, lang: string): boolean {
 }
 
 function salvageWriteFileFence(content: string): SalvagedCodeBlock | null {
-  if (!/\bwriteFile\s*\(/.test(content)) return null;
+  if (!/\bwrite_file\s*\(/.test(content)) return null;
 
   const pathMatch = content.match(/\bpath\s*:\s*["']([^"']+)["']/);
   const contentMatch = /\bcontent\s*:\s*`/.exec(content);

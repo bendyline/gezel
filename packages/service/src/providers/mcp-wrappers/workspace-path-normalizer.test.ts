@@ -21,7 +21,7 @@ describe('WorkspacePathNormalizer', () => {
   it('rewrites workspace-relative write paths without mutating the original args', async () => {
     const args = { path: 'workspace/index.html', content: '<!doctype html>' };
 
-    const verdict = await WorkspacePathNormalizer.preProcess!('writeFile', args, {} as never);
+    const verdict = await WorkspacePathNormalizer.preProcess!('write_file', args, {} as never);
 
     expect(verdict).toEqual({
       kind: 'allow',

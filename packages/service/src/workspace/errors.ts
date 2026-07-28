@@ -1,5 +1,5 @@
 /**
- * Thrown when a workspace-mutating op (`writeFile`, `rm`, `mkdir`,
+ * Thrown when a workspace-mutating op (`write_file`, `delete_path`, `make_dir`,
  * `rename`, `run_nodejs_script`, `npm_install`) is attempted against a
  * project whose per-project write contract denies it: an **external**
  * `workingDir` without the `allowGezelWrites: true` opt-in

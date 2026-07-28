@@ -27,12 +27,12 @@ const IMPLEMENTER_NAME = 'Deepak';
 export const PLAN_PATH = 'plan.md';
 
 const PLAN_MUTATION_TOOLS = new Set([
-  'writeFile',
-  'replaceInFile',
-  'replaceLines',
-  'appendToFile',
-  'insertAtMarker',
-  'applyPatch',
+  'write_file',
+  'replace_in_file',
+  'replace_lines',
+  'append_to_file',
+  'insert_at_marker',
+  'apply_patch',
   'copy_artifact_to_workspace',
 ]);
 const PLANNER_RETRY_MARKER = '[scenario collaboration check]';
@@ -347,7 +347,7 @@ export function planRepairDirective(): string {
     `Patch \`${PLAN_PATH}\` to fix exactly the named gap. The Work plan table needs`,
     'columns `ID | Task | Owner | Depends on | Done when`, owners from team.md only',
     '(never the contractor), dependencies pointing at EARLIER rows, and observable',
-    '"Done when" states. Your next tool call should be writeFile (or replaceInFile)',
+    '"Done when" states. Your next tool call should be write_file (or replace_in_file)',
     'on plan.md.',
   ].join(' ');
 }

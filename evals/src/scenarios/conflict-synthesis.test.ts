@@ -110,12 +110,12 @@ const BOLD_CLUSTER_COMPLETE = [
 ].join('\n');
 
 function readCall(path: string, success = true): SynthesisToolCall {
-  return { name: 'readFile', success, path, argsFull: `path: ${path}` };
+  return { name: 'read_file', success, path, argsFull: `path: ${path}` };
 }
 
 function mutationCall(path: string, content: string): SynthesisToolCall {
   return {
-    name: 'writeFile',
+    name: 'write_file',
     success: true,
     path,
     argsFull: `content:\n${content}\npath: ${path}`,
@@ -514,7 +514,7 @@ describe('conflict-synthesis grader', () => {
 
   it('does not count a failed source read or a filename collision as grounded evidence', () => {
     const failedFinanceTrace = groundedTrace(REFERENCE_SYNTHESIS).map((call) =>
-      call.name === 'readFile' && call.path === 'finance.csv'
+      call.name === 'read_file' && call.path === 'finance.csv'
         ? readCall('finance.csv', false)
         : call,
     );
@@ -555,7 +555,7 @@ describe('conflict-synthesis grader', () => {
     ]);
     const directive = synthesisRepairDirective(check.failReason);
 
-    expect(directive).toContain('readFile');
+    expect(directive).toContain('read_file');
     for (const path of SYNTHESIS_REQUIRED_SOURCE_PATHS) expect(directive).toContain(path);
     expect(directive).not.toMatch(
       /2026-08-15|2026-09-01|210[,.]?000|240[,.]?000|450[,.]?000|Marcus|Priya/,

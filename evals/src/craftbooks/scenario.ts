@@ -88,7 +88,7 @@ function craftbookEvalProjectAbout(spec: CraftbookEvalSpec): string {
     '### Eval harness rules',
     'This is a self-contained craftbook eval project. Treat all paths as project workspace paths.',
     seededPaths.length > 0
-      ? `Seeded workspace inputs: ${seededPaths.map((path) => `\`${path}\``).join(', ')}. Read them with the workspace \`readFile\` tool, not artifact/document/library tools.`
+      ? `Seeded workspace inputs: ${seededPaths.map((path) => `\`${path}\``).join(', ')}. Read them with the workspace \`read_file\` tool, not artifact/document/library tools.`
       : null,
     outputs.length > 0
       ? `Required workspace deliverable${outputs.length === 1 ? '' : 's'}: ${outputs.map((path) => `\`${path}\``).join(', ')}. Chat summaries, artifacts, plans, and task notes do not satisfy file deliverables.`
@@ -118,7 +118,7 @@ function craftbookEvalMissionObjectives(spec: CraftbookEvalSpec): string {
 function craftbookEvalKickoffPrompt(spec: CraftbookEvalSpec): string {
   const seededPaths = workspaceFixturePaths(spec);
   const outputs = deliverablePaths(spec);
-  const readCalls = seededPaths.map((path) => `readFile({ path: "${path}" })`);
+  const readCalls = seededPaths.map((path) => `read_file({ path: "${path}" })`);
   const harnessLines = [
     '[craftbook eval harness]',
     'This project is self-contained; all referenced source paths are workspace-root-relative.',
@@ -126,7 +126,7 @@ function craftbookEvalKickoffPrompt(spec: CraftbookEvalSpec): string {
       ? `Before writing any deliverable, read every seeded input with workspace file tools: ${readCalls.map((call) => `\`${call}\``).join(', ')}. Do not use \`read_artifact\`, \`read_document\`, or library tools for these workspace files.`
       : 'Use workspace file tools for any project files you need to inspect.',
     outputs.length > 0
-      ? `The eval only passes when the actual workspace file${outputs.length === 1 ? '' : 's'} exist${outputs.length === 1 ? 's' : ''}: ${outputs.map((path) => `\`${path}\``).join(', ')}. Write with \`writeFile\` using the exact path, not \`workspace/<path>\`.`
+      ? `The eval only passes when the actual workspace file${outputs.length === 1 ? '' : 's'} exist${outputs.length === 1 ? 's' : ''}: ${outputs.map((path) => `\`${path}\``).join(', ')}. Write with \`write_file\` using the exact path, not \`workspace/<path>\`.`
       : null,
     spec.success.taskGraph
       ? 'Use the requested craftbook/template by invoking it when needed, but keep the work task-native: create and complete the authoring flow for the draft task graph. Do not activate the draft and do not build the planned workspace artifact.'
@@ -142,16 +142,16 @@ function craftbookMissingDeliverableRepairDirective(spec: CraftbookEvalSpec): st
   const lines = [
     '[craftbook eval repair]',
     seededPaths.length > 0
-      ? `The source fixture is already in this project workspace: ${seededPaths.map((path) => `\`${path}\``).join(', ')}. If you need source content, call workspace \`readFile\` on that exact path; do not ask the user for it and do not use artifact/document/library tools.`
+      ? `The source fixture is already in this project workspace: ${seededPaths.map((path) => `\`${path}\``).join(', ')}. If you need source content, call workspace \`read_file\` on that exact path; do not ask the user for it and do not use artifact/document/library tools.`
       : null,
-    'Final deliverables must be written with the workspace `writeFile` tool. Do not call `write_artifact` or `write_document` for final deliverables.',
+    'Final deliverables must be written with the workspace `write_file` tool. Do not call `write_artifact` or `write_document` for final deliverables.',
     'If you invoked a craftbook task, do not wait for another assignee before producing the eval deliverable. Execute the active step yourself or make an explicit file-deliverable handoff, then write the required file.',
   ].filter((line): line is string => !!line);
   return lines.join('\n');
 }
 
 function craftbookSourceReadRepairDirective(missingPaths: readonly string[]): string {
-  const calls = missingPaths.map((path) => `readFile({ path: "${path}" })`);
+  const calls = missingPaths.map((path) => `read_file({ path: "${path}" })`);
   return [
     'SOURCE_READ_REQUIRED: the output is being repaired before the seeded input files have been opened.',
     `Your next tool call${calls.length === 1 ? '' : 's'} MUST read the missing source file${calls.length === 1 ? '' : 's'}: ${calls.map((call) => `\`${call}\``).join(', ')}.`,
@@ -178,7 +178,7 @@ function sessionReadPaths(session: ChatSessionLike, seededPaths: readonly string
   const read = new Set<string>();
   for (const message of session.messages ?? []) {
     for (const call of message.toolCalls ?? []) {
-      if (call.name !== 'readFile' || call.success === false) continue;
+      if (call.name !== 'read_file' || call.success === false) continue;
       for (const path of seededPaths) {
         if (toolCallReferencesPath(call, path)) read.add(path);
       }

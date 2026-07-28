@@ -4,12 +4,12 @@ import { filterPromptToolDirectives, lintPromptToolContract } from './prompt-too
 describe('lintPromptToolContract', () => {
   it('rejects a hard directive for a missing tool', () => {
     const report = lintPromptToolContract({
-      prompt: 'Your first assistant action should be `writeFile({ path, content })`.',
-      availableTools: ['readFile'],
+      prompt: 'Your first assistant action should be `write_file({ path, content })`.',
+      availableTools: ['read_file'],
     });
 
     expect(report.errors).toMatchObject([
-      { rule: 'hard-directive-missing-tool', tool: 'writeFile' },
+      { rule: 'hard-directive-missing-tool', tool: 'write_file' },
     ]);
   });
 
@@ -26,8 +26,8 @@ describe('lintPromptToolContract', () => {
   it('ignores negative and conditional references', () => {
     const report = lintPromptToolContract({
       prompt: [
-        'Do not call `writeFile`; it is not on your tool list.',
-        'When `readFile` is available, use it for workspace files.',
+        'Do not call `write_file`; it is not on your tool list.',
+        'When `read_file` is available, use it for workspace files.',
       ].join('\n'),
       availableTools: [],
     });
@@ -38,7 +38,7 @@ describe('lintPromptToolContract', () => {
   it('rejects a false file-capability denial', () => {
     const report = lintPromptToolContract({
       prompt: 'You have no file writing tools this turn.',
-      availableTools: ['writeFile'],
+      availableTools: ['write_file'],
     });
 
     expect(report.errors).toMatchObject([{ rule: 'false-capability-denial' }]);
@@ -46,13 +46,13 @@ describe('lintPromptToolContract', () => {
 
   it('filters contradictory behavior lines while preserving truthful and negative guidance', () => {
     const prompt = [
-      'Use `writeFile` to create the deliverable.',
-      'Call `readFile` before editing.',
-      'Do not call `rm` for this task.',
+      'Use `write_file` to create the deliverable.',
+      'Call `read_file` before editing.',
+      'Do not call `delete_path` for this task.',
     ].join('\n');
 
-    expect(filterPromptToolDirectives({ prompt, availableTools: ['readFile'] })).toBe(
-      'Call `readFile` before editing.\nDo not call `rm` for this task.',
+    expect(filterPromptToolDirectives({ prompt, availableTools: ['read_file'] })).toBe(
+      'Call `read_file` before editing.\nDo not call `delete_path` for this task.',
     );
   });
 });

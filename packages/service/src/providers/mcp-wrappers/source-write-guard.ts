@@ -10,7 +10,7 @@ export const SourceWriteGuard: McpToolWrapper = {
     return isGezelMcp(spec);
   },
   async preProcess(toolName, args, ctx) {
-    if (toolName !== 'writeFile' && toolName !== 'replaceLines') return { kind: 'allow' };
+    if (toolName !== 'write_file' && toolName !== 'replace_lines') return { kind: 'allow' };
     const path = typeof args.path === 'string' ? args.path : '';
     const content = typeof args.content === 'string' ? args.content : '';
     if (!path || !SOURCE_EXT_RE.test(path) || content.length === 0) return { kind: 'allow' };
@@ -18,11 +18,11 @@ export const SourceWriteGuard: McpToolWrapper = {
     let normalizedContent = pathLooksHtml(path) ? normalizeHtmlScriptBody(content) : content;
     const existing = await readExistingFile(ctx, path);
 
-    // replaceLines is normally the safer, surgical edit surface, but a model
+    // replace_lines is normally the safer, surgical edit surface, but a model
     // can still use an oversized range to clobber the entire file. Apply the
     // same short-overwrite protection when the requested range covers all of
     // the existing source, while leaving genuinely focused replacements open.
-    if (toolName === 'replaceLines') {
+    if (toolName === 'replace_lines') {
       if (
         existing &&
         replaceLinesCoversWholeFile(existing, args) &&
@@ -31,7 +31,7 @@ export const SourceWriteGuard: McpToolWrapper = {
       ) {
         return {
           kind: 'reject',
-          error: `ERROR: Refusing to replace all of \`${path}\` with ${normalizedContent.length} bytes via \`replaceLines\` (existing file is ${existing.length} bytes). Use a focused line range for the small change, or send the complete replacement file without placeholders.`,
+          error: `ERROR: Refusing to replace all of \`${path}\` with ${normalizedContent.length} bytes via \`replace_lines\` (existing file is ${existing.length} bytes). Use a focused line range for the small change, or send the complete replacement file without placeholders.`,
         };
       }
       return normalizedContent === content
@@ -61,7 +61,7 @@ export const SourceWriteGuard: McpToolWrapper = {
     if (truncatedHtml) {
       return {
         kind: 'reject',
-        error: `ERROR: Refusing to write \`${path}\` because the content looks truncated (${truncatedHtml}). Call \`writeFile\` again with the complete file contents in one tool call.`,
+        error: `ERROR: Refusing to write \`${path}\` because the content looks truncated (${truncatedHtml}). Call \`write_file\` again with the complete file contents in one tool call.`,
       };
     }
 
@@ -80,7 +80,7 @@ export const SourceWriteGuard: McpToolWrapper = {
     // Same-file clobber guard — OFF BY DEFAULT (it backfired on e4b; see the
     // verdict above the helpers). When enabled via GEZEL_SAME_FILE_REWRITE_GUARD,
     // a full rewrite of an existing substantial file that mostly matches disk
-    // is rejected with a concrete `replaceInFile` directive so a sibling fix
+    // is rejected with a concrete `replace_in_file` directive so a sibling fix
     // in the same file can't be reverted.
     if (
       existing &&
@@ -106,9 +106,9 @@ async function readExistingFile(
   ctx: Parameters<NonNullable<McpToolWrapper['preProcess']>>[2],
   path: string,
 ): Promise<string | null> {
-  if (!ctx.hasTool('readFile')) return null;
+  if (!ctx.hasTool('read_file')) return null;
   try {
-    const result = await ctx.callTool('readFile', { path, raw: true });
+    const result = await ctx.callTool('read_file', { path, raw: true });
     return result.text;
   } catch {
     return null;
@@ -120,7 +120,7 @@ function pathLooksHtml(path: string): boolean {
 }
 
 // A broken artifact does not deserve shrink protection. Wild-caught on
-// craftbook-audiobook-master-pack (gemma4-e2b): the first writeFile landed
+// craftbook-audiobook-master-pack (gemma4-e2b): the first write_file landed
 // invalid JSON (missing its opening `{`), and this guard then rejected every
 // smaller-but-valid rewrite until the stale-no-write watchdog killed the run
 // — the guard was protecting garbage from its own repair. Scope: JSON only,
@@ -177,28 +177,28 @@ function replaceLinesCoversWholeFile(existing: string, args: Record<string, unkn
 
 // ── Same-file clobber guard (OFF BY DEFAULT — experimental) ──────────────
 //
-// The idea: small/medium local models default to a full-file `writeFile`
+// The idea: small/medium local models default to a full-file `write_file`
 // even for a localized change, and regenerating the whole file from memory
 // silently drops edits already in it. Wild-caught on gemma4-e4b's
 // `fix-squisq-bugs` run: two bugs lived in the SAME file, and fixing one via
 // a full rewrite reverted the sibling fix, oscillating forever (the
 // "same-file clobber"). So: refuse a full rewrite of an existing substantial
 // file whose new content mostly matches disk, and hand back a surgical
-// `replaceInFile` (which can't touch regions outside its match) so a sibling
+// `replace_in_file` (which can't touch regions outside its match) so a sibling
 // fix can't be reverted.
 //
 // VERDICT — IT BACKFIRED, so it ships disabled. A controlled N=4 A/B
 // (runs/batch-2026-06-06T06-01-38*) scored 0/4 WITH the guard vs
 // 1/4 (25%) without, and no guarded trial even reached 4/5 (the baseline
 // did). Why: the same co-location that causes the clobber means a single
-// `writeFile` fixes BOTH same-file bugs at once — full rewrite is the small
-// model's *stronger* modality. Forcing `replaceInFile` splits that into two
+// `write_file` fixes BOTH same-file bugs at once — full rewrite is the small
+// model's *stronger* modality. Forcing `replace_in_file` splits that into two
 // precision edits e4b fumbles (it lands one, not both). The clobber is a
 // symptom of a coordination/coherence limit, not the root cause; edit-tool
 // shaping doesn't fix it (right-size the model instead). Read-before-rewrite
 // wouldn't help either — e4b read the file 9-16×/trial and still dropped the
 // fix. Kept behind a flag in case a local model genuinely good at
-// `replaceInFile` benefits where the precision tax doesn't bite. Enable with
+// `replace_in_file` benefits where the precision tax doesn't bite. Enable with
 // `GEZEL_SAME_FILE_REWRITE_GUARD=1`.
 
 const REWRITE_GUARD_TIERS: ReadonlySet<string> = new Set(['tiny', 'small', 'medium']);
@@ -248,7 +248,7 @@ function rewritePreservedFraction(existing: string, replacement: string): number
 }
 
 /**
- * True when a `writeFile` to an existing substantial source file is really a
+ * True when a `write_file` to an existing substantial source file is really a
  * localized change dressed up as a full rewrite. Genuine overhauls (most
  * lines changed), small files, and exact no-op rewrites are left alone.
  */
@@ -288,12 +288,12 @@ function singleRegionDiff(
 }
 
 function buildReplaceInFileRedirect(path: string, existing: string, replacement: string): string {
-  const base = `ERROR: Refusing to rewrite the entire file \`${path}\` for a localized change. A full-file \`writeFile\` regenerates the whole file from memory, which silently reverts other edits already in it (a fix in one function gets dropped) and risks truncating a large file. Make this change with \`replaceInFile\`, editing ONLY the lines that change — it leaves the rest of the file untouched.`;
+  const base = `ERROR: Refusing to rewrite the entire file \`${path}\` for a localized change. A full-file \`write_file\` regenerates the whole file from memory, which silently reverts other edits already in it (a fix in one function gets dropped) and risks truncating a large file. Make this change with \`replace_in_file\`, editing ONLY the lines that change — it leaves the rest of the file untouched.`;
   const diff = singleRegionDiff(existing, replacement);
   if (diff && !diff.find.includes('\n') && !diff.replace.includes('\n')) {
-    return `${base}\nFor this change: replaceInFile({ path: ${JSON.stringify(path)}, find: ${JSON.stringify(diff.find)}, replace: ${JSON.stringify(diff.replace)} })`;
+    return `${base}\nFor this change: replace_in_file({ path: ${JSON.stringify(path)}, find: ${JSON.stringify(diff.find)}, replace: ${JSON.stringify(diff.replace)} })`;
   }
-  return `${base} If your change touches more than one place, make a separate \`replaceInFile\` call for each — do not rewrite the whole file.`;
+  return `${base} If your change touches more than one place, make a separate \`replace_in_file\` call for each — do not rewrite the whole file.`;
 }
 
 function describeTruncatedHtml(content: string): string | null {

@@ -65,7 +65,7 @@ function makeFacts(opts: FactsOptions = {}): TrialFacts {
     },
     toolUse: {
       totalToolCalls: opts.calls ?? 5,
-      byTool: { writeFile: 1 },
+      byTool: { write_file: 1 },
       redFlags: opts.redFlags ?? [],
     },
     artifacts: {

@@ -35,7 +35,7 @@ const trailEntry = (signatureHash: string, attempt = 1): GateAttemptRecord => ({
 const WRITE_FILE_TOOL = [
   {
     type: 'function' as const,
-    function: { name: 'writeFile', description: 'Write a file.', parameters: {} },
+    function: { name: 'write_file', description: 'Write a file.', parameters: {} },
   },
 ];
 
@@ -147,7 +147,7 @@ describe('escalation nudges vs llama-cpp turn-mode matchers', () => {
       ...WRITE_FILE_TOOL,
       {
         type: 'function' as const,
-        function: { name: 'replaceInFile', description: 'Edit.', parameters: {} },
+        function: { name: 'replace_in_file', description: 'Edit.', parameters: {} },
       },
     ];
     expect(isScenarioFileRepairTurn(stage1, repairTools)).toBe(false);
@@ -169,11 +169,11 @@ describe('escalation nudges vs llama-cpp turn-mode matchers', () => {
     const patchTools = [
       {
         type: 'function' as const,
-        function: { name: 'replaceInFile', description: 'Edit.', parameters: {} },
+        function: { name: 'replace_in_file', description: 'Edit.', parameters: {} },
       },
       {
         type: 'function' as const,
-        function: { name: 'replaceLines', description: 'Edit lines.', parameters: {} },
+        function: { name: 'replace_lines', description: 'Edit lines.', parameters: {} },
       },
       ...WRITE_FILE_TOOL,
     ];

@@ -252,7 +252,7 @@ Each OpenAI or Mock session that has `mcpServer` set spawns the `@bendyline/geze
 Tool categories (`packages/mcp/src/server.ts`):
 
 - **Memory**: `search_memory`, `save_memory`, `list_memories`
-- **Workspace** (read-write, mirrors Node `fs`): `readdir`, `readFile`, `stat`, `writeFile`, `rm`, `mkdir`, `rename`
+- **Workspace** (read-write workspace files): `list_dir`, `read_file`, `stat`, `write_file`, `delete_path`, `make_dir`, `rename`
 - **Artifacts** (read-write, project-scoped): `list_artifacts`, `read_artifact`, `write_artifact`
 - **Documents** (shared library): `list_documents`, `read_document`, `write_document`, `delete_document`
 - **Execution**: `run_nodejs_script`, `run_playwright_script`, `npm_install`, `list_packages`

@@ -216,9 +216,9 @@ describe('McpDefaultMissingFields wrapper', () => {
     }
   });
 
-  it('fills writeFile path for single-file HTML content when omitted', async () => {
+  it('fills write_file path for single-file HTML content when omitted', async () => {
     const verdict = await wrapper.preProcess!(
-      'writeFile',
+      'write_file',
       { content: '<!doctype html><html><body><script>console.log(1)</script></body></html>' },
       STOCK_CTX,
     );
@@ -229,9 +229,9 @@ describe('McpDefaultMissingFields wrapper', () => {
     }
   });
 
-  it('fills writeFile path for single-file HTML content when recovered path is punctuation', async () => {
+  it('fills write_file path for single-file HTML content when recovered path is punctuation', async () => {
     const verdict = await wrapper.preProcess!(
-      'writeFile',
+      'write_file',
       {
         path: ',',
         content: '<!doctype html><html><body><script>console.log(1)</script></body></html>',
@@ -244,9 +244,9 @@ describe('McpDefaultMissingFields wrapper', () => {
     }
   });
 
-  it('fills writeFile path for single-file HTML content when recovered path is a product name', async () => {
+  it('fills write_file path for single-file HTML content when recovered path is a product name', async () => {
     const verdict = await wrapper.preProcess!(
-      'writeFile',
+      'write_file',
       {
         path: 'Premium Dog Kibble',
         content:
@@ -263,7 +263,7 @@ describe('McpDefaultMissingFields wrapper', () => {
 
   it('keeps explicit HTML paths for single-file HTML content', async () => {
     const verdict = await wrapper.preProcess!(
-      'writeFile',
+      'write_file',
       {
         path: 'pages/landing.html',
         content:
@@ -277,9 +277,9 @@ describe('McpDefaultMissingFields wrapper', () => {
     }
   });
 
-  it('does not fill writeFile path for non-HTML content', async () => {
+  it('does not fill write_file path for non-HTML content', async () => {
     const verdict = await wrapper.preProcess!(
-      'writeFile',
+      'write_file',
       { content: 'export const x = 1;' },
       STOCK_CTX,
     );
@@ -593,7 +593,7 @@ describe('McpCompactToolSchemas wrapper', () => {
       [
         {
           type: 'function',
-          name: 'writeFile',
+          name: 'write_file',
           description:
             'Create or overwrite a file in the project. This long second sentence should be clipped away for local model prompt budget.',
           parameters: {
@@ -630,7 +630,7 @@ describe('McpCompactToolSchemas wrapper', () => {
       [
         {
           type: 'function',
-          name: 'readFile',
+          name: 'read_file',
           description: 'Read a file. Extra prose.',
           parameters: {
             type: 'object',
@@ -652,7 +652,7 @@ describe('McpCompactToolSchemas wrapper', () => {
       [
         {
           type: 'function',
-          name: 'readFile',
+          name: 'read_file',
           description: 'Read a file. Extra prose.',
           parameters: {
             type: 'object',
@@ -734,7 +734,7 @@ describe('McpCompactToolSchemas wrapper', () => {
       [
         {
           type: 'function',
-          name: 'readFile',
+          name: 'read_file',
           description: 'Read a file.',
           parameters: {
             type: 'object',

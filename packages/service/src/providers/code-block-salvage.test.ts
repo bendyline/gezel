@@ -60,7 +60,7 @@ console.log('hi');
 Here is another update for index.html:
 
 \`\`\`javascript
-const indexHtml = readFile({ path: "index.html" });
+const indexHtml = read_file({ path: "index.html" });
 \`\`\`
 `);
 
@@ -106,11 +106,11 @@ Here is the content of \`workspace/index.html\`:
     expect(blocks[0]!.content).toContain('<script>');
   });
 
-  it('extracts untyped writeFile fences and inlines companion JavaScript', () => {
+  it('extracts untyped write_file fences and inlines companion JavaScript', () => {
     const blocks = inlineCompanionAssets(
       salvageCodeBlocks(`
 \`\`\`
-writeFile({
+write_file({
   path: "index.html",
   content: \`
 <!DOCTYPE html>
@@ -120,7 +120,7 @@ writeFile({
 \`\`\`
 
 \`\`\`
-writeFile({
+write_file({
   path: "main.js",
   content: \`
 const currentPlayer = 'X';
@@ -157,7 +157,7 @@ alert(\`Player \${currentPlayer} wins!\`);
 
   it('drops a fragment destined for a .html target (the source-write-guard would reject it)', () => {
     // A `<script>`-body / JS fragment fenced as html, salvaged toward
-    // index.html. Promoting it to writeFile only burns the failure budget.
+    // index.html. Promoting it to write_file only burns the failure budget.
     const jsFragment = '```html\nfunction drawStars(){ for(let i=0;i<100;i++){} }\n```';
     expect(salvageCodeBlocks(`update index.html:\n${jsFragment}`)).toEqual([]);
   });

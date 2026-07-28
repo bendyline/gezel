@@ -12,7 +12,7 @@
  *             rewrite storm and the frozen resubmitter equally.)
  *   stage 2 — full-rewrite directive: targeted edits aren't landing,
  *             replace the deliverable whole. Deliberately worded to trip
- *             the llama-cpp immediate-write turn mode (writeFile-only
+ *             the llama-cpp immediate-write turn mode (write_file-only
  *             surface, low temp, thinking off).
  *   stage 3 — stop: pause with the full attempt trail as diagnosis.
  *
@@ -110,26 +110,26 @@ export function buildStageOneNudge(opts: {
 
 ${opts.failingBullets}
 
-Fix the FIRST failure above with the smallest targeted edit — use replaceInFile on the exact section the check names. Do NOT recreate the file, do NOT re-read everything, and do NOT reply that you already finished.`;
+Fix the FIRST failure above with the smallest targeted edit — use replace_in_file on the exact section the check names. Do NOT recreate the file, do NOT re-read everything, and do NOT reply that you already finished.`;
 }
 
 /**
  * Stage 2 — complete-rewrite directive. Embeds two verified llama-cpp
  * immediate-write trigger phrases ("Do not end your turn until
- * `writeFile`", "writeFile({ path:") plus the GATE_FULL_REWRITE marker
+ * `write_file`", "write_file({ path:") plus the GATE_FULL_REWRITE marker
  * (the eval TICTACTOE_FULL_REWRITE convention) so the provider clamps
- * the turn to a writeFile-only surface with thinking off.
+ * the turn to a write_file-only surface with thinking off.
  */
 export function buildStageTwoNudge(opts: {
   file: string;
   failingBullets: string;
   repeats: number;
 }): string {
-  return `GATE_FULL_REWRITE: targeted edits have not cleared the gate after ${opts.repeats} attempts — replace the deliverable whole. Do not end your turn until \`writeFile\` has rewritten \`${opts.file}\` as one complete corrected version fixing every failure below:
+  return `GATE_FULL_REWRITE: targeted edits have not cleared the gate after ${opts.repeats} attempts — replace the deliverable whole. Do not end your turn until \`write_file\` has rewritten \`${opts.file}\` as one complete corrected version fixing every failure below:
 
 ${opts.failingBullets}
 
-Call writeFile({ path: "${opts.file}", content: <the complete corrected file> }) as your next tool call. No planning prose, no reads first, no partial appends.`;
+Call write_file({ path: "${opts.file}", content: <the complete corrected file> }) as your next tool call. No planning prose, no reads first, no partial appends.`;
 }
 
 /**

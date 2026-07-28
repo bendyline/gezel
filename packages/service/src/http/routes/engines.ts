@@ -1,7 +1,19 @@
+import { existsSync } from 'node:fs';
+import type { NativeEngineName } from '@bendyline/gezel';
+import { resolvePlatformKey } from '@bendyline/gezel/native';
 import { Hono } from 'hono';
 import { type SSEStreamingApi, streamSSE } from 'hono/streaming';
-import { isKnownEngine } from '../../engines/registry.js';
+import { effectiveEngineRelease, isEnginePinned } from '../../engines/native-manifest.js';
+import { KNOWN_ENGINES, isKnownEngine } from '../../engines/registry.js';
 import type { ServiceContext } from '../context.js';
+
+const ENGINE_ENV_VAR: Record<NativeEngineName, string> = {
+  'llama-server': 'GEZEL_LLAMA_SERVER_BIN',
+  'ds4-server': 'GEZEL_DS4_SERVER_BIN',
+  'sd-server': 'GEZEL_SD_SERVER_BIN',
+  'whisper-server': 'GEZEL_WHISPER_SERVER_BIN',
+  uv: 'GEZEL_UV_BIN',
+};
 
 /**
  * `/api/engines` — runtime view of the local-engine pool. The
@@ -15,6 +27,36 @@ import type { ServiceContext } from '../context.js';
  */
 export function enginesRoutes(ctx: ServiceContext): Hono {
   const app = new Hono();
+
+  /**
+   * Source pin + executable availability for first-run clients. This is a
+   * daemon-runtime view: an executable only reads installed when its resolved
+   * path exists and has been stamped into this process.
+   */
+  app.get('/binaries/status', (c) => {
+    const backendRaw =
+      process.env.GEZEL_LLAMA_SERVER_BACKEND ?? process.env.GEZEL_LLAMA_DETECTED_BACKEND;
+    const llamaBackend = ['cuda', 'vulkan', 'metal', 'cpu'].find((value) => value === backendRaw) as
+      | 'cuda'
+      | 'vulkan'
+      | 'metal'
+      | 'cpu'
+      | undefined;
+    return c.json({
+      release: effectiveEngineRelease(),
+      pinned: isEnginePinned(),
+      platformKey: resolvePlatformKey(),
+      ...(llamaBackend ? { llamaBackend } : {}),
+      engines: KNOWN_ENGINES.map((name) => {
+        const path = process.env[ENGINE_ENV_VAR[name]];
+        return {
+          name,
+          installed: !!path && existsSync(path),
+          ...(path ? { path } : {}),
+        };
+      }),
+    });
+  });
 
   /**
    * Start (or attach to) a download+verify of `engine` (optionally a GPU
@@ -117,18 +159,25 @@ async function subscribeEngineSse(
   key: string,
   stream: SSEStreamingApi,
 ): Promise<void> {
+  const engine = ctx.engineBinaries.get(key)?.engine;
   let done = false;
   let resolveDone!: () => void;
   const finished = new Promise<void>((r) => {
     resolveDone = r;
   });
+  let writes = Promise.resolve();
   const unsubscribe = ctx.engineBinaries.subscribe(key, (event) => {
     if (done) return;
-    void stream.writeSSE({ data: JSON.stringify(event) }).catch(() => {});
-    if (event.type === 'done' || event.type === 'error') {
-      done = true;
-      resolveDone();
-    }
+    writes = writes.then(async () => {
+      if (event.type === 'done' && engine) {
+        await refreshNativeConsumer(ctx, engine);
+      }
+      await stream.writeSSE({ data: JSON.stringify(event) }).catch(() => {});
+      if (event.type === 'done' || event.type === 'error') {
+        done = true;
+        resolveDone();
+      }
+    });
   });
   if (!unsubscribe) {
     // The resolve finished + was GC'd between ensure() and subscribe().
@@ -140,5 +189,22 @@ async function subscribeEngineSse(
     resolveDone();
   });
   await finished;
+  await writes;
   unsubscribe();
+}
+
+/**
+ * Provider managers are lazy but sticky: a status/list request made before a
+ * binary install may have cached an "unconfigured" provider. Drop that cache
+ * before reporting `done` so a model pull or first generation in the same CLI
+ * process immediately sees the newly stamped executable.
+ */
+async function refreshNativeConsumer(ctx: ServiceContext, engine: NativeEngineName): Promise<void> {
+  if (engine === 'llama-server') {
+    await ctx.recognition.reset();
+  } else if (engine === 'sd-server') {
+    await ctx.imageProvider.reset();
+  } else if (engine === 'whisper-server') {
+    await ctx.stt.reset();
+  }
 }

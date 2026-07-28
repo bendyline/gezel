@@ -408,7 +408,7 @@ interface OllamaSessionDeps {
   /**
    * Active craftbook step. Passed through to anti-spin abort messages
    * so the corrective points at the step's onExit script instead of
-   * generic `writeFile`. Unset on non-task sessions.
+   * generic `write_file`. Unset on non-task sessions.
    */
   activeCraftbookStep?: NonNullable<SessionOpts['activeCraftbookStep']>;
   /**
@@ -428,7 +428,7 @@ const MID_LOOP_COMPACT_MIN_PRIOR = 4;
 /**
  * Max back-to-back tool-call rounds the model is allowed in one turn
  * before we bail. Orientation + exploration on a real project routinely
- * chains 20–40 reads (readdir fan-out + readFile on key files +
+ * chains 20–40 reads (list_dir fan-out + read_file on key files +
  * read_artifact on design docs + get_task + read_task_notes), before
  * the model writes a single line. Pathological loops (model re-calling
  * the same tool with the same args because it didn't absorb the
@@ -845,7 +845,7 @@ class OllamaSession extends StreamingSessionBase implements LLMSession {
       const abortErrorMessage = async (): Promise<string> => {
         if (abortKind === 'external') return '[ollama] turn cancelled by caller';
         if (abortKind === 'ramble') {
-          return `[ollama] aborting — the gezel emitted ${turnText.length} characters of prose this turn without calling any action tool. Stop planning. Your next message must START with a single tool call — or, if the work is genuinely finished and nothing is left to do, be ONE short sentence saying so and nothing else. If shipping source or project files and \`writeFile\` is in your tool list, call it NOW with the full file contents — no preamble, no plan. If you lack workspace write access, start with a handoff tool or \`ask_user_question\` instead. Do not save source files with \`write_artifact\`; artifacts are for plans/scratch.`;
+          return `[ollama] aborting — the gezel emitted ${turnText.length} characters of prose this turn without calling any action tool. Stop planning. Your next message must START with a single tool call — or, if the work is genuinely finished and nothing is left to do, be ONE short sentence saying so and nothing else. If shipping source or project files and \`write_file\` is in your tool list, call it NOW with the full file contents — no preamble, no plan. If you lack workspace write access, start with a handoff tool or \`ask_user_question\` instead. Do not save source files with \`write_artifact\`; artifacts are for plans/scratch.`;
         }
         if (abortKind === 'idle') {
           if (idlePhase === 'pre-first-byte') {
@@ -899,7 +899,7 @@ class OllamaSession extends StreamingSessionBase implements LLMSession {
       let turnText = '';
       let toolCalls: OllamaMessage['tool_calls'];
       // Tracks calls synthesized by the truncation salvage stage —
-      // their tool results get an `appendToFile` continuation hint
+      // their tool results get an `append_to_file` continuation hint
       // appended via {@link appendTruncationHintToToolResult}. Lives
       // for the duration of one tool-loop iteration; entries don't
       // need to survive across turns. Uses object identity (WeakSet)
@@ -1011,7 +1011,7 @@ class OllamaSession extends StreamingSessionBase implements LLMSession {
             // Last-ditch code-block salvage on ramble abort: small
             // models often inline the file in a fenced block instead of
             // calling the write tool. Promote each block to a synthesized
-            // write call. Prefer `writeFile` (salvaged source belongs in
+            // write call. Prefer `write_file` (salvaged source belongs in
             // the workspace, not the artifacts drawer — the abort copy
             // itself says so); fall back to `write_artifact` only when
             // the role has no workspace-write surface. Assigning
@@ -1025,8 +1025,8 @@ class OllamaSession extends StreamingSessionBase implements LLMSession {
                         ? []
                         : this.deps.bridges.getOpenAITools().map((t) => t.name),
                     );
-                    const salvageToolName = known.has('writeFile')
-                      ? 'writeFile'
+                    const salvageToolName = known.has('write_file')
+                      ? 'write_file'
                       : known.has('write_artifact')
                         ? 'write_artifact'
                         : null;
@@ -1462,7 +1462,7 @@ class OllamaSession extends StreamingSessionBase implements LLMSession {
             // fit in the remaining context budget. Ollama silently
             // truncates prefixes when prompts overflow num_ctx, so
             // bounding the tool output here prevents a single fat
-            // fetch_url / readFile call from eating turns of
+            // fetch_url / read_file call from eating turns of
             // history. Same helper + ratio the llama-cpp provider
             // uses, so behavior stays aligned across local engines.
             const budgetChars = computeToolBudgetChars(

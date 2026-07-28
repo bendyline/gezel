@@ -27,16 +27,16 @@ describe('remote wire contract', () => {
         {
           role: 'assistant',
           content: '',
-          toolCalls: [{ id: 't1', name: 'readFile', arguments: '{}' }],
+          toolCalls: [{ id: 't1', name: 'read_file', arguments: '{}' }],
         },
         { role: 'tool', content: 'file body', toolCallId: 't1' },
       ],
-      tools: [{ name: 'readFile', parameters: { type: 'object' } }],
+      tools: [{ name: 'read_file', parameters: { type: 'object' } }],
       tuning: { sampling: { temperature: 0.7 } },
       queue: { lane: 'background', affinity: false },
     });
     expect(parsed.priorMessages).toHaveLength(3);
-    expect(parsed.tools?.[0]?.name).toBe('readFile');
+    expect(parsed.tools?.[0]?.name).toBe('read_file');
   });
 
   it('rejects a request missing the queue hints', () => {
@@ -53,7 +53,7 @@ describe('remote wire contract', () => {
   it('parses every response frame variant', () => {
     const frames = [
       { type: 'delta', text: 'tok' },
-      { type: 'tool_call', calls: [{ id: 'a', name: 'writeFile', arguments: '{"path":"x"}' }] },
+      { type: 'tool_call', calls: [{ id: 'a', name: 'write_file', arguments: '{"path":"x"}' }] },
       {
         type: 'usage',
         model: 'm',

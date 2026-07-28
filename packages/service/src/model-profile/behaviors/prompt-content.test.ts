@@ -58,15 +58,15 @@ describe('PromptToolCookbookFull', () => {
     const out = PromptToolCookbookFull.promptAppend!(promptCtx({}), undefined);
     expect(out).toContain('Never claim past-tense action without a tool call this turn.');
     expect(out).toContain('Never write placeholder content');
-    expect(out).toContain('write it via `writeFile`');
+    expect(out).toContain('write it via `write_file`');
     expect(out).toContain('not a workspace/source file');
-    expect(out).not.toContain('writeFile` (or `write_artifact`)');
+    expect(out).not.toContain('write_file` (or `write_artifact`)');
   });
 
-  it("includes the patch-don't-re-emit edit guidance steering to replaceLines", () => {
+  it("includes the patch-don't-re-emit edit guidance steering to replace_lines", () => {
     const out = PromptToolCookbookFull.promptAppend!(promptCtx({}), undefined);
     expect(out).toContain('Editing a file that already exists');
-    expect(out).toContain('replaceLines');
+    expect(out).toContain('replace_lines');
     expect(out).toContain('N→');
   });
 });
@@ -78,11 +78,11 @@ describe('PromptToolCookbookCondensed', () => {
     expect(out).toContain('Never claim past-tense action');
     expect(out).toContain('Markup is not a tool call');
     expect(out).toContain('If the path appears under "Workspace files"');
-    expect(out).toContain('write it via `writeFile`');
-    expect(out).not.toContain('writeFile` (or `write_artifact`)');
+    expect(out).toContain('write it via `write_file`');
+    expect(out).not.toContain('write_file` (or `write_artifact`)');
     // Rule 10: the patch-don't-re-emit edit nudge.
     expect(out).toContain("Patch it, don't re-emit");
-    expect(out).toContain('replaceLines');
+    expect(out).toContain('replace_lines');
   });
 
   it('does not include the full cookbook table', () => {
@@ -120,12 +120,12 @@ describe('legacy verbose reasoning prompt aliases', () => {
 });
 
 describe('PromptPreferWritefileEdits', () => {
-  it('steers to positional line-number edits (replaceLines) and overrides the patch guidance', () => {
+  it('steers to positional line-number edits (replace_lines) and overrides the patch guidance', () => {
     const out = PromptPreferWritefileEdits.promptAppend!(promptCtx({}), undefined);
     expect(out).toContain('edit by line number');
-    expect(out).toContain('replaceLines');
+    expect(out).toContain('replace_lines');
     expect(out).toContain('OVERRIDES');
-    expect(out).toContain('Avoid `replaceInFile`');
+    expect(out).toContain('Avoid `replace_in_file`');
     expect(out).toContain('byte-for-byte');
   });
 });

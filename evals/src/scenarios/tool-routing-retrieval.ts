@@ -8,11 +8,11 @@ import type { EvalContext, EvalScenario, SuccessCheckResult } from '../types.ts'
  * multi-file repo and a "where is X and what's wrong with it" question,
  * does the team LOCATE the code with a retrieval tool (`search_files`,
  * `search_code`, `find_symbol`, `map_repo`, `find_references`) instead of
- * readFile-walking the listing? File-walking is the classic local-model
+ * read_file-walking the listing? File-walking is the classic local-model
  * failure this measures: each read burns a turn and floods the context.
  *
- * Pass: a retrieval `tool.called` event fires with at most 3 readFile
- * events before the first one. Fail fast: 8+ readFile events with no
+ * Pass: a retrieval `tool.called` event fires with at most 3 read_file
+ * events before the first one. Fail fast: 8+ read_file events with no
  * retrieval call (the walk happened; no point waiting out the clock).
  *
  * Setup seeds the workspace and waits for the STRUCTURAL index (no LLM
@@ -23,7 +23,7 @@ import type { EvalContext, EvalScenario, SuccessCheckResult } from '../types.ts'
 const PROJECT_NAME = 'winkelwagen';
 
 const RETRIEVAL_TOOL_RE = /\b(search_files|search_code|find_symbol|map_repo|find_references)\b/i;
-const READ_FILE_RE = /\breadFile\b/;
+const READ_FILE_RE = /\bread_file\b/;
 const MAX_READS_BEFORE_SEARCH = 3;
 const WALK_FAIL_THRESHOLD = 8;
 const INDEX_WAIT_MS = 120_000;
@@ -101,7 +101,7 @@ async function setup({ client, log }: EvalContext): Promise<void> {
 export const toolRoutingRetrievalScenario: EvalScenario = {
   id: 'tool-routing-retrieval',
   description:
-    'Tests whether the team locates code with retrieval tools (search_files/search_code/find_symbol/map_repo) instead of readFile-walking the workspace listing. Probe for the Tier-3 retrieval-first steering.',
+    'Tests whether the team locates code with retrieval tools (search_files/search_code/find_symbol/map_repo) instead of read_file-walking the workspace listing. Probe for the Tier-3 retrieval-first steering.',
   prompt: `In the "${PROJECT_NAME}" project there is a bug: gift-voucher discounts come out one cent too high. Find where gift-voucher discounts are applied and reply IN CHAT with the file path, the line, and what is wrong. Do not fix anything — just locate and explain it.`,
   timeoutMs: 15 * 60_000,
   setup,
@@ -133,7 +133,7 @@ export const toolRoutingRetrievalScenario: EvalScenario = {
 
     logChanged(
       'routing',
-      `[scenario] readFile-before-search=${readsBeforeSearch} retrieval=${retrievalSeen ?? 'none yet'}`,
+      `[scenario] read_file-before-search=${readsBeforeSearch} retrieval=${retrievalSeen ?? 'none yet'}`,
     );
 
     if (retrievalSeen) {
@@ -142,15 +142,15 @@ export const toolRoutingRetrievalScenario: EvalScenario = {
         done: true,
         success: ok,
         reason: ok
-          ? `${retrievalSeen} called after ${readsBeforeSearch} readFile(s)`
-          : `${retrievalSeen} called only after ${readsBeforeSearch} readFile-walk steps`,
+          ? `${retrievalSeen} called after ${readsBeforeSearch} read_file(s)`
+          : `${retrievalSeen} called only after ${readsBeforeSearch} read_file-walk steps`,
       };
     }
     if (readsBeforeSearch >= WALK_FAIL_THRESHOLD) {
       return {
         done: true,
         success: false,
-        reason: `readFile-walked ${readsBeforeSearch} files without any retrieval call`,
+        reason: `read_file-walked ${readsBeforeSearch} files without any retrieval call`,
       };
     }
     return { done: false };

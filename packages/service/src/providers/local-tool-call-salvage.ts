@@ -161,7 +161,7 @@ export function findGemmaNativeToolCallSpans(
   // Embedded, unterminated envelope: the `<|tool_call>` opener appears
   // mid-text with no closing `<tool_call|>` (the turn ran to EOS mid-call,
   // often after the model echoed instruction prose and slid straight into a
-  // malformed `…|<channel|><|tool_call>call:writeFile{…` with no boundary).
+  // malformed `…|<channel|><|tool_call>call:write_file{…` with no boundary).
   // The terminated-envelope regex above can't match (no closer) and the
   // whole-text fallback below anchors the name at `^` (the opener is not at
   // the start), so a real deliverable is silently dropped and the file-work
@@ -197,9 +197,9 @@ const HEADLESS_GEMMA_BODY_RE = /^\s*[a-zA-Z_][a-zA-Z0-9_-]*\s*:\s*<\|"\|>/;
 // The tool name is gone with the eaten prefix, so it must be inferred —
 // only from an EXACT arg-key signature, and only for signatures whose
 // mapping is unambiguous. Deliberately tiny: `{path}` alone could be
-// readFile/rm/stat/mkdir, so it stays out.
+// read_file/delete_path/stat/make_dir, so it stays out.
 const HEADLESS_KEY_SIGNATURES: ReadonlyArray<{ keys: readonly string[]; tool: string }> = [
-  { keys: ['content', 'path'], tool: 'writeFile' },
+  { keys: ['content', 'path'], tool: 'write_file' },
 ];
 
 function parseHeadlessGemmaNativeSpan(
@@ -487,7 +487,7 @@ export function describeMalformation(body: string): string {
     .replace(/<\/?reasoning>/gi, '')
     .trim();
   if (!/^\s*(?:call\s*:\s*)?[a-zA-Z_][a-zA-Z0-9_]*\s*\{/.test(cleaned)) {
-    return `The body didn't start with a recognizable function name + arg block — the runtime expects \`name{json}\` shape (e.g. \`writeFile{"path":"index.html","content":"..."}\`). Got: "${truncate(echoSafe, 80)}".`;
+    return `The body didn't start with a recognizable function name + arg block — the runtime expects \`name{json}\` shape (e.g. \`write_file{"path":"index.html","content":"..."}\`). Got: "${truncate(echoSafe, 80)}".`;
   }
   if (!/\}\s*$/.test(cleaned)) {
     return `The argument block was missing its closing brace. Got: "${truncate(echoSafe, 80)}".`;
@@ -640,7 +640,7 @@ export function findProseToolCallSpans(
  *      key→value boundary structure and re-escapes stray `"` chars
  *      inside HTML/JS content (the model writes `<tag class="x">`
  *      instead of `<tag class=\"x\">`). Common on Gemma 4 26B's
- *      writeFile / write_artifact calls with HTML payloads.
+ *      write_file / write_artifact calls with HTML payloads.
  *   4. Python-style kwargs — `key=value, key2=value2` rewritten to
  *      `{key:value,…}` and JSON.parse'd.
  *
@@ -721,7 +721,7 @@ function parseProseArgs(inside: string): Record<string, unknown> | null {
 /**
  * Re-escape unescaped `"` chars that appear inside JSON string values.
  *
- * The motivating shape (wild-caught on Gemma 4 26B `writeFile` calls):
+ * The motivating shape (wild-caught on Gemma 4 26B `write_file` calls):
  *
  *   {"path": "index.html", "content": "<!DOCTYPE html>
  *   <html lang="en">
@@ -1145,7 +1145,7 @@ const XML_ATTR_RE = /([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*(?:"([^"]*)"|'([^']*)')/g;
  * Coerce an XML attribute string value into the JS shape MCP tools
  * expect. Bare numbers and `true`/`false` get unquoted; everything
  * else stays a string. URLs and paths land here as strings, which
- * is what every relevant tool wants (`browser_navigate`, `readFile`,
+ * is what every relevant tool wants (`browser_navigate`, `read_file`,
  * `write_artifact` all take string args).
  */
 function coerceXmlAttrValue(s: string): unknown {
@@ -1345,7 +1345,7 @@ export function stripClaudeInvokeToolCallsFromText(
 // then alternating `<arg_key>K</arg_key>` / `<arg_value>V</arg_value>`
 // pairs, closed by `</tool_call>`:
 //
-//   <tool_call>writeFile
+//   <tool_call>write_file
 //   <arg_key>path</arg_key>
 //   <arg_value>notes.md</arg_value>
 //   <arg_key>content</arg_key>
@@ -1412,7 +1412,7 @@ function parseGlmArgPairs(body: string): Record<string, unknown> {
  *
  * Terminated calls are matched by {@link GLM_TOOL_CALL_RE}; a single
  * trailing UNTERMINATED opener (stream ran out mid-call, common on long
- * `writeFile` content) is recovered separately — the closed
+ * `write_file` content) is recovered separately — the closed
  * `<arg_key>/<arg_value>` pairs are parsed normally, and a final dangling
  * `<arg_value>` (no closer) contributes its partial value with the span
  * flagged `truncated`.
@@ -1448,7 +1448,7 @@ export function findGlmToolCallSpans(
         const args = parseGlmArgPairs(body);
         let truncated = false;
         // A final `<arg_value>` opened with no matching `</arg_value>`:
-        // capture the partial value so a truncated writeFile still lands.
+        // capture the partial value so a truncated write_file still lands.
         const lastValOpen = body.lastIndexOf('<arg_value>');
         if (lastValOpen >= 0 && !body.includes('</arg_value>', lastValOpen)) {
           const keyClose = body.lastIndexOf('</arg_key>', lastValOpen);
@@ -1501,7 +1501,7 @@ export function stripGlmToolCallsFromText(
 // never emits Gemma's `<|tool_call>` trigger token (so the llguidance grammar
 // never engages) narrates the call in this shape instead, e.g.:
 //
-//   invoke writeFile {
+//   invoke write_file {
 //     "path": "preflight.txt",
 //     "content": "FLIGHT OK"
 //   }
@@ -1509,7 +1509,7 @@ export function stripGlmToolCallsFromText(
 // None of the other salvage shapes match (they key on `(`, `<...>`, or Gemma
 // tokens), so the call was silently dropped and the turn stalled. The `\b`
 // anchors the keyword; `resolveToolNameAlias` + the object-parse gate keep
-// prose like "you can invoke writeFile to …" (no `{json}` object) from
+// prose like "you can invoke write_file to …" (no `{json}` object) from
 // false-matching.
 const BARE_INVOKE_RE = /\binvoke\s+([a-zA-Z_][a-zA-Z0-9_-]*)\s*\{/gi;
 
@@ -1771,13 +1771,13 @@ export function findHermesFunctionToolCallSpan(
 // strict regex above finds nothing.
 //
 // Wild-caught on Qwen 3.6 27B (MLX, tictactoe trials):
-// Tamara emits a `<tool_call><function=writeFile><parameter=path>…</parameter>
+// Tamara emits a `<tool_call><function=write_file><parameter=path>…</parameter>
 // <parameter=content>` opener and then streams a multi-kilobyte HTML body
 // — but the body's `</parameter>` and `</function>` closing tags never
 // arrive because the model's `max_tokens` cap (or the stream watchdog)
 // trips first. The strict regex above requires those closers, so the
 // salvage drops the entire call and the next turn the model claims
-// "the writeFile call got truncated mid-stream" — fabrication that
+// "the write_file call got truncated mid-stream" — fabrication that
 // loops the whole trial to a timeout.
 //
 // Recovery rules:
@@ -2012,7 +2012,7 @@ export function findUnrecognizedToolEnvelope(
  * `knownToolNames`, so an unknown name leaves NO synthesized call and —
  * before this — NO feedback either: the markup was just stripped and the
  * model believed its call succeeded. Wild-caught: a voorman
- * (no `writeFile`) emitted `<function=writeFile>` repeatedly; nothing told
+ * (no `write_file`) emitted `<function=write_file>` repeatedly; nothing told
  * it the tool wasn't its, so it "completed" a file that never existed.
  */
 export function findUnrecognizedFunctionMarkup(
@@ -2047,17 +2047,17 @@ export function findUnrecognizedFunctionMarkup(
  * delegate."
  */
 const DELEGATABLE_WRITE_TOOLS: ReadonlySet<string> = new Set([
-  'writeFile',
-  'appendToFile',
-  'replaceInFile',
+  'write_file',
+  'append_to_file',
+  'replace_in_file',
 ]);
 
 /**
  * Build the corrective `[system]` nudge for a tool-call naming a tool the
  * role doesn't have. Unifies the two cases:
  *
- *   1. A delegator role (no `writeFile`) tried to write. The shared
- *      "build X → call writeFile" prompt scaffolding pulls every build
+ *   1. A delegator role (no `write_file`) tried to write. The shared
+ *      "build X → call write_file" prompt scaffolding pulls every build
  *      turn toward writing even for read-only roles; silently dropping
  *      the markup lets the model fabricate completion. Tell it plainly it
  *      cannot write here and point at blocking delegation via
@@ -2096,7 +2096,7 @@ export function buildUnknownToolNudge(
   if (DELEGATABLE_WRITE_TOOLS.has(wanted) && !knownToolNames.has(wanted)) {
     const canDelegate = knownToolNames.has('message_gezel') || knownToolNames.has('ask_specialist');
     if (canDelegate) {
-      return `[system] You emitted a \`${wanted}\` call, but \`${wanted}\` is NOT in your tool list — you have no workspace write access in this role, so that markup did NOTHING and no file was written. Do not emit \`${wanted}\` again. To get the file created you must DELEGATE: call \`message_gezel\` targeting the Builder/Developer you already assigned, or call \`ensure_gezel\` for a Builder/Developer first if none exists. Include \`expectedDeliverable: { kind: "file", filePath: "<path>" }\` and a concrete instruction to write the file and reply with its path. Do not call \`ask_specialist\` for file deliverables. Before telling anyone the file is done, confirm it exists with \`readdir\` / \`readFile\`.`;
+      return `[system] You emitted a \`${wanted}\` call, but \`${wanted}\` is NOT in your tool list — you have no workspace write access in this role, so that markup did NOTHING and no file was written. Do not emit \`${wanted}\` again. To get the file created you must DELEGATE: call \`message_gezel\` targeting the Builder/Developer you already assigned, or call \`ensure_gezel\` for a Builder/Developer first if none exists. Include \`expectedDeliverable: { kind: "file", filePath: "<path>" }\` and a concrete instruction to write the file and reply with its path. Do not call \`ask_specialist\` for file deliverables. Before telling anyone the file is done, confirm it exists with \`list_dir\` / \`read_file\`.`;
     }
     return `[system] You emitted a \`${wanted}\` call, but \`${wanted}\` is NOT in your tool list — you have no workspace write access and no delegation tool in this role, so NO file was written. Tell the user plainly that you cannot create the file yourself and what they should do instead.`;
   }
@@ -2320,7 +2320,7 @@ export interface TruncatedToolCallMatch {
    * Callers MUST treat string values as potentially truncated — for
    * write-shaped tools, the framework lands the partial content to
    * disk and emits a continuation hint instructing the model to
-   * issue `appendToFile` for the remaining bytes.
+   * issue `append_to_file` for the remaining bytes.
    */
   partialArgs: Record<string, unknown>;
 }
@@ -2798,7 +2798,7 @@ export function foldPreToolPreamble(opts: {
  * Character budget past which a post-action continuation reply from a
  * leaky-reasoning model is treated as rumination rather than a
  * deliberate long answer. Legitimate wrap-ups ("Played e5 — your
- * move!", a short paragraph summarizing what a writeFile shipped) sit
+ * move!", a short paragraph summarizing what a write_file shipped) sit
  * far below it; the wild-caught failure (gemma4-12b checkers: a 4,000+
  * char board re-derivation as the "one short line of table talk")
  * sits far above.
@@ -3310,12 +3310,12 @@ function stripTrailingCommas(json: string): string {
  * mid-content for one of these, the framework synthesizes the call
  * with the partial bytes received so far and appends a continuation
  * hint to the tool result instructing the model to issue
- * `appendToFile` for the missing tail.
+ * `append_to_file` for the missing tail.
  *
  * Excludes tools whose semantics would be corrupted by partial args
  * (e.g. `read_artifact`, `start_project`, `set_task_status`).
  */
-const WRITE_SHAPED_TOOL_NAMES = new Set(['writeFile', 'write_artifact', 'appendToFile']);
+const WRITE_SHAPED_TOOL_NAMES = new Set(['write_file', 'write_artifact', 'append_to_file']);
 
 export interface TruncationSalvageResult {
   /**
@@ -3352,7 +3352,7 @@ export interface TruncationSalvageResult {
  *
  * Tries the JSON-envelope detector first (more structurally
  * informative than the prose one), falls back to prose. Gated on:
- *   - tool name being write-shaped (writeFile / write_artifact / appendToFile)
+ *   - tool name being write-shaped (write_file / write_artifact / append_to_file)
  *   - `path` arg present and string
  *   - `content` arg present and string
  *
@@ -3407,7 +3407,7 @@ export function salvageWriteShapedTruncation(
 /**
  * Append a continuation hint to a tool result when the call was
  * tagged as truncated. The hint instructs the model to issue
- * `appendToFile` for the missing tail rather than re-emit the whole
+ * `append_to_file` for the missing tail rather than re-emit the whole
  * file (which would just truncate again on the same byte budget).
  *
  * Idempotent — appends only once even if called multiple times on
@@ -3443,7 +3443,7 @@ export function appendTruncationHintToToolResult(
   // disallows the multi-line `+` form). Lines stay logically grouped via
   // the `\n` between sentences so the model still reads it as a numbered
   // recovery menu rather than a wall of prose.
-  return `${toolResult}\n\n[runtime] Your \`${toolName}\` call for \`${path}\` was streamed mid-content and the closing markup never arrived; the file on disk contains the first ~${bytes} bytes you generated. If that content is incomplete (e.g. unclosed tags, missing JS, truncated CSS), your next message MUST emit ONE of these as its first tool call: (a) \`appendToFile(path="${path}", content="...the rest of the file, starting exactly where the truncated content left off...")\` — preferred for large files since you only need to write the missing tail; (b) \`${toolName}(path="${path}", content="...the FULL replacement content in a leaner form that fits in one stream...")\`. Do not narrate "the call got truncated" — just emit the corrective tool call directly.`;
+  return `${toolResult}\n\n[runtime] Your \`${toolName}\` call for \`${path}\` was streamed mid-content and the closing markup never arrived; the file on disk contains the first ~${bytes} bytes you generated. If that content is incomplete (e.g. unclosed tags, missing JS, truncated CSS), your next message MUST emit ONE of these as its first tool call: (a) \`append_to_file(path="${path}", content="...the rest of the file, starting exactly where the truncated content left off...")\` — preferred for large files since you only need to write the missing tail; (b) \`${toolName}(path="${path}", content="...the FULL replacement content in a leaner form that fits in one stream...")\`. Do not narrate "the call got truncated" — just emit the corrective tool call directly.`;
 }
 
 /**
@@ -3484,7 +3484,7 @@ export function appendCapTruncationHintToRejectedWrite(
         ? args.name
         : '(unknown path)';
   const capLabel = maxTokens !== null ? ` (max_tokens=${maxTokens})` : '';
-  return `${toolResult}\n\n[runtime] Your \`${toolName}\` call for \`${path}\` hit the per-turn output token cap${capLabel} mid-content — the file body never finished, the write was rejected, and the file on disk is unchanged. Re-emitting the whole file WILL hit the same cap again; do not retry a full rewrite. Apply the change as a sequence of smaller targeted edits instead: \`replaceInFile(path="${path}", find="...", replace="...")\` or \`replaceLines(path="${path}", startLine=N, endLine=M, content="...")\`, using several calls if needed, each well under the cap. Do not narrate the failure — emit the first corrective edit call directly.`;
+  return `${toolResult}\n\n[runtime] Your \`${toolName}\` call for \`${path}\` hit the per-turn output token cap${capLabel} mid-content — the file body never finished, the write was rejected, and the file on disk is unchanged. Re-emitting the whole file WILL hit the same cap again; do not retry a full rewrite. Apply the change as a sequence of smaller targeted edits instead: \`replace_in_file(path="${path}", find="...", replace="...")\` or \`replace_lines(path="${path}", startLine=N, endLine=M, content="...")\`, using several calls if needed, each well under the cap. Do not narrate the failure — emit the first corrective edit call directly.`;
 }
 
 /**

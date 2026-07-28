@@ -183,7 +183,7 @@ interface DeliverableNearMissCandidate {
 /**
  * Enumerate all HTML files in a project's workspace + artifacts trees.
  * Both surfaces matter — voorman/developer templates write to
- * workspace/ via writeFile; create_artifact / write_artifact land
+ * workspace/ via write_file; create_artifact / write_artifact land
  * in artifacts/. The model picks based on its own template guidance.
  */
 export async function listHtmlFiles(

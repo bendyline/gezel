@@ -6,8 +6,8 @@ describe('loadBuiltinToolContractsForLint', () => {
     const contracts = await loadBuiltinToolContractsForLint();
     const byName = new Map(contracts.map((tool) => [tool.name, tool]));
 
-    expect(byName.has('writeFile')).toBe(true);
-    expect(byName.has('draftEmail')).toBe(true);
+    expect(byName.has('write_file')).toBe(true);
+    expect(byName.has('draft_email')).toBe(true);
     expect(byName.has('request_tool_permission')).toBe(true);
     expect(byName.has('craftbook_update_step')).toBe(true);
     expect(byName.has('craftbook_create')).toBe(false);

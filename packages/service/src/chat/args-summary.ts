@@ -84,15 +84,15 @@ export function humanizeToolCall(
       return 'Listed the tasks';
     case 'list_gezels':
       return 'Listed the team';
-    case 'writeFile':
+    case 'write_file':
       return `Wrote ${str('path') ?? 'a file'}`;
-    case 'appendToFile':
+    case 'append_to_file':
       return `Appended to ${str('path') ?? 'a file'}`;
-    case 'replaceInFile':
+    case 'replace_in_file':
       return `Edited ${str('path') ?? 'a file'}`;
-    case 'readFile':
+    case 'read_file':
       return `Read ${str('path') ?? 'a file'}`;
-    case 'readdir':
+    case 'list_dir':
       return `Listed ${str('path') ?? 'the folder'}`;
     case 'write_artifact':
       return `Saved a note${str('path') ? ` (${str('path')})` : ''}`;

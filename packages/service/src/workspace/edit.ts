@@ -41,11 +41,11 @@ export function findAllOccurrences(haystack: string, needle: string): number[] {
 }
 
 /**
- * Whitespace-flexible, line-based fallback for `replaceInFile` when an
+ * Whitespace-flexible, line-based fallback for `replace_in_file` when an
  * exact substring match finds nothing. Small models routinely botch the
  * indentation or internal spacing of a `find` snippet they copied from a
  * read — and they sometimes paste a line-number gutter (`  12→…`) from a
- * numbered `readFile`. Rather than bounce them into a full-file rewrite
+ * numbered `read_file`. Rather than bounce them into a full-file rewrite
  * (where they stomp their own work), we match on *normalized whole
  * lines*: strip a leading `N→` gutter, collapse internal whitespace, and
  * trim. The needle's leading/trailing blank lines are ignored so the
@@ -122,7 +122,7 @@ export function findFlexibleMatch(haystack: string, needle: string): FlexibleMat
  * Read a file's UTF-8 content for editing, mapping any read failure
  * (ENOENT, EISDIR, EACCES, etc.) to a `WorkspaceEditError` whose
  * message is shaped for the model — telling it the file isn't there
- * and suggesting `writeFile` for net-new files.
+ * and suggesting `write_file` for net-new files.
  */
 export async function readFileForEditOrThrow(fullPath: string, relPath: string): Promise<string> {
   try {
@@ -130,7 +130,7 @@ export async function readFileForEditOrThrow(fullPath: string, relPath: string):
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
     throw new WorkspaceEditError(
-      `Cannot edit ${relPath}: file does not exist (${reason}). Use \`writeFile\` to create it first.`,
+      `Cannot edit ${relPath}: file does not exist (${reason}). Use \`write_file\` to create it first.`,
       'file-not-found',
     );
   }

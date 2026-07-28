@@ -459,7 +459,7 @@ export const ChatMessageToolCallSchema = z.object({
   videos: z.array(ToolCallVideoSchema).optional(),
   /**
    * Unified diff describing the change a surgical-edit tool made
-   * (`replaceInFile`, `applyPatch`, `insertAtMarker`). Used by the UI
+   * (`replace_in_file`, `apply_patch`, `insert_at_marker`). Used by the UI
    * to render an inline diff under the tool-call row. Capped at ~100KB
    * server-side; larger diffs are truncated with a marker line.
    */
@@ -722,7 +722,7 @@ export const ChatEventSchema = z.discriminatedUnion('type', [
     videos: z.array(ToolCallVideoSchema).optional(),
     /**
      * Unified diff describing the change a surgical-edit tool made
-     * (`replaceInFile`, `applyPatch`, `insertAtMarker`). Streams to the
+     * (`replace_in_file`, `apply_patch`, `insert_at_marker`). Streams to the
      * UI mid-turn so the chat bubble can render an inline diff under
      * the tool-call row even before the assistant message is finalized.
      */
@@ -754,7 +754,7 @@ export const ChatEventSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('wire_pulse') }),
   /**
    * Live tool-argument stream. Fired while the model is generating a
-   * structured tool call — most visibly a multi-minute `writeFile`
+   * structured tool call — most visibly a multi-minute `write_file`
    * whose argument tokens never appear as visible `delta`s, so without
    * this channel the only signal is the accumulating wire-pulse count.
    * `name` is the tool being called ('' until the name chunk arrives);

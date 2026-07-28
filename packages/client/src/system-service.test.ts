@@ -1,0 +1,69 @@
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, describe, expect, it } from 'vitest';
+import {
+  readSystemServiceEndpoint,
+  readSystemServiceRuntime,
+  systemServiceHome,
+} from './system-service.js';
+
+const homes: string[] = [];
+
+afterEach(async () => {
+  await Promise.all(homes.splice(0).map((home) => rm(home, { recursive: true, force: true })));
+});
+
+async function runtimeHome(): Promise<string> {
+  const home = await mkdtemp(join(tmpdir(), 'gezel-system-runtime-'));
+  homes.push(home);
+  await mkdir(join(home, 'runtime'));
+  return home;
+}
+
+describe('systemServiceHome', () => {
+  it('resolves every packaged platform without using host path semantics', () => {
+    expect(systemServiceHome('win32', { ProgramData: 'D:\\MachineData' })).toBe(
+      'D:\\MachineData\\Gezel',
+    );
+    expect(systemServiceHome('darwin')).toBe('/Library/Application Support/Gezel');
+    expect(systemServiceHome('linux')).toBe('/var/lib/gezel');
+    expect(systemServiceHome('freebsd')).toBeNull();
+  });
+});
+
+describe('system service runtime discovery', () => {
+  it('reads endpoint metadata without requiring the desktop credential', async () => {
+    const home = await runtimeHome();
+    await writeFile(join(home, 'runtime', 'port'), '43935\n');
+    await writeFile(join(home, 'runtime', 'cert.pem'), 'certificate');
+
+    await expect(readSystemServiceEndpoint(home)).resolves.toEqual({
+      port: 43935,
+      baseUrl: 'https://127.0.0.1:43935',
+      cert: 'certificate',
+      home,
+    });
+    await expect(readSystemServiceRuntime(home)).resolves.toBeNull();
+  });
+
+  it('adds the scoped desktop token only for the Electron runtime reader', async () => {
+    const home = await runtimeHome();
+    await writeFile(join(home, 'runtime', 'port'), '43935\n');
+    await writeFile(join(home, 'runtime', 'auth-token'), 'desktop-token\n');
+
+    await expect(readSystemServiceRuntime(home)).resolves.toEqual({
+      port: 43935,
+      baseUrl: 'http://127.0.0.1:43935',
+      cert: null,
+      home,
+      token: 'desktop-token',
+    });
+  });
+
+  it('rejects invalid and out-of-range ports', async () => {
+    const home = await runtimeHome();
+    await writeFile(join(home, 'runtime', 'port'), '70000\n');
+    await expect(readSystemServiceEndpoint(home)).resolves.toBeNull();
+  });
+});

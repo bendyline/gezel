@@ -545,7 +545,7 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
       status: 'validated',
       localModels: ['gemma4-e4b-q8'],
       notes:
-        'Validated locally with gemma4-e4b-q8 using direct readFile/writeFile on the seeded CSV/report path. Still needs computed-value assertions.',
+        'Validated locally with gemma4-e4b-q8 using direct read_file/write_file on the seeded CSV/report path. Still needs computed-value assertions.',
     },
     gaps: ['Add a numeric oracle for computed month-over-month changes.'],
   },
@@ -1108,7 +1108,7 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
       status: 'implemented',
       localModels: ['gemma4-e4b-q8'],
       notes:
-        'Declarative-fanout spawn host, run as a real craftbook task. The framework path is proven end-to-end: the task is created from the book and its entry step dispatches to the worker (daemon.log: "[tasks] entry dispatched: fieldnote-studio-office/1 step scope"), and the fanout trigger + spawnChild dispatch are covered by fanout.integration + manager unit tests. NOT passing on the local small model: gemma4-e4b-q8 (tier small, 8B) reflex-loops read_task_notes on the entry step — 13 tool calls, all read_task_notes, zero readFile/writeFile — and exhausts its repair budget before writing notes/billables.json, so no children spawn. The harness classifies this itself (result.json failureClass: "model", failureMode: "model-stuck"). Even the repeat-tracker\'s strongest "do NOT call read_task_notes again" nudge did not break the loop, so it is a small-model capability floor, not a prompt-completeness or framework gap. Per the anti-overtuning doctrine the bar is a medium model; validate the live PASS there rather than overtuning the small-model path.',
+        'Declarative-fanout spawn host, run as a real craftbook task. The framework path is proven end-to-end: the task is created from the book and its entry step dispatches to the worker (daemon.log: "[tasks] entry dispatched: fieldnote-studio-office/1 step scope"), and the fanout trigger + spawnChild dispatch are covered by fanout.integration + manager unit tests. NOT passing on the local small model: gemma4-e4b-q8 (tier small, 8B) reflex-loops read_task_notes on the entry step — 13 tool calls, all read_task_notes, zero read_file/write_file — and exhausts its repair budget before writing notes/billables.json, so no children spawn. The harness classifies this itself (result.json failureClass: "model", failureMode: "model-stuck"). Even the repeat-tracker\'s strongest "do NOT call read_task_notes again" nudge did not break the loop, so it is a small-model capability floor, not a prompt-completeness or framework gap. Per the anti-overtuning doctrine the bar is a medium model; validate the live PASS there rather than overtuning the small-model path.',
     },
     gaps: [
       'Live PASS pending a medium-tier local model (no medium weights currently downloaded).',

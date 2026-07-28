@@ -256,9 +256,8 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   // Gate only the API and event stream. The static UI bundle is public —
   // it's just HTML/JS/CSS, and the token needs to be injected by the UI
   // script anyway to hit the API. Loopback + bearer is still the real fence.
-  // `/api/*` is the internal product API — the existing surface gated
-  // by the per-launch root token plus future per-app tokens with the
-  // `root` scope.
+  // `/api/*` is the internal product API, gated by the per-launch root token,
+  // scoped UI/session credentials, or an explicitly user-approved CLI token.
   // `/v1/*` is the public OpenAI-compatible facade aimed at third-party
   // local apps. Auth is selective: `/v1/apps/register` and the grant
   // polling endpoints must be reachable WITHOUT a token (the app

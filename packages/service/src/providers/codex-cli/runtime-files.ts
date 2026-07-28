@@ -75,7 +75,7 @@ export interface CodexRuntimeConfig {
   /**
    * Codex's `tool_output_token_limit` — caps any single tool result's
    * contribution to the rollout. Critical for repo-walking scenarios
-   * where one `readFile` on a large file would otherwise inject tens
+   * where one `read_file` on a large file would otherwise inject tens
    * of K of tokens that never come back out of context. Skipped from
    * the config.toml when unset.
    */

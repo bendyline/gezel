@@ -126,7 +126,7 @@ export const ROLES: Record<RoleId, RoleDefinition> = {
   // No `code-intel` either: symbol-level navigation
   // (outline_file / find_symbol / read_symbol / find_references / map_repo /
   // search_code) is the DEVELOPER's surface — the voorman reads to diagnose
-  // (workspace-fs-read covers readFile/search_files/find_files) and then
+  // (workspace-fs-read covers read_file/search_files/find_files) and then
   // delegates the deep code work. Those 6 tools were ~pure roster tax on a
   // coordinator that never calls them, and on a medium local model (the
   // qwen3.6-27b/MLX 37K-token prefill stall) every tool schema costs
@@ -190,7 +190,7 @@ export const ROLES: Record<RoleId, RoleDefinition> = {
   },
   // Researcher: read sources + file long-form analysis to disk
   // (workspace-fs-write is load-bearing — the about converts the
-  // consultation reply into a writeFile). `tasks-readonly` (reads task
+  // consultation reply into a write_file). `tasks-readonly` (reads task
   // context, doesn't mutate) and no `git`. `web` + write retained, so the
   // role still qualifies for browser automation (navigates live sites).
   researcher: {
@@ -278,7 +278,7 @@ export const ROLES: Record<RoleId, RoleDefinition> = {
   },
   // Image generation specialists — built around `generate_image`. No
   // `workspace-fs-write`: the image route already drops a workspace copy
-  // at assets/generated/, so a generator has no business calling writeFile
+  // at assets/generated/, so a generator has no business calling write_file
   // (the petshop "wrote prose into logo.png" fabrication).
   'image-generator': {
     id: 'image-generator',
@@ -301,7 +301,7 @@ export const ROLES: Record<RoleId, RoleDefinition> = {
   // Video generation specialists — built around `generate_video`. Same
   // no-`workspace-fs-write` rationale as image-generator: the video route
   // already drops a workspace copy at assets/generated/, so a generator
-  // has no business calling writeFile.
+  // has no business calling write_file.
   'video-generator': {
     id: 'video-generator',
     label: 'Video Generator',

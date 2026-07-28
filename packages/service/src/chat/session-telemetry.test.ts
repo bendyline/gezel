@@ -13,8 +13,8 @@ describe('SessionTelemetryTracker', () => {
     t.noteHeartbeat('s1');
     t.noteEnginePhase('s1', 'prefill');
     t.noteEnginePhase('s1', 'generating');
-    t.noteToolCall('s1', { name: 'readFile', args: { path: 'a.txt' } });
-    t.noteToolCall('s1', { name: 'writeFile', args: { path: 'a.txt', content: 'x'.repeat(50) } });
+    t.noteToolCall('s1', { name: 'read_file', args: { path: 'a.txt' } });
+    t.noteToolCall('s1', { name: 'write_file', args: { path: 'a.txt', content: 'x'.repeat(50) } });
     t.noteTurnEnd('s1');
     t.noteTurnStart(scope('s1'));
     t.noteDelta('s1', 3);
@@ -39,7 +39,7 @@ describe('SessionTelemetryTracker', () => {
     const t = new SessionTelemetryTracker();
     t.noteTurnStart(scope('s1'));
     t.noteDelta('s1', 4);
-    t.noteToolCall('s1', { name: 'writeFile', args: { path: 'x' } });
+    t.noteToolCall('s1', { name: 'write_file', args: { path: 'x' } });
     expect(t.snapshot('s1', true)?.currentTurn).toMatchObject({
       streamedContentChars: 4,
       toolCalls: 1,
@@ -59,8 +59,8 @@ describe('SessionTelemetryTracker', () => {
     const t = new SessionTelemetryTracker();
     t.noteTurnStart(scope('s1'));
     for (const name of FILE_MUTATION_TOOLS) t.noteToolCall('s1', { name });
-    t.noteToolCall('s1', { name: 'readFile' });
-    t.noteToolCall('s1', { name: 'rm' });
+    t.noteToolCall('s1', { name: 'read_file' });
+    t.noteToolCall('s1', { name: 'delete_path' });
     const snap = t.snapshot('s1', true);
     expect(snap?.fileMutations).toBe(FILE_MUTATION_TOOLS.size);
     expect(snap?.toolCalls).toBe(FILE_MUTATION_TOOLS.size + 2);
@@ -83,7 +83,7 @@ describe('SessionTelemetryTracker', () => {
   it('drops signals for sessions never started and after delete', () => {
     const t = new SessionTelemetryTracker();
     t.noteDelta('ghost', 100);
-    t.noteToolCall('ghost', { name: 'writeFile' });
+    t.noteToolCall('ghost', { name: 'write_file' });
     t.noteGpuSwap('ghost', 'started', 'image_generation');
     expect(t.snapshot('ghost', false)).toBeNull();
 
@@ -125,7 +125,7 @@ describe('SessionTelemetryTracker', () => {
     t.noteTurnStart(scope('s1'));
     const circular: Record<string, unknown> = {};
     circular.self = circular;
-    t.noteToolCall('s1', { name: 'writeFile', args: circular });
+    t.noteToolCall('s1', { name: 'write_file', args: circular });
     const snap = t.snapshot('s1', true);
     expect(snap?.toolCalls).toBe(1);
     expect(snap?.fileMutations).toBe(1);

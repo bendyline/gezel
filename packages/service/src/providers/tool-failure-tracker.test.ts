@@ -20,19 +20,19 @@ describe('ToolFailureTracker', () => {
   it('counts plain MCP teaching errors as failures too', () => {
     const t = new ToolFailureTracker({ surgicalEditsAvailable: true, delegationAvailable: true });
     t.recordResult(
-      'replaceLines',
-      'replaceLines was rejected because src/game.ts failed validation',
+      'replace_lines',
+      'replace_lines was rejected because src/game.ts failed validation',
     );
     t.recordResult(
-      'replaceLines',
-      'replaceLines was rejected because src/game.ts failed validation',
+      'replace_lines',
+      'replace_lines was rejected because src/game.ts failed validation',
     );
     const r = t.recordResult(
-      'replaceLines',
-      'replaceLines was rejected because src/game.ts failed validation',
+      'replace_lines',
+      'replace_lines was rejected because src/game.ts failed validation',
     );
     expect(r.count).toBe(3);
-    expect(r.output).toContain('3rd consecutive failure of `replaceLines`');
+    expect(r.output).toContain('3rd consecutive failure of `replace_lines`');
     expect(r.output).toContain('delegate_meester');
   });
 
@@ -98,55 +98,55 @@ describe('ToolFailureTracker', () => {
 
   it('uses a full-source soft warning for repeated source edit failures', () => {
     const t = new ToolFailureTracker();
-    t.recordResult('writeFile', 'ERROR: truncated');
-    t.recordResult('writeFile', 'ERROR: truncated');
-    const r = t.recordResult('writeFile', 'ERROR: truncated');
+    t.recordResult('write_file', 'ERROR: truncated');
+    t.recordResult('write_file', 'ERROR: truncated');
+    const r = t.recordResult('write_file', 'ERROR: truncated');
 
     expect(r.count).toBe(3);
     expect(r.shouldAbort).toBe(false);
     expect(r.output).toContain('STOP retrying fragments');
     expect(r.output).toContain('complete corrected source file');
-    expect(r.output).toContain('writeFile');
+    expect(r.output).toContain('write_file');
   });
 
-  it('steers to a targeted line-number patch (replaceLines) when surgical edits are available', () => {
+  it('steers to a targeted line-number patch (replace_lines) when surgical edits are available', () => {
     const t = new ToolFailureTracker({ surgicalEditsAvailable: true });
-    t.recordResult('writeFile', 'ERROR: truncated');
-    t.recordResult('writeFile', 'ERROR: truncated');
-    const r = t.recordResult('writeFile', 'ERROR: truncated');
+    t.recordResult('write_file', 'ERROR: truncated');
+    t.recordResult('write_file', 'ERROR: truncated');
+    const r = t.recordResult('write_file', 'ERROR: truncated');
 
-    // No "re-emit the whole file" advice — point at replaceLines (edit by
+    // No "re-emit the whole file" advice — point at replace_lines (edit by
     // line number), the surgical tool a small model can actually drive.
-    expect(r.output).toContain('replaceLines');
+    expect(r.output).toContain('replace_lines');
     expect(r.output).not.toContain('complete corrected source file');
     expect(r.output).toContain('TARGETED');
   });
 
   it('escalates to delegation on repeated source-edit failure when delegation is available', () => {
     const t = new ToolFailureTracker({ surgicalEditsAvailable: true, delegationAvailable: true });
-    t.recordResult('replaceInFile', 'ERROR: pattern not found');
-    t.recordResult('replaceInFile', 'ERROR: pattern not found');
-    const r = t.recordResult('replaceInFile', 'ERROR: pattern not found');
+    t.recordResult('replace_in_file', 'ERROR: pattern not found');
+    t.recordResult('replace_in_file', 'ERROR: pattern not found');
+    const r = t.recordResult('replace_in_file', 'ERROR: pattern not found');
     // Soft nudge still offers the better tool first, plus the handoff hint.
-    expect(r.output).toContain('replaceLines');
+    expect(r.output).toContain('replace_lines');
     expect(r.output).toContain('delegate_meester');
   });
 
-  it('treats replaceLines as a source-edit tool (its failures get the source-edit corrective)', () => {
+  it('treats replace_lines as a source-edit tool (its failures get the source-edit corrective)', () => {
     const t = new ToolFailureTracker({ surgicalEditsAvailable: true, delegationAvailable: true });
-    t.recordResult('replaceLines', 'ERROR: bad range');
-    t.recordResult('replaceLines', 'ERROR: bad range');
-    const r = t.recordResult('replaceLines', 'ERROR: bad range');
+    t.recordResult('replace_lines', 'ERROR: bad range');
+    t.recordResult('replace_lines', 'ERROR: bad range');
+    const r = t.recordResult('replace_lines', 'ERROR: bad range');
     expect(r.output).toContain('delegate_meester');
   });
 
   it('keeps complete-write advice for truncated source writes even when surgical edits are available', () => {
     const t = new ToolFailureTracker({ surgicalEditsAvailable: true });
     const err =
-      'ERROR: Refusing to write `index.html` because the content looks truncated (the final HTML tag is incomplete). Call `writeFile` again with the complete file contents in one tool call.';
-    t.recordResult('writeFile', err);
-    t.recordResult('writeFile', err);
-    const r = t.recordResult('writeFile', err);
+      'ERROR: Refusing to write `index.html` because the content looks truncated (the final HTML tag is incomplete). Call `write_file` again with the complete file contents in one tool call.';
+    t.recordResult('write_file', err);
+    t.recordResult('write_file', err);
+    const r = t.recordResult('write_file', err);
 
     expect(r.sourceFailureKind).toBe('truncated');
     expect(r.output).toContain('complete corrected source file');
@@ -157,57 +157,57 @@ describe('ToolFailureTracker', () => {
     const t = new ToolFailureTracker({ surgicalEditsAvailable: true });
     const err =
       'ERROR: scripts/clean_data.mjs: syntax error. This write was rejected atomically; THE FILE WAS NOT WRITTEN and no bytes from this call were persisted.';
-    t.recordResult('writeFile', err);
-    t.recordResult('writeFile', err);
-    const r = t.recordResult('writeFile', err);
+    t.recordResult('write_file', err);
+    t.recordResult('write_file', err);
+    const r = t.recordResult('write_file', err);
 
     expect(r.sourceFailureKind).toBe('not-persisted');
     expect(r.output).toContain('complete corrected source file');
     expect(r.output).not.toContain('TARGETED');
-    expect(r.output).not.toContain('replaceLines');
+    expect(r.output).not.toContain('replace_lines');
   });
 
   it('buildAbortMessage steers to a targeted line-number patch when surgical edits are available', () => {
     const msg = ToolFailureTracker.buildAbortMessage({
       providerLabel: 'Mac AI',
-      toolName: 'writeFile',
+      toolName: 'write_file',
       count: 5,
       surgicalEditsAvailable: true,
     });
-    expect(msg).toContain('replaceLines');
+    expect(msg).toContain('replace_lines');
     expect(msg).not.toContain('entire corrected source file');
   });
 
   it('buildAbortMessage hands off to a more capable model when delegation is available', () => {
     const msg = ToolFailureTracker.buildAbortMessage({
       providerLabel: 'llama.cpp',
-      toolName: 'replaceInFile',
+      toolName: 'replace_in_file',
       count: 5,
       surgicalEditsAvailable: true,
       delegationAvailable: true,
     });
     expect(msg).toContain('delegate_meester');
     // Escalation takes precedence over edit-tool advice once the budget's spent.
-    expect(msg).not.toContain('replaceLines');
+    expect(msg).not.toContain('replace_lines');
   });
 
   it('buildAbortMessage keeps complete-write advice for truncated source writes', () => {
     const msg = ToolFailureTracker.buildAbortMessage({
       providerLabel: 'Mac AI',
-      toolName: 'writeFile',
+      toolName: 'write_file',
       count: 5,
       surgicalEditsAvailable: true,
       sourceFailureKind: 'truncated',
     });
-    expect(msg).toContain('complete `writeFile');
-    expect(msg).not.toContain('replaceInFile');
+    expect(msg).toContain('complete `write_file');
+    expect(msg).not.toContain('replace_in_file');
   });
 
   it('buildUserMessage is plain — no provider prefix, no model-coaching imperatives', () => {
-    const msg = ToolFailureTracker.buildUserMessage({ toolName: 'replaceInFile', count: 5 });
+    const msg = ToolFailureTracker.buildUserMessage({ toolName: 'replace_in_file', count: 5 });
     expect(msg).not.toContain('[');
-    expect(msg).not.toContain('replaceLines');
-    expect(msg).not.toContain('writeFile');
+    expect(msg).not.toContain('replace_lines');
+    expect(msg).not.toContain('write_file');
     expect(msg).not.toMatch(/your next message/i);
     expect(msg).toContain('file edit');
     expect(msg).toContain('5');
@@ -222,17 +222,17 @@ describe('ToolFailureTracker', () => {
   it('buildAbort carries the model corrective on message and the user summary on userMessage', () => {
     const err = ToolFailureTracker.buildAbort({
       providerLabel: 'llama.cpp',
-      toolName: 'replaceInFile',
+      toolName: 'replace_in_file',
       count: 5,
       surgicalEditsAvailable: true,
     });
     expect(err).toBeInstanceOf(TurnAbortError);
     // model-facing on .message — keeps the provider label + tool steering
     expect(err.message).toContain('[llama.cpp]');
-    expect(err.message).toContain('replaceLines');
+    expect(err.message).toContain('replace_lines');
     // user-facing on .userMessage — neither leaks to the banner
     expect(err.userMessage).not.toContain('[llama.cpp]');
-    expect(err.userMessage).not.toContain('replaceLines');
+    expect(err.userMessage).not.toContain('replace_lines');
   });
 
   it('hard-aborts at the hard threshold (default 5) without augmenting output further', () => {
@@ -347,20 +347,20 @@ describe('ToolFailureTracker', () => {
   it('uses a full-source hard abort message for source edit failures', () => {
     const msg = ToolFailureTracker.buildAbortMessage({
       providerLabel: 'llama.cpp',
-      toolName: 'replaceInFile',
+      toolName: 'replace_in_file',
       count: 5,
     });
-    expect(msg).toContain('`replaceInFile` failed 5 times');
+    expect(msg).toContain('`replace_in_file` failed 5 times');
     expect(msg).toContain('Stop emitting source fragments');
     expect(msg).toContain('entire corrected source file');
-    expect(msg).toContain('writeFile({ path, content })');
+    expect(msg).toContain('write_file({ path, content })');
     expect(msg).not.toContain('Ask the gezel');
   });
 
   it('lets missing deliverable feedback redirect a source edit failure', () => {
     const msg = ToolFailureTracker.buildAbortMessage({
       providerLabel: 'llama.cpp',
-      toolName: 'writeFile',
+      toolName: 'write_file',
       count: 5,
     });
     expect(msg).toContain('different missing deliverable path');

@@ -17,6 +17,7 @@ export function PromptLine(props: {
   taskRef: string | undefined;
   mode: 'chat' | 'cli';
   provider: string | undefined;
+  model: string | undefined;
   busy: boolean;
   statusLabel?: string | undefined;
   value: string;
@@ -33,6 +34,7 @@ export function PromptLine(props: {
     taskRef,
     mode,
     provider,
+    model,
     busy,
     statusLabel,
     value,
@@ -122,7 +124,7 @@ export function PromptLine(props: {
           </>
         ) : null}
         <Text> </Text>
-        <EnginePill provider={provider} busy={busy} label={statusLabel} />
+        <EnginePill provider={provider} model={model} busy={busy} label={statusLabel} />
       </Box>
       {visibleSuggestions.length > 0 ? (
         <Box flexDirection="column" marginLeft={2}>

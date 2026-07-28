@@ -63,7 +63,7 @@ describe('score-trial project history fallback', () => {
           at: '2026-06-04T00:00:04.000Z',
           kind: 'tool.called',
           gezelId: 'sam',
-          details: { name: 'readFile', durationMs: 2, success: true },
+          details: { name: 'read_file', durationMs: 2, success: true },
         },
         {
           at: '2026-06-04T00:00:07.000Z',
@@ -75,7 +75,7 @@ describe('score-trial project history fallback', () => {
           at: '2026-06-04T00:00:07.010Z',
           kind: 'tool.called',
           gezelId: 'sam',
-          details: { name: 'writeFile', durationMs: 10, success: true },
+          details: { name: 'write_file', durationMs: 10, success: true },
         },
       ]
         .map((entry) => JSON.stringify(entry))
@@ -85,7 +85,7 @@ describe('score-trial project history fallback', () => {
     const facts = score(tempRoot);
 
     expect(facts.toolUse.totalToolCalls).toBe(2);
-    expect(facts.toolUse.byTool).toEqual({ readFile: 1, writeFile: 1 });
+    expect(facts.toolUse.byTool).toEqual({ read_file: 1, write_file: 1 });
     expect(facts.timing.timeToFirstArtifactMs).toBe(7_000);
     expect(facts.timing.timeToLastArtifactWriteMs).toBe(7_000);
   });
@@ -127,7 +127,7 @@ describe('score-trial F4.1 latency timing', () => {
             role: 'assistant',
             content: 'writing',
             at: '2026-06-04T00:00:03.000Z',
-            toolCalls: [{ name: 'writeFile', success: true, argsSummary: 'path: "x.html"' }],
+            toolCalls: [{ name: 'write_file', success: true, argsSummary: 'path: "x.html"' }],
           },
         ],
       }),

@@ -8,9 +8,9 @@ const ok = (stdout = '', code: number | string = 0): RunResult => ({ code, stdou
 
 /** Windows runner: returns the given Get-AuthenticodeSignature status. */
 const winRun =
-  (status: string): Runner =>
+  (status: string, subject = ''): Runner =>
   async () =>
-    ok(status);
+    ok(`${status}\n${subject}`);
 
 /** macOS runner: `codesign --verify` exits `verifyCode`; `codesign -dv` emits `dvStderr`. */
 const macRun =
@@ -31,6 +31,26 @@ describe('verifyCodeSignature — windows', () => {
       expect(o.result.status).toBe('valid');
       expect(o.accepted).toBe(true);
     }
+  });
+
+  it('requires the expected Authenticode publisher when configured', async () => {
+    const valid = await verifyCodeSignature('x.exe', {
+      policy: 'require',
+      platform: 'win32',
+      expectedPublisher: 'Bendyline LLC',
+      run: winRun('Valid', 'CN=Bendyline LLC, O=Bendyline LLC, C=US'),
+    });
+    expect(valid.result.status).toBe('valid');
+    expect(valid.accepted).toBe(true);
+
+    const wrong = await verifyCodeSignature('x.exe', {
+      policy: 'require',
+      platform: 'win32',
+      expectedPublisher: 'Bendyline LLC',
+      run: winRun('Valid', 'CN=Somebody Else, O=Somebody Else, C=US'),
+    });
+    expect(wrong.result.status).toBe('invalid');
+    expect(wrong.accepted).toBe(false);
   });
 
   it('NotSigned → unsigned; prefer accepts, require rejects', async () => {
@@ -59,7 +79,7 @@ describe('verifyCodeSignature — windows', () => {
     const run: Runner = async () => ({ code: 'ENOENT', stdout: '', stderr: '' });
     const o = await verifyCodeSignature('x.exe', { policy: 'require', platform: 'win32', run });
     expect(o.result.status).toBe('unsupported');
-    expect(o.accepted).toBe(true); // require accepts unsupported — sha is the gate there
+    expect(o.accepted).toBe(false);
   });
 });
 
@@ -72,6 +92,65 @@ describe('verifyCodeSignature — macos', () => {
     });
     expect(o.result.status).toBe('valid');
     expect(o.accepted).toBe(true);
+  });
+
+  it('requires the expected Developer ID authority', async () => {
+    const o = await verifyCodeSignature('bin', {
+      policy: 'require',
+      platform: 'darwin',
+      expectedPublisher: 'Bendyline LLC',
+      run: macRun(0, 'Authority=Developer ID Application: Bendyline LLC (TEAMID)'),
+    });
+    expect(o.result.status).toBe('valid');
+    expect(o.accepted).toBe(true);
+  });
+
+  it('requires a Notarized Developer ID Gatekeeper result when requested', async () => {
+    const run: Runner = async (cmd, args) => {
+      if (cmd === 'spctl') {
+        return { code: 0, stdout: '', stderr: 'source=Notarized Developer ID' };
+      }
+      return args.includes('--verify')
+        ? { code: 0, stdout: '', stderr: '' }
+        : {
+            code: 0,
+            stdout: '',
+            stderr: 'Authority=Developer ID Application: Bendyline LLC (TEAMID)',
+          };
+    };
+    const o = await verifyCodeSignature('bin', {
+      policy: 'require',
+      platform: 'darwin',
+      expectedPublisher: 'Bendyline LLC',
+      requireNotarization: true,
+      run,
+    });
+    expect(o.result.status).toBe('valid');
+    expect(o.accepted).toBe(true);
+  });
+
+  it('rejects a signed but non-notarized binary when notarization is required', async () => {
+    const run: Runner = async (cmd, args) => {
+      if (cmd === 'spctl') {
+        return { code: 3, stdout: '', stderr: 'source=Developer ID' };
+      }
+      return args.includes('--verify')
+        ? { code: 0, stdout: '', stderr: '' }
+        : {
+            code: 0,
+            stdout: '',
+            stderr: 'Authority=Developer ID Application: Bendyline LLC (TEAMID)',
+          };
+    };
+    const o = await verifyCodeSignature('bin', {
+      policy: 'require',
+      platform: 'darwin',
+      expectedPublisher: 'Bendyline LLC',
+      requireNotarization: true,
+      run,
+    });
+    expect(o.result.status).toBe('invalid');
+    expect(o.accepted).toBe(false);
   });
 
   it('verify fails + "not signed at all" → unsigned', async () => {

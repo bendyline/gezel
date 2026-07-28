@@ -16,6 +16,10 @@ export async function ensureDaemon(): Promise<GezelClient> {
   const result = await discoverOrSpawn({
     daemonEntry: resolveDaemonEntry(import.meta.url),
     detached: true,
+    // Port 43935 belongs to the Electron-installed machine service. A
+    // user-owned fallback advertises its actual ephemeral port through
+    // ~/.gezel/runtime instead of blocking that service from starting later.
+    env: { ...process.env, GEZEL_PORT: '0' },
   });
   return result.client;
 }

@@ -1,5 +1,6 @@
 import { createLogger } from '@bendyline/gezel';
 import { BUILTIN_TOOL_TO_GROUP } from '@bendyline/gezel-catalog';
+import { canonicalToolName } from '@bendyline/gezel-mcp';
 import { type AnthropicTool, McpBridge, type OpenAIFunctionTool } from './mcp-bridge.js';
 import type { SessionOpts } from './types.js';
 
@@ -161,6 +162,17 @@ export class McpBridgePool {
     return this.bridges.length === 0;
   }
 
+  // Allowlist + group membership run in CANONICAL name space: the sets
+  // hold canonical names, but the advertised name can be a legacy
+  // spelling in the naming-A/B legacy arm. Without canonicalization a
+  // legacy-advertised `writeFile` misses `BUILTIN_TOOL_TO_GROUP` and
+  // sails past the role filter as if it were third-party (fails open).
+  private allowsBuiltin(allow: ReadonlySet<string>, name: string): boolean {
+    const canonical = canonicalToolName(name);
+    if (!BUILTIN_TOOL_TO_GROUP.has(canonical)) return true;
+    return allow.has(canonical);
+  }
+
   getOpenAITools(): OpenAIFunctionTool[] {
     const allow = this.toolAllowlist;
     const seen = new Set<string>();
@@ -168,7 +180,7 @@ export class McpBridgePool {
     for (const { bridge } of this.bridges) {
       for (const t of bridge.getOpenAITools()) {
         if (seen.has(t.name)) continue;
-        if (allow && BUILTIN_TOOL_TO_GROUP.has(t.name) && !allow.has(t.name)) continue;
+        if (allow && !this.allowsBuiltin(allow, t.name)) continue;
         seen.add(t.name);
         out.push(t);
       }
@@ -183,7 +195,7 @@ export class McpBridgePool {
     for (const { bridge } of this.bridges) {
       for (const t of bridge.getAnthropicTools()) {
         if (seen.has(t.name)) continue;
-        if (allow && BUILTIN_TOOL_TO_GROUP.has(t.name) && !allow.has(t.name)) continue;
+        if (allow && !this.allowsBuiltin(allow, t.name)) continue;
         seen.add(t.name);
         out.push(t);
       }
@@ -238,19 +250,17 @@ export class McpBridgePool {
   }
 
   private isCallableByModel(name: string): boolean {
-    // Immediate-write sessions intentionally advertise only `writeFile` on
+    const canonical = canonicalToolName(name);
+    // Immediate-write sessions intentionally advertise only `write_file` on
     // their first request. If that write is truncated, the local-provider
-    // loop injects a temporary `appendToFile` schema so the model can finish
+    // loop injects a temporary `append_to_file` schema so the model can finish
     // the saved partial without re-streaming the whole file. Treat append as
-    // an in-scope recovery primitive whenever writeFile was authorized;
+    // an in-scope recovery primitive whenever write_file was authorized;
     // otherwise the injected continuation tool is visible but the pool
     // rejects it as unavailable.
-    if (name === 'appendToFile' && this.toolAllowlist?.has('writeFile')) return true;
-    return !(
-      this.toolAllowlist &&
-      BUILTIN_TOOL_TO_GROUP.has(name) &&
-      !this.toolAllowlist.has(name)
-    );
+    if (canonical === 'append_to_file' && this.toolAllowlist?.has('write_file')) return true;
+    if (!this.toolAllowlist) return true;
+    return this.allowsBuiltin(this.toolAllowlist, name);
   }
 
   async stop(): Promise<void> {

@@ -6,7 +6,7 @@ import { type RuntimeAssertion, pollHtmlSniff } from './helpers.ts';
  * `arcade-deluxe` — the deliberately-HARD, multi-phase scenario.
  *
  * The legacy game scenarios (tictactoe, tankcombat) are one-shottable:
- * a capable model emits a single working canvas in one `writeFile`, and
+ * a capable model emits a single working canvas in one `write_file`, and
  * the suite saturates at 100%. This scenario instead demands a *polished,
  * multi-screen* game — a title screen, gameplay, AND a game-over screen
  * with a restart — and gates on the full title → play → game-over →

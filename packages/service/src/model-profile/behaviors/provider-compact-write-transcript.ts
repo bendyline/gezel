@@ -10,5 +10,5 @@ import type { Behavior } from '../types.js';
 export const ProviderCompactWriteTranscript: Behavior = {
   id: 'provider.compact-write-transcript',
   description:
-    'Compacts successful large writeFile/appendToFile arguments in the local provider transcript after execution, preserving path + byte count while telling the model to readFile for current contents. OFF by default; A/B via GEZEL_FORCE_BEHAVIORS.',
+    'Compacts successful large write_file/append_to_file arguments in the local provider transcript after execution, preserving path + byte count while telling the model to read_file for current contents. OFF by default; A/B via GEZEL_FORCE_BEHAVIORS.',
 };

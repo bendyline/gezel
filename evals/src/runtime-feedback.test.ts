@@ -161,7 +161,7 @@ describe('postRuntimeFeedback', () => {
     expect(body.text).toContain('`GameState` is undefined');
     expect(body.text).toContain('`gameState`');
     expect(body.text).toContain(
-      'replaceInFile({ path: "index.html", find: "GameState", replace: "gameState", occurrence: "all" })',
+      'replace_in_file({ path: "index.html", find: "GameState", replace: "gameState", occurrence: "all" })',
     );
     expect(body.text).toContain('Do not make an identity edit');
   });
@@ -191,7 +191,7 @@ describe('postRuntimeFeedback', () => {
     expect(body.text).toContain('`cellDivt` is undefined');
     expect(body.text).toContain('`cellDiv`');
     expect(body.text).toContain(
-      'replaceInFile({ path: "index.html", find: "cellDivt", replace: "cellDiv", occurrence: "all" })',
+      'replace_in_file({ path: "index.html", find: "cellDivt", replace: "cellDiv", occurrence: "all" })',
     );
   });
 
@@ -245,11 +245,11 @@ describe('postRuntimeFeedback', () => {
 
     const body = client.messageGezel.mock.calls[0]![1];
     expect(body.text).toContain('TICTACTOE_FULL_REWRITE');
-    expect(body.text).toContain('Your next tool call MUST be `writeFile`');
+    expect(body.text).toContain('Your next tool call MUST be `write_file`');
     expect(body.text).toContain('data-cell="0"');
     expect(body.text).toContain('data-cell="8"');
     expect(body.text).toContain('Do not rely on JavaScript to create the cells');
-    expect(body.text).toContain('do not call `validate`, `readFile`, `ask_user_question`');
+    expect(body.text).toContain('do not call `validate`, `read_file`, `ask_user_question`');
     expect(body.text).not.toContain('Call `validate');
   });
 
@@ -278,7 +278,7 @@ describe('postRuntimeFeedback', () => {
     expect(body.text).toContain('empty grid container');
     expect(body.text).toContain('<button class=\\"cell\\" data-cell=\\"0\\"');
     expect(body.text).toContain(
-      'replaceInFile({ path: "index.html", find: "<div class=\\"grid\\" id=\\"grid\\"></div>"',
+      'replace_in_file({ path: "index.html", find: "<div class=\\"grid\\" id=\\"grid\\"></div>"',
     );
     expect(body.text).toContain('Do not append another unrelated script fragment');
   });

@@ -114,10 +114,10 @@ describe('incident-postmortem objective grounding gate', () => {
       '# existing postmortem',
     );
 
-    expect(directive).toContain('appendToFile');
+    expect(directive).toContain('append_to_file');
     expect(directive).toContain('clears 7 KiB with headroom');
     expect(directive).toContain('at least 1500 substantive characters');
-    expect(directive).toContain('Do not call `writeFile`');
+    expect(directive).toContain('Do not call `write_file`');
   });
 
   it('combines length, grounding, and action repairs instead of starving later failures', () => {
@@ -143,13 +143,13 @@ ${FROZEN_NAMED_OWNER_ACTIONS.replaceAll('Phil Okeke', 'TBD')}`;
 
     expect(directive).toContain('INCIDENT POSTMORTEM COMBINED PATCH');
     expect(directive).toContain(failures.join(' | '));
-    expect(directive).toContain('`replaceInFile`');
-    expect(directive).toContain('`appendToFile`');
+    expect(directive).toContain('`replace_in_file`');
+    expect(directive).toContain('`append_to_file`');
     expect(directive).toContain('at least 2221 substantive evidence-backed characters');
     expect(directive).toContain('13% error peak and 99% saturation impact');
     expect(directive).toContain('Bertha Vargas first response and Mira Chen incident command');
     expect(directive).toContain('Complete every numbered file edit before replying');
-    expect(directive).toContain('Do not call `writeFile`');
+    expect(directive).toContain('Do not call `write_file`');
   });
 
   it('passes a substantive reference that recovers the critical evidence-pack facts', () => {

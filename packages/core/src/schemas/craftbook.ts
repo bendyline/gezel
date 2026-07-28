@@ -75,7 +75,7 @@ export type CraftbookBranch = z.infer<typeof CraftbookBranchSchema>;
  * runtime MAY advance the step WITHOUT the model calling `advance_task_step`
  * — the moment the named deliverable is observed (exists, clears `minBytes`,
  * and passes the optional `sniff`) at the end of the assignee's turn. This
- * exists because models reliably DO work (`writeFile`) but reliably DON'T
+ * exists because models reliably DO work (`write_file`) but reliably DON'T
  * call the meta-navigation tool, so step progression rides on the work
  * itself. Distinct from `onExit` (which only runs AFTER a model-driven
  * advance). Strictly opt-in — absent the field, advancement is unchanged.
@@ -101,8 +101,8 @@ export const AdvanceWhenSchema = z.object({
    * gate would fire on the very first turn because the file already exists
    * and clears `minBytes`, advancing past the step before any fix lands.
    * With it, the step holds until the model actually edits the file (a
-   * successful `writeFile`/`replaceInFile`/`appendToFile`/`applyPatch`/
-   * `insertAtMarker` targeting `file` this turn). The `sniff`/`minBytes`
+   * successful `write_file`/`replace_in_file`/`append_to_file`/`apply_patch`/
+   * `insert_at_marker` targeting `file` this turn). The `sniff`/`minBytes`
    * floor still applies on top. Absent → legacy "exists is enough".
    */
   requireChange: z.boolean().optional(),

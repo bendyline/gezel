@@ -361,7 +361,7 @@ describe('renderAvailableToolsBlock — compact mode (small/medium tier)', () =>
   it('adds workspace-vs-artifact guidance when both surfaces are present', () => {
     const out = renderAvailableToolsBlock({
       tools: [
-        { name: 'readFile', description: 'Read a workspace file.' },
+        { name: 'read_file', description: 'Read a workspace file.' },
         { name: 'read_artifact', description: 'Read an artifact.' },
         { name: 'write_artifact', description: 'Write an artifact.' },
       ],
@@ -369,13 +369,13 @@ describe('renderAvailableToolsBlock — compact mode (small/medium tier)', () =>
       providerName: 'mlx',
     });
     expect(out).toContain('### Workspace vs Artifacts');
-    expect(out).toContain('Workspace paths from "Workspace files" use `readFile`');
+    expect(out).toContain('Workspace paths from "Workspace files" use `read_file`');
     expect(out).toContain('Artifacts are a separate drawer');
     expect(out).toContain(
       '`write_artifact({ path: "packages/...", content: "..." })` does not edit the workspace',
     );
     // Do not introduce unavailable workspace-write tools into read-only roles.
-    expect(out).not.toContain('`writeFile`');
+    expect(out).not.toContain('`write_file`');
   });
 
   it('uses a shorter framing sentence on compact tiers', () => {

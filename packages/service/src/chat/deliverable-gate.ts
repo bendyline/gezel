@@ -57,11 +57,11 @@ export interface DeliverableGateResult {
  * coupling.
  */
 const WRITE_TOOL_NAMES: ReadonlySet<string> = new Set([
-  'writeFile',
-  'replaceInFile',
-  'appendToFile',
-  'applyPatch',
-  'insertAtMarker',
+  'write_file',
+  'replace_in_file',
+  'append_to_file',
+  'apply_patch',
+  'insert_at_marker',
 ]);
 
 /**

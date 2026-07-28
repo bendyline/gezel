@@ -115,7 +115,7 @@ export interface ToolActivity {
   videos?: ToolCallVideo[];
   /**
    * Unified diff describing the change a surgical-edit tool made
-   * (`replaceInFile`, `applyPatch`, `insertAtMarker`). When set, the
+   * (`replace_in_file`, `apply_patch`, `insert_at_marker`). When set, the
    * tool row gets a collapsible `<ToolDiffBlock>` underneath showing
    * the before/after with `+`/`-` line coloring.
    */
@@ -1066,7 +1066,7 @@ export interface StreamingBubbleProps {
   liveReasoning?: string;
   /**
    * Live tool-argument stream — the model is generating a structured
-   * tool call (typically a long `writeFile`) whose tokens never arrive
+   * tool call (typically a long `write_file`) whose tokens never arrive
    * as visible deltas. Rendered as a dimmed "working" block at the
    * bottom of the bubble, near the streaming caret, showing the tool
    * verb, the target path when one is parseable from the args head,
@@ -2630,13 +2630,13 @@ function LiveReasoning({ text }: { text: string }) {
 /** Friendly verb for the live tool-args block's label. */
 function toolArgsVerb(name: string): string {
   switch (name) {
-    case 'writeFile':
+    case 'write_file':
     case 'write_artifact':
     case 'write_document':
       return 'Writing';
-    case 'replaceInFile':
-    case 'applyPatch':
-    case 'insertAtMarker':
+    case 'replace_in_file':
+    case 'apply_patch':
+    case 'insert_at_marker':
       return 'Editing';
     case '':
       return 'Working';
@@ -2647,7 +2647,7 @@ function toolArgsVerb(name: string): string {
 
 /**
  * Pull a target path out of the head of a streaming tool-args JSON
- * fragment ("Writing index.html" beats "Writing — writeFile"). The
+ * fragment ("Writing index.html" beats "Writing — write_file"). The
  * head is captured before the tail cap scrolls the opening away; a
  * mid-stream fragment is not valid JSON, so this is a regex sniff,
  * not a parse.
@@ -2660,7 +2660,7 @@ function extractToolArgsPath(head: string): string | null {
 /**
  * Live view of a structured tool call being generated — the "what are
  * those tokens?" answer for the long silent stretch of a streamed
- * `writeFile`, where argument tokens never appear as visible deltas
+ * `write_file`, where argument tokens never appear as visible deltas
  * and the only other signal is the climbing wire-pulse counter.
  * Same dimmed-live-block pattern as {@link LiveReasoning}: always
  * open, auto-scrolled to the tail, torn down when the real tool row

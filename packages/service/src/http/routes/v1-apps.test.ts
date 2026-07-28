@@ -161,6 +161,32 @@ describe('POST /v1/apps/register', () => {
     expect(body.error).toBe('invalid_scope');
     expect(body.hint).toContain('workspace:write');
   });
+
+  it('accepts the user-approved CLI control scope', async () => {
+    const res = await v1('POST', '/v1/apps/register', {
+      body: { appId: 'gezel-cli', appName: 'Gezel CLI', scopes: ['cli'] },
+    });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { grantRequestId: string; status: string };
+    expect(body.status).toBe('pending');
+    expect(body.grantRequestId).toBeTruthy();
+
+    expect(
+      (
+        await v1('POST', `/v1/apps/grant/${body.grantRequestId}/approve`, {
+          token: uiToken,
+        })
+      ).status,
+    ).toBe(200);
+    const approved = await v1('GET', `/v1/apps/grant/${body.grantRequestId}`);
+    const grant = (await approved.json()) as { status: string; token: string };
+    expect(grant.status).toBe('approved');
+
+    // The approved CLI may use the product API but is not a first-party
+    // desktop credential and cannot administer other app grants.
+    expect((await v1('GET', '/api/config', { token: grant.token })).status).toBe(200);
+    expect((await v1('GET', '/v1/apps', { token: grant.token })).status).toBe(403);
+  });
 });
 
 describe('GET /v1/apps/grant/:id', () => {

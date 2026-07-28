@@ -51,15 +51,22 @@ import type {
   TrialStatus,
 } from './types.ts';
 
+// Legacy camelCase spellings kept for scoring pre-rename run dirs.
 const COMPLETED_REPAIR_MUTATION_TOOLS = new Set([
-  'writeFile',
+  'write_file',
   'write_artifact',
+  'replace_in_file',
+  'replace_lines',
+  'apply_patch',
+  'append_to_file',
+  'insert_at_marker',
+  'copy_artifact_to_workspace',
+  'writeFile',
   'replaceInFile',
   'replaceLines',
   'applyPatch',
   'appendToFile',
   'insertAtMarker',
-  'copy_artifact_to_workspace',
 ]);
 
 /**
@@ -531,6 +538,7 @@ export async function runTrial(scenario: EvalScenario, opts: TrialOptions): Prom
     ...(forceBehaviors.length > 0 ? { forceBehaviors } : {}),
     ...(opts.removeBehaviors ? { removeBehaviors: opts.removeBehaviors } : {}),
     ...(opts.craftbookDocFormat ? { craftbookDocFormat: opts.craftbookDocFormat } : {}),
+    ...(opts.toolNaming ? { toolNaming: opts.toolNaming } : {}),
     ...(opts.disableBackgroundEnrich ? { disableBackgroundEnrich: true } : {}),
     ...(opts.enrichModelId ? { enrichModelId: opts.enrichModelId } : {}),
     ...(opts.enableModelRouting ? { enableModelRouting: true } : {}),
@@ -959,6 +967,8 @@ export function evalDaemonEnvForTrial(opts: {
   removeBehaviors?: string[];
   /** See {@link TrialOptions.craftbookDocFormat} — `GEZEL_CRAFTBOOK_DOC_FORMAT`. */
   craftbookDocFormat?: 'json' | 'md';
+  /** See {@link TrialOptions.toolNaming} — `GEZEL_MCP_TOOL_NAMING`. */
+  toolNaming?: 'snake' | 'legacy';
   /** See {@link TrialOptions.disableBackgroundEnrich}. */
   disableBackgroundEnrich?: boolean;
   /** See {@link TrialOptions.enrichModelId} — `GEZEL_ENRICH_MODEL`. */
@@ -991,6 +1001,9 @@ export function evalDaemonEnvForTrial(opts: {
       ? { GEZEL_PROMPT_BREAKDOWN: process.env.GEZEL_PROMPT_BREAKDOWN }
       : {}),
     ...(opts.craftbookDocFormat ? { GEZEL_CRAFTBOOK_DOC_FORMAT: opts.craftbookDocFormat } : {}),
+    // Explicit for BOTH arms of the naming A/B so each daemon.log records
+    // which arm produced it (`snake` is behaviorally the same as unset).
+    ...(opts.toolNaming ? { GEZEL_MCP_TOOL_NAMING: opts.toolNaming } : {}),
     ...(opts.launch?.extraEnv ?? {}),
     ...behaviorEnvForTrial(opts),
   };
@@ -1431,16 +1444,16 @@ export async function pollUntilDone(
   //   - FAST path: 8 min plateau + ≥3 artifact-WRITE calls (catches A —
   //     stubborn-rewriter re-emitting the same failing shape). Gated on
   //     writes, NOT total tool calls: a held sniff key with climbing
-  //     readFile calls is research toward the next write (any real write
+  //     read_file calls is research toward the next write (any real write
   //     moves the bytes/score and resets the key), not a rewrite loop.
   //     The old total-tool-call gate false-killed gemma4-31b squisq-review
-  // (twice) on 19 readFile research calls.
+  // (twice) on 19 read_file research calls.
   //   - LONG path: 12 min plateau AND the team has gone idle (≤4 new
   //     tool calls) (catches B — stuck-after-nudge; an idled team has
   //     nothing left to deliver). A team still CLIMBING tool calls is
   // actively working — gemma4-31b squisq-review lost a
   //     trial when the un-gated LONG path fired at 12m on a reviewer with
-  //     12+ climbing readFile calls, before the prompt's own 25m "start
+  //     12+ climbing read_file calls, before the prompt's own 25m "start
   //     writing" mark. The idle gate keeps mode B (the Sonnet tankcombat
   //     idle-after-nudge case had FLAT tool calls).
   //   - STALL path: 18 min plateau on a scored artifact regardless of
@@ -1463,7 +1476,7 @@ export async function pollUntilDone(
   // loop. The old total-tool-call gate (15) mistook read-only research
   // for rewriting and false-killed squisq-review (twice: a
   // 4806B/5cit and a 4088B/3cit draft, each still being researched to
-  // completion when 19 readFile calls tripped the 8-min FAST path).
+  // completion when 19 read_file calls tripped the 8-min FAST path).
   const RETRY_LOOP_FAST_WRITE_THRESHOLD = 3;
   const RETRY_LOOP_LONG_WINDOW_MS = 12 * 60 * 1000;
   // LONG path only fires when the team has effectively stopped issuing
@@ -1490,7 +1503,7 @@ export async function pollUntilDone(
   // Pre-trigger nudge fires at 80% of the fast-path window once the team
   // has been busy (total tool calls, read OR write). Catches "team busy
   // reading but never writing the deliverable" — qwen3.6 squisq-review
-  // iter2: 19 tool calls of readFile/grep_artifact, never a
+  // iter2: 19 tool calls of read_file/grep_artifact, never a
   // write_artifact for the review.md, sniff stuck at score=0 the whole
   // time. Deliberately keyed on TOTAL tool calls (unlike the FAST path's
   // write gate) — read-heavy churn is exactly when the "stop reading,
@@ -1865,7 +1878,7 @@ export async function pollUntilDone(
         // recently-active downstream session and tell it to stop reading
         // and write the deliverable. Catches plan-but-never-execute
         // without waiting for the harness to give up — squisq-review iter2
-        // (qwen3.6) hit the retry-loop at 19 tool calls, all readFile/
+        // (qwen3.6) hit the retry-loop at 19 tool calls, all read_file/
         // grep_artifact, never a write_artifact for the actual review.
         // Same target-picking logic as the soft-timeout nudge, different
         // trigger condition. One-shot, independent of that nudge's flag.
@@ -1903,8 +1916,8 @@ export async function pollUntilDone(
             const filePathClause = filePath ? ` \`${filePath}\`` : '';
             const writeCall = formatImmediateWriteFileCall(filePath);
             const nudge = artifactExists
-              ? `Direct kick from the eval harness: your deliverable file${filePathClause} EXISTS but still fails the latest \`[scenario check]\`. Treat that check like a failing test: fix the specific error it names, preserve working behavior, and make the smallest targeted code/content edit that clears the gate. Do NOT recreate the file from scratch and do NOT reply that you already wrote it. If the check names a runtime/command failure, repair the file that caused it and verify with the available execution tool when practical. Your next tool call must be an edit (\`replaceInFile\`, \`appendToFile\`, \`applyPatch\`, or \`writeFile\`); do not call more read-only tools until after that edit.`
-              : `Direct kick from the eval harness: you've been reading and exploring for a while but the deliverable file hasn't reached its expected path yet${filePath ? ` (\`${filePath}\`)` : ''}. Stop reading. Do not end your turn until \`writeFile\` has created the workspace file. Your next tool call MUST be \`${writeCall}\` creating the actual deliverable file${filePath ? ` at \`${filePath}\`` : ' (e.g. `review.md`, `index.html`)'} with whatever you can write now — a stub is better than nothing. You can refine it on the next turn. Do not use \`write_artifact\` for source or app files, and do not call any more read-only tools until the workspace file exists.`;
+              ? `Direct kick from the eval harness: your deliverable file${filePathClause} EXISTS but still fails the latest \`[scenario check]\`. Treat that check like a failing test: fix the specific error it names, preserve working behavior, and make the smallest targeted code/content edit that clears the gate. Do NOT recreate the file from scratch and do NOT reply that you already wrote it. If the check names a runtime/command failure, repair the file that caused it and verify with the available execution tool when practical. Your next tool call must be an edit (\`replace_in_file\`, \`append_to_file\`, \`apply_patch\`, or \`write_file\`); do not call more read-only tools until after that edit.`
+              : `Direct kick from the eval harness: you've been reading and exploring for a while but the deliverable file hasn't reached its expected path yet${filePath ? ` (\`${filePath}\`)` : ''}. Stop reading. Do not end your turn until \`write_file\` has created the workspace file. Your next tool call MUST be \`${writeCall}\` creating the actual deliverable file${filePath ? ` at \`${filePath}\`` : ' (e.g. `review.md`, `index.html`)'} with whatever you can write now — a stub is better than nothing. You can refine it on the next turn. Do not use \`write_artifact\` for source or app files, and do not call any more read-only tools until the workspace file exists.`;
             if (downstream) {
               await args.client.messageGezel(targetId, {
                 fromGezelId: args.meesterId,
@@ -1938,7 +1951,7 @@ export async function pollUntilDone(
         // through that gate. Without this check, the 8-min fast path
         // guillotines a legitimate research phase mid-stride: gemma4-31b
         // squisq-review lost 2/3 trials this way — each
-        // killed at exactly 8m with 15 genuine readFile calls and
+        // killed at exactly 8m with 15 genuine read_file calls and
         // review.md never yet written, while the only surviving trial
         // wrote it at ~9m.
         //
@@ -1950,7 +1963,7 @@ export async function pollUntilDone(
         // team has gone quiet (≤RETRY_LOOP_LONG_IDLE_TOOL_MAX new calls),
         // while a reviewer gathering citations keeps climbing. Without the
         // idle gate the LONG path guillotined gemma4-31b squisq-review
-        // at 12m with 12+ climbing readFile calls — the exact
+        // at 12m with 12+ climbing read_file calls — the exact
         // research the ≥5-citation scenario requires, and well before the
         // prompt's own "start writing around 25m" mark.
         const artifactHasScored = sniffArtifactHasScored(latestSniff, scoredSniffKeys);
@@ -2125,7 +2138,7 @@ export async function captureFinalState(args: {
   // Snapshot every project's artifacts/ AND workspace/ dir, plus the
   // per-project history.jsonl. Using fs.cp directly is much cheaper than
   // walking the list APIs + fetching blobs over HTTP. The developer
-  // template writes to workspace/ via writeFile by default — without a
+  // template writes to workspace/ via write_file by default — without a
   // workspace snapshot, "Vivian wrote a file" claims can't be verified.
   try {
     const { projects } = await client.listProjects();
@@ -2432,7 +2445,7 @@ export function buildPoisonedSessionRecoveryMessage(args: {
   const taskGraphLine = taskGraphPoisonedSessionRecoveryLine(sniff?.failReason);
   const explicitLineEditFailure =
     !!error &&
-    /(?:\b(?:replaceLines|replaceInFile|applyPatch)\b.{0,160}\b(?:fail(?:ed|ure)?|reject(?:ed|ion)?|invalid|atomic)\b|\b(?:fail(?:ed|ure)?|reject(?:ed|ion)?|invalid|atomic)\b.{0,160}\b(?:replaceLines|replaceInFile|applyPatch)\b)/i.test(
+    /(?:\b(?:replace_lines|replace_in_file|apply_patch)\b.{0,160}\b(?:fail(?:ed|ure)?|reject(?:ed|ion)?|invalid|atomic)\b|\b(?:fail(?:ed|ure)?|reject(?:ed|ion)?|invalid|atomic)\b.{0,160}\b(?:replace_lines|replace_in_file|apply_patch)\b)/i.test(
       error,
     );
   const existingCheckedFile = !!filePath && !!sniff && sniff.bytes > 0;
@@ -2440,14 +2453,14 @@ export function buildPoisonedSessionRecoveryMessage(args: {
     taskGraphLine ??
     (filePath
       ? explicitLineEditFailure || !existingCheckedFile
-        ? `Your next tool call should repair \`${filePath}\`. ${explicitLineEditFailure ? 'The prior line-based edit was explicitly rejected, so change strategy: ' : ''}use \`writeFile\` to write a complete corrected version at exactly \`${filePath}\`.`
-        : `Your next tool call should make the smallest targeted repair in \`${filePath}\` using \`replaceInFile\` or \`replaceLines\` for the latest concrete validator failure. Preserve the file's existing public exports, signatures, state shape, and already-passing behavior. If you need exact source text, read \`${filePath}\` once, then patch only the failing logic. Do not replace the complete file.`
-      : 'Your next tool call should write or repair the requested workspace deliverable. Prefer `writeFile` for recovery after a failed line-based edit.');
+        ? `Your next tool call should repair \`${filePath}\`. ${explicitLineEditFailure ? 'The prior line-based edit was explicitly rejected, so change strategy: ' : ''}use \`write_file\` to write a complete corrected version at exactly \`${filePath}\`.`
+        : `Your next tool call should make the smallest targeted repair in \`${filePath}\` using \`replace_in_file\` or \`replace_lines\` for the latest concrete validator failure. Preserve the file's existing public exports, signatures, state shape, and already-passing behavior. If you need exact source text, read \`${filePath}\` once, then patch only the failing logic. Do not replace the complete file.`
+      : 'Your next tool call should write or repair the requested workspace deliverable. Prefer `write_file` for recovery after a failed line-based edit.');
   const closingLine = taskGraphLine
     ? 'Do not answer only in prose. Make the named task-tool calls, then stop with a short status note.'
     : existingCheckedFile && !explicitLineEditFailure
       ? 'Do not answer only in prose. Make one concrete targeted workspace edit, then stop with a short status note.'
-      : 'Do not answer only in prose. Do not retry the same malformed `replaceLines` or `replaceInFile` call. Make one concrete workspace edit, then stop with a short status note.';
+      : 'Do not answer only in prose. Do not retry the same malformed `replace_lines` or `replace_in_file` call. Make one concrete workspace edit, then stop with a short status note.';
   return [
     '[eval recovery]',
     'Your previous turn aborted, so the scheduler stopped automatic follow-up for this project.',
@@ -2484,7 +2497,7 @@ export function taskGraphPoisonedSessionRecoveryLine(failReason?: string): strin
     'This is a task-graph repair, not a workspace-file repair.',
     `Your next tool calls MUST attach gates to the existing ungated build steps on draft ${draftRef}:`,
     calls,
-    'Do not call `set_task_status`, `activate_task`, `writeFile`, `add_task_step`, or `message_gezel` for this recovery.',
+    'Do not call `set_task_status`, `activate_task`, `write_file`, `add_task_step`, or `message_gezel` for this recovery.',
   ].join('\n');
 }
 
@@ -2532,7 +2545,7 @@ export function recoveryFilePathForSniff(
 
 function formatImmediateWriteFileCall(filePath: string | null): string {
   const path = filePath ? JSON.stringify(filePath) : '"<workspace-relative-file>"';
-  return `writeFile({ path: ${path}, content: <the full deliverable contents> })`;
+  return `write_file({ path: ${path}, content: <the full deliverable contents> })`;
 }
 
 export function buildReEngageNudge(args: {
@@ -2556,7 +2569,7 @@ export function buildReEngageNudge(args: {
     if (downstream) {
       return {
         filePath,
-        text: `Direct kick from the eval harness: the existing checked workspace file${path} is on disk (${sniff?.bytes ?? 0} bytes) but has not passed yet.${failureText} Treat that failure like a failing test: edit the existing file in place, preserve behavior that already passes, and make the smallest targeted change that clears it. Do NOT recreate the file or replace it with a new draft. Your next tool call must be an edit (prefer \`replaceInFile\`, \`replaceLines\`, or \`applyPatch\`; use \`writeFile\` only if a complete rewrite is explicitly required). Do not answer only in prose.`,
+        text: `Direct kick from the eval harness: the existing checked workspace file${path} is on disk (${sniff?.bytes ?? 0} bytes) but has not passed yet.${failureText} Treat that failure like a failing test: edit the existing file in place, preserve behavior that already passes, and make the smallest targeted change that clears it. Do NOT recreate the file or replace it with a new draft. Your next tool call must be an edit (prefer \`replace_in_file\`, \`replace_lines\`, or \`apply_patch\`; use \`write_file\` only if a complete rewrite is explicitly required). Do not answer only in prose.`,
       };
     }
     return {
@@ -2576,7 +2589,7 @@ export function buildReEngageNudge(args: {
   const writeCall = formatImmediateWriteFileCall(filePath);
   return {
     filePath,
-    text: `Direct kick from the eval harness: the deliverable hasn't landed in the project's workspace yet${filePathClause}. Do not write more planning documents, do not ask for confirmation. Do not end your turn until \`writeFile\` has landed the workspace file. Your next tool call MUST be \`${writeCall}\` creating the actual deliverable file${filePath ? ` at \`${filePath}\`` : ' (e.g. `index.html`)'} in the project's workspace. Use \`copy_artifact_to_workspace\` only for binary assets that already exist in artifacts. Do not use \`write_artifact\` for source or app files.`,
+    text: `Direct kick from the eval harness: the deliverable hasn't landed in the project's workspace yet${filePathClause}. Do not write more planning documents, do not ask for confirmation. Do not end your turn until \`write_file\` has landed the workspace file. Your next tool call MUST be \`${writeCall}\` creating the actual deliverable file${filePath ? ` at \`${filePath}\`` : ' (e.g. `index.html`)'} in the project's workspace. Use \`copy_artifact_to_workspace\` only for binary assets that already exist in artifacts. Do not use \`write_artifact\` for source or app files.`,
   };
 }
 

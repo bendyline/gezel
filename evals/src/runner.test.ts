@@ -48,17 +48,17 @@ describe('completed repair-action snapshots', () => {
     const snapshot = completedRepairActionSnapshot(
       {
         messages: [
-          { role: 'user', toolCalls: [{ name: 'writeFile', success: true }] },
-          { role: 'assistant', toolCalls: [{ name: 'readFile', success: true }] },
-          { role: 'assistant', toolCalls: [{ name: 'replaceInFile', success: false }] },
+          { role: 'user', toolCalls: [{ name: 'write_file', success: true }] },
+          { role: 'assistant', toolCalls: [{ name: 'read_file', success: true }] },
+          { role: 'assistant', toolCalls: [{ name: 'replace_in_file', success: false }] },
           {
             role: 'assistant',
             toolCalls: [
-              { name: 'replaceLines', success: false },
-              { name: 'writeFile', success: true },
+              { name: 'replace_lines', success: false },
+              { name: 'write_file', success: true },
             ],
           },
-          { role: 'assistant', toolCalls: [{ name: 'applyPatch', success: true }] },
+          { role: 'assistant', toolCalls: [{ name: 'apply_patch', success: true }] },
         ],
       },
       false,
@@ -71,7 +71,7 @@ describe('completed repair-action snapshots', () => {
     expect(
       completedRepairActionSnapshot(
         {
-          messages: [{ role: 'assistant', toolCalls: [{ name: 'appendToFile', success: true }] }],
+          messages: [{ role: 'assistant', toolCalls: [{ name: 'append_to_file', success: true }] }],
         },
         true,
       ),
@@ -459,7 +459,7 @@ describe('poisoned-session recovery', () => {
 
   it('builds a direct edit recovery prompt for line-edit aborts', () => {
     const message = buildPoisonedSessionRecoveryMessage({
-      lastTurnError: '`replaceLines` failed 5 times in a row',
+      lastTurnError: '`replace_lines` failed 5 times in a row',
       filePath: 'server.mjs',
       sniff: {
         key: 'server.mjs',
@@ -470,11 +470,11 @@ describe('poisoned-session recovery', () => {
     });
 
     expect(message).toContain('[eval recovery]');
-    expect(message).toContain('replaceLines');
+    expect(message).toContain('replace_lines');
     expect(message).toContain('score 6');
     expect(message).toContain('pagination.limit');
     expect(message).toContain('repair `server.mjs`');
-    expect(message).toContain('use `writeFile`');
+    expect(message).toContain('use `write_file`');
     expect(message).toContain('Do not answer only in prose');
   });
 
@@ -492,12 +492,12 @@ describe('poisoned-session recovery', () => {
     });
 
     expect(message).toContain('smallest targeted repair');
-    expect(message).toContain('`replaceInFile` or `replaceLines`');
+    expect(message).toContain('`replace_in_file` or `replace_lines`');
     expect(message).toContain(
       "Preserve the file's existing public exports, signatures, state shape",
     );
     expect(message).toContain('Do not replace the complete file');
-    expect(message).not.toContain('`writeFile`');
+    expect(message).not.toContain('`write_file`');
   });
 
   it('uses a complete write when the checked file is missing', () => {
@@ -507,7 +507,7 @@ describe('poisoned-session recovery', () => {
       sniff: { key: 'source-repair', score: 0, bytes: 0, failReason: 'missing deliverable' },
     });
 
-    expect(message).toContain('use `writeFile` to write a complete corrected version');
+    expect(message).toContain('use `write_file` to write a complete corrected version');
     expect(message).not.toContain('smallest targeted repair');
   });
 
@@ -534,7 +534,7 @@ describe('poisoned-session recovery', () => {
     );
     expect(message).toContain('Do not call `set_task_status`');
     expect(message).not.toContain('workspace deliverable');
-    expect(message).not.toContain('writeFile` for recovery');
+    expect(message).not.toContain('write_file` for recovery');
   });
 
   it('infers a concrete recovery file from generic scenario fail reasons', () => {
@@ -847,7 +847,7 @@ describe('re-engage nudge state', () => {
     expect(nudge.text).toContain('existing checked workspace file');
     expect(nudge.text).toContain('1193 bytes');
     expect(nudge.text).toContain('CASE 3 expected a4 got a5');
-    expect(nudge.text).toContain('replaceInFile');
+    expect(nudge.text).toContain('replace_in_file');
     expect(nudge.text).toContain('Do NOT recreate');
     expect(nudge.text).not.toContain("deliverable hasn't landed");
     expect(nudge.text).not.toContain('creating the actual deliverable');
@@ -860,7 +860,7 @@ describe('re-engage nudge state', () => {
     });
 
     expect(nudge.text).toContain("deliverable hasn't landed");
-    expect(nudge.text).toContain('writeFile');
+    expect(nudge.text).toContain('write_file');
     expect(nudge.text).toContain('creating the actual deliverable');
   });
 });

@@ -24,7 +24,7 @@ import type { EvalContext, EvalScenario, SuccessCheckResult } from '../types.ts'
  * The "substantively the same shape" check is forgiving — we don't
  * forbid rewriting (a small model might genuinely find that easier).
  * What we DO want to surface in the postmortem: did the model read
- * before writing? The score-trial counts readFile/grep_artifact calls
+ * before writing? The score-trial counts read_file/grep_artifact calls
  * against this scenario's project; lots of writes + zero reads is the
  * tell-tale "I'll just regenerate from scratch" anti-pattern.
  */
@@ -151,10 +151,10 @@ async function setup({ client, log }: EvalContext): Promise<void> {
     message:
       'Please fix the bug in `index.html` in this project — the click counter does not ' +
       'increment when the button is clicked. ' +
-      'First call `readFile(path: "index.html")` to read it — paths are relative to ' +
+      'First call `read_file(path: "index.html")` to read it — paths are relative to ' +
       'the workspace root, so do NOT use "workspace/index.html" or you will get 404. ' +
       'Then identify the JavaScript syntax error and edit the file in place via ' +
-      '`writeFile`. Do not rewrite the file from scratch; the fix should be a single-' +
+      '`write_file`. Do not rewrite the file from scratch; the fix should be a single-' +
       'line correction. Stay in this project — do not create a new one.',
     projectId,
   });
@@ -197,7 +197,7 @@ export const selfCorrectionScenario: EvalScenario = {
   // 12 min — the 9b hit the old ceiling while "forward progress kept
   // happening" (a throughput artifact, MLX matrix). The diagnostic
   // is preserved AND sharpened: a model that can't decide to read makes NO
-  // progress and now fails fast at the 10-min watchdog (the readFile-call
+  // progress and now fails fast at the 10-min watchdog (the read_file-call
   // count is still the tell), while a model that's actually iterating gets the
   // headroom to close.
   timeoutMs: 25 * 60_000,

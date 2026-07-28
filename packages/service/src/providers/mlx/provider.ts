@@ -129,27 +129,27 @@ const DEFAULT_NUM_CTX = 65_536;
 // matching llama.cpp's immediate-write path; user/model tuning may still grant
 // more. This is intentionally not a cap.
 const FILE_WRITE_MIN_TOKENS = 4_096;
-// Max automatic appendToFile continuations after an immediate-write
+// Max automatic append_to_file continuations after an immediate-write
 // truncation before we bail with the partial. Each continuation is one
 // bounded turn that writes the next chunk — comfortably above any
 // single-file scenario deliverable while preventing a runaway. Replaces
 // the old "bail after one truncated write and hope the next turn appends"
-// path: the weak model had no appendToFile in its surface and just rambled
+// path: the weak model had no append_to_file in its surface and just rambled
 // instead (wild-caught tankcombat: a 5.8 KB game truncated at the former
 // short output budget and the model never continued it).
 const MAX_IMMEDIATE_WRITE_CONTINUATIONS = 6;
-// Minimal `appendToFile` surfaced ONLY during a write-continuation. The
-// base immediate-write surface is writeFile-only; on truncation we add
+// Minimal `append_to_file` surfaced ONLY during a write-continuation. The
+// base immediate-write surface is write_file-only; on truncation we add
 // this so the model can emit the file's missing tail instead of
 // re-writing the whole thing (which would just truncate again).
 // Constructed inline so it doesn't depend on the role-filtered bridge
-// surface, which deliberately hides appendToFile from builders.
+// surface, which deliberately hides append_to_file from builders.
 const APPEND_TO_FILE_CONTINUATION_TOOL: ChatCompletionTool = {
   type: 'function',
   function: {
-    name: 'appendToFile',
+    name: 'append_to_file',
     description:
-      'Append text to the END of an existing workspace file. Use this to write the remaining tail of a file whose previous writeFile was truncated mid-content. Do not repeat content already on disk — start exactly where the file currently ends.',
+      'Append text to the END of an existing workspace file. Use this to write the remaining tail of a file whose previous write_file was truncated mid-content. Do not repeat content already on disk — start exactly where the file currently ends.',
     parameters: {
       type: 'object',
       properties: {
@@ -164,7 +164,7 @@ const APPEND_TO_FILE_CONTINUATION_TOOL: ChatCompletionTool = {
   },
 };
 const IMMEDIATE_FILE_WRITE_PROMPT_SUFFIX =
-  '\n\n[Local-model rescue: make this a compact first pass. Your entire visible output should be one `writeFile` tool call. Prioritize a complete, runnable file over decorative extras; include every requested behavior and any named asset path. Do not include planning prose.]';
+  '\n\n[Local-model rescue: make this a compact first pass. Your entire visible output should be one `write_file` tool call. Prioritize a complete, runnable file over decorative extras; include every requested behavior and any named asset path. Do not include planning prose.]';
 
 const log = createLogger('mlx');
 /**
@@ -238,11 +238,11 @@ function isImmediateFileWriteTurn(
   tools: ChatCompletionTool[] | undefined,
 ): boolean {
   if (!tools || tools.length !== 1) return false;
-  if (chatCompletionToolName(tools[0]!) !== 'writeFile') return false;
+  if (chatCompletionToolName(tools[0]!) !== 'write_file') return false;
   return (
     prompt.includes('There is still **no `index.html`** in the workspace') ||
-    prompt.includes('Do not end your turn until `writeFile`') ||
-    prompt.includes('writeFile({ path:')
+    prompt.includes('Do not end your turn until `write_file`') ||
+    prompt.includes('write_file({ path:')
   );
 }
 
@@ -1080,10 +1080,10 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
     // an existing file, so a repeated source-write failure should steer
     // toward a targeted patch rather than "re-emit the whole file."
     const surgicalEditsAvailable =
-      knownToolNames.has('replaceInFile') ||
-      knownToolNames.has('insertAtMarker') ||
-      knownToolNames.has('replaceLines') ||
-      knownToolNames.has('appendToFile');
+      knownToolNames.has('replace_in_file') ||
+      knownToolNames.has('insert_at_marker') ||
+      knownToolNames.has('replace_lines') ||
+      knownToolNames.has('append_to_file');
     // Delegation tools on the roster ⇒ repeated edit failures can hand the
     // file to a more capable model instead of thrashing to a plain abort.
     const delegationAvailable = [...knownToolNames].some((n) => n.startsWith('delegate_'));
@@ -1098,9 +1098,9 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
     // nudge already fired once) and end the turn instead of apology-looping.
     let lastBadCallSig: string | null = null;
     // Auto-continuation state for truncated immediate-writes. When an
-    // immediate-write `writeFile` is EOS-flushed (file larger than the
+    // immediate-write `write_file` is EOS-flushed (file larger than the
     // per-turn token cap), we keep the turn alive — surfacing
-    // `appendToFile` and looping — until the model writes the tail
+    // `append_to_file` and looping — until the model writes the tail
     // without truncating, or we hit MAX_IMMEDIATE_WRITE_CONTINUATIONS.
     let writeContinuationActive = false;
     let writeContinuations = 0;
@@ -1112,9 +1112,9 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
     const failureTracker = new ToolFailureTracker({ surgicalEditsAvailable, delegationAvailable });
     // Per-turn same-(name, args) repeat tracker. Catches the
     // "narrative spinning" loop where the model re-reads the same
-    // files (read_task_notes, readFile, etc.) iteration after
+    // files (read_task_notes, read_file, etc.) iteration after
     // iteration, narrating "let me plan" prose between each call,
-    // never reaching writeFile. See ToolRepeatTracker docstring for
+    // never reaching write_file. See ToolRepeatTracker docstring for
     // the threshold rationale.
     const repeatTracker = new ToolRepeatTracker();
     const deliverableReadPaceTracker = DeliverableReadPaceTracker.fromUserText(prompt);
@@ -1266,7 +1266,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
           body.top_p = 0.8;
           setChatTemplateKwarg(body, 'enable_thinking', false);
           log.debug(
-            `turn#${seq}.${turn} immediate-write mode: writeFile-only surface, thinking disabled, max_tokens=${body.max_tokens}`,
+            `turn#${seq}.${turn} immediate-write mode: write_file-only surface, thinking disabled, max_tokens=${body.max_tokens}`,
           );
         }
         if (
@@ -1296,12 +1296,12 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
               `~${Math.round(serialized.length / 4)} tok (${serialized.length} ch). Largest:\n${top}`,
           );
         }
-        // Write-continuation: add `appendToFile` to the surface so the
+        // Write-continuation: add `append_to_file` to the surface so the
         // model can finish a truncated file by appending its tail. Only
         // active after an immediate-write truncation; the base surface
-        // stays writeFile-only so the FIRST write is still focused.
+        // stays write_file-only so the FIRST write is still focused.
         if (writeContinuationActive && Array.isArray(body.tools)) {
-          if (!body.tools.some((t) => chatCompletionToolName(t) === 'appendToFile')) {
+          if (!body.tools.some((t) => chatCompletionToolName(t) === 'append_to_file')) {
             body.tools = [...body.tools, APPEND_TO_FILE_CONTINUATION_TOOL];
           }
         }
@@ -1569,7 +1569,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
         // ramble detector aborts a turn with NO recognizable tool-call
         // markup but the buffered prose DOES contain a fenced code
         // block (the "Here's the file: ```html …```" pattern small
-        // models drift into instead of calling writeFile), we promote
+        // models drift into instead of calling write_file), we promote
         // each block to a synthesized `write_artifact` call. The
         // accumulator below lives outside the try/catch so the post-
         // exit merge can include it alongside the other salvage
@@ -1810,7 +1810,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
                 // fenced blocks instead of calling the write tool.
                 // Promote each fenced block to a synthesized write call.
                 //
-                // Prefer `writeFile`: a salvaged fenced block is source
+                // Prefer `write_file`: a salvaged fenced block is source
                 // the user ships, which belongs in the workspace, not
                 // the artifacts drawer — the abort copy itself says
                 // "don't save source files with write_artifact." Fall
@@ -1819,7 +1819,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
                 // Either way, gate on the chosen tool being wired —
                 // fabricating a call to a tool that doesn't exist would
                 // just trip the validate-ids wrapper. Wild-caught
-                // (qwen3.6 consultation): a writeFile-only
+                // (qwen3.6 consultation): a write_file-only
                 // Builder role rambled the HTML in chat, but this gate
                 // checked ONLY `write_artifact` and skipped salvage,
                 // so the whole turn (and the drafted file) was thrown
@@ -1827,8 +1827,8 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
                 // shape, so the synthesized args are identical. Only
                 // fires when there's no other salvageable signal (the
                 // structured markup branch above handled the easy cases).
-                const salvageToolName = knownToolNames.has('writeFile')
-                  ? 'writeFile'
+                const salvageToolName = knownToolNames.has('write_file')
+                  ? 'write_file'
                   : knownToolNames.has('write_artifact')
                     ? 'write_artifact'
                     : null;
@@ -1871,7 +1871,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
                     `turn#${seq}.${turn} ramble-no-salvage preview head=${JSON.stringify(head)} tail=${JSON.stringify(tail)}`,
                   );
                   throw new Error(
-                    `[Mac AI] aborting — the gezel emitted ${turnContent.length} characters of prose this turn without calling any action tool. Stop planning. Your next message must START with a single tool call — or, if the work is genuinely finished and nothing is left to do, be ONE short sentence saying so and nothing else. If shipping source or project files and \`writeFile\` is in your tool list, call it NOW with the full file contents — no preamble, no plan. If you lack workspace write access, start with a handoff tool or \`ask_user_question\` instead. Do not save source files with \`write_artifact\`; artifacts are for plans/scratch.`,
+                    `[Mac AI] aborting — the gezel emitted ${turnContent.length} characters of prose this turn without calling any action tool. Stop planning. Your next message must START with a single tool call — or, if the work is genuinely finished and nothing is left to do, be ONE short sentence saying so and nothing else. If shipping source or project files and \`write_file\` is in your tool list, call it NOW with the full file contents — no preamble, no plan. If you lack workspace write access, start with a handoff tool or \`ask_user_question\` instead. Do not save source files with \`write_artifact\`; artifacts are for plans/scratch.`,
                   );
                 }
               }
@@ -1945,7 +1945,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
         // was flagged `truncated` by the lenient Hermes parser. The
         // tool-execution loop reads this to append an auto-
         // continuation hint to the corresponding tool result, so the
-        // model knows the partial writeFile landed and can issue a
+        // model knows the partial write_file landed and can issue a
         // follow-up with the remaining bytes.
         const truncatedCallIds = new Set<string>();
 
@@ -1997,9 +1997,9 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
             if (eosFlushedIndices.has(bodyIdx)) {
               const args = parsed.arguments;
               const isWriteShaped =
-                parsed.name === 'writeFile' ||
+                parsed.name === 'write_file' ||
                 parsed.name === 'write_artifact' ||
-                parsed.name === 'appendToFile';
+                parsed.name === 'append_to_file';
               if (
                 isWriteShaped &&
                 typeof args.content === 'string' &&
@@ -2174,7 +2174,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
         ) {
           let hermesSpans = findHermesFunctionToolCallSpans(turnContent, knownToolNames);
           if (hermesSpans.length === 0 && /<function=/i.test(turnContent)) {
-            // Streaming-truncated case (Qwen 3.6 27B writeFile bodies
+            // Streaming-truncated case (Qwen 3.6 27B write_file bodies
             // that exceed max_tokens): the strict regex needs
             // `</parameter>` + `</function>` closers, the lenient
             // parser accepts the open-only shape and extends the last
@@ -2310,12 +2310,12 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
           }
         }
         // Truncation-with-partial-args salvage. When the model started
-        // a write-shaped call (`writeFile`, `write_artifact`,
-        // `appendToFile`) but the stream ended mid-content, promote
+        // a write-shaped call (`write_file`, `write_artifact`,
+        // `append_to_file`) but the stream ended mid-content, promote
         // the partial body to a synthesized tool_call so the bytes
         // we DID receive land on disk — and tag the call id as
         // truncated so the tool-result auto-continuation hint below
-        // tells the model to issue `appendToFile` for the missing
+        // tells the model to issue `append_to_file` for the missing
         // tail. Shared logic with Ollama + llama-cpp providers via
         // {@link salvageWriteShapedTruncation}.
         //
@@ -2364,7 +2364,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
         // Bare `invoke NAME {json}` — a weak-model prose shape (wild-caught
         // on gemma4-e2b-q8/MLX) that no earlier layer recognizes: the model
         // never emits Gemma's `<|tool_call>` trigger so the grammar can't
-        // engage, and it narrates the call as `invoke writeFile {…}` instead.
+        // engage, and it narrates the call as `invoke write_file {…}` instead.
         // Last-resort salvage, gated on nothing else having fired.
         const bareInvokeRepaired: typeof structuredCalls = [];
         if (
@@ -2445,7 +2445,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
             `turn#${seq}.${turn} ramble-clean-exit-no-salvage preview head=${JSON.stringify(head)} tail=${JSON.stringify(tail)}`,
           );
           throw new Error(
-            `[Mac AI] aborting — the gezel emitted ${rawTurnContentBeforeReasoning.length} characters of prose this turn without calling any action tool. Stop planning. Your next message must START with a single tool call — or, if the work is genuinely finished and nothing is left to do, be ONE short sentence saying so and nothing else. If shipping source or project files and \`writeFile\` is in your tool list, call it NOW with the full file contents — no preamble, no plan. If you lack workspace write access, start with a handoff tool or \`ask_user_question\` instead. Do not save source files with \`write_artifact\`; artifacts are for plans/scratch.`,
+            `[Mac AI] aborting — the gezel emitted ${rawTurnContentBeforeReasoning.length} characters of prose this turn without calling any action tool. Stop planning. Your next message must START with a single tool call — or, if the work is genuinely finished and nothing is left to do, be ONE short sentence saying so and nothing else. If shipping source or project files and \`write_file\` is in your tool list, call it NOW with the full file contents — no preamble, no plan. If you lack workspace write access, start with a handoff tool or \`ask_user_question\` instead. Do not save source files with \`write_artifact\`; artifacts are for plans/scratch.`,
           );
         }
         // Auto-fold pre-tool preamble for verbose-family models. When
@@ -2607,8 +2607,8 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
         if (toolCalls.length === 0) {
           // Cover BOTH unknown-tool shapes: the JSON `{tool,args}`
           // envelope AND the `<function=NAME>` / `<invoke name=…>`
-          // markup. The latter is how a delegator role (no `writeFile`)
-          // "calls" writeFile — before this it got no feedback and
+          // markup. The latter is how a delegator role (no `write_file`)
+          // "calls" write_file — before this it got no feedback and
           // believed the write succeeded. `buildUnknownToolNudge` routes
           // a no-write-access role to delegation instead of "did you
           // mean…?". Wild-caught (Space Shooter Arcade).
@@ -2895,7 +2895,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
             }
             if (
               (immediateFileWriteTurn || writeContinuationActive) &&
-              (call.function.name === 'writeFile' || call.function.name === 'appendToFile') &&
+              (call.function.name === 'write_file' || call.function.name === 'append_to_file') &&
               !output.startsWith('ERROR:')
             ) {
               if (typeof args.path === 'string') immediateFileWritePaths.push(args.path);
@@ -2917,10 +2917,10 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
             output = `ERROR: tool ${call.function.name} is not available`;
           }
           // Auto-continuation hint for truncated write-shaped tool
-          // calls. Wild-caught on Qwen 3.6 27B writeFile calls whose
+          // calls. Wild-caught on Qwen 3.6 27B write_file calls whose
           // `<parameter=content>…` stream-truncated before the closer
           // arrived (Hermes shape), and on Gemma 4 26B prose-shape /
-          // JSON-envelope `writeFile({...})` calls cut mid-content.
+          // JSON-envelope `write_file({...})` calls cut mid-content.
           // The bridge executed the call with the partial body (an
           // incomplete file on disk); without this hint the model
           // just narrates "I wrote the file" on the next turn and
@@ -3007,15 +3007,15 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
           // File was truncated mid-content and we still have continuation
           // budget — keep the turn alive instead of bailing on a partial.
           // The tool result already carries the "append the rest" hint;
-          // surfacing `appendToFile` (above) lets the model act on it.
+          // surfacing `append_to_file` (above) lets the model act on it.
           if (immediateWriteTruncated && writeContinuations < MAX_IMMEDIATE_WRITE_CONTINUATIONS) {
             writeContinuationActive = true;
             writeContinuations++;
-            // Make appendToFile callable + salvageable for the next turn.
-            advertisedBridgeToolNames.add('appendToFile');
-            knownToolNames.add('appendToFile');
+            // Make append_to_file callable + salvageable for the next turn.
+            advertisedBridgeToolNames.add('append_to_file');
+            knownToolNames.add('append_to_file');
             log.info(
-              `turn#${seq} immediate-write truncated — auto-continuation ${writeContinuations}/${MAX_IMMEDIATE_WRITE_CONTINUATIONS} (appendToFile surfaced) paths=${immediateFileWritePaths.join(',')}`,
+              `turn#${seq} immediate-write truncated — auto-continuation ${writeContinuations}/${MAX_IMMEDIATE_WRITE_CONTINUATIONS} (append_to_file surfaced) paths=${immediateFileWritePaths.join(',')}`,
             );
             continue;
           }

@@ -38,7 +38,8 @@
  *        <write_artifact path="notes.md" content="..." />
  *      Restricted to snake_case-style names to avoid matching
  *      legitimate HTML in code blocks (`<div />`, `<br />`). camelCase
- *      tool names like `<readFile path="..." />` are NOT caught here
+ *      tag names like `<readFile path="..." />` (legacy pre-rename tool
+ *      spellings a model may still mimic) are NOT caught here
  *      since they're indistinguishable from custom JSX components
  *      without a tool registry; if a model emits these, they'll only
  *      appear after the iteration ends and salvage fires.
@@ -54,7 +55,7 @@
  *
  * In-flight tolerance: each parser handles partial input so the row
  * appears as soon as the model's intent is detectable. A bare
- * `<function=writeFile>` or `<invoke name="readFile">` with no
+ * `<function=write_file>` or `<invoke name="read_file">` with no
  * params yet still shows up as `(streaming…)`.
  */
 
@@ -142,8 +143,9 @@ function parseAnthropicInvokePending(text: string): PendingToolCall[] {
 // Tag-name filter: must contain an underscore (snake_case) AND be at
 // least 4 chars. This catches real tool names (`browser_navigate`,
 // `write_artifact`, `read_task_notes`) and rejects HTML / JSX
-// (`<div />`, `<br />`, `<MyComponent />`, `<svg />`). camelCase
-// tools (`readFile`, `readdir`) slip through this filter — that's
+// (`<div />`, `<br />`, `<MyComponent />`, `<svg />`). Underscore-less
+// names (`stat`, `rename`, or legacy camelCase spellings like
+// `readFile`) slip through this filter — that's
 // acceptable; they show up after salvage fires.
 const XML_SELF_CLOSING_RE =
   /<([a-z][a-z0-9_]*_[a-z0-9_]+)((?:\s+[a-zA-Z_][a-zA-Z0-9_]*\s*=\s*"[^"]*")*)\s*\/>/g;
@@ -297,7 +299,7 @@ export function formatPendingArgsPreview(params: Record<string, string>): string
   }
   if (pickedKey === null) pickedKey = keys[0]!;
   const value = params[pickedKey] ?? '';
-  // Truncate long values (a writeFile content param could be the
+  // Truncate long values (a write_file content param could be the
   // whole file; the user just needs to know what's queueing).
   const truncated = value.length > 80 ? `${value.slice(0, 79)}…` : value;
   return `${pickedKey}: ${truncated}`;

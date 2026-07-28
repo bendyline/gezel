@@ -351,7 +351,7 @@ export interface SessionOpts {
    * for anti-spin guidance. Local providers' abort-message builders
    * use this to surface "the right next call is `run_script({ name:
    * '<onExitScriptName>' })`" instead of pointing the model at
-   * generic `writeFile`/`assign_task` candidates that are wrong for
+   * generic `write_file`/`assign_task` candidates that are wrong for
    * mid-craftbook work. Unset for sessions not scoped to a task with
    * an active step.
    */
@@ -469,7 +469,7 @@ export interface ToolCallEvent {
   }>;
   /**
    * MCP `structuredContent` returned by the tool. Layer 4 surgical-edit
-   * tools (`replaceInFile`, `applyPatch`, `insertAtMarker`) populate
+   * tools (`replace_in_file`, `apply_patch`, `insert_at_marker`) populate
    * `{diff, addedLines, removedLines, diffTruncated?}` here. The chat
    * manager copies known fields onto ChatMessageToolCall for the UI
    * inline diff viewer. Other tools can populate other fields; the
@@ -657,7 +657,7 @@ export interface LLMSession {
    * Optional: subscribe to live tool-argument chunks — the raw argument
    * text streamed while the model builds a structured tool call
    * (llama-cpp/MLX `delta.tool_calls[].function.arguments` fragments).
-   * A multi-minute structured `writeFile` emits no visible deltas, so
+   * A multi-minute structured `write_file` emits no visible deltas, so
    * this is the only channel that can show the user *what* is being
    * generated during that stretch. Display-only. Providers whose tool
    * calls arrive whole (Ollama) or run server-side (Copilot, OpenAI)

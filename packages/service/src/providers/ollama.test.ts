@@ -337,10 +337,10 @@ describe('ollama tool-loop bail', () => {
 
   it('detectRepeatCall returns null for diverse, legitimate exploration', () => {
     const log: ToolCallEntry[] = [
-      entry('readdir', { path: 'src' }),
-      entry('readFile', { path: 'src/a.ts' }),
-      entry('readFile', { path: 'src/b.ts' }),
-      entry('readFile', { path: 'src/c.ts' }),
+      entry('list_dir', { path: 'src' }),
+      entry('read_file', { path: 'src/a.ts' }),
+      entry('read_file', { path: 'src/b.ts' }),
+      entry('read_file', { path: 'src/c.ts' }),
       entry('stat', { path: 'src/d.ts' }),
     ];
     expect(detectRepeatCall(log)).toBeNull();
@@ -348,14 +348,14 @@ describe('ollama tool-loop bail', () => {
 
   it('detectRepeatCall fires when the same (name, args) pair appears 3 times in a row', () => {
     const log: ToolCallEntry[] = [
-      entry('readdir', { path: 'src' }),
-      entry('readFile', { path: 'src/a.ts' }),
-      entry('readFile', { path: 'src/a.ts' }),
-      entry('readFile', { path: 'src/a.ts' }),
+      entry('list_dir', { path: 'src' }),
+      entry('read_file', { path: 'src/a.ts' }),
+      entry('read_file', { path: 'src/a.ts' }),
+      entry('read_file', { path: 'src/a.ts' }),
     ];
     const hit = detectRepeatCall(log);
     expect(hit).not.toBeNull();
-    expect(hit?.name).toBe('readFile');
+    expect(hit?.name).toBe('read_file');
     expect(hit?.count).toBe(3);
   });
 
@@ -383,9 +383,9 @@ describe('ollama tool-loop bail', () => {
 
   it('detectRepeatCall treats different args as distinct', () => {
     const log: ToolCallEntry[] = [
-      entry('readFile', { path: 'src/a.ts' }),
-      entry('readFile', { path: 'src/b.ts' }),
-      entry('readFile', { path: 'src/c.ts' }),
+      entry('read_file', { path: 'src/a.ts' }),
+      entry('read_file', { path: 'src/b.ts' }),
+      entry('read_file', { path: 'src/c.ts' }),
     ];
     expect(detectRepeatCall(log)).toBeNull();
   });
@@ -395,63 +395,63 @@ describe('ollama tool-loop bail', () => {
     const log: ToolCallEntry[] = [
       entry('list_tasks', {}),
       entry('read_task_notes', { ref: 'a' }),
-      entry('readFile', { path: 'x' }),
-      entry('readdir', { path: 'y' }),
-      entry('readdir', { path: 'y' }),
-      entry('readdir', { path: 'y' }),
+      entry('read_file', { path: 'x' }),
+      entry('list_dir', { path: 'y' }),
+      entry('list_dir', { path: 'y' }),
+      entry('list_dir', { path: 'y' }),
     ];
     const hit = detectRepeatCall(log);
-    expect(hit?.name).toBe('readdir');
+    expect(hit?.name).toBe('list_dir');
   });
 
   it('buildLoopBailMessage (cap) names the reason and lists top tools in non-debug mode', () => {
     const callLog: ToolCallEntry[] = [
-      entry('readFile', { path: 'a' }),
-      entry('readFile', { path: 'b' }),
-      entry('readdir', { path: 'src' }),
+      entry('read_file', { path: 'a' }),
+      entry('read_file', { path: 'b' }),
+      entry('list_dir', { path: 'src' }),
     ];
     const msg = buildLoopBailMessage({ reason: 'cap', callLog, debugOn: false });
     expect(msg).toContain('96 tool-call rounds');
-    expect(msg).toContain('readFile ×2');
-    expect(msg).toContain('readdir ×1');
+    expect(msg).toContain('read_file ×2');
+    expect(msg).toContain('list_dir ×1');
     expect(msg).not.toContain('Sequence:');
   });
 
   it('buildLoopBailMessage (repeat) names the looped tool', () => {
     const callLog: ToolCallEntry[] = [
-      entry('readFile', { path: 'a' }),
-      entry('readFile', { path: 'a' }),
-      entry('readFile', { path: 'a' }),
+      entry('read_file', { path: 'a' }),
+      entry('read_file', { path: 'a' }),
+      entry('read_file', { path: 'a' }),
     ];
     const msg = buildLoopBailMessage({
       reason: 'repeat',
       callLog,
       debugOn: false,
       repeat: {
-        name: 'readFile',
+        name: 'read_file',
         argsKey: stableArgsKey({ path: 'a' }),
         argsRaw: { path: 'a' },
         count: 3,
       },
     });
-    expect(msg).toContain('`readFile`');
+    expect(msg).toContain('`read_file`');
     expect(msg).toContain('3× in a row');
   });
 
   it('buildLoopBailMessage in debug mode appends an ordered sequence', () => {
     const callLog: ToolCallEntry[] = [
-      entry('readdir', { path: 'src' }),
-      entry('readFile', { path: 'src/a.ts' }),
+      entry('list_dir', { path: 'src' }),
+      entry('read_file', { path: 'src/a.ts' }),
     ];
     const msg = buildLoopBailMessage({ reason: 'cap', callLog, debugOn: true });
     expect(msg).toContain('Sequence:');
-    expect(msg).toContain('1. readdir({"path":"src"})');
-    expect(msg).toContain('2. readFile({"path":"src/a.ts"})');
+    expect(msg).toContain('1. list_dir({"path":"src"})');
+    expect(msg).toContain('2. read_file({"path":"src/a.ts"})');
   });
 
   it('buildLoopBailMessage in debug mode clips a runaway sequence', () => {
     const callLog: ToolCallEntry[] = Array.from({ length: 60 }, (_, i) =>
-      entry('readFile', { path: `f${i}.ts` }),
+      entry('read_file', { path: `f${i}.ts` }),
     );
     const msg = buildLoopBailMessage({ reason: 'cap', callLog, debugOn: true });
     expect(msg).toContain('…(20 more)');

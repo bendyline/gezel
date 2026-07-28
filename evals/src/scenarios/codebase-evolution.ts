@@ -39,12 +39,12 @@ export const PHASE_1_MESSAGE = [
   'Keep this first version monolithic: HTML, CSS, and inline JavaScript in that one file; do not create `src/` files yet.',
   'It should be a small offline kanban board for launch tasks with Backlog, Doing, and Done sections.',
   'Include a form/input to add tasks, at least three seed tasks, rendering logic, and localStorage persistence.',
-  'Use workspace `writeFile` paths relative to the workspace root.',
+  'Use workspace `write_file` paths relative to the workspace root.',
 ].join(' ');
 
 export const PHASE_2_MESSAGE = [
   'Phase 2: modify the existing Launch Board codebase, do not start over.',
-  'Your next assistant action should be a workspace `replaceInFile` or `writeFile` edit for `index.html`, not a chat-only plan.',
+  'Your next assistant action should be a workspace `replace_in_file` or `write_file` edit for `index.html`, not a chat-only plan.',
   'Add task priority support: each task can be Low, Medium, or High priority, the add-task form lets the user choose priority, and the UI can filter by priority.',
   'Make it concrete in this edit: add a `priority` field to each seeded task and to newly added tasks, add a visible priority select/input in the add-task form, add a visible priority filter, and apply that filter in the render loop.',
   'Preserve the Phase 1 board, status columns, seeded tasks, rendering, and localStorage behavior.',
@@ -52,7 +52,7 @@ export const PHASE_2_MESSAGE = [
 
 export const PHASE_3_MESSAGE = [
   'Phase 3: continue evolving the same Launch Board codebase.',
-  'Your next assistant action should be a workspace `writeFile` edit for `index.html`, not a chat-only plan.',
+  'Your next assistant action should be a workspace `write_file` edit for `index.html`, not a chat-only plan.',
   'Priority is already done; do not keep revising priority controls unless the edit also adds due-date state, controls, rendering, and summary counts.',
   'Add due dates to tasks and a small summary area with Overdue, Today, and Upcoming counts.',
   'The add-task form should include a date input, rendered tasks should show their due date, and the summary should be computed from task due dates.',
@@ -940,9 +940,9 @@ function repairDirectiveForPhase(phase: CodebasePhase, failReason: string): stri
   if (phase === 4) {
     return [
       prefix,
-      'Your next assistant action must be workspace `writeFile` calls for the module split, not a chat-only plan and not another small `index.html` patch.',
+      'Your next assistant action must be workspace `write_file` calls for the module split, not a chat-only plan and not another small `index.html` patch.',
       'Create or update all four relevant files in this repair: `index.html`, `src/state.js`, `src/render.js`, and `src/app.js`.',
-      'Use workspace `writeFile` paths relative to the workspace root; make multiple `writeFile` calls in one turn for the module split if needed.',
+      'Use workspace `write_file` paths relative to the workspace root; make multiple `write_file` calls in one turn for the module split if needed.',
       'If the remaining miss is the HTML shell, rewrite `index.html` to remove all inline app JavaScript and add exactly `<script type="module" src="./src/app.js"></script>` before `</body>`.',
       'If the remaining miss is due-date logic, patch the module that renders the summary. Store/backfill the task field as `dueDate`, not only `due`, and compute each bucket with `new Date(task.dueDate + "T00:00:00")` compared with `new Date()`; do not leave an undefined `today`/`todayStr` variable mismatch.',
       'If the remaining miss is the due summary, keep visible `Overdue`, `Today`, and `Upcoming` labels in `index.html` and update their count spans from `src/render.js`.',

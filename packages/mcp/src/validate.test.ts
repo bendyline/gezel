@@ -120,7 +120,7 @@ describe('validateFile — JSON', () => {
 });
 
 describe('validateFile — images', () => {
-  // petshop case: model wrote a 4-byte logo.png via writeFile.
+  // petshop case: model wrote a 4-byte logo.png via write_file.
   // The verification gate now requires evidence; the model would call
   // validate first and learn the file is corrupt + the fix is to use
   // copy_artifact_to_workspace.

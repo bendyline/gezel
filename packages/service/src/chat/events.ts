@@ -257,7 +257,7 @@ export class ChatEventBus {
       }
     }
     // Tool-argument fragments coalesce like deltas (a multi-minute
-    // structured writeFile streams thousands of them) but only within
+    // structured write_file streams thousands of them) but only within
     // the same tool name, so a reconnecting client replays one entry
     // per call and the live "working" block survives a mid-write reload.
     if (event.type === 'tool_args_delta') {

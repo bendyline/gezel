@@ -1,8 +1,8 @@
 import { useState } from 'react';
 
 /**
- * Inline diff viewer for surgical-edit tools (`replaceInFile`,
- * `applyPatch`, `insertAtMarker`). Collapsed by default with a
+ * Inline diff viewer for surgical-edit tools (`replace_in_file`,
+ * `apply_patch`, `insert_at_marker`). Collapsed by default with a
  * "Show diff (+N −M)" toggle; expanded, renders the unified diff
  * with `+`/`-` line coloring. Self-contained: no external diff
  * library — the unified-diff format is simple enough that this

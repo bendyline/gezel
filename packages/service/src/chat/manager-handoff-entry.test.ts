@@ -118,7 +118,7 @@ describe('single-channel kickoff (D1)', () => {
       steps: [
         {
           name: 'Build',
-          prompt: 'Write the landing page to index.html using writeFile.',
+          prompt: 'Write the landing page to index.html using write_file.',
           suggestedRole: 'developer',
           deliverable: { path: 'index.html' },
         },

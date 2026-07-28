@@ -40,7 +40,7 @@ function fakeCopilotSdk(configs: Array<Record<string, unknown>>) {
 describe('sandbox permission handler', () => {
   it('approves mcp and custom-tool kinds', () => {
     const handler = buildSandboxPermissionHandler();
-    expect(handler({ kind: 'mcp', toolName: 'readFile' })).toEqual({ kind: 'approved' });
+    expect(handler({ kind: 'mcp', toolName: 'read_file' })).toEqual({ kind: 'approved' });
     expect(handler({ kind: 'custom-tool', toolName: 'lookup_issue' })).toEqual({
       kind: 'approved',
     });

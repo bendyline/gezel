@@ -30,16 +30,16 @@ function poolWithFakeBridge(toolAllowlist: Set<string> | null): McpBridgePool {
         { type: 'function', name: 'start_project', description: 'Start a project.' },
         { type: 'function', name: 'ask_gezel', description: 'Ask another gezel.' },
         { type: 'function', name: 'delegate_reviewer', description: 'Delegate to a reviewer.' },
-        { type: 'function', name: 'writeFile', description: 'Write a file.' },
-        { type: 'function', name: 'appendToFile', description: 'Append to a file.' },
+        { type: 'function', name: 'write_file', description: 'Write a file.' },
+        { type: 'function', name: 'append_to_file', description: 'Append to a file.' },
       ],
       getAnthropicTools: () => [],
       hasTool: (name) =>
         name === 'start_project' ||
         name === 'ask_gezel' ||
         name === 'delegate_reviewer' ||
-        name === 'writeFile' ||
-        name === 'appendToFile',
+        name === 'write_file' ||
+        name === 'append_to_file',
       callTool: async (name) => `called ${name}`,
       callToolRich: async (name) => ({ text: `called ${name}`, images: [] }),
     },
@@ -66,16 +66,16 @@ describe('McpBridgePool allowlist enforcement', () => {
     );
   });
 
-  it('allows the hidden append recovery primitive when writeFile is authorized', async () => {
-    const pool = poolWithFakeBridge(new Set(['writeFile']));
+  it('allows the hidden append recovery primitive when write_file is authorized', async () => {
+    const pool = poolWithFakeBridge(new Set(['write_file']));
 
-    // The first-turn model surface stays writeFile-only. Local providers
-    // inject appendToFile only after detecting a truncated saved partial.
-    expect(pool.getOpenAITools().map((tool) => tool.name)).toEqual(['writeFile']);
-    expect(pool.hasTool('appendToFile')).toBe(true);
+    // The first-turn model surface stays write_file-only. Local providers
+    // inject append_to_file only after detecting a truncated saved partial.
+    expect(pool.getOpenAITools().map((tool) => tool.name)).toEqual(['write_file']);
+    expect(pool.hasTool('append_to_file')).toBe(true);
     await expect(
-      pool.callTool('appendToFile', { path: 'index.html', content: '</html>' }),
-    ).resolves.toBe('called appendToFile');
+      pool.callTool('append_to_file', { path: 'index.html', content: '</html>' }),
+    ).resolves.toBe('called append_to_file');
   });
 });
 

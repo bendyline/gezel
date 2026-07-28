@@ -37,6 +37,7 @@ import { listApplicableCraftbooks } from './craftbook/applicable.js';
 import { makeCraftbookResolver } from './craftbook/resolve.js';
 import { DebugFlag } from './debug/flag.js';
 import { ProjectDigestGenerator } from './digest/generator.js';
+import { effectiveEngineRelease } from './engines/native-manifest.js';
 import { EngineBinaryRegistry } from './engines/registry.js';
 import { ModelFitnessManager } from './fitness/manager.js';
 import { type FitnessEngine, runFitnessProbe } from './fitness/probe.js';
@@ -442,6 +443,17 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   // engine binaries here so the on-device chat path finds them. Idempotent
   // when the supervisor already populated the env (embedded / dev /
   // packaged-spawn launches); the discovery short-circuits per binary.
+  // Bare npm/CLI installs have no Electron supervisor to point discovery at
+  // the runtime-downloaded cache. Make the source-pinned cache the default
+  // native-bin root while preserving a packaged/operator override. This makes
+  // a verified TUI bootstrap install available immediately and on later daemon
+  // launches without another download.
+  process.env.GEZEL_NATIVE_BIN_DIR ??= join(
+    home,
+    'engines',
+    'native-bin',
+    effectiveEngineRelease(),
+  );
   const nativeDiscovery = discoverNativeBinaries({
     home,
     ...(bootConfig.llamaCppBackendOverride
@@ -595,8 +607,8 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   // manual Settings trigger). Verified download → cache → env-stamp; see
   // engines/resolver.ts. Background-job lifecycle mirrors `imagePulls`.
   // Constructed before ChatManager so the lazy on-device hook can reach it.
-  // Signature policy is config-driven so it can be flipped to `require`
-  // (once the native pipeline signs binaries) without a code change.
+  // Signature validation fails closed by default on Windows/macOS. The
+  // config remains an explicit operator escape hatch for development.
   const engineBinaries = new EngineBinaryRegistry({
     home,
     ...(bootConfig.engineSignaturePolicy
@@ -983,7 +995,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     // (legacy GateSpec, or a StepGate with `at: 'activation'`), the
     // RUNTIME evaluates it against the workspace and routes the task —
     // with NO model turn. This is what carries a small model through the
-    // loop: it only ever has to `writeFile`; the runtime judges + routes
+    // loop: it only ever has to `write_file`; the runtime judges + routes
     // + loops. Completion-moment gates are NOT handled here — they fire
     // inside TaskManager.completeStep as a guard.
     if (newStep.gate) {
@@ -1748,10 +1760,10 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     });
   }
 
-  // On-device first-run bootstrap: if the user hasn't picked a
-  // provider, default to on-device and download a tier-appropriate
-  // Gemma 4 model in the background. No-op on subsequent boots (the
-  // helper's own idempotence guard tracks `firstRunCompleted`).
+  // On-device first-run recommendation: if the user hasn't picked a
+  // provider, default to the best-fitting local catalog model. This only
+  // pins the choice; the desktop or TUI asks before starting a download.
+  // No-op on subsequent boots (`firstRunCompleted` is the guard).
   // Gated off during mock/skip modes so tests don't try to hit
   // Hugging Face. See `bootstrapOnDeviceFirstRun` for the decision
   // tree.

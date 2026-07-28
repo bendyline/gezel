@@ -25,18 +25,18 @@ export const ALWAYS_REGISTERED_TOOLS = [
   'save_memory',
   'list_memories',
 
-  // Workspace (read-write fs mirror)
-  'readdir',
-  'readFile',
+  // Workspace (read-write project files)
+  'list_dir',
+  'read_file',
   'stat',
-  'writeFile',
-  'appendToFile',
-  'replaceInFile',
-  'replaceLines',
-  'applyPatch',
-  'insertAtMarker',
-  'rm',
-  'mkdir',
+  'write_file',
+  'append_to_file',
+  'replace_in_file',
+  'replace_lines',
+  'apply_patch',
+  'insert_at_marker',
+  'delete_path',
+  'make_dir',
   'rename',
   'copy_artifact_to_workspace',
   'validate',
@@ -260,10 +260,91 @@ export const CONDITIONALLY_REGISTERED_TOOLS = {
   request_tool_permission: { envVar: 'GEZEL_PERMISSION_PROMPT', envValue: '1' },
   // Email write tools — registered only for mail-enabled projects (the chat
   // manager sets GEZEL_MAIL_ENABLED when project.mail is configured).
-  draftEmail: { envVar: 'GEZEL_MAIL_ENABLED', envValue: '1' },
-  queueEmail: { envVar: 'GEZEL_MAIL_ENABLED', envValue: '1' },
-  sendEmail: { envVar: 'GEZEL_MAIL_ENABLED', envValue: '1' },
+  draft_email: { envVar: 'GEZEL_MAIL_ENABLED', envValue: '1' },
+  queue_email: { envVar: 'GEZEL_MAIL_ENABLED', envValue: '1' },
+  send_email: { envVar: 'GEZEL_MAIL_ENABLED', envValue: '1' },
 } as const;
 
 export type AlwaysRegisteredToolName = (typeof ALWAYS_REGISTERED_TOOLS)[number];
 export type ConditionallyRegisteredToolName = keyof typeof CONDITIONALLY_REGISTERED_TOOLS;
+
+/**
+ * Legacy spelling → canonical name for every tool renamed in the
+ * snake_case standardization. The old names never appear in `tools/list`
+ * (zero prompt cost) but stay callable forever: pinned gilde role
+ * templates teach some of them in prose, and lower-capability models
+ * guess them from training priors. Dispatch-time resolution lives in
+ * server.ts (stdio callers) and mcp-bridge.ts (bridged providers).
+ *
+ * `GEZEL_MCP_TOOL_NAMING=legacy` flips registration back to these
+ * spellings — an A/B lever for the naming experiment, not a supported
+ * production mode.
+ */
+export const RENAMED_TOOLS = {
+  readdir: 'list_dir',
+  readFile: 'read_file',
+  writeFile: 'write_file',
+  appendToFile: 'append_to_file',
+  replaceInFile: 'replace_in_file',
+  replaceLines: 'replace_lines',
+  applyPatch: 'apply_patch',
+  insertAtMarker: 'insert_at_marker',
+  rm: 'delete_path',
+  mkdir: 'make_dir',
+  draftEmail: 'draft_email',
+  queueEmail: 'queue_email',
+  sendEmail: 'send_email',
+} as const satisfies Record<string, AlwaysRegisteredToolName | ConditionallyRegisteredToolName>;
+
+export type LegacyToolName = keyof typeof RENAMED_TOOLS;
+
+/** Canonical name → legacy spelling (inverse of {@link RENAMED_TOOLS}). */
+export const LEGACY_SPELLING_BY_CANONICAL: Readonly<Record<string, string>> = Object.fromEntries(
+  Object.entries(RENAMED_TOOLS).map(([legacy, canonical]) => [canonical, legacy]),
+);
+
+/**
+ * Resolve any spelling of a built-in tool name to its canonical form.
+ * Unknown names (third-party toolset tools, project script tools) pass
+ * through unchanged — this maps only the frozen rename table plus
+ * case/punctuation variants of it, never fuzzy near-misses.
+ */
+export function canonicalToolName(name: string): string {
+  const direct = (RENAMED_TOOLS as Record<string, string>)[name];
+  if (direct) return direct;
+  return name;
+}
+
+/**
+ * Resolve a requested tool name to whatever spelling is live in
+ * `knownNames`. Exact hits win; then the frozen rename table in both
+ * directions (so `writeFile` resolves when `write_file` is live, and
+ * `write_file` resolves in the legacy A/B arm where `writeFile` is
+ * live); then a case/punctuation-insensitive match against the live
+ * names — `WriteFile`, `write-file`, and `read_dir` all land. Never
+ * fuzzy: names that don't resolve return unchanged so "tool not found"
+ * errors stay honest. Both the stdio server's dispatch and the
+ * service's McpBridge route through this, which is what lets every
+ * name-keyed gate downstream assume a single spelling.
+ */
+export function resolveToolNameSpelling(
+  requested: string,
+  knownNames: ReadonlySet<string>,
+): string {
+  if (knownNames.has(requested)) return requested;
+  const viaRename = (RENAMED_TOOLS as Record<string, string>)[requested];
+  if (viaRename && knownNames.has(viaRename)) return viaRename;
+  const viaLegacy = LEGACY_SPELLING_BY_CANONICAL[requested];
+  if (viaLegacy && knownNames.has(viaLegacy)) return viaLegacy;
+  const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const wanted = normalize(requested);
+  if (!wanted) return requested;
+  for (const candidate of knownNames) {
+    if (normalize(candidate) === wanted) return candidate;
+  }
+  for (const [legacy, canonical] of Object.entries(RENAMED_TOOLS)) {
+    if (normalize(legacy) === wanted && knownNames.has(canonical)) return canonical;
+    if (normalize(canonical) === wanted && knownNames.has(legacy)) return legacy;
+  }
+  return requested;
+}

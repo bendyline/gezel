@@ -395,16 +395,16 @@ describe('TurnAutoAcknowledgeToolErrors', () => {
     expect(detect(ctx, undefined as never)).toBeNull();
   });
 
-  it('returns null for writeFile errors that saved an invalid first draft for repair', () => {
+  it('returns null for write_file errors that saved an invalid first draft for repair', () => {
     const ctx = turnCtx({
       drained: [
         {
-          name: 'writeFile',
+          name: 'write_file',
           success: false,
           durationMs: 1,
           errorMessage:
             'inline JS does not parse (Invalid destructuring assignment target)\n\n' +
-            'Invalid first draft index.html was saved anyway so you can continue with readFile({ path: "index.html" }) and then repair it with replaceInFile(...) instead of starting over.',
+            'Invalid first draft index.html was saved anyway so you can continue with read_file({ path: "index.html" }) and then repair it with replace_in_file(...) instead of starting over.',
         },
       ],
       assistantContent: 'I wrote `index.html` to the workspace.',
@@ -441,11 +441,11 @@ describe('TurnAutoAcknowledgeToolErrors', () => {
     const ctx = turnCtx({
       drained: [
         {
-          ...call('replaceLines', false),
+          ...call('replace_lines', false),
           path: 'workspace\\src//store.ts',
         },
         {
-          ...call('writeFile', true),
+          ...call('write_file', true),
           path: './src/store.ts',
         },
       ],
@@ -459,11 +459,11 @@ describe('TurnAutoAcknowledgeToolErrors', () => {
     const ctx = turnCtx({
       drained: [
         {
-          ...call('writeFile', false),
+          ...call('write_file', false),
           path: 'workspace/src/store.ts',
         },
         {
-          ...call('writeFile', true),
+          ...call('write_file', true),
           path: './src/store.ts',
         },
       ],
@@ -477,11 +477,11 @@ describe('TurnAutoAcknowledgeToolErrors', () => {
     const ctx = turnCtx({
       drained: [
         {
-          ...call('replaceLines', false),
+          ...call('replace_lines', false),
           path: 'src/store.ts',
         },
         {
-          ...call('writeFile', true),
+          ...call('write_file', true),
           path: 'src/handlers.ts',
         },
       ],
@@ -490,18 +490,18 @@ describe('TurnAutoAcknowledgeToolErrors', () => {
 
     const out = detect(ctx, undefined as never);
     expect(out).not.toBeNull();
-    expect(out!.reason).toContain('replaceLines');
+    expect(out!.reason).toContain('replace_lines');
   });
 
   it('still re-prompts when the same workspace mutation tool later succeeds on a different path', () => {
     const ctx = turnCtx({
       drained: [
         {
-          ...call('writeFile', false),
+          ...call('write_file', false),
           path: 'src/store.ts',
         },
         {
-          ...call('writeFile', true),
+          ...call('write_file', true),
           path: 'src/handlers.ts',
         },
       ],
@@ -510,18 +510,18 @@ describe('TurnAutoAcknowledgeToolErrors', () => {
 
     const out = detect(ctx, undefined as never);
     expect(out).not.toBeNull();
-    expect(out!.reason).toContain('writeFile');
+    expect(out!.reason).toContain('write_file');
   });
 
   it('still re-prompts when the matching mutation happened before the failure', () => {
     const ctx = turnCtx({
       drained: [
         {
-          ...call('writeFile', true),
+          ...call('write_file', true),
           path: 'src/store.ts',
         },
         {
-          ...call('replaceLines', false),
+          ...call('replace_lines', false),
           path: 'src/store.ts',
         },
       ],
@@ -535,11 +535,11 @@ describe('TurnAutoAcknowledgeToolErrors', () => {
     const ctx = turnCtx({
       drained: [
         {
-          ...call('replaceLines', false),
+          ...call('replace_lines', false),
           path: 'src/store.ts',
         },
         {
-          ...call('readFile', true),
+          ...call('read_file', true),
           path: 'src/store.ts',
         },
       ],
@@ -585,7 +585,7 @@ describe('TurnPermissionStall', () => {
     const out = detect(
       turnCtx({
         userText: 'Can you fix the Space Invaders game?',
-        drained: [call('readFile')],
+        drained: [call('read_file')],
         assistantContent: 'I found the issue. Would you like me to proceed with these fixes?',
       }),
       undefined as never,
@@ -600,7 +600,7 @@ describe('TurnPermissionStall', () => {
     const out = detect(
       turnCtx({
         userText: 'Please fix src/game.ts.',
-        drained: [call('replaceLines')],
+        drained: [call('replace_lines')],
         assistantContent: 'I updated `initGame`. Should I proceed with the next changes?',
       }),
       undefined as never,
