@@ -30,6 +30,49 @@ jobs:
       - name: Require immutable full-length action pins
         run: node scripts/check-workflow-action-pins.mjs
 
+  # Conventional Commits are enforced here and nowhere else — there is no
+  # local git hook, deliberately. This matters beyond tidiness:
+  # multi-semantic-release derives every published npm version bump from
+  # these exact messages, so a malformed subject on main silently changes
+  # what the next release publishes. Checked on PRs AND on pushes to main.
+  commitlint:
+    name: Conventional commits
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@008330803749db0355799c700092d9a85fd074e9 # v6.0.9
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Lint pull request commits
+        if: github.event_name == 'pull_request'
+        run: >-
+          pnpm exec commitlint
+          --from ${{ github.event.pull_request.base.sha }}
+          --to ${{ github.event.pull_request.head.sha }}
+          --verbose
+      - name: Lint pushed commits
+        if: github.event_name == 'push'
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          # `before` is all-zeros for a new branch, and can point at a commit
+          # that no longer exists after a force-push. Fall back to the tip.
+          if [[ "$BEFORE_SHA" =~ ^0+$ ]] || ! git cat-file -e "$BEFORE_SHA^{commit}" 2>/dev/null; then
+            pnpm exec commitlint --last --verbose
+          else
+            pnpm exec commitlint --from "$BEFORE_SHA" --to "$HEAD_SHA" --verbose
+          fi
+
   unit:
     name: Build, lint, typecheck, and unit tests
     needs: workflow-policy

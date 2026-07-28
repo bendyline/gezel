@@ -21,6 +21,17 @@ is a request for consideration, not a commitment that it will be accepted or
 implemented. For requests that do not need a full proposal, you may instead
 [open a GitHub issue](https://github.com/bendyline/gezel/issues/new).
 
+## Commit Messages
+
+Commits on `main` follow [Conventional Commits](https://www.conventionalcommits.org/)
+and are checked by the `commitlint` job in CI on pull requests and on pushes to
+`main`. There is no local git hook.
+
+This is not a style preference: `multi-semantic-release` derives every published
+npm version bump and changelog entry from these messages, so a malformed subject
+on `main` changes what the next release publishes. See
+[docs/npm-release.md](docs/npm-release.md).
+
 ## Submission Terms
 
 By submitting a pull request, you represent that you have the right to submit

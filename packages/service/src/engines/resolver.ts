@@ -36,8 +36,8 @@ const ENGINE_ENV_VAR: Record<NativeBinaryName, string> = {
 
 /**
  * Thrown for the "can't resolve, and that's expected/actionable" cases:
- * no pinned release, no token while private, asset missing, verification
- * failed. Callers surface the message; they don't retry blindly.
+ * no pinned release, asset missing, verification failed. Callers surface
+ * the message; they don't retry blindly.
  */
 export class EngineUnavailableError extends Error {
   constructor(message: string) {
@@ -182,13 +182,13 @@ export async function* resolveEngine(
   }
 
   const apiBase = opts.githubApiBase ?? GITHUB_API;
-  const isLocalFixture = apiBase !== GITHUB_API;
+  // `bendyline/gezel` is public, so release metadata and assets are readable
+  // anonymously. A token stays OPTIONAL and is used when present purely to
+  // lift GitHub's 60-request/hour unauthenticated API rate limit. Do not
+  // reinstate a hard gate here: users who install from npm have no `gh`
+  // login, and requiring one would make on-device engines unreachable for
+  // every consumer outside this repo.
   const token = opts.token !== undefined ? opts.token : await resolveGithubToken();
-  if (!token && !isLocalFixture) {
-    yield* fail(
-      'engine download needs a GitHub token while the gezel repo is private — set GEZEL_GITHUB_TOKEN or run `gh auth login`. (No token needed once the repo is public.)',
-    );
-  }
 
   const baseFetch = opts.fetchImpl ?? globalThis.fetch;
   const tag = `native-v${version}`;

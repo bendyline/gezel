@@ -51,6 +51,12 @@ export function findHandboekContent(): string | null {
   const candidates = [
     // dist/handboek.js or dist/index.js → dist/handboek-content/
     join(here, 'handboek-content'),
+    // dist/bin/gezeld.js → dist/handboek-content/. The daemon binary is the
+    // one entry point that does NOT sit directly in dist/, and it is the
+    // only one an npm install runs. Without this the daemon logged "no
+    // handboek content tree found" for every consumer while quietly working
+    // in this repo, where the docs/handboek fallbacks below still resolve.
+    join(here, '..', 'handboek-content'),
     // src/handboek/content.ts → repo docs/handboek/
     join(here, '..', '..', '..', '..', 'docs', 'handboek'),
     // dist/ in a source checkout where the copy step didn't run

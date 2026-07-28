@@ -1,0 +1,167 @@
+# npm release workflow — versions, changelogs, tags and publishes the gezel
+# packages to npm via multi-semantic-release.
+#
+# Trigger: manual dispatch only. Same house rule as release-electron.yml —
+# a CI run must never be able to ship by accident. Merging to main changes
+# nothing until a maintainer dispatches this.
+#
+# ── npm AUTHENTICATION IS NOT IN THIS REPO ───────────────────────────────
+# There is deliberately no NPM_TOKEN / NODE_AUTH_TOKEN here. Publishing uses
+# npm Trusted Publishing (OIDC), configured OUTSIDE this repo on npmjs.com.
+# Each published package must have a trusted publisher registered pointing at:
+#
+#     repository: bendyline/gezel
+#     workflow:   .github/workflows/publish-npm.yml
+#
+# with NO GitHub Environment (this job configures none, so the trusted
+# publisher must not require one either).
+#
+# How it works: scripts/publish-package.mjs shells out to `pnpm publish`,
+# which exchanges this job's GitHub OIDC token for a short-lived npm token.
+# That is why `id-token: write` below and setup-node's `registry-url` are
+# BOTH required — the exchange only runs when the resolved registry is
+# exactly registry.npmjs.org. `--provenance` rides on the same OIDC token.
+#
+# IF A RELEASE EVER FAILS WITH "No npm token specified." (ENONPMTOKEN), the
+# trusted-publisher config on npmjs.com has been dropped or no longer matches
+# this workflow's path/repo. It is NOT a missing secret. Note in particular
+# that the config is keyed on the workflow FILE PATH — renaming this file
+# breaks publishing until the trusted publishers are re-pointed.
+#
+# First publish: trusted publishing can only be configured on a package that
+# already exists, so the initial version of each package is published once by
+# hand with a granular token. See docs/npm-release.md.
+
+name: Publish npm packages
+run-name: Publish npm packages from ${{ github.ref_name }}${{ inputs.dry_run && ' (dry run)' || '' }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Run every gate and compute versions, but publish nothing.'
+        type: boolean
+        default: false
+
+env:
+  NODE_VERSION: '24'
+  PNPM_VERSION: '11.15.1'
+  # The UI production bundle includes Monaco and Squisq's diagram/media
+  # workers. Vite needs more than Node's default ~2 GiB heap to transform it.
+  NODE_OPTIONS: '--max-old-space-size=4096'
+
+permissions:
+  contents: read
+
+# Never let two releases interleave — multi-semantic-release reads and writes
+# git tags, and a concurrent run would compute versions against a moving base.
+concurrency:
+  group: release-npm
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Verify release
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # semantic-release derives every version bump from commit history.
+          fetch-depth: 0
+
+      - name: Require immutable full-length action pins
+        run: node scripts/check-workflow-action-pins.mjs
+
+      - uses: pnpm/action-setup@008330803749db0355799c700092d9a85fd074e9 # v6.0.9
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Reject local workspace links
+        run: pnpm check:local-links
+      - run: pnpm install --frozen-lockfile
+
+      - name: Check release toolchain
+        run: pnpm check:release-toolchain
+
+      - name: Install Chromium
+        run: pnpm --filter @bendyline/gezel-evals exec playwright install --with-deps chromium
+
+      # The canonical gate. Keep local, CI and release assurance identical:
+      # add mandatory checks to the root `validate` script rather than
+      # duplicating a step list here. `validate` already runs
+      # `test:published` and `check:packages`, which are the npm-specific
+      # gates (tarball shape, size budgets, workspace-protocol resolution,
+      # and a real `npm install` of the tarballs into a non-workspace
+      # project followed by a daemon boot).
+      - name: Canonical gate
+        run: xvfb-run -a pnpm validate
+
+      - name: Audit licenses
+        run: pnpm audit:licenses
+      - name: Generate SBOM
+        run: pnpm audit:sbom
+      - name: Audit vulnerabilities
+        run: pnpm audit:vulnerabilities
+
+      - name: Upload SBOM
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: npm-release-sbom
+          path: artifacts/gezel.cdx.json
+          retention-days: 14
+
+  release:
+    name: Publish packages
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      # semantic-release pushes the release commit and creates GitHub releases.
+      contents: write
+      # Load-bearing for npm publishing, not just provenance: this repo has no
+      # NPM_TOKEN. See the header.
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@008330803749db0355799c700092d9a85fd074e9 # v6.0.9
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          # Required for the OIDC token exchange — it only fires when the
+          # resolved registry is exactly registry.npmjs.org.
+          registry-url: 'https://registry.npmjs.org'
+
+      - run: pnpm install --frozen-lockfile
+
+      # The tarballs must contain built output. `verify` ran in a different
+      # job on a clean runner, so build again here rather than shipping
+      # whatever a partial cache left behind.
+      - name: Build
+        run: pnpm build
+
+      # --sequential-prepare is required, not cosmetic: pnpm rewrites
+      # `workspace:*` to a sibling's CURRENT version at pack time, so every
+      # dependency must have its new version written before a dependent is
+      # packed.
+      - name: Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GEZEL_RELEASE_DRY_RUN: ${{ inputs.dry_run && '1' || '0' }}
+        run: |
+          set -euo pipefail
+          args=(--ignore-packages=packages/ui,packages/eval-viewer,evals --sequential-prepare)
+          if [[ "$GEZEL_RELEASE_DRY_RUN" == "1" ]]; then
+            args+=(--dry-run)
+          fi
+          pnpm exec multi-semantic-release "${args[@]}"

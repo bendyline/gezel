@@ -1,14 +1,34 @@
 {
   "name": "@bendyline/gezel-cli",
   "version": "0.0.0",
-  "private": true,
   "description": "The `gezel` command-line tool.",
   "license": "MIT",
+  "keywords": ["gezel", "ai", "agents", "local-first", "cli", "terminal", "tui"],
+  "homepage": "https://github.com/bendyline/gezel",
+  "bugs": {
+    "url": "https://github.com/bendyline/gezel/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bendyline/gezel.git",
+    "directory": "packages/cli"
+  },
+  "author": {
+    "name": "Bendyline",
+    "email": "support@bendyline.com"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "type": "module",
   "bin": {
     "gezel": "./dist/bin/gezel.js"
   },
-  "files": ["dist"],
+  "exports": {
+    "./package.json": "./package.json"
+  },
+  "files": ["dist", "!dist/**/*.map"],
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",

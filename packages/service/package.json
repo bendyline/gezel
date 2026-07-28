@@ -1,9 +1,26 @@
 {
   "name": "@bendyline/gezel-service",
   "version": "0.0.0",
-  "private": true,
   "description": "The Gezel daemon: HTTP API, task runner, sandbox, agent runtime.",
   "license": "MIT",
+  "keywords": ["gezel", "ai", "agents", "local-first", "daemon", "server", "llm"],
+  "homepage": "https://github.com/bendyline/gezel",
+  "bugs": {
+    "url": "https://github.com/bendyline/gezel/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bendyline/gezel.git",
+    "directory": "packages/service"
+  },
+  "author": {
+    "name": "Bendyline",
+    "email": "support@bendyline.com"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
@@ -23,7 +40,7 @@
     "./dist/bin/gezeld.js": "./dist/bin/gezeld.js",
     "./package.json": "./package.json"
   },
-  "files": ["dist"],
+  "files": ["dist", "!dist/**/*.map"],
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",

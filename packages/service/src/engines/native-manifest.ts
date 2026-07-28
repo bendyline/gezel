@@ -33,10 +33,10 @@
  */
 
 /** Native release version this build pins. Placeholder until first public release. */
-export const NATIVE_ENGINE_RELEASE = '0.0.0';
+export const NATIVE_ENGINE_RELEASE = '0.1.19';
 
 /** sha256 of the pinned release's `SHA256SUMS` asset. All-zeros = unpinned. */
-export const SHA256SUMS_DIGEST = '0000000000000000000000000000000000000000000000000000000000000000';
+export const SHA256SUMS_DIGEST = '35559474a6c852c01091525177d6f9e95fec1356be7b1f3c966e9494113420e0';
 
 /** True when a sha256 hex string is the all-zeros placeholder. */
 export function isPlaceholderDigest(digest: string): boolean {

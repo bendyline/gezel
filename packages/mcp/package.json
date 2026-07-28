@@ -1,11 +1,29 @@
 {
   "name": "@bendyline/gezel-mcp",
   "version": "0.0.0",
-  "private": true,
-  "description": "Gezel MCP server — gives agents access to memory, workspace, artifacts, and tools.",
+  "description": "Gezel MCP server \u2014 gives agents access to memory, workspace, artifacts, and tools.",
   "license": "MIT",
+  "keywords": ["gezel", "ai", "agents", "local-first", "mcp", "model-context-protocol", "tools"],
+  "homepage": "https://github.com/bendyline/gezel",
+  "bugs": {
+    "url": "https://github.com/bendyline/gezel/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bendyline/gezel.git",
+    "directory": "packages/mcp"
+  },
+  "author": {
+    "name": "Bendyline",
+    "email": "support@bendyline.com"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "type": "module",
   "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "bin": {
     "gezel-mcp": "./dist/server.js"
   },
@@ -21,7 +39,7 @@
     "./dist/server.js": "./dist/server.js",
     "./package.json": "./package.json"
   },
-  "files": ["dist"],
+  "files": ["dist", "!dist/**/*.map"],
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",

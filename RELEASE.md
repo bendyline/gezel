@@ -4,6 +4,8 @@ This is the maintainer runbook for the desktop release defined by [`.github/work
 
 End users should download installers from [GitHub Releases](https://github.com/bendyline/gezel/releases), not follow this runbook.
 
+> **Publishing the npm packages is a separate pipeline** — see [docs/npm-release.md](docs/npm-release.md). It has its own workflow ([`publish-npm.yml`](.github/workflows/publish-npm.yml)), its own version line (real semver per package, from Conventional Commits, rather than the `1.YYDDD.RUN` scheme below), and shares nothing with this one except the `native-v*` releases both depend on. Re-pin the native release with `node scripts/pin-native-release.mjs --latest` before either.
+
 ## Release contract
 
 The **Release Electron App** workflow is manually dispatched and always creates a **draft** GitHub Release. It cannot publish a release. Publishing is a separate maintainer action after smoke testing.
@@ -87,6 +89,8 @@ When you do need a new one:
 5. **Publish the draft from the GitHub Releases UI.** Until you do, the Electron workflow's preflight rejects the tag with "still a draft".
 
 A failed leg produces no draft at all, so an absent release usually means a red `Build native engines` run — check that before assuming the tag never fired.
+
+6. **Re-pin the npm side.** `node scripts/pin-native-release.mjs --latest` updates `NATIVE_ENGINE_RELEASE` and `SHA256SUMS_DIGEST` in [`packages/service/src/engines/native-manifest.ts`](packages/service/src/engines/native-manifest.ts). Those two constants are the root of trust for engine downloads by anyone who installed from npm — they have no bundled binaries, so a stale pin sends them at the previous release. Review the diff and commit it; see [docs/npm-release.md](docs/npm-release.md).
 
 ## Cut a release
 

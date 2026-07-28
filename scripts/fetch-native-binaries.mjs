@@ -17,8 +17,10 @@
  *
  * Auth:
  *   Tries in order: GEZEL_GITHUB_TOKEN env, GITHUB_TOKEN env, `gh auth token`.
- *   bendyline/gezel is private, so a token with `repo` scope is required
- *   for both the releases and the run-artifact endpoints.
+ *   bendyline/gezel is public, so the releases endpoints work anonymously and
+ *   a token only lifts GitHub's 60-request/hour unauthenticated API rate
+ *   limit. The `--run` workflow-artifact path DOES still require a token with
+ *   `actions:read`, because run artifacts are never public.
  *
  * Where files land:
  *   packages/app/native-bin/<platform>[-<variant>]/<binary>[.exe]

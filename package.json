@@ -31,6 +31,10 @@
     "test:stability": "pnpm -r --workspace-concurrency=1 --filter @bendyline/gezel-ui --filter @bendyline/gezel-service run test && pnpm -r --workspace-concurrency=1 --filter @bendyline/gezel-ui --filter @bendyline/gezel-service run test",
     "test:extended": "pnpm --filter @bendyline/gezel-service exec tsx src/chat/prompt-tool-contract-matrix.ts",
     "test:coverage": "node scripts/check-test-surface.mjs --json artifacts/test-surface-coverage.json",
+    "test:published": "vitest run --config vitest.published.config.ts",
+    "check:packages": "node scripts/check-package-consumers.mjs",
+    "check:release-toolchain": "node scripts/check-release-toolchain.mjs",
+    "release": "multi-semantic-release",
     "pw:install": "pnpm --filter @bendyline/gezel-app exec playwright install chromium",
     "test:e2e:run": "pnpm --filter @bendyline/gezel-app run test:e2e",
     "test:e2e:desktop:smoke": "pnpm --filter @bendyline/gezel-app exec playwright test app.spec.ts supervisor-spawn.spec.ts --reporter=line --retries=0 --workers=1",
@@ -45,7 +49,7 @@
     "eval:postmortems": "pnpm --filter @bendyline/gezel-evals run postmortems",
     "eval:viewer": "pnpm --filter @bendyline/gezel-eval-viewer run dev",
     "eval:viewer:build": "pnpm --filter @bendyline/gezel-eval-viewer run build",
-    "validate": "pnpm check:local-links && pnpm build && pnpm typecheck && pnpm lint && pnpm test && pnpm test:stability && pnpm test:coverage && pnpm test:e2e:run && pnpm test:e2e:desktop:smoke && pnpm pw:install && pnpm test:e2e:web:run && pnpm test:e2e:web:smoke && pnpm build:bundle",
+    "validate": "pnpm check:local-links && pnpm build && pnpm typecheck && pnpm lint && pnpm test && pnpm test:stability && pnpm test:coverage && pnpm test:published && pnpm check:packages && pnpm test:e2e:run && pnpm test:e2e:desktop:smoke && pnpm pw:install && pnpm test:e2e:web:run && pnpm test:e2e:web:smoke && pnpm build:bundle",
     "all": "pnpm install --frozen-lockfile && pnpm setup:native && pnpm validate",
     "typecheck": "pnpm -r --filter \"@bendyline/gezel*\" run typecheck",
     "audit:licenses": "node scripts/check-licenses.mjs",
@@ -78,9 +82,18 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
+    "@commitlint/cli": "21.2.1",
+    "@commitlint/config-conventional": "21.2.0",
+    "@semantic-release/changelog": "7.0.0",
+    "@semantic-release/exec": "7.1.0",
+    "@semantic-release/git": "11.0.1",
     "@types/node": "^24.13.3",
+    "conventional-changelog-conventionalcommits": "10.2.1",
+    "multi-semantic-release": "3.1.0",
+    "semantic-release": "25.0.8",
     "tar": "^7.5.21",
-    "typescript": "^6.0.3"
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10"
   },
   "pnpm": {}
 }
