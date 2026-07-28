@@ -184,7 +184,10 @@ describe('MCP builtin toolset grouping', () => {
 
   it('does not list unknown tools in built-in toolset groups', () => {
     const groups = readBuiltinToolsetGroups();
-    const known = new Set<string>(ALWAYS_REGISTERED_TOOLS);
+    const known = new Set<string>([
+      ...ALWAYS_REGISTERED_TOOLS,
+      ...Object.keys(CONDITIONALLY_REGISTERED_TOOLS),
+    ]);
     const extras = Array.from(groups.entries()).flatMap(([groupId, tools]) =>
       tools.filter((toolName) => !known.has(toolName)).map((toolName) => `${groupId}:${toolName}`),
     );
@@ -245,7 +248,9 @@ describe('MCP conditional tool registration', () => {
       const off = await loadServer({ [gate.envVar]: '' });
       expect(Object.keys(off._registeredTools)).not.toContain(name);
 
-      const on = await loadServer({ [gate.envVar]: gate.envValue });
+      const on = await loadServer({
+        [gate.envVar]: gate.envValue === '*' ? 'test-context' : gate.envValue,
+      });
       expect(Object.keys(on._registeredTools)).toContain(name);
     });
   }

@@ -10547,7 +10547,7 @@ export class ChatManager {
             2,
           )
         : `(craftbook "${record.craftbookRef}" not found — call craftbook_read to inspect it.)`;
-      const craftbookBlock = `\n\n## Craftbook you are editing\n\nYou are editing the local craftbook template **${record.craftbookRef}**. The unified \`craftbook_*\` tools default to it (no need to pass a target). Edit surgically — \`craftbook_add_step\` / \`craftbook_update_step\` / \`craftbook_remove_step\` / \`craftbook_reorder_steps\` / \`craftbook_set_entry\` — or \`craftbook_replace\` for a full rewrite. Give each step a role and, where you can, an exit \`gate\` or an \`advanceWhen\` deliverable. After each change, tell the user in one line what you changed. Current structure:\n\n\`\`\`json\n${summary}\n\`\`\``;
+      const craftbookBlock = `\n\n## Craftbook you are editing\n\nYou are editing the local craftbook template **${record.craftbookRef}**. The unified \`craftbook_*\` tools default to it (no need to pass a target). For broad changes, read the full document with \`craftbook_read\`, edit it, and save it atomically with \`craftbook_write\`. For surgical changes use \`craftbook_add_step\` / \`craftbook_update_step\` / \`craftbook_remove_step\` / \`craftbook_reorder_steps\` / \`craftbook_set_entry\`; use \`set_step_deliverable\` for a focused deliverable gate. Give each step a role and concrete exit criteria. After each change, tell the user in one line what you changed. Current structure:\n\n\`\`\`json\n${summary}\n\`\`\``;
       if (layeredPrefixCacheEnabled) {
         // Craftbook-editing context is session-scoped, not gezel-stable —
         // keep it OUT of the stable prefix (fold into the volatile message)

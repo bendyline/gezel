@@ -266,9 +266,20 @@ layers that already carry them. `developer` 1.4.0 is the pilot (see A/B stage 4 
 For local engines the tool schemas are rendered into the prompt by the chat template, so
 they compete with text for context and prefill. Measured accounting:
 
-- Full bridge inventory: **146 tools**; raw schemas ~92.6K ch (~23K tok), compacted by
-  `mcp.compact-tool-schemas` (strips description prose, tiny/small/medium only) to
-  ~29.7K ch (~7.4K tok). The compactor is worth ~15K tokens on a full surface.
+- The frozen cross-platform bridge inventory currently contains **161 ordinary tools**,
+  with feature-, compatibility-, and session-context tools tracked separately. Actual
+  sessions see their role kit, not that whole inventory. `mcp.compact-tool-schemas`
+  strips description prose from local-model schemas while preserving their callable
+  structure.
+- The standard Voorman kit is **77 tools** after consolidating four duplicate entry
+  points: `craftbook_create` / `craftbook_replace` fold into `craftbook_write`,
+  `list_project_local_gezels` folds into the sectioned `list_project_gezels`, and
+  `create_gezel_from_gilde` folds into `create_gezel({ templateId })`. The old handlers
+  remain available only with `GEZEL_MCP_LEGACY_TOOLS=1` for compatibility. The
+  structurally large `craftbook_update_step` schema is additionally loaded only in an
+  explicit Craftbook editor session; ordinary sessions keep the focused
+  `set_step_deliverable`. Together those changes remove about **64.2K compact schema
+  characters** from an ordinary coordinator surface without removing a capability.
 - Per-role count-caps ([session-tool-surface.ts](../packages/service/src/chat/session-tool-surface.ts)):
   tiny uses a broad cap (implementation 75, everything else 15). Small caps only
   coordinator roles, and does so **at the full curated orchestration-list length**

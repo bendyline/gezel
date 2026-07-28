@@ -75,7 +75,6 @@ export const ALWAYS_REGISTERED_TOOLS = [
   'export_project_type',
   'import_project_type',
   'ensure_gezel',
-  'create_gezel_from_gilde',
   'update_gezel',
   'message_gezel',
   'ask_gezel',
@@ -115,7 +114,6 @@ export const ALWAYS_REGISTERED_TOOLS = [
   'fetch_repo',
   'fetch_diff',
   'update_project',
-  'list_project_local_gezels',
   'list_project_gezels',
   'add_gezel_to_project',
   'remove_gezel_from_project',
@@ -223,14 +221,11 @@ export const ALWAYS_REGISTERED_TOOLS = [
   'craftbook_read',
   'craftbook_write',
   'craftbook_add_step',
-  'craftbook_update_step',
   'set_step_deliverable',
   'craftbook_remove_step',
   'craftbook_reorder_steps',
   'craftbook_set_entry',
   'craftbook_update',
-  'craftbook_create',
-  'craftbook_replace',
   'export_task_craftbook',
 
   // GitHub (PR + workflow operations)
@@ -246,12 +241,22 @@ export const ALWAYS_REGISTERED_TOOLS = [
 ] as const;
 
 /**
- * Tools registered only when their feature flag is set in the env.
- * Currently just the Claude Code permission-prompt tool, which is gated
- * on `GEZEL_PERMISSION_PROMPT=1` so it doesn't appear under Copilot /
- * OpenAI / Ollama where there's no CLI permission system to wire it in.
+ * Tools registered only when their feature or session-context gate is set
+ * in the env. Keep contextual/compatibility tools here so inventory users
+ * can distinguish them from the ordinary model-facing surface.
  */
 export const CONDITIONALLY_REGISTERED_TOOLS = {
+  // Compatibility aliases consolidated into smaller primary tools. Hidden
+  // from model sessions by default; direct MCP clients can opt in while they
+  // migrate by setting GEZEL_MCP_LEGACY_TOOLS=1.
+  create_gezel_from_gilde: { envVar: 'GEZEL_MCP_LEGACY_TOOLS', envValue: '1' },
+  list_project_local_gezels: { envVar: 'GEZEL_MCP_LEGACY_TOOLS', envValue: '1' },
+  craftbook_create: { envVar: 'GEZEL_MCP_LEGACY_TOOLS', envValue: '1' },
+  craftbook_replace: { envVar: 'GEZEL_MCP_LEGACY_TOOLS', envValue: '1' },
+  // The large surgical-step schema is useful in the explicit craftbook
+  // editor, but wasteful on every ordinary coordinator turn. `*` means any
+  // non-empty GEZEL_CRAFTBOOK_ID enables it.
+  craftbook_update_step: { envVar: 'GEZEL_CRAFTBOOK_ID', envValue: '*' },
   request_tool_permission: { envVar: 'GEZEL_PERMISSION_PROMPT', envValue: '1' },
   // Email write tools — registered only for mail-enabled projects (the chat
   // manager sets GEZEL_MAIL_ENABLED when project.mail is configured).

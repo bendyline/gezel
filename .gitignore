@@ -205,3 +205,4 @@ __pycache__/
 /runs
 packages/catalog/scripts/harvested-auth/
 /native/helpers/service-host/.build
+/.tmp-game-peers

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import { after, before, describe, it } from 'node:test';
 
 import { findMachOBinaries, isMachOMagic } from './sign-macho-tree.mjs';
@@ -50,8 +50,8 @@ describe('findMachOBinaries', () => {
   it('finds Mach-O files by content at any depth, ignoring others', async () => {
     const found = await findMachOBinaries(dir);
     assert.deepEqual(
-      found.map((p) => p.slice(dir.length + 1)),
-      ['nested/deep/spawn-helper', 'pty.node'],
+      found.map((p) => relative(dir, p)),
+      [join('nested', 'deep', 'spawn-helper'), 'pty.node'],
     );
   });
 

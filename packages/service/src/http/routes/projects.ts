@@ -299,7 +299,7 @@ export function projectRoutes(ctx: ServiceContext): Hono {
       if (!candidate) {
         return c.json(
           {
-            error: `voormanGezelId "${body.voormanGezelId}" does not match any existing gezel. If "${body.voormanGezelId}" is a gilde template name, instantiate a gezel first via the \`create_gezel_from_gilde\` MCP tool (or \`ensure_gezel\`), then pass the new gezel's id here.`,
+            error: `voormanGezelId "${body.voormanGezelId}" does not match any existing gezel. If "${body.voormanGezelId}" is a gilde role/template name, instantiate it first via \`ensure_gezel\` (or force a new one with \`create_gezel\`), then pass the returned gezel id here.`,
           },
           400,
         );

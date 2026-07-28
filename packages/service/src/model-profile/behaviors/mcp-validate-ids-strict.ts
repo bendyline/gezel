@@ -109,7 +109,7 @@ function extractIdsFromValue(value: unknown, into: Set<string>): void {
  *   2. JSON-key prose — `"id":"abc"` embedded inside a longer
  *      message ("got id":"abc"; etc.).
  *   3. Plain-prose suffix — `Created project "X" — id: abc-123. Next: …`
- *      from create_project / create_gezel_from_gilde / etc. This is
+ *      from create_project / create_gezel / etc. This is
  *      the dominant shape for "I just created something" replies.
  *
  * All three are scanned. The plain-prose form `id: <value>` accepts

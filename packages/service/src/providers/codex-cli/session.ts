@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { ALWAYS_REGISTERED_TOOLS } from '@bendyline/gezel-mcp';
+import { ALWAYS_REGISTERED_TOOLS, CONDITIONALLY_REGISTERED_TOOLS } from '@bendyline/gezel-mcp';
 import { scriptToolNamesFromEnv } from '../../project-type/script-tools.js';
 import { type ProviderQueue, runInQueue } from '../queue.js';
 import { StreamingSessionBase } from '../streaming-session.js';
@@ -88,10 +88,11 @@ export class CodexCliSession extends StreamingSessionBase implements LLMSession 
    * not yet started." Codex CLI manages its own MCP loop in-process,
    * so gezel-daemon-side introspection of the live tool list is
    * impossible. What we can honestly report: what we asked codex to
-   * wire — the gezel-mcp tools NOT in {@link CODEX_CLI_EXCLUDED_MCP_TOOLS}
-   * (those are silenced via `GEZEL_MCP_EXCLUDE` env), plus an opaque
-   * `mcp__<id>__*` marker per extra MCP server in `extraMcpServers`
-   * whose tool list we can't enumerate without spawning the server.
+   * wire — the ordinary gezel-mcp inventory plus conditionally registered
+   * tools whose MCP env gates are active, all minus
+   * {@link CODEX_CLI_EXCLUDED_MCP_TOOLS} (silenced via `GEZEL_MCP_EXCLUDE`),
+   * plus an opaque `mcp__<id>__*` marker per extra MCP server in
+   * `extraMcpServers` whose tool list we can't enumerate without spawning it.
    *
    * Names use codex's MCP namespacing convention (`mcp__<server>__<tool>`),
    * which is also what gpt-5/5.5 emit when they draft a tool call —
@@ -108,6 +109,13 @@ export class CodexCliSession extends StreamingSessionBase implements LLMSession 
     const allow = this.deps.toolAllowlist;
     const out: string[] = [];
     for (const name of ALWAYS_REGISTERED_TOOLS) {
+      if (excluded.has(name)) continue;
+      if (allow && !allow.has(name)) continue;
+      out.push(`mcp__gezel__${name}`);
+    }
+    for (const [name, gate] of Object.entries(CONDITIONALLY_REGISTERED_TOOLS)) {
+      const value = this.deps.mcpServer.env[gate.envVar];
+      if (!value || (gate.envValue !== '*' && value !== gate.envValue)) continue;
       if (excluded.has(name)) continue;
       if (allow && !allow.has(name)) continue;
       out.push(`mcp__gezel__${name}`);

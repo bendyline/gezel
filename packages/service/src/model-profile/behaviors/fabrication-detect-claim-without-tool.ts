@@ -4,7 +4,7 @@
  * skips: the model called *some* tools this turn, but narrated
  * past-tense completion of an action whose required tool was NOT
  * among them. The wild-caught case: Cosima firing
- * `create_gezel_from_gilde` + `update_project` then claiming "I have
+ * a gezel-creation tool + `update_project` then claiming "I have
  * created the 'Space Invaders' project" — without ever calling
  * `create_project`. The plain past-tense detector exits early when
  * any tool succeeded; this one looks at *which* tools succeeded.
@@ -144,7 +144,7 @@ const CLAIM_RULES: ReadonlyArray<ClaimRule> = [
     claim: 'created a gezel',
     nudge:
       'You told the user you created a gezel, but you did not call `create_gezel`, `ensure_gezel`, ' +
-      '`create_gezel_from_gilde`, `start_project`, or `start_job` this turn. Call the right one now.',
+      '`start_project`, or `start_job` this turn. Call the right one now.',
   },
   {
     pattern: new RegExp(

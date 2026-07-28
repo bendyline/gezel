@@ -9,6 +9,17 @@ describe('loadBuiltinToolContractsForLint', () => {
     expect(byName.has('writeFile')).toBe(true);
     expect(byName.has('draftEmail')).toBe(true);
     expect(byName.has('request_tool_permission')).toBe(true);
+    expect(byName.has('craftbook_update_step')).toBe(true);
+    expect(byName.has('craftbook_create')).toBe(false);
+    expect(byName.has('craftbook_replace')).toBe(false);
+    expect(byName.has('list_project_local_gezels')).toBe(false);
+    expect(byName.has('create_gezel_from_gilde')).toBe(false);
+    expect(byName.get('create_gezel')?.inputSchema).toMatchObject({
+      properties: { templateId: { type: 'string' } },
+    });
+    expect(
+      (byName.get('create_gezel')?.inputSchema.required as string[] | undefined) ?? [],
+    ).not.toContain('role');
     expect(byName.get('set_task_status')?.inputSchema).toMatchObject({
       type: 'object',
       required: ['ref', 'status'],

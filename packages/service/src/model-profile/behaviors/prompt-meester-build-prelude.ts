@@ -116,12 +116,12 @@ const MEESTER_CREW_BUILD_PRELUDE =
   '(System note for this turn: the user is asking for a new substantive build. Make ONE tool call:\n' +
   ' • `start_project({ name, about, missionObjectives, taskDescription })`. Creates a fresh project, recruits a voorman, wires them in as lead, creates the kickoff task, and hands the crew its entry step (the work starts in a task-scoped session). Use this for "build me a website / game / app / dashboard" and ALL multimodal asks (e.g. site AND logo, code AND tests AND docs). `taskDescription` must ask the lead to ship the actual requested deliverable, not to create a plan. For browser games/sites, name `workspace/index.html` and the acceptance criteria.\n' +
   ' • Do not use `start_job` unless the user explicitly scoped the work to one specialist ("quick prototype", "one-shot", "just for me", "single HTML file", "no build step").\n' +
-  'After the macro returns, your turn is done — tell the user the lead/specialist is on it. Do NOT call `create_gezel_from_gilde`, `update_project`, `create_task`, or `message_gezel` separately — the macro handles them. Do NOT reuse the existing "Default" project; the macro creates a fresh dedicated one.)';
+  'After the macro returns, your turn is done — tell the user the lead/specialist is on it. Do NOT call `create_gezel`, `update_project`, `create_task`, or `message_gezel` separately — the macro handles them. Do NOT reuse the existing "Default" project; the macro creates a fresh dedicated one.)';
 
 const MEESTER_SINGLE_JOB_PRELUDE =
   '(System note for this turn: the user asked for a one-specialist deliverable. Make ONE tool call:\n' +
   ' • `start_job({ name, about, missionObjectives, taskDescription, specialistRole })`. Use `specialistRole: "builder"` or `"developer"` for code. `taskDescription` must tell the specialist to deliver the requested file, not a plan. For source code say to write `index.html` with `writeFile` (workspace-relative path; do not prefix `workspace/`). Preserve the acceptance criteria.\n' +
-  ' • Do NOT call `start_project` for this single-file / no-build-step request. Do NOT call `create_gezel_from_gilde`, `update_project`, `create_task`, or `message_gezel` separately — the macro handles them.\n' +
+  ' • Do NOT call `start_project` for this single-file / no-build-step request. Do NOT call `create_gezel`, `update_project`, `create_task`, or `message_gezel` separately — the macro handles them.\n' +
   'After the macro returns, your turn is done — tell the user which specialist is on it.)';
 
 export const PromptMeesterBuildPrelude: Behavior = {

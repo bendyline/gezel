@@ -29,16 +29,13 @@ import type { Behavior } from '../types.js';
 /**
  * Default values used at preProcess time to fill in any required
  * field the model omitted. Each default must be long enough to pass
- * the upstream Zod min-length check (60 / 40 / 100 / 40 chars
- * respectively).
+ * the upstream Zod min-length checks.
  */
 const DEFAULTS = {
   projectAbout:
     'Project created from a chat conversation. The user (or a voorman gezel) should update this with the actual scope, target audience, and out-of-scope items via update_project once the project direction is clear.',
   projectMissionObjectives:
     'Initial setup — define concrete success criteria via update_project once scope is clear.',
-  gezelAbout:
-    "This gezel was created from a chat conversation as a placeholder. Their working style, expertise, and preferences should be filled in via update_gezel once the role is clear. Until then they default to general-purpose assistant behavior — terse, direct, and focused on the user's ask.",
   taskDescription:
     'Initial task setup — fill in the job-to-be-done via update_task once scope is clear.',
 } as const;
@@ -216,16 +213,9 @@ function fillDefaults(
     return mutated ? filled : null;
   }
   // `create_project` is no longer exposed as an MCP tool — only the
-  // `start_project` macro is. Keeping the createProject autofill
-  // would be dead code; the macro's autofill below covers the case.
-  if (toolName === 'create_gezel') {
-    const filled = { ...args };
-    if (typeof filled.about !== 'string' || filled.about.length < 100) {
-      filled.about = DEFAULTS.gezelAbout;
-      return filled;
-    }
-    return null;
-  }
+  // `start_project` macro is. `create_gezel` also needs no default:
+  // omitting `about` deliberately selects the role/template's curated
+  // prompt instead of a generic placeholder.
   if (toolName === 'create_task') {
     const filled = { ...args };
     if (typeof filled.description !== 'string' || filled.description.length < 40) {

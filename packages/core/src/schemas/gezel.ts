@@ -191,8 +191,8 @@ export const GezelFrontmatterSchema = z.object({
   voice: z.string().optional(),
   /**
    * Provenance: the id of the gilde catalog template this gezel was
-   * created from, if any. Written by `create_gezel_from_gilde`,
-   * `ensure_gezel`'s template path, and the catalog install route.
+   * created from, if any. Written by exact-template or about-omitted
+   * `create_gezel`, `ensure_gezel`'s template path, and the catalog route.
    * Absent on bespoke-generated or hand-authored gezels. The UI uses
    * this to offer "reset to original template" on the about editor.
    */

@@ -6,8 +6,8 @@
  * still passes.
  *
  * The gezel-mcp server requires `about` and `missionObjectives` on
- * `create_project`, `about` on `create_gezel`, `description` on
- * `create_task` so frontier models can't ship empty placeholder
+ * project creation and `description` on `create_task` so frontier
+ * models can't ship empty placeholder
  * objects. For a 4B local model that schema is a footgun: the model
  * populates the most obvious arg (`name`) and ships the call,
  * upstream Zod rejects with `[{code:invalid_type,...}]`, the model
@@ -41,7 +41,6 @@ const RELAXATIONS: Record<string, readonly string[]> = {
   // `start_project` / `start_job` are exposed now), so it no longer
   // needs a relaxation entry. The HTTP API still accepts the strict
   // shape for direct callers — nothing to relax there either.
-  create_gezel: ['about'],
   create_task: ['description'],
   start_project: ['about', 'missionObjectives', 'taskDescription'],
   // `start_job`'s `specialistRole` stays required even after relaxation —

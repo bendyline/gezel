@@ -3901,11 +3901,11 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
     }
   });
 
-  it('medium local voorman keeps the complete curated orchestration roster', async () => {
-    // A broad coordinator workbench can fill a 64k local window with schemas
-    // before the first reply. The medium default now keeps the complete
-    // curated orchestration list (including task resume + craftbook routing)
-    // and trims unrelated authoring/document tails.
+  it('medium local voorman keeps the full default roster without arbitrary trimming', async () => {
+    // A capable medium model (12–45B) gets the role's documented full kit.
+    // Message- and step-specific clamps may still narrow individual turns,
+    // but the generic tier policy must not silently evict newly added
+    // task/craftbook tools from a critical coordinator role.
     const home = await mkdtemp(join(tmpdir(), 'gezel-medium-voorman-cap-'));
     const localStore = new Store({ home });
     await localStore.ensureLayout();
@@ -3935,7 +3935,8 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
 
       const create = localMock.calls.find((c) => c.kind === 'create');
       const allow = create!.opts!.toolAllowlist!;
-      // Investigation + the craftbook front door survive.
+      // Investigation + the broader craftbook, memory, and document kit
+      // survive because medium is not count-capped.
       expect(allow.has('search_files')).toBe(true);
       expect(allow.has('readFile')).toBe(true);
       // Code-intelligence is no longer in the voorman's roster:
@@ -3948,14 +3949,35 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
       expect(allow.has('craftbook_read')).toBe(true);
       expect(allow.has('craftbook_write')).toBe(true);
       expect(allow.has('read_task_notes')).toBe(true);
-      // Whole-craftbook authoring and document-library tails are not part of
-      // the per-turn coordination surface.
+      // Whole-document creation/replacement is consolidated into
+      // craftbook_write; the legacy structured aliases are not advertised.
       expect(allow.has('craftbook_create')).toBe(false);
-      expect(allow.has('list_documents')).toBe(false);
+      expect(allow.has('craftbook_replace')).toBe(false);
+      // The very large surgical patch schema is contextual to the explicit
+      // Craftbook editor, not part of every ordinary Voorman turn.
+      expect(allow.has('craftbook_update_step')).toBe(false);
+      expect(allow.has('search_memory')).toBe(true);
+      expect(allow.has('list_documents')).toBe(true);
+      // These were the concrete Voorman capabilities evicted by the
+      // medium-tier 84 → 57 regression. Keep the screenshot's failure set
+      // pinned so a future coordinator diet cannot silently return.
+      for (const tool of [
+        'verify_outcome',
+        'add_verification_step',
+        'activate_task',
+        'list_task_children',
+        'spawn_task_instances',
+        'craftbook_add_step',
+        'set_step_deliverable',
+      ]) {
+        expect(allow.has(tool), `${tool} should survive on medium tier`).toBe(true);
+      }
       // The team tools the voorman actually uses survive...
       expect(allow.has('message_gezel')).toBe(true);
       expect(allow.has('ensure_gezel')).toBe(true);
       expect(allow.has('list_gezels')).toBe(true);
+      expect(allow.has('list_project_gezels')).toBe(true);
+      expect(allow.has('list_project_local_gezels')).toBe(false);
       expect(allow.has('update_project')).toBe(true);
       // ...but the Meester-only kickoff tools are stripped from her roster
       // (she's a foreman within one project, not a project-starter).
@@ -3964,10 +3986,10 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
       expect(allow.has('fetch_repo')).toBe(false);
       expect(allow.has('create_gezel')).toBe(false);
 
-      // Transparency: the persisted turn says the broad roster was trimmed.
+      // The documented full kit fits without a tier-cap warning.
       const disk = await localStore.getSession('reyansh', session.id);
       const assistant = disk?.messages.find((m) => m.role === 'assistant');
-      expect(assistant?.warnings?.some((w) => w.includes('Tool cap trimmed'))).toBe(true);
+      expect(assistant?.warnings?.some((w) => w.includes('Tool cap trimmed'))).not.toBe(true);
     } finally {
       await localMgr.drainBackground();
       await localMgr.shutdown();

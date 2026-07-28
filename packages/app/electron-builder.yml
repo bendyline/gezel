@@ -75,11 +75,11 @@ files:
   # while a chat turn is live; each base PNG picks up its @2x sibling.
   - assets/trayWorking*Template*.png
   - assets/splash.html
-  # The splash document references `./gezellogo.png` from the same
+  # The splash document references `./gezel-mark.png` from the same
   # folder. Without listing it here electron-builder leaves the image
   # out of app.asar, the splash loads, and the <img> renders as a
   # broken-image icon for the ~2-3s window before the real UI paints.
-  - assets/gezellogo.png
+  - assets/gezel-mark.png
   - '!**/node_modules/*/{CHANGELOG.md,README.md,README,readme.md,readme}'
   - '!**/node_modules/*/{test,__tests__,tests,powered-test,example,examples}'
   - '!**/node_modules/*.d.ts'

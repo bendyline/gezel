@@ -162,6 +162,15 @@ export async function resolveSessionToolSurface(
     ...(opts.securityPolicy ? { securityPolicy: opts.securityPolicy } : {}),
     ...(opts.workspaceWritable !== undefined ? { workspaceWritable: opts.workspaceWritable } : {}),
   });
+  // The full surgical step-patch schema is intentionally absent from every
+  // ordinary role kit. It is worth its ~18K compact schema characters only
+  // in the explicit Craftbook editor, where the session is pinned to one
+  // template and the editing prompt names it. Null already means unrestricted;
+  // a concrete role/security allowlist needs this contextual grant.
+  if (rawAllowlist && opts.session.craftbookRef) {
+    rawAllowlist = new Set(rawAllowlist);
+    rawAllowlist.add('craftbook_update_step');
+  }
   // Lean-profile hard override: collapse the builtin surface to the minimal
   // essential set. Applied right after the role compute — a game session has
   // no task/step, so none of the step-completion / kit augmentation below
@@ -494,7 +503,6 @@ const MEESTER_TOOL_CAP_PRIORITY = [
   'craftbook_read',
   'craftbook_write',
   'list_gilde',
-  'create_gezel_from_gilde',
   'create_gezel',
   'update_gezel',
   'ask_specialist',
@@ -657,11 +665,11 @@ export function toolCapForTierAndRole(
   // execution/browser tools while keeping EVERY curated tool, crucially
   // `read_task_notes` (rank ~26), whose trimming under the old cap-of-13
   // broke a 12B meester (the incident above). Capping AT the list length
-  // (never below it) is exactly what makes that safe. This is now the
-  // default: shipping the uncapped surface made a 64k local-model window
-  // start effectively full before the first user token. Operators can
-  // temporarily restore the legacy surface with
-  // GEZEL_MEESTER_TOOL_DIET=0 while diagnosing a missing-tool regression.
+  // (never below it) is exactly what makes that safe. Keep this opt-in:
+  // medium/large roles are documented as receiving their full kit, and
+  // coordinator priority lists drift whenever new task/craftbook tools land.
+  // GEZEL_MEESTER_TOOL_DIET=1 remains available for targeted prompt-cost
+  // experiments without silently weakening the production coordinator kit.
   if (tier === 'medium' || tier === 'large') {
     const diet = coordinatorToolDietCap(role, opts?.coordinatorToolDiet);
     if (diet !== null) return diet;
@@ -685,10 +693,7 @@ function coordinatorToolDietCap(
   role: string | undefined,
   enabledOverride?: boolean,
 ): number | null {
-  const enabled =
-    enabledOverride ??
-    (process.env.GEZEL_MEESTER_TOOL_DIET === undefined ||
-      process.env.GEZEL_MEESTER_TOOL_DIET === '1');
+  const enabled = enabledOverride ?? process.env.GEZEL_MEESTER_TOOL_DIET === '1';
   if (!enabled) return null;
   return coordinatorPriorityLength(role);
 }

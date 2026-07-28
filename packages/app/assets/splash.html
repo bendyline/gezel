@@ -17,23 +17,50 @@
         display: flex;
         align-items: center;
         justify-content: center;
+        position: relative;
         height: 100%;
         width: 100%;
+        background-color: #667f62;
+        /* Stretch the mark's empty upper band across the window so the
+           centered artwork sits in one continuous mottled-sage field. */
+        background-image: url("./gezel-mark.png");
+        background-repeat: no-repeat;
+        background-position: center top;
+        background-size: auto 500%;
       }
+
       .splash img {
-        width: 40%;
-        max-width: 360px;
+        width: 50%;
+        height: auto;
+        max-height: 72%;
+        object-fit: contain;
         opacity: 0;
-        animation: fade-in 220ms ease-out forwards;
+        filter: saturate(0.72) contrast(0.92);
+        animation: fade-in 360ms ease-out forwards;
       }
+
+      .splash::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: rgba(102, 127, 98, 0.2);
+        pointer-events: none;
+      }
+
       @keyframes fade-in {
-        to { opacity: 1; }
+        to { opacity: 0.58; }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .splash img {
+          animation-duration: 0.01ms;
+        }
       }
     </style>
   </head>
   <body>
     <div class="splash">
-      <img src="./gezellogo.png" alt="Gezel" />
+      <img src="./gezel-mark.png" alt="Gezel" />
     </div>
   </body>
 </html>

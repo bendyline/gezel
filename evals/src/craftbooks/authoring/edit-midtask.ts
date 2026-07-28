@@ -73,7 +73,7 @@ export const EDIT_MIDTASK_KICKOFF_TEMPLATE = [
   'recipe. Then drive the task to completion.',
   'The gate itself is correct — do not delete or weaken it.',
   "Make the fix with the craftbook editing tools (craftbook_read to inspect the task's book,",
-  'then craftbook_write / craftbook_update_step / craftbook_add_step to change it) — rewriting',
+  'then craftbook_write / craftbook_add_step to change it) — rewriting',
   'the output file over and over without fixing the recipe will keep failing.',
   'Do all of this on task {ref} in THIS project — do not create a new project or a replacement task.',
 ].join(' ');

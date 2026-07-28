@@ -6,7 +6,7 @@
  * deciding the next action.
  *
  * The pattern this catches: Gemma 26B in Meester mode chains
- * `create_gezel_from_gilde` → `create_project` → `update_project`
+ * `create_gezel` → `create_project` → `update_project`
  * → `message_gezel` in one streaming response without waiting for
  * any of them to return. The chain compounds fabrications because
  * each later call references results the model invented for the

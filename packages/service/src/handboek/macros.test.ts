@@ -207,6 +207,14 @@ describe('data macros', () => {
     expect(markdown).toContain('full kit');
   });
 
+  it('documents the consolidated medium Voorman surface as the full kit', async () => {
+    const { markdown } = await expandMacros('::handboek-role-tools{role=voorman scope=tiers}', {
+      ...ctx('site'),
+    });
+    expect(markdown).toContain('| medium | 12–45B | full kit (77 tools) |');
+    expect(markdown).not.toContain('| medium | 12–45B | 57 of');
+  });
+
   it('role-about pulls the template about.md and demotes headings', async () => {
     const { markdown } = await expandMacros('::handboek-role-about{role=meester}', {
       ...ctx('site'),

@@ -65,8 +65,11 @@ const STOCK_TOOLS: OpenAIFunctionTool[] = [
     description: 'Create a new gezel',
     parameters: {
       type: 'object',
-      required: ['role', 'about'],
-      properties: { role: { type: 'string' }, about: { type: 'string' } },
+      properties: {
+        role: { type: 'string' },
+        about: { type: 'string' },
+        templateId: { type: 'string' },
+      },
     },
   },
   {
@@ -131,10 +134,10 @@ describe('McpRelaxRequiredFields wrapper', () => {
     ]);
   });
 
-  it('strips about from create_gezel required', () => {
+  it('leaves create_gezel optional role/template semantics unchanged', () => {
     const out = wrapper.decorateTools!(STOCK_TOOLS, STOCK_CTX);
     const cg = out.find((t) => t.name === 'create_gezel')!;
-    expect((cg.parameters as Record<string, unknown>).required).toEqual(['role']);
+    expect((cg.parameters as Record<string, unknown>).required).toBeUndefined();
   });
 
   it('strips description from create_task required', () => {
@@ -184,12 +187,23 @@ describe('McpDefaultMissingFields wrapper', () => {
     }
   });
 
-  it('fills create_gezel about when missing', async () => {
+  it('lets role-based create_gezel use its curated template when about is omitted', async () => {
     const verdict = await wrapper.preProcess!('create_gezel', { role: 'designer' }, STOCK_CTX);
     expect(verdict.kind).toBe('allow');
-    if (verdict.kind === 'allow' && verdict.args) {
-      expect(typeof verdict.args.about).toBe('string');
-      expect((verdict.args.about as string).length).toBeGreaterThanOrEqual(100);
+    if (verdict.kind === 'allow') {
+      expect(verdict.args).toBeUndefined();
+    }
+  });
+
+  it('preserves exact-template create_gezel calls without injecting a custom about', async () => {
+    const verdict = await wrapper.preProcess!(
+      'create_gezel',
+      { templateId: 'designer' },
+      STOCK_CTX,
+    );
+    expect(verdict.kind).toBe('allow');
+    if (verdict.kind === 'allow') {
+      expect(verdict.args).toBeUndefined();
     }
   });
 

@@ -146,6 +146,31 @@ describe('CodexCliSession', () => {
       expect(names).not.toContain('mcp__gezel__writeFile');
       expect(names).not.toContain('mcp__gezel__fetch_url');
       expect(names).not.toContain('mcp__gezel__run_npx');
+      expect(names).not.toContain('mcp__gezel__craftbook_update_step');
+      expect(names).not.toContain('mcp__gezel__craftbook_create');
+      expect(names).not.toContain('mcp__gezel__create_gezel_from_gilde');
+    });
+
+    it('reports contextual and opt-in compatibility tools only when their MCP env gates are active', () => {
+      const codex = '/usr/bin/false';
+      const deps = buildDeps({ binaryPath: codex });
+      deps.mcpServer = {
+        command: 'node',
+        args: ['/tmp/gezel-mcp.js'],
+        env: {
+          GEZEL_CRAFTBOOK_ID: 'weekly-review',
+          GEZEL_MCP_LEGACY_TOOLS: '1',
+        },
+      };
+      deps.toolAllowlist = new Set([
+        'craftbook_update_step',
+        'craftbook_create',
+        'create_gezel_from_gilde',
+      ]);
+      const names = new CodexCliSession(deps).getRegisteredToolNames();
+      expect(names).toContain('mcp__gezel__craftbook_update_step');
+      expect(names).toContain('mcp__gezel__craftbook_create');
+      expect(names).toContain('mcp__gezel__create_gezel_from_gilde');
     });
 
     it('applies the role/tool allowlist to the reported gezel-mcp surface', () => {

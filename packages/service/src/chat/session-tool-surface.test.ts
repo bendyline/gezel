@@ -7,17 +7,14 @@ import { resolveSessionToolSurface, toolCapForTierAndRole } from './session-tool
  * test: the count-cap repeatedly rendered coordinator gezels inoperable by
  * evicting load-bearing tools while keeping incidental reads (the imara
  * office-hours kickoff loop,, was the 4th such incident). The
- * policy is now: coordinators are capped to their complete curated surface
- * at small/medium/large, with a load-bearing floor so no step loses the tools
- * needed to finish. Implementation roles keep their broad workbench.
+ * policy is now: small coordinators are capped to their complete curated
+ * surface, while medium/large roles keep their full kit by default. The
+ * opt-in coordinator diet remains covered independently. Implementation
+ * roles keep their broad workbench.
  */
 describe('toolCapForTierAndRole', () => {
-  it('by default medium/large coordinators use the curated diet', () => {
-    for (const role of ['Meester', 'Voorman'] as const) {
-      expect(toolCapForTierAndRole('medium', role)).not.toBeNull();
-      expect(toolCapForTierAndRole('large', role)).not.toBeNull();
-    }
-    for (const role of ['Developer', 'Data Wizard', undefined] as const) {
+  it('by default medium/large are uncapped for every role', () => {
+    for (const role of ['Meester', 'Voorman', 'Developer', 'Data Wizard', undefined] as const) {
       expect(toolCapForTierAndRole('medium', role)).toBeNull();
       expect(toolCapForTierAndRole('large', role)).toBeNull();
     }
@@ -44,18 +41,20 @@ describe('toolCapForTierAndRole', () => {
     expect(toolCapForTierAndRole('small', undefined)).toBeNull();
   });
 
-  describe('coordinator diet environment override', () => {
+  describe('opt-in coordinator diet (GEZEL_MEESTER_TOOL_DIET=1)', () => {
     beforeEach(() => {
-      process.env.GEZEL_MEESTER_TOOL_DIET = '0';
+      process.env.GEZEL_MEESTER_TOOL_DIET = '1';
     });
     afterEach(() => {
       delete process.env.GEZEL_MEESTER_TOOL_DIET;
     });
 
-    it('allows the legacy medium/large coordinator surface to be restored', () => {
+    it('caps medium/large coordinators to their curated list length', () => {
       for (const tier of ['medium', 'large'] as const) {
         for (const role of ['Meester', 'guildmaster meester', 'Voorman', 'shop foreman']) {
-          expect(toolCapForTierAndRole(tier, role)).toBeNull();
+          const cap = toolCapForTierAndRole(tier, role);
+          expect(cap).not.toBeNull();
+          expect(cap!).toBeGreaterThanOrEqual(27);
         }
       }
     });
@@ -140,6 +139,24 @@ describe('resolveSessionToolSurface — step-scoped sessions', () => {
     expect([...allowlist!]).toEqual(['ask_user_question']);
     expect(allowlist!.has('writeFile')).toBe(false);
     expect(allowlist!.has('list_tasks')).toBe(false);
+  });
+
+  it('loads the large step-patch schema only for an explicit craftbook editor session', async () => {
+    const ordinary = await resolveSessionToolSurface({
+      ...baseOpts,
+      session: baseSession({}),
+      tier: 'medium',
+    });
+    const editor = await resolveSessionToolSurface({
+      ...baseOpts,
+      session: baseSession({ craftbookRef: 'weekly-review' }),
+      tier: 'medium',
+    });
+
+    expect(ordinary.allowlist?.has('craftbook_update_step')).toBe(false);
+    expect(editor.allowlist?.has('craftbook_update_step')).toBe(true);
+    expect(editor.allowlist?.has('craftbook_write')).toBe(true);
+    expect(editor.allowlist?.has('set_step_deliverable')).toBe(true);
   });
 
   it('grants write_task_note/advance_task_step to a Meester assigned a step', async () => {

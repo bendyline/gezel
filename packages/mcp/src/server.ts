@@ -13,6 +13,8 @@
  *   GEZEL_PROJECT_ID — the project context
  *   GEZEL_SESSION_ID — the chat session this subprocess serves
  *   GEZEL_HOME       — path to ~/.gezel (for direct memory access)
+ *   GEZEL_CRAFTBOOK_ID — explicit craftbook-editor context (loads step surgery)
+ *   GEZEL_MCP_LEGACY_TOOLS=1 — expose compatibility aliases during migration
  */
 
 import { readFileSync } from 'node:fs';
@@ -164,6 +166,24 @@ const excludedToolNames = new Set([
     ? []
     : unavailableToolsForPlatform(process.platform)),
 ]);
+// Compatibility handlers remain available to direct MCP clients for one
+// migration window, but ordinary model sessions should never pay their tool
+// count or schema cost. Every capability has a smaller primary replacement.
+if (process.env.GEZEL_MCP_LEGACY_TOOLS !== '1') {
+  for (const name of [
+    'create_gezel_from_gilde',
+    'list_project_local_gezels',
+    'craftbook_create',
+    'craftbook_replace',
+  ]) {
+    excludedToolNames.add(name);
+  }
+}
+// `craftbook_update_step` carries the full gate/branch unions (~18K compact
+// schema chars). Load it only for the explicit Craftbook editor; ordinary
+// task/project sessions use craftbook_read + craftbook_write for structural
+// edits and the focused set_step_deliverable tool for gate repairs.
+if (!sessionCraftbookId) excludedToolNames.add('craftbook_update_step');
 const allowEnv = process.env.GEZEL_MCP_ALLOW;
 const allowedToolNames =
   allowEnv === undefined
@@ -3145,12 +3165,13 @@ server.tool(
 
 server.tool(
   'create_gezel',
-  "Spin up a NEW gezel. Required: `role`. The `about` is the gezel's system prompt — a few paragraphs on their identity, expertise, working style, and the tools they lean on. When `about` is OMITTED and the role matches a shipped gilde template (Developer, Designer, Reviewer, …), the template's curated about.md is used automatically — for standard roles that is the best default, same as `create_gezel_from_gilde`. Supply a custom `about` only when the gezel genuinely needs bespoke behavior no template covers; a thin hand-written about performs worse than the shipped template. The first name is assigned automatically from a curated pool — do not try to name the gezel yourself.",
+  'Force-create a NEW gezel. For ordinary recruitment use ensure_gezel, which reuses a good existing fit. Pass either `role` for role-based template matching or `templateId` for an exact template from list_gilde. Supply a custom `about` only with `role`, when the gezel genuinely needs bespoke behavior no template covers. The first name is assigned automatically.',
   {
     role: z
       .string()
+      .optional()
       .describe(
-        'Short role description (e.g. "Reviewer", "Planner", "UI/UX Designer"). Required — this is the gezel\'s purpose in one phrase.',
+        'Short role description (e.g. "Reviewer", "Planner", "UI/UX Designer"). Required unless templateId is supplied.',
       ),
     about: z
       .string()
@@ -3159,26 +3180,45 @@ server.tool(
       .describe(
         "Optional custom about.md — several paragraphs of markdown injected verbatim into every system prompt. Cover: identity (who they are, second-person), expertise, working style, tools they lean on, and preferences. At minimum 100 characters — a one-line placeholder is not acceptable. OMIT for standard roles: the role's shipped gilde template about is used instead, which is usually better than a hand-written one.",
       ),
+    templateId: z
+      .string()
+      .optional()
+      .describe(
+        'Exact template id from list_gilde. Omit for normal role-based template matching. Cannot be combined with a custom about.',
+      ),
     provider: ProviderNameSchema.optional().describe('Override the default provider'),
     model: z.string().optional().describe('Override the default model'),
   },
-  async ({ role, about, provider, model }) => {
+  async ({ role, about, templateId, provider, model }) => {
+    if (!role && !templateId) {
+      throw new Error('create_gezel requires either a role or a templateId from list_gilde.');
+    }
+    if (templateId && about) {
+      throw new Error(
+        'create_gezel accepts either templateId or a custom about, not both. Omit about to use the template.',
+      );
+    }
     const { name, gender } = pickRandomNameWithGender();
-    const created = await api.createGezel({
-      name,
-      gender,
-      role,
-      ...(about ? { about } : {}),
-      ...(model ? { model } : {}),
-    });
-    if (provider) {
-      await api.updateGezelSettings(created.id, { provider });
+    const created = templateId
+      ? await api.createGezelFromTemplate(templateId, { name, gender })
+      : await api.createGezel({
+          name,
+          gender,
+          role: role!,
+          ...(about ? { about } : {}),
+          ...(model ? { model } : {}),
+        });
+    if (provider || (templateId && model)) {
+      await api.updateGezelSettings(created.id, {
+        ...(provider ? { provider } : {}),
+        ...(templateId && model ? { model } : {}),
+      });
     }
     return {
       content: [
         {
           type: 'text' as const,
-          text: `Created gezel "${created.name}" (${role}) — id: ${created.id}. The name was auto-assigned; the user can rename later from the UI. Remember: the about.md you supplied is the system prompt; it cannot be changed at run time, only via update_gezel.`,
+          text: `Created gezel "${created.name}" (${created.role ?? role ?? templateId})${templateId ? ` from template "${templateId}"` : ''} — id: ${created.id}. The name was auto-assigned; the user can rename later from the UI.${about ? ' The supplied about.md is the system prompt and can be changed later via update_gezel.' : ''}`,
         },
       ],
     };
@@ -3187,7 +3227,7 @@ server.tool(
 
 server.tool(
   'list_gilde',
-  'List the gezel templates ("gilde" — the guild roster) bundled with Gezel. Each template has a canonical role, a name suggestion, and a curated about.md tuned for that role. Call this BEFORE create_gezel: if a template fits, use create_gezel_from_gilde and you skip having to hand-write an about.',
+  'List the gezel templates ("gilde" — the guild roster) bundled with Gezel. Each template has a canonical role and curated about.md. For normal recruitment call ensure_gezel with the role; to force a separate new gezel from an exact template, call create_gezel with templateId.',
   {},
   async () => {
     const res = await api.listCatalogItems('gezel-template');
@@ -4352,7 +4392,7 @@ server.tool(
 
 server.tool(
   'ensure_gezel',
-  "Make sure a gezel exists who can handle a given job (designer, dev, copywriter, …) and return them, creating one if nothing fits. Prefer this over the `list_gezels` → `list_gilde` → `create_gezel*` sequence: a single call does the right thing every time, and the match is fuzzy (dev/developer, UX/designer collapse to the same role). Gezels are shared across projects — reusing an existing designer keeps their memory of the user's preferences intact. Names are assigned automatically; do not try to name the gezel yourself. Use `create_gezel` or `create_gezel_from_gilde` only when you need fine control over the about.md.",
+  "Make sure a gezel exists who can handle a given job (designer, dev, copywriter, …) and return them, creating one if nothing fits. Prefer this over the `list_gezels` → `list_gilde` → `create_gezel` sequence: one fuzzy, idempotent call reuses a good roster match or creates from the matching gilde template. Gezels are shared across projects, so reuse preserves their memory of the user's preferences. Use `create_gezel` only when you explicitly need a separate new gezel, an exact templateId, or a custom about.md.",
   {
     jobTitle: z
       .string()
@@ -6172,7 +6212,7 @@ server.tool(
 
 server.tool(
   'list_project_gezels',
-  "List the gezels on a project's roster — the team that's been pulled in. Auto-fills the first time a gezel is set as voorman, opens a session, is messaged, or is assigned to a task here. Use this to answer 'who's on this project?' without scanning chat history. Returns ids only; pair with `list_gezels` to resolve names + roles.",
+  "List every gezel available in a project, in two clearly labeled sections: the shared roster pulled into this project and workspace-local gezels such as `@project` derived from AGENTS.md/CLAUDE.md or `.gezel/`. Use this single call to answer 'who is on this project?' or discover a project-local specialist.",
   {
     project: z
       .string()
@@ -6181,22 +6221,47 @@ server.tool(
   },
   async ({ project }) => {
     const resolvedProject = project ? await resolveProjectId(project) : projectId;
-    const res = await api.listProjectGezels(resolvedProject);
-    if (res.gezelIds.length === 0) {
+    const [roster, local, allGezels] = await Promise.all([
+      api.listProjectGezels(resolvedProject),
+      api.listProjectLocalGezels(resolvedProject),
+      api.listGezels(),
+    ]);
+    if (roster.gezelIds.length === 0 && local.gezels.length === 0) {
       return {
         content: [
           {
             type: 'text' as const,
-            text: `Project ${resolvedProject} has no gezels on the roster yet.`,
+            text: `Project ${resolvedProject} has no shared-roster or workspace-local gezels yet.`,
           },
         ],
       };
+    }
+    const byId = new Map(allGezels.gezels.map((g) => [g.id, g]));
+    const sections: string[] = [`Project ${resolvedProject} gezels:`];
+    if (roster.gezelIds.length > 0) {
+      sections.push(
+        [
+          `Shared roster (${roster.gezelIds.length}):`,
+          ...roster.gezelIds.map((id) => {
+            const g = byId.get(id);
+            return g ? `• ${g.name}${g.role ? ` (${g.role})` : ''} — id: ${id}` : `• id: ${id}`;
+          }),
+        ].join('\n'),
+      );
+    }
+    if (local.gezels.length > 0) {
+      sections.push(
+        [
+          `Workspace-local (${local.gezels.length}):`,
+          ...local.gezels.map((g) => `• ${g.name}${g.role ? ` (${g.role})` : ''} — id: ${g.id}`),
+        ].join('\n'),
+      );
     }
     return {
       content: [
         {
           type: 'text' as const,
-          text: `Project ${resolvedProject} roster (${res.gezelIds.length}): ${res.gezelIds.join(', ')}`,
+          text: sections.join('\n\n'),
         },
       ],
     };

@@ -179,10 +179,8 @@ const CONSULTATION_STRIPPED_TOOLS: ReadonlySet<string> = new Set(['ask_specialis
 const VOORMAN_STRIPPED_MEESTER_TOOLS: ReadonlySet<string> = new Set([
   'create_gezel',
   'update_gezel',
-  'create_gezel_from_gilde',
   'list_gilde',
   'list_projects',
-  'list_project_local_gezels',
   'start_project',
   'start_job',
   'fetch_repo',

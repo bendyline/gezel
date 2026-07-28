@@ -44,9 +44,8 @@ export interface EnsureGezelResult {
  *      preferences lives with the gezel, and carrying that across
  *      projects is most of the point.
  *   2. **Gilde**: score the curated template roster (designer,
- *      copywriter, etc.). On a hit, create_gezel_from_gilde with a
- *      caller-supplied `preferredName` or a random one from the same
- *      pool the Meester uses.
+ *      copywriter, etc.). On a hit, create from that exact template with a
+ *      caller-supplied `preferredName` or a random one from the same pool.
  *   3. **Bespoke**: spin up an LLM one-shot to write a real about.md
  *      from `jobTitle`, then create the gezel with it. The name falls
  *      back to the same random pool.
