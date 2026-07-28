@@ -12,8 +12,8 @@ vi.mock('../../theme.js', () => ({ useEffectiveTheme: () => 'light' }));
 // jsdom can't drive — the embed's own logic (article fetch, doc/video
 // toggle, link routing to the Handboek) is what this file covers.
 vi.mock('@bendyline/squisq-react', () => ({
-  LinearDocView: ({ doc }: { doc: unknown }) => (
-    <div data-testid="linear-doc-view">
+  LinearDocView: ({ doc, showCover }: { doc: unknown; showCover?: boolean }) => (
+    <div data-testid="linear-doc-view" data-show-cover={String(showCover ?? true)}>
       {doc ? 'doc' : 'no-doc'}
       <a href="the-crew.md">crew link</a>
       <a href="https://gezelgilde.com">external link</a>
@@ -52,6 +52,16 @@ describe('IntroHandboekArticle', () => {
     });
     expect(api.getHandboekArticle).toHaveBeenCalledWith('welcome');
     expect(screen.queryByTestId('doc-player')).not.toBeInTheDocument();
+  });
+
+  // The default cover turns the article's start block into a page-tall hero
+  // band whose backdrop is the leading figure — in this card that rendered
+  // the brand mark shrunk into the corner of an oversized slide, above a
+  // title/subtitle restating the first section.
+  it('reads without a synthesized cover page', async () => {
+    render(<IntroHandboekArticle />);
+    const view = await screen.findByTestId('linear-doc-view');
+    expect(view).toHaveAttribute('data-show-cover', 'false');
   });
 
   it('switches to the synthetic-clock video player and back', async () => {
