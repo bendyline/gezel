@@ -2,6 +2,7 @@ import type { HandboekArticle, HandboekToc } from '@bendyline/gezel';
 import { DocPlayer, LinearDocView, MediaContext } from '@bendyline/squisq-react';
 import { markdownToDoc } from '@bendyline/squisq/doc';
 import { parseMarkdown } from '@bendyline/squisq/markdown';
+import { getDocPlaybackDuration } from '@bendyline/squisq/schemas';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { AreaIcon } from '../components/AreaIcon.js';
@@ -125,6 +126,24 @@ export function HandboekView() {
       return null;
     }
   }, [article]);
+
+  // Every timing path in squisq 2.5.0's DocPlayer — `totalDuration`, the
+  // synthetic timer's arming condition, the scrubber — reads the audio
+  // segment list, which an unnarrated article doesn't have. The clock length
+  // comes out 0 and playback freezes at 0:00 / 0:00 on the first slide.
+  // Standing in one srcless segment spanning the document's own timeline
+  // restores it; in `synthetic` audio mode every media path in the player
+  // returns early, so the segment is never fetched. Local shim — drop it once
+  // a squisq release derives the synthetic clock from the doc itself.
+  const syntheticDoc = useMemo(() => {
+    if (!doc || doc.audio.segments.length > 0) return doc;
+    const duration = getDocPlaybackDuration(doc);
+    if (duration <= 0) return doc;
+    return {
+      ...doc,
+      audio: { segments: [{ src: '', name: 'synthetic', duration, startTime: 0 }] },
+    };
+  }, [doc]);
 
   // Kokoro narration: fetch the per-block segment manifest + WAVs on
   // first Listen. Segments are positionally aligned with doc blocks
@@ -329,7 +348,7 @@ export function HandboekView() {
               <div className="handboek-player" data-testid="handboek-player">
                 <DocPlayer
                   key={narratedDoc ? 'narrated' : 'synthetic'}
-                  doc={narratedDoc ?? doc}
+                  doc={narratedDoc ?? syntheticDoc ?? doc}
                   theme={gezelChatTheme}
                   displayMode="video"
                   audioMode={narratedDoc ? 'media' : 'synthetic'}

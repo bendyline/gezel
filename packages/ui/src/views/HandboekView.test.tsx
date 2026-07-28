@@ -17,11 +17,22 @@ vi.mock('@bendyline/squisq-react', () => ({
       <a href="https://gezelgilde.com">external link</a>
     </div>
   ),
-  DocPlayer: ({ captionStyle, audioMode }: { captionStyle?: string; audioMode?: string }) => (
+  DocPlayer: ({
+    captionStyle,
+    audioMode,
+    doc,
+  }: {
+    captionStyle?: string;
+    audioMode?: string;
+    doc?: { audio?: { segments: { duration: number }[] } };
+  }) => (
     <div
       data-testid="doc-player"
       data-caption-style={captionStyle ?? ''}
       data-audio-mode={audioMode ?? ''}
+      data-clock-length={String(
+        (doc?.audio?.segments ?? []).reduce((total, seg) => total + seg.duration, 0),
+      )}
     >
       player
     </div>
@@ -145,6 +156,19 @@ describe('HandboekView', () => {
     expect(screen.queryByTestId('linear-doc-view')).not.toBeInTheDocument();
     await user.click(screen.getByRole('radio', { name: 'Document' }));
     expect(await screen.findByTestId('linear-doc-view')).toBeInTheDocument();
+  });
+
+  it('gives the unnarrated player a clock to run on', async () => {
+    // An article with no narration still has to play. The player takes its
+    // timeline length from the audio track, so a doc with no segments leaves
+    // it frozen at 0:00 / 0:00 — see the synthetic-segment shim in the view.
+    const user = userEvent.setup();
+    render(<HandboekView />);
+    await screen.findByTestId('linear-doc-view');
+    await user.click(screen.getByRole('radio', { name: 'Video' }));
+    const player = await screen.findByTestId('doc-player');
+    expect(player).toHaveAttribute('data-audio-mode', 'synthetic');
+    expect(Number(player.getAttribute('data-clock-length'))).toBeGreaterThan(0);
   });
 
   it('offers Listen in video mode when TTS is healthy and switches to media audio', async () => {
