@@ -15316,8 +15316,10 @@ export async function buildLlamaCppProvider(opts: {
   // We want a generous working window without allocating a full 128K
   // slot on a 2B model where most of it would sit empty and eat VRAM.
   //
-  //   preferredCap          — `config.llamaCppNumCtx`, or 49K default
-  // (bumped from 32K — see below).
+  //   preferredCap          — env/`config.llamaCppNumCtx`, else the
+  //                           per-model manifest
+  //                           `tuning.engine.llamaCpp.contextSize`, else
+  //                           the 65K global default (see below).
   //   modelCtx              — advertised native context from the GGUF
   //                           metadata the catalog captured on install.
   //                           Unknown → fall back to preferredCap.
@@ -15345,8 +15347,25 @@ export async function buildLlamaCppProvider(opts: {
   // ~45K and have headroom for 2-3 more tool round-trips. KV cache
   // at 65K on a 26B Q4_K_M Gemma is ~2 GB resident — well under
   // the 32+ GB hosts this size model already requires.
+  // Per-model engine-launch defaults from the catalog manifest
+  // (`tuning.engine.llamaCpp`). Resolved here (stable catalog data) so
+  // `contextSize` can feed `preferredCap` below; also consumed later by
+  // specDraft / MTP resolution and merged UNDER the user's global
+  // `config.llamaCpp*` overrides by `buildLlamaCppEngineArgs`.
+  const manifestEngineConfig = opts.catalog
+    ? await resolveCatalogLlamaCppEngineConfig(
+        opts.catalog,
+        opts.modelOverride?.modelId ?? defaultModelId,
+      )
+    : undefined;
+
   const PREFERRED_CTX_DEFAULT = 65_536;
-  const preferredCap = numCtx ?? PREFERRED_CTX_DEFAULT;
+  // Precedence: env (`GEZEL_LLAMA_NUM_CTX`) / user `config.llamaCppNumCtx`
+  // override the per-model manifest `tuning.engine.llamaCpp.contextSize`,
+  // which overrides the 64K global default. `effectiveNumCtx` still clamps
+  // to the model's native GGUF train ctx (`modelCtx`) below, so a manifest
+  // can only opt a model UP toward its own window, never past it.
+  const preferredCap = numCtx ?? manifestEngineConfig?.contextSize ?? PREFERRED_CTX_DEFAULT;
   const modelCtx = modelCatalogInfo?.contextWindow ?? preferredCap;
   const effectiveNumCtx = Math.min(modelCtx, preferredCap);
 
@@ -15446,17 +15465,6 @@ export async function buildLlamaCppProvider(opts: {
   // See `resolveCatalogReasoningBudget` for the lookup rationale.
   const reasoningBudgetTokens = opts.catalog
     ? await resolveCatalogReasoningBudget(
-        opts.catalog,
-        opts.modelOverride?.modelId ?? defaultModelId,
-      )
-    : undefined;
-
-  // Per-model engine-launch defaults from the catalog manifest
-  // (`tuning.engine.llamaCpp`). Resolved once here (stable catalog
-  // data); merged UNDER the user's global `config.llamaCpp*` overrides
-  // by `buildLlamaCppEngineArgs`, which runs inside the launch closure.
-  const manifestEngineConfig = opts.catalog
-    ? await resolveCatalogLlamaCppEngineConfig(
         opts.catalog,
         opts.modelOverride?.modelId ?? defaultModelId,
       )
