@@ -1,8 +1,8 @@
 import type { MeesterStatusReport, Poppetje as PoppetjeStruct } from '@bendyline/gezel';
-import type { ReactNode } from 'react';
 import { GezelIcon } from '../../components/GezelIcon.js';
 import { useShowPoppetjes } from '../../components/useShowPoppetjes.js';
 import { Poppetje } from '../../poppetje/index.js';
+import { IntroHandboekArticle } from './IntroHandboekArticle.js';
 import { StatusReportPanel } from './StatusReportPanel.js';
 import { TipOfDay } from './TipOfDay.js';
 import { type HomeChip, type HomeNavView, greetingForHour } from './utils.js';
@@ -42,18 +42,6 @@ function Chips({ chips }: { chips: HomeChip[] }) {
         </span>
       ))}
     </>
-  );
-}
-
-function HowColumn({ tag, title, children }: { tag: string; title: string; children: ReactNode }) {
-  return (
-    <div className="home-workshop-how">
-      <div className="home-workshop-how-head">
-        <span className="home-workshop-how-tag">{tag}</span>
-        <span className="home-workshop-how-title">{title}</span>
-      </div>
-      <div className="home-workshop-how-body">{children}</div>
-    </div>
   );
 }
 
@@ -238,36 +226,7 @@ export function GreetingBand({
             />
           ) : tab === 'tour' ? (
             <div className="home-workshop-tour-inline" role="tabpanel">
-              <div className="home-workshop-tour-rows">
-                <HowColumn tag="01" title="What gezel is">
-                  A workshop that lives <em className="home-workshop-italic">on this machine</em> —
-                  a small crew of AI craftspeople you assemble yourself. Free, open source, no
-                  account. Nothing leaves the machine unless you say so.
-                </HowColumn>
-                <HowColumn tag="02" title="What a meester is">
-                  <em className="home-workshop-italic">{meesterName}</em> greets you at the door.
-                  Tell them what you want and they route it to the right gezel, hire a new one, or
-                  spin up a job. Start here when you&rsquo;re not sure where to go.
-                </HowColumn>
-                <HowColumn tag="03" title="The rules of the game">
-                  <strong>People, not agents.</strong> Local models first — cloud and the web are
-                  opt-in and <em className="home-workshop-italic">always marked</em>. Calm by
-                  default; one thing lights up when a gezel is working. Everything is yours, on your
-                  disk.
-                </HowColumn>
-              </div>
-              <div className="home-workshop-stamps">
-                <span className="home-workshop-stamp sage">★ on this disk</span>
-                <span className="home-workshop-stamp" style={{ opacity: 0.6 }}>
-                  ↗ off-disk · off
-                </span>
-                <span
-                  className="home-workshop-italic"
-                  style={{ fontSize: 12, color: 'var(--ink-3)' }}
-                >
-                  free · open source · yours
-                </span>
-              </div>
+              <IntroHandboekArticle />
             </div>
           ) : (
             <>

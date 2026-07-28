@@ -604,9 +604,12 @@ export function EngineStatusPill() {
             <span className="engine-pill-model">{` · ${displayModelName}`}</span>
           )}
           {healthPresentation?.inline && (
-            <span className={`engine-pill-health engine-pill-health-${healthPresentation.tone}`}>
-              {` · ${healthPresentation.inline}`}
-            </span>
+            <>
+              {' · '}
+              <span className={`engine-pill-health engine-pill-health-${healthPresentation.tone}`}>
+                {healthPresentation.inline}
+              </span>
+            </>
           )}
           {busy && elapsed > 0 && <span className="engine-pill-elapsed">{` · ${elapsed}s`}</span>}
           {queuedWaiting > 0 && (

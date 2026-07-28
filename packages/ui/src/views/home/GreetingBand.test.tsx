@@ -12,6 +12,23 @@ vi.mock('./StatusReportPanel.js', () => ({
     <div data-testid="status-report-panel">{report.report}</div>
   ),
 }));
+vi.mock('./IntroHandboekArticle.js', () => ({
+  IntroHandboekArticle: () => (
+    <div data-testid="home-intro-article">
+      <button type="button">Open in Handboek →</button>
+      <div role="radiogroup" aria-label="View as">
+        <label>
+          <input type="radio" name="intro-mode" checked readOnly />
+          Read
+        </label>
+        <label>
+          <input type="radio" name="intro-mode" readOnly />
+          Watch
+        </label>
+      </div>
+    </div>
+  ),
+}));
 
 const REPORT: MeesterStatusReport = {
   headline: 'Your space war game is done! Click to play it!',
@@ -79,6 +96,16 @@ describe('GreetingBand', () => {
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(
       'Your space war game is done!',
     );
+  });
+
+  it('shows the Handboek article with read and watch choices in the tour', () => {
+    renderBand({ tab: 'tour' });
+    expect(screen.getByTestId('home-intro-article')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Open in Handboek/ })).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: 'Read' })).toBeChecked();
+    expect(screen.getByRole('radio', { name: 'Watch' })).not.toBeChecked();
+    expect(screen.queryByText('What a meester is')).not.toBeInTheDocument();
+    expect(screen.queryByText(/off-disk/i)).not.toBeInTheDocument();
   });
 });
 

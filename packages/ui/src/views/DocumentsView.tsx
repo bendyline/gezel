@@ -228,13 +228,29 @@ export function DocumentsView() {
       <div className="documents-split">
         <aside className="documents-tree">
           <div className="area-toolbar">
-            <button type="button" className="area-toolbar-btn" onClick={() => openNewDoc()}>
-              + Document
-            </button>
-            <button type="button" className="area-toolbar-btn" onClick={() => openNewFolder()}>
-              + Folder
-            </button>
             {status && <span className="area-toolbar-status">{status}</span>}
+            <div className="area-toolbar-actions">
+              <button
+                type="button"
+                className="area-toolbar-btn area-toolbar-icon-btn"
+                aria-label="New folder"
+                title="New folder"
+                onClick={() => openNewFolder()}
+              >
+                {/* biome-ignore lint/a11y/noAriaHiddenOnFocusable: decorative icon, not focusable */}
+                <i className="fa-solid fa-folder-plus" aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                className="area-toolbar-btn area-toolbar-icon-btn"
+                aria-label="New document"
+                title="New document"
+                onClick={() => openNewDoc()}
+              >
+                {/* biome-ignore lint/a11y/noAriaHiddenOnFocusable: decorative icon, not focusable */}
+                <i className="fa-solid fa-file-circle-plus" aria-hidden="true" />
+              </button>
+            </div>
           </div>
           <div className="documents-tree-list">
             {entries.length === 0 ? (

@@ -83,7 +83,15 @@ test('the greeting collapses and the tour tab swaps content', async () => {
   await tour.click();
   await expect(tour).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByText('Tip of the day')).toBeHidden();
-  await expect(page.getByText('What gezel is')).toBeVisible();
+  await expect(page.getByRole('button', { name: /Open in Handboek/ })).toBeVisible();
+  await expect(page.getByRole('radio', { name: 'Read' })).toBeVisible();
+  await expect(page.getByRole('radio', { name: 'Watch' })).toBeVisible();
+  await expect(page.getByText(/off-disk/i)).toHaveCount(0);
+
+  await page.screenshot({
+    path: join(screenshotDir, 'home-03-workshop-tour.png'),
+    fullPage: true,
+  });
 });
 
 test('renders the workshop in dark (dusk) mode', async () => {
@@ -91,7 +99,7 @@ test('renders the workshop in dark (dusk) mode', async () => {
   // date tab is always the first in the strip) for a clean shot.
   if (
     await page
-      .getByText('What gezel is')
+      .getByRole('button', { name: /Open in Handboek/ })
       .isVisible()
       .catch(() => false)
   ) {

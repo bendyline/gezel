@@ -1035,7 +1035,15 @@ html.embedded-chat #root {
   opacity: 0.82;
 }
 .engine-pill-health-warning {
-  color: var(--warning);
+  display: inline-flex;
+  align-items: center;
+  margin-left: 0.1rem;
+  padding: 0.05rem 0.25rem;
+  border-radius: var(--radius-sm);
+  color: var(--titlebar-ink);
+  border: 1px solid color-mix(in srgb, var(--warning) 72%, var(--titlebar-ink));
+  background: linear-gradient(rgba(0, 0, 0, 0.44), rgba(0, 0, 0, 0.44)), var(--warning);
+  opacity: 1;
 }
 .engine-pill-health-danger {
   color: var(--danger);
@@ -1570,6 +1578,24 @@ html.embedded-chat #root {
   color: var(--text);
 }
 
+.area-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+}
+
+.area-toolbar-icon-btn {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1rem;
+  line-height: 1;
+}
+
 /* Pushed to the right edge (Projects collapse control). */
 .area-toolbar-toggle {
   margin-left: auto;
@@ -1630,27 +1656,6 @@ html.embedded-chat #root {
 .document-detail .editor-wrap {
   flex: 1;
   min-height: 0;
-}
-
-/* Slim header above the editor: the document's on-disk path (local-first —
-   users should always be able to see where the file lives) on the left,
-   the autosave status chip on the right. Replaces the old floating
-   `<output class="status">` that rendered clipped beside the editor. */
-.document-detail-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  padding: 0.25rem 0.6rem;
-  border-bottom: 1px solid var(--border);
-  background: var(--panel);
-}
-.document-detail-path {
-  font-size: var(--text-xs);
-  color: var(--text-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 /* Standalone document tab: TabContent mounts `.document-detail` directly
    inside `.app-main`, so its `1rem 1.25rem` padding shows as a margin
@@ -8758,29 +8763,6 @@ button.bench-step-foot:disabled {
 .home-workshop-collapse-btn > svg {
   display: block;
 }
-.home-workshop-stamp {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-family: var(--font-ui);
-  font-size: 10px;
-  font-weight: 500;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--terra-deep);
-  padding: 3px 8px;
-  border: 1.5px solid var(--terra);
-  border-radius: 3px;
-  background: rgba(201, 117, 83, 0.04);
-  transform: rotate(-1deg);
-  white-space: nowrap;
-}
-.home-workshop-stamp.sage {
-  color: var(--sage-ink);
-  border-color: var(--sage-deep);
-  background: rgba(138, 154, 118, 0.08);
-}
-
 /* — Greeting band — */
 .home-workshop-greeting {
   border-bottom: 1px solid var(--home-hair);
@@ -9029,45 +9011,6 @@ button.bench-step-foot:disabled {
 .home-workshop-tour-inline {
   display: flex;
   flex-direction: column;
-  gap: 18px;
-}
-.home-workshop-tour-rows {
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-}
-.home-workshop-how {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.home-workshop-how-head {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-}
-.home-workshop-how-tag {
-  font-family: var(--mono);
-  font-size: 11px;
-  color: var(--terra-deep);
-}
-.home-workshop-how-title {
-  font-family: var(--font-display);
-  font-size: 19px;
-  font-weight: 500;
-  white-space: nowrap;
-}
-.home-workshop-how-body {
-  font-size: 13.5px;
-  line-height: 1.6;
-  color: var(--ink-2);
-}
-.home-workshop-stamps {
-  display: flex;
-  gap: 8px;
-  margin-top: 12px;
-  flex-wrap: wrap;
-  align-items: center;
 }
 
 /* — Body: full-width conversation — */
@@ -9216,7 +9159,7 @@ button.bench-step-foot:disabled {
 }
 
 /* The intro body is the "What is gezel?" Handboek article embedded as a
-   live page: a row of controls (Open in Handboek + the Document/Video
+   live page: a row of controls (Open in Handboek + the Read/Watch
    tray), then the page itself — a cream sheet resting on the sage card. */
 .home-intro-article-controls {
   display: flex;
@@ -9860,9 +9803,9 @@ button.bench-step-foot:disabled {
    written. Identity-distinct from the ok/warn variants so it's hard to
    forget debug mode is on. */
 .home-status-debug {
-  color: #e8a548;
-  border-color: rgba(232, 165, 72, 0.5);
-  background: rgba(232, 165, 72, 0.09);
+  color: color-mix(in srgb, var(--warning) 55%, var(--text));
+  border-color: color-mix(in srgb, var(--warning) 50%, transparent);
+  background: var(--warning-bg);
   font-weight: 500;
 }
 

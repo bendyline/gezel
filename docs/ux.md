@@ -280,9 +280,9 @@ initial; never expose the browser's native broken-image placeholder.
 also belongs in the documentation, don't hardcode the prose — embed the
 Handboek article (`LinearDocView`/`DocPlayer` + `createHandboekMediaProvider`,
 with the shared `GEZEL_LIGHT_SURFACE` overlay in light mode) so the pitch and
-the docs never drift. The Home first-run intro's "What is gezel?" embed
+the docs never drift. The Home "What is gezel?" embed
 (`IntroHandboekArticle`) is the reference implementation: a cream page
-resting on the card, a Document/Video key tray, and an "Open in Handboek →"
+resting on the card, a Read/Watch key tray, and an "Open in Handboek →"
 link that lands on the same article.
 
 **Loading states.** Prefer inline `muted` text ("loading models…",

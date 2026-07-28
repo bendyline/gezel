@@ -423,7 +423,7 @@ describe('HomeView', () => {
     // The tour content replaces the greeting + tip in the left column.
     expect(tourTab).toHaveAttribute('aria-selected', 'true');
     expect(screen.queryByText('Tip of the day')).not.toBeInTheDocument();
-    expect(screen.getByText('What gezel is')).toBeInTheDocument();
+    expect(screen.getByTestId('home-intro-article')).toBeInTheDocument();
   });
 
   it('cycles the tip of the day', async () => {

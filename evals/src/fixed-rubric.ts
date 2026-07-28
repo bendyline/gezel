@@ -301,6 +301,10 @@ function scoreQuality(facts: TrialFacts, profile: QualityProfile): AxisScore {
 function scoreEfficiency(facts: TrialFacts): AxisScore {
   const budget = facts.outcome.budgetUsedFraction;
   const calls = facts.toolUse.totalToolCalls;
+  const severeBudget = Number.isFinite(budget) && budget >= 1;
+  const severeCalls = calls >= 30;
+  const efficientBudget = Number.isFinite(budget) && budget <= 0.5;
+  const efficientCalls = calls <= 10;
   const evidence = [
     factsEvidence('outcome.budgetUsedFraction', budget),
     factsEvidence('toolUse.totalToolCalls', calls),
@@ -308,7 +312,23 @@ function scoreEfficiency(facts: TrialFacts): AxisScore {
     factsEvidence('outcome.durationMs', facts.outcome.durationMs),
   ];
 
-  if (Number.isFinite(budget) && budget <= 0.5 && calls <= 10) {
+  if (severeBudget && severeCalls) {
+    return {
+      score: 0,
+      ruleId: 'E_BOTH_SEVERE',
+      summary: 'The trial exhausted its budget while making at least thirty tool calls.',
+      evidence,
+    };
+  }
+  if (severeBudget || severeCalls) {
+    return {
+      score: 2.5,
+      ruleId: 'E_ONE_SEVERE',
+      summary: 'Exactly one efficiency dimension reached the severe threshold.',
+      evidence,
+    };
+  }
+  if (efficientBudget && efficientCalls) {
     return {
       score: 10,
       ruleId: 'E_LOW_BUDGET_LOW_CALLS',
@@ -316,19 +336,22 @@ function scoreEfficiency(facts: TrialFacts): AxisScore {
       evidence,
     };
   }
-  if (Number.isFinite(budget) && budget >= 1 && calls >= 30) {
+  if (
+    (efficientBudget && calls >= 11 && calls <= 19) ||
+    (budget > 0.5 && budget < 1 && efficientCalls)
+  ) {
     return {
-      score: 0,
-      ruleId: 'E_FULL_BUDGET_HIGH_CALLS',
-      summary: 'The trial exhausted its budget while making at least thirty tool calls.',
+      score: 7.5,
+      ruleId: 'E_ONE_MILD_INTERMEDIATE',
+      summary: 'One efficiency dimension is efficient and the other is mildly intermediate.',
       evidence,
     };
   }
   return {
     score: 5,
-    ruleId: 'E_MIXED_OR_MIDRANGE',
+    ruleId: 'E_MODERATE',
     summary:
-      'The budget and tool-call evidence is mixed or falls between the fixed best/worst anchors.',
+      'The non-severe efficiency evidence is moderate, including a 20-29 call trace or two intermediate dimensions.',
     evidence,
   };
 }

@@ -214,10 +214,15 @@ describe('fixed eval-run rubric', () => {
     );
   });
 
-  it('implements the efficiency best, worst, and mixed anchors exactly', () => {
+  it('implements every efficiency precedence band exactly', () => {
     expect(scoreTrialFacts(makeFacts({ budget: 0.5, calls: 10 })).axes.efficiency.score).toBe(10);
+    expect(scoreTrialFacts(makeFacts({ budget: 0.5, calls: 11 })).axes.efficiency.score).toBe(7.5);
+    expect(scoreTrialFacts(makeFacts({ budget: 0.7, calls: 10 })).axes.efficiency.score).toBe(7.5);
+    expect(scoreTrialFacts(makeFacts({ budget: 0.5, calls: 20 })).axes.efficiency.score).toBe(5);
+    expect(scoreTrialFacts(makeFacts({ budget: 0.7, calls: 11 })).axes.efficiency.score).toBe(5);
+    expect(scoreTrialFacts(makeFacts({ budget: 1, calls: 10 })).axes.efficiency.score).toBe(2.5);
+    expect(scoreTrialFacts(makeFacts({ budget: 0.5, calls: 30 })).axes.efficiency.score).toBe(2.5);
     expect(scoreTrialFacts(makeFacts({ budget: 1, calls: 30 })).axes.efficiency.score).toBe(0);
-    expect(scoreTrialFacts(makeFacts({ budget: 0.7, calls: 7 })).axes.efficiency.score).toBe(5);
   });
 
   it('scores red flags, missing roles, and exactly two interventions deterministically', () => {

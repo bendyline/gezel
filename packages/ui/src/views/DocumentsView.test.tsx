@@ -216,7 +216,20 @@ describe('DocumentsView', () => {
     expect(pathInput).toHaveValue('guidelines/');
   });
 
-  it('clicking + Document opens a dialog; submitting calls writeDocument and refreshes', async () => {
+  it('renders right-aligned Font Awesome creation actions', async () => {
+    render(<DocumentsView />);
+    await waitFor(() => {
+      expect(api.listDocuments).toHaveBeenCalledTimes(1);
+    });
+
+    const folderButton = screen.getByRole('button', { name: 'New folder' });
+    const documentButton = screen.getByRole('button', { name: 'New document' });
+    expect(folderButton.parentElement).toHaveClass('area-toolbar-actions');
+    expect(folderButton.querySelector('i')).toHaveClass('fa-solid', 'fa-folder-plus');
+    expect(documentButton.querySelector('i')).toHaveClass('fa-solid', 'fa-file-circle-plus');
+  });
+
+  it('clicking New document opens a dialog; submitting calls writeDocument and refreshes', async () => {
     vi.mocked(api.listDocuments).mockResolvedValue({ files: [] } as never);
     render(<DocumentsView />);
     await waitFor(() => {
@@ -224,7 +237,7 @@ describe('DocumentsView', () => {
     });
 
     const user = userEvent.setup();
-    await user.click(screen.getByRole('button', { name: /\+ Document/ }));
+    await user.click(screen.getByRole('button', { name: 'New document' }));
 
     // The new-doc dialog renders a Path input.
     const pathInput = screen.getByPlaceholderText('e.g. guidelines/coding.md');

@@ -61,9 +61,9 @@ const MODEL_TUNING: Readonly<Record<string, ModelTuningTarget>> = {
   },
   'gemma4-e4b-q8': {
     manifest: '../gilde/data/chat-models/ge/gemma4-e4b-q8/manifest.json',
-    compactToolSchemas: false,
+    compactToolSchemas: true,
     buildPrelude: true,
-    codingTemperature: { current: 0.6, proposed: 0.4 },
+    codingTemperature: { current: 0.3, proposed: 0.2 },
     generalTemperature: { current: 0.9, proposed: 0.7 },
     efficiency: { field: 'tuning.reasoning.thinkingBudget', current: 96, proposed: 64 },
     cleanRun: {
@@ -624,7 +624,7 @@ function renderMatrixSummary(entries: TrialEntry[], roots: string[]): string {
     const craftbook = all.filter((entry) => entry.facts.scenarioId.startsWith('craftbook-'));
     const other = all.filter((entry) => !entry.facts.scenarioId.startsWith('craftbook-'));
     lines.push(
-      `| ${model} | ${fmt1(mean(craftbook.map((entry) => entry.score.composite)))} | ${fmt1(mean(other.map((entry) => entry.score.composite)))} | ${craftbook.filter((entry) => entry.facts.outcome.success).length}/${craftbook.length} | ${other.filter((entry) => entry.facts.outcome.success).length}/${other.length} |`,
+      `| ${model} | ${craftbook.length > 0 ? fmt1(mean(craftbook.map((entry) => entry.score.composite))) : 'n/a'} | ${other.length > 0 ? fmt1(mean(other.map((entry) => entry.score.composite))) : 'n/a'} | ${craftbook.filter((entry) => entry.facts.outcome.success).length}/${craftbook.length} | ${other.filter((entry) => entry.facts.outcome.success).length}/${other.length} |`,
     );
   }
 
@@ -688,26 +688,78 @@ function renderMatrixSummary(entries: TrialEntry[], roots: string[]): string {
       (entry) =>
         entry.facts.outcome.budgetUsedFraction > 0.5 || entry.facts.toolUse.totalToolCalls > 10,
     ).length;
-    lines.push(
-      `- **${model}:** A/B \`${target.manifest}\` coding temperature ${target.codingTemperature.current} -> ${target.codingTemperature.proposed} for parse stability (${parse} critical-output trials), and \`${target.efficiency.field}\` ${target.efficiency.current} -> ${target.efficiency.proposed} for budget control (${expensive} expensive trials). Track ${stalled} no-artifact and ${interventions} high-intervention trials; accept only cross-scenario improvements.`,
+    const experiments: string[] = [];
+    if (parse > 0) {
+      experiments.push(
+        `A/B \`${target.manifest}\` coding temperature ${target.codingTemperature.current} -> ${target.codingTemperature.proposed} for parse stability (${parse} critical-output trials)`,
+      );
+    }
+    if (expensive > 0) {
+      experiments.push(
+        `A/B \`${target.manifest}\` \`${target.efficiency.field}\` ${target.efficiency.current} -> ${target.efficiency.proposed} for budget control (${expensive} expensive trials)`,
+      );
+    }
+    if (stalled > 0) {
+      experiments.push(`measure first-artifact latency (${stalled} no-artifact trials)`);
+    }
+    if (interventions > 0) {
+      experiments.push(`reduce avoidable questions (${interventions} high-intervention trials)`);
+    }
+    if (experiments.length === 0) {
+      experiments.push(
+        `retain the current manifest as baseline; no parse, no-artifact, intervention, or efficiency failure signal justified a tuning change`,
+      );
+    }
+    lines.push(`- **${model}:** ${experiments.join('; ')}. Accept only cross-scenario improvements.`);
+  }
+  const routingSignals = entries.filter(
+    (entry) =>
+      entry.facts.toolUse.redFlags.length > 0 ||
+      entry.facts.team.missingExpectedRoles.length > 0,
+  ).length;
+  const strategicPriorities: string[] = [];
+  if (criticalOutput > 0) {
+    strategicPriorities.push(
+      `**Pre-terminal validation:** connect \`validate-inline-js-parses.ts\` to \`deliverable-gate.ts\` with a bounded repair turn; ${criticalOutput} trials provide evidence.`,
+    );
+  }
+  if (noOutput > 0) {
+    strategicPriorities.push(
+      `**First-artifact control:** add a first-tool/first-artifact checkpoint in \`task-budget.ts\` + \`deliverable-contract.ts\`; ${noOutput} trials lacked an observed artifact.`,
+    );
+  }
+  if (routingSignals > 0) {
+    strategicPriorities.push(
+      `**Role/tool routing:** strengthen \`role-tool-filter.ts\` and corrective tool-surface hints; ${routingSignals} trials recorded red flags or missing roles.`,
+    );
+  }
+  if (highIntervention > 0) {
+    strategicPriorities.push(
+      `**Question ergonomics:** classify reversible/defaultable questions in \`questions.ts\` + \`phase-gate.ts\`; ${highIntervention} trials needed at least two interventions.`,
+    );
+  }
+  if (highBudget > 0) {
+    strategicPriorities.push(
+      `**Adaptive early finish and write ergonomics:** use \`deliverable-gate.ts\`, \`session-telemetry.ts\`, and validated patch/replace-section support in \`packages/mcp/src/server.ts\`; ${highBudget} trials exceeded the conservative efficiency anchor.`,
+    );
+  }
+  if (strategicPriorities.length === 0) {
+    strategicPriorities.push(
+      '**Regression coverage:** keep this matrix as a smoke baseline; no reusable failure signal justified a framework change.',
     );
   }
   lines.push(
     '',
     '## Strategic priorities',
     '',
-    `1. **Pre-terminal validation:** connect \`validate-inline-js-parses.ts\` to \`deliverable-gate.ts\` with a bounded repair turn; ${criticalOutput} trials provide cross-model evidence.`,
-    `2. **First-artifact control:** add a first-tool/first-artifact checkpoint in \`task-budget.ts\` + \`deliverable-contract.ts\`; ${noOutput} trials lacked an observed artifact.`,
-    `3. **Role/tool routing:** strengthen \`role-tool-filter.ts\` and corrective tool-surface hints; ${entries.filter((entry) => entry.facts.toolUse.redFlags.length > 0 || entry.facts.team.missingExpectedRoles.length > 0).length} trials recorded red flags or missing roles.`,
-    `4. **Question ergonomics:** classify reversible/defaultable questions in \`questions.ts\` + \`phase-gate.ts\`; ${highIntervention} trials needed at least two interventions.`,
-    `5. **Adaptive early finish and write ergonomics:** use \`deliverable-gate.ts\`, \`session-telemetry.ts\`, and validated patch/replace-section support in \`packages/mcp/src/server.ts\`; ${highBudget} trials exceeded the conservative efficiency anchor.`,
+    ...strategicPriorities.map((priority, index) => `${index + 1}. ${priority}`),
     '',
     'These are framework/tuning hypotheses, not model-ceiling claims. No recommendation encodes a scenario name, selector, expected output string, or implementation recipe into model behavior.',
     '',
     '## Limitations and recovery record',
     '',
     '- One trial per model/scenario pair: rankings are a complete matrix, but not statistical confidence intervals.',
-    '- The sweep spans three roots because two machine/GPU reboots interrupted orchestration. Only missing model/scenario pairs were resumed; the final set contains no duplicates.',
+    `- The sweep spans ${roots.length} root${roots.length === 1 ? '' : 's'}; the final set contains no duplicate model/scenario pairs.`,
     '- Infra/operator/grader-classified terminal trials remain documented but are excluded from model capability means.',
     '- Performance reflects this host and llama.cpp/CUDA configuration; it is not part of the capability composite.',
     '',

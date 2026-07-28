@@ -12,11 +12,13 @@ vi.mock('@bendyline/squisq-editor-react', () => ({
     fileName,
     onChange,
     toolbarSlotAfterActions,
+    toolbarSlotRight,
   }: {
     initialMarkdown: string;
     fileName: string;
     onChange: (s: string) => void;
     toolbarSlotAfterActions?: React.ReactNode;
+    toolbarSlotRight?: React.ReactNode;
   }) => (
     <div data-testid="editor-shell" data-file={fileName}>
       <div data-testid="editor-initial">{initialMarkdown}</div>
@@ -31,6 +33,7 @@ vi.mock('@bendyline/squisq-editor-react', () => ({
         emit-newer-change
       </button>
       <div data-testid="editor-toolbar">{toolbarSlotAfterActions}</div>
+      <div data-testid="editor-toolbar-right">{toolbarSlotRight}</div>
     </div>
   ),
 }));
@@ -106,6 +109,7 @@ describe('DocumentDetail', () => {
     });
     expect(screen.getByTestId('editor-shell').getAttribute('data-file')).toBe('mission.md');
     expect(screen.getByTestId('editor-initial')).toHaveTextContent('# Mission');
+    expect(document.querySelector('.document-detail-head')).not.toBeInTheDocument();
   });
 
   it('typing fires a debounced writeDocument after ~1s of idle', async () => {

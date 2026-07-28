@@ -69,10 +69,10 @@ describe('IntroHandboekArticle', () => {
     render(<IntroHandboekArticle />);
     await screen.findByTestId('linear-doc-view');
 
-    await user.click(screen.getByRole('radio', { name: 'Video' }));
+    await user.click(screen.getByRole('radio', { name: 'Watch' }));
     expect(screen.getByTestId('doc-player')).toHaveAttribute('data-audio-mode', 'synthetic');
 
-    await user.click(screen.getByRole('radio', { name: 'Document' }));
+    await user.click(screen.getByRole('radio', { name: 'Read' }));
     expect(screen.getByTestId('linear-doc-view')).toBeInTheDocument();
   });
 

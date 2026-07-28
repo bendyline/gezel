@@ -26,7 +26,7 @@ function openHandboek(articleId: string) {
 }
 
 /**
- * The first-run intro card's body: the "What is gezel?" Handboek article
+ * A Home surface for the "What is gezel?" Handboek article
  * embedded as a live page — readable as a document or playable as a
  * captioned video — instead of prose hardcoded into the Home view. The
  * article is the single source of that copy; this is just a small frame
@@ -156,7 +156,7 @@ export function IntroHandboekArticle() {
             className={mode === 'doc' ? 'gz-key gz-key-active' : 'gz-key'}
             onClick={() => setMode('doc')}
           >
-            Document
+            Read
           </button>
           <button
             type="button"
@@ -166,7 +166,7 @@ export function IntroHandboekArticle() {
             className={mode === 'video' ? 'gz-key gz-key-active' : 'gz-key'}
             onClick={() => setMode('video')}
           >
-            Video
+            Watch
           </button>
         </div>
       </div>

@@ -111,31 +111,28 @@ export function DocumentDetail({ path, standalone = false }: DocumentDetailProps
   }
 
   const markdown = isMarkdown(path);
+  const autosaveStatus = (
+    <output className={`autosave-chip autosave-chip-${autosave.phase}`} aria-live="polite">
+      {autosave.phase === 'dirty' && 'Unsaved changes'}
+      {autosave.phase === 'saving' && 'Saving…'}
+      {autosave.phase === 'saved' && 'Saved'}
+      {autosave.phase === 'error' && (
+        <>
+          <span title={autosave.error?.message ?? 'unknown error'}>Save failed</span>
+          <button
+            type="button"
+            className="link-btn"
+            onClick={() => void autosave.retry().catch(() => {})}
+          >
+            Retry
+          </button>
+        </>
+      )}
+    </output>
+  );
 
   return (
     <section className="document-detail" data-testid="document-detail">
-      <div className="document-detail-head">
-        <span className="document-detail-path" title={path}>
-          {path}
-        </span>
-        <output className={`autosave-chip autosave-chip-${autosave.phase}`} aria-live="polite">
-          {autosave.phase === 'dirty' && 'Unsaved changes'}
-          {autosave.phase === 'saving' && 'Saving…'}
-          {autosave.phase === 'saved' && 'Saved'}
-          {autosave.phase === 'error' && (
-            <>
-              <span title={autosave.error?.message ?? 'unknown error'}>Save failed</span>
-              <button
-                type="button"
-                className="link-btn"
-                onClick={() => void autosave.retry().catch(() => {})}
-              >
-                Retry
-              </button>
-            </>
-          )}
-        </output>
-      </div>
       <div className="editor-wrap">
         <EditorShell
           initialMarkdown={content}
@@ -158,9 +155,10 @@ export function DocumentDetail({ path, standalone = false }: DocumentDetailProps
             ) : undefined
           }
           toolbarSlotRight={
-            markdown ? (
-              <ExportToolbarControls selectedFile={path} mediaContainer={container} />
-            ) : undefined
+            <>
+              {autosaveStatus}
+              {markdown && <ExportToolbarControls selectedFile={path} mediaContainer={container} />}
+            </>
           }
         />
       </div>
