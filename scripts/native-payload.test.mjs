@@ -117,3 +117,18 @@ test('standalone notarization trusts Accepted notarytool results without app ass
     'bare command-line payloads must not be assessed as app bundles',
   );
 });
+
+test('Windows native signing passes resolved file paths to signtool', () => {
+  const start = workflow.indexOf('      - name: Sign Windows native payload (Authenticode)');
+  const end = workflow.indexOf('      - name: Import Apple signing certificate (macOS)', start);
+  assert.notEqual(start, -1, 'could not find the Windows native signing step');
+  assert.notEqual(end, -1, 'could not find the end of the Windows native signing step');
+  const step = workflow.slice(start, end);
+
+  assert.match(step, /"\$\(\$target\.FullName\)"/);
+  assert.doesNotMatch(
+    step,
+    /"\$target\.FullName"/,
+    'PowerShell appends literal `.FullName` inside this interpolation form',
+  );
+});
