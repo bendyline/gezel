@@ -35,6 +35,7 @@ import { readFile, readdir, readlink, unlink, writeFile } from 'node:fs/promises
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
+import { signMachOTree } from './sign-macho-tree.mjs';
 
 const exec = promisify(execFile);
 
@@ -187,6 +188,10 @@ async function main() {
     console.log('[build-service-bundle] ✓ bundle ready (archive skipped)');
     return;
   }
+
+  // Must happen before the tarball exists: Apple's notary service inspects
+  // the archive contents, but nothing after this point can reach inside it.
+  await signMachOTree(target);
 
   await emitArchive(target, archivePath);
   await emitMeta(target, archivePath, metaPath);

@@ -20,6 +20,8 @@ jobs:
   full-e2e:
     name: ${{ matrix.surface }} E2E
     runs-on: ubuntu-latest
+    # Electron surface is the slower of the matrix at ~7 min green.
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:

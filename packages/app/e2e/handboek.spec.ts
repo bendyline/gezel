@@ -71,10 +71,21 @@ test('handboek opens from the sidebar, renders an article, and plays as video', 
     { timeout: 15_000 },
   );
 
-  // Toggle to the video playback mode: the DocPlayer mounts.
+  // Toggle to the video playback mode: the DocPlayer mounts and its clock
+  // actually runs. Handboek articles carry no narration audio, so playback
+  // rides the synthetic clock — which sat frozen at 0:00 / 0:00 on the first
+  // slide for as long as the player measured the timeline by the (empty)
+  // audio track rather than by the document.
   await view.getByRole('radio', { name: 'Video' }).click();
-  await expect(page.getByTestId('handboek-player')).toBeVisible();
+  const player = page.getByTestId('handboek-player');
+  await expect(player).toBeVisible();
   await expect(page.getByTestId('handboek-doc')).toHaveCount(0);
+
+  const scrubber = player.getByRole('slider');
+  expect(Number(await scrubber.getAttribute('aria-valuemax'))).toBeGreaterThan(0);
+  await expect
+    .poll(async () => Number(await scrubber.getAttribute('aria-valuenow')), { timeout: 15_000 })
+    .toBeGreaterThan(0);
 
   // And back to the document.
   await view.getByRole('radio', { name: 'Document' }).click();

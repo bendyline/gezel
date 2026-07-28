@@ -52,6 +52,9 @@ concurrency:
 jobs:
   release-preflight:
     runs-on: ubuntu-latest
+    # Only probes the native release assets over the network; a minute is
+    # typical. A ceiling here catches a hung API call, nothing more.
+    timeout-minutes: 15
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
@@ -132,6 +135,9 @@ jobs:
   quality:
     needs: release-preflight
     runs-on: ubuntu-latest
+    # ~21 min observed green (Test alone is 12.4). Room for the suite to
+    # grow without the ceiling becoming the thing that fails.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: pnpm/action-setup@008330803749db0355799c700092d9a85fd074e9 # v6.0.9
@@ -187,6 +193,9 @@ jobs:
   build-windows:
     needs: [quality, release-preflight]
     runs-on: windows-latest
+    # Unproven end-to-end: the signing sweep plus NSIS and installer
+    # signing have never both completed. Sized off the Linux build.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: pnpm/action-setup@008330803749db0355799c700092d9a85fd074e9 # v6.0.9
@@ -397,6 +406,10 @@ jobs:
   build-macos:
     needs: [quality, release-preflight]
     runs-on: macos-latest
+    # Widest of the six. electron-builder notarizes the .app and the .pkg
+    # separately, and one rejected submission alone took 13.5 min — two
+    # round-trips through Apple's service is the realistic worst case.
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: pnpm/action-setup@008330803749db0355799c700092d9a85fd074e9 # v6.0.9
@@ -451,9 +464,6 @@ jobs:
           fi
           echo "verified $count signed Mach-O binaries"
 
-      - name: Build + produce service bundle
-        run: pnpm build:packaged
-
       - name: Import Apple signing certificate
         env:
           APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
@@ -470,6 +480,16 @@ jobs:
             -k "$KEYCHAIN_PATH"
           security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           security list-keychains -d user -s "$KEYCHAIN_PATH" login.keychain
+
+      - name: Build + produce service bundle
+        # Runs after the certificate import, not before: the native modules
+        # inside service-bundle.tar.gz have to be Developer ID-signed before
+        # the tarball is sealed. electron-builder cannot see into the archive
+        # afterwards, but Apple's notary service can — and rejected the build
+        # over 15 unsigned binaries in there.
+        run: pnpm build:packaged
+        env:
+          GEZEL_MACOS_SIGN_BUNDLE: '1'
 
       - name: Package macOS installer
         # Raise fd limits — codesign opens all .app files concurrently and
@@ -549,6 +569,9 @@ jobs:
           - arch: arm64
             runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
+    # arm64 completed green in 20 min (15.3 of it packaging). The x64 leg
+    # of this same matrix then hung indefinitely, which is why this exists.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: pnpm/action-setup@008330803749db0355799c700092d9a85fd074e9 # v6.0.9
@@ -633,6 +656,9 @@ jobs:
   release:
     needs: [quality, release-preflight, build-windows, build-macos, build-linux]
     runs-on: ubuntu-latest
+    # Downloads every platform's installers to draft the release; bounded
+    # by artifact transfer, not compute.
+    timeout-minutes: 30
     permissions:
       contents: write
       # Sigstore build-provenance attestations over the installers.

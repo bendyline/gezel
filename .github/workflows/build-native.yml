@@ -434,6 +434,10 @@ jobs:
             needs_cuda: false
             needs_vulkan: false
     runs-on: ${{ matrix.runner }}
+    # The llama-cpp darwin-arm64 metal leg has legitimately run 98 min green,
+    # and the linux-x64 cuda leg 67. Sized at roughly 2x the worst observed so
+    # a slow-but-working compile is never the thing that trips this.
+    timeout-minutes: 180
     env:
       # Multi-variant engines (currently only llama-cpp) read these
       # to pick the cmake backend flag and emit to a per-variant
@@ -1196,6 +1200,9 @@ jobs:
     needs: build
     if: startsWith(github.ref, 'refs/tags/native-v')
     runs-on: ubuntu-latest
+    # Downloads every matrix artifact and assembles the draft; 6 min typical,
+    # 13 on the slowest observed run.
+    timeout-minutes: 45
     permissions:
       contents: write
       # actions/download-artifact@v4 lists + pulls the build jobs' artifacts

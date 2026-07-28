@@ -50,7 +50,7 @@ function walk(dir, out = []) {
   return out;
 }
 
-async function signSweep(appOutDir) {
+async function signSweep(appOutDir, mainExecutable) {
   if (!signingConfigured()) {
     console.log('[sign-sweep] Trusted Signing env not set — skipping payload sweep');
     return;
@@ -60,6 +60,15 @@ async function signSweep(appOutDir) {
   let kept = 0;
   const vendor = [];
   for (const file of candidates) {
+    // afterPack runs BEFORE electron-builder's own doSignAfterPack, which
+    // edits the main exe's Windows resources (icon, version, publisher) and
+    // only then signs it via the `sign` hook. Signing it here makes that edit
+    // fail: pe-library refuses with "Parsing signed executable binary is not
+    // allowed by default". Leave the one file electron-builder owns to it.
+    if (mainExecutable && path.resolve(file) === path.resolve(mainExecutable)) {
+      console.log(`[sign-sweep] left ${path.basename(file)} to electron-builder`);
+      continue;
+    }
     if (isThirdPartyBinary(file)) {
       vendor.push(`${path.basename(file)} (${thirdPartySource(file)})`);
       continue;
@@ -80,9 +89,37 @@ async function signSweep(appOutDir) {
   );
 }
 
+/**
+ * The one executable electron-builder edits and signs itself. Resolved by
+ * probing the names it may have used rather than reaching for a single
+ * internal property, which has moved between major versions.
+ */
+function mainExecutablePath(context) {
+  const packager = context.packager ?? {};
+  const names = [
+    packager.platformSpecificBuildOptions?.executableName,
+    packager.executableName,
+    packager.appInfo?.productFilename,
+  ].filter((name) => typeof name === 'string' && name.length > 0);
+  for (const name of names) {
+    const candidate = path.join(context.appOutDir, `${name}.exe`);
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
 module.exports = async function afterPack(context) {
   await fixAsar(context);
   if (context.electronPlatformName === 'win32') {
-    await signSweep(context.appOutDir);
+    const mainExecutable = mainExecutablePath(context);
+    if (!mainExecutable) {
+      // Not fatal on its own, but electron-builder's resource edit will fail
+      // right after this with a far less obvious message. Say so here.
+      console.warn(
+        '[sign-sweep] could not resolve the main executable — it may be signed ' +
+          'before electron-builder edits its resources',
+      );
+    }
+    await signSweep(context.appOutDir, mainExecutable);
   }
 };
