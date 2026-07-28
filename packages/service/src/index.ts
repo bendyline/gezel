@@ -14,3 +14,8 @@ export { MemoryCompactor } from './memory/compaction.js';
 export { evaluateGate, gateCheckLabel } from './tasks/gate-eval.js';
 export type { GateCheckOutcome, GateCheckResult, GateEvalDeps } from './tasks/gate-eval.js';
 export { parseScriptMeta } from './scripts/meta.js';
+export {
+  reuseVerifiedElectronNativeBinaries,
+  type ElectronNativeReuseOptions,
+  type ElectronNativeReuseResult,
+} from './engines/electron-native-reuse.js';

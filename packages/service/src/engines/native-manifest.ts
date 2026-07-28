@@ -18,7 +18,11 @@
  *     hashes the downloaded archive against the bundled value.
  *   - `NATIVE_ENGINE_MACOS_NOTARIZED` whether the pinned native release
  *     was independently submitted to Apple's notary service. This is
- *     separate from notarizing an Electron app that later embeds it.
+ *     release provenance, separate from notarizing an Electron app that
+ *     later embeds it. Bare command-line binaries cannot carry a stapled
+ *     ticket or pass app-bundle `spctl` assessment; runtime trust is the
+ *     accepted release workflow plus these source-pinned hashes and the
+ *     Developer ID signature.
  *
  * This mirrors the `NODE_SHA256` pin in
  * [node-version.ts](../../../app/src/node-version.ts): a placeholder of

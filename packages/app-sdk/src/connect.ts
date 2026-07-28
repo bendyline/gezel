@@ -1,7 +1,7 @@
 import { GezelApp } from './client.js';
 import { readRuntimeForConnect } from './detect.js';
 import { GezelSdkError, errorFromResponse } from './errors.js';
-import type { ConnectInput } from './types.js';
+import type { AuthorizedConnection, ConnectInput } from './types.js';
 
 /**
  * Bootstrap a {@link GezelApp} for a third-party app.
@@ -11,8 +11,9 @@ import type { ConnectInput } from './types.js';
  *   2. If `existingToken` is supplied OR loaded via `tokenStorage`,
  *      skip registration.
  *   3. Otherwise call `POST /v1/apps/register`, poll the grant
- *      endpoint until decided or `approvalTimeoutSec` elapses, save
- *      the token via `tokenStorage`.
+ *      endpoint until decided or `approvalTimeoutSec` elapses. Stateful
+ *      scopes also deliver a requester-visible verification code through
+ *      `onVerificationCode`. Save the token via `tokenStorage`.
  *   4. Return a `GezelApp` ready to call `chat`, `models`, etc.
  *
  * Errors:
@@ -23,6 +24,19 @@ import type { ConnectInput } from './types.js';
  *     are surfaced as `GezelSdkError` with the route's code.
  */
 export async function connect(input: ConnectInput): Promise<GezelApp> {
+  return new GezelApp(await authorize(input));
+}
+
+/**
+ * Run Gezel's generic client-side authorization protocol and return the
+ * resolved transport plus scoped bearer token.
+ *
+ * This is the reusable layer for clients that need more than the
+ * OpenAI-compatible {@link GezelApp}. It deliberately does not import Gezel's
+ * internal product API types; callers can hand the result to whichever typed
+ * client matches the scopes they requested.
+ */
+export async function authorize(input: ConnectInput): Promise<AuthorizedConnection> {
   const baseUrlAndFetch = await resolveBaseUrlAndFetch(input);
 
   // Try a token the caller already has (env, keychain, prior session).
@@ -30,11 +44,21 @@ export async function connect(input: ConnectInput): Promise<GezelApp> {
     input.existingToken ??
     (input.tokenStorage?.load ? await input.tokenStorage.load(input.appId) : null);
   if (existing) {
-    return new GezelApp({
+    return {
       baseUrl: baseUrlAndFetch.baseUrl,
       token: existing,
       fetch: baseUrlAndFetch.fetch,
-    });
+    };
+  }
+
+  const expectsVerification =
+    input.requireVerificationCode === true ||
+    input.scopes.some((scope) => scope !== 'openai' && scope !== 'remote-inference');
+  if (expectsVerification && !input.onVerificationCode) {
+    throw new GezelSdkError(
+      'This scope requires onVerificationCode so the requesting app can show the user the connection code.',
+      { code: 'verification_code_handler_required' },
+    );
   }
 
   // Fresh registration.
@@ -45,6 +69,7 @@ export async function connect(input: ConnectInput): Promise<GezelApp> {
       appId: input.appId,
       appName: input.appName,
       scopes: input.scopes,
+      ...(input.requireVerificationCode ? { requireVerificationCode: true } : {}),
       ...(input.iconUrl ? { iconUrl: input.iconUrl } : {}),
     }),
   });
@@ -53,9 +78,31 @@ export async function connect(input: ConnectInput): Promise<GezelApp> {
   }
   const registered = (await registerRes.json()) as {
     grantRequestId: string;
-    status: 'pending' | 'approved' | 'denied';
+    status: 'pending' | 'approved' | 'denied' | 'expired';
     token?: string;
+    verificationRequired?: boolean;
+    verificationCode?: string;
   };
+
+  if (
+    expectsVerification &&
+    registered.status === 'pending' &&
+    registered.verificationRequired !== true
+  ) {
+    throw new GezelSdkError(
+      'The daemon did not honor the required connection-code handshake. Update Gezel before connecting this client.',
+      { code: 'verification_not_supported' },
+    );
+  }
+
+  if (registered.verificationRequired) {
+    if (!registered.verificationCode) {
+      throw new GezelSdkError('The daemon required verification but returned no connection code.', {
+        code: 'invalid_grant_response',
+      });
+    }
+    await input.onVerificationCode?.(registered.verificationCode);
+  }
 
   let token = registered.token;
   if (!token) {
@@ -71,11 +118,11 @@ export async function connect(input: ConnectInput): Promise<GezelApp> {
     await input.tokenStorage.save(input.appId, token);
   }
 
-  return new GezelApp({
+  return {
     baseUrl: baseUrlAndFetch.baseUrl,
     token,
     fetch: baseUrlAndFetch.fetch,
-  });
+  };
 }
 
 async function resolveBaseUrlAndFetch(
@@ -123,7 +170,7 @@ async function pollUntilDecided(opts: {
       throw await errorFromResponse(res);
     }
     const body = (await res.json()) as {
-      status: 'pending' | 'approved' | 'denied';
+      status: 'pending' | 'approved' | 'denied' | 'expired';
       token?: string;
     };
     if (body.status === 'approved' && body.token) return body.token;
@@ -131,6 +178,12 @@ async function pollUntilDecided(opts: {
       throw new GezelSdkError('The user declined the connection.', {
         code: 'user_denied',
         status: 403,
+      });
+    }
+    if (body.status === 'expired') {
+      throw new GezelSdkError('The connection request expired before it was approved.', {
+        code: 'grant_expired',
+        status: 410,
       });
     }
     // status === 'pending' → loop and re-poll.

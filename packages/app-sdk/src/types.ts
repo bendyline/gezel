@@ -48,12 +48,20 @@ export interface ConnectInput {
   appName: string;
   /**
    * The scope set you're asking for. For OpenAI-shaped chat /
-   * embeddings / models / ensure, request `['openai']`. The first-party
-   * Gezel CLI requests `['cli']`, a high-authority internal API scope whose
-   * consent dialog explicitly warns that it can read and change product
-   * state. Third-party apps should request the narrowest available scope.
+   * embeddings / models / ensure, request `['openai']`. External clients
+   * that use ordinary Gezel product APIs request `['product']`; the Gezel CLI
+   * requests `['cli']`. Both stateful scopes trigger the requester-visible
+   * code handshake. Third-party apps should request the narrowest available
+   * scope.
    */
   scopes: string[];
+  /**
+   * Require the daemon-generated connection-code step even when all requested
+   * scopes are inference-only. Useful for first-party clients such as the
+   * VS Code extension that want stronger proof of user intent without asking
+   * for broader authority.
+   */
+  requireVerificationCode?: boolean;
   /** Optional icon URL surfaced in the consent dialog. */
   iconUrl?: string;
   /**
@@ -73,8 +81,8 @@ export interface ConnectInput {
    * Persistence hooks for the issued token. The SDK calls
    * `save(appId, token)` on successful approval; subsequent runs
    * should call `connect({existingToken: await load(appId)})`.
-   * Default is no persistence — the app must read the returned token
-   * off the result and store it itself.
+   * Default is no persistence. Call {@link authorize} when your integration
+   * needs the raw authorized connection to pass into another client.
    */
   tokenStorage?: {
     save(appId: string, token: string): Promise<void> | void;
@@ -86,8 +94,26 @@ export interface ConnectInput {
    * the gezel desktop app, scroll to Settings, and approve manually.
    */
   approvalTimeoutSec?: number;
+  /**
+   * Called with the daemon-generated verification code for grants carrying
+   * stateful authority. Show this code in the requesting application so the
+   * user can type it into Gezel's approval dialog. The desktop app never
+   * receives or displays the code.
+   */
+  onVerificationCode?(code: string): Promise<void> | void;
   /** Override the underlying fetch (tests inject; Node default trusts the loopback cert). */
   fetch?: typeof fetch;
+}
+
+/**
+ * Generic result of the discovery + consent protocol. Consumers that only
+ * need the OpenAI-compatible API can use {@link connect}; integrations that
+ * also have a typed product client can pass this token and transport into it.
+ */
+export interface AuthorizedConnection {
+  baseUrl: string;
+  token: string;
+  fetch: typeof fetch;
 }
 
 export type ChatMessageRole = 'system' | 'user' | 'assistant' | 'tool';

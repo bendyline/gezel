@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { AlertDialog } from '../primitives/index.js';
+import {
+  approvalErrorMessage,
+  formatVerificationCode,
+  isVerificationCodeReady,
+} from './grant-verification.js';
 
 /**
  * Global consent prompt for `/v1/apps/register`. Mounted once in App.tsx
@@ -23,6 +28,7 @@ interface PendingGrant {
   status: 'pending' | 'approved' | 'denied' | 'expired';
   createdAt: number;
   kind?: 'app' | 'device';
+  verificationRequired?: boolean;
 }
 
 interface ConnectedAppsResponse {
@@ -36,6 +42,7 @@ export function GrantConsentDialog() {
   const [grant, setGrant] = useState<PendingGrant | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [verificationCode, setVerificationCode] = useState('');
 
   const poll = useCallback(async () => {
     try {
@@ -68,6 +75,12 @@ export function GrantConsentDialog() {
     return () => window.clearInterval(t);
   }, [poll]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: changing grants must reset transient form state
+  useEffect(() => {
+    setVerificationCode('');
+    setError(null);
+  }, [grant?.id]);
+
   const decide = useCallback(
     async (action: 'approve' | 'deny') => {
       if (!grant || busy) return;
@@ -76,10 +89,21 @@ export function GrantConsentDialog() {
       try {
         const res = await fetch(
           `${api.getBaseUrl()}/v1/apps/grant/${encodeURIComponent(grant.id)}/${action}`,
-          { method: 'POST', headers: api.authHeader() },
+          {
+            method: 'POST',
+            headers: {
+              ...api.authHeader(),
+              ...(action === 'approve' && grant.verificationRequired
+                ? { 'Content-Type': 'application/json' }
+                : {}),
+            },
+            ...(action === 'approve' && grant.verificationRequired
+              ? { body: JSON.stringify({ verificationCode }) }
+              : {}),
+          },
         );
         if (!res.ok) {
-          setError(`HTTP ${res.status}`);
+          setError(await approvalErrorMessage(res, `Could not ${action} this request`));
           return;
         }
         setGrant(null);
@@ -91,7 +115,7 @@ export function GrantConsentDialog() {
         setBusy(false);
       }
     },
-    [grant, busy, poll],
+    [grant, busy, poll, verificationCode],
   );
 
   if (!grant) return null;
@@ -117,7 +141,9 @@ export function GrantConsentDialog() {
                   ? 'Another Gezel device is asking to use models served by this computer.'
                   : grant.scopes.includes('cli')
                     ? 'The Gezel command line is asking to use this service.'
-                    : 'An application on this computer or local network is asking to connect to Gezel.'}
+                    : grant.scopes.includes('product')
+                      ? 'An application is asking to use Gezel features and data.'
+                      : 'An application on this computer or local network is asking to connect to Gezel.'}
               </p>
               <dl className="grant-consent-details">
                 <dt>App ID</dt>
@@ -135,6 +161,38 @@ export function GrantConsentDialog() {
                   </strong>{' '}
                   Approve only if you started this request from your terminal.
                 </p>
+              )}
+              {grant.scopes.includes('product') && (
+                <p className="small" role="alert">
+                  <strong>
+                    Product access can read and change your gezels, projects, settings, models, and
+                    conversations.
+                  </strong>{' '}
+                  Approve only if you started this request from {grant.appName}.
+                </p>
+              )}
+              {grant.verificationRequired && (
+                <div className="grant-verification">
+                  <label htmlFor={`grant-code-${grant.id}`}>Connection code</label>
+                  <input
+                    id={`grant-code-${grant.id}`}
+                    value={verificationCode}
+                    onChange={(event) =>
+                      setVerificationCode(formatVerificationCode(event.currentTarget.value))
+                    }
+                    placeholder="___-___"
+                    maxLength={7}
+                    autoComplete="off"
+                    autoCapitalize="characters"
+                    spellCheck={false}
+                    inputMode="text"
+                    aria-describedby={`grant-code-help-${grant.id}`}
+                  />
+                  <p id={`grant-code-help-${grant.id}`} className="muted small">
+                    Enter the six-character code shown by the requesting application. Gezel does not
+                    display it for you.
+                  </p>
+                </div>
               )}
               <p className="muted small">
                 You can revoke this any time from Settings → Connected Apps.
@@ -160,7 +218,9 @@ export function GrantConsentDialog() {
                   e.preventDefault();
                   void decide('approve');
                 }}
-                disabled={busy}
+                disabled={
+                  busy || (grant.verificationRequired && !isVerificationCodeReady(verificationCode))
+                }
               >
                 {busy ? 'Working…' : 'Approve'}
               </button>

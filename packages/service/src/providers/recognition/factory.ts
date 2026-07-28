@@ -1,5 +1,6 @@
 import { join } from 'node:path';
 import { Agent, fetch as undiciFetch } from 'undici';
+import { modelStorageRoots } from '../../models/storage-roots.js';
 import { pickFreePort } from '../native/port.js';
 import { NativeEngineSupervisor } from '../native/supervisor.js';
 import { DEFAULT_RECOGNITION_MODEL_ID } from './catalog.js';
@@ -47,7 +48,8 @@ export async function createRecognitionProvider(
   opts: RecognitionFactoryOptions,
 ): Promise<RecognitionProvider> {
   const env = opts.env ?? process.env;
-  const modelsRoot = recognitionModelsRoot(opts.home);
+  const storageRoots = modelStorageRoots({ home: opts.home, engine: 'recognition', env });
+  const modelsRoot = storageRoots.writableRoot;
   const modelId = opts.modelId ?? DEFAULT_RECOGNITION_MODEL_ID;
 
   if (env.GEZEL_MOCK_PROVIDER === '1') {
@@ -58,6 +60,7 @@ export async function createRecognitionProvider(
     return new LlamaVisionProvider({
       baseUrl: env.GEZEL_RECOGNITION_SERVER_URL,
       modelsRoot,
+      storageRoots,
       modelId,
       fetchImpl: patientFetch(),
     });
@@ -75,7 +78,12 @@ export async function createRecognitionProvider(
       resolveLaunch: async () => {
         const port = cachedPort ?? (await pickFreePort());
         cachedPort = port;
-        const provider = new LlamaVisionProvider({ baseUrl: '', modelsRoot, modelId });
+        const provider = new LlamaVisionProvider({
+          baseUrl: '',
+          modelsRoot,
+          storageRoots,
+          modelId,
+        });
         const installed = await provider.listInstalledModels();
         const chosen = installed.find((m) => m.id === modelId) ?? installed[0];
         if (!chosen?.weightsPath || !chosen.mmprojPath) {
@@ -108,6 +116,7 @@ export async function createRecognitionProvider(
     return new LlamaVisionProvider({
       baseUrl: 'http://127.0.0.1:9084',
       modelsRoot,
+      storageRoots,
       modelId,
       supervisor,
       fetchImpl: patientFetch(),
@@ -117,6 +126,7 @@ export async function createRecognitionProvider(
   return new LlamaVisionProvider({
     baseUrl: 'http://127.0.0.1:9084',
     modelsRoot,
+    storageRoots,
     modelId,
     configured: false,
   });

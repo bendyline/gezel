@@ -5,13 +5,23 @@ import { OPEN_FILE_COMMAND } from './code-intel-core.js';
 import { registerCodeIntel } from './code-intel.js';
 import { registerCommands } from './commands.js';
 import { readConfig } from './config.js';
-import { type Connection, acquireAppConnection, resolveDaemon } from './daemon.js';
+import {
+  type AppConnection,
+  type Connection,
+  acquireAppConnection,
+  resolveDaemon,
+} from './daemon.js';
 import { GezelLanguageModelProvider } from './lm-provider.js';
 import { createLogger } from './log.js';
 import { WebviewRpc } from './webview-rpc.js';
 import { ensureDevGezel, ensureProjectForWorkspace } from './workspace.js';
 
 interface ExtensionState {
+  /**
+   * Discovery credential retained only while app authorization is pending or
+   * for the explicit approve/reset commands. Never exposed to the webview.
+   */
+  bootstrapConnection: Connection | null;
   connection: Connection | null;
   activeFolder: vscode.WorkspaceFolder | null;
   activeProjectId: string | null;
@@ -53,6 +63,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   );
 
   const state: ExtensionState = {
+    bootstrapConnection: null,
     connection: null,
     activeFolder: vscode.workspace.workspaceFolders?.[0] ?? null,
     activeProjectId: null,
@@ -120,6 +131,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   };
 
   const reconnect = async (): Promise<void> => {
+    state.bootstrapConnection = null;
     state.connection = null;
     state.activeProjectId = null;
     state.projectCache.clear();
@@ -137,7 +149,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     ...registerCommands({
       view,
       getClient: () => state.connection?.client ?? null,
-      getConnection: () => state.connection,
+      getConnection: () => state.connection ?? state.bootstrapConnection,
       getActiveGezel: () => state.activeGezel,
       setActiveGezel,
       getActiveFolder: () => state.activeFolder,
@@ -201,7 +213,14 @@ async function connect(
   state.lastError = null;
   try {
     const cfg = readConfig();
-    const conn = await resolveDaemon(cfg, logger);
+    const bootstrapConnection = await resolveDaemon(cfg, logger);
+    state.bootstrapConnection = bootstrapConnection;
+    const appConnection = await acquireVerifiedExtensionAccess(
+      bootstrapConnection,
+      context,
+      logger,
+    );
+    const conn = appConnection.connection;
     state.connection = conn;
     const gezel = await ensureDevGezel(conn.client, cfg.defaultGezel, logger);
     state.activeGezel = gezel;
@@ -221,7 +240,7 @@ async function connect(
     if (lmProviderEnabled()) {
       logger.info('lm-provider: enabled by setting; starting registration...');
       try {
-        await ensureLanguageModelProvider(state, conn, context, logger);
+        await ensureLanguageModelProvider(state, conn, appConnection, logger);
       } catch (err) {
         // LM Chat Provider is additive — its failure must not break
         // the rest of the extension's chat panel. Surface explicitly
@@ -263,15 +282,21 @@ async function connect(
     state.lastError = { stage: 'connect', message };
     logger.error(`connect failed: ${message}`);
     view.post({ type: 'connection-error', message, retryable: true });
+    const alreadyConnected = /already_connected/i.test(message);
+    const actions = alreadyConnected
+      ? (['Reset Connection', 'Show Logs', 'Show Status'] as const)
+      : (['Show Logs', 'Show Status', 'Reconnect'] as const);
     void vscode.window
       .showErrorMessage(
-        `Gezel: couldn't reach the daemon — ${message}`,
-        'Show Logs',
-        'Show Status',
-        'Reconnect',
+        alreadyConnected
+          ? 'Gezel: the daemon has a VS Code authorization, but this extension no longer has its token. Reset the connection to approve it again.'
+          : `Gezel: couldn't connect — ${message}`,
+        ...actions,
       )
       .then((pick) => {
-        if (pick === 'Show Logs') void vscode.commands.executeCommand('gezel.showLogs');
+        if (pick === 'Reset Connection')
+          void vscode.commands.executeCommand('gezel.resetConnection');
+        else if (pick === 'Show Logs') void vscode.commands.executeCommand('gezel.showLogs');
         else if (pick === 'Show Status') void vscode.commands.executeCommand('gezel.showStatus');
         else if (pick === 'Reconnect') void vscode.commands.executeCommand('gezel.refresh');
       });
@@ -286,68 +311,77 @@ function lmProviderEnabled(): boolean {
 async function ensureLanguageModelProvider(
   state: ExtensionState,
   conn: Connection,
-  context: vscode.ExtensionContext,
+  appConnection: AppConnection,
   logger: ReturnType<typeof createLogger>,
 ): Promise<void> {
-  // Reuse the existing daemon connection — the SDK consent flow runs
-  // against the same baseUrl + cert-trusting fetch we already built.
-  //
-  // Surface a non-modal info toast while we're waiting so the user
-  // knows to open the Gezel app and approve. Without this, the
-  // 5-minute poll feels like a hang. The toast auto-dismisses once
-  // the SDK resolves; on rejection (denied / timeout) it's replaced
-  // by the warning we show in `connect`.
-  // Only surface the "waiting for approval" toast once the SDK has
-  // been working for at least 1.5s — by then we know we're genuinely
-  // polling rather than failing fast with `already_connected` /
-  // network error. Otherwise the toast would race the warning and the
-  // user sees two contradictory popups (as just happened).
+  // Authorization already happened for the complete extension before the
+  // embedded product UX was allowed to boot. Reuse that same app identity
+  // here rather than filing a second, inference-only grant.
+  logger.info('lm-provider: instantiating provider from the extension app grant...');
+  const provider = new GezelLanguageModelProvider(
+    appConnection.app,
+    conn.baseUrl,
+    appConnection.appToken,
+    conn.fetch,
+    logger,
+    // Reconnect handle — see ExtensionState.reconnect. Wrapped
+    // in a closure so the provider always reaches the current
+    // `state.reconnect` (vs capturing the value at construction
+    // time, which would let a torn-down callback persist if the
+    // provider outlived a reconnect).
+    () => state.reconnect?.() ?? Promise.resolve(),
+  );
+  state.lmProvider = provider;
+  logger.info('lm-provider: calling vscode.lm.registerLanguageModelChatProvider...');
+  state.lmProviderDisposable = vscode.lm.registerLanguageModelChatProvider('gezel', provider);
+  logger.info('lm-provider: registered (vendor=gezel) — gezel models should appear in pickers');
+}
+
+async function acquireVerifiedExtensionAccess(
+  conn: Connection,
+  context: vscode.ExtensionContext,
+  logger: ReturnType<typeof createLogger>,
+): Promise<AppConnection> {
   const stillWaiting = { value: true };
+  const verificationCodeShown = { value: false };
   const waitToastTimer = setTimeout(() => {
-    if (!stillWaiting.value) return;
+    if (!stillWaiting.value || verificationCodeShown.value) return;
     void vscode.window
       .showInformationMessage(
-        'Gezel: waiting for approval — open the Gezel desktop app and approve VS Code, ' +
-          'or run "Gezel: Approve Pending App Connection" to approve from here.',
-        'Approve from here',
+        'Gezel: waiting to start the authorization request. Keep the Gezel desktop app open.',
         'Show Logs',
       )
       .then((pick) => {
         if (!stillWaiting.value) return;
-        if (pick === 'Approve from here') {
-          void vscode.commands.executeCommand('gezel.approvePendingApp');
-        } else if (pick === 'Show Logs') {
+        if (pick === 'Show Logs') {
           void vscode.commands.executeCommand('gezel.showLogs');
         }
       });
   }, 1500);
 
   try {
-    logger.info('lm-provider: calling acquireAppConnection (SDK consent flow)...');
-    const { app, appToken } = await acquireAppConnection(conn, context, logger);
-    logger.info('lm-provider: SDK returned app token; instantiating provider...');
-    const provider = new GezelLanguageModelProvider(
-      app,
-      conn.baseUrl,
-      appToken,
-      conn.fetch,
-      logger,
-      // Reconnect handle — see ExtensionState.reconnect. Wrapped
-      // in a closure so the provider always reaches the current
-      // `state.reconnect` (vs capturing the value at construction
-      // time, which would let a torn-down callback persist if the
-      // provider outlived a reconnect).
-      () => state.reconnect?.() ?? Promise.resolve(),
-    );
-    state.lmProvider = provider;
-    logger.info('lm-provider: calling vscode.lm.registerLanguageModelChatProvider...');
-    state.lmProviderDisposable = vscode.lm.registerLanguageModelChatProvider('gezel', provider);
-    logger.info('lm-provider: registered (vendor=gezel) — gezel models should appear in pickers');
-  } catch (err) {
-    logger.error(
-      `lm-provider: failed during registration — ${err instanceof Error ? err.message : String(err)}`,
-    );
-    throw err;
+    logger.info('authorization: requesting product + inference access through the app SDK...');
+    return await acquireAppConnection(conn, context, logger, async (code) => {
+      verificationCodeShown.value = true;
+      clearTimeout(waitToastTimer);
+      logger.info('authorization: daemon issued a requester-side connection code');
+      const action = await vscode.window.showInformationMessage(
+        `Gezel connection code: ${code}`,
+        {
+          modal: true,
+          detail:
+            'Enter this code in the Gezel desktop app to let Visual Studio Code use your ' +
+            'Gezel workspace and models. Do not approve if you did not start this connection.',
+        },
+        'Copy Code',
+      );
+      if (action === 'Copy Code') {
+        await vscode.env.clipboard.writeText(code);
+        void vscode.window.showInformationMessage(
+          'Gezel connection code copied. Enter it in the Gezel desktop app.',
+        );
+      }
+    });
   } finally {
     stillWaiting.value = false;
     clearTimeout(waitToastTimer);

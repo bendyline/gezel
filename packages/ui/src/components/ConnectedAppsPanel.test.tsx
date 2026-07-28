@@ -30,7 +30,7 @@ describe('ConnectedAppsPanel', () => {
             {
               appId: 'vscode',
               appName: 'Visual Studio Code',
-              scopes: ['openai'],
+              scopes: ['product', 'openai'],
               createdAt: Date.now(),
               lastUsedAt: Date.now(),
             },
@@ -43,6 +43,7 @@ describe('ConnectedAppsPanel', () => {
               scopes: ['cli'],
               status: 'pending',
               createdAt: Date.now(),
+              verificationRequired: true,
             },
           ],
         }),
@@ -71,8 +72,9 @@ describe('ConnectedAppsPanel', () => {
 
   it('describes a pending CLI grant as command-line control', async () => {
     render(<ConnectedAppsPanel />);
-    expect(
-      await screen.findByText('gezel-cli — wants command-line control of this Gezel service'),
-    ).toBeInTheDocument();
+    expect(await screen.findByText(/wants command-line control/)).toBeInTheDocument();
+    expect(screen.getByLabelText('Connection code for Gezel CLI')).toHaveValue('');
+    expect(screen.getByRole('button', { name: 'Approve' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Deny' })).toBeEnabled();
   });
 });

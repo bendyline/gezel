@@ -147,12 +147,20 @@ sets `c.var.auth = { appId, scopes, projectId?, gezelId?, team? }`.
 | **root** | `['root']` | no; process memory only | full `/api/*` + `/v1/*` |
 | **desktop client** | `['ui','openai']` | no; written to `runtime/auth-token` | first-party product API + local OpenAI facade |
 | **web-ui** | `['ui']` | no (ephemeral) | first-party product API; never daemon root |
-| **app** (`/v1/apps/register`) | `['openai']` | yes (`tokens.json`, 0600) | only `/v1/*` inference, gated by `requireScope('openai')` |
+| **inference app** (`/v1/apps/register`) | `['openai']` | yes (`tokens.json`, 0600) | only `/v1/*` inference, gated by `requireScope('openai')` |
+| **product app** (`/v1/apps/register`) | `['product']` (+ `openai` when needed) | yes (`tokens.json`, 0600) | ordinary `/api/*` product access; never first-party app-grant administration |
+| **CLI** (`/v1/apps/register`) | `['cli']` | yes (`tokens.json`, 0600) | ordinary `/api/*` product access with CLI-specific consent copy |
 | **session** (a gezel's MCP subprocess) | `['session']` + `projectId`/`gezelId`/`team` | **no** (ephemeral, dies with daemon) | deny-by-default MCP route allowlist + ownership guards |
 
 `TokenRecord` carries optional `projectId`, `gezelId`, and `team` (set only on session
 tokens). `issueSession()` mints an ephemeral, never-persisted, upsert-on-respawn token;
 `revokeSession()` drops it. The root token comparison is a `Map` lookup of a high-entropy secret.
+
+Stateful app scopes (`product`, `cli`, and future non-inference scopes) require a
+daemon-generated six-character requester code in addition to the detailed consent prompt.
+The requester receives and displays the plaintext once; the daemon persists only a salted
+hash, and the Gezel approval surface never displays the code. Inference-only scopes may opt
+into the same handshake.
 
 ### 4.2 Internal and session scope guards
 
@@ -161,7 +169,8 @@ scoped to `{projectId, gezelId}`**, minted at spawn in `chat/manager.ts` and rev
 session teardown. `team` is derived from `roleHasTeamScope(role, projectMode)` in
 `role-tool-filter.ts` — true for coordinator roles (meester / voorman / planner) outside a
 solo job — so the token's cross-project reach can't drift from the team tools the model is
-actually offered. `requireInternalApiAccess` first keeps app/device tokens on `/v1`.
+actually offered. `requireInternalApiAccess` first keeps inference-only app/device tokens on
+`/v1`, while admitting explicitly approved `product` and `cli` credentials.
 `sessionRouteGuard` then denies session tokens by default, admitting only explicitly classified
 MCP routes and rejecting config, raw sessions/tool invocation, events, terminals, engine/admin
 routes, foreign project-document fallbacks, and body/query scope spoofing. Three ownership/
@@ -415,7 +424,18 @@ fix and is not yet implemented.
 - **`install_package`** is consent-gated and forces `--ignore-scripts` (npm lifecycle-script
   vector closed).
 - **Engine binaries** downloaded by the supervisor are sha256 + code-signature verified
-  (`engines/resolver.ts`) before use.
+  (`engines/resolver.ts`) before use. Standalone macOS archives must receive an `Accepted`
+  result from Apple's notary service before CI hashes and packages those exact signed bytes;
+  bare command-line binaries cannot carry a stapled ticket or undergo app-bundle Gatekeeper
+  assessment. Electron-native reuse additionally hashes every executable/loadable file
+  against source-bundled pins and validates the expected Authenticode/Developer ID identity;
+  macOS also validates the signed/notarized parent app with Gatekeeper.
+- **Machine model sharing** exposes only the installer-owned `assets/models/` subtree.
+  Ordinary users receive read/execute access but no write access; the restricted service
+  identity is the sole writer. Standalone clients treat it as a lower-priority overlay,
+  revalidate payload hashes on first adoption, and keep verification/runtime caches in
+  their user-owned home. Private machine-service config, gezels, projects, and tokens are
+  never part of this overlay.
 - **Installers** run every machine service under a dedicated/restricted identity. Windows uses
   LocalService plus a restricted service SID (never LocalSystem); macOS/Linux use dedicated
   non-root accounts with platform hardening such as `NoNewPrivileges` / `ProtectSystem`.

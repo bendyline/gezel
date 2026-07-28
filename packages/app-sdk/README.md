@@ -68,6 +68,56 @@ The first time your app calls `connect()` for a given `appId`, gezel shows a des
 - **Denied** — `connect()` throws a `GezelSdkError` with `code: 'user_denied'`. Surface a clear "User declined the gezel connection" to your user.
 - **Timeout** — defaults to 120s. Override with `approvalTimeoutSec`. Throws `code: 'approval_timeout'`.
 
+Grants that can read or change Gezel product state require an additional
+requester-visible code. Supply `onVerificationCode` and show the value in your
+application; the user types it into Gezel's approval dialog:
+
+```ts
+await connect({
+  appId: 'acme.gezel-tools',
+  appName: 'Acme Gezel Tools',
+  scopes: ['cli'],
+  onVerificationCode(code) {
+    console.error(`Enter ${code} in Gezel to approve this connection.`);
+  },
+});
+```
+
+The daemon generates the six-character code, expires it with the grant after
+ten minutes, and never sends it to the desktop approval surface. Inference-only
+scopes (`openai` and `remote-inference`) retain click approval without a code.
+Inference-only clients can opt into the same stronger handshake by setting
+`requireVerificationCode: true` and providing `onVerificationCode`.
+
+## Product clients
+
+`authorize()` exposes the generic client side of the protocol when your
+integration needs Gezel's product API rather than only the OpenAI-compatible
+facade. It performs the same discovery, registration, code delivery, polling,
+and token persistence as `connect()`, then returns the scoped token and
+transport:
+
+```ts
+import { authorize } from '@bendyline/gezel-app-sdk';
+import { GezelClient } from '@bendyline/gezel-client/node';
+
+const authorized = await authorize({
+  appId: 'acme.editor',
+  appName: 'Acme Editor',
+  scopes: ['product', 'openai'],
+  onVerificationCode(code) {
+    showConnectionCode(code);
+  },
+  tokenStorage: keychainStorage,
+});
+
+const client = new GezelClient(authorized);
+```
+
+Use `product` for ordinary stateful product access and add `openai` only when
+the same app also calls the OpenAI-compatible inference routes. `product` does
+not grant first-party administration of other app connections.
+
 For CI / scripted environments, the gezel daemon honors `GEZEL_AUTOAPPROVE_APPS=appId1,appId2` and auto-approves listed apps at registration time.
 
 ## Headless / browser apps
@@ -92,6 +142,7 @@ Browser apps can't trust the loopback self-signed cert without OS-level interven
 |---|---|
 | `detectGezel()` | Probe runtime files + health |
 | `connect()` | Register + consent + token storage |
+| `authorize()` | Generic discovery + consent result (`baseUrl`, scoped token, fetch) |
 | `app.chat()` | OpenAI-compatible chat (streaming + non) |
 | `app.embeddings()` | OpenAI-compatible embeddings |
 | `app.models()` | List available models |
@@ -110,6 +161,9 @@ Errors thrown by the SDK are `GezelSdkError` instances carrying both an HTTP `st
 - `daemon_not_running` — no runtime files / health probe failed
 - `user_denied` — consent dialog rejected
 - `approval_timeout` — `approvalTimeoutSec` elapsed
+- `grant_expired` — the request expired or used all verification attempts
+- `verification_code_handler_required` — a stateful scope omitted `onVerificationCode`
+- `verification_not_supported` — the daemon did not honor an explicit code requirement
 - `model_not_found` — unknown `<provider>:<model>` prefix
 - `tool_calling_not_supported_v1` — `tools` / `tool_choice` field present (deferred to v2)
 - `embeddings_not_supported` — provider doesn't expose embeddings

@@ -15,6 +15,7 @@
 export { GezelApp } from './client.js';
 export { GezelSdkError } from './errors.js';
 export type {
+  AuthorizedConnection,
   ConnectInput,
   ChatMessage,
   ChatMessageContent,

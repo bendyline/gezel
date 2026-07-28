@@ -1,9 +1,9 @@
 /**
  * `@bendyline/gezel-app-sdk` — Node entry.
  *
- * Build a third-party app against gezel's OpenAI-compatible `/v1/*`
- * surface. Discovers a running daemon at `~/.gezel/runtime/`, opens a
- * consent grant, and returns a {@link GezelApp} with `chat`,
+ * Build a third-party app against Gezel. {@link authorize} implements the
+ * generic discovery + consent protocol for any grantable scope; {@link connect}
+ * wraps its result as a {@link GezelApp} with OpenAI-compatible `chat`,
  * `embeddings`, `models`, and `ensureModel`.
  *
  * Quickstart:
@@ -40,7 +40,7 @@
  *   }
  */
 export { detectGezel } from './detect.js';
-export { connect } from './connect.js';
+export { authorize, connect } from './connect.js';
 export { GezelApp } from './client.js';
 export { GezelSdkError } from './errors.js';
 export {
@@ -50,6 +50,7 @@ export {
 export type {
   DetectResult,
   ConnectInput,
+  AuthorizedConnection,
   ChatMessage,
   ChatMessageContent,
   ChatMessageRole,

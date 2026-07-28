@@ -21,6 +21,16 @@ import { createReadStream } from 'node:fs';
 import { mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createLogger } from '@bendyline/gezel';
+import {
+  type ModelStorageRoots,
+  findModelRoot,
+  hashModelPayloadFiles,
+  listOverlayModelIds,
+  makeSharedModelReadable,
+  modelExistsOnlyReadOnly,
+  readOnlyModelError,
+  verifyReadOnlyModelPayload,
+} from '../../models/storage-roots.js';
 import { downloadWithRetry } from '../../utils/download-with-retry.js';
 import type { GpuArbiter } from '../gpu-arbiter.js';
 import type { NativeEngineSupervisor } from '../native/supervisor.js';
@@ -43,6 +53,8 @@ export interface StableDiffusionCppProviderOptions {
   baseUrl: string;
   /** Absolute path to `~/.gezel/engines/sd-cpp/models`. */
   modelsRoot: string;
+  /** Optional read-only machine-store overlay. */
+  storageRoots?: ModelStorageRoots;
   /** Per-request timeout in ms. Defaults to 10 minutes. */
   timeoutMs?: number;
   /** Injected for tests. Defaults to global fetch. */
@@ -152,6 +164,7 @@ export class StableDiffusionCppProvider implements ImageProvider {
   readonly name = 'sd-cpp';
   private readonly baseUrl: string;
   private readonly modelsRoot: string;
+  private readonly storageRoots: ModelStorageRoots;
   private readonly timeoutMs: number;
   private readonly fetchImpl: typeof fetch;
   private readonly supervisor?: NativeEngineSupervisor;
@@ -162,6 +175,10 @@ export class StableDiffusionCppProvider implements ImageProvider {
   constructor(opts: StableDiffusionCppProviderOptions) {
     this.baseUrl = opts.baseUrl.replace(/\/+$/, '');
     this.modelsRoot = opts.modelsRoot;
+    this.storageRoots = opts.storageRoots ?? {
+      writableRoot: opts.modelsRoot,
+      readOnlyRoots: [],
+    };
     this.timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.fetchImpl = opts.fetchImpl ?? fetch;
     this.supervisor = opts.supervisor;
@@ -319,15 +336,12 @@ export class StableDiffusionCppProvider implements ImageProvider {
   }
 
   async listInstalledModels(): Promise<InstalledImageModelInfo[]> {
-    let entries: string[] = [];
-    try {
-      entries = await readdir(this.modelsRoot);
-    } catch {
-      return [];
-    }
+    const entries = await listOverlayModelIds(this.storageRoots);
     const out: InstalledImageModelInfo[] = [];
     for (const id of entries) {
-      const metaPath = join(this.modelsRoot, id, 'manifest.json');
+      const root = await findModelRoot(this.storageRoots, id);
+      if (!root) continue;
+      const metaPath = join(root, id, 'manifest.json');
       try {
         const raw = await readFile(metaPath, 'utf8');
         const parsed = JSON.parse(raw) as {
@@ -335,8 +349,12 @@ export class StableDiffusionCppProvider implements ImageProvider {
           name?: string;
           approxSizeBytes?: number;
           installedAt?: string;
+          fileSha256?: Record<string, string>;
         };
         if (!parsed.id || !parsed.name || !parsed.approxSizeBytes || !parsed.installedAt) continue;
+        if (!(await verifyReadOnlyModelPayload(this.storageRoots, root, id, parsed.fileSha256))) {
+          continue;
+        }
         out.push({
           id: parsed.id,
           name: parsed.name,
@@ -410,6 +428,7 @@ export class StableDiffusionCppProvider implements ImageProvider {
       auxiliaryRecords.push({ role: aux.role, filename: auxFilename });
     }
 
+    const fileSha256 = await hashModelPayloadFiles(itemDir);
     await writeFile(
       join(itemDir, 'manifest.json'),
       JSON.stringify(
@@ -422,6 +441,7 @@ export class StableDiffusionCppProvider implements ImageProvider {
           weightsSizeBytes: weightsActualSize,
           sha256: spec.sha256.toLowerCase(),
           auxiliaryFiles: auxiliaryRecords,
+          fileSha256,
           installedAt: new Date().toISOString(),
         },
         null,
@@ -429,6 +449,7 @@ export class StableDiffusionCppProvider implements ImageProvider {
       ),
       'utf8',
     );
+    await makeSharedModelReadable(itemDir);
 
     yield { type: 'progress', bytesWritten: writtenAll, totalBytes: totalAllBytes };
     yield { type: 'done', id };
@@ -529,6 +550,9 @@ export class StableDiffusionCppProvider implements ImageProvider {
   }
 
   async deleteModel(id: string): Promise<void> {
+    if (await modelExistsOnlyReadOnly(this.storageRoots, id)) {
+      throw readOnlyModelError(id);
+    }
     const itemDir = join(this.modelsRoot, id);
     await rm(itemDir, { recursive: true, force: true });
   }
@@ -605,7 +629,9 @@ export class StableDiffusionCppProvider implements ImageProvider {
   private async defaultSampleSteps(modelId: string | undefined): Promise<number> {
     if (!modelId) return DEFAULT_SAMPLE_STEPS;
     try {
-      const raw = await readFile(join(this.modelsRoot, modelId, 'manifest.json'), 'utf8');
+      const root = await findModelRoot(this.storageRoots, modelId);
+      if (!root) return DISTILLED_MODEL_SAMPLE_STEPS.get(modelId) ?? DEFAULT_SAMPLE_STEPS;
+      const raw = await readFile(join(root, modelId, 'manifest.json'), 'utf8');
       const parsed = JSON.parse(raw) as { recommendedSteps?: unknown };
       if (
         typeof parsed.recommendedSteps === 'number' &&

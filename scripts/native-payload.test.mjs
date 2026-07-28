@@ -23,10 +23,11 @@ import { NATIVE_PAYLOAD, allPlatformKeys, expectedBinaries } from './native-payl
 const workflowPath = fileURLToPath(
   new URL('../.github/workflows/build-native.yml', import.meta.url),
 );
+const workflow = readFileSync(workflowPath, 'utf8');
 
 /** Every `{platform, variant, artifact}` entry in the build matrix. */
 function parseMatrix() {
-  const lines = readFileSync(workflowPath, 'utf8').split('\n');
+  const lines = workflow.split('\n');
   const start = lines.findIndex((line) => /^ {8}include:$/.test(line));
   assert.notEqual(start, -1, 'could not find the matrix `include:` block');
 
@@ -99,4 +100,20 @@ test('no platform key is declared with an empty binary list', () => {
   for (const key of allPlatformKeys()) {
     assert.ok(NATIVE_PAYLOAD[key].length > 0, `${key} declares no binaries`);
   }
+});
+
+test('standalone notarization trusts Accepted notarytool results without app assessment', () => {
+  const start = workflow.indexOf('      - name: Notarize macOS native payload');
+  const end = workflow.indexOf('      - name: Tear down keychain (macOS)', start);
+  assert.notEqual(start, -1, 'could not find the standalone notarization step');
+  assert.notEqual(end, -1, 'could not find the end of the standalone notarization step');
+  const step = workflow.slice(start, end);
+
+  assert.match(step, /xcrun notarytool submit/);
+  assert.match(step, /\[\[ "\$status" != "Accepted" \|\| -z "\$submission_id" \]\]/);
+  assert.doesNotMatch(
+    step,
+    /^\s*spctl\s/m,
+    'bare command-line payloads must not be assessed as app bundles',
+  );
 });

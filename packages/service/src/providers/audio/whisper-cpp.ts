@@ -22,6 +22,16 @@ import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
+import {
+  type ModelStorageRoots,
+  findModelRoot,
+  hashModelPayloadFiles,
+  listOverlayModelIds,
+  makeSharedModelReadable,
+  modelExistsOnlyReadOnly,
+  readOnlyModelError,
+  verifyReadOnlyModelPayload,
+} from '../../models/storage-roots.js';
 import { downloadWithRetry } from '../../utils/download-with-retry.js';
 import type { NativeEngineSupervisor } from '../native/supervisor.js';
 import type {
@@ -37,6 +47,7 @@ import type {
 export interface WhisperCppProviderOptions {
   baseUrl: string;
   modelsRoot: string;
+  storageRoots?: ModelStorageRoots;
   /** Per-request timeout in ms. Defaults to 5 minutes — long enough for
    *  small models on a 30-minute audio file on weak hardware. */
   timeoutMs?: number;
@@ -101,6 +112,7 @@ export class WhisperCppProvider implements SpeechToTextProvider {
   readonly name = 'whisper-cpp';
   private readonly baseUrl: string;
   private readonly modelsRoot: string;
+  private readonly storageRoots: ModelStorageRoots;
   private readonly timeoutMs: number;
   private readonly fetchImpl: typeof fetch;
   private readonly supervisor?: NativeEngineSupervisor;
@@ -109,6 +121,10 @@ export class WhisperCppProvider implements SpeechToTextProvider {
   constructor(opts: WhisperCppProviderOptions) {
     this.baseUrl = opts.baseUrl.replace(/\/+$/, '');
     this.modelsRoot = opts.modelsRoot;
+    this.storageRoots = opts.storageRoots ?? {
+      writableRoot: opts.modelsRoot,
+      readOnlyRoots: [],
+    };
     this.timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.fetchImpl = opts.fetchImpl ?? fetch;
     this.supervisor = opts.supervisor;
@@ -195,18 +211,20 @@ export class WhisperCppProvider implements SpeechToTextProvider {
   }
 
   async listInstalledModels(): Promise<InstalledAudioModelInfo[]> {
-    let entries: string[] = [];
-    try {
-      entries = await readdir(this.modelsRoot);
-    } catch {
-      return [];
-    }
+    const entries = await listOverlayModelIds(this.storageRoots);
     const out: InstalledAudioModelInfo[] = [];
     for (const id of entries) {
       try {
-        const raw = await readFile(join(this.modelsRoot, id, 'manifest.json'), 'utf8');
-        const parsed = JSON.parse(raw) as Partial<InstalledAudioModelInfo>;
+        const root = await findModelRoot(this.storageRoots, id);
+        if (!root) continue;
+        const raw = await readFile(join(root, id, 'manifest.json'), 'utf8');
+        const parsed = JSON.parse(raw) as Partial<InstalledAudioModelInfo> & {
+          fileSha256?: Record<string, string>;
+        };
         if (!parsed.id || !parsed.name || !parsed.installedAt) continue;
+        if (!(await verifyReadOnlyModelPayload(this.storageRoots, root, id, parsed.fileSha256))) {
+          continue;
+        }
         out.push({
           id: parsed.id,
           name: parsed.name,
@@ -247,6 +265,7 @@ export class WhisperCppProvider implements SpeechToTextProvider {
       writtenAll = result.writtenAll;
     }
 
+    const fileSha256 = await hashModelPayloadFiles(itemDir);
     await writeFile(
       join(itemDir, 'manifest.json'),
       JSON.stringify(
@@ -259,6 +278,7 @@ export class WhisperCppProvider implements SpeechToTextProvider {
             filename: filenameForRole(f.role, f.downloadUrl),
             sha256: f.sha256.toLowerCase(),
           })),
+          fileSha256,
           installedAt: new Date().toISOString(),
         },
         null,
@@ -266,12 +286,16 @@ export class WhisperCppProvider implements SpeechToTextProvider {
       ),
       'utf8',
     );
+    await makeSharedModelReadable(itemDir);
 
     yield { type: 'progress', bytesWritten: writtenAll, totalBytes: totalAllBytes };
     yield { type: 'done', id };
   }
 
   async deleteModel(id: string): Promise<void> {
+    if (await modelExistsOnlyReadOnly(this.storageRoots, id)) {
+      throw readOnlyModelError(id);
+    }
     await rm(join(this.modelsRoot, id), { recursive: true, force: true });
   }
 

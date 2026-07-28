@@ -6054,6 +6054,50 @@ button.danger {
 
 /* Connected apps read like a small permissions ledger: one app per ruled
    line, with the revocation action kept in a predictable final column. */
+.grant-verification {
+  margin: var(--space-md) 0;
+  padding: var(--space-md);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+.grant-verification label,
+.connected-app-code span {
+  display: block;
+  margin-bottom: var(--space-xs);
+  color: var(--text);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.grant-verification input,
+.connected-app-code input {
+  width: 8.5rem;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: var(--text-lg);
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.grant-verification p {
+  margin: var(--space-sm) 0 0;
+}
+
+.connected-app-code {
+  min-width: 8.5rem;
+}
+
+.connected-app-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: flex-end;
+  gap: var(--space-sm);
+}
+
 .connected-apps-table-wrap {
   width: min(100%, 960px);
   margin-top: var(--space-sm);

@@ -20,10 +20,10 @@
  * match a download; run this script, review the diff, and commit it.
  *
  * Usage:
- *   node scripts/pin-native-release.mjs native-v0.1.19
- *   node scripts/pin-native-release.mjs 0.1.19
+ *   node scripts/pin-native-release.mjs native-v0.1.20 --macos-notarized
+ *   node scripts/pin-native-release.mjs 0.1.20 --macos-notarized
  *   node scripts/pin-native-release.mjs --latest
- *   node scripts/pin-native-release.mjs native-v0.1.19 --print   # don't write
+ *   node scripts/pin-native-release.mjs native-v0.1.20 --print   # don't write
  *   node scripts/pin-native-release.mjs 0.1.20 --macos-notarized
  *
  * Matches bump-node.mjs / bump-pnpm.mjs in shape and ergonomics.
@@ -42,6 +42,10 @@ const GITHUB_API = 'https://api.github.com';
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, '..');
 const pinFile = resolve(repoRoot, 'packages/service/src/engines/native-manifest.ts');
+const nativeFilesPinFile = resolve(
+  repoRoot,
+  'packages/service/src/engines/native-file-manifest.json',
+);
 
 const argv = process.argv.slice(2);
 const printOnly = argv.includes('--print');
@@ -107,6 +111,12 @@ const sums = release.assets?.find((a) => a.name === 'SHA256SUMS');
 if (!sums) {
   throw new Error(`release ${release.tag_name} has no SHA256SUMS asset — nothing to anchor to`);
 }
+const nativeFilesAsset = release.assets?.find((a) => a.name === 'NATIVE_FILE_MANIFESTS.json');
+if (!nativeFilesAsset) {
+  throw new Error(
+    `release ${release.tag_name} has no NATIVE_FILE_MANIFESTS.json asset; Electron native reuse cannot be source-pinned`,
+  );
+}
 
 // Fetch through the API asset URL with an octet-stream accept so this works
 // identically for public and (historically) private releases.
@@ -128,12 +138,30 @@ for (const filename of archiveHashes.keys()) {
   }
 }
 const archiveBlock = renderArchiveHashes(version, archiveHashes);
+const nativeFilesResponse = await fetch(nativeFilesAsset.url, {
+  headers: headers('application/octet-stream'),
+  redirect: 'follow',
+});
+if (!nativeFilesResponse.ok) {
+  throw new Error(`HTTP ${nativeFilesResponse.status} downloading NATIVE_FILE_MANIFESTS.json`);
+}
+const nativeFilesBytes = Buffer.from(await nativeFilesResponse.arrayBuffer());
+const nativeFiles = JSON.parse(nativeFilesBytes.toString('utf8'));
+if (
+  nativeFiles?.schemaVersion !== 1 ||
+  nativeFiles?.release !== version ||
+  !nativeFiles.platforms ||
+  Object.keys(nativeFiles.platforms).length === 0
+) {
+  throw new Error('NATIVE_FILE_MANIFESTS.json has an invalid schema, release, or platform set');
+}
 
 if (printOnly) {
   console.log(`NATIVE_ENGINE_RELEASE = ${version}`);
   console.log(`SHA256SUMS_DIGEST     = ${digest}`);
   console.log(`NATIVE_ENGINE_MACOS_NOTARIZED = ${macosNotarized}`);
   console.log(archiveBlock);
+  console.log(`NATIVE_FILE_MANIFESTS = ${Object.keys(nativeFiles.platforms).length} platform keys`);
   console.log(`(${archiveHashes.size} archive hashes)`);
   process.exit(0);
 }
@@ -168,7 +196,9 @@ if (
 }
 
 await writeFile(pinFile, next);
+await writeFile(nativeFilesPinFile, `${JSON.stringify(nativeFiles, null, 2)}\n`, 'utf8');
 console.log(`pinned ${pinFile}`);
+console.log(`pinned ${nativeFilesPinFile}`);
 console.log(`  NATIVE_ENGINE_RELEASE → ${version}`);
 console.log(`  SHA256SUMS_DIGEST     → ${digest}`);
 console.log(`  ARCHIVE_SHA256        → ${archiveHashes.size} exact archive hashes`);

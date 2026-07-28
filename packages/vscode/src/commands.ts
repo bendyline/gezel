@@ -95,11 +95,10 @@ export function registerCommands(ctx: CommandContext): vscode.Disposable[] {
       else if (pick === 'Reconnect') await ctx.reconnect();
     }),
     /**
-     * Workaround for "the gezel desktop app never showed the consent
-     * dialog" (typically: older build that predates Phase 1b's
-     * GrantConsentDialog). Lists pending grants via the daemon's
-     * root token and lets the user approve one in-place from VS Code,
-     * then reconnects so the SDK picks up the freshly-issued token.
+     * Recovery path when the desktop consent dialog is unavailable.
+     * Lists and approves grants with the host-only discovery credential;
+     * the code is still required, so approval remains bound to the request
+     * initiated by this extension.
      */
     vscode.commands.registerCommand('gezel.approvePendingApp', async () => {
       const conn = ctx.getConnection();
@@ -108,14 +107,20 @@ export function registerCommands(ctx: CommandContext): vscode.Disposable[] {
         return;
       }
       const res = await conn.fetch(`${conn.baseUrl}/v1/apps`, {
-        headers: { Authorization: `Bearer ${conn.token}` },
+        headers: { Authorization: `Bearer ${conn.firstPartyToken}` },
       });
       if (!res.ok) {
         void vscode.window.showErrorMessage(`Gezel: couldn't list apps — HTTP ${res.status}`);
         return;
       }
       const body = (await res.json()) as {
-        grants: Array<{ id: string; appId: string; appName: string; status: string }>;
+        grants: Array<{
+          id: string;
+          appId: string;
+          appName: string;
+          status: string;
+          verificationRequired?: boolean;
+        }>;
       };
       const pending = body.grants.filter((g) => g.status === 'pending');
       if (pending.length === 0) {
@@ -134,16 +139,50 @@ export function registerCommands(ctx: CommandContext): vscode.Disposable[] {
         { placeHolder: 'Select a pending connection to approve' },
       );
       if (!pick) return;
+      let verificationCode: string | undefined;
+      if (pick.grant.verificationRequired) {
+        const entered = await vscode.window.showInputBox({
+          title: `Approve ${pick.grant.appName}`,
+          prompt: 'Enter the six-character connection code shown by the requesting application.',
+          placeHolder: '___-___',
+          ignoreFocusOut: true,
+          validateInput: (value) =>
+            normalizeVerificationCode(value)
+              ? null
+              : 'Enter a valid six-character connection code.',
+        });
+        if (entered === undefined) return;
+        verificationCode = normalizeVerificationCode(entered) ?? undefined;
+      }
       const approve = await conn.fetch(
         `${conn.baseUrl}/v1/apps/grant/${encodeURIComponent(pick.grant.id)}/approve`,
-        { method: 'POST', headers: { Authorization: `Bearer ${conn.token}` } },
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${conn.firstPartyToken}`,
+            ...(verificationCode ? { 'Content-Type': 'application/json' } : {}),
+          },
+          ...(verificationCode ? { body: JSON.stringify({ verificationCode }) } : {}),
+        },
       );
       if (!approve.ok) {
-        void vscode.window.showErrorMessage(`Gezel: approval failed — HTTP ${approve.status}`);
+        const error = (await approve.json().catch(() => null)) as {
+          error?: string;
+          attemptsRemaining?: number;
+        } | null;
+        const remaining =
+          typeof error?.attemptsRemaining === 'number'
+            ? ` ${error.attemptsRemaining} attempt${error.attemptsRemaining === 1 ? '' : 's'} remaining.`
+            : '';
+        void vscode.window.showErrorMessage(
+          error?.error === 'verification_code_invalid'
+            ? `Gezel: that connection code did not match.${remaining}`
+            : `Gezel: approval failed — ${error?.error ?? `HTTP ${approve.status}`}`,
+        );
         return;
       }
       void vscode.window.showInformationMessage(
-        `Approved ${pick.grant.appName}. Reconnecting to register the Language Model Chat Provider…`,
+        `Approved ${pick.grant.appName}. Reconnecting the Gezel extension…`,
       );
       await ctx.reconnect();
     }),
@@ -155,7 +194,7 @@ export function registerCommands(ctx: CommandContext): vscode.Disposable[] {
      * already given up, …). Every fresh launch then hits 409 on
      * `POST /v1/apps/register` and we never register a language model.
      *
-     * Fix: DELETE the daemon-side token using the root bearer, clear
+     * Fix: DELETE the daemon-side token using the host-only discovery bearer, clear
      * the (likely empty) VS Code secret, then reconnect — which fires
      * a fresh `register`, lands a brand-new grant, and either
      * auto-approves (env var) or surfaces the normal consent flow.
@@ -169,7 +208,7 @@ export function registerCommands(ctx: CommandContext): vscode.Disposable[] {
       const appId = 'vscode';
       const del = await conn.fetch(`${conn.baseUrl}/v1/apps/${encodeURIComponent(appId)}/token`, {
         method: 'DELETE',
-        headers: { Authorization: `Bearer ${conn.token}` },
+        headers: { Authorization: `Bearer ${conn.firstPartyToken}` },
       });
       if (!del.ok && del.status !== 404) {
         void vscode.window.showErrorMessage(
@@ -184,4 +223,11 @@ export function registerCommands(ctx: CommandContext): vscode.Disposable[] {
       await ctx.reconnect();
     }),
   ];
+}
+
+function normalizeVerificationCode(value: string): string | null {
+  const normalized = value.replace(/[-\s]/g, '').toUpperCase();
+  return /^[2-9A-HJ-KM-NP-TV-Z]{6}$/.test(normalized)
+    ? `${normalized.slice(0, 3)}-${normalized.slice(3)}`
+    : null;
 }

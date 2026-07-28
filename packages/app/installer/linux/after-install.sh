@@ -13,6 +13,7 @@ umask 077
 
 GEZEL_USER=gezel
 DATA_DIR=/var/lib/gezel
+ASSETS_DIR="$DATA_DIR/assets"
 SERVICE_TREE="$DATA_DIR/service"
 UNIT_SRC=/opt/Gezel/gezeld.service
 UNIT_DST=/etc/systemd/system/gezeld.service
@@ -133,13 +134,18 @@ fi
 # is 0755 so desktop clients can read only the metadata gezeld publishes.
 assert_not_symlink "$DATA_DIR" "Gezel data directory"
 assert_not_symlink "$DATA_DIR/runtime" "Gezel runtime directory"
+assert_not_symlink "$ASSETS_DIR" "Gezel public asset directory"
+assert_not_symlink "$ASSETS_DIR/models" "Gezel shared model directory"
 assert_not_symlink "$DATA_DIR/logs" "Gezel logs directory"
 assert_not_symlink "$SERVICE_TREE" "Gezel service tree"
 install -d -o "$GEZEL_USER" -g "$GEZEL_USER" -m 700 "$DATA_DIR"
 install -d -o "$GEZEL_USER" -g "$GEZEL_USER" -m 700 "$DATA_DIR/runtime"
 install -d -o "$GEZEL_USER" -g "$GEZEL_USER" -m 700 "$DATA_DIR/logs"
+install -d -o "$GEZEL_USER" -g "$GEZEL_USER" -m 755 "$ASSETS_DIR/models"
 assert_not_symlink "$DATA_DIR" "Gezel data directory"
 assert_not_symlink "$DATA_DIR/runtime" "Gezel runtime directory"
+assert_not_symlink "$ASSETS_DIR" "Gezel public asset directory"
+assert_not_symlink "$ASSETS_DIR/models" "Gezel shared model directory"
 assert_not_symlink "$DATA_DIR/logs" "Gezel logs directory"
 assert_not_symlink "$SERVICE_TREE" "Gezel service tree"
 
@@ -158,6 +164,12 @@ find "$DATA_DIR" -xdev ! -type l -exec chmod go-rwx {} +
 chmod 711 "$DATA_DIR"
 chmod 755 "$DATA_DIR/runtime"
 chmod 700 "$DATA_DIR/logs"
+if find "$ASSETS_DIR" -xdev -type l -print -quit | grep -q .; then
+  echo "[gezel after-install] ERROR: shared asset store contains a symlink" >&2
+  exit 1
+fi
+find "$ASSETS_DIR" -xdev -type d -exec chmod 755 {} +
+find "$ASSETS_DIR" -xdev -type f -exec chmod 644 {} +
 
 # Remove any root-equivalent token left by a pre-split release before runtime
 # becomes readable. gezeld recreates it as a scoped first-party credential.

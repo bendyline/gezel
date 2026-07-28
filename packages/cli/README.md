@@ -30,8 +30,10 @@ With no connection flags, the CLI follows this order:
 
 1. Use the Electron-installed machine service on port `43935` when it is
    healthy. On first use, the terminal waits while the Gezel app asks you to
-   approve **Gezel CLI**. The resulting revocable credential is saved under
-   the user-owned `~/.gezel/cli/tokens/` directory.
+   approve **Gezel CLI**. The terminal shows a six-character code that you must
+   enter in the app to confirm that you initiated the request. The resulting
+   revocable credential is saved under the user-owned
+   `~/.gezel/cli/tokens/` directory.
 2. If the machine service is not installed or is down, adopt or start a
    user-owned runtime using `~/.gezel`. CLI-owned runtimes use a discoverable
    ephemeral port so they never prevent the machine service from starting.
@@ -41,6 +43,17 @@ models, and conversations through the service API. The standalone fallback
 does **not** open the machine service's private data directory directly:
 machine-service state is protected for its restricted OS account, and two
 processes must not write the same file-backed state concurrently.
+
+It may reuse two deliberately public asset surfaces:
+
+- Immutable machine models under the installer-owned `assets/models/` tree.
+  User-owned models in `~/.gezel/engines/` take precedence; the CLI re-hashes
+  a machine model on first adoption, caches file identity/size/mtime locally,
+  and downloads replacements only into its user-owned home.
+- Electron's `native-bin/` payload when its native release exactly matches the
+  CLI pin, every executable/loadable file matches the per-file hashes embedded
+  in the CLI, and platform signing checks pass. Any mismatch falls back to the
+  CLI's independently downloaded native cache.
 
 The global overrides are:
 
@@ -85,12 +98,17 @@ package; the release's `SHA256SUMS` file must both match its own compiled
 digest and agree with the selected compiled archive hash. The downloaded
 archive is then hashed against that local value.
 
-First-party Windows executables must carry a valid Bendyline Authenticode
-signature, while macOS executables must carry the expected Developer ID.
-Pins for independently notarized native releases additionally require a
-`Notarized Developer ID` Gatekeeper assessment. Linux has no equivalent
-native signing channel and remains anchored by the compiled hashes. The
-upstream `uv.exe` is an explicit unsigned exception, verified by its compiled
+First-party Windows executables and loadable DLLs must carry a valid Bendyline
+Authenticode signature, while macOS executable code must carry the expected
+Developer ID.
+Standalone macOS archives are accepted by Apple's notary service in release
+CI before their hashes are pinned. Bare command-line binaries cannot carry a
+stapled ticket or be assessed as app bundles, so runtime checks combine those
+source-pinned hashes with Developer ID validation. Electron reuse separately
+requires a `Notarized Developer ID` Gatekeeper assessment of the parent
+`.app`. Linux has no equivalent native signing channel and remains anchored
+by the compiled hashes. The upstream `uv.exe` is an explicit unsigned
+exception, verified by its compiled
 archive hash. Each CLI release resolves one exact native release rather than
 following `latest`; the setup prompt shows that pinned version. Nothing is
 fetched until you ask for it.

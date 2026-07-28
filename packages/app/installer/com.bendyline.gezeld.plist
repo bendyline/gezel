@@ -44,6 +44,8 @@
         <string>43935</string>
         <key>GEZEL_SYSTEM_SCOPE</key>
         <string>1</string>
+        <key>GEZEL_SHARED_ASSETS_DIR</key>
+        <string>/Library/Application Support/Gezel/assets</string>
         <!-- Override the launchd default $HOME of /var/empty (the
              _gezeld user's NFSHomeDirectory). Tools that derive cache
              / state paths from $HOME — pnpm's store at

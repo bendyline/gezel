@@ -151,7 +151,14 @@ describe('token scope guard (integration)', () => {
       appName: 'OpenAI-only app',
       scopes: ['openai'],
     });
+    const productToken = await svc.context.tokenStore.issue({
+      appId: 'product-app',
+      appName: 'Product app',
+      scopes: ['product', 'openai'],
+    });
     expect((await get('/api/config', appToken.token)).status).toBe(403);
+    expect((await get('/api/config', productToken.token)).status).toBe(200);
+    expect((await get('/v1/apps', productToken.token)).status).toBe(403);
     expect((await get('/api/config', svc.clientToken)).status).toBe(200);
 
     const worker = svc.context.tokenStore.issueSession({

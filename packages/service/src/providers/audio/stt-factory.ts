@@ -16,9 +16,16 @@
  * image and audio engines is preserved.
  */
 
-import { readFile, readdir } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { Agent, fetch as undiciFetch } from 'undici';
+import {
+  type ModelStorageRoots,
+  findModelRoot,
+  listOverlayModelIds,
+  modelStorageRoots,
+  verifyReadOnlyModelPayload,
+} from '../../models/storage-roots.js';
 import { pickFreePort } from '../native/port.js';
 import { NativeEngineSupervisor } from '../native/supervisor.js';
 import { MockSpeechToTextProvider } from './mock-stt.js';
@@ -50,7 +57,8 @@ export async function createSpeechToTextProvider(
   opts: SpeechToTextFactoryOptions,
 ): Promise<SpeechToTextProvider> {
   const env = opts.env ?? process.env;
-  const modelsRoot = join(opts.home, 'engines', 'whisper-cpp', 'models');
+  const storageRoots = modelStorageRoots({ home: opts.home, engine: 'whisper-cpp', env });
+  const modelsRoot = storageRoots.writableRoot;
 
   if (env.GEZEL_MOCK_PROVIDER === '1') {
     return new MockSpeechToTextProvider({ modelsRoot });
@@ -60,6 +68,7 @@ export async function createSpeechToTextProvider(
     return new WhisperCppProvider({
       baseUrl: env.GEZEL_WHISPER_SERVER_URL,
       modelsRoot,
+      storageRoots,
       fetchImpl: patientFetch(),
     });
   }
@@ -75,7 +84,7 @@ export async function createSpeechToTextProvider(
       resolveLaunch: async () => {
         const port = cachedPort ?? (await pickFreePort());
         cachedPort = port;
-        const firstModel = await findFirstInstalledWhisperModel(modelsRoot);
+        const firstModel = await findFirstInstalledWhisperModel(storageRoots);
         if (!firstModel) {
           throw new Error(
             'No STT model is available locally. Download one from Settings → Audio before transcribing.',
@@ -91,6 +100,7 @@ export async function createSpeechToTextProvider(
     return new WhisperCppProvider({
       baseUrl: 'http://127.0.0.1:9082',
       modelsRoot,
+      storageRoots,
       supervisor,
       fetchImpl: patientFetch(),
     });
@@ -99,6 +109,7 @@ export async function createSpeechToTextProvider(
   return new WhisperCppProvider({
     baseUrl: 'http://127.0.0.1:9082',
     modelsRoot,
+    storageRoots,
     configured: false,
   });
 }
@@ -110,30 +121,31 @@ interface ResolvedWhisperModel {
 }
 
 async function findFirstInstalledWhisperModel(
-  modelsRoot: string,
+  storageRoots: ModelStorageRoots,
 ): Promise<ResolvedWhisperModel | undefined> {
-  let entries: string[] = [];
-  try {
-    entries = await readdir(modelsRoot);
-  } catch {
-    return undefined;
-  }
+  const entries = await listOverlayModelIds(storageRoots);
   entries.sort();
   for (const id of entries) {
     try {
-      const raw = await readFile(join(modelsRoot, id, 'manifest.json'), 'utf8');
+      const root = await findModelRoot(storageRoots, id);
+      if (!root) continue;
+      const raw = await readFile(join(root, id, 'manifest.json'), 'utf8');
       const parsed = JSON.parse(raw) as {
         id?: string;
         name?: string;
         files?: Array<{ role?: string; filename?: string }>;
+        fileSha256?: Record<string, string>;
       };
       if (!parsed.id || !parsed.name || !Array.isArray(parsed.files)) continue;
+      if (!(await verifyReadOnlyModelPayload(storageRoots, root, id, parsed.fileSha256))) {
+        continue;
+      }
       const weightsFile = parsed.files.find((f) => f.role === 'weights' && f.filename);
       if (!weightsFile?.filename) continue;
       return {
         id: parsed.id,
         name: parsed.name,
-        weightsPath: join(modelsRoot, id, weightsFile.filename),
+        weightsPath: join(root, id, weightsFile.filename),
       };
     } catch {
       /* skip malformed */

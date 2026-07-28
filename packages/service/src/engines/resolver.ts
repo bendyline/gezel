@@ -9,7 +9,6 @@ import * as tar from 'tar';
 import { type DownloadResult, downloadWithRetry } from '../utils/download-with-retry.js';
 import {
   NATIVE_ENGINE_ARCHIVE_SHA256,
-  NATIVE_ENGINE_MACOS_NOTARIZED,
   SHA256SUMS_DIGEST,
   effectiveEngineRelease,
   isPlaceholderDigest,
@@ -68,8 +67,6 @@ export interface ResolveEngineOptions {
   expectedSha256sumsDigest?: string;
   /** Override the source-bundled per-archive hashes (tests). */
   expectedArchiveSha256?: Readonly<Record<string, string>>;
-  /** Override whether Gatekeeper notarization is required on macOS (tests/dev). */
-  requireMacosNotarization?: boolean;
   /** Override the GitHub API base (tests point this at a local fixture). */
   githubApiBase?: string;
   /** Override signature verification (tests — avoids spawning powershell/codesign). */
@@ -100,6 +97,11 @@ interface GhRelease {
  * release, verify (SHA256SUMS digest → archive sha → code signature),
  * extract atomically into `~/.gezel/engines/native-bin/<version>/<key>/`,
  * and stamp the provider env var.
+ *
+ * macOS release notarization happens in CI against the signed archive before
+ * its hashes are pinned here. Bare command-line binaries cannot be stapled or
+ * assessed as app bundles, so runtime verification deliberately checks the
+ * source-pinned bytes and Developer ID identity without invoking `spctl`.
  *
  * Yields `progress`/`retrying`/`verifying`/`done`/`error`; the generator's
  * RETURN value carries the resolved result. On a handled failure it yields
@@ -163,16 +165,12 @@ export async function* resolveEngine(
       `'${archiveName}' is missing from this build's bundled native checksum map — refusing to install an unpinned archive`,
     );
   }
-  const requireMacosNotarization =
-    opts.requireMacosNotarization ??
-    (usesSourcePin && process.platform === 'darwin' && NATIVE_ENGINE_MACOS_NOTARIZED);
   const verifyAuthenticity = opts.verifyOverride ?? verifyCodeSignature;
   const verifyOptions = {
     policy,
     ...(engine === 'uv' && process.platform === 'win32'
       ? {}
       : { expectedPublisher: 'Bendyline LLC' }),
-    ...(requireMacosNotarization ? { requireNotarization: true } : {}),
   } as const;
 
   const versionDir = join(opts.home, 'engines', 'native-bin', version);

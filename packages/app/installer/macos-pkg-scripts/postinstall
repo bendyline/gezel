@@ -20,6 +20,7 @@ umask 077
 DAEMON_USER="_gezeld"
 DAEMON_LABEL="com.bendyline.gezeld"
 DATA_DIR="/Library/Application Support/Gezel"
+ASSETS_DIR="${DATA_DIR}/assets"
 SERVICE_TREE="${DATA_DIR}/service"
 PLIST_DST="/Library/LaunchDaemons/${DAEMON_LABEL}.plist"
 PLIST_SRC="/Applications/Gezel.app/Contents/Resources/${DAEMON_LABEL}.plist"
@@ -135,11 +136,15 @@ fi
 # only cross-account state gezeld explicitly publishes.
 assert_not_symlink "$DATA_DIR" "Gezel data directory"
 assert_not_symlink "$DATA_DIR/runtime" "Gezel runtime directory"
+assert_not_symlink "$ASSETS_DIR" "Gezel public asset directory"
+assert_not_symlink "$ASSETS_DIR/models" "Gezel shared model directory"
 assert_not_symlink "$DATA_DIR/logs" "Gezel logs directory"
 assert_not_symlink "$SERVICE_TREE" "Gezel service tree"
-mkdir -p "$DATA_DIR/runtime" "$DATA_DIR/logs"
+mkdir -p "$DATA_DIR/runtime" "$DATA_DIR/logs" "$ASSETS_DIR/models"
 assert_not_symlink "$DATA_DIR" "Gezel data directory"
 assert_not_symlink "$DATA_DIR/runtime" "Gezel runtime directory"
+assert_not_symlink "$ASSETS_DIR" "Gezel public asset directory"
+assert_not_symlink "$ASSETS_DIR/models" "Gezel shared model directory"
 assert_not_symlink "$DATA_DIR/logs" "Gezel logs directory"
 assert_not_symlink "$SERVICE_TREE" "Gezel service tree"
 
@@ -154,6 +159,14 @@ find -x "$DATA_DIR" ! -type l -exec chmod go-rwx {} +
 chmod 711 "$DATA_DIR"
 chmod 755 "$DATA_DIR/runtime"
 chmod 700 "$DATA_DIR/logs"
+# Shared model bundles are the sole public data subtree. Refuse links before
+# widening modes so an elevated upgrade can never publish an external target.
+if find -x "$ASSETS_DIR" -type l -print -quit | grep -q .; then
+  echo "[gezel postinstall] ERROR: shared asset store contains a symlink" >&2
+  exit 1
+fi
+find -x "$ASSETS_DIR" -type d -exec chmod 755 {} +
+find -x "$ASSETS_DIR" -type f -exec chmod 644 {} +
 
 # Invalidate legacy root-equivalent discovery material before making runtime
 # traversable. The replacement auth-token is a scoped first-party credential.

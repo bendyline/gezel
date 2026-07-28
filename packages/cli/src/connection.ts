@@ -6,9 +6,11 @@ import {
   GezelApiError,
   GezelClient,
   createTrustingFetch,
+  electronNativeBinCandidates,
   isProcessAlive,
   readRuntime,
   readSystemServiceEndpoint,
+  systemSharedAssetsDir,
 } from '@bendyline/gezel-client/node';
 import { gezelPaths } from '@bendyline/gezel/paths';
 import { ensureDaemon } from './spawn-daemon.js';
@@ -38,6 +40,12 @@ export class CliError extends Error {
 /** Apply `--home` to the env so gezelHome()/readRuntime()/startService see it. */
 export function applyHome(globals: CliGlobals): void {
   if (globals.home) process.env.GEZEL_HOME = resolve(globals.home);
+  // A standalone CLI may read immutable, service-published model bundles,
+  // but still writes downloads/caches only beneath its own GEZEL_HOME.
+  if (!process.env.GEZEL_SHARED_ASSETS_DIR) {
+    const sharedAssets = systemSharedAssetsDir();
+    if (sharedAssets) process.env.GEZEL_SHARED_ASSETS_DIR = sharedAssets;
+  }
 }
 
 /** Reject global flag combinations before any command performs work. */
@@ -100,6 +108,10 @@ export async function connectOwned(globals: CliGlobals): Promise<GezelClient> {
   applyHome(globals);
   const preferred = await connectPreferredService(globals);
   if (preferred) return preferred.client;
+  const runtime = await readRuntime();
+  if (!runtime || !isProcessAlive(runtime.pid)) {
+    await prepareStandaloneAssets();
+  }
   return ensureDaemon();
 }
 
@@ -133,6 +145,7 @@ export async function connectForRun(globals: CliGlobals): Promise<RunConnection>
     });
     return { kind: 'owned', client, baseUrl: runtime.baseUrl };
   }
+  await prepareStandaloneAssets();
 
   // Nothing running → start the service in-process for this single turn, on
   // an ephemeral port. Skip the heavy system bootstrap (Chromium/Playwright)
@@ -260,6 +273,19 @@ async function connectPreferredService(
   };
 }
 
+/**
+ * A local fallback may borrow the Electron install's native tree, but only
+ * after the service package has checked every loadable file against the
+ * source-pinned release manifest and platform signature policy.
+ */
+async function prepareStandaloneAssets(): Promise<void> {
+  if (process.env.GEZEL_NATIVE_BIN_DIR) return;
+  const candidates = electronNativeBinCandidates();
+  if (candidates.length === 0) return;
+  const { reuseVerifiedElectronNativeBinaries } = await import('@bendyline/gezel-service');
+  await reuseVerifiedElectronNativeBinaries({ candidates });
+}
+
 async function connectWithCliGrant(input: {
   baseUrl: string;
   fetch: typeof fetch;
@@ -292,13 +318,12 @@ async function connectWithCliGrant(input: {
     }
   }
 
-  console.error(
-    `Gezel CLI needs permission to use the service at ${input.baseUrl}.\nOpen the Gezel app and approve “Gezel CLI”. Waiting for approval…`,
-  );
+  console.error(`Requesting Gezel CLI access to the service at ${input.baseUrl}…`);
 
+  let issuedToken: string;
   try {
-    const { connect } = await import('@bendyline/gezel-app-sdk');
-    await connect({
+    const { authorize } = await import('@bendyline/gezel-app-sdk');
+    const authorized = await authorize({
       appId,
       appName: 'Gezel CLI',
       scopes: ['cli'],
@@ -306,7 +331,13 @@ async function connectWithCliGrant(input: {
       fetch: input.fetch,
       approvalTimeoutSec: CLI_APPROVAL_TIMEOUT_SEC,
       tokenStorage: storage,
+      onVerificationCode: (code) => {
+        console.error(
+          `Connecting to your Gezel service at ${input.baseUrl}.\nOpen the Gezel app and enter code ${code} to approve this connection. Waiting for approval…`,
+        );
+      },
     });
+    issuedToken = authorized.token;
   } catch (error) {
     if (error instanceof CliError) throw error;
     const { GezelSdkError } = await import('@bendyline/gezel-app-sdk');
@@ -324,16 +355,17 @@ async function connectWithCliGrant(input: {
           `Timed out after ${CLI_APPROVAL_TIMEOUT_SEC / 60} minutes waiting for Gezel CLI approval.`,
         );
       }
+      if (error.code === 'grant_expired') {
+        throw new CliError(
+          'The Gezel CLI approval request expired. Run the command again to get a new code.',
+        );
+      }
     }
     throw new CliError(
       `Could not authorize Gezel CLI against ${input.baseUrl}: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
 
-  const issuedToken = await storage.load(appId);
-  if (!issuedToken) {
-    throw new CliError('Gezel approved the CLI connection but returned no credential.');
-  }
   const client = buildCliClient(input.baseUrl, issuedToken, input.fetch);
   await validateCliClient(client, 'The approved Gezel CLI authorization');
   return client;

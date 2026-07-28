@@ -3,9 +3,13 @@ import { bodyLimit } from 'hono/body-limit';
 import { streamSSE } from 'hono/streaming';
 import { z } from 'zod';
 import {
+  GrantExpiredError,
   type GrantRequest,
+  InvalidVerificationCodeError,
   PendingGrantExistsError,
   TooManyPendingGrantsError,
+  VerificationAttemptsExceededError,
+  VerificationCodeRequiredError,
 } from '../../grants/manager.js';
 import { bearerAuth, requireFirstParty } from '../auth.js';
 import type { ServiceContext } from '../context.js';
@@ -45,11 +49,17 @@ const RegisterRequestSchema = z.object({
     .regex(/^[a-z0-9][a-z0-9._-]*$/i, 'appId must be alphanumeric (plus . _ -)'),
   appName: z.string().min(1).max(120),
   scopes: z.array(z.string().min(1)).min(1).max(16),
+  /** Opt into requester-code verification for otherwise inference-only scopes. */
+  requireVerificationCode: z.boolean().optional(),
   iconUrl: z.string().url().optional(),
   /** `'device'` for the remote-model-execution pairing flow. */
   kind: z.enum(['app', 'device']).optional(),
   /** Paired device's identity public key (SPKI PEM), pinned by the peer. */
   deviceIdentityPubKey: z.string().max(4096).optional(),
+});
+
+const ApproveRequestSchema = z.object({
+  verificationCode: z.string().max(32).optional(),
 });
 
 /**
@@ -153,15 +163,19 @@ export function v1AppsRoutes(ctx: ServiceContext): Hono {
       }
 
       let grant: GrantRequest;
+      let verificationCode: string | undefined;
       try {
-        grant = await ctx.grants.request({
+        const created = await ctx.grants.request({
           appId: body.appId,
           appName: body.appName,
           scopes: body.scopes,
+          ...(body.requireVerificationCode ? { requireVerificationCode: true } : {}),
           ...(body.iconUrl ? { iconUrl: body.iconUrl } : {}),
           ...(body.kind ? { kind: body.kind } : {}),
           ...(body.deviceIdentityPubKey ? { deviceIdentityPubKey: body.deviceIdentityPubKey } : {}),
         });
+        grant = created.grant;
+        verificationCode = created.verificationCode;
       } catch (error) {
         if (error instanceof PendingGrantExistsError) {
           return c.json({ error: 'grant_already_pending' }, 409);
@@ -179,6 +193,7 @@ export function v1AppsRoutes(ctx: ServiceContext): Hono {
           grantRequestId: grant.id,
           status: grant.status,
           ...(token ? { token } : {}),
+          ...(verificationCode ? { verificationRequired: true, verificationCode } : {}),
         },
         201,
       );
@@ -331,6 +346,7 @@ export function v1AppsRoutes(ctx: ServiceContext): Hono {
         createdAt: g.createdAt,
         ...(g.decidedAt ? { decidedAt: g.decidedAt } : {}),
         ...(g.kind ? { kind: g.kind } : {}),
+        ...(g.verificationRequired ? { verificationRequired: true } : {}),
       })),
     });
   });
@@ -342,10 +358,38 @@ export function v1AppsRoutes(ctx: ServiceContext): Hono {
    */
   app.post('/grant/:id/approve', auth, firstParty, async (c) => {
     const id = c.req.param('id');
+    let body: z.infer<typeof ApproveRequestSchema>;
     try {
-      const grant = await ctx.grants.approve(id);
+      const parsed =
+        c.req.header('content-type')?.split(';', 1)[0]?.trim().toLowerCase() === 'application/json'
+          ? await c.req.json()
+          : {};
+      body = ApproveRequestSchema.parse(parsed);
+    } catch {
+      return c.json({ error: 'invalid_approval_request' }, 400);
+    }
+    try {
+      const grant = await ctx.grants.approve(id, body.verificationCode);
       return c.json({ ok: true, grant: toPollResponse(grant) });
     } catch (err) {
+      if (err instanceof GrantExpiredError) {
+        return c.json({ error: 'grant_expired' }, 410);
+      }
+      if (err instanceof VerificationCodeRequiredError) {
+        return c.json({ error: 'verification_code_required' }, 400);
+      }
+      if (err instanceof InvalidVerificationCodeError) {
+        return c.json(
+          {
+            error: 'verification_code_invalid',
+            attemptsRemaining: err.attemptsRemaining,
+          },
+          403,
+        );
+      }
+      if (err instanceof VerificationAttemptsExceededError) {
+        return c.json({ error: 'verification_attempts_exceeded' }, 429);
+      }
       const msg = err instanceof Error ? err.message : String(err);
       if (msg.includes('not found')) return c.json({ error: 'grant_not_found' }, 404);
       return c.json({ error: msg }, 409);

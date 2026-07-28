@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
+import {
+  approvalErrorMessage,
+  formatVerificationCode,
+  isVerificationCodeReady,
+} from './grant-verification.js';
 
 /**
  * Settings → Connected Apps tab. Lists every third-party app that's
@@ -36,6 +41,7 @@ interface PendingGrant {
   createdAt: number;
   decidedAt?: number;
   kind?: 'app' | 'device';
+  verificationRequired?: boolean;
 }
 
 interface ConnectedAppsResponse {
@@ -57,6 +63,7 @@ export function ConnectedAppsPanel() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [revokeTarget, setRevokeTarget] = useState<ConnectedApp | null>(null);
+  const [verificationCodes, setVerificationCodes] = useState<Record<string, string>>({});
 
   const refresh = useCallback(async () => {
     try {
@@ -85,25 +92,42 @@ export function ConnectedAppsPanel() {
   const decide = useCallback(
     async (grantId: string, action: 'approve' | 'deny') => {
       if (busy) return;
+      const grant = state?.grants.find((candidate) => candidate.id === grantId);
+      const verificationCode = verificationCodes[grantId] ?? '';
       setBusy(`${action}:${grantId}`);
       try {
         const res = await fetch(
           `${api.getBaseUrl()}/v1/apps/grant/${encodeURIComponent(grantId)}/${action}`,
           {
             method: 'POST',
-            headers: api.authHeader(),
+            headers: {
+              ...api.authHeader(),
+              ...(action === 'approve' && grant?.verificationRequired
+                ? { 'Content-Type': 'application/json' }
+                : {}),
+            },
+            ...(action === 'approve' && grant?.verificationRequired
+              ? { body: JSON.stringify({ verificationCode }) }
+              : {}),
           },
         );
         if (!res.ok) {
-          setError(`Failed to ${action} grant: HTTP ${res.status}`);
+          setError(await approvalErrorMessage(res, `Failed to ${action} grant`));
           return;
         }
+        setVerificationCodes((current) => {
+          const next = { ...current };
+          delete next[grantId];
+          return next;
+        });
         await refresh();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
       } finally {
         setBusy(null);
       }
     },
-    [busy, refresh],
+    [busy, refresh, state?.grants, verificationCodes],
   );
 
   const revoke = useCallback(async () => {
@@ -158,10 +182,30 @@ export function ConnectedAppsPanel() {
                       ? 'wants to run models on this device'
                       : g.scopes.includes('cli')
                         ? `${g.appId} — wants command-line control of this Gezel service`
-                        : `${g.appId} — wants: ${g.scopes.join(', ')}`}
+                        : g.scopes.includes('product')
+                          ? `${g.appId} — wants access to Gezel features and data`
+                          : `${g.appId} — wants: ${g.scopes.join(', ')}`}
                   </div>
                 </div>
                 <div className="connected-app-actions">
+                  {g.verificationRequired && (
+                    <label className="connected-app-code">
+                      <span>Connection code</span>
+                      <input
+                        value={verificationCodes[g.id] ?? ''}
+                        onChange={(event) => {
+                          const code = formatVerificationCode(event.currentTarget.value);
+                          setVerificationCodes((current) => ({ ...current, [g.id]: code }));
+                        }}
+                        placeholder="___-___"
+                        maxLength={7}
+                        autoComplete="off"
+                        autoCapitalize="characters"
+                        spellCheck={false}
+                        aria-label={`Connection code for ${g.appName}`}
+                      />
+                    </label>
+                  )}
                   <button
                     type="button"
                     onClick={() => void decide(g.id, 'deny')}
@@ -173,7 +217,11 @@ export function ConnectedAppsPanel() {
                     type="button"
                     className="primary"
                     onClick={() => void decide(g.id, 'approve')}
-                    disabled={busy !== null}
+                    disabled={
+                      busy !== null ||
+                      (g.verificationRequired &&
+                        !isVerificationCodeReady(verificationCodes[g.id] ?? ''))
+                    }
                   >
                     {busy === `approve:${g.id}` ? 'Approving…' : 'Approve'}
                   </button>

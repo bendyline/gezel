@@ -42,6 +42,17 @@ import {
   listBundleModelFiles,
   publishStagedModel,
 } from '../../models/bundle-storage.js';
+import {
+  type ModelStorageRoots,
+  findModelRoot,
+  hashModelPayloadFiles,
+  listOverlayModelIds,
+  makeSharedModelReadable,
+  modelExistsOnlyReadOnly,
+  modelStorageRoots,
+  readOnlyModelError,
+  verifyReadOnlyModelPayload,
+} from '../../models/storage-roots.js';
 import { checkDiskSpace, describeDiskShortfall } from '../../utils/disk-space.js';
 import { downloadWithRetry } from '../../utils/download-with-retry.js';
 import { readMlxSummary } from './config-parser.js';
@@ -150,6 +161,7 @@ interface InstalledManifest {
   chatTemplatePresent: boolean;
   /** File names that were written into the model dir, in install order. */
   files: string[];
+  fileSha256?: Record<string, string>;
 }
 
 export interface MlxModelManagerOptions {
@@ -232,6 +244,7 @@ class AsyncEventQueue<T> implements AsyncIterable<T> {
 
 export class MlxModelManager {
   private readonly modelsRoot: string;
+  private readonly storageRoots: ModelStorageRoots;
   private readonly catalog: CatalogService;
   private readonly fetchImpl: typeof fetch;
   private readonly onInstallStart?: (info: { catalogId: string }) => void;
@@ -244,7 +257,8 @@ export class MlxModelManager {
   private readonly activeInstalls = new Map<string, MlxActiveInstallSnapshot>();
 
   constructor(opts: MlxModelManagerOptions) {
-    this.modelsRoot = join(opts.home, 'engines', 'mlx', 'models');
+    this.storageRoots = modelStorageRoots({ home: opts.home, engine: 'mlx' });
+    this.modelsRoot = this.storageRoots.writableRoot;
     this.catalog = opts.catalog;
     this.fetchImpl = opts.fetchImpl ?? fetch;
     if (opts.onInstallStart) this.onInstallStart = opts.onInstallStart;
@@ -255,12 +269,7 @@ export class MlxModelManager {
   }
 
   async listInstalled(): Promise<InstalledMlxModel[]> {
-    let entries: string[] = [];
-    try {
-      entries = await readdir(this.modelsRoot);
-    } catch {
-      return [];
-    }
+    const entries = await listOverlayModelIds(this.storageRoots);
     const out: InstalledMlxModel[] = [];
     for (const id of entries) {
       const summary = await this.loadInstalled(id);
@@ -291,6 +300,9 @@ export class MlxModelManager {
 
   async delete(id: string): Promise<void> {
     if (!isSafeId(id)) throw new Error(`refusing to delete with unsafe id: ${id}`);
+    if (await modelExistsOnlyReadOnly(this.storageRoots, id)) {
+      throw readOnlyModelError(id);
+    }
     await rm(join(this.modelsRoot, id), { recursive: true, force: true });
   }
 
@@ -299,7 +311,9 @@ export class MlxModelManager {
     if (!isSafeId(id)) throw new Error(`unsafe model id: ${id}`);
     const summary = await this.loadInstalled(id);
     if (!summary) throw new Error(`model "${id}" is not available locally for mlx`);
-    const modelDir = join(this.modelsRoot, id);
+    const root = await findModelRoot(this.storageRoots, id);
+    if (!root) throw new Error(`model "${id}" is not available locally for mlx`);
+    const modelDir = join(root, id);
     const installedManifest = JSON.parse(
       await readFile(join(modelDir, 'manifest.json'), 'utf8'),
     ) as Record<string, unknown>;
@@ -345,6 +359,7 @@ export class MlxModelManager {
       architecture: summary.architecture ?? parsed.architecture,
       chatTemplatePresent: summary.chatTemplatePresent,
       files,
+      fileSha256: await hashModelPayloadFiles(opts.stagedModelDir),
     };
     await writeFile(
       join(opts.stagedModelDir, 'manifest.json'),
@@ -357,6 +372,7 @@ export class MlxModelManager {
       stagedModelDir: opts.stagedModelDir,
       replace: opts.replace,
     });
+    await makeSharedModelReadable(join(this.modelsRoot, opts.id));
   }
 
   /**
@@ -618,7 +634,9 @@ export class MlxModelManager {
         chatTemplatePresent,
         files: files.map((f) => f.name),
       };
+      installed.fileSha256 = await hashModelPayloadFiles(itemDir);
       await writeFile(join(itemDir, 'manifest.json'), JSON.stringify(installed, null, 2), 'utf8');
+      await makeSharedModelReadable(itemDir);
 
       // The sidecar case is the modern norm (Gemma 4, etc.) and mlx_vlm
       // reads it natively — nothing actionable to surface, so no warning.
@@ -767,7 +785,9 @@ export class MlxModelManager {
   }
 
   private async loadInstalled(id: string): Promise<InstalledMlxModel | null> {
-    const metaPath = join(this.modelsRoot, id, 'manifest.json');
+    const root = await findModelRoot(this.storageRoots, id);
+    if (!root) return null;
+    const metaPath = join(root, id, 'manifest.json');
     let raw: string;
     try {
       raw = await readFile(metaPath, 'utf8');
@@ -783,12 +803,15 @@ export class MlxModelManager {
     if (!parsed.id || !parsed.name || !parsed.installedAt || !Array.isArray(parsed.files)) {
       return null;
     }
+    if (!(await verifyReadOnlyModelPayload(this.storageRoots, root, id, parsed.fileSha256))) {
+      return null;
+    }
     return {
       id: parsed.id,
       name: parsed.name,
       approxSizeBytes: parsed.approxSizeBytes ?? 0,
       installedAt: parsed.installedAt,
-      modelDir: join(this.modelsRoot, id),
+      modelDir: join(root, id),
       ...(parsed.contextWindow ? { contextWindow: parsed.contextWindow } : {}),
       ...(parsed.quantization ? { quantization: parsed.quantization } : {}),
       chatTemplatePresent: parsed.chatTemplatePresent ?? true,

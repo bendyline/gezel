@@ -34,7 +34,7 @@ describe('GrantManager — request / approve / deny lifecycle', () => {
     const events: GrantEvent[] = [];
     grants.subscribe((e) => events.push(e));
 
-    const grant = await grants.request({
+    const { grant } = await grants.request({
       appId: 'docblocks',
       appName: 'DocBlocks',
       scopes: ['openai'],
@@ -73,7 +73,7 @@ describe('GrantManager — request / approve / deny lifecycle', () => {
       if (e.type === 'grant_decided') decided.push(e);
     });
 
-    const grant = await grants.request({
+    const { grant } = await grants.request({
       appId: 'docblocks',
       appName: 'DocBlocks',
       scopes: ['openai'],
@@ -88,10 +88,148 @@ describe('GrantManager — request / approve / deny lifecycle', () => {
     expect(decided).toHaveLength(1);
   });
 
+  it('requires a requester-visible code for CLI authority without persisting plaintext', async () => {
+    const tokenStore = await createTokenStore({ home, rootToken: 'ROOT' });
+    const grants = await createGrantManager({ home, tokenStore });
+
+    const { grant, verificationCode } = await grants.request({
+      appId: 'gezel-cli.test',
+      appName: 'Gezel CLI',
+      scopes: ['cli'],
+    });
+
+    expect(verificationCode).toMatch(/^[2-9A-HJ-KM-NP-TV-Z]{3}-[2-9A-HJ-KM-NP-TV-Z]{3}$/);
+    expect(grant).toMatchObject({
+      status: 'pending',
+      verificationRequired: true,
+      verificationFailedAttempts: 0,
+    });
+    await expect(grants.approve(grant.id)).rejects.toThrow(/verification code is required/);
+    expect(tokenStore.list().map((record) => record.appId)).not.toContain('gezel-cli.test');
+
+    const persisted = await readFile(join(home, 'pending-grants.json'), 'utf8');
+    expect(persisted).not.toContain(verificationCode!);
+    expect(persisted).not.toContain(verificationCode!.replace('-', ''));
+    expect(JSON.parse(persisted).grants[0]).toMatchObject({
+      verificationRequired: true,
+      verificationFailedAttempts: 0,
+    });
+
+    const approved = await grants.approve(grant.id, verificationCode!.toLowerCase());
+    expect(approved.status).toBe('approved');
+    expect(approved.verificationCodeHash).toBeUndefined();
+    expect(approved.verificationCodeSalt).toBeUndefined();
+
+    const decided = await readFile(join(home, 'pending-grants.json'), 'utf8');
+    expect(decided).not.toContain('verificationCodeHash');
+    expect(decided).not.toContain('verificationCodeSalt');
+  });
+
+  it('requires the same code handshake for generic product authority', async () => {
+    const tokenStore = await createTokenStore({ home, rootToken: 'ROOT' });
+    const grants = await createGrantManager({ home, tokenStore });
+
+    const { grant, verificationCode } = await grants.request({
+      appId: 'vscode',
+      appName: 'Visual Studio Code',
+      scopes: ['product', 'openai'],
+    });
+
+    expect(grant.verificationRequired).toBe(true);
+    expect(verificationCode).toMatch(/^[2-9A-HJ-KM-NP-TV-Z]{3}-[2-9A-HJ-KM-NP-TV-Z]{3}$/);
+    await expect(grants.approve(grant.id, verificationCode)).resolves.toMatchObject({
+      status: 'approved',
+      scopes: ['product', 'openai'],
+    });
+  });
+
+  it('expires a protected grant after five incorrect codes', async () => {
+    const tokenStore = await createTokenStore({ home, rootToken: 'ROOT' });
+    const grants = await createGrantManager({ home, tokenStore });
+    const { grant } = await grants.request({
+      appId: 'gezel-cli.attempts',
+      appName: 'Gezel CLI',
+      scopes: ['cli'],
+    });
+
+    for (let remaining = 4; remaining > 0; remaining -= 1) {
+      await expect(grants.approve(grant.id, 'ZZZ-ZZZ')).rejects.toMatchObject({
+        attemptsRemaining: remaining,
+      });
+      expect(grants.get(grant.id)?.status).toBe('pending');
+    }
+    await expect(grants.approve(grant.id, 'ZZZ-ZZZ')).rejects.toThrow(
+      /too many incorrect verification-code attempts/,
+    );
+    expect(grants.get(grant.id)).toMatchObject({ status: 'expired' });
+    expect(tokenStore.list().map((record) => record.appId)).not.toContain('gezel-cli.attempts');
+  });
+
+  it('removes verification material when a protected request expires or is denied', async () => {
+    const tokenStore = await createTokenStore({ home, rootToken: 'ROOT' });
+    const grants = await createGrantManager({ home, tokenStore });
+    const { grant: expired, verificationCode } = await grants.request({
+      appId: 'gezel-cli.expired',
+      appName: 'Gezel CLI',
+      scopes: ['cli'],
+    });
+    expired.expiresAt = Date.now() - 1;
+    await expect(grants.approve(expired.id, verificationCode)).rejects.toThrow(/grant has expired/);
+    expect(grants.get(expired.id)).toMatchObject({ status: 'expired' });
+    expect(grants.get(expired.id)?.verificationCodeHash).toBeUndefined();
+    expect(grants.get(expired.id)?.verificationCodeSalt).toBeUndefined();
+
+    const { grant: denied } = await grants.request({
+      appId: 'gezel-cli.denied',
+      appName: 'Gezel CLI',
+      scopes: ['cli'],
+    });
+    await grants.deny(denied.id);
+    expect(grants.get(denied.id)).toMatchObject({ status: 'denied' });
+    expect(grants.get(denied.id)?.verificationCodeHash).toBeUndefined();
+    expect(grants.get(denied.id)?.verificationCodeSalt).toBeUndefined();
+  });
+
+  it('keeps inference-only grants on click approval without a code', async () => {
+    const tokenStore = await createTokenStore({ home, rootToken: 'ROOT' });
+    const grants = await createGrantManager({ home, tokenStore });
+
+    for (const [appId, scopes] of [
+      ['chat-app', ['openai']],
+      ['paired-device', ['remote-inference']],
+    ] as const) {
+      const { grant, verificationCode } = await grants.request({
+        appId,
+        appName: appId,
+        scopes: [...scopes],
+      });
+      expect(verificationCode).toBeUndefined();
+      expect(grant.verificationRequired).toBeUndefined();
+      await expect(grants.approve(grant.id)).resolves.toMatchObject({ status: 'approved' });
+    }
+  });
+
+  it('lets an inference-only client opt into requester-code verification', async () => {
+    const tokenStore = await createTokenStore({ home, rootToken: 'ROOT' });
+    const grants = await createGrantManager({ home, tokenStore });
+    const { grant, verificationCode } = await grants.request({
+      appId: 'vscode',
+      appName: 'Visual Studio Code',
+      scopes: ['openai'],
+      requireVerificationCode: true,
+    });
+
+    expect(grant.verificationRequired).toBe(true);
+    expect(verificationCode).toMatch(/^[2-9A-HJ-KM-NP-TV-Z]{3}-[2-9A-HJ-KM-NP-TV-Z]{3}$/);
+    await expect(grants.approve(grant.id, verificationCode)).resolves.toMatchObject({
+      status: 'approved',
+    });
+  });
+
   it('delivers an approved token once and removes it from grant storage', async () => {
     const tokenStore = await createTokenStore({ home, rootToken: 'ROOT' });
     const grants = await createGrantManager({ home, tokenStore });
-    const grant = await grants.request({
+    const { grant } = await grants.request({
       appId: 'one-time',
       appName: 'One Time',
       scopes: ['openai'],
@@ -119,7 +257,11 @@ describe('GrantManager — request / approve / deny lifecycle', () => {
   it('expires a stale pending request during sweeping', async () => {
     const tokenStore = await createTokenStore({ home, rootToken: 'ROOT' });
     const grants = await createGrantManager({ home, tokenStore });
-    const grant = await grants.request({ appId: 'stale', appName: 'Stale', scopes: ['openai'] });
+    const { grant } = await grants.request({
+      appId: 'stale',
+      appName: 'Stale',
+      scopes: ['openai'],
+    });
     grant.expiresAt = Date.now() - 1;
 
     await grants.sweepExpired();
@@ -129,7 +271,7 @@ describe('GrantManager — request / approve / deny lifecycle', () => {
   it('revokes an approved token that expires before delivery', async () => {
     const tokenStore = await createTokenStore({ home, rootToken: 'ROOT' });
     const grants = await createGrantManager({ home, tokenStore });
-    const grant = await grants.request({
+    const { grant } = await grants.request({
       appId: 'unclaimed',
       appName: 'Unclaimed',
       scopes: ['openai'],
@@ -147,7 +289,7 @@ describe('GrantManager — request / approve / deny lifecycle', () => {
   it('revalidates a pending grant immediately before issuance', async () => {
     const tokenStore = await createTokenStore({ home, rootToken: 'ROOT' });
     const grants = await createGrantManager({ home, tokenStore });
-    const grant = await grants.request({
+    const { grant } = await grants.request({
       appId: 'docblocks',
       appName: 'DocBlocks',
       scopes: ['openai'],
@@ -160,7 +302,7 @@ describe('GrantManager — request / approve / deny lifecycle', () => {
   it('deny transitions to denied without issuing a token', async () => {
     const tokenStore = await createTokenStore({ home, rootToken: 'ROOT' });
     const grants = await createGrantManager({ home, tokenStore });
-    const grant = await grants.request({
+    const { grant } = await grants.request({
       appId: 'docblocks',
       appName: 'DocBlocks',
       scopes: ['openai'],
@@ -175,7 +317,7 @@ describe('GrantManager — request / approve / deny lifecycle', () => {
   it('approve and deny throw when the grant is already decided', async () => {
     const tokenStore = await createTokenStore({ home, rootToken: 'ROOT' });
     const grants = await createGrantManager({ home, tokenStore });
-    const grant = await grants.request({
+    const { grant } = await grants.request({
       appId: 'docblocks',
       appName: 'DocBlocks',
       scopes: ['openai'],
@@ -195,7 +337,7 @@ describe('GrantManager — request / approve / deny lifecycle', () => {
   it('persists decided grants across reload', async () => {
     const tokenStore = await createTokenStore({ home, rootToken: 'ROOT' });
     const first = await createGrantManager({ home, tokenStore });
-    const grant = await first.request({
+    const { grant } = await first.request({
       appId: 'docblocks',
       appName: 'DocBlocks',
       scopes: ['openai'],
@@ -294,7 +436,7 @@ describe('GrantManager — request / approve / deny lifecycle', () => {
       autoApproveAppIds: ['docblocks'],
     });
 
-    const grant = await grants.request({
+    const { grant } = await grants.request({
       appId: 'docblocks',
       appName: 'DocBlocks',
       scopes: ['openai'],
@@ -303,6 +445,26 @@ describe('GrantManager — request / approve / deny lifecycle', () => {
     expect(grant.status).toBe('approved');
     expect(grant.token).toBeTruthy();
     expect(tokenStore.lookup(grant.token!)?.appId).toBe('docblocks');
+  });
+
+  it('keeps the explicit auto-approve escape hatch non-interactive for CLI grants', async () => {
+    const tokenStore = await createTokenStore({ home, rootToken: 'ROOT' });
+    const grants = await createGrantManager({
+      home,
+      tokenStore,
+      autoApproveAppIds: ['gezel-cli.ci'],
+    });
+
+    const { grant, verificationCode } = await grants.request({
+      appId: 'gezel-cli.ci',
+      appName: 'Gezel CLI',
+      scopes: ['cli'],
+    });
+
+    expect(grant.status).toBe('approved');
+    expect(grant.verificationCodeHash).toBeUndefined();
+    expect(verificationCode).toBeUndefined();
+    expect(tokenStore.lookup(grant.token!)?.appId).toBe('gezel-cli.ci');
   });
 
   it('autoapprove for an already-connected appId degrades to denied (safety net)', async () => {
@@ -318,7 +480,7 @@ describe('GrantManager — request / approve / deny lifecycle', () => {
       autoApproveAppIds: ['docblocks'],
     });
 
-    const grant = await grants.request({
+    const { grant } = await grants.request({
       appId: 'docblocks',
       appName: 'DocBlocks (retry)',
       scopes: ['openai'],

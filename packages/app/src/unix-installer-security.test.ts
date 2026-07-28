@@ -21,7 +21,7 @@ const linuxPostinstall = installerFile('linux/after-install.sh');
 const linuxUnit = installerFile('gezeld.service');
 
 describe('macOS machine-service filesystem security', () => {
-  it('migrates existing state privately while exposing only runtime discovery', () => {
+  it('migrates private state while exposing runtime and read-only assets', () => {
     expect(macPostinstall).toContain('umask 077');
     expect(macPostinstall).toContain(
       'find -x "$DATA_DIR" -exec chown -h "${DAEMON_USER}:${DAEMON_USER}" {} +',
@@ -33,6 +33,8 @@ describe('macOS machine-service filesystem security', () => {
     expect(macPostinstall).toContain('chmod 711 "$DATA_DIR"');
     expect(macPostinstall).toContain('chmod 755 "$DATA_DIR/runtime"');
     expect(macPostinstall).toContain('chmod 700 "$DATA_DIR/logs"');
+    expect(macPostinstall).toContain('find -x "$ASSETS_DIR" -type d -exec chmod 755 {} +');
+    expect(macPostinstall).toContain('find -x "$ASSETS_DIR" -type f -exec chmod 644 {} +');
     expect(macPostinstall).toContain('"$DATA_DIR/runtime/auth-token"');
 
     const stop = position(macPostinstall, 'launchctl bootout "system/${DAEMON_LABEL}"');
@@ -53,6 +55,7 @@ describe('macOS machine-service filesystem security', () => {
     expect(macPostinstall).toContain('if [ -L "$path" ]');
     expect(macPostinstall).toContain('assert_not_symlink "$DATA_DIR"');
     expect(macPostinstall).toContain('assert_not_symlink "$DATA_DIR/runtime"');
+    expect(macPostinstall).toContain('assert_not_symlink "$ASSETS_DIR/models"');
     expect(macPostinstall).toContain('assert_not_symlink "$SERVICE_TREE"');
     expect(macPostinstall).toContain('dscl . -list /Groups PrimaryGroupID');
     expect(macPostinstall).toContain('for candidate in $(seq 200 399)');
@@ -69,6 +72,9 @@ describe('macOS machine-service filesystem security', () => {
     expect(macPostinstall).toContain('[ "$daemon_hidden" != "1" ]');
     expect(macPlist).toMatch(/<key>Umask<\/key>\s*<integer>63<\/integer>/);
     expect(macPlist).toMatch(/<key>GEZEL_PORT<\/key>\s*<string>43935<\/string>/);
+    expect(macPlist).toMatch(
+      /<key>GEZEL_SHARED_ASSETS_DIR<\/key>\s*<string>\/Library\/Application Support\/Gezel\/assets<\/string>/,
+    );
   });
 });
 
@@ -92,7 +98,7 @@ describe('Linux machine-service filesystem security', () => {
     expect(validation).toBeLessThan(extraction);
   });
 
-  it('migrates existing state privately while exposing only runtime discovery', () => {
+  it('migrates private state while exposing runtime and read-only assets', () => {
     expect(linuxPostinstall).toContain('umask 077');
     expect(linuxPostinstall).toContain(
       'find "$DATA_DIR" -xdev -exec chown --no-dereference "$GEZEL_USER:$GEZEL_USER" -- {} +',
@@ -104,6 +110,8 @@ describe('Linux machine-service filesystem security', () => {
     expect(linuxPostinstall).toContain('chmod 711 "$DATA_DIR"');
     expect(linuxPostinstall).toContain('chmod 755 "$DATA_DIR/runtime"');
     expect(linuxPostinstall).toContain('chmod 700 "$DATA_DIR/logs"');
+    expect(linuxPostinstall).toContain('find "$ASSETS_DIR" -xdev -type d -exec chmod 755 {} +');
+    expect(linuxPostinstall).toContain('find "$ASSETS_DIR" -xdev -type f -exec chmod 644 {} +');
     expect(linuxPostinstall).toContain('"$DATA_DIR/runtime/auth-token"');
 
     const stop = position(linuxPostinstall, 'systemctl stop gezeld.service');
@@ -122,8 +130,10 @@ describe('Linux machine-service filesystem security', () => {
     expect(linuxPostinstall).toContain('if [ -L "$path" ]');
     expect(linuxPostinstall).toContain('assert_not_symlink "$DATA_DIR"');
     expect(linuxPostinstall).toContain('assert_not_symlink "$DATA_DIR/runtime"');
+    expect(linuxPostinstall).toContain('assert_not_symlink "$ASSETS_DIR/models"');
     expect(linuxPostinstall).toContain('assert_not_symlink "$SERVICE_TREE"');
     expect(linuxUnit).toContain('UMask=0077');
     expect(linuxUnit).toContain('Environment=GEZEL_PORT=43935');
+    expect(linuxUnit).toContain('Environment=GEZEL_SHARED_ASSETS_DIR=/var/lib/gezel/assets');
   });
 });

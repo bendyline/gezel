@@ -28,6 +28,9 @@ Environment=GEZEL_PORT=43935
 # auth-token with mode 0644 when this is set. The daemon root token remains
 # process-local; desktop clients receive only the credential they need.
 Environment=GEZEL_SYSTEM_SCOPE=1
+# Public immutable model bundles live outside the daemon's private state
+# boundary. Only the `gezel` service identity can write this tree.
+Environment=GEZEL_SHARED_ASSETS_DIR=/var/lib/gezel/assets
 # The `gezel` system user is created with --no-create-home, so $HOME
 # defaults to /home/gezel (which doesn't exist) or /. Tools that derive
 # state paths from $HOME — pnpm's store at ~/.local/share/pnpm, npm

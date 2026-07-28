@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises';
-import { join, win32 } from 'node:path';
+import { join, posix, win32 } from 'node:path';
 
 /** Canonical port reserved for the machine-wide Gezel service. */
 export const SYSTEM_SERVICE_PORT = 43935;
@@ -21,6 +21,54 @@ export function systemServiceHome(
   if (platform === 'darwin') return '/Library/Application Support/Gezel';
   if (platform === 'linux') return '/var/lib/gezel';
   return null;
+}
+
+/** Public, service-owned assets. This is not part of the daemon's private state API. */
+export function systemSharedAssetsDir(
+  platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env,
+): string | null {
+  const home = systemServiceHome(platform, env);
+  return home
+    ? platform === 'win32'
+      ? win32.join(home, 'assets')
+      : posix.join(home, 'assets')
+    : null;
+}
+
+/**
+ * Conventional Electron payload locations used only as discovery hints.
+ * Callers must fully verify a candidate before executing anything from it.
+ */
+export function electronNativeBinCandidates(
+  platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env,
+): string[] {
+  if (platform === 'win32') {
+    const roots = [
+      env.ProgramW6432,
+      env.ProgramFiles,
+      env.PROGRAMFILES,
+      env.LOCALAPPDATA ? win32.join(env.LOCALAPPDATA, 'Programs') : undefined,
+    ].filter((value): value is string => !!value?.trim());
+    return Array.from(
+      new Set(
+        roots.map((root) =>
+          win32.join(root, 'Gezel', 'resources', 'app.asar.unpacked', 'native-bin'),
+        ),
+      ),
+    );
+  }
+  if (platform === 'darwin') {
+    return ['/Applications/Gezel.app/Contents/Resources/app.asar.unpacked/native-bin'];
+  }
+  if (platform === 'linux') {
+    return [
+      '/opt/Gezel/resources/app.asar.unpacked/native-bin',
+      '/opt/gezel/resources/app.asar.unpacked/native-bin',
+    ];
+  }
+  return [];
 }
 
 export interface SystemServiceEndpoint {

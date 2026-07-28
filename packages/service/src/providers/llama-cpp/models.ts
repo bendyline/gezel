@@ -43,6 +43,17 @@ import {
   publishStagedModel,
   safeBundleModelPath,
 } from '../../models/bundle-storage.js';
+import {
+  type ModelStorageRoots,
+  findModelRoot,
+  hashModelPayloadFiles,
+  listOverlayModelIds,
+  makeSharedModelReadable,
+  modelExistsOnlyReadOnly,
+  modelStorageRoots,
+  readOnlyModelError,
+  verifyReadOnlyModelPayload,
+} from '../../models/storage-roots.js';
 import { checkDiskSpace, describeDiskShortfall } from '../../utils/disk-space.js';
 import { downloadWithRetry } from '../../utils/download-with-retry.js';
 import { readGgufSummary } from './gguf-metadata.js';
@@ -67,6 +78,8 @@ export interface InstalledLlamaCppModel {
   quantization?: string;
   /** Empty when `tokenizer.chat_template` is missing — surfaced in the UI as a warning. */
   chatTemplatePresent: boolean;
+  /** Complete payload hashes used when adopting a read-only machine model. */
+  fileSha256?: Record<string, string>;
   /**
    * The architecture string from the GGUF metadata (qwen2 / llama / gemma3 / …).
    * Lets the UI surface a hint when a model claims a family llama.cpp doesn't
@@ -204,6 +217,8 @@ interface InstalledManifest {
   contextWindow?: number;
   architecture?: string;
   chatTemplatePresent: boolean;
+  /** Complete payload hashes used when adopting a read-only machine model. */
+  fileSha256?: Record<string, string>;
 }
 
 interface DownloadPlanEntry {
@@ -259,6 +274,7 @@ const PROGRESS_INTERVAL_MS = 250;
 
 export class LlamaCppModelManager {
   private readonly modelsRoot: string;
+  private readonly storageRoots: ModelStorageRoots;
   private readonly catalog: CatalogService;
   private readonly fetchImpl: typeof fetch;
   private readonly engine: 'llama-cpp' | 'ds4';
@@ -273,7 +289,8 @@ export class LlamaCppModelManager {
 
   constructor(opts: LlamaCppModelManagerOptions) {
     this.engine = opts.engine ?? 'llama-cpp';
-    this.modelsRoot = join(opts.home, 'engines', this.engine, 'models');
+    this.storageRoots = modelStorageRoots({ home: opts.home, engine: this.engine });
+    this.modelsRoot = this.storageRoots.writableRoot;
     this.catalog = opts.catalog;
     this.fetchImpl = opts.fetchImpl ?? fetch;
     this.onInstalled = opts.onInstalled;
@@ -311,12 +328,7 @@ export class LlamaCppModelManager {
    * partial directories — they're skipped, not surfaced as errors.
    */
   async listInstalled(): Promise<InstalledLlamaCppModel[]> {
-    let entries: string[] = [];
-    try {
-      entries = await readdir(this.modelsRoot);
-    } catch {
-      return [];
-    }
+    const entries = await listOverlayModelIds(this.storageRoots);
     const out: InstalledLlamaCppModel[] = [];
     for (const id of entries) {
       const summary = await this.loadInstalled(id);
@@ -383,6 +395,9 @@ export class LlamaCppModelManager {
 
   async delete(id: string): Promise<void> {
     if (!isSafeId(id)) throw new Error(`refusing to delete with unsafe id: ${id}`);
+    if (await modelExistsOnlyReadOnly(this.storageRoots, id)) {
+      throw readOnlyModelError(id);
+    }
     const itemDir = join(this.modelsRoot, id);
     await rm(itemDir, { recursive: true, force: true });
   }
@@ -392,7 +407,9 @@ export class LlamaCppModelManager {
     if (!isSafeId(id)) throw new Error(`unsafe model id: ${id}`);
     const summary = await this.loadInstalled(id);
     if (!summary) throw new Error(`model "${id}" is not available locally for ${this.engine}`);
-    const modelDir = join(this.modelsRoot, id);
+    const root = await findModelRoot(this.storageRoots, id);
+    if (!root) throw new Error(`model "${id}" is not available locally for ${this.engine}`);
+    const modelDir = join(root, id);
     const installedManifest = JSON.parse(
       await readFile(join(modelDir, 'manifest.json'), 'utf8'),
     ) as Record<string, unknown>;
@@ -438,9 +455,13 @@ export class LlamaCppModelManager {
     // Parsing the GGUF header is the same final usability check a network
     // install performs after checksum verification.
     readGgufSummary(safeBundleModelPath(opts.stagedModelDir, parsed.weightsFilename));
+    const importedManifest: InstalledManifest = {
+      ...parsed,
+      fileSha256: await hashModelPayloadFiles(opts.stagedModelDir),
+    } as InstalledManifest;
     await writeFile(
       join(opts.stagedModelDir, 'manifest.json'),
-      `${JSON.stringify(parsed, null, 2)}\n`,
+      `${JSON.stringify(importedManifest, null, 2)}\n`,
       'utf8',
     );
     await publishStagedModel({
@@ -449,6 +470,7 @@ export class LlamaCppModelManager {
       stagedModelDir: opts.stagedModelDir,
       replace: opts.replace,
     });
+    await makeSharedModelReadable(join(this.modelsRoot, opts.id));
     try {
       this.onInstalled?.({ engine: this.engine, id: opts.id });
     } catch {
@@ -742,7 +764,9 @@ export class LlamaCppModelManager {
       ...(summary.architecture ? { architecture: summary.architecture } : {}),
       chatTemplatePresent: !summary.chatTemplateMissing,
     };
+    installed.fileSha256 = await hashModelPayloadFiles(itemDir);
     await writeFile(join(itemDir, 'manifest.json'), JSON.stringify(installed, null, 2), 'utf8');
+    await makeSharedModelReadable(itemDir);
 
     const warning = summary.chatTemplateMissing
       ? 'Model has no embedded chat template (tokenizer.chat_template is missing). llama-server will fall back to a generic template that may not match this model — replies may be incoherent. Consider a different quant of the same model.'
@@ -756,7 +780,9 @@ export class LlamaCppModelManager {
   }
 
   private async loadInstalled(id: string): Promise<InstalledLlamaCppModel | null> {
-    const metaPath = join(this.modelsRoot, id, 'manifest.json');
+    const root = await findModelRoot(this.storageRoots, id);
+    if (!root) return null;
+    const metaPath = join(root, id, 'manifest.json');
     let raw: string;
     try {
       raw = await readFile(metaPath, 'utf8');
@@ -772,15 +798,16 @@ export class LlamaCppModelManager {
     if (!parsed.id || !parsed.name || !parsed.weightsFilename || !parsed.installedAt) {
       return null;
     }
+    if (!(await verifyReadOnlyModelPayload(this.storageRoots, root, id, parsed.fileSha256))) {
+      return null;
+    }
     return {
       id: parsed.id,
       name: parsed.name,
       approxSizeBytes: parsed.approxSizeBytes ?? 0,
       installedAt: parsed.installedAt,
-      weightsPath: join(this.modelsRoot, id, parsed.weightsFilename),
-      ...(parsed.mmprojFilename
-        ? { mmprojPath: join(this.modelsRoot, id, parsed.mmprojFilename) }
-        : {}),
+      weightsPath: join(root, id, parsed.weightsFilename),
+      ...(parsed.mmprojFilename ? { mmprojPath: join(root, id, parsed.mmprojFilename) } : {}),
       ...(parsed.contextWindow ? { contextWindow: parsed.contextWindow } : {}),
       ...(parsed.quantization ? { quantization: parsed.quantization } : {}),
       chatTemplatePresent: parsed.chatTemplatePresent ?? true,

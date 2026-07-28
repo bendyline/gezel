@@ -53,6 +53,16 @@ describe('TokenStore', () => {
     expect(store.lookup(rec.token)?.scopes).toEqual(['cli']);
   });
 
+  it('issues the generic product-control scope for external applications', async () => {
+    const store = await createTokenStore({ home, rootToken: 'ROOT' });
+    const rec = await store.issue({
+      appId: 'vscode',
+      appName: 'Visual Studio Code',
+      scopes: ['product', 'openai'],
+    });
+    expect(store.lookup(rec.token)?.scopes).toEqual(['product', 'openai']);
+  });
+
   it('persists per-app tokens to disk and reloads them on the next open', async () => {
     const first = await createTokenStore({ home, rootToken: 'ROOT-1' });
     const issued = await first.issue({

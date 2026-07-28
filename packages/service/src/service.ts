@@ -70,6 +70,7 @@ import { MemoryCompactor } from './memory/compaction.js';
 import { MemoryHealthMonitor } from './memory/health.js';
 import { MemoryManager } from './memory/manager.js';
 import { createEnsureModelOrchestrator } from './models/ensure.js';
+import { migrateLegacySystemModels } from './models/storage-roots.js';
 import { normalizeBundledPnpmPath } from './packages/pnpm.js';
 import { PreviewLogBuffer } from './preview-log/buffer.js';
 import { recoverTypedProjectCreations } from './project-type/create.js';
@@ -284,6 +285,12 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     runtimeDir,
     lockPath: join(runtimeDir, 'lock'),
   });
+  const migratedSharedModels = await migrateLegacySystemModels(home);
+  if (migratedSharedModels > 0) {
+    log.info(
+      `[assets] moved ${migratedSharedModels} legacy machine model(s) into the public read-only asset store`,
+    );
+  }
   // Discover externalFolders from on-disk config before constructing the
   // Store — every other path in the system depends on knowing which
   // scopes are externalized. The config file itself always lives at

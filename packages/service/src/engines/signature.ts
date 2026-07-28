@@ -43,8 +43,12 @@ export interface VerifyOptions {
   platform?: NodeJS.Platform;
   /** Expected organization in the Authenticode/Developer ID identity. */
   expectedPublisher?: string;
-  /** Require Gatekeeper to identify the binary as Notarized Developer ID. */
-  requireNotarization?: boolean;
+  /**
+   * Require Gatekeeper to identify a parent `.app` bundle as Notarized
+   * Developer ID. Never use this for a bare command-line binary: Apple
+   * notarizes its submitted archive, but `spctl` does not assess it as an app.
+   */
+  requireNotarizedApp?: boolean;
   /** Test seam — defaults to a real `execFile` runner. */
   run?: Runner;
 }
@@ -85,7 +89,7 @@ export async function verifyCodeSignature(
     platform === 'win32'
       ? await verifyWindows(binPath, run, opts.expectedPublisher)
       : platform === 'darwin'
-        ? await verifyMac(binPath, run, opts.expectedPublisher, opts.requireNotarization === true)
+        ? await verifyMac(binPath, run, opts.expectedPublisher, opts.requireNotarizedApp === true)
         : { status: 'unsupported' as const, detail: 'no signing standard for this platform' };
 
   const accepted = policyAccepts(result.status, opts.policy, platform);
@@ -150,7 +154,7 @@ async function verifyMac(
   binPath: string,
   run: Runner,
   expectedPublisher?: string,
-  requireNotarization = false,
+  requireNotarizedApp = false,
 ): Promise<SignatureResult> {
   // `codesign --verify` exits 0 for a valid signature, non-zero otherwise.
   const verify = await run('codesign', ['--verify', '--strict', binPath]);
@@ -169,7 +173,13 @@ async function verifyMac(
         detail: `unexpected Developer ID authority for ${binPath}`,
       };
     }
-    if (requireNotarization) {
+    if (requireNotarizedApp) {
+      if (!/\.app\/?$/i.test(binPath)) {
+        return {
+          status: 'invalid',
+          detail: 'Gatekeeper notarization assessment requires a parent .app bundle',
+        };
+      }
       const assessment = await run('spctl', [
         '--assess',
         '--type',

@@ -118,11 +118,11 @@ describe('verifyCodeSignature — macos', () => {
             stderr: 'Authority=Developer ID Application: Bendyline LLC (TEAMID)',
           };
     };
-    const o = await verifyCodeSignature('bin', {
+    const o = await verifyCodeSignature('/Applications/Gezel.app', {
       policy: 'require',
       platform: 'darwin',
       expectedPublisher: 'Bendyline LLC',
-      requireNotarization: true,
+      requireNotarizedApp: true,
       run,
     });
     expect(o.result.status).toBe('valid');
@@ -142,15 +142,40 @@ describe('verifyCodeSignature — macos', () => {
             stderr: 'Authority=Developer ID Application: Bendyline LLC (TEAMID)',
           };
     };
-    const o = await verifyCodeSignature('bin', {
+    const o = await verifyCodeSignature('/Applications/Gezel.app', {
       policy: 'require',
       platform: 'darwin',
       expectedPublisher: 'Bendyline LLC',
-      requireNotarization: true,
+      requireNotarizedApp: true,
       run,
     });
     expect(o.result.status).toBe('invalid');
     expect(o.accepted).toBe(false);
+  });
+
+  it('never uses Gatekeeper app assessment for a bare command-line binary', async () => {
+    const commands: string[] = [];
+    const run: Runner = async (cmd, args) => {
+      commands.push(cmd);
+      return args.includes('--verify')
+        ? { code: 0, stdout: '', stderr: '' }
+        : {
+            code: 0,
+            stdout: '',
+            stderr: 'Authority=Developer ID Application: Bendyline LLC (TEAMID)',
+          };
+    };
+    const o = await verifyCodeSignature('/usr/local/bin/gezel-llama-server', {
+      policy: 'require',
+      platform: 'darwin',
+      expectedPublisher: 'Bendyline LLC',
+      requireNotarizedApp: true,
+      run,
+    });
+    expect(o.result.status).toBe('invalid');
+    expect(o.result.detail).toMatch(/parent \.app bundle/i);
+    expect(o.accepted).toBe(false);
+    expect(commands).not.toContain('spctl');
   });
 
   it('verify fails + "not signed at all" → unsigned', async () => {

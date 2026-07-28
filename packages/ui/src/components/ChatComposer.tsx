@@ -385,6 +385,11 @@ export function ChatComposer({
   }, [liveSessionId]);
 
   const turnActive = streaming || serverInflight;
+  // Keep Escape handling live for the composer's whole lifetime. Installing
+  // the listener only after `turnActive` flips true leaves a commit-to-effect
+  // gap where the Stop button is already visible but Escape does nothing.
+  const turnActiveRef = useRef(turnActive);
+  turnActiveRef.current = turnActive;
 
   /**
    * Mention provider — backs both the WYSIWYG `@` popover and the Raw
@@ -687,15 +692,14 @@ export function ChatComposer({
   }, []);
 
   useEffect(() => {
-    if (!turnActive) return;
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || event.defaultPrevented) return;
+      if (!turnActiveRef.current || event.key !== 'Escape' || event.defaultPrevented) return;
       event.preventDefault();
       void stopActiveTurn();
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [turnActive, stopActiveTurn]);
+  }, [stopActiveTurn]);
 
   return (
     <div className="chat-composer" data-testid="chat-composer">

@@ -25,6 +25,17 @@ import { dirname, join } from 'node:path';
 import { createLogger } from '@bendyline/gezel';
 import type { VideoModelLoad } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
+import {
+  type ModelStorageRoots,
+  findModelRoot,
+  hashModelPayloadFiles,
+  listOverlayModelIds,
+  makeSharedModelReadable,
+  modelExistsOnlyReadOnly,
+  modelStorageRoots,
+  readOnlyModelError,
+  verifyReadOnlyModelPayload,
+} from '../../models/storage-roots.js';
 import { downloadWithRetry } from '../../utils/download-with-retry.js';
 import type { VideoModelPullEvent } from './types.js';
 
@@ -61,6 +72,7 @@ interface InstalledManifest {
   huggingfaceRepo: string;
   /** Repo-relative file names written into the model dir, in install order. */
   files: string[];
+  fileSha256?: Record<string, string>;
 }
 
 export interface VideoModelManagerOptions {
@@ -128,13 +140,15 @@ class AsyncEventQueue<T> implements AsyncIterable<T> {
 
 export class VideoModelManager {
   private readonly modelsRoot: string;
+  private readonly storageRoots: ModelStorageRoots;
   private readonly catalog: CatalogService;
   private readonly fetchImpl: typeof fetch;
   /** Guards against duplicate concurrent installs of the same id. */
   private readonly activeInstalls = new Set<string>();
 
   constructor(opts: VideoModelManagerOptions) {
-    this.modelsRoot = join(opts.home, 'engines', 'video', 'models');
+    this.storageRoots = modelStorageRoots({ home: opts.home, engine: 'video' });
+    this.modelsRoot = this.storageRoots.writableRoot;
     this.catalog = opts.catalog;
     this.fetchImpl = opts.fetchImpl ?? fetch;
   }
@@ -144,12 +158,7 @@ export class VideoModelManager {
   }
 
   async listInstalled(): Promise<InstalledVideoModel[]> {
-    let entries: string[] = [];
-    try {
-      entries = await readdir(this.modelsRoot);
-    } catch {
-      return [];
-    }
+    const entries = await listOverlayModelIds(this.storageRoots);
     const out: InstalledVideoModel[] = [];
     for (const id of entries) {
       const summary = await this.loadInstalled(id);
@@ -170,6 +179,9 @@ export class VideoModelManager {
 
   async delete(id: string): Promise<void> {
     if (!isSafeId(id)) throw new Error(`refusing to delete with unsafe id: ${id}`);
+    if (await modelExistsOnlyReadOnly(this.storageRoots, id)) {
+      throw readOnlyModelError(id);
+    }
     await rm(join(this.modelsRoot, id), { recursive: true, force: true });
   }
 
@@ -304,7 +316,9 @@ export class VideoModelManager {
         huggingfaceRepo: src.huggingfaceRepo,
         files: files.map((f) => f.name),
       };
+      installed.fileSha256 = await hashModelPayloadFiles(itemDir);
       await writeFile(join(itemDir, 'manifest.json'), JSON.stringify(installed, null, 2), 'utf8');
+      await makeSharedModelReadable(itemDir);
       log.info(`[video] installed ${catalogId} (${files.length} files)`);
       yield { type: 'done', id: catalogId };
     } finally {
@@ -411,7 +425,9 @@ export class VideoModelManager {
   }
 
   private async loadInstalled(id: string): Promise<InstalledVideoModel | null> {
-    const metaPath = join(this.modelsRoot, id, 'manifest.json');
+    const root = await findModelRoot(this.storageRoots, id);
+    if (!root) return null;
+    const metaPath = join(root, id, 'manifest.json');
     let raw: string;
     try {
       raw = await readFile(metaPath, 'utf8');
@@ -427,12 +443,15 @@ export class VideoModelManager {
     if (!parsed.id || !parsed.name || !parsed.installedAt || !Array.isArray(parsed.files)) {
       return null;
     }
+    if (!(await verifyReadOnlyModelPayload(this.storageRoots, root, id, parsed.fileSha256))) {
+      return null;
+    }
     return {
       id: parsed.id,
       name: parsed.name,
       approxSizeBytes: parsed.approxSizeBytes ?? 0,
       installedAt: parsed.installedAt,
-      modelDir: join(this.modelsRoot, id),
+      modelDir: join(root, id),
       family: parsed.family ?? 'ltx',
       ...(parsed.load ? { load: parsed.load } : {}),
       ...(parsed.guidanceScale !== undefined ? { guidanceScale: parsed.guidanceScale } : {}),

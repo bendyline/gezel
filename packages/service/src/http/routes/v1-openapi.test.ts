@@ -36,7 +36,10 @@ describe('GET /v1/openapi.json', () => {
       openapi: string;
       info: { title: string; version: string };
       paths: Record<string, unknown>;
-      components: { securitySchemes: Record<string, unknown> };
+      components: {
+        securitySchemes: Record<string, unknown>;
+        schemas: Record<string, unknown>;
+      };
     };
     expect(body.openapi).toBe('3.1.0');
     expect(body.info.title).toBe('Gezel Public API');
@@ -46,6 +49,8 @@ describe('GET /v1/openapi.json', () => {
     expect(body.paths['/v1/models']).toBeTruthy();
     expect(body.paths['/v1/models/ensure']).toBeTruthy();
     expect(body.paths['/v1/apps/register']).toBeTruthy();
+    expect(body.paths['/v1/apps/grant/{grantId}/approve']).toBeTruthy();
+    expect(body.components.schemas.GrantApprovalRequest).toBeTruthy();
     expect(body.components.securitySchemes.bearerAuth).toBeTruthy();
   });
 });

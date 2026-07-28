@@ -26,6 +26,16 @@ import { join } from 'node:path';
 import { type ImageRecognition, createLogger, nowIso } from '@bendyline/gezel';
 import type { RecognitionHealth } from '@bendyline/gezel';
 import { readImageStaticMeta } from '../../index-store/image-meta.js';
+import {
+  type ModelStorageRoots,
+  findModelRoot,
+  hashModelPayloadFiles,
+  listOverlayModelIds,
+  makeSharedModelReadable,
+  modelExistsOnlyReadOnly,
+  readOnlyModelError,
+  verifyReadOnlyModelPayload,
+} from '../../models/storage-roots.js';
 import { downloadWithSha256 } from '../audio/whisper-cpp.js';
 import type { NativeEngineSupervisor } from '../native/supervisor.js';
 import { MODE_PROMPTS } from './prompts.js';
@@ -44,6 +54,7 @@ const DEFAULT_TIMEOUT_MS = 90_000;
 export interface LlamaVisionProviderOptions {
   baseUrl: string;
   modelsRoot: string;
+  storageRoots?: ModelStorageRoots;
   modelId?: string;
   timeoutMs?: number;
   fetchImpl?: typeof fetch;
@@ -57,6 +68,7 @@ export class LlamaVisionProvider implements RecognitionProvider {
   readonly name = 'llama-cpp';
   private readonly baseUrl: string;
   private readonly modelsRoot: string;
+  private readonly storageRoots: ModelStorageRoots;
   private readonly timeoutMs: number;
   private readonly fetchImpl: typeof fetch;
   private readonly supervisor?: NativeEngineSupervisor;
@@ -66,6 +78,10 @@ export class LlamaVisionProvider implements RecognitionProvider {
   constructor(opts: LlamaVisionProviderOptions) {
     this.baseUrl = opts.baseUrl.replace(/\/+$/, '');
     this.modelsRoot = opts.modelsRoot;
+    this.storageRoots = opts.storageRoots ?? {
+      writableRoot: opts.modelsRoot,
+      readOnlyRoots: [],
+    };
     this.timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.fetchImpl = opts.fetchImpl ?? fetch;
     this.supervisor = opts.supervisor;
@@ -174,24 +190,25 @@ export class LlamaVisionProvider implements RecognitionProvider {
   }
 
   async listInstalledModels(): Promise<InstalledRecognitionModelInfo[]> {
-    let entries: string[] = [];
-    try {
-      entries = await readdir(this.modelsRoot);
-    } catch {
-      return [];
-    }
+    const entries = await listOverlayModelIds(this.storageRoots);
     const out: InstalledRecognitionModelInfo[] = [];
     for (const id of entries) {
       try {
-        const raw = await readFile(join(this.modelsRoot, id, 'manifest.json'), 'utf8');
+        const root = await findModelRoot(this.storageRoots, id);
+        if (!root) continue;
+        const raw = await readFile(join(root, id, 'manifest.json'), 'utf8');
         const parsed = JSON.parse(raw) as {
           id?: string;
           name?: string;
           approxSizeBytes?: number;
           installedAt?: string;
           files?: Array<{ role: string; filename: string }>;
+          fileSha256?: Record<string, string>;
         };
         if (!parsed.id || !parsed.name || !parsed.installedAt) continue;
+        if (!(await verifyReadOnlyModelPayload(this.storageRoots, root, id, parsed.fileSha256))) {
+          continue;
+        }
         const weights = parsed.files?.find((f) => f.role === 'weights');
         const mmproj = parsed.files?.find((f) => f.role === 'mmproj');
         // A vision model without its projector is just a small text model —
@@ -202,8 +219,8 @@ export class LlamaVisionProvider implements RecognitionProvider {
           name: parsed.name,
           approxSizeBytes: parsed.approxSizeBytes ?? 0,
           installedAt: parsed.installedAt,
-          weightsPath: join(this.modelsRoot, id, weights.filename),
-          mmprojPath: join(this.modelsRoot, id, mmproj.filename),
+          weightsPath: join(root, id, weights.filename),
+          mmprojPath: join(root, id, mmproj.filename),
         });
       } catch {
         /* skip malformed entries */
@@ -238,6 +255,7 @@ export class LlamaVisionProvider implements RecognitionProvider {
 
     // Written last, so an interrupted pull leaves no manifest and the model
     // reads as not-installed rather than installed-and-broken.
+    const fileSha256 = await hashModelPayloadFiles(itemDir);
     await writeFile(
       join(itemDir, 'manifest.json'),
       `${JSON.stringify(
@@ -250,6 +268,7 @@ export class LlamaVisionProvider implements RecognitionProvider {
             filename: f.filename,
             sha256: f.sha256.toLowerCase(),
           })),
+          fileSha256,
           installedAt: nowIso(),
         },
         null,
@@ -257,12 +276,16 @@ export class LlamaVisionProvider implements RecognitionProvider {
       )}\n`,
       'utf8',
     );
+    await makeSharedModelReadable(itemDir);
 
     yield { type: 'progress', bytesWritten: writtenAll, totalBytes: totalAllBytes };
     yield { type: 'done', id };
   }
 
   async deleteModel(id: string): Promise<void> {
+    if (await modelExistsOnlyReadOnly(this.storageRoots, id)) {
+      throw readOnlyModelError(id);
+    }
     await rm(join(this.modelsRoot, id), { recursive: true, force: true });
   }
 

@@ -26,7 +26,7 @@ function commandLine(containing: string): string {
 }
 
 describe('Windows machine-service installer security', () => {
-  it('makes the ProgramData root private while exposing only runtime discovery', () => {
+  it('keeps private state closed while exposing runtime and read-only assets', () => {
     expect(hook).toContain('/setowner "*S-1-5-32-544"');
     expect(hook).toContain('"${GEZEL_DATA_DIR}" /setowner "*S-1-5-32-544" /T /L');
     expect(hook).toContain('"${GEZEL_DATA_DIR}" /reset /T /L');
@@ -59,9 +59,18 @@ describe('Windows machine-service installer security', () => {
     expect(runtimeRemove).toContain('*S-1-5-11');
     expect(runtimeRemove).toContain('*S-1-1-0');
 
+    const assetsAcl = commandLine('"${GEZEL_DATA_DIR}\\assets" /inheritance:r');
+    const [assetsGrant = '', assetsRemove = ''] = assetsAcl.split('/remove:g');
+    expect(assetsGrant).toContain('*S-1-5-18:(OI)(CI)(F)');
+    expect(assetsGrant).toContain('*S-1-5-32-544:(OI)(CI)(F)');
+    expect(assetsGrant).toContain('*S-1-5-32-545:(OI)(CI)(RX)');
+    expect(assetsGrant).not.toMatch(/S-1-5-32-545:[^"]*[WMF]/);
+    expect(assetsRemove).toContain('*S-1-5-11');
+    expect(assetsRemove).toContain('*S-1-1-0');
+
     // The protected runtime directory does not inherit the service SID from
-    // the parent, so both grants are required.
-    expect(hook.match(/NT SERVICE\\\${GEZEL_SERVICE_NAME}:\(OI\)\(CI\)\(M\)/g)).toHaveLength(2);
+    // the parent; the asset boundary also has an explicit DACL.
+    expect(hook.match(/NT SERVICE\\\${GEZEL_SERVICE_NAME}:\(OI\)\(CI\)\(M\)/g)).toHaveLength(3);
   });
 
   it('registers born-disabled LocalService and restricts the SID before startup', () => {
@@ -92,6 +101,7 @@ describe('Windows machine-service installer security', () => {
   it('compiles the service environment contract into the service host', () => {
     expect(serviceHost).toContain('L"GEZEL_SYSTEM_SCOPE", L"1"');
     expect(serviceHost).toContain('L"GEZEL_PORT", L"43935"');
+    expect(serviceHost).toContain('L"GEZEL_SHARED_ASSETS_DIR", home + L"\\\\assets"');
     expect(serviceHost).toContain('L"ELECTRON_RUN_AS_NODE", L"1"');
     expect(serviceHost).toContain('{L"TEMP", home + L"\\\\tmp"}');
     expect(serviceHost).toContain('{L"TMP", home + L"\\\\tmp"}');

@@ -10,6 +10,8 @@
  * Served at `GET /v1/openapi.json` so third-party app authors can
  * point an OpenAPI viewer or codegen at it directly.
  */
+import { APP_GRANTABLE_SCOPES } from '../token-store.js';
+
 export interface OpenApiDoc {
   openapi: '3.1.0';
   info: { title: string; version: string; description: string };
@@ -42,7 +44,9 @@ export function buildOpenApiDoc(version: string): OpenApiDoc {
           summary: 'Open a new consent request.',
           description:
             'Unauthenticated. The user sees a consent dialog in the gezel desktop app; ' +
-            'the app polls `GET /v1/apps/grant/:id` until decided. When ' +
+            'the app polls `GET /v1/apps/grant/:id` until decided. Grants with stateful ' +
+            'authority return a short verification code that the requesting app must show ' +
+            'to the user; the user types it into the desktop consent dialog. When ' +
             '`GEZEL_AUTOAPPROVE_APPS` lists the appId, the response carries a token ' +
             'immediately and `status: "approved"`.',
           requestBody: {
@@ -109,10 +113,37 @@ export function buildOpenApiDoc(version: string): OpenApiDoc {
           },
         },
       },
+      '/v1/apps/grant/{grantId}/approve': {
+        parameters: [{ name: 'grantId', in: 'path', required: true, schema: { type: 'string' } }],
+        post: {
+          summary: 'Approve a pending app grant.',
+          description:
+            'Requires a first-party root or UI token. When registration returned ' +
+            '`verificationRequired: true`, the requester-visible code is required in the body.',
+          security: [{ bearerAuth: [] }],
+          requestBody: {
+            required: false,
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/GrantApprovalRequest' },
+              },
+            },
+          },
+          responses: {
+            '200': { description: 'Approved.' },
+            '400': { description: 'Verification code required or malformed request.' },
+            '403': { description: 'Incorrect verification code.' },
+            '404': { description: 'Unknown grant id.' },
+            '409': { description: 'Grant already decided.' },
+            '410': { description: 'Grant expired.' },
+            '429': { description: 'Five incorrect codes; grant expired.' },
+          },
+        },
+      },
       '/v1/apps': {
         get: {
           summary: 'List connected apps and grants.',
-          description: 'Requires root scope. Drives the Settings → Connected Apps view.',
+          description: 'Requires a first-party root or UI scope. Drives Connected Apps settings.',
           security: [{ bearerAuth: [] }],
           responses: {
             '200': {
@@ -295,7 +326,20 @@ export function buildOpenApiDoc(version: string): OpenApiDoc {
           properties: {
             appId: { type: 'string', pattern: '^[a-z0-9][a-z0-9._-]*$', maxLength: 64 },
             appName: { type: 'string', maxLength: 120 },
-            scopes: { type: 'array', items: { type: 'string' }, minItems: 1, maxItems: 16 },
+            scopes: {
+              type: 'array',
+              items: {
+                type: 'string',
+                enum: [...APP_GRANTABLE_SCOPES],
+              },
+              minItems: 1,
+              maxItems: 16,
+            },
+            requireVerificationCode: {
+              type: 'boolean',
+              description:
+                'Require requester-code verification even when every requested scope is inference-only.',
+            },
             iconUrl: { type: 'string', format: 'uri' },
           },
         },
@@ -304,8 +348,27 @@ export function buildOpenApiDoc(version: string): OpenApiDoc {
           required: ['grantRequestId', 'status'],
           properties: {
             grantRequestId: { type: 'string' },
-            status: { type: 'string', enum: ['pending', 'approved', 'denied'] },
+            status: { type: 'string', enum: ['pending', 'approved', 'denied', 'expired'] },
             token: { type: 'string', description: 'Present when status="approved".' },
+            verificationRequired: {
+              type: 'boolean',
+              description: 'True when approval requires the requester-visible code.',
+            },
+            verificationCode: {
+              type: 'string',
+              pattern: '^[2-9A-HJ-KM-NP-TV-Z]{3}-[2-9A-HJ-KM-NP-TV-Z]{3}$',
+              description:
+                'Present only in this registration response. Show it in the requesting app.',
+            },
+          },
+        },
+        GrantApprovalRequest: {
+          type: 'object',
+          properties: {
+            verificationCode: {
+              type: 'string',
+              description: 'Code shown by the requesting app, when required.',
+            },
           },
         },
         GrantPollResponse: {

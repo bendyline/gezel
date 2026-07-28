@@ -261,10 +261,11 @@ jobs:
           # it. Same list, same module — see third-party-binaries.cjs.
           $patterns = node packages/app/scripts/third-party-binaries.cjs --patterns | ConvertFrom-Json
           if (-not $patterns) { throw 'third-party-binaries.cjs --patterns returned nothing' }
-          $exes = Get-ChildItem 'packages/app/native-bin' -Recurse -Filter '*.exe'
-          if ($exes.Count -eq 0) { throw 'No native .exe binaries staged' }
+          $nativeCode = Get-ChildItem 'packages/app/native-bin' -Recurse -File |
+            Where-Object { $_.Extension -in '.exe', '.dll' }
+          if ($nativeCode.Count -eq 0) { throw 'No native executable/loadable binaries staged' }
           $verified = 0
-          foreach ($exe in $exes) {
+          foreach ($exe in $nativeCode) {
             $isThirdParty = $false
             foreach ($p in $patterns) { if ($exe.Name -imatch $p) { $isThirdParty = $true; break } }
             if ($isThirdParty) {

@@ -957,9 +957,9 @@ jobs:
       # packages/app/scripts/third-party-binaries.cjs, shared by the Electron
       # afterPack sweep and the release's "Verify Windows signatures" gate.
       #
-      # Windows signs ONLY the main artifact, and not even that when the
-      # "engine" is a prebuilt download (uv). Peer DLLs — our ggml/llama
-      # builds — are swept by the afterPack hook before packaging.
+      # Windows signs every first-party executable and DLL in each native
+      # payload at birth. The explicit vendor allowlist remains byte-for-byte
+      # untouched; the Electron afterPack sweep later re-verifies this policy.
       #
       # For the record, since an earlier version of this comment had it
       # backwards: the cuBLAS/cudart peers are NOT NVIDIA-signed. They arrive
@@ -1018,7 +1018,7 @@ jobs:
       # Astral, not something we compile, so it ships as they published it
       # (unsigned — verified against their 0.11.32 release). Signing what we
       # build only; see packages/app/scripts/third-party-binaries.cjs.
-      - name: Sign Windows binary (Authenticode)
+      - name: Sign Windows native payload (Authenticode)
         if: steps.preflight.outputs.pinned == 'true' && startsWith(matrix.platform, 'win32') && matrix.engine != 'uv'
         shell: pwsh
         env:
@@ -1036,11 +1036,24 @@ jobs:
             ForEach-Object { Join-Path $_.FullName 'x64\signtool.exe' } |
             Where-Object { Test-Path $_ } | Select-Object -First 1
           if (-not $signtool) { $signtool = 'signtool.exe' }
-          $bin = Join-Path "${{ steps.outdir.outputs.dir }}" "${{ matrix.artifact }}"
-          Write-Host "[sign] $bin (via $signtool)"
-          & $signtool sign /v /fd SHA256 /tr http://timestamp.acs.microsoft.com /td SHA256 `
-            /dlib "$env:TRUSTED_SIGNING_DLIB_PATH" /dmdf "$env:TRUSTED_SIGNING_METADATA_PATH" "$bin"
-          if ($LASTEXITCODE -ne 0) { throw "signtool failed for $bin" }
+          $patterns = node packages/app/scripts/third-party-binaries.cjs --patterns | ConvertFrom-Json
+          $targets = Get-ChildItem "${{ steps.outdir.outputs.dir }}" -Recurse -File |
+            Where-Object { $_.Extension -in '.exe', '.dll' } |
+            Where-Object {
+              $name = $_.Name
+              -not ($patterns | Where-Object { $name -imatch $_ })
+            }
+          if (-not $targets) { throw '[sign] no first-party executable/loadable files found' }
+          foreach ($target in $targets) {
+            Write-Host "[sign] $($target.FullName) (via $signtool)"
+            & $signtool sign /v /fd SHA256 /tr http://timestamp.acs.microsoft.com /td SHA256 `
+              /dlib "$env:TRUSTED_SIGNING_DLIB_PATH" /dmdf "$env:TRUSTED_SIGNING_METADATA_PATH" "$target.FullName"
+            if ($LASTEXITCODE -ne 0) { throw "signtool failed for $($target.FullName)" }
+            $signature = Get-AuthenticodeSignature -LiteralPath $target.FullName
+            if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'O=Bendyline LLC') {
+              throw "unexpected Authenticode identity for $($target.FullName): $($signature.Status) $($signature.SignerCertificate.Subject)"
+            }
+          }
 
       - name: Import Apple signing certificate (macOS)
         if: steps.preflight.outputs.pinned == 'true' && startsWith(matrix.platform, 'darwin')
@@ -1126,7 +1139,6 @@ jobs:
           done
 
           out="${{ steps.outdir.outputs.dir }}"
-          bin="$out/${{ matrix.artifact }}"
           submission="$RUNNER_TEMP/native-${{ matrix.engine }}-${{ matrix.platform }}.zip"
           result="$RUNNER_TEMP/native-notary-result.json"
           ditto -c -k --keepParent "$out" "$submission"
@@ -1138,16 +1150,18 @@ jobs:
             --output-format json > "$result"
           cat "$result"
           status="$(jq -r '.status // empty' "$result")"
-          if [[ "$status" != "Accepted" ]]; then
-            echo "::error::Apple notarization returned status '$status'."
+          submission_id="$(jq -r '.id // empty' "$result")"
+          if [[ "$status" != "Accepted" || -z "$submission_id" ]]; then
+            echo "::error::Apple notarization returned status '$status' with submission id '$submission_id'."
             exit 1
           fi
 
-          # Bare command-line binaries cannot carry a stapled ticket. A
-          # successful online Gatekeeper assessment proves Apple's notary
-          # service recognizes the exact signed code hash that will be packed.
-          spctl --assess --type execute --verbose=4 "$bin"
-          echo "[notary] standalone native payload accepted by Gatekeeper"
+          # Bare command-line binaries cannot carry a stapled ticket and
+          # `spctl --assess` treats them as malformed app bundles ("does not
+          # seem to be an app"). The Accepted notarytool result is Apple's
+          # authoritative gate for this archive. Nothing mutates `out` after
+          # submission; the following steps hash and pack those exact bytes.
+          echo "[notary] Apple accepted standalone payload submission $submission_id"
 
       - name: Tear down keychain (macOS)
         if: always() && startsWith(matrix.platform, 'darwin')
@@ -1451,6 +1465,11 @@ jobs:
           fi
           echo "Validated ${#expected[@]} required native release archives."
 
+      - name: Generate per-file native integrity manifest
+        env:
+          VERSION: ${{ steps.pack.outputs.version }}
+        run: node scripts/generate-native-file-manifests.mjs --root native/build --version "$VERSION" --out release/NATIVE_FILE_MANIFESTS.json
+
       - name: Generate SHA256SUMS
         run: |
           set -euo pipefail
@@ -1472,10 +1491,11 @@ jobs:
             release/*.tar.gz
             release/*.zip
             release/SHA256SUMS
+            release/NATIVE_FILE_MANIFESTS.json
 
       # ── Create / update the draft GitHub Release ──────────────────
       # No signing happens in this job: the build matrix signed every
-      # binary at birth (Authenticode on Windows engine exes; Developer
+      # binary at birth (Authenticode on Windows first-party exes/DLLs; Developer
       # ID + hardened runtime on every macOS Mach-O, dylibs included),
       # so the tarballs packed above — and the SHA256SUMS over them —
       # already reflect signed bytes.
@@ -1489,7 +1509,7 @@ jobs:
           generate_release_notes: true
           body: |
             Prebuilt Gezel native engine binaries, signed at birth:
-            Windows engine executables carry Bendyline Authenticode
+            Windows first-party executables and DLLs carry Bendyline Authenticode
             signatures (Azure Trusted Signing); macOS binaries — engine
             executables and peer dylibs — are Developer ID-signed with
             hardened runtime and independently accepted by Apple's notary
@@ -1512,3 +1532,4 @@ jobs:
             release/*.tar.gz
             release/*.zip
             release/SHA256SUMS
+            release/NATIVE_FILE_MANIFESTS.json

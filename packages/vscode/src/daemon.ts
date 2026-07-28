@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import { type GezelApp, connect as sdkConnect } from '@bendyline/gezel-app-sdk';
+import { GezelApp, authorize as sdkAuthorize } from '@bendyline/gezel-app-sdk';
 import {
   type DiscoverOrSpawnResult,
   GezelClient,
@@ -16,8 +16,13 @@ export type ConnectMode = 'configured' | 'adopted' | 'spawned';
 export interface Connection {
   client: GezelClient;
   baseUrl: string;
-  /** Root daemon token — drives the existing webview chat panel. */
+  /** Revocable app token used by the webview and other ordinary extension calls. */
   token: string;
+  /**
+   * Per-launch discovery credential used only to administer the extension's
+   * own grant (approval/reset). It is never forwarded into the webview.
+   */
+  firstPartyToken: string;
   /** PEM-encoded loopback cert; null when daemon serves plain HTTP. */
   cert: string | null;
   /** Fetch implementation bound to the daemon's TLS trust anchor. */
@@ -27,16 +32,18 @@ export interface Connection {
 }
 
 /**
- * Per-app SDK connection used by the Language Model Chat Provider.
+ * Code-verified app connection used by the complete VS Code extension.
  *
- * The provider talks to `/v1/chat/completions` via the SDK so it goes
- * through the public consent flow and uses a scoped token rather than
- * the root token. The webview chat panel keeps using the root token
- * (it loads the gezel SPA which expects root-level access).
+ * `connection` is rebuilt around the revocable app token: its `product`
+ * scope powers the embedded chat UX and its `openai` scope powers the
+ * Language Model Provider. `firstPartyToken` remains host-only so the
+ * extension can approve or reset its own grant without exposing that
+ * discovery credential to the webview.
  */
 export interface AppConnection {
   app: GezelApp;
   appToken: string;
+  connection: Connection;
 }
 
 /**
@@ -61,6 +68,7 @@ export async function resolveDaemon(config: ResolvedConfig, logger: Logger): Pro
       client,
       baseUrl: config.daemonUrl,
       token: config.daemonToken,
+      firstPartyToken: config.daemonToken,
       cert,
       fetch: fetchImpl,
       mode: 'configured',
@@ -94,6 +102,7 @@ export async function resolveDaemon(config: ResolvedConfig, logger: Logger): Pro
     client: result.client,
     baseUrl: result.baseUrl,
     token: result.token,
+    firstPartyToken: result.token,
     cert: certPem,
     fetch: fetchImpl,
     mode: result.outcome,
@@ -102,45 +111,87 @@ export async function resolveDaemon(config: ResolvedConfig, logger: Logger): Pro
 }
 
 /**
- * Acquire a per-app token for the Language Model Chat Provider.
+ * Acquire one per-app token for the complete VS Code integration.
  *
  * Uses the SDK's consent flow (`POST /v1/apps/register` → poll grant)
  * with `tokenStorage` backed by VS Code's secret store so the user
  * only sees the approval dialog once per machine.
  *
- * The `appId` is namespaced to the workspace's machine identity so
- * each install ships its own token; revoking from Connected Apps
- * affects only that machine's VS Code.
+ * Older extension builds stored an inference-only `openai` token under
+ * the same app id. Probe a saved token against the product API and
+ * self-revoke it before requesting the expanded, code-verified grant.
  */
 export async function acquireAppConnection(
   connection: Connection,
   context: vscode.ExtensionContext,
   logger: Logger,
+  onVerificationCode: (code: string) => Promise<void> | void,
 ): Promise<AppConnection> {
   const appId = 'vscode';
-  const app = await sdkConnect({
+  const secretKey = `gezel:${appId}`;
+  const existingToken = await context.secrets.get(secretKey);
+  if (existingToken) {
+    const productProbe = await connection.fetch(`${connection.baseUrl}/api/config`, {
+      headers: { Authorization: `Bearer ${existingToken}` },
+    });
+    const inferenceProbe = productProbe.ok
+      ? await connection.fetch(`${connection.baseUrl}/v1/models`, {
+          headers: { Authorization: `Bearer ${existingToken}` },
+        })
+      : null;
+    const lacksRequiredScope =
+      productProbe.status === 401 ||
+      productProbe.status === 403 ||
+      inferenceProbe?.status === 401 ||
+      inferenceProbe?.status === 403;
+    if (lacksRequiredScope) {
+      logger.info(
+        'saved VS Code token lacks product or inference access; replacing it through consent',
+      );
+      const revoke = await connection.fetch(
+        `${connection.baseUrl}/v1/apps/${encodeURIComponent(appId)}/token`,
+        {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${existingToken}` },
+        },
+      );
+      if (!revoke.ok && revoke.status !== 401 && revoke.status !== 404) {
+        throw new Error(`could not replace the legacy VS Code token (HTTP ${revoke.status})`);
+      }
+      await context.secrets.delete(secretKey);
+    } else if (!productProbe.ok || !inferenceProbe?.ok) {
+      throw new Error(
+        `could not validate the saved VS Code token (HTTP ${productProbe.status}/${inferenceProbe?.status ?? 'not-run'})`,
+      );
+    }
+  }
+
+  const authorized = await sdkAuthorize({
     appId,
     appName: 'Visual Studio Code',
-    scopes: ['openai'],
+    scopes: ['product', 'openai'],
     baseUrl: connection.baseUrl,
     fetch: connection.fetch,
+    onVerificationCode,
     tokenStorage: {
       save: async (id, t) => context.secrets.store(`gezel:${id}`, t),
       load: async (id) => (await context.secrets.get(`gezel:${id}`)) ?? null,
     },
     approvalTimeoutSec: 300,
   });
-  // The SDK returns the connected GezelApp but not the raw token.
-  // The provider needs the token to attach to `Authorization: Bearer`
-  // headers on follow-up `/v1/gezels` calls (which the GezelApp doesn't
-  // wrap directly). Re-read it from secrets — guaranteed present once
-  // connect() resolved.
-  const appToken = (await context.secrets.get(`gezel:${appId}`)) ?? '';
-  if (!appToken) {
-    throw new Error('SDK consent flow returned without persisting an app token');
-  }
-  logger.info('acquired per-app token for Language Model Chat Provider');
-  return { app, appToken };
+  const appToken = authorized.token;
+  const app = new GezelApp(authorized);
+  const authorizedConnection: Connection = {
+    ...connection,
+    client: new GezelClient({
+      baseUrl: connection.baseUrl,
+      token: appToken,
+      fetch: connection.fetch,
+    }),
+    token: appToken,
+  };
+  logger.info('acquired code-verified product + inference token for Visual Studio Code');
+  return { app, appToken, connection: authorizedConnection };
 }
 
 async function resolveCertAndFetchForUrl(

@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { chmod } from 'node:fs/promises';
 import { pendingGrantsFile as defaultPendingGrantsFile } from '@bendyline/gezel/paths';
 import { readSecurityJson, writeSecurityJson } from '../fs/security-json.js';
@@ -7,6 +7,10 @@ import { type TokenStore, assertGrantableAppToken } from '../http/token-store.js
 export const PENDING_GRANT_TTL_MS = 10 * 60_000;
 export const APPROVED_GRANT_DELIVERY_TTL_MS = 5 * 60_000;
 export const MAX_PENDING_GRANTS = 32;
+export const MAX_VERIFICATION_ATTEMPTS = 5;
+
+const VERIFICATION_CODE_ALPHABET = '23456789ABCDEFGHJKMNPQRSTVWXYZ';
+const INFERENCE_ONLY_SCOPES = new Set(['openai', 'remote-inference']);
 
 /**
  * Status of a `/v1/apps/register` consent request.
@@ -34,6 +38,15 @@ export interface GrantRequest {
   expiresAt?: number;
   tokenRetrievedAt?: number;
   /**
+   * Whether approval requires the user to enter the requester-visible code.
+   * The plaintext code is never attached to this record or persisted.
+   */
+  verificationRequired?: boolean;
+  /** Random salt and digest for the short-lived verification code. */
+  verificationCodeSalt?: string;
+  verificationCodeHash?: string;
+  verificationFailedAttempts?: number;
+  /**
    * The bearer token issued to the app on approval. Present only until the
    * first successful poll/SSE delivery, then atomically removed.
    */
@@ -59,9 +72,20 @@ export interface GrantRequestInput {
   appId: string;
   appName: string;
   scopes: string[];
+  /** Request code verification even when every requested scope is inference-only. */
+  requireVerificationCode?: boolean;
   iconUrl?: string;
   kind?: 'app' | 'device';
   deviceIdentityPubKey?: string;
+}
+
+export interface GrantRequestCreated {
+  grant: GrantRequest;
+  /**
+   * Requester-visible code. Returned exactly once from `request()` and never
+   * retained in manager state or written to `pending-grants.json`.
+   */
+  verificationCode?: string;
 }
 
 export interface GrantManager {
@@ -70,7 +94,7 @@ export interface GrantManager {
    * contains `appId`, the grant is auto-approved (token issued, status
    * set to `approved`) at request time. Persists.
    */
-  request(input: GrantRequestInput): Promise<GrantRequest>;
+  request(input: GrantRequestInput): Promise<GrantRequestCreated>;
   get(id: string): GrantRequest | null;
   list(): GrantRequest[];
   /** Expire stale pending/unclaimed approvals and revoke undelivered tokens. */
@@ -82,7 +106,7 @@ export interface GrantManager {
    * {@link TokenStore} and stamps `decidedAt`. Throws if the grant is
    * not in `pending`.
    */
-  approve(id: string): Promise<GrantRequest>;
+  approve(id: string, verificationCode?: string): Promise<GrantRequest>;
   /** Deny a pending grant. Throws if the grant is not in `pending`. */
   deny(id: string): Promise<GrantRequest>;
   /**
@@ -126,6 +150,86 @@ export class TooManyPendingGrantsError extends Error {
     super(`too many pending grants (maximum ${MAX_PENDING_GRANTS})`);
     this.name = 'TooManyPendingGrantsError';
   }
+}
+
+export class VerificationCodeRequiredError extends Error {
+  constructor() {
+    super('a verification code is required to approve this grant');
+    this.name = 'VerificationCodeRequiredError';
+  }
+}
+
+export class InvalidVerificationCodeError extends Error {
+  constructor(readonly attemptsRemaining: number) {
+    super('the verification code is incorrect');
+    this.name = 'InvalidVerificationCodeError';
+  }
+}
+
+export class VerificationAttemptsExceededError extends Error {
+  constructor() {
+    super('too many incorrect verification-code attempts');
+    this.name = 'VerificationAttemptsExceededError';
+  }
+}
+
+export class GrantExpiredError extends Error {
+  constructor() {
+    super('the grant has expired');
+    this.name = 'GrantExpiredError';
+  }
+}
+
+/**
+ * Stateful scopes require a requester-visible verification code. Keeping the
+ * exemptions as an inference-only allowlist makes future privileged scopes
+ * opt into verification automatically.
+ */
+export function requiresGrantVerification(scopes: readonly string[]): boolean {
+  return scopes.some((scope) => !INFERENCE_ONLY_SCOPES.has(scope));
+}
+
+export function normalizeVerificationCode(code: string): string | null {
+  const normalized = code.replace(/[-\s]/g, '').toUpperCase();
+  if (normalized.length !== 6) return null;
+  for (const char of normalized) {
+    if (!VERIFICATION_CODE_ALPHABET.includes(char)) return null;
+  }
+  return normalized;
+}
+
+function generateVerificationCode(): string {
+  let raw = '';
+  while (raw.length < 6) {
+    for (const byte of randomBytes(8)) {
+      // Reject the top 16 byte values so modulo 30 remains unbiased.
+      if (byte >= 240) continue;
+      raw += VERIFICATION_CODE_ALPHABET[byte % VERIFICATION_CODE_ALPHABET.length];
+      if (raw.length === 6) break;
+    }
+  }
+  return `${raw.slice(0, 3)}-${raw.slice(3)}`;
+}
+
+function hashVerificationCode(salt: string, normalizedCode: string): Buffer {
+  return createHash('sha256')
+    .update(salt, 'base64url')
+    .update('\0')
+    .update(normalizedCode, 'ascii')
+    .digest();
+}
+
+function codeMatches(grant: GrantRequest, suppliedCode: string): boolean {
+  const normalized = normalizeVerificationCode(suppliedCode);
+  if (!normalized || !grant.verificationCodeSalt || !grant.verificationCodeHash) return false;
+  const actual = hashVerificationCode(grant.verificationCodeSalt, normalized);
+  let expected: Buffer;
+  try {
+    expected = Buffer.from(grant.verificationCodeHash, 'base64url');
+  } catch {
+    return false;
+  }
+  return expected.length === actual.length && timingSafeEqual(expected, actual);
 }
 
 /**
@@ -181,6 +285,9 @@ export async function createGrantManager(opts: CreateGrantManagerOptions): Promi
       grant.decidedAt ??= Date.now();
       grant.token = issued.token;
       grant.expiresAt ??= grant.decidedAt + APPROVED_GRANT_DELIVERY_TTL_MS;
+      delete grant.verificationCodeSalt;
+      delete grant.verificationCodeHash;
+      delete grant.verificationFailedAttempts;
     }
     delete grant.issuingToken;
     recovered = true;
@@ -200,6 +307,11 @@ export async function createGrantManager(opts: CreateGrantManagerOptions): Promi
 
   const approveGrant = async (grant: GrantRequest): Promise<GrantRequest> => {
     assertGrantableAppToken(grant);
+    const verificationState = {
+      salt: grant.verificationCodeSalt,
+      hash: grant.verificationCodeHash,
+      failedAttempts: grant.verificationFailedAttempts,
+    };
     grant.issuingToken = randomBytes(32).toString('base64url');
     await persist();
     let issued: ReturnType<TokenStore['list']>[number];
@@ -222,6 +334,9 @@ export async function createGrantManager(opts: CreateGrantManagerOptions): Promi
     grant.expiresAt = grant.decidedAt + APPROVED_GRANT_DELIVERY_TTL_MS;
     grant.token = issued.token;
     delete grant.issuingToken;
+    delete grant.verificationCodeSalt;
+    delete grant.verificationCodeHash;
+    delete grant.verificationFailedAttempts;
     try {
       await persist();
     } catch (err) {
@@ -237,6 +352,11 @@ export async function createGrantManager(opts: CreateGrantManagerOptions): Promi
       delete grant.decidedAt;
       grant.expiresAt = grant.createdAt + PENDING_GRANT_TTL_MS;
       delete grant.token;
+      if (verificationState.salt) grant.verificationCodeSalt = verificationState.salt;
+      if (verificationState.hash) grant.verificationCodeHash = verificationState.hash;
+      if (verificationState.failedAttempts !== undefined) {
+        grant.verificationFailedAttempts = verificationState.failedAttempts;
+      }
       if (revoked) delete grant.issuingToken;
       await persist().catch(() => undefined);
       throw err;
@@ -245,7 +365,7 @@ export async function createGrantManager(opts: CreateGrantManagerOptions): Promi
   };
 
   return {
-    async request(input: GrantRequestInput): Promise<GrantRequest> {
+    async request(input: GrantRequestInput): Promise<GrantRequestCreated> {
       return mutate(async () => {
         assertGrantableAppToken(input);
         if (
@@ -262,6 +382,15 @@ export async function createGrantManager(opts: CreateGrantManagerOptions): Promi
           throw new TooManyPendingGrantsError();
         }
         const createdAt = Date.now();
+        const verificationRequired =
+          input.requireVerificationCode === true || requiresGrantVerification(input.scopes);
+        const verificationCode = verificationRequired ? generateVerificationCode() : undefined;
+        const normalizedCode = verificationCode
+          ? normalizeVerificationCode(verificationCode)
+          : undefined;
+        const verificationCodeSalt = verificationRequired
+          ? randomBytes(16).toString('base64url')
+          : undefined;
         const grant: GrantRequest = {
           id: randomUUID(),
           appId: input.appId,
@@ -275,6 +404,17 @@ export async function createGrantManager(opts: CreateGrantManagerOptions): Promi
           status: 'pending',
           createdAt,
           expiresAt: createdAt + PENDING_GRANT_TTL_MS,
+          ...(verificationRequired
+            ? {
+                verificationRequired: true,
+                verificationCodeSalt,
+                verificationCodeHash: hashVerificationCode(
+                  verificationCodeSalt!,
+                  normalizedCode!,
+                ).toString('base64url'),
+                verificationFailedAttempts: 0,
+              }
+            : {}),
         };
         byId.set(grant.id, grant);
         try {
@@ -294,11 +434,17 @@ export async function createGrantManager(opts: CreateGrantManagerOptions): Promi
             if (grant.issuingToken) throw err;
             grant.status = 'denied';
             grant.decidedAt = Date.now();
+            delete grant.verificationCodeSalt;
+            delete grant.verificationCodeHash;
+            delete grant.verificationFailedAttempts;
             await persist();
           }
           emit({ type: 'grant_decided', grant });
         }
-        return grant;
+        return {
+          grant,
+          ...(verificationCode && grant.status === 'pending' ? { verificationCode } : {}),
+        };
       });
     },
 
@@ -343,6 +489,9 @@ export async function createGrantManager(opts: CreateGrantManagerOptions): Promi
             delete grant.expiresAt;
             delete grant.token;
             delete grant.issuingToken;
+            delete grant.verificationCodeSalt;
+            delete grant.verificationCodeHash;
+            delete grant.verificationFailedAttempts;
           }
           await persist();
         } catch (error) {
@@ -403,12 +552,69 @@ export async function createGrantManager(opts: CreateGrantManagerOptions): Promi
       });
     },
 
-    async approve(id: string): Promise<GrantRequest> {
+    async approve(id: string, verificationCode?: string): Promise<GrantRequest> {
       return mutate(async () => {
         const grant = byId.get(id);
         if (!grant) throw new Error(`grant not found: ${id}`);
         if (grant.status !== 'pending' || grant.issuingToken) {
           throw new Error(`grant already decided: ${grant.status}`);
+        }
+        if (grant.expiresAt !== undefined && grant.expiresAt <= Date.now()) {
+          const prior = { ...grant, scopes: [...grant.scopes] };
+          grant.status = 'expired';
+          grant.decidedAt = Date.now();
+          delete grant.expiresAt;
+          delete grant.verificationCodeSalt;
+          delete grant.verificationCodeHash;
+          delete grant.verificationFailedAttempts;
+          try {
+            await persist();
+          } catch (error) {
+            byId.set(grant.id, prior);
+            throw error;
+          }
+          emit({ type: 'grant_decided', grant });
+          throw new GrantExpiredError();
+        }
+        if (grant.verificationRequired) {
+          if (!verificationCode) throw new VerificationCodeRequiredError();
+          if (!codeMatches(grant, verificationCode)) {
+            const priorAttempts = grant.verificationFailedAttempts ?? 0;
+            grant.verificationFailedAttempts = priorAttempts + 1;
+            const attemptsRemaining = Math.max(
+              0,
+              MAX_VERIFICATION_ATTEMPTS - grant.verificationFailedAttempts,
+            );
+            if (attemptsRemaining === 0) {
+              const verificationCodeSalt = grant.verificationCodeSalt;
+              const verificationCodeHash = grant.verificationCodeHash;
+              grant.status = 'expired';
+              grant.decidedAt = Date.now();
+              delete grant.expiresAt;
+              delete grant.verificationCodeSalt;
+              delete grant.verificationCodeHash;
+              try {
+                await persist();
+              } catch (error) {
+                grant.status = 'pending';
+                delete grant.decidedAt;
+                grant.expiresAt = grant.createdAt + PENDING_GRANT_TTL_MS;
+                grant.verificationFailedAttempts = priorAttempts;
+                if (verificationCodeSalt) grant.verificationCodeSalt = verificationCodeSalt;
+                if (verificationCodeHash) grant.verificationCodeHash = verificationCodeHash;
+                throw error;
+              }
+              emit({ type: 'grant_decided', grant });
+              throw new VerificationAttemptsExceededError();
+            }
+            try {
+              await persist();
+            } catch (error) {
+              grant.verificationFailedAttempts = priorAttempts;
+              throw error;
+            }
+            throw new InvalidVerificationCodeError(attemptsRemaining);
+          }
         }
         await approveGrant(grant);
         emit({ type: 'grant_decided', grant });
@@ -423,13 +629,26 @@ export async function createGrantManager(opts: CreateGrantManagerOptions): Promi
         if (grant.status !== 'pending' || grant.issuingToken) {
           throw new Error(`grant already decided: ${grant.status}`);
         }
+        const verificationState = {
+          salt: grant.verificationCodeSalt,
+          hash: grant.verificationCodeHash,
+          failedAttempts: grant.verificationFailedAttempts,
+        };
         grant.status = 'denied';
         grant.decidedAt = Date.now();
+        delete grant.verificationCodeSalt;
+        delete grant.verificationCodeHash;
+        delete grant.verificationFailedAttempts;
         try {
           await persist();
         } catch (err) {
           grant.status = 'pending';
           delete grant.decidedAt;
+          if (verificationState.salt) grant.verificationCodeSalt = verificationState.salt;
+          if (verificationState.hash) grant.verificationCodeHash = verificationState.hash;
+          if (verificationState.failedAttempts !== undefined) {
+            grant.verificationFailedAttempts = verificationState.failedAttempts;
+          }
           throw err;
         }
         emit({ type: 'grant_decided', grant });
@@ -493,12 +712,22 @@ function decodePersisted(raw: string): GrantRequest[] {
       throw new Error(`unknown grant kind for ${e.appId}`);
     }
     const token = typeof e.token === 'string' && e.token.length > 0 ? e.token : undefined;
+    const verificationRequired =
+      e.verificationRequired === true || requiresGrantVerification(scopes);
+    const hasVerificationProof =
+      typeof e.verificationCodeSalt === 'string' &&
+      e.verificationCodeSalt.length > 0 &&
+      typeof e.verificationCodeHash === 'string' &&
+      e.verificationCodeHash.length > 0;
+    const missingRequiredProof =
+      status === 'pending' && verificationRequired && !hasVerificationProof;
+    const decodedStatus = missingRequiredProof ? 'expired' : status;
     const expiresAt =
       typeof e.expiresAt === 'number'
         ? e.expiresAt
-        : status === 'pending'
+        : decodedStatus === 'pending'
           ? e.createdAt + PENDING_GRANT_TTL_MS
-          : status === 'approved' && token
+          : decodedStatus === 'approved' && token
             ? (e.decidedAt ?? e.createdAt) + APPROVED_GRANT_DELIVERY_TTL_MS
             : undefined;
     grants.push({
@@ -507,14 +736,29 @@ function decodePersisted(raw: string): GrantRequest[] {
       appName: e.appName,
       scopes,
       ...(typeof e.iconUrl === 'string' ? { iconUrl: e.iconUrl } : {}),
-      status,
+      status: decodedStatus,
       createdAt: e.createdAt,
-      ...(typeof e.decidedAt === 'number' ? { decidedAt: e.decidedAt } : {}),
-      ...(expiresAt !== undefined ? { expiresAt } : {}),
+      ...(typeof e.decidedAt === 'number'
+        ? { decidedAt: e.decidedAt }
+        : missingRequiredProof
+          ? { decidedAt: Date.now() }
+          : {}),
+      ...(expiresAt !== undefined && !missingRequiredProof ? { expiresAt } : {}),
       ...(typeof e.tokenRetrievedAt === 'number' ? { tokenRetrievedAt: e.tokenRetrievedAt } : {}),
-      ...(status === 'approved' && token !== undefined ? { token } : {}),
-      ...(status === 'pending' && typeof e.issuingToken === 'string'
+      ...(decodedStatus === 'approved' && token !== undefined ? { token } : {}),
+      ...(decodedStatus === 'pending' && typeof e.issuingToken === 'string'
         ? { issuingToken: e.issuingToken }
+        : {}),
+      ...(verificationRequired ? { verificationRequired: true } : {}),
+      ...(decodedStatus === 'pending' && hasVerificationProof
+        ? {
+            verificationCodeSalt: e.verificationCodeSalt,
+            verificationCodeHash: e.verificationCodeHash,
+            verificationFailedAttempts:
+              typeof e.verificationFailedAttempts === 'number'
+                ? Math.max(0, Math.floor(e.verificationFailedAttempts))
+                : 0,
+          }
         : {}),
       ...(e.kind === 'app' || e.kind === 'device' ? { kind: e.kind } : {}),
       ...(typeof e.deviceIdentityPubKey === 'string'

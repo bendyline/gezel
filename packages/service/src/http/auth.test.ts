@@ -155,7 +155,7 @@ describe('requireScope', () => {
 });
 
 describe('first-party and internal API scope boundaries', () => {
-  it('lets root and ui administer first-party routes, but rejects cli/app/session scopes', async () => {
+  it('lets root and ui administer first-party routes, but rejects product/cli/app/session scopes', async () => {
     store = await createTokenStore({
       home,
       rootToken: 'ROOT-TOKEN',
@@ -178,6 +178,11 @@ describe('first-party and internal API scope boundaries', () => {
       appName: 'Gezel CLI',
       scopes: ['cli'],
     });
+    const product = await store.issue({
+      appId: 'vscode',
+      appName: 'Visual Studio Code',
+      scopes: ['product', 'openai'],
+    });
     const session = store.issueSession({
       appId: 'session:s1',
       projectId: 'p1',
@@ -193,6 +198,7 @@ describe('first-party and internal API scope boundaries', () => {
       (await guarded.request('/admin', { headers: { Authorization: `Bearer ${token}` } })).status;
     expect(await status('ROOT-TOKEN')).toBe(200);
     expect(await status('UI-TOKEN')).toBe(200);
+    expect(await status(product.token)).toBe(403);
     expect(await status(cli.token)).toBe(403);
     expect(await status(openai.token)).toBe(403);
     expect(await status(session.token)).toBe(403);
@@ -220,6 +226,11 @@ describe('first-party and internal API scope boundaries', () => {
       appId: 'gezel-cli',
       appName: 'Gezel CLI',
       scopes: ['cli'],
+    });
+    const product = await store.issue({
+      appId: 'vscode',
+      appName: 'Visual Studio Code',
+      scopes: ['product', 'openai'],
     });
     const remote = await store.issue({
       appId: 'remote-device',
@@ -249,6 +260,7 @@ describe('first-party and internal API scope boundaries', () => {
     expect((await guarded.request('/api/health')).status).toBe(200);
     expect(await status('ROOT-TOKEN')).toBe(200);
     expect(await status('UI-TOKEN')).toBe(200);
+    expect(await status(product.token)).toBe(200);
     expect(await status(cli.token)).toBe(200);
     expect(await status(session.token)).toBe(200);
     expect(await status(openai.token)).toBe(403);

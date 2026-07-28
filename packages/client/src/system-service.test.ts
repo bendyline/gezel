@@ -3,9 +3,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  electronNativeBinCandidates,
   readSystemServiceEndpoint,
   readSystemServiceRuntime,
   systemServiceHome,
+  systemSharedAssetsDir,
 } from './system-service.js';
 
 const homes: string[] = [];
@@ -29,6 +31,25 @@ describe('systemServiceHome', () => {
     expect(systemServiceHome('darwin')).toBe('/Library/Application Support/Gezel');
     expect(systemServiceHome('linux')).toBe('/var/lib/gezel');
     expect(systemServiceHome('freebsd')).toBeNull();
+    expect(systemSharedAssetsDir('win32', { ProgramData: 'D:\\MachineData' })).toBe(
+      'D:\\MachineData\\Gezel\\assets',
+    );
+    expect(systemSharedAssetsDir('linux')).toBe('/var/lib/gezel/assets');
+  });
+
+  it('returns conventional Electron native roots as untrusted discovery hints', () => {
+    expect(
+      electronNativeBinCandidates('win32', {
+        ProgramFiles: 'C:\\Program Files',
+        LOCALAPPDATA: 'C:\\Users\\test\\AppData\\Local',
+      }),
+    ).toEqual([
+      'C:\\Program Files\\Gezel\\resources\\app.asar.unpacked\\native-bin',
+      'C:\\Users\\test\\AppData\\Local\\Programs\\Gezel\\resources\\app.asar.unpacked\\native-bin',
+    ]);
+    expect(electronNativeBinCandidates('darwin')).toEqual([
+      '/Applications/Gezel.app/Contents/Resources/app.asar.unpacked/native-bin',
+    ]);
   });
 });
 

@@ -246,11 +246,15 @@
   !insertmacro RejectReparsePoint "${GEZEL_DATA_DIR}" "Gezel data directory" SkipNssm
 
   CreateDirectory "${GEZEL_DATA_DIR}\runtime"
+  CreateDirectory "${GEZEL_DATA_DIR}\assets"
+  CreateDirectory "${GEZEL_DATA_DIR}\assets\models"
   CreateDirectory "${GEZEL_DATA_DIR}\logs"
   CreateDirectory "${GEZEL_DATA_DIR}\tmp"
   CreateDirectory "${GEZEL_DATA_DIR}\appdata"
   CreateDirectory "${GEZEL_DATA_DIR}\localappdata"
   !insertmacro RejectReparsePoint "${GEZEL_DATA_DIR}\runtime" "Gezel runtime directory" SkipNssm
+  !insertmacro RejectReparsePoint "${GEZEL_DATA_DIR}\assets" "Gezel public asset directory" SkipNssm
+  !insertmacro RejectReparsePoint "${GEZEL_DATA_DIR}\assets\models" "Gezel shared model directory" SkipNssm
   !insertmacro RejectReparsePoint "${GEZEL_DATA_DIR}\logs" "Gezel logs directory" SkipNssm
   !insertmacro RejectReparsePoint "${GEZEL_DATA_DIR}\tmp" "Gezel temporary directory" SkipNssm
   !insertmacro RejectReparsePoint "${GEZEL_DATA_DIR}\appdata" "Gezel roaming application-data directory" SkipNssm
@@ -265,6 +269,24 @@
   ${If} $0 != 0
     DetailPrint "ERROR: failed to set a trusted runtime owner (icacls exit $0)."
     MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not secure its machine-service runtime directory. The service will not be installed; the desktop app will use its per-user fallback."
+    Goto SkipNssm
+  ${EndIf}
+
+  ; Public immutable asset boundary. Users may traverse and read/execute
+  ; published models, but cannot create, replace, or delete them. The service
+  ; SID receives write access only after it exists below.
+  nsExec::ExecToLog '"$SYSDIR\icacls.exe" "${GEZEL_DATA_DIR}\assets" /setowner "*S-1-5-32-544" /T /L'
+  Pop $0
+  ${If} $0 != 0
+    DetailPrint "ERROR: failed to set a trusted asset-store owner (icacls exit $0)."
+    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not secure its shared model store. The service will not be installed; the desktop app will use its per-user fallback."
+    Goto SkipNssm
+  ${EndIf}
+  nsExec::ExecToLog '"$SYSDIR\icacls.exe" "${GEZEL_DATA_DIR}\assets" /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)(F)" "*S-1-5-32-544:(OI)(CI)(F)" "*S-1-5-32-545:(OI)(CI)(RX)" /remove:g "*S-1-5-11" "*S-1-1-0" "*S-1-5-19" /T /L'
+  Pop $0
+  ${If} $0 != 0
+    DetailPrint "ERROR: failed to apply the read-only asset-store ACL (icacls exit $0)."
+    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not secure its shared model store. The service will not be installed; the desktop app will use its per-user fallback."
     Goto SkipNssm
   ${EndIf}
 
@@ -350,6 +372,14 @@
     DetailPrint "ERROR: failed to grant the service SID access to runtime state (exit $0)."
     !insertmacro RemoveGezelService
     MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not grant its restricted service access to runtime state. The registration was removed; the desktop app will use its per-user fallback."
+    Goto SkipNssm
+  ${EndIf}
+  nsExec::ExecToLog '"$SYSDIR\icacls.exe" "${GEZEL_DATA_DIR}\assets" /grant:r "NT SERVICE\${GEZEL_SERVICE_NAME}:(OI)(CI)(M)" /T /L'
+  Pop $0
+  ${If} $0 != 0
+    DetailPrint "ERROR: failed to grant the service SID access to shared assets (exit $0)."
+    !insertmacro RemoveGezelService
+    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not grant its restricted service access to shared model assets. The registration was removed; the desktop app will use its per-user fallback."
     Goto SkipNssm
   ${EndIf}
 

@@ -28,6 +28,13 @@
 import { join } from 'node:path';
 import type { GezelConfig } from '@bendyline/gezel';
 import { Agent, fetch as undiciFetch } from 'undici';
+import {
+  type ModelStorageRoots,
+  findModelRoot,
+  listOverlayModelIds,
+  modelStorageRoots,
+  verifyReadOnlyModelPayload,
+} from '../../models/storage-roots.js';
 import type { SecretStore } from '../../secrets/types.js';
 import type { GpuArbiter } from '../gpu-arbiter.js';
 import { pickFreePort } from '../native/port.js';
@@ -84,7 +91,8 @@ export async function createImageProvider(
   opts: ImageProviderFactoryOptions,
 ): Promise<ImageProvider> {
   const env = opts.env ?? process.env;
-  const modelsRoot = join(opts.home, 'engines', 'sd-cpp', 'models');
+  const storageRoots = modelStorageRoots({ home: opts.home, engine: 'sd-cpp', env });
+  const modelsRoot = storageRoots.writableRoot;
 
   if (env.GEZEL_MOCK_PROVIDER === '1') {
     return new MockImageProvider();
@@ -114,6 +122,7 @@ export async function createImageProvider(
     return new StableDiffusionCppProvider({
       baseUrl: env.GEZEL_SD_SERVER_URL,
       modelsRoot,
+      storageRoots,
       fetchImpl: patientFetch(),
     });
   }
@@ -152,8 +161,8 @@ export async function createImageProvider(
         // the requested one having been deleted).
         const model =
           (launchState.modelId
-            ? await findInstalledModel(modelsRoot, launchState.modelId)
-            : undefined) ?? (await findFirstInstalledModel(modelsRoot));
+            ? await findInstalledModel(storageRoots, launchState.modelId)
+            : undefined) ?? (await findFirstInstalledModel(storageRoots));
         if (!model) {
           throw new Error(
             'No image model is available locally. Download one from Settings → Image generation before generating.',
@@ -171,6 +180,7 @@ export async function createImageProvider(
       // not yet resolved; generate() overrides from `ensureRunning()`.
       baseUrl: 'http://127.0.0.1:9081',
       modelsRoot,
+      storageRoots,
       supervisor,
       launchState,
       fetchImpl: patientFetch(),
@@ -181,6 +191,7 @@ export async function createImageProvider(
   return new StableDiffusionCppProvider({
     baseUrl: 'http://127.0.0.1:9081',
     modelsRoot,
+    storageRoots,
     // Branch 4: nothing was wired up. Flag the provider so `health()`
     // can return `not-configured` (distinct UI guidance) rather than
     // making the user wait for a generic "unreachable" probe to fail.
@@ -201,6 +212,7 @@ export interface ResolvedInstalledModel extends InstalledImageModelInfo {
 async function resolveInstalledModel(
   modelsRoot: string,
   id: string,
+  storageRoots?: ModelStorageRoots,
 ): Promise<ResolvedInstalledModel | undefined> {
   const { readFile } = await import('node:fs/promises');
   try {
@@ -214,8 +226,15 @@ async function resolveInstalledModel(
       weightsFilename?: string;
       weightsKind?: 'checkpoint' | 'diffusion-model';
       auxiliaryFiles?: Array<{ role?: string; filename?: string }>;
+      fileSha256?: Record<string, string>;
     };
     if (!parsed.id || !parsed.name || !parsed.weightsFilename) return undefined;
+    if (
+      storageRoots &&
+      !(await verifyReadOnlyModelPayload(storageRoots, modelsRoot, id, parsed.fileSha256))
+    ) {
+      return undefined;
+    }
     const aux: Array<{ role: string; path: string }> = [];
     for (const a of parsed.auxiliaryFiles ?? []) {
       if (a.role && a.filename) aux.push({ role: a.role, path: join(itemDir, a.filename) });
@@ -236,25 +255,20 @@ async function resolveInstalledModel(
 
 /** Resolve a specific installed model by id (the one a request targets). */
 async function findInstalledModel(
-  modelsRoot: string,
+  storageRoots: ModelStorageRoots,
   id: string,
 ): Promise<ResolvedInstalledModel | undefined> {
-  return resolveInstalledModel(modelsRoot, id);
+  const root = await findModelRoot(storageRoots, id);
+  return root ? resolveInstalledModel(root, id, storageRoots) : undefined;
 }
 
 async function findFirstInstalledModel(
-  modelsRoot: string,
+  storageRoots: ModelStorageRoots,
 ): Promise<ResolvedInstalledModel | undefined> {
-  const { readdir } = await import('node:fs/promises');
-  let entries: string[] = [];
-  try {
-    entries = await readdir(modelsRoot);
-  } catch {
-    return undefined;
-  }
+  const entries = await listOverlayModelIds(storageRoots);
   entries.sort();
   for (const id of entries) {
-    const model = await resolveInstalledModel(modelsRoot, id);
+    const model = await findInstalledModel(storageRoots, id);
     if (model) return model;
   }
   return undefined;

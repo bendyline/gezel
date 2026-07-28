@@ -76,10 +76,16 @@ describe('POST /v1/apps/register', () => {
       body: { appId: 'pending-app', appName: 'Pending App', scopes: ['openai'] },
     });
     expect(res.status).toBe(201);
-    const body = (await res.json()) as { grantRequestId: string; status: string; token?: string };
+    const body = (await res.json()) as {
+      grantRequestId: string;
+      status: string;
+      token?: string;
+      verificationCode?: string;
+    };
     expect(typeof body.grantRequestId).toBe('string');
     expect(body.status).toBe('pending');
     expect(body.token).toBeUndefined();
+    expect(body.verificationCode).toBeUndefined();
     expect(res.headers.get('content-security-policy')).toContain("default-src 'self'");
     expect(res.headers.get('x-frame-options')).toBe('DENY');
     expect(res.headers.get('x-content-type-options')).toBe('nosniff');
@@ -167,14 +173,22 @@ describe('POST /v1/apps/register', () => {
       body: { appId: 'gezel-cli', appName: 'Gezel CLI', scopes: ['cli'] },
     });
     expect(res.status).toBe(201);
-    const body = (await res.json()) as { grantRequestId: string; status: string };
+    const body = (await res.json()) as {
+      grantRequestId: string;
+      status: string;
+      verificationRequired?: boolean;
+      verificationCode?: string;
+    };
     expect(body.status).toBe('pending');
     expect(body.grantRequestId).toBeTruthy();
+    expect(body.verificationRequired).toBe(true);
+    expect(body.verificationCode).toMatch(/^[2-9A-HJ-KM-NP-TV-Z]{3}-[2-9A-HJ-KM-NP-TV-Z]{3}$/);
 
     expect(
       (
         await v1('POST', `/v1/apps/grant/${body.grantRequestId}/approve`, {
           token: uiToken,
+          body: { verificationCode: body.verificationCode },
         })
       ).status,
     ).toBe(200);
@@ -186,6 +200,29 @@ describe('POST /v1/apps/register', () => {
     // desktop credential and cannot administer other app grants.
     expect((await v1('GET', '/api/config', { token: grant.token })).status).toBe(200);
     expect((await v1('GET', '/v1/apps', { token: grant.token })).status).toBe(403);
+  });
+
+  it('never exposes the CLI verification code in polling or the desktop grant list', async () => {
+    const res = await v1('POST', '/v1/apps/register', {
+      body: { appId: 'gezel-cli.hidden-code', appName: 'Gezel CLI', scopes: ['cli'] },
+    });
+    const registered = (await res.json()) as {
+      grantRequestId: string;
+      verificationCode: string;
+    };
+
+    const poll = await v1('GET', `/v1/apps/grant/${registered.grantRequestId}`);
+    expect(JSON.stringify(await poll.json())).not.toContain(registered.verificationCode);
+
+    const list = await v1('GET', '/v1/apps', { token: uiToken });
+    const body = (await list.json()) as {
+      grants: Array<Record<string, unknown>>;
+    };
+    const listed = body.grants.find((grant) => grant.id === registered.grantRequestId);
+    expect(listed).toMatchObject({ verificationRequired: true });
+    expect(listed).not.toHaveProperty('verificationCode');
+    expect(listed).not.toHaveProperty('verificationCodeHash');
+    expect(listed).not.toHaveProperty('verificationCodeSalt');
   });
 });
 
@@ -284,6 +321,59 @@ describe('POST /v1/apps/grant/:id/{approve,deny}', () => {
       token: rootToken,
     });
     expect(second.status).toBe(409);
+  });
+
+  it('requires the code for CLI approval and expires after five incorrect attempts', async () => {
+    const reg = await v1('POST', '/v1/apps/register', {
+      body: { appId: 'gezel-cli.bad-codes', appName: 'Gezel CLI', scopes: ['cli'] },
+    });
+    const { grantRequestId } = (await reg.json()) as { grantRequestId: string };
+
+    const missing = await v1('POST', `/v1/apps/grant/${grantRequestId}/approve`, {
+      token: uiToken,
+    });
+    expect(missing.status).toBe(400);
+    expect(await missing.json()).toEqual({ error: 'verification_code_required' });
+
+    for (let attemptsRemaining = 4; attemptsRemaining > 0; attemptsRemaining -= 1) {
+      const invalid = await v1('POST', `/v1/apps/grant/${grantRequestId}/approve`, {
+        token: uiToken,
+        body: { verificationCode: 'ZZZ-ZZZ' },
+      });
+      expect(invalid.status).toBe(403);
+      expect(await invalid.json()).toEqual({
+        error: 'verification_code_invalid',
+        attemptsRemaining,
+      });
+    }
+
+    const exhausted = await v1('POST', `/v1/apps/grant/${grantRequestId}/approve`, {
+      token: uiToken,
+      body: { verificationCode: 'ZZZ-ZZZ' },
+    });
+    expect(exhausted.status).toBe(429);
+    expect(await exhausted.json()).toEqual({ error: 'verification_attempts_exceeded' });
+
+    const poll = await v1('GET', `/v1/apps/grant/${grantRequestId}`);
+    expect(await poll.json()).toMatchObject({ status: 'expired' });
+  });
+
+  it('rejects a correct code after the ten-minute grant deadline', async () => {
+    const reg = await v1('POST', '/v1/apps/register', {
+      body: { appId: 'gezel-cli.stale-code', appName: 'Gezel CLI', scopes: ['cli'] },
+    });
+    const registered = (await reg.json()) as {
+      grantRequestId: string;
+      verificationCode: string;
+    };
+    svc.context.grants.get(registered.grantRequestId)!.expiresAt = Date.now() - 1;
+
+    const expired = await v1('POST', `/v1/apps/grant/${registered.grantRequestId}/approve`, {
+      token: uiToken,
+      body: { verificationCode: registered.verificationCode },
+    });
+    expect(expired.status).toBe(410);
+    expect(await expired.json()).toEqual({ error: 'grant_expired' });
   });
 });
 

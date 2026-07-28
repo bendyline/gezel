@@ -142,17 +142,35 @@ The chain of trust is anchored in the **published package**:
 [`packages/service/src/engines/native-manifest.ts`](../packages/service/src/engines/native-manifest.ts)
 bakes in `NATIVE_ENGINE_RELEASE` (the `native-v*` tag this build trusts) and
 `SHA256SUMS_DIGEST` (the sha256 of that release's `SHA256SUMS` asset).
+[`native-file-manifest.json`](../packages/service/src/engines/native-file-manifest.json)
+also pins every executable and loadable library after signing/notarization.
+That second manifest lets a standalone CLI verify and reuse an Electron
+installation's extracted payload without trusting metadata supplied by the
+installation itself.
 [`resolver.ts`](../packages/service/src/engines/resolver.ts) verifies the
 downloaded `SHA256SUMS` against that digest *before* trusting any per-asset
 hash, then verifies each archive against its line. A tampered release cannot
 swap a binary.
 
+For macOS standalone payloads, the workflow's `notarytool submit --wait`
+result must be `Accepted` before those exact signed bytes are hashed and
+packed. Bare command-line binaries cannot carry a stapled ticket and `spctl`
+cannot assess them as app bundles; `--macos-notarized` records the accepted
+release provenance when the hashes are pinned. Electron reuse separately
+assesses the signed/notarized parent `.app`.
+
+`0.1.19` predates the per-file manifest, so its checked-in platform set is
+intentionally empty and Electron reuse fails closed. The first native release
+cut with the current workflow must be pinned with the command below before
+publishing the corresponding CLI/Electron release.
+
 **Whenever a `native-v*` release is published, re-pin before the next npm
 release:**
 
 ```bash
-node scripts/pin-native-release.mjs --latest      # or native-v0.1.19
+node scripts/pin-native-release.mjs --latest --macos-notarized
 git diff packages/service/src/engines/native-manifest.ts
+git diff packages/service/src/engines/native-file-manifest.json
 ```
 
 Review and commit; the PR is the audit trail. Never hand-edit the digest to
