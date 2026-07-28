@@ -26,10 +26,10 @@
  *   GEZEL_CONSUMER_SKIP_DAEMON=1   skip the daemon boot (fastest useful run)
  */
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { basename, delimiter, dirname, join, resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const keep = process.argv.includes('--keep');
@@ -91,10 +91,67 @@ function run(command, args, options = {}) {
   return result;
 }
 
+function findOnPath(fileName) {
+  for (const rawDir of (process.env.PATH ?? '').split(delimiter)) {
+    const pathDir = rawDir.replace(/^"(.*)"$/, '$1');
+    if (!pathDir) continue;
+    const candidate = join(pathDir, fileName);
+    if (existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
+/**
+ * Node does not launch Windows .cmd shims through spawnSync without a shell.
+ * Run the package-manager JavaScript entry point with Node instead;
+ * this keeps argument handling safe and works whether this script was reached
+ * through `pnpm all` or invoked directly as documented above.
+ */
+function windowsPackageManagerCli(manager) {
+  const candidates = [];
+  const invokedCli = process.env.npm_execpath;
+  if (invokedCli) {
+    const invokedName = basename(invokedCli).toLowerCase();
+    if (
+      (manager === 'pnpm' && invokedName.startsWith('pnpm')) ||
+      (manager === 'npm' && invokedName.startsWith('npm'))
+    ) {
+      candidates.push(invokedCli);
+    }
+  }
+
+  const shim = findOnPath(`${manager}.cmd`);
+  if (shim) {
+    const shimDir = dirname(shim);
+    if (manager === 'pnpm') {
+      candidates.push(
+        join(shimDir, 'node_modules', 'pnpm', 'bin', 'pnpm.mjs'),
+        join(shimDir, 'node_modules', 'pnpm', 'bin', 'pnpm.cjs'),
+      );
+    } else {
+      candidates.push(join(shimDir, 'node_modules', 'npm', 'bin', 'npm-cli.js'));
+    }
+  }
+
+  if (manager === 'npm') {
+    candidates.push(join(dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js'));
+  }
+
+  const cli = candidates.find((candidate) => existsSync(candidate));
+  if (!cli) throw new Error(`could not resolve the Windows ${manager} CLI`);
+  return cli;
+}
+
+function runPackageManager(manager, args, options = {}) {
+  if (process.platform !== 'win32') return run(manager, args, options);
+  return run(process.execPath, [windowsPackageManagerCli(manager), ...args], options);
+}
+
 const root = mkdtempSync(join(tmpdir(), 'gezel-packed-consumer-'));
 const tarballDir = join(root, 'tarballs');
 const consumer = join(root, 'consumer');
-run('mkdir', ['-p', tarballDir, consumer]);
+mkdirSync(tarballDir, { recursive: true });
+mkdirSync(consumer, { recursive: true });
 
 try {
   // ── 1. Pack ────────────────────────────────────────────────────────────
@@ -102,7 +159,9 @@ try {
   const tarballs = [];
   for (const dir of PUBLISHED) {
     const packageDir = resolve(repoRoot, 'packages', dir);
-    const result = run('pnpm', ['pack', '--pack-destination', tarballDir], { cwd: packageDir });
+    const result = runPackageManager('pnpm', ['pack', '--pack-destination', tarballDir], {
+      cwd: packageDir,
+    });
     if (result.status !== 0) fail(`pnpm pack ${dir}\n${result.stderr}`);
   }
   for (const file of readdirSync(tarballDir)) {
@@ -120,7 +179,7 @@ try {
     join(consumer, 'package.json'),
     `${JSON.stringify({ name: 'gezel-packed-consumer', private: true, type: 'module', version: '0.0.0' }, null, 2)}\n`,
   );
-  const install = run('npm', ['install', '--no-audit', '--no-fund', ...tarballs], {
+  const install = runPackageManager('npm', ['install', '--no-audit', '--no-fund', ...tarballs], {
     cwd: consumer,
   });
   if (install.status !== 0) {
@@ -162,9 +221,9 @@ try {
 
   // ── 5. The CLI binary ──────────────────────────────────────────────────
   step('running the installed CLI');
-  const bin = join(consumer, 'node_modules', '.bin', 'gezel');
+  const bin = join(consumer, 'node_modules', '@bendyline', 'gezel-cli', 'dist', 'bin', 'gezel.js');
   for (const args of [['--version'], ['--help']]) {
-    const result = run(bin, args, {
+    const result = run(process.execPath, [bin, ...args], {
       cwd: consumer,
       env: { ...process.env, GEZEL_VERSION: '0.0.0-consumer' },
     });
@@ -238,9 +297,15 @@ async function daemonSmoke(consumerDir) {
       return;
     }
 
-    const { GezelClient } = await import(
-      join(consumerDir, 'node_modules', '@bendyline', 'gezel-client', 'dist', 'index.js')
+    const clientEntry = join(
+      consumerDir,
+      'node_modules',
+      '@bendyline',
+      'gezel-client',
+      'dist',
+      'index.js',
     );
+    const { GezelClient } = await import(pathToFileURL(clientEntry).href);
     const client = new GezelClient({ baseUrl: runtime.baseUrl, token: runtime.token });
 
     const health = await client.health();
