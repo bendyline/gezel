@@ -70,31 +70,26 @@ export function IntroHandboekArticle() {
   // Two doc builds from one markdown. The reading doc carries no block
   // durations — durations turn LinearDocView into a timed reader that
   // dims all but the active block, wrong for a static embed. The player
-  // doc keeps them so the synthetic clock paces the video. Both drop the
-  // article's own `# title`: the gezellig theme renders a level-1
-  // heading as a full-height hero page, which is the right move in the
-  // Handboek but overwhelms this embed — the card's wordmark header
-  // already names the subject.
-  const markdown = useMemo(() => article?.markdown.replace(/^#\s+[^\n]*\n/, '') ?? null, [article]);
+  // doc keeps them so the synthetic clock paces the video.
   const doc = useMemo(() => {
-    if (markdown === null) return null;
+    if (!article) return null;
     try {
-      return markdownToDoc(parseMarkdown(markdown));
+      return markdownToDoc(parseMarkdown(article.markdown));
     } catch {
       return null;
     }
-  }, [markdown]);
+  }, [article]);
   const playerDoc = useMemo(() => {
-    if (markdown === null || !article) return null;
+    if (!article) return null;
     try {
-      return markdownToDoc(parseMarkdown(markdown), {
+      return markdownToDoc(parseMarkdown(article.markdown), {
         articleId: article.id,
         defaultDuration: article.defaultDuration ?? 6,
       });
     } catch {
       return null;
     }
-  }, [markdown, article]);
+  }, [article]);
 
   // Intra-article links (`the-crew.md`, `projects-and-sessions.md`) can't
   // resolve inside the Home card — send them to the Handboek, landing on
@@ -179,12 +174,22 @@ export function IntroHandboekArticle() {
         <MediaContext.Provider value={mediaProvider}>
           {mode === 'doc' ? (
             <div className="home-intro-doc" onClickCapture={onDocClickCapture}>
+              {/* No synthesized cover, same call HandboekView makes.
+                  LinearDocView's default turns `doc.startBlock` into a
+                  full-bleed hero: a page-tall band whose backdrop is the
+                  article's leading figure and whose title/subtitle restate
+                  the first section verbatim a scroll above the real thing.
+                  Without it the article opens on its own heading with the
+                  brand mark at editorial size beside the prose. Video mode
+                  keeps its cover — a title slide is the right opening
+                  frame there. */}
               <LinearDocView
                 doc={doc}
                 theme={gezelChatTheme}
                 surface={surface}
                 thinMargins
                 imageDisplayMode="inline"
+                showCover={false}
               />
             </div>
           ) : (

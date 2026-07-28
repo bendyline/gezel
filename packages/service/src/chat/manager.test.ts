@@ -4293,12 +4293,16 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
       const create = localMock.calls.find((c) => c.kind === 'create');
       const allow = create!.opts!.toolAllowlist!;
       // Non-delegation router surface stays compact; role tools are exempt.
+      // The two craftbook entry points keep exact-format deliverables on
+      // their bundled production path instead of falling back to ad-hoc work.
       expect(
         [...allow].filter((t) => !t.startsWith('delegate_') && !t.startsWith('consult_')).length,
-      ).toBeLessThanOrEqual(12);
+      ).toBeLessThanOrEqual(14);
       expect(allow.has('start_job')).toBe(true);
       expect(allow.has('start_project')).toBe(true);
       expect(allow.has('message_gezel')).toBe(true);
+      expect(allow.has('suggest_craftbook')).toBe(true);
+      expect(allow.has('invoke_craftbook')).toBe(true);
       expect(allow.has('ask_user_question')).toBe(false);
       expect(allow.has('ask_gezel')).toBe(false);
       expect(allow.has('ask_specialist')).toBe(false);
@@ -4313,6 +4317,8 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
         expect(listedTools).toContain('`start_job`');
         expect(listedTools).toContain('`start_project`');
         expect(listedTools).toContain('`message_gezel`');
+        expect(listedTools).toContain('`suggest_craftbook`');
+        expect(listedTools).toContain('`invoke_craftbook`');
         expect(listedTools).not.toContain('`ask_user_question`');
         expect(listedTools).not.toContain('`ask_gezel`');
         expect(listedTools).not.toContain('`ask_specialist`');

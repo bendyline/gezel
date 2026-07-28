@@ -34,13 +34,20 @@ let mcpPath: string;
 let bridgeEnv: Record<string, string>;
 
 async function waitForProjectSessionText(projectId: string, pattern: RegExp): Promise<string> {
-  // Generous poll window: the kickoff session is created asynchronously
-  // after start_job returns, and under full-suite load (several test files
-  // each spawning MCP server children) that can take well past a couple of
-  // seconds. The loop returns the instant the text appears, so a larger
-  // deadline only costs wall-clock in the genuine-failure case.
-  const deadline = Date.now() + 15_000;
-  while (Date.now() < deadline) {
+  // The kickoff macros return once the entry step is ENQUEUED on the task
+  // runner; the handoff session and its seed message only exist after a
+  // runner tick dispatches it and the fire-and-forget send lands. Drive
+  // both ends rather than racing a wall clock: `tick()` is public for
+  // exactly this, and `drainBackground()` awaits the detached send.
+  // A timed poll passed here for months and then failed on CI, where the
+  // 5s ticker and a per-session MCP child spawn on a loaded 4-vCPU runner
+  // outran the window — a slow machine must not change the outcome.
+  for (let pass = 0; pass < 10; pass++) {
+    // Drain first so slots and writes from earlier tests' unawaited
+    // kickoffs settle before this pass measures anything.
+    await svc.context.chat.drainBackground();
+    await svc.context.taskRunner.tick();
+    await svc.context.chat.drainBackground();
     const sessions = await svc.context.store.listSessions({ projectId });
     for (const summary of sessions) {
       const session = await svc.context.store.getSession(summary.gezelId, summary.id);

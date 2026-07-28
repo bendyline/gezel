@@ -70,7 +70,10 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  await rm(home, { recursive: true, force: true });
+  // MCP subprocess teardown can finish releasing files just after the
+  // manager disconnects under full-suite load. Retry the recursive walk
+  // instead of surfacing that harmless overlap as ENOTEMPTY.
+  await rm(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 async function createTask(projectId: string, title: string) {
@@ -153,6 +156,9 @@ describe('layered prefix cache — gating', () => {
     }
   });
 
+  // The 30s budget: this integration path starts a real MCP subprocess. It is
+  // sub-second alone but can cross the project's 10s default at the tail of the
+  // full service suite, where other subprocess-heavy files have the same budget.
   it('NEVER restructures a cloud provider, even with { enabled: true }', async () => {
     await store.writeConfig({ provider: 'copilot', layeredPrefixCache: { enabled: true } });
     const proj = await store.createProject({ name: 'Shop' });
@@ -177,7 +183,7 @@ describe('layered prefix cache — gating', () => {
       await manager.drainBackground();
       await manager.shutdown();
     }
-  });
+  }, 30_000);
 
   it('keeps the stable prefix byte-identical across sessions with different volatile state (#1)', async () => {
     await store.writeConfig({ provider: 'llama-cpp' });
