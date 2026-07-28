@@ -2821,6 +2821,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
           tool: string;
           count: number;
           sourceFailureKind?: 'truncated' | 'not-persisted';
+          transportFailure?: boolean;
         } | null = null;
         let asyncFileHandoffCount = 0;
         const immediateFileWritePaths: string[] = [];
@@ -2960,6 +2961,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
               ...(tracked.sourceFailureKind
                 ? { sourceFailureKind: tracked.sourceFailureKind }
                 : {}),
+              ...(tracked.transportFailure ? { transportFailure: true } : {}),
             };
             break;
           }
@@ -2998,6 +3000,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
             ...(abortDueToFailureLoop.sourceFailureKind
               ? { sourceFailureKind: abortDueToFailureLoop.sourceFailureKind }
               : {}),
+            ...(abortDueToFailureLoop.transportFailure ? { transportFailure: true } : {}),
           });
         }
         if (immediateFileWritePaths.length > 0) {

@@ -369,7 +369,7 @@ export function projectRoutes(ctx: ServiceContext): Hono {
       ...projectItems,
       ...catalogItems.filter((it) => !projectIds.has(it.manifest.id)),
     ];
-    const missingToolsets = await missingToolsetsForCraftbooks(ctx.store, items);
+    const missingToolsets = await missingToolsetsForCraftbooks(ctx.store, items, id);
     // Resolve the project's type (user override → auto-detected → none) and
     // compute the curated suggested subset. Additive fields: older clients
     // ignore them and keep showing the full list.

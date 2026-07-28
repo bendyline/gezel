@@ -41,6 +41,31 @@ describe('ToolFailureTracker', () => {
     expect(t.recordResult('delegate_meester', 'Write failed: fetch failed').count).toBe(1);
   });
 
+  it('uses one shared transport circuit across different tool names', () => {
+    const t = new ToolFailureTracker();
+    const first = t.recordResult('delegate_researcher', 'Write failed: fetch failed');
+    expect(first.shouldAbort).toBe(false);
+    expect(first.transportFailure).toBe(true);
+    expect(first.output).toContain('share the same connection');
+
+    const second = t.recordResult('message_gezel', 'ERROR: fetch failed');
+    expect(second.shouldAbort).toBe(true);
+    expect(second.transportFailure).toBe(true);
+    expect(second.count).toBe(2);
+  });
+
+  it('surfaces transport aborts as an internal connection problem', () => {
+    const err = ToolFailureTracker.buildAbort({
+      providerLabel: 'llama.cpp',
+      toolName: 'message_gezel',
+      count: 2,
+      transportFailure: true,
+    });
+    expect(err.message).toContain('internal tool connection');
+    expect(err.userMessage).toContain('lost its internal tool connection');
+    expect(err.userMessage).not.toContain('message_gezel');
+  });
+
   it('counts draft-plan set_task_status refusals and redirects to set_step_deliverable immediately', () => {
     const t = new ToolFailureTracker();
     const refusal = [

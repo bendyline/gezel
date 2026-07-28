@@ -21,6 +21,7 @@ import {
   type Craftbook,
   CraftbookBranchSchema,
   type CraftbookStep,
+  type CraftbookToolsetNeed,
   type DeliverableKind,
   DeliverableKindSchema,
   ExpectedDeliverableSchema,
@@ -3478,9 +3479,19 @@ function clampText(text: string, max: number): string {
   return clean.length <= max ? clean : `${clean.slice(0, max - 1)}…`;
 }
 
+function craftbookSetupRequiredText(craftbookId: string, missing: CraftbookToolsetNeed[]): string {
+  const needs = missing
+    .map((need) => {
+      const reason = need.reason ? ` (${clampText(need.reason, 120)})` : '';
+      return `${need.toolsetId}${reason}`;
+    })
+    .join(', ');
+  return `SETUP REQUIRED for craftbook "${craftbookId}": install/configure ${needs} from the project's Craftbooks/Commands setup before invoking it. Do not create a substitute task, hand-write replacement steps, or silently change the requested output format.`;
+}
+
 server.tool(
   'suggest_craftbook',
-  'Rank the available craftbooks against a task description and return the best-matching few — a shortlist, not the whole catalog. Use this (instead of scanning list_craftbooks) whenever you have a job to do and want the right procedure: describe the job, take the top hit, and invoke_craftbook it. If nothing scores well, fall back to the generic "build-loop" book or create_task with explicit phase steps.',
+  'Rank the available craftbooks against a task description and return the best-matching few — a shortlist, not the whole catalog. Use this (instead of scanning list_craftbooks) whenever you have a job to do and want the right procedure. The result explicitly identifies missing required toolset setup; never invoke or substitute for a craftbook until that setup is complete.',
   {
     query: z
       .string()
@@ -3503,11 +3514,16 @@ server.tool(
   },
   async ({ query, project, limit }) => {
     const resolvedProject = project ? await resolveProjectId(project) : projectId;
-    const res = await api.suggestCraftbooks({
-      query,
-      ...(resolvedProject ? { projectId: resolvedProject } : {}),
-      ...(limit ? { topK: limit } : {}),
-    });
+    const [res, projectCraftbooks] = await Promise.all([
+      api.suggestCraftbooks({
+        query,
+        ...(resolvedProject ? { projectId: resolvedProject } : {}),
+        ...(limit ? { topK: limit } : {}),
+      }),
+      resolvedProject
+        ? api.listProjectCraftbooks(resolvedProject).catch(() => null)
+        : Promise.resolve(null),
+    ]);
     if (!res.suggestions.length) {
       return {
         content: [
@@ -3522,14 +3538,25 @@ server.tool(
       .map((s, i) => {
         const pct = Math.round(s.score * 100);
         const desc = s.description ? ` — ${s.description}` : '';
-        return `${i + 1}. ${s.name} (id: ${s.id}) [${s.source}, ${s.stepCount} step(s), ${pct}% match]${desc}`;
+        const missing = projectCraftbooks?.missingToolsets[s.id] ?? [];
+        const setup =
+          missing.length > 0
+            ? ` [SETUP REQUIRED: ${missing.map((need) => need.toolsetId).join(', ')}]`
+            : '';
+        return `${i + 1}. ${s.name} (id: ${s.id}) [${s.source}, ${s.stepCount} step(s), ${pct}% match]${setup}${desc}`;
       })
       .join('\n');
+    const top = res.suggestions[0]!;
+    const topMissing = projectCraftbooks?.missingToolsets[top.id] ?? [];
+    const nextAction =
+      topMissing.length > 0
+        ? craftbookSetupRequiredText(top.id, topMissing)
+        : `Next call: invoke_craftbook({ craftbookId: "${top.id}" }) — send it now unless a lower match clearly fits the job better. Do not delegate the job raw and do not hand-write task steps; the recipe's gated steps already handle assignment and quality checks.`;
     return {
       content: [
         {
           type: 'text' as const,
-          text: `Best craftbook matches for "${query}":\n${listing}\n\nNext call: invoke_craftbook({ craftbookId: "${res.suggestions[0]!.id}" }) — send it now unless a lower match clearly fits the job better. Do not delegate the job raw and do not hand-write task steps; the recipe's gated steps already handle assignment and quality checks.`,
+          text: `Best craftbook matches for "${query}":\n${listing}\n\n${nextAction}`,
         },
       ],
     };
@@ -3636,7 +3663,7 @@ server.tool(
 
 server.tool(
   'invoke_craftbook',
-  "Spawn a task from a craftbook template — the procedure-first shorthand for create_task with a craftbookId. The new task starts at the recipe's entry step. The craftbook's bundled scripts (if any) install into the project on first invocation. Returns the new task ref.",
+  "Spawn a task from a craftbook template — the procedure-first shorthand for create_task with a craftbookId. Required toolsets are preflighted first; when setup is missing, this returns SETUP REQUIRED and does not create a doomed task. The new task starts at the recipe's entry step. The craftbook's bundled scripts (if any) install into the project on first invocation. Returns the new task ref.",
   {
     craftbookId: z
       .string()
@@ -3658,6 +3685,18 @@ server.tool(
   async ({ craftbookId, project, title, description, version, assignee }) => {
     const resolvedProject = project ? await resolveProjectId(project) : projectId;
     try {
+      const projectCraftbooks = await api.listProjectCraftbooks(resolvedProject);
+      const missing = projectCraftbooks.missingToolsets[craftbookId] ?? [];
+      if (missing.length > 0) {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: craftbookSetupRequiredText(craftbookId, missing),
+            },
+          ],
+        };
+      }
       const created = await api.createTask(resolvedProject, {
         title: title ?? `${craftbookId} — ${new Date().toISOString().slice(0, 16)}`,
         description: description ?? `Run the ${craftbookId} craftbook against this project.`,

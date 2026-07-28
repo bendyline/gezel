@@ -1379,6 +1379,18 @@ export class GezelApiError extends Error {
   }
 }
 
+function describeTransportError(error: unknown): string {
+  if (!(error instanceof Error)) return String(error);
+  const cause = (error as Error & { cause?: unknown }).cause;
+  if (cause instanceof Error && cause.message && cause.message !== error.message) {
+    return `${error.message} (${cause.message})`;
+  }
+  if (cause && typeof cause === 'object' && 'code' in cause) {
+    return `${error.message} (${String((cause as { code?: unknown }).code)})`;
+  }
+  return error.message;
+}
+
 type ConsumeApiSseJsonOptions<T> = ConsumeSseJsonOptions<T> & {
   staleMessage?: string;
 };
@@ -1502,16 +1514,26 @@ export class GezelClient {
     extraHeaders?: Record<string, string>,
     signal?: AbortSignal,
   ): Promise<T> {
-    const res = await this.fetchImpl(`${this.baseUrl}${path}`, {
-      method,
-      headers: {
-        Authorization: `Bearer ${this.token}`,
-        ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
-        ...(extraHeaders ?? {}),
-      },
-      body: body !== undefined ? JSON.stringify(body) : undefined,
-      ...(signal ? { signal } : {}),
-    });
+    let res: Response;
+    try {
+      res = await this.fetchImpl(`${this.baseUrl}${path}`, {
+        method,
+        headers: {
+          Authorization: `Bearer ${this.token}`,
+          ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+          ...(extraHeaders ?? {}),
+        },
+        body: body !== undefined ? JSON.stringify(body) : undefined,
+        ...(signal ? { signal } : {}),
+      });
+    } catch (error) {
+      const message = describeTransportError(error);
+      throw new GezelApiError(
+        `Gezel API transport unavailable on ${method} ${path}: ${message}`,
+        0,
+        { kind: 'transport', cause: message },
+      );
+    }
     if (!res.ok) {
       // Read the body exactly once — fetch Response bodies are
       // one-shot streams, so calling `.json()` consumes them even on
@@ -2103,6 +2125,28 @@ export class GezelClient {
   ): Promise<{ versions: CatalogItemVersionInfo[] }> {
     const qs = source ? `?source=${encodeURIComponent(source)}` : '';
     return this.request('GET', `/api/catalog/${kind}/${encodeURIComponent(id)}/versions${qs}`);
+  }
+
+  /**
+   * Fetch a catalog item's bundled file (logo, README, about.md) as a Blob,
+   * given the server-composed path from `CatalogItemSummary.logoUrl`.
+   *
+   * Takes the whole path rather than (kind, id, rel, source) because the
+   * service already built it — reassembling it here would duplicate
+   * `logoUrlFor`'s escaping and drift from it.
+   *
+   * Exists because `/api/*` is bearer-gated and `<img src>` cannot send an
+   * Authorization header: consumers fetch here and wrap the Blob in an
+   * object URL. Do NOT "fix" this by admitting `?token=` on the catalog
+   * file route — that would stamp the root credential across every logo
+   * URL in the DOM. The SSE query-token exemption is one URL by design.
+   */
+  async fetchCatalogFile(path: string): Promise<Blob> {
+    const res = await this.fetchImpl(`${this.baseUrl}${path}`, {
+      headers: { Authorization: `Bearer ${this.token}` },
+    });
+    if (!res.ok) throw new Error(`catalog file fetch failed: ${res.status}`);
+    return res.blob();
   }
 
   createGezelFromTemplate(

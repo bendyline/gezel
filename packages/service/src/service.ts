@@ -709,6 +709,21 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
       ? { tickIntervalMs: config.taskRunner.tickIntervalMs }
       : {}),
   });
+  // A model-owned completion-gate loop keeps repairing inside its existing
+  // turn; TaskManager therefore does not enqueue a replacement handoff. Move
+  // TaskRunner's live dispatch to the new activation timestamp immediately so
+  // its stale-dispatch pruning does not cancel that same recovery turn.
+  tasks.setCurrentTurnStepReactivatedHook(({ task, newStep }) => {
+    const gezelId =
+      newStep.assignee?.kind === 'gezel' ? newStep.assignee.gezelId : newStep.suggestedGezelId;
+    if (!gezelId || !newStep.lastActivatedAt) return;
+    taskRunner.adoptActiveDispatchActivation({
+      taskRef: task.ref,
+      stepId: newStep.id,
+      gezelId,
+      activationAt: newStep.lastActivatedAt,
+    });
+  });
 
   // Script runner: executes project-scoped TypeScript scripts in the
   // sandbox with fd-3 RPC back to the service. Wired into TaskManager
@@ -1842,6 +1857,11 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     async stop() {
       scheduler.stop();
       nightShift.stop();
+      // Quiesce chat before tearing down any callback dependencies. In
+      // particular, keep the HTTP listener alive while MCP subprocesses and
+      // active provider turns unwind; otherwise their service callbacks fail
+      // as the misleading transport error "fetch failed".
+      await chat.beginShutdown();
       await taskRunner.stop();
       memoryHealth.stop();
       memoryCompactor.stop();
@@ -1880,6 +1900,9 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
           setTimeout(finish, 2_000).unref();
         });
       }
+      await chat.drainBackground();
+      // Shut providers down while the service backchannel is still alive.
+      await chat.shutdown().catch(() => {});
       // Initiate graceful close, but don't block forever waiting for
       // SSE streams to wind down. Active streams hold the server open
       // until each handler's keepalive loop notices the disconnect —
@@ -1914,14 +1937,6 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
         // process exits or the next test starts.
         setTimeout(finish, 2_000).unref();
       });
-      await chat.drainBackground();
-      // Shut the chat manager down explicitly so each provider's
-      // shutdown() runs — including MlxProvider, whose
-      // NativeEngineSupervisor owns the `gezel_mlx_server.py` child.
-      // Without this the python subprocess stays alive past
-      // Electron's before-quit, gets reparented to launchd, and
-      // accumulates one orphan per app launch.
-      await chat.shutdown().catch(() => {});
       // Kill all persistent terminal shells. Without this, the bash
       // (or PowerShell) children spawned by the per-thread pool stay
       // resident past the daemon's exit until their idle timers

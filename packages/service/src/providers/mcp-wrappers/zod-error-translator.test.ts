@@ -78,6 +78,18 @@ describe('ZodErrorTranslator', () => {
     expect(out).toContain('expected string');
   });
 
+  it('recognizes Zod 4 missing fields when received is only present in the message', async () => {
+    const raw = `Invalid arguments for tool create_task: [
+  {"expected":"string","code":"invalid_type","path":["title"],"message":"Invalid input: expected string, received undefined"},
+  {"expected":"string","code":"invalid_type","path":["description"],"message":"Invalid input: expected string, received undefined"}
+]`;
+    const out = await ZodErrorTranslator.postProcessError!('create_task', {}, raw, ctx);
+    expect(out).toContain('Missing required fields');
+    expect(out).toContain('`title`');
+    expect(out).toContain('`description`');
+    expect(out).not.toContain('got unknown');
+  });
+
   it('redirects impossible draft status changes toward plan gate authoring', async () => {
     const raw = `Invalid arguments for tool set_task_status: [
   {"received":"draft","code":"invalid_enum_value","options":["paused","active","complete","canceled"],"path":["status"],"message":"Invalid enum value. Expected 'paused' | 'active' | 'complete' | 'canceled', received 'draft'"}

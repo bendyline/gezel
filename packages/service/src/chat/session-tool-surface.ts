@@ -397,6 +397,11 @@ const MEESTER_PROJECT_ORCHESTRATION_TOOLS = [
   'list_gezels',
   'ensure_gezel',
   'message_gezel',
+  // Exact-format production should enter its bundled procedure instead of
+  // falling back to ad-hoc task creation or markdown. These two are the
+  // compact front door; the invoked task carries the rest of the workflow.
+  'suggest_craftbook',
+  'invoke_craftbook',
   'search_memory',
   'save_memory',
   'search_history',
@@ -652,8 +657,11 @@ export function toolCapForTierAndRole(
   // execution/browser tools while keeping EVERY curated tool, crucially
   // `read_task_notes` (rank ~26), whose trimming under the old cap-of-13
   // broke a 12B meester (the incident above). Capping AT the list length
-  // (never below it) is exactly what makes that safe. Env-gated OFF by
-  // default pending a live macro-brief A/B (GEZEL_MEESTER_TOOL_DIET=1).
+  // (never below it) is exactly what makes that safe. This is now the
+  // default: shipping the uncapped surface made a 64k local-model window
+  // start effectively full before the first user token. Operators can
+  // temporarily restore the legacy surface with
+  // GEZEL_MEESTER_TOOL_DIET=0 while diagnosing a missing-tool regression.
   if (tier === 'medium' || tier === 'large') {
     const diet = coordinatorToolDietCap(role, opts?.coordinatorToolDiet);
     if (diet !== null) return diet;
@@ -677,7 +685,10 @@ function coordinatorToolDietCap(
   role: string | undefined,
   enabledOverride?: boolean,
 ): number | null {
-  const enabled = enabledOverride ?? process.env.GEZEL_MEESTER_TOOL_DIET === '1';
+  const enabled =
+    enabledOverride ??
+    (process.env.GEZEL_MEESTER_TOOL_DIET === undefined ||
+      process.env.GEZEL_MEESTER_TOOL_DIET === '1');
   if (!enabled) return null;
   return coordinatorPriorityLength(role);
 }
@@ -789,7 +800,7 @@ function shouldConstrainToProjectOrchestration(opts: {
 }): boolean {
   if (!isLocalProvider(opts.provider)) return false;
   const normalizedRole = opts.role?.toLowerCase().trim() ?? '';
-  if (!normalizedRole.includes('meester')) return false;
+  if (!normalizedRole.includes('meester') && !normalizedRole.includes('voorman')) return false;
   const text = opts.latestUserMessage?.toLowerCase() ?? '';
   if (!text.trim()) return false;
   // Procedure/recipe asks have their own Meester prelude and tool surface.
@@ -806,7 +817,7 @@ function shouldConstrainToProjectOrchestration(opts: {
   }
   const asksForBuild = /\b(?:build|create|make|develop|implement|prototype|ship)\b/i.test(text);
   const namesDeliverable =
-    /\b(?:project|game|app|application|website|site|dashboard|tool|prototype|html|browser)\b/i.test(
+    /\b(?:project|game|app|application|website|site|dashboard|tool|prototype|html|browser|powerpoint|presentation|slide\s*deck|slides?|document|report|pdf|docx|pptx|xlsx|spreadsheet)\b/i.test(
       text,
     );
   return asksForBuild && namesDeliverable;

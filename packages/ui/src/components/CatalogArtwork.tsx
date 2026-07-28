@@ -1,4 +1,5 @@
 import { type ReactNode, useState } from 'react';
+import { useCatalogArtworkUrl } from './catalog-artwork-url.js';
 
 /**
  * Renders catalog artwork without ever exposing the browser's native
@@ -7,6 +8,11 @@ import { type ReactNode, useState } from 'react';
  *
  * `iconSvg` is intended for catalog SVG that has already been sanitized by
  * the service before it reaches the UI.
+ *
+ * `logoUrl` takes the raw value off `CatalogItemSummary` — including the
+ * service's bearer-gated `/api/catalog/.../file/...` paths, which
+ * `useCatalogArtworkUrl` swaps for an object URL because `<img>` cannot send
+ * an Authorization header. Absolute and `data:` URLs pass through untouched.
  */
 export function CatalogArtwork({
   iconSvg,
@@ -23,6 +29,7 @@ export function CatalogArtwork({
 }) {
   const [failedLogoUrl, setFailedLogoUrl] = useState<string | null>(null);
   const [loadedLogoUrl, setLoadedLogoUrl] = useState<string | null>(null);
+  const artworkUrl = useCatalogArtworkUrl(logoUrl);
 
   if (iconSvg) {
     return (
@@ -34,17 +41,17 @@ export function CatalogArtwork({
     );
   }
 
-  if (logoUrl && failedLogoUrl !== logoUrl) {
+  if (artworkUrl && failedLogoUrl !== artworkUrl) {
     return (
       <>
-        {loadedLogoUrl !== logoUrl && fallback}
+        {loadedLogoUrl !== artworkUrl && fallback}
         <img
           className={imageClassName}
-          src={logoUrl}
+          src={artworkUrl}
           alt=""
-          hidden={loadedLogoUrl !== logoUrl}
-          onLoad={() => setLoadedLogoUrl(logoUrl)}
-          onError={() => setFailedLogoUrl(logoUrl)}
+          hidden={loadedLogoUrl !== artworkUrl}
+          onLoad={() => setLoadedLogoUrl(artworkUrl)}
+          onError={() => setFailedLogoUrl(artworkUrl)}
         />
       </>
     );

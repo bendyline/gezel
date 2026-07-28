@@ -162,7 +162,13 @@ export class TaskRunner {
   private readonly pending: PendingHandoff[] = [];
   private readonly activeDispatches = new Map<
     string,
-    { sessionId: string; taskRef: string; stepId: string; activationAt?: string }
+    {
+      sessionId: string;
+      taskRef: string;
+      stepId: string;
+      gezelId: string;
+      activationAt?: string;
+    }
   >();
   private nextId = 1;
   private ticker: ReturnType<typeof setInterval> | null = null;
@@ -210,6 +216,50 @@ export class TaskRunner {
       enqueuedAt: this.now(),
       id: this.nextId++,
     });
+  }
+
+  /**
+   * Transfer an already-running dispatch to a fresh activation of the same
+   * task step. Completion-gate self-loops driven by the active model turn do
+   * not enqueue a replacement handoff—the current turn consumes the verdict
+   * and repairs the deliverable—so the dispatch must follow the new
+   * `lastActivatedAt`. Otherwise `pruneActiveDispatches` treats it as
+   * superseded and aborts the healthy recovery turn.
+   *
+   * Returns true when a matching live dispatch was found. Sessions started
+   * outside TaskRunner are intentionally a no-op.
+   */
+  adoptActiveDispatchActivation(args: {
+    taskRef: string;
+    stepId: string;
+    gezelId: string;
+    activationAt: string;
+  }): boolean {
+    let adopted = false;
+    for (const [key, dispatch] of [...this.activeDispatches]) {
+      if (
+        dispatch.taskRef !== args.taskRef ||
+        dispatch.stepId !== args.stepId ||
+        dispatch.gezelId !== args.gezelId
+      ) {
+        continue;
+      }
+      const next = { ...dispatch, activationAt: args.activationAt };
+      const nextKey = handoffKey({
+        taskRef: next.taskRef,
+        stepId: next.stepId,
+        gezelId: next.gezelId,
+        activationAt: next.activationAt,
+      });
+      if (nextKey !== key) this.activeDispatches.delete(key);
+      this.activeDispatches.set(nextKey, next);
+      adopted = true;
+      log.debug(
+        `[task-runner] active dispatch ${dispatch.sessionId} adopted ` +
+          `${args.taskRef}/${args.stepId} activation ${args.activationAt}`,
+      );
+    }
+    return adopted;
   }
 
   /**
@@ -419,6 +469,7 @@ export class TaskRunner {
           sessionId: started.sessionId,
           taskRef: handoff.taskRef,
           stepId: handoff.stepId,
+          gezelId: handoff.gezelId,
           ...(activationAt ? { activationAt } : {}),
         });
         inTickDispatches.set(providerName, (inTickDispatches.get(providerName) ?? 0) + 1);

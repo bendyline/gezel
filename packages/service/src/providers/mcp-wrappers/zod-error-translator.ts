@@ -34,6 +34,17 @@ interface ZodIssue {
   received?: string;
 }
 
+function isMissingValueIssue(issue: ZodIssue): boolean {
+  if (issue.code !== 'invalid_type') return false;
+  // Zod 3 included `received: "undefined"` in serialized issues. Zod 4
+  // moved that detail into the human message and omits `received`, so
+  // checking only the field mislabels required fields as "got unknown".
+  return (
+    issue.received === 'undefined' ||
+    (issue.received === undefined && /\breceived undefined\b/i.test(issue.message ?? ''))
+  );
+}
+
 const VALIDATION_PREFIX_RE =
   /(?:Input validation error: )?Invalid arguments for tool ([\w-]+):\s*(\[[\s\S]*\])/;
 
@@ -81,7 +92,7 @@ function translateIssues(toolName: string, issues: ZodIssue[]): string {
 
   for (const issue of issues) {
     const label = pathLabel(issue.path);
-    if (issue.code === 'invalid_type' && issue.received === 'undefined') {
+    if (isMissingValueIssue(issue)) {
       missing.push(label);
     } else if (issue.code === 'invalid_type') {
       wrongType.push(

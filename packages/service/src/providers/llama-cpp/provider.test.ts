@@ -7544,6 +7544,7 @@ describe('malformed structured tool-call argument repair', () => {
     expect(out.repaired[0]?.path).toBe('index.html');
     expect(out.repaired[0]?.bytes).toBeGreaterThan(80);
     expect(out.sanitized).toEqual([]);
+    expect(out.sanitizedIds).toEqual([]);
     const args = JSON.parse(out.toolCalls[0]?.function.arguments ?? '{}');
     expect(args.path).toBe('index.html');
     expect(args.content).toContain('<button>Reset</button>');
@@ -7562,6 +7563,7 @@ describe('malformed structured tool-call argument repair', () => {
     );
     expect(out.repaired).toEqual([]);
     expect(out.sanitized).toEqual(['get_weather']);
+    expect(out.sanitizedIds).toEqual(['call_weather']);
     expect(out.toolCalls[0]?.function.arguments).toBe('{}');
   });
 });

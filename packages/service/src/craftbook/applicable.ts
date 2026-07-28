@@ -138,14 +138,18 @@ export async function projectCraftbookSummaries(
 
 /**
  * The ids of every toolset installed and visible to a project's
- * craftbooks. Gathers the `shared` + `system` scopes (a craftbook's
- * launcher listing isn't gezel-scoped, so per-gezel toolsets are out of
- * frame here). Used to compute which declared toolsets a craftbook is
- * still missing. Distinct from `requirements`: a missing toolset never
- * hides the craftbook — it surfaces a "needs setup" affordance.
+ * craftbooks. Gathers the `shared` + `system` scopes and, when supplied,
+ * the current project scope. The launcher isn't gezel-scoped, so per-gezel
+ * toolsets remain out of frame. Used to compute which declared toolsets a
+ * craftbook is still missing. Distinct from `requirements`: a missing
+ * toolset never hides the craftbook — it surfaces a "needs setup" affordance.
  */
-export async function installedToolsetIds(store: Store): Promise<Set<string>> {
-  const scopes: ToolsetsScope[] = [{ kind: 'shared' }, { kind: 'system' }];
+export async function installedToolsetIds(store: Store, projectId?: string): Promise<Set<string>> {
+  const scopes: ToolsetsScope[] = [
+    { kind: 'shared' },
+    { kind: 'system' },
+    ...(projectId ? ([{ kind: 'project', projectId }] satisfies ToolsetsScope[]) : []),
+  ];
   const ids = new Set<string>();
   for (const scope of scopes) {
     const installed = await store.listInstalledToolsets(scope).catch(() => []);
@@ -164,8 +168,9 @@ export async function installedToolsetIds(store: Store): Promise<Set<string>> {
 export async function missingToolsetsForCraftbooks(
   store: Store,
   items: CatalogItemSummary[],
+  projectId?: string,
 ): Promise<Record<string, CraftbookToolsetNeed[]>> {
-  const installed = await installedToolsetIds(store);
+  const installed = await installedToolsetIds(store, projectId);
   const out: Record<string, CraftbookToolsetNeed[]> = {};
   for (const it of items) {
     if (it.manifest.kind !== 'craftbook-template') continue;

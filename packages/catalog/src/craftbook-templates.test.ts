@@ -23,6 +23,7 @@ import { gildeDataDir } from './gilde-data.js';
 const indexPath = join(gildeDataDir(), 'craftbook-templates', 'index.json');
 
 interface BundledManifest {
+  logo?: string;
   id: string;
   name: string;
   entryStepId: string;
@@ -90,5 +91,37 @@ describe('bundled craftbook templates', () => {
     expect(byId.get('evaluate')?.next).toBe('build');
     expect(byId.get('finish')?.terminal).toBe(true);
     expect(byId.get('finish')?.next).toBeUndefined();
+  });
+
+  /**
+   * Gallery artwork. Gilde ships a `logo.webp` per craftbook and points each
+   * manifest at it; the UI resolves that through `logoUrlFor` into a
+   * `/api/catalog/.../file/...` path.
+   *
+   * This guards the failure mode that hid the artwork for four days: the
+   * imagery landed in gilde but the published npm package predated it, and
+   * because a missing logo degrades silently to a category glyph, the app
+   * looked identical either way. A release that drops or renames the files
+   * fails here instead of quietly reverting the gallery to glyphs.
+   */
+  it('every template declares a logo whose file is present in the package', async () => {
+    const manifests = await loadManifests();
+    const missingDeclaration = manifests.filter((m) => !m.logo).map((m) => m.id);
+    expect(missingDeclaration, 'craftbooks with no manifest.logo').toEqual([]);
+
+    const missingFile: string[] = [];
+    for (const m of manifests) {
+      const shard = m.id.slice(0, 2).toLowerCase();
+      const path = join(gildeDataDir(), 'craftbook-templates', shard, m.id, String(m.logo));
+      try {
+        const bytes = await readFile(path);
+        // A zero-byte or near-empty file would still "exist" while rendering
+        // as a broken image, which is the state this test is here to reject.
+        if (bytes.byteLength < 1024) missingFile.push(`${m.id} (${bytes.byteLength} bytes)`);
+      } catch {
+        missingFile.push(`${m.id} (${path} unreadable)`);
+      }
+    }
+    expect(missingFile, 'craftbooks whose logo file is absent or empty').toEqual([]);
   });
 });

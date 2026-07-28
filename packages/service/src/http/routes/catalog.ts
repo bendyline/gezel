@@ -15,6 +15,7 @@ import { BUILTIN_TOOLSETS, installNpmPackageToolset } from '@bendyline/gezel-cat
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { roleToolsetGroups } from '../../chat/role-tool-filter.js';
+import { isTrustedConstrainedToolset } from '../../toolsets/trust.js';
 import type { ServiceContext } from '../context.js';
 
 /**
@@ -317,14 +318,18 @@ export function catalogRoutes(ctx: ServiceContext): Hono {
       return c.json({ error: 'kind mismatch' }, 400);
     }
 
-    // Centralized security ceiling: installing a non-builtin toolset means
-    // downloading code (npm tarball) or wiring up a remote MCP — outbound
-    // external-service access. Blocked when services are disabled. Built-in
-    // groups are in-process and need no download, so they stay installable.
-    // (HuggingFace model pulls are the deliberate, separately-gated
-    // exception and don't flow through here.)
+    // Centralized security ceiling: arbitrary non-builtin toolsets download
+    // code or wire up remote MCP servers, so strict postures block them. The
+    // exact bundled DocBlocks package is a first-party, sha256-pinned runtime
+    // that starts with project-root confinement; installing it is the narrow
+    // exception needed for local document production under strict security.
     if (
       manifest.runtime.kind !== 'builtin' &&
+      !isTrustedConstrainedToolset({
+        toolsetId: manifest.id,
+        sourceId: detail.sourceId,
+        runtime: manifest.runtime,
+      }) &&
       !resolveSecurityPolicy(await ctx.store.readConfig()).allowExternalServices
     ) {
       return c.json(

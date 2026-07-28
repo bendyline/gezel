@@ -8,6 +8,7 @@ import {
   SetTaskStatusRequestSchema,
   SpawnTaskInstancesRequestSchema,
   StepPositionSchema,
+  type Task,
   type TaskNoteAuthor,
   TaskStatusSchema,
   UpdateTaskCraftbookRequestSchema,
@@ -31,6 +32,7 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import { craftbookScriptErrors } from '../../scripts/source.js';
 import { dispatchTaskEntry } from '../../tasks/entry-dispatch.js';
+import { CraftbookSetupRequiredError } from '../../tasks/manager.js';
 import type { ServiceContext } from '../context.js';
 
 const taskDocLog = createLogger('craftbooks');
@@ -101,7 +103,23 @@ export function projectTaskRoutes(ctx: ServiceContext): Hono {
   app.post('/:projectId/tasks', async (c) => {
     const projectId = c.req.param('projectId');
     const { dispatchEntry, ...body } = CreateTaskRequestSchema.parse(await c.req.json());
-    const task = await ctx.tasks.create(projectId, body);
+    let task: Task;
+    try {
+      task = await ctx.tasks.create(projectId, body);
+    } catch (err) {
+      if (err instanceof CraftbookSetupRequiredError) {
+        return c.json(
+          {
+            error: err.message,
+            code: err.code,
+            craftbookId: err.craftbookId,
+            missingToolsets: err.missingToolsets,
+          },
+          409,
+        );
+      }
+      throw err;
+    }
     if (dispatchEntry) {
       // Single-channel kickoff: hand the entry step to its gezel as a
       // task-scoped handoff. Best-effort — guard trips are logged +

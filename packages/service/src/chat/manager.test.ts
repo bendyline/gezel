@@ -1131,6 +1131,30 @@ describe('ChatManager — inflight visibility + cancel', () => {
     const res = await manager.cancelInflight(session.id);
     expect(res.cancelled).toBe(false);
   });
+
+  it('beginShutdown cancels live turns, drops parked handoffs, and rejects new sends', async () => {
+    const session = await manager.createSession({ gezelId: 'ada' });
+    let parkedRan = false;
+    const internals = manager as unknown as {
+      inflight: Map<string, { userText: string; startedAt: number }>;
+      afterSessionIdle: Map<string, Array<() => void>>;
+    };
+    internals.inflight.set(session.id, { userText: 'still running', startedAt: Date.now() });
+    internals.afterSessionIdle.set(session.id, [
+      () => {
+        parkedRan = true;
+      },
+    ]);
+
+    await manager.beginShutdown();
+
+    expect(manager.inflightInfo(session.id)).toBeNull();
+    expect(parkedRan).toBe(false);
+    expect(internals.afterSessionIdle.size).toBe(0);
+    await expect(manager.send(session.id, 'one more thing')).rejects.toThrow(
+      'service shutting down',
+    );
+  });
 });
 
 describe('ChatManager — listSessions', () => {
@@ -1223,6 +1247,34 @@ describe('ChatManager — messageGezel (cross-gezel messaging)', () => {
     expect(seed).toContain('single-file HTML deliverable');
     expect(seed).toContain('put CSS in `<style>` and JavaScript in one inline `<script>`');
     expect(seed).toContain('Do NOT create or rely on `script.js`, `styles.css`');
+  });
+
+  it('preserves a PPTX handoff as a binary deliverable instead of writeFile markdown', async () => {
+    await store.createGezel({ name: 'Maya', role: 'Developer' });
+    const adaSession = await manager.createSession({ gezelId: 'ada' });
+    mock.script('The exact-format production surface is unavailable.');
+
+    const res = await manager.messageGezel({
+      fromGezelId: 'ada',
+      fromSessionId: adaSession.id,
+      toGezelIdOrName: 'maya',
+      text: 'Create a PowerPoint about D-Day.',
+      expectedDeliverable: { kind: 'file', filePath: 'd-day.pptx' },
+    });
+
+    await waitForCondition(async () => {
+      const disk = await store.getSession('maya', res.sessionId);
+      return (disk?.messages.length ?? 0) >= 2;
+    });
+
+    const mayaDisk = await store.getSession('maya', res.sessionId);
+    const seed = String(mayaDisk!.messages[0]?.content ?? '');
+    expect(seed).toContain('REAL BINARY DOCUMENT at `d-day.pptx`');
+    expect(seed).toContain('`convert_document`');
+    expect(seed).toContain('`preview_document`');
+    expect(seed).toContain('`save_artifact`');
+    expect(seed).toContain('blocked instead of silently substituting another format');
+    expect(seed).not.toContain('first assistant action should be the tool call `writeFile');
   });
 
   it('does not append a contradictory writeFile-first instruction to focused repair handoffs', async () => {
@@ -3849,14 +3901,11 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
     }
   });
 
-  it('medium local voorman keeps her full default roster without arbitrary trimming', async () => {
-    // Repro (qwen3.6-27b-q8/MLX, "Empire Strategy Game"): the
-    // medium-tier voorman cap was 20, so a foreman's ~75-tool non-exempt
-    // roster was slashed to 20 — the debug bundle showed "Tool cap trimmed
-    // 92 → 37" AND a contradictory "37 is heavy, lose track past 20". A
-    // capable medium model (12–45B) tracks the broad roster fine, so the cap
-    // is now a high sanity ceiling (80) like the implementation roles, and
-    // the meester-only kickoff tools are stripped from her roster up front.
+  it('medium local voorman keeps the complete curated orchestration roster', async () => {
+    // A broad coordinator workbench can fill a 64k local window with schemas
+    // before the first reply. The medium default now keeps the complete
+    // curated orchestration list (including task resume + craftbook routing)
+    // and trims unrelated authoring/document tails.
     const home = await mkdtemp(join(tmpdir(), 'gezel-medium-voorman-cap-'));
     const localStore = new Store({ home });
     await localStore.ensureLayout();
@@ -3886,17 +3935,7 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
 
       const create = localMock.calls.find((c) => c.kind === 'create');
       const allow = create!.opts!.toolAllowlist!;
-      // Cap-counted surface (excludes the cap-exempt delegation tools and the
-      // `validate` self-check) sits under the high sanity cap, so nothing is
-      // trimmed.
-      expect(
-        [...allow].filter(
-          (t) => !t.startsWith('delegate_') && !t.startsWith('consult_') && t !== 'validate',
-        ).length,
-      ).toBeLessThanOrEqual(80);
-      // Investigation (workspace-fs-read) + craftbook-authoring + memory/docs
-      // tools that the old 20-cap evicted now survive — the about.md names
-      // these, so they have to actually be callable.
+      // Investigation + the craftbook front door survive.
       expect(allow.has('search_files')).toBe(true);
       expect(allow.has('readFile')).toBe(true);
       // Code-intelligence is no longer in the voorman's roster:
@@ -3904,9 +3943,15 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
       // diagnose then delegates. Trims per-turn tool-schema prefill.
       expect(allow.has('find_symbol')).toBe(false);
       expect(allow.has('outline_file')).toBe(false);
-      expect(allow.has('craftbook_create')).toBe(true);
-      expect(allow.has('search_memory')).toBe(true);
-      expect(allow.has('list_documents')).toBe(true);
+      expect(allow.has('suggest_craftbook')).toBe(true);
+      expect(allow.has('invoke_craftbook')).toBe(true);
+      expect(allow.has('craftbook_read')).toBe(true);
+      expect(allow.has('craftbook_write')).toBe(true);
+      expect(allow.has('read_task_notes')).toBe(true);
+      // Whole-craftbook authoring and document-library tails are not part of
+      // the per-turn coordination surface.
+      expect(allow.has('craftbook_create')).toBe(false);
+      expect(allow.has('list_documents')).toBe(false);
       // The team tools the voorman actually uses survive...
       expect(allow.has('message_gezel')).toBe(true);
       expect(allow.has('ensure_gezel')).toBe(true);
@@ -3919,10 +3964,10 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
       expect(allow.has('fetch_repo')).toBe(false);
       expect(allow.has('create_gezel')).toBe(false);
 
-      // No "Tool cap trimmed" warning — the roster fits without slashing.
+      // Transparency: the persisted turn says the broad roster was trimmed.
       const disk = await localStore.getSession('reyansh', session.id);
       const assistant = disk?.messages.find((m) => m.role === 'assistant');
-      expect(assistant?.warnings?.some((w) => w.includes('Tool cap trimmed'))).not.toBe(true);
+      expect(assistant?.warnings?.some((w) => w.includes('Tool cap trimmed'))).toBe(true);
     } finally {
       await localMgr.drainBackground();
       await localMgr.shutdown();

@@ -725,6 +725,20 @@ export function computeToolAllowlist(opts: {
   const needsTeamStrip = opts.projectMode === 'solo' || opts.consultationMode === true;
   const groups = needsTeamStrip ? stripTeamManagement(baseGroups) : baseGroups;
   let resolved = applyGates(expandToolsetGroups(groups));
+  // Compatibility floor for installs/watch sessions where core's role
+  // registry already names the narrow `craftbook-launch` group but the
+  // catalog package serving builtin group metadata has not rebuilt yet.
+  // A Meester told to suggest a craftbook must also be able to invoke the
+  // selected procedure; otherwise the routing prompt creates a dead end.
+  if (
+    !hasToolsetOverride &&
+    canonicalRoleKey(opts.role) === 'meester' &&
+    resolved.has('suggest_craftbook') &&
+    !resolved.has('invoke_craftbook')
+  ) {
+    resolved = new Set(resolved);
+    resolved.add('invoke_craftbook');
+  }
   // CONSULTATION_STRIPPED_TOOLS = { ask_specialist, ask_gezel } — exactly
   // the generic dispatchers we demote when role tools are active (we keep
   // message_gezel as a name-addressed escape hatch), so the rolesAsTools

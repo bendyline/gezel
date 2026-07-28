@@ -1439,6 +1439,7 @@ class OllamaSession extends StreamingSessionBase implements LLMSession {
         tool: string;
         count: number;
         sourceFailureKind?: 'truncated' | 'not-persisted';
+        transportFailure?: boolean;
       } | null = null;
       for (const call of toolCalls) {
         const fn = call.function;
@@ -1511,6 +1512,7 @@ class OllamaSession extends StreamingSessionBase implements LLMSession {
             tool: fn.name,
             count: tracked.count,
             ...(tracked.sourceFailureKind ? { sourceFailureKind: tracked.sourceFailureKind } : {}),
+            ...(tracked.transportFailure ? { transportFailure: true } : {}),
           };
           break;
         }
@@ -1536,6 +1538,7 @@ class OllamaSession extends StreamingSessionBase implements LLMSession {
           ...(abortDueToFailureLoop.sourceFailureKind
             ? { sourceFailureKind: abortDueToFailureLoop.sourceFailureKind }
             : {}),
+          ...(abortDueToFailureLoop.transportFailure ? { transportFailure: true } : {}),
         });
       }
 

@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Store } from '../fs/store.js';
 import { ProviderQueue } from '../providers/queue.js';
 import type { LLMProvider, ProviderName } from '../providers/types.js';
+import { TaskManager } from './manager.js';
 import { TaskRunner } from './runner.js';
 
 /** Build a fixture craftbook from inline step records — keeps tests terse. */
@@ -423,6 +424,92 @@ describe('TaskRunner — cancellation via task status', () => {
 
     // Once the turn finishes on its own, a later tick just retires the
     // tracking entry — still no cancel.
+    dispatcher.activeSessionIds.delete('session-1');
+    await runner.tick();
+    expect(dispatcher.cancelledSessionIds).toEqual([]);
+  });
+
+  it('does not cancel a model-owned same-step gate recovery after reactivation', async () => {
+    await store.createProject({ name: 'p1' });
+    await store.createGezel({ name: 'Bea' });
+    const dispatcher = new FakeDispatcher(new Map([['bea', 'copilot']]));
+    dispatcher.setProvider('copilot', new ProviderQueue({ concurrency: 10 }));
+    const runner = new TaskRunner({ store, dispatcher });
+    const tasks = new TaskManager(store);
+    let adopted = false;
+    tasks.setCurrentTurnStepReactivatedHook(({ task, newStep }) => {
+      const gezelId =
+        newStep.assignee?.kind === 'gezel' ? newStep.assignee.gezelId : newStep.suggestedGezelId;
+      if (!gezelId || !newStep.lastActivatedAt) return;
+      adopted =
+        runner.adoptActiveDispatchActivation({
+          taskRef: task.ref,
+          stepId: newStep.id,
+          gezelId,
+          activationAt: newStep.lastActivatedAt,
+        }) || adopted;
+    });
+    const task = await tasks.create('p1', {
+      title: 'Gate recovery',
+      description: 'The current model turn repairs a rejected same-step deliverable gate.',
+      assignee: { kind: 'gezel', gezelId: 'bea' },
+      steps: [
+        {
+          id: 'scope',
+          name: 'Scope',
+          assignee: { kind: 'gezel', gezelId: 'bea' },
+          gate: {
+            at: 'completion',
+            checks: [{ kind: 'minBytes', file: 'notes/scope.md', bytes: 120 }],
+            onReject: 'scope',
+          },
+        },
+      ] as never,
+    });
+    const originalActivation = task.craftbook.steps[0]?.lastActivatedAt;
+    expect(originalActivation).toBeTruthy();
+    if (!originalActivation) return;
+
+    runner.enqueueHandoff({
+      taskRef: task.ref,
+      stepId: 'scope',
+      gezelId: 'bea',
+      projectId: 'p1',
+      activationAt: originalActivation,
+    });
+    await runner.tick();
+    expect(dispatcher.dispatches).toHaveLength(1);
+    expect(dispatcher.isHandoffSessionActive('session-1')).toBe(true);
+
+    const outcome = await tasks.completeStepChecked('p1', task.num, 'scope', undefined, {
+      cause: 'model',
+    });
+    expect(outcome.status).toBe('held');
+    expect(adopted).toBe(true);
+    const reactivated = await tasks.get('p1', task.num);
+    const currentActivation = reactivated?.craftbook.steps[0]?.lastActivatedAt;
+    expect(currentActivation).toBeTruthy();
+    expect(currentActivation).not.toBe(originalActivation);
+
+    // This is the race from the debug bundle: the pruning tick lands after
+    // the gate bumped lastActivatedAt but while the same turn is consuming
+    // the rejection. It must leave the live provider call alone.
+    await runner.tick();
+    expect(dispatcher.cancelledSessionIds).toEqual([]);
+    expect(dispatcher.isHandoffSessionActive('session-1')).toBe(true);
+
+    // Re-keying also suppresses a duplicate enqueue for the adopted
+    // activation while its original session is still running.
+    runner.enqueueHandoff({
+      taskRef: task.ref,
+      stepId: 'scope',
+      gezelId: 'bea',
+      projectId: 'p1',
+      activationAt: currentActivation!,
+    });
+    await runner.tick();
+    expect(dispatcher.dispatches).toHaveLength(1);
+
     dispatcher.activeSessionIds.delete('session-1');
     await runner.tick();
     expect(dispatcher.cancelledSessionIds).toEqual([]);

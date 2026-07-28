@@ -210,6 +210,13 @@ export const BUILTIN_TOOLSETS: BuiltinToolsetGroup[] = [
     tools: ['list_tasks', 'get_task', 'list_craftbooks', 'suggest_craftbook', 'read_task_notes'],
   },
   {
+    id: 'craftbook-launch',
+    name: 'Craftbook Launcher',
+    description:
+      'Procedure-first task launch surface for coordinators: rank applicable craftbooks and invoke a selected recipe after its required setup is ready.',
+    tools: ['list_craftbooks', 'suggest_craftbook', 'invoke_craftbook'],
+  },
+  {
     id: 'team-management',
     name: 'Team & Project Management',
     description:

@@ -188,6 +188,11 @@ export function ChatComposer({
   const editorTheme = useEffectiveTheme();
   const roleBasedNameOnlyMode = useRoleBasedNameOnlyMode();
   const [streaming, setStreaming] = useState(false);
+  // The local SSE is only one view of a turn. Navigation, remounts, and a
+  // renderer reconnect can drop it while the service keeps generating.
+  // Track the service's authoritative in-flight state separately so the
+  // composer never regresses to a misleading Send button.
+  const [serverInflight, setServerInflight] = useState(false);
   const [error, setError] = useState<string | null>(null);
   /**
    * How many turns are ahead of this one on the provider queue, when
@@ -277,8 +282,10 @@ export function ChatComposer({
   // we lazy-create a session (from either a paste or a Send click). Shared
   // between the media provider and the send path so they can't disagree.
   const liveSessionIdRef = useRef<string | null>(sessionId ?? null);
+  const [liveSessionId, setLiveSessionId] = useState<string | null>(sessionId ?? null);
   useEffect(() => {
     liveSessionIdRef.current = sessionId ?? null;
+    setLiveSessionId(sessionId ?? null);
   }, [sessionId]);
 
   const ensureSessionId = useCallback(async (): Promise<string> => {
@@ -300,6 +307,7 @@ export function ChatComposer({
           const existing = res.sessions.find((s) => !s.archived && s.gezelId === gezelId);
           if (existing) {
             liveSessionIdRef.current = existing.id;
+            setLiveSessionId(existing.id);
             onSessionCreated?.(existing.id);
             return existing.id;
           }
@@ -309,6 +317,7 @@ export function ChatComposer({
         const existing = res.sessions.find((s) => !s.archived);
         if (existing) {
           liveSessionIdRef.current = existing.id;
+          setLiveSessionId(existing.id);
           onSessionCreated?.(existing.id);
           return existing.id;
         }
@@ -325,6 +334,7 @@ export function ChatComposer({
     };
     const created = await api.createChatSession(body);
     liveSessionIdRef.current = created.id;
+    setLiveSessionId(created.id);
     onSessionCreated?.(created.id);
     return created.id;
   }, [gezelId, projectId, taskRef, stepId, craftbookRef, onSessionCreated]);
@@ -347,6 +357,34 @@ export function ChatComposer({
       mediaProvider.dispose();
     };
   }, [mediaProvider]);
+
+  // Reconcile with the service even when this component did not initiate
+  // the turn. A short poll is intentionally scoped to the active session;
+  // it also heals missed SSE `done` events after a renderer reconnect.
+  useEffect(() => {
+    if (!liveSessionId) {
+      setServerInflight(false);
+      return;
+    }
+    let disposed = false;
+    const syncInflight = async () => {
+      try {
+        const result = await api.getChatSessionInflight(liveSessionId);
+        if (!disposed) setServerInflight(result.inflight !== null);
+      } catch {
+        // A transient status-read failure must not clear a known running
+        // turn and expose Send while the server may still be busy.
+      }
+    };
+    void syncInflight();
+    const timer = window.setInterval(() => void syncInflight(), 2_000);
+    return () => {
+      disposed = true;
+      window.clearInterval(timer);
+    };
+  }, [liveSessionId]);
+
+  const turnActive = streaming || serverInflight;
 
   /**
    * Mention provider — backs both the WYSIWYG `@` popover and the Raw
@@ -384,11 +422,11 @@ export function ChatComposer({
       ? 'error'
       : queuedAhead !== null
         ? 'queued'
-        : streaming
+        : turnActive
           ? 'streaming'
           : 'idle';
     onTurnStateChange?.(state, error ?? undefined);
-  }, [streaming, queuedAhead, error, onTurnStateChange]);
+  }, [turnActive, queuedAhead, error, onTurnStateChange]);
 
   // Tracks the length of the previous draft so we can detect "the
   // user just started typing a new draft" — the signal for the
@@ -455,7 +493,7 @@ export function ChatComposer({
 
   const send = useCallback(async () => {
     const userText = draftRef.current.trim();
-    if (!gezelId || !userText || streaming) return;
+    if (!gezelId || !userText || turnActive) return;
     if (engagementOff) return;
     // Sticky @-mentions tried to reconstitute `@[Label](gezel:id)`
     // markdown as the next composer's `initialMarkdown` so the chip
@@ -601,7 +639,7 @@ export function ChatComposer({
   }, [
     gezelId,
     projectId,
-    streaming,
+    turnActive,
     engagementOff,
     ensureSessionId,
     onToolActivity,
@@ -627,6 +665,37 @@ export function ChatComposer({
     setWedged(null);
     setError(null);
   }, [wedged]);
+
+  const stopActiveTurn = useCallback(async () => {
+    const sid = liveSessionIdRef.current;
+    streamRef.current?.abort();
+    setStreaming(false);
+    setQueuedAhead(null);
+    if (!sid) {
+      setServerInflight(false);
+      return;
+    }
+    try {
+      await api.cancelChatSessionTurn(sid);
+      setServerInflight(false);
+      setError(null);
+    } catch (err) {
+      // Keep the authoritative busy state visible when cancellation did not
+      // reach the service; the poll will clear it if the turn already ended.
+      setError(`Cancel failed: ${(err as Error).message}`);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!turnActive) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return;
+      event.preventDefault();
+      void stopActiveTurn();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [turnActive, stopActiveTurn]);
 
   return (
     <div className="chat-composer" data-testid="chat-composer">
@@ -718,29 +787,11 @@ export function ChatComposer({
           thinMargins
           submitOnEnter={() => void send()}
           toolbarSlotRight={
-            streaming ? (
+            turnActive ? (
               <button
                 type="button"
                 className="chat-stop-btn"
-                onClick={() => {
-                  // Tell the server to actually halt the in-flight
-                  // turn — without this, only the local SSE consumer
-                  // disconnects and the provider keeps generating in
-                  // the background (especially noticeable on MLX
-                  // where prefill + generation are minutes-long
-                  // operations the user wants to bail out of). Best-
-                  // effort: a 404/500 here just means the turn is
-                  // already done, in which case the local abort
-                  // below is enough on its own.
-                  const sid = liveSessionIdRef.current;
-                  if (sid) {
-                    void api.cancelChatSessionTurn(sid).catch(() => {
-                      /* server-side cancel is best-effort; the local
-                       * abort still flips the UI back to idle */
-                    });
-                  }
-                  streamRef.current?.abort();
-                }}
+                onClick={() => void stopActiveTurn()}
                 title="Stop generating (Escape)"
               >
                 ■ Stop

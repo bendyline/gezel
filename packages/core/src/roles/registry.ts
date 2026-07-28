@@ -88,11 +88,12 @@ function std(name: string, inputs?: Record<string, unknown>): GateScriptRef {
 }
 
 export const ROLES: Record<RoleId, RoleDefinition> = {
-  // Meester surface, post-trim: `tasks-readonly` (the
-  // start_project/start_job macros create the kickoff task; mutation lives
-  // with the voorman/assignee) and no `web` group (research routes through
-  // ask_specialist({ role: 'researcher' }) — one schema vs. five web
-  // tools, meaningful for tier:medium locals).
+  // Meester surface, post-trim: `tasks-readonly` plus the narrow
+  // `craftbook-launch` front door. The latter may create a procedure-backed
+  // task, but all subsequent mutation lives with the voorman/assignee.
+  // No `web` group (research routes through ask_specialist({ role:
+  // 'researcher' }) — one schema vs. five web tools, meaningful for
+  // tier:medium locals).
   meester: {
     id: 'meester',
     label: 'Meester',
@@ -100,6 +101,7 @@ export const ROLES: Record<RoleId, RoleDefinition> = {
     toolsetGroups: [
       'team-management',
       'tasks-readonly',
+      'craftbook-launch',
       'craftbooks',
       'artifacts',
       'memory',

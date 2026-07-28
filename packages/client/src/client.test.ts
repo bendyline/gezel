@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { GezelClient } from './client.js';
+import { GezelApiError, GezelClient } from './client.js';
 
 describe('GezelClient task refs', () => {
   it('rejects malformed task refs without throwing synchronously', async () => {
@@ -27,6 +27,25 @@ describe('GezelClient health', () => {
 
     await expect(client.health(controller.signal)).resolves.toMatchObject({ ok: true });
     expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
+  it('wraps fetch failures as an explicit internal transport error with the cause', async () => {
+    const cause = Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:43123'), {
+      code: 'ECONNREFUSED',
+    });
+    const fetchImpl = vi
+      .fn()
+      .mockRejectedValue(
+        Object.assign(new TypeError('fetch failed'), { cause }),
+      ) as unknown as typeof fetch;
+    const client = new GezelClient({ baseUrl: 'http://test', token: 't', fetch: fetchImpl });
+
+    const error = await client.health().catch((err) => err);
+    expect(error).toBeInstanceOf(GezelApiError);
+    expect(error.status).toBe(0);
+    expect(error.message).toContain('Gezel API transport unavailable on GET /api/health');
+    expect(error.message).toContain('fetch failed');
+    expect(error.message).toContain('ECONNREFUSED');
   });
 });
 

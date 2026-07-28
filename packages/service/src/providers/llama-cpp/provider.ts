@@ -2227,7 +2227,7 @@ const MID_LOOP_COMPACT_RATIO = 0.7;
  * same model) outweighs the freed tokens. Aligned with the manager-
  * side check (`COMPACTION_KEEP_TAIL + 2` floor in compactInFlight).
  */
-const MID_LOOP_COMPACT_MIN_PRIOR = 4;
+const MID_LOOP_COMPACT_MIN_PRIOR = 2;
 
 class LlamaCppSession extends StreamingSessionBase implements LLMSession {
   private readonly messages: ChatMessage[];
@@ -2802,15 +2802,11 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
           throw new Error(`[llama-cpp] timed out after ${Math.round(totalTimeoutMs / 1000)}s`);
         }
 
-        // Mid-tool-loop pressure check. Skip the first iteration —
-        // no tool result has been pushed yet, the manager-side
-        // pressure check at user-message boundary already handled
-        // pre-existing history. From iteration 2 onward, tool results
-        // can balloon the transcript fast (a single 12k-token tool
-        // output is enough to push a 16k-slot ctx into truncation
-        // territory mid-args-serialization). Best-effort; failures
-        // log and the turn continues.
-        if (turn > 0) await this.maybeCompactMidLoop();
+        // Check every iteration, including the first. Tool schemas can fill
+        // most of a local context window before a single result exists, and
+        // the session's exact post-clamp roster is more accurate here than
+        // the manager's earlier boundary estimate.
+        await this.maybeCompactMidLoop();
 
         const releaseGpuLease = await this.deps.acquireGpuLease?.();
         let gpuLeaseReleased = false;
@@ -4704,12 +4700,14 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
             }
           }
         }
+        let malformedStructuredCallIds = new Set<string>();
         if (toolCalls.length > 0) {
           const normalized = normalizeMalformedStructuredToolCalls(
             toolCalls,
             collectKnownToolNames(),
           );
           toolCalls = normalized.toolCalls;
+          malformedStructuredCallIds = new Set(normalized.sanitizedIds);
           for (const r of normalized.repaired) {
             log.info(
               `[llama-cpp] repaired malformed structured ${r.name} args (path=${r.path}, content=${r.bytes} bytes)`,
@@ -4719,6 +4717,19 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
             log.info(
               `[llama-cpp] sanitized malformed structured tool args: ${normalized.sanitized.join(', ')}`,
             );
+            if (finishReason === 'length') {
+              const recovered = await this.maybeCompactMidLoop({ force: true });
+              if (recovered || this.condenseInTurnToolResults() > 0) {
+                // The cut-off call was never committed or executed. Retry
+                // from the shorter prompt so the model can emit complete
+                // arguments instead of turning `{}` into a fake validation
+                // failure.
+                continue;
+              }
+              this.emitWarning(
+                'The model hit its output limit in the middle of a tool call. The incomplete call was not executed; reduce the request scope or increase the on-device context/output limits before retrying.',
+              );
+            }
           }
         }
         // Tracks ids of calls synthesized by the truncation salvage
@@ -5277,6 +5288,7 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
           tool: string;
           count: number;
           sourceFailureKind?: 'truncated' | 'not-persisted';
+          transportFailure?: boolean;
         } | null = null;
         const immediateFileWritePaths: string[] = [];
         const immediatePartialWritePaths: string[] = [];
@@ -5331,6 +5343,8 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
           if (call.function.name === 'ask_user_question' && askedQuestionThisTurn) {
             output =
               "You already posted a question card to the user earlier in this turn. The second `ask_user_question` call was suppressed so the user only sees one card. END YOUR TURN NOW — the user's answer to the first question will arrive as the next user message; this turn produces no further visible content.";
+          } else if (malformedStructuredCallIds.has(call.id)) {
+            output = `ERROR: \`${call.function.name}\` was not executed because the model emitted malformed JSON arguments. Emit one new compact call with valid JSON and every required field. Do not claim the tool succeeded.`;
           } else if (
             (call.function.name === 'start_project' || call.function.name === 'start_job') &&
             startedProjectOrJobThisTurn
@@ -5696,6 +5710,7 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
               ...(tracked.sourceFailureKind
                 ? { sourceFailureKind: tracked.sourceFailureKind }
                 : {}),
+              ...(tracked.transportFailure ? { transportFailure: true } : {}),
             };
             break;
           }
@@ -5855,6 +5870,7 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
             ...(abortDueToFailureLoop.sourceFailureKind
               ? { sourceFailureKind: abortDueToFailureLoop.sourceFailureKind }
               : {}),
+            ...(abortDueToFailureLoop.transportFailure ? { transportFailure: true } : {}),
           });
         }
       }
@@ -5964,9 +5980,11 @@ export function normalizeMalformedStructuredToolCalls(
   toolCalls: StructuredToolCall[];
   repaired: Array<{ name: string; path: string; bytes: number }>;
   sanitized: string[];
+  sanitizedIds: string[];
 } {
   const repaired: Array<{ name: string; path: string; bytes: number }> = [];
   const sanitized: string[] = [];
+  const sanitizedIds: string[] = [];
   const normalized = toolCalls.map((call): StructuredToolCall => {
     const raw = call.function.arguments;
     try {
@@ -5992,9 +6010,10 @@ export function normalizeMalformedStructuredToolCalls(
       };
     }
     sanitized.push(call.function.name || '<unknown>');
+    sanitizedIds.push(call.id);
     return { ...call, function: { ...call.function, arguments: '{}' } };
   });
-  return { toolCalls: normalized, repaired, sanitized };
+  return { toolCalls: normalized, repaired, sanitized, sanitizedIds };
 }
 
 export function tryRepairMalformedWriteToolArguments(

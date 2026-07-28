@@ -7,13 +7,17 @@ import { resolveSessionToolSurface, toolCapForTierAndRole } from './session-tool
  * test: the count-cap repeatedly rendered coordinator gezels inoperable by
  * evicting load-bearing tools while keeping incidental reads (the imara
  * office-hours kickoff loop,, was the 4th such incident). The
- * policy is now: count-cap ONLY at tiny tier, with a load-bearing floor so
- * even there a session keeps the tools to finish its step. Every larger tier
- * relies on `mcp.compact-tool-schemas` for the prefill cost instead.
+ * policy is now: coordinators are capped to their complete curated surface
+ * at small/medium/large, with a load-bearing floor so no step loses the tools
+ * needed to finish. Implementation roles keep their broad workbench.
  */
 describe('toolCapForTierAndRole', () => {
-  it('by default (diet off) medium/large are uncapped for every role', () => {
-    for (const role of ['Meester', 'Voorman', 'Developer', 'Data Wizard', undefined] as const) {
+  it('by default medium/large coordinators use the curated diet', () => {
+    for (const role of ['Meester', 'Voorman'] as const) {
+      expect(toolCapForTierAndRole('medium', role)).not.toBeNull();
+      expect(toolCapForTierAndRole('large', role)).not.toBeNull();
+    }
+    for (const role of ['Developer', 'Data Wizard', undefined] as const) {
       expect(toolCapForTierAndRole('medium', role)).toBeNull();
       expect(toolCapForTierAndRole('large', role)).toBeNull();
     }
@@ -40,24 +44,18 @@ describe('toolCapForTierAndRole', () => {
     expect(toolCapForTierAndRole('small', undefined)).toBeNull();
   });
 
-  describe('Theme F coordinator diet (GEZEL_MEESTER_TOOL_DIET=1)', () => {
+  describe('coordinator diet environment override', () => {
     beforeEach(() => {
-      process.env.GEZEL_MEESTER_TOOL_DIET = '1';
+      process.env.GEZEL_MEESTER_TOOL_DIET = '0';
     });
     afterEach(() => {
       delete process.env.GEZEL_MEESTER_TOOL_DIET;
     });
 
-    it('caps meester + voorman at medium/large to their curated list length', () => {
-      // read_task_notes is rank ~26 in MEESTER_TOOL_CAP_PRIORITY; the cap
-      // MUST exceed that so the "resume via read_task_notes" tool always
-      // survives (the guardrail the old cap-of-13 violated). Capping AT the
-      // list length keeps the whole curated orchestration surface.
+    it('allows the legacy medium/large coordinator surface to be restored', () => {
       for (const tier of ['medium', 'large'] as const) {
         for (const role of ['Meester', 'guildmaster meester', 'Voorman', 'shop foreman']) {
-          const cap = toolCapForTierAndRole(tier, role);
-          expect(cap).not.toBeNull();
-          expect(cap!).toBeGreaterThanOrEqual(27);
+          expect(toolCapForTierAndRole(tier, role)).toBeNull();
         }
       }
     });
@@ -224,6 +222,42 @@ describe('resolveSessionToolSurface — step-scoped sessions', () => {
 });
 
 describe('resolveSessionToolSurface — Meester routing precedence', () => {
+  it('routes an exact-format PowerPoint request through the compact craftbook front door', async () => {
+    const prompt = 'Create a PowerPoint presentation about D-Day and deliver the .pptx file.';
+    for (const role of ['Meester', 'Voorman']) {
+      const { allowlist, projectOrchestrationConstrained } = await resolveSessionToolSurface({
+        surface: 'bridge',
+        session: {
+          id: `powerpoint-${role.toLowerCase()}`,
+          gezelId: role.toLowerCase(),
+          projectId: 'default',
+          providerName: 'llama-cpp',
+          title: prompt,
+          messages: [{ role: 'user', content: prompt, at: '2026-07-27T00:00:00.000Z' }],
+          createdAt: '2026-07-27T00:00:00.000Z',
+          lastActivityAt: '2026-07-27T00:00:00.000Z',
+        } as ChatSession,
+        role,
+        mode: 'always',
+        provider: 'llama-cpp',
+        modelId: 'qwen3.6-27b-q4',
+        parameterSize: '27B',
+        toolsetsGroupOverride: [],
+        githubLinked: false,
+        isGitRepo: false,
+        tier: 'medium',
+        latestUserMessage: prompt,
+      });
+
+      expect(projectOrchestrationConstrained).toBe(true);
+      expect(allowlist?.has('suggest_craftbook')).toBe(true);
+      expect(allowlist?.has('invoke_craftbook')).toBe(true);
+      expect(allowlist?.has('message_gezel')).toBe(true);
+      expect(allowlist?.has('writeFile')).toBe(false);
+      expect(allowlist!.size).toBeLessThan(25);
+    }
+  });
+
   it('keeps the craftbook authoring surface for reusable-procedure requests', async () => {
     const prompt =
       'Create a reusable weekly procedure for reviewing project quality and invoking the right crew.';

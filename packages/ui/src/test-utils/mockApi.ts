@@ -77,6 +77,7 @@ const DEFAULT_RESPONSES: Record<string, unknown> = {
   listToolsets: { toolsets: [] },
   health: { ok: true, version: 'test' },
   getConfig: { provider: 'mock' },
+  getChatSessionInflight: { inflight: null },
   getMemoryProfile: {
     platform: 'darwin',
     totalRamBytes: 128_000_000_000,

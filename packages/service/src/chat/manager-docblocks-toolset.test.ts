@@ -98,6 +98,14 @@ async function extraSpecsAfterSend(
 }
 
 describe('ChatManager — docblocks toolset spawn grants project roots', () => {
+  it('keeps the exact bundled, root-confined runtime available under super-lockdown', async () => {
+    await store.writeConfig({ securityPolicy: securityPolicyForLevel('super-lockdown') });
+    await store.writeInstalledToolsets({ kind: 'shared' }, [docblocksToolset(join(home, 'stub'))]);
+
+    const extras = await extraSpecsAfterSend();
+    expect(extras.find((e) => e.id === 'docblocks')).toBeTruthy();
+  });
+
   it('grants read on workspace + artifacts and write on artifacts only', async () => {
     // Make the workspace dir exist — only existing directories are granted
     // (docblocks physically validates roots at startup).

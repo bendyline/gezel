@@ -283,6 +283,20 @@ function FullApp() {
     return () => window.removeEventListener('gezel:gezel-deleted', onDeleted);
   }, [commitSelection]);
 
+  // Project deletion → if the deleted project occupies the main pane,
+  // return to the Meester home. Without clearing the persisted selection,
+  // ProjectDetailView keeps trying to load an id that no longer exists.
+  useEffect(() => {
+    const onDeleted = (e: Event) => {
+      const detail = (e as CustomEvent<{ projectId?: string }>).detail;
+      if (!detail?.projectId) return;
+      const sel = selectionRef.current;
+      if (sel?.kind === 'project' && sel.id === detail.projectId) commitSelection(null);
+    };
+    window.addEventListener('gezel:project-deleted', onDeleted);
+    return () => window.removeEventListener('gezel:project-deleted', onDeleted);
+  }, [commitSelection]);
+
   // Document deletion → if the deleted doc is the current selection, fall
   // back to Meester home. The Sidebar refreshes its own document list.
   useEffect(() => {

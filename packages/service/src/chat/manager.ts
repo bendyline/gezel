@@ -168,6 +168,7 @@ import {
 import type { GateWorkspaceReader } from '../tasks/gate-eval.js';
 import { aggregateModelGateEvidence } from '../tasks/gate-telemetry.js';
 import { type GateScriptExecutor, gateMessageFingerprint } from '../tasks/step-gate.js';
+import { isTrustedConstrainedToolset } from '../toolsets/trust.js';
 import { humanizeToolCall, renderFullToolArgs, summarizeToolArgs } from './args-summary.js';
 import { extractReferencedArtifacts } from './artifact-references.js';
 import { type ResidentModel, selectBackgroundEngine } from './background-routing.js';
@@ -4490,6 +4491,9 @@ export class ChatManager {
       hidden?: boolean;
     },
   ): Promise<ChatMessage> {
+    if (this.shuttingDown) {
+      throw new Error('service shutting down');
+    }
     if (!isEngagementAllowed({ aiEngagementMode: this.engagementMode })) {
       throw new Error('engagement-off: AI is disabled in settings; re-enable to send');
     }
@@ -6240,6 +6244,7 @@ export class ChatManager {
           }
           let stallReason: 'text' | 'tool-only' | 'voorman-idle' | null = null;
           let voormanIdleVerdict: 'idle' | 'nothing-built' | null = null;
+          const completedAsyncHandoff = drained.some(isSuccessfulAsyncHandoffToolCall);
           if (looksStalled(finalContent)) {
             // Subdivide: stall + tools-ran is "you ran the tools, now
             // wrap up with words" (CLOSING_SUMMARY_NUDGE). Stall +
@@ -6253,6 +6258,15 @@ export class ChatManager {
             if (noopConfirmationAccepted) {
               log.info(
                 `session ${sessionId}: confirmation-only prompt satisfied -- skipping continuation nudge`,
+              );
+            } else if (completedAsyncHandoff) {
+              // message_gezel/delegate_* intentionally parks delivery until
+              // this sender releases its turn. A closing-summary nudge keeps
+              // the sender alive, so the parked recipient can never start;
+              // weak models then repeat the same handoff and create duplicate
+              // work. The successful handoff IS the terminal action.
+              log.info(
+                `session ${sessionId}: async handoff completed — releasing sender so the parked recipient can start`,
               );
             } else if (drained.length > 0) {
               if (
@@ -6304,9 +6318,10 @@ export class ChatManager {
             const pressure = snap
               ? snap.running + snap.queuedInteractive + snap.queuedBackground
               : 0;
-            if (pressure > 0) {
+            const parkedHandoffs = this.afterSessionIdle.get(sessionId)?.length ?? 0;
+            if (pressure > 0 || parkedHandoffs > 0) {
               log.info(
-                `session ${sessionId}: ${stallReason} stall detected but ${pressure} turn(s) are competing for the provider — skipping continuation nudge to free the slot`,
+                `session ${sessionId}: ${stallReason} stall detected but ${pressure} provider turn(s) and ${parkedHandoffs} parked handoff(s) are waiting — skipping continuation nudge to free the slot`,
               );
               break;
             }
@@ -6950,6 +6965,10 @@ export class ChatManager {
     const project = await this.store.getProject(record.projectId).catch(() => null);
     if (!project?.voormanGezelId) return null;
     if (project.voormanGezelId !== record.gezelId) return null;
+    // A message_gezel/delegate_* callback parked behind this sender is
+    // concrete pending work. Nudging the voorman before releasing the turn
+    // deadlocks that handoff and encourages a duplicate dispatch.
+    if ((this.afterSessionIdle.get(currentSessionId)?.length ?? 0) > 0) return null;
     // Any mutating (non-read-only) tool fired this turn → real work happened.
     if (toolCalls.some((tc) => !isReadOnlyToolName(tc.name))) return null;
     // Another session in this project is mid-turn → a handoff might
@@ -7715,8 +7734,31 @@ export class ChatManager {
     }
   }
 
-  async shutdown(): Promise<void> {
+  /**
+   * Stop admitting work and actively unwind every live turn while the HTTP
+   * service is still reachable. MCP subprocesses call back into that server,
+   * so closing the listener first turns graceful shutdown into `fetch failed`
+   * tool results and can trigger autonomous retry/handoff loops.
+   */
+  async beginShutdown(): Promise<void> {
+    if (this.shuttingDown) return;
     this.shuttingDown = true;
+    // Parked handoffs must not dispatch as their sender unwinds.
+    this.afterSessionIdle.clear();
+    for (const sessionId of Array.from(this.pendingSends.keys())) {
+      this.rejectQueuedForSession(sessionId, 'service shutting down');
+    }
+    await Promise.allSettled(
+      Array.from(this.inflight.keys()).map((sessionId) => this.cancelInflight(sessionId)),
+    );
+    // Register deferred extraction work before service.stop drains background
+    // jobs and before providers are reset. shutdown() repeats this harmlessly
+    // for direct callers that do not use the two-phase service teardown.
+    this.flushDeferredExtractions();
+  }
+
+  async shutdown(): Promise<void> {
+    await this.beginShutdown();
     this.telemetryGpuUnsub?.();
     this.telemetryGpuUnsub = null;
     // Fire any deferred memory extractions immediately so any
@@ -7726,12 +7768,6 @@ export class ChatManager {
     // promises. Done first so the trackBackground registrations land
     // before resetClient starts disconnecting providers.
     this.flushDeferredExtractions();
-    // Reject any queued messages so their promises settle before
-    // teardown; otherwise callers awaiting `send()` could hang past
-    // the shutdown boundary.
-    for (const sessionId of Array.from(this.pendingSends.keys())) {
-      this.rejectQueuedForSession(sessionId, 'service shutting down');
-    }
     // Final service teardown must not re-arm injected providers.
     await this.resetClient({ restoreSeededProviders: false });
   }
@@ -11118,6 +11154,7 @@ export class ChatManager {
 
     const seen = new Set<string>();
     const extras: NonNullable<SessionOpts['extraMcpServers']> = [];
+    const trustedConstrainedExtraIds = new Set<string>();
     const knownSecretValues = new Set<string>();
     for (const t of [...perGezel, ...shared, ...system, ...perProject]) {
       if (seen.has(t.toolsetId)) continue;
@@ -11234,18 +11271,32 @@ export class ChatManager {
         args: [runtimeEntry, ...t.runtime.args, ...extraArgs],
         env,
       });
+      if (
+        isTrustedConstrainedToolset({
+          toolsetId: t.toolsetId,
+          sourceId: t.sourceId,
+          runtime: t.runtime,
+        })
+      ) {
+        trustedConstrainedExtraIds.add(t.toolsetId);
+      }
     }
-    // Centralized security ceiling: third-party (non-builtin) MCP toolsets
-    // bypass the builtin tool allowlist and can't be confined yet, so a
-    // locked-down posture (super-lockdown / lockdown) refuses to spawn them
-    // at all — leaving builtin tools as the only model-facing surface.
+    // Centralized security ceiling: arbitrary third-party MCP toolsets bypass
+    // the builtin tool allowlist and cannot be confined, so strict postures
+    // refuse to spawn them. Exact bundled toolsets whose runtime applies
+    // narrow physical authority (currently DocBlocks' project-root grants)
+    // remain available after their pinned package has been verified.
     const allowNonBuiltinToolsets = securityPolicy.allowNonBuiltinToolsets;
-    if (extras.length > 0 && !allowNonBuiltinToolsets) {
+    const permittedExtras = allowNonBuiltinToolsets
+      ? extras
+      : extras.filter((extra) => trustedConstrainedExtraIds.has(extra.id));
+    const blockedExtraCount = extras.length - permittedExtras.length;
+    if (blockedExtraCount > 0) {
       log.info(
-        `security: blocking ${extras.length} non-builtin MCP toolset(s) for ${record.gezelId} — external toolsets are disabled by the security policy`,
+        `security: blocking ${blockedExtraCount} non-builtin MCP toolset(s) for ${record.gezelId} — external toolsets are disabled by the security policy`,
       );
     }
-    if (extras.length > 0 && allowNonBuiltinToolsets) opts.extraMcpServers = extras;
+    if (permittedExtras.length > 0) opts.extraMcpServers = permittedExtras;
     if (knownSecretValues.size > 0) opts.knownSecretValues = knownSecretValues;
     if (this.debug) opts.debug = this.debug;
 
@@ -11409,44 +11460,25 @@ export class ChatManager {
           })) as ChatMessage[],
         );
         if (!transcript.trim()) return null;
-        // ds4-server is a hard singleton: this hook fires MID-tool-loop, while
-        // the foreground turn still holds the engine's only slot, so an LLM
-        // summary one-shot can't get a concurrent engine — it would block then
-        // time out. Condense deterministically instead (head + tail of the
-        // older transcript, capped well under numCtx so the kept recent turns +
-        // generation still fit). No engine, no block. The BETWEEN-turn path
-        // (compactInFlight, slot free) still gets a real LLM summary.
-        if (sessionRef.providerName === 'ds4') {
-          const capChars = Math.floor(numCtx * 0.4) * FORCEFIT_CHARS_PER_TOKEN;
-          const condensed =
-            transcript.length <= capChars
-              ? transcript
-              : `${transcript.slice(0, Math.ceil(capChars * 0.6))}${FORCEFIT_MARKER}${transcript.slice(
-                  -Math.floor(capChars * 0.4),
-                )}`;
-          return {
-            syntheticContent: `[Earlier in this conversation, condensed to fit the model context:\n\n${condensed}]`,
-          };
-        }
-        const compactionGezelId = globalConfig.klerkGezelId ?? sessionRef.gezelId;
-        let synthesis: string;
-        try {
-          synthesis = await this.oneShotCompletion(`${COMPACTION_PROMPT}${transcript}`, 60_000, {
-            providerName: sessionRef.providerName,
-            ...(sessionRef.model ? { model: sessionRef.model } : {}),
-            ...(compactionGezelId ? { gezelId: compactionGezelId } : {}),
-            jobLabel: `mid-loop compact · ${sessionRef.id.slice(0, 8)}`,
-          });
-        } catch (err) {
-          log.warn(
-            `[chat] mid-loop compaction one-shot failed for session ${sessionRef.id.slice(0, 8)} (${estimatedTokens}/${numCtx}): ${err instanceof Error ? err.message : err}`,
-          );
-          return null;
-        }
-        const trimmed = synthesis.trim();
-        if (!trimmed) return null;
+        // This callback runs while the foreground turn still owns the local
+        // engine slot. Starting a second LLM summary on the same provider can
+        // only queue behind the turn that is waiting for the summary: a
+        // self-deadlock that previously ended as a 60s timeout. Use bounded,
+        // deterministic head+tail condensation for every local provider.
+        // Between-turn compaction (slot free) still gets the richer LLM
+        // synthesis path.
+        const capChars = Math.floor(numCtx * 0.4) * FORCEFIT_CHARS_PER_TOKEN;
+        const condensed =
+          transcript.length <= capChars
+            ? transcript
+            : `${transcript.slice(0, Math.ceil(capChars * 0.6))}${FORCEFIT_MARKER}${transcript.slice(
+                -Math.floor(capChars * 0.4),
+              )}`;
+        log.info(
+          `[chat] deterministic mid-loop compaction for session ${sessionRef.id.slice(0, 8)} (${estimatedTokens}/${numCtx} estimated tokens)`,
+        );
         return {
-          syntheticContent: `[Earlier in this conversation, summarized to fit the model context:\n\n${trimmed}]`,
+          syntheticContent: `[Earlier in this conversation, condensed to fit the model context:\n\n${condensed}]`,
         };
       };
     }
@@ -11824,6 +11856,9 @@ function formatExpectedDeliverableAnnotation(
   if (path && isExpectedImageDeliverablePath(path)) {
     return `\n\n[Deliverable expected as an IMAGE FILE at \`${path}\`. Your first assistant action should be the tool call \`generate_image({ prompt, saveAs: "${path}" })\`; the image tool writes the PNG/JPG/WebP bytes to disk. Reply in chat with the path + a 2-sentence precis — do NOT call \`writeFile({ path, content })\` for binary image bytes and do NOT paste base64 or prose as the deliverable.]`;
   }
+  if (path && isExpectedBinaryDocumentDeliverablePath(path)) {
+    return `\n\n[Deliverable expected as a REAL BINARY DOCUMENT at \`${path}\`. Preserve that exact format — a markdown outline or similarly named text file is not the deliverable. Use the installed document-production tools/craftbook (for PowerPoint: \`convert_document\`, visually inspect with \`preview_document\`, then persist with \`save_artifact\`). Do NOT call \`writeFile\` with prose or base64 for this binary file. If those production tools are not on your roster, reply that the exact-format deliverable is blocked instead of silently substituting another format.]`;
+  }
   const explicitEditTools = extractExplicitFileEditTools(requestText);
   if (explicitEditTools.length > 0) {
     const formattedTools = explicitEditTools.map((tool) => `\`${tool}\``).join(' and ');
@@ -11861,6 +11896,10 @@ function normalizeExpectedDeliverablePath(path: string): string {
     .replace(/^workspace\//i, '')
     .replace(/^\.\//, '')
     .toLowerCase();
+}
+
+function isExpectedBinaryDocumentDeliverablePath(path: string): boolean {
+  return /\.(?:pptx|docx|xlsx|pdf)$/i.test(path.trim());
 }
 
 function isExplicitAppendOnlyRequest(requestText: string | undefined): boolean {
@@ -12998,6 +13037,16 @@ function isReadOnlyToolName(name: string): boolean {
   return /^(?:list|read|get|search|has)_/.test(name);
 }
 
+function isSuccessfulAsyncHandoffToolCall(toolCall: ChatMessageToolCall): boolean {
+  if (!toolCall.success) return false;
+  return (
+    toolCall.name === 'message_gezel' ||
+    toolCall.name === 'ask_gezel' ||
+    toolCall.name === 'ask_specialist' ||
+    toolCall.name.startsWith('delegate_')
+  );
+}
+
 /**
  * Heuristic: did the model end its turn announcing what it would do
  * instead of doing it? Looks at the last paragraph of the response and
@@ -13741,17 +13790,51 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
   const isExecutorRole = role ? !isPureDelegationRole(role) : false;
   const trimExecutor = (trimExecutorContext ?? false) && isExecutorRole;
   const providerNeedsGuardrail = providerName === 'anthropic-cli' || providerName === 'codex-cli';
-  // Shared tail for both routing variants — what a delegation role should
-  // never try, and what it does itself.
-  const routingTail = `\n\n**Things you should never try:**\n\n- "I'll just write the file myself" / "Let me create that for you" → no. Even if writing the file feels faster, the answer is to delegate. The user's session with you is the lobby; the work happens in the project.\n- Searching the tool catalog for a workaround when a tool was denied. A denial is a signal that you're outside your role, not a puzzle to solve. Stop, route, hand off.\n- Using \`Bash\`, \`Write\`, \`Edit\`, \`Read\`, \`Grep\`, \`Glob\`, \`NotebookEdit\`, \`WebFetch\`, \`WebSearch\` — these aren't yours, and pattern-matching against gezel-mcp tool names with similar shapes won't help either.\n\n**Things you DO do yourself:**\n\n- Talk to the user. Ask clarifying questions. Confirm scope.\n- Read and write to the **artifacts drawer** (\`list_artifacts\` / \`read_artifact\` / \`write_artifact\`) — that's your scratch space for plans, recommendations, meeting notes, etc.\n- Manage the team (\`create_gezel\`, \`ensure_gezel\`, \`update_gezel\`, \`message_gezel\`, \`list_gezels\`).\n- Manage projects and tasks (\`start_project\`, \`start_job\`, \`update_project\`, \`create_task\`, \`assign_task\`, \`advance_task_step\`, \`write_task_note\`).\n- Memory (\`search_memory\` / \`save_memory\`) and history (\`search_history\`).\n- Ask the user structured questions via \`ask_user_question\`.`;
+  // Shared tail for both routing variants — generated from the post-clamp
+  // roster. Never coach a model to call a tool that was removed by role,
+  // security policy, install state, or the coordinator context diet.
+  const toolsFrom = (names: readonly string[]) =>
+    names.filter((tool) => availableToolNameSet.has(tool));
+  const formatToolList = (names: readonly string[]) =>
+    names.length > 0 ? names.map((tool) => `\`${tool}\``).join(' / ') : 'none wired';
+  const teamTools = toolsFrom([
+    'create_gezel',
+    'ensure_gezel',
+    'update_gezel',
+    'message_gezel',
+    'list_gezels',
+  ]);
+  const projectTaskTools = toolsFrom([
+    'start_project',
+    'start_job',
+    'update_project',
+    'create_task',
+    'assign_task',
+    'advance_task_step',
+    'write_task_note',
+  ]);
+  const artifactTools = toolsFrom(['list_artifacts', 'read_artifact', 'write_artifact']);
+  const routingTail = `\n\n**Things you should never try:**\n\n- "I'll just write the file myself" / "Let me create that for you" → no. Even if writing the file feels faster, the answer is to delegate. The user's session with you is the lobby; the work happens in the project.\n- Searching the tool catalog for a workaround when a tool was denied. A denial is a signal that you're outside your role, not a puzzle to solve. Stop, route, hand off.\n- Naming or fabricating tools that are not in the Available tools list for this turn.\n\n**Things you DO do yourself:**\n\n- Talk to the user. Ask clarifying questions. Confirm scope.\n- Use the **artifacts drawer** for plans and scratch when available (${formatToolList(artifactTools)}).\n- Manage the team with the tools actually wired this turn (${formatToolList(teamTools)}).\n- Manage projects and tasks with the tools actually wired this turn (${formatToolList(projectTaskTools)}).`;
   // FLAT density flips the routing default from crew→solo: one capable
   // generalist (the ambachtsman, via `start_job`) owns the whole job, which
   // also collapses the craftbook onto that single specialist. This is the
   // frontier-adaptive path — a self-orchestrating model doesn't need a crew
   // relay or per-step hand-offs. Emitted for any delegation role in flat
   // mode (not just the cli providers); see docs/frontier-adaptive-execution.md.
-  const flatRoutingGuardrail = `\n\n---\n\n## Your job is to ROUTE, not to BUILD — and on this install, route SOLO\n\nYou are a router; specialists do the work. On this install the default is a SINGLE capable specialist who owns the whole job end-to-end — not a crew.\n\n**When the user asks for something concrete** (build a game, fix a bug, write a doc, run an analysis):\n\n1. **Default — solo:** \`start_job({ name, about, missionObjectives, taskDescription, specialistRole })\` — one specialist (the "ambachtsman") takes the entire job. Pick \`specialistRole\` from the gilde: \`"developer"\` (code/most asks), \`"researcher"\` (analysis/writing), \`"designer"\`, \`"builder"\`, \`"copywriter"\`, \`"planner"\`. ONE call. This is the right choice for essentially every single-deliverable ask — a game, a spec, a fix, an ETL job, a report — no matter how substantial; one strong specialist handles big single-deliverable work.\n2. **Crew — for genuinely multimodal asks** that need multiple MEDIA at once (e.g. "a website AND a logo image"), **or when the user explicitly asks for a separate review / second-opinion pass** on a high-stakes deliverable: \`start_project({ ... })\`, which recruits a voorman + crew. Do NOT reach for a crew just because a task feels big — one strong specialist handles big single-deliverable work.\n3. Tell the user briefly who's on it.${routingTail}`;
-  const crewRoutingGuardrail = `\n\n---\n\n## Your job is to ROUTE, not to BUILD\n\nYou do not write code, run shell commands, edit project files, or execute scripts. Those are not capabilities you have — and that is **deliberate**. You are a router and team-builder; the work itself is done by specialist gezels.\n\n**When the user asks for something concrete** (build a game, fix a bug, write a doc, run an analysis):\n\n1. Crew work (default, multimodal "AND" asks): \`start_project({ name, about, missionObjectives, taskDescription })\` — creates the project, recruits a voorman, wires them in, creates the kickoff task, and notifies them. ONE call.\n2. Solo work (only when the user explicitly says "quick prototype" / "one-shot" / "just for me"): \`start_job({ ..., specialistRole: "developer" /* or designer / builder / copywriter / planner */ })\` — same shape but the lead is a specialist instead of a voorman, and they can't recruit anyone else.\n3. Tell the user briefly which lead is on it.${routingTail}`;
+  const craftbookRoute =
+    availableToolNameSet.has('suggest_craftbook') && availableToolNameSet.has('invoke_craftbook')
+      ? 'For named output formats or multi-step production work, first call `suggest_craftbook`, then `invoke_craftbook` when it finds a match.'
+      : '';
+  const flatPrimaryRoute = availableToolNameSet.has('start_job')
+    ? '`start_job({ name, about, missionObjectives, taskDescription, specialistRole })`'
+    : availableToolNameSet.has('message_gezel')
+      ? '`ensure_gezel` when needed, then `message_gezel` with the exact deliverable and acceptance criteria'
+      : 'the available project/task tools listed below';
+  const crewPrimaryRoute = availableToolNameSet.has('start_project')
+    ? '`start_project({ name, about, missionObjectives, taskDescription })`'
+    : flatPrimaryRoute;
+  const flatRoutingGuardrail = `\n\n---\n\n## Your job is to ROUTE, not to BUILD — and on this install, route SOLO\n\nYou are a router; specialists do the work. For concrete work, route through ${flatPrimaryRoute}. ${craftbookRoute} Preserve the user's requested output format in every brief and expected deliverable. Tell the user briefly who's on it.${routingTail}`;
+  const crewRoutingGuardrail = `\n\n---\n\n## Your job is to ROUTE, not to BUILD\n\nYou do not write code, run shell commands, edit project files, or execute scripts. Route concrete work through ${crewPrimaryRoute}. ${craftbookRoute} Preserve the user's requested output format in every brief and expected deliverable. Tell the user briefly which lead is on it.${routingTail}`;
   const delegationGuardrail = !isDelegationRole
     ? ''
     : opts.executionDensity === 'flat'
@@ -13759,6 +13842,13 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
       : providerNeedsGuardrail
         ? crewRoutingGuardrail
         : '';
+  const exactFormatGuidance =
+    isDelegationRole &&
+    (availableToolNameSet.has('suggest_craftbook') ||
+      availableToolNameSet.has('invoke_craftbook') ||
+      availableToolNameSet.has('convert_document'))
+      ? `\n\n---\n\n## Preserve requested output formats\n\nA named format is an acceptance criterion, not a suggestion. If the user asks for PowerPoint/PPTX, DOCX, XLSX, PDF, or another binary document, do not silently substitute markdown, HTML, or chat prose. For PowerPoint, prefer the matching craftbook via ${availableToolNameSet.has('suggest_craftbook') ? '`suggest_craftbook`' : 'the available craftbook surface'}${availableToolNameSet.has('invoke_craftbook') ? ' + `invoke_craftbook`' : ''}. A real PPTX production step uses \`convert_document\`, visual QA with \`preview_document\`, and \`save_artifact\` when those tools are present. If the required production surface is unavailable, explain the blocker instead of claiming completion.`
+      : '';
 
   let projectContext = '';
   if (project) {
@@ -14383,6 +14473,8 @@ ${artifactsLine}
     const expectedFilePath = expectedDeliverable?.filePath?.trim();
     const wantsImageFile =
       wantsFile && !!expectedFilePath && isExpectedImageDeliverablePath(expectedFilePath);
+    const wantsBinaryDocument =
+      wantsFile && !!expectedFilePath && isExpectedBinaryDocumentDeliverablePath(expectedFilePath);
     const singleFileHtmlClause =
       expectedFilePath && /(?:^|\/)index\.html$/i.test(expectedFilePath)
         ? ' For `index.html`, write a single self-contained HTML file: inline `<style>` and inline `<script>` only; do not create or depend on `script.js`, `styles.css`, external assets, or a build step unless the asker explicitly named those files.'
@@ -14394,12 +14486,19 @@ ${artifactsLine}
     // for that file kind is on THIS turn's post-clamp roster. Security is
     // one reason it may be absent; role filtering and tiny-tier caps are
     // others. Never turn expectedDeliverable into a fabricated tool call.
-    const requiredFileTool = wantsImageFile ? 'generate_image' : 'writeFile';
+    const requiredFileTools = wantsImageFile
+      ? ['generate_image']
+      : wantsBinaryDocument
+        ? ['convert_document', 'save_artifact']
+        : ['writeFile'];
+    const missingRequiredFileTools = requiredFileTools.filter(
+      (tool) => !consultationToolNames.has(tool),
+    );
     const fileDeliverableBlocked =
-      wantsFile && (fileEditsDisabled || !consultationToolNames.has(requiredFileTool));
+      wantsFile && (fileEditsDisabled || missingRequiredFileTools.length > 0);
     const fileBlockReason = fileEditsDisabled
       ? 'this project has **gezel file edits turned off**'
-      : `the required \`${requiredFileTool}\` tool is **not wired on your roster this turn**`;
+      : `the required ${missingRequiredFileTools.map((tool) => `\`${tool}\``).join(' / ')} tool surface is **not wired on your roster this turn**`;
     const fileBlockRecovery = fileEditsDisabled
       ? 'the asker can enable "Allow gezels to modify the workspace directory" in Project → Settings'
       : 'the asker must route this deliverable to a gezel whose roster includes that tool';
@@ -14407,16 +14506,20 @@ ${artifactsLine}
       ? `- **You cannot write the file this turn.** The asker expected a file at ${filePathClause}, but ${fileBlockReason}. Do NOT claim you wrote it. Reply in chat that the file deliverable is blocked (${fileBlockRecovery}); give your answer as prose if that's still useful.`
       : wantsImageFile
         ? `- **Reply with the image file path**, not prose or base64. The asker passed \`expectedDeliverable: {kind: "file"}\` for an image at ${filePathClause}. End your turn by calling \`generate_image({ prompt, saveAs: "${expectedFilePath}" })\`; the image tool writes the binary file to disk. Then reply in chat with just the path and a 2-sentence precis. Do not call \`writeFile({ path, content })\` for PNG/JPG/WebP bytes.`
-        : wantsFile
-          ? `- **Reply with the file**, not the contents. The asker passed \`expectedDeliverable: {kind: "file"}\` — this consultation expects a substantive written deliverable on disk at ${filePathClause}, not a wall of prose in chat. Your first assistant action should be \`writeFile({ path, content })\` (use the path the asker named when there is one); draft inside the tool argument, then reply in chat with just the path and a 2-sentence precis.${singleFileHtmlClause} The full deliverable lives on disk where the asker (and any third gezel) can \`readFile\` it.`
-          : '- **Reply in the chat** — the asker reads your reply directly. Write an artifact only if the answer *is* an artifact (a code sketch, a diagram). For a stack recommendation or a numbered plan, prose in the reply is better.';
+        : wantsBinaryDocument
+          ? `- **Produce the real binary document at ${filePathClause}.** A markdown source file is only an intermediate, never the deliverable. Use \`convert_document\`, inspect the rendered result with \`preview_document\` when available, then persist it with \`save_artifact\`. Do not call \`writeFile\` with prose or base64 for this path. Reply with the saved path and a 2-sentence precis.`
+          : wantsFile
+            ? `- **Reply with the file**, not the contents. The asker passed \`expectedDeliverable: {kind: "file"}\` — this consultation expects a substantive written deliverable on disk at ${filePathClause}, not a wall of prose in chat. Your first assistant action should be \`writeFile({ path, content })\` (use the path the asker named when there is one); draft inside the tool argument, then reply in chat with just the path and a 2-sentence precis.${singleFileHtmlClause} The full deliverable lives on disk where the asker (and any third gezel) can \`readFile\` it.`
+            : '- **Reply in the chat** — the asker reads your reply directly. Write an artifact only if the answer *is* an artifact (a code sketch, a diagram). For a stack recommendation or a numbered plan, prose in the reply is better.';
     const consultationCloser = fileDeliverableBlocked
       ? 'a plain-chat reply explaining why the file deliverable is blocked'
       : wantsImageFile
         ? 'the `generate_image` call + chat precis'
-        : wantsFile
-          ? 'the `writeFile` call + chat precis'
-          : 'the answer';
+        : wantsBinaryDocument
+          ? 'the `convert_document` + `save_artifact` calls and a chat precis'
+          : wantsFile
+            ? 'the `writeFile` call + chat precis'
+            : 'the answer';
     consultationAddendum = `\n\n---\n\n## Consultation mode\n\nYou were invoked by another gezel via \`ask_specialist\` (or \`ask_gezel\`) to answer **one specific question**. They are parked waiting for your reply right now — your only job this turn is to **answer that question directly**.\n\n- **Don't recruit other gezels** or propose to fan out further consultations. The team-management and onward-consultation tools (\`ensure_gezel\`, \`message_gezel\`, \`ask_specialist\`, \`ask_gezel\`, \`start_project\`, …) have been intentionally removed from your roster for this turn — the asker has them, you don't. They'll handle next steps based on your answer.\n- **Don't propose a multi-step plan-as-deliverable** unless the question literally asked for one. A short, concrete answer is the deliverable.\n${deliverableBullet}\n- **Don't ask the user a clarifying question** unless the question is genuinely ambiguous. Take your best shot first; the asker can refine.\n\nEnd your turn with ${consultationCloser}.`;
   }
 
@@ -14501,6 +14604,7 @@ ${artifactsLine}
     const sections: Array<readonly [string, string, 'stable' | 'volatile']> = [
       ['header', header, 'stable'],
       ['delegationGuardrail', delegationGuardrail, 'stable'],
+      ['exactFormatGuidance', exactFormatGuidance, 'stable'],
       ['aboutIntro', aboutIntro, 'stable'],
       ['about (persona body)', body, 'stable'],
       ['traits', traitsBlock, 'stable'],
@@ -14557,7 +14661,7 @@ ${artifactsLine}
   // Legacy single-band ordering (flag OFF) — byte-identical to before.
   if (!layeredPrefixCache) {
     return {
-      full: `${header}${delegationGuardrail}${aboutIntro}${body}${traitsBlock}${lessonsBlock}${projectContext}${workspaceGestaltBlock}${workspaceFilesBlock}${documentsContext}${taskContext}${assignedTasksContext}${recall}\n\n---\n\n${actDontNarrate}\n\n${askWhenStuck}${browsingForRole}\n\n---\n\n${markdownGuidance}${untrustedContentBlock}${localHints}${verboseModelHints}${availableToolsBlock}${fileEditsDisabledNote}${consultationAddendum}${freshProjectAddendum}${activeTaskAnchor}`,
+      full: `${header}${delegationGuardrail}${exactFormatGuidance}${aboutIntro}${body}${traitsBlock}${lessonsBlock}${projectContext}${workspaceGestaltBlock}${workspaceFilesBlock}${documentsContext}${taskContext}${assignedTasksContext}${recall}\n\n---\n\n${actDontNarrate}\n\n${askWhenStuck}${browsingForRole}\n\n---\n\n${markdownGuidance}${untrustedContentBlock}${localHints}${verboseModelHints}${availableToolsBlock}${fileEditsDisabledNote}${consultationAddendum}${freshProjectAddendum}${activeTaskAnchor}`,
     };
   }
 
@@ -14567,7 +14671,7 @@ ${artifactsLine}
   // above) — and ONLY removes the volatile band. The gezel-identity
   // prefix (everything before projectContext) is a true byte-prefix of
   // the full stable message, so adapters key `prefix-gezel` ⊂ `prefix-gp`.
-  const gezelPrefix = `${header}${delegationGuardrail}${aboutIntro}${body}${traitsBlock}${lessonsBlock}`;
+  const gezelPrefix = `${header}${delegationGuardrail}${exactFormatGuidance}${aboutIntro}${body}${traitsBlock}${lessonsBlock}`;
   const stableSystem = `${gezelPrefix}${projectContext}\n\n---\n\n${actDontNarrate}\n\n${askWhenStuck}${browsingForRole}\n\n---\n\n${markdownGuidance}${untrustedContentBlock}${localHints}${verboseModelHints}${availableToolsBlock}${fileEditsDisabledNote}`;
 
   // Volatile band → a frozen message injected after the tool block. The

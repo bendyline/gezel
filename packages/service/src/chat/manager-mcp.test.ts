@@ -182,6 +182,35 @@ describe('ChatManager + MCP — tool calls fire through the bridge', () => {
     ]);
   }, 30_000);
 
+  it('ends the sender turn after a successful async handoff instead of nudging it to repeat', async () => {
+    await store.createGezel({ name: 'Maya', role: 'Developer' });
+    const session = await manager.createSession({ gezelId: 'ada' });
+
+    mock.scriptToolCalls([
+      {
+        name: 'message_gezel',
+        arguments: {
+          gezel: 'maya',
+          message: 'Create the requested deck.',
+          expectedDeliverable: { kind: 'file', filePath: 'd-day.pptx' },
+        },
+      },
+    ]);
+    // This text normally trips looksStalled(). The successful fire-and-forget
+    // handoff is nevertheless the terminal action for this sender turn.
+    mock.script('Let me hand this off.');
+
+    await manager.send(session.id, 'Create a PowerPoint about D-Day.');
+
+    const senderSends = mock.calls.filter(
+      (call) => call.kind === 'send' && call.sendOpts?.queue?.sessionId === session.id,
+    );
+    expect(senderSends).toHaveLength(1);
+    expect(mock.toolCallOutputs.find((output) => output.name === 'message_gezel')?.output).toMatch(
+      /Pinged Maya/,
+    );
+  }, 30_000);
+
   it('runs the generate_image tool and writes a real PNG to project artifacts', async () => {
     const session = await manager.createSession({ gezelId: 'ada' });
 

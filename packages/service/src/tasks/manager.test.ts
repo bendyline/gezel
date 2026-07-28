@@ -25,6 +25,18 @@ afterEach(async () => {
 });
 
 describe('TaskManager', () => {
+  const installProjectToolset = async (toolsetId: string) => {
+    await store.writeInstalledToolsets({ kind: 'project', projectId: 'website' }, [
+      {
+        toolsetId,
+        sourceId: 'bundled',
+        version: '1.0.0',
+        installedAt: '2026-07-27T00:00:00.000Z',
+        runtime: { kind: 'builtin', toolsetGroupId: toolsetId },
+      },
+    ]);
+  };
+
   it('create allocates num=1 then increments', async () => {
     const a = await tasks.create('website', {
       title: 'First',
@@ -60,6 +72,7 @@ describe('TaskManager', () => {
   });
 
   it('snapshots a craftbook’s toolsets and basedOn credit onto the task', async () => {
+    await installProjectToolset('usb-camera');
     tasks.setCraftbookResolver({
       async resolve(id) {
         return {
@@ -89,6 +102,47 @@ describe('TaskManager', () => {
       name: 'Camera recipe',
       url: 'https://example.com/camera-recipe',
     });
+  });
+
+  it('refuses to create a craftbook task until required project toolsets are installed', async () => {
+    tasks.setCraftbookResolver({
+      async resolve(id) {
+        return {
+          craftbook: {
+            id,
+            name: 'PowerPoint Deck',
+            steps: [{ id: 'produce', name: 'Produce', terminal: true }],
+            entryStepId: 'produce',
+            toolsets: [
+              {
+                toolsetId: 'docblocks',
+                reason: 'produce and visually verify the real PPTX',
+              },
+            ],
+            createdAt: '2026-07-27T00:00:00Z',
+            updatedAt: '2026-07-27T00:00:00Z',
+          },
+          sourceId: 'bundled',
+        };
+      },
+    });
+
+    await expect(
+      tasks.create('website', {
+        title: 'D-Day deck',
+        assignee: { kind: 'user' },
+        craftbookId: 'powerpoint-deck',
+      }),
+    ).rejects.toThrow(/SETUP REQUIRED.*docblocks.*No task was created/i);
+    expect(await tasks.list({ projectId: 'website' })).toHaveLength(0);
+
+    await installProjectToolset('docblocks');
+    const created = await tasks.create('website', {
+      title: 'D-Day deck',
+      assignee: { kind: 'user' },
+      craftbookId: 'powerpoint-deck',
+    });
+    expect(created.craftbook.toolsets?.[0]?.toolsetId).toBe('docblocks');
   });
 
   it('emits task.created history', async () => {

@@ -1946,7 +1946,10 @@ describe('BUILTIN_TOOLSETS coverage', () => {
     // narrower slice of the same surface (Meester gets
     // `tasks-readonly` instead of `tasks`). Every other pair must be
     // disjoint.
-    const SUBSET_OF: Record<string, string> = { 'tasks-readonly': 'tasks' };
+    const SUBSET_OF: Record<string, string> = {
+      'tasks-readonly': 'tasks',
+      'craftbook-launch': 'tasks',
+    };
     const seen = new Map<string, string>();
     for (const g of BUILTIN_TOOLSETS) {
       for (const t of g.tools) {

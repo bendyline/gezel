@@ -32,6 +32,7 @@ import { TurnAbortError } from './turn-abort-error.js';
 
 const SOFT_WARNING_AT_DEFAULT = 3;
 const HARD_ABORT_AT_DEFAULT = 5;
+const TRANSPORT_ABORT_AT = 2;
 
 /**
  * `write_artifact` refusals caused by an existing workspace file at the
@@ -84,10 +85,13 @@ export interface ToolFailureResult {
   count: number;
   /** Source-write failure class used to choose the next-turn corrective. */
   sourceFailureKind?: 'truncated' | 'not-persisted';
+  /** The shared internal MCP/service transport failed, not this tool's schema. */
+  transportFailure?: boolean;
 }
 
 export class ToolFailureTracker {
   private readonly failures = new Map<string, number>();
+  private transportFailures = 0;
   private readonly softWarningAt: number;
   private readonly hardAbortAt: number;
   private readonly surgicalEditsAvailable: boolean;
@@ -109,7 +113,22 @@ export class ToolFailureTracker {
     if (!isFailureOutput(output)) {
       // Success — reset this tool's counter.
       this.failures.set(toolName, 0);
+      // Any successful MCP call proves the shared backchannel is reachable.
+      this.transportFailures = 0;
       return { output, shouldAbort: false, count: 0 };
+    }
+    if (isTransportFailureOutput(output)) {
+      this.transportFailures += 1;
+      const count = this.transportFailures;
+      if (count >= TRANSPORT_ABORT_AT) {
+        return { output, shouldAbort: true, count, transportFailure: true };
+      }
+      return {
+        output: `${output}\n\n[runtime] Gezel's internal tool connection is unavailable. Do not retry this call or switch to another tool; they share the same connection. End the turn and report the internal connection failure.`,
+        shouldAbort: false,
+        count,
+        transportFailure: true,
+      };
     }
     const fails = (this.failures.get(toolName) ?? 0) + 1;
     this.failures.set(toolName, fails);
@@ -189,7 +208,11 @@ export class ToolFailureTracker {
     delegationAvailable?: boolean;
     /** See {@link ToolFailureResult.sourceFailureKind}. */
     sourceFailureKind?: 'truncated' | 'not-persisted';
+    transportFailure?: boolean;
   }): string {
+    if (opts.transportFailure) {
+      return `[${opts.providerLabel}] aborting — Gezel's internal tool connection failed ${opts.count} times in this turn. The calls were not rejected by their schemas; the local service backchannel was unavailable, so changing tools or arguments cannot recover this turn.`;
+    }
     if (isSourceEditFailureTool(opts.toolName)) {
       // Burned the whole budget failing to edit one file — a coordination/
       // coherence limit more nudging won't clear. If the model can delegate,
@@ -217,7 +240,11 @@ export class ToolFailureTracker {
     toolName: string;
     count: number;
     delegationAvailable?: boolean;
+    transportFailure?: boolean;
   }): string {
+    if (opts.transportFailure) {
+      return `Gezel lost its internal tool connection, so the turn was stopped after ${opts.count} failed calls. Your chat and completed tool history were preserved; retry after the service reconnects.`;
+    }
     if (isSourceEditFailureTool(opts.toolName)) {
       const handoff = opts.delegationAvailable
         ? ' Try sending your message again, or hand the file to a more capable model.'
@@ -240,6 +267,7 @@ export class ToolFailureTracker {
     surgicalEditsAvailable?: boolean;
     delegationAvailable?: boolean;
     sourceFailureKind?: 'truncated' | 'not-persisted';
+    transportFailure?: boolean;
   }): TurnAbortError {
     return new TurnAbortError(
       ToolFailureTracker.buildAbortMessage(opts),
@@ -260,6 +288,12 @@ function isFailureOutput(output: string): boolean {
     /^Write failed:/i.test(trimmed) ||
     /^Tool call failed:/i.test(trimmed) ||
     isDraftPlanGateFailure('', trimmed)
+  );
+}
+
+function isTransportFailureOutput(output: string): boolean {
+  return /\bfetch failed\b|\bECONNREFUSED\b|\bECONNRESET\b|\bsocket hang up\b|\bconnection refused\b/i.test(
+    output,
   );
 }
 

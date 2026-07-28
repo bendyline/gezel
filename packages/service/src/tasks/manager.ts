@@ -3,6 +3,7 @@ import {
   type ChatSessionSummary,
   type Craftbook,
   type CraftbookStep,
+  type CraftbookToolsetNeed,
   type CreateTaskRequest,
   DEFAULT_NIGHT_SHIFT_WINDOW,
   type GateAttemptRecord,
@@ -46,9 +47,11 @@ import {
   stepInsertionIndex,
   summarizePlanDocument,
   uniqueStepId,
+  unmetToolsets,
 } from '@bendyline/gezel';
 import { collapseCraftbookForTier as collapseCraftbookPass } from '@bendyline/gezel';
 import { evaluateDeliverableGate } from '../chat/deliverable-gate.js';
+import { installedToolsetIds } from '../craftbook/applicable.js';
 import type { Store } from '../fs/store.js';
 import type { HistoryManager } from '../history/manager.js';
 import type { ScriptRunner } from '../scripts/runner.js';
@@ -85,6 +88,24 @@ export interface CraftbookResolver {
     sourceId: string;
     version?: string;
   } | null>;
+}
+
+/** A craftbook was selected correctly, but its declared runtime is not ready. */
+export class CraftbookSetupRequiredError extends Error {
+  readonly code = 'CRAFTBOOK_SETUP_REQUIRED';
+
+  constructor(
+    readonly craftbookId: string,
+    readonly missingToolsets: CraftbookToolsetNeed[],
+  ) {
+    const details = missingToolsets
+      .map((need) => `${need.toolsetId}${need.reason ? ` (${need.reason})` : ''}`)
+      .join(', ');
+    super(
+      `SETUP REQUIRED for craftbook "${craftbookId}": install/configure ${details} before creating this task. No task was created.`,
+    );
+    this.name = 'CraftbookSetupRequiredError';
+  }
 }
 
 function describeAssignee(
@@ -234,6 +255,23 @@ export type StepActivatedHook = (ctx: {
 }) => Promise<void> | void;
 
 /**
+ * Fired when a completion gate re-activates a step but the model turn that
+ * triggered the gate remains responsible for the repair. The task runner uses
+ * this to transfer its live dispatch to the fresh activation instead of
+ * mistaking the timestamp change for superseding work and cancelling the turn.
+ *
+ * Deliberately synchronous: it runs immediately after the task write, before
+ * any awaited history/project work gives the runner's pruning timer a chance
+ * to observe the new activation without its current-turn ownership.
+ */
+export type CurrentTurnStepReactivatedHook = (ctx: {
+  projectId: string;
+  task: Task;
+  newStep: TaskCraftbookStep;
+  gatedStep: TaskCraftbookStep;
+}) => void;
+
+/**
  * Fired once after a task is created and written to disk. Used by
  * `service.ts` to install a craftbook's bundled scripts into the
  * project's scripts/ folder so onEnter/onExit refs resolve on first
@@ -350,6 +388,7 @@ export class GateRejectionError extends Error {
 
 export class TaskManager {
   private onStepActivated?: StepActivatedHook;
+  private onCurrentTurnStepReactivated?: CurrentTurnStepReactivatedHook;
   private onTaskCreated?: TaskCreatedHook;
   private onTaskSettled?: TaskSettledHook;
   private scriptRunner?: ScriptRunner;
@@ -436,6 +475,11 @@ export class TaskManager {
   /** Register the auto-handoff hook. Only one hook is supported. */
   setStepActivatedHook(fn: StepActivatedHook): void {
     this.onStepActivated = fn;
+  }
+
+  /** Register the current-turn gate-loop ownership hook. */
+  setCurrentTurnStepReactivatedHook(fn: CurrentTurnStepReactivatedHook): void {
+    this.onCurrentTurnStepReactivated = fn;
   }
 
   /**
@@ -572,6 +616,13 @@ export class TaskManager {
         throw new Error(`task ${projectId}/${num}: craftbook "${input.craftbookId}" not found`);
       }
       mainBook = resolved.craftbook;
+      const missingToolsets = unmetToolsets(
+        mainBook.toolsets,
+        await installedToolsetIds(this.store, projectId),
+      );
+      if (missingToolsets.length > 0) {
+        throw new CraftbookSetupRequiredError(input.craftbookId, missingToolsets);
+      }
       sources.push({
         role: 'main',
         catalogId: input.craftbookId,
@@ -611,6 +662,13 @@ export class TaskManager {
         );
       }
       spawnBook = resolved.craftbook;
+      const missingToolsets = unmetToolsets(
+        spawnBook.toolsets,
+        await installedToolsetIds(this.store, projectId),
+      );
+      if (missingToolsets.length > 0) {
+        throw new CraftbookSetupRequiredError(input.spawnsCraftbookId, missingToolsets);
+      }
       sources.push({
         role: 'spawn',
         catalogId: input.spawnsCraftbookId,
@@ -2535,6 +2593,26 @@ export class TaskManager {
       updatedAt: now,
     };
     await this.store.writeTask(next);
+    const newStep = next.craftbook.steps.find((s) => s.id === targetId);
+    // Model/tool and observable-progress attempts already have a live chat
+    // turn that receives the gate verdict and continues the repair loop.
+    // Claim the fresh activation for that dispatch immediately after the
+    // durable task write. Without this handoff, TaskRunner sees the changed
+    // `lastActivatedAt` on its next prune and cancels the healthy turn as a
+    // stale activation.
+    const currentTurnOwnsRecovery = cause === 'model' || cause === 'auto';
+    if (newStep && currentTurnOwnsRecovery && this.onCurrentTurnStepReactivated) {
+      try {
+        this.onCurrentTurnStepReactivated({
+          projectId,
+          task: next,
+          newStep,
+          gatedStep,
+        });
+      } catch (err) {
+        log.error('[tasks] current-turn step reactivation hook failed:', err);
+      }
+    }
     await this.reactivateProject(projectId);
     await this.history?.log({
       kind: 'task.step.activated',
@@ -2542,13 +2620,11 @@ export class TaskManager {
       summary: `Gate looped ${next.ref} back to "${target.name}"`,
       details: { ref: next.ref, stepId: targetId },
     });
-    const newStep = next.craftbook.steps.find((s) => s.id === targetId);
     // Model/tool and observable-progress attempts already have a live chat
     // turn that receives the gate verdict and continues the repair loop.
     // Starting a second handoff here creates two workers for the same
     // activation. Non-chat drivers (idle sweep/user/runtime routing) still
     // need a fresh handoff because no current model turn can consume it.
-    const currentTurnOwnsRecovery = cause === 'model' || cause === 'auto';
     if (newStep && this.onStepActivated && !currentTurnOwnsRecovery) {
       try {
         await this.onStepActivated({ projectId, task: next, newStep, completedStep: gatedStep });
