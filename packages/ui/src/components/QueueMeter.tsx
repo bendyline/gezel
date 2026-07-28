@@ -21,6 +21,7 @@ import type {
 } from '@bendyline/gezel-client';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
+import { queueOpenSession } from './pending-open-session.js';
 import { providerLabel } from './provider-label.js';
 import { type LiveTurnState, useOnDeviceLiveTurns } from './useOnDeviceLiveTurns.js';
 
@@ -63,6 +64,56 @@ function formatMs(ms: number): string {
   const m = Math.floor(s / 60);
   const r = s % 60;
   return r === 0 ? `${m}m` : `${m}m ${r}s`;
+}
+
+/**
+ * Navigate through the same queued-intent + live-event path as titlebar
+ * search. Looking up the session at click time gives us its authoritative
+ * project, which the provider queue does not carry.
+ */
+async function openQueuedChat(sessionId: string, onClose: () => void): Promise<void> {
+  try {
+    const session = await api.getChatSession(sessionId);
+    const intent = {
+      gezelId: session.gezelId,
+      sessionId: session.id,
+      projectId: session.projectId,
+    };
+    queueOpenSession(intent);
+    onClose();
+    window.dispatchEvent(
+      new CustomEvent('gezel:open-tab', {
+        detail: { kind: 'gezel', id: session.gezelId },
+      }),
+    );
+    window.dispatchEvent(new CustomEvent('gezel:open-session', { detail: intent }));
+  } catch {
+    // Queue snapshots are inherently racy: a session can disappear between
+    // the poll and the click. Leave the panel open when there is nowhere to go.
+  }
+}
+
+function QueueItemOpenButton({
+  sessionId,
+  actor,
+  onClose,
+}: {
+  sessionId: string | undefined;
+  actor: string;
+  onClose: () => void;
+}) {
+  // Paired-device queue ids are namespaced for isolation and do not identify
+  // a session in this app's local store.
+  if (!sessionId || sessionId.startsWith('dev:')) return null;
+  return (
+    <button
+      type="button"
+      className="queue-meter-panel-item-open"
+      aria-label={`Open chat with ${actor}`}
+      title="Open this chat"
+      onClick={() => void openQueuedChat(sessionId, onClose)}
+    />
+  );
 }
 
 export function QueueMeter() {
@@ -329,6 +380,11 @@ function QueueMeterPanel({
                 key={`preparing-${sessionId}`}
                 className="queue-meter-panel-item queue-meter-panel-item-pending queue-meter-panel-item-interactive"
               >
+                <QueueItemOpenButton
+                  sessionId={sessionId}
+                  actor={describeActor(turn.gezelId, gezels)}
+                  onClose={onClose}
+                />
                 <span className="queue-meter-panel-lane" title="preparing">
                   •
                 </span>
@@ -404,6 +460,11 @@ function QueueMeterPanel({
                       key={`active-${a.sessionId ?? i}`}
                       className="queue-meter-panel-item queue-meter-panel-item-active"
                     >
+                      <QueueItemOpenButton
+                        sessionId={a.sessionId}
+                        actor={describeActor(a.gezelId, gezels)}
+                        onClose={onClose}
+                      />
                       <span className="queue-meter-panel-status-dot" aria-hidden />
                       <span className="queue-meter-panel-gezel">
                         {describeActor(a.gezelId, gezels)}
@@ -442,6 +503,11 @@ function QueueMeterPanel({
                       key={`pending-${p.id}`}
                       className={`queue-meter-panel-item queue-meter-panel-item-pending queue-meter-panel-item-${p.lane}`}
                     >
+                      <QueueItemOpenButton
+                        sessionId={p.sessionId}
+                        actor={describeActor(p.gezelId, gezels)}
+                        onClose={onClose}
+                      />
                       <span className="queue-meter-panel-lane" title={`${p.lane} lane`}>
                         {p.lane === 'interactive' ? '•' : '·'}
                       </span>

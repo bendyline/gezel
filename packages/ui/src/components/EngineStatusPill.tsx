@@ -31,7 +31,6 @@ import { api } from '../api.js';
 import { streamSharedAllChatEvents } from '../shared-chat-events.js';
 import {
   type DeviceHealth,
-  deviceSafetyModeLabel,
   presentDeviceHealth,
 } from './engine-pill-device-health.js';
 import {
@@ -656,8 +655,6 @@ export function EngineStatusPill() {
               <>
                 <dt>Machine health</dt>
                 <dd>{healthPresentation.detail}</dd>
-                <dt>Safety</dt>
-                <dd>{deviceSafetyModeLabel(deviceHealth?.mode)}</dd>
               </>
             )}
             {activeMedia && (

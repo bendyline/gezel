@@ -17,19 +17,17 @@ import { type Theme, resolveTheme } from '@bendyline/squisq/schemas';
 
 export const GEZEL_CHAT_THEME_ID = 'gezellig';
 
-// Light-mode reading surface: 75% of the way from Squisq's stark `#ffffff`
-// `LIGHT_SURFACE.background` toward the gezel app's `--panel` canvas
-// (`#f3eddf`). A pure midpoint still read too stark against the cream
-// chrome — pushed further toward canvas so the prose sits on warm paper.
-// `backgroundLight` follows the same 75/25 lerp against
-// `LIGHT_SURFACE.backgroundLight` (`#f5f5f5`) so inset code-block tints
-// stay subtly distinct from the surface. Text colors carry over from
-// `LIGHT_SURFACE`. Shared by chat bubbles and the Home intro's embedded
-// Handboek page so gezel's light reading surfaces never drift apart.
+// Light-mode reading surface: a very pale greige-brown that keeps the warmth
+// of paper without a yellow cast. `background` must stay
+// matched to the light `--chat-bubble-bg` token in styles.css so the Squisq
+// interior and its outer bubble remain one continuous surface.
+// `backgroundLight` is the slightly deeper inset tone used for code blocks.
+// Text colors carry over from `LIGHT_SURFACE`. Shared by chat bubbles and the
+// Home intro's embedded Handboek page so gezel's reading surfaces never drift.
 export const GEZEL_LIGHT_SURFACE: SurfaceScheme = {
   id: 'gezel-chat-light',
-  background: '#f6f1e7',
-  backgroundLight: '#f4efe5',
+  background: '#f2efed',
+  backgroundLight: '#ece8e6',
   text: LIGHT_SURFACE.text,
   textMuted: LIGHT_SURFACE.textMuted,
 };

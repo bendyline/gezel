@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+  <!--
+    Pixel-aligned artwork for the 24 px frame in icon.ico.
+
+    The 24 px taskbar frame needs its own geometry: reducing the detailed
+    artwork makes the vise mask collapse and lets the grain change the
+    apparent weight of the two legs. Both leg paths use reflected coordinates
+    around x=14 and the same winding direction.
+  -->
+  <rect width="24" height="24" fill="#849577" />
+
+  <g fill="#f8f8f4">
+    <!-- Bench top and stretcher. -->
+    <rect x="6" y="5" width="16" height="4" rx=".5" />
+    <rect x="10" y="15" width="8" height="2" rx=".5" />
+
+    <!-- Equal-width legs reflected exactly around the bench center (x=14). -->
+    <path d="M8 10h3l-1 11H7z M17 10h3l1 11h-3z" />
+
+    <!-- Vise: a full-pixel spindle, substantial knobs, and a separate jaw. -->
+    <rect x="3" y="2" width="1" height="10" />
+    <circle cx="3.5" cy="2" r="1.5" />
+    <circle cx="3.5" cy="12" r="1.5" />
+    <rect x="1" y="5" width="4" height="4" rx=".5" />
+  </g>
+
+  <!-- Openings are painted directly instead of masked so they survive 24 px. -->
+  <g fill="#849577">
+    <circle cx="3.5" cy="7" r="1" />
+    <circle cx="9.5" cy="12.5" r=".75" />
+    <circle cx="18.5" cy="12.5" r=".75" />
+    <circle cx="8.5" cy="18.5" r=".75" />
+    <circle cx="19.5" cy="18.5" r=".75" />
+  </g>
+</svg>

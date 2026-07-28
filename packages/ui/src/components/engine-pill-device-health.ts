@@ -74,9 +74,3 @@ export function presentDeviceHealth(health: DeviceHealth): {
       };
   }
 }
-
-export function deviceSafetyModeLabel(mode: DeviceHealth['mode'] | undefined): string {
-  if (mode === 'guard') return 'Guarded · new work pauses when the device is too warm';
-  if (mode === 'observe') return 'Observing · warnings do not pause work';
-  return 'Off';
-}

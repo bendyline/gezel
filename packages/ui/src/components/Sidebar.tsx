@@ -499,7 +499,10 @@ export function Sidebar({
               const status = p.status ?? 'active';
               const select = () => onSelect(toRecentTab({ kind: 'project', id: p.id }));
               return (
-                <li key={p.id} className="app-sidebar-proj-row">
+                <li
+                  key={p.id}
+                  className={`app-sidebar-proj-row${activeKey === key ? ' active' : ''}`}
+                >
                   <button
                     type="button"
                     className={`app-sidebar-item app-sidebar-subitem${activeKey === key ? ' active' : ''}`}

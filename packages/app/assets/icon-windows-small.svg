@@ -2,7 +2,7 @@
   <!--
     Pixel-aligned artwork for the small frames in icon.ico.
 
-    Windows commonly displays application icons at 16–24 px. Reducing the
+    Windows commonly displays application icons at 16–20 px. Reducing the
     textured 1024 px master directly makes the legs fuzzy and closes the
     joinery cuts, so these shapes are deliberately simpler. Coordinates sit
     on a four-unit grid where possible: four SVG units become one pixel in

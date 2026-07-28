@@ -2168,12 +2168,10 @@ export function ChatTimelineView({
       return;
     }
     const containerRect = el.getBoundingClientRect();
-    // Publish the timeline's scrollbar gutter so the sticky-header
-    // (which is absolutely positioned in the viewport, OUTSIDE the
-    // timeline's content box) can subtract it from its width and stay
-    // aligned with `.msg`'s 92% cap. Without this the sticky overhangs
-    // the widest assistant bubble by ~13–15px on platforms with a
-    // classic scrollbar.
+    // Publish the timeline's scrollbar gutter for the sticky header's
+    // CSS fallback. Once an occluding bubble is found below, its actual
+    // rendered bounds replace that fallback so threaded and top-level
+    // replies each align to their own column.
     const viewportEl = el.parentElement;
     if (viewportEl) {
       const sbWidth = el.offsetWidth - el.clientWidth;
@@ -2202,6 +2200,7 @@ export function ChatTimelineView({
     let occludingAssistantId: string | null = null;
     let occludingAssistantTop = 0;
     let occludingSessionId: string | null = null;
+    let occludingAssistantRect: DOMRect | null = null;
     let lastUserIdInSession: string | null = null;
 
     const nodes = el.querySelectorAll<HTMLElement>('[data-msg-id]');
@@ -2221,7 +2220,21 @@ export function ChatTimelineView({
         occludingAssistantId = msgId;
         occludingAssistantTop = rect.top;
         occludingSessionId = sessionId ?? null;
+        occludingAssistantRect = rect;
       }
+    }
+
+    // The sticky lives outside the scrolling timeline, so CSS alone
+    // cannot tell whether the active bubble is in the indented reply
+    // column (with a thread rail) or at the timeline root. Mirror the
+    // detected bubble's exact border-box instead of guessing from a
+    // global indent. This also avoids fractional-pixel drift at the
+    // right edge when the 92% max-width resolves differently.
+    if (viewportEl && occludingAssistantRect) {
+      const viewportRect = viewportEl.getBoundingClientRect();
+      const left = occludingAssistantRect.left - viewportRect.left;
+      viewportEl.style.setProperty('--chat-sticky-left', `${left}px`);
+      viewportEl.style.setProperty('--chat-sticky-width', `${occludingAssistantRect.width}px`);
     }
 
     // Second pass: find the most-recent user message in the same
@@ -2276,6 +2289,17 @@ export function ChatTimelineView({
   useEffect(() => {
     scheduleStickyRecompute();
   }, [rows, scheduleStickyRecompute]);
+
+  // Keep the measured sticky bounds current when the chat column
+  // changes width (window resize, sidebar drag, or rail toggle) even
+  // if the user has not generated a scroll event.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(scheduleStickyRecompute);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [rows.length, scheduleStickyRecompute]);
 
   // Drop the rAF on unmount so we don't leave a callback running
   // after the component is gone.

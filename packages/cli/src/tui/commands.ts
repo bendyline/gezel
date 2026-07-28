@@ -12,6 +12,35 @@ export type ParsedInput =
   | { kind: 'tools' }
   | { kind: 'tool'; name: string; argsJson: string };
 
+export interface SlashCommand {
+  name: string;
+  description: string;
+}
+
+export const SLASH_COMMAND_WORDWHEEL_SIZE = 4;
+
+export const SLASH_COMMANDS: ReadonlyArray<SlashCommand> = [
+  { name: 'help', description: 'show the command reference' },
+  { name: 'project', description: 'switch active project' },
+  { name: 'gezel', description: 'switch active gezel' },
+  { name: 'task', description: 'set the active task' },
+  { name: 'focus', description: 'send into another active chat' },
+  { name: 'cli', description: 'make bare input run shell commands' },
+  { name: 'chat', description: 'make bare input message your gezel' },
+  { name: 'clear', description: 'clear the visible feed' },
+  { name: 'quit', description: 'exit the TUI' },
+];
+
+/**
+ * Return prefix matches while the user is typing a slash command. Once a
+ * space is entered the command is complete and the wordwheel closes.
+ */
+export function suggestSlashCommands(input: string): ReadonlyArray<SlashCommand> {
+  if (!input.startsWith('/') || /\s/.test(input)) return [];
+  const query = input.slice(1).toLowerCase();
+  return SLASH_COMMANDS.filter((command) => command.name.startsWith(query));
+}
+
 export function parseInput(raw: string, cliMode: boolean): ParsedInput {
   const text = raw.trim();
   if (!text) return { kind: 'empty' };

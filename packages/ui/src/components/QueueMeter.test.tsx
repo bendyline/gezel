@@ -79,6 +79,41 @@ describe('QueueMeter — preparing window', () => {
     expect(api.cancelChatSessionTurn).toHaveBeenCalledWith('sess-1');
   });
 
+  it('opens the exact queued chat, including its project', async () => {
+    mockLiveTurns.set('sess-1', liveTurn({ gezelId: 'gez-1', label: 'Loading model' }));
+    vi.mocked(api.getChatSession).mockResolvedValue({
+      version: 1,
+      id: 'sess-1',
+      gezelId: 'gez-1',
+      projectId: 'project-7',
+      providerName: 'llama-cpp',
+      title: 'Queued work',
+      createdAt: '2026-07-28T00:00:00.000Z',
+      lastActivityAt: '2026-07-28T00:00:00.000Z',
+      messages: [],
+      providerState: {},
+    } as never);
+    const dispatch = vi.spyOn(window, 'dispatchEvent');
+
+    render(<QueueMeter />);
+    await userEvent.click(await screen.findByTitle(/AI chat queue/));
+    await userEvent.click(await screen.findByRole('button', { name: 'Open chat with Alejandro' }));
+
+    await waitFor(() => expect(api.getChatSession).toHaveBeenCalledWith('sess-1'));
+    const events = dispatch.mock.calls
+      .map(([event]) => event)
+      .filter((event): event is CustomEvent => event instanceof CustomEvent);
+    expect(events.find((event) => event.type === 'gezel:open-tab')?.detail).toEqual({
+      kind: 'gezel',
+      id: 'gez-1',
+    });
+    expect(events.find((event) => event.type === 'gezel:open-session')?.detail).toEqual({
+      gezelId: 'gez-1',
+      sessionId: 'sess-1',
+      projectId: 'project-7',
+    });
+  });
+
   it('renders nothing when the active provider is cloud (no on-device turns)', async () => {
     vi.mocked(api.getConfig).mockResolvedValue({ provider: 'copilot' } as ConfigResponse);
     // Cloud provider → hook stays disabled → empty map (mocked here).

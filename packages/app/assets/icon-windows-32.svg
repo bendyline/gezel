@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!--
+    Pixel-aligned artwork for the 32 px frame in icon.ico.
+
+    The bench is centered on x=19, an integer pixel boundary, and the left
+    leg coordinates are reflected around that boundary. Keeping this frame separate from
+    the 24 px artwork prevents fractional scaling from changing either leg's
+    apparent weight.
+  -->
+  <rect width="32" height="32" fill="#849577" />
+
+  <g fill="#f8f8f4">
+    <!-- Bench top and stretcher. -->
+    <rect x="8" y="7" width="22" height="5" rx="1" />
+    <rect x="13" y="20" width="12" height="3" rx=".75" />
+
+    <!-- Equal-width legs reflected exactly around the bench center (x=19). -->
+    <path d="M11 14h4l-2 14H9z M23 14h4l2 14h-4z" />
+
+    <!-- Vise with a full-pixel spindle and a five-pixel-deep jaw. -->
+    <rect x="4" y="3" width="1" height="13" />
+    <circle cx="4.5" cy="3" r="2" />
+    <circle cx="4.5" cy="16" r="2" />
+    <rect x="1" y="7" width="6" height="5" rx=".75" />
+  </g>
+
+  <!-- Openings are painted directly instead of masked at this small size. -->
+  <g fill="#849577">
+    <circle cx="4.5" cy="9.5" r="1.5" />
+    <circle cx="12.5" cy="16.5" r="1" />
+    <circle cx="25.5" cy="16.5" r="1" />
+    <circle cx="11.5" cy="24.5" r="1" />
+    <circle cx="26.5" cy="24.5" r="1" />
+  </g>
+</svg>

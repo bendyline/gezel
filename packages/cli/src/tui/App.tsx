@@ -2,7 +2,7 @@ import type { GezelSummary } from '@bendyline/gezel';
 import type { ConfigResponse, GezelClient } from '@bendyline/gezel-client/node';
 import { Box, Text, useApp, useInput, useStdout } from 'ink';
 import { type JSX, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { parseInput } from './commands.js';
+import { SLASH_COMMAND_WORDWHEEL_SIZE, parseInput, suggestSlashCommands } from './commands.js';
 import { ChatFeed } from './components/ChatFeed.js';
 import { Picker, type PickerItem } from './components/Picker.js';
 import { PromptLine } from './components/PromptLine.js';
@@ -62,6 +62,8 @@ export function App(props: {
   client: GezelClient;
   initialProjectId: string;
   initialProjectName: string;
+  /** Role-based labels are the compact TUI default. */
+  boring?: boolean;
 }): JSX.Element {
   const { client } = props;
   const { exit } = useApp();
@@ -89,9 +91,15 @@ export function App(props: {
   const [selectedTaskRef, setSelectedTaskRef] = useState<string | null>(null);
   const [exitArmed, setExitArmed] = useState(false);
   const termRows = useTerminalRows();
-  const visibleRows = Math.max(4, termRows - 7);
+  const wordwheelCount = overlay === null && !pendingInput ? suggestSlashCommands(value).length : 0;
+  const wordwheelRows =
+    wordwheelCount > 0 ? Math.min(SLASH_COMMAND_WORDWHEEL_SIZE, wordwheelCount) + 1 : 0;
+  const visibleRows = Math.max(4, termRows - 7 - wordwheelRows);
 
-  const boring = config?.roleBasedNameOnlyMode === true;
+  // Keep terminal labels compact and task-oriented regardless of the desktop
+  // UI preference. The TUI defaults to role-based names without mutating the
+  // shared boring-mode setting.
+  const boring = props.boring ?? true;
   const busy = turns.size > 0;
   const statusLabel = useMemo(() => {
     if (turns.size === 0) return undefined;
@@ -197,8 +205,8 @@ export function App(props: {
   // Refresh tasks for the active project. Deliberately NOT polling
   // /api/config here: that endpoint reads provider credentials from the
   // OS keychain, which (under a bare `node` dev run) re-prompts on every
-  // read. Provider + boring-mode are read once in the initial load; they
-  // rarely change mid-session. `listTasks` only touches task files.
+  // read. Provider is read once in the initial load; it rarely changes
+  // mid-session. `listTasks` only touches task files.
   useEffect(() => {
     let cancelled = false;
     const load = async () => {

@@ -174,7 +174,7 @@ export function SessionSwitcher({
         <Select.Trigger className="gezel-chat-session-select">
           <Select.Value placeholder={hasSessions ? 'Pick a thread' : emptyLabel} />
         </Select.Trigger>
-        <Select.Content>
+        <Select.Content className="gezel-chat-session-menu">
           {hasSessions ? (
             sessions.map((s) => (
               <Select.Item key={s.id} value={s.id} textValue={rowTextValue(s, engineLabel)}>

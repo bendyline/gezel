@@ -272,10 +272,9 @@ function toolLabel(event: Extract<ChatEventEnvelope['event'], { type: 'tool' }>)
 }
 
 /**
- * Display label for a gezel. Honors "boring mode"
- * (`config.roleBasedNameOnlyMode`): role-based name only, never the
- * friendly name. Falls back to the raw id when the gezel isn't in the
- * roster snapshot.
+ * Display label for a gezel. In boring mode this uses the role-based name
+ * only, never the friendly name. Falls back to the raw id when the gezel
+ * isn't in the roster snapshot.
  */
 export function gezelLabel(
   gezelId: string,

@@ -26,6 +26,7 @@
     "app:clean": "node scripts/dev-fresh-runtime.mjs && pnpm rebuild && pnpm --filter @bendyline/gezel-app exec electron . --no-sandbox",
     "cli": "test -f packages/cli/dist/bin/gezel.js || pnpm --filter @bendyline/gezel-cli run build; GEZEL_DEV=1 node packages/cli/dist/bin/gezel.js",
     "cli:fresh": "pnpm --filter @bendyline/gezel-cli run build && GEZEL_DEV=1 node packages/cli/dist/bin/gezel.js",
+    "cli:tui": "pnpm bootstrap && pnpm --filter @bendyline/gezel-cli... run build && node scripts/run-cli-tui.mjs",
     "test": "pnpm -r --filter \"@bendyline/gezel*\" run test",
     "test:ci": "pnpm -r --workspace-concurrency=1 --filter \"@bendyline/gezel*\" run test",
     "test:stability": "pnpm -r --workspace-concurrency=1 --filter @bendyline/gezel-ui --filter @bendyline/gezel-service run test && pnpm -r --workspace-concurrency=1 --filter @bendyline/gezel-ui --filter @bendyline/gezel-service run test",

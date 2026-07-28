@@ -1,6 +1,7 @@
 import { Box, Text, useInput } from 'ink';
 import TextInput from 'ink-text-input';
 import { type JSX, useEffect, useState } from 'react';
+import { SLASH_COMMAND_WORDWHEEL_SIZE, suggestSlashCommands } from '../commands.js';
 import { EnginePill } from './EnginePill.js';
 
 /**
@@ -47,20 +48,55 @@ export function PromptLine(props: {
   // (= the "live" draft line); ↑ walks back, ↓ walks forward to the draft.
   // Resets to the end whenever a new line lands in history.
   const [cursor, setCursor] = useState(history.length);
+  const [suggestionIndex, setSuggestionIndex] = useState(0);
+  const suggestions = active && !pendingPrompt ? suggestSlashCommands(value) : [];
+  const activeSuggestionIndex = Math.min(suggestionIndex, Math.max(0, suggestions.length - 1));
+  const suggestionWindowStart = Math.min(
+    Math.max(0, activeSuggestionIndex - SLASH_COMMAND_WORDWHEEL_SIZE + 1),
+    Math.max(0, suggestions.length - SLASH_COMMAND_WORDWHEEL_SIZE),
+  );
+  const visibleSuggestions = suggestions.slice(
+    suggestionWindowStart,
+    suggestionWindowStart + SLASH_COMMAND_WORDWHEEL_SIZE,
+  );
+  const changeValue = (nextValue: string) => {
+    setSuggestionIndex(0);
+    onChange(nextValue);
+  };
+  const submitValue = (submittedValue: string) => {
+    const selected = suggestions[activeSuggestionIndex];
+    onSubmit(selected ? `/${selected.name}` : submittedValue);
+  };
+
   useEffect(() => {
     setCursor(history.length);
   }, [history.length]);
   useInput(
     (_input, key) => {
+      if (suggestions.length > 0) {
+        if (key.upArrow) {
+          setSuggestionIndex((i) => (i <= 0 ? suggestions.length - 1 : i - 1));
+          return;
+        }
+        if (key.downArrow) {
+          setSuggestionIndex((i) => (i >= suggestions.length - 1 ? 0 : i + 1));
+          return;
+        }
+        if (key.tab) {
+          const selected = suggestions[activeSuggestionIndex];
+          if (selected) changeValue(`/${selected.name} `);
+          return;
+        }
+      }
       if (pendingPrompt) return; // don't recall history while answering a prompt
       if (key.upArrow && history.length > 0) {
         const next = Math.max(0, cursor - 1);
         setCursor(next);
-        onChange(history[next] ?? '');
+        changeValue(history[next] ?? '');
       } else if (key.downArrow && cursor < history.length) {
         const next = cursor + 1;
         setCursor(next);
-        onChange(next === history.length ? '' : (history[next] ?? ''));
+        changeValue(next === history.length ? '' : (history[next] ?? ''));
       }
     },
     { isActive: active },
@@ -88,12 +124,32 @@ export function PromptLine(props: {
         <Text> </Text>
         <EnginePill provider={provider} busy={busy} label={statusLabel} />
       </Box>
+      {visibleSuggestions.length > 0 ? (
+        <Box flexDirection="column" marginLeft={2}>
+          {visibleSuggestions.map((command, windowIndex) => {
+            const index = suggestionWindowStart + windowIndex;
+            const selected = index === activeSuggestionIndex;
+            return (
+              <Text key={command.name} color={selected ? 'cyan' : undefined}>
+                {selected ? '› ' : '  '}/{command.name}
+                <Text dimColor> — {command.description}</Text>
+              </Text>
+            );
+          })}
+          <Text dimColor>
+            ↑/↓ choose · Enter run · Tab complete
+            {suggestions.length > SLASH_COMMAND_WORDWHEEL_SIZE
+              ? ` · ${activeSuggestionIndex + 1}/${suggestions.length}`
+              : ''}
+          </Text>
+        </Box>
+      ) : null}
       <Box>
         <Text color={pendingPrompt ? 'yellow' : mode === 'cli' ? 'green' : 'cyan'}>{prefix}</Text>
         <TextInput
           value={value}
-          onChange={onChange}
-          onSubmit={onSubmit}
+          onChange={changeValue}
+          onSubmit={submitValue}
           focus={active}
           mask={pendingMode === 'password' ? '*' : undefined}
           placeholder={placeholder}

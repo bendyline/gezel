@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  type DeviceHealth,
-  deviceSafetyModeLabel,
-  presentDeviceHealth,
-} from './engine-pill-device-health.js';
+import { type DeviceHealth, presentDeviceHealth } from './engine-pill-device-health.js';
 
 function health(overrides: Partial<DeviceHealth>): DeviceHealth {
   return {
@@ -59,13 +55,15 @@ describe('engine pill device health', () => {
     });
   });
 
-  it('makes cooling and blocked states explicit', () => {
-    expect(presentDeviceHealth(health({ state: 'cooling' }))).toMatchObject({
+  it('keeps warnings and work delays in the machine-health detail', () => {
+    expect(presentDeviceHealth(health({ state: 'cooling' }))).toEqual({
       inline: 'Cooling',
+      detail: 'Cooling before new work',
       tone: 'warning',
     });
-    expect(presentDeviceHealth(health({ state: 'blocked' }))).toMatchObject({
+    expect(presentDeviceHealth(health({ state: 'blocked' }))).toEqual({
       inline: 'Paused for safety',
+      detail: 'New work paused for safety',
       tone: 'danger',
     });
   });
@@ -84,11 +82,5 @@ describe('engine pill device health', () => {
       detail: 'Device telemetry unavailable · new work is blocked',
       tone: 'danger',
     });
-  });
-
-  it('explains safety modes in plain language', () => {
-    expect(deviceSafetyModeLabel('guard')).toContain('new work pauses');
-    expect(deviceSafetyModeLabel('observe')).toContain('warnings do not pause');
-    expect(deviceSafetyModeLabel('off')).toBe('Off');
   });
 });

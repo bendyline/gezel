@@ -3033,13 +3033,10 @@ export function RenderedMarkdown({
   // bubble bodies and the attachment previewer in
   // [ChatReferences.tsx](./ChatReferences.tsx) stay in lockstep.
   //
-  // In light mode we overlay a chat-tuned surface so the bubble
-  // interior reads as one uniform shade halfway between stark white
-  // and the cream `--panel` canvas (the bubble's outer fill) — paired
-  // with `.msg-body-rendered`'s matching `--bubble-bg` override in
-  // `styles.css`, the bubble appears seamlessly tinted instead of
-  // stark-white-on-cream. In dark mode we skip the surface overlay so
-  // the theme's own warm-tinted dark background comes through.
+  // In light mode we overlay the shared pale-brown reading surface. Its
+  // color matches the `--chat-bubble-bg` token used by the outer bubble,
+  // so the result appears seamlessly tinted. In dark mode we skip the
+  // surface overlay so the theme's own warm-tinted canvas comes through.
   const surface = effective === 'light' ? CHAT_BUBBLE_LIGHT_SURFACE : undefined;
   if (!doc) return <>{markdown}</>;
   // Chat history uses Squisq's thumbnail image mode so a pasted screenshot

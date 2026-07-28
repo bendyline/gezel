@@ -1,7 +1,20 @@
-import type { GezelSummary } from '@bendyline/gezel';
+import { GEZEL_VERSION, type GezelSummary } from '@bendyline/gezel';
 import { Box, Text } from 'ink';
 import type { JSX } from 'react';
 import { type FeedRow, gezelLabel } from '../feed.js';
+
+const BENCH_FACE_WIDTH = 21;
+const benchLabel = `gezel ${GEZEL_VERSION}`;
+const benchLabelPadding = Math.max(0, BENCH_FACE_WIDTH - benchLabel.length);
+const centeredBenchLabel = `${' '.repeat(Math.floor(benchLabelPadding / 2))}${benchLabel}${' '.repeat(
+  Math.ceil(benchLabelPadding / 2),
+)}`;
+const BENCH_LOGO = [
+  '      ______________________',
+  `     /${centeredBenchLabel}/|`,
+  '    /_____________________/ |',
+  '      ||               ||',
+].join('\n');
 
 const KIND_COLOR: Record<FeedRow['kind'], string | undefined> = {
   user: 'white',
@@ -30,7 +43,11 @@ export function ChatFeed(props: {
   return (
     <Box flexDirection="column" flexGrow={1}>
       {shown.length === 0 ? (
-        <Text dimColor>No chat yet. Type a message to your gezel, or /help.</Text>
+        <Box flexDirection="column" marginBottom={1}>
+          <Text color="yellow">{BENCH_LOGO}</Text>
+          <Text> </Text>
+          <Text dimColor>Type a message to begin · /help for commands</Text>
+        </Box>
       ) : (
         shown.map((row) => {
           const who =

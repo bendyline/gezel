@@ -302,6 +302,15 @@ just the parent screen. When a signal can also be dismissed, put the
 dismissal in that entity's `⋯` menu (e.g. "Clear error indicator"), gated
 so the item only appears while there's something to clear.
 
+**Selected navigation tabs join the canvas.** The current destination in
+the main sidebar is a raised piece of canvas-colored paper, not a pressed
+choice key. Its inner edge bridges across the rail seam into the open canvas,
+while its remaining edges keep a quiet border and directional drop shadow.
+Mirror the bridge and shadow when the sidebar changes sides, and put
+row-level status/actions on the same raised surface. Reserve this treatment
+for the one destination currently shown; hover and expand/collapse states
+remain flat in the rail.
+
 **Landing cues.** When navigation scrolls a surface to a specific row
 rather than the top or bottom of it, flash the row so the jump doesn't read
 as the view moving on its own: add `.timeline-focus-flash` (a ~2s ring that

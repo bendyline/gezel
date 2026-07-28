@@ -38,7 +38,18 @@
      in cream — it should feel like nested paper, not a contrast
      boundary. */
   --bg: #eae5d6;
+  --home-workshop-paper: #f1e9e5;
   --panel: #f3eddf;
+  /* Chat prose sits on a quiet greige-brown in light mode. Keep this
+     matched to `GEZEL_LIGHT_SURFACE.background` in chat-theme.ts so the
+     Squisq interior and its outer bubble remain one continuous surface. */
+  --chat-bubble-bg: #f2efed;
+  --chat-handoff-bg: #efebe8;
+  --chat-handoff-border: rgba(112, 98, 90, 0.32);
+  /* Thread selection is chat chrome, not app canvas: keep its trigger and
+     portaled menu cooler than the yellow parchment behind them. */
+  --chat-thread-bg: #ece8e5;
+  --chat-thread-menu-bg: #e4dfdc;
   /* In light mode `--surface` is a deeper, more saturated step than
      the canvas, used for inset cards / inputs that should read as
      pressed-into the page. Dark mode keeps the usual additive
@@ -57,6 +68,10 @@
   --accent-hover: #996142;
   --text: #1c1c1c;
   --text-muted: #666;
+  /* Tool icons use a warmer ink than body copy on light parchment.
+     Applied only by light-theme toolbar rules so dark-mode contrast and
+     active-state colors keep their existing treatments. */
+  --toolbar-icon-ink: #5c4937;
 
   /* Brand palette */
   --titlebar: #667f62;
@@ -130,13 +145,12 @@
   --key-pressed-ink: #fff6ea;
   --key-pressed-shadow: inset 0 1px 2px rgba(60, 30, 10, 0.28);
 
-  /* Scrollbars — warm terracotta tint over the cream canvas in light
-     mode so the thumb reads as part of the gezellig palette instead
-     of falling back to the OS dark default. Dark-mode override below
-     swaps to a muted cream over the dark canvas. */
-  --scrollbar-thumb: rgba(176, 114, 76, 0.42);
-  --scrollbar-thumb-hover: rgba(176, 114, 76, 0.62);
-  --scrollbar-track: rgba(176, 114, 76, 0.08);
+  /* Scrollbars — a quiet greige-brown over the light canvas keeps the
+     control warm without the old yellow-orange cast. Dark mode swaps
+     to a muted cream over its dark canvas below. */
+  --scrollbar-thumb: rgba(112, 98, 90, 0.42);
+  --scrollbar-thumb-hover: rgba(112, 98, 90, 0.62);
+  --scrollbar-track: rgba(112, 98, 90, 0.08);
 
   /* Alias for the palette's muted text. Dozens of rules reference
      `var(--muted, <fallback>)`; without this alias every one silently
@@ -153,7 +167,13 @@
 @media (prefers-color-scheme: dark) {
   :root {
     --bg: #141517;
+    --home-workshop-paper: #1f1c18;
     --panel: #1c1d20;
+    --chat-bubble-bg: var(--panel);
+    --chat-handoff-bg: rgba(176, 114, 76, 0.08);
+    --chat-handoff-border: rgba(176, 114, 76, 0.45);
+    --chat-thread-bg: var(--bg);
+    --chat-thread-menu-bg: var(--surface);
     --surface: #1f2124;
     --surface-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.35);
     --sidebar-seam-shadow: rgba(0, 0, 0, 0.28);
@@ -206,7 +226,13 @@
      dark-grey background even though the rest of the UI is parchment. */
   color-scheme: light;
   --bg: #eae5d6;
+  --home-workshop-paper: #f1e9e5;
   --panel: #f3eddf;
+  --chat-bubble-bg: #f2efed;
+  --chat-handoff-bg: #efebe8;
+  --chat-handoff-border: rgba(112, 98, 90, 0.32);
+  --chat-thread-bg: #ece8e5;
+  --chat-thread-menu-bg: #e4dfdc;
   --surface: #ddd3bd;
   --surface-shadow: 0 1px 2px rgba(0, 0, 0, 0.05), 0 6px 18px rgba(0, 0, 0, 0.06);
   --sidebar-seam-shadow: rgba(0, 0, 0, 0.1);
@@ -231,9 +257,9 @@
   --diff-gutter: rgba(0, 0, 0, 0.35);
   --diff-sep: rgba(0, 0, 0, 0.45);
   --logo-active-fill: #3d4d3a;
-  --scrollbar-thumb: rgba(176, 114, 76, 0.42);
-  --scrollbar-thumb-hover: rgba(176, 114, 76, 0.62);
-  --scrollbar-track: rgba(176, 114, 76, 0.08);
+  --scrollbar-thumb: rgba(112, 98, 90, 0.42);
+  --scrollbar-thumb-hover: rgba(112, 98, 90, 0.62);
+  --scrollbar-track: rgba(112, 98, 90, 0.08);
   --tray-bg: #ddd3bd;
   --tray-border: rgba(92, 74, 55, 0.22);
   --tray-shadow: inset 0 1px 3px rgba(60, 45, 30, 0.16), inset 0 -1px 0 rgba(255, 255, 255, 0.35);
@@ -251,7 +277,13 @@
 [data-theme="dark"] {
   color-scheme: dark;
   --bg: #141517;
+  --home-workshop-paper: #1f1c18;
   --panel: #1c1d20;
+  --chat-bubble-bg: var(--panel);
+  --chat-handoff-bg: rgba(176, 114, 76, 0.08);
+  --chat-handoff-border: rgba(176, 114, 76, 0.45);
+  --chat-thread-bg: var(--bg);
+  --chat-thread-menu-bg: var(--surface);
   --surface: #1f2124;
   --surface-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.35);
   --sidebar-seam-shadow: rgba(0, 0, 0, 0.28);
@@ -804,6 +836,21 @@ html.embedded-chat #root {
   pointer-events: none;
 }
 
+/* On phone-width windows, spend the scarce titlebar room on the search well
+   instead of the two layers of spacing between it and the brand (the header
+   gap plus the search's own left margin). This is intentionally a viewport
+   query: changing the flex parent's gap from its own container query is not
+   supported, and the header always spans the window. */
+@media (max-width: 500px) {
+  .app-header {
+    gap: 0.5rem;
+  }
+
+  .titlebar-search {
+    margin-left: 0;
+  }
+}
+
 /* The results palette is portaled by Radix (`.gz-popover`); size + scroll it. */
 .search-palette-popover {
   width: min(560px, 80vw);
@@ -1187,7 +1234,7 @@ html.embedded-chat #root {
   text-transform: uppercase;
   letter-spacing: 0.04em;
   opacity: 0.6;
-  align-self: center;
+  align-self: start;
 }
 .engine-pill-stats dd {
   margin: 0;
@@ -1368,11 +1415,40 @@ html.embedded-chat #root {
 }
 
 .queue-meter-panel-item {
+  position: relative;
   display: grid;
   grid-template-columns: 0.8rem 1fr auto auto;
   gap: 0.4rem;
   align-items: baseline;
   font-size: 0.82rem;
+  border-radius: var(--radius-sm);
+  margin-inline: -0.2rem;
+  padding-inline: 0.2rem;
+}
+
+/* A real chat-session row is one large navigation target. The transparent
+ * button sits behind its text and status; the action cluster stays above it
+ * so reorder/cancel remain independent controls. */
+.queue-meter-panel-item-open {
+  position: absolute;
+  inset: -0.1rem 0;
+  z-index: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  cursor: pointer;
+}
+.queue-meter-panel-item-open:hover {
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+}
+.queue-meter-panel-item-open:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.queue-meter-panel-item:has(> .queue-meter-panel-item-open) > span {
+  position: relative;
+  z-index: 1;
+  pointer-events: none;
 }
 
 .queue-meter-panel-status-dot {
@@ -1413,11 +1489,16 @@ html.embedded-chat #root {
  * so the resting list stays scannable; appears in-place on hover so
  * the row layout never reflows under the cursor. */
 .queue-meter-panel-actions {
+  position: relative;
+  z-index: 2;
   display: inline-flex;
   align-items: center;
   gap: 0.15rem;
   opacity: 0;
   transition: opacity 0.12s ease-out;
+}
+.queue-meter-panel-item:has(> .queue-meter-panel-item-open) > .queue-meter-panel-actions {
+  pointer-events: auto;
 }
 .queue-meter-panel-item:hover .queue-meter-panel-actions,
 .queue-meter-panel-actions:focus-within {
@@ -1594,6 +1675,16 @@ html.embedded-chat #root {
   line-height: 1;
 }
 
+[data-theme="light"] .area-toolbar-icon-btn {
+  color: var(--toolbar-icon-ink);
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) .area-toolbar-icon-btn {
+    color: var(--toolbar-icon-ink);
+  }
+}
+
 /* Pushed to the right edge (Projects collapse control). */
 .area-toolbar-toggle {
   margin-left: auto;
@@ -1628,6 +1719,14 @@ html.embedded-chat #root {
   overflow-y: auto;
   padding: 0.4rem 0.25rem;
 }
+
+/* Keep the folder chevron's click target intact while tightening the visual
+   gap before both folder icons and file icons (whose rows use the matching
+   toggle spacer). */
+.documents-tree-list .tree-label {
+  margin-left: -4px;
+}
+
 .documents-detail {
   overflow: auto;
   min-height: 0;
@@ -1971,7 +2070,11 @@ html.embedded-chat #root {
   overflow: hidden;
   position: relative;
   background: var(--panel);
-  border-right: 1px solid var(--border);
+  /* Use an inset divider instead of a physical border. Active navigation
+     tabs sit above this paint layer, so their canvas bridge can erase the
+     seam locally while the rest of the rail keeps its crisp edge. */
+  border-right: none;
+  box-shadow: inset -1px 0 var(--border);
   user-select: none;
 }
 
@@ -2037,11 +2140,6 @@ html.embedded-chat #root {
 
 .app-sidebar-item:hover {
   background: rgba(176, 114, 76, 0.08);
-}
-
-.app-sidebar-item.active {
-  background: rgba(176, 114, 76, 0.16);
-  border-color: rgba(176, 114, 76, 0.28);
 }
 
 .app-sidebar-item-icon {
@@ -2439,15 +2537,6 @@ html.embedded-chat #root {
   background: rgba(176, 114, 76, 0.08);
 }
 
-.app-sidebar-group-header.active .app-sidebar-group-toggle {
-  color: var(--accent);
-  /* Match the selected-item treatment (.app-sidebar-item.active): a darker
-     fill plus a selection rectangle so the active area header reads as
-     selected, not just accent-colored. */
-  background: rgba(176, 114, 76, 0.16);
-  border-color: rgba(176, 114, 76, 0.28);
-}
-
 .app-sidebar-group-label {
   font-size: 0.78rem;
   text-transform: uppercase;
@@ -2548,6 +2637,83 @@ html.embedded-chat #root {
   gap: 0.1rem;
 }
 
+/* The current destination is a raised paper tab joined to the open canvas,
+   rather than a tinted button floating inside the navigation rail. The
+   pseudo-element fills the rail's inner padding and paints over its seam
+   shadow; the square inner corners make the tab and canvas read as one
+   continuous surface. Project/gezel wrappers own the treatment so their
+   status and action controls remain on the same piece of paper. */
+.app-sidebar-scroll {
+  --sidebar-tab-bridge-size: calc(0.4rem + 1px);
+  --sidebar-tab-border: color-mix(in srgb, var(--accent) 38%, var(--border));
+  --sidebar-tab-surface: var(--bg);
+}
+
+.app-sidebar-item.active,
+.app-sidebar-group-header.active,
+.app-sidebar-proj-row.active,
+.app-sidebar-gezel-row.active,
+.app-sidebar-tree .tree-row.tree-row-selected {
+  position: relative;
+  z-index: 2;
+  background: var(--sidebar-tab-surface);
+  border: 1px solid var(--sidebar-tab-border);
+  border-right-color: transparent;
+  border-radius: var(--radius-md) 0 0 var(--radius-md);
+  /* The bridge is part of the tab's visible silhouette. A filter shadow
+     follows that combined row + pseudo-element shape; box-shadow would stop
+     at the wrapper edge and leave the bridge outline floating above it. */
+  box-shadow: inset 0 1px 0 color-mix(in srgb, white 10%, transparent);
+  filter: drop-shadow(-1px 2px 3px var(--sidebar-seam-shadow))
+    drop-shadow(-3px 5px 9px var(--sidebar-seam-shadow));
+}
+
+.app-sidebar-item.active::after,
+.app-sidebar-group-header.active::after,
+.app-sidebar-proj-row.active::after,
+.app-sidebar-gezel-row.active::after,
+.app-sidebar-tree .tree-row.tree-row-selected::after {
+  content: "";
+  position: absolute;
+  top: -1px;
+  bottom: -1px;
+  right: calc(-1 * var(--sidebar-tab-bridge-size));
+  width: var(--sidebar-tab-bridge-size);
+  background: var(--sidebar-tab-surface);
+  border-top: 1px solid var(--sidebar-tab-border);
+  border-bottom: 1px solid var(--sidebar-tab-border);
+  pointer-events: none;
+}
+
+/* Wrapper-owned selections suppress the old button-shaped selection inside
+   them. Keeping one elevation layer avoids a doubled border/shadow while the
+   nested button retains its full hit target and focus treatment. */
+.app-sidebar-proj-row.active > .app-sidebar-item.active,
+.app-sidebar-gezel-row.active > .app-sidebar-item.active {
+  position: static;
+  z-index: auto;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.app-sidebar-proj-row.active > .app-sidebar-item.active::after,
+.app-sidebar-gezel-row.active > .app-sidebar-item.active::after {
+  display: none;
+}
+
+.app-sidebar-group-header.active .app-sidebar-group-toggle {
+  color: var(--accent);
+  background: transparent;
+  border: none;
+  border-radius: 0;
+}
+
+.app-body:has(.home-workshop) .app-sidebar-home.active {
+  --sidebar-tab-surface: var(--home-workshop-paper);
+}
+
 /* Footer (outside the scroll region) — the collapse toggle. */
 .app-sidebar-footer {
   flex: 0 0 auto;
@@ -2618,7 +2784,8 @@ html.embedded-chat #root {
 
 :root[data-sidebar-side="right"] .app-sidebar {
   border-right: none;
-  border-left: 1px solid var(--border);
+  border-left: none;
+  box-shadow: inset 1px 0 var(--border);
 }
 
 :root[data-sidebar-side="right"] .app-sidebar-grip {
@@ -2634,6 +2801,42 @@ html.embedded-chat #root {
 
 :root[data-sidebar-side="right"] .app-sidebar-footer {
   justify-content: flex-start;
+}
+
+/* Mirror the connected tab when the navigation rail lives on the right.
+   Nested project/gezel rows also span the group's 0.9rem indent so their
+   paper bridge still reaches the canvas seam. */
+:root[data-sidebar-side="right"] .app-sidebar-item.active,
+:root[data-sidebar-side="right"] .app-sidebar-group-header.active,
+:root[data-sidebar-side="right"] .app-sidebar-proj-row.active,
+:root[data-sidebar-side="right"] .app-sidebar-gezel-row.active,
+:root[data-sidebar-side="right"] .app-sidebar-tree .tree-row.tree-row-selected {
+  border-right-color: var(--sidebar-tab-border);
+  border-left-color: transparent;
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, white 10%, transparent);
+  filter: drop-shadow(1px 2px 3px var(--sidebar-seam-shadow))
+    drop-shadow(3px 5px 9px var(--sidebar-seam-shadow));
+}
+
+:root[data-sidebar-side="right"] .app-sidebar-item.active::after,
+:root[data-sidebar-side="right"] .app-sidebar-group-header.active::after,
+:root[data-sidebar-side="right"] .app-sidebar-proj-row.active::after,
+:root[data-sidebar-side="right"] .app-sidebar-gezel-row.active::after,
+:root[data-sidebar-side="right"] .app-sidebar-tree .tree-row.tree-row-selected::after {
+  right: auto;
+  left: calc(-1 * var(--sidebar-tab-bridge-size));
+}
+
+:root[data-sidebar-side="right"] .app-sidebar-proj-row.active,
+:root[data-sidebar-side="right"] .app-sidebar-gezel-row.active {
+  --sidebar-tab-bridge-size: calc(1.3rem + 1px);
+}
+
+/* The elevation shadow must not swallow the app-wide keyboard focus ring. */
+.app-sidebar-item.active:focus-visible,
+:root[data-sidebar-side="right"] .app-sidebar-item.active:focus-visible {
+  box-shadow: var(--focus-ring);
 }
 
 /* Collapsed (icon-only, ~40px) mode: hide text + chrome, center icons. */
@@ -2657,6 +2860,7 @@ html.embedded-chat #root {
 }
 
 .app-sidebar.collapsed .app-sidebar-scroll {
+  --sidebar-tab-bridge-size: calc(0.2rem + 1px);
   padding-left: 0.2rem;
   padding-right: 0.2rem;
 }
@@ -4212,7 +4416,7 @@ button.danger {
   word-break: break-word;
   padding: 0.7rem 0.9rem;
   border-radius: 12px;
-  background: var(--panel);
+  background: var(--chat-bubble-bg, var(--panel));
   border: 1px solid var(--border);
   line-height: 1.45;
   /* Bubble never grows past its flex parent (the .msg wrapper already
@@ -4231,17 +4435,10 @@ button.danger {
   padding: 0.45rem 0.65rem;
   max-width: 100%;
   min-width: 0;
-  /* Match the chat-bubble light surface (`CHAT_BUBBLE_LIGHT_SURFACE` in
-     [chat-bubbles.tsx](src/components/chat-bubbles.tsx)) so the outer
-     bubble fill and the Squisq-rendered interior read as one uniform
-     shade in light mode instead of stark-white-on-cream. Dark mode
-     keeps the panel default — the gezellig theme's own dark canvas
-     already blends into the bubble. */
-  background: var(--bubble-bg, var(--panel));
-}
-
-[data-theme="light"] .msg-body-rendered {
-  --bubble-bg: #f6f1e7;
+  /* Match the Squisq reading surface (`GEZEL_LIGHT_SURFACE` in
+     chat-theme.ts) through the shared light-mode token, so the outer
+     bubble and rendered interior read as one continuous shade. */
+  background: var(--chat-bubble-bg, var(--panel));
 }
 
 /* AI bubbles fill the wrapper's full width so they stay aligned with
@@ -4254,11 +4451,6 @@ button.danger {
   align-self: stretch;
 }
 
-@media (prefers-color-scheme: light) {
-  :root:not([data-theme="dark"]) .msg-body-rendered {
-    --bubble-bg: #f6f1e7;
-  }
-}
 /* Streaming bubble segment wrapper. The first segment renders
    flush at the top; subsequent ones get a gap so a thinking-pause
    between text bursts shows as a visible paragraph break, not one
@@ -4407,12 +4599,12 @@ button.danger {
   width: 100%;
 }
 
-/* Squisq paints its own outer surface (`#f6f1e7` from
-   CHAT_BUBBLE_LIGHT_SURFACE) on the inner `.squisq-linear` div. In
+/* Squisq paints its own light-brown reading surface on the inner
+   `.squisq-linear` div. In
    user bubbles that surface sits on top of the warm-tan bubble fill
    and reads as a stark white inset — let the bubble fill show through
    instead. The same goes for from-gezel handoff bubbles, which have
-   their own dashed-warm tint. Assistant bubbles keep the Squisq
+   their own dashed handoff tint. Assistant bubbles keep the Squisq
    surface so the rendered prose has its own paper-toned reading
    background distinct from the chat canvas. */
 .msg-user .squisq-linear,
@@ -4443,8 +4635,8 @@ button.danger {
 }
 
 .msg-from-gezel .msg-body {
-  background: rgba(176, 114, 76, 0.08);
-  border: 1px dashed rgba(176, 114, 76, 0.45);
+  background: var(--chat-handoff-bg, rgba(176, 114, 76, 0.08));
+  border: 1px dashed var(--chat-handoff-border, rgba(176, 114, 76, 0.45));
 }
 
 .msg-role-handoff {
@@ -4936,6 +5128,7 @@ button.danger {
 .squisq-editor-shell[data-theme="light"] .squisq-toolbar,
 [data-theme="light"] .squisq-toolbar {
   background: rgba(88, 138, 63, 0.22) !important;
+  --squisq-toolbar-icon: var(--toolbar-icon-ink);
 }
 .squisq-editor-shell[data-theme="light"] .squisq-toolbar-view-tabs,
 [data-theme="light"] .squisq-toolbar-view-tabs {
@@ -4950,6 +5143,7 @@ button.danger {
 @media (prefers-color-scheme: light) {
   :root:not([data-theme="dark"]) .squisq-toolbar {
     background: rgba(88, 138, 63, 0.22) !important;
+    --squisq-toolbar-icon: var(--toolbar-icon-ink);
   }
   :root:not([data-theme="dark"]) .squisq-toolbar-view-tabs {
     background: transparent !important;
@@ -4957,6 +5151,36 @@ button.danger {
   }
   :root:not([data-theme="dark"]) .squisq-toolbar-separator {
     background: rgba(88, 138, 63, 0.36) !important;
+  }
+}
+
+/* Squisq renders formatting symbols in two ways: Font Awesome icons consume
+   `--squisq-toolbar-icon`, while text glyphs such as H1/H2 inherit the
+   button ink. Keep both families in the same warm brown at rest and on
+   hover; active controls remain sage through the more-specific rules below. */
+.squisq-editor-shell[data-theme="light"]
+  .squisq-toolbar-button:not(.squisq-toolbar-button--active):not(.squisq-toolbar-button--danger),
+[data-theme="light"]
+  .squisq-toolbar-button:not(.squisq-toolbar-button--active):not(.squisq-toolbar-button--danger),
+.squisq-editor-shell[data-theme="light"]
+  .squisq-toolbar-overflow-item:not(.squisq-toolbar-overflow-item--active):not(
+    .squisq-toolbar-overflow-item--danger
+  ),
+[data-theme="light"]
+  .squisq-toolbar-overflow-item:not(.squisq-toolbar-overflow-item--active):not(
+    .squisq-toolbar-overflow-item--danger
+  ) {
+  color: var(--toolbar-icon-ink);
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"])
+    .squisq-toolbar-button:not(.squisq-toolbar-button--active):not(.squisq-toolbar-button--danger),
+  :root:not([data-theme="dark"])
+    .squisq-toolbar-overflow-item:not(.squisq-toolbar-overflow-item--active):not(
+      .squisq-toolbar-overflow-item--danger
+    ) {
+    color: var(--toolbar-icon-ink);
   }
 }
 
@@ -8615,7 +8839,10 @@ button.bench-step-foot:disabled {
    ────────────────────────────────────────────────────────────────── */
 .home-workshop {
   /* Paper & ink */
-  --paper: #f4ecdc;
+  /* A pale mushroom-brown keeps the workshop warm without the old
+     yellow parchment cast. The darker paper steps remain available
+     for inset controls and rules. */
+  --paper: var(--home-workshop-paper);
   --paper-2: #ece2cd;
   --paper-3: #e2d5b9;
   --ink: #2a2520;
@@ -8663,7 +8890,7 @@ button.bench-step-foot:disabled {
 }
 
 [data-theme="dark"] .home-workshop {
-  --paper: #1f1c18;
+  --paper: var(--home-workshop-paper);
   --paper-2: #2a2620;
   --paper-3: #3a342b;
   --ink: #f0e8d5;
@@ -8679,7 +8906,7 @@ button.bench-step-foot:disabled {
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) .home-workshop {
-    --paper: #1f1c18;
+    --paper: var(--home-workshop-paper);
     --paper-2: #2a2620;
     --paper-3: #3a342b;
     --ink: #f0e8d5;
@@ -9867,6 +10094,14 @@ button.bench-step-foot:disabled {
   font-size: 0.8rem;
   white-space: nowrap;
   overflow: hidden;
+}
+
+.gz-select-trigger.gezel-chat-session-select {
+  background: var(--chat-thread-bg, var(--bg));
+}
+
+.gz-select-content.gezel-chat-session-menu {
+  background: var(--chat-thread-menu-bg, var(--surface));
 }
 
 /* Radix Select.Value renders as a span inside the trigger. Force
@@ -11362,10 +11597,9 @@ body.chat-rail-resizing webview {
      body and unaffected. */
   z-index: 0;
   /* Left inset applied to a thread's reply column (rail + gutter).
-     Declared here — not on `.timeline-thread-replies` — because the
-     sticky context header lives outside the timeline's content box
-     and must subtract the same inset to stay edge-aligned with the
-     (indented) assistant bubbles it tops. */
+     The sticky context header lives outside the timeline's content
+     box and measures the active bubble's rendered bounds, so this
+     token only owns the in-flow thread geometry. */
   --thread-indent: 1.05rem;
 }
 
@@ -11392,29 +11626,17 @@ body.chat-rail-resizing webview {
      bubbles being scrolled under it. */
   position: absolute;
   top: 0;
-  /* Line up with assistant bubbles — the sticky is effectively a
-     topper for the assistant message the user just scrolled past, so
-     its edges should match a max-width assistant bubble (left-aligned
-     at the timeline's 0.75rem padding, width = 92% of timeline content
-     box). User bubbles are right-aligned and intentionally don't
-     match; a centered sticky would visually disagree with both.
-     100% here is `.chat-timeline-viewport` which — per current
-     layout — has the same bounds as `.chat-timeline`, so the
-     timeline's 0.75rem horizontal padding is what we subtract to get
-     the content box. */
-  left: calc(0.75rem + var(--thread-indent, 0px));
-  /* The timeline's vertical scrollbar lives inside its border-box,
-     shrinking the content box that `.msg` is sized against. Subtract
-     it here so the sticky's right edge lines up with the widest
-     assistant bubble. The variable is published by ChatTimelineView's
-     `recomputeStickyHeader` from `offsetWidth - clientWidth`.
-     `--thread-indent` mirrors the reply column's left inset —
-     assistant bubbles render inside `.timeline-thread-replies`, so
-     their content box (and therefore their 92% cap) starts that much
-     further in. */
-  width: calc(
-    (100% - 1.5rem - var(--chat-timeline-sb-width, 0px) - var(--thread-indent, 0px)) *
-    0.92
+  /* ChatTimelineView measures the occluded assistant bubble and
+     publishes its border-box here. That makes the sticky follow an
+     indented thread reply when a rail is present and the root column
+     when it is not. The gutter value is a safe pre-measure fallback. */
+  left: var(--chat-sticky-left, 0.75rem);
+  /* The measured width avoids fractional-pixel drift at the right
+     edge. Before measurement, derive the root-column width from the
+     timeline padding and its published native scrollbar gutter. */
+  width: var(
+    --chat-sticky-width,
+    calc((100% - 1.5rem - var(--chat-timeline-sb-width, 0px)) * 0.92)
   );
   z-index: 5;
   min-width: 0;
@@ -11423,19 +11645,17 @@ body.chat-rail-resizing webview {
      bubble's own border still give the "sticky above, content below"
      depth cue without a hard line cutting between them. */
   border-radius: 0;
-  /* Mostly-opaque so bubble text scrolling underneath doesn't
-     read-through the header. `color-mix` keeps light/dark theme
-     neutrality — the panel var resolves to #1c1d20 in dark and
-     #fff in light, and we keep 8% transparency as a subtle depth
-     hint over the solid bubble. */
-  background: color-mix(in srgb, var(--panel) 92%, transparent);
+  /* Mostly opaque so bubble text scrolling underneath doesn't read
+     through the header. Reuse the bubble surface for the same cool
+     paper tone in light mode; dark mode resolves it to the panel. */
+  background: color-mix(in srgb, var(--chat-bubble-bg, var(--panel)) 96%, transparent);
   border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
   border-top: none;
   border-bottom: none;
   box-shadow: 0 6px 10px -4px rgba(0, 0, 0, 0.45);
   font-size: 0.82rem;
   line-height: 1.3;
-  /* Backdrop so anything leaking through the 8% transparent edge
+  /* Backdrop so anything leaking through the 4% transparent edge
      is blurred rather than razor-sharp. */
   backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
@@ -12568,8 +12788,10 @@ button.timeline-session-divider-continuing::before {
 }
 
 .chat-rail-task-status-active {
-  background: rgba(106, 211, 143, 0.15);
-  color: #9cd9b2;
+  background: color-mix(in srgb, var(--success) 18%, transparent);
+  color: color-mix(in srgb, var(--success) 24%, var(--text));
+  border: 1px solid color-mix(in srgb, var(--success) 42%, transparent);
+  font-weight: 600;
 }
 
 .chat-rail-task-status-draft {
@@ -16532,6 +16754,10 @@ a.license-button:hover {
    * the tabs with the stable input band so both sit below the Send / terminal
    * toolbar instead of following the variable recipient + context rows. */
   align-items: flex-end;
+  /* Keep the tabs just clear of the window edge without weakening their
+   * attached seam against the composer. */
+  padding-right: 2px;
+  padding-bottom: 2px;
   /* Negative margin lets the active tab's left edge overlap the
    * composer's right border by 1px, giving the "tab attached to
    * panel" look. */

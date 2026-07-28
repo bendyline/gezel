@@ -160,6 +160,7 @@ describe('Sidebar', () => {
     render(<Sidebar selection={selection} onSelect={vi.fn()} onOpenArea={vi.fn()} />);
     const beta = await screen.findByText('Beta');
     expect(beta.closest('button')?.className).toContain('active');
+    expect(beta.closest('li')).toHaveClass('app-sidebar-proj-row', 'active');
   });
 
   it('shows the per-project signal by precedence: intervene > poisoned > thinking > status', async () => {
