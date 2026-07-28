@@ -144,7 +144,7 @@ asarUnpack:
 #   2. On Windows, an Authenticode sweep that signs every exe/dll in the
 #      packed payload lacking a valid signature — electron-builder's own
 #      pass never descends into extraFiles or the asar-unpacked payload
-#      (pnpm.exe, our-built engine DLLs).
+#      (our-built engine DLLs).
 afterPack: scripts/after-pack.cjs
 
 # electron-builder's built-in @electron/notarize integration notarizes both

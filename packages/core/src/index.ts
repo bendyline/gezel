@@ -29,6 +29,7 @@ export * from './skills/index.js';
 export * from './execution-density.js';
 export * from './plan/plan-document.js';
 export * from './mentions.js';
+export * from './pnpm-invocation.js';
 
 /**
  * The package version is embedded into health responses and logs so clients

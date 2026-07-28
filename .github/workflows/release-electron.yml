@@ -339,9 +339,12 @@ jobs:
           # Unsigned here means the sweep regressed — fail the release.
           #
           # Third-party binaries we redistribute verbatim are exempt: we sign
-          # what we compile, so NVIDIA's cuBLAS/cudart, uv.exe and node.exe
-          # ship exactly as their vendors released them. The exemption list
-          # comes from scripts/third-party-binaries.cjs
+          # what we compile, so NVIDIA's cuBLAS/cudart, uv.exe, and pnpm's
+          # optional fastlist helpers ship exactly as their vendors released
+          # them. Bundled node.exe is also kept
+          # byte-identical, but its existing OpenJS Authenticode signature is
+          # explicitly validated below. The allowlist comes from
+          # scripts/third-party-binaries.cjs
           # so this gate and the sweep cannot drift apart. It is an explicit
           # allowlist, not "ignore unsigned" — a first-party DLL that failed
           # to get signed still fails here.
@@ -362,6 +365,17 @@ jobs:
           $checked = 0
           $skipped = @()
           foreach ($executable in @($installers) + $payload) {
+            if ($executable.Name -ieq 'node.exe') {
+              $signature = Get-AuthenticodeSignature $executable.FullName
+              if ($signature.Status -ne 'Valid') {
+                throw "Invalid upstream Authenticode signature for $($executable.FullName): $($signature.Status)"
+              }
+              if ($signature.SignerCertificate.Subject -notmatch 'O=OpenJS Foundation(?:,|$)') {
+                throw "Unexpected node.exe signer for $($executable.FullName): $($signature.SignerCertificate.Subject)"
+              }
+              $checked += 1
+              continue
+            }
             if (Test-ThirdParty $executable.Name) {
               $skipped += $executable.Name
               continue

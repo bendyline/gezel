@@ -13,8 +13,8 @@ import { canApplyMacSandbox, sandboxEnv } from '../sandbox/runner.js';
  *   - `cwd` is the project workspace; the caller has already passed the
  *     `assertWorkspaceWritable` gate.
  *   - Env is allowlist-scrubbed — tokens and API keys never reach the
- *     child. `GEZEL_PNPM_PATH` is preserved so nested pnpm calls
- *     resolve the bundled binary.
+ *     child. `GEZEL_PNPM_PATH` and `GEZEL_NODE_PATH` are preserved so
+ *     nested pnpm calls resolve the bundled script and runtime.
  *   - Wall-clock timeout with process-group kill, so a runaway
  *     `tsc --watch` can't outlive its deadline.
  *   - 200KB output caps per stream so a chatty build can't flood the
@@ -62,6 +62,7 @@ export async function runWorkspaceCommand(
     ...sandboxEnv(process.env),
     GEZEL_SANDBOX: '1',
     ...(process.env.GEZEL_PNPM_PATH ? { GEZEL_PNPM_PATH: process.env.GEZEL_PNPM_PATH } : {}),
+    ...(process.env.GEZEL_NODE_PATH ? { GEZEL_NODE_PATH: process.env.GEZEL_NODE_PATH } : {}),
     ...(opts.extraEnv ?? {}),
   };
 

@@ -18,8 +18,8 @@ export interface InstallResult {
  * Runs `pnpm add --ignore-scripts <pkg>` inside a project directory.
  * Each project has its own package.json + node_modules as its toolbox.
  * `--ignore-scripts` is forced by `runPnpm` — post-install hooks are a
- * supply-chain vector we don't accept. pnpm binary resolves from
- * `GEZEL_PNPM_PATH` (bundled), falling back to `pnpm` on PATH.
+ * supply-chain vector we don't accept. pnpm resolves from the bundled
+ * script + Node runtime, falling back to `pnpm` on PATH.
  */
 export async function installPackage(opts: InstallPackageOptions): Promise<InstallResult> {
   const cwd = projectLocalDir(opts.home, opts.projectId);

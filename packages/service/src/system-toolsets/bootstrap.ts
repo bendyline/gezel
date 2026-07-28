@@ -11,7 +11,7 @@ import {
 } from '@bendyline/gezel-catalog';
 import { systemToolsetsInstallDir } from '@bendyline/gezel/paths';
 import type { Store } from '../fs/store.js';
-import { resolvePnpmBinary } from '../packages/pnpm.js';
+import { resolvePnpmCommand } from '../packages/pnpm.js';
 import { SYSTEM_LOCKFILES } from './locks.js';
 import {
   CHROMIUM_REVISION,
@@ -377,11 +377,13 @@ async function installOne(
       await writeFile(join(pkgDir, 'pnpm-lock.yaml'), lockfile);
 
       logger?.info?.(`[system-toolsets] running pnpm install --prod for ${entry.toolsetId}`);
-      await run(
-        resolvePnpmBinary(),
-        ['install', '--prod', '--frozen-lockfile', '--ignore-scripts'],
-        pkgDir,
-      );
+      const pnpm = resolvePnpmCommand([
+        'install',
+        '--prod',
+        '--frozen-lockfile',
+        '--ignore-scripts',
+      ]);
+      await run(pnpm.command, pnpm.args, pkgDir, pnpm.shell);
 
       await publishStagedNpmInstall(staging, target, backup);
       return { installPath: join(target, 'package') };
@@ -511,7 +513,7 @@ async function readBoundedJson(response: Response, maxBytes: number): Promise<un
   }
 }
 
-function run(cmd: string, args: string[], cwd?: string): Promise<void> {
+function run(cmd: string, args: string[], cwd?: string, shell?: boolean): Promise<void> {
   return new Promise((resolve, reject) => {
     // Windows: pnpm, tar, and most tools we invoke here are resolved via
     // `.cmd` / `.bat` shims on PATH. Node's `spawn` without `shell` can't
@@ -523,7 +525,7 @@ function run(cmd: string, args: string[], cwd?: string): Promise<void> {
     const child = spawn(cmd, args, {
       cwd,
       stdio: 'inherit',
-      shell: process.platform === 'win32',
+      shell: shell ?? process.platform === 'win32',
     });
     child.on('error', (err) => {
       // Translate the Node-level `ENOENT` into something a user (or a
@@ -531,7 +533,7 @@ function run(cmd: string, args: string[], cwd?: string): Promise<void> {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
         const pnpmEnv = process.env.GEZEL_PNPM_PATH;
         const hint = pnpmEnv
-          ? `GEZEL_PNPM_PATH=${pnpmEnv} but the file is missing or not executable.`
+          ? `GEZEL_PNPM_PATH=${pnpmEnv} could not be launched; check that it exists and that GEZEL_NODE_PATH names a working Node runtime when it is a JavaScript entrypoint.`
           : `GEZEL_PNPM_PATH is unset; the daemon's launcher did not provide a path to the bundled pnpm.`;
         reject(new Error(`Could not run '${cmd}' (${err.message}). ${hint}`));
         return;

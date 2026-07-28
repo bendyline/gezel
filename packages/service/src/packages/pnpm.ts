@@ -1,12 +1,16 @@
 import { type SpawnOptions, spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
+import { type PnpmInvocation, resolvePnpmInvocation } from '@bendyline/gezel';
 
 /**
  * Single entry point for spawning pnpm from the service. Centralizes two
  * concerns:
  *
- *  1. **Binary resolution** — the Electron supervisor sets
- *     `GEZEL_PNPM_PATH` to the bundled pnpm binary on launch. When unset
- *     (dev `pnpm dev` workflow), we fall back to the `pnpm` on PATH.
+ *  1. **Invocation resolution** — packaged Gezel points
+ *     `GEZEL_PNPM_PATH` at pnpm's JavaScript entrypoint and
+ *     `GEZEL_NODE_PATH` at bundled Node. Development can still use a
+ *     configured executable or `pnpm` on PATH.
  *  2. **`--ignore-scripts` everywhere** — post-install hooks are the
  *     exact supply-chain vector we're eliminating. Any legitimate
  *     post-install work (e.g. Playwright's chromium download) is invoked
@@ -43,8 +47,33 @@ export interface RunPnpmOptions {
   lifecycle?: 'ignore' | 'allow';
 }
 
-export function resolvePnpmBinary(): string {
-  return process.env.GEZEL_PNPM_PATH || 'pnpm';
+export function resolvePnpmCommand(args: string[] = []): PnpmInvocation {
+  return resolvePnpmInvocation(args, {
+    pnpmPath: process.env.GEZEL_PNPM_PATH,
+    nodePath: process.env.GEZEL_NODE_PATH,
+    processExecPath: process.execPath,
+    platform: process.platform,
+  });
+}
+
+/**
+ * Native service-host releases before the script-runtime migration wrote a
+ * bundle-local `pnpm[.exe]` path. Redirect that legacy value to the ordinary
+ * package's adjacent JS entrypoint so an existing signed helper can launch a
+ * newly packaged service without a coordinated native release. Prefer the
+ * script even if an upgrade left the old standalone file behind.
+ */
+export function normalizeBundledPnpmPath(): string | undefined {
+  const configured = process.env.GEZEL_PNPM_PATH;
+  if (!configured) return configured;
+
+  const legacyName = basename(configured).toLowerCase();
+  if (legacyName !== 'pnpm' && legacyName !== 'pnpm.exe') return configured;
+
+  const entryPath = join(dirname(configured), 'bin', 'pnpm.mjs');
+  if (!existsSync(entryPath)) return configured;
+  process.env.GEZEL_PNPM_PATH = entryPath;
+  return entryPath;
 }
 
 /**
@@ -72,24 +101,20 @@ function quoteWinShellArg(arg: string): string {
  */
 export function runPnpm(args: string[], opts: RunPnpmOptions): Promise<PnpmResult> {
   return new Promise((resolve) => {
-    const binary = resolvePnpmBinary();
     const lifecycle = opts.lifecycle ?? 'ignore';
     const rawArgs = lifecycle === 'ignore' ? ['--ignore-scripts', ...args] : [...args];
-    // Windows: pnpm is a `.cmd` shim on PATH. Without `shell: true`,
-    // `spawn` can't resolve the shim and fails with ENOENT. When
-    // GEZEL_PNPM_PATH points at an absolute `pnpm.exe` this flag is a
-    // no-op; the branch matters for the dev fallback. shell:true means
-    // cmd.exe parses the args, so quote each one to neutralize injection.
-    const useShell = process.platform === 'win32';
-    const finalArgs = useShell ? rawArgs.map(quoteWinShellArg) : rawArgs;
+    const invocation = resolvePnpmCommand(rawArgs);
+    // Only the Windows PATH/.cmd fallback needs cmd.exe. The bundled JS
+    // route invokes Node directly and never passes through a shell.
+    const finalArgs = invocation.shell ? invocation.args.map(quoteWinShellArg) : invocation.args;
     const spawnOpts: SpawnOptions = {
       cwd: opts.cwd,
       env: { ...process.env, ...opts.env } as NodeJS.ProcessEnv,
       stdio: ['ignore', 'pipe', 'pipe'],
-      shell: useShell,
+      shell: invocation.shell,
     };
     if (opts.timeoutMs) spawnOpts.timeout = opts.timeoutMs;
-    const child = spawn(binary, finalArgs, spawnOpts);
+    const child = spawn(invocation.command, finalArgs, spawnOpts);
 
     let stdout = '';
     let stderr = '';

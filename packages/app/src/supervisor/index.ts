@@ -487,24 +487,9 @@ export type Connection = SupervisedService;
  * silent drift into embedded mode.
  */
 export async function connectOrStart(opts: ConnectOptions): Promise<SupervisedService> {
-  // Ensure the bundled pnpm binary (if one shipped) is laid down at
-  // `~/.gezel/bin/pnpm[.exe]` before we boot the service. The service
-  // reads `GEZEL_PNPM_PATH` to invoke pnpm for system-toolset installs;
-  // without this, it falls back to whatever pnpm is on PATH (dev mode).
-  try {
-    const bundleDir = defaultPnpmBundleDir(import.meta.url);
-    const pnpm = await installPnpmIfNeeded({ home: opts.home, bundleDir, logger: opts.logger });
-    if (pnpm.binaryPath) {
-      process.env.GEZEL_PNPM_PATH = pnpm.binaryPath;
-    }
-  } catch (err) {
-    opts.logger?.warn?.(
-      `[supervisor] pnpm install step failed: ${(err as Error).message}; continuing without bundled pnpm`,
-    );
-  }
-
-  // Same dance for the bundled Node.js binary. The sandbox runner
-  // prefers `GEZEL_NODE_PATH` over `node` on PATH so
+  // Install Node first: the bundled pnpm package is a JavaScript CLI and
+  // every packaged platform launches it with this runtime. The sandbox
+  // runner also prefers `GEZEL_NODE_PATH` over `node` on PATH so
   // `run_nodejs_script` works on machines without a global Node
   // install. Absent bundle → supervisor logs "no-bundle" and the
   // sandbox falls back to whatever `node` the shell resolves.
@@ -521,6 +506,22 @@ export async function connectOrStart(opts: ConnectOptions): Promise<SupervisedSe
   } catch (err) {
     opts.logger?.warn?.(
       `[supervisor] node install step failed: ${(err as Error).message}; continuing without bundled node`,
+    );
+  }
+
+  // Lay down the ordinary pnpm package at
+  // `~/.gezel/bin/pnpm-runtime/` and point the service at its JS
+  // entrypoint. Invocation resolution combines this with
+  // `GEZEL_NODE_PATH`; dev mode still falls back to pnpm on PATH.
+  try {
+    const bundleDir = defaultPnpmBundleDir(import.meta.url);
+    const pnpm = await installPnpmIfNeeded({ home: opts.home, bundleDir, logger: opts.logger });
+    if (pnpm.entryPath) {
+      process.env.GEZEL_PNPM_PATH = pnpm.entryPath;
+    }
+  } catch (err) {
+    opts.logger?.warn?.(
+      `[supervisor] pnpm install step failed: ${(err as Error).message}; continuing without bundled pnpm`,
     );
   }
 

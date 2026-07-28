@@ -69,6 +69,7 @@ import { MemoryCompactor } from './memory/compaction.js';
 import { MemoryHealthMonitor } from './memory/health.js';
 import { MemoryManager } from './memory/manager.js';
 import { createEnsureModelOrchestrator } from './models/ensure.js';
+import { normalizeBundledPnpmPath } from './packages/pnpm.js';
 import { PreviewLogBuffer } from './preview-log/buffer.js';
 import { recoverTypedProjectCreations } from './project-type/create.js';
 import { SpeechToTextProviderManager } from './providers/audio/stt-manager.js';
@@ -219,7 +220,7 @@ export interface RunningService {
  * If the daemon was launched with `GEZEL_NODE_PATH` pointing at a
  * bundled Node binary, prepend its directory to `PATH`. Internal code
  * uses `GEZEL_NODE_PATH` directly (e.g. `sandbox/runner.ts`,
- * `resolvePnpmBinary`), so the daemon itself doesn't need this — but
+ * `resolvePnpmCommand`), so the daemon itself doesn't need this — but
  * spawned child processes that go through shell shims do.
  *
  * Concrete example: `pnpm exec playwright install chromium` invokes
@@ -252,6 +253,10 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   // common offender, but the same need applies to any post-install
   // hook a system-toolset install runs.
   ensureBundledNodeOnPath();
+  // Older signed Windows service-host builds point at the retired
+  // bundle-local pnpm.exe. Redirect that legacy path to the ordinary
+  // package's JS entrypoint before catalog/bootstrap code reads env.
+  normalizeBundledPnpmPath();
 
   // Node's Happy Eyeballs default of 250ms per address is too short for
   // Windows machines on slow paths to Cloudflare-fronted hosts (Hugging

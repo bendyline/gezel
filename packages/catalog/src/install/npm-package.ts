@@ -3,7 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { mkdir, open, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
-import type { ToolsetManifest } from '@bendyline/gezel';
+import { type ToolsetManifest, resolvePnpmInvocation } from '@bendyline/gezel';
 import * as tar from 'tar';
 
 const DEFAULT_REGISTRY = 'https://registry.npmjs.org';
@@ -58,12 +58,16 @@ export async function installNpmPackageToolset(opts: NpmInstallOptions): Promise
     await rm(tarballPath, { force: true });
 
     const packageDir = join(staging, 'package');
-    const pnpm = process.env.GEZEL_PNPM_PATH || 'pnpm';
-    await runAndWait(
-      pnpm,
+    const pnpm = resolvePnpmInvocation(
       ['install', '--prod', '--ignore-scripts', '--frozen-lockfile=false'],
-      packageDir,
+      {
+        pnpmPath: process.env.GEZEL_PNPM_PATH,
+        nodePath: process.env.GEZEL_NODE_PATH,
+        processExecPath: process.execPath,
+        platform: process.platform,
+      },
     );
+    await runAndWait(pnpm.command, pnpm.args, packageDir, pnpm.shell);
     await resolvePackageEntry(packageDir, entry);
 
     await publishStagedNpmInstall(staging, target, backup);
@@ -360,16 +364,14 @@ export async function recoverInterruptedNpmInstall(target: string, backup: strin
   }
 }
 
-function runAndWait(command: string, args: string[], cwd: string): Promise<void> {
+function runAndWait(command: string, args: string[], cwd: string, shell: boolean): Promise<void> {
   return new Promise((resolvePromise, reject) => {
     const child = spawn(command, args, {
       cwd,
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
       detached: process.platform !== 'win32',
-      shell:
-        process.platform === 'win32' &&
-        (!/\.[a-z0-9]{1,5}$/i.test(command) || /\.(?:cmd|bat)$/i.test(command)),
+      shell,
     });
     let output = '';
     let settled = false;

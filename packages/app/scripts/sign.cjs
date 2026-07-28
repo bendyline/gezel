@@ -3,7 +3,7 @@
  * hook (called once per file electron-builder targets itself: `gezel.exe`
  * and the NSIS installer .exe) plus the `signFile`/`isValidlySigned`
  * helpers the afterPack sweep in `after-pack.cjs` uses to cover the rest
- * of the payload (pnpm.exe, our-built engine DLLs). We use
+ * of the payload (our-built engine DLLs). We use
  * `signtool.exe` with the Azure Trusted Signing dlib so the signing key
  * lives in a cloud HSM, not on disk.
  *

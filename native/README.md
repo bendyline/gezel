@@ -240,8 +240,8 @@ code signatures on the staged binaries (`Get-AuthenticodeSignature` /
 `codesign --verify --strict`), packages with electron-builder, and on
 Windows runs the afterPack sweep
 (`packages/app/scripts/after-pack.cjs`) that signs any exe/dll in the
-payload still lacking a valid signature — covering `pnpm.exe` and
-our-built engine DLLs while leaving upstream-signed
+payload still lacking a valid signature — covering our-built engine DLLs
+while leaving upstream-signed
 binaries byte-identical to the native release. Post-package
 verification asserts the full payload validates on both platforms.
 

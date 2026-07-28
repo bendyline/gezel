@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { playwrightBrowsersDir } from '@bendyline/gezel/paths';
-import { resolvePnpmBinary } from '../packages/pnpm.js';
+import { resolvePnpmCommand } from '../packages/pnpm.js';
 import type { SystemStatusBus } from './status-bus.js';
 
 /**
@@ -47,26 +47,26 @@ export async function ensureChromiumInstalled(args: {
     browserProgress: { bytesDownloaded: 0, bytesTotal: null },
   });
 
-  const pnpm = resolvePnpmBinary();
   // `pnpm exec playwright install chromium` resolves Playwright from the
   // MCP toolset's own node_modules, so there's no global Playwright dep.
+  const pnpm = resolvePnpmCommand([
+    '--dir',
+    args.playwrightInstallPath,
+    'exec',
+    'playwright',
+    'install',
+    'chromium',
+  ]);
   return new Promise((resolve) => {
-    const child = spawn(
-      pnpm,
-      ['--dir', args.playwrightInstallPath, 'exec', 'playwright', 'install', 'chromium'],
-      {
-        cwd: args.playwrightInstallPath,
-        env: {
-          ...process.env,
-          PLAYWRIGHT_BROWSERS_PATH: browsersDir,
-        },
-        stdio: ['ignore', 'pipe', 'pipe'],
-        // Windows: bare `pnpm` resolves to `pnpm.cmd`; spawn can't launch
-        // .cmd shims without going through cmd.exe. Same fix as
-        // packages/pnpm.ts and system-toolsets/bootstrap.ts.
-        shell: process.platform === 'win32',
+    const child = spawn(pnpm.command, pnpm.args, {
+      cwd: args.playwrightInstallPath,
+      env: {
+        ...process.env,
+        PLAYWRIGHT_BROWSERS_PATH: browsersDir,
       },
-    );
+      stdio: ['ignore', 'pipe', 'pipe'],
+      shell: pnpm.shell,
+    });
     let stderrTail = '';
     const onChunk = (chunk: Buffer) => {
       const text = chunk.toString('utf8');

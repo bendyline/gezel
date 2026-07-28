@@ -8,7 +8,7 @@
  *    every `.exe`/`.dll` that doesn't already carry a valid signature.
  *    electron-builder's own signing pass only covers `gezel.exe` and the
  *    installer executable — it never descends into the asar-unpacked
- *    payload (pnpm.exe, our-built ggml/llama engine DLLs). Anything
+ *    payload (our-built ggml/llama engine DLLs). Anything
  *    already validly signed is left byte-identical: node.exe (OpenJS),
  *    and the gezel-* engine exes plus gezel-service-host.exe signed at
  *    birth by build-native.yml — re-signing those would break the "one
@@ -20,8 +20,9 @@
  *    We sign what we compile; NVIDIA's cuBLAS and Astral's uv ship exactly
  *    as their vendors released them, byte-identical and hash-comparable
  *    against the vendors' own manifests. (They arrive unsigned: NVIDIA's
- *    CUDA DLLs have no certificate table at all, and uv.exe is unsigned as
- *    Astral publishes it. So this is "leave them alone", not "preserve an
+ *    CUDA DLLs have no certificate table, uv.exe is unsigned as Astral
+ *    publishes it, and pnpm's optional fastlist helpers are part of the
+ *    pinned package. So this is "leave them alone", not "preserve an
  *    existing signature" — except node.exe, which does carry OpenJS's.)
  *
  *    The release workflow's "Verify Windows signatures" gate exempts the

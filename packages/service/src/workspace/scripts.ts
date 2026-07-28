@@ -6,7 +6,7 @@ import type { CommandApprovalScope, Question } from '@bendyline/gezel';
 import { nowIso } from '@bendyline/gezel';
 import type { Store } from '../fs/store.js';
 import type { HistoryManager } from '../history/manager.js';
-import { resolvePnpmBinary } from '../packages/pnpm.js';
+import { resolvePnpmCommand } from '../packages/pnpm.js';
 import {
   type CommandApprovalsFile,
   hashCommandBody,
@@ -88,9 +88,14 @@ export async function runPackageScript(opts: RunPackageScriptOptions): Promise<R
   });
   if (gateOutcome) return gateOutcome;
 
+  const invocation = resolvePnpmCommand([
+    'run',
+    opts.script,
+    ...(opts.args && opts.args.length > 0 ? ['--', ...opts.args] : []),
+  ]);
   const res = await runWorkspaceCommand({
-    bin: resolvePnpmBinary(),
-    args: ['run', opts.script, ...(opts.args && opts.args.length > 0 ? ['--', ...opts.args] : [])],
+    bin: invocation.command,
+    args: invocation.args,
     cwd: gate.workspaceDir,
     ...(opts.timeoutMs ? { timeoutMs: opts.timeoutMs } : {}),
   });

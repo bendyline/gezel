@@ -99,6 +99,8 @@ describe('Windows machine-service installer security', () => {
     expect(serviceHost).toContain('{L"LOCALAPPDATA", home + L"\\\\localappdata"}');
     expect(serviceHost).toContain('{L"USERPROFILE", home}');
     expect(serviceHost).toContain('L"C:\\\\ProgramData\\\\Gezel"');
+    expect(serviceHost).toContain('dist\\\\pnpm-bundle\\\\bin\\\\pnpm.mjs');
+    expect(serviceHost).not.toContain('dist\\\\pnpm-bundle\\\\pnpm.exe');
   });
 
   it('fails closed if any load-bearing identity control fails', () => {

@@ -44,12 +44,15 @@ const THIRD_PARTY_PATTERNS = [
   { pattern: '^nvrtc-builtins64_.+\\.dll$', source: 'NVIDIA CUDA Toolkit' },
   { pattern: '^nvJitLink_\\d+\\.dll$', source: 'NVIDIA CUDA Toolkit' },
 
-  // Prebuilt vendor binaries we download rather than compile. uv.exe is
-  // unsigned as Astral publishes it; node.exe carries OpenJS's own
-  // signature and must keep it.
+  // Prebuilt vendor binaries we download rather than compile. uv.exe and
+  // pnpm's optional fastlist helpers are unsigned as published; node.exe
+  // carries OpenJS's own signature and must keep it.
   { pattern: '^uv\\.exe$', source: 'Astral uv (prebuilt release)' },
   { pattern: '^node\\.exe$', source: 'OpenJS Node.js (prebuilt release)' },
-  { pattern: '^pnpm\\.exe$', source: 'pnpm (prebuilt release)' },
+  {
+    pattern: '^fastlist-[\\w.-]+\\.exe$',
+    source: 'pnpm fastlist helper (ordinary pnpm package)',
+  },
 ];
 
 const COMPILED = THIRD_PARTY_PATTERNS.map((entry) => ({

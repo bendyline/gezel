@@ -48,17 +48,17 @@
              Point them at the same system-scope dir we already own. -->
         <key>HOME</key>
         <string>/Library/Application Support/Gezel</string>
-        <!-- Bundled pnpm + Node binaries. The Electron supervisor sets
+        <!-- Bundled pnpm script + Node binary. The Electron supervisor sets
              these in its own process env for user-context launches; the
              system service is started by launchd with a clean
              environment and never sees those, so they have to be
-             declared here. Both paths point at the asar-unpacked
-             binaries inside the installed .app — already code-signed,
-             already world-executable, no extraction needed. The
+             declared here. Both paths point inside the installed .app's
+             asar-unpacked tree; Node is code-signed and executes pnpm's
+             ordinary JavaScript entry directly. The
              postinstall pinning these to /Applications/Gezel.app
              matches how ProgramArguments and GEZEL_UI_DIR are pinned. -->
         <key>GEZEL_PNPM_PATH</key>
-        <string>/Applications/Gezel.app/Contents/Resources/app.asar.unpacked/dist/pnpm-bundle/pnpm</string>
+        <string>/Applications/Gezel.app/Contents/Resources/app.asar.unpacked/dist/pnpm-bundle/bin/pnpm.mjs</string>
         <key>GEZEL_NODE_PATH</key>
         <string>/Applications/Gezel.app/Contents/Resources/app.asar.unpacked/dist/node-bundle/node</string>
         <!-- Static UI bundle. Lives at app.asar.unpacked/dist/ui/

@@ -31,12 +31,12 @@ Environment=GEZEL_SYSTEM_SCOPE=1
 # cache at ~/.npm, node's ~/.node-gyp — need a writable home. Point them
 # at the same system-scope dir we already own.
 Environment=HOME=/var/lib/gezel
-# Bundled pnpm + Node binaries. The Electron supervisor sets these in
+# Bundled pnpm script + Node binary. The Electron supervisor sets these in
 # its own process env for user-context launches; the system service is
 # started by systemd with a clean environment and never sees those, so
 # they have to be declared here. Both paths point at the asar-unpacked
-# binaries inside /opt/Gezel — already executable, no extraction needed.
-Environment=GEZEL_PNPM_PATH=/opt/Gezel/resources/app.asar.unpacked/dist/pnpm-bundle/pnpm
+# tree inside /opt/Gezel; Node executes pnpm's ordinary JavaScript entry.
+Environment=GEZEL_PNPM_PATH=/opt/Gezel/resources/app.asar.unpacked/dist/pnpm-bundle/bin/pnpm.mjs
 Environment=GEZEL_NODE_PATH=/opt/Gezel/resources/app.asar.unpacked/dist/node-bundle/node
 # Static UI bundle. Lives at /opt/Gezel/resources/app.asar.unpacked/dist/ui.
 # The daemon's own findBundledUi searches relative to gezeld.js and would

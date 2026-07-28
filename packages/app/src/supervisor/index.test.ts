@@ -49,7 +49,7 @@ const ctx = vi.hoisted(() => ({
 
 vi.mock('./extract-pnpm.js', () => ({
   defaultPnpmBundleDir: () => '/fake/pnpm-bundle',
-  installPnpmIfNeeded: vi.fn().mockResolvedValue({ binaryPath: null }),
+  installPnpmIfNeeded: vi.fn().mockResolvedValue({ entryPath: null }),
 }));
 vi.mock('./extract-node.js', () => ({
   defaultNodeBundleDir: () => '/fake/node-bundle',

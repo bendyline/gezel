@@ -246,6 +246,7 @@ export class PersistentShell {
       TERM: 'xterm-256color',
       GEZEL_SANDBOX: '1',
       ...(process.env.GEZEL_PNPM_PATH ? { GEZEL_PNPM_PATH: process.env.GEZEL_PNPM_PATH } : {}),
+      ...(process.env.GEZEL_NODE_PATH ? { GEZEL_NODE_PATH: process.env.GEZEL_NODE_PATH } : {}),
     } as { [key: string]: string };
 
     log.info(`spawning shell ${spec.file} ${spec.args.join(' ')} (cwd=${options.cwd})`);

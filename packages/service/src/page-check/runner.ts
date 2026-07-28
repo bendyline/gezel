@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { createLogger } from '@bendyline/gezel';
 import { playwrightBrowsersDir } from '@bendyline/gezel/paths';
 import type { Store } from '../fs/store.js';
-import { resolvePnpmBinary } from '../packages/pnpm.js';
+import { resolvePnpmCommand } from '../packages/pnpm.js';
 
 const log = createLogger('page-check');
 
@@ -169,7 +169,6 @@ async function runPageCheckInner(opts: RunPageCheckOptions): Promise<PageCheckOu
   const runnerPath = join(scratch, 'page-check-runner.mjs');
   await writeFile(runnerPath, RUNNER_SOURCE, 'utf8');
 
-  const pnpm = resolvePnpmBinary();
   const args = [
     '--dir',
     opts.installPath,
@@ -180,16 +179,15 @@ async function runPageCheckInner(opts: RunPageCheckOptions): Promise<PageCheckOu
     String(settleMs),
     String(inBrowserCapMs),
   ];
+  const pnpm = resolvePnpmCommand(args);
 
   try {
     const raw = await new Promise<{ log: string; failed?: string }>((resolve) => {
-      const child = spawnImpl(pnpm, args, {
+      const child = spawnImpl(pnpm.command, pnpm.args, {
         cwd: opts.installPath,
         env: { ...process.env, PLAYWRIGHT_BROWSERS_PATH: opts.browsersPath },
         stdio: ['ignore', 'pipe', 'pipe'],
-        // Windows: bare `pnpm` is a `.cmd` shim — spawn needs cmd.exe
-        // to find it. Same fix as packages/pnpm.ts.
-        shell: process.platform === 'win32',
+        shell: pnpm.shell,
       });
       let out = '';
       const cap = (chunk: Buffer) => {

@@ -43,7 +43,7 @@ import { ProjectDeleteError } from '../../fs/store.js';
 import { GitError, runGit } from '../../github/git.js';
 import { buildEnrichDeps } from '../../index-store/enrich.js';
 import { installPackage } from '../../packages/install.js';
-import { resolvePnpmBinary } from '../../packages/pnpm.js';
+import { resolvePnpmCommand } from '../../packages/pnpm.js';
 import { applyProjectType } from '../../project-type/apply.js';
 import { TypedProjectCreateError, createTypedProject } from '../../project-type/create.js';
 import { importGzlBundle, packProjectTypeBundle } from '../../project-type/gzl.js';
@@ -1010,23 +1010,21 @@ export function projectRoutes(ctx: ServiceContext): Hono {
 
     const isTest =
       body.mode === 'test' || /\.(spec|test)\.(mts|mjs|ts|js|cjs|cts)$/.test(scriptRel);
-    const pnpm = resolvePnpmBinary();
     const args = isTest
       ? ['--dir', playwright.installPath, 'exec', 'playwright', 'test', scriptAbs]
       : ['--dir', playwright.installPath, 'exec', 'node', '--experimental-strip-types', scriptAbs];
+    const pnpm = resolvePnpmCommand(args);
 
     const result = await new Promise<{ ok: boolean; code: number | null; log: string }>(
       (resolve) => {
-        const child = spawn(pnpm, args, {
+        const child = spawn(pnpm.command, pnpm.args, {
           cwd: playwright.installPath,
           env: {
             ...process.env,
             PLAYWRIGHT_BROWSERS_PATH: playwrightBrowsersDir(ctx.home),
           },
           stdio: ['ignore', 'pipe', 'pipe'],
-          // Windows: bare `pnpm` is a `.cmd` shim — spawn needs cmd.exe
-          // to find it. Same fix as packages/pnpm.ts.
-          shell: process.platform === 'win32',
+          shell: pnpm.shell,
         });
         let log = '';
         const cap = (chunk: Buffer) => {

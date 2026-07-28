@@ -50,7 +50,7 @@ export default defineConfig({
       );
     }
 
-    // Download + verify the pinned pnpm binary into dist/pnpm-bundle/.
+    // Download + verify the pinned ordinary pnpm package into dist/pnpm-bundle/.
     // Honors GEZEL_PNPM_SKIP=1 for offline dev; the supervisor's
     // extract-pnpm step treats a missing bundle as "fall back to system
     // pnpm" in dev.
