@@ -65,22 +65,30 @@ afterAll(() => {
 function dryRunPack(directory: string): PackResult {
   const cache = mkdtempSync(join(tmpdir(), 'gezel-pack-cache-'));
   caches.push(cache);
-  const result = spawnSync(
-    process.platform === 'win32' ? 'npm.cmd' : 'npm',
-    [
-      'pack',
-      '.',
-      '--dry-run',
-      '--json',
-      '--ignore-scripts',
-      '--workspaces=false',
-      '--cache',
-      cache,
-    ],
-    { cwd: directory, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 },
-  );
+  const packArgs = [
+    'pack',
+    '.',
+    '--dry-run',
+    '--json',
+    '--ignore-scripts',
+    '--workspaces=false',
+    '--cache',
+    cache,
+  ];
+  // npm is exposed through a .cmd shim on Windows. Node cannot launch
+  // command-script shims directly, so invoke it explicitly through cmd.exe.
+  const command = process.platform === 'win32' ? (process.env.ComSpec ?? 'cmd.exe') : 'npm';
+  const args = process.platform === 'win32' ? ['/d', '/s', '/c', 'npm.cmd', ...packArgs] : packArgs;
+  const result = spawnSync(command, args, {
+    cwd: directory,
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
+  });
   if (result.status !== 0) {
-    throw new Error(`npm pack failed in ${directory}:\n${result.stderr}`);
+    const detail = [result.error?.stack, result.stderr, result.stdout].filter(Boolean).join('\n');
+    throw new Error(
+      `npm pack failed in ${directory} (status=${result.status}, signal=${result.signal}):\n${detail}`,
+    );
   }
   const parsed = JSON.parse(result.stdout);
   const packed = Array.isArray(parsed) ? parsed[0] : parsed;

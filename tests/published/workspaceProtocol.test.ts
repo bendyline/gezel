@@ -18,7 +18,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as tar from 'tar';
 import { afterAll, describe, expect, it } from 'vitest';
-import { type PackageJson, loadPublishedPackages } from './_packages';
+import { type PackageJson, REPO_ROOT, loadPublishedPackages } from './_packages';
 
 const RUNTIME_DEP_FIELDS = ['dependencies', 'peerDependencies', 'optionalDependencies'] as const;
 
@@ -34,26 +34,11 @@ afterAll(() => {
   for (const dir of temporaryDirs) rmSync(dir, { recursive: true, force: true });
 });
 
-function packedManifest(packageDir: string): PackageJson {
-  const destination = mkdtempSync(join(tmpdir(), 'gezel-ws-pack-'));
-  temporaryDirs.push(destination);
-
-  const result = spawnSync('pnpm', ['pack', '--pack-destination', destination], {
-    cwd: packageDir,
-    encoding: 'utf8',
-    maxBuffer: 64 * 1024 * 1024,
-  });
-  if (result.status !== 0) {
-    throw new Error(`pnpm pack failed in ${packageDir}:\n${result.stderr}`);
-  }
-
-  const tarball = readdirSync(destination).find((f) => f.endsWith('.tgz'));
-  if (!tarball) throw new Error(`pnpm pack produced no tarball in ${destination}`);
-
+function readPackedManifest(tarball: string): PackageJson {
   let manifest: PackageJson | undefined;
   const chunks: Buffer[] = [];
   tar.list({
-    file: join(destination, tarball),
+    file: tarball,
     sync: true,
     filter: (path) => path === 'package/package.json',
     onReadEntry: (entry) => {
@@ -64,9 +49,50 @@ function packedManifest(packageDir: string): PackageJson {
     },
   });
 
-  if (!manifest) throw new Error(`no package.json inside the tarball for ${packageDir}`);
+  if (!manifest) throw new Error(`no package.json inside ${tarball}`);
   return manifest;
 }
+
+function packedManifests(): Map<string, PackageJson> {
+  if (packages.length === 0) return new Map();
+
+  const destination = mkdtempSync(join(tmpdir(), 'gezel-ws-pack-'));
+  temporaryDirs.push(destination);
+
+  // Pack every relevant workspace package in one pnpm process. Besides being
+  // faster in general, this avoids paying the unusually high CLI cold-start
+  // cost once per package on Windows.
+  const packArgs = [
+    '--recursive',
+    ...packages.flatMap(({ name }) => ['--filter', name]),
+    'pack',
+    '--pack-destination',
+    destination,
+  ];
+  // pnpm is exposed through a .cmd shim on Windows. Node cannot launch
+  // command-script shims directly, so invoke it explicitly through cmd.exe.
+  const command = process.platform === 'win32' ? (process.env.ComSpec ?? 'cmd.exe') : 'pnpm';
+  const args =
+    process.platform === 'win32' ? ['/d', '/s', '/c', 'pnpm.cmd', ...packArgs] : packArgs;
+  const result = spawnSync(command, args, {
+    cwd: REPO_ROOT,
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  if (result.status !== 0) {
+    const detail = [result.error?.stack, result.stderr, result.stdout].filter(Boolean).join('\n');
+    throw new Error(
+      `pnpm pack failed in ${REPO_ROOT} (status=${result.status}, signal=${result.signal}):\n${detail}`,
+    );
+  }
+
+  const manifests = readdirSync(destination)
+    .filter((file) => file.endsWith('.tgz'))
+    .map((file) => readPackedManifest(join(destination, file)));
+  return new Map(manifests.map((manifest) => [manifest.name, manifest]));
+}
+
+const packedByName = packedManifests();
 
 describe('workspace protocol is resolved at pack time', () => {
   it('has packages to check', () => {
@@ -75,8 +101,9 @@ describe('workspace protocol is resolved at pack time', () => {
 
   it.each(packages)(
     '$name ships concrete versions for its workspace siblings',
-    ({ path, pkg }) => {
-      const packed = packedManifest(path);
+    ({ name, pkg }) => {
+      const packed = packedByName.get(name);
+      if (!packed) throw new Error(`pnpm pack produced no tarball for ${name}`);
 
       for (const field of RUNTIME_DEP_FIELDS) {
         for (const [dep, range] of Object.entries(packed[field] ?? {})) {
