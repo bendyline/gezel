@@ -1,6 +1,11 @@
 import type { NativeEngineResolveEvent } from '@bendyline/gezel';
 import { describe, expect, it, vi } from 'vitest';
-import { GezelApiError, GezelClient, type MlxInstallEvent } from './client.js';
+import {
+  GezelApiError,
+  GezelClient,
+  type LlamaCppInstallEvent,
+  type MlxInstallEvent,
+} from './client.js';
 
 /**
  * Build a fetch that streams the given SSE frames then closes the body.
@@ -87,6 +92,31 @@ describe('installMlxModel terminal-frame handling', () => {
       client.installMlxModel('gemma4-12b-q8', (ev) => events.push(ev)),
     ).resolves.toBeUndefined();
     expect(events.at(-1)).toMatchObject({ type: 'error', error: 'sha256 mismatch' });
+  });
+});
+
+describe('installLlamaCppModel companion handling', () => {
+  it('accepts image-recognition companion progress before the primary done frame', async () => {
+    const client = makeClient(
+      streamingFetch([
+        { type: 'extracting-metadata' },
+        {
+          type: 'companion',
+          kind: 'image-recognition',
+          id: 'minicpm-v',
+          name: 'MiniCPM-V',
+          bytesWritten: 1024,
+          totalBytes: 4096,
+        },
+        { type: 'done', id: 'qwen3.5-2b-q4' },
+      ]),
+    );
+    const events: LlamaCppInstallEvent[] = [];
+
+    await expect(
+      client.installLlamaCppModel('qwen3.5-2b-q4', (event) => events.push(event)),
+    ).resolves.toBeUndefined();
+    expect(events.map((event) => event.type)).toEqual(['extracting-metadata', 'companion', 'done']);
   });
 });
 

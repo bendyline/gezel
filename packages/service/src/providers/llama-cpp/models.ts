@@ -72,6 +72,12 @@ export interface InstalledLlamaCppModel {
    * video inputs on llama-server. Absent → text-only model.
    */
   mmprojPath?: string;
+  /**
+   * Absolute path to a speculative-decoding companion GGUF, when the
+   * catalog ships one. The launcher forwards it as
+   * `--spec-draft-model <path>` for the selected draft algorithm.
+   */
+  draftModelPath?: string;
   /** From the GGUF metadata — useful for the supervisor's `-c` flag (Phase 3). */
   contextWindow?: number;
   /** Quantization tag (Q4_K_M / Q8_0 / …) lifted from the catalog source block. */
@@ -209,6 +215,11 @@ interface InstalledManifest {
    * resolves it to an absolute path and passes `--mmproj` on launch.
    */
   mmprojFilename?: string;
+  /**
+   * Speculative-decoding companion filename, when the catalog source set
+   * `draftModel`. Stored beside the weights and resolved by the launcher.
+   */
+  draftModelFilename?: string;
   installedAt: string;
   catalogId: string;
   catalogVersion: string;
@@ -235,9 +246,10 @@ interface DownloadPlanEntry {
    * drive the GGUF metadata parse and the `weightsFilename` field on
    * the install manifest; `weights-shard` entries are extra GGUF shards
    * (the 2nd-onwards of a split model); `mmproj` is the multimodal
-   * projector sidecar consumed by `--mmproj`.
+   * projector sidecar consumed by `--mmproj`; `draft-model` is a
+   * speculative-decoding companion consumed by `--spec-draft-model`.
    */
-  role: 'weights' | 'weights-shard' | 'mmproj';
+  role: 'weights' | 'weights-shard' | 'mmproj' | 'draft-model';
 }
 
 export interface LlamaCppModelManagerOptions {
@@ -450,6 +462,9 @@ export class LlamaCppModelManager {
     }
     if (parsed.mmprojFilename && !files.includes(parsed.mmprojFilename)) {
       throw new Error('installed manifest references a missing multimodal projector');
+    }
+    if (parsed.draftModelFilename && !files.includes(parsed.draftModelFilename)) {
+      throw new Error('installed manifest references a missing speculative draft model');
     }
 
     // Parsing the GGUF header is the same final usability check a network
@@ -690,9 +705,9 @@ export class LlamaCppModelManager {
     }
 
     // Parse metadata from the first weights entry (first shard for a
-    // sharded install, or the only file for single-file). The mmproj
-    // sidecar has its own GGUF header but isn't what llama-server
-    // probes for context length / chat template.
+    // sharded install, or the only file for single-file). Sidecars have
+    // their own GGUF headers but aren't what llama-server probes for the
+    // target model's context length / chat template.
     tracked.phase = 'extracting-metadata';
     yield { type: 'extracting-metadata' };
     const firstWeights = plan.find((e) => e.role === 'weights');
@@ -739,6 +754,7 @@ export class LlamaCppModelManager {
 
     const weightsShards = plan.filter((e) => e.role === 'weights' || e.role === 'weights-shard');
     const mmprojEntry = plan.find((e) => e.role === 'mmproj');
+    const draftModelEntry = plan.find((e) => e.role === 'draft-model');
     const installed: InstalledManifest = {
       id: catalogId,
       name: manifest.name,
@@ -759,6 +775,7 @@ export class LlamaCppModelManager {
           }
         : {}),
       ...(mmprojEntry ? { mmprojFilename: mmprojEntry.destFilename } : {}),
+      ...(draftModelEntry ? { draftModelFilename: draftModelEntry.destFilename } : {}),
       ...(src.quantization ? { quantization: src.quantization } : {}),
       ...(summary.contextLength ? { contextWindow: Number(summary.contextLength) } : {}),
       ...(summary.architecture ? { architecture: summary.architecture } : {}),
@@ -808,6 +825,9 @@ export class LlamaCppModelManager {
       installedAt: parsed.installedAt,
       weightsPath: join(root, id, parsed.weightsFilename),
       ...(parsed.mmprojFilename ? { mmprojPath: join(root, id, parsed.mmprojFilename) } : {}),
+      ...(parsed.draftModelFilename
+        ? { draftModelPath: join(root, id, parsed.draftModelFilename) }
+        : {}),
       ...(parsed.contextWindow ? { contextWindow: parsed.contextWindow } : {}),
       ...(parsed.quantization ? { quantization: parsed.quantization } : {}),
       chatTemplatePresent: parsed.chatTemplatePresent ?? true,
@@ -837,6 +857,7 @@ function planDownloads(
     approxSizeBytes: number;
     shards?: Array<{ name: string; sha256: string; sizeBytes: number }>;
     mmproj?: { filename: string; sha256: string; sizeBytes: number };
+    draftModel?: { filename: string; sha256: string; sizeBytes: number };
   },
   /**
    * Whether to also fetch the vision projector. Off by default even when the
@@ -876,6 +897,19 @@ function planDownloads(
       sha256: src.mmproj.sha256,
       sizeBytes: src.mmproj.sizeBytes,
       role: 'mmproj',
+    });
+  }
+  // Draft companions are part of the model's selected decoding path, not
+  // an optional modality. Download them whenever the catalog ships one so
+  // an explicitly selected `draft-mtp`/other draft mode can work immediately
+  // after install without a second download.
+  if (src.draftModel) {
+    out.push({
+      repoPath: src.draftModel.filename,
+      destFilename: basename(src.draftModel.filename),
+      sha256: src.draftModel.sha256,
+      sizeBytes: src.draftModel.sizeBytes,
+      role: 'draft-model',
     });
   }
   return out;

@@ -27,7 +27,7 @@ pnpm eval:run tictactoe
 # or with options
 pnpm eval:run tictactoe --model gemma4-e4b-q8 --timeout 20m
 
-# Image-gen scenario; Gemma 4 E4B Q8 + SDXL Lightning by default. Override either:
+# Image-gen scenario; provider-specific chat default + SDXL Lightning. Override either:
 pnpm eval:run petshop --image-model sdxl-lightning-4step --timeout 25m
 ```
 
@@ -203,8 +203,8 @@ real model work.
   `~/.gezel-eval-cache/engines/llama-cpp/models/gemma4-e4b-q8/`; subsequent
   trials reuse it via filesystem links.
 - **For Apple Silicon MLX trials** — the platform-aware default provider is
-  MLX, and its complete `gemma4-e4b-q8` source must already exist under
-  `~/.gezel-dev/engines/mlx/models/gemma4-e4b-q8/`; the eval runner links it
+  MLX, and its complete `qwen3.5-4b-q4` source must already exist under
+  `~/.gezel-dev/engines/mlx/models/qwen3.5-4b-q4/`; the eval runner links it
   into each trial.
 - **For `petshop` / image-tool trials** — `sdxl-lightning-4step` may live in
   either `~/.gezel-dev/engines/sd-cpp/models/sdxl-lightning-4step/` or

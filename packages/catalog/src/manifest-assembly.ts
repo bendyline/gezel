@@ -114,6 +114,38 @@ export function carryRevision(block: LooseRecord, revision: string): LooseRecord
 }
 
 /**
+ * Apply an RFC 7396-style JSON Merge Patch without mutating either input.
+ * Object values merge recursively, arrays/scalars replace, and `null`
+ * removes a key. Release configs use this to make a small, intentional
+ * tuning change without reseeding (and potentially erasing) the model's
+ * eval-evolved sampling/profile data.
+ */
+export function applyJsonMergePatch(target: LooseRecord, patch: LooseRecord): LooseRecord {
+  const out: LooseRecord = { ...target };
+  for (const [key, value] of Object.entries(patch)) {
+    if (value === null) {
+      delete out[key];
+      continue;
+    }
+    const current = out[key];
+    if (
+      typeof value === 'object' &&
+      !Array.isArray(value) &&
+      typeof current === 'object' &&
+      current !== null &&
+      !Array.isArray(current)
+    ) {
+      out[key] = applyJsonMergePatch(current as LooseRecord, value as LooseRecord);
+    } else if (typeof value === 'object' && !Array.isArray(value)) {
+      out[key] = applyJsonMergePatch({}, value as LooseRecord);
+    } else {
+      out[key] = value;
+    }
+  }
+  return out;
+}
+
+/**
  * Assemble a chat-model manifest from its config, freshly fetched provider
  * blocks, and (optionally) the manifest currently on disk. Non-lossy by
  * default: see the module header for the ownership model.
@@ -158,8 +190,12 @@ export function assembleManifest(input: AssembleInput): AssembleResult {
   for (const key of PROVIDER_FIELDS) {
     const fresh = providerBlocks[key];
     if (!fresh) continue;
-    const prevRev = (existing?.[key] as LooseRecord | undefined)?.revision;
-    if (typeof prevRev === 'string' && fresh.revision === undefined) {
+    const previousBlock = existing?.[key] as LooseRecord | undefined;
+    const prevRev = previousBlock?.revision;
+    const sameRepo =
+      previousBlock?.huggingfaceRepo === undefined ||
+      fresh.huggingfaceRepo === previousBlock.huggingfaceRepo;
+    if (typeof prevRev === 'string' && fresh.revision === undefined && sameRepo) {
       manifest[key] = carryRevision(fresh, prevRev);
       carriedRevisions.push(key);
     } else {

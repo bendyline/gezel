@@ -159,10 +159,18 @@ export interface SniffFeedbackOptions {
   /**
    * Defaults to the failing `filePath`, which enables direct file-write
    * repair mode for source deliverables. Set to `null` for failures that
-   * need a non-write_file tool first, such as generating a missing image
-   * asset before patching HTML.
+   * need a non-write_file tool first, such as reading authoritative sources
+   * or generating a missing image asset before patching HTML.
    */
   expectedDeliverable?: { kind: 'file'; filePath: string } | null;
+  /**
+   * Keep the handoff free of an eager `expectedDeliverable` write contract,
+   * but name the only file that may be mutated after the repair directive's
+   * prerequisite reads complete. This is for evidence-grounded repairs where
+   * the model must read authoritative sources before it may patch or rewrite
+   * the checked file.
+   */
+  postReadMutationTarget?: string;
   /**
    * Optional direct specialist handoff for sniff failures whose next
    * repair is a sibling asset rather than the failing source file.
@@ -230,13 +238,14 @@ function hashSniffFailure(
       : opts.expectedDeliverable === null
         ? 'none'
         : `${opts.expectedDeliverable.kind}:${opts.expectedDeliverable.filePath}`;
+  const postReadMutationTarget = opts.postReadMutationTarget ?? '';
   const targetGezelId = opts.targetGezelId ?? '';
   const targetedEditsOnly = opts.targetedEditsOnly ? 'yes' : 'no';
   const assetHandoff = opts.assetHandoff
     ? `${opts.assetHandoff.jobTitle}:${opts.assetHandoff.filePath}:${opts.assetHandoff.message}`
     : '';
   const sourceRevision = '';
-  return `${filePath}::missing:${missing}::failReason:${failReason}::imageSrcs:${imageSrcs}::brokenImageSrcs:${brokenImageSrcs}::repair:${repairDirective}::dedupe:${dedupeToken}::expected:${expectedDeliverable}::target:${targetGezelId}::targeted:${targetedEditsOnly}::asset:${assetHandoff}::source:${sourceRevision}`;
+  return `${filePath}::missing:${missing}::failReason:${failReason}::imageSrcs:${imageSrcs}::brokenImageSrcs:${brokenImageSrcs}::repair:${repairDirective}::dedupe:${dedupeToken}::expected:${expectedDeliverable}::postReadMutationTarget:${postReadMutationTarget}::target:${targetGezelId}::targeted:${targetedEditsOnly}::asset:${assetHandoff}::source:${sourceRevision}`;
 }
 
 /**
@@ -329,10 +338,11 @@ export async function postSniffFeedback(
     state.lastRevisionKey = revisionKey;
   }
   // A write_file clamp is the wrong order when the fix needs a non-write
-  // tool first (source-read and generate-image flows). Keep stage 2
-  // surgical for those calls, but do not cap the LOGICAL ladder at stage
-  // 1: reusing its already-posted dedupe key would make attempt 4 and the
-  // bounded exhaustion terminal unreachable.
+  // tool first. Plain expectedDeliverable-null flows stay surgical; an
+  // explicit post-read mutation target gets its own read-then-mutate
+  // escalation. Do not cap the LOGICAL ladder at stage 1: reusing its
+  // already-posted dedupe key would make attempt 4 and the bounded
+  // exhaustion terminal unreachable.
   const stage = stageForSniffAttempts(state.attempts);
 
   // Stage transitions re-key the binary dedup so the escalated message
@@ -381,18 +391,28 @@ export async function postSniffFeedback(
 
   const appendOnlyRepair = hasAppendOnlyRepairDirective(opts.repairDirective);
   const combinedRepair = hasCombinedRepairDirective(opts.repairDirective);
+  const postReadMutationRepair = !!opts.postReadMutationTarget;
+  const structuralRewriteRepair =
+    structuralOrderRepairLine(filePath, sniff.failReason) !== undefined;
   const text =
     appendOnlyRepair && stage > 0
       ? `${sniffAppendEscalationLine(filePath, sniff, state.attempts)}\n\n${formatNudge(filePath, sniff, opts)}`
       : combinedRepair && stage > 0
         ? `${sniffCombinedEscalationLine(filePath, sniff, state.attempts)}\n\n${formatNudge(filePath, sniff, opts)}`
-        : stage === 2
-          ? opts.targetedEditsOnly || opts.expectedDeliverable === null
-            ? `${sniffEscalationLine(filePath, sniff, state.attempts)}\n\n${formatNudge(filePath, sniff, opts)}`
-            : formatFullRewriteNudge(filePath, sniff, opts, state.attempts)
-          : stage === 1
-            ? `${sniffEscalationLine(filePath, sniff, state.attempts)}\n\n${formatNudge(filePath, sniff, opts)}`
-            : formatNudge(filePath, sniff, opts);
+        : postReadMutationRepair && stage > 0
+          ? `${sniffPostReadMutationEscalationLine(
+              opts.postReadMutationTarget!,
+              sniff,
+              state.attempts,
+              structuralRewriteRepair,
+            )}\n\n${formatNudge(filePath, sniff, opts)}`
+          : stage === 2
+            ? opts.targetedEditsOnly || opts.expectedDeliverable === null
+              ? `${sniffEscalationLine(filePath, sniff, state.attempts)}\n\n${formatNudge(filePath, sniff, opts)}`
+              : formatFullRewriteNudge(filePath, sniff, opts, state.attempts)
+            : stage === 1
+              ? `${sniffEscalationLine(filePath, sniff, state.attempts)}\n\n${formatNudge(filePath, sniff, opts)}`
+              : formatNudge(filePath, sniff, opts);
   const expectedDeliverable =
     opts.expectedDeliverable === undefined
       ? { kind: 'file' as const, filePath }
@@ -515,6 +535,19 @@ function sniffCombinedEscalationLine(
   return `REPEAT COMBINED MISS — attempt ${attempts} on \`${filePath}\`: the previous multi-defect repair did not clear the same checks${missing ? ` (${missing})` : ''}. Preserve passing content and repeat the entire numbered repair directive below in this turn; do not stop after the first failure, rewrite the whole file, or reply that it is done.`;
 }
 
+function sniffPostReadMutationEscalationLine(
+  mutationTarget: string,
+  sniff: SniffResult,
+  attempts: number,
+  structuralRewrite: boolean,
+): string {
+  const missing = (sniff.missingRequiredSignals ?? []).join(', ');
+  const mutationInstruction = structuralRewrite
+    ? `repeat the bounded \`write_file\` rewrite of exactly \`${mutationTarget}\``
+    : `use \`write_file\`, \`replace_in_file\`, or \`replace_lines\` on exactly \`${mutationTarget}\` as the failure requires`;
+  return `REPEAT READ-THEN-MUTATE MISS — attempt ${attempts} on \`${mutationTarget}\`: the previous grounded repair did not clear the same check${missing ? ` (${missing})` : ''}. Complete every required \`read_file\` call first, then ${mutationInstruction}. Do not mutate a similarly named path or reply that it is done.`;
+}
+
 /**
  * Stage-2 message: the strategy change to ONE complete rewrite. Contract
  * with the service side (providers/llama-cpp/provider.ts:301-332): the
@@ -554,6 +587,9 @@ function formatFullRewriteNudge(
 }
 
 function formatCoordinatorCopy(filePath: string, opts: SniffFeedbackOptions): string {
+  if (opts.expectedDeliverable === null && opts.postReadMutationTarget) {
+    return `[scenario coordinator copy] The direct implementer may be in a long turn. This repair must read its authoritative sources first and then mutate exactly \`${opts.postReadMutationTarget}\`. If you take it over, complete the required \`read_file\` calls before using \`write_file\`, \`replace_in_file\`, or \`replace_lines\` on that exact path. Do not write a similarly named file, only write a task note, queue a plain message, or call ask_specialist for this repair.`;
+  }
   if (opts.expectedDeliverable === null) {
     return `[scenario coordinator copy] The direct implementer may be in a long turn. This repair likely needs a non-write_file tool before the HTML patch. If you are coordinating this project and \`generate_image\` is available, generate the missing asset now (for petshop, save it as \`assets/logo.png\`), then patch \`${filePath}\` to reference it. If you need a handoff, ensure an Image Generator for \`assets/logo.png\` first, then a Builder/Developer for \`${filePath}\`. Do not only write a task note, queue a plain message, or call ask_specialist for this file.`;
   }
@@ -603,7 +639,7 @@ function formatNudge(
   const firstBrokenSrc = brokenImageSrcs[0] ?? 'assets/dog_food.jpg';
   const exactReplaceCall =
     imageSrcs.length > 0
-      ? `replace_in_file({ path: ${JSON.stringify(filePath)}, search: ${JSON.stringify(firstBrokenSrc)}, replace: ${JSON.stringify(imageSrcs[0])} })`
+      ? `replace_in_file({ path: ${JSON.stringify(filePath)}, find: ${JSON.stringify(firstBrokenSrc)}, replace: ${JSON.stringify(imageSrcs[0])} })`
       : undefined;
   const missingSignals = sniff.missingRequiredSignals ?? [];
   const workingImageRepair =
@@ -617,6 +653,9 @@ function formatNudge(
     ? sourceParseRepairLine(filePath, sniff.failReason, opts.sourceText)
     : undefined;
   const structuralOrderRepair = structuralOrderRepairLine(filePath, sniff.failReason);
+  const postReadMutationLine = opts.postReadMutationTarget
+    ? `POST_READ_MUTATION_TARGET: complete the required \`read_file\` calls first. After the final required read succeeds, mutate exactly \`${opts.postReadMutationTarget}\` with the named \`write_file\` or patch operation; do not write a similarly named path.`
+    : undefined;
   const repairLine = parseRepair
     ? [parseRepair, customRepair].filter(Boolean).join(' ')
     : structuralOrderRepair
@@ -643,6 +682,7 @@ function formatNudge(
     missingLine,
     failReasonLine,
     '',
+    postReadMutationLine,
     repairLine,
   ]
     .filter((line) => line !== '')

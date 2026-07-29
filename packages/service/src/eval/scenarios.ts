@@ -28,9 +28,9 @@ export interface EvalScenarioManifest {
   /**
    * Default chat model to pre-select when this scenario is chosen in the UI.
    * Must ship weights for every default engine — on Apple Silicon the default
-   * provider is MLX, so a model with no working MLX build (e.g. Gemma-4 E4B,
-   * whose mlx block carries `disabledReason`) would crash on load the moment a
-   * Mac user hits Run. Pick a cross-engine model (llama.cpp + MLX both work).
+   * provider is MLX, so a model whose mlx block is absent or carries
+   * `disabledReason` would fail on load the moment a Mac user hits Run. Pick a
+   * cross-engine model (llama.cpp + MLX both work).
    */
   defaultModel: string;
   /** Default image model to pick (only set for image-gen scenarios). */

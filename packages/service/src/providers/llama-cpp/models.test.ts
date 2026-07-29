@@ -18,6 +18,7 @@ function buildGguf(opts: {
   contextLength?: number;
   fileType?: number;
   chatTemplate?: string;
+  nextnPredictLayers?: number;
 }): Buffer {
   const parts: Buffer[] = [];
   let metaCount = 0n;
@@ -68,6 +69,9 @@ function buildGguf(opts: {
   }
   if (opts.chatTemplate !== undefined) {
     metaString('tokenizer.chat_template', opts.chatTemplate);
+  }
+  if (opts.nextnPredictLayers !== undefined) {
+    metaU32(`${opts.arch ?? 'qwen2'}.nextn_predict_layers`, opts.nextnPredictLayers);
   }
 
   const blob = Buffer.concat(parts);
@@ -734,6 +738,77 @@ describe('LlamaCppModelManager.install', () => {
     const installed = await mgr.listInstalled();
     expect(installed).toHaveLength(1);
     expect(installed[0]?.mmprojPath).toBe(join(dir, 'mmproj-BF16.gguf'));
+  });
+
+  it('always downloads and resolves a speculative draft-model sidecar', async () => {
+    const weights = buildGguf({
+      arch: 'gemma4',
+      contextLength: 131072,
+      chatTemplate: 'gemma-template',
+    });
+    const draft = buildGguf({
+      arch: 'gemma4-assistant',
+      nextnPredictLayers: 4,
+    });
+    const catalog = fakeCatalog(
+      new Map<string, ChatModelManifest>([
+        [
+          'mtp-sidecar-test',
+          {
+            schemaVersion: 1,
+            kind: 'chat-model',
+            id: 'mtp-sidecar-test',
+            name: 'MTP Sidecar Test',
+            description: 'fixture',
+            tags: [],
+            maintainer: { name: 'Test' },
+            version: '1.0.0',
+            releasedAt: '2026-07-28T00:00:00Z',
+            availableVersions: ['1.0.0'],
+            parameterSize: '12B',
+            approxSizeBytes: weights.byteLength,
+            supportsTools: true,
+            llamaCpp: {
+              huggingfaceRepo: 'test-org/gemma-GGUF',
+              filename: 'gemma-Q4_K_M.gguf',
+              sha256: sha256Hex(weights),
+              approxSizeBytes: weights.byteLength,
+              quantization: 'Q4_K_M',
+              draftModel: {
+                filename: 'MTP/mtp-gemma-Q4_0.gguf',
+                sha256: sha256Hex(draft),
+                sizeBytes: draft.byteLength,
+              },
+            },
+          } as ChatModelManifest,
+        ],
+      ]),
+    );
+    const requested: string[] = [];
+    const fetchImpl = (async (input: string | URL) => {
+      const href = typeof input === 'string' ? input : input.toString();
+      requested.push(href);
+      const buf = href.includes('mtp-gemma') ? draft : weights;
+      return new Response(buf, {
+        status: 200,
+        headers: { 'content-length': String(buf.byteLength) },
+      });
+    }) as typeof fetch;
+    const mgr = new LlamaCppModelManager({ home, catalog, fetchImpl });
+    const events = await drain(mgr.install('mtp-sidecar-test'));
+    expect(
+      events.find((event) => event.type === 'done'),
+      JSON.stringify(events),
+    ).toBeDefined();
+    expect(requested.some((url) => url.includes('MTP/mtp-gemma'))).toBe(true);
+
+    const dir = join(home, 'engines', 'llama-cpp', 'models', 'mtp-sidecar-test');
+    const onDisk = JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf8'));
+    expect(onDisk.draftModelFilename).toBe('mtp-gemma-Q4_0.gguf');
+    expect(readFileSync(join(dir, 'mtp-gemma-Q4_0.gguf')).equals(draft)).toBe(true);
+
+    const installed = await mgr.listInstalled();
+    expect(installed[0]?.draftModelPath).toBe(join(dir, 'mtp-gemma-Q4_0.gguf'));
   });
 
   // Default OFF is the load-bearing half. Loading a projector makes

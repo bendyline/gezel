@@ -18,13 +18,13 @@
     "name": "Alibaba",
     "url": "https://huggingface.co/Qwen/Qwen3.5-122B-A10B"
   },
-  "version": "1.0.0",
-  "updatedAt": "2026-02-24T00:00:00Z",
+  "version": "1.0.1",
+  "updatedAt": "2026-07-28T00:00:00Z",
   "license": "Apache-2.0",
   "licenseClass": "open",
   "licenseShortName": "Apache 2.0",
   "parameterSize": "122B",
-  "approxSizeBytes": 77000000000,
+  "approxSizeBytes": 78260403200,
   "supportsTools": true,
   "contextWindow": 262144,
   "upstream": "https://huggingface.co/Qwen/Qwen3.5-122B-A10B",
@@ -134,11 +134,23 @@
     }
   },
   "llamaCpp": {
-    "huggingfaceRepo": "unsloth/Qwen3.5-122B-A10B-GGUF",
-    "shardsDir": "Q4_K_M",
-    "quantization": "Q4_K_M",
-    "residentBytes": 92939074214,
+    "huggingfaceRepo": "unsloth/Qwen3.5-122B-A10B-MTP-GGUF",
+    "shardsDir": "UD-Q4_K_M",
+    "quantization": "UD-Q4_K_M",
+    "residentBytes": 93912483840,
     "mmprojFilename": "mmproj-BF16.gguf"
+  },
+  "releasePatch": {
+    "tuning": {
+      "engine": {
+        "llamaCpp": {
+          "spec": {
+            "mtp": true,
+            "nMax": 4
+          }
+        }
+      }
+    }
   },
   "mlx": {
     "huggingfaceRepo": "mlx-community/Qwen3.5-122B-A10B-4bit",

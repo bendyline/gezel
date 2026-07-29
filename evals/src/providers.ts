@@ -133,14 +133,11 @@ export function isSelfOrchestratingProvider(p: ChatProvider): boolean {
  * `pnpm eval:run <scenario>` with `--provider <p>` but no `--model`.
  *
  * llama-cpp keeps its historical default (`gemma4-e4b-q8`) — what every
- * existing tuning postmortem is calibrated against. MLX CANNOT use it:
- * gemma-4 E4B's elastic-MatFormer + audio-tower arch fails to load on
- * mlx_vlm (`Missing 54 parameters`) across every published build and
- * version (MLX sweep), so a bare `eval:run` on the Mac default
- * engine would crash on the default model. MLX defaults to the smallest
- * model that reliably loads on BOTH engines (`qwen3.5-4b-q4`) so the
- * cross-engine default stays comparable. Cloud / CLI providers pick a
- * current flagship that's a reasonable fit for the anchored scenarios.
+ * existing tuning postmortem is calibrated against. MLX uses the smaller
+ * `qwen3.5-4b-q4` as its fast default; both it and Gemma-4 E4B now ship
+ * working MLX sources, so explicit E4B trials remain available. Cloud / CLI
+ * providers pick a current flagship that's a reasonable fit for the anchored
+ * scenarios.
  *
  * If a provider is added here, also extend the model-id-to-display-name
  * surface in the catalog so the postmortem renders the right label.

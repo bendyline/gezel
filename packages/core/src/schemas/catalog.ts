@@ -1088,6 +1088,26 @@ export const ChatModelLlamaCppSourceSchema = z
         sizeBytes: z.number().int().positive(),
       })
       .optional(),
+    /**
+     * Optional speculative-decoding companion GGUF. Some model families
+     * (notably Gemma 4) publish their MTP assistant head as a separate
+     * model rather than embedding it in the primary GGUF. llama-server
+     * loads this file through `--spec-draft-model`.
+     *
+     * This is deliberately generic: the tuning block selects the matching
+     * `draft-mtp`, `draft-dflash`, or other draft mode. Merely shipping a
+     * sidecar does not opt a model into a speculative-decoding algorithm.
+     */
+    draftModel: z
+      .object({
+        /** Filename within the same HF repo. May include a subdirectory. */
+        filename: z.string(),
+        /** SHA-256 of the draft GGUF, lifted from HF LFS metadata. */
+        sha256: z.string().regex(/^[a-f0-9]{64}$/),
+        /** Size on disk after download. */
+        sizeBytes: z.number().int().positive(),
+      })
+      .optional(),
   })
   .refine(
     (v) => {
@@ -1247,9 +1267,7 @@ export const ChatModelMlxSourceSchema = z.object({
    * upstream fix lands. The string is the human-readable reason (shown in
    * logs / advanced UI). Use this instead of DELETING the `mlx` block when
    * the incompatibility is expected to be temporary (an mlx-vlm arch/quant
-   * gap), so the repo pin isn't lost. Wild-caught: Gemma-4 E4B
-   * (elastic MatFormer + audio tower) fails to load on every published
-   * build across mlx-vlm 0.6.1–0.6.4.
+   * gap), so the repo pin isn't lost.
    */
   disabledReason: z.string().optional(),
 });

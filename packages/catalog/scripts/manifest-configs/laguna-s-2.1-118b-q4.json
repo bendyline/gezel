@@ -19,14 +19,14 @@
     "name": "Poolside",
     "url": "https://huggingface.co/poolside/Laguna-S-2.1"
   },
-  "version": "1.0.0",
-  "updatedAt": "2026-07-21T00:00:00Z",
+  "version": "1.0.1",
+  "updatedAt": "2026-07-28T00:00:00Z",
   "license": "OpenMDW-1.1",
   "licenseClass": "open",
   "licenseShortName": "OpenMDW 1.1",
   "licenseUrl": "https://huggingface.co/poolside/Laguna-S-2.1/blob/main/LICENSE.md",
   "parameterSize": "118B",
-  "approxSizeBytes": 75200000000,
+  "approxSizeBytes": 96031829760,
   "supportsTools": true,
   "contextWindow": 262144,
   "upstream": "https://huggingface.co/poolside/Laguna-S-2.1",
@@ -118,7 +118,7 @@
     "huggingfaceRepo": "poolside/Laguna-S-2.1-GGUF",
     "filename": "laguna-s-2.1-Q4_K_M.gguf",
     "quantization": "Q4_K_M",
-    "residentBytes": 90207723840
+    "residentBytes": 115238195712
   },
   "mlx": {
     "huggingfaceRepo": "mlx-community/Laguna-S-2.1-oQ4e",

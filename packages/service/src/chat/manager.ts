@@ -15392,7 +15392,7 @@ export async function buildLlamaCppProvider(opts: {
   const brokerSnap = opts.broker?.committed();
   const budgetBytes = brokerSnap?.enforced ? brokerSnap.budgetBytes : autoDetectBudgetBytes();
   const committedOtherBytes = brokerSnap?.enforced ? brokerSnap.committedBytes : 0;
-  const slots =
+  let slots =
     configuredSlots ??
     Math.min(
       defaultLocalEngineSlots(),
@@ -15404,6 +15404,17 @@ export async function buildLlamaCppProvider(opts: {
         committedOtherBytes,
       }),
     );
+  // The bundled llama.cpp line still has known multi-slot MTP allocation
+  // failures. Keep an explicitly selected MTP mode on one slot so its first
+  // decode is reliable; `spec.mtp` alone is capability metadata, not an
+  // auto-enable policy.
+  const selectedSpecType = config.llamaCppSpecType ?? manifestEngineConfig?.spec?.type;
+  if (selectedSpecType === 'draft-mtp' && slots > 1) {
+    log.info(
+      `[llama-cpp] limiting ${modelCatalogInfo?.id ?? 'MTP model'} to one slot because draft-mtp is not reliable with --parallel > 1 in the bundled engine`,
+    );
+    slots = 1;
+  }
   // Opportunistic batched inference (adaptive interactive policy). Default
   // on for llama-cpp with >1 slot — llama-server batches the `--parallel`
   // slots with continuous batching on by default. `GEZEL_BATCHED_INFERENCE`
@@ -15500,13 +15511,20 @@ export async function buildLlamaCppProvider(opts: {
   // back to the engine's own `--fit` / `-ngl auto`.
   let offloadDecision: PlannerOffloadDecision | undefined;
   // Whether the model's GGUF ships MTP (`nextn`) layers — a safety
-  // cross-check for the manifest `spec.mtp` auto-path (see below).
+  // cross-check for an explicit draft-mtp request.
   let ggufHasMtp = false;
+  let mtpLayerCount = 0;
   if (binary && modelPath) {
     try {
       const summary = readGgufSummary(modelPath);
       const isMoE = (summary.expertCount ?? 0) > 1;
-      ggufHasMtp = (summary.nextnPredictLayers ?? 0) > 0;
+      mtpLayerCount = summary.nextnPredictLayers ?? 0;
+      ggufHasMtp = mtpLayerCount > 0;
+      if (!ggufHasMtp && modelCatalogInfo?.draftModelPath) {
+        const draftSummary = readGgufSummary(modelCatalogInfo.draftModelPath);
+        mtpLayerCount = draftSummary.nextnPredictLayers ?? 0;
+        ggufHasMtp = mtpLayerCount > 0;
+      }
       const approxBytes = modelCatalogInfo?.approxSizeBytes ?? summary.fileSizeBytes;
       const residentBytes = Math.round(approxBytes * 1.2);
       const probe = await probeLlamaDevices({ binaryPath: binary, home });
@@ -15517,14 +15535,13 @@ export async function buildLlamaCppProvider(opts: {
           `[llama-cpp] offload plan (${modelCatalogInfo?.id ?? 'model'}): ${offloadDecision.reason}`,
         );
       }
-      // Surface an MTP opportunity WITHOUT auto-enabling it: `--spec-type
-      // draft-mtp` on a model llama.cpp can't build an MTP context for is
-      // a FATAL launch error (verified), so it stays a human-verified
-      // opt-in via the manifest's `spec.mtp` — which `ggufHasMtp` then
-      // safety-gates in `buildLlamaCppEngineArgs`.
+      // Surface an MTP opportunity WITHOUT auto-enabling it. `--spec-type
+      // draft-mtp` on a model llama.cpp can't build an MTP context for is a
+      // fatal launch error, and current model/backend pairs still need A/B
+      // qualification before default-on.
       if (ggufHasMtp && !manifestEngineConfig?.spec?.mtp && !manifestEngineConfig?.spec?.type) {
         log.info(
-          `[llama-cpp] ${modelCatalogInfo?.id ?? 'model'} ships an MTP head (nextn_predict_layers=${summary.nextnPredictLayers}); set tuning.engine.llamaCpp.spec.mtp=true to enable --spec-type draft-mtp once verified.`,
+          `[llama-cpp] ${modelCatalogInfo?.id ?? 'model'} ships an MTP head (nextn_predict_layers=${mtpLayerCount}); select MTP speculative decoding in Advanced llama.cpp settings to test it.`,
         );
       }
     } catch (err) {
@@ -15532,6 +15549,11 @@ export async function buildLlamaCppProvider(opts: {
         `[llama-cpp] offload planning skipped: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
+  }
+  if (selectedSpecType === 'draft-mtp' && !ggufHasMtp) {
+    log.warn(
+      `[llama-cpp] draft-mtp was requested for ${modelCatalogInfo?.id ?? 'model'}, but its installed target/companion GGUF does not confirm MTP tensors; starting without speculative decoding.`,
+    );
   }
 
   // Forward-declared provider reference — the supervisor's onRawLine
@@ -15676,6 +15698,7 @@ export async function buildLlamaCppProvider(opts: {
             kvCacheType,
             slots,
             ggufHasMtp,
+            installedDraftModelPath: modelCatalogInfo?.draftModelPath,
             // Opt-in A/B lever: `GEZEL_LLAMA_REASONING_FORMAT=none`
             // disables llama-server's chat-template output parsing so
             // mangled gemma tool-call turns (dropped pre-SSE by the

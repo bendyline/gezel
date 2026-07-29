@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { gildeDataDir } from './gilde-data.js';
 import {
   type LooseRecord,
+  applyJsonMergePatch,
   assembleManifest,
   providerBlocksWithoutRevision,
 } from './manifest-assembly.js';
@@ -105,6 +106,70 @@ describe('assembleManifest merge semantics', () => {
       'approxSizeBytes',
     ]);
     expect(carriedRevisions).toEqual(['llamaCpp']);
+  });
+
+  it('does not carry a revision pin across a Hugging Face repo change', () => {
+    const existing: LooseRecord = {
+      ...cfg,
+      llamaCpp: { huggingfaceRepo: 'org/old-GGUF', revision: 'abc123', shards: [] },
+    };
+    const { manifest, carriedRevisions } = assembleManifest({
+      cfg,
+      providerBlocks: {
+        llamaCpp: { ...freshLlama, huggingfaceRepo: 'org/new-GGUF' },
+      },
+      existing,
+    });
+    expect((manifest.llamaCpp as LooseRecord).revision).toBeUndefined();
+    expect(carriedRevisions).toEqual([]);
+  });
+});
+
+describe('applyJsonMergePatch', () => {
+  it('merges nested release tuning without replacing evolved siblings', () => {
+    const manifest = {
+      version: '1.0.0',
+      tuning: {
+        sampling: { temperature: 0.7 },
+        engine: {
+          llamaCpp: {
+            contextSize: 65536,
+            spec: { type: 'draft-simple', draftModelId: 'old-draft' },
+          },
+        },
+      },
+    };
+    const patched = applyJsonMergePatch(manifest, {
+      version: '1.0.1',
+      tuning: {
+        engine: {
+          llamaCpp: {
+            spec: {
+              type: null,
+              draftModelId: null,
+              mtp: true,
+              nMax: 4,
+            },
+          },
+        },
+      },
+    });
+    expect(patched).toEqual({
+      version: '1.0.1',
+      tuning: {
+        sampling: { temperature: 0.7 },
+        engine: {
+          llamaCpp: {
+            contextSize: 65536,
+            spec: { mtp: true, nMax: 4 },
+          },
+        },
+      },
+    });
+    expect(manifest.tuning.engine.llamaCpp.spec).toEqual({
+      type: 'draft-simple',
+      draftModelId: 'old-draft',
+    });
   });
 });
 

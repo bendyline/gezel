@@ -103,6 +103,34 @@ function defaultRunsDir(): string {
 }
 
 /**
+ * Eval-only switch for clean speculative-decoding A/Bs. Keeping the lever in
+ * config (rather than mutating catalog manifests between arms) guarantees the
+ * model weights, prompts, behaviors, and scenario stay fixed.
+ */
+function evalLlamaSpecTypeOverride(): GezelConfig['llamaCppSpecType'] | undefined {
+  const raw = process.env.GEZEL_EVAL_LLAMA_SPEC_TYPE?.trim();
+  if (!raw) return undefined;
+  const allowed = new Set<NonNullable<GezelConfig['llamaCppSpecType']>>([
+    'none',
+    'draft-mtp',
+    'draft-eagle3',
+    'draft-dflash',
+    'draft-simple',
+    'ngram-mod',
+    'ngram-simple',
+    'ngram-map-k',
+    'ngram-map-k4v',
+    'ngram-cache',
+  ]);
+  if (!allowed.has(raw as NonNullable<GezelConfig['llamaCppSpecType']>)) {
+    throw new Error(
+      `invalid GEZEL_EVAL_LLAMA_SPEC_TYPE="${raw}" (expected ${[...allowed].join(', ')})`,
+    );
+  }
+  return raw as NonNullable<GezelConfig['llamaCppSpecType']>;
+}
+
+/**
  * For `engine: 'mlx'` trials: where to look for an existing model dir
  * to symlink into the trial home. Defaults to `~/.gezel-dev` (the home
  * `pnpm app` writes to in dev mode), where Mac users running the app
@@ -222,6 +250,7 @@ export function localEvalDeviceSafetyConfig(
  */
 export async function runTrial(scenario: EvalScenario, opts: TrialOptions): Promise<TrialResult> {
   const engine = opts.engine ?? 'llama-cpp';
+  const evalLlamaSpecType = evalLlamaSpecTypeOverride();
   // Capability tier of the model under test (Theme E / E1-B) — stamped
   // onto every finalize so reporting can render tiny-tier cells as counts.
   const modelTier = classifyEvalModelTier({ engine, modelId: opts.modelId });
@@ -670,6 +699,7 @@ export async function runTrial(scenario: EvalScenario, opts: TrialOptions): Prom
     await client.updateConfig({
       ...buildProviderConfig(engine, opts.modelId),
       ...(llamaEvalLaunch?.config ? llamaEvalLaunch.config : {}),
+      ...(evalLlamaSpecType ? { llamaCppSpecType: evalLlamaSpecType } : {}),
       ...localEvalDeviceSafetyConfig(engine),
       // Theme-F lever probe: point `GEZEL_EVAL_SPEC_DRAFT_PATH` at a draft
       // GGUF to A/B speculative decoding on a real scenario via the
@@ -714,7 +744,7 @@ export async function runTrial(scenario: EvalScenario, opts: TrialOptions): Prom
       firstRunCompleted: true,
     });
     log(
-      `[trial] provider=${engine}${imageModelId ? ' imageProvider=sd-cpp' : ''}${opts.executionDensity ? ` executionDensity=${opts.executionDensity}` : ''}${opts.keurmeester ? ` keurmeester=${opts.keurmeester.providerName}${opts.keurmeester.model ? `/${opts.keurmeester.model}` : ''}` : ''} configured, firstRunCompleted=true`,
+      `[trial] provider=${engine}${evalLlamaSpecType ? ` llamaSpec=${evalLlamaSpecType}` : ''}${imageModelId ? ' imageProvider=sd-cpp' : ''}${opts.executionDensity ? ` executionDensity=${opts.executionDensity}` : ''}${opts.keurmeester ? ` keurmeester=${opts.keurmeester.providerName}${opts.keurmeester.model ? `/${opts.keurmeester.model}` : ''}` : ''} configured, firstRunCompleted=true`,
     );
 
     // Phase 5: ensure Meester exists.

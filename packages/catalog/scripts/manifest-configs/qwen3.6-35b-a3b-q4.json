@@ -5,12 +5,12 @@
   "tags": ["alibaba", "multimodal", "vision", "video", "tools", "long-context", "moe"],
   "category": "general",
   "maintainer": { "name": "Alibaba", "url": "https://huggingface.co/Qwen/Qwen3.6-35B-A3B" },
-  "version": "1.0.0",
-  "updatedAt": "2026-06-02T00:00:00Z",
+  "version": "1.0.1",
+  "updatedAt": "2026-07-28T00:00:00Z",
   "license": "Apache-2.0",
   "recoScore": 20,
   "parameterSize": "35B",
-  "approxSizeBytes": 21200000000,
+  "approxSizeBytes": 22663387424,
   "supportsTools": true,
   "contextWindow": 262144,
   "upstream": "https://huggingface.co/Qwen/Qwen3.6-35B-A3B",
@@ -107,9 +107,22 @@
     }
   },
   "llamaCpp": {
-    "huggingfaceRepo": "lmstudio-community/Qwen3.6-35B-A3B-GGUF",
-    "filename": "Qwen3.6-35B-A3B-Q4_K_M.gguf",
-    "quantization": "Q4_K_M"
+    "huggingfaceRepo": "unsloth/Qwen3.6-35B-A3B-MTP-GGUF",
+    "filename": "Qwen3.6-35B-A3B-UD-Q4_K_M.gguf",
+    "quantization": "UD-Q4_K_M",
+    "residentBytes": 27196064909
+  },
+  "releasePatch": {
+    "tuning": {
+      "engine": {
+        "llamaCpp": {
+          "spec": {
+            "mtp": true,
+            "nMax": 4
+          }
+        }
+      }
+    }
   },
   "mlx": {
     "huggingfaceRepo": "mlx-community/Qwen3.6-35B-A3B-4bit",

@@ -10,18 +10,12 @@ import { lintAllChatModelManifests, lintChatModelManifest } from './chat-model-m
  * into a CI failure at commit time.
  */
 const KNOWN_GAPS: ReadonlyArray<`${string} ${string}`> = [
-  'gemma4-12b-q4 missing-resident-bytes',
-  'gemma4-12b-q8 missing-resident-bytes',
-  'gemma4-26b-q4 missing-resident-bytes',
   'gpt-oss-120b-q4 missing-tuning-sampling',
   'gpt-oss-120b-q4 missing-resident-bytes',
   'gpt-oss-20b-q4 missing-tuning-sampling',
   'mistral-medium-3.5-128b-q4 missing-resident-bytes',
   'nemotron3-nano-30b-q4 missing-resident-bytes',
   'nemotron3-super-120b-q4 missing-resident-bytes',
-  'qwen3.6-27b-q8 missing-resident-bytes',
-  'qwen3.6-35b-a3b-q4 missing-resident-bytes',
-  'qwen3.6-35b-a3b-q8 missing-resident-bytes',
 ];
 
 describe('chat-model manifest lint (ratchet over real catalog data)', () => {

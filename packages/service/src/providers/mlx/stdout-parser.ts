@@ -225,9 +225,7 @@ export function classifyMlxFatalErrorLine(line: string): MlxFatalError | null {
   // The mirror of the branch above: `ValueError: Missing N parameters`
   // means mlx-vlm built a model graph with slots the checkpoint doesn't
   // fill — i.e. the loader's model class can't fully represent this
-  // architecture yet, so no quant of it will load. Wild-caught:
-  // Gemma-4 E4B (elastic MatFormer + audio tower) fails this way on every
-  // published MLX build across mlx-vlm 0.6.1–0.6.4. Distinct hint from the
+  // architecture yet, so no quant of it will load. Distinct hint from the
   // extra-params case: the fix is an mlx-vlm that adds the architecture,
   // not a different quant — and until then the model is llama.cpp-only.
   if (errorClass === 'ValueError' && /Missing \d+ parameters?/i.test(message)) {

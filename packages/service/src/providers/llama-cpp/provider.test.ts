@@ -2559,6 +2559,176 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     expect(bodies).toHaveLength(requiredPaths.length + 1);
   });
 
+  it('pins post-read scenario patches to the checked target and rejects wrong-path mutations', async () => {
+    const requiredPaths = ['runbook.md', 'state/services.json'];
+    const bodies: Array<{
+      messages: Array<{ role: string; content: string | null }>;
+      tools?: Array<{
+        function: {
+          name: string;
+          parameters?: { properties?: { path?: { enum?: string[] } } };
+        };
+      }>;
+      tool_choice?: unknown;
+    }> = [];
+    let requestCount = 0;
+    const executedMutations: Array<{ name: string; path: unknown }> = [];
+    globalThis.fetch = (async (_input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? '{}')) as (typeof bodies)[number];
+      bodies.push(body);
+      requestCount += 1;
+      if (requestCount <= requiredPaths.length) {
+        const expectedPath = requiredPaths[requestCount - 1]!;
+        expect(body.tools?.map((tool) => tool.function.name)).toEqual(['read_file']);
+        return sseResponse([
+          {
+            choices: [
+              {
+                index: 0,
+                delta: {
+                  tool_calls: [
+                    {
+                      index: 0,
+                      id: `call_read_${requestCount}`,
+                      type: 'function',
+                      function: {
+                        name: 'read_file',
+                        arguments: JSON.stringify({ path: expectedPath }),
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+          { choices: [{ index: 0, finish_reason: 'tool_calls' }] },
+          '[DONE]',
+        ]);
+      }
+
+      const mutationTools = body.tools ?? [];
+      expect(mutationTools.map((tool) => tool.function.name).sort()).toEqual([
+        'append_to_file',
+        'replace_in_file',
+        'replace_lines',
+        'write_file',
+      ]);
+      for (const tool of mutationTools) {
+        expect(tool.function.parameters?.properties?.path?.enum).toEqual(['runlog.md']);
+      }
+
+      if (requestCount === 3) {
+        return sseResponse([
+          {
+            choices: [
+              {
+                index: 0,
+                delta: {
+                  tool_calls: [
+                    {
+                      index: 0,
+                      id: 'call_wrong_patch',
+                      type: 'function',
+                      function: {
+                        name: 'replace_in_file',
+                        arguments:
+                          '{"path":"maintenance/runlog.md","find":"STEP 1","replace":"STEP 1\\n14 services"}',
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+          { choices: [{ index: 0, finish_reason: 'tool_calls' }] },
+          '[DONE]',
+        ]);
+      }
+
+      expect(body.messages.at(-1)?.role).toBe('tool');
+      expect(body.messages.at(-1)?.content).toContain(
+        'must patch exactly `runlog.md`, but you called replace_in_file for `maintenance/runlog.md`',
+      );
+      return sseResponse([
+        {
+          choices: [
+            {
+              index: 0,
+              delta: {
+                tool_calls: [
+                  {
+                    index: 0,
+                    id: 'call_correct_patch',
+                    type: 'function',
+                    function: {
+                      name: 'replace_in_file',
+                      arguments:
+                        '{"path":"runlog.md","find":"STEP 1","replace":"STEP 1\\n14 services"}',
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+        { choices: [{ index: 0, finish_reason: 'tool_calls' }] },
+        '[DONE]',
+      ]);
+    }) as typeof fetch;
+
+    const provider = new LlamaCppProvider({ baseUrl: 'http://llama.test' });
+    const session = await provider.createSession({ systemMessage: 'sys', model: 'llama' });
+    const internal = session as unknown as {
+      deps: {
+        bridges: {
+          isEmpty: () => boolean;
+          getOpenAITools: () => Array<{
+            name: string;
+            description: string;
+            parameters: Record<string, unknown>;
+          }>;
+          hasTool: (name: string) => boolean;
+          callTool: (name: string, args: Record<string, unknown>) => Promise<string>;
+        };
+      };
+    };
+    const toolNames = [
+      'read_file',
+      'write_file',
+      'append_to_file',
+      'replace_in_file',
+      'replace_lines',
+    ];
+    internal.deps.bridges = {
+      isEmpty: () => false,
+      getOpenAITools: () =>
+        toolNames.map((name) => ({
+          name,
+          description: `${name} tool`,
+          parameters: { type: 'object' },
+        })),
+      hasTool: (name: string) => toolNames.includes(name),
+      callTool: async (name: string, args: Record<string, unknown>) => {
+        if (name === 'read_file') return `observed ${String(args.path)}`;
+        executedMutations.push({ name, path: args.path });
+        return `patched ${String(args.path)}`;
+      },
+    };
+
+    const prompt = [
+      "[scenario check] I looked at `runlog.md` and the success criteria aren't met yet.",
+      'Specific failure: STEP 1 is missing its observed verification value.',
+      'POST_READ_MUTATION_TARGET: complete the required read_file calls first. After the final required read succeeds, mutate exactly `runlog.md` with the named write_file or patch operation.',
+      'First use read_file on runbook.md and state/services.json.',
+      'Then patch runlog.md with only the observed value.',
+    ].join(' ');
+    expect(extractPrerequisiteRepairReadPaths(prompt)).toEqual(requiredPaths);
+
+    await expect(session.sendAndWait(prompt)).resolves.toBe('');
+    expect(executedMutations).toEqual([{ name: 'replace_in_file', path: 'runlog.md' }]);
+    expect(bodies).toHaveLength(4);
+  });
+
   it('extracts before-edit rereads from scenario feedback', () => {
     const prompt = [
       "[scenario check] I looked at `src/machine.ts` and the success criteria aren't met yet.",
@@ -2569,6 +2739,18 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     expect(extractPrerequisiteRepairReadPaths(prompt)).toEqual([
       'tests/machine.test.ts',
       'src/machine.ts',
+    ]);
+  });
+
+  it('extracts prerequisite reads when the grounded mutation is phrased as record', () => {
+    const prompt = [
+      "[scenario check] I looked at `runlog.md` and the success criteria aren't met yet.",
+      'STEP_1_SOURCE_PATCH: first read runbook.md and state/services.json, count the services array, then record the observed count under STEP 1 in runlog.md.',
+    ].join(' ');
+
+    expect(extractPrerequisiteRepairReadPaths(prompt)).toEqual([
+      'runbook.md',
+      'state/services.json',
     ]);
   });
 

@@ -5,12 +5,12 @@
   "tags": ["google", "multimodal", "vision", "tools", "mix of experts", "agentic", "qat"],
   "category": "general",
   "maintainer": { "name": "Google", "url": "https://huggingface.co/google/gemma-4-26B-A4B-it" },
-  "version": "1.2.0",
-  "updatedAt": "2026-06-06T00:00:00Z",
+  "version": "1.2.1",
+  "updatedAt": "2026-07-28T00:00:00Z",
   "license": "Apache-2.0",
   "recoScore": 15,
   "parameterSize": "25.2B",
-  "approxSizeBytes": 14249045120,
+  "approxSizeBytes": 14249047104,
   "supportsTools": true,
   "contextWindow": 256000,
   "upstream": "https://huggingface.co/google/gemma-4-26B-A4B-it",
@@ -42,7 +42,21 @@
   "llamaCpp": {
     "huggingfaceRepo": "unsloth/gemma-4-26B-A4B-it-qat-GGUF",
     "filename": "gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf",
-    "quantization": "UD-Q4_K_XL"
+    "quantization": "UD-Q4_K_XL",
+    "residentBytes": 17401183718,
+    "draftModelFilename": "MTP/mtp-gemma-4-26B-A4B-it-Q4_0.gguf"
+  },
+  "releasePatch": {
+    "tuning": {
+      "engine": {
+        "llamaCpp": {
+          "spec": {
+            "mtp": true,
+            "nMax": 4
+          }
+        }
+      }
+    }
   },
   "mlx": {
     "huggingfaceRepo": "mlx-community/gemma-4-26B-A4B-it-qat-nvfp4",

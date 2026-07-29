@@ -791,13 +791,12 @@ export const GezelConfigSchema = z.object({
    */
   llamaCppBatchSize: z.number().int().positive().optional(),
   /**
-   * Speculative-decoding mode (`--spec-type`). Lossless decode speedup
-   * (verified tokens — output is identical). `ngram-mod`/`ngram-simple`
-   * need no draft model (prompt/context n-gram lookup — wins on
-   * artifact-heavy generation); `draft-mtp`/`draft-eagle3` use the
-   * model's own prediction head (only when the GGUF ships those
-   * tensors); `draft-simple` needs a separate `llamaCppDraftModelPath`.
-   * Default unset (`none`). Phase v3 auto-selects per-model.
+   * Speculative-decoding mode (`--spec-type`). These algorithms verify
+   * drafted tokens against the target distribution and are designed to be
+   * lossless, but experimental model/backend pairs must still be A/B tested.
+   * `ngram-mod`/`ngram-simple` need no draft model; `draft-mtp`/
+   * `draft-eagle3` use a model prediction head; `draft-simple` needs a
+   * separate `llamaCppDraftModelPath`. Default unset (off).
    */
   llamaCppSpecType: z
     .enum([

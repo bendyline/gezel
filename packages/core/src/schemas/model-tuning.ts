@@ -296,7 +296,7 @@ export const LlamaCppEngineConfigSchema = z
           .boolean()
           .optional()
           .describe(
-            'VERIFIED that this model’s shipped GGUF carries MTP tensors. Phase v3 gate for auto `--spec-type draft-mtp`.',
+            'VERIFIED capability metadata: this model’s target or companion GGUF carries MTP tensors. Does not enable `draft-mtp` by itself.',
           ),
         draftModelId: z
           .string()

@@ -474,6 +474,26 @@ describe('ops-runbook grader', () => {
     expect(directives[1]).toContain('state/backup.json');
   });
 
+  it('classifies execution-order failures as structural rewrites instead of step-one misses', () => {
+    const directive = runbookRepairDirective(
+      'runlog.md must record STEP 1, STEP 2, STEP 3, then STEP 4 in execution order',
+    );
+
+    expect(directive).toContain('RUNBOOK_ORDER_REWRITE');
+    expect(directive).toContain('read_file on runbook.md and runlog.md');
+    expect(directive).not.toContain('STEP_1_SOURCE_PATCH');
+  });
+
+  it('routes provenance failures about the halt report to halt-report.md', () => {
+    const failReason =
+      'source-read provenance is out of order: state/backup.json before halt report';
+
+    expect(runbookFeedbackPath(failReason)).toBe(HALT_REPORT_PATH);
+    expect(runbookRepairDirective(failReason)).toContain(
+      'Then rewrite halt-report.md from only the values observed in those reads.',
+    );
+  });
+
   it('states the source-read contract in both mission and kickoff', () => {
     expect(RUNBOOK_MISSION_OBJECTIVES).toContain('Never copy a verification value');
     expect(RUNBOOK_KICKOFF_MESSAGE).toContain('read_file({ path: "runbook.md" })');

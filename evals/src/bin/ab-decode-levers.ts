@@ -13,9 +13,11 @@
  * temperature 0 through gezel's OpenAI-compat endpoint — a
  * `<provider>:<model>` ref gets `systemPrefix=''`, i.e. near-raw
  * generation — and we parse llama-server's per-request `prompt eval time` /
- * `eval time` timing lines out of `daemon.log`. Length + greedy sampling
- * come from per-model `modelTuning` (the `/v1` route rejects per-request
- * sampling by design), so both are identical across arms.
+ * `eval time` timing lines out of `daemon.log`. The Gezel `/v1` route rejects
+ * per-request sampling by design, so a short request first lazy-starts the
+ * supervised engine; measured requests then go directly to that loopback
+ * llama-server with fixed length + greedy sampling. Both are identical across
+ * arms and still exercise the exact engine process/flags Gezel launched.
  *
  * Levers map to `config` fields resolved in
  * providers/llama-cpp/engine-flags.ts:
@@ -42,7 +44,7 @@ import { defaultCacheRoot, ensureWarmModel, linkModelIntoTrial } from '../model-
 import { resolveLlamaBinary } from '../native-bin.ts';
 import { shutdownTrialDaemon, spawnTrialDaemon } from '../spawn.ts';
 
-const MODEL = 'gemma4-e4b-q8';
+const MODEL = process.env.GEZEL_EVAL_DECODE_MODEL?.trim() || 'gemma4-e4b-q8';
 const MODEL_REF = `llama-cpp:${MODEL}`;
 // The draft partner for draft-simple: same Gemma-4 family / tokenizer, ~2B
 // effective params. Warm-cached at this absolute path; passed verbatim to
@@ -88,21 +90,44 @@ const BASELINE_TUNING = {
 function armSet(): Arm[] {
   return [
     // Reference: whatever the RAM-tier default resolves to (4 slots on a
-    // 64GB+ box), no spec, flash-attn/ubatch at server defaults.
-    { name: 'baseline', config: {} },
+    // 64GB+ box), with speculative decoding EXPLICITLY disabled. An omitted
+    // llamaCppSpecType now lets verified per-model catalog tuning auto-enable
+    // MTP, which would contaminate every non-spec arm in this harness.
+    { name: 'baseline', config: { llamaCppSpecType: 'none' } },
     // Single-slot: 4× less KV reserved, and engine-flags auto-enables
     // --cache-reuse 256 (gated to slots===1).
-    { name: 'slots1', config: { providerConcurrency: { 'llama-cpp': 1 } } },
+    {
+      name: 'slots1',
+      config: { providerConcurrency: { 'llama-cpp': 1 }, llamaCppSpecType: 'none' },
+    },
     // Single-slot + flash-attn forced on.
     {
       name: 'slots1-fa',
-      config: { providerConcurrency: { 'llama-cpp': 1 }, llamaCppFlashAttn: 'on' },
+      config: {
+        providerConcurrency: { 'llama-cpp': 1 },
+        llamaCppFlashAttn: 'on',
+        llamaCppSpecType: 'none',
+      },
     },
     // Single-slot + a wider inner microbatch (server default 512 → 1024)
     // to exploit the GB10's compute headroom during prefill.
     {
       name: 'slots1-ubatch1024',
-      config: { providerConcurrency: { 'llama-cpp': 1 }, llamaCppUbatchSize: 1024 },
+      config: {
+        providerConcurrency: { 'llama-cpp': 1 },
+        llamaCppUbatchSize: 1024,
+        llamaCppSpecType: 'none',
+      },
+    },
+    // Single-slot + the target model's verified MTP head. For Gemma 4 the
+    // catalog-installed draft sidecar is resolved automatically.
+    {
+      name: 'slots1-mtp',
+      config: {
+        providerConcurrency: { 'llama-cpp': 1 },
+        llamaCppSpecType: 'draft-mtp',
+        llamaCppSpecDraftNMax: 4,
+      },
     },
     // Single-slot + draft-simple speculative decoding (gemma4-e2b draft).
     {
@@ -224,20 +249,51 @@ async function runArm(arm: Arm, llamaBin: string): Promise<ArmResult> {
     // HTTPS daemon → trust the per-launch self-signed cert; plain-HTTP
     // daemon (no cert) → global fetch.
     const doFetch = spawned.cert ? createTrustingFetch({ cert: spawned.cert }) : fetch;
-    const url = `${spawned.baseUrl}/v1/chat/completions`;
+    const gezelUrl = `${spawned.baseUrl}/v1/chat/completions`;
+
+    // Lazy-start the supervised provider. This request is warmup only and is
+    // excluded from the timing aggregate below.
+    const warmup = await doFetch(gezelUrl, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${spawned.token}`,
+      },
+      body: JSON.stringify({
+        model: MODEL_REF,
+        messages: [{ role: 'user', content: 'Reply with exactly: OK' }],
+        stream: false,
+      }),
+    });
+    if (!warmup.ok) {
+      const body = await warmup.text().catch(() => '');
+      throw new Error(`warmup HTTP ${warmup.status}: ${body.slice(0, 300)}`);
+    }
+
+    const launchedLog = await readFile(logPath, 'utf8');
+    const endpoints = [
+      ...launchedLog.matchAll(/\[llama-server\].*listening on (http:\/\/127\.0\.0\.1:\d+)/g),
+    ];
+    const llamaBaseUrl = endpoints.at(-1)?.[1];
+    if (!llamaBaseUrl) throw new Error('could not resolve supervised llama-server endpoint');
+    const url = `${llamaBaseUrl}/v1/chat/completions`;
+
     for (let i = 0; i < PROMPTS.length; i++) {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
       try {
-        const res = await doFetch(url, {
+        const res = await fetch(url, {
           method: 'POST',
           headers: {
             'content-type': 'application/json',
-            authorization: `Bearer ${spawned.token}`,
           },
           body: JSON.stringify({
-            model: MODEL_REF,
+            model: MODEL,
             messages: [{ role: 'user', content: PROMPTS[i] }],
+            temperature: 0,
+            max_tokens: MAX_TOKENS,
+            seed: 0,
+            chat_template_kwargs: { enable_thinking: false },
             stream: false,
           }),
           signal: controller.signal,
@@ -255,8 +311,12 @@ async function runArm(arm: Arm, llamaBin: string): Promise<ArmResult> {
         // biome-ignore lint/suspicious/noExplicitAny: OpenAI-compat response shape
         const json: any = await res.json();
         const content: string = json?.choices?.[0]?.message?.content ?? '';
+        const reasoning: string = json?.choices?.[0]?.message?.reasoning_content ?? '';
+        const finishReason: string = json?.choices?.[0]?.finish_reason ?? 'unknown';
         responses.push(content);
-        console.log(`[decode] ${arm.name} req#${i}: ${content.length} chars generated`);
+        console.log(
+          `[decode] ${arm.name} req#${i}: ${content.length} content chars, ${reasoning.length} reasoning chars, finish=${finishReason}`,
+        );
       } finally {
         clearTimeout(timer);
       }
@@ -284,7 +344,7 @@ async function runArm(arm: Arm, llamaBin: string): Promise<ArmResult> {
     promptTokensAvg: measured.length ? Math.round(promptTokens / measured.length) : 0,
     samples: measured.length,
     responses,
-    acceptance: /spec/.test(arm.name) ? extractAcceptance(log) : [],
+    acceptance: /(spec|mtp)/.test(arm.name) ? extractAcceptance(log) : [],
     launchFailed,
   };
   console.log(
@@ -324,7 +384,7 @@ async function main(): Promise<void> {
   const pad = (s: string, n: number) => s.padEnd(n);
   const padL = (s: string, n: number) => s.padStart(n);
 
-  console.log('\n================ DECODE-LEVER A/B RESULT (gemma4-e4b-q8, GPU) ================');
+  console.log(`\n================ DECODE-LEVER A/B RESULT (${MODEL}, GPU) ================`);
   console.log(
     `${pad('arm', 20)}${padL('decode t/s', 12)}${padL('Δ decode', 10)}${padL('prefill t/s', 14)}${padL('gen tok', 9)}${padL('n', 4)}`,
   );
@@ -345,21 +405,16 @@ async function main(): Promise<void> {
   }
   console.log('=============================================================================');
 
-  // Output-identity is INFORMATIONAL ONLY here. The `/v1` OpenAI-compat path
-  // does not thread `modelTuning` into a raw `<provider>:<model>` session
-  // (v1-chat.ts builds sessionOpts without `tuning`), so these arms sample at
-  // llama-server's stochastic default — independent draws differ run-to-run
-  // regardless of the lever, so a mismatch here says nothing about a lever's
-  // correctness. draft-simple is lossless by construction (rejection-sampled
-  // against the target distribution; see the acceptance log below). The real
-  // correctness gate for a lever is the frozen ANCHOR pass-rate via the
-  // gezel-session path (where tuning applies), run separately before default-on.
+  // With greedy sampling and the same max-token cap, text identity is a useful
+  // semantic-stability check. A mismatch is a release-gating signal even when
+  // the algorithm is intended to verify drafts against the target distribution.
+  // The separate frozen-scenario eval remains the agent-path correctness gate.
   if (baseline) {
     for (const r of results) {
       if (r.name === 'baseline' || r.launchFailed) continue;
       const cmp = sameOutput(baseline.responses, r.responses);
       console.log(
-        `[identity] ${r.name}: ${cmp.identical ? 'text matched baseline' : `text differs (first at prompt #${cmp.firstDiff})`} — informational only (raw /v1 samples stochastically; gate on anchor pass-rate, not this)`,
+        `[identity] ${r.name}: ${cmp.identical ? 'text matched baseline' : `text differs (first at prompt #${cmp.firstDiff})`}`,
       );
     }
   }

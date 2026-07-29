@@ -5,12 +5,12 @@
   "tags": ["alibaba", "multimodal", "vision", "video", "tools", "long-context"],
   "category": "general",
   "maintainer": { "name": "Alibaba", "url": "https://ollama.com/library/qwen3.6" },
-  "version": "1.1.0",
-  "updatedAt": "2026-04-26T00:00:00Z",
+  "version": "1.1.4",
+  "updatedAt": "2026-07-28T00:00:00Z",
   "license": "Apache-2.0",
   "recoScore": 20,
   "parameterSize": "27B",
-  "approxSizeBytes": 17000000000,
+  "approxSizeBytes": 17106773120,
   "supportsTools": true,
   "contextWindow": 262144,
   "upstream": "https://ollama.com/library/qwen3.6",
@@ -31,9 +31,22 @@
   ],
   "ollama": { "tag": "qwen3.6" },
   "llamaCpp": {
-    "huggingfaceRepo": "lmstudio-community/Qwen3.6-27B-GGUF",
+    "huggingfaceRepo": "unsloth/Qwen3.6-27B-MTP-GGUF",
     "filename": "Qwen3.6-27B-Q4_K_M.gguf",
-    "quantization": "Q4_K_M"
+    "quantization": "Q4_K_M",
+    "residentBytes": 20528127744
+  },
+  "releasePatch": {
+    "tuning": {
+      "engine": {
+        "llamaCpp": {
+          "spec": {
+            "mtp": true,
+            "nMax": 4
+          }
+        }
+      }
+    }
   },
   "mlx": {
     "huggingfaceRepo": "mlx-community/Qwen3.6-27B-4bit",

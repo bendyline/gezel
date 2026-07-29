@@ -97,14 +97,13 @@ describe('defaultModelFor', () => {
     }
   });
 
-  it('keeps gemma4-e4b as the llama-cpp default, but an MLX-loadable model for MLX', () => {
-    // gemma4-e4b-q8 is the historical llama-cpp calibration baseline. It
-    // does NOT load on MLX (E4B arch gap in mlx_vlm), so MLX must default
-    // to a model that actually loads on the Mac-default engine.
+  it('keeps the historical llama-cpp baseline and a smaller MLX default', () => {
     expect(defaultModelFor('llama-cpp')).toBe('gemma4-e4b-q8');
     expect(defaultModelFor('mlx')).toBe('qwen3.5-4b-q4');
-    // The MLX default must ship MLX weights (else a bare eval:run crashes).
+    // Both the fast default and the historical E4B baseline must be runnable
+    // on MLX so explicit cross-engine comparisons do not fail during warm.
     expect(chatModelSources('qwen3.5-4b-q4')?.mlx).toBe(true);
+    expect(chatModelSources('gemma4-e4b-q8')?.mlx).toBe(true);
   });
 });
 

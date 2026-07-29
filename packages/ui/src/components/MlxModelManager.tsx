@@ -76,9 +76,9 @@ function asMlxEntry(
   m: CatalogItemSummary['manifest'],
 ): (ChatModelManifest & { mlx: NonNullable<ChatModelManifest['mlx']> }) | null {
   if (m.kind !== 'chat-model') return null;
-  // No mlx build, or a build flagged as known-broken on MLX
-  // (`disabledReason`, e.g. Gemma-4 E4B's mlx-vlm arch gap) — not offered
-  // in the MLX picker. The model is still installable via llama.cpp.
+  // No mlx build, or a build flagged as known-broken on MLX via
+  // `disabledReason` — not offered in the MLX picker. The model may still be
+  // installable via llama.cpp.
   if (!m.mlx || m.mlx.disabledReason) return null;
   return m as ChatModelManifest & { mlx: NonNullable<ChatModelManifest['mlx']> };
 }

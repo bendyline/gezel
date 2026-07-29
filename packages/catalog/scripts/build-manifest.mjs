@@ -59,7 +59,7 @@ import { existsSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { assembleManifest } from '../src/manifest-assembly.js';
+import { applyJsonMergePatch, assembleManifest } from '../src/manifest-assembly.js';
 import { requireGildeCheckout } from './gilde-checkout.js';
 
 const HF_HUB_BASE = 'https://huggingface.co';
@@ -75,12 +75,26 @@ function parseArgs(argv) {
     if (a === '--config') out.config = argv[++i];
     else if (a === '--dry-run') out.dryRun = true;
     else if (a === '--reseed') out.reseed = true;
+    else if (a === '--release') out.release = true;
   }
   if (!out.config) {
-    console.error('usage: build-manifest.mjs --config <file> [--dry-run] [--reseed]');
+    console.error('usage: build-manifest.mjs --config <file> [--dry-run] [--reseed] [--release]');
     process.exit(2);
   }
   return out;
+}
+
+async function fetchCommit(repo, rev = 'main') {
+  const url = `${HF_HUB_BASE}/api/models/${repo}/revision/${rev}`;
+  const res = await fetch(url);
+  if (!res.ok) {
+    throw new Error(`HF model fetch ${url} failed: ${res.status} ${res.statusText}`);
+  }
+  const data = await res.json();
+  if (typeof data.sha !== 'string' || data.sha.length === 0) {
+    throw new Error(`HF model fetch ${url} did not return a commit sha`);
+  }
+  return data.sha;
 }
 
 async function fetchTree(repo, rev = 'main') {
@@ -137,7 +151,7 @@ function selectMlxFiles(files) {
   return files.filter((f) => MLX_KEEP.some((re) => re.test(f.path)));
 }
 
-async function buildLlamaCppBlock(cfg) {
+async function buildLlamaCppBlock(cfg, pinCurrent = false) {
   const {
     huggingfaceRepo,
     filename,
@@ -145,6 +159,7 @@ async function buildLlamaCppBlock(cfg) {
     shardsPrefix,
     quantization,
     mmprojFilename,
+    draftModelFilename,
     residentBytes,
   } = cfg;
   const shardForms = [shardsDir, shardsPrefix].filter(Boolean).length;
@@ -160,7 +175,8 @@ async function buildLlamaCppBlock(cfg) {
     throw new Error('llamaCpp config must set only one of `shardsDir` or `shardsPrefix`');
   }
   console.log(`[hf] fetching tree for llama.cpp source ${huggingfaceRepo}…`);
-  const tree = await fetchTree(huggingfaceRepo);
+  const revision = pinCurrent ? await fetchCommit(huggingfaceRepo) : undefined;
+  const tree = await fetchTree(huggingfaceRepo, revision);
 
   let mmproj;
   if (mmprojFilename) {
@@ -172,6 +188,22 @@ async function buildLlamaCppBlock(cfg) {
       throw new Error(`mmproj file ${mmprojFilename} is not LFS-backed; sha256 unavailable`);
     }
     mmproj = { filename: mmprojFilename, sha256: f.sha256, sizeBytes: f.sizeBytes };
+  }
+
+  let draftModel;
+  if (draftModelFilename) {
+    const f = tree.find((e) => e.path === draftModelFilename);
+    if (!f) {
+      throw new Error(`draft model ${draftModelFilename} not found in ${huggingfaceRepo}`);
+    }
+    if (!f.lfsBacked) {
+      throw new Error(`draft model ${draftModelFilename} is not LFS-backed; sha256 unavailable`);
+    }
+    draftModel = {
+      filename: draftModelFilename,
+      sha256: f.sha256,
+      sizeBytes: f.sizeBytes,
+    };
   }
 
   if (shardsDir || shardsPrefix) {
@@ -195,6 +227,7 @@ async function buildLlamaCppBlock(cfg) {
     const approxSizeBytes = shards.reduce((sum, s) => sum + s.sizeBytes, 0);
     return {
       huggingfaceRepo,
+      ...(revision ? { revision } : {}),
       shards: shards.map((s) => ({
         name: s.path,
         sha256: s.sha256,
@@ -204,6 +237,7 @@ async function buildLlamaCppBlock(cfg) {
       ...(quantization ? { quantization } : {}),
       ...(residentBytes ? { residentBytes } : {}),
       ...(mmproj ? { mmproj } : {}),
+      ...(draftModel ? { draftModel } : {}),
     };
   }
 
@@ -216,12 +250,14 @@ async function buildLlamaCppBlock(cfg) {
   }
   return {
     huggingfaceRepo,
+    ...(revision ? { revision } : {}),
     filename,
     sha256: file.sha256,
     approxSizeBytes: file.sizeBytes,
     ...(quantization ? { quantization } : {}),
     ...(residentBytes ? { residentBytes } : {}),
     ...(mmproj ? { mmproj } : {}),
+    ...(draftModel ? { draftModel } : {}),
   };
 }
 
@@ -236,11 +272,13 @@ async function buildLlamaCppBlock(cfg) {
  * read out of the GGUF, and the safe cache/context budgets follow from it. They
  * pass through from the config verbatim.
  */
-async function buildDs4Block(cfg) {
+async function buildDs4Block(cfg, pinCurrent = false) {
   const { residentBytes, cacheExpertsBytes, ssdStreaming, maxLaunchCtx, ...installCfg } = cfg;
-  const base = await buildLlamaCppBlock(installCfg);
-  if (base.mmproj) {
-    throw new Error('ds4 config must not set `mmprojFilename` — ds4 has no multimodal path');
+  const base = await buildLlamaCppBlock(installCfg, pinCurrent);
+  if (base.mmproj || base.draftModel) {
+    throw new Error(
+      'ds4 config must not set `mmprojFilename` or `draftModelFilename` — ds4 has no sidecar path',
+    );
   }
   return {
     ...base,
@@ -251,10 +289,11 @@ async function buildDs4Block(cfg) {
   };
 }
 
-async function buildMlxBlock(cfg) {
+async function buildMlxBlock(cfg, pinCurrent = false) {
   const { huggingfaceRepo, quantization, chatTemplate, residentBytes } = cfg;
   console.log(`[hf] fetching tree for MLX source ${huggingfaceRepo}…`);
-  const tree = await fetchTree(huggingfaceRepo);
+  const revision = pinCurrent ? await fetchCommit(huggingfaceRepo) : undefined;
+  const tree = await fetchTree(huggingfaceRepo, revision);
   const installFiles = selectMlxFiles(tree);
   if (installFiles.length === 0) {
     throw new Error(`no MLX install files found in ${huggingfaceRepo}`);
@@ -263,7 +302,7 @@ async function buildMlxBlock(cfg) {
   if (nonLfs.length > 0) {
     console.log(`[hf]   hashing ${nonLfs.length} non-LFS file(s) for SHA-256…`);
     for (const f of nonLfs) {
-      const { sha256, sizeBytes } = await fetchAndHash(huggingfaceRepo, f.path);
+      const { sha256, sizeBytes } = await fetchAndHash(huggingfaceRepo, f.path, revision);
       f.sha256 = sha256;
       f.sizeBytes = sizeBytes;
       f.lfsBacked = true;
@@ -272,6 +311,7 @@ async function buildMlxBlock(cfg) {
   const approxSizeBytes = installFiles.reduce((s, f) => s + f.sizeBytes, 0);
   return {
     huggingfaceRepo,
+    ...(revision ? { revision } : {}),
     ...(quantization ? { quantization } : {}),
     approxSizeBytes,
     files: installFiles.map((f) => ({
@@ -322,9 +362,11 @@ async function main() {
   // Fetch fresh provider blocks (sha256 / size / file lists) from HF.
   const providerBlocks = {};
   if (cfg.ollama) providerBlocks.ollama = { tag: cfg.ollama.tag };
-  if (cfg.llamaCpp) providerBlocks.llamaCpp = await buildLlamaCppBlock(cfg.llamaCpp);
-  if (cfg.mlx) providerBlocks.mlx = await buildMlxBlock(cfg.mlx);
-  if (cfg.ds4) providerBlocks.ds4 = await buildDs4Block(cfg.ds4);
+  if (cfg.llamaCpp) {
+    providerBlocks.llamaCpp = await buildLlamaCppBlock(cfg.llamaCpp, Boolean(args.release));
+  }
+  if (cfg.mlx) providerBlocks.mlx = await buildMlxBlock(cfg.mlx, Boolean(args.release));
+  if (cfg.ds4) providerBlocks.ds4 = await buildDs4Block(cfg.ds4, Boolean(args.release));
 
   const subdir = deriveSubdir(cfg.id);
   const outPath = resolve(GILDE_DATA_DIR, 'chat-models', subdir, cfg.id, 'manifest.json');
@@ -338,12 +380,28 @@ async function main() {
   if (existsSync(outPath)) {
     existing = JSON.parse(await readFile(outPath, 'utf-8'));
   }
-  const { manifest, preservedFromManifest, carriedRevisions } = assembleManifest({
+  const assembled = assembleManifest({
     cfg,
     providerBlocks,
     existing,
     reseed: Boolean(args.reseed),
   });
+  let { manifest } = assembled;
+  const { preservedFromManifest, carriedRevisions } = assembled;
+
+  // A release refresh adopts the config's release identity while preserving
+  // all other eval-evolved editorial data. `releasePatch` is an optional
+  // JSON Merge Patch for surgical changes such as enabling a verified MTP
+  // spec; null removes obsolete keys (for example an older draft-simple
+  // configuration).
+  if (args.release) {
+    manifest = applyJsonMergePatch(manifest, {
+      version: cfg.version,
+      updatedAt: cfg.updatedAt,
+      approxSizeBytes: cfg.approxSizeBytes,
+      ...(cfg.releasePatch && typeof cfg.releasePatch === 'object' ? cfg.releasePatch : {}),
+    });
+  }
 
   if (existing && preservedFromManifest.length > 0) {
     const how = args.reseed

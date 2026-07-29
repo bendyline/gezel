@@ -5,12 +5,12 @@
   "tags": ["google", "multimodal", "vision", "audio", "tools", "agentic", "qat"],
   "category": "general",
   "maintainer": { "name": "Google", "url": "https://huggingface.co/google/gemma-4-12B-it" },
-  "version": "1.1.0",
-  "updatedAt": "2026-06-06T00:00:00Z",
+  "version": "1.1.2",
+  "updatedAt": "2026-07-28T00:00:00Z",
   "license": "Apache-2.0",
   "recoScore": 15,
   "parameterSize": "12B",
-  "approxSizeBytes": 6716355328,
+  "approxSizeBytes": 6716356800,
   "supportsTools": true,
   "contextWindow": 256000,
   "upstream": "https://huggingface.co/google/gemma-4-12B-it",
@@ -127,7 +127,21 @@
   "llamaCpp": {
     "huggingfaceRepo": "unsloth/gemma-4-12B-it-qat-GGUF",
     "filename": "gemma-4-12B-it-qat-UD-Q4_K_XL.gguf",
-    "quantization": "UD-Q4_K_XL"
+    "quantization": "UD-Q4_K_XL",
+    "residentBytes": 8364078720,
+    "draftModelFilename": "MTP/mtp-gemma-4-12B-it-Q4_0.gguf"
+  },
+  "releasePatch": {
+    "tuning": {
+      "engine": {
+        "llamaCpp": {
+          "spec": {
+            "mtp": true,
+            "nMax": 4
+          }
+        }
+      }
+    }
   },
   "mlx": {
     "huggingfaceRepo": "mlx-community/gemma-4-12B-it-qat-4bit",

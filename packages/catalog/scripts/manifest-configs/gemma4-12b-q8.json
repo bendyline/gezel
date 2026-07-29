@@ -5,12 +5,12 @@
   "tags": ["google", "multimodal", "vision", "audio", "tools", "agentic"],
   "category": "general",
   "maintainer": { "name": "Google", "url": "https://huggingface.co/google/gemma-4-12B-it" },
-  "version": "1.0.0",
-  "updatedAt": "2026-06-03T00:00:00Z",
+  "version": "1.0.2",
+  "updatedAt": "2026-07-28T00:00:00Z",
   "license": "Apache-2.0",
   "recoScore": 15,
   "parameterSize": "12B",
-  "approxSizeBytes": 12669645728,
+  "approxSizeBytes": 12669646976,
   "supportsTools": true,
   "contextWindow": 256000,
   "upstream": "https://huggingface.co/google/gemma-4-12B-it",
@@ -122,7 +122,21 @@
   "llamaCpp": {
     "huggingfaceRepo": "ggml-org/gemma-4-12B-it-GGUF",
     "filename": "gemma-4-12B-it-Q8_0.gguf",
-    "quantization": "Q8_0"
+    "quantization": "Q8_0",
+    "residentBytes": 15761707354,
+    "draftModelFilename": "mtp-gemma-4-12B-it-Q8_0.gguf"
+  },
+  "releasePatch": {
+    "tuning": {
+      "engine": {
+        "llamaCpp": {
+          "spec": {
+            "mtp": true,
+            "nMax": 4
+          }
+        }
+      }
+    }
   },
   "mlx": {
     "huggingfaceRepo": "mlx-community/gemma-4-12b-it-8bit",

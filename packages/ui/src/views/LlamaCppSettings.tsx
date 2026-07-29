@@ -251,7 +251,8 @@ export function LlamaCppSettings({ config, onConfigChanged, health }: Props) {
       setSaving('saving');
       try {
         const next = await api.updateConfig({
-          // 'none' = off — clear the override.
+          // Unset is the persisted off/default state. Catalog MTP capability
+          // metadata never activates speculative decoding by itself.
           llamaCppSpecType: value === 'none' ? undefined : value,
         });
         onConfigChanged(next);
@@ -459,14 +460,15 @@ export function LlamaCppSettings({ config, onConfigChanged, health }: Props) {
           >
             <option value="none">Off</option>
             <option value="ngram-mod">N-gram lookup (no draft model)</option>
-            <option value="draft-mtp">Model MTP head (if supported)</option>
+            <option value="draft-mtp">Model MTP head (experimental)</option>
           </select>
         </div>
         <p className="muted small" style={{ marginTop: '0.25rem', marginLeft: '10rem' }}>
-          Drafts several tokens per step and verifies them in one pass — a lossless speedup (the
-          output is identical). <em>N-gram</em> needs no extra model and helps most on repetitive or
-          structured output; <em>MTP</em> uses the model's own prediction head and only works when
-          the downloaded weights include it. Takes effect the next time the engine starts.
+          Drafts several tokens per step and verifies them against the target model. <em>N-gram</em>{' '}
+          needs no extra model and helps most on repetitive or structured output. <em>MTP</em> uses
+          the model's own prediction head, requires compatible downloaded weights, and may change
+          behavior on experimental engine/model combinations. Takes effect the next time the engine
+          starts.
         </p>
 
         <div className="new-row" style={{ marginTop: '0.75rem', alignItems: 'center' }}>

@@ -303,7 +303,7 @@ describe('postSniffFeedback', () => {
     expect(body.text).toContain('assets/pets/dog_placeholder.jpg');
     expect(body.text).toContain('Do not call `make_dir`');
     expect(body.text).toContain(
-      'replace_in_file({ path: "index.html", search: "assets/logo.png", replace: "assets/generated/image-1213420199.png" })',
+      'replace_in_file({ path: "index.html", find: "assets/logo.png", replace: "assets/generated/image-1213420199.png" })',
     );
   });
 
@@ -2197,6 +2197,40 @@ describe('sniff escalation ladder', () => {
     expect(texts[2]).toContain('REPEAT MISS — attempt 3');
     expect(requestTerminalFailure).toHaveBeenCalledTimes(1);
     expect(snapshotRepairActions).toHaveBeenCalled();
+  });
+
+  it('keeps read-first null handoffs pinned to a bounded mutation target across escalations', async () => {
+    const client = makeClient({
+      sessions: [{ id: 's', gezelId: 'operator-1', lastActivityAt: '2026-06-04T05:00:00Z' }],
+    });
+    const ctx = makeCtx(client);
+    const sniff = failingSniff({
+      failReason: 'runlog.md must record STEP 1, STEP 2, STEP 3, then STEP 4 in execution order',
+      missingRequiredSignals: ['no-phantom-completion'],
+    });
+    const opts = {
+      expectedDeliverable: null,
+      postReadMutationTarget: 'runlog.md',
+      repairDirective:
+        'RUNBOOK_ORDER_REWRITE: first use read_file on runbook.md and runlog.md. Then rewrite runlog.md once in execution order.',
+    } as const;
+
+    for (const sourceText of ['revision-1', 'revision-2', 'revision-3']) {
+      await postSniffFeedback(ctx, 'runlog.md', sniff, { ...opts, sourceText });
+    }
+
+    const texts = client.messageGezel.mock.calls.map((call) => call[1].text as string);
+    expect(texts).toHaveLength(3);
+    for (const text of texts) {
+      expect(text).toContain('POST_READ_MUTATION_TARGET');
+      expect(text).toContain('mutate exactly `runlog.md`');
+      expect(text).toContain('one bounded `write_file` rewrite');
+      expect(text).not.toContain('Do not rewrite the whole file');
+      expect(text).not.toContain('GATE_FULL_REWRITE');
+    }
+    expect(texts[1]).toContain('REPEAT READ-THEN-MUTATE MISS');
+    expect(texts[2]).toContain('repeat the bounded `write_file` rewrite');
+    expect(client.messageGezel.mock.calls[0]![1].expectedDeliverable).toBeUndefined();
   });
 
   it('counts byte-identical completed mutations when expectedDeliverable is null', async () => {

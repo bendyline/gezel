@@ -170,38 +170,69 @@ describe('buildLlamaCppEngineArgs — speculative decoding', () => {
     expect(argValue(args, '--spec-draft-n-max')).toBe('5');
   });
   it('per-model spec block is honoured', () => {
-    const args = buildLlamaCppEngineArgs({ config: {}, perModel: { spec: { type: 'draft-mtp' } } });
+    const args = buildLlamaCppEngineArgs({
+      config: {},
+      perModel: { spec: { type: 'draft-mtp' } },
+      ggufHasMtp: true,
+    });
     expect(argValue(args, '--spec-type')).toBe('draft-mtp');
   });
 
-  it('auto-MTP: manifest spec.mtp enables draft-mtp only when the GGUF confirms MTP', () => {
+  it('passes a catalog-installed sidecar to separate-head MTP models', () => {
+    const args = buildLlamaCppEngineArgs({
+      config: { llamaCppSpecType: 'draft-mtp' },
+      perModel: { spec: { mtp: true, nMax: 4 } },
+      ggufHasMtp: true,
+      installedDraftModelPath: '/models/gemma/mtp.gguf',
+    });
+    expect(argValue(args, '--spec-type')).toBe('draft-mtp');
+    expect(argValue(args, '--spec-draft-model')).toBe('/models/gemma/mtp.gguf');
+    expect(argValue(args, '--spec-draft-n-max')).toBe('4');
+  });
+
+  it('does not require a sidecar for combined MTP GGUFs', () => {
+    const args = buildLlamaCppEngineArgs({
+      config: { llamaCppSpecType: 'draft-mtp' },
+      perModel: { spec: { mtp: true } },
+      ggufHasMtp: true,
+    });
+    expect(argValue(args, '--spec-type')).toBe('draft-mtp');
+    expect(has(args, '--spec-draft-model')).toBe(false);
+  });
+
+  it('passes a catalog-installed sidecar to other draft algorithms', () => {
+    const args = buildLlamaCppEngineArgs({
+      config: {},
+      perModel: { spec: { type: 'draft-dflash' } },
+      installedDraftModelPath: '/models/laguna/dflash.gguf',
+    });
+    expect(argValue(args, '--spec-type')).toBe('draft-dflash');
+    expect(argValue(args, '--spec-draft-model')).toBe('/models/laguna/dflash.gguf');
+  });
+
+  it('keeps manifest spec.mtp as capability metadata instead of auto-enabling MTP', () => {
     const args = buildLlamaCppEngineArgs({
       config: {},
       perModel: { spec: { mtp: true } },
       ggufHasMtp: true,
     });
-    expect(argValue(args, '--spec-type')).toBe('draft-mtp');
+    expect(has(args, '--spec-type')).toBe(false);
   });
-  it('auto-MTP SAFETY: spec.mtp with NO GGUF confirmation does not enable (draft-mtp on a non-MTP model is fatal)', () => {
-    // ggufHasMtp omitted / false → the mis-set flag must NOT fatally break launch.
+  it('MTP SAFETY: an explicit request with no GGUF confirmation does not enable', () => {
     expect(
-      has(
-        buildLlamaCppEngineArgs({ config: {}, perModel: { spec: { mtp: true } } }),
-        '--spec-type',
-      ),
+      has(buildLlamaCppEngineArgs({ config: { llamaCppSpecType: 'draft-mtp' } }), '--spec-type'),
     ).toBe(false);
     expect(
       has(
         buildLlamaCppEngineArgs({
-          config: {},
-          perModel: { spec: { mtp: true } },
+          config: { llamaCppSpecType: 'draft-mtp' },
           ggufHasMtp: false,
         }),
         '--spec-type',
       ),
     ).toBe(false);
   });
-  it('auto-MTP: an explicit global spec type wins (user override, no cross-check)', () => {
+  it('an explicit global non-MTP spec type wins over MTP capability metadata', () => {
     const args = buildLlamaCppEngineArgs({
       config: { llamaCppSpecType: 'ngram-mod' },
       perModel: { spec: { mtp: true } },
@@ -209,14 +240,14 @@ describe('buildLlamaCppEngineArgs — speculative decoding', () => {
     });
     expect(argValue(args, '--spec-type')).toBe('ngram-mod');
   });
-  it('auto-MTP: an explicit manifest spec.type wins over mtp', () => {
+  it('an explicit manifest spec.type wins over MTP capability metadata', () => {
     const args = buildLlamaCppEngineArgs({
       config: {},
       perModel: { spec: { type: 'ngram-mod', mtp: true } },
     });
     expect(argValue(args, '--spec-type')).toBe('ngram-mod');
   });
-  it('auto-MTP: explicit "none" opts out even with mtp verified', () => {
+  it('explicit "none" stays off even with MTP capability metadata', () => {
     const args = buildLlamaCppEngineArgs({
       config: { llamaCppSpecType: 'none' },
       perModel: { spec: { mtp: true } },

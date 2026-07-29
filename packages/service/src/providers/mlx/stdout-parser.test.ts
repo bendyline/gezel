@@ -90,7 +90,7 @@ describe('classifyMlxFatalErrorLine', () => {
     expect(res?.hint).toMatch(/Reset venv/i);
   });
 
-  it('recognizes the arch-unsupported failure from a MISSING-parameters strict load (Gemma-4 E4B)', () => {
+  it('recognizes a historical arch-unsupported MISSING-parameters strict load', () => {
     const res = classifyMlxFatalErrorLine(
       '[mlx_vlm.server] ValueError: Missing 54 parameters: language_model.model.layers.0.altup.correction_coefs.weight,',
     );

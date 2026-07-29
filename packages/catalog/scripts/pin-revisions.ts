@@ -116,7 +116,7 @@ function pinnedFiles(key: SourceBlock['key'], src: Record<string, unknown>): Pin
     }
     return out;
   }
-  // llamaCpp / ds4: single file, or shards[], plus an optional mmproj sidecar.
+  // llamaCpp / ds4: single file, or shards[], plus optional sidecars.
   if (typeof src.filename === 'string' && typeof src.sha256 === 'string') {
     out.push({ path: src.filename, sha256: src.sha256 });
   }
@@ -125,6 +125,8 @@ function pinnedFiles(key: SourceBlock['key'], src: Record<string, unknown>): Pin
   }
   const mmproj = src.mmproj as { filename: string; sha256: string } | undefined;
   if (mmproj) out.push({ path: mmproj.filename, sha256: mmproj.sha256 });
+  const draftModel = src.draftModel as { filename: string; sha256: string } | undefined;
+  if (draftModel) out.push({ path: draftModel.filename, sha256: draftModel.sha256 });
   return out;
 }
 
@@ -146,7 +148,7 @@ function readSources(manifest: Record<string, unknown>): SourceBlock[] {
 /**
  * Adopt a new sha + size for one pinned file: replace the (unique) old
  * sha256 string, then update the size field that immediately follows it
- * (`sizeBytes` for mlx files / shards / mmproj, `approxSizeBytes` for a
+ * (`sizeBytes` for mlx files / shards / sidecars, `approxSizeBytes` for a
  * single-file llamaCpp source). Returns the new text, or throws if the
  * old sha isn't found exactly once (so a bad edit fails loud, never
  * silently corrupts).
@@ -174,11 +176,17 @@ function adoptFileEdit(text: string, oldSha: string, newSha: string, newSize: nu
 }
 
 /**
- * Insert `"revision": "<commit>"` right after the `huggingfaceRepo` line
- * carrying `<repo>`. Returns the new text, or null if no insertion site
- * was found / a revision already sits there.
+ * Insert or replace `"revision": "<commit>"` right after the
+ * `huggingfaceRepo` line carrying `<repo>`. Conservative pin mode leaves
+ * an existing revision alone; adopt mode replaces it so refreshed hashes
+ * and sizes are pinned to the snapshot they were read from.
  */
-function insertRevision(text: string, repo: string, commit: string): string | null {
+function upsertRevision(
+  text: string,
+  repo: string,
+  commit: string,
+  replaceExisting = false,
+): string | null {
   const lines = text.split('\n');
   // Escape regex metachars in the repo id (dots, dashes are common).
   const escaped = repo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -190,8 +198,17 @@ function insertRevision(text: string, repo: string, commit: string): string | nu
     if (!m) continue;
     const indent = m[1] ?? '';
     const hadComma = m[2] === ',';
-    // Already pinned right below? Idempotent — leave it.
-    if (/^\s*"revision":/.test(lines[i + 1] ?? '')) return null;
+    const nextLine = lines[i + 1] ?? '';
+    const existingRevision = nextLine.match(/^(\s*)"revision":\s*"[0-9a-f]+"(,?)\s*$/);
+    if (existingRevision) {
+      if (!replaceExisting) return null;
+      const existingIndent = existingRevision[1] ?? indent;
+      const existingComma = existingRevision[2] ?? '';
+      const replacement = `${existingIndent}"revision": "${commit}"${existingComma}`;
+      if (replacement === nextLine) return null;
+      lines[i + 1] = replacement;
+      return lines.join('\n');
+    }
     // huggingfaceRepo must end with a comma so the inserted line is
     // valid; if it was the last key, add one and drop it from revision.
     if (!hadComma) lines[i] = `${line.replace(/\s*$/, '')},`;
@@ -272,6 +289,7 @@ async function main(): Promise<void> {
   let drifted = 0;
   let skipped = 0;
   let adopted = 0;
+  let repinned = 0;
   const driftReport: string[] = [];
   const adoptReport: string[] = [];
 
@@ -294,6 +312,7 @@ async function main(): Promise<void> {
       }
       let newText = text;
       let changed = false;
+      let contentChanged = false;
       let failed = false;
       for (const src of sources) {
         let commit: string;
@@ -330,6 +349,7 @@ async function main(): Promise<void> {
           try {
             newText = adoptFileEdit(newText, f.sha256, newSha, entry.sizeBytes);
             changed = true;
+            contentChanged = true;
             adoptReport.push(
               `  ${id} [${src.key}]: ${f.path} → ${newSha.slice(0, 10)} (${entry.sizeBytes} B)`,
             );
@@ -342,12 +362,10 @@ async function main(): Promise<void> {
         }
         // Pin the revision too (covers both the just-adopted block and
         // any block that was already content-clean but still unpinned).
-        if (!src.revision || force) {
-          const next = insertRevision(newText, src.repo, commit);
-          if (next) {
-            newText = next;
-            changed = true;
-          }
+        const next = upsertRevision(newText, src.repo, commit, true);
+        if (next) {
+          newText = next;
+          changed = true;
         }
       }
       if (failed || !changed) continue;
@@ -392,8 +410,13 @@ async function main(): Promise<void> {
         adoptReport.push(`  ${id}: post-adopt verification FAILED — not written`);
         continue;
       }
-      adopted++;
-      console.log(`${write ? 'adopted ' : 'would adopt '} ${id}`);
+      if (contentChanged) {
+        adopted++;
+        console.log(`${write ? 'adopted ' : 'would adopt '} ${id}`);
+      } else {
+        repinned++;
+        console.log(`${write ? 'repinned' : 'would repin'} ${id} (files unchanged)`);
+      }
       if (write) writeFileSync(path, newText);
       continue;
     }
@@ -462,7 +485,7 @@ async function main(): Promise<void> {
     if (toInsert.length === 0) continue;
 
     for (const { repo, commit } of toInsert) {
-      const next = insertRevision(newText, repo, commit);
+      const next = upsertRevision(newText, repo, commit);
       if (next) newText = next;
     }
     // Validate: must still parse, and differ only by added revisions.
@@ -482,11 +505,14 @@ async function main(): Promise<void> {
   console.log('\n── summary ──');
   if (adopt) {
     console.log(`${write ? 'adopted' : 'would adopt'}: ${adopted}`);
+    console.log(`${write ? 'repinned' : 'would repin'} (files unchanged): ${repinned}`);
     if (adoptReport.length > 0) {
       console.log('\nadopt detail:');
       for (const line of adoptReport) console.log(line);
     }
-    console.log('\n⚠ adopted models pulled in current upstream content — re-test them.');
+    if (adopted > 0) {
+      console.log('\n⚠ adopted models pulled in current upstream content — re-test them.');
+    }
   } else {
     console.log(`${write ? 'pinned' : 'would pin'}: ${pinned}`);
     console.log(`already pinned: ${alreadyPinned}`);
@@ -497,7 +523,7 @@ async function main(): Promise<void> {
       for (const line of driftReport) console.log(line);
     }
   }
-  if (!write && (pinned > 0 || adopted > 0)) {
+  if (!write && (pinned > 0 || adopted > 0 || repinned > 0)) {
     console.log('\n(dry run — re-run with --write to apply)');
   }
 }

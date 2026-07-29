@@ -84,14 +84,18 @@ export interface EngineFlagInput {
   slots?: number | undefined;
   /**
    * Whether the model's GGUF actually ships MTP (`nextn`) layers, read
-   * from its header. A SAFETY cross-check for the `spec.mtp` auto-path:
-   * `--spec-type draft-mtp` on a model that lacks MTP layers makes
-   * llama-server EXIT with a fatal load error, so the manifest's
-   * `spec.mtp` opt-in only takes effect when this confirms MTP is
-   * present. (An explicit `spec.type`/`llamaCppSpecType` is the user's
-   * own call and is passed regardless.)
+   * from its header. A safety cross-check for an explicit `draft-mtp`
+   * request: selecting it for a model without MTP layers makes llama-server
+   * exit with a fatal load error, so the flag is emitted only when this
+   * confirms the capability.
    */
   ggufHasMtp?: boolean | undefined;
+  /**
+   * Absolute path to a catalog-installed speculative draft sidecar.
+   * Separate MTP assistants (Gemma) and other draft algorithms need this;
+   * combined MTP GGUFs (Qwen) intentionally leave it unset.
+   */
+  installedDraftModelPath?: string | undefined;
   /**
    * `--reasoning-format <value>` opt-in (resolved from the
    * `GEZEL_LLAMA_REASONING_FORMAT` env var at the call site). `none`
@@ -135,7 +139,16 @@ function normalizeFlagKey(key: string): string {
  * `args` array.
  */
 export function buildLlamaCppEngineArgs(input: EngineFlagInput): string[] {
-  const { config, perModel, planner, kvCacheType, slots, ggufHasMtp, reasoningFormat } = input;
+  const {
+    config,
+    perModel,
+    planner,
+    kvCacheType,
+    slots,
+    ggufHasMtp,
+    installedDraftModelPath,
+    reasoningFormat,
+  } = input;
   const args: string[] = [];
 
   // ── GPU-layer offload (`--n-gpu-layers`) ──────────────────────────
@@ -187,20 +200,18 @@ export function buildLlamaCppEngineArgs(input: EngineFlagInput): string[] {
   if (perModel?.chatTemplate) args.push('--chat-template', perModel.chatTemplate);
 
   // ── Speculative decoding (`--spec-type` + draft knobs) ────────────
-  // Auto-MTP: a model whose manifest opts in (`spec.mtp`) gets lossless
-  // speculative decoding via its own MTP head for free — but ONLY when
-  // the GGUF header actually confirms MTP layers (`ggufHasMtp`), because
-  // `draft-mtp` on a non-MTP model makes llama-server exit with a fatal
-  // load error. An explicit `type` (config or manifest) is the user's
-  // own call and wins outright (including `'none'` to opt out).
-  const specType =
-    config.llamaCppSpecType ??
-    perModel?.spec?.type ??
-    (perModel?.spec?.mtp && ggufHasMtp ? 'draft-mtp' : undefined);
-  if (specType && specType !== 'none') {
-    args.push('--spec-type', specType);
-    if (specType === 'draft-simple') {
-      const draftModel = config.llamaCppDraftModelPath ?? perModel?.spec?.draftModelId;
+  // `spec.mtp` is capability metadata only. MTP stays explicit opt-in
+  // through config or a manifest `spec.type` until a model/backend pair has
+  // cleared deterministic-output and agent-path A/B gates. Even an explicit
+  // draft-mtp request is safety-gated by the installed GGUF metadata:
+  // llama-server exits fatally when the selected model has no MTP tensors.
+  const specType = config.llamaCppSpecType ?? perModel?.spec?.type;
+  const safeSpecType = specType === 'draft-mtp' && !ggufHasMtp ? undefined : specType;
+  if (safeSpecType && safeSpecType !== 'none') {
+    args.push('--spec-type', safeSpecType);
+    if (safeSpecType.startsWith('draft-')) {
+      const draftModel =
+        config.llamaCppDraftModelPath ?? installedDraftModelPath ?? perModel?.spec?.draftModelId;
       if (draftModel) args.push('--spec-draft-model', draftModel);
     }
     const nMax = config.llamaCppSpecDraftNMax ?? perModel?.spec?.nMax;

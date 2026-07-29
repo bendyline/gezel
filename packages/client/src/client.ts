@@ -1155,6 +1155,15 @@ export type LlamaCppInstallEvent =
     }
   | { type: 'verifying' }
   | { type: 'extracting-metadata' }
+  | {
+      type: 'companion';
+      kind: 'image-recognition';
+      id: string;
+      name: string;
+      bytesWritten: number;
+      totalBytes: number;
+      error?: string;
+    }
   | { type: 'done'; id: string; warning?: string }
   /**
    * Terminal failure. When `mismatch` is present, the failure is a
@@ -1430,6 +1439,15 @@ const LlamaCppInstallEventSchema: z.ZodType<LlamaCppInstallEvent> = z.discrimina
   }),
   z.object({ type: z.literal('verifying') }),
   z.object({ type: z.literal('extracting-metadata') }),
+  z.object({
+    type: z.literal('companion'),
+    kind: z.literal('image-recognition'),
+    id: z.string(),
+    name: z.string(),
+    bytesWritten: z.number().nonnegative(),
+    totalBytes: z.number().nonnegative(),
+    error: z.string().optional(),
+  }),
   z.object({ type: z.literal('done'), id: z.string(), warning: z.string().optional() }),
   z.object({ type: z.literal('error'), error: z.string(), mismatch: mismatchSchema.optional() }),
 ]);

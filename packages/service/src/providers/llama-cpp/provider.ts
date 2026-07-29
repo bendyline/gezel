@@ -591,10 +591,10 @@ const PREREQUISITE_REPAIR_NO_PROGRESS_LIMIT = 2;
 export function extractPrerequisiteRepairReadPaths(prompt: string): string[] {
   if (!isScenarioFileRepairPrompt(prompt)) return [];
   const orderedClause =
-    /\bfirst\s+(?:(?:call|use)\s+`?read_file`?\s+(?:on\s+)?|(?:re-)?read\s+)([\s\S]{1,700}?)(?:[.;]\s*then\s+(?:patch|edit|revise|rewrite|update)|\s+before\s+(?:patching|editing|revising|rewriting|updating))\b/i.exec(
+    /\bfirst\s+(?:(?:call|use)\s+`?read_file`?\s+(?:on\s+)?|(?:re-)?read\s+)([\s\S]{1,700}?)(?:[.,;]\s*then\s+(?:patch|edit|revise|rewrite|update|write|record|replace|append)|\s+before\s+(?:patching|editing|revising|rewriting|updating|writing|recording|replacing|appending))\b/i.exec(
       prompt,
     )?.[1] ??
-    /\bbefore\s+(?:patching|editing|revising|rewriting|updating)\b[\s,:-]+([\s\S]{1,700}?)(?=[.;]\s*(?:then\s+)?(?:patch|edit|revise|rewrite|update)\b)/i.exec(
+    /\bbefore\s+(?:patching|editing|revising|rewriting|updating|writing|recording|replacing|appending)\b[\s,:-]+([\s\S]{1,700}?)(?=[.;]\s*(?:then\s+)?(?:patch|edit|revise|rewrite|update|write|record|replace|append)\b)/i.exec(
       prompt,
     )?.[1];
   if (!orderedClause) return [];
@@ -644,6 +644,13 @@ function scenarioRepairTargetPath(prompt: string): string | null {
     /\[runtime check(?:\s+[^\]]+)?\]\s+You've now rewritten\s+`([^`]+)`\s+\d+\s+time\(s\)/i.exec(
       prompt,
     )?.[1] ??
+    null
+  );
+}
+
+function scenarioRepairPostReadMutationTargetPath(prompt: string): string | null {
+  return (
+    /POST_READ_MUTATION_TARGET:[\s\S]{0,500}?\bmutate exactly\s+`([^`]+)`/i.exec(prompt)?.[1] ??
     null
   );
 }
@@ -976,13 +983,15 @@ function compactToolForConstrainedLocalTurn(
   tool: ChatCompletionTool,
   context: {
     writeFileTargetPath?: string | null;
+    fileMutationTargetPath?: string | null;
     runNodeScriptTargetPath?: string | null;
     readFileTargetPaths?: readonly string[] | null;
   } = {},
 ): ChatCompletionTool {
   const name = chatCompletionToolName(tool);
   if (name === 'write_file') {
-    const targetPath = context.writeFileTargetPath?.trim() || null;
+    const targetPath =
+      context.writeFileTargetPath?.trim() || context.fileMutationTargetPath?.trim() || null;
     return {
       type: 'function',
       function: {
@@ -1063,15 +1072,24 @@ function compactToolForConstrainedLocalTurn(
     };
   }
   if (name === 'replace_in_file') {
+    const targetPath = context.fileMutationTargetPath?.trim() || null;
     return {
       type: 'function',
       function: {
         name,
-        description: 'Replace a literal substring in an existing workspace file.',
+        description: targetPath
+          ? `Replace a literal substring in exactly ${targetPath}. Do not patch any other path.`
+          : 'Replace a literal substring in an existing workspace file.',
         parameters: {
           type: 'object',
           properties: {
-            path: { type: 'string', description: 'Workspace-relative path.' },
+            path: targetPath
+              ? {
+                  type: 'string',
+                  enum: [targetPath],
+                  description: `Must be exactly ${targetPath}.`,
+                }
+              : { type: 'string', description: 'Workspace-relative path.' },
             find: { type: 'string', description: 'Exact text to replace.' },
             replace: { type: 'string', description: 'Replacement text.' },
             occurrence: {
@@ -1085,15 +1103,24 @@ function compactToolForConstrainedLocalTurn(
     };
   }
   if (name === 'replace_lines') {
+    const targetPath = context.fileMutationTargetPath?.trim() || null;
     return {
       type: 'function',
       function: {
         name,
-        description: 'Replace an inclusive line range in an existing workspace file.',
+        description: targetPath
+          ? `Replace an inclusive line range in exactly ${targetPath}. Do not patch any other path.`
+          : 'Replace an inclusive line range in an existing workspace file.',
         parameters: {
           type: 'object',
           properties: {
-            path: { type: 'string', description: 'Workspace-relative path.' },
+            path: targetPath
+              ? {
+                  type: 'string',
+                  enum: [targetPath],
+                  description: `Must be exactly ${targetPath}.`,
+                }
+              : { type: 'string', description: 'Workspace-relative path.' },
             startLine: { type: 'number', description: 'First 1-based line to replace.' },
             endLine: { type: 'number', description: 'Last 1-based line to replace.' },
             content: { type: 'string', description: 'Replacement text for the range.' },
@@ -1104,15 +1131,24 @@ function compactToolForConstrainedLocalTurn(
     };
   }
   if (name === 'append_to_file') {
+    const targetPath = context.fileMutationTargetPath?.trim() || null;
     return {
       type: 'function',
       function: {
         name,
-        description: 'Append text to the end of an existing workspace file.',
+        description: targetPath
+          ? `Append text to exactly ${targetPath}. Do not append to any other path.`
+          : 'Append text to the end of an existing workspace file.',
         parameters: {
           type: 'object',
           properties: {
-            path: { type: 'string', description: 'Workspace-relative path.' },
+            path: targetPath
+              ? {
+                  type: 'string',
+                  enum: [targetPath],
+                  description: `Must be exactly ${targetPath}.`,
+                }
+              : { type: 'string', description: 'Workspace-relative path.' },
             content: { type: 'string', description: 'Text to append.' },
             create: { type: 'boolean', description: 'Create the file if missing.' },
           },
@@ -1128,6 +1164,7 @@ function compactToolsForConstrainedLocalTurn(
   tools: ChatCompletionTool[] | undefined,
   context: {
     writeFileTargetPath?: string | null;
+    fileMutationTargetPath?: string | null;
     runNodeScriptTargetPath?: string | null;
     readFileTargetPaths?: readonly string[] | null;
   } = {},
@@ -1156,12 +1193,15 @@ function directFileWorkMutationSatisfiesTarget(
   return writtenPath === target;
 }
 
-function writeFileWrongTargetError(
+function fileMutationWrongTargetError(
+  toolName: string,
   args: Record<string, unknown>,
   targetPath: string,
 ): string | null {
+  const action =
+    toolName === 'write_file' ? 'write' : toolName === 'append_to_file' ? 'append to' : 'patch';
   if (typeof args.path !== 'string') {
-    return `ERROR: This constrained file-write turn must write exactly \`${targetPath}\`, but the tool call did not include a string path. Retry with path exactly \`${targetPath}\` and the complete file contents.`;
+    return `ERROR: This constrained repair turn must ${action} exactly \`${targetPath}\`, but the ${toolName} call did not include a string path. Retry ${toolName} with path exactly \`${targetPath}\`.`;
   }
   const writtenPath = normalizeWorkspacePathForCompare(args.path);
   const target = normalizeWorkspacePathForCompare(targetPath);
@@ -1170,7 +1210,8 @@ function writeFileWrongTargetError(
     target === normalizeWorkspacePathForCompare(DIRECT_FILE_WORK_SCRIPT_HELPER_PATH)
       ? 'Do not write the final deliverable in this call; write the helper script path exactly.'
       : 'Do not write helper scripts or intermediate files.';
-  return `ERROR: This constrained file-write turn must write exactly \`${targetPath}\`, but you called write_file for \`${args.path}\`. ${pathInstruction} Retry with path exactly \`${targetPath}\` and the complete file contents.`;
+  const retryDetail = toolName === 'write_file' ? ' and the complete file contents' : '';
+  return `ERROR: This constrained repair turn must ${action} exactly \`${targetPath}\`, but you called ${toolName} for \`${args.path}\`. ${pathInstruction} Retry ${toolName} with path exactly \`${targetPath}\`${retryDetail}.`;
 }
 
 export function runNodeScriptWrongTargetError(
@@ -2955,16 +2996,18 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
         const existingSourceRewriteFallback =
           existingSourceEditTurn &&
           (existingSourceEditNoMutationNudges >= 2 || existingSourceEditFailedMutationCalls >= 2);
-        // Pin constrained whole-file writes to the file named by the
-        // checker/repair ask. This prevents a recovery from accidentally
-        // writing `store.ts` at the workspace root when the checked target
-        // is `src/store.ts`. For an ordinary localized repair, prefer the
-        // defect-bound path from the prompt, then the failed/read path the
-        // model actually touched this turn.
+        // Pin an evidence-grounded post-read repair when sniff feedback names
+        // the bounded mutation target explicitly. Other scenario repairs may
+        // legitimately fix a dependency rather than the checked entry point,
+        // so they retain the older pin only for whole-file rewrite fallbacks.
+        const postReadMutationTarget = scenarioRepairPostReadMutationTargetPath(prompt);
         const scenarioRepairWriteTarget =
-          scenarioFileRepairTurn && (explicitFullRewriteScenarioRepairTurn || sourceRewriteFallback)
-            ? (scenarioRepairTargetPath(prompt) ?? scenarioRepairReadFilePaths.at(-1) ?? null)
-            : null;
+          scenarioFileRepairTurn && postReadMutationTarget
+            ? postReadMutationTarget
+            : scenarioFileRepairTurn &&
+                (explicitFullRewriteScenarioRepairTurn || sourceRewriteFallback)
+              ? (scenarioRepairTargetPath(prompt) ?? scenarioRepairReadFilePaths.at(-1) ?? null)
+              : null;
         const sourceRewriteRefreshReadPending =
           sourceRewriteFallback &&
           scenarioRepairWriteTarget !== null &&
@@ -3510,6 +3553,8 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
               : null;
           requestTools = compactToolsForConstrainedLocalTurn(requestTools, {
             writeFileTargetPath: constrainedWriteFileTarget,
+            fileMutationTargetPath:
+              scenarioRepairWriteTarget ?? existingSourceEditWriteTarget ?? directFileWorkTarget,
             runNodeScriptTargetPath: constrainedRunNodeScriptTarget,
             readFileTargetPaths: prerequisiteRepairReadsPending
               ? remainingPrerequisiteReadPaths
@@ -5308,8 +5353,8 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
           } catch {
             /* bad JSON — let the tool see empty args and decide what to do */
           }
-          const constrainedWriteFileTarget: string | null =
-            call.function.name === 'write_file'
+          const constrainedFileMutationTarget: string | null =
+            SCENARIO_FILE_REPAIR_MUTATION_TOOL_NAMES.has(call.function.name)
               ? (missingFileCreatePath ??
                 immediateFileWriteTarget ??
                 directFileWorkRejectedWritePath ??
@@ -5321,6 +5366,8 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
                     ? null
                     : directFileWorkTarget))
               : null;
+          const constrainedWriteFileTarget: string | null =
+            call.function.name === 'write_file' ? constrainedFileMutationTarget : null;
           const constrainedRunNodeScriptTarget: string | null =
             call.function.name === 'run_nodejs_script' &&
             directFileWorkScriptHelperMode &&
@@ -5357,9 +5404,13 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
             log.warn(
               `[llama-cpp] direct-file-work rejected byte-identical failed helper rewrite path=${DIRECT_FILE_WORK_SCRIPT_HELPER_PATH}`,
             );
-          } else if (constrainedWriteFileTarget) {
+          } else if (constrainedFileMutationTarget) {
             output =
-              writeFileWrongTargetError(args, constrainedWriteFileTarget) ??
+              fileMutationWrongTargetError(
+                call.function.name,
+                args,
+                constrainedFileMutationTarget,
+              ) ??
               (await this.deps.bridges
                 .callTool(call.function.name, args, {
                   budgetChars: computeToolBudgetChars(this.deps.numCtx, this.estimatePromptChars()),

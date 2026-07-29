@@ -5,11 +5,11 @@
   "tags": ["alibaba", "multimodal", "vision", "tools", "small"],
   "category": "general",
   "maintainer": { "name": "Alibaba", "url": "https://ollama.com/library/qwen3.5" },
-  "version": "1.1.0",
-  "updatedAt": "2026-04-26T00:00:00Z",
+  "version": "1.1.2",
+  "updatedAt": "2026-07-28T00:00:00Z",
   "license": "Apache-2.0",
   "parameterSize": "2B",
-  "approxSizeBytes": 2700000000,
+  "approxSizeBytes": 1329851808,
   "supportsTools": true,
   "contextWindow": 256000,
   "upstream": "https://ollama.com/library/qwen3.5",
@@ -31,9 +31,22 @@
   ],
   "ollama": { "tag": "qwen3.5:2b" },
   "llamaCpp": {
-    "huggingfaceRepo": "unsloth/Qwen3.5-2B-GGUF",
+    "huggingfaceRepo": "unsloth/Qwen3.5-2B-MTP-GGUF",
     "filename": "Qwen3.5-2B-Q4_K_M.gguf",
-    "quantization": "Q4_K_M"
+    "quantization": "Q4_K_M",
+    "residentBytes": 1595822170
+  },
+  "releasePatch": {
+    "tuning": {
+      "engine": {
+        "llamaCpp": {
+          "spec": {
+            "mtp": true,
+            "nMax": 4
+          }
+        }
+      }
+    }
   },
   "mlx": {
     "huggingfaceRepo": "mlx-community/Qwen3.5-2B-4bit",

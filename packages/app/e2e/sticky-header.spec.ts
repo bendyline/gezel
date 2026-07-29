@@ -119,14 +119,15 @@ test('sticky header does NOT show while the bubble header is visible', async () 
 });
 
 test('sticky header aligns with chat bubbles', async () => {
-  // Eight sequential send-and-reply turns can still approach the default
-  // budget on a slow CI host, so retain the lifecycle-sized timeout even
-  // though the helper waits on UI state instead of fixed sleeps.
+  // Four long turns are enough to overflow the timeline at the test viewport.
+  // Keep this fixture below Chromium's per-origin connection limit: mock
+  // replies finish so quickly that the prior finite SSE response may still be
+  // retiring when the next turn starts, unlike a real model-paced chat.
   test.setTimeout(60_000);
   // Send enough messages to create vertical overflow so the sticky can
-  // actually trigger on scroll. Each mock reply is short; we pad the
-  // user message with filler so the bubble is tall.
-  for (let i = 0; i < 8; i++) {
+  // actually trigger on scroll. The mock echoes each padded user message,
+  // producing a tall user/assistant pair per turn.
+  for (let i = 0; i < 4; i++) {
     const filler = [
       `Turn ${i + 1}:`,
       'Lorem ipsum dolor sit amet, consectetur adipiscing elit.',

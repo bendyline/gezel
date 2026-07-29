@@ -51,11 +51,10 @@ function loadIndex(): Map<string, ChatModelSources> {
     for (const entry of idx.entries ?? []) {
       const man = entry.manifest;
       if (!man?.id) continue;
-      // A `disabledReason` on the mlx block marks a known-broken MLX build
-      // (e.g. Gemma-4 E4B's mlx-vlm arch gap) — treat it as NO mlx source
-      // so `assertLocalEngineSource('mlx', …)` errors clearly with a
-      // "use --provider llama-cpp" hint instead of the model appearing
-      // MLX-capable and crashing on load.
+      // A `disabledReason` on the mlx block marks a known-broken MLX build.
+      // Treat it as NO mlx source so `assertLocalEngineSource('mlx', …)`
+      // errors clearly with a "use --provider llama-cpp" hint instead of
+      // the model appearing MLX-capable and crashing on load.
       const mlxBlock = man.mlx as { disabledReason?: unknown } | undefined;
       map.set(man.id, {
         ollama: Boolean(man.ollama),
