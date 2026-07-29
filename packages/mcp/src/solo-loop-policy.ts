@@ -94,12 +94,12 @@ export function policyForDeliverable(
  *
  * - With a semantic component (the all-MiniLM embedding stack available), a
  *   blended score of ~0.5+ is a confident match and 0.3 is a sane floor.
- * - Without embeddings (best-effort — no `sharp`, no model cache; this is the
- *   case for every eval trial and any install that skipped `setup:native`),
- *   the score collapses to pure lexical overlap where even a perfect match
- *   tops out ~0.18. A flat 0.3 floor is then unreachable, so the pin silently
- *   never fires and the "steered" craftbook arm degenerates to freeform.
- *   (Wild-caught: arcade-deluxe 0/3, `state.json.craftbook: null`.)
+ * - Without embeddings (best-effort — no model cache or local inference; this
+ *   is the case for every eval trial), the score collapses to pure lexical
+ *   overlap where even a perfect match tops out ~0.18. A flat 0.3 floor is then
+ *   unreachable, so the pin silently never fires and the "steered" craftbook
+ *   arm degenerates to freeform. (Wild-caught: arcade-deluxe 0/3,
+ *   `state.json.craftbook: null`.)
  *
  * So gate lexical-only matches on the 0.15 lexical-suggest floor instead. The
  * `semantic` field's presence on the top suggestion is the mode signal.

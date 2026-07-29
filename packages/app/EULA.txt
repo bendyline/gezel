@@ -30,7 +30,6 @@ While Gezel can work with cloud AI providers like OpenAI or Anthropic, it may us
 Gezel ships with open-source and third-party software that is licensed under its own terms rather than the MIT License above. Most of it is permissively licensed (MIT, Apache-2.0, BSD, ISC), but some of it is not. In particular:
 
   - the bundled FFmpeg WebAssembly runtime is GPL-2.0-or-later;
-  - the libvips image-processing runtime is LGPL-3.0-or-later;
   - the resvg SVG renderer is MPL-2.0;
   - the GitHub Copilot CLI is proprietary, and its license does not permit
     redistributing it on its own or modifying it.

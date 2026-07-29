@@ -81,11 +81,6 @@ the applicable upstream license and notice material.
 - `@ffmpeg/core@0.12.9` — GPL-2.0-or-later, pulled in by
   `@bendyline/squisq-video-react`.
 - `@resvg/resvg-js@2.6.2` and its platform binaries — MPL-2.0.
-- `@img/sharp-*@0.35.3` platform bindings — Apache-2.0, pulled in by
-  `@huggingface/transformers`.
-- `@img/sharp-libvips-*@1.3.2` platform runtimes — LGPL-3.0-or-later,
-  pulled in by Sharp. The complete LGPL v3 and GPL v3 terms are included in
-  the installed legal bundle.
 
 `pnpm audit:licenses` encodes these as narrow reviewed exceptions. It remains
 red for any different package, version, or reported license expression.
@@ -276,9 +271,9 @@ project, [Hochschule für Gestaltung Schwäbisch Gmünd](https://www.hfg-gmuend.
 ## Proprietary and non-permissive components
 
 Most of Gezel's own **code** dependencies (npm packages and native engines) are
-permissively licensed (MIT / Apache-2.0 / BSD / ISC). The reviewed FFmpeg,
-Sharp, and resvg component redistributions are documented above. There are also
-two proprietary exceptions:
+permissively licensed (MIT / Apache-2.0 / BSD / ISC). The reviewed FFmpeg and
+resvg component redistributions are documented above. There are also two
+proprietary exceptions:
 
 - **`@github/copilot`** (and its platform-specific binary siblings
   `@github/copilot-{darwin,linux,win32}-{arm64,x64}`), pulled in transitively

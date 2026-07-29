@@ -266,7 +266,6 @@ function fallbackLicenseMaterials(input) {
 
   const standards = {
     'GPL-2.0-or-later': ['GPL-2.0.txt'],
-    'LGPL-3.0-or-later': ['LGPL-3.0.txt', 'GPL-3.0.txt'],
   }[reportedLicense];
   if (standards) {
     return [

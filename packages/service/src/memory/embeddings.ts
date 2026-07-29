@@ -42,7 +42,7 @@ export class EmbeddingsDisabledError extends Error {
 
 // Once the model fails to load, we permanently flip into a disabled state.
 // Every subsequent call throws the short marker error instead of re-attempting
-// the import and re-printing the ~20-line sharp error on every chat turn.
+// the import and re-printing the full model-load error on every chat turn.
 let disabledReason: string | null = null;
 
 const ENV_DISABLED_REASON = 'disabled by GEZEL_DISABLE_EMBEDDINGS';
@@ -179,15 +179,12 @@ async function embedInProcess(texts: string[]): Promise<number[][]> {
 function markDisabled(message: string): void {
   if (disabledReason) return;
   disabledReason = firstLine(message);
-  // Loud once — full error + the fix command — so the user knows what to run.
-  // Subsequent callers get the short `EmbeddingsDisabledError`.
+  // Loud once with the underlying model/runtime error. Subsequent callers get
+  // the short `EmbeddingsDisabledError`.
   log.error(
     '[memory] failed to load embedding pipeline; vector memory is now disabled for this process.',
   );
   log.error('[memory] underlying error:', message);
-  log.error(
-    "[memory] to enable vector memory, run `pnpm setup:native` (installs sharp's platform binary) then restart gezeld.",
-  );
 }
 
 /** Embed `texts`, preferring the worker and degrading to in-process. */
