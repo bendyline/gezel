@@ -76,10 +76,16 @@ if (process.argv.includes('--print')) {
 
 // Read and validate every target before the first write. A missing/corrupt
 // surface must never leave a checkout stamped only halfway.
-const packages = packagePaths.map((pkgPath) => ({
-  pkgPath,
-  pkg: JSON.parse(readFileSync(pkgPath, 'utf8')),
-}));
+const packageVersionPattern = /^ {2}"version": "[^"]*",$/m;
+const packages = packagePaths.map((pkgPath) => {
+  const source = readFileSync(pkgPath, 'utf8');
+  JSON.parse(source);
+  if (!packageVersionPattern.test(source)) {
+    console.error(`could not find formatted top-level version field in ${pkgPath}`);
+    process.exit(1);
+  }
+  return { pkgPath, source };
+});
 const coreSource = readFileSync(coreVersionPath, 'utf8');
 const versionPattern = /export const GEZEL_VERSION = '[^']*';/;
 if (!versionPattern.test(coreSource)) {
@@ -87,9 +93,8 @@ if (!versionPattern.test(coreSource)) {
   process.exit(1);
 }
 
-for (const { pkgPath, pkg } of packages) {
-  pkg.version = version;
-  writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
+for (const { pkgPath, source } of packages) {
+  writeFileSync(pkgPath, source.replace(packageVersionPattern, `  "version": "${version}",`));
   console.log(`stamped ${pkgPath} → ${version}`);
 }
 

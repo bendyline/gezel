@@ -33,7 +33,16 @@ test('release stamping updates packages, runtime constant, service metadata, and
       join(root, 'packages', 'core', 'package.json'),
       join(root, 'packages', 'service', 'package.json'),
     ]) {
-      await writeFile(path, `${JSON.stringify({ name: 'fixture', version: '0.0.0' }, null, 2)}\n`);
+      await writeFile(
+        path,
+        `{
+  "name": "fixture",
+  "version": "0.0.0",
+  "keywords": ["gezel", "ai"],
+  "files": ["dist", "!dist/**/*.map"]
+}
+`,
+      );
     }
     await writeFile(
       join(root, 'packages', 'core', 'src', 'index.ts'),
@@ -53,8 +62,19 @@ test('release stamping updates packages, runtime constant, service metadata, and
       join(root, 'packages', 'core', 'package.json'),
       join(root, 'packages', 'service', 'package.json'),
     ]) {
-      const pkg = JSON.parse(await readFile(path, 'utf8'));
+      const source = await readFile(path, 'utf8');
+      const pkg = JSON.parse(source);
       assert.equal(pkg.version, version);
+      assert.equal(
+        source,
+        `{
+  "name": "fixture",
+  "version": "${version}",
+  "keywords": ["gezel", "ai"],
+  "files": ["dist", "!dist/**/*.map"]
+}
+`,
+      );
     }
     assert.match(
       await readFile(join(root, 'packages', 'core', 'src', 'index.ts'), 'utf8'),
