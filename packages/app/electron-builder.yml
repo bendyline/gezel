@@ -264,8 +264,15 @@ mac:
   # untouched; codesign still seals the complete native-bin tree (including
   # symlink metadata) into the outer app signature, and release CI verifies
   # both the per-file manifest and the final app with --strict --deep.
+  #
+  # The pinned official Node runtime follows the same provenance rule. It
+  # arrives Developer ID signed, hardened, and notarized by the Node.js
+  # Foundation, then fetch-node.mjs records the exact executable bytes in
+  # sha256.txt. Re-signing it here replaces that vendor signature and makes
+  # the supervisor reject the packaged runtime as modified.
   signIgnore:
     - /Contents/Resources/app\.asar\.unpacked/native-bin/
+    - /Contents/Resources/app\.asar\.unpacked/dist/node-bundle/node$
   # Ship the LaunchDaemon plist + uninstall.sh inside the .app bundle
   # so the postinstall script can find them at known paths under
   # /Applications/Gezel.app/Contents/Resources/.
