@@ -150,9 +150,10 @@ asarUnpack:
 #      ~13 bytes; the hook restores the affected files from canonical
 #      source. Delete that half once electron-builder ships a fix.
 #   2. On Windows, an Authenticode sweep that signs every exe/dll in the
-#      packed payload lacking a valid signature — electron-builder's own
-#      pass never descends into extraFiles or the asar-unpacked payload
-#      (our-built engine DLLs).
+#      packed payload lacking a valid signature. electron-builder later
+#      traverses executable files in app.asar.unpacked too, so sign.cjs
+#      preserves the already-valid native signatures and their manifest-
+#      pinned bytes while this sweep covers DLLs its pass does not reach.
 afterPack: scripts/after-pack.cjs
 
 # electron-builder's built-in @electron/notarize integration notarizes both

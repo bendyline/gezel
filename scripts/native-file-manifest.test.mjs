@@ -14,6 +14,7 @@ const generator = join(here, 'generate-native-file-manifests.mjs');
 const buildNativeWorkflow = join(here, '..', '.github', 'workflows', 'build-native.yml');
 const releaseElectronWorkflow = join(here, '..', '.github', 'workflows', 'release-electron.yml');
 const electronBuilderConfig = join(here, '..', 'packages', 'app', 'electron-builder.yml');
+const windowsSignHook = join(here, '..', 'packages', 'app', 'scripts', 'sign.cjs');
 
 test(
   'generator records an internal SONAME chain separately from concrete files',
@@ -170,9 +171,10 @@ test('native release generates the link-aware manifest before packing archives',
 });
 
 test('Electron packaging preserves and verifies source-pinned native bytes', async () => {
-  const [config, workflow] = await Promise.all([
+  const [config, workflow, signHook] = await Promise.all([
     readFile(electronBuilderConfig, 'utf8'),
     readFile(releaseElectronWorkflow, 'utf8'),
+    readFile(windowsSignHook, 'utf8'),
   ]);
 
   assert.match(
@@ -191,5 +193,22 @@ test('Electron packaging preserves and verifies source-pinned native bytes', asy
     workflow.match(/--native-source packages\/app\/native-bin/g)?.length,
     3,
     'every finished installer type must verify its packaged native tree',
+  );
+
+  const preserveValidSignature = signHook.indexOf('if (isValidlySigned(configuration.path))');
+  const signTarget = signHook.lastIndexOf('signFile(configuration.path);');
+  assert.notEqual(
+    preserveValidSignature,
+    -1,
+    'the Windows sign hook must detect already-valid native signatures',
+  );
+  assert.ok(
+    preserveValidSignature < signTarget,
+    'the Windows sign hook must preserve a valid signature before its fallback signing pass',
+  );
+  assert.match(
+    signHook.slice(preserveValidSignature, signTarget),
+    /return;/,
+    'the valid-signature guard must return without changing source-pinned native bytes',
   );
 });
