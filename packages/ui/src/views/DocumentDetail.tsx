@@ -34,7 +34,7 @@ interface DocumentDetailProps {
  * Wraps squisq's `EditorShell` with the full feature set available to
  * documents-library files: WYSIWYG + raw markdown + the Play (preview)
  * tab, the Files panel for image uploads, version history, the
- * sibling-document link picker, and a docblocks-style Export "…" menu
+ * sibling-document link picker, and a DocBlocks-style Export menu
  * for PDF / DOCX / PPTX / HTML / Markdown / video output.
  *
  * The editor talks to disk through a `ContentContainer` adapter scoped
@@ -157,7 +157,13 @@ export function DocumentDetail({ path, standalone = false }: DocumentDetailProps
           toolbarSlotRight={
             <>
               {autosaveStatus}
-              {markdown && <ExportToolbarControls selectedFile={path} mediaContainer={container} />}
+              {markdown && (
+                <ExportToolbarControls
+                  selectedFile={path}
+                  mediaContainer={container}
+                  colorScheme={editorTheme}
+                />
+              )}
             </>
           }
         />

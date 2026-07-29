@@ -11,7 +11,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../../api.js';
 import { CatalogArtwork } from '../../components/CatalogArtwork.js';
 import { GezelJsonEditor } from '../../components/GezelJsonEditor.js';
-import { GitHubSignInChip } from '../../components/GitHubSignInChip.js';
+import { GitHubSignInChip } from '../../components/GithubSignInChip.js';
 import { connectMailboxOAuth } from '../../components/mail-link.js';
 import { Dialog } from '../../primitives/index.js';
 import { NewProjectPaneHero, type PaneSelection } from './NewProjectDetailPane.js';

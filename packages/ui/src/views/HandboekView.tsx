@@ -339,6 +339,7 @@ export function HandboekView() {
                     right opening frame there. */}
                 <LinearDocView
                   doc={doc}
+                  className="gezel-article-view"
                   theme={gezelChatTheme}
                   imageDisplayMode="inline"
                   showCover={false}

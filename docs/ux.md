@@ -38,12 +38,15 @@ pacing of a transition. If a first-time user can't quite put a finger on
 
 ## What that translates into
 
-- **Color** lives in [packages/ui/src/styles.css](../packages/ui/src/styles.css)
-  as CSS variables (`--bg`, `--surface`, `--panel`, `--border`, `--text`,
-  `--text-muted`, `--accent`, `--success`, `--warning`, `--danger`). Both
-  light and dark modes are supported. When the branding pass lands, those
-  variables are the single surface to change — do not introduce hardcoded
-  hex values in components.
+- **Color** lives in [packages/ui/src/styles.css](../packages/ui/src/styles.css).
+  The `--gezel-*` foundation palette is the authored source for paper, ink,
+  sage, and terracotta tones; theme-resolving semantic aliases (`--bg`,
+  `--surface`, `--panel`, `--border`, `--text`, `--text-muted`, `--accent`,
+  `--success`, `--warning`, `--danger`) are what component rules consume.
+  Scoped surfaces may derive a nearby tone with `color-mix()` but must not
+  start a parallel palette. Hardcoded colors are reserved for domain visuals
+  whose color carries data or content (diffs, terminal ANSI, Village artwork,
+  poppetjes), not app chrome.
 - **Motion** is slow-ish and soft: ~120–160ms ease-out for overlay and
   dialog in/out. Nothing snaps or bounces. See the `gz-overlay` /
   `gz-dialog` keyframes for the canonical cadence; match it elsewhere.

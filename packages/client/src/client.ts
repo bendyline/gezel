@@ -922,6 +922,11 @@ export interface ConfigResponse {
    */
   themePref?: 'system' | 'light' | 'dark';
   /**
+   * Last-used markdown/document export settings. Mirrored server-side so the
+   * quick-export action survives the embedded daemon's changing loopback port.
+   */
+  documentExportOptions?: import('@bendyline/gezel').DocumentExportOptions;
+  /**
    * Which side the primary navigation sidebar sits on. Cross-boot source
    * of truth (same ephemeral-port reasoning as `themePref`). Absent =
    * `right` (the default); only an explicit `left` opts out. See

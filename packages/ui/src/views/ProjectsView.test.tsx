@@ -77,7 +77,7 @@ vi.mock('../components/ToolsetsEditor.js', () => ({
   ToolsetsEditor: () => <div data-testid="toolsets-editor" />,
 }));
 vi.mock('./HistoryView.js', () => ({ HistoryView: () => null }));
-vi.mock('./ProjectGitHubView.js', () => ({ ProjectGitHubView: () => null }));
+vi.mock('./ProjectGithubView.js', () => ({ ProjectGitHubView: () => null }));
 vi.mock('./ScriptsView.js', () => ({ ScriptsView: () => null }));
 vi.mock('./TasksView.js', () => ({ TasksView: () => null }));
 vi.mock('../theme.js', () => ({ useEffectiveTheme: () => 'dark' }));

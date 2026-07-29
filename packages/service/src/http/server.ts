@@ -204,7 +204,7 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
         'content-security-policy',
         [
           "default-src 'self'",
-          "script-src 'self'",
+          "script-src 'self' 'wasm-unsafe-eval'",
           "style-src 'self' 'unsafe-inline'",
           "img-src 'self' data: blob: https:",
           "font-src 'self' data:",
@@ -219,6 +219,12 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
         ].join('; '),
       );
       c.res.headers.set('x-frame-options', 'DENY');
+      // Browser MP4 fallback and animated-GIF export use ffmpeg.wasm, whose
+      // execution paths require SharedArrayBuffer. `credentialless` preserves
+      // cross-origin isolation without breaking blob-backed frame capture or
+      // public media embedded in documents.
+      c.res.headers.set('cross-origin-opener-policy', 'same-origin');
+      c.res.headers.set('cross-origin-embedder-policy', 'credentialless');
     }
     c.res.headers.set('x-content-type-options', 'nosniff');
     c.res.headers.set('referrer-policy', 'no-referrer');

@@ -395,6 +395,38 @@ describe('fileReviews config + reply contract', () => {
   });
 });
 
+describe('document export preferences', () => {
+  it('accepts the complete quick-export settings block', () => {
+    const cfg = GezelConfigSchema.parse({
+      documentExportOptions: {
+        format: 'html',
+        themeId: 'gezellig',
+        transformStyle: 'documentary',
+        pageSize: 'a4',
+        htmlStyle: 'rendered',
+        htmlBundle: 'zip',
+      },
+    });
+
+    expect(cfg.documentExportOptions).toEqual({
+      format: 'html',
+      themeId: 'gezellig',
+      transformStyle: 'documentary',
+      pageSize: 'a4',
+      htmlStyle: 'rendered',
+      htmlBundle: 'zip',
+    });
+  });
+
+  it('rejects partial or unknown export settings', () => {
+    expect(() =>
+      GezelConfigSchema.parse({
+        documentExportOptions: { format: 'pdf', pageSize: 'tabloid' },
+      }),
+    ).toThrow();
+  });
+});
+
 describe('Night Shift model defaults', () => {
   it('parses an optional provider/model override without changing the inherited default', () => {
     expect(GezelConfigSchema.parse({}).nightShift).toBeUndefined();

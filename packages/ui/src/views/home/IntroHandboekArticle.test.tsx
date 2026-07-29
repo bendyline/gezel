@@ -12,8 +12,20 @@ vi.mock('../../theme.js', () => ({ useEffectiveTheme: () => 'light' }));
 // jsdom can't drive — the embed's own logic (article fetch, doc/video
 // toggle, link routing to the Handboek) is what this file covers.
 vi.mock('@bendyline/squisq-react', () => ({
-  LinearDocView: ({ doc, showCover }: { doc: unknown; showCover?: boolean }) => (
-    <div data-testid="linear-doc-view" data-show-cover={String(showCover ?? true)}>
+  LinearDocView: ({
+    doc,
+    showCover,
+    className,
+  }: {
+    doc: unknown;
+    showCover?: boolean;
+    className?: string;
+  }) => (
+    <div
+      data-testid="linear-doc-view"
+      data-show-cover={String(showCover ?? true)}
+      className={className}
+    >
       {doc ? 'doc' : 'no-doc'}
       <a href="the-crew.md">crew link</a>
       <a href="https://gezelgilde.com">external link</a>
@@ -50,6 +62,7 @@ describe('IntroHandboekArticle', () => {
     await waitFor(() => {
       expect(screen.getByTestId('linear-doc-view')).toBeInTheDocument();
     });
+    expect(screen.getByTestId('linear-doc-view')).toHaveClass('gezel-article-view');
     expect(api.getHandboekArticle).toHaveBeenCalledWith('welcome');
     expect(screen.queryByTestId('doc-player')).not.toBeInTheDocument();
   });

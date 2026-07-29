@@ -29,7 +29,40 @@
   --text-lg: 1rem; /* emphasized body, dialog/panel sub-headings */
   --text-xl: 1.1rem; /* panel & dialog section headings */
 
-  /* Core palette */
+  /* Gezel foundation palette.
+     These are the small set of authored colors for app chrome. Component
+     rules consume the semantic aliases below (--bg, --panel, --surface,
+     --text, --accent, etc.); scoped surfaces such as Home may derive nearby
+     tones from these primitives, but should not start a parallel palette. */
+  --gezel-paper-canvas: #eae5d6;
+  --gezel-paper-workshop: #efe6dc;
+  --gezel-paper-panel: #f3eddf;
+  --gezel-paper-reading: #f1e9e1;
+  --gezel-paper-reading-inset: #e8dfd7;
+  --gezel-paper-handoff: #efebe8;
+  --gezel-paper-control: #ece8e5;
+  --gezel-paper-control-deep: #e4dfdc;
+  --gezel-paper-inset: #ddd3bd;
+  --gezel-ink: #1c1c1c;
+  --gezel-ink-muted: #666;
+  --gezel-ink-warm: #2a2520;
+  --gezel-ink-warm-muted: #5a4f42;
+  --gezel-ink-warm-quiet: #8b7e6b;
+  --gezel-sage: #667f62;
+  --gezel-sage-muted: #8a9a76;
+  --gezel-sage-deep: #5c6a4a;
+  --gezel-sage-forest: #3d4d3a;
+  --gezel-sage-soft: #d6dec6;
+  --gezel-terra: #b0724c;
+  --gezel-terra-hover: #996142;
+  --gezel-terra-raised: #9c6440;
+  --gezel-terra-bright: #c97553;
+  --gezel-terra-deep: #9a4e30;
+  --gezel-terra-soft: #f0d4bf;
+  --gezel-cream-ink: #f3ede0;
+  --gezel-toolbar-ink: #5c4937;
+
+  /* Semantic palette */
   --border: rgba(127, 127, 127, 0.25);
   /* Warm canvas/parchment tone — sits gracefully under the sage-green
      titlebar and the warm-brown accent. The panel stays brighter so
@@ -37,24 +70,24 @@
      by a small step so the chrome doesn't read as stark white sitting
      in cream — it should feel like nested paper, not a contrast
      boundary. */
-  --bg: #eae5d6;
-  --home-workshop-paper: #f1e9e5;
-  --panel: #f3eddf;
-  /* Chat prose sits on a quiet greige-brown in light mode. Keep this
+  --bg: var(--gezel-paper-canvas);
+  --home-workshop-paper: var(--gezel-paper-workshop);
+  --panel: var(--gezel-paper-panel);
+  /* Chat prose sits on a quiet mushroom beige in light mode. Keep this
      matched to `GEZEL_LIGHT_SURFACE.background` in chat-theme.ts so the
      Squisq interior and its outer bubble remain one continuous surface. */
-  --chat-bubble-bg: #f2efed;
-  --chat-handoff-bg: #efebe8;
+  --chat-bubble-bg: var(--gezel-paper-reading);
+  --chat-handoff-bg: var(--gezel-paper-handoff);
   --chat-handoff-border: rgba(112, 98, 90, 0.32);
   /* Thread selection is chat chrome, not app canvas: keep its trigger and
      portaled menu cooler than the yellow parchment behind them. */
-  --chat-thread-bg: #ece8e5;
-  --chat-thread-menu-bg: #e4dfdc;
+  --chat-thread-bg: var(--gezel-paper-control);
+  --chat-thread-menu-bg: var(--gezel-paper-control-deep);
   /* In light mode `--surface` is a deeper, more saturated step than
      the canvas, used for inset cards / inputs that should read as
      pressed-into the page. Dark mode keeps the usual additive
      elevation. */
-  --surface: #ddd3bd;
+  --surface: var(--gezel-paper-inset);
   --surface-shadow: 0 1px 2px rgba(0, 0, 0, 0.05), 0 6px 18px rgba(0, 0, 0, 0.06);
   /* Shadow the elevated main pane casts onto the recessed navigation rail
      along their shared seam. Darker in dark mode where a faint black
@@ -64,21 +97,21 @@
      from the sidebar seam so the top edge can carry more depth without
      making the vertical divider feel heavy. */
   --titlebar-pane-shadow: rgba(0, 0, 0, 0.18);
-  --accent: #b0724c;
-  --accent-hover: #996142;
+  --accent: var(--gezel-terra);
+  --accent-hover: var(--gezel-terra-hover);
   /* Dark ink keeps selected text legible on both themes' medium-orange
      accent fills. */
   --accent-selection-ink: #231207;
-  --text: #1c1c1c;
-  --text-muted: #666;
+  --text: var(--gezel-ink);
+  --text-muted: var(--gezel-ink-muted);
   /* Tool icons use a warmer ink than body copy on light parchment.
      Applied only by light-theme toolbar rules so dark-mode contrast and
      active-state colors keep their existing treatments. */
-  --toolbar-icon-ink: #5c4937;
+  --toolbar-icon-ink: var(--gezel-toolbar-ink);
 
   /* Brand palette */
-  --titlebar: #667f62;
-  --titlebar-ink: #f3ede0;
+  --titlebar: var(--gezel-sage);
+  --titlebar-ink: var(--gezel-cream-ink);
   /* Veil alpha that mutes the wood-grain titlebar texture. The grain is
      screened over --titlebar, then this near-opaque sage green is laid on
      top at `normal` blend so only a whisper of grain shows through across
@@ -90,7 +123,7 @@
      and contrasts strongly with the cream-tan tab background. Dark
      mode keeps cream (no flip needed — the lifted tab is dark and
      the original cream already pops). */
-  --logo-active-fill: #3d4d3a;
+  --logo-active-fill: var(--gezel-sage-forest);
 
   /* Semantic colors */
   --success: #27ae60;
@@ -135,7 +168,7 @@
      "Controls: keys in trays"). A tray is a shallow recess routed into the
      bench; keys are raised, mostly-square caps; the chosen key sits pressed
      and latched. Shadows model one soft light source from above. */
-  --tray-bg: #ddd3bd;
+  --tray-bg: var(--gezel-paper-inset);
   --tray-border: rgba(92, 74, 55, 0.22);
   --tray-shadow: inset 0 1px 3px rgba(60, 45, 30, 0.16), inset 0 -1px 0 rgba(255, 255, 255, 0.35);
   --key-bg: linear-gradient(to bottom, #f7f1e2, #ece4d0);
@@ -143,7 +176,7 @@
   --key-border: rgba(92, 74, 55, 0.3);
   --key-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6), 0 1px 2px rgba(60, 45, 30, 0.18), 0 2px 3px
     rgba(60, 45, 30, 0.08);
-  --key-pressed-bg: linear-gradient(to bottom, #9c6440, #b0724c);
+  --key-pressed-bg: linear-gradient(to bottom, var(--gezel-terra-raised), var(--gezel-terra));
   --key-pressed-border: #8f5a3a;
   --key-pressed-ink: #fff6ea;
   --key-pressed-shadow: inset 0 1px 2px rgba(60, 30, 10, 0.28);
@@ -168,23 +201,24 @@
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #141517;
-    --home-workshop-paper: #1f1c18;
-    --panel: #1c1d20;
-    --chat-bubble-bg: var(--panel);
+  :root:not([data-theme="light"]) {
+    --gezel-paper-canvas: #141517;
+    --gezel-paper-workshop: #1f1c18;
+    --gezel-paper-panel: #1c1d20;
+    --gezel-paper-reading: var(--gezel-paper-panel);
+    --gezel-paper-control: var(--gezel-paper-canvas);
+    --gezel-paper-control-deep: #1f2124;
+    --gezel-paper-inset: #1f2124;
+    --gezel-ink: #f0f0f0;
+    --gezel-ink-muted: #999;
+    --gezel-terra: #c0875d;
+    --gezel-terra-hover: #d5a07a;
+    --gezel-terra-raised: #b07a50;
     --chat-handoff-bg: rgba(176, 114, 76, 0.08);
     --chat-handoff-border: rgba(176, 114, 76, 0.45);
-    --chat-thread-bg: var(--bg);
-    --chat-thread-menu-bg: var(--surface);
-    --surface: #1f2124;
     --surface-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.35);
     --sidebar-seam-shadow: rgba(0, 0, 0, 0.28);
     --titlebar-pane-shadow: rgba(0, 0, 0, 0.46);
-    --text: #f0f0f0;
-    --text-muted: #999;
-    --accent: #c0875d;
-    --accent-hover: #d5a07a;
     --success: #6ad38f;
     --success-bg: rgba(106, 211, 143, 0.15);
     --warning: #f0a04b;
@@ -214,7 +248,6 @@
     --key-border: rgba(255, 255, 255, 0.08);
     --key-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 1px 2px rgba(0, 0, 0, 0.5), 0 2px 3px
       rgba(0, 0, 0, 0.25);
-    --key-pressed-bg: linear-gradient(to bottom, #b07a50, #c0875d);
     --key-pressed-border: rgba(30, 15, 5, 0.7);
     --key-pressed-ink: #231207;
     --key-pressed-shadow: inset 0 1px 2px rgba(30, 15, 5, 0.38);
@@ -228,73 +261,27 @@
      Without this, an OS in dark mode keeps painting <select> with a
      dark-grey background even though the rest of the UI is parchment. */
   color-scheme: light;
-  --bg: #eae5d6;
-  --home-workshop-paper: #f1e9e5;
-  --panel: #f3eddf;
-  --chat-bubble-bg: #f2efed;
-  --chat-handoff-bg: #efebe8;
-  --chat-handoff-border: rgba(112, 98, 90, 0.32);
-  --chat-thread-bg: #ece8e5;
-  --chat-thread-menu-bg: #e4dfdc;
-  --surface: #ddd3bd;
-  --surface-shadow: 0 1px 2px rgba(0, 0, 0, 0.05), 0 6px 18px rgba(0, 0, 0, 0.06);
-  --sidebar-seam-shadow: rgba(0, 0, 0, 0.1);
-  --titlebar-pane-shadow: rgba(0, 0, 0, 0.18);
-  --text: #1c1c1c;
-  --text-muted: #666;
-  --accent: #b0724c;
-  --accent-hover: #996142;
-  --success: #27ae60;
-  --success-bg: rgba(39, 174, 96, 0.12);
-  --warning: #e67e22;
-  --warning-bg: rgba(230, 126, 34, 0.12);
-  --danger: #c0392b;
-  --danger-bg: rgba(192, 57, 43, 0.12);
-  --diff-add: #1e7e44;
-  --diff-add-bg: rgba(39, 174, 96, 0.1);
-  --diff-rem: #b03a2e;
-  --diff-rem-bg: rgba(192, 57, 43, 0.08);
-  --diff-hunk: #3a5fbf;
-  --diff-surface: rgba(0, 0, 0, 0.04);
-  --diff-border: rgba(0, 0, 0, 0.12);
-  --diff-gutter: rgba(0, 0, 0, 0.35);
-  --diff-sep: rgba(0, 0, 0, 0.45);
-  --logo-active-fill: #3d4d3a;
-  --scrollbar-thumb: rgba(112, 98, 90, 0.42);
-  --scrollbar-thumb-hover: rgba(112, 98, 90, 0.62);
-  --scrollbar-track: rgba(112, 98, 90, 0.08);
-  --tray-bg: #ddd3bd;
-  --tray-border: rgba(92, 74, 55, 0.22);
-  --tray-shadow: inset 0 1px 3px rgba(60, 45, 30, 0.16), inset 0 -1px 0 rgba(255, 255, 255, 0.35);
-  --key-bg: linear-gradient(to bottom, #f7f1e2, #ece4d0);
-  --key-bg-hover: linear-gradient(to bottom, #fbf6e9, #f0e8d5);
-  --key-border: rgba(92, 74, 55, 0.3);
-  --key-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6), 0 1px 2px rgba(60, 45, 30, 0.18), 0 2px 3px
-    rgba(60, 45, 30, 0.08);
-  --key-pressed-bg: linear-gradient(to bottom, #9c6440, #b0724c);
-  --key-pressed-border: #8f5a3a;
-  --key-pressed-ink: #fff6ea;
-  --key-pressed-shadow: inset 0 1px 2px rgba(60, 30, 10, 0.28);
 }
 
 [data-theme="dark"] {
   color-scheme: dark;
-  --bg: #141517;
-  --home-workshop-paper: #1f1c18;
-  --panel: #1c1d20;
-  --chat-bubble-bg: var(--panel);
+  --gezel-paper-canvas: #141517;
+  --gezel-paper-workshop: #1f1c18;
+  --gezel-paper-panel: #1c1d20;
+  --gezel-paper-reading: var(--gezel-paper-panel);
+  --gezel-paper-control: var(--gezel-paper-canvas);
+  --gezel-paper-control-deep: #1f2124;
+  --gezel-paper-inset: #1f2124;
+  --gezel-ink: #f0f0f0;
+  --gezel-ink-muted: #999;
+  --gezel-terra: #c0875d;
+  --gezel-terra-hover: #d5a07a;
+  --gezel-terra-raised: #b07a50;
   --chat-handoff-bg: rgba(176, 114, 76, 0.08);
   --chat-handoff-border: rgba(176, 114, 76, 0.45);
-  --chat-thread-bg: var(--bg);
-  --chat-thread-menu-bg: var(--surface);
-  --surface: #1f2124;
   --surface-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.35);
   --sidebar-seam-shadow: rgba(0, 0, 0, 0.28);
   --titlebar-pane-shadow: rgba(0, 0, 0, 0.46);
-  --text: #f0f0f0;
-  --text-muted: #999;
-  --accent: #c0875d;
-  --accent-hover: #d5a07a;
   --success: #6ad38f;
   --success-bg: rgba(106, 211, 143, 0.15);
   --warning: #f0a04b;
@@ -322,7 +309,6 @@
   --key-border: rgba(255, 255, 255, 0.08);
   --key-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 1px 2px rgba(0, 0, 0, 0.5), 0 2px 3px
     rgba(0, 0, 0, 0.25);
-  --key-pressed-bg: linear-gradient(to bottom, #b07a50, #c0875d);
   --key-pressed-border: rgba(30, 15, 5, 0.7);
   --key-pressed-ink: #231207;
   --key-pressed-shadow: inset 0 1px 2px rgba(30, 15, 5, 0.38);
@@ -2283,21 +2269,38 @@ html.embedded-chat #root {
 
 /* Status light — reuses the top-bar status-dot color mapping. */
 .project-row-status {
+  width: 1.4rem;
+  height: 1.4rem;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  cursor: pointer;
+}
+.project-row-status::before {
+  content: "";
   width: 0.5rem;
   height: 0.5rem;
   border-radius: 50%;
   background: var(--muted);
 }
-.project-row-status-active {
+.project-row-status:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.project-row-status-active::before {
   background: rgba(80, 180, 100, 0.95);
   box-shadow: 0 0 0 2px rgba(80, 180, 100, 0.18);
 }
-.project-row-status-stable {
+.project-row-status-stable::before {
   background: rgba(120, 170, 220, 0.95);
   box-shadow: 0 0 0 2px rgba(120, 170, 220, 0.18);
 }
-.project-row-status-readonly,
-.project-row-status-inactive {
+.project-row-status-readonly::before,
+.project-row-status-inactive::before {
   background: var(--muted);
 }
 
@@ -2718,8 +2721,11 @@ html.embedded-chat #root {
 .app-sidebar-tree .tree-row.tree-row-selected::after {
   content: "";
   position: absolute;
-  top: -1px;
-  bottom: -1px;
+  /* The pseudo-element is positioned from the tab's padding box. Zero
+     aligns its borders with the tab border; -1px creates a visible stair
+     step that makes the bridge look bowed at the pane seam. */
+  top: 0;
+  bottom: 0;
   right: calc(-1 * var(--sidebar-tab-bridge-size));
   width: var(--sidebar-tab-bridge-size);
   background: var(--sidebar-tab-surface);
@@ -4048,193 +4054,161 @@ button.danger {
   overflow: hidden;
 }
 
-/* ── Document Export — toolbar "…" menu + dialog ─────────────────── */
+/* ── Document Export — DocBlocks-style toolbar button + shared primitives ── */
 
-.gezel-toolbar-menu {
-  position: relative;
-  display: inline-block;
-}
-.gezel-toolbar-menu-trigger {
-  background: transparent;
-  color: inherit;
+.gezel-export-trigger.squisq-toolbar-button {
+  width: auto;
+  min-width: 5.25rem;
+  gap: 0.4rem;
+  padding: 2px 0.65rem 0;
   border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 0.25rem 0.6rem;
-  font: inherit;
-  font-size: 0.85rem;
-  cursor: pointer;
-  letter-spacing: 0.05em;
+  border-radius: var(--radius-md);
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
 }
-.gezel-toolbar-menu-trigger:hover {
+
+.gezel-export-trigger.squisq-toolbar-button svg {
+  width: 17px;
+  height: 17px;
+  flex: 0 0 auto;
+}
+
+.gezel-export-trigger.squisq-toolbar-button[aria-expanded="true"] {
   border-color: var(--accent);
+  background: color-mix(in oklch, var(--accent) 16%, transparent);
 }
-.gezel-toolbar-menu-dropdown {
-  position: absolute;
-  top: calc(100% + 0.35rem);
-  right: 0;
-  min-width: 220px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
-  padding: 0.3rem;
-  z-index: 50;
-  display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
+
+.gezel-export-menu.app-nav-menu {
+  min-width: 16rem;
+  z-index: 1100;
 }
-.gezel-toolbar-menu-item {
-  background: transparent;
-  color: inherit;
-  border: none;
-  border-radius: 5px;
-  padding: 0.45rem 0.7rem;
-  font: inherit;
-  font-size: 0.9rem;
-  text-align: left;
-  cursor: pointer;
+
+.gezel-export-menu .app-nav-menu-item {
+  font-size: var(--text-md);
   white-space: nowrap;
 }
-.gezel-toolbar-menu-item:hover:not(:disabled) {
-  background: rgba(243, 237, 224, 0.08);
-}
-.gezel-toolbar-menu-item:disabled {
+
+.gezel-export-menu .app-nav-menu-item[data-disabled] {
   opacity: 0.5;
   cursor: wait;
 }
-.gezel-toolbar-menu-divider {
+
+.gezel-export-menu-divider {
   height: 1px;
   background: var(--border);
-  margin: 0.2rem 0;
+  margin: 0.25rem 0;
 }
 
-.gezel-dialog-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.55);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
+.gezel-export-dialog.gz-dialog {
+  width: min(34rem, calc(100vw - 2rem));
+  min-width: 0;
+  padding: 0;
+  overflow: hidden;
 }
-.gezel-dialog {
-  background: var(--surface);
-  color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
-  min-width: 420px;
-  max-width: 560px;
-  max-height: 85vh;
+
+.gezel-export-dialog form {
   display: flex;
+  min-height: 0;
+  max-height: 85vh;
   flex-direction: column;
 }
-.gezel-dialog-header {
+
+.gezel-export-dialog-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0.85rem 1.1rem;
+  gap: 1rem;
+  padding: 0.9rem 1.1rem;
   border-bottom: 1px solid var(--border);
 }
-.gezel-dialog-title {
-  margin: 0;
-  font-size: 1.05rem;
-}
-.gezel-dialog-close {
+
+.gezel-export-dialog-close {
+  width: 1.8rem;
+  height: 1.8rem;
+  flex: 0 0 auto;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-md);
   background: transparent;
-  color: inherit;
-  border: none;
-  font-size: 1.4rem;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--text-xl);
   line-height: 1;
-  padding: 0.1rem 0.35rem;
   cursor: pointer;
-  opacity: 0.7;
 }
-.gezel-dialog-close:hover {
-  opacity: 1;
+
+.gezel-export-dialog-close:hover {
+  background: var(--key-bg-hover);
+  color: var(--text);
 }
-.gezel-dialog-body {
-  padding: 1rem 1.1rem;
-  overflow-y: auto;
+
+.gezel-export-dialog-body {
   display: flex;
+  min-height: 0;
+  overflow-y: auto;
   flex-direction: column;
   gap: 1rem;
+  padding: 1rem 1.1rem;
 }
+
 .gezel-export-field {
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
 }
+
 .gezel-export-label {
-  font-size: 0.85rem;
+  font-size: var(--text-sm);
   font-weight: 600;
-  opacity: 0.85;
+  color: var(--text);
 }
+
 .gezel-export-hint {
-  font-size: 0.78rem;
-  opacity: 0.7;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
 }
-.gezel-export-chips {
-  display: flex;
+
+.gezel-export-choice-tray.gz-tray {
+  width: 100%;
+  justify-content: flex-start;
   flex-wrap: wrap;
-  gap: 0.35rem;
 }
-.gezel-export-chip {
-  background: transparent;
-  color: inherit;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 0.3rem 0.8rem;
-  font: inherit;
-  font-size: 0.85rem;
+
+.gezel-export-choice-tray .gz-key {
+  position: relative;
+}
+
+.gezel-export-choice-radio {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
   cursor: pointer;
-  transition: border-color 0.15s, background 0.15s;
 }
-.gezel-export-chip:hover {
-  border-color: var(--accent);
+
+.gezel-export-choice-tray .gz-key:has(.gezel-export-choice-radio:focus-visible) {
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
-.gezel-export-chip--active {
-  background: var(--accent);
-  color: #fff;
-  border-color: var(--accent);
-}
+
 .gezel-export-select {
   background: var(--panel);
   color: inherit;
   border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 0.35rem 0.5rem;
+  border-radius: var(--radius-md);
+  padding: 0.4rem 0.5rem;
   font: inherit;
-  font-size: 0.9rem;
+  font-size: var(--text-md);
 }
-.gezel-export-footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: 0.5rem;
+
+.gezel-export-dialog .gz-dialog-actions {
+  margin: 0;
   padding: 0.8rem 1.1rem;
   border-top: 1px solid var(--border);
 }
-.gezel-export-btn {
-  background: transparent;
-  color: inherit;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 0.4rem 1rem;
-  font: inherit;
-  font-size: 0.9rem;
-  cursor: pointer;
-}
-.gezel-export-btn:hover:not(:disabled) {
-  border-color: var(--accent);
-}
-.gezel-export-btn--primary {
-  background: var(--accent);
-  color: #fff;
-  border-color: var(--accent);
-}
-.gezel-export-btn:disabled {
-  opacity: 0.5;
-  cursor: wait;
+
+.gezel-export-loading-dialog.gz-dialog {
+  width: min(28rem, calc(100vw - 2rem));
+  min-width: 0;
 }
 
 .placeholder {
@@ -9113,25 +9087,25 @@ button.bench-step-foot:disabled {
    ────────────────────────────────────────────────────────────────── */
 .home-workshop {
   /* Paper & ink */
-  /* A pale mushroom-brown keeps the workshop warm without the old
-     yellow parchment cast. The darker paper steps remain available
-     for inset controls and rules. */
+  /* A pale mushroom beige puts a little brown warmth back into the
+     workshop without reviving the old yellow parchment cast. The
+     darker paper steps remain available for inset controls and rules. */
   --paper: var(--home-workshop-paper);
-  --paper-2: #ece2cd;
-  --paper-3: #e2d5b9;
-  --ink: #2a2520;
-  --ink-2: #5a4f42;
-  --ink-3: #8b7e6b;
-  --rule: #c8b994;
+  --paper-2: color-mix(in srgb, var(--gezel-paper-workshop) 72%, var(--gezel-paper-inset));
+  --paper-3: color-mix(in srgb, var(--gezel-paper-workshop) 42%, var(--gezel-paper-inset));
+  --ink: var(--gezel-ink-warm);
+  --ink-2: var(--gezel-ink-warm-muted);
+  --ink-3: var(--gezel-ink-warm-quiet);
+  --rule: color-mix(in srgb, var(--gezel-paper-inset) 82%, var(--gezel-terra));
   /* Sage (structure) */
-  --sage: #8a9a76;
-  --sage-deep: #5c6a4a;
+  --sage: var(--gezel-sage-muted);
+  --sage-deep: var(--gezel-sage-deep);
   --sage-ink: #2f3a23;
-  --sage-soft: #d6dec6;
+  --sage-soft: var(--gezel-sage-soft);
   /* Terracotta (action / heat) */
-  --terra: #c97553;
-  --terra-deep: #9a4e30;
-  --terra-soft: #f0d4bf;
+  --terra: var(--gezel-terra-bright);
+  --terra-deep: var(--gezel-terra-deep);
+  --terra-soft: var(--gezel-terra-soft);
   /* Craft hues */
   --ochre: #c89248;
   --indigo: #4d6b9a;
@@ -9139,14 +9113,15 @@ button.bench-step-foot:disabled {
   --moss: #6b8a5a;
   --slate: #6b7480;
   --live: #9ed084;
-  /* Derived home surfaces (accent multiplier fixed at 1 = "Balanced") */
-  --home-card: #fbf6ea;
-  --home-surf2: #f5ecd6;
+  /* Derived home surfaces stay on the foundation paper ramp. White lifts
+     cards without adding yellow; the inset tone supplies the brown depth. */
+  --home-card: color-mix(in srgb, var(--gezel-paper-workshop) 52%, white);
+  --home-surf2: color-mix(in srgb, var(--gezel-paper-workshop) 76%, var(--gezel-paper-inset));
   --home-border: var(--paper-3);
   --home-hair: var(--rule);
-  --home-user: #efe6d2;
-  --home-amber: rgba(201, 117, 83, 0.07);
-  --home-amber-bd: rgba(201, 117, 83, 0.3);
+  --home-user: color-mix(in srgb, var(--gezel-paper-workshop) 58%, var(--gezel-paper-inset));
+  --home-amber: color-mix(in srgb, var(--gezel-terra-bright) 7%, transparent);
+  --home-amber-bd: color-mix(in srgb, var(--gezel-terra-bright) 30%, transparent);
   /* Provenance mono — JetBrains isn't bundled; system mono is fine at 11px. */
   --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 
@@ -9157,9 +9132,16 @@ button.bench-step-foot:disabled {
   display: flex;
   flex-direction: column;
   color: var(--ink);
-  background: radial-gradient(1200px 600px at 80% -10%, rgba(138, 154, 118, 0.1), transparent 60%),
-    radial-gradient(900px 500px at -10% 110%, rgba(201, 117, 83, 0.06), transparent 60%),
-    var(--paper);
+  background: radial-gradient(
+      1200px 600px at 80% -10%,
+      color-mix(in srgb, var(--gezel-sage-muted) 10%, transparent),
+      transparent 60%
+    ),
+    radial-gradient(
+      900px 500px at -10% 110%,
+      color-mix(in srgb, var(--gezel-terra-bright) 6%, transparent),
+      transparent 60%
+    ), var(--paper);
   overflow: hidden;
 }
 
@@ -9695,6 +9677,56 @@ button.bench-step-foot:disabled {
 .home-intro-doc .squisq-linear {
   height: auto;
   overflow: visible;
+}
+
+/* Article reading scale. Squisq's page renderer assigns fixed rem sizes to
+   each content pattern, so changing only the inherited root size leaves prose,
+   feature splits, and headings mismatched. Keep one host class on every
+   scrolling article view and reduce the common editorial roles together.
+   Presentation/video mode deliberately retains Squisq's full display scale. */
+.gezel-article-view .squisq-linear-content {
+  font-size: var(--text-md) !important;
+}
+
+.gezel-article-view .squisq-page-prose,
+.gezel-article-view .squisq-page-feature-body,
+.gezel-article-view .squisq-page-items li,
+.gezel-article-view .squisq-page-table {
+  font-size: 0.95rem;
+}
+
+.gezel-article-view .squisq-page-feature-title {
+  font-size: 1.55rem;
+}
+
+.gezel-article-view .squisq-page-prose h1 {
+  font-size: 1.9rem;
+}
+
+.gezel-article-view .squisq-page-prose h2 {
+  font-size: 1.5rem;
+}
+
+.gezel-article-view .squisq-page-prose h3 {
+  font-size: 1.2rem;
+}
+
+.gezel-article-view .squisq-page-prose :is(h4, h5, h6) {
+  font-size: 1.05rem;
+}
+
+.gezel-article-view
+  .squisq-page
+  :is(.squisq-page-cards-title, .squisq-page-items-title, .squisq-page-table-title) {
+  font-size: 1.7rem;
+}
+
+.gezel-article-view .squisq-page-callout-title {
+  font-size: 1.2rem;
+}
+
+.gezel-article-view .squisq-page-card-title {
+  font-size: 1.15rem;
 }
 
 .home-intro-player {

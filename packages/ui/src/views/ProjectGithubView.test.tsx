@@ -26,7 +26,7 @@ vi.mock('../components/github/PullRequestsView.js', () => ({
   PullRequestsView: () => <div data-testid="prs-view" />,
 }));
 
-const { ProjectGitHubView } = await import('./ProjectGitHubView.js');
+const { ProjectGitHubView } = await import('./ProjectGithubView.js');
 const { api } = await import('../api.js');
 
 const PROJECT: ProjectDetail = {

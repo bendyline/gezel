@@ -1,7 +1,7 @@
 import type { GitHubIdentity } from '@bendyline/gezel';
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
-import { GitHubDeviceCodeModal } from './GitHubDeviceCodeModal.js';
+import { GitHubDeviceCodeModal } from './GithubDeviceCodeModal.js';
 
 /**
  * Inline pill rendered next to anything that needs a GitHub identity

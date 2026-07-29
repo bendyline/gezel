@@ -185,6 +185,7 @@ export function IntroHandboekArticle() {
                   frame there. */}
               <LinearDocView
                 doc={doc}
+                className="gezel-article-view"
                 theme={gezelChatTheme}
                 surface={surface}
                 thinMargins

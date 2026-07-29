@@ -200,7 +200,30 @@ describe('Sidebar', () => {
     expect(screen.getByRole('button', { name: /Beta: a gezel is working/ })).toBeInTheDocument();
     // p3 is idle with a non-default status → the status dot.
     const gammaRow = screen.getByText('Gamma').closest('li');
-    expect(gammaRow?.querySelector('.project-row-status-stable')).toBeTruthy();
+    const stableStatus = gammaRow?.querySelector('.project-row-status-stable');
+    expect(stableStatus).toHaveAttribute(
+      'aria-label',
+      'Gamma: Stable — work is at rest because its tasks are finished or canceled; new or resumed tasks reactivate it.',
+    );
+    expect(stableStatus).toHaveAttribute('type', 'button');
+  });
+
+  it.each([
+    ['active', 'Active — automatic project work can run, including scheduled tasks and handoffs.'],
+    ['readonly', 'Read-only — automatic project work is paused for review; chat still works.'],
+    [
+      'inactive',
+      'Inactive — the project is archived and automatic project work is paused; chat still works.',
+    ],
+  ] as const)('explains the %s project status', async (status, description) => {
+    vi.mocked(api.listProjects).mockResolvedValue({
+      projects: [{ id: 'p1', name: 'Alpha', status } as Project],
+    } as never);
+    render(<Sidebar selection={null} onSelect={vi.fn()} onOpenArea={vi.fn()} />);
+
+    expect(
+      await screen.findByRole('button', { name: `Alpha: ${description}` }),
+    ).toBeInTheDocument();
   });
 
   it('opens the resolution dialog when the intervene button is clicked', async () => {

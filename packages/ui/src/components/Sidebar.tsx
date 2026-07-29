@@ -10,6 +10,7 @@ import {
   useState,
 } from 'react';
 import { api } from '../api.js';
+import { Tooltip } from '../primitives/index.js';
 import { getSidebarSide } from '../sidebar-side.js';
 import { AreaIcon } from './AreaIcon.js';
 import { type FileEntry, FileTree } from './FileTree.js';
@@ -36,6 +37,17 @@ const ROLE_DESCRIPTIONS: Record<string, string> = {
   meester: 'Primary concierge',
   voorman: 'Manages projects',
   boekwachter: 'Indexes/catalogs content',
+};
+
+type ProjectLifecycleStatus = NonNullable<Project['status']>;
+
+const PROJECT_STATUS_DESCRIPTIONS: Record<ProjectLifecycleStatus, string> = {
+  active: 'Active — automatic project work can run, including scheduled tasks and handoffs.',
+  stable:
+    'Stable — work is at rest because its tasks are finished or canceled; new or resumed tasks reactivate it.',
+  readonly: 'Read-only — automatic project work is paused for review; chat still works.',
+  inactive:
+    'Inactive — the project is archived and automatic project work is paused; chat still works.',
 };
 
 function roleDescription(role?: string, roleBasedName?: string): string {
@@ -589,11 +601,18 @@ export function Sidebar({
                         <span className="project-row-thinking-dot" aria-hidden="true" />
                       </button>
                     ) : (
-                      <span
-                        className={`project-row-status project-row-status-${status}`}
-                        aria-hidden="true"
-                        title={`Status: ${status}`}
-                      />
+                      <Tooltip.Hint
+                        text={PROJECT_STATUS_DESCRIPTIONS[status]}
+                        side="left"
+                        delay={150}
+                      >
+                        <button
+                          type="button"
+                          className={`project-row-status project-row-status-${status}`}
+                          onClick={select}
+                          aria-label={`${p.name}: ${PROJECT_STATUS_DESCRIPTIONS[status]}`}
+                        />
+                      </Tooltip.Hint>
                     )}
                   </span>
                   <ProjectActionsMenu

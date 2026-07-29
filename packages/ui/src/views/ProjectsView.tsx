@@ -39,7 +39,7 @@ import { Select, Tabs } from '../primitives/index.js';
 import { useEffectiveTheme } from '../theme.js';
 import { FileMapView } from './FileMapView.js';
 import { HistoryView } from './HistoryView.js';
-import { ProjectGitHubView } from './ProjectGitHubView.js';
+import { ProjectGitHubView } from './ProjectGithubView.js';
 import { ProjectOverviewView } from './ProjectOverviewView.js';
 import { TasksView } from './TasksView.js';
 import { NewProjectDialog } from './projects/NewProjectDialog.js';
@@ -2221,8 +2221,8 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
 /**
  * Markdown-artifact editor with the full squisq feature set — Play
  * tab, the Files panel for image uploads (writes land in the parent
- * directory next to the markdown), the docblocks-style Export "…"
- * menu, version history, and a sibling-artifact link picker. The
+ * directory next to the markdown), the DocBlocks-style Export menu,
+ * version history, and a sibling-artifact link picker. The
  * editor talks to `projects/{id}/artifacts/<dir>/` through a
  * `ContentContainer` adapter so image references in the doc resolve
  * relative to the doc's directory.
@@ -2292,7 +2292,11 @@ function ProjectMarkdownArtifactEditor({
                 Save
               </button>
             )}
-            <ExportToolbarControls selectedFile={path} mediaContainer={container} />
+            <ExportToolbarControls
+              selectedFile={path}
+              mediaContainer={container}
+              colorScheme={editorTheme}
+            />
           </>
         }
       />

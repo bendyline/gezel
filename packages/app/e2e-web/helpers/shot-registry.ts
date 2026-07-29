@@ -32,6 +32,7 @@ export const SHOT_REGISTRY: Record<ShotArea, string[]> = {
     'sidebar-collapsed',
     'sidebar-meester',
     'engine-pill-ds4',
+    'sidebar-project-status-tooltip',
   ],
   home: ['workshop', 'greeting-band', 'meester-chat'],
   chat: [

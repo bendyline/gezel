@@ -157,6 +157,23 @@ export const DeviceSafetyPolicySchema = z.object({
 });
 export type DeviceSafetyPolicyConfig = z.infer<typeof DeviceSafetyPolicySchema>;
 
+/**
+ * Last-used document export settings.
+ *
+ * The UI keeps a localStorage cache for immediate toolbar rendering, but the
+ * durable copy belongs in config.json because the embedded daemon may bind a
+ * different loopback port on each launch (and localStorage is origin-scoped).
+ */
+export const DocumentExportOptionsSchema = z.object({
+  format: z.enum(['docx', 'pdf', 'pptx', 'md', 'html']),
+  themeId: z.string().min(1),
+  transformStyle: z.string().min(1),
+  pageSize: z.enum(['letter', 'a4']),
+  htmlStyle: z.enum(['rendered', 'plain']),
+  htmlBundle: z.enum(['single', 'zip']),
+});
+export type DocumentExportOptions = z.infer<typeof DocumentExportOptionsSchema>;
+
 export const GezelConfigSchema = z.object({
   /** Default LLM provider. Missing → 'copilot' for backwards compatibility. */
   provider: ProviderNameSchema.optional(),
@@ -1413,6 +1430,12 @@ export const GezelConfigSchema = z.object({
    * source of truth across boots.
    */
   themePref: z.enum(['system', 'light', 'dark']).optional(),
+  /**
+   * Last-used document export settings. This is the cross-boot source of
+   * truth for the editor's quick-export action; see
+   * `DocumentExportOptionsSchema`.
+   */
+  documentExportOptions: DocumentExportOptionsSchema.optional(),
   /**
    * Which side of the window the primary navigation sidebar
    * (projects / gezellen / documents / …) sits on. Server-side for the
