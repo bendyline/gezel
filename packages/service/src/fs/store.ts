@@ -49,7 +49,7 @@ import {
   ProjectCraftbookProvenanceSchema,
   type ProjectDetail,
   type ProjectFileEntry,
-  type ProjectGithub,
+  type ProjectGitHub,
   type ProjectLocalConfig,
   ProjectLocalConfigSchema,
   type ProjectMail,
@@ -135,8 +135,8 @@ import {
 import { applyPatch, parsePatch } from 'diff';
 import { matchReferencedArtifactsInContent } from '../chat/artifact-references.js';
 import { matchReferencedTasksInContent } from '../chat/task-references.js';
-import { inspectGitWorkdir } from '../github/inspect.js';
-import { parseGithubUrl, sameGithubRepo } from '../github/url.js';
+import { inspectGitWorkdir } from '../git/inspect.js';
+import { parseGitHubUrl, sameGitHubRepo } from '../github/url.js';
 import {
   DEFAULT_MEMORY_KIND,
   type MemoryKind,
@@ -586,7 +586,7 @@ export class Store {
         await rename(legacyGh, workspaceDir);
         // Update metadata so projectWorkspaceDir + the github tab use
         // the new path.
-        await this.updateProjectGithub(p.id, {
+        await this.updateProjectGitHub(p.id, {
           url: p.github.url,
           ...(p.github.branch ? { branch: p.github.branch } : {}),
           checkoutDir: workspaceDir,
@@ -2442,15 +2442,15 @@ export class Store {
     // Same auto-link as updateProject — pointing workingDir at an
     // existing github clone wires up the github link without an extra
     // round-trip from the UI.
-    let nextGithub = meta.github;
+    let nextGitHub = meta.github;
     if (workingDir && workingDir.length > 0) {
-      const detected = await autoDetectGithubLink(workingDir, nextGithub);
-      if (detected) nextGithub = detected;
+      const detected = await autoDetectGitHubLink(workingDir, nextGitHub);
+      if (detected) nextGitHub = detected;
     }
     const updated: Project = {
       ...meta,
       workingDir: workingDir || undefined,
-      ...(nextGithub !== meta.github ? { github: nextGithub } : {}),
+      ...(nextGitHub !== meta.github ? { github: nextGitHub } : {}),
       updatedAt: nowIso(),
     };
     await writeFileAtomic(projectMetaFile(this.home, id), `${JSON.stringify(updated, null, 2)}\n`);
@@ -2464,7 +2464,7 @@ export class Store {
    * external path (falls back to internal); omit the key to leave it alone.
    * `github: null` unlinks the repo entirely; passing `{ url, branch? }`
    * links/relinks (the link is a user-supplied claim — actual cloning is
-   * driven separately by the GitHubManager).
+   * driven separately by the GitManager).
    */
   async updateProject(
     id: string,
@@ -2506,7 +2506,7 @@ export class Store {
     const meta = await this.tryGetProjectMeta(id);
     if (!meta) throw new Error(`project ${id} not found`);
     if (typeof patch.workingDir === 'string') this.assertSafeWorkingDir(patch.workingDir);
-    let nextGithub = mergeGithubPatch(meta.github, patch.github);
+    let nextGitHub = mergeGitHubPatch(meta.github, patch.github);
     // Auto-link: if the user is pointing workingDir at an existing
     // github clone, populate the github link silently (origin URL +
     // checkoutDir). Skip if the user explicitly passed a different
@@ -2516,8 +2516,8 @@ export class Store {
       patch.workingDir.length > 0 &&
       patch.github !== null
     ) {
-      const detected = await autoDetectGithubLink(patch.workingDir, nextGithub);
-      if (detected) nextGithub = detected;
+      const detected = await autoDetectGitHubLink(patch.workingDir, nextGitHub);
+      if (detected) nextGitHub = detected;
     }
     const updated: Project = {
       ...meta,
@@ -2537,7 +2537,7 @@ export class Store {
       ...(patch.voormanAutoAssignedAt !== undefined
         ? { voormanAutoAssignedAt: patch.voormanAutoAssignedAt }
         : {}),
-      ...(patch.github !== undefined ? { github: nextGithub } : {}),
+      ...(patch.github !== undefined ? { github: nextGitHub } : {}),
       ...(patch.mail === null
         ? { mail: undefined }
         : patch.mail !== undefined
@@ -2677,7 +2677,7 @@ export class Store {
     }
     if (patch.github !== undefined) {
       const previousUrl = meta.github?.url;
-      const nextUrl = nextGithub?.url;
+      const nextUrl = nextGitHub?.url;
       if (patch.github === null || !nextUrl) {
         if (previousUrl) {
           await this.history?.log({
@@ -2692,7 +2692,7 @@ export class Store {
           kind: 'project.github.linked',
           projectId: id,
           summary: `Linked "${detail.name}" to ${nextUrl}`,
-          details: { previousUrl, url: nextUrl, branch: nextGithub?.branch },
+          details: { previousUrl, url: nextUrl, branch: nextGitHub?.branch },
         });
       }
     }
@@ -2936,16 +2936,16 @@ export class Store {
     await writeFileAtomic(meesterStatusStateFile(this.home), `${JSON.stringify(state, null, 2)}\n`);
   }
 
-  async updateProjectGithub(id: string, patch: Partial<ProjectGithub>): Promise<void> {
+  async updateProjectGitHub(id: string, patch: Partial<ProjectGitHub>): Promise<void> {
     const meta = await this.tryGetProjectMeta(id);
     if (!meta) return;
     const url = patch.url ?? meta.github?.url;
     if (!url) return;
-    const nextGithub: ProjectGithub = { ...(meta.github ?? { url }), ...patch, url };
+    const nextGitHub: ProjectGitHub = { ...(meta.github ?? { url }), ...patch, url };
     const updated: Project = {
       ...meta,
       updatedAt: nowIso(),
-      github: nextGithub,
+      github: nextGitHub,
     };
     await writeFileAtomic(projectMetaFile(this.home, id), `${JSON.stringify(updated, null, 2)}\n`);
     if (patch.lastSyncedAt) {
@@ -2954,9 +2954,9 @@ export class Store {
         projectId: id,
         summary: `Synced GitHub repo for "${meta.name}"`,
         details: {
-          url: nextGithub.url,
-          branch: nextGithub.branch,
-          checkoutDir: nextGithub.checkoutDir,
+          url: nextGitHub.url,
+          branch: nextGitHub.branch,
+          checkoutDir: nextGitHub.checkoutDir,
         },
       });
     }
@@ -5693,24 +5693,24 @@ function migrateLegacyIntents(session: ChatSession): boolean {
 
 /**
  * If `workingDir` is itself an existing git checkout of a github.com
- * repo, return a `ProjectGithub` that populates `url` (from origin) and
+ * repo, return a `ProjectGitHub` that populates `url` (from origin) and
  * `checkoutDir = workingDir` so the GitHub features (status bar,
  * branch picker, etc.) light up without the user having to type the
  * URL. Returns `undefined` when the dir isn't a git repo, the origin
  * isn't github.com, or the existing link already points at a
  * different URL (we don't silently clobber a user-supplied link).
  */
-async function autoDetectGithubLink(
+async function autoDetectGitHubLink(
   workingDir: string,
-  existing: ProjectGithub | undefined,
-): Promise<ProjectGithub | undefined> {
+  existing: ProjectGitHub | undefined,
+): Promise<ProjectGitHub | undefined> {
   const inspected = await inspectGitWorkdir(workingDir);
   if (!inspected.isRepo || !inspected.originUrl) return undefined;
-  const parsed = parseGithubUrl(inspected.originUrl);
+  const parsed = parseGitHubUrl(inspected.originUrl);
   if (!parsed) return undefined;
   // Honor an existing link only if it points at the same repo; refuse
   // to overwrite a different one (the user explicitly set it).
-  if (existing?.url && !sameGithubRepo(existing.url, parsed.canonical)) return undefined;
+  if (existing?.url && !sameGitHubRepo(existing.url, parsed.canonical)) return undefined;
   return {
     ...(existing ?? {}),
     url: parsed.canonical,
@@ -5719,10 +5719,10 @@ async function autoDetectGithubLink(
   };
 }
 
-function mergeGithubPatch(
-  existing: ProjectGithub | undefined,
+function mergeGitHubPatch(
+  existing: ProjectGitHub | undefined,
   patch: { url?: string; branch?: string } | null | undefined,
-): ProjectGithub | undefined {
+): ProjectGitHub | undefined {
   if (patch === undefined) return existing;
   if (patch === null) return undefined;
   // url is required to keep a link alive — clearing it via "" also unlinks.

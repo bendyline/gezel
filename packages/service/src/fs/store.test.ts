@@ -576,7 +576,7 @@ describe('project workspace', () => {
   it('points at github.checkoutDir when github-linked and clone has landed', async () => {
     // Simulate a github-linked project whose clone has populated.
     await store.createProject({ name: 'Cloned', github: { url: 'https://github.com/foo/bar' } });
-    await store.updateProjectGithub('cloned', {
+    await store.updateProjectGitHub('cloned', {
       url: 'https://github.com/foo/bar',
       checkoutDir: '/var/tmp/my-clone',
     });
@@ -624,9 +624,9 @@ describe('project workspace', () => {
         name: 'PCloned',
         github: { url: 'https://github.com/foo/bar' },
       });
-      // Simulate the clone landing — this is what GitHubManager.persistCheckoutDir
+      // Simulate the clone landing — this is what GitManager.persistCheckoutDir
       // does after `git clone` succeeds.
-      await store.updateProjectGithub('pcloned', {
+      await store.updateProjectGitHub('pcloned', {
         url: 'https://github.com/foo/bar',
         checkoutDir: '/var/tmp/cloned-repo',
       });
@@ -718,7 +718,7 @@ describe('project workspace', () => {
       await writeFile(join(legacyGh, 'src', 'index.ts'), 'export {};\n', 'utf8');
       // Set checkoutDir to the legacy location to mimic the pre-Phase-2
       // ensureClone outcome.
-      await store.updateProjectGithub('legacyclone', {
+      await store.updateProjectGitHub('legacyclone', {
         url: 'https://github.com/foo/bar',
         checkoutDir: legacyGh,
       });
@@ -754,7 +754,7 @@ describe('project workspace', () => {
       // block the migration to avoid data loss.
       await mkdir(workspaceDir, { recursive: true });
       await writeFile(join(workspaceDir, 'my-notes.md'), 'user wrote this\n', 'utf8');
-      await store.updateProjectGithub('legacycloneusercontent', {
+      await store.updateProjectGitHub('legacycloneusercontent', {
         url: 'https://github.com/foo/bar',
         checkoutDir: legacyGh,
       });

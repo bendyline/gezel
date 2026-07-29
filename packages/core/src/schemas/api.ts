@@ -15,7 +15,7 @@ import { ChatModelTuningSchema } from './model-tuning.js';
 import {
   HttpsOriginSchema,
   ProjectDetailSchema,
-  ProjectGithubSchema,
+  ProjectGitHubSchema,
   ProjectNudgeConfigSchema,
   ProjectSchema,
   ProjectTabVisibilitySchema,
@@ -77,7 +77,7 @@ export type HealthResponse = z.infer<typeof HealthResponseSchema>;
  * manually-pasted PAT). Written by the OAuth device-flow completion
  * handler and cleared by sign-out.
  */
-export const GithubAuthMetaSchema = z.object({
+export const GitHubAuthMetaSchema = z.object({
   kind: z.enum(['pat', 'oauth']),
   login: z.string().optional(),
   name: z.string().optional(),
@@ -85,7 +85,7 @@ export const GithubAuthMetaSchema = z.object({
   scopes: z.array(z.string()).optional(),
   acquiredAt: z.string().optional(),
 });
-export type GithubAuthMeta = z.infer<typeof GithubAuthMetaSchema>;
+export type GitHubAuthMeta = z.infer<typeof GitHubAuthMetaSchema>;
 
 /**
  * Per-scope external roots for folder externalization. When a field is
@@ -202,8 +202,8 @@ export const GezelConfigSchema = z.object({
    */
   narrateAssistantReplies: z.boolean().optional(),
   githubToken: z.string().optional(),
-  /** Non-secret companion to `githubToken`. See {@link GithubAuthMetaSchema}. */
-  githubAuth: GithubAuthMetaSchema.optional(),
+  /** Non-secret companion to `githubToken`. See {@link GitHubAuthMetaSchema}. */
+  githubAuth: GitHubAuthMetaSchema.optional(),
   openaiApiKey: z.string().optional(),
   openaiOrganization: z.string().optional(),
   /** Anthropic API key for the `anthropic` provider. SecretStore-routed. */
@@ -2839,16 +2839,18 @@ export const CreateTypedProjectResponseSchema = z.object({
 });
 export type CreateTypedProjectResponse = z.infer<typeof CreateTypedProjectResponseSchema>;
 
-// ── GitHub operations (per-project) ─────────────────────────────────
+// ── Git operations (per-project, host-agnostic) ─────────────────────
 
-export const GithubStatusResponseSchema = z.object({
-  github: ProjectGithubSchema.optional(),
+export const GitStatusResponseSchema = z.object({
+  github: ProjectGitHubSchema.optional(),
   /** Whether a checkout exists on disk at github.checkoutDir. */
   exists: z.boolean(),
   /** Whether the checkout's `origin` remote matches `github.url`. */
   originMatches: z.boolean().optional(),
   /** Current local branch (HEAD), if exists. */
   branch: z.string().optional(),
+  /** Repo default branch, when already detected and cached (never triggers network). */
+  defaultBranch: z.string().optional(),
   /** Commits ahead of upstream, if known. */
   ahead: z.number().int().optional(),
   /** Commits behind upstream, if known. */
@@ -2871,19 +2873,19 @@ export const GithubStatusResponseSchema = z.object({
    */
   credentialSource: z.enum(['pat', 'env', 'gh', 'none']),
 });
-export type GithubStatusResponse = z.infer<typeof GithubStatusResponseSchema>;
-export type GithubCredentialSource = GithubStatusResponse['credentialSource'];
+export type GitStatusResponse = z.infer<typeof GitStatusResponseSchema>;
+export type GitHubCredentialSource = GitStatusResponse['credentialSource'];
 
-export const GithubCloneResponseSchema = z.object({
+export const GitCloneResponseSchema = z.object({
   ok: z.literal(true),
   checkoutDir: z.string(),
   branch: z.string().optional(),
   /** True when a pre-existing repo at workingDir was adopted. */
   adopted: z.boolean(),
 });
-export type GithubCloneResponse = z.infer<typeof GithubCloneResponseSchema>;
+export type GitCloneResponse = z.infer<typeof GitCloneResponseSchema>;
 
-export const GithubBranchSwitchRequestSchema = z.object({
+export const GitBranchSwitchRequestSchema = z.object({
   branch: z.string().min(1),
   /**
    * When true, create the branch from current HEAD (`git checkout -b`).
@@ -2891,9 +2893,9 @@ export const GithubBranchSwitchRequestSchema = z.object({
    */
   create: z.boolean().optional(),
 });
-export type GithubBranchSwitchRequest = z.infer<typeof GithubBranchSwitchRequestSchema>;
+export type GitBranchSwitchRequest = z.infer<typeof GitBranchSwitchRequestSchema>;
 
-export const GithubBranchesResponseSchema = z.object({
+export const GitBranchesResponseSchema = z.object({
   /** Local branches that exist in the checkout. */
   local: z.array(z.string()),
   /** Remote branches under `origin/` with the prefix stripped. Already
@@ -2903,38 +2905,38 @@ export const GithubBranchesResponseSchema = z.object({
   /** Currently-checked-out branch, when there is one. Undefined in detached HEAD. */
   current: z.string().optional(),
 });
-export type GithubBranchesResponse = z.infer<typeof GithubBranchesResponseSchema>;
+export type GitBranchesResponse = z.infer<typeof GitBranchesResponseSchema>;
 
-export const GithubFetchResponseSchema = z.object({
+export const GitFetchResponseSchema = z.object({
   ok: z.literal(true),
   /** True when `git fetch` advanced any ref. */
   fetched: z.boolean(),
 });
-export type GithubFetchResponse = z.infer<typeof GithubFetchResponseSchema>;
+export type GitFetchResponse = z.infer<typeof GitFetchResponseSchema>;
 
-export const GithubCommitRequestSchema = z.object({
+export const GitCommitRequestSchema = z.object({
   message: z.string().min(1),
   /** Allow committing with no changes. Defaults to false. */
   allowEmpty: z.boolean().optional(),
 });
-export type GithubCommitRequest = z.infer<typeof GithubCommitRequestSchema>;
+export type GitCommitRequest = z.infer<typeof GitCommitRequestSchema>;
 
-export const GithubCommitResponseSchema = z.object({
+export const GitCommitResponseSchema = z.object({
   ok: z.literal(true),
   sha: z.string(),
   filesChanged: z.number().int(),
 });
-export type GithubCommitResponse = z.infer<typeof GithubCommitResponseSchema>;
+export type GitCommitResponse = z.infer<typeof GitCommitResponseSchema>;
 
-export const GithubPushResponseSchema = z.object({
+export const GitPushResponseSchema = z.object({
   ok: z.literal(true),
   pushed: z.boolean(),
   /** When push didn't land, the broad reason class. */
   rejected: z.enum(['non-fast-forward', 'auth', 'unknown']).optional(),
 });
-export type GithubPushResponse = z.infer<typeof GithubPushResponseSchema>;
+export type GitPushResponse = z.infer<typeof GitPushResponseSchema>;
 
-export const GithubPullSummarySchema = z.object({
+export const GitHubPullSummarySchema = z.object({
   number: z.number().int(),
   title: z.string(),
   author: z.string(),
@@ -2944,14 +2946,14 @@ export const GithubPullSummarySchema = z.object({
   updatedAt: z.string(),
   url: z.string(),
 });
-export type GithubPullSummary = z.infer<typeof GithubPullSummarySchema>;
+export type GitHubPullSummary = z.infer<typeof GitHubPullSummarySchema>;
 
-export const ListGithubPullsResponseSchema = z.object({
-  pulls: z.array(GithubPullSummarySchema),
+export const ListGitHubPullsResponseSchema = z.object({
+  pulls: z.array(GitHubPullSummarySchema),
 });
-export type ListGithubPullsResponse = z.infer<typeof ListGithubPullsResponseSchema>;
+export type ListGitHubPullsResponse = z.infer<typeof ListGitHubPullsResponseSchema>;
 
-export const GithubPullDetailSchema = GithubPullSummarySchema.extend({
+export const GitHubPullDetailSchema = GitHubPullSummarySchema.extend({
   body: z.string(),
   state: z.string(),
   merged: z.boolean(),
@@ -2960,9 +2962,9 @@ export const GithubPullDetailSchema = GithubPullSummarySchema.extend({
   deletions: z.number().int(),
   changedFiles: z.number().int(),
 });
-export type GithubPullDetail = z.infer<typeof GithubPullDetailSchema>;
+export type GitHubPullDetail = z.infer<typeof GitHubPullDetailSchema>;
 
-export const GithubPullFileSchema = z.object({
+export const GitHubPullFileSchema = z.object({
   filename: z.string(),
   status: z.string(),
   additions: z.number().int(),
@@ -2973,14 +2975,14 @@ export const GithubPullFileSchema = z.object({
   /** Prior path when `status === 'renamed'`. */
   previousFilename: z.string().optional(),
 });
-export type GithubPullFile = z.infer<typeof GithubPullFileSchema>;
+export type GitHubPullFile = z.infer<typeof GitHubPullFileSchema>;
 
-export const ListGithubPullFilesResponseSchema = z.object({
-  files: z.array(GithubPullFileSchema),
+export const ListGitHubPullFilesResponseSchema = z.object({
+  files: z.array(GitHubPullFileSchema),
 });
-export type ListGithubPullFilesResponse = z.infer<typeof ListGithubPullFilesResponseSchema>;
+export type ListGitHubPullFilesResponse = z.infer<typeof ListGitHubPullFilesResponseSchema>;
 
-export const GithubPullCommentSchema = z.object({
+export const GitHubPullCommentSchema = z.object({
   id: z.number(),
   author: z.string(),
   body: z.string(),
@@ -2990,46 +2992,46 @@ export const GithubPullCommentSchema = z.object({
   /** For review comments: the file path being commented on. */
   path: z.string().optional(),
 });
-export type GithubPullComment = z.infer<typeof GithubPullCommentSchema>;
+export type GitHubPullComment = z.infer<typeof GitHubPullCommentSchema>;
 
-export const ListGithubPullCommentsResponseSchema = z.object({
-  comments: z.array(GithubPullCommentSchema),
+export const ListGitHubPullCommentsResponseSchema = z.object({
+  comments: z.array(GitHubPullCommentSchema),
 });
-export type ListGithubPullCommentsResponse = z.infer<typeof ListGithubPullCommentsResponseSchema>;
+export type ListGitHubPullCommentsResponse = z.infer<typeof ListGitHubPullCommentsResponseSchema>;
 
-export const GithubPullDiffResponseSchema = z.object({
+export const GitHubPullDiffResponseSchema = z.object({
   number: z.number().int(),
   diff: z.string(),
 });
-export type GithubPullDiffResponse = z.infer<typeof GithubPullDiffResponseSchema>;
+export type GitHubPullDiffResponse = z.infer<typeof GitHubPullDiffResponseSchema>;
 
-export const GithubCreateCommentRequestSchema = z.object({
+export const GitHubCreateCommentRequestSchema = z.object({
   body: z.string().min(1),
 });
-export type GithubCreateCommentRequest = z.infer<typeof GithubCreateCommentRequestSchema>;
+export type GitHubCreateCommentRequest = z.infer<typeof GitHubCreateCommentRequestSchema>;
 
-export const GithubCreateCommentResponseSchema = z.object({
+export const GitHubCreateCommentResponseSchema = z.object({
   id: z.number(),
   url: z.string(),
 });
-export type GithubCreateCommentResponse = z.infer<typeof GithubCreateCommentResponseSchema>;
+export type GitHubCreateCommentResponse = z.infer<typeof GitHubCreateCommentResponseSchema>;
 
-export const GithubCreatePullRequestSchema = z.object({
+export const GitHubCreatePullRequestSchema = z.object({
   title: z.string().min(1),
   body: z.string().optional(),
   head: z.string().min(1),
   base: z.string().min(1),
   draft: z.boolean().optional(),
 });
-export type GithubCreatePullRequest = z.infer<typeof GithubCreatePullRequestSchema>;
+export type GitHubCreatePullRequest = z.infer<typeof GitHubCreatePullRequestSchema>;
 
-export const GithubCreatePullResponseSchema = z.object({
+export const GitHubCreatePullResponseSchema = z.object({
   number: z.number().int(),
   url: z.string(),
 });
-export type GithubCreatePullResponse = z.infer<typeof GithubCreatePullResponseSchema>;
+export type GitHubCreatePullResponse = z.infer<typeof GitHubCreatePullResponseSchema>;
 
-export const GithubWorkflowRunSchema = z.object({
+export const GitHubWorkflowRunSchema = z.object({
   id: z.number(),
   name: z.string(),
   status: z.string(),
@@ -3037,14 +3039,14 @@ export const GithubWorkflowRunSchema = z.object({
   createdAt: z.string(),
   url: z.string(),
 });
-export type GithubWorkflowRun = z.infer<typeof GithubWorkflowRunSchema>;
+export type GitHubWorkflowRun = z.infer<typeof GitHubWorkflowRunSchema>;
 
-export const ListGithubWorkflowRunsResponseSchema = z.object({
-  runs: z.array(GithubWorkflowRunSchema),
+export const ListGitHubWorkflowRunsResponseSchema = z.object({
+  runs: z.array(GitHubWorkflowRunSchema),
 });
-export type ListGithubWorkflowRunsResponse = z.infer<typeof ListGithubWorkflowRunsResponseSchema>;
+export type ListGitHubWorkflowRunsResponse = z.infer<typeof ListGitHubWorkflowRunsResponseSchema>;
 
-export const GithubCheckStatusResponseSchema = z.object({
+export const GitHubCheckStatusResponseSchema = z.object({
   state: z.enum(['success', 'failure', 'pending', 'unknown']),
   checks: z.array(
     z.object({
@@ -3055,42 +3057,42 @@ export const GithubCheckStatusResponseSchema = z.object({
     }),
   ),
 });
-export type GithubCheckStatusResponse = z.infer<typeof GithubCheckStatusResponseSchema>;
+export type GitHubCheckStatusResponse = z.infer<typeof GitHubCheckStatusResponseSchema>;
 
 // ── GitHub tab: changes / sync / merge (per-project) ─────────────────
 
-export const GithubChangeKindSchema = z.enum([
+export const GitChangeKindSchema = z.enum([
   'modified',
   'added',
   'deleted',
   'renamed',
   'conflicted',
 ]);
-export type GithubChangeKind = z.infer<typeof GithubChangeKindSchema>;
+export type GitChangeKind = z.infer<typeof GitChangeKindSchema>;
 
-export const GithubWorkingChangeSchema = z.object({
+export const GitWorkingChangeSchema = z.object({
   /** Path relative to the checkout root, forward slashes. */
   path: z.string(),
   /** For renames: the previous path. */
   oldPath: z.string().optional(),
-  kind: GithubChangeKindSchema,
+  kind: GitChangeKindSchema,
   additions: z.number().int().optional(),
   deletions: z.number().int().optional(),
   binary: z.boolean().optional(),
 });
-export type GithubWorkingChange = z.infer<typeof GithubWorkingChangeSchema>;
+export type GitWorkingChange = z.infer<typeof GitWorkingChangeSchema>;
 
-export const GithubChangesResponseSchema = z.object({
-  changes: z.array(GithubWorkingChangeSchema),
+export const GitChangesResponseSchema = z.object({
+  changes: z.array(GitWorkingChangeSchema),
   /** Total number of changed files before the listing cap. */
   total: z.number().int(),
   truncated: z.boolean(),
 });
-export type GithubChangesResponse = z.infer<typeof GithubChangesResponseSchema>;
+export type GitChangesResponse = z.infer<typeof GitChangesResponseSchema>;
 
-export const GithubFileDiffResponseSchema = z.object({
+export const GitFileDiffResponseSchema = z.object({
   path: z.string(),
-  kind: GithubChangeKindSchema,
+  kind: GitChangeKindSchema,
   oldPath: z.string().optional(),
   binary: z.boolean(),
   truncated: z.boolean(),
@@ -3099,9 +3101,9 @@ export const GithubFileDiffResponseSchema = z.object({
   additions: z.number().int().optional(),
   deletions: z.number().int().optional(),
 });
-export type GithubFileDiffResponse = z.infer<typeof GithubFileDiffResponseSchema>;
+export type GitFileDiffResponse = z.infer<typeof GitFileDiffResponseSchema>;
 
-export const GithubDiscardRequestSchema = z
+export const GitDiscardRequestSchema = z
   .object({
     /** Specific files to restore to their last-saved state. */
     paths: z.array(z.string().min(1)).min(1).optional(),
@@ -3111,15 +3113,15 @@ export const GithubDiscardRequestSchema = z
   .refine((v) => Boolean(v.all) !== Boolean(v.paths?.length), {
     message: 'Pass exactly one of `paths` or `all`.',
   });
-export type GithubDiscardRequest = z.infer<typeof GithubDiscardRequestSchema>;
+export type GitDiscardRequest = z.infer<typeof GitDiscardRequestSchema>;
 
-export const GithubDiscardResponseSchema = z.object({
+export const GitDiscardResponseSchema = z.object({
   ok: z.literal(true),
   discarded: z.number().int(),
 });
-export type GithubDiscardResponse = z.infer<typeof GithubDiscardResponseSchema>;
+export type GitDiscardResponse = z.infer<typeof GitDiscardResponseSchema>;
 
-export const GithubLogEntrySchema = z.object({
+export const GitLogEntrySchema = z.object({
   sha: z.string(),
   shortSha: z.string(),
   author: z.string(),
@@ -3131,15 +3133,15 @@ export const GithubLogEntrySchema = z.object({
   additions: z.number().int(),
   deletions: z.number().int(),
 });
-export type GithubLogEntry = z.infer<typeof GithubLogEntrySchema>;
+export type GitLogEntry = z.infer<typeof GitLogEntrySchema>;
 
-export const GithubLogResponseSchema = z.object({
-  commits: z.array(GithubLogEntrySchema),
+export const GitLogResponseSchema = z.object({
+  commits: z.array(GitLogEntrySchema),
   hasMore: z.boolean(),
 });
-export type GithubLogResponse = z.infer<typeof GithubLogResponseSchema>;
+export type GitLogResponse = z.infer<typeof GitLogResponseSchema>;
 
-export const GithubCommitDetailResponseSchema = z.object({
+export const GitCommitDetailResponseSchema = z.object({
   sha: z.string(),
   shortSha: z.string(),
   author: z.string(),
@@ -3157,9 +3159,9 @@ export const GithubCommitDetailResponseSchema = z.object({
   diff: z.string().optional(),
   truncated: z.boolean(),
 });
-export type GithubCommitDetailResponse = z.infer<typeof GithubCommitDetailResponseSchema>;
+export type GitCommitDetailResponse = z.infer<typeof GitCommitDetailResponseSchema>;
 
-export const GithubSyncStateSchema = z.enum([
+export const GitSyncStateSchema = z.enum([
   'synced',
   'needs-save',
   'conflicts',
@@ -3167,10 +3169,10 @@ export const GithubSyncStateSchema = z.enum([
   'offline',
   'error',
 ]);
-export type GithubSyncState = z.infer<typeof GithubSyncStateSchema>;
+export type GitSyncState = z.infer<typeof GitSyncStateSchema>;
 
-export const GithubSyncResponseSchema = z.object({
-  state: GithubSyncStateSchema,
+export const GitSyncResponseSchema = z.object({
+  state: GitSyncStateSchema,
   /** Commits received from GitHub this sync. */
   pulled: z.number().int(),
   /** Commits sent to GitHub this sync. */
@@ -3182,29 +3184,29 @@ export const GithubSyncResponseSchema = z.object({
   /** Human-readable detail for `state: 'error'`. */
   message: z.string().optional(),
 });
-export type GithubSyncResponse = z.infer<typeof GithubSyncResponseSchema>;
+export type GitSyncResponse = z.infer<typeof GitSyncResponseSchema>;
 
-export const GithubConflictKindSchema = z.enum([
+export const GitConflictKindSchema = z.enum([
   'both-modified',
   'both-added',
   'deleted-by-us',
   'deleted-by-them',
 ]);
-export type GithubConflictKind = z.infer<typeof GithubConflictKindSchema>;
+export type GitConflictKind = z.infer<typeof GitConflictKindSchema>;
 
-export const GithubConflictFileSchema = z.object({
+export const GitConflictFileSchema = z.object({
   path: z.string(),
-  kind: GithubConflictKindSchema,
+  kind: GitConflictKindSchema,
 });
-export type GithubConflictFile = z.infer<typeof GithubConflictFileSchema>;
+export type GitConflictFile = z.infer<typeof GitConflictFileSchema>;
 
-export const GithubMergeStateResponseSchema = z.object({
+export const GitMergeStateResponseSchema = z.object({
   inMerge: z.boolean(),
-  conflicts: z.array(GithubConflictFileSchema),
+  conflicts: z.array(GitConflictFileSchema),
 });
-export type GithubMergeStateResponse = z.infer<typeof GithubMergeStateResponseSchema>;
+export type GitMergeStateResponse = z.infer<typeof GitMergeStateResponseSchema>;
 
-export const GithubConflictVersionsResponseSchema = z.object({
+export const GitConflictVersionsResponseSchema = z.object({
   path: z.string(),
   /** Common-ancestor content. Absent when both sides added the file. */
   base: z.string().optional(),
@@ -3216,9 +3218,9 @@ export const GithubConflictVersionsResponseSchema = z.object({
   /** True when a side exceeded the content cap — contents omitted. */
   tooLarge: z.boolean(),
 });
-export type GithubConflictVersionsResponse = z.infer<typeof GithubConflictVersionsResponseSchema>;
+export type GitConflictVersionsResponse = z.infer<typeof GitConflictVersionsResponseSchema>;
 
-export const GithubResolveConflictRequestSchema = z
+export const GitResolveConflictRequestSchema = z
   .object({
     path: z.string().min(1),
     choice: z.enum(['mine', 'theirs', 'custom']),
@@ -3228,47 +3230,170 @@ export const GithubResolveConflictRequestSchema = z
   .refine((v) => v.choice !== 'custom' || v.content !== undefined, {
     message: '`content` is required when choice is `custom`.',
   });
-export type GithubResolveConflictRequest = z.infer<typeof GithubResolveConflictRequestSchema>;
+export type GitResolveConflictRequest = z.infer<typeof GitResolveConflictRequestSchema>;
 
-export const GithubResolveConflictResponseSchema = z.object({
+export const GitResolveConflictResponseSchema = z.object({
   ok: z.literal(true),
   /** Conflicted files still unresolved after this resolution. */
   remaining: z.number().int(),
 });
-export type GithubResolveConflictResponse = z.infer<typeof GithubResolveConflictResponseSchema>;
+export type GitResolveConflictResponse = z.infer<typeof GitResolveConflictResponseSchema>;
 
-export const GithubCompleteMergeRequestSchema = z.object({
+export const GitCompleteMergeRequestSchema = z.object({
   message: z.string().optional(),
 });
-export type GithubCompleteMergeRequest = z.infer<typeof GithubCompleteMergeRequestSchema>;
+export type GitCompleteMergeRequest = z.infer<typeof GitCompleteMergeRequestSchema>;
 
-export const GithubCompleteMergeResponseSchema = z.object({
+export const GitCompleteMergeResponseSchema = z.object({
   ok: z.literal(true),
   sha: z.string(),
 });
-export type GithubCompleteMergeResponse = z.infer<typeof GithubCompleteMergeResponseSchema>;
+export type GitCompleteMergeResponse = z.infer<typeof GitCompleteMergeResponseSchema>;
 
-export const GithubAbandonMergeResponseSchema = z.object({
+export const GitAbandonMergeResponseSchema = z.object({
   ok: z.literal(true),
 });
-export type GithubAbandonMergeResponse = z.infer<typeof GithubAbandonMergeResponseSchema>;
+export type GitAbandonMergeResponse = z.infer<typeof GitAbandonMergeResponseSchema>;
 
-export const GithubSuggestMessageResponseSchema = z.object({
+export const GitSuggestMessageResponseSchema = z.object({
   message: z.string(),
 });
-export type GithubSuggestMessageResponse = z.infer<typeof GithubSuggestMessageResponseSchema>;
+export type GitSuggestMessageResponse = z.infer<typeof GitSuggestMessageResponseSchema>;
 
-export const GithubAiMergeRequestSchema = z.object({
+export const GitAiMergeRequestSchema = z.object({
   path: z.string().min(1),
 });
-export type GithubAiMergeRequest = z.infer<typeof GithubAiMergeRequestSchema>;
+export type GitAiMergeRequest = z.infer<typeof GitAiMergeRequestSchema>;
 
-export const GithubAiMergeResponseSchema = z.object({
+export const GitAiMergeResponseSchema = z.object({
   path: z.string(),
   /** Proposed merged file content — a preview, never auto-applied. */
   merged: z.string(),
 });
-export type GithubAiMergeResponse = z.infer<typeof GithubAiMergeResponseSchema>;
+export type GitAiMergeResponse = z.infer<typeof GitAiMergeResponseSchema>;
+
+// ── Code review (git change-set reviews) ────────────────────────────
+// Pure local-git feature (no GitHub API involved), hence the unprefixed
+// CodeReview* names — the SecurityFinding* precedent for project routes.
+
+export const CodeReviewKindSchema = z.enum(['commit', 'pr']);
+export type CodeReviewKind = z.infer<typeof CodeReviewKindSchema>;
+
+/**
+ * Persisted lifecycle only. "Paused / needs attention" is a live *task*
+ * condition derived at read time (see {@link CodeReviewSchema}), never
+ * persisted — the settle hook is the record's single writer after start.
+ */
+export const CodeReviewStatusSchema = z.enum(['running', 'complete', 'canceled', 'error']);
+export type CodeReviewStatus = z.infer<typeof CodeReviewStatusSchema>;
+
+/** The durable per-project review record (code-reviews.json rows). */
+export const CodeReviewRecordSchema = z.object({
+  /** Sortable id: `{kind}-{YYYYMMDD-HHmmss}-{4 hex}`. */
+  id: z.string().min(1),
+  kind: CodeReviewKindSchema,
+  status: CodeReviewStatusSchema,
+  createdAt: z.string(),
+  settledAt: z.string().optional(),
+  outcome: z.enum(['complete', 'canceled']).optional(),
+  /** Status `error` only — why the review record was abandoned. */
+  error: z.string().optional(),
+  /** The review task, as "{projectId}/{num}". */
+  taskRef: z.string().min(1),
+  /** Reviewer gezel the task was assigned to. */
+  gezelId: z.string().optional(),
+  /** Branch under review at snapshot time ("(detached)" for a commit review off-branch). */
+  branch: z.string(),
+  headSha: z.string(),
+  /** pr: "origin/<defaultBranch>"; commit: "HEAD". */
+  baseRef: z.string().optional(),
+  /** pr: the merge-base sha. */
+  baseSha: z.string().optional(),
+  filesChanged: z.number().int(),
+  additions: z.number().int().optional(),
+  deletions: z.number().int().optional(),
+  /** pr only — commits on the branch beyond the base. */
+  commitCount: z.number().int().optional(),
+  /** File list hit MAX_CHANGE_ENTRIES. */
+  filesTruncated: z.boolean(),
+  /** changes.diff hit the review diff cap. */
+  diffTruncated: z.boolean(),
+  /** Artifact paths (relative to the project artifacts drawer). */
+  manifestPath: z.string(),
+  diffPath: z.string(),
+  reportPath: z.string(),
+});
+export type CodeReviewRecord = z.infer<typeof CodeReviewRecordSchema>;
+
+/** Wire shape: the record enriched with live task-derived fields (best-effort). */
+export const CodeReviewSchema = CodeReviewRecordSchema.extend({
+  taskStatus: z.enum(['draft', 'paused', 'active', 'complete', 'canceled']).optional(),
+  /** True when the review task is paused (e.g. gate maxAttempts exhausted). */
+  needsAttention: z.boolean().optional(),
+  activeStepName: z.string().optional(),
+  stepsTotal: z.number().int().optional(),
+  stepsComplete: z.number().int().optional(),
+  assigneeName: z.string().optional(),
+});
+export type CodeReview = z.infer<typeof CodeReviewSchema>;
+
+export const StartCodeReviewRequestSchema = z.object({
+  kind: CodeReviewKindSchema,
+});
+export type StartCodeReviewRequest = z.infer<typeof StartCodeReviewRequestSchema>;
+
+export const StartCodeReviewResponseSchema = z.object({
+  ok: z.literal(true),
+  review: CodeReviewSchema,
+});
+export type StartCodeReviewResponse = z.infer<typeof StartCodeReviewResponseSchema>;
+
+export const ListCodeReviewsResponseSchema = z.object({
+  reviews: z.array(CodeReviewSchema),
+});
+export type ListCodeReviewsResponse = z.infer<typeof ListCodeReviewsResponseSchema>;
+
+export const CodeReviewResponseSchema = CodeReviewSchema;
+export type CodeReviewResponse = z.infer<typeof CodeReviewResponseSchema>;
+
+export const CancelCodeReviewResponseSchema = z.object({
+  ok: z.literal(true),
+  review: CodeReviewSchema,
+});
+export type CancelCodeReviewResponse = z.infer<typeof CancelCodeReviewResponseSchema>;
+
+/**
+ * The snapshot manifest written to `reviews/<reviewId>/manifest.json` in
+ * the project artifacts drawer — the reviewer gezel's stable input. The
+ * unified diff lives beside it (`diffFile`); for branch reviews the
+ * commit list is embedded here (no separate commits file).
+ */
+export const CodeReviewManifestSchema = z.object({
+  version: z.literal(1),
+  reviewId: z.string().min(1),
+  kind: CodeReviewKindSchema,
+  projectId: z.string().min(1),
+  createdAt: z.string(),
+  branch: z.string(),
+  headSha: z.string(),
+  /** pr: "origin/<defaultBranch>"; commit: "HEAD". */
+  baseRef: z.string(),
+  /** pr: merge-base sha; commit: the head sha itself. */
+  baseSha: z.string(),
+  files: z.array(GitWorkingChangeSchema),
+  totalFiles: z.number().int(),
+  filesTruncated: z.boolean(),
+  /** Sibling diff file name (always "changes.diff"). */
+  diffFile: z.string(),
+  diffChars: z.number().int(),
+  diffTruncated: z.boolean(),
+  /** pr only — newest first, capped at 200. */
+  commits: z.array(GitLogEntrySchema).optional(),
+  commitsTruncated: z.boolean().optional(),
+  /** Human-readable caveats (offline fetch, binary files excluded, …). */
+  notes: z.array(z.string()),
+});
+export type CodeReviewManifest = z.infer<typeof CodeReviewManifestSchema>;
 
 export const ProjectResponseSchema = ProjectDetailSchema;
 
@@ -4608,7 +4733,7 @@ export type RunGitResponse = z.infer<typeof RunGitResponseSchema>;
  * `deviceCode` every `interval` seconds until either `expiresIn`
  * elapses or the user completes the auth in their browser.
  */
-export const GithubLoginStartResponseSchema = z.object({
+export const GitHubLoginStartResponseSchema = z.object({
   deviceCode: z.string(),
   userCode: z.string(),
   verificationUri: z.string(),
@@ -4617,19 +4742,19 @@ export const GithubLoginStartResponseSchema = z.object({
   /** Total seconds the user has to complete the flow. */
   expiresIn: z.number().int().positive(),
 });
-export type GithubLoginStartResponse = z.infer<typeof GithubLoginStartResponseSchema>;
+export type GitHubLoginStartResponse = z.infer<typeof GitHubLoginStartResponseSchema>;
 
-export const GithubIdentitySchema = z.object({
+export const GitHubIdentitySchema = z.object({
   login: z.string(),
   name: z.string().optional(),
   avatarUrl: z.string().optional(),
 });
-export type GithubIdentity = z.infer<typeof GithubIdentitySchema>;
+export type GitHubIdentity = z.infer<typeof GitHubIdentitySchema>;
 
-export const GithubLoginPollRequestSchema = z.object({
+export const GitHubLoginPollRequestSchema = z.object({
   deviceCode: z.string(),
 });
-export type GithubLoginPollRequest = z.infer<typeof GithubLoginPollRequestSchema>;
+export type GitHubLoginPollRequest = z.infer<typeof GitHubLoginPollRequestSchema>;
 
 /**
  * Outcome of a single poll. `pending` and `slow_down` mean keep polling;
@@ -4637,14 +4762,14 @@ export type GithubLoginPollRequest = z.infer<typeof GithubLoginPollRequestSchema
  * fetched identity (and the token has been persisted to the SecretStore
  * by the time this returns).
  */
-export const GithubLoginPollResponseSchema = z.discriminatedUnion('status', [
+export const GitHubLoginPollResponseSchema = z.discriminatedUnion('status', [
   z.object({ status: z.literal('pending') }),
   z.object({ status: z.literal('slow_down') }),
   z.object({ status: z.literal('expired') }),
   z.object({ status: z.literal('denied'), error: z.string().optional() }),
   z.object({
     status: z.literal('success'),
-    identity: GithubIdentitySchema,
+    identity: GitHubIdentitySchema,
     scopes: z.array(z.string()).optional(),
   }),
   z.object({
@@ -4652,13 +4777,13 @@ export const GithubLoginPollResponseSchema = z.discriminatedUnion('status', [
     error: z.string(),
   }),
 ]);
-export type GithubLoginPollResponse = z.infer<typeof GithubLoginPollResponseSchema>;
+export type GitHubLoginPollResponse = z.infer<typeof GitHubLoginPollResponseSchema>;
 
-export const GithubIdentityResponseSchema = z.union([
-  GithubIdentitySchema.extend({ signedIn: z.literal(true) }),
+export const GitHubIdentityResponseSchema = z.union([
+  GitHubIdentitySchema.extend({ signedIn: z.literal(true) }),
   z.object({ signedIn: z.literal(false) }),
 ]);
-export type GithubIdentityResponse = z.infer<typeof GithubIdentityResponseSchema>;
+export type GitHubIdentityResponse = z.infer<typeof GitHubIdentityResponseSchema>;
 
 // ── GitHub repo listing (authenticated user's accessible repos) ──────
 
@@ -4668,28 +4793,28 @@ export type GithubIdentityResponse = z.infer<typeof GithubIdentityResponseSchema
  * full name (owner/repo), HTTPS clone URL, optional description, and
  * a privacy flag so the UI can render a small lock for private repos.
  */
-export const GithubRepoSummarySchema = z.object({
+export const GitHubRepoSummarySchema = z.object({
   fullName: z.string(),
   url: z.string(),
   description: z.string().optional(),
   private: z.boolean().optional(),
   pushedAt: z.string().optional(),
 });
-export type GithubRepoSummary = z.infer<typeof GithubRepoSummarySchema>;
+export type GitHubRepoSummary = z.infer<typeof GitHubRepoSummarySchema>;
 
-export const GithubReposResponseSchema = z.object({
-  repos: z.array(GithubRepoSummarySchema),
+export const GitHubReposResponseSchema = z.object({
+  repos: z.array(GitHubRepoSummarySchema),
 });
-export type GithubReposResponse = z.infer<typeof GithubReposResponseSchema>;
+export type GitHubReposResponse = z.infer<typeof GitHubReposResponseSchema>;
 
 // ── GitHub repo preview (URL → metadata + README) ──────────────────────
 
-export const GithubRepoPreviewRequestSchema = z.object({
+export const GitHubRepoPreviewRequestSchema = z.object({
   url: z.string(),
 });
-export type GithubRepoPreviewRequest = z.infer<typeof GithubRepoPreviewRequestSchema>;
+export type GitHubRepoPreviewRequest = z.infer<typeof GitHubRepoPreviewRequestSchema>;
 
-export const GithubRepoPreviewResponseSchema = z.object({
+export const GitHubRepoPreviewResponseSchema = z.object({
   owner: z.string(),
   repo: z.string(),
   canonicalUrl: z.string(),
@@ -4701,7 +4826,7 @@ export const GithubRepoPreviewResponseSchema = z.object({
   readme: z.string(),
   readmeTruncated: z.boolean(),
 });
-export type GithubRepoPreviewResponse = z.infer<typeof GithubRepoPreviewResponseSchema>;
+export type GitHubRepoPreviewResponse = z.infer<typeof GitHubRepoPreviewResponseSchema>;
 
 // ── Project about/mission preview (LLM draft from repo) ────────────────
 
@@ -5456,3 +5581,235 @@ export const InvokeSessionToolResponseSchema = z.object({
   images: z.array(z.object({ base64: z.string(), mimeType: z.string() })),
 });
 export type InvokeSessionToolResponse = z.infer<typeof InvokeSessionToolResponseSchema>;
+
+// ── Deprecated aliases — Git/GitHub naming realignment ──
+// Local-git wire shapes were renamed Github* → Git* (host-agnostic), and
+// GitHub-web-service shapes Github* → GitHub* (capital H). These aliases keep
+// the published surface compiling; removal is a future breaking release.
+
+/** @deprecated Use {@link GitStatusResponseSchema}. */
+export const GithubStatusResponseSchema = GitStatusResponseSchema;
+/** @deprecated Use {@link GitStatusResponse}. */
+export type GithubStatusResponse = GitStatusResponse;
+/** @deprecated Use {@link GitCloneResponseSchema}. */
+export const GithubCloneResponseSchema = GitCloneResponseSchema;
+/** @deprecated Use {@link GitCloneResponse}. */
+export type GithubCloneResponse = GitCloneResponse;
+/** @deprecated Use {@link GitBranchSwitchRequestSchema}. */
+export const GithubBranchSwitchRequestSchema = GitBranchSwitchRequestSchema;
+/** @deprecated Use {@link GitBranchSwitchRequest}. */
+export type GithubBranchSwitchRequest = GitBranchSwitchRequest;
+/** @deprecated Use {@link GitBranchesResponseSchema}. */
+export const GithubBranchesResponseSchema = GitBranchesResponseSchema;
+/** @deprecated Use {@link GitBranchesResponse}. */
+export type GithubBranchesResponse = GitBranchesResponse;
+/** @deprecated Use {@link GitFetchResponseSchema}. */
+export const GithubFetchResponseSchema = GitFetchResponseSchema;
+/** @deprecated Use {@link GitFetchResponse}. */
+export type GithubFetchResponse = GitFetchResponse;
+/** @deprecated Use {@link GitCommitRequestSchema}. */
+export const GithubCommitRequestSchema = GitCommitRequestSchema;
+/** @deprecated Use {@link GitCommitRequest}. */
+export type GithubCommitRequest = GitCommitRequest;
+/** @deprecated Use {@link GitCommitResponseSchema}. */
+export const GithubCommitResponseSchema = GitCommitResponseSchema;
+/** @deprecated Use {@link GitCommitResponse}. */
+export type GithubCommitResponse = GitCommitResponse;
+/** @deprecated Use {@link GitPushResponseSchema}. */
+export const GithubPushResponseSchema = GitPushResponseSchema;
+/** @deprecated Use {@link GitPushResponse}. */
+export type GithubPushResponse = GitPushResponse;
+/** @deprecated Use {@link GitChangeKindSchema}. */
+export const GithubChangeKindSchema = GitChangeKindSchema;
+/** @deprecated Use {@link GitChangeKind}. */
+export type GithubChangeKind = GitChangeKind;
+/** @deprecated Use {@link GitWorkingChangeSchema}. */
+export const GithubWorkingChangeSchema = GitWorkingChangeSchema;
+/** @deprecated Use {@link GitWorkingChange}. */
+export type GithubWorkingChange = GitWorkingChange;
+/** @deprecated Use {@link GitChangesResponseSchema}. */
+export const GithubChangesResponseSchema = GitChangesResponseSchema;
+/** @deprecated Use {@link GitChangesResponse}. */
+export type GithubChangesResponse = GitChangesResponse;
+/** @deprecated Use {@link GitFileDiffResponseSchema}. */
+export const GithubFileDiffResponseSchema = GitFileDiffResponseSchema;
+/** @deprecated Use {@link GitFileDiffResponse}. */
+export type GithubFileDiffResponse = GitFileDiffResponse;
+/** @deprecated Use {@link GitDiscardRequestSchema}. */
+export const GithubDiscardRequestSchema = GitDiscardRequestSchema;
+/** @deprecated Use {@link GitDiscardRequest}. */
+export type GithubDiscardRequest = GitDiscardRequest;
+/** @deprecated Use {@link GitDiscardResponseSchema}. */
+export const GithubDiscardResponseSchema = GitDiscardResponseSchema;
+/** @deprecated Use {@link GitDiscardResponse}. */
+export type GithubDiscardResponse = GitDiscardResponse;
+/** @deprecated Use {@link GitLogEntrySchema}. */
+export const GithubLogEntrySchema = GitLogEntrySchema;
+/** @deprecated Use {@link GitLogEntry}. */
+export type GithubLogEntry = GitLogEntry;
+/** @deprecated Use {@link GitLogResponseSchema}. */
+export const GithubLogResponseSchema = GitLogResponseSchema;
+/** @deprecated Use {@link GitLogResponse}. */
+export type GithubLogResponse = GitLogResponse;
+/** @deprecated Use {@link GitCommitDetailResponseSchema}. */
+export const GithubCommitDetailResponseSchema = GitCommitDetailResponseSchema;
+/** @deprecated Use {@link GitCommitDetailResponse}. */
+export type GithubCommitDetailResponse = GitCommitDetailResponse;
+/** @deprecated Use {@link GitSyncStateSchema}. */
+export const GithubSyncStateSchema = GitSyncStateSchema;
+/** @deprecated Use {@link GitSyncState}. */
+export type GithubSyncState = GitSyncState;
+/** @deprecated Use {@link GitSyncResponseSchema}. */
+export const GithubSyncResponseSchema = GitSyncResponseSchema;
+/** @deprecated Use {@link GitSyncResponse}. */
+export type GithubSyncResponse = GitSyncResponse;
+/** @deprecated Use {@link GitConflictKindSchema}. */
+export const GithubConflictKindSchema = GitConflictKindSchema;
+/** @deprecated Use {@link GitConflictKind}. */
+export type GithubConflictKind = GitConflictKind;
+/** @deprecated Use {@link GitConflictFileSchema}. */
+export const GithubConflictFileSchema = GitConflictFileSchema;
+/** @deprecated Use {@link GitConflictFile}. */
+export type GithubConflictFile = GitConflictFile;
+/** @deprecated Use {@link GitMergeStateResponseSchema}. */
+export const GithubMergeStateResponseSchema = GitMergeStateResponseSchema;
+/** @deprecated Use {@link GitMergeStateResponse}. */
+export type GithubMergeStateResponse = GitMergeStateResponse;
+/** @deprecated Use {@link GitConflictVersionsResponseSchema}. */
+export const GithubConflictVersionsResponseSchema = GitConflictVersionsResponseSchema;
+/** @deprecated Use {@link GitConflictVersionsResponse}. */
+export type GithubConflictVersionsResponse = GitConflictVersionsResponse;
+/** @deprecated Use {@link GitResolveConflictRequestSchema}. */
+export const GithubResolveConflictRequestSchema = GitResolveConflictRequestSchema;
+/** @deprecated Use {@link GitResolveConflictRequest}. */
+export type GithubResolveConflictRequest = GitResolveConflictRequest;
+/** @deprecated Use {@link GitResolveConflictResponseSchema}. */
+export const GithubResolveConflictResponseSchema = GitResolveConflictResponseSchema;
+/** @deprecated Use {@link GitResolveConflictResponse}. */
+export type GithubResolveConflictResponse = GitResolveConflictResponse;
+/** @deprecated Use {@link GitCompleteMergeRequestSchema}. */
+export const GithubCompleteMergeRequestSchema = GitCompleteMergeRequestSchema;
+/** @deprecated Use {@link GitCompleteMergeRequest}. */
+export type GithubCompleteMergeRequest = GitCompleteMergeRequest;
+/** @deprecated Use {@link GitCompleteMergeResponseSchema}. */
+export const GithubCompleteMergeResponseSchema = GitCompleteMergeResponseSchema;
+/** @deprecated Use {@link GitCompleteMergeResponse}. */
+export type GithubCompleteMergeResponse = GitCompleteMergeResponse;
+/** @deprecated Use {@link GitAbandonMergeResponseSchema}. */
+export const GithubAbandonMergeResponseSchema = GitAbandonMergeResponseSchema;
+/** @deprecated Use {@link GitAbandonMergeResponse}. */
+export type GithubAbandonMergeResponse = GitAbandonMergeResponse;
+/** @deprecated Use {@link GitSuggestMessageResponseSchema}. */
+export const GithubSuggestMessageResponseSchema = GitSuggestMessageResponseSchema;
+/** @deprecated Use {@link GitSuggestMessageResponse}. */
+export type GithubSuggestMessageResponse = GitSuggestMessageResponse;
+/** @deprecated Use {@link GitAiMergeRequestSchema}. */
+export const GithubAiMergeRequestSchema = GitAiMergeRequestSchema;
+/** @deprecated Use {@link GitAiMergeRequest}. */
+export type GithubAiMergeRequest = GitAiMergeRequest;
+/** @deprecated Use {@link GitAiMergeResponseSchema}. */
+export const GithubAiMergeResponseSchema = GitAiMergeResponseSchema;
+/** @deprecated Use {@link GitAiMergeResponse}. */
+export type GithubAiMergeResponse = GitAiMergeResponse;
+/** @deprecated Use {@link GitHubAuthMetaSchema}. */
+export const GithubAuthMetaSchema = GitHubAuthMetaSchema;
+/** @deprecated Use {@link GitHubAuthMeta}. */
+export type GithubAuthMeta = GitHubAuthMeta;
+/** @deprecated Use {@link GitHubPullSummarySchema}. */
+export const GithubPullSummarySchema = GitHubPullSummarySchema;
+/** @deprecated Use {@link GitHubPullSummary}. */
+export type GithubPullSummary = GitHubPullSummary;
+/** @deprecated Use {@link GitHubPullDetailSchema}. */
+export const GithubPullDetailSchema = GitHubPullDetailSchema;
+/** @deprecated Use {@link GitHubPullDetail}. */
+export type GithubPullDetail = GitHubPullDetail;
+/** @deprecated Use {@link GitHubPullFileSchema}. */
+export const GithubPullFileSchema = GitHubPullFileSchema;
+/** @deprecated Use {@link GitHubPullFile}. */
+export type GithubPullFile = GitHubPullFile;
+/** @deprecated Use {@link GitHubPullCommentSchema}. */
+export const GithubPullCommentSchema = GitHubPullCommentSchema;
+/** @deprecated Use {@link GitHubPullComment}. */
+export type GithubPullComment = GitHubPullComment;
+/** @deprecated Use {@link GitHubPullDiffResponseSchema}. */
+export const GithubPullDiffResponseSchema = GitHubPullDiffResponseSchema;
+/** @deprecated Use {@link GitHubPullDiffResponse}. */
+export type GithubPullDiffResponse = GitHubPullDiffResponse;
+/** @deprecated Use {@link GitHubCreateCommentRequestSchema}. */
+export const GithubCreateCommentRequestSchema = GitHubCreateCommentRequestSchema;
+/** @deprecated Use {@link GitHubCreateCommentRequest}. */
+export type GithubCreateCommentRequest = GitHubCreateCommentRequest;
+/** @deprecated Use {@link GitHubCreateCommentResponseSchema}. */
+export const GithubCreateCommentResponseSchema = GitHubCreateCommentResponseSchema;
+/** @deprecated Use {@link GitHubCreateCommentResponse}. */
+export type GithubCreateCommentResponse = GitHubCreateCommentResponse;
+/** @deprecated Use {@link GitHubCreatePullRequestSchema}. */
+export const GithubCreatePullRequestSchema = GitHubCreatePullRequestSchema;
+/** @deprecated Use {@link GitHubCreatePullRequest}. */
+export type GithubCreatePullRequest = GitHubCreatePullRequest;
+/** @deprecated Use {@link GitHubCreatePullResponseSchema}. */
+export const GithubCreatePullResponseSchema = GitHubCreatePullResponseSchema;
+/** @deprecated Use {@link GitHubCreatePullResponse}. */
+export type GithubCreatePullResponse = GitHubCreatePullResponse;
+/** @deprecated Use {@link GitHubWorkflowRunSchema}. */
+export const GithubWorkflowRunSchema = GitHubWorkflowRunSchema;
+/** @deprecated Use {@link GitHubWorkflowRun}. */
+export type GithubWorkflowRun = GitHubWorkflowRun;
+/** @deprecated Use {@link GitHubCheckStatusResponseSchema}. */
+export const GithubCheckStatusResponseSchema = GitHubCheckStatusResponseSchema;
+/** @deprecated Use {@link GitHubCheckStatusResponse}. */
+export type GithubCheckStatusResponse = GitHubCheckStatusResponse;
+/** @deprecated Use {@link GitHubLoginStartResponseSchema}. */
+export const GithubLoginStartResponseSchema = GitHubLoginStartResponseSchema;
+/** @deprecated Use {@link GitHubLoginStartResponse}. */
+export type GithubLoginStartResponse = GitHubLoginStartResponse;
+/** @deprecated Use {@link GitHubIdentitySchema}. */
+export const GithubIdentitySchema = GitHubIdentitySchema;
+/** @deprecated Use {@link GitHubIdentity}. */
+export type GithubIdentity = GitHubIdentity;
+/** @deprecated Use {@link GitHubLoginPollRequestSchema}. */
+export const GithubLoginPollRequestSchema = GitHubLoginPollRequestSchema;
+/** @deprecated Use {@link GitHubLoginPollRequest}. */
+export type GithubLoginPollRequest = GitHubLoginPollRequest;
+/** @deprecated Use {@link GitHubLoginPollResponseSchema}. */
+export const GithubLoginPollResponseSchema = GitHubLoginPollResponseSchema;
+/** @deprecated Use {@link GitHubLoginPollResponse}. */
+export type GithubLoginPollResponse = GitHubLoginPollResponse;
+/** @deprecated Use {@link GitHubIdentityResponseSchema}. */
+export const GithubIdentityResponseSchema = GitHubIdentityResponseSchema;
+/** @deprecated Use {@link GitHubIdentityResponse}. */
+export type GithubIdentityResponse = GitHubIdentityResponse;
+/** @deprecated Use {@link GitHubRepoSummarySchema}. */
+export const GithubRepoSummarySchema = GitHubRepoSummarySchema;
+/** @deprecated Use {@link GitHubRepoSummary}. */
+export type GithubRepoSummary = GitHubRepoSummary;
+/** @deprecated Use {@link GitHubReposResponseSchema}. */
+export const GithubReposResponseSchema = GitHubReposResponseSchema;
+/** @deprecated Use {@link GitHubReposResponse}. */
+export type GithubReposResponse = GitHubReposResponse;
+/** @deprecated Use {@link GitHubRepoPreviewRequestSchema}. */
+export const GithubRepoPreviewRequestSchema = GitHubRepoPreviewRequestSchema;
+/** @deprecated Use {@link GitHubRepoPreviewRequest}. */
+export type GithubRepoPreviewRequest = GitHubRepoPreviewRequest;
+/** @deprecated Use {@link GitHubRepoPreviewResponseSchema}. */
+export const GithubRepoPreviewResponseSchema = GitHubRepoPreviewResponseSchema;
+/** @deprecated Use {@link GitHubRepoPreviewResponse}. */
+export type GithubRepoPreviewResponse = GitHubRepoPreviewResponse;
+/** @deprecated Use {@link ListGitHubPullsResponseSchema}. */
+export const ListGithubPullsResponseSchema = ListGitHubPullsResponseSchema;
+/** @deprecated Use {@link ListGitHubPullsResponse}. */
+export type ListGithubPullsResponse = ListGitHubPullsResponse;
+/** @deprecated Use {@link ListGitHubPullFilesResponseSchema}. */
+export const ListGithubPullFilesResponseSchema = ListGitHubPullFilesResponseSchema;
+/** @deprecated Use {@link ListGitHubPullFilesResponse}. */
+export type ListGithubPullFilesResponse = ListGitHubPullFilesResponse;
+/** @deprecated Use {@link ListGitHubPullCommentsResponseSchema}. */
+export const ListGithubPullCommentsResponseSchema = ListGitHubPullCommentsResponseSchema;
+/** @deprecated Use {@link ListGitHubPullCommentsResponse}. */
+export type ListGithubPullCommentsResponse = ListGitHubPullCommentsResponse;
+/** @deprecated Use {@link ListGitHubWorkflowRunsResponseSchema}. */
+export const ListGithubWorkflowRunsResponseSchema = ListGitHubWorkflowRunsResponseSchema;
+/** @deprecated Use {@link ListGitHubWorkflowRunsResponse}. */
+export type ListGithubWorkflowRunsResponse = ListGitHubWorkflowRunsResponse;
+/** @deprecated Use {@link GitHubCredentialSource}. */
+export type GithubCredentialSource = GitHubCredentialSource;

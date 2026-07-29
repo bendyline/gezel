@@ -1242,6 +1242,31 @@ html.embedded-chat #root {
   font-variant-numeric: tabular-nums;
   word-break: break-word;
 }
+.engine-pill-health-policy {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.3rem;
+}
+.engine-pill-health-mode .gz-key {
+  padding: 0.25rem 0.55rem;
+  font-size: 0.72rem;
+}
+.engine-pill-health-mode {
+  min-inline-size: 0;
+  margin: 0;
+}
+.engine-pill-health-policy-note,
+.engine-pill-health-policy-error {
+  font-size: 0.7rem;
+  line-height: 1.35;
+}
+.engine-pill-health-policy-note {
+  color: var(--text-muted);
+}
+.engine-pill-health-policy-error {
+  color: var(--danger);
+}
 .engine-pill-empty {
   margin: 0.5rem 0 0 0;
 }
@@ -6133,6 +6158,69 @@ button.danger {
 .settings-panel a,
 .settings-panel .home-link {
   font-family: var(--font-ui);
+}
+
+/* Machine health is a device-level policy: the mode is a prominent binary
+   choice, while the temperature remains a compact numeric setting beneath it. */
+.machine-health-settings {
+  margin-bottom: 2rem;
+}
+
+.machine-health-mode {
+  margin: 0.25rem 0 0.8rem;
+}
+
+.machine-health-mode .gz-key {
+  min-width: 8.5rem;
+}
+
+.machine-health-mode .gz-key small {
+  font-size: var(--text-xs);
+  font-weight: 400;
+  opacity: 0.8;
+}
+
+.machine-health-temperature-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 0.9rem;
+}
+
+.machine-health-temperature-row > label {
+  min-width: 9.5rem;
+  font-weight: 500;
+}
+
+.machine-health-temperature-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.machine-health-temperature-control input {
+  width: 5rem;
+}
+
+.settings-panel .machine-health-temperature-help {
+  margin: 0.3rem 0 0 10.25rem;
+}
+
+.settings-panel .machine-health-off-note,
+.settings-panel .machine-health-save-state {
+  margin: 0.5rem 0 0;
+}
+
+@media (max-width: 640px) {
+  .machine-health-temperature-row {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 0.35rem;
+  }
+
+  .settings-panel .machine-health-temperature-help {
+    margin-left: 0;
+  }
 }
 
 /* Connected apps read like a small permissions ledger: one app per ruled
@@ -16742,17 +16830,40 @@ a.license-button:hover {
   font-style: italic;
 }
 
+.terminal-output-viewport {
+  margin: 0;
+  border-radius: 0.4rem;
+  box-sizing: border-box;
+  max-width: 100%;
+  min-width: 0;
+  max-height: 24rem;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.terminal-output-viewport:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 60%, transparent);
+  outline-offset: 2px;
+}
+
 .terminal-output-body {
   margin: 0;
   padding: 0.5rem 0.75rem;
   background: var(--color-surface-2, #1c1c1c);
-  border-radius: 0.4rem;
   font-family: inherit;
   font-size: 0.8rem;
-  white-space: pre-wrap;
-  word-break: break-word;
-  max-height: 24rem;
-  overflow-y: auto;
+  line-height: 1.35;
+  tab-size: 4;
+  /* Terminal layout is spatial: tables, progress meters, and TUI-like
+   * output use columns deliberately. Preserve every line exactly and keep
+   * overflow inside its viewport instead of reflowing it as chat prose. */
+  white-space: pre;
+  overflow-wrap: normal;
+  word-break: normal;
+  box-sizing: border-box;
+  width: max-content;
+  min-width: 100%;
 }
 
 /* Light-mode terminal surfaces — `--color-*` tokens above are undefined
@@ -18443,10 +18554,170 @@ a.license-button:hover {
   padding: 1.5rem;
 }
 
+/* Code review sub-tab: kickoff cards + running status + history on the
+   left, the finished report on the right. Same two-pane grid family as
+   the Changes layout. */
+.gh-review-layout {
+  display: grid;
+  grid-template-columns: minmax(280px, 340px) 1fr;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  align-items: start;
+  min-height: 0;
+  flex: 1;
+}
+
+.gh-review-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-height: 0;
+}
+
+.gh-review-kickoff-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.gh-review-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  padding: 0.6rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.gh-review-card p {
+  margin: 0;
+}
+
+.gh-review-status-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  padding: 0.6rem 0.75rem;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.gh-review-status-running {
+  border-color: var(--accent);
+}
+
+.gh-review-status-attention {
+  border-color: var(--warning);
+  background: var(--warning-bg);
+}
+
+.gh-review-status-main {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  flex: 1;
+  min-width: 0;
+}
+
+.gh-review-stop {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  flex: 0 0 auto;
+}
+
+.gh-review-stop:hover:not(:disabled) {
+  color: var(--danger);
+}
+
+.gh-review-history {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.gh-review-history-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  text-align: left;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  padding: 0.4rem 0.6rem;
+}
+
+.gh-review-history-item.is-selected {
+  background: var(--surface);
+}
+
+.gh-review-history-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gh-review-outcome-chip {
+  flex: 0 0 auto;
+  padding: 0.05rem 0.4rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.68rem;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  background: var(--surface);
+}
+
+.gh-review-outcome-complete {
+  color: var(--diff-add);
+  background: var(--diff-add-bg);
+  border-color: transparent;
+}
+
+.gh-review-outcome-error {
+  color: var(--danger);
+  background: var(--danger-bg);
+  border-color: transparent;
+}
+
+.gh-review-report {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  padding: 0.75rem;
+  min-height: 12rem;
+  min-width: 0;
+  overflow-y: auto;
+}
+
+.gh-review-report-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.gh-review-rail-button {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+}
+
+.gh-review-rail-button:hover:not(:disabled) {
+  color: var(--accent);
+}
+
 /* Compact widths: stack the two-pane layouts. */
 @media (max-width: 860px) {
   .gh-changes-layout,
-  .gh-timeline-layout {
+  .gh-timeline-layout,
+  .gh-review-layout {
     grid-template-columns: 1fr;
     flex: 0 0 auto;
   }

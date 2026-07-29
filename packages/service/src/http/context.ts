@@ -9,8 +9,9 @@ import type { EngineBinaryRegistry } from '../engines/registry.js';
 import type { ModelFitnessManager } from '../fitness/manager.js';
 import type { JobManager } from '../folders/job-manager.js';
 import type { Store } from '../fs/store.js';
-import type { GitHubManager } from '../github/manager.js';
-import type { GithubPrs } from '../github/prs.js';
+import type { GitManager } from '../git/manager.js';
+import type { CodeReviewManager } from '../git/reviews.js';
+import type { GitHubPrs } from '../github/prs.js';
 import type { GrantManager } from '../grants/manager.js';
 import type { GrowthEngine } from '../growth/engine.js';
 import type { HandboekEngine } from '../handboek/engine.js';
@@ -80,8 +81,10 @@ export interface ServiceContext {
    */
   handboek: HandboekEngine;
   secrets: SecretStore;
-  github: GitHubManager;
-  githubPrs: GithubPrs;
+  git: GitManager;
+  gitHubPrs: GitHubPrs;
+  /** Snapshot-driven code reviews (the GitHub tab's Review panel). */
+  codeReviews: CodeReviewManager;
   mail: MailManager;
   connectors: ConnectorManager;
   connectorActions: ConnectorActionManager;

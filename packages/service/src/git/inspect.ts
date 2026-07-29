@@ -14,7 +14,7 @@ export interface InspectedGit {
 
 /**
  * Cheap "is this folder a git repo, and where does its origin point?"
- * probe. Used both by the GithubManager (to adopt a workingDir whose
+ * probe. Used both by the GitManager (to adopt a workingDir whose
  * origin matches the project's configured URL) and by the project-
  * update path (to auto-link a github URL when the user sets a
  * workingDir at an existing clone).

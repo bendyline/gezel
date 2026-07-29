@@ -1,4 +1,4 @@
-import type { GithubChangeKind } from '@bendyline/gezel';
+import type { GitChangeKind } from '@bendyline/gezel';
 import { useMemo, useState } from 'react';
 import { parseUnifiedDiff } from './diffModel.js';
 import { GIT_COPY, plural } from './gitCopy.js';
@@ -16,7 +16,7 @@ const COLLAPSE_LINE_LIMIT = 500;
 
 interface Props {
   diff?: string;
-  kind?: GithubChangeKind;
+  kind?: GitChangeKind;
   oldPath?: string;
   binary?: boolean;
   /** True when the backend cut the diff at its size cap. */

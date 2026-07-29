@@ -6,6 +6,7 @@ import { api } from '../api.js';
 import { EngineBudgetStrip } from '../components/EngineBudgetStrip.js';
 import { EngineClonePicker } from '../components/EngineClonePicker.js';
 import { LlamaCppModelManager } from '../components/LlamaCppModelManager.js';
+import { MachineHealthSettings } from '../components/MachineHealthSettings.js';
 
 interface Props {
   config: ConfigResponse | null;
@@ -340,6 +341,12 @@ export function LlamaCppSettings({ config, onConfigChanged, health }: Props) {
       )}
 
       <EngineBudgetStrip provider="llama-cpp" />
+
+      <MachineHealthSettings
+        config={config}
+        onConfigChanged={onConfigChanged}
+        platform={window.__GEZEL__?.platform ?? health?.platform}
+      />
 
       <section style={{ marginBottom: '2rem' }}>
         <h4>Models</h4>

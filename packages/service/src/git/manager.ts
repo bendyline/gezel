@@ -1,17 +1,18 @@
 import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type {
-  GithubCommitDetailResponse,
-  GithubConflictFile,
-  GithubConflictKind,
-  GithubConflictVersionsResponse,
-  GithubFileDiffResponse,
-  GithubLogEntry,
-  GithubSyncResponse,
-  GithubWorkingChange,
+  CodeReviewKind,
+  GitCommitDetailResponse,
+  GitConflictFile,
+  GitConflictKind,
+  GitConflictVersionsResponse,
+  GitFileDiffResponse,
+  GitLogEntry,
+  GitSyncResponse,
+  GitWorkingChange,
   ProjectDetail,
   ProjectFileEntry,
-  ProjectGithub,
+  ProjectGitHub,
 } from '@bendyline/gezel';
 import {
   projectInternalGithubDir,
@@ -22,8 +23,14 @@ import {
 import { createPatch } from 'diff';
 import { safeJoin } from '../fs/safe-paths.js';
 import type { Store } from '../fs/store.js';
+import { AmbientGitHubAuth } from '../github/ambient.js';
+import {
+  authenticatedCloneUrl,
+  parseGitHubUrl,
+  sameGitHubRepo,
+  sharedCloneKey,
+} from '../github/url.js';
 import type { SecretStore } from '../secrets/types.js';
-import { AmbientGithubAuth } from './ambient.js';
 import {
   EMPTY_TREE_SHA,
   LOG_FORMAT,
@@ -31,6 +38,8 @@ import {
   MAX_CONFLICT_SIDE_CHARS,
   MAX_UNTRACKED_STAT_BYTES,
   type NumstatEntry,
+  REVIEW_DIFF_MAX_CHARS,
+  classifyNameStatus,
   countLines,
   parseLog,
   parseNumstatLines,
@@ -49,7 +58,6 @@ import {
   worktreeRemove,
 } from './git.js';
 import { inspectGitWorkdir } from './inspect.js';
-import { authenticatedCloneUrl, parseGithubUrl, sameGithubRepo, sharedCloneKey } from './url.js';
 
 export { inspectGitWorkdir };
 export type { InspectedGit } from './inspect.js';
@@ -83,10 +91,10 @@ export interface CheckoutResolution {
 }
 
 /** Where GitHub API/auth credentials come from, in precedence order. */
-export type GithubCredentialSource = 'pat' | 'env' | 'gh' | 'none';
+export type GitHubCredentialSource = 'pat' | 'env' | 'gh' | 'none';
 
-export interface GithubStatus {
-  github?: ProjectGithub;
+export interface GitStatus {
+  github?: ProjectGitHub;
   exists: boolean;
   originMatches?: boolean;
   branch?: string;
@@ -98,7 +106,7 @@ export interface GithubStatus {
   mergeInProgress?: boolean;
   hasUpstream?: boolean;
   hasPat: boolean;
-  credentialSource: GithubCredentialSource;
+  credentialSource: GitHubCredentialSource;
 }
 
 export class MissingPatError extends Error {
@@ -111,10 +119,10 @@ export class MissingPatError extends Error {
   }
 }
 
-export class NoGithubLinkError extends Error {
+export class NoGitHubLinkError extends Error {
   constructor(projectId: string) {
     super(`Project ${projectId} has no GitHub repo linked.`);
-    this.name = 'NoGithubLinkError';
+    this.name = 'NoGitHubLinkError';
   }
 }
 
@@ -123,6 +131,48 @@ export class GitNotInstalledError extends Error {
     super('git is not installed (or not on PATH). Install git to use GitHub repos in Gezel.');
     this.name = 'GitNotInstalledError';
   }
+}
+
+export class NoDefaultBranchError extends Error {
+  constructor() {
+    super("Couldn't work out this repo's main branch — sync once, then try again.");
+    this.name = 'NoDefaultBranchError';
+  }
+}
+
+export class DetachedHeadError extends Error {
+  constructor() {
+    super('Switch to a branch first, then start the review.');
+    this.name = 'DetachedHeadError';
+  }
+}
+
+export class NothingToReviewError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'NothingToReviewError';
+  }
+}
+
+/**
+ * The isolated change set a code review runs against — everything the
+ * CodeReviewManager needs to write `reviews/<id>/manifest.json` +
+ * `changes.diff` except the review identity itself.
+ */
+export interface GitReviewSnapshot {
+  kind: CodeReviewKind;
+  branch: string;
+  headSha: string;
+  baseRef: string;
+  baseSha: string;
+  files: GitWorkingChange[];
+  totalFiles: number;
+  filesTruncated: boolean;
+  diff: string;
+  diffTruncated: boolean;
+  commits?: GitLogEntry[];
+  commitsTruncated?: boolean;
+  notes: string[];
 }
 
 export class MergeInProgressError extends Error {
@@ -146,14 +196,14 @@ export class ConflictsRemainError extends Error {
   }
 }
 
-export class GitHubManager {
+export class GitManager {
   private readonly locks = new Map<string, Promise<unknown>>();
 
   constructor(
     private readonly home: string,
     private readonly store: Store,
     private readonly secrets: SecretStore,
-    private readonly ambient: AmbientGithubAuth = new AmbientGithubAuth(),
+    private readonly ambient: AmbientGitHubAuth = new AmbientGitHubAuth(),
   ) {}
 
   /** Read the PAT from the github toolset's secret store entry. */
@@ -178,7 +228,7 @@ export class GitHubManager {
   }
 
   /** Which credential source getToken() would use right now. */
-  async credentialSource(): Promise<GithubCredentialSource> {
+  async credentialSource(): Promise<GitHubCredentialSource> {
     if (await this.hasPat()) return 'pat';
     return (await this.ambient.getToken())?.source ?? 'none';
   }
@@ -224,7 +274,7 @@ export class GitHubManager {
         // doesn't exist or not a bare repo — fall through to clone
       }
       if (!(await isGitInstalled())) throw new GitNotInstalledError();
-      const parsed = parseGithubUrl(url);
+      const parsed = parseGitHubUrl(url);
       // GitHub URLs flow through PAT auth + persisted-remote cleanup.
       // Non-github URLs (local paths, ssh-elsewhere, gitlab/gitea) just
       // get a vanilla `git clone --bare` — the schema accepts them and
@@ -420,10 +470,10 @@ export class GitHubManager {
    */
   async resolveCheckout(project: ProjectDetail): Promise<CheckoutResolution> {
     const link = project.github;
-    if (!link) throw new NoGithubLinkError(project.id);
+    if (!link) throw new NoGitHubLinkError(project.id);
     if (project.workingDir) {
       const wdRepo = await inspectGitWorkdir(project.workingDir);
-      if (wdRepo.isRepo && wdRepo.originUrl && sameGithubRepo(wdRepo.originUrl, link.url)) {
+      if (wdRepo.isRepo && wdRepo.originUrl && sameGitHubRepo(wdRepo.originUrl, link.url)) {
         return {
           dir: project.workingDir,
           exists: true,
@@ -436,7 +486,7 @@ export class GitHubManager {
       return {
         dir: inSub,
         exists: subRepo.isRepo,
-        originMatches: subRepo.originUrl ? sameGithubRepo(subRepo.originUrl, link.url) : false,
+        originMatches: subRepo.originUrl ? sameGitHubRepo(subRepo.originUrl, link.url) : false,
         isAtWorkingDir: false,
       };
     }
@@ -450,7 +500,7 @@ export class GitHubManager {
       return {
         dir: workspace,
         exists: true,
-        originMatches: wsRepo.originUrl ? sameGithubRepo(wsRepo.originUrl, link.url) : false,
+        originMatches: wsRepo.originUrl ? sameGitHubRepo(wsRepo.originUrl, link.url) : false,
         isAtWorkingDir: false,
       };
     }
@@ -461,7 +511,7 @@ export class GitHubManager {
         dir: legacy,
         exists: true,
         originMatches: legacyRepo.originUrl
-          ? sameGithubRepo(legacyRepo.originUrl, link.url)
+          ? sameGitHubRepo(legacyRepo.originUrl, link.url)
           : false,
         isAtWorkingDir: false,
       };
@@ -501,7 +551,7 @@ export class GitHubManager {
         );
       }
       if (!(await isGitInstalled())) throw new GitNotInstalledError();
-      const parsed = parseGithubUrl(project.github!.url);
+      const parsed = parseGitHubUrl(project.github!.url);
       if (!parsed) throw new Error(`Could not parse GitHub URL: ${project.github!.url}`);
       const pat = await this.getToken();
       const cloneUrl = authenticatedCloneUrl(parsed.cloneUrl, pat);
@@ -769,7 +819,7 @@ export class GitHubManager {
    */
   async listChanges(
     project: ProjectDetail,
-  ): Promise<{ changes: GithubWorkingChange[]; total: number; truncated: boolean }> {
+  ): Promise<{ changes: GitWorkingChange[]; total: number; truncated: boolean }> {
     const resolved = await this.resolveCheckout(project);
     if (!resolved.exists) return { changes: [], total: 0, truncated: false };
     const dir = resolved.dir;
@@ -789,9 +839,9 @@ export class GitHubManager {
     } catch {
       // Offline against a partial clone etc. — list without stats.
     }
-    const changes: GithubWorkingChange[] = [];
+    const changes: GitWorkingChange[] = [];
     for (const entry of capped) {
-      const change: GithubWorkingChange = { path: entry.path, kind: entry.kind };
+      const change: GitWorkingChange = { path: entry.path, kind: entry.kind };
       if (entry.oldPath) change.oldPath = entry.oldPath;
       if (entry.untracked) {
         Object.assign(change, await this.statUntracked(dir, entry.path));
@@ -813,7 +863,7 @@ export class GitHubManager {
    * synthesized all-added patch (NOT `git diff --no-index`, which exits 1
    * and `GitError` drops stdout). Binary files short-circuit with no text.
    */
-  async fileDiff(project: ProjectDetail, relPath: string): Promise<GithubFileDiffResponse> {
+  async fileDiff(project: ProjectDetail, relPath: string): Promise<GitFileDiffResponse> {
     const resolved = await this.resolveCheckout(project);
     if (!resolved.exists) {
       throw new Error(`No checkout exists for project ${project.id}; clone first.`);
@@ -922,6 +972,282 @@ export class GitHubManager {
     return { diff: truncateDiff(diff, 60_000).text, changedPaths };
   }
 
+  // ── code-review snapshots ──────────────────────────────────────────
+
+  /**
+   * The repo's default branch: cached on the project link, else local
+   * `origin/HEAD`, else one `ls-remote` round-trip (cached back into the
+   * local ref), else an existence probe of origin/main + origin/master.
+   * The result is persisted on `project.github.defaultBranch` so later
+   * calls never touch the network.
+   */
+  async defaultBranch(project: ProjectDetail): Promise<string> {
+    const cached = project.github?.defaultBranch;
+    if (cached) return cached;
+    const resolved = await this.resolveCheckout(project);
+    if (!resolved.exists) throw new NoDefaultBranchError();
+    const dir = resolved.dir;
+    let name: string | undefined;
+    try {
+      const { stdout } = await runGit(['symbolic-ref', 'refs/remotes/origin/HEAD'], { cwd: dir });
+      name = stdout.trim().replace(/^refs\/remotes\/origin\//, '') || undefined;
+    } catch {
+      // origin/HEAD not set locally (common for bare-clone worktrees).
+    }
+    if (!name) {
+      try {
+        const { baseArgs, redact } = await this.patArgs();
+        const { stdout } = await runGit([...baseArgs, 'ls-remote', '--symref', 'origin', 'HEAD'], {
+          cwd: dir,
+          redact,
+        });
+        const m = /^ref:\s+refs\/heads\/(\S+)\s+HEAD/m.exec(stdout);
+        if (m?.[1]) {
+          name = m[1];
+          await runGit(['remote', 'set-head', 'origin', name], { cwd: dir }).catch(() => {});
+        }
+      } catch {
+        // Offline — fall through to the existence probe.
+      }
+    }
+    if (!name) {
+      for (const candidate of ['main', 'master']) {
+        try {
+          await runGit(['rev-parse', '-q', '--verify', `refs/remotes/origin/${candidate}`], {
+            cwd: dir,
+          });
+          name = candidate;
+          break;
+        } catch {
+          // Keep probing.
+        }
+      }
+    }
+    if (!name) throw new NoDefaultBranchError();
+    await this.store.updateProjectGitHub(project.id, { defaultBranch: name }).catch(() => {});
+    return name;
+  }
+
+  /**
+   * Commit-review snapshot: the uncommitted working tree vs HEAD, as one
+   * stable file list + unified diff. Locked so a concurrent save/discard
+   * can't skew the list against the diff. Untracked text files get
+   * synthesized all-added patches with review-grade caps.
+   */
+  async snapshotWorkingChanges(project: ProjectDetail): Promise<GitReviewSnapshot> {
+    return this.withLock(project.id, async () => {
+      const resolved = await this.resolveCheckout(project);
+      if (!resolved.exists) {
+        throw new Error(`No checkout exists for project ${project.id}; clone first.`);
+      }
+      const dir = resolved.dir;
+      if (await this.isMergeInProgress(dir)) throw new MergeInProgressError();
+      const { stdout: statusOut } = await runGit(['status', '--porcelain=v1', '-z'], { cwd: dir });
+      const entries = parseStatusZ(statusOut);
+      if (entries.length === 0) {
+        throw new NothingToReviewError('There are no unsaved changes to review.');
+      }
+      const notes: string[] = [];
+      const total = entries.length;
+      const capped = entries.slice(0, MAX_CHANGE_ENTRIES);
+      const head = (await this.headExists(dir)) ? 'HEAD' : EMPTY_TREE_SHA;
+      const { baseArgs, redact } = await this.patArgs();
+      let stats = new Map<string, NumstatEntry>();
+      try {
+        const numstat = await runGit([...baseArgs, 'diff', head, '--numstat', '-z', '-M'], {
+          cwd: dir,
+          redact,
+        });
+        stats = parseNumstatZ(numstat.stdout);
+      } catch {
+        notes.push('Per-file +/- counts were unavailable (offline against a partial clone?).');
+      }
+      const files: GitWorkingChange[] = [];
+      for (const entry of capped) {
+        const change: GitWorkingChange = { path: entry.path, kind: entry.kind };
+        if (entry.oldPath) change.oldPath = entry.oldPath;
+        if (entry.untracked) {
+          Object.assign(change, await this.statUntracked(dir, entry.path));
+        } else {
+          const s = stats.get(entry.path);
+          if (s?.binary) change.binary = true;
+          else if (s) {
+            change.additions = s.additions;
+            change.deletions = s.deletions;
+          }
+        }
+        files.push(change);
+      }
+      let diff = '';
+      try {
+        ({ stdout: diff } = await runGit([...baseArgs, 'diff', head, '-M'], { cwd: dir, redact }));
+      } catch {
+        notes.push('The tracked-file diff was unavailable (offline against a partial clone?).');
+      }
+      let appended = 0;
+      for (const entry of capped) {
+        if (!entry.untracked) continue;
+        if (appended >= 50 || diff.length > REVIEW_DIFF_MAX_CHARS) break;
+        const abs = safeJoin(dir, entry.path);
+        if (!abs) continue;
+        try {
+          const s = await stat(abs);
+          if (!s.isFile() || s.size > 256_000) continue;
+          const buf = await readFile(abs);
+          if (sniffBinary(buf)) continue;
+          diff += `\n${createPatch(entry.path, '', buf.toString('utf8'))}`;
+          appended++;
+        } catch {
+          // Skip unreadable files.
+        }
+      }
+      const truncatedDiff = truncateDiff(diff, REVIEW_DIFF_MAX_CHARS);
+      if (files.some((f) => f.binary)) {
+        notes.push(
+          'Binary files are listed in the manifest with binary:true and excluded from changes.diff.',
+        );
+      }
+      const branch = (await this.currentBranch(dir)) ?? '(detached)';
+      const headSha = (await this.headSha(dir)) ?? EMPTY_TREE_SHA;
+      return {
+        kind: 'commit',
+        branch,
+        headSha,
+        baseRef: 'HEAD',
+        baseSha: headSha,
+        files,
+        totalFiles: total,
+        filesTruncated: total > capped.length,
+        diff: truncatedDiff.text,
+        diffTruncated: truncatedDiff.truncated,
+        notes,
+      };
+    });
+  }
+
+  /**
+   * Branch-review snapshot: this branch's committed work vs the default
+   * branch — merge-base three-dot diff plus the commit list, computed
+   * entirely from local git (a best-effort fetch refreshes the base
+   * first; offline is tolerated with a note).
+   */
+  async snapshotBranchDiff(project: ProjectDetail): Promise<GitReviewSnapshot> {
+    return this.withLock(project.id, async () => {
+      const resolved = await this.resolveCheckout(project);
+      if (!resolved.exists) {
+        throw new Error(`No checkout exists for project ${project.id}; clone first.`);
+      }
+      const dir = resolved.dir;
+      const branch = await this.currentBranch(dir);
+      if (!branch) throw new DetachedHeadError();
+      const defaultBranch = await this.defaultBranch(project);
+      if (branch === defaultBranch) {
+        throw new NothingToReviewError(
+          `You are on ${defaultBranch} — switch to a work branch to review it against ${defaultBranch}.`,
+        );
+      }
+      const notes: string[] = [];
+      const { baseArgs, redact } = await this.patArgs();
+      await this.ensureFetchRefspec(dir);
+      try {
+        await runGit([...baseArgs, 'fetch', '--quiet', 'origin', defaultBranch], {
+          cwd: dir,
+          redact,
+        });
+      } catch {
+        notes.push(
+          `Could not refresh origin/${defaultBranch} (offline?) — comparing against the last-fetched state.`,
+        );
+      }
+      const baseRef = `origin/${defaultBranch}`;
+      try {
+        await runGit(['rev-parse', '-q', '--verify', `refs/remotes/${baseRef}`], { cwd: dir });
+      } catch {
+        throw new NoDefaultBranchError();
+      }
+      const headSha = await this.headSha(dir);
+      if (!headSha) throw new NothingToReviewError('This branch has no commits to review yet.');
+      const { stdout: baseShaOut } = await runGit(['merge-base', 'HEAD', baseRef], { cwd: dir });
+      const baseSha = baseShaOut.trim();
+      const range = `${baseRef}...HEAD`;
+      const nameStatus = await runGit([...baseArgs, 'diff', '--name-status', '-z', '-M', range], {
+        cwd: dir,
+        redact,
+      });
+      const kinds = classifyNameStatus(nameStatus.stdout);
+      const numstat = await runGit([...baseArgs, 'diff', '--numstat', '-z', '-M', range], {
+        cwd: dir,
+        redact,
+      });
+      const stats = parseNumstatZ(numstat.stdout);
+      const allPaths = [...kinds.keys()];
+      const capped = allPaths.slice(0, MAX_CHANGE_ENTRIES);
+      const files: GitWorkingChange[] = [];
+      for (const path of capped) {
+        const ns = kinds.get(path);
+        const change: GitWorkingChange = { path, kind: ns?.kind ?? 'modified' };
+        if (ns?.oldPath) change.oldPath = ns.oldPath;
+        const s = stats.get(path);
+        if (s?.binary) change.binary = true;
+        else if (s) {
+          change.additions = s.additions;
+          change.deletions = s.deletions;
+        }
+        files.push(change);
+      }
+      const diffOut = await runGit([...baseArgs, 'diff', '-M', range], { cwd: dir, redact });
+      const truncatedDiff = truncateDiff(diffOut.stdout, REVIEW_DIFF_MAX_CHARS);
+      const COMMITS_CAP = 200;
+      let commits: GitLogEntry[] = [];
+      let commitsTruncated = false;
+      try {
+        const { stdout } = await runGit(
+          [
+            ...baseArgs,
+            'log',
+            `--max-count=${COMMITS_CAP + 1}`,
+            '--date-order',
+            `--format=${LOG_FORMAT}`,
+            '--numstat',
+            `${baseRef}..HEAD`,
+          ],
+          { cwd: dir, redact },
+        );
+        const parsed = parseLog(stdout);
+        commitsTruncated = parsed.length > COMMITS_CAP;
+        commits = parsed.slice(0, COMMITS_CAP).map(({ email, ...rest }) => ({
+          ...rest,
+          ...(email ? { email } : {}),
+        }));
+      } catch {
+        notes.push('The commit list was unavailable — the diff is still complete.');
+      }
+      if (commits.length === 0 && truncatedDiff.text.trim().length === 0) {
+        throw new NothingToReviewError(`This branch has nothing new compared to ${defaultBranch}.`);
+      }
+      if (files.some((f) => f.binary)) {
+        notes.push(
+          'Binary files are listed in the manifest with binary:true and excluded from changes.diff.',
+        );
+      }
+      return {
+        kind: 'pr',
+        branch,
+        headSha,
+        baseRef,
+        baseSha,
+        files,
+        totalFiles: allPaths.length,
+        filesTruncated: allPaths.length > capped.length,
+        diff: truncatedDiff.text,
+        diffTruncated: truncatedDiff.truncated,
+        commits,
+        commitsTruncated,
+        notes,
+      };
+    });
+  }
+
   /**
    * Put files back to their last-saved state. Tracked files are restored
    * from HEAD; untracked files are deleted. `all` resets the whole tree
@@ -974,7 +1300,7 @@ export class GitHubManager {
   async log(
     project: ProjectDetail,
     opts: { limit?: number; skip?: number } = {},
-  ): Promise<{ commits: GithubLogEntry[]; hasMore: boolean }> {
+  ): Promise<{ commits: GitLogEntry[]; hasMore: boolean }> {
     const resolved = await this.resolveCheckout(project);
     if (!resolved.exists) return { commits: [], hasMore: false };
     const limit = Math.max(1, Math.min(200, opts.limit ?? 50));
@@ -1015,7 +1341,7 @@ export class GitHubManager {
   }
 
   /** One commit with per-file stats and its full patch (truncated). */
-  async commitDetail(project: ProjectDetail, sha: string): Promise<GithubCommitDetailResponse> {
+  async commitDetail(project: ProjectDetail, sha: string): Promise<GitCommitDetailResponse> {
     const resolved = await this.resolveCheckout(project);
     if (!resolved.exists) {
       throw new Error(`No checkout exists for project ${project.id}; clone first.`);
@@ -1063,7 +1389,7 @@ export class GitHubManager {
    *   - 'auth' / 'offline'  fetch or push could not reach GitHub
    *   - 'error'       anything else, with a human-readable message
    */
-  async sync(project: ProjectDetail): Promise<GithubSyncResponse> {
+  async sync(project: ProjectDetail): Promise<GitSyncResponse> {
     return this.withLock(project.id, async () => {
       const resolved = await this.resolveCheckout(project);
       if (!resolved.exists) {
@@ -1182,7 +1508,7 @@ export class GitHubManager {
   /** Whether a merge is waiting on resolution, and which files overlap. */
   async mergeState(
     project: ProjectDetail,
-  ): Promise<{ inMerge: boolean; conflicts: GithubConflictFile[] }> {
+  ): Promise<{ inMerge: boolean; conflicts: GitConflictFile[] }> {
     const resolved = await this.resolveCheckout(project);
     if (!resolved.exists) return { inMerge: false, conflicts: [] };
     const dir = resolved.dir;
@@ -1203,7 +1529,7 @@ export class GitHubManager {
   async conflictFileVersions(
     project: ProjectDetail,
     relPath: string,
-  ): Promise<GithubConflictVersionsResponse> {
+  ): Promise<GitConflictVersionsResponse> {
     const resolved = await this.resolveCheckout(project);
     if (!resolved.exists) throw new NotInMergeError();
     const dir = resolved.dir;
@@ -1343,7 +1669,7 @@ export class GitHubManager {
     return { name: 'gezel-bot', email: 'noreply@gezel.local' };
   }
 
-  async status(project: ProjectDetail): Promise<GithubStatus> {
+  async status(project: ProjectDetail): Promise<GitStatus> {
     const credentialSource = await this.credentialSource();
     const hasPat = credentialSource === 'pat';
     if (!project.github) return { exists: false, hasPat, credentialSource };
@@ -1593,7 +1919,7 @@ export class GitHubManager {
   private async statUntracked(
     dir: string,
     relPath: string,
-  ): Promise<Pick<GithubWorkingChange, 'additions' | 'deletions' | 'binary'>> {
+  ): Promise<Pick<GitWorkingChange, 'additions' | 'deletions' | 'binary'>> {
     const abs = safeJoin(dir, relPath);
     if (!abs) return {};
     try {
@@ -1644,7 +1970,7 @@ export class GitHubManager {
   private pushFailureToSync(
     res: { rejected?: 'non-fast-forward' | 'auth' | 'unknown' },
     partial: { pulled: number; pushed: number; branch: string },
-  ): GithubSyncResponse {
+  ): GitSyncResponse {
     if (res.rejected === 'auth') return { state: 'auth', ...partial };
     return {
       state: 'error',
@@ -1661,12 +1987,12 @@ export class GitHubManager {
     checkoutDir: string,
     branch?: string,
   ): Promise<void> {
-    const next: Partial<ProjectGithub> = {
+    const next: Partial<ProjectGitHub> = {
       checkoutDir,
       lastSyncedAt: new Date().toISOString(),
     };
     if (branch) next.branch = branch;
-    await this.store.updateProjectGithub(project.id, next);
+    await this.store.updateProjectGitHub(project.id, next);
   }
 
   private async withLock<T>(projectId: string, fn: () => Promise<T>): Promise<T> {
@@ -1694,7 +2020,7 @@ export class GitHubManager {
  * (one side's add is all that exists); DD folds into deleted-by-them
  * (either resolution deletes the file, so the distinction is moot).
  */
-function conflictKindFromXY(xy: string): GithubConflictKind {
+function conflictKindFromXY(xy: string): GitConflictKind {
   switch (xy) {
     case 'UU':
       return 'both-modified';

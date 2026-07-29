@@ -12,8 +12,8 @@ import { projectLocalDir } from '@bendyline/gezel/paths';
 import type { ChatEventBus } from '../chat/events.js';
 import { writeFileAtomic } from '../fs/atomic.js';
 import type { Store } from '../fs/store.js';
-import { runGit } from '../github/git.js';
-import { inspectGitWorkdir } from '../github/inspect.js';
+import { runGit } from '../git/git.js';
+import { inspectGitWorkdir } from '../git/inspect.js';
 import type { HistoryManager } from '../history/manager.js';
 
 /**

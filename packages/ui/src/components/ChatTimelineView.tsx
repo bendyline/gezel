@@ -183,7 +183,7 @@ interface TerminalLiveSlot {
   /** Folder-pill display string (project-relative or absolute). */
   cwd: string;
   /** Concatenated `outputChunk` payloads. The streaming bubble
-   *  feeds this to a stateful `AnsiOutput` renderer. */
+   *  re-renders this complete buffer through `AnsiOutput`. */
   content: string;
   /** Set by `inputRequested` SSE events; cleared by the next
    *  `outputChunk` (which implies the shell got our input and
@@ -216,6 +216,8 @@ interface LiveSlot {
    * does show the banner after the threshold elapses.
    */
   lastActivityAt: number;
+  /** True only after this turn emits an actual provider/model progress signal. */
+  hasProgress: boolean;
   /**
    * Most-recent `at` we've seen for any message in this session, used to
    * place the streaming row chronologically. Updated when the streaming
@@ -341,6 +343,25 @@ interface LiveSlot {
    * dragging or why the provider dropped into degraded mode.
    */
   warnings?: InlineWarning[];
+}
+
+/**
+ * Find clean live slots that survived locally even though the service no
+ * longer reports their turns as in flight. Object identity protects slots
+ * created or replaced while the reconciliation request was in flight.
+ */
+export function staleLiveSessionIds(
+  current: ReadonlyMap<string, { error?: string }>,
+  observed: ReadonlyMap<string, object>,
+  inflight: ReadonlySet<string>,
+): string[] {
+  const stale: string[] = [];
+  for (const [sessionId, observedSlot] of observed) {
+    const currentSlot = current.get(sessionId);
+    if (!currentSlot || currentSlot !== observedSlot) continue;
+    if (!currentSlot.error && !inflight.has(sessionId)) stale.push(sessionId);
+  }
+  return stale;
 }
 
 export interface ChatTimelineViewProps {
@@ -785,6 +806,7 @@ export function ChatTimelineView({
                 entry.lastProgressAgoMs != null
                   ? Date.now() - entry.lastProgressAgoMs
                   : entry.startedAt,
+              hasProgress: entry.lastProgressAgoMs != null,
               anchorAt: lastForSession ? bumpIso(lastForSession.at) : new Date().toISOString(),
               ...(lastForSession
                 ? {
@@ -1279,6 +1301,46 @@ export function ChatTimelineView({
     }
   }, [loadTimeline]);
 
+  // SSE remains the low-latency path, but a dropped `done` envelope must
+  // not leave a permanent thinking/stalled bubble. Reconcile the local
+  // slots against the service's authoritative in-flight set.
+  useEffect(() => {
+    let stopped = false;
+    let checking = false;
+    const reconcile = async () => {
+      if (checking || liveRef.current.size === 0) return;
+      checking = true;
+      const observed = new Map(liveRef.current);
+      try {
+        const response = await api.listInflightTurns({
+          ...(inflightProjectId !== undefined ? { projectId: inflightProjectId } : {}),
+          ...(inflightGezelId !== undefined ? { gezelId: inflightGezelId } : {}),
+        });
+        if (stopped) return;
+        const active = new Set(response.inflight.map((entry) => entry.sessionId));
+        const stale = staleLiveSessionIds(liveRef.current, observed, active);
+        if (stale.length === 0) return;
+        for (const sessionId of stale) {
+          liveRef.current.delete(sessionId);
+          pendingNarrationRef.current.delete(sessionId);
+        }
+        setLiveBump((n) => n + 1);
+        void refreshLatest();
+      } catch {
+        // Non-fatal. A later poll or the normal `done` event will converge.
+      } finally {
+        checking = false;
+      }
+    };
+    const timer = window.setInterval(() => {
+      void reconcile();
+    }, 5_000);
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+    };
+  }, [inflightProjectId, inflightGezelId, refreshLatest]);
+
   useEffect(() => {
     return subscribeOptimisticUserMessages((message) => {
       if (inflightProjectId !== undefined && message.projectId !== inflightProjectId) return;
@@ -1312,6 +1374,7 @@ export function ChatTimelineView({
           segments: [],
           startedAt: slotStart,
           lastActivityAt: slotStart,
+          hasProgress: false,
           anchorAt: bumpIso(message.at),
           ...(lastForSession
             ? { sessionTitle: lastForSession.sessionTitle }
@@ -1466,6 +1529,7 @@ export function ChatTimelineView({
             segments: [],
             startedAt: slotStart,
             lastActivityAt: slotStart,
+            hasProgress: false,
             anchorAt: bumpIso(event.message.at),
             ...(lastForSession
               ? { sessionTitle: lastForSession.sessionTitle }
@@ -1505,6 +1569,7 @@ export function ChatTimelineView({
           slot.segments.push({ kind: 'text', content: event.content });
         }
         slot.lastActivityAt = now;
+        slot.hasProgress = true;
         // First delta means the provider actually started this turn —
         // drop the "queued" indicator if we had one. Also resets
         // the wire-pulse dot accumulator since we just got real
@@ -1535,6 +1600,7 @@ export function ChatTimelineView({
         const slot = liveRef.current.get(sessionId) ?? createSlot(gezelId, projectId, sessionId);
         slot.liveReasoning = (slot.liveReasoning ?? '') + event.content;
         slot.lastActivityAt = Date.now();
+        slot.hasProgress = true;
         delete slot.queueAhead;
         slot.wirePulseCount = 0;
         delete slot.thinkingProgress;
@@ -1567,6 +1633,7 @@ export function ChatTimelineView({
           tail,
         };
         slot.lastActivityAt = Date.now();
+        slot.hasProgress = true;
         delete slot.queueAhead;
         liveRef.current.set(sessionId, slot);
         setLiveBump((n) => n + 1);
@@ -1581,6 +1648,8 @@ export function ChatTimelineView({
         // so the queue-wait is over — drop any stale `queueAhead`.
         const slot = liveRef.current.get(sessionId) ?? createSlot(gezelId, projectId, sessionId);
         slot.wirePulseCount = (slot.wirePulseCount ?? 0) + 1;
+        slot.lastActivityAt = Date.now();
+        slot.hasProgress = true;
         delete slot.queueAhead;
         liveRef.current.set(sessionId, slot);
         setLiveBump((n) => n + 1);
@@ -1595,6 +1664,7 @@ export function ChatTimelineView({
         const slot = liveRef.current.get(sessionId) ?? createSlot(gezelId, projectId, sessionId);
         slot.segments.push({ kind: 'intent', label: event.label });
         slot.lastActivityAt = Date.now();
+        slot.hasProgress = true;
         slot.wirePulseCount = 0;
         delete slot.queueAhead;
         liveRef.current.set(sessionId, slot);
@@ -1610,6 +1680,7 @@ export function ChatTimelineView({
         // reasoning stretches.
         const slot = liveRef.current.get(sessionId) ?? createSlot(gezelId, projectId, sessionId);
         slot.lastActivityAt = Date.now();
+        slot.hasProgress = true;
         slot.wirePulseCount = 0;
         slot.thinkingLabel = event.label;
         delete slot.queueAhead;
@@ -1685,6 +1756,7 @@ export function ChatTimelineView({
         // continues writing" instead of all tools stacked at the top.
         slot.segments.push({ kind: 'tool', tool });
         slot.lastActivityAt = Date.now();
+        slot.hasProgress = true;
         slot.wirePulseCount = 0;
         // The finished tool row supersedes the live tool-args block.
         delete slot.liveToolArgs;
@@ -1729,6 +1801,7 @@ export function ChatTimelineView({
         if (existing) {
           existing.segments = [];
           existing.lastActivityAt = Date.now();
+          existing.hasProgress = true;
           existing.anchorAt = bumpIso(event.message.at);
           existing.wirePulseCount = 0;
           // Drop the live think-phase block: the just-committed message
@@ -1832,6 +1905,7 @@ export function ChatTimelineView({
         // back between turns once the engine is warm.
         const slot = liveRef.current.get(sessionId) ?? createSlot(gezelId, projectId, sessionId);
         slot.lastActivityAt = Date.now();
+        slot.hasProgress = true;
         if (event.phase === 'ready') {
           delete slot.thinkingLabel;
           delete slot.thinkingProgress;
@@ -1963,6 +2037,7 @@ export function ChatTimelineView({
           segments: [],
           startedAt: now,
           lastActivityAt: now,
+          hasProgress: false,
           anchorAt: lastForSession ? bumpIso(lastForSession.at) : nowIso(),
           ...(lastForSession ? { sessionTitle: lastForSession.sessionTitle } : {}),
           ...(lastForSession ? { sessionCreatedAt: lastForSession.sessionCreatedAt } : {}),
@@ -2721,6 +2796,7 @@ export function ChatTimelineView({
         segments={slot.segments}
         startedAt={slot.startedAt}
         lastActivityAt={slot.lastActivityAt}
+        hasProgress={slot.hasProgress}
         {...(providerForGezel(slot.gezelId) === 'ollama'
           ? { onProbeOllama: () => api.ollamaProbe() }
           : {})}

@@ -1,6 +1,6 @@
 import {
   type FileMapResponse,
-  type GithubPullFile,
+  type GitHubPullFile,
   type MapBlock,
   type MapPrChange,
   type MapPrOverlay,
@@ -49,7 +49,7 @@ function center(r: Rect): { x: number; y: number } {
 export function buildPrOverlay(opts: {
   prNumber: number;
   title?: string;
-  files: GithubPullFile[];
+  files: GitHubPullFile[];
   map: Pick<FileMapResponse, 'blocks' | 'districts' | 'bounds' | 'streets' | 'plazas'>;
 }): PrOverlayResult {
   const { prNumber, title, files, map } = opts;

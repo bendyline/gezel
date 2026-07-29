@@ -26,7 +26,7 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe('previewGithubRepo', () => {
+describe('previewGitHubRepo', () => {
   it('returns metadata + decoded README for a public repo', async () => {
     reposGet.mockResolvedValue({
       data: {
@@ -42,8 +42,8 @@ describe('previewGithubRepo', () => {
         encoding: 'base64',
       },
     });
-    const { previewGithubRepo } = await import('./repo-preview.js');
-    const result = await previewGithubRepo(null, 'https://github.com/octocat/Hello-World');
+    const { previewGitHubRepo } = await import('./repo-preview.js');
+    const result = await previewGitHubRepo(null, 'https://github.com/octocat/Hello-World');
     expect(result.owner).toBe('octocat');
     expect(result.repo).toBe('Hello-World');
     expect(result.canonicalUrl).toBe('https://github.com/octocat/Hello-World');
@@ -61,8 +61,8 @@ describe('previewGithubRepo', () => {
     reposGetReadme.mockResolvedValue({
       data: { content: Buffer.from(big, 'utf8').toString('base64'), encoding: 'base64' },
     });
-    const { previewGithubRepo } = await import('./repo-preview.js');
-    const result = await previewGithubRepo(null, 'https://github.com/o/r');
+    const { previewGitHubRepo } = await import('./repo-preview.js');
+    const result = await previewGitHubRepo(null, 'https://github.com/o/r');
     expect(result.readmeTruncated).toBe(true);
     expect(result.readme.length).toBeLessThan(big.length);
   });
@@ -71,47 +71,47 @@ describe('previewGithubRepo', () => {
     reposGet.mockResolvedValue({ data: { default_branch: 'main' } });
     const notFound = Object.assign(new Error('not found'), { status: 404 });
     reposGetReadme.mockRejectedValue(notFound);
-    const { previewGithubRepo } = await import('./repo-preview.js');
-    const result = await previewGithubRepo(null, 'https://github.com/o/r');
+    const { previewGitHubRepo } = await import('./repo-preview.js');
+    const result = await previewGitHubRepo(null, 'https://github.com/o/r');
     expect(result.readme).toBe('');
     expect(result.readmeTruncated).toBe(false);
   });
 
   it('rejects an unparseable URL', async () => {
-    const { previewGithubRepo, InvalidGithubUrlError } = await import('./repo-preview.js');
-    await expect(previewGithubRepo(null, 'https://example.com/foo')).rejects.toBeInstanceOf(
-      InvalidGithubUrlError,
+    const { previewGitHubRepo, InvalidGitHubUrlError } = await import('./repo-preview.js');
+    await expect(previewGitHubRepo(null, 'https://example.com/foo')).rejects.toBeInstanceOf(
+      InvalidGitHubUrlError,
     );
   });
 
-  it('surfaces 404 from repos.get as GithubRepoNotFoundError', async () => {
+  it('surfaces 404 from repos.get as GitHubRepoNotFoundError', async () => {
     const notFound = Object.assign(new Error('not found'), { status: 404 });
     reposGet.mockRejectedValue(notFound);
-    const { previewGithubRepo, GithubRepoNotFoundError } = await import('./repo-preview.js');
-    await expect(previewGithubRepo(null, 'https://github.com/o/r')).rejects.toBeInstanceOf(
-      GithubRepoNotFoundError,
+    const { previewGitHubRepo, GitHubRepoNotFoundError } = await import('./repo-preview.js');
+    await expect(previewGitHubRepo(null, 'https://github.com/o/r')).rejects.toBeInstanceOf(
+      GitHubRepoNotFoundError,
     );
   });
 
-  it('maps 401 from repos.get to GithubAccessDeniedError', async () => {
+  it('maps 401 from repos.get to GitHubAccessDeniedError', async () => {
     const unauth = Object.assign(new Error('unauthorized'), { status: 401 });
     reposGet.mockRejectedValue(unauth);
-    const { previewGithubRepo, GithubAccessDeniedError } = await import('./repo-preview.js');
-    await expect(previewGithubRepo('ghp_token', 'https://github.com/o/r')).rejects.toBeInstanceOf(
-      GithubAccessDeniedError,
+    const { previewGitHubRepo, GitHubAccessDeniedError } = await import('./repo-preview.js');
+    await expect(previewGitHubRepo('ghp_token', 'https://github.com/o/r')).rejects.toBeInstanceOf(
+      GitHubAccessDeniedError,
     );
   });
 
-  it('maps 403 from repos.get to GithubAccessDeniedError with a scope hint', async () => {
+  it('maps 403 from repos.get to GitHubAccessDeniedError with a scope hint', async () => {
     const forbidden = Object.assign(new Error('forbidden'), { status: 403 });
     reposGet.mockRejectedValue(forbidden);
-    const { previewGithubRepo, GithubAccessDeniedError } = await import('./repo-preview.js');
+    const { previewGitHubRepo, GitHubAccessDeniedError } = await import('./repo-preview.js');
     try {
-      await previewGithubRepo('ghp_token', 'https://github.com/o/r');
+      await previewGitHubRepo('ghp_token', 'https://github.com/o/r');
       throw new Error('expected rejection');
     } catch (err) {
-      expect(err).toBeInstanceOf(GithubAccessDeniedError);
-      expect((err as InstanceType<typeof GithubAccessDeniedError>).status).toBe(403);
+      expect(err).toBeInstanceOf(GitHubAccessDeniedError);
+      expect((err as InstanceType<typeof GitHubAccessDeniedError>).status).toBe(403);
       expect((err as Error).message).toMatch(/scope|OAuth/i);
     }
   });
@@ -124,13 +124,13 @@ describe('previewGithubRepo', () => {
       response: { data: { message: githubMessage } },
     });
     reposGet.mockRejectedValue(forbidden);
-    const { previewGithubRepo, GithubAccessDeniedError } = await import('./repo-preview.js');
+    const { previewGitHubRepo, GitHubAccessDeniedError } = await import('./repo-preview.js');
     try {
-      await previewGithubRepo('ghp_token', 'https://github.com/acme-org/private-repo');
+      await previewGitHubRepo('ghp_token', 'https://github.com/acme-org/private-repo');
       throw new Error('expected rejection');
     } catch (err) {
-      expect(err).toBeInstanceOf(GithubAccessDeniedError);
-      const denied = err as InstanceType<typeof GithubAccessDeniedError>;
+      expect(err).toBeInstanceOf(GitHubAccessDeniedError);
+      const denied = err as InstanceType<typeof GitHubAccessDeniedError>;
       expect(denied.message).toContain(githubMessage);
       // Includes the specific org name from the URL in the fix URL.
       expect(denied.fixUrl).toMatch(/connections\/applications\//);

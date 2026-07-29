@@ -40,7 +40,7 @@ import {
   safeJoin,
 } from '../../fs/safe-paths.js';
 import { ProjectDeleteError } from '../../fs/store.js';
-import { GitError, runGit } from '../../github/git.js';
+import { GitError, runGit } from '../../git/git.js';
 import { buildEnrichDeps } from '../../index-store/enrich.js';
 import { installPackage } from '../../packages/install.js';
 import { resolvePnpmCommand } from '../../packages/pnpm.js';
@@ -147,10 +147,10 @@ export function projectRoutes(ctx: ServiceContext): Hono {
     // repo can take a minute, and the New Project dialog has already
     // closed. Failures land in the service log and the status of the
     // checkout can be observed via the existing
-    // GET /api/projects/:id/github/status endpoint that the GitHub
+    // GET /api/projects/:id/git/status endpoint that the GitHub
     // tab already polls.
     if (project.github?.url) {
-      void ctx.github.ensureClone(project).catch((err) => {
+      void ctx.git.ensureClone(project).catch((err) => {
         const message = err instanceof Error ? err.message : String(err);
         log.warn(`[projects] background clone failed for ${project.id}: ${message}`);
       });
@@ -1274,7 +1274,7 @@ export function projectRoutes(ctx: ServiceContext): Hono {
     }
 
     // Walk the cloned tree (excluding .git/) to compute the report.
-    // 5_000 file cap to match GithubManager's MAX_FILES_RETURNED — past
+    // 5_000 file cap to match GitManager's MAX_FILES_RETURNED — past
     // that we just stop counting; the response stays sane even if the
     // user pointed us at a monorepo by accident.
     let files = 0;
@@ -1317,7 +1317,7 @@ export function projectRoutes(ctx: ServiceContext): Hono {
     // on disk; the user can re-link via Settings.
     if (cloneToWorkspaceRoot) {
       try {
-        await ctx.store.updateProjectGithub(id, {
+        await ctx.store.updateProjectGitHub(id, {
           url: body.url,
           ...(body.branch ? { branch: body.branch } : {}),
           checkoutDir: workspaceDir,
@@ -1599,7 +1599,7 @@ export function projectRoutes(ctx: ServiceContext): Hono {
     // clone has succeeded.
     if (cloneToWorkspaceRoot) {
       try {
-        await ctx.store.updateProjectGithub(id, {
+        await ctx.store.updateProjectGitHub(id, {
           url: body.url,
           ...(body.headRef ? { branch: body.headRef } : {}),
           checkoutDir: workspaceDir,

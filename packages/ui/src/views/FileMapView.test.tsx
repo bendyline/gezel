@@ -171,7 +171,7 @@ beforeEach(() => {
   delete window.__GEZEL__?.openWorkspaceFile;
   shellProps.length = 0;
   vi.mocked(api.toolFileMap).mockResolvedValue(MODEL);
-  vi.mocked(api.listProjectGithubPulls).mockResolvedValue({ pulls: [] });
+  vi.mocked(api.listProjectGitHubPulls).mockResolvedValue({ pulls: [] });
   vi.mocked(api.readProjectWorkspaceFile).mockImplementation(async (_id, path: string) => ({
     path,
     content: 'export function run() {}\n',

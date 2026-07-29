@@ -34,6 +34,7 @@ import type {
   ArchiveListResponse,
   AskQuestionRequest,
   AskQuestionResponse,
+  CancelCodeReviewResponse,
   CatalogItemDetail,
   CatalogItemSummary,
   CatalogItemVersionInfo,
@@ -43,6 +44,7 @@ import type {
   ChatHistoryResponse,
   ChatSession,
   ChatSessionSummary,
+  CodeReviewResponse,
   CompleteStepRequest,
   CompleteStepResponse,
   CopyArtifactToWorkspaceRequest,
@@ -65,6 +67,7 @@ import type {
   DelegateSecurityFindingResponse,
   DescribeFolderRequest,
   DescribeFolderResponse,
+  DeviceSafetyPolicyConfig,
   DiffFilesRequest,
   DiffFilesResponse,
   DraftScriptRequest,
@@ -104,36 +107,36 @@ import type {
   GezelResponse,
   GezmodelEngine,
   GezmodelImportReview,
-  GithubAbandonMergeResponse,
-  GithubAiMergeResponse,
-  GithubBranchesResponse,
-  GithubChangesResponse,
-  GithubCheckStatusResponse,
-  GithubCloneResponse,
-  GithubCommitDetailResponse,
-  GithubCommitResponse,
-  GithubCompleteMergeResponse,
-  GithubConflictVersionsResponse,
-  GithubCreateCommentResponse,
-  GithubCreatePullRequest,
-  GithubCreatePullResponse,
-  GithubDiscardResponse,
-  GithubFetchResponse,
-  GithubFileDiffResponse,
-  GithubIdentityResponse,
-  GithubLogResponse,
-  GithubLoginPollResponse,
-  GithubLoginStartResponse,
-  GithubMergeStateResponse,
-  GithubPullDetail,
-  GithubPullDiffResponse,
-  GithubPushResponse,
-  GithubRepoPreviewResponse,
-  GithubReposResponse,
-  GithubResolveConflictResponse,
-  GithubStatusResponse,
-  GithubSuggestMessageResponse,
-  GithubSyncResponse,
+  GitAbandonMergeResponse,
+  GitAiMergeResponse,
+  GitBranchesResponse,
+  GitChangesResponse,
+  GitCloneResponse,
+  GitCommitDetailResponse,
+  GitCommitResponse,
+  GitCompleteMergeResponse,
+  GitConflictVersionsResponse,
+  GitDiscardResponse,
+  GitFetchResponse,
+  GitFileDiffResponse,
+  GitHubCheckStatusResponse,
+  GitHubCreateCommentResponse,
+  GitHubCreatePullRequest,
+  GitHubCreatePullResponse,
+  GitHubIdentityResponse,
+  GitHubLoginPollResponse,
+  GitHubLoginStartResponse,
+  GitHubPullDetail,
+  GitHubPullDiffResponse,
+  GitHubRepoPreviewResponse,
+  GitHubReposResponse,
+  GitLogResponse,
+  GitMergeStateResponse,
+  GitPushResponse,
+  GitResolveConflictResponse,
+  GitStatusResponse,
+  GitSuggestMessageResponse,
+  GitSyncResponse,
   GrepArtifactRequest,
   GrepArtifactResponse,
   GzelBundleManifest,
@@ -153,6 +156,7 @@ import type {
   InvokePageToolResponse,
   InvokeSessionToolResponse,
   ListChatSessionsResponse,
+  ListCodeReviewsResponse,
   ListCraftbooksResponse,
   ListDependenciesResponse,
   ListEntityMentionsRequest,
@@ -160,10 +164,10 @@ import type {
   ListFileIssuesRequest,
   ListFileIssuesResponse,
   ListGezelsResponse,
-  ListGithubPullCommentsResponse,
-  ListGithubPullFilesResponse,
-  ListGithubPullsResponse,
-  ListGithubWorkflowRunsResponse,
+  ListGitHubPullCommentsResponse,
+  ListGitHubPullFilesResponse,
+  ListGitHubPullsResponse,
+  ListGitHubWorkflowRunsResponse,
   ListHistoryResponse,
   ListMentionCandidatesResponse,
   ListModelsResponse,
@@ -259,6 +263,8 @@ import type {
   SessionTelemetry,
   SessionTelemetryListResponse,
   SpawnTaskInstancesRequest,
+  StartCodeReviewRequest,
+  StartCodeReviewResponse,
   StepPosition,
   SuggestCraftbooksResponse,
   SystemBootstrapStatus,
@@ -383,6 +389,8 @@ export interface ProviderQueueState {
   running: number;
   queuedInteractive: number;
   queuedBackground: number;
+  /** Ambient jobs currently held until the provider has been quiet long enough. */
+  ambientHeld?: number;
   concurrency: number;
   /**
    * Cap on how many of the `concurrency` slots can be held by the
@@ -429,6 +437,8 @@ export interface ProviderQueueState {
     gezelId?: string;
     /** See active[].job. */
     job?: string;
+    /** Housekeeping work that yields until the provider is otherwise idle. */
+    ambient?: boolean;
     waitedMs: number;
   }>;
 }
@@ -768,6 +778,11 @@ export interface ConfigResponse {
    * for models the user has explicitly configured.
    */
   modelTuningProfile?: Record<string, string>;
+  /**
+   * Shared accelerator-health admission policy. The UI exposes Observe and
+   * Manage while retaining `off` as an operator/configuration escape hatch.
+   */
+  deviceSafety?: DeviceSafetyPolicyConfig;
   /** MLX: base URL of an already-running mlx_lm.server, for dev/LAN. */
   mlxBaseUrl?: string;
   /** MLX: absolute path to an MLX model directory override. */
@@ -2051,23 +2066,23 @@ export class GezelClient {
   /**
    * Begin a device-flow sign-in. The UI displays the returned `userCode`
    * and opens `verificationUri` in a browser, then polls
-   * `pollGithubLogin(deviceCode)` every `interval` seconds until the
+   * `pollGitHubLogin(deviceCode)` every `interval` seconds until the
    * user completes the auth or it expires.
    */
-  startGithubLogin(): Promise<GithubLoginStartResponse> {
+  startGitHubLogin(): Promise<GitHubLoginStartResponse> {
     return this.request('POST', '/api/system/github-login/start', {});
   }
 
-  pollGithubLogin(deviceCode: string): Promise<GithubLoginPollResponse> {
+  pollGitHubLogin(deviceCode: string): Promise<GitHubLoginPollResponse> {
     return this.request('POST', '/api/system/github-login/poll', { deviceCode });
   }
 
-  githubLogout(): Promise<{ ok: true }> {
+  gitHubLogout(): Promise<{ ok: true }> {
     return this.request('POST', '/api/system/github-logout', {});
   }
 
   /** Fetch the signed-in user's identity. `signedIn: false` if no token. */
-  getGithubIdentity(): Promise<GithubIdentityResponse> {
+  getGitHubIdentity(): Promise<GitHubIdentityResponse> {
     return this.request('GET', '/api/system/github-identity');
   }
 
@@ -2076,7 +2091,7 @@ export class GezelClient {
    * pushedAt desc). Returns an empty list when the user isn't signed
    * in — the dialog just renders no suggestions.
    */
-  listGithubRepos(): Promise<GithubReposResponse> {
+  listGitHubRepos(): Promise<GitHubReposResponse> {
     return this.request('GET', '/api/system/github-repos');
   }
 
@@ -2084,7 +2099,7 @@ export class GezelClient {
    * Fetch metadata + README for a GitHub repo URL. Used by the New
    * Project dialog to seed the project-about preview.
    */
-  previewGithubRepo(url: string): Promise<GithubRepoPreviewResponse> {
+  previewGitHubRepo(url: string): Promise<GitHubRepoPreviewResponse> {
     return this.request('POST', '/api/system/github-repo-preview', { url });
   }
 
@@ -4668,154 +4683,147 @@ export class GezelClient {
 
   // ── per-project GitHub ────────────────────────────────────────────
 
-  getProjectGithubStatus(id: string): Promise<GithubStatusResponse> {
-    return this.request('GET', `/api/projects/${encodeURIComponent(id)}/github/status`);
+  getProjectGitStatus(id: string): Promise<GitStatusResponse> {
+    return this.request('GET', `/api/projects/${encodeURIComponent(id)}/git/status`);
   }
 
-  cloneProjectGithub(id: string): Promise<GithubCloneResponse> {
-    return this.request('POST', `/api/projects/${encodeURIComponent(id)}/github/clone`);
+  cloneProjectGit(id: string): Promise<GitCloneResponse> {
+    return this.request('POST', `/api/projects/${encodeURIComponent(id)}/git/clone`);
   }
 
-  pullProjectGithub(id: string): Promise<{ ok: true; branch?: string; updated: boolean }> {
-    return this.request('POST', `/api/projects/${encodeURIComponent(id)}/github/pull`);
+  pullProjectGit(id: string): Promise<{ ok: true; branch?: string; updated: boolean }> {
+    return this.request('POST', `/api/projects/${encodeURIComponent(id)}/git/pull`);
   }
 
-  setProjectGithubBranch(id: string, branch: string): Promise<{ ok: true; branch: string }> {
-    return this.request('POST', `/api/projects/${encodeURIComponent(id)}/github/branch`, {
+  setProjectGitBranch(id: string, branch: string): Promise<{ ok: true; branch: string }> {
+    return this.request('POST', `/api/projects/${encodeURIComponent(id)}/git/branch`, {
       branch,
     });
   }
 
   /** Create a new branch off current HEAD and switch to it. */
-  createProjectGithubBranch(id: string, branch: string): Promise<{ ok: true; branch: string }> {
-    return this.request('POST', `/api/projects/${encodeURIComponent(id)}/github/branch`, {
+  createProjectGitBranch(id: string, branch: string): Promise<{ ok: true; branch: string }> {
+    return this.request('POST', `/api/projects/${encodeURIComponent(id)}/git/branch`, {
       branch,
       create: true,
     });
   }
 
-  listProjectGithubBranches(id: string): Promise<GithubBranchesResponse> {
-    return this.request('GET', `/api/projects/${encodeURIComponent(id)}/github/branches`);
+  listProjectGitBranches(id: string): Promise<GitBranchesResponse> {
+    return this.request('GET', `/api/projects/${encodeURIComponent(id)}/git/branches`);
   }
 
-  fetchProjectGithub(id: string): Promise<GithubFetchResponse> {
-    return this.request('POST', `/api/projects/${encodeURIComponent(id)}/github/fetch`);
+  fetchProjectGit(id: string): Promise<GitFetchResponse> {
+    return this.request('POST', `/api/projects/${encodeURIComponent(id)}/git/fetch`);
   }
 
-  commitProjectGithub(id: string, message: string): Promise<GithubCommitResponse> {
-    return this.request('POST', `/api/projects/${encodeURIComponent(id)}/github/commit`, {
+  commitProjectGit(id: string, message: string): Promise<GitCommitResponse> {
+    return this.request('POST', `/api/projects/${encodeURIComponent(id)}/git/commit`, {
       message,
     });
   }
 
-  pushProjectGithub(id: string): Promise<GithubPushResponse> {
-    return this.request('POST', `/api/projects/${encodeURIComponent(id)}/github/push`);
+  pushProjectGit(id: string): Promise<GitPushResponse> {
+    return this.request('POST', `/api/projects/${encodeURIComponent(id)}/git/push`);
   }
 
   // ── GitHub tab: changes / sync / merge ───────────────────────────
 
   /** Working-tree changes vs the last save, with per-file +/- stats. */
-  getProjectGithubChanges(id: string): Promise<GithubChangesResponse> {
-    return this.request('GET', `/api/projects/${encodeURIComponent(id)}/github/changes`);
+  getProjectGitChanges(id: string): Promise<GitChangesResponse> {
+    return this.request('GET', `/api/projects/${encodeURIComponent(id)}/git/changes`);
   }
 
   /** Unified diff of one changed file vs the last save. */
-  getProjectGithubFileDiff(id: string, filePath: string): Promise<GithubFileDiffResponse> {
+  getProjectGitFileDiff(id: string, filePath: string): Promise<GitFileDiffResponse> {
     return this.request(
       'GET',
-      `/api/projects/${encodeURIComponent(id)}/github/changes/diff?path=${encodeURIComponent(filePath)}`,
+      `/api/projects/${encodeURIComponent(id)}/git/changes/diff?path=${encodeURIComponent(filePath)}`,
     );
   }
 
   /** Put files back to their last-saved state (or everything, with `all`). */
-  discardProjectGithubChanges(
+  discardProjectGitChanges(
     id: string,
     args: { paths?: string[]; all?: boolean },
-  ): Promise<GithubDiscardResponse> {
-    return this.request('POST', `/api/projects/${encodeURIComponent(id)}/github/discard`, args);
+  ): Promise<GitDiscardResponse> {
+    return this.request('POST', `/api/projects/${encodeURIComponent(id)}/git/discard`, args);
   }
 
   /** Commit history for the Timeline view, newest first. */
-  getProjectGithubLog(
+  getProjectGitLog(
     id: string,
     opts: { limit?: number; skip?: number } = {},
-  ): Promise<GithubLogResponse> {
+  ): Promise<GitLogResponse> {
     const params = new URLSearchParams();
     if (opts.limit !== undefined) params.set('limit', String(opts.limit));
     if (opts.skip !== undefined) params.set('skip', String(opts.skip));
     const qs = params.toString();
     return this.request(
       'GET',
-      `/api/projects/${encodeURIComponent(id)}/github/log${qs ? `?${qs}` : ''}`,
+      `/api/projects/${encodeURIComponent(id)}/git/log${qs ? `?${qs}` : ''}`,
     );
   }
 
   /** One commit with per-file stats and its diff. */
-  getProjectGithubCommit(id: string, sha: string): Promise<GithubCommitDetailResponse> {
+  getProjectGitCommit(id: string, sha: string): Promise<GitCommitDetailResponse> {
     return this.request(
       'GET',
-      `/api/projects/${encodeURIComponent(id)}/github/log/${encodeURIComponent(sha)}`,
+      `/api/projects/${encodeURIComponent(id)}/git/log/${encodeURIComponent(sha)}`,
     );
   }
 
   /** One-verb sync: fetch + integrate + push. Switch on `state`. */
-  syncProjectGithub(id: string): Promise<GithubSyncResponse> {
-    return this.request('POST', `/api/projects/${encodeURIComponent(id)}/github/sync`);
+  syncProjectGit(id: string): Promise<GitSyncResponse> {
+    return this.request('POST', `/api/projects/${encodeURIComponent(id)}/git/sync`);
   }
 
   /** Merge-in-progress state + the list of conflicted files. */
-  getProjectGithubMergeState(id: string): Promise<GithubMergeStateResponse> {
-    return this.request('GET', `/api/projects/${encodeURIComponent(id)}/github/merge`);
+  getProjectGitMergeState(id: string): Promise<GitMergeStateResponse> {
+    return this.request('GET', `/api/projects/${encodeURIComponent(id)}/git/merge`);
   }
 
   /** Base/ours/theirs content for one conflicted file. */
-  getProjectGithubConflictVersions(
+  getProjectGitConflictVersions(
     id: string,
     filePath: string,
-  ): Promise<GithubConflictVersionsResponse> {
+  ): Promise<GitConflictVersionsResponse> {
     return this.request(
       'GET',
-      `/api/projects/${encodeURIComponent(id)}/github/merge/file?path=${encodeURIComponent(filePath)}`,
+      `/api/projects/${encodeURIComponent(id)}/git/merge/file?path=${encodeURIComponent(filePath)}`,
     );
   }
 
   /** Settle one conflicted file: keep mine, keep GitHub's, or custom content. */
-  resolveProjectGithubConflict(
+  resolveProjectGitConflict(
     id: string,
     args: { path: string; choice: 'mine' | 'theirs' | 'custom'; content?: string },
-  ): Promise<GithubResolveConflictResponse> {
-    return this.request(
-      'POST',
-      `/api/projects/${encodeURIComponent(id)}/github/merge/resolve`,
-      args,
-    );
+  ): Promise<GitResolveConflictResponse> {
+    return this.request('POST', `/api/projects/${encodeURIComponent(id)}/git/merge/resolve`, args);
   }
 
   /** Commit the merge once every conflict is settled. */
-  completeProjectGithubMerge(id: string, message?: string): Promise<GithubCompleteMergeResponse> {
+  completeProjectGitMerge(id: string, message?: string): Promise<GitCompleteMergeResponse> {
     return this.request(
       'POST',
-      `/api/projects/${encodeURIComponent(id)}/github/merge/complete`,
+      `/api/projects/${encodeURIComponent(id)}/git/merge/complete`,
       message ? { message } : {},
     );
   }
 
   /** Cancel an in-progress merge, restoring the pre-sync state. */
-  abandonProjectGithubMerge(id: string): Promise<GithubAbandonMergeResponse> {
-    return this.request('POST', `/api/projects/${encodeURIComponent(id)}/github/merge/abandon`);
+  abandonProjectGitMerge(id: string): Promise<GitAbandonMergeResponse> {
+    return this.request('POST', `/api/projects/${encodeURIComponent(id)}/git/merge/abandon`);
   }
 
   /** AI-suggested one-line save description from the current changes. */
-  suggestProjectGithubMessage(id: string): Promise<GithubSuggestMessageResponse> {
-    return this.request(
-      'POST',
-      `/api/projects/${encodeURIComponent(id)}/github/ai/suggest-message`,
-    );
+  suggestProjectGitMessage(id: string): Promise<GitSuggestMessageResponse> {
+    return this.request('POST', `/api/projects/${encodeURIComponent(id)}/git/ai/suggest-message`);
   }
 
   /** AI-proposed merged content for one conflicted file (preview only). */
-  aiResolveProjectGithubConflict(id: string, filePath: string): Promise<GithubAiMergeResponse> {
-    return this.request('POST', `/api/projects/${encodeURIComponent(id)}/github/ai/merge`, {
+  aiResolveProjectGitConflict(id: string, filePath: string): Promise<GitAiMergeResponse> {
+    return this.request('POST', `/api/projects/${encodeURIComponent(id)}/git/ai/merge`, {
       path: filePath,
     });
   }
@@ -4850,47 +4858,72 @@ export class GezelClient {
     return this.request('GET', `/api/projects/${encodeURIComponent(id)}/index/skills`);
   }
 
-  listProjectGithubFiles(
+  listProjectGitFiles(
     id: string,
   ): Promise<{ files: Array<{ name: string; path: string; isDirectory: boolean }> }> {
-    return this.request('GET', `/api/projects/${encodeURIComponent(id)}/github/files`);
+    return this.request('GET', `/api/projects/${encodeURIComponent(id)}/git/files`);
   }
 
-  readProjectGithubFile(id: string, filePath: string): Promise<{ path: string; content: string }> {
+  readProjectGitFile(id: string, filePath: string): Promise<{ path: string; content: string }> {
     return this.request(
       'GET',
-      `/api/projects/${encodeURIComponent(id)}/github/files/read?path=${encodeURIComponent(filePath)}`,
+      `/api/projects/${encodeURIComponent(id)}/git/files/read?path=${encodeURIComponent(filePath)}`,
     );
   }
 
-  listProjectGithubPulls(id: string): Promise<ListGithubPullsResponse> {
+  startProjectCodeReview(
+    id: string,
+    args: StartCodeReviewRequest,
+  ): Promise<StartCodeReviewResponse> {
+    return this.request('POST', `/api/projects/${encodeURIComponent(id)}/git/reviews`, args);
+  }
+
+  listProjectCodeReviews(id: string): Promise<ListCodeReviewsResponse> {
+    return this.request('GET', `/api/projects/${encodeURIComponent(id)}/git/reviews`);
+  }
+
+  getProjectCodeReview(id: string, reviewId: string): Promise<CodeReviewResponse> {
+    return this.request(
+      'GET',
+      `/api/projects/${encodeURIComponent(id)}/git/reviews/${encodeURIComponent(reviewId)}`,
+    );
+  }
+
+  cancelProjectCodeReview(id: string, reviewId: string): Promise<CancelCodeReviewResponse> {
+    return this.request(
+      'POST',
+      `/api/projects/${encodeURIComponent(id)}/git/reviews/${encodeURIComponent(reviewId)}/cancel`,
+    );
+  }
+
+  listProjectGitHubPulls(id: string): Promise<ListGitHubPullsResponse> {
     return this.request('GET', `/api/projects/${encodeURIComponent(id)}/github/prs`);
   }
 
-  getProjectGithubPull(id: string, num: number): Promise<GithubPullDetail> {
+  getProjectGitHubPull(id: string, num: number): Promise<GitHubPullDetail> {
     return this.request('GET', `/api/projects/${encodeURIComponent(id)}/github/prs/${num}`);
   }
 
-  listProjectGithubPullFiles(id: string, num: number): Promise<ListGithubPullFilesResponse> {
+  listProjectGitHubPullFiles(id: string, num: number): Promise<ListGitHubPullFilesResponse> {
     return this.request('GET', `/api/projects/${encodeURIComponent(id)}/github/prs/${num}/files`);
   }
 
-  listProjectGithubPullComments(id: string, num: number): Promise<ListGithubPullCommentsResponse> {
+  listProjectGitHubPullComments(id: string, num: number): Promise<ListGitHubPullCommentsResponse> {
     return this.request(
       'GET',
       `/api/projects/${encodeURIComponent(id)}/github/prs/${num}/comments`,
     );
   }
 
-  getProjectGithubPullDiff(id: string, num: number): Promise<GithubPullDiffResponse> {
+  getProjectGitHubPullDiff(id: string, num: number): Promise<GitHubPullDiffResponse> {
     return this.request('GET', `/api/projects/${encodeURIComponent(id)}/github/prs/${num}/diff`);
   }
 
-  createProjectGithubPullComment(
+  createProjectGitHubPullComment(
     id: string,
     num: number,
     body: string,
-  ): Promise<GithubCreateCommentResponse> {
+  ): Promise<GitHubCreateCommentResponse> {
     return this.request(
       'POST',
       `/api/projects/${encodeURIComponent(id)}/github/prs/${num}/comments`,
@@ -4898,18 +4931,18 @@ export class GezelClient {
     );
   }
 
-  createProjectGithubPullRequest(
+  createProjectGitHubPullRequest(
     id: string,
-    args: GithubCreatePullRequest,
-  ): Promise<GithubCreatePullResponse> {
+    args: GitHubCreatePullRequest,
+  ): Promise<GitHubCreatePullResponse> {
     return this.request('POST', `/api/projects/${encodeURIComponent(id)}/github/prs`, args);
   }
 
-  listProjectGithubWorkflowRuns(
+  listProjectGitHubWorkflowRuns(
     id: string,
     branch: string,
     limit?: number,
-  ): Promise<ListGithubWorkflowRunsResponse> {
+  ): Promise<ListGitHubWorkflowRunsResponse> {
     const params = new URLSearchParams({ branch });
     if (limit !== undefined) params.set('limit', String(limit));
     return this.request(
@@ -4918,7 +4951,7 @@ export class GezelClient {
     );
   }
 
-  getProjectGithubChecks(id: string, ref: string): Promise<GithubCheckStatusResponse> {
+  getProjectGitHubChecks(id: string, ref: string): Promise<GitHubCheckStatusResponse> {
     return this.request(
       'GET',
       `/api/projects/${encodeURIComponent(id)}/github/checks?ref=${encodeURIComponent(ref)}`,
@@ -5720,6 +5753,284 @@ export class GezelClient {
       'DELETE',
       `/api/craftbooks/${encodeURIComponent(id)}/scripts/source?name=${encodeURIComponent(name)}`,
     );
+  }
+  // ── Deprecated aliases — Git/GitHub naming realignment ──
+  // Local-git methods were renamed *ProjectGithub* → *ProjectGit* (and now
+  // call the canonical /git/ routes); GitHub web-service methods gained a
+  // capital H. These delegating aliases keep the published surface
+  // compiling; removal is a future breaking release.
+
+  /** @deprecated Use {@link GezelClient.getProjectGitStatus}. */
+  getProjectGithubStatus(
+    ...args: Parameters<GezelClient['getProjectGitStatus']>
+  ): ReturnType<GezelClient['getProjectGitStatus']> {
+    return this.getProjectGitStatus(...args);
+  }
+
+  /** @deprecated Use {@link GezelClient.cloneProjectGit}. */
+  cloneProjectGithub(
+    ...args: Parameters<GezelClient['cloneProjectGit']>
+  ): ReturnType<GezelClient['cloneProjectGit']> {
+    return this.cloneProjectGit(...args);
+  }
+
+  /** @deprecated Use {@link GezelClient.pullProjectGit}. */
+  pullProjectGithub(
+    ...args: Parameters<GezelClient['pullProjectGit']>
+  ): ReturnType<GezelClient['pullProjectGit']> {
+    return this.pullProjectGit(...args);
+  }
+
+  /** @deprecated Use {@link GezelClient.setProjectGitBranch}. */
+  setProjectGithubBranch(
+    ...args: Parameters<GezelClient['setProjectGitBranch']>
+  ): ReturnType<GezelClient['setProjectGitBranch']> {
+    return this.setProjectGitBranch(...args);
+  }
+
+  /** @deprecated Use {@link GezelClient.createProjectGitBranch}. */
+  createProjectGithubBranch(
+    ...args: Parameters<GezelClient['createProjectGitBranch']>
+  ): ReturnType<GezelClient['createProjectGitBranch']> {
+    return this.createProjectGitBranch(...args);
+  }
+
+  /** @deprecated Use {@link GezelClient.listProjectGitBranches}. */
+  listProjectGithubBranches(
+    ...args: Parameters<GezelClient['listProjectGitBranches']>
+  ): ReturnType<GezelClient['listProjectGitBranches']> {
+    return this.listProjectGitBranches(...args);
+  }
+
+  /** @deprecated Use {@link GezelClient.fetchProjectGit}. */
+  fetchProjectGithub(
+    ...args: Parameters<GezelClient['fetchProjectGit']>
+  ): ReturnType<GezelClient['fetchProjectGit']> {
+    return this.fetchProjectGit(...args);
+  }
+
+  /** @deprecated Use {@link GezelClient.commitProjectGit}. */
+  commitProjectGithub(
+    ...args: Parameters<GezelClient['commitProjectGit']>
+  ): ReturnType<GezelClient['commitProjectGit']> {
+    return this.commitProjectGit(...args);
+  }
+
+  /** @deprecated Use {@link GezelClient.pushProjectGit}. */
+  pushProjectGithub(
+    ...args: Parameters<GezelClient['pushProjectGit']>
+  ): ReturnType<GezelClient['pushProjectGit']> {
+    return this.pushProjectGit(...args);
+  }
+
+  /** @deprecated Use {@link GezelClient.getProjectGitChanges}. */
+  getProjectGithubChanges(
+    ...args: Parameters<GezelClient['getProjectGitChanges']>
+  ): ReturnType<GezelClient['getProjectGitChanges']> {
+    return this.getProjectGitChanges(...args);
+  }
+
+  /** @deprecated Use {@link GezelClient.getProjectGitFileDiff}. */
+  getProjectGithubFileDiff(
+    ...args: Parameters<GezelClient['getProjectGitFileDiff']>
+  ): ReturnType<GezelClient['getProjectGitFileDiff']> {
+    return this.getProjectGitFileDiff(...args);
+  }
+
+  /** @deprecated Use {@link GezelClient.discardProjectGitChanges}. */
+  discardProjectGithubChanges(
+    ...args: Parameters<GezelClient['discardProjectGitChanges']>
+  ): ReturnType<GezelClient['discardProjectGitChanges']> {
+    return this.discardProjectGitChanges(...args);
+  }
+
+  /** @deprecated Use {@link GezelClient.getProjectGitLog}. */
+  getProjectGithubLog(
+    ...args: Parameters<GezelClient['getProjectGitLog']>
+  ): ReturnType<GezelClient['getProjectGitLog']> {
+    return this.getProjectGitLog(...args);
+  }
+
+  /** @deprecated Use {@link GezelClient.getProjectGitCommit}. */
+  getProjectGithubCommit(
+    ...args: Parameters<GezelClient['getProjectGitCommit']>
+  ): ReturnType<GezelClient['getProjectGitCommit']> {
+    return this.getProjectGitCommit(...args);
+  }
+
+  /** @deprecated Use {@link GezelClient.syncProjectGit}. */
+  syncProjectGithub(
+    ...args: Parameters<GezelClient['syncProjectGit']>
+  ): ReturnType<GezelClient['syncProjectGit']> {
+    return this.syncProjectGit(...args);
+  }
+
+  /** @deprecated Use {@link GezelClient.getProjectGitMergeState}. */
+  getProjectGithubMergeState(
+    ...args: Parameters<GezelClient['getProjectGitMergeState']>
+  ): ReturnType<GezelClient['getProjectGitMergeState']> {
+    return this.getProjectGitMergeState(...args);
+  }
+
+  /** @deprecated Use {@link GezelClient.getProjectGitConflictVersions}. */
+  getProjectGithubConflictVersions(
+    ...args: Parameters<GezelClient['getProjectGitConflictVersions']>
+  ): ReturnType<GezelClient['getProjectGitConflictVersions']> {
+    return this.getProjectGitConflictVersions(...args);
+  }
+
+  /** @deprecated Use {@link GezelClient.resolveProjectGitConflict}. */
+  resolveProjectGithubConflict(
+    ...args: Parameters<GezelClient['resolveProjectGitConflict']>
+  ): ReturnType<GezelClient['resolveProjectGitConflict']> {
+    return this.resolveProjectGitConflict(...args);
+  }
+
+  /** @deprecated Use {@link GezelClient.completeProjectGitMerge}. */
+  completeProjectGithubMerge(
+    ...args: Parameters<GezelClient['completeProjectGitMerge']>
+  ): ReturnType<GezelClient['completeProjectGitMerge']> {
+    return this.completeProjectGitMerge(...args);
+  }
+
+  /** @deprecated Use {@link GezelClient.abandonProjectGitMerge}. */
+  abandonProjectGithubMerge(
+    ...args: Parameters<GezelClient['abandonProjectGitMerge']>
+  ): ReturnType<GezelClient['abandonProjectGitMerge']> {
+    return this.abandonProjectGitMerge(...args);
+  }
+
+  /** @deprecated Use {@link GezelClient.suggestProjectGitMessage}. */
+  suggestProjectGithubMessage(
+    ...args: Parameters<GezelClient['suggestProjectGitMessage']>
+  ): ReturnType<GezelClient['suggestProjectGitMessage']> {
+    return this.suggestProjectGitMessage(...args);
+  }
+
+  /** @deprecated Use {@link GezelClient.aiResolveProjectGitConflict}. */
+  aiResolveProjectGithubConflict(
+    ...args: Parameters<GezelClient['aiResolveProjectGitConflict']>
+  ): ReturnType<GezelClient['aiResolveProjectGitConflict']> {
+    return this.aiResolveProjectGitConflict(...args);
+  }
+
+  /** @deprecated Use {@link GezelClient.listProjectGitFiles}. */
+  listProjectGithubFiles(
+    ...args: Parameters<GezelClient['listProjectGitFiles']>
+  ): ReturnType<GezelClient['listProjectGitFiles']> {
+    return this.listProjectGitFiles(...args);
+  }
+
+  /** @deprecated Use {@link GezelClient.readProjectGitFile}. */
+  readProjectGithubFile(
+    ...args: Parameters<GezelClient['readProjectGitFile']>
+  ): ReturnType<GezelClient['readProjectGitFile']> {
+    return this.readProjectGitFile(...args);
+  }
+
+  /** @deprecated Use {@link GezelClient.listProjectGitHubPulls}. */
+  listProjectGithubPulls(
+    ...args: Parameters<GezelClient['listProjectGitHubPulls']>
+  ): ReturnType<GezelClient['listProjectGitHubPulls']> {
+    return this.listProjectGitHubPulls(...args);
+  }
+
+  /** @deprecated Use {@link GezelClient.getProjectGitHubPull}. */
+  getProjectGithubPull(
+    ...args: Parameters<GezelClient['getProjectGitHubPull']>
+  ): ReturnType<GezelClient['getProjectGitHubPull']> {
+    return this.getProjectGitHubPull(...args);
+  }
+
+  /** @deprecated Use {@link GezelClient.listProjectGitHubPullFiles}. */
+  listProjectGithubPullFiles(
+    ...args: Parameters<GezelClient['listProjectGitHubPullFiles']>
+  ): ReturnType<GezelClient['listProjectGitHubPullFiles']> {
+    return this.listProjectGitHubPullFiles(...args);
+  }
+
+  /** @deprecated Use {@link GezelClient.listProjectGitHubPullComments}. */
+  listProjectGithubPullComments(
+    ...args: Parameters<GezelClient['listProjectGitHubPullComments']>
+  ): ReturnType<GezelClient['listProjectGitHubPullComments']> {
+    return this.listProjectGitHubPullComments(...args);
+  }
+
+  /** @deprecated Use {@link GezelClient.getProjectGitHubPullDiff}. */
+  getProjectGithubPullDiff(
+    ...args: Parameters<GezelClient['getProjectGitHubPullDiff']>
+  ): ReturnType<GezelClient['getProjectGitHubPullDiff']> {
+    return this.getProjectGitHubPullDiff(...args);
+  }
+
+  /** @deprecated Use {@link GezelClient.createProjectGitHubPullComment}. */
+  createProjectGithubPullComment(
+    ...args: Parameters<GezelClient['createProjectGitHubPullComment']>
+  ): ReturnType<GezelClient['createProjectGitHubPullComment']> {
+    return this.createProjectGitHubPullComment(...args);
+  }
+
+  /** @deprecated Use {@link GezelClient.createProjectGitHubPullRequest}. */
+  createProjectGithubPullRequest(
+    ...args: Parameters<GezelClient['createProjectGitHubPullRequest']>
+  ): ReturnType<GezelClient['createProjectGitHubPullRequest']> {
+    return this.createProjectGitHubPullRequest(...args);
+  }
+
+  /** @deprecated Use {@link GezelClient.listProjectGitHubWorkflowRuns}. */
+  listProjectGithubWorkflowRuns(
+    ...args: Parameters<GezelClient['listProjectGitHubWorkflowRuns']>
+  ): ReturnType<GezelClient['listProjectGitHubWorkflowRuns']> {
+    return this.listProjectGitHubWorkflowRuns(...args);
+  }
+
+  /** @deprecated Use {@link GezelClient.getProjectGitHubChecks}. */
+  getProjectGithubChecks(
+    ...args: Parameters<GezelClient['getProjectGitHubChecks']>
+  ): ReturnType<GezelClient['getProjectGitHubChecks']> {
+    return this.getProjectGitHubChecks(...args);
+  }
+
+  /** @deprecated Use {@link GezelClient.startGitHubLogin}. */
+  startGithubLogin(
+    ...args: Parameters<GezelClient['startGitHubLogin']>
+  ): ReturnType<GezelClient['startGitHubLogin']> {
+    return this.startGitHubLogin(...args);
+  }
+
+  /** @deprecated Use {@link GezelClient.pollGitHubLogin}. */
+  pollGithubLogin(
+    ...args: Parameters<GezelClient['pollGitHubLogin']>
+  ): ReturnType<GezelClient['pollGitHubLogin']> {
+    return this.pollGitHubLogin(...args);
+  }
+
+  /** @deprecated Use {@link GezelClient.getGitHubIdentity}. */
+  getGithubIdentity(
+    ...args: Parameters<GezelClient['getGitHubIdentity']>
+  ): ReturnType<GezelClient['getGitHubIdentity']> {
+    return this.getGitHubIdentity(...args);
+  }
+
+  /** @deprecated Use {@link GezelClient.listGitHubRepos}. */
+  listGithubRepos(
+    ...args: Parameters<GezelClient['listGitHubRepos']>
+  ): ReturnType<GezelClient['listGitHubRepos']> {
+    return this.listGitHubRepos(...args);
+  }
+
+  /** @deprecated Use {@link GezelClient.previewGitHubRepo}. */
+  previewGithubRepo(
+    ...args: Parameters<GezelClient['previewGitHubRepo']>
+  ): ReturnType<GezelClient['previewGitHubRepo']> {
+    return this.previewGitHubRepo(...args);
+  }
+
+  /** @deprecated Use {@link GezelClient.gitHubLogout}. */
+  githubLogout(
+    ...args: Parameters<GezelClient['gitHubLogout']>
+  ): ReturnType<GezelClient['gitHubLogout']> {
+    return this.gitHubLogout(...args);
   }
 }
 

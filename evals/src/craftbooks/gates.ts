@@ -30,7 +30,17 @@ import type { CraftbookEvalGateCheck, PrometheusAlertsGateCheck } from './types.
 
 const execFileAsync = promisify(execFile);
 
-export type CraftbookEvalWorkspace = WorkspaceLike;
+/**
+ * Structurally mirrors the service's `GateWorkspaceReader`: the base
+ * `read`/`list` hit the shipped workspace; the optional artifact
+ * accessors back any check carrying `artifact: true` (the runtime
+ * evaluator swaps readers — without them such checks fail closed).
+ */
+export type CraftbookEvalWorkspace = WorkspaceLike & {
+  readArtifact?: (file: string) => Promise<string | null>;
+  listArtifacts?: () => Promise<string[]>;
+  readArtifactBytes?: (file: string) => Promise<Uint8Array | null>;
+};
 
 export interface CraftbookEvalGateResult {
   pass: boolean;
@@ -62,6 +72,12 @@ async function evaluateOne(
   check: CraftbookEvalGateCheck,
   ws: CraftbookEvalWorkspace,
 ): Promise<string | null> {
+  // Artifact-drawer checks delegate straight to the runtime evaluator,
+  // which owns the workspace↔artifact reader swap — the local fast paths
+  // below all read the workspace and would judge the wrong tree.
+  if ((check as { artifact?: boolean }).artifact === true) {
+    return delegateToRuntimeEvaluator(check as GateCheck, ws);
+  }
   switch (check.kind) {
     case 'minBytes': {
       const result = await fileMinBytes(ws, check.file, check.bytes);

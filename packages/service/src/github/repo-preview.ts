@@ -1,7 +1,7 @@
-import type { GithubRepoPreviewResponse } from '@bendyline/gezel';
+import type { GitHubRepoPreviewResponse } from '@bendyline/gezel';
 import { Octokit } from '@octokit/rest';
 import { githubOauthClientId } from './oauth-config.js';
-import { parseGithubUrl } from './url.js';
+import { parseGitHubUrl } from './url.js';
 
 /**
  * Fetch the metadata + README for a GitHub repo URL — fed into the
@@ -19,20 +19,20 @@ import { parseGithubUrl } from './url.js';
 
 const README_BYTE_LIMIT = 6 * 1024;
 
-export class InvalidGithubUrlError extends Error {
+export class InvalidGitHubUrlError extends Error {
   constructor(input: string) {
     super(`Not a recognizable GitHub URL: ${input}`);
-    this.name = 'InvalidGithubUrlError';
+    this.name = 'InvalidGitHubUrlError';
   }
 }
 
-export class GithubRepoNotFoundError extends Error {
+export class GitHubRepoNotFoundError extends Error {
   constructor(
     public readonly owner: string,
     public readonly repo: string,
   ) {
     super(`GitHub repo ${owner}/${repo} not found or not accessible with current token.`);
-    this.name = 'GithubRepoNotFoundError';
+    this.name = 'GitHubRepoNotFoundError';
   }
 }
 
@@ -41,7 +41,7 @@ export class GithubRepoNotFoundError extends Error {
  * remediation differs: re-auth for 401, OAuth-App-org-approval or
  * broader scopes for 403.
  */
-export class GithubAccessDeniedError extends Error {
+export class GitHubAccessDeniedError extends Error {
   constructor(
     public readonly status: 401 | 403,
     public readonly hint: string,
@@ -50,16 +50,16 @@ export class GithubAccessDeniedError extends Error {
     public readonly fixUrl?: string,
   ) {
     super(hint);
-    this.name = 'GithubAccessDeniedError';
+    this.name = 'GitHubAccessDeniedError';
   }
 }
 
-export async function previewGithubRepo(
+export async function previewGitHubRepo(
   token: string | null,
   url: string,
-): Promise<GithubRepoPreviewResponse> {
-  const parsed = parseGithubUrl(url);
-  if (!parsed) throw new InvalidGithubUrlError(url);
+): Promise<GitHubRepoPreviewResponse> {
+  const parsed = parseGitHubUrl(url);
+  if (!parsed) throw new InvalidGitHubUrlError(url);
   const { owner, repo, canonical } = parsed;
 
   const octo = new Octokit({
@@ -72,7 +72,7 @@ export async function previewGithubRepo(
     const res = await octo.repos.get({ owner, repo });
     repoData = res.data;
   } catch (err) {
-    if (isNotFound(err)) throw new GithubRepoNotFoundError(owner, repo);
+    if (isNotFound(err)) throw new GitHubRepoNotFoundError(owner, repo);
     const denied = asAccessDenied(err, token, owner);
     if (denied) throw denied;
     throw err;
@@ -130,7 +130,7 @@ function isNotFound(err: unknown): boolean {
  * scope problem, or a rate-limit notice. Surfacing GitHub's own text
  * is far more useful than guessing.
  */
-function readGithubMessage(err: unknown): string | null {
+function readGitHubMessage(err: unknown): string | null {
   if (!err || typeof err !== 'object') return null;
   const data = (err as { response?: { data?: { message?: unknown } } }).response?.data;
   if (data && typeof data === 'object' && typeof data.message === 'string') {
@@ -145,11 +145,11 @@ function asAccessDenied(
   err: unknown,
   token: string | null,
   owner: string,
-): GithubAccessDeniedError | null {
+): GitHubAccessDeniedError | null {
   if (!err || typeof err !== 'object' || !('status' in err)) return null;
   const status = (err as { status?: number }).status;
   if (status === 401) {
-    return new GithubAccessDeniedError(
+    return new GitHubAccessDeniedError(
       401,
       token
         ? 'GitHub rejected the stored token (401). Sign out and sign in again to refresh it.'
@@ -158,7 +158,7 @@ function asAccessDenied(
   }
   if (status !== 403) return null;
 
-  const githubMessage = readGithubMessage(err);
+  const githubMessage = readGitHubMessage(err);
   const clientId = githubOauthClientId();
   // The owner-side OAuth App approval page. Org owners go here to
   // approve; non-owners can request approval from the same URL.
@@ -168,26 +168,26 @@ function asAccessDenied(
   const userConnectionUrl = `https://github.com/settings/connections/applications/${clientId}`;
 
   if (githubMessage && /OAuth App access restrictions/i.test(githubMessage)) {
-    return new GithubAccessDeniedError(
+    return new GitHubAccessDeniedError(
       403,
       `${githubMessage} Open the connection page below and request access (or, if you own ${owner}, approve the Gezel OAuth App at ${orgApprovalUrl}).`,
       userConnectionUrl,
     );
   }
   if (githubMessage && /SAML/i.test(githubMessage)) {
-    return new GithubAccessDeniedError(
+    return new GitHubAccessDeniedError(
       403,
       `${githubMessage} Open the connection page to authorize SSO for the Gezel OAuth App.`,
       userConnectionUrl,
     );
   }
   if (githubMessage && /rate limit/i.test(githubMessage)) {
-    return new GithubAccessDeniedError(403, `${githubMessage} Wait a few minutes and try again.`);
+    return new GitHubAccessDeniedError(403, `${githubMessage} Wait a few minutes and try again.`);
   }
   // Generic 403 fallback — surface GitHub's text if it had any, plus
   // both useful URLs.
   const detail = githubMessage ? ` GitHub said: "${githubMessage}".` : '';
-  return new GithubAccessDeniedError(
+  return new GitHubAccessDeniedError(
     403,
     `GitHub returned 403.${detail} If ${owner} is an organization with OAuth App restrictions, open ${userConnectionUrl} to request access; otherwise the OAuth grant may lack \`repo\` scope — sign out and back in to refresh.`,
     userConnectionUrl,

@@ -14,7 +14,7 @@ subsystem.** Everything a connector needs already exists and is proven in produc
 [packages/service/src/mail/](../packages/service/src/mail/): a provider-agnostic adapter
 contract, cursor-resumed incremental sync, normalized files carrying trust frontmatter, an
 injection scanner that quarantines outside indexed roots, credentials in the SecretStore,
-and a deny-by-default outbox with night-shift deferral. [github/manager.ts](../packages/service/src/github/manager.ts)
+and a deny-by-default outbox with night-shift deferral. [git/manager.ts](../packages/service/src/git/manager.ts)
 is a second instance of the same pattern built independently. Codifying **one** contract
 lets the next source (calendar, Drive, Slack, RSS, a watched filesystem folder) reuse the
 sync engine, the safety rails, the secret store, the indexer, and the consent model instead
@@ -135,7 +135,7 @@ manifest*, so a new source is a JSON file, not a compile. The registry dispatche
   > **Git/GitHub is NOT a connector.** Git's value is its *structure* — the commit DAG, diffs,
   > branches, and an AI-*editable* working copy — which is the inverse of the connector shape
   > (mirror an external source into a read-first normalized corpus). Git stays a **core concept**
-  > of gezel (native in `github/manager.ts` + `ProjectGithubView`); the connector framework never
+  > of gezel (native in `git/manager.ts` + `ProjectGitHubView`); the connector framework never
   > touches the git substrate. GitHub's *non-git content* (issues, PR discussions) is a different
   > thing — that content is legitimately connector-eligible data (the `github-issues-cli` `script`
   > exemplar), but the git substrate itself is not. GitHub wikis are connector-eligible page

@@ -1,10 +1,10 @@
-import type { GithubConflictFile } from '@bendyline/gezel';
+import type { GitConflictFile } from '@bendyline/gezel';
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../../api.js';
 import { ConfirmDialog } from '../ConfirmDialog.js';
 import { ConflictFileCard, type Resolution } from './ConflictFileCard.js';
 import { GIT_COPY, plural } from './gitCopy.js';
-import { notifyGithubChanged } from './useGitSync.js';
+import { notifyGitChanged } from './useGitSync.js';
 
 /**
  * Guided conflict flow that takes over the Changes pane while a sync is
@@ -38,7 +38,7 @@ export function ConflictResolutionView({
   onFinished,
   onExited,
 }: Props) {
-  const [conflicts, setConflicts] = useState<GithubConflictFile[] | null>(null);
+  const [conflicts, setConflicts] = useState<GitConflictFile[] | null>(null);
   const [resolutions, setResolutions] = useState<Map<string, Resolution>>(new Map());
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [busy, setBusy] = useState<'' | 'resolve' | 'finish' | 'cancel'>('');
@@ -47,7 +47,7 @@ export function ConflictResolutionView({
   useEffect(() => {
     let cancelled = false;
     void api
-      .getProjectGithubMergeState(projectId)
+      .getProjectGitMergeState(projectId)
       .then((state) => {
         if (cancelled) return;
         if (!state.inMerge) {
@@ -69,7 +69,7 @@ export function ConflictResolutionView({
     async (path: string, choice: 'mine' | 'theirs' | 'custom', content?: string) => {
       setBusy('resolve');
       try {
-        await api.resolveProjectGithubConflict(projectId, {
+        await api.resolveProjectGitConflict(projectId, {
           path,
           choice,
           ...(content !== undefined ? { content } : {}),
@@ -86,7 +86,7 @@ export function ConflictResolutionView({
           );
           return remaining[0]?.path ?? null;
         });
-        notifyGithubChanged(projectId);
+        notifyGitChanged(projectId);
       } catch (err) {
         showToast('err', err instanceof Error ? err.message : String(err));
       } finally {
@@ -99,8 +99,8 @@ export function ConflictResolutionView({
   const finish = useCallback(async () => {
     setBusy('finish');
     try {
-      await api.completeProjectGithubMerge(projectId);
-      notifyGithubChanged(projectId);
+      await api.completeProjectGitMerge(projectId);
+      notifyGitChanged(projectId);
       showToast('ok', GIT_COPY.conflictFinishToast);
       onFinished();
     } catch (err) {
@@ -112,8 +112,8 @@ export function ConflictResolutionView({
   const cancel = useCallback(async () => {
     setBusy('cancel');
     try {
-      await api.abandonProjectGithubMerge(projectId);
-      notifyGithubChanged(projectId);
+      await api.abandonProjectGitMerge(projectId);
+      notifyGitChanged(projectId);
       onExited();
     } catch (err) {
       showToast('err', err instanceof Error ? err.message : String(err));

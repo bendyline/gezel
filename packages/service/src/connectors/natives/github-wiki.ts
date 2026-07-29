@@ -9,7 +9,7 @@ import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, extname, join } from 'node:path';
 import { realpathContained, safeJoin } from '../../fs/safe-paths.js';
-import { type RunGitOptions, type RunGitResult, isGitInstalled, runGit } from '../../github/git.js';
+import { type RunGitOptions, type RunGitResult, isGitInstalled, runGit } from '../../git/git.js';
 import { connectorSecretKey, registerNativeAdapter } from '../registry.js';
 import type {
   AdapterDeps,

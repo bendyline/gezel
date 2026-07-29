@@ -63,7 +63,7 @@ describe('Store.createProject — github field', () => {
     });
     expect(created.github).toBeUndefined();
 
-    await store.updateProjectGithub(created.id, {
+    await store.updateProjectGitHub(created.id, {
       url: 'https://github.com/bendyline/squisq',
       checkoutDir: join(home, 'projects', created.id, 'workspace'),
     });

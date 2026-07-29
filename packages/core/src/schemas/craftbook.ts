@@ -322,7 +322,7 @@ export type CraftbookRunModes = z.infer<typeof CraftbookRunModesSchema>;
 /** The project facts a craftbook's requirements are evaluated against. */
 export interface CraftbookRequirementContext {
   /** Project has a GitHub repo connected (`project.github.url` set). */
-  hasGithub: boolean;
+  hasGitHub: boolean;
   /** Current git branch of the project's checkout, or null if unknown. */
   branch: string | null;
 }
@@ -341,7 +341,7 @@ export function unmetCraftbookRequirements(
   const unmet: string[] = [];
   for (const r of requirements ?? []) {
     if (r.kind === 'github') {
-      if (!ctx.hasGithub) unmet.push('a GitHub-connected project');
+      if (!ctx.hasGitHub) unmet.push('a GitHub-connected project');
     } else if (r.kind === 'non-main-branch') {
       if (!ctx.branch || MAIN_BRANCHES.has(ctx.branch)) {
         unmet.push('a branch other than main/master');

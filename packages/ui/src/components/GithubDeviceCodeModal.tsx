@@ -1,4 +1,4 @@
-import type { GithubIdentity, GithubLoginStartResponse } from '@bendyline/gezel';
+import type { GitHubIdentity, GitHubLoginStartResponse } from '@bendyline/gezel';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { Dialog } from '../primitives/index.js';
@@ -6,12 +6,12 @@ import { Dialog } from '../primitives/index.js';
 /**
  * Renders the GitHub OAuth device-flow handshake. Lifecycle:
  *
- *   1. On mount, calls `startGithubLogin()` to get a `deviceCode` +
+ *   1. On mount, calls `startGitHubLogin()` to get a `deviceCode` +
  *      `userCode` + `verificationUri`.
  *   2. Shows the user code prominently with a copy button, plus an
  *      "Open GitHub" button that pops `verificationUri` in the
  *      browser. The user signs in there.
- *   3. Polls `pollGithubLogin(deviceCode)` every `interval` seconds
+ *   3. Polls `pollGitHubLogin(deviceCode)` every `interval` seconds
  *      (extending by 5s on `slow_down` per GitHub's contract) until
  *      success / expired / denied / fatal.
  *   4. On `success`, fires `onSignedIn(identity)` and the parent
@@ -20,16 +20,16 @@ import { Dialog } from '../primitives/index.js';
  * Closing the modal mid-poll cancels the timer; the device code
  * naturally expires server-side a few minutes later.
  */
-export function GithubDeviceCodeModal({
+export function GitHubDeviceCodeModal({
   onClose,
   onSignedIn,
 }: {
   onClose: () => void;
-  onSignedIn: (identity: GithubIdentity) => void;
+  onSignedIn: (identity: GitHubIdentity) => void;
 }) {
   const [state, setState] = useState<
     | { kind: 'starting' }
-    | { kind: 'awaiting'; start: GithubLoginStartResponse; status: string }
+    | { kind: 'awaiting'; start: GitHubLoginStartResponse; status: string }
     | { kind: 'expired' }
     | { kind: 'denied'; message?: string }
     | { kind: 'error'; message: string }
@@ -41,7 +41,7 @@ export function GithubDeviceCodeModal({
     const cancel = cancelRef.current;
     void (async () => {
       try {
-        const start = await api.startGithubLogin();
+        const start = await api.startGitHubLogin();
         if (cancel.cancelled) return;
         setState({ kind: 'awaiting', start, status: 'Waiting for you to authorize on GitHub…' });
         let intervalSec = start.interval;
@@ -53,9 +53,9 @@ export function GithubDeviceCodeModal({
             setState({ kind: 'expired' });
             return;
           }
-          let res: Awaited<ReturnType<typeof api.pollGithubLogin>>;
+          let res: Awaited<ReturnType<typeof api.pollGitHubLogin>>;
           try {
-            res = await api.pollGithubLogin(start.deviceCode);
+            res = await api.pollGitHubLogin(start.deviceCode);
           } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
             setState({ kind: 'error', message });
@@ -103,7 +103,7 @@ export function GithubDeviceCodeModal({
     }
   }, [state]);
 
-  const openGithub = useCallback(() => {
+  const openGitHub = useCallback(() => {
     if (state.kind !== 'awaiting') return;
     window.open(state.start.verificationUri, '_blank', 'noopener,noreferrer');
   }, [state]);
@@ -130,7 +130,7 @@ export function GithubDeviceCodeModal({
                 </button>
               </div>
               <div className="gz-github-device-actions">
-                <button type="button" className="primary" onClick={openGithub}>
+                <button type="button" className="primary" onClick={openGitHub}>
                   Open GitHub
                 </button>
                 <span className="muted small">{state.status}</span>

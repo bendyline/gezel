@@ -206,6 +206,16 @@ describe('evaluateDeviceHealth', () => {
     const strict = resolveDeviceSafetyPolicy({ mode: 'guard', onTelemetryFailure: 'block' }, {});
     expect(evaluateDeviceHealth(sample([]), strict, false).admissible).toBe(false);
   });
+
+  it('marks temperatures above 95C as a hard block', () => {
+    const observe = resolveDeviceSafetyPolicy({ mode: 'observe' }, {});
+    const decision = evaluateDeviceHealth(
+      sample([{ vendor: 'nvidia', deviceId: '0', temperatureC: 96 }]),
+      observe,
+    );
+    expect(decision.hardBlocked).toBe(true);
+    expect(decision.reasons).toContainEqual(expect.stringContaining('hard 95C safety limit'));
+  });
 });
 
 describe('DeviceHealthGate', () => {
@@ -252,6 +262,34 @@ describe('DeviceHealthGate', () => {
     });
     await expect(gate.admit('test')).resolves.toMatchObject({ admissible: true });
     expect(sleeps).toBe(0);
+  });
+
+  it('observe mode still gates new GPU work above 95C', async () => {
+    const samples = [
+      sample([{ vendor: 'amd', deviceId: '0', temperatureC: 96 }]),
+      sample([{ vendor: 'amd', deviceId: '0', temperatureC: 95 }]),
+    ];
+    let now = 0;
+    let calls = 0;
+    let sleeps = 0;
+    const gate = new DeviceHealthGate({
+      probe: {
+        sample: async () => samples[Math.min(calls++, samples.length - 1)]!,
+      },
+      policy: { mode: 'observe', pollIntervalMs: 500, maxWaitMs: 2_000 },
+      now: () => now,
+      sleep: async (ms) => {
+        sleeps += 1;
+        now += ms;
+      },
+    });
+
+    await expect(gate.admit('test')).resolves.toMatchObject({
+      admissible: true,
+      hardBlocked: false,
+    });
+    expect(calls).toBe(2);
+    expect(sleeps).toBe(1);
   });
 
   it('surfaces a normalized warm snapshot for status UI', async () => {

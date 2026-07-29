@@ -33,6 +33,7 @@ import { enginesRoutes } from './routes/engines.js';
 import { evalRoutes } from './routes/eval.js';
 import { folderRoutes } from './routes/folders.js';
 import { gezelRoutes } from './routes/gezels.js';
+import { gitRoutes } from './routes/git.js';
 import { githubRoutes } from './routes/github.js';
 import { growthRoutes } from './routes/growth.js';
 import { handboekRoutes } from './routes/handboek.js';
@@ -432,6 +433,12 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   // Per-project gezels + import review queue at /api/projects/:id/gezels|imports/*
   app.route('/api/projects', projectGezelRoutes(ctx));
   // Per-project GitHub operations live at /api/projects/:id/github/*
+  app.route('/api/projects', gitRoutes(ctx, 'git'));
+  // Legacy alias: the same local-git routes under the old /github segment,
+  // kept so older HTTP clients (e.g. a stale VSCode extension talking to a
+  // newer machine daemon) keep working. Removal is a deliberate breaking
+  // release, not a cleanup.
+  app.route('/api/projects', gitRoutes(ctx, 'github'));
   app.route('/api/projects', githubRoutes(ctx));
   // Per-project mail operations live at /api/projects/:id/mail/*
   app.route('/api/projects', mailRoutes(ctx));

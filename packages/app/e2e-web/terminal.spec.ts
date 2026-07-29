@@ -8,6 +8,7 @@
 import { expect, test } from './fixtures/test.js';
 import { settle } from './helpers/determinism.js';
 import { gotoHome, openProject } from './helpers/nav.js';
+import { shot } from './helpers/shot.js';
 
 async function gotoProject(page: import('@playwright/test').Page, projectId: string) {
   await gotoHome(page);
@@ -118,6 +119,80 @@ test('mounts, submits on Enter, newlines on Shift+Enter', async ({ page, world }
   await page.keyboard.press('Shift+Enter');
   await page.keyboard.type('b');
   await expect(editor.locator('.view-line')).toHaveCount(2);
+});
+
+test('preserves wide output columns in a horizontally scrollable pane', async ({ page, world }) => {
+  await openTerminal(page, world!.projectId);
+  const fixtureOutput = [
+    `Name${' '.repeat(76)}LastWriteTime${' '.repeat(28)}Length`,
+    `${'-'.repeat(80)}  ${'-'.repeat(40)}  ${'-'.repeat(12)}`,
+    `terminal-output-fixture${' '.repeat(57)}7/29/2026  3:47 PM${' '.repeat(20)}30357`,
+  ].join('\n');
+  await page.getByTestId('chat-timeline').evaluate((timeline, text) => {
+    const bubble = document.createElement('div');
+    bubble.className = 'msg msg-assistant terminal-group terminal-group-output';
+
+    const header = document.createElement('div');
+    header.className = 'msg-header terminal-group-header';
+    const folder = document.createElement('span');
+    folder.className = 'terminal-folder-pill';
+    folder.textContent = '/docs';
+    const author = document.createElement('span');
+    author.className = 'msg-author';
+    author.textContent = 'Terminal output';
+    const exit = document.createElement('span');
+    exit.className = 'terminal-exit-pill terminal-exit-ok';
+    exit.textContent = 'exit 0';
+    const duration = document.createElement('span');
+    duration.className = 'terminal-duration';
+    duration.textContent = '23ms';
+    header.append(folder, author, exit, duration);
+
+    const viewport = document.createElement('section');
+    viewport.className = 'terminal-output-viewport';
+    viewport.setAttribute('aria-label', 'Terminal output');
+    viewport.tabIndex = 0;
+    const body = document.createElement('pre');
+    body.className = 'terminal-output-body';
+    body.textContent = text;
+    viewport.append(body);
+    bubble.append(header, viewport);
+    timeline.append(bubble);
+  }, fixtureOutput);
+
+  const output = page
+    .getByRole('region', { name: 'Terminal output' })
+    .filter({ hasText: 'terminal-output-fixture' })
+    .last();
+  await expect(output).toBeVisible();
+
+  const layout = await output.evaluate((viewport) => {
+    const body = viewport.querySelector<HTMLElement>('.terminal-output-body');
+    if (!body) return null;
+    return {
+      whiteSpace: getComputedStyle(body).whiteSpace,
+      overflowX: getComputedStyle(viewport).overflowX,
+      scrollWidth: viewport.scrollWidth,
+      clientWidth: viewport.clientWidth,
+      tabIndex: viewport.tabIndex,
+    };
+  });
+  expect(layout).not.toBeNull();
+  expect(layout!.whiteSpace).toBe('pre');
+  expect(layout!.overflowX).toBe('auto');
+  expect(layout!.scrollWidth).toBeGreaterThan(layout!.clientWidth);
+  expect(layout!.tabIndex).toBe(0);
+
+  const bubble = page
+    .locator('.terminal-group-output')
+    .filter({ hasText: 'terminal-output-fixture' })
+    .last();
+  await shot(page, 'wide-output', {
+    area: 'terminal',
+    description: 'Wide terminal output preserves fixed columns and exposes a horizontal scrollbar',
+    clip: bubble,
+    selector: '.terminal-group-output',
+  });
 });
 
 test('places the caret after a command staged from the Commands rail', async ({

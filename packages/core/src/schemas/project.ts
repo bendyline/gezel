@@ -30,7 +30,7 @@ export const HttpsOriginSchema = z
  * `~/.gezel/projects/{id}/gh/`). The PAT used for clone + API access lives
  * in the shared `github` toolset, not on the project.
  */
-export const ProjectGithubSchema = z.object({
+export const ProjectGitHubSchema = z.object({
   // Accept any non-empty string. Git URLs come in many forms beyond
   // `https://`: ssh shorthand (`git@github.com:owner/repo`), local
   // filesystem paths (`/path/to/bare.git`), other-host references.
@@ -43,8 +43,10 @@ export const ProjectGithubSchema = z.object({
   /** Resolved absolute path to the working tree. Managed by the service. */
   checkoutDir: z.string().optional(),
   lastSyncedAt: z.string().optional(),
+  /** Repo default branch (e.g. "main"), detected lazily and cached. Managed by the service. */
+  defaultBranch: z.string().optional(),
 });
-export type ProjectGithub = z.infer<typeof ProjectGithubSchema>;
+export type ProjectGitHub = z.infer<typeof ProjectGitHubSchema>;
 
 /**
  * One bound mailbox on a mail-enabled project. The account's credential is
@@ -261,7 +263,7 @@ export const ProjectSchema = z.object({
    * focused single-purpose task. Absent → the full agent profile.
    */
   leanProfile: z.boolean().optional(),
-  github: ProjectGithubSchema.optional(),
+  github: ProjectGitHubSchema.optional(),
   /** Optional email association — see {@link ProjectMailSchema}. */
   mail: ProjectMailSchema.optional(),
   connectors: z.array(ProjectConnectorBindingSchema).optional(),
@@ -423,3 +425,9 @@ export const ProjectFileEntrySchema = z.object({
   isDirectory: z.boolean(),
 });
 export type ProjectFileEntry = z.infer<typeof ProjectFileEntrySchema>;
+
+// ── Deprecated aliases — Git/GitHub naming realignment ──
+/** @deprecated Use {@link ProjectGitHubSchema}. */
+export const ProjectGithubSchema = ProjectGitHubSchema;
+/** @deprecated Use {@link ProjectGitHub}. */
+export type ProjectGithub = ProjectGitHub;

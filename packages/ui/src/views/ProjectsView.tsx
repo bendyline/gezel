@@ -39,7 +39,7 @@ import { Select, Tabs } from '../primitives/index.js';
 import { useEffectiveTheme } from '../theme.js';
 import { FileMapView } from './FileMapView.js';
 import { HistoryView } from './HistoryView.js';
-import { ProjectGithubView } from './ProjectGithubView.js';
+import { ProjectGitHubView } from './ProjectGitHubView.js';
 import { ProjectOverviewView } from './ProjectOverviewView.js';
 import { TasksView } from './TasksView.js';
 import { NewProjectDialog } from './projects/NewProjectDialog.js';
@@ -469,8 +469,8 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
       gezelId?: string;
     }>
   >([]);
-  const [githubUrlDraft, setGithubUrlDraft] = useState('');
-  const [githubStatus, setGithubStatus] = useState<string>('');
+  const [githubUrlDraft, setGitHubUrlDraft] = useState('');
+  const [gitStatus, setGitStatus] = useState<string>('');
   const [availableCredentials, setAvailableCredentials] = useState<
     Array<{ name: string; label: string; stored: boolean; defaultOrigins: string[] }>
   >([]);
@@ -714,8 +714,8 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
       setArtifactFiles([]);
       setTab('chat');
       setWorkingDirDraft(project.workingDir ?? '');
-      setGithubUrlDraft(project.github?.url ?? '');
-      setGithubStatus('');
+      setGitHubUrlDraft(project.github?.url ?? '');
+      setGitStatus('');
       await refreshOutputFiles(id);
       // Emit a project-opened event so the top-nav MRU (see App.tsx)
       // can promote this project to the front of its recents list.
@@ -802,8 +802,8 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
       setArtifactFiles([]);
       setTab('chat');
       setWorkingDirDraft('');
-      setGithubUrlDraft('');
-      setGithubStatus('');
+      setGitHubUrlDraft('');
+      setGitStatus('');
       await refreshOutputFiles(created.id);
     },
     [refresh, refreshOutputFiles],
@@ -822,7 +822,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
     }
   }, [pkgName, selected]);
 
-  const saveGithubUrl = useCallback(
+  const saveGitHubUrl = useCallback(
     async (nextRaw: string) => {
       if (!selected) return;
       const next = nextRaw.trim();
@@ -832,23 +832,23 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
         if (next === '') {
           const updated = await api.updateProject(selected.id, { github: null });
           setSelected(updated);
-          setGithubStatus('Unlinked.');
+          setGitStatus('Unlinked.');
           return;
         }
         const updated = await api.updateProject(selected.id, { github: { url: next } });
         setSelected(updated);
-        setGithubStatus('Cloning…');
+        setGitStatus('Cloning…');
         try {
-          const res = await api.cloneProjectGithub(selected.id);
+          const res = await api.cloneProjectGit(selected.id);
           const after = await api.getProject(selected.id);
           setSelected(after);
-          setGithubStatus(res.adopted ? 'Adopted existing checkout.' : 'Cloned.');
+          setGitStatus(res.adopted ? 'Adopted existing checkout.' : 'Cloned.');
         } catch (err) {
           const message = (err as Error).message || 'clone failed';
-          setGithubStatus(`Linked, but clone failed: ${message}`);
+          setGitStatus(`Linked, but clone failed: ${message}`);
         }
       } catch (err) {
-        setGithubStatus(`save failed: ${(err as Error).message}`);
+        setGitStatus(`save failed: ${(err as Error).message}`);
       }
     },
     [selected],
@@ -1319,7 +1319,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                   void saveAllowGezelWrites(next);
                 }
               }}
-              onOpenGithub={selected.github?.url ? () => setTab('github') : undefined}
+              onOpenGitHub={selected.github?.url ? () => setTab('github') : undefined}
               status={selected.status ?? 'active'}
               onStatusChange={async (v) => {
                 const updated = await api.updateProject(selected.id, { status: v });
@@ -1625,8 +1625,8 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                               <input
                                 placeholder="https://github.com/owner/repo"
                                 value={githubUrlDraft}
-                                onChange={(e) => setGithubUrlDraft(e.target.value)}
-                                onBlur={() => void saveGithubUrl(githubUrlDraft)}
+                                onChange={(e) => setGitHubUrlDraft(e.target.value)}
+                                onBlur={() => void saveGitHubUrl(githubUrlDraft)}
                               />
                             </div>
                             <small className="muted">
@@ -1635,10 +1635,10 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                                   ? `Linked. Checkout: ${selected.github.checkoutDir}${selected.github.branch ? ` (${selected.github.branch})` : ''}`
                                   : 'Linked. Use the GitHub tab to clone.'
                                 : 'Optional. When set, gezels gain a GitHub-linked checkout and a new GitHub tab.'}
-                              {githubStatus && (
+                              {gitStatus && (
                                 <>
                                   {' '}
-                                  — <span className="status">{githubStatus}</span>
+                                  — <span className="status">{gitStatus}</span>
                                 </>
                               )}
                             </small>
@@ -2184,7 +2184,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                   {tab === 'tasks' && <TasksView projectId={selected.id} />}
 
                   {tab === 'github' && selected.github?.url && (
-                    <ProjectGithubView project={selected} onProjectChange={setSelected} />
+                    <ProjectGitHubView project={selected} onProjectChange={setSelected} />
                   )}
 
                   {tab === 'mail' && (

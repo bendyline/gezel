@@ -1,11 +1,11 @@
-import type { GithubPullDetail, GithubPullSummary } from '@bendyline/gezel';
+import type { GitHubPullDetail, GitHubPullSummary } from '@bendyline/gezel';
 import { useEffect, useState } from 'react';
 import { api } from '../../api.js';
 
 /**
  * The Pull requests sub-tab: open-PR list on the left, a read-only
  * detail panel (description, per-file patches, comments) on the right.
- * Extracted as-is from the original ProjectGithubView; gezels do the
+ * Extracted as-is from the original ProjectGitHubView; gezels do the
  * actual PR actions via the github toolset's MCP tools.
  */
 
@@ -14,7 +14,7 @@ interface Props {
 }
 
 export function PullRequestsView({ projectId }: Props) {
-  const [pulls, setPulls] = useState<GithubPullSummary[] | null>(null);
+  const [pulls, setPulls] = useState<GitHubPullSummary[] | null>(null);
   const [selectedPr, setSelectedPr] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -24,7 +24,7 @@ export function PullRequestsView({ projectId }: Props) {
     setError(null);
     let cancelled = false;
     void api
-      .listProjectGithubPulls(projectId)
+      .listProjectGitHubPulls(projectId)
       .then((res) => {
         if (!cancelled) setPulls(res.pulls);
       })
@@ -100,12 +100,12 @@ export function PullRequestsView({ projectId }: Props) {
 }
 
 function PrDetailPanel({ projectId, num }: { projectId: string; num: number }) {
-  const [detail, setDetail] = useState<GithubPullDetail | null>(null);
+  const [detail, setDetail] = useState<GitHubPullDetail | null>(null);
   const [files, setFiles] = useState<
-    Awaited<ReturnType<typeof api.listProjectGithubPullFiles>>['files'] | null
+    Awaited<ReturnType<typeof api.listProjectGitHubPullFiles>>['files'] | null
   >(null);
   const [comments, setComments] = useState<
-    Awaited<ReturnType<typeof api.listProjectGithubPullComments>>['comments'] | null
+    Awaited<ReturnType<typeof api.listProjectGitHubPullComments>>['comments'] | null
   >(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -118,9 +118,9 @@ function PrDetailPanel({ projectId, num }: { projectId: string; num: number }) {
     (async () => {
       try {
         const [d, f, c] = await Promise.all([
-          api.getProjectGithubPull(projectId, num),
-          api.listProjectGithubPullFiles(projectId, num),
-          api.listProjectGithubPullComments(projectId, num),
+          api.getProjectGitHubPull(projectId, num),
+          api.listProjectGitHubPullFiles(projectId, num),
+          api.listProjectGitHubPullComments(projectId, num),
         ]);
         if (cancelled) return;
         setDetail(d);

@@ -668,7 +668,7 @@ export function computeToolAllowlist(opts: {
   // `false` strips; `undefined` leaves the surface untouched so callers
   // that don't know the git state (and existing tests) keep prior
   // behavior. The production call site always passes concrete booleans.
-  const stripGithub = opts.githubLinked === false;
+  const stripGitHub = opts.githubLinked === false;
   const stripRunGit = opts.isGitRepo === false;
 
   // Security posture is a hard ceiling that fires in every branch below
@@ -689,13 +689,13 @@ export function computeToolAllowlist(opts: {
   const applyGates = (allow: Set<string>): Set<string> => {
     const gated = applyGitToolGates(
       applySearchToolGates(allow, { stripWebSearch, stripWikipediaSearch }),
-      { stripGithub, stripRunGit },
+      { stripGitHub, stripRunGit },
     );
     return applySecurityPolicyGates(gated, securityPolicy, stripWorkspaceWrite);
   };
 
   const gatesActive =
-    stripWebSearch || stripWikipediaSearch || stripGithub || stripRunGit || securityGatesActive;
+    stripWebSearch || stripWikipediaSearch || stripGitHub || stripRunGit || securityGatesActive;
 
   if (mode === 'never') {
     if (!gatesActive) return null;
@@ -1217,11 +1217,11 @@ function applySearchToolGates(
 
 function applyGitToolGates(
   allow: Set<string>,
-  gates: { stripGithub: boolean; stripRunGit: boolean },
+  gates: { stripGitHub: boolean; stripRunGit: boolean },
 ): Set<string> {
-  if (!gates.stripGithub && !gates.stripRunGit) return allow;
+  if (!gates.stripGitHub && !gates.stripRunGit) return allow;
   const next = new Set(allow);
-  if (gates.stripGithub) for (const name of GITHUB_REMOTE_TOOLS) next.delete(name);
+  if (gates.stripGitHub) for (const name of GITHUB_REMOTE_TOOLS) next.delete(name);
   if (gates.stripRunGit) next.delete('run_git');
   return next;
 }

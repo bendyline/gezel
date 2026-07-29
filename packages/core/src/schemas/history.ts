@@ -45,6 +45,8 @@ export const HistoryEventKindSchema = z.enum([
   'project.github.linked',
   'project.github.unlinked',
   'project.github.synced',
+  'project.review.requested',
+  'project.review.settled',
   'project.connector.bound',
   'project.connector.unbound',
   'project.connector.synced',

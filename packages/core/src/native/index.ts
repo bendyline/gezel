@@ -56,6 +56,7 @@ export type {
 export {
   createSystemDeviceHealthProbe,
   DEFAULT_DEVICE_SAFETY_POLICY,
+  DEVICE_HARD_TEMPERATURE_C,
   DeviceHealthGate,
   evaluateDeviceHealth,
   parseAmdSmiJson,

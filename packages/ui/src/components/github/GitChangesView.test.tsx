@@ -30,28 +30,28 @@ function renderView(overrides: Partial<Parameters<typeof GitChangesView>[0]> = {
 describe('GitChangesView', () => {
   beforeEach(() => {
     window.localStorage.clear();
-    vi.mocked(api.getProjectGithubChanges).mockResolvedValue({
+    vi.mocked(api.getProjectGitChanges).mockResolvedValue({
       changes: CHANGES,
       total: 2,
       truncated: false,
     } as never);
-    vi.mocked(api.getProjectGithubFileDiff).mockResolvedValue({
+    vi.mocked(api.getProjectGitFileDiff).mockResolvedValue({
       path: 'src/app.ts',
       kind: 'modified',
       binary: false,
       truncated: false,
       diff: '@@ -1,2 +1,2 @@\n-removed line\n+added line\n',
     } as never);
-    vi.mocked(api.commitProjectGithub).mockResolvedValue({
+    vi.mocked(api.commitProjectGit).mockResolvedValue({
       ok: true,
       sha: 'abc',
       filesChanged: 2,
     } as never);
-    vi.mocked(api.discardProjectGithubChanges).mockResolvedValue({
+    vi.mocked(api.discardProjectGitChanges).mockResolvedValue({
       ok: true,
       discarded: 1,
     } as never);
-    vi.mocked(api.suggestProjectGithubMessage).mockResolvedValue({ message: '' } as never);
+    vi.mocked(api.suggestProjectGitMessage).mockResolvedValue({ message: '' } as never);
   });
 
   it('lists changed files with stats and auto-selects the first for its diff', async () => {
@@ -62,7 +62,7 @@ describe('GitChangesView', () => {
     expect(screen.getByText('new-page.md')).toBeInTheDocument();
     expect(screen.getByText('2 changed files')).toBeInTheDocument();
     await waitFor(() => {
-      expect(api.getProjectGithubFileDiff).toHaveBeenCalledWith('pj-1', 'src/app.ts');
+      expect(api.getProjectGitFileDiff).toHaveBeenCalledWith('pj-1', 'src/app.ts');
     });
     await waitFor(() => {
       expect(screen.getByText(/added line/)).toBeInTheDocument();
@@ -79,7 +79,7 @@ describe('GitChangesView', () => {
     );
     await user.click(screen.getByRole('button', { name: 'Save & sync' }));
     await waitFor(() => {
-      expect(api.commitProjectGithub).toHaveBeenCalledWith('pj-1', 'Reworked the intro');
+      expect(api.commitProjectGit).toHaveBeenCalledWith('pj-1', 'Reworked the intro');
     });
     expect(props.onSyncRequested).toHaveBeenCalled();
     expect(props.showToast).toHaveBeenCalledWith('ok', 'Saved.');
@@ -92,10 +92,7 @@ describe('GitChangesView', () => {
     await user.click(screen.getByLabelText('Also send to GitHub now'));
     await user.click(screen.getByRole('button', { name: 'Save changes' }));
     await waitFor(() => {
-      expect(api.commitProjectGithub).toHaveBeenCalledWith(
-        'pj-1',
-        'Updated app.ts and 1 more file',
-      );
+      expect(api.commitProjectGit).toHaveBeenCalledWith('pj-1', 'Updated app.ts and 1 more file');
     });
   });
 
@@ -107,7 +104,7 @@ describe('GitChangesView', () => {
     expect(screen.getByText('Undo changes to app.ts?')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Undo changes' }));
     await waitFor(() => {
-      expect(api.discardProjectGithubChanges).toHaveBeenCalledWith('pj-1', {
+      expect(api.discardProjectGitChanges).toHaveBeenCalledWith('pj-1', {
         paths: ['src/app.ts'],
       });
     });
@@ -120,12 +117,12 @@ describe('GitChangesView', () => {
     await user.click(screen.getByRole('button', { name: 'Undo all…' }));
     await user.click(screen.getByRole('button', { name: 'Undo everything' }));
     await waitFor(() => {
-      expect(api.discardProjectGithubChanges).toHaveBeenCalledWith('pj-1', { all: true });
+      expect(api.discardProjectGitChanges).toHaveBeenCalledWith('pj-1', { all: true });
     });
   });
 
   it('shows the all-saved empty state with a Sync affordance', async () => {
-    vi.mocked(api.getProjectGithubChanges).mockResolvedValue({
+    vi.mocked(api.getProjectGitChanges).mockResolvedValue({
       changes: [],
       total: 0,
       truncated: false,

@@ -1036,6 +1036,8 @@ export interface StreamingBubbleProps {
    * arrived yet.
    */
   lastActivityAt?: number;
+  /** Whether this turn has emitted an actual provider/model progress signal. */
+  hasProgress?: boolean;
   /**
    * When set, the slow banner gets a "Check Ollama" button that
    * fires this callback and renders the result inline. Lets the
@@ -1449,6 +1451,7 @@ export function StreamingBubble({
   error,
   queueAhead,
   lastActivityAt,
+  hasProgress,
   onProbeOllama,
   onReEngage,
   wirePulseCount,
@@ -1595,14 +1598,14 @@ export function StreamingBubble({
   // been updated.
   const silentFor = useElapsedSeconds(lastActivityAt ?? startedAt);
   // Has the turn produced ANY signal yet (a delta, a tool event)? Before
-  // the first token, `lastActivityAt` is null and `silentFor` counts from
-  // turn start — so a legitimately slow COLD start (a 284B DeepSeek model
-  // streaming experts from disk takes ~3 min to first token) would trip the
-  // "stalled/wedged" tier even though the model is prefilling, not wedged.
+  // the first token, `silentFor` counts from turn start — so a legitimately
+  // slow COLD start (a 284B DeepSeek model streaming experts from disk takes
+  // ~3 min to first token) would trip the "stalled/wedged" tier even though
+  // the model is prefilling, not wedged.
   // A turn can only be "wedged mid-turn" if it was mid-turn — i.e. it
   // streamed something and THEN went quiet. Until then, the reassuring
   // "still working / first load is slow" copy is the honest signal.
-  const streamedThisTurn = lastActivityAt != null;
+  const stalledSilence = isStalledSilence(silentFor, hasProgress === true);
   // Inline diagnostic state for the slow-banner's "Check Ollama"
   // button. `null` = idle (haven't probed); object = result of last
   // probe. Re-clicking the button re-probes and overwrites.
@@ -1896,7 +1899,7 @@ export function StreamingBubble({
             // doubly wrong (silent ≠ slow ≠ contended).
             <div className="msg-slow-banner">
               <div>
-                {silentFor >= STALLED_AFTER_S && streamedThisTurn ? (
+                {stalledSilence ? (
                   <>
                     This turn looks stalled — no signal for {formatElapsedLong(silentFor)}. The
                     model may have wedged mid-turn; you can stop it and ask it to pick up where it
@@ -1915,7 +1918,7 @@ export function StreamingBubble({
                   </>
                 )}
               </div>
-              {silentFor >= STALLED_AFTER_S && streamedThisTurn && onReEngage && (
+              {stalledSilence && onReEngage && (
                 <div className="msg-slow-banner-probe">
                   <button
                     type="button"
@@ -2151,6 +2154,11 @@ const SILENCE_BANNER_AFTER_S = 30;
  * threshold for now; a server-side stall signal can replace it later.
  */
 const STALLED_AFTER_S = 120;
+
+/** The stalled tier is valid only after this turn has made observable progress. */
+export function isStalledSilence(silentFor: number | null, hasProgress: boolean): boolean {
+  return silentFor !== null && silentFor >= STALLED_AFTER_S && hasProgress;
+}
 
 /**
  * Per-tool-call "details" disclosure: the full, untruncated arguments

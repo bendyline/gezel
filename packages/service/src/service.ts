@@ -43,8 +43,9 @@ import { ModelFitnessManager } from './fitness/manager.js';
 import { type FitnessEngine, runFitnessProbe } from './fitness/probe.js';
 import { ActivityTracker } from './fs/activity-tracker.js';
 import { Store } from './fs/store.js';
-import { GitHubManager } from './github/manager.js';
-import { GithubPrs } from './github/prs.js';
+import { GitManager } from './git/manager.js';
+import { CodeReviewManager } from './git/reviews.js';
+import { GitHubPrs } from './github/prs.js';
 import { createGrantManager, parseAutoApproveAppIds } from './grants/manager.js';
 import { GrowthEngine } from './growth/engine.js';
 import { createDaemonDeviceInfo } from './handboek/daemon-device.js';
@@ -923,8 +924,8 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
 
   const channels = new ChannelManager({ store, secrets, history, debug });
 
-  const github = new GitHubManager(home, store, secrets);
-  const githubPrs = new GithubPrs(github);
+  const git = new GitManager(home, store, secrets);
+  const gitHubPrs = new GitHubPrs(git);
   const renderer = new ImageRenderer({ home });
 
   // Image-generation provider manager. Lazy-builds the underlying
@@ -1343,11 +1344,6 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   // Content index (code/doc intelligence) — backs the code-intel MCP tools and
   // is refreshed by the workspace indexer's tick.
   const contentIndex = new ContentIndex(store, home);
-  // Finding delegation is task-backed: successful completion closes the
-  // linked finding (and its rooftop fire); cancellation returns it to open.
-  tasks.setTaskSettledHook(async ({ projectId, task, outcome }) => {
-    await contentIndex.settleFindingsForTask(projectId, task.ref, outcome);
-  });
   // Post-construction injection (ChatManager is built ~500 lines earlier):
   // powers the workspace-gestalt prompt block and index-enriched recall.
   chat.setContentIndex(contentIndex);
@@ -1358,6 +1354,32 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     catalog,
     contentIndex,
     events: chatEvents,
+  });
+  // Code reviews: snapshot-driven review tasks kicked off from the GitHub
+  // tab's Review panel; records live in per-project code-reviews.json.
+  const codeReviews = new CodeReviewManager({
+    home,
+    store,
+    git,
+    tasks,
+    taskRunner,
+    history,
+    catalog,
+    chat,
+    contentIndex,
+    workspaceIndex,
+  });
+  // Terminal-task fan-out, one callee per feature, each isolated so a
+  // failing settle never starves the others: finding delegation closes
+  // the linked finding (cancel reopens it); code reviews flip their
+  // record to complete/canceled.
+  tasks.setTaskSettledHook(async ({ projectId, task, outcome }) => {
+    await contentIndex
+      .settleFindingsForTask(projectId, task.ref, outcome)
+      .catch((err) => log.warn(`[service] finding settle failed for ${task.ref}: ${String(err)}`));
+    await codeReviews
+      .settleForTask(projectId, task.ref, outcome)
+      .catch((err) => log.warn(`[service] review settle failed for ${task.ref}: ${String(err)}`));
   });
   // Global search index (session transcripts + history mirror + documents):
   // change hooks enqueue into the single-writer manager; the read facade is
@@ -1546,8 +1568,9 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     catalog,
     handboek,
     secrets,
-    github,
-    githubPrs,
+    git,
+    gitHubPrs,
+    codeReviews,
     mail,
     connectors,
     connectorActions,

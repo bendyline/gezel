@@ -1,4 +1,4 @@
-import type { GithubSyncResponse } from '@bendyline/gezel';
+import type { GitSyncResponse } from '@bendyline/gezel';
 import { useCallback, useRef, useState } from 'react';
 import { api } from '../../api.js';
 import { GIT_COPY, syncedToast } from './gitCopy.js';
@@ -13,16 +13,16 @@ import { GIT_COPY, syncedToast } from './gitCopy.js';
 let inFlightProjectId: string | null = null;
 
 /** Both surfaces re-poll on this — fired after any git mutation. */
-export const GITHUB_CHANGED_EVENT = 'gezel:github-changed';
+export const GIT_CHANGED_EVENT = 'gezel:git-changed';
 
-export function notifyGithubChanged(projectId: string): void {
-  window.dispatchEvent(new CustomEvent(GITHUB_CHANGED_EVENT, { detail: { projectId } }));
+export function notifyGitChanged(projectId: string): void {
+  window.dispatchEvent(new CustomEvent(GIT_CHANGED_EVENT, { detail: { projectId } }));
 }
 
 export interface GitSyncCallbacks {
   onToast?: (kind: 'ok' | 'err', text: string) => void;
   /** Sync stopped on overlapping edits — navigate to the conflict flow. */
-  onConflicts?: (result: GithubSyncResponse) => void;
+  onConflicts?: (result: GitSyncResponse) => void;
   /** Dirty tree — prompt the user to save first. */
   onNeedsSave?: () => void;
   /** PAT missing/revoked — point at Settings → Toolsets. */
@@ -36,12 +36,12 @@ export function useGitSync(projectId: string, callbacks: GitSyncCallbacks = {}) 
   const cbRef = useRef(callbacks);
   cbRef.current = callbacks;
 
-  const sync = useCallback(async (): Promise<GithubSyncResponse | null> => {
+  const sync = useCallback(async (): Promise<GitSyncResponse | null> => {
     if (inFlightProjectId === projectId) return null;
     inFlightProjectId = projectId;
     setSyncing(true);
     try {
-      const result = await api.syncProjectGithub(projectId);
+      const result = await api.syncProjectGit(projectId);
       const cb = cbRef.current;
       switch (result.state) {
         case 'synced':
@@ -63,7 +63,7 @@ export function useGitSync(projectId: string, callbacks: GitSyncCallbacks = {}) 
         default:
           cb.onToast?.('err', result.message || GIT_COPY.syncGenericError);
       }
-      notifyGithubChanged(projectId);
+      notifyGitChanged(projectId);
       return result;
     } catch (err) {
       cbRef.current.onToast?.(

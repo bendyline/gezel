@@ -950,3 +950,84 @@ describe('TaskManager — derived assignee', () => {
     expect(advanced.assignee).toEqual({ kind: 'gezel', gezelId: 'reviewer-id' });
   });
 });
+
+describe('TaskManager craftbookParams interpolation', () => {
+  const bookWithPlaceholders = {
+    id: 'code-review',
+    name: 'Code Review',
+    steps: [
+      {
+        id: 'report',
+        name: 'Write the report for {{reviewId}}',
+        prompt: 'Write the review to reviews/{{reviewId}}/report.md. Leave {{unknown}} alone.',
+        advanceWhen: { file: 'reviews/{{reviewId}}/report.md', artifact: true, minBytes: 400 },
+        gate: {
+          at: 'completion' as const,
+          checks: [
+            {
+              kind: 'minBytes' as const,
+              file: 'reviews/{{reviewId}}/report.md',
+              bytes: 400,
+              artifact: true,
+            },
+          ],
+          onReject: 'report',
+          maxAttempts: 3,
+        },
+        next: 'done',
+      },
+      { id: 'done', name: 'Done', terminal: true },
+    ],
+    entryStepId: 'report',
+    createdAt: '2026-01-01T00:00:00Z',
+    updatedAt: '2026-01-01T00:00:00Z',
+  };
+
+  it('lands params in the snapshot: prompts, advanceWhen paths, and gate check paths', async () => {
+    tasks.setCraftbookResolver({
+      async resolve(id) {
+        return { craftbook: { ...bookWithPlaceholders, id }, sourceId: 'bundled' };
+      },
+    });
+    const task = await tasks.create('website', {
+      title: 'Review',
+      description: 'Review the snapshotted change set and write the gated report artifact now.',
+      craftbookId: 'code-review',
+      assignee: { kind: 'user' },
+      craftbookParams: { reviewId: 'commit-20260729-1200-ab12' },
+    });
+    const step = task.craftbook.steps.find((s) => s.id === 'report');
+    expect(step?.name).toBe('Write the report for commit-20260729-1200-ab12');
+    expect(step?.prompt).toContain('reviews/commit-20260729-1200-ab12/report.md');
+    // Unknown placeholders survive untouched — half-substitution would be
+    // worse than none.
+    expect(step?.prompt).toContain('{{unknown}}');
+    expect(step?.advanceWhen?.file).toBe('reviews/commit-20260729-1200-ab12/report.md');
+    const check = step?.gate?.checks?.[0] as { file?: string } | undefined;
+    expect(check?.file).toBe('reviews/commit-20260729-1200-ab12/report.md');
+    // Copy-on-write regression: the resolver's template must never see the
+    // substitution — an in-place mutation here would leak this task's
+    // params into every later task resolved from the same book object.
+    const templateStep = bookWithPlaceholders.steps[0]!;
+    expect(templateStep.advanceWhen?.file).toBe('reviews/{{reviewId}}/report.md');
+    expect((templateStep.gate?.checks?.[0] as { file?: string }).file).toBe(
+      'reviews/{{reviewId}}/report.md',
+    );
+  });
+
+  it('leaves the snapshot byte-identical when no params are given', async () => {
+    tasks.setCraftbookResolver({
+      async resolve(id) {
+        return { craftbook: { ...bookWithPlaceholders, id }, sourceId: 'bundled' };
+      },
+    });
+    const task = await tasks.create('website', {
+      title: 'Review',
+      craftbookId: 'code-review',
+      assignee: { kind: 'user' },
+    });
+    const step = task.craftbook.steps.find((s) => s.id === 'report');
+    expect(step?.advanceWhen?.file).toBe('reviews/{{reviewId}}/report.md');
+    expect(step?.prompt).toContain('{{reviewId}}');
+  });
+});

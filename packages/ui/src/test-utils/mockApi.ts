@@ -48,6 +48,7 @@ const DEFAULT_RESPONSES: Record<string, unknown> = {
   quickOpen: { results: [], truncated: false },
   listTasks: { tasks: [] },
   listProjectTasks: { tasks: [] },
+  listProjectCodeReviews: { reviews: [] },
   listQuestions: { questions: [] },
   listScripts: { scripts: [] },
   listProjectScripts: { scripts: [] },

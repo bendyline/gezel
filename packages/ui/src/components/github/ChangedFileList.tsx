@@ -1,4 +1,4 @@
-import type { GithubWorkingChange } from '@bendyline/gezel';
+import type { GitWorkingChange } from '@bendyline/gezel';
 import { changeKindWord } from './gitCopy.js';
 
 /**
@@ -17,10 +17,10 @@ const KIND_LETTER: Record<string, string> = {
 };
 
 interface Props {
-  changes: GithubWorkingChange[];
+  changes: GitWorkingChange[];
   selectedPath: string | null;
   onSelect: (path: string) => void;
-  onDiscard: (change: GithubWorkingChange) => void;
+  onDiscard: (change: GitWorkingChange) => void;
   disabled?: boolean;
 }
 

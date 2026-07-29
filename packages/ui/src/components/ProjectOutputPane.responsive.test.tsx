@@ -9,14 +9,12 @@ vi.mock('../api.js', async () => {
 });
 
 class ResizeObserverMock {
-  constructor(_callback: ResizeObserverCallback) {}
   observe(): void {}
   unobserve(): void {}
   disconnect(): void {}
 }
 
-const longPageLabel =
-  'evals/src/scenarios/fixtures/petshop-gemma4-e4b-q8-2026-07-10-malformed';
+const longPageLabel = 'evals/src/scenarios/fixtures/petshop-gemma4-e4b-q8-2026-07-10-malformed';
 
 beforeEach(() => {
   (globalThis as { ResizeObserver?: typeof ResizeObserver }).ResizeObserver =

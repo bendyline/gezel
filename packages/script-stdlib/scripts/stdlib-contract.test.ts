@@ -10,7 +10,7 @@ const scripts = (await readdir(scriptsDir))
 
 describe('standard gate script contracts', () => {
   it('keeps the expected standard library breadth', () => {
-    expect(scripts).toHaveLength(33);
+    expect(scripts).toHaveLength(34);
   });
 
   it.each(scripts)('%s has loadable, discoverable metadata', async (filename) => {

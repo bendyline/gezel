@@ -64,7 +64,7 @@ import { isEnginePinned } from '../engines/native-manifest.js';
 import { resolveInside } from '../fs/safe-paths.js';
 import type { Store } from '../fs/store.js';
 import { rankProjectsForGezel } from '../gezels/roster.js';
-import { inspectGitWorkdir } from '../github/inspect.js';
+import { inspectGitWorkdir } from '../git/inspect.js';
 import type { KeurmeesterManager } from '../keurmeester/manager.js';
 import { isSilentStallAbort, isTransportErrorMessage } from '../keurmeester/manager.js';
 import { extractMemories } from '../memory/extractor.js';
@@ -1027,6 +1027,13 @@ export class ChatManager {
     string,
     { timer: NodeJS.Timeout | null; firstQueuedAt: number; fire: () => void }
   >();
+  /**
+   * Per-session memory extractions that have fired but have not settled.
+   * This includes time spent waiting behind the provider queue's ambient
+   * gate. Later turns coalesce into one requested follow-up instead of
+   * enqueueing duplicate snapshots while the cursor is still stale.
+   */
+  private readonly activeMemoryExtractions = new Map<string, { rerunRequested: boolean }>();
   private readonly store: Store;
   private readonly events: ChatEventBus;
   private readonly memory: MemoryManager;
@@ -1750,6 +1757,10 @@ export class ChatManager {
       const state = this.states.get(sessionId);
       if (!state) continue;
       const lastProgressAt = this.telemetry.snapshot(sessionId, true)?.lastProgressAt ?? null;
+      // Telemetry counters persist across turns. Do not let an earlier
+      // turn's final delta make a newly queued turn look mid-stream.
+      const currentTurnProgressAt =
+        lastProgressAt !== null && lastProgressAt >= entry.startedAt ? lastProgressAt : null;
       out.push({
         sessionId,
         gezelId: state.record.gezelId,
@@ -1759,7 +1770,9 @@ export class ChatManager {
         userText: entry.userText,
         startedAt: entry.startedAt,
         elapsedMs: now - entry.startedAt,
-        ...(lastProgressAt !== null ? { lastProgressAgoMs: now - lastProgressAt } : {}),
+        ...(currentTurnProgressAt !== null
+          ? { lastProgressAgoMs: now - currentTurnProgressAt }
+          : {}),
       });
     }
     return out;
@@ -6456,6 +6469,11 @@ export class ChatManager {
         // Cloud providers fire this immediately below; heavy providers
         // hand it to the debouncer.
         const fire = () => {
+          const alreadyActive = this.activeMemoryExtractions.get(sessionId);
+          if (alreadyActive) {
+            alreadyActive.rerunRequested = true;
+            return;
+          }
           const liveState = this.states.get(sessionId);
           if (!liveState) return; // session gone
           const snap = liveState.record;
@@ -6468,86 +6486,98 @@ export class ChatManager {
           memLog.debug(
             `extract#${tag} START provider=${snap.providerName} msgs=${snap.messages.length}`,
           );
-          this.trackBackground(
-            extractMemories({
-              messages: snap.messages,
-              // Cursor-bounded window: only messages since the last
-              // extraction are eligible; earlier ones ride along as
-              // read-only context. A concurrent in-flight extraction on
-              // fast consecutive cloud turns can overlap one window —
-              // rare, bounded, and absorbed by save()'s dedup.
-              extractedUpTo: snap.extractedUpTo ?? 0,
-              oneShot: (prompt, timeoutMs) =>
-                this.oneShotCompletion(prompt, timeoutMs, {
-                  gezelId: snap.gezelId,
-                  // Housekeeping — on local engines the ambient admission
-                  // gate holds this until the user has been quiet for a
-                  // window, so extraction can never camp on the lane
-                  // right before their next move (the second half of the
-                  // ds4 checkers fix; the reroute below is the first).
-                  ambient: true,
-                  // Local providers: do NOT pin provider/model. The pin
-                  // used to force extraction onto the session's own engine
-                  // — on ds4's single KV lane the ~2k-token chore prompt
-                  // evicted the live conversation KV mid-game, so the next
-                  // turn re-paid a full SSD-streamed prefill (minutes).
-                  // Left unpinned, `oneShotCompletion`'s background routing
-                  // (`selectEngineForTask`) moves the chore to a smaller
-                  // resident model on another engine; with nothing better
-                  // resident it falls back to the same provider — no worse
-                  // than before. Gezels with a frontmatter model pin keep
-                  // the pinned behavior (`pinnedByGezel`). Cloud providers
-                  // keep the explicit pin: extraction there is ~1s and
-                  // contention-free. No `useKlerk` — persona injection
-                  // would dilute the structured EXTRACT_PROMPT (same
-                  // reasoning as compaction above).
-                  ...(isLocalProvider(snap.providerName)
-                    ? {}
-                    : {
-                        providerName: snap.providerName,
-                        ...(snap.model ? { model: snap.model } : {}),
-                      }),
-                  jobLabel: `memory · ${snap.id.slice(0, 8)}`,
-                }),
-              memory: this.memory,
-              gezelId: snap.gezelId,
-              projectId: snap.projectId,
-              debug: this.debug,
-            })
-              .then(async () => {
-                // Update the LIVE record first — the next turn's gate and
-                // window read it, and the next turn-end writeSession of
-                // the live record would otherwise clobber the disk
-                // persist below with a stale cursor.
-                const live = this.states.get(sessionId);
-                if (live) {
-                  live.record.extractedUpTo = Math.min(messagesAtTime, live.record.messages.length);
-                }
-                // Persist the cursor so the cadence survives restart.
-                // Re-read the session from disk rather than writing
-                // `snap` back — a concurrent write (user answering a
-                // question, stamping pendingQuestionId, compaction,
-                // etc.) while extraction was running would otherwise be
-                // clobbered by the stale snapshot. Use messagesAtTime
-                // rather than the current length since we shouldn't
-                // claim to have extracted messages that hadn't arrived
-                // when extraction started.
-                try {
-                  const fresh = await this.store.getSession(snap.gezelId, snap.id);
-                  if (!fresh) return;
-                  fresh.extractedUpTo = Math.min(messagesAtTime, fresh.messages.length);
-                  await this.store.writeSession(fresh);
-                } catch (err) {
-                  memLog.warn(
-                    `extractedUpTo persist failed: ${err instanceof Error ? err.message : err}`,
-                  );
-                }
-                memLog.debug(`extract#${tag} END ok afterMs=${Date.now() - memT0}`);
-              })
-              .catch((err) => {
-                memLog.warn(`extract#${tag} END err afterMs=${Date.now() - memT0}:`, err);
+          const active = { rerunRequested: false };
+          this.activeMemoryExtractions.set(sessionId, active);
+          const extraction = extractMemories({
+            messages: snap.messages,
+            // Cursor-bounded window: only messages since the last
+            // extraction are eligible; earlier ones ride along as
+            // read-only context. The per-session active map coalesces
+            // later turns until this cursor advances.
+            extractedUpTo: snap.extractedUpTo ?? 0,
+            oneShot: (prompt, timeoutMs) =>
+              this.oneShotCompletion(prompt, timeoutMs, {
+                gezelId: snap.gezelId,
+                // Housekeeping — on local engines the ambient admission
+                // gate holds this until the user has been quiet for a
+                // window, so extraction can never camp on the lane
+                // right before their next move (the second half of the
+                // ds4 checkers fix; the reroute below is the first).
+                ambient: true,
+                // Local providers: do NOT pin provider/model. The pin
+                // used to force extraction onto the session's own engine
+                // — on ds4's single KV lane the ~2k-token chore prompt
+                // evicted the live conversation KV mid-game, so the next
+                // turn re-paid a full SSD-streamed prefill (minutes).
+                // Left unpinned, `oneShotCompletion`'s background routing
+                // (`selectEngineForTask`) moves the chore to a smaller
+                // resident model on another engine; with nothing better
+                // resident it falls back to the same provider — no worse
+                // than before. Gezels with a frontmatter model pin keep
+                // the pinned behavior (`pinnedByGezel`). Cloud providers
+                // keep the explicit pin: extraction there is ~1s and
+                // contention-free. No `useKlerk` — persona injection
+                // would dilute the structured EXTRACT_PROMPT (same
+                // reasoning as compaction above).
+                ...(isLocalProvider(snap.providerName)
+                  ? {}
+                  : {
+                      providerName: snap.providerName,
+                      ...(snap.model ? { model: snap.model } : {}),
+                    }),
+                jobLabel: `memory · ${snap.id.slice(0, 8)}`,
               }),
-          );
+            memory: this.memory,
+            gezelId: snap.gezelId,
+            projectId: snap.projectId,
+            debug: this.debug,
+          })
+            .then(async () => {
+              // Update the LIVE record first — the next turn's gate and
+              // window read it, and the next turn-end writeSession of
+              // the live record would otherwise clobber the disk
+              // persist below with a stale cursor.
+              const live = this.states.get(sessionId);
+              if (live) {
+                live.record.extractedUpTo = Math.min(messagesAtTime, live.record.messages.length);
+              }
+              // Persist the cursor so the cadence survives restart.
+              // Re-read the session from disk rather than writing
+              // `snap` back — a concurrent write (user answering a
+              // question, stamping pendingQuestionId, compaction,
+              // etc.) while extraction was running would otherwise be
+              // clobbered by the stale snapshot. Use messagesAtTime
+              // rather than the current length since we shouldn't
+              // claim to have extracted messages that hadn't arrived
+              // when extraction started.
+              try {
+                const fresh = await this.store.getSession(snap.gezelId, snap.id);
+                if (!fresh) return;
+                fresh.extractedUpTo = Math.min(messagesAtTime, fresh.messages.length);
+                await this.store.writeSession(fresh);
+              } catch (err) {
+                memLog.warn(
+                  `extractedUpTo persist failed: ${err instanceof Error ? err.message : err}`,
+                );
+              }
+              memLog.debug(`extract#${tag} END ok afterMs=${Date.now() - memT0}`);
+            })
+            .catch((err) => {
+              memLog.warn(`extract#${tag} END err afterMs=${Date.now() - memT0}:`, err);
+            })
+            .finally(() => {
+              if (this.activeMemoryExtractions.get(sessionId) !== active) return;
+              this.activeMemoryExtractions.delete(sessionId);
+              if (!active.rerunRequested || this.shuttingDown) return;
+              const latest = this.states.get(sessionId)?.record;
+              if (!latest || !this.shouldRunMemoryExtraction(latest)) return;
+              if (this.isHeavyExtractionProvider(latest.providerName)) {
+                this.scheduleHeavyExtraction(sessionId, fire);
+              } else {
+                fire();
+              }
+            });
+          this.trackBackground(extraction);
         };
         if (this.isHeavyExtractionProvider(recordSnapshot.providerName)) {
           this.scheduleHeavyExtraction(sessionId, fire);
@@ -8330,6 +8360,11 @@ export class ChatManager {
    * instead of debouncing further.
    */
   private scheduleHeavyExtraction(sessionId: string, fire: () => void): void {
+    const active = this.activeMemoryExtractions.get(sessionId);
+    if (active) {
+      active.rerunRequested = true;
+      return;
+    }
     const existing = this.pendingExtractions.get(sessionId);
     const firstQueuedAt = existing?.firstQueuedAt ?? Date.now();
     if (Date.now() - firstQueuedAt >= EXTRACT_LOCAL_DEFER_CAP_MS) {

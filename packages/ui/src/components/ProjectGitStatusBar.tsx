@@ -1,13 +1,13 @@
 import type {
-  GithubBranchesResponse,
-  GithubStatusResponse,
+  GitBranchesResponse,
+  GitStatusResponse,
   WorkspaceIndexStatus,
 } from '@bendyline/gezel';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { Popover, Select, Tooltip } from '../primitives/index.js';
 import { statusChipPhrase } from './github/gitCopy.js';
-import { GITHUB_CHANGED_EVENT, useGitSync } from './github/useGitSync.js';
+import { GIT_CHANGED_EVENT, useGitSync } from './github/useGitSync.js';
 
 type ProjectStatus = 'active' | 'readonly' | 'inactive' | 'stable';
 
@@ -35,7 +35,7 @@ interface Props {
    */
   onAllowWritesChange?: (next: boolean) => void;
   /** Opens the GitHub tab — the workbench for saves, diffs, and conflicts. */
-  onOpenGithub?: () => void;
+  onOpenGitHub?: () => void;
   /**
    * Project lifecycle status, surfaced as an always-visible dropdown in the
    * bar (next to the index chip) so it doesn't hide inside the Settings tab.
@@ -158,13 +158,13 @@ export function ProjectGitStatusBar({
   allowGezelWrites,
   workingDir,
   onAllowWritesChange,
-  onOpenGithub,
+  onOpenGitHub,
   status: projectStatus,
   onStatusChange,
 }: Props) {
-  const [status, setStatus] = useState<GithubStatusResponse | null>(null);
+  const [status, setStatus] = useState<GitStatusResponse | null>(null);
   const [indexStatus, setIndexStatus] = useState<WorkspaceIndexStatus | null>(null);
-  const [branches, setBranches] = useState<GithubBranchesResponse | null>(null);
+  const [branches, setBranches] = useState<GitBranchesResponse | null>(null);
   const [branchMenuOpen, setBranchMenuOpen] = useState(false);
   const [newBranchOpen, setNewBranchOpen] = useState(false);
   const [newBranchDraft, setNewBranchDraft] = useState('');
@@ -178,7 +178,7 @@ export function ProjectGitStatusBar({
 
   const refresh = useCallback(async () => {
     try {
-      const s = await api.getProjectGithubStatus(projectId);
+      const s = await api.getProjectGitStatus(projectId);
       setStatus(s);
     } catch {
       /* swallow — status bar is best-effort UX */
@@ -211,8 +211,8 @@ export function ProjectGitStatusBar({
     const onChanged = (e: Event) => {
       if ((e as CustomEvent).detail?.projectId === projectId) void refresh();
     };
-    window.addEventListener(GITHUB_CHANGED_EVENT, onChanged);
-    return () => window.removeEventListener(GITHUB_CHANGED_EVENT, onChanged);
+    window.addEventListener(GIT_CHANGED_EVENT, onChanged);
+    return () => window.removeEventListener(GIT_CHANGED_EVENT, onChanged);
   }, [projectId, refresh]);
 
   const onClickIndexDot = useCallback(async () => {
@@ -248,7 +248,7 @@ export function ProjectGitStatusBar({
   useEffect(() => {
     if (!branchMenuOpen || branches) return;
     void api
-      .listProjectGithubBranches(projectId)
+      .listProjectGitBranches(projectId)
       .then(setBranches)
       .catch(() => setBranches({ local: [], remote: [] }));
   }, [branchMenuOpen, branches, projectId]);
@@ -263,9 +263,9 @@ export function ProjectGitStatusBar({
     // Needs-save and conflicts both resolve in the GitHub tab — hand off.
     onNeedsSave: () => {
       showToast('err', 'Save your changes first — they’re waiting in the GitHub tab.');
-      onOpenGithub?.();
+      onOpenGitHub?.();
     },
-    onConflicts: () => onOpenGithub?.(),
+    onConflicts: () => onOpenGitHub?.(),
   });
 
   const onSync = useCallback(async () => {
@@ -278,7 +278,7 @@ export function ProjectGitStatusBar({
       setBranchMenuOpen(false);
       setBusy('branch');
       try {
-        await api.setProjectGithubBranch(projectId, branch);
+        await api.setProjectGitBranch(projectId, branch);
         await refresh();
         showToast('ok', `Switched to ${branch}.`);
       } catch (err) {
@@ -300,7 +300,7 @@ export function ProjectGitStatusBar({
       setNewBranchDraft('');
       setBusy('branch');
       try {
-        await api.createProjectGithubBranch(projectId, name);
+        await api.createProjectGitBranch(projectId, name);
         // Invalidate cached branches so the dropdown reflects the new one
         // next time it opens.
         setBranches(null);
@@ -315,7 +315,7 @@ export function ProjectGitStatusBar({
     [newBranchDraft, projectId, refresh, showToast],
   );
 
-  const hasGithub = Boolean(status?.github);
+  const hasGitHub = Boolean(status?.github);
   const branch = status?.branch;
   const lastSynced = status?.github?.lastSyncedAt;
   const indexState = indexStatus?.state ?? 'never';
@@ -376,7 +376,7 @@ export function ProjectGitStatusBar({
   return (
     <div className={`project-git-status-bar${compact ? ' is-compact' : ''}`}>
       <div className="project-git-status-bar-left">
-        {hasGithub && (
+        {hasGitHub && (
           <>
             <div className="project-git-branch-picker" ref={branchMenuRef}>
               <button
@@ -464,7 +464,7 @@ export function ProjectGitStatusBar({
                 className={`project-git-status-chip${chipAttention ? ' has-attention' : ''}${
                   status.mergeInProgress ? ' has-conflict' : ''
                 }`}
-                onClick={onOpenGithub}
+                onClick={onOpenGitHub}
                 title="Open the GitHub tab"
               >
                 {chipPhrase}
@@ -702,7 +702,7 @@ export function ProjectGitStatusBar({
       </div>
       {!compact && (
         <div className="project-git-status-bar-right">
-          {hasGithub && (
+          {hasGitHub && (
             <button
               type="button"
               className="project-git-action"

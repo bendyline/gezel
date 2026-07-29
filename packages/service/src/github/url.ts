@@ -9,7 +9,7 @@
  * supported but flagged via `host` so callers can decide what to do.
  */
 
-export interface ParsedGithubUrl {
+export interface ParsedGitHubUrl {
   host: string;
   owner: string;
   repo: string;
@@ -23,7 +23,7 @@ const SSH_RE = /^git@([^:]+):([^/]+)\/(.+?)(?:\.git)?\/?$/i;
 const HTTPS_RE = /^https?:\/\/([^/]+)\/([^/]+)\/([^/]+?)(?:\.git)?\/?(?:[?#].*)?$/i;
 const SCHEMELESS_RE = /^([^/]+)\/([^/]+)\/([^/]+?)(?:\.git)?\/?$/;
 
-export function parseGithubUrl(input: string): ParsedGithubUrl | null {
+export function parseGitHubUrl(input: string): ParsedGitHubUrl | null {
   const trimmed = input.trim();
   if (!trimmed) return null;
   let host: string | null = null;
@@ -59,12 +59,12 @@ export function parseGithubUrl(input: string): ParsedGithubUrl | null {
 }
 
 /**
- * Compare two URLs as if normalized via parseGithubUrl. Used to detect when
+ * Compare two URLs as if normalized via parseGitHubUrl. Used to detect when
  * a workingDir's `origin` already points at the project's configured repo.
  */
-export function sameGithubRepo(a: string, b: string): boolean {
-  const pa = parseGithubUrl(a);
-  const pb = parseGithubUrl(b);
+export function sameGitHubRepo(a: string, b: string): boolean {
+  const pa = parseGitHubUrl(a);
+  const pb = parseGitHubUrl(b);
   if (!pa || !pb) return false;
   return (
     pa.host.toLowerCase() === pb.host.toLowerCase() &&
@@ -91,7 +91,7 @@ export function sameGithubRepo(a: string, b: string): boolean {
 export function sharedCloneKey(url: string): string | null {
   const trimmed = url.trim();
   if (!trimmed) return null;
-  const parsed = parseGithubUrl(trimmed);
+  const parsed = parseGitHubUrl(trimmed);
   if (parsed) {
     const slug = `${parsed.host}-${parsed.owner}-${parsed.repo}`
       .toLowerCase()
@@ -99,7 +99,7 @@ export function sharedCloneKey(url: string): string | null {
       .replace(/-+/g, '-')
       .replace(/^-+|-+$/g, '');
     // Hash the lowercased canonical so case variants (BendyLine vs
-    // bendyline) collapse to the same key — matches `sameGithubRepo`'s
+    // bendyline) collapse to the same key — matches `sameGitHubRepo`'s
     // case-insensitive comparison.
     const hash = hashUrl(parsed.canonical.toLowerCase()).slice(0, 8);
     return `${slug}-${hash}`;

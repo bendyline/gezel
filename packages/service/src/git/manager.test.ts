@@ -4,10 +4,10 @@ import { join } from 'node:path';
 import type { ProjectDetail } from '@bendyline/gezel';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Store } from '../fs/store.js';
+import { AmbientGitHubAuth } from '../github/ambient.js';
 import type { SecretKey, SecretStore, SecretStoreBackend } from '../secrets/types.js';
-import { AmbientGithubAuth } from './ambient.js';
 import { isGitInstalled, runGit } from './git.js';
-import { GitHubManager } from './manager.js';
+import { GitManager } from './manager.js';
 
 class InMemorySecrets implements SecretStore {
   readonly backend: SecretStoreBackend = 'file';
@@ -37,13 +37,13 @@ class InMemorySecrets implements SecretStore {
 let home: string;
 let store: Store;
 let secrets: InMemorySecrets;
-let manager: GitHubManager;
+let manager: GitManager;
 let scratch: string;
 /** Per-test ambient token — keeps tests hermetic on machines signed into gh. */
 let ambientGhToken: string | null;
 
-function stubAmbient(env: Record<string, string | undefined> = {}): AmbientGithubAuth {
-  return new AmbientGithubAuth({ env, ghToken: async () => ambientGhToken });
+function stubAmbient(env: Record<string, string | undefined> = {}): AmbientGitHubAuth {
+  return new AmbientGitHubAuth({ env, ghToken: async () => ambientGhToken });
 }
 
 beforeEach(async () => {
@@ -53,7 +53,7 @@ beforeEach(async () => {
   await store.ensureLayout();
   secrets = new InMemorySecrets();
   ambientGhToken = null;
-  manager = new GitHubManager(home, store, secrets, stubAmbient());
+  manager = new GitManager(home, store, secrets, stubAmbient());
 });
 
 afterEach(async () => {
@@ -80,7 +80,7 @@ async function initLocalRepo(dir: string, originUrl: string): Promise<void> {
   await runGit(['remote', 'add', 'origin', originUrl], { cwd: dir });
 }
 
-describe('GitHubManager.resolveCheckout', () => {
+describe('GitManager.resolveCheckout', () => {
   // Phase 2 of the workspace-fs unification: when there's no
   // workingDir, the clone lands at the project's workspace dir (not
   // a sibling `gh/` folder). The clone IS the workspace from the
@@ -142,7 +142,7 @@ describe('GitHubManager.resolveCheckout', () => {
   });
 });
 
-describe('GitHubManager status + credentials', () => {
+describe('GitManager status + credentials', () => {
   it('reports hasPat=false and credentialSource=none with no credentials anywhere', async () => {
     const project = await makeProject();
     const status = await manager.status(project);
@@ -167,7 +167,7 @@ describe('GitHubManager status + credentials', () => {
   });
 
   it('reports credentialSource=env when GH_TOKEN is set', async () => {
-    const withEnv = new GitHubManager(home, store, secrets, stubAmbient({ GH_TOKEN: 'gho_env' }));
+    const withEnv = new GitManager(home, store, secrets, stubAmbient({ GH_TOKEN: 'gho_env' }));
     const project = await makeProject();
     const status = await withEnv.status(project);
     expect(status.credentialSource).toBe('env');
@@ -181,7 +181,7 @@ describe('GitHubManager status + credentials', () => {
   });
 });
 
-describe('GitHubManager.getToken', () => {
+describe('GitManager.getToken', () => {
   it('returns null when nothing is configured', async () => {
     expect(await manager.getToken()).toBeNull();
   });
@@ -206,7 +206,7 @@ describe('GitHubManager.getToken', () => {
 // These tests use a LOCAL bare repo created with `git init --bare` as
 // the upstream — no network involved. The `URL` constant from the
 // outer scope points at github.com which we never actually contact.
-describe('GitHubManager — shared clones + worktrees (Phase 3)', () => {
+describe('GitManager — shared clones + worktrees (Phase 3)', () => {
   // Set up a small upstream repo with one commit so worktree add has
   // a real ref to check out. Skipped when git is unavailable so CI
   // hosts without git still get the rest of the suite green.
@@ -296,7 +296,7 @@ describe('GitHubManager — shared clones + worktrees (Phase 3)', () => {
     const pb = await store.createProject({ name: 'BB', github: { url: upstreamUrl } });
     await manager.addProjectWorktree({ projectId: pa.id, url: upstreamUrl, ref: 'main' });
     await manager.addProjectWorktree({ projectId: pb.id, url: upstreamUrl, ref: 'feature' });
-    const key = (await import('./url.js')).sharedCloneKey(upstreamUrl);
+    const key = (await import('../github/url.js')).sharedCloneKey(upstreamUrl);
     if (!key) throw new Error('expected non-null shared clone key');
     const { sharedCloneDir } = await import('@bendyline/gezel/paths');
     const bareDir = sharedCloneDir(home, key);
@@ -319,7 +319,7 @@ describe('GitHubManager — shared clones + worktrees (Phase 3)', () => {
     const p = await store.createProject({ name: 'Orphan' });
     await store.updateProject(p.id, { github: { url: upstreamUrl } });
     await manager.ensureSharedClone(upstreamUrl);
-    const key = (await import('./url.js')).sharedCloneKey(upstreamUrl);
+    const key = (await import('../github/url.js')).sharedCloneKey(upstreamUrl);
     if (!key) throw new Error('expected non-null shared clone key');
     const { sharedCloneDir } = await import('@bendyline/gezel/paths');
     const bareDir = sharedCloneDir(home, key);

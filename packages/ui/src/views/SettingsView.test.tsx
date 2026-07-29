@@ -24,8 +24,8 @@ vi.mock('../components/ConfirmDialog.js', () => ({ ConfirmDialog: () => null }))
 vi.mock('../components/CopilotLoginCommand.js', () => ({ CopilotLoginCommand: () => null }));
 vi.mock('../components/DeviceSummary.js', () => ({ DeviceSummary: () => null }));
 vi.mock('../components/GezelIcon.js', () => ({ GezelIcon: () => null }));
-vi.mock('../components/GithubDeviceCodeModal.js', () => ({ GithubDeviceCodeModal: () => null }));
-vi.mock('../components/GithubSignInChip.js', () => ({ GithubSignInChip: () => null }));
+vi.mock('../components/GitHubDeviceCodeModal.js', () => ({ GitHubDeviceCodeModal: () => null }));
+vi.mock('../components/GitHubSignInChip.js', () => ({ GitHubSignInChip: () => null }));
 vi.mock('../components/HealthStrip.js', () => ({ HealthStrip: () => null }));
 vi.mock('../components/InstallModelTuningEditor.js', () => ({
   InstallModelTuningEditor: () => null,

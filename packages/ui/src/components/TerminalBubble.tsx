@@ -2,6 +2,9 @@ import type { TerminalTimelineEntry } from '@bendyline/gezel';
 import { AnsiOutput } from './AnsiOutput.js';
 import { formatFolderLabel } from './terminal-folder-label.js';
 
+// Scroll containers need a tab stop so keyboard users can reach both axes.
+const KEYBOARD_SCROLL_PROPS = { tabIndex: 0 } as const;
+
 /**
  * Renders one row from a terminal thread inside the project timeline.
  *
@@ -83,9 +86,15 @@ export function TerminalBubble({ entry }: { entry: TerminalTimelineEntry }) {
       {entry.errorMessage && entry.exitCode === -1 && (
         <div className="terminal-error-banner">{entry.errorMessage}</div>
       )}
-      <pre className="terminal-output-body">
-        {entry.content ? <AnsiOutput text={entry.content} /> : isFailed ? '(no output)' : ''}
-      </pre>
+      <section
+        className="terminal-output-viewport"
+        aria-label="Terminal output"
+        {...KEYBOARD_SCROLL_PROPS}
+      >
+        <pre className="terminal-output-body">
+          {entry.content ? <AnsiOutput text={entry.content} /> : isFailed ? '(no output)' : ''}
+        </pre>
+      </section>
     </div>
   );
 }

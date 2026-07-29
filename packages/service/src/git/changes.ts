@@ -1,6 +1,6 @@
 /**
  * Pure parsers for the "changes" surface of the GitHub tab: porcelain
- * status, numstat, and log output. No I/O here — `GitHubManager` runs
+ * status, numstat, and log output. No I/O here — `GitManager` runs
  * the git commands and feeds the raw stdout through these so the gnarly
  * NUL-separated formats stay unit-testable without a real repo.
  */
@@ -238,4 +238,49 @@ export function truncateDiff(
   if (diff.length <= maxChars) return { text: diff, truncated: false };
   const cut = diff.lastIndexOf('\n', maxChars);
   return { text: diff.slice(0, cut > 0 ? cut : maxChars), truncated: true };
+}
+
+/**
+ * Whole-snapshot cap for code-review diffs (reviews/<id>/changes.diff).
+ * 2× the per-file MAX_DIFF_CHARS: the reviewer reads it via read_artifact
+ * slices, so bigger is fine — unbounded is not.
+ */
+export const REVIEW_DIFF_MAX_CHARS = 400_000;
+
+export interface NameStatusEntry {
+  kind: ChangeKind;
+  oldPath?: string;
+}
+
+/**
+ * Parse `git diff --name-status -z -M` output into path → change kind.
+ * NUL framing: `STATUS\0path\0` per entry, except renames/copies which are
+ * `RNNN\0old\0new\0`. Copies read as "added" (a new file from the review's
+ * point of view); typechange reads as "modified".
+ */
+export function classifyNameStatus(stdout: string): Map<string, NameStatusEntry> {
+  const out = new Map<string, NameStatusEntry>();
+  const parts = stdout.split('\0');
+  let i = 0;
+  while (i < parts.length) {
+    const status = parts[i];
+    if (!status) break;
+    const code = status[0];
+    if (code === 'R' || code === 'C') {
+      const oldPath = parts[i + 1];
+      const newPath = parts[i + 2];
+      i += 3;
+      if (!oldPath || !newPath) break;
+      if (code === 'R') out.set(newPath, { kind: 'renamed', oldPath });
+      else out.set(newPath, { kind: 'added' });
+      continue;
+    }
+    const path = parts[i + 1];
+    i += 2;
+    if (!path) break;
+    const kind: ChangeKind =
+      code === 'A' ? 'added' : code === 'D' ? 'deleted' : code === 'U' ? 'conflicted' : 'modified';
+    out.set(path, { kind });
+  }
+  return out;
 }

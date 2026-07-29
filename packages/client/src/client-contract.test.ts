@@ -11,6 +11,43 @@ interface ContractCase {
 
 const cases: ContractCase[] = [
   { name: 'health', method: 'GET', path: '/api/health', invoke: (c) => c.health() },
+  {
+    name: 'code review start',
+    method: 'POST',
+    path: '/api/projects/p1/git/reviews',
+    body: { kind: 'pr' },
+    invoke: (c) => c.startProjectCodeReview('p1', { kind: 'pr' }),
+  },
+  {
+    name: 'code review list',
+    method: 'GET',
+    path: '/api/projects/p1/git/reviews',
+    invoke: (c) => c.listProjectCodeReviews('p1'),
+  },
+  {
+    name: 'code review read with escaping',
+    method: 'GET',
+    path: '/api/projects/p1/git/reviews/pr-20260729%2Fx',
+    invoke: (c) => c.getProjectCodeReview('p1', 'pr-20260729/x'),
+  },
+  {
+    name: 'code review cancel',
+    method: 'POST',
+    path: '/api/projects/p1/git/reviews/pr-20260729-093000-ab12/cancel',
+    invoke: (c) => c.cancelProjectCodeReview('p1', 'pr-20260729-093000-ab12'),
+  },
+  {
+    name: 'git status uses the canonical git segment',
+    method: 'GET',
+    path: '/api/projects/p1/git/status',
+    invoke: (c) => c.getProjectGitStatus('p1'),
+  },
+  {
+    name: 'deprecated github status alias still resolves',
+    method: 'GET',
+    path: '/api/projects/p1/git/status',
+    invoke: (c) => c.getProjectGithubStatus('p1'),
+  },
   { name: 'usage', method: 'GET', path: '/api/usage', invoke: (c) => c.getUsage() },
   { name: 'queue status', method: 'GET', path: '/api/queues', invoke: (c) => c.getQueueStatus() },
   {
