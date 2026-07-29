@@ -26,8 +26,22 @@ async function importEsmTwin(cjsEntry, esmName) {
   return import(pathToFileURL(join(dirname(cjsEntry), esmName)).href);
 }
 
-test('both Transformers.js dependency trees load against the no-image stub', async () => {
+test('both Transformers.js dependency trees share one ONNX runtime and load against the no-image stub', async () => {
   const directEntry = requireFromService.resolve('@huggingface/transformers');
+  const kokoroEntry = requireFromService.resolve('kokoro-js');
+  const requireFromKokoro = createRequire(kokoroEntry);
+  const nestedEntry = requireFromKokoro.resolve('@huggingface/transformers');
+  assert.notEqual(
+    nestedEntry,
+    directEntry,
+    'the test must exercise Kokoro’s distinct Transformers.js major version',
+  );
+  assert.equal(
+    createRequire(nestedEntry).resolve('onnxruntime-node/package.json'),
+    createRequire(directEntry).resolve('onnxruntime-node/package.json'),
+    'both Transformers.js majors must share one native ONNX runtime in the daemon process',
+  );
+
   assertStubFrom(directEntry);
   const direct = await importEsmTwin(directEntry, 'transformers.node.mjs');
   assert.equal(typeof direct.pipeline, 'function');
@@ -38,14 +52,6 @@ test('both Transformers.js dependency trees load against the no-image stub', asy
     (error) => error?.code === 'GEZEL_TRANSFORMERS_IMAGE_UNSUPPORTED',
   );
 
-  const kokoroEntry = requireFromService.resolve('kokoro-js');
-  const requireFromKokoro = createRequire(kokoroEntry);
-  const nestedEntry = requireFromKokoro.resolve('@huggingface/transformers');
-  assert.notEqual(
-    nestedEntry,
-    directEntry,
-    'the test must exercise Kokoro’s distinct Transformers.js major version',
-  );
   assertStubFrom(nestedEntry);
   const nested = await importEsmTwin(nestedEntry, 'transformers.node.mjs');
   assert.equal(typeof nested.pipeline, 'function');
