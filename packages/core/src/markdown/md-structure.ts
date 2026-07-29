@@ -1,4 +1,4 @@
-import matter from 'gray-matter';
+import { parseYamlMapping, stringifyYamlMapping } from './frontmatter.js';
 
 /**
  * ─ Fence-aware markdown structure helpers ────────────────────────────
@@ -152,18 +152,14 @@ export function isFenceClose(line: string, marker: string): boolean {
   );
 }
 
-/** Parse a yaml fence body via gray-matter's engine (no extra dependency). */
+/** Parse a YAML fence body as an in-memory mapping. */
 export function parseYamlBlock(yamlText: string): Record<string, unknown> {
-  if (yamlText.trim().length === 0) return {};
-  const parsed = matter(`---\n${yamlText}\n---\n`);
-  return parsed.data as Record<string, unknown>;
+  return parseYamlMapping(yamlText);
 }
 
-/** Stringify fields as a yaml block body via gray-matter (trailing newline included). */
+/** Stringify fields as a YAML block body (trailing newline included). */
 export function stringifyYamlBlock(fields: Record<string, unknown>): string {
-  const full = matter.stringify('', fields);
-  // matter.stringify wraps as `---\n<yaml>---\n`; strip the delimiters.
-  return full.replace(/^---\r?\n/, '').replace(/---\r?\n?$/, '');
+  return stringifyYamlMapping(fields);
 }
 
 /** A fence long enough that the source's own backtick runs can't close it early. */

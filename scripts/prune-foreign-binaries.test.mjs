@@ -14,6 +14,7 @@ describe('pruneReason', () => {
     assert.equal(pruneReason('darwin', 'napi-v6', target), null);
     assert.equal(pruneReason('arm64', 'darwin', target), null);
     assert.equal(pruneReason('darwin-arm64', 'prebuilds', target), null);
+    assert.equal(pruneReason('reflink-darwin-arm64', '@reflink', target), null);
   });
 
   it('prunes foreign platforms and arches in both directory shapes', () => {
@@ -22,6 +23,8 @@ describe('pruneReason', () => {
     assert.match(pruneReason('x64', 'darwin', target), /foreign arch/);
     assert.match(pruneReason('darwin-x64', 'prebuilds', target), /foreign arch/);
     assert.match(pruneReason('win32-x64', 'prebuilds', target), /foreign platform/);
+    assert.match(pruneReason('reflink-darwin-x64', '@reflink', target), /foreign arch/);
+    assert.match(pruneReason('reflink-win32-x64-msvc', '@reflink', target), /foreign platform/);
   });
 
   it('leaves a bare arch directory alone unless its parent is a platform', () => {
@@ -35,6 +38,7 @@ describe('pruneReason', () => {
     assert.equal(pruneReason('darwinia', 'x', target), null);
     assert.equal(pruneReason('linux-extras', 'x', target), null);
     assert.equal(pruneReason('node_modules', 'x', target), null);
+    assert.equal(pruneReason('docs-darwin-x64', 'ordinary-parent', target), null);
   });
 });
 
@@ -53,6 +57,9 @@ describe('pruneForeignBinaries', () => {
       'node_modules/node-pty/prebuilds/darwin-arm64',
       'node_modules/node-pty/prebuilds/win32-x64',
       'node_modules/node-pty/prebuilds/linux-arm64',
+      'node_modules/@reflink/reflink-darwin-arm64',
+      'node_modules/@reflink/reflink-darwin-x64',
+      'node_modules/@reflink/reflink-win32-x64-msvc',
       'node_modules/somepkg/lib/x64',
     ];
     for (const d of dirs) {
@@ -71,6 +78,7 @@ describe('pruneForeignBinaries', () => {
     const kept = (p) => existsSync(join(dir, p, 'binary.node'));
     assert.equal(kept('node_modules/onnxruntime-node/bin/napi-v6/darwin/arm64'), true);
     assert.equal(kept('node_modules/node-pty/prebuilds/darwin-arm64'), true);
+    assert.equal(kept('node_modules/@reflink/reflink-darwin-arm64'), true);
     // A path that is not platform-shaped must survive.
     assert.equal(kept('node_modules/somepkg/lib/x64'), true);
 
@@ -79,8 +87,10 @@ describe('pruneForeignBinaries', () => {
     assert.equal(kept('node_modules/onnxruntime-node/bin/napi-v6/linux/arm64'), false);
     assert.equal(kept('node_modules/node-pty/prebuilds/win32-x64'), false);
     assert.equal(kept('node_modules/node-pty/prebuilds/linux-arm64'), false);
+    assert.equal(kept('node_modules/@reflink/reflink-darwin-x64'), false);
+    assert.equal(kept('node_modules/@reflink/reflink-win32-x64-msvc'), false);
 
-    assert.equal(removed.length, 5);
+    assert.equal(removed.length, 7);
   });
 
   it('dryRun reports without deleting', async () => {

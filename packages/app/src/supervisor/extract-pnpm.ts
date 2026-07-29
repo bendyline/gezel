@@ -3,6 +3,7 @@ import { cp, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promis
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { verifyBundleManifest } from './bundle-manifest.js';
+import { redirectAsarToUnpacked } from './extract-bundle.js';
 
 export interface PnpmInstallOptions {
   /** User home root — runtime lands at `<home>/bin/pnpm-runtime/`. */
@@ -27,7 +28,7 @@ export interface PnpmInstallResult {
  */
 export function defaultPnpmBundleDir(mainMetaUrl: string): string {
   const mainDir = dirname(fileURLToPath(mainMetaUrl));
-  return resolve(mainDir, 'pnpm-bundle');
+  return redirectAsarToUnpacked(resolve(mainDir, 'pnpm-bundle'));
 }
 
 /**

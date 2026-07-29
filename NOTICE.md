@@ -30,7 +30,6 @@ These ship in the Electron app or the `gezeld` daemon.
 | [@radix-ui/react-tooltip](https://radix-ui.com/primitives) | MIT | radix-ui.com |
 | [@huggingface/transformers](https://github.com/huggingface/transformers.js) | Apache-2.0 | huggingface/transformers.js |
 | [commander](https://github.com/tj/commander.js) | MIT | tj/commander.js |
-| [gray-matter](https://github.com/jonschlinkert/gray-matter) | MIT | jonschlinkert/gray-matter |
 | [hono](https://hono.dev) | MIT | hono.dev |
 | [kokoro-js](https://github.com/hexgrad/kokoro) | Apache-2.0 | hexgrad/kokoro |
 | [monaco-editor](https://github.com/microsoft/monaco-editor) | MIT | microsoft/monaco-editor |
@@ -40,6 +39,7 @@ These ship in the Electron app or the `gezeld` daemon.
 | [react](https://react.dev) | MIT | react.dev |
 | [react-dom](https://react.dev) | MIT | react.dev |
 | [vectra](https://github.com/Stevenic/vectra) | MIT | Stevenic/vectra |
+| [yaml](https://github.com/eemeli/yaml) | ISC | eemeli/yaml |
 | [zod](https://zod.dev) | MIT | zod.dev |
 
 ## Bundled application runtimes

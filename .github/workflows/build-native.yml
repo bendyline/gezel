@@ -71,12 +71,12 @@ concurrency:
 
 env:
   CMAKE_MIN: '3.24'
-  # The app's declared macOS floor. Never let `macos-latest` or a newer Xcode
-  # silently raise LC_BUILD_VERSION again: native-v0.1.23 inherited macOS 26
-  # from the runner and therefore could not load on otherwise-supported Macs.
-  # Electron 44 requires macOS 13+, while ggml's Accelerate backend uses the
-  # ILP64 BLAS/LAPACK interface introduced in macOS 13.3. Keep the declared
-  # floor at the first OS release where every shipped native engine is safe.
+  # The native payload's build target. Never let `macos-latest` or a newer
+  # Xcode silently raise LC_BUILD_VERSION again: native-v0.1.23 inherited
+  # macOS 26 from the runner and therefore could not load on otherwise-
+  # supported Macs. ggml's Accelerate backend uses the ILP64 BLAS/LAPACK
+  # interface introduced in macOS 13.3, so engines target 13.3. The complete
+  # Electron product declares 13.5 because the pinned Node runtime requires it.
   MACOSX_DEPLOYMENT_TARGET: '13.3'
   # Current LunarG SDK on both platforms. The tarball/installer ships the
   # SPIRV-Headers CMake config required by ggml-vulkan, and LunarG keeps the

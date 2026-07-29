@@ -1,4 +1,4 @@
-import matter from 'gray-matter';
+import { parseYamlFrontmatter } from '../markdown/frontmatter.js';
 import { stripGeneratedPreamble } from './preamble.js';
 
 /**
@@ -76,7 +76,7 @@ export function parseSkillDoc(raw: string, opts: ParseSkillDocOptions): SkillDoc
   let fm: Record<string, unknown> = {};
   let content = raw;
   try {
-    const parsed = matter(raw);
+    const parsed = parseYamlFrontmatter(raw);
     fm = (parsed.data ?? {}) as Record<string, unknown>;
     content = parsed.content;
   } catch {

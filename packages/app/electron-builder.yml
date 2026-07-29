@@ -236,8 +236,19 @@ nsis:
 # .app and final .pkg, gated on APPLE_ID/APP_SPECIFIC_PASSWORD/TEAM_ID.
 mac:
   artifactName: ${productName}-${version}-mac-${arch}.${ext}
+  # The native engines deliberately target the Accelerate ILP64 API introduced
+  # in macOS 13.3, while the pinned official Node 24 runtime declares 13.5.
+  # The product floor must be the highest requirement in the complete payload.
+  minimumSystemVersion: '13.5'
   target:
     - target: pkg
+      arch:
+        - arm64
+    # electron-updater's MacUpdater consumes a signed app ZIP and
+    # latest-mac.yml; it cannot install the privileged first-install PKG.
+    # Ship both: PKG for initial installation/system-service registration,
+    # ZIP for Squirrel.Mac application updates.
+    - target: zip
       arch:
         - arm64
   icon: assets/icon.icns
@@ -346,7 +357,8 @@ rpm:
   afterRemove: installer/linux/after-remove.sh
   depends:
     - libnotify
-    - libgtk-3-0
+    # Fedora/RHEL package and RPM provide name. `libgtk-3-0` is Debian-only.
+    - gtk3
     - libXScrnSaver
     - libXtst
     - libuuid

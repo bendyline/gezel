@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { cpSync, existsSync } from 'node:fs';
+import { cpSync, existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { defineConfig } from 'tsup';
 
@@ -19,6 +19,20 @@ export default defineConfig({
   target: 'node20',
   splitting: false,
   platform: 'node',
+  // esbuild's ESM wrapper for any bundled CommonJS dependency delegates
+  // dynamic built-in loads to an in-scope `require`. Native ESM does not
+  // provide one, so keep a standard Node createRequire bridge at the bundle
+  // boundary instead of relying on Electron's loader implementation.
+  banner: {
+    js: 'import { createRequire as __gezelCreateRequire } from "node:module"; const require = __gezelCreateRequire(import.meta.url);',
+  },
+  // These are workspace packages in development, where pnpm exposes them as
+  // symlinks. electron-builder deliberately does not follow those workspace
+  // links into app.asar, so leaving tsup's dependency auto-externalization in
+  // place produces a main.js with bare imports that cannot resolve after
+  // installation. Bundle both packages (including their exported subpaths)
+  // into the Electron main entry instead.
+  noExternal: [/^@bendyline\/gezel(?:\/.*)?$/, /^@bendyline\/gezel-client(?:\/.*)?$/],
   // `@bendyline/gezel-service` is a devDep rather than a prod dep (see the
   // CLAUDE.md gotcha about the embedded fallback loading from the unpacked
   // service-bundle) — but tsup only auto-externalizes prod deps, so the
@@ -28,6 +42,23 @@ export default defineConfig({
   // external keeps it as a runtime dynamic import.
   external: ['electron', '@bendyline/gezel-service'],
   onSuccess: async () => {
+    // A final guard on the emitted bytes. This is intentionally about the
+    // bundle rather than the source/config: it catches a future tsup upgrade
+    // or config refactor that starts externalizing either workspace package
+    // again before electron-builder can create a broken installer.
+    const mainBundle = readFileSync('dist/main.js', 'utf8');
+    for (const packageName of ['@bendyline/gezel', '@bendyline/gezel-client']) {
+      const escaped = packageName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const bareImport = new RegExp(
+        String.raw`(?:from\s*|import\s*\()\s*["']${escaped}(?:/[^"']*)?["']`,
+      );
+      if (bareImport.test(mainBundle)) {
+        throw new Error(
+          `[tsup] dist/main.js still contains a runtime import of ${packageName}; the packaged app would fail because workspace packages are not copied into app.asar`,
+        );
+      }
+    }
+
     // Copy the plain CJS preload into dist/. Electron's sandboxed preloads
     // need to be CJS, and it's a tiny file — not worth running it through
     // the TS compiler.

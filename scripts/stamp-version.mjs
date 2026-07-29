@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Stamp packages/app/package.json with a date-based version.
+ * Stamp every release-version surface with a date-based version.
  *
  * Format: 1.YYDDD.RUN
  *   YY  — two-digit year
@@ -25,7 +25,13 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, '..');
-const pkgPath = resolve(repoRoot, 'packages/app/package.json');
+const packagePaths = [
+  resolve(repoRoot, 'package.json'),
+  resolve(repoRoot, 'packages/app/package.json'),
+  resolve(repoRoot, 'packages/core/package.json'),
+  resolve(repoRoot, 'packages/service/package.json'),
+];
+const coreVersionPath = resolve(repoRoot, 'packages/core/src/index.ts');
 
 function arg(name) {
   const idx = process.argv.indexOf(name);
@@ -68,8 +74,27 @@ if (process.argv.includes('--print')) {
   process.exit(0);
 }
 
-const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'));
-pkg.version = version;
-writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
+// Read and validate every target before the first write. A missing/corrupt
+// surface must never leave a checkout stamped only halfway.
+const packages = packagePaths.map((pkgPath) => ({
+  pkgPath,
+  pkg: JSON.parse(readFileSync(pkgPath, 'utf8')),
+}));
+const coreSource = readFileSync(coreVersionPath, 'utf8');
+const versionPattern = /export const GEZEL_VERSION = '[^']*';/;
+if (!versionPattern.test(coreSource)) {
+  console.error(`could not find GEZEL_VERSION declaration in ${coreVersionPath}`);
+  process.exit(1);
+}
 
-console.log(`stamped ${pkgPath} → ${version}`);
+for (const { pkgPath, pkg } of packages) {
+  pkg.version = version;
+  writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
+  console.log(`stamped ${pkgPath} → ${version}`);
+}
+
+writeFileSync(
+  coreVersionPath,
+  coreSource.replace(versionPattern, `export const GEZEL_VERSION = '${version}';`),
+);
+console.log(`stamped ${coreVersionPath} → ${version}`);

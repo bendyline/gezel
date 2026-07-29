@@ -85,6 +85,15 @@ const quitCoordinator = new QuitCoordinator({
   quitAgain: () => app.quit(),
   onError: (error) => console.warn('[app] service shutdown failed:', error),
 });
+const packagedSmoke =
+  process.env.GEZEL_PACKAGED_SMOKE === '1' || process.argv.includes('--gezel-packaged-smoke');
+const packagedSmokeHome = process.argv
+  .find((arg) => arg.startsWith('--gezel-home='))
+  ?.slice('--gezel-home='.length);
+const packagedSmokeExpectedVersion =
+  process.argv
+    .find((arg) => arg.startsWith('--gezel-expected-version='))
+    ?.slice('--gezel-expected-version='.length) || process.env.GEZEL_EXPECTED_VERSION;
 
 // Stable app identity. Set before app.whenReady() so platform shells
 // pick it up while the first window is being created — anything we
@@ -96,6 +105,9 @@ const quitCoordinator = new QuitCoordinator({
 // productName in electron-builder.yml only takes effect inside
 // packaged builds — dev runs need this explicit setName to match.
 app.setName('Gezel');
+if (packagedSmoke) {
+  process.stderr.write('[packaged-smoke] main module imported\n');
+}
 
 // Group every Gezel window under one taskbar button on Windows. Without
 // this, launches are tagged with Electron's default AppUserModelID
@@ -121,8 +133,8 @@ if (process.platform === 'linux') {
   app.commandLine.appendSwitch('class', 'Gezel');
 }
 
-// E2E isolation: redirect Chromium's userData dir into the test's
-// `GEZEL_HOME` temp dir BEFORE the singleton-lock check. Electron stores
+// E2E/release-smoke isolation: redirect Chromium's userData dir into the
+// test's `GEZEL_HOME` temp dir BEFORE the singleton-lock check. Electron stores
 // `SingletonLock` (and Cache/, Cookies, blob_storage/, …) under
 // userData, defaulting to `~/Library/Application Support/Gezel/` —
 // shared with any installed `/Applications/Gezel.app`. Without this
@@ -133,8 +145,9 @@ if (process.platform === 'linux') {
 // e2e test passes a fresh tmpdir as GEZEL_HOME, so this scopes the
 // lock per-test-run and lets the dev/test instance coexist with a
 // production Gezel install.
-if (process.env.GEZEL_E2E === '1' && process.env.GEZEL_HOME) {
-  app.setPath('userData', join(process.env.GEZEL_HOME, '.electron-userdata'));
+if (process.env.GEZEL_E2E === '1' || packagedSmoke) {
+  const isolatedHome = packagedSmokeHome || process.env.GEZEL_HOME;
+  if (isolatedHome) app.setPath('userData', join(isolatedHome, '.electron-userdata'));
 }
 
 // Dev↔packaged coexistence. A dev launch (`electron .`) and an installed
@@ -146,8 +159,8 @@ if (process.env.GEZEL_E2E === '1' && process.env.GEZEL_HOME) {
 // itself as a duplicate, and `app.exit(0)` before a window ever opens. The
 // service layer is already isolated (dev → `~/.gezel-dev`, packaged →
 // `~/.gezel`; see resolveLaunch), so scoping dev's `userData` to its own home
-// is the only remaining piece needed to let the two run side by side. The E2E
-// branch above is the same move for tests; this extends it to ordinary
+// is the only remaining piece needed to let the two run side by side. The
+// E2E/smoke branch above is the same move for tests; this extends it to ordinary
 // `pnpm app` dev runs. Skipped when E2E already scoped userData.
 if (!app.isPackaged && process.env.GEZEL_E2E !== '1') {
   app.setPath('userData', join(resolveLaunch().home, '.electron-userdata'));
@@ -343,7 +356,7 @@ async function createWindow(): Promise<void> {
   // surface, so Playwright screenshots keep working — unlike `show: false`,
   // which stops the window compositing and blanks captures. Pairs with the
   // `accessory` activation policy set in `whenReady` (suppresses the dock).
-  const e2e = process.env.GEZEL_E2E === '1';
+  const e2e = process.env.GEZEL_E2E === '1' || packagedSmoke;
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 820,
@@ -1457,6 +1470,34 @@ function pinLoopbackCert(certPem: string | null): void {
 }
 
 app.whenReady().then(async () => {
+  // Release CI launches the final electron-builder output with this flag.
+  // The early assertions catch an unpacked/dev executable or a stale
+  // electron-builder version immediately. The smoke run then continues
+  // through an isolated embedded daemon and a real BrowserWindow below.
+  if (packagedSmoke) {
+    if (!app.isPackaged) {
+      console.error('[packaged-smoke] refused: Electron is not running a packaged application');
+      process.exit(1);
+      return;
+    }
+    if (packagedSmokeExpectedVersion && app.getVersion() !== packagedSmokeExpectedVersion) {
+      console.error(
+        `[packaged-smoke] version mismatch: app=${app.getVersion()} expected=${packagedSmokeExpectedVersion}`,
+      );
+      process.exit(1);
+      return;
+    }
+    // Never consult a developer's keychain or external model provider during
+    // a release smoke. `--gezel-home` forces the packaged supervisor down its
+    // embedded path, keeping all state inside the runner temp directory.
+    process.env.GEZEL_SECRETS_BACKEND = 'file';
+    process.env.GEZEL_MOCK_PROVIDER = '1';
+    // The smoke must prove these came from the packaged, manifest-verified
+    // payload rather than accepting an inherited developer/runner override.
+    delete process.env.GEZEL_NODE_PATH;
+    delete process.env.GEZEL_PNPM_PATH;
+  }
+
   installMenu();
 
   // Trust the daemon's per-launch self-signed cert — and ONLY that cert,
@@ -1559,7 +1600,11 @@ app.whenReady().then(async () => {
   // This suppresses the dock/menu-bar presence; the window itself is kept
   // off-screen and shown inactive in `createWindow` (the `e2e` branch), so
   // between the two the window never appears or steals focus on any platform.
-  if (process.platform === 'darwin' && process.env.GEZEL_E2E === '1' && app.dock) {
+  if (
+    process.platform === 'darwin' &&
+    (process.env.GEZEL_E2E === '1' || packagedSmoke) &&
+    app.dock
+  ) {
     app.dock.hide();
     // setActivationPolicy is the load-bearing call — `dock.hide()` alone
     // doesn't prevent focus theft on window creation.
@@ -1589,6 +1634,10 @@ app.whenReady().then(async () => {
     });
   } catch (err) {
     console.error('Gezel service failed to start:', err);
+    if (packagedSmoke) {
+      app.exit(1);
+      return;
+    }
     app.quit();
     return;
   }
@@ -1622,6 +1671,55 @@ app.whenReady().then(async () => {
   });
 
   await createWindow();
+
+  if (packagedSmoke) {
+    try {
+      if (!mainWindow || mainWindow.isDestroyed() || !apiClient || !connection) {
+        throw new Error('main window, API client, or service connection was not created');
+      }
+      if (!process.env.GEZEL_NODE_PATH) {
+        throw new Error('bundled Node runtime did not pass integrity verification and install');
+      }
+      if (!process.env.GEZEL_PNPM_PATH) {
+        throw new Error('bundled pnpm runtime did not pass integrity verification and install');
+      }
+      const [health, renderer] = await Promise.all([
+        apiClient.health(),
+        mainWindow.webContents.executeJavaScript(
+          '({ readyState: document.readyState, hasBody: Boolean(document.body?.childElementCount) })',
+        ) as Promise<{ readyState: string; hasBody: boolean }>,
+      ]);
+      const loadedUrl = mainWindow.webContents.getURL();
+      if (!loadedUrl.startsWith(connection.baseUrl)) {
+        throw new Error(`renderer loaded unexpected URL ${loadedUrl}`);
+      }
+      if (health.ok !== true) throw new Error('daemon health response was not ok');
+      if (packagedSmokeExpectedVersion && health.version !== packagedSmokeExpectedVersion) {
+        throw new Error(
+          `daemon health version=${health.version} expected=${packagedSmokeExpectedVersion}`,
+        );
+      }
+      if (renderer.readyState !== 'complete' || !renderer.hasBody) {
+        throw new Error(
+          `renderer was not ready (readyState=${renderer.readyState}, hasBody=${renderer.hasBody})`,
+        );
+      }
+      console.log(
+        `[packaged-smoke] ready app=${app.getVersion()} daemon=${health.version} renderer=${loadedUrl}`,
+      );
+      isQuitting = true;
+      mainWindow.destroy();
+      await connection.shutdown();
+      connection = null;
+      app.exit(0);
+    } catch (err) {
+      console.error(
+        `[packaged-smoke] failed: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`,
+      );
+      app.exit(1);
+    }
+    return;
+  }
 
   // Report OS idle time to the daemon so the background "boekwachter"
   // enrichment loop only runs heavy local-model work when the user is away.

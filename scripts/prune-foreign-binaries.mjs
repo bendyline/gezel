@@ -13,10 +13,11 @@
  * right thing to keep. `GEZEL_BUNDLE_PLATFORM` / `GEZEL_BUNDLE_ARCH` override
  * that if a cross-build ever appears.
  *
- * Deliberately conservative. Only two directory shapes are pruned:
+ * Deliberately conservative. Only three directory shapes are pruned:
  *
  *   <platform>/<arch>/      onnxruntime-node/bin/napi-v6/darwin/arm64/
  *   <platform>-<arch>/      node-pty/prebuilds/darwin-arm64/
+ *   <pkg>-<platform>-<arch>/ @reflink/reflink-darwin-x64/
  *
  * A bare `x64`/`arm64` directory is pruned only when its parent is a platform
  * directory we recognise — otherwise an unrelated `x64` folder could be hit.
@@ -39,6 +40,21 @@ export function pruneReason(name, parentName, target) {
   const hyphen = name.split('-');
   if (hyphen.length === 2 && PLATFORMS.has(hyphen[0]) && ARCHES.has(hyphen[1])) {
     const [platform, arch] = hyphen;
+    if (platform !== target.platform) return `foreign platform (${platform})`;
+    if (arch !== target.arch) return `foreign arch (${arch})`;
+    return null;
+  }
+  // A platform-qualified package under a scope, e.g.
+  // @reflink/reflink-darwin-x64 or @reflink/reflink-win32-x64-msvc.
+  // Requiring a scoped parent avoids treating arbitrary application
+  // directories such as docs-darwin-x64 as native package variants.
+  const qualifiedPackage =
+    parentName.startsWith('@') &&
+    /^(?:.+-)(darwin|linux|win32|android|freebsd|sunos|aix)-(x64|arm64|ia32|arm|armv7l|ppc64|s390x|riscv64)(?:-[a-z0-9_]+)*$/.exec(
+      name,
+    );
+  if (qualifiedPackage) {
+    const [, platform, arch] = qualifiedPackage;
     if (platform !== target.platform) return `foreign platform (${platform})`;
     if (arch !== target.arch) return `foreign arch (${arch})`;
     return null;
