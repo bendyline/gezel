@@ -14,6 +14,13 @@ import { useRoleBasedNameOnlyMode } from './useRoleBasedNameOnlyMode.js';
 
 export type ComposerTurnState = 'idle' | 'streaming' | 'queued' | 'error';
 
+interface LocalTurnStream {
+  id: number;
+  sessionId: string;
+  controller: AbortController;
+  accepted: boolean;
+}
+
 /**
  * Module-level queue for prefill payloads. A view elsewhere in the
  * app (e.g. the "Complain about this" preview-error button) calls
@@ -277,7 +284,8 @@ export function ChatComposer({
     return () => window.removeEventListener('gezel:config-updated', onConfigUpdated);
   }, []);
   const engagementOff = engagementMode === 'off';
-  const streamRef = useRef<AbortController | null>(null);
+  const localTurnRef = useRef<LocalTurnStream | null>(null);
+  const localTurnSequenceRef = useRef(0);
   // Live session id — initialized from the prop and updated the first time
   // we lazy-create a session (from either a paste or a Send click). Shared
   // between the media provider and the send path so they can't disagree.
@@ -352,11 +360,55 @@ export function ChatComposer({
   // revoke any cached blob URLs the media provider handed out.
   useEffect(() => {
     return () => {
-      streamRef.current?.abort();
-      streamRef.current = null;
+      localTurnRef.current?.controller.abort();
+      localTurnRef.current = null;
       mediaProvider.dispose();
     };
   }, [mediaProvider]);
+
+  const settleLocalTurn = useCallback(
+    (turnId: number, opts: { abort?: boolean; serverIdle?: boolean } = {}) => {
+      const localTurn = localTurnRef.current;
+      if (!localTurn || localTurn.id !== turnId) return;
+      localTurnRef.current = null;
+      if (opts.abort) localTurn.controller.abort();
+      setStreaming(false);
+      setQueuedAhead(null);
+      if (opts.serverIdle) setServerInflight(false);
+    },
+    [],
+  );
+
+  const syncInflight = useCallback(
+    async (targetSessionId: string, shouldApply?: () => boolean): Promise<void> => {
+      // Only an authoritative read that STARTED after this local send was
+      // accepted may reconcile a missed terminal SSE event. An older idle
+      // request can otherwise return late and clear a newer turn.
+      const localAtStart = localTurnRef.current;
+      const acceptedTurnId =
+        localAtStart?.sessionId === targetSessionId && localAtStart.accepted
+          ? localAtStart.id
+          : null;
+      const result = await api.getChatSessionInflight(targetSessionId);
+      if (shouldApply && !shouldApply()) return;
+      if (liveSessionIdRef.current !== targetSessionId) return;
+
+      // Ignore a result tied to a local turn that completed or was replaced
+      // while the request was in flight. Its state is already stale.
+      if (acceptedTurnId !== null && localTurnRef.current?.id !== acceptedTurnId) {
+        return;
+      }
+
+      const inflight = result.inflight !== null;
+      setServerInflight(inflight);
+      if (!inflight && acceptedTurnId !== null) {
+        // The service has finished, but the finite session SSE missed `done`.
+        // Abort that reader so it releases its Chromium connection slot too.
+        settleLocalTurn(acceptedTurnId, { abort: true, serverIdle: true });
+      }
+    },
+    [settleLocalTurn],
+  );
 
   // Reconcile with the service even when this component did not initiate
   // the turn. A short poll is intentionally scoped to the active session;
@@ -367,22 +419,21 @@ export function ChatComposer({
       return;
     }
     let disposed = false;
-    const syncInflight = async () => {
+    const sync = async () => {
       try {
-        const result = await api.getChatSessionInflight(liveSessionId);
-        if (!disposed) setServerInflight(result.inflight !== null);
+        if (!disposed) await syncInflight(liveSessionId, () => !disposed);
       } catch {
         // A transient status-read failure must not clear a known running
         // turn and expose Send while the server may still be busy.
       }
     };
-    void syncInflight();
-    const timer = window.setInterval(() => void syncInflight(), 2_000);
+    void sync();
+    const timer = window.setInterval(() => void sync(), 2_000);
     return () => {
       disposed = true;
       window.clearInterval(timer);
     };
-  }, [liveSessionId]);
+  }, [liveSessionId, syncInflight]);
 
   const turnActive = streaming || serverInflight;
   // Keep Escape handling live for the composer's whole lifetime. Installing
@@ -530,8 +581,14 @@ export function ChatComposer({
 
     setStreaming(true);
 
+    const localTurnId = ++localTurnSequenceRef.current;
     const ctrl = new AbortController();
-    streamRef.current = ctrl;
+    localTurnRef.current = {
+      id: localTurnId,
+      sessionId: activeSessionId,
+      controller: ctrl,
+      accepted: false,
+    };
     const streamPromise = (async () => {
       try {
         for await (const event of streamChatEvents({
@@ -540,6 +597,7 @@ export function ChatComposer({
           signal: ctrl.signal,
           fetch: api.getFetch(),
         })) {
+          if (localTurnRef.current?.id !== localTurnId) return;
           if (event.type === 'tool') {
             const tool: ToolActivity = {
               name: event.name,
@@ -557,11 +615,9 @@ export function ChatComposer({
             onToolActivity?.(tool);
           } else if (event.type === 'error') {
             setError(humanizeChatError(event.error));
-            setStreaming(false);
             setQueuedAhead(null);
           } else if (event.type === 'done') {
-            setStreaming(false);
-            setQueuedAhead(null);
+            settleLocalTurn(localTurnId, { serverIdle: true });
             return;
           } else if (event.type === 'queued') {
             // Service only fires this after a >200ms wait, so no
@@ -579,11 +635,12 @@ export function ChatComposer({
         }
       } catch (err) {
         if ((err as Error).name === 'AbortError') {
-          setStreaming(false);
+          settleLocalTurn(localTurnId);
           return;
         }
+        if (localTurnRef.current?.id !== localTurnId) return;
         setError(humanizeChatError((err as Error).message));
-        setStreaming(false);
+        settleLocalTurn(localTurnId);
       }
     })();
 
@@ -604,6 +661,16 @@ export function ChatComposer({
       if (mentionIds.length > 0) body.mentions = mentionIds;
       if (ccIds.length > 0) body.passiveCcGezelIds = ccIds;
       await api.sendToChatSession(activeSessionId, body);
+      const acceptedTurn = localTurnRef.current;
+      if (acceptedTurn?.id === localTurnId) {
+        acceptedTurn.accepted = true;
+        // Fast mock/local turns can finish before their `done` frame reaches
+        // this renderer. Reconcile immediately instead of waiting 2s for the
+        // periodic poll.
+        void syncInflight(activeSessionId).catch(() => {
+          /* the periodic poll remains the recovery path */
+        });
+      }
       publishOptimisticUserMessage({
         sessionId: activeSessionId,
         gezelId,
@@ -616,6 +683,7 @@ export function ChatComposer({
       if (ccIds.length > 0) onPassiveCcConsumed?.();
     } catch (err) {
       ctrl.abort();
+      settleLocalTurn(localTurnId);
       const raw = (err as Error).message ?? String(err);
       if (/already in flight/i.test(raw)) {
         // A previous turn is stuck. Pull the details so we can show the
@@ -638,7 +706,6 @@ export function ChatComposer({
       } else {
         setError(humanizeChatError(raw));
       }
-      setStreaming(false);
     }
     await streamPromise;
   }, [
@@ -647,6 +714,8 @@ export function ChatComposer({
     turnActive,
     engagementOff,
     ensureSessionId,
+    settleLocalTurn,
+    syncInflight,
     onToolActivity,
     // Both are read at send-time on every invocation — without them
     // a pivot that updates `passiveCcGezelIds` after the composer
@@ -673,9 +742,14 @@ export function ChatComposer({
 
   const stopActiveTurn = useCallback(async () => {
     const sid = liveSessionIdRef.current;
-    streamRef.current?.abort();
-    setStreaming(false);
-    setQueuedAhead(null);
+    const localTurn = localTurnRef.current;
+    if (localTurn) {
+      localTurn.controller.abort();
+      settleLocalTurn(localTurn.id);
+    } else {
+      setStreaming(false);
+      setQueuedAhead(null);
+    }
     if (!sid) {
       setServerInflight(false);
       return;
@@ -689,7 +763,7 @@ export function ChatComposer({
       // reach the service; the poll will clear it if the turn already ended.
       setError(`Cancel failed: ${(err as Error).message}`);
     }
-  }, []);
+  }, [settleLocalTurn]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {

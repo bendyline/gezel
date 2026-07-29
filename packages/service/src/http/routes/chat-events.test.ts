@@ -450,46 +450,60 @@ describe('SSE protocol contract', () => {
     expect(frames.every((f) => f.id === undefined)).toBe(true);
   }, 6_000);
 
-  it('close-on-done lifecycle: client can stream past `done` and abort cleanly', async () => {
-    // The route does NOT close the stream when the chat manager emits
-    // `done` — the `done` event is just another frame, and the stream
-    // stays open with keepalives until the client aborts. The UI's
-    // consumer reads `done`, then aborts the AbortController. This
-    // test verifies the full lifecycle without relying on the stream
-    // self-closing.
+  it('close-on-done lifecycle: the server ends the finite stream and allows a fresh connect', async () => {
+    // A session stream represents one finite turn. The server must end the
+    // response after writing `done`; relying on renderer cancellation left
+    // enough retiring HTTP connections to hit Chromium's per-origin cap.
     const session = (await (await api('POST', '/api/sessions', { gezelId })).json()) as {
       id: string;
     };
 
     const controller = new AbortController();
-    const sendPromise = api('POST', `/api/sessions/${session.id}/send`, {
-      message: 'lifecycle',
+    const response = await httpFetch(`${baseUrl}/events/chat?session=${session.id}`, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: controller.signal,
+    });
+    expect(response.status).toBe(200);
+    expect(response.body).toBeTruthy();
+
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    let raw = '';
+    let reachedEof = false;
+    let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<never>((_, reject) => {
+      deadlineTimer = setTimeout(
+        () => reject(new Error('session SSE did not close after done')),
+        10_000,
+      );
     });
 
-    const sawDone = (frames: SSEFrame[]) =>
-      frames.some((f) => {
-        if (f.event !== undefined) return false;
-        try {
-          return (JSON.parse(f.data) as { type?: string }).type === 'done';
-        } catch {
-          return false;
-        }
+    try {
+      const sendPromise = api('POST', `/api/sessions/${session.id}/send`, {
+        message: 'lifecycle',
       });
+      while (true) {
+        const { value, done } = await Promise.race([reader.read(), deadline]);
+        if (done) {
+          reachedEof = true;
+          break;
+        }
+        raw += decoder.decode(value, { stream: true });
+      }
+      raw += decoder.decode();
+      await sendPromise;
+    } finally {
+      if (deadlineTimer) clearTimeout(deadlineTimer);
+      controller.abort();
+      await reader.cancel().catch(() => {});
+      reader.releaseLock();
+    }
 
-    // Phase 1: read until `done` arrives.
-    const { frames: frames1, status } = await readSSEFramesUntil(
-      `${baseUrl}/events/chat?session=${session.id}`,
-      controller,
-      sawDone,
-      10_000,
-    );
-    await sendPromise;
-
-    expect(status).toBe(200);
-    expect(sawDone(frames1)).toBe(true);
+    expect(raw).toContain('"type":"done"');
+    expect(reachedEof).toBe(true);
 
     // Phase 2: a second connect cycle must work end-to-end. If the
-    // first abort had leaked a subscriber or hung the keepalive loop,
+    // first close leaked a subscriber or hung the keepalive loop,
     // the second connect would either 5xx or never produce a frame
     // before the deadline.
     const controller2 = new AbortController();

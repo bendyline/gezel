@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { NativeEngineStatusResponseSchema } from '@bendyline/gezel';
 import { Hono } from 'hono';
 import { describe, expect, it } from 'vitest';
+import { NATIVE_ENGINE_RELEASE } from '../../engines/native-manifest.js';
 import { enginesRoutes } from './engines.js';
 
 function makeApp(
@@ -35,7 +36,7 @@ describe('engines routes', () => {
       const res = await app.request('/api/engines/binaries/status');
       expect(res.status).toBe(200);
       const body = NativeEngineStatusResponseSchema.parse(await res.json());
-      expect(body.release).toBe('0.1.19');
+      expect(body.release).toBe(NATIVE_ENGINE_RELEASE);
       expect(body.pinned).toBe(true);
       expect(body.engines.find((engine) => engine.name === 'uv')).toMatchObject({
         installed: true,

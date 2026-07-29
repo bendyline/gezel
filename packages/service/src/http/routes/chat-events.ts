@@ -36,28 +36,42 @@ export function chatEventsRoutes(ctx: ServiceContext): Hono {
     const key = sessionId;
     return streamSSE(c, async (stream) => {
       let closed = false;
-      const unsubscribe = ctx.chatEvents.subscribe(key, async (event) => {
-        try {
-          await stream.writeSSE({ data: JSON.stringify(event) });
-        } catch {
-          /* stream closed */
-        }
+      let releaseClose: (() => void) | undefined;
+      const closeSignal = new Promise<void>((resolve) => {
+        releaseClose = resolve;
       });
-
-      stream.onAbort(() => {
+      let unsubscribe = () => {};
+      const close = () => {
+        if (closed) return;
         closed = true;
         unsubscribe();
+        releaseClose?.();
+      };
+      unsubscribe = ctx.chatEvents.subscribe(key, async (event) => {
+        try {
+          await stream.writeSSE({ data: JSON.stringify(event) });
+          // This is a finite, single-turn stream. Return immediately after
+          // the terminal frame so Chromium can reclaim the connection slot
+          // before the next rapid send opens another session stream.
+          if (event.type === 'done') close();
+        } catch {
+          close();
+        }
       });
+      if (closed) unsubscribe();
+
+      stream.onAbort(close);
 
       while (!closed) {
-        await stream.sleep(1000);
+        await Promise.race([stream.sleep(1000), closeSignal]);
+        if (closed) break;
         try {
           await stream.writeSSE({ event: 'ping', data: '' });
         } catch {
-          closed = true;
+          close();
         }
       }
-      unsubscribe();
+      close();
     });
   });
 
