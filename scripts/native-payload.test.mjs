@@ -198,7 +198,10 @@ test('every compiled native wrapper configures source path remapping', () => {
 test('native tar archives normalize ownership, ordering, and timestamps', () => {
   const intermediate = workflow.slice(
     workflow.indexOf('      - name: Pack build output'),
-    workflow.indexOf('      - uses: actions/upload-artifact', workflow.indexOf('      - name: Pack build output')),
+    workflow.indexOf(
+      '      - uses: actions/upload-artifact',
+      workflow.indexOf('      - name: Pack build output'),
+    ),
   );
   assert.match(intermediate, /--uid 0 --gid 0 --uname root --gname root/);
   assert.match(intermediate, /--owner=0 --group=0 --numeric-owner/);
