@@ -6,7 +6,6 @@ $helperDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = Resolve-Path (Join-Path $helperDir '..\..\..')
 $buildDir = Join-Path $helperDir '.build\win32-x64'
 $outputDir = Join-Path $repoRoot 'native\build\win32-x64'
-$pathMapFlag = "/pathmap:$($repoRoot.Path)=gezel"
 
 function Import-VsDevEnv {
   $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
@@ -100,11 +99,8 @@ function Reset-BuildDirIfGeneratorChanged {
 
 Import-VsDevEnv
 Reset-BuildDirIfGeneratorChanged -BuildDir $buildDir -Generator 'Ninja'
-$env:CL = if ($env:CL) { "$pathMapFlag $env:CL" } else { $pathMapFlag }
 
-& cmake -S $helperDir -B $buildDir -G Ninja -DCMAKE_BUILD_TYPE=Release `
-  "-DCMAKE_C_FLAGS=$pathMapFlag" "-DCMAKE_CXX_FLAGS=$pathMapFlag" `
-  -DBUILD_TESTING=ON
+& cmake -S $helperDir -B $buildDir -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
 if ($LASTEXITCODE -ne 0) {
   throw "cmake configure failed (exit $LASTEXITCODE)"
 }

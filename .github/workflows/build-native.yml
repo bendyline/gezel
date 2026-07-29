@@ -992,12 +992,12 @@ jobs:
           fi
           echo "[floor] $checked Mach-O file(s) are compatible with macOS $floor"
 
-      # Release binaries should identify upstream source paths, not the
-      # ephemeral hosted-runner checkout. Compiler prefix maps are configured
-      # in every build wrapper; this gate makes that policy fail closed when
-      # a compiler family or a newly-added engine ignores them.
+      # GCC and Clang have stable prefix-map flags, so keep Unix payloads free
+      # of hosted-runner paths. Windows is deliberately excluded: MSVC only
+      # honors /pathmap with /experimental:deterministic, and checkout paths
+      # are not worth putting release builds on an experimental compiler mode.
       - name: Assert no build-host paths
-        if: steps.preflight.outputs.pinned == 'true' && matrix.engine != 'uv'
+        if: steps.preflight.outputs.pinned == 'true' && matrix.engine != 'uv' && !startsWith(matrix.platform, 'win32')
         shell: bash
         run: |
           set -euo pipefail
@@ -1005,14 +1005,14 @@ jobs:
           bad=0
           while IFS= read -r -d '' f; do
             [[ -f "$f" && ! -L "$f" ]] || continue
-            if LC_ALL=C grep -aEq '/home/runner/work/|/Users/runner/work/|[A-Za-z]:\\a\\|[A-Za-z]:/a/' "$f"; then
+            if LC_ALL=C grep -aEq '/home/runner/work/|/Users/runner/work/' "$f"; then
               echo "::error::$(basename "$f") embeds a hosted-runner checkout path"
-              LC_ALL=C strings "$f" | grep -E -m 3 '/home/runner/work/|/Users/runner/work/|[A-Za-z]:\\a\\|[A-Za-z]:/a/' || true
+              LC_ALL=C strings "$f" | grep -E -m 3 '/home/runner/work/|/Users/runner/work/' || true
               bad=1
             fi
           done < <(find "$out" -type f -print0)
           if (( bad )); then
-            echo "::error::Fix the engine's compiler prefix/path-map flags rather than exempting the file."
+            echo "::error::Fix the Unix engine's stable compiler prefix-map flags rather than exempting the file."
             exit 1
           fi
           echo "[paths] no hosted-runner checkout paths in $out"

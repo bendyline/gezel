@@ -24,15 +24,17 @@ const workflowPath = fileURLToPath(
   new URL('../.github/workflows/build-native.yml', import.meta.url),
 );
 const workflow = readFileSync(workflowPath, 'utf8');
-const wrapperPaths = [
+const unixWrapperPaths = [
   '../native/engines/llama-cpp/build.sh',
-  '../native/engines/llama-cpp/build.ps1',
   '../native/engines/sd-cpp/build.sh',
-  '../native/engines/sd-cpp/build.ps1',
   '../native/engines/whisper-cpp/build.sh',
-  '../native/engines/whisper-cpp/build.ps1',
   '../native/engines/ds4/build.sh',
   '../native/helpers/device-health/build.sh',
+].map((path) => [path, readFileSync(fileURLToPath(new URL(path, import.meta.url)), 'utf8')]);
+const windowsWrapperPaths = [
+  '../native/engines/llama-cpp/build.ps1',
+  '../native/engines/sd-cpp/build.ps1',
+  '../native/engines/whisper-cpp/build.ps1',
   '../native/helpers/device-health/build.ps1',
   '../native/helpers/service-host/build.ps1',
 ].map((path) => [path, readFileSync(fileURLToPath(new URL(path, import.meta.url)), 'utf8')]);
@@ -158,7 +160,7 @@ test('macOS deployment compatibility is declared and checked before signing', ()
   assert.match(step, /No Mach-O files found/);
 });
 
-test('compiled native payloads fail closed on hosted-runner path leaks', () => {
+test('Unix native payloads fail closed on hosted-runner path leaks', () => {
   const start = workflow.indexOf('      - name: Assert no build-host paths');
   const end = workflow.indexOf('      # ── Code-sign the engine binaries', start);
   assert.notEqual(start, -1, 'could not find the build-host path gate');
@@ -166,16 +168,19 @@ test('compiled native payloads fail closed on hosted-runner path leaks', () => {
   const step = workflow.slice(start, end);
 
   assert.match(step, /matrix\.engine != 'uv'/);
+  assert.match(step, /!startsWith\(matrix\.platform, 'win32'\)/);
   assert.match(step, /\/home\/runner\/work\//);
   assert.match(step, /\/Users\/runner\/work\//);
-  assert.match(step, /\[A-Za-z\]:\\\\a\\\\/);
-  assert.match(step, /\[A-Za-z\]:\/a\//);
+  assert.doesNotMatch(step, /\[A-Za-z\]:\\\\a\\\\/);
 });
 
-test('every compiled native wrapper configures source path remapping', () => {
-  for (const [path, contents] of wrapperPaths) {
-    const expected = path.endsWith('.ps1') ? /\/pathmap:/ : /-ffile-prefix-map=/;
-    assert.match(contents, expected, `${path} does not configure source path remapping`);
+test('Unix native wrappers configure stable source path remapping', () => {
+  for (const [path, contents] of unixWrapperPaths) {
+    assert.match(
+      contents,
+      /-ffile-prefix-map=/,
+      `${path} does not configure source path remapping`,
+    );
   }
 
   for (const path of [
@@ -183,16 +188,27 @@ test('every compiled native wrapper configures source path remapping', () => {
     '../native/engines/sd-cpp/build.sh',
     '../native/engines/whisper-cpp/build.sh',
   ]) {
-    const contents = wrapperPaths.find(([candidate]) => candidate === path)?.[1] ?? '';
+    const contents = unixWrapperPaths.find(([candidate]) => candidate === path)?.[1] ?? '';
     assert.match(contents, /CMAKE_OSX_DEPLOYMENT_TARGET/);
   }
 
-  const llama = wrapperPaths.find(([path]) => path.includes('llama-cpp/build.sh'))?.[1] ?? '';
-  const sd = wrapperPaths.find(([path]) => path.includes('sd-cpp/build.sh'))?.[1] ?? '';
-  const ds4 = wrapperPaths.find(([path]) => path.includes('ds4/build.sh'))?.[1] ?? '';
+  const llama = unixWrapperPaths.find(([path]) => path.includes('llama-cpp/build.sh'))?.[1] ?? '';
+  const sd = unixWrapperPaths.find(([path]) => path.includes('sd-cpp/build.sh'))?.[1] ?? '';
+  const ds4 = unixWrapperPaths.find(([path]) => path.includes('ds4/build.sh'))?.[1] ?? '';
   assert.match(llama, /CMAKE_CUDA_FLAGS=.*-Xcompiler=-ffile-prefix-map=/);
   assert.match(sd, /CMAKE_CUDA_FLAGS=.*-Xcompiler=-ffile-prefix-map=/);
   assert.match(ds4, /NVCCFLAGS=.*source_map|nvcc_flags\+=.*-ffile-prefix-map=/);
+});
+
+test('Windows native wrappers avoid experimental path remapping', () => {
+  for (const [path, contents] of windowsWrapperPaths) {
+    assert.doesNotMatch(contents, /\/pathmap:/, `${path} enables MSVC /pathmap`);
+    assert.doesNotMatch(
+      contents,
+      /\/experimental:deterministic/,
+      `${path} enables an experimental MSVC mode`,
+    );
+  }
 });
 
 test('native tar archives normalize ownership, ordering, and timestamps', () => {

@@ -77,9 +77,8 @@ cmake_flags=(
   # `/home/runner/work/gezel/gezel/native/engines/llama-cpp/.upstream/src/...`.
   # Cosmetic, but it is the CI layout of a private repo embedded in a
   # user-facing artifact, and it reads better in a bug report too.
-  # build.ps1 applies MSVC /pathmap; CUDA gets the equivalent host-compiler
-  # flags below. Include macro + debug maps so both __FILE__ and compiler
-  # metadata stay stable.
+  # Include macro + debug maps so both __FILE__ and compiler metadata stay
+  # stable. Windows deliberately does not use MSVC's experimental /pathmap.
   "-DCMAKE_C_FLAGS=$source_map_flags"
   "-DCMAKE_CXX_FLAGS=$source_map_flags"
   # ggml defaults GGML_OPENMP=ON, which puts a hard load-time dependency
