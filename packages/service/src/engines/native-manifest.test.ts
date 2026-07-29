@@ -8,7 +8,7 @@ import {
 } from './native-manifest.js';
 
 describe('native release trust manifest', () => {
-  it('pins every native-v0.1.19 archive with an immutable SHA256', () => {
+  it('pins every published archive with an immutable SHA256', () => {
     const entries = Object.entries(NATIVE_ENGINE_ARCHIVE_SHA256);
 
     expect(entries).toHaveLength(13);
@@ -21,7 +21,7 @@ describe('native release trust manifest', () => {
     expect(isEnginePinned()).toBe(true);
   });
 
-  it('does not claim standalone notarization for the pre-notary 0.1.19 release', () => {
-    expect(NATIVE_ENGINE_MACOS_NOTARIZED).toBe(false);
+  it('declares standalone notarization for the accepted-notary release', () => {
+    expect(NATIVE_ENGINE_MACOS_NOTARIZED).toBe(true);
   });
 });

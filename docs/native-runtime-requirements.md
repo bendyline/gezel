@@ -83,9 +83,11 @@ driver installs it into `System32`, so it is not provisioned.
 
 ## macOS
 
-The bundled native engines require **macOS 13 Ventura or newer**. The floor is
-declared as `MACOSX_DEPLOYMENT_TARGET` in `build-native.yml`, passed explicitly
-through the engine build wrappers, and asserted from every shipped Mach-O
+The bundled native engines require **macOS 13.3 Ventura or newer**. Electron
+requires macOS 13+, and ggml's Accelerate backend uses the ILP64 BLAS/LAPACK
+interface introduced in macOS 13.3. The floor is declared as
+`MACOSX_DEPLOYMENT_TARGET` in `build-native.yml`, passed explicitly through the
+engine build wrappers, and asserted from every shipped Mach-O
 `LC_BUILD_VERSION` before signing. This prevents a newer `macos-latest` runner
 or Xcode SDK from silently narrowing compatibility.
 

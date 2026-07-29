@@ -74,8 +74,10 @@ env:
   # The app's declared macOS floor. Never let `macos-latest` or a newer Xcode
   # silently raise LC_BUILD_VERSION again: native-v0.1.23 inherited macOS 26
   # from the runner and therefore could not load on otherwise-supported Macs.
-  # Electron 44 also requires macOS 13+, so 13 is the durable product floor.
-  MACOSX_DEPLOYMENT_TARGET: '13.0'
+  # Electron 44 requires macOS 13+, while ggml's Accelerate backend uses the
+  # ILP64 BLAS/LAPACK interface introduced in macOS 13.3. Keep the declared
+  # floor at the first OS release where every shipped native engine is safe.
+  MACOSX_DEPLOYMENT_TARGET: '13.3'
   # Current LunarG SDK on both platforms. The tarball/installer ships the
   # SPIRV-Headers CMake config required by ggml-vulkan, and LunarG keeps the
   # 1.4 SDK backward-compatible with older Vulkan targets.

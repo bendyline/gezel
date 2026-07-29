@@ -102,7 +102,7 @@ cmake_flags=(
   -DSD_SERVER_BUILD_FRONTEND=OFF
 )
 if [[ "$os" == "Darwin" ]]; then
-  macos_deployment_target="${MACOSX_DEPLOYMENT_TARGET:-13.0}"
+  macos_deployment_target="${MACOSX_DEPLOYMENT_TARGET:-13.3}"
   cmake_flags+=("-DCMAKE_OSX_DEPLOYMENT_TARGET=$macos_deployment_target")
 fi
 # NOTE: upstream removed the `SD_BUILD_SERVER` option (commit

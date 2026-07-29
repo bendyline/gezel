@@ -110,7 +110,7 @@ cmake_flags=(
   -DLLAMA_CURL=OFF
 )
 if [[ "$os" == "Darwin" ]]; then
-  macos_deployment_target="${MACOSX_DEPLOYMENT_TARGET:-13.0}"
+  macos_deployment_target="${MACOSX_DEPLOYMENT_TARGET:-13.3}"
   cmake_flags+=("-DCMAKE_OSX_DEPLOYMENT_TARGET=$macos_deployment_target")
 fi
 case "$backend" in

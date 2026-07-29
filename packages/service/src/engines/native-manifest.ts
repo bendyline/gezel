@@ -41,49 +41,49 @@
  */
 
 /** Native release version this build pins. Placeholder until first public release. */
-export const NATIVE_ENGINE_RELEASE = '0.1.19';
+export const NATIVE_ENGINE_RELEASE = '0.1.25';
 
 /** sha256 of the pinned release's `SHA256SUMS` asset. All-zeros = unpinned. */
-export const SHA256SUMS_DIGEST = '35559474a6c852c01091525177d6f9e95fec1356be7b1f3c966e9494113420e0';
+export const SHA256SUMS_DIGEST = 'a230ed74a38c074df59c1acc72e04d1d11c32d27547d007221f0b0d9d64d1cbf';
 
 // BEGIN PINNED NATIVE ARCHIVE HASHES
-/** Exact SHA256 values for every archive published by native-v0.1.19. */
+/** Exact SHA256 values for every archive published by native-v0.1.25. */
 export const NATIVE_ENGINE_ARCHIVE_SHA256: Readonly<Record<string, string>> = Object.freeze({
-  'gezel-native-0.1.19-darwin-arm64-metal.tar.gz':
-    '5bbb331ea66c5c9be88ec91e39d46abb2f169f0794061e43f2a6fa4225667ca1',
-  'gezel-native-0.1.19-darwin-arm64.tar.gz':
-    '07e015d8bde62e56aa4fb5194108c412c4d61bd0f5bd7f23d2d0aa2f833bb93c',
-  'gezel-native-0.1.19-linux-arm64-cpu.tar.gz':
-    '0a1b59c11a1b7458574ebfe22d5c0d696ef1316afe4267d0fed75dba55bc0f6c',
-  'gezel-native-0.1.19-linux-arm64-cuda.tar.gz':
-    'cc85b7a856a28c5ac19655005e5bb471c801d44402beec4991ab2b76e2ec3c3e',
-  'gezel-native-0.1.19-linux-arm64.tar.gz':
-    'cbbe42446d92fb88ceeab291ca5583b4c716f2ac7ddd4060d0673427c38ffc9b',
-  'gezel-native-0.1.19-linux-x64-cpu.tar.gz':
-    '5cb604035d7ccbb67cfaf01bf53e1b2e6d1da543b9b6c735c5a2bb2a92bc4232',
-  'gezel-native-0.1.19-linux-x64-cuda.tar.gz':
-    '22c763b679eda1fd4599aa12e78f72118943ff543395d5047a108d71f020ec07',
-  'gezel-native-0.1.19-linux-x64-vulkan.tar.gz':
-    '9c6507673eccd6a4e51e2f51a78b3ba583f5e2f3bc7cc39e4e0c6dc9c3843318',
-  'gezel-native-0.1.19-linux-x64.tar.gz':
-    'd45f0638ff5f0a5e36d708dbe3b54cdffbd9fdec5515fb6a175de32f4e2ca326',
-  'gezel-native-0.1.19-win32-x64-cpu.zip':
-    '53887cfc090e81d649fbeecf42887835431902e5db3e9ca4b9489bc048b3c8e9',
-  'gezel-native-0.1.19-win32-x64-cuda.zip':
-    'a4df3aa97c96408c7df2842ff42e073963a9ddcafdcc89712d6f8e4724530435',
-  'gezel-native-0.1.19-win32-x64-vulkan.zip':
-    'e3470567b83a67d07f7763ad48b93c5edfbdf6f131978d953acde8e33ef6f336',
-  'gezel-native-0.1.19-win32-x64.zip':
-    '7f8af4a8ea3aaa384a480a4b8170702420bb2992dbde140406322e861edb5bcd',
+  'gezel-native-0.1.25-darwin-arm64-metal.tar.gz':
+    'a0ca402a686eef983b5c4f1806cf8b2085effda82a68d237e326f527bb3db96b',
+  'gezel-native-0.1.25-darwin-arm64.tar.gz':
+    'b086282fd071d2bd714de3a31f9814371cefd6882ac18f7d8de79868f5f1d2c0',
+  'gezel-native-0.1.25-linux-arm64-cpu.tar.gz':
+    '881633ff47ca08f892c2148ad7afc9cc9eacced554068c313133c13d47d8c546',
+  'gezel-native-0.1.25-linux-arm64-cuda.tar.gz':
+    '35d82160e230bd703ae8daf90165f52de1285060620e4edebf9c9cd37c23c5ca',
+  'gezel-native-0.1.25-linux-arm64.tar.gz':
+    '9b74a08bb2e685dcd73570ad76752f4383d307e160661f0e8a1775b1e3564d28',
+  'gezel-native-0.1.25-linux-x64-cpu.tar.gz':
+    '87488990828913b332349b929ba98598a8c9e151aeacde062db3a1a4a8649253',
+  'gezel-native-0.1.25-linux-x64-cuda.tar.gz':
+    '167ebaaf3755af72f647086c8d791d8c6c827fad58eca4ef9546902567e49ceb',
+  'gezel-native-0.1.25-linux-x64-vulkan.tar.gz':
+    '47e6efe613ec84807e64b24efc40a7360eff64ac543fc0aa9179195f394733a0',
+  'gezel-native-0.1.25-linux-x64.tar.gz':
+    'aa57873020089dafcb4f237d33ee2a20bc78634321372bfa43485a0f210a5a93',
+  'gezel-native-0.1.25-win32-x64-cpu.zip':
+    '1836caae51a87b37ae636e94b96368c0dc595c387763c9233a20133a5b83fd84',
+  'gezel-native-0.1.25-win32-x64-cuda.zip':
+    '9da905dd3f97e2334e6a01ce65279bef564a22437f0a5d03a3843fc55ddef577',
+  'gezel-native-0.1.25-win32-x64-vulkan.zip':
+    'fd8e2bdd050490bcc77fc9d6b4568f36e1558646de12a5b01256ca84ad2d73e9',
+  'gezel-native-0.1.25-win32-x64.zip':
+    '97d4ac65369637eafc58858f3fa46e44ce588b400bdda2d35d80531552e04fe5',
 });
 // END PINNED NATIVE ARCHIVE HASHES
 
 /**
- * native-v0.1.19 is Developer ID signed, but its standalone archives were
- * not submitted to Apple's notary service. The Electron release notarizes
- * its enclosing app later; that is not the same distribution contract.
+ * True only when the pinned release's standalone macOS archives were
+ * Developer ID signed and accepted by Apple's notary service before
+ * packaging. Electron notarization is a separate distribution contract.
  */
-export const NATIVE_ENGINE_MACOS_NOTARIZED = false;
+export const NATIVE_ENGINE_MACOS_NOTARIZED = true;
 
 /** True when a sha256 hex string is the all-zeros placeholder. */
 export function isPlaceholderDigest(digest: string): boolean {

@@ -141,7 +141,7 @@ make_cc="${CC:-cc} $source_map_flags"
 case "$platform" in
   darwin-arm64)
     backend="metal"
-    macos_deployment_target="${MACOSX_DEPLOYMENT_TARGET:-13.0}"
+    macos_deployment_target="${MACOSX_DEPLOYMENT_TARGET:-13.3}"
     make_cc+=" -mmacosx-version-min=$macos_deployment_target"
     ;;
   linux-x64|linux-arm64)

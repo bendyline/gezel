@@ -148,7 +148,7 @@ test('Windows native signing passes resolved file paths to signtool', () => {
 });
 
 test('macOS deployment compatibility is declared and checked before signing', () => {
-  assert.match(workflow, /^\s{2}MACOSX_DEPLOYMENT_TARGET: '13\.0'$/m);
+  assert.match(workflow, /^\s{2}MACOSX_DEPLOYMENT_TARGET: '13\.3'$/m);
   const start = workflow.indexOf('      - name: Assert macOS deployment target');
   const end = workflow.indexOf('      # ── Code-sign the engine binaries', start);
   assert.notEqual(start, -1, 'could not find the macOS deployment-target gate');
@@ -190,6 +190,20 @@ test('Unix native wrappers configure stable source path remapping', () => {
   ]) {
     const contents = unixWrapperPaths.find(([candidate]) => candidate === path)?.[1] ?? '';
     assert.match(contents, /CMAKE_OSX_DEPLOYMENT_TARGET/);
+  }
+
+  for (const path of [
+    '../native/engines/llama-cpp/build.sh',
+    '../native/engines/sd-cpp/build.sh',
+    '../native/engines/whisper-cpp/build.sh',
+    '../native/engines/ds4/build.sh',
+  ]) {
+    const contents = unixWrapperPaths.find(([candidate]) => candidate === path)?.[1] ?? '';
+    assert.match(
+      contents,
+      /MACOSX_DEPLOYMENT_TARGET:-13\.3/,
+      `${path} does not default to the declared macOS 13.3 floor`,
+    );
   }
 
   const llama = unixWrapperPaths.find(([path]) => path.includes('llama-cpp/build.sh'))?.[1] ?? '';
