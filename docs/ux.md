@@ -298,6 +298,15 @@ link that lands on the same article.
 `.gezel-icon--pulse`) is the canonical "this thing is working in the
 background" signal.
 
+**Terminal output.** Terminal text is spatial, not prose: preserve whitespace
+and columns exactly, and contain overflow in a keyboard-focusable viewport with
+horizontal and vertical scrolling. Never reflow output to fit a chat bubble.
+Live output follows the newest line while the reader is at the bottom; scrolling
+up pauses that follow behavior until they return to the tail. The timeline's
+lightweight ANSI rendering is the durable transcript view. Full-screen TUIs that
+depend on cursor movement or the alternate screen belong in a dedicated live
+terminal surface backed by a terminal emulator, not in every historical bubble.
+
 **Errors.** Inline, close to the thing that failed, `.error` class. Don't
 use toasts for errors. If the operation is dismissable, show the error
 until the next user action; if it blocks something, show it until the user

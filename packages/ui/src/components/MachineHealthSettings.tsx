@@ -27,6 +27,7 @@ function supportsMachineHealth(platform: string | undefined): boolean {
  * outcome. macOS stays hidden until it has a supported telemetry adapter.
  */
 export function MachineHealthSettings({ config, onConfigChanged, platform }: Props) {
+  const configuredMode = config?.deviceSafety?.mode ?? 'observe';
   const configuredTemperature =
     config?.deviceSafety?.maxStartTemperatureC ?? DEFAULT_MANAGE_TEMPERATURE_C;
   const [temperatureDraft, setTemperatureDraft] = useState(String(configuredTemperature));
@@ -61,10 +62,10 @@ export function MachineHealthSettings({ config, onConfigChanged, platform }: Pro
 
   const saveMode = useCallback(
     (mode: UserDeviceSafetyMode) => {
-      if (config?.deviceSafety?.mode === mode) return;
+      if (configuredMode === mode) return;
       void savePolicy({ mode });
     },
-    [config?.deviceSafety?.mode, savePolicy],
+    [configuredMode, savePolicy],
   );
 
   const saveTemperature = useCallback(() => {
@@ -91,8 +92,6 @@ export function MachineHealthSettings({ config, onConfigChanged, platform }: Pro
 
   if (!supportsMachineHealth(platform)) return null;
 
-  const configuredMode = config?.deviceSafety?.mode ?? 'observe';
-
   return (
     <section className="machine-health-settings" aria-labelledby="machine-health-heading">
       <h4 id="machine-health-heading">Machine health</h4>
@@ -101,15 +100,11 @@ export function MachineHealthSettings({ config, onConfigChanged, platform }: Pro
         before starting new on-device work.
       </p>
 
-      <div
-        className="gz-tray machine-health-mode"
-        role="radiogroup"
-        aria-label="Machine health mode"
-      >
+      <fieldset className="gz-tray machine-health-mode">
+        <legend className="sr-only">Machine health mode</legend>
         <button
           type="button"
-          role="radio"
-          aria-checked={configuredMode === 'observe'}
+          aria-pressed={configuredMode === 'observe'}
           className={`gz-key gz-key--stacked${configuredMode === 'observe' ? ' gz-key-active' : ''}`}
           disabled={saving}
           onClick={() => saveMode('observe')}
@@ -119,8 +114,7 @@ export function MachineHealthSettings({ config, onConfigChanged, platform }: Pro
         </button>
         <button
           type="button"
-          role="radio"
-          aria-checked={configuredMode === 'guard'}
+          aria-pressed={configuredMode === 'guard'}
           className={`gz-key gz-key--stacked${configuredMode === 'guard' ? ' gz-key-active' : ''}`}
           disabled={saving}
           onClick={() => saveMode('guard')}
@@ -128,12 +122,12 @@ export function MachineHealthSettings({ config, onConfigChanged, platform }: Pro
           <span>Manage</span>
           <small>Pause new work</small>
         </button>
-      </div>
+      </fieldset>
 
       {configuredMode === 'off' && (
         <p className="muted small machine-health-off-note">
-          Machine health is disabled by an advanced configuration override. Choose Observe or
-          Manage to turn it back on.
+          Machine health is disabled by an advanced configuration override. Choose Observe or Manage
+          to turn it back on.
         </p>
       )}
 
@@ -159,16 +153,15 @@ export function MachineHealthSettings({ config, onConfigChanged, platform }: Pro
           <span aria-hidden="true">°C</span>
         </span>
       </div>
-      <p id="machine-health-temperature-help" className="muted small machine-health-temperature-help">
+      <p
+        id="machine-health-temperature-help"
+        className="muted small machine-health-temperature-help"
+      >
         In Manage mode, new accelerator work waits above this temperature and resumes after a 5°C
         cooldown. The default is 80°C. Both modes retain the 95°C emergency cutoff.
       </p>
 
-      {saving && (
-        <p className="muted small machine-health-save-state" role="status">
-          Saving…
-        </p>
-      )}
+      {saving && <output className="muted small machine-health-save-state">Saving…</output>}
       {error && (
         <p className="error small machine-health-save-state" role="alert">
           {error}

@@ -6167,6 +6167,7 @@ button.danger {
 }
 
 .machine-health-mode {
+  min-inline-size: 0;
   margin: 0.25rem 0 0.8rem;
 }
 
@@ -6208,6 +6209,7 @@ button.danger {
 
 .settings-panel .machine-health-off-note,
 .settings-panel .machine-health-save-state {
+  display: block;
   margin: 0.5rem 0 0;
 }
 

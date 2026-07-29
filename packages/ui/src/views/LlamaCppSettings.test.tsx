@@ -23,6 +23,7 @@ const BASE_HEALTH = {
 
 describe('LlamaCppSettings', () => {
   beforeEach(() => {
+    window.__GEZEL__ = { ...window.__GEZEL__!, platform: 'linux' };
     vi.mocked(api.listLlamaCppModels).mockResolvedValue({
       models: [
         { id: 'llama-3-8b', name: 'Llama 3 8B', sizeMb: 4500, status: 'installed' } as never,
@@ -56,11 +57,11 @@ describe('LlamaCppSettings', () => {
       <LlamaCppSettings config={BASE_CONFIG} onConfigChanged={vi.fn()} health={BASE_HEALTH} />,
     );
 
-    const policy = await screen.findByRole('radiogroup', { name: 'Machine health mode' });
+    const policy = await screen.findByRole('group', { name: 'Machine health mode' });
     expect(screen.getByRole('heading', { name: 'Machine health' })).toBeInTheDocument();
     expect(screen.getByLabelText('Manage temperature')).toHaveValue(80);
 
-    await user.click(within(policy).getByRole('radio', { name: /Manage/ }));
+    await user.click(within(policy).getByRole('button', { name: /Manage/ }));
 
     await waitFor(() => {
       expect(api.updateConfig).toHaveBeenCalledWith({
@@ -99,6 +100,7 @@ describe('LlamaCppSettings', () => {
   });
 
   it('hides machine-health controls on macOS', async () => {
+    window.__GEZEL__ = { ...window.__GEZEL__!, platform: 'darwin' };
     render(
       <LlamaCppSettings
         config={BASE_CONFIG}
