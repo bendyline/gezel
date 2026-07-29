@@ -68,6 +68,7 @@ if [[ "$backend" == "auto" ]]; then
   esac
 fi
 
+source_map_flags="-ffile-prefix-map=$src=llama.cpp -fmacro-prefix-map=$src=llama.cpp -fdebug-prefix-map=$src=llama.cpp"
 cmake_flags=(
   -DCMAKE_BUILD_TYPE=Release
   # Rewrite the absolute checkout path baked into __FILE__ by every
@@ -76,11 +77,11 @@ cmake_flags=(
   # `/home/runner/work/gezel/gezel/native/engines/llama-cpp/.upstream/src/...`.
   # Cosmetic, but it is the CI layout of a private repo embedded in a
   # user-facing artifact, and it reads better in a bug report too.
-  # Unix-only: MSVC has no equivalent, so build.ps1 does not set it.
-  # Does not cover .cu translation units — those compile under
-  # CMAKE_CUDA_FLAGS, deliberately left alone to keep nvcc out of scope.
-  "-DCMAKE_C_FLAGS=-ffile-prefix-map=$src=llama.cpp"
-  "-DCMAKE_CXX_FLAGS=-ffile-prefix-map=$src=llama.cpp"
+  # build.ps1 applies MSVC /pathmap; CUDA gets the equivalent host-compiler
+  # flags below. Include macro + debug maps so both __FILE__ and compiler
+  # metadata stay stable.
+  "-DCMAKE_C_FLAGS=$source_map_flags"
+  "-DCMAKE_CXX_FLAGS=$source_map_flags"
   # ggml defaults GGML_OPENMP=ON, which puts a hard load-time dependency
   # on libgomp.so.1 (Linux) / VCOMP140.DLL (Windows) into libggml-base
   # and libggml-cpu. We bundle neither, so on a host without the GCC
@@ -109,6 +110,10 @@ cmake_flags=(
   # dep and shrink the binary.
   -DLLAMA_CURL=OFF
 )
+if [[ "$os" == "Darwin" ]]; then
+  macos_deployment_target="${MACOSX_DEPLOYMENT_TARGET:-13.0}"
+  cmake_flags+=("-DCMAKE_OSX_DEPLOYMENT_TARGET=$macos_deployment_target")
+fi
 case "$backend" in
   metal)
     cmake_flags+=(-DGGML_METAL=ON -DGGML_METAL_EMBED_LIBRARY=ON)
@@ -118,6 +123,9 @@ case "$backend" in
     ;;
   cuda)
     cmake_flags+=(-DGGML_CUDA=ON)
+    cmake_flags+=(
+      "-DCMAKE_CUDA_FLAGS=-Xcompiler=-ffile-prefix-map=$src=llama.cpp -Xcompiler=-fmacro-prefix-map=$src=llama.cpp -Xcompiler=-fdebug-prefix-map=$src=llama.cpp"
+    )
     # CUDA arch selection. The DEFAULT (LLAMA_CUDA_ARCH unset) omits
     # CMAKE_CUDA_ARCHITECTURES and lets llama.cpp's own CMake pick its
     # portable default list — which at CUDA 12.9+ already includes

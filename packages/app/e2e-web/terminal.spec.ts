@@ -120,6 +120,57 @@ test('mounts, submits on Enter, newlines on Shift+Enter', async ({ page, world }
   await expect(editor.locator('.view-line')).toHaveCount(2);
 });
 
+test('places the caret after a command staged from the Commands rail', async ({
+  page,
+  world,
+  daemon,
+}) => {
+  await gotoProject(page, world!.projectId);
+
+  const craftbook = await page.evaluate(
+    async ([projectId, token]) => {
+      const response = await fetch(`/api/projects/${projectId}/craftbooks`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!response.ok) return null;
+      const body = await response.json();
+      const missing = body.missingToolsets ?? {};
+      const item = body.items?.find((candidate: { manifest?: Record<string, unknown> }) => {
+        const manifest = candidate.manifest;
+        if (!manifest || typeof manifest.id !== 'string' || typeof manifest.name !== 'string') {
+          return false;
+        }
+        const properties = (manifest.paramSchema as { properties?: Record<string, unknown> })
+          ?.properties;
+        return !missing[manifest.id] && (!properties || Object.keys(properties).length === 0);
+      });
+      if (!item) return null;
+      return {
+        id: item.manifest.id as string,
+        name: item.manifest.name as string,
+        command:
+          typeof item.manifest.command === 'string' && item.manifest.command.trim()
+            ? item.manifest.command.trim()
+            : (item.manifest.id as string),
+      };
+    },
+    [world!.projectId, daemon.token] as const,
+  );
+  test.skip(!craftbook, 'no parameterless craftbook available to stage');
+
+  const commandsTab = page.getByRole('tab', { name: 'Commands' });
+  if (await commandsTab.isVisible()) await commandsTab.click();
+  await page.getByRole('textbox', { name: 'Filter commands' }).fill(craftbook!.id);
+  await page.locator('.commands-panel-item').filter({ hasText: craftbook!.name }).first().click();
+
+  const editor = page.getByTestId('terminal-editor');
+  await expect(editor.locator('.monaco-editor')).toBeVisible({ timeout: 15_000 });
+  await expect(editor.locator('.view-lines')).toHaveText(craftbook!.command);
+
+  await page.keyboard.type(' --review');
+  await expect(editor.locator('.view-lines')).toHaveText(`${craftbook!.command} --review`);
+});
+
 test('autocompletes craftbooks', async ({ page, world }) => {
   const editor = await openTerminal(page, world!.projectId);
   await page.waitForTimeout(1500); // craftbook fetch

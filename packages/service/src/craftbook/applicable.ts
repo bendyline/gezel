@@ -106,6 +106,7 @@ export function craftbookTemplateManifestFromRuntime(
     ...(book.paramSchema ? { paramSchema: book.paramSchema } : {}),
     ...(book.command ? { command: book.command } : {}),
     ...(book.requirements ? { requirements: book.requirements } : {}),
+    ...(book.runModes ? { runModes: book.runModes } : {}),
     ...(book.toolsets ? { toolsets: book.toolsets } : {}),
   });
   return parsed.success ? parsed.data : null;

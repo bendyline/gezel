@@ -565,6 +565,27 @@ describe('TaskManager spawn craftbooks & children', () => {
     expect(child.assignee).toEqual({ kind: 'gezel', gezelId: 'ada' });
   });
 
+  it('copies scheduled craftbook parameters onto each spawned child', async () => {
+    const parent = await tasks.create('website', {
+      title: 'Weekly review',
+      assignee: { kind: 'user' },
+      steps: [{ name: 'Wait' }],
+      spawnsSteps: [{ name: 'Review' }],
+      spawnsCraftbookParams: { depth: 'thorough', includeMetrics: 'true' },
+      cron: { expression: '0 9 * * 1' },
+    });
+
+    const child = await tasks.spawnChild(parent.ref);
+    expect(parent.spawnsCraftbookParams).toEqual({
+      depth: 'thorough',
+      includeMetrics: 'true',
+    });
+    expect(child.craftbookParams).toEqual({
+      depth: 'thorough',
+      includeMetrics: 'true',
+    });
+  });
+
   it('spawnChild binds the child entry step to a gezel so it can dispatch', async () => {
     // onStepActivated dispatches off the STEP's binding, not the task
     // assignee. A binding-less spawn step must still land a concrete

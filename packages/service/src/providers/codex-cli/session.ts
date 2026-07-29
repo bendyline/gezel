@@ -245,6 +245,7 @@ export class CodexCliSession extends StreamingSessionBase implements LLMSession 
           command: extra.command,
           args: extra.args,
           env: extra.env,
+          ...(extra.cwd ? { cwd: extra.cwd } : {}),
         };
       }
     }

@@ -43,6 +43,17 @@ type Monaco = TerminalSetup['monaco'];
 type StandaloneEditor = import('monaco-editor').editor.IStandaloneCodeEditor;
 type TextModel = import('monaco-editor').editor.ITextModel;
 
+/** Keep staged / recalled commands ready for the user to extend or run. */
+function moveCaretToEnd(editor: StandaloneEditor, model: TextModel): void {
+  const lastLine = model.getLineCount();
+  const position = {
+    lineNumber: lastLine,
+    column: model.getLineMaxColumn(lastLine),
+  };
+  editor.setPosition(position);
+  editor.revealPosition(position);
+}
+
 const TerminalCodeEditor = forwardRef<TerminalCodeEditorHandle, TerminalCodeEditorProps>(
   function TerminalCodeEditor(
     {
@@ -236,6 +247,10 @@ const TerminalCodeEditor = forwardRef<TerminalCodeEditorHandle, TerminalCodeEdit
         }
 
         editor.focus();
+        // Monaco's initial focus resets its insertion point to column 1.
+        // Move it afterwards so a command staged from the Commands rail is
+        // ready to extend or run, matching the imperative setValue path.
+        moveCaretToEnd(editor, model);
         setReady(true);
         onReadyRef.current?.();
       })();
@@ -266,8 +281,7 @@ const TerminalCodeEditor = forwardRef<TerminalCodeEditorHandle, TerminalCodeEdit
           model.setValue(text);
           // Keep the escape gate in sync so a programmatic set never trips it.
           prevLenRef.current = text.length;
-          const last = model.getLineCount();
-          editor?.setPosition({ lineNumber: last, column: model.getLineMaxColumn(last) });
+          if (editor) moveCaretToEnd(editor, model);
         },
         focus: () => editorRef.current?.focus(),
       }),

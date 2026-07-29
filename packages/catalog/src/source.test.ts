@@ -365,6 +365,7 @@ describe('BundledSource — craftbook template layouts', () => {
         name: 'kk-book book',
         description: 'THE INLINE PROSE',
         basedOn: { name: 'Fixture upstream', url: 'https://example.com/fixture' },
+        runModes: { scheduled: 'recommended', nightShift: 'supported' },
         entryStepId: 'go',
         steps: [{ id: 'go', name: 'Go' }],
         scripts: { hello: SCRIPT_SOURCE },
@@ -382,6 +383,10 @@ describe('BundledSource — craftbook template layouts', () => {
     expect(detail.manifest.basedOn).toEqual({
       name: 'Fixture upstream',
       url: 'https://example.com/fixture',
+    });
+    expect(detail.manifest.runModes).toEqual({
+      scheduled: 'recommended',
+      nightShift: 'supported',
     });
     expect(detail.manifest.steps.map((s) => s.id)).toEqual(['go']);
     expect(detail.manifest.scripts).toEqual({ hello: SCRIPT_SOURCE });
@@ -409,6 +414,7 @@ describe('BundledSource — craftbook template layouts', () => {
       version: '1.0.0',
       releasedAt: '2026-04-22T00:00:00Z',
       about: 'about.md',
+      runModes: { scheduled: 'supported' },
       entryStepId: 'go',
       steps: [{ id: 'go', name: 'Go' }],
       bundledScripts: ['hello.ts'],
@@ -421,6 +427,7 @@ describe('BundledSource — craftbook template layouts', () => {
     expect(detail).not.toBeNull();
     if (!detail || detail.manifest.kind !== 'craftbook-template') throw new Error('wrong kind');
     expect(detail.manifest.entryStepId).toBe('go');
+    expect(detail.manifest.runModes).toEqual({ scheduled: 'supported' });
     expect(detail.manifest.bundledScripts).toEqual(['hello.ts']);
     expect(detail.manifest.scripts).toBeUndefined();
     expect(detail.about).toBe('LEGACY PROSE');

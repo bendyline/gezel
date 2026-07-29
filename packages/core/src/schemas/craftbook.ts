@@ -307,6 +307,18 @@ export const CraftbookRequirementSchema = z.discriminatedUnion('kind', [
 ]);
 export type CraftbookRequirement = z.infer<typeof CraftbookRequirementSchema>;
 
+/**
+ * Author guidance for the task launchers. Every craftbook remains usable as
+ * a one-time task; these optional flags identify recipes that are also safe
+ * to run unattended on a cadence or during Night Shift. `recommended` sorts
+ * ahead of merely `supported` recipes in the corresponding launcher.
+ */
+export const CraftbookRunModesSchema = z.object({
+  scheduled: z.enum(['supported', 'recommended']).optional(),
+  nightShift: z.enum(['supported', 'recommended']).optional(),
+});
+export type CraftbookRunModes = z.infer<typeof CraftbookRunModesSchema>;
+
 /** The project facts a craftbook's requirements are evaluated against. */
 export interface CraftbookRequirementContext {
   /** Project has a GitHub repo connected (`project.github.url` set). */
@@ -538,6 +550,8 @@ export const CraftbookSchema = z
      * and not recognized as a terminal command. Absent = always offered.
      */
     requirements: z.array(CraftbookRequirementSchema).optional(),
+    /** Unattended launch modes this recipe is suitable for. */
+    runModes: CraftbookRunModesSchema.optional(),
     /**
      * Toolsets (MCP servers / CLIs / APIs) this craftbook depends on. Drives
      * the launcher's install/config affordance and — for entries with
@@ -684,6 +698,7 @@ export const CreateCraftbookRequestSchema = z.object({
     .regex(/^[a-z][a-z0-9-]*$/)
     .optional(),
   requirements: z.array(CraftbookRequirementSchema).optional(),
+  runModes: CraftbookRunModesSchema.optional(),
   toolsets: z.array(CraftbookToolsetNeedSchema).optional(),
   scripts: CraftbookScriptsSchema.optional(),
 });
@@ -704,6 +719,7 @@ export const UpdateCraftbookRequestSchema = z.object({
     .nullable()
     .optional(),
   requirements: z.array(CraftbookRequirementSchema).nullable().optional(),
+  runModes: CraftbookRunModesSchema.nullable().optional(),
   toolsets: z.array(CraftbookToolsetNeedSchema).nullable().optional(),
   /** Full-replace semantics: the map is the truth. `null` clears all scripts. */
   scripts: CraftbookScriptsSchema.nullable().optional(),

@@ -76,6 +76,8 @@ export interface StdioMcpServerSpec {
   command: string;
   args: string[];
   env: Record<string, string>;
+  /** Working directory for project-local/custom MCP servers. */
+  cwd?: string;
 }
 
 export interface HttpMcpServerSpec {
@@ -1276,6 +1278,7 @@ export function buildTransport(spec: McpServerSpec): Transport {
     // Toolsets pass the secrets they actually need through `spec.env`
     // (spread last, so the gezel-mcp server still gets its GEZEL_* vars).
     env: { ...filterMcpChildEnv(process.env), ...spec.env } as Record<string, string>,
+    ...(spec.cwd ? { cwd: spec.cwd } : {}),
   });
 }
 

@@ -323,6 +323,11 @@ export const TaskSchema = z.object({
    * note + the task description.
    */
   craftbookParams: z.record(z.string(), z.string()).optional(),
+  /**
+   * Invocation parameters for a schedule/fanout host's child template.
+   * Copied to each spawned child's `craftbookParams`.
+   */
+  spawnsCraftbookParams: z.record(z.string(), z.string()).optional(),
   activeStepId: z.string().optional(),
   parentTaskRef: z.string().optional(),
   /**
@@ -410,6 +415,8 @@ export const CreateTaskRequestSchema = z
     entryStepId: z.string().optional(),
     /** Invocation-time param values for the main craftbook (launcher). */
     craftbookParams: z.record(z.string(), z.string()).optional(),
+    /** Invocation-time param values copied to each spawned child. */
+    spawnsCraftbookParams: z.record(z.string(), z.string()).optional(),
     /** Spawn-side (for schedule hosts and fanouts): catalog reference. */
     spawnsCraftbookId: z.string().optional(),
     spawnsCraftbookSourceId: z.string().optional(),
@@ -468,6 +475,16 @@ export const CreateTaskRequestSchema = z
     {
       message: 'spawn craftbook only valid when cron or fanout is set',
       path: ['spawnsCraftbookId'],
+    },
+  )
+  .refine(
+    (v) =>
+      !v.spawnsCraftbookParams ||
+      !!v.spawnsCraftbookId ||
+      !!(v.spawnsSteps && v.spawnsSteps.length > 0),
+    {
+      message: 'spawn craftbook params require spawnsCraftbookId or spawnsSteps',
+      path: ['spawnsCraftbookParams'],
     },
   )
   .refine((v) => v.status !== 'draft' || (!v.cron && !v.fanout), {

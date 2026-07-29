@@ -14,7 +14,10 @@ build_dir="$helper_dir/.build/$platform"
 output_dir="$repo_root/native/build/$platform"
 
 cmake -S "$helper_dir" -B "$build_dir" -G Ninja \
-  -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+  -DCMAKE_BUILD_TYPE=Release \
+  "-DCMAKE_C_FLAGS=-ffile-prefix-map=$repo_root=gezel -fmacro-prefix-map=$repo_root=gezel -fdebug-prefix-map=$repo_root=gezel" \
+  "-DCMAKE_CXX_FLAGS=-ffile-prefix-map=$repo_root=gezel -fmacro-prefix-map=$repo_root=gezel -fdebug-prefix-map=$repo_root=gezel" \
+  -DBUILD_TESTING=ON
 cmake --build "$build_dir" --parallel
 ctest --test-dir "$build_dir" --output-on-failure
 

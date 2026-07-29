@@ -665,6 +665,7 @@ export class ClaudeWorker {
         command: extra.command,
         args: extra.args,
         env: extra.env,
+        ...(extra.cwd ? { cwd: extra.cwd } : {}),
       };
     }
     const path = join(

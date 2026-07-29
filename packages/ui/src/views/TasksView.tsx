@@ -1,15 +1,51 @@
 import type { GezelSummary, Project, Task, TaskStatus } from '@bendyline/gezel';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
-import { Select } from '../primitives/index.js';
+import { DropdownMenu, Select } from '../primitives/index.js';
 import { TaskTabContent } from './TaskTabContent.js';
-import { NewTaskDialog } from './tasks/NewTaskDialog.js';
+import { NewTaskDialog, type TaskCreationMode } from './tasks/NewTaskDialog.js';
 
 const SELECTED_TASK_STORAGE_KEY = 'gezel:tasks:selectedRef';
 
 interface TaskGroup {
   parent: Task;
   children: Task[];
+}
+
+type TaskKindFilter = TaskCreationMode;
+
+const TASK_KIND_OPTIONS: Array<{ value: TaskKindFilter; label: string }> = [
+  { value: 'one-time', label: 'One-time tasks' },
+  { value: 'scheduled', label: 'Scheduled tasks' },
+  { value: 'night-shift', label: 'Night Shift tasks' },
+];
+
+function taskKind(task: Task): TaskKindFilter {
+  if (task.nightShift?.enabled) return 'night-shift';
+  if (task.cron) return 'scheduled';
+  return 'one-time';
+}
+
+/**
+ * Filter by the top-level task's kind while keeping its child runs nested
+ * beneath it. A scheduled run therefore stays with its schedule rather than
+ * leaking into the one-time list as an orphan.
+ */
+function tasksForKind(tasks: Task[], kind: TaskKindFilter): Task[] {
+  const included = new Set(
+    tasks.filter((task) => !task.parentTaskRef && taskKind(task) === kind).map((task) => task.ref),
+  );
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const task of tasks) {
+      if (task.parentTaskRef && included.has(task.parentTaskRef) && !included.has(task.ref)) {
+        included.add(task.ref);
+        changed = true;
+      }
+    }
+  }
+  return tasks.filter((task) => included.has(task.ref));
 }
 
 /**
@@ -42,6 +78,7 @@ function groupTasks(tasks: Task[]): TaskGroup[] {
 }
 
 function taskBadge(task: Task): string | null {
+  if (task.nightShift?.enabled) return 'night-shift';
   if (task.spawnsCraftbook && task.craftbook.steps.length === 0) return 'template';
   if (task.spawnsCraftbook && task.fanout?.materializedAt) return 'coordinator';
   if (task.cron) return 'cron';
@@ -70,7 +107,8 @@ export function TasksView({ projectId }: TasksViewProps = {}) {
   const [projectFilter, setProjectFilter] = useState(projectId ?? '');
   const [statusFilter, setStatusFilter] = useState<'' | TaskStatus>('');
   const [assigneeFilter, setAssigneeFilter] = useState('');
-  const [creating, setCreating] = useState(false);
+  const [kindFilter, setKindFilter] = useState<TaskKindFilter>('one-time');
+  const [creating, setCreating] = useState<TaskCreationMode | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [hasLoadedTasks, setHasLoadedTasks] = useState(false);
   const [expandedParents, setExpandedParents] = useState<Set<string>>(() => new Set());
@@ -90,7 +128,7 @@ export function TasksView({ projectId }: TasksViewProps = {}) {
   const shortRef = projectId !== undefined;
   const openTask = useCallback(
     (ref: string) => {
-      setCreating(false);
+      setCreating(null);
       setSelectedRef(ref);
       // Only the standalone Tasks area persists selection across remounts;
       // task detail panels embedded inside a project tab live alongside other
@@ -157,15 +195,17 @@ export function TasksView({ projectId }: TasksViewProps = {}) {
     setTasks((prev) => prev.map((t) => (t.ref === updated.ref ? updated : t)));
   }, []);
 
+  const visibleTasks = useMemo(() => tasksForKind(tasks, kindFilter), [tasks, kindFilter]);
+
   // Land on the newest task instead of a two-thirds-empty "click a task"
   // pane. Runs only when nothing is selected (or the stored selection no
   // longer exists) — a deep-link or the user's own pick always wins.
   useEffect(() => {
-    if (tasks.length === 0) return;
-    if (selectedRef && tasks.some((t) => t.ref === selectedRef)) return;
-    const first = tasks[0];
+    if (visibleTasks.length === 0) return;
+    if (selectedRef && visibleTasks.some((t) => t.ref === selectedRef)) return;
+    const first = visibleTasks[0];
     if (first) setSelectedRef(first.ref);
-  }, [tasks, selectedRef]);
+  }, [visibleTasks, selectedRef]);
 
   const gezelName = useMemo(() => {
     const m = new Map<string, string>();
@@ -173,25 +213,41 @@ export function TasksView({ projectId }: TasksViewProps = {}) {
     return (id?: string) => (id ? (m.get(id) ?? id) : '');
   }, [gezels]);
 
-  const groups = useMemo(() => groupTasks(tasks), [tasks]);
+  const groups = useMemo(() => groupTasks(visibleTasks), [visibleTasks]);
 
-  const openCreate = useCallback(() => setCreating(true), []);
+  const openCreate = useCallback((mode: TaskCreationMode) => setCreating(mode), []);
 
   const onCreated = useCallback(
     async (task: Task) => {
-      setCreating(false);
+      setCreating(null);
+      setKindFilter(taskKind(task));
       await refresh();
       openTask(task.ref);
     },
     [refresh, openTask],
   );
 
-  const showEmptyState = hasLoadedTasks && tasks.length === 0;
+  const showEmptyState = hasLoadedTasks && visibleTasks.length === 0;
   const hideTaskPanes = !hasLoadedTasks || showEmptyState;
 
   return (
     <div className="tasks-view" data-testid="tasks-view">
       <header className="tasks-header">
+        <div className="gz-tray tasks-kind-filter" role="radiogroup" aria-label="Task type">
+          {TASK_KIND_OPTIONS.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              // biome-ignore lint/a11y/useSemanticElements: keys use the documented radio-group pattern; a native input would duplicate the pressable key surface.
+              role="radio"
+              aria-checked={kindFilter === option.value}
+              className={`gz-key${kindFilter === option.value ? ' gz-key-active' : ''}`}
+              onClick={() => setKindFilter(option.value)}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
         <div className="tasks-filters">
           {projectId === undefined && (
             <Select.Root
@@ -243,14 +299,50 @@ export function TasksView({ projectId }: TasksViewProps = {}) {
               ))}
             </Select.Content>
           </Select.Root>
-          <button
-            type="button"
-            className="primary"
-            onClick={openCreate}
-            disabled={!(projectFilter || projects[0])}
-          >
-            + New task
-          </button>
+          <div className="tasks-create-split">
+            <button
+              type="button"
+              className="primary tasks-create-main"
+              onClick={() => openCreate('one-time')}
+              disabled={!(projectFilter || projects[0])}
+            >
+              + New task
+            </button>
+            <DropdownMenu.Root>
+              <DropdownMenu.Trigger asChild>
+                <button
+                  type="button"
+                  className="primary tasks-create-more"
+                  aria-label="More task types"
+                  disabled={!(projectFilter || projects[0])}
+                >
+                  ▾
+                </button>
+              </DropdownMenu.Trigger>
+              <DropdownMenu.Portal>
+                <DropdownMenu.Content
+                  className="app-nav-menu tasks-create-menu"
+                  sideOffset={4}
+                  align="end"
+                >
+                  <DropdownMenu.Item
+                    className="app-nav-menu-item"
+                    onSelect={() => openCreate('scheduled')}
+                  >
+                    <span>New scheduled task</span>
+                    <small>Runs a fresh copy on a cadence</small>
+                  </DropdownMenu.Item>
+                  <DropdownMenu.Item
+                    className="app-nav-menu-item"
+                    onSelect={() => openCreate('night-shift')}
+                  >
+                    <span>New Night Shift task</span>
+                    <small>Waits for the unattended work window</small>
+                  </DropdownMenu.Item>
+                </DropdownMenu.Content>
+              </DropdownMenu.Portal>
+            </DropdownMenu.Root>
+          </div>
         </div>
       </header>
 
@@ -268,7 +360,7 @@ export function TasksView({ projectId }: TasksViewProps = {}) {
               <p>
                 {statusFilter || assigneeFilter
                   ? 'No tasks match these filters.'
-                  : 'No tasks have been created yet.'}
+                  : `No ${TASK_KIND_OPTIONS.find((option) => option.value === kindFilter)?.label.toLowerCase()} have been created yet.`}
               </p>
             )}
           </div>
@@ -317,7 +409,9 @@ export function TasksView({ projectId }: TasksViewProps = {}) {
                               : g.parent.ref}
                           </span>
                           {badge && (
-                            <span className={`task-badge task-badge-${badge}`}>{badge}</span>
+                            <span className={`task-badge task-badge-${badge}`}>
+                              {badge === 'night-shift' ? 'night shift' : badge}
+                            </span>
                           )}
                           {g.children.length > 0 && (
                             <span className="task-child-count">
@@ -381,12 +475,13 @@ export function TasksView({ projectId }: TasksViewProps = {}) {
       </div>
 
       <NewTaskDialog
-        open={creating}
+        open={creating !== null}
+        creationMode={creating ?? 'one-time'}
         defaultProjectId={projectFilter || projects[0]?.id || ''}
         projects={projects}
         gezels={gezels}
         projectLocked={projectId !== undefined}
-        onClose={() => setCreating(false)}
+        onClose={() => setCreating(null)}
         onCreated={onCreated}
       />
     </div>

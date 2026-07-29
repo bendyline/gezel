@@ -237,6 +237,14 @@ Ollama, engagement modes, tempo), use **keys in a tray** — see
 [Controls: keys in trays](#controls-keys-in-trays). The Home + Settings
 provider switches are this pattern.
 
+**Split buttons.** Use a split button when one creation action is the clear,
+frequent default and two or three closely-related variants should remain
+available without crowding the toolbar. The wide left key performs the default
+immediately; the narrow attached right key opens a `DropdownMenu`. Join the
+halves on one straight seam and keep `--radius-md` only on the outside corners.
+Menu items should name the variant and may carry one short hint line. The Tasks
+screen's New task / scheduled / Night Shift control is the reference.
+
 **Forms.** Raw `<input>`, `<textarea>`, `<fieldset>` are fine — Radix
 doesn't ship form primitives and we don't need them. Schema-driven Squisq
 forms use the shared `GezelJsonEditor` wrapper. It keeps Squisq's built-in

@@ -71,6 +71,7 @@ const FRONTMATTER_KEYS = [
   'plan',
   'defaultAssignee',
   'requirements',
+  'runModes',
   'toolsets',
   'paramSchema',
   'hooks',

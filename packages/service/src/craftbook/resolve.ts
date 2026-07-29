@@ -39,6 +39,7 @@ export function runtimeCraftbookFromTemplate(
     ...(m.paramSchema ? { paramSchema: m.paramSchema } : {}),
     ...(m.command ? { command: m.command } : {}),
     ...(m.requirements ? { requirements: m.requirements } : {}),
+    ...(m.runModes ? { runModes: m.runModes } : {}),
     ...(scripts ? { scripts } : {}),
     // Declarative per-item fanout config rides into the runtime book so the
     // task snapshot carries it — the runtime reads `task.craftbook.spawn`

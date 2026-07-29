@@ -8,7 +8,7 @@ import type {
 } from '@bendyline/gezel';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
-import { Dialog } from '../primitives/index.js';
+import { Dialog, Tabs } from '../primitives/index.js';
 import { CatalogBrowser } from './CatalogBrowser.js';
 import { ToolsetConfigForm, type ToolsetConfigFormValue } from './ToolsetConfigForm.js';
 
@@ -168,8 +168,13 @@ export function ToolsetsEditor({ scope, subject, hint }: ToolsetsEditorProps) {
   const [roleDefault, setRoleDefault] = useState<RoleDefault | null>(null);
   const [catalog, setCatalog] = useState<CatalogItemSummary[]>([]);
   const [showPicker, setShowPicker] = useState(false);
+  const [pickerTab, setPickerTab] = useState<'catalog' | 'custom'>('catalog');
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notices, setNotices] = useState<string[]>([]);
+  const [discoveryWarnings, setDiscoveryWarnings] = useState<string[]>([]);
+  const [customText, setCustomText] = useState('');
+  const [customSourceName, setCustomSourceName] = useState('Pasted JSON');
   const [installTarget, setInstallTarget] = useState<InstallTarget | null>(null);
   const [configureTarget, setConfigureTarget] = useState<ConfigureTarget | null>(null);
 
@@ -179,8 +184,9 @@ export function ToolsetsEditor({ scope, subject, hint }: ToolsetsEditorProps) {
         api.listInstalledToolsets(scope),
         api.listCatalogItems('toolset'),
       ]);
-      setInstalled(roster.toolsets);
+      setInstalled(roster.toolsets ?? []);
       setRoleDefault(roster.roleDefault ?? null);
+      setDiscoveryWarnings((roster.discoveryWarnings ?? []).map((warning) => warning.message));
       setCatalog(items.items);
     } catch (err) {
       setError((err as Error).message);
@@ -333,6 +339,46 @@ export function ToolsetsEditor({ scope, subject, hint }: ToolsetsEditorProps) {
     }
   };
 
+  const importCustomConfig = async () => {
+    if (!customText.trim()) return;
+    setBusy('__custom_import__');
+    setError(null);
+    setNotices([]);
+    try {
+      const result = await api.importCustomMcpConfig({
+        scope,
+        text: customText,
+        sourceName: customSourceName.trim() || 'Pasted JSON',
+      });
+      await refresh();
+      setNotices([
+        `Imported ${result.imported.length} custom MCP server${result.imported.length === 1 ? '' : 's'}: ${result.imported.join(', ')}`,
+        ...result.warnings.map((warning) =>
+          warning.serverName ? `${warning.serverName}: ${warning.message}` : warning.message,
+        ),
+      ]);
+      setCustomText('');
+      setCustomSourceName('Pasted JSON');
+      setShowPicker(false);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const readCustomFile = async (file: File | undefined) => {
+    if (!file) return;
+    setError(null);
+    try {
+      const text = await file.text();
+      setCustomText(text);
+      setCustomSourceName(file.name);
+    } catch (err) {
+      setError(`Could not read ${file.name}: ${(err as Error).message}`);
+    }
+  };
+
   /**
    * Convert the inherited-via-role-default state into an explicitly
    * managed list by installing every inherited built-in group at
@@ -356,6 +402,7 @@ export function ToolsetsEditor({ scope, subject, hint }: ToolsetsEditorProps) {
   };
 
   const tileNameFor = (entry: InstalledToolset): string => {
+    if (entry.runtime.kind === 'custom-mcp') return entry.runtime.serverName;
     return catalogById.get(entry.toolsetId)?.manifest.name ?? entry.toolsetId;
   };
   const tileIconSvgFor = (entry: InstalledToolset): string | undefined => {
@@ -363,6 +410,15 @@ export function ToolsetsEditor({ scope, subject, hint }: ToolsetsEditorProps) {
   };
   const tileLogoFor = (entry: InstalledToolset): string | undefined => {
     return catalogById.get(entry.toolsetId)?.logoUrl;
+  };
+  const tileCaptionFor = (entry: InstalledToolset): string | undefined => {
+    if (entry.runtime.kind !== 'custom-mcp') return undefined;
+    if (entry.runtime.source.kind === 'project-file') {
+      return `Project config · ${entry.runtime.source.relativePath}`;
+    }
+    return entry.runtime.source.sourceName
+      ? `Custom · ${entry.runtime.source.sourceName}`
+      : 'Custom MCP';
   };
 
   return (
@@ -408,6 +464,16 @@ export function ToolsetsEditor({ scope, subject, hint }: ToolsetsEditorProps) {
         </div>
       )}
       {error && <p className="error small">{error}</p>}
+      {notices.map((notice) => (
+        <p key={notice} className="status small toolsets-notice">
+          {notice}
+        </p>
+      ))}
+      {discoveryWarnings.map((warning) => (
+        <p key={warning} className="warning small toolsets-notice">
+          Project MCP config: {warning}
+        </p>
+      ))}
       {(installed.length > 0 || inheritedTiles.length > 0) && (
         <div className="toolsets-tile-grid">
           {installed.map((entry) => (
@@ -417,9 +483,18 @@ export function ToolsetsEditor({ scope, subject, hint }: ToolsetsEditorProps) {
               iconSvg={tileIconSvgFor(entry)}
               logoUrl={tileLogoFor(entry)}
               tone="installed"
+              caption={tileCaptionFor(entry)}
               busy={busy === entry.toolsetId}
-              onConfigure={() => void openConfigure(entry.toolsetId)}
-              onRemove={() => void uninstall(entry.toolsetId)}
+              onConfigure={
+                catalogById.has(entry.toolsetId)
+                  ? () => void openConfigure(entry.toolsetId)
+                  : undefined
+              }
+              onRemove={
+                entry.runtime.kind === 'custom-mcp' && entry.runtime.source.kind === 'project-file'
+                  ? undefined
+                  : () => void uninstall(entry.toolsetId)
+              }
             />
           ))}
           {inheritedTiles.map((tile) => (
@@ -443,7 +518,7 @@ export function ToolsetsEditor({ scope, subject, hint }: ToolsetsEditorProps) {
       >
         <Dialog.Portal>
           <Dialog.Overlay />
-          <Dialog.Content className="template-picker-dialog">
+          <Dialog.Content className="template-picker-dialog toolsets-picker-dialog">
             <header
               style={{
                 display: 'flex',
@@ -458,31 +533,90 @@ export function ToolsetsEditor({ scope, subject, hint }: ToolsetsEditorProps) {
                 Cancel
               </button>
             </header>
-            <CatalogBrowser
-              kind="toolset"
-              emptyMessage="No toolsets in the catalog yet."
-              // Pass items only after the parent fetch has populated
-              // them, so the picker doesn't briefly flash an empty
-              // state when opened mid-fetch. catalog.length === 0 is
-              // treated as "not yet loaded" — a truly empty catalog
-              // would just trigger one redundant fetch with the same
-              // result.
-              initialItems={catalog.length > 0 ? catalog : undefined}
-              action={(item) => {
-                if (item.manifest.kind !== 'toolset') return null;
-                const m = item.manifest;
-                const already = installed.some((t) => t.toolsetId === m.id);
-                return (
+            <Tabs.Root
+              value={pickerTab}
+              onValueChange={(value) => setPickerTab(value as 'catalog' | 'custom')}
+              className="toolsets-picker-tabs"
+            >
+              <Tabs.List aria-label="Toolset source">
+                <Tabs.Trigger value="catalog">Catalog</Tabs.Trigger>
+                <Tabs.Trigger value="custom">Custom MCP</Tabs.Trigger>
+              </Tabs.List>
+              <Tabs.Content value="catalog">
+                <CatalogBrowser
+                  kind="toolset"
+                  emptyMessage="No toolsets in the catalog yet."
+                  // Pass items only after the parent fetch has populated
+                  // them, so the picker doesn't briefly flash an empty
+                  // state when opened mid-fetch. catalog.length === 0 is
+                  // treated as "not yet loaded" — a truly empty catalog
+                  // would just trigger one redundant fetch with the same
+                  // result.
+                  initialItems={catalog.length > 0 ? catalog : undefined}
+                  action={(item) => {
+                    if (item.manifest.kind !== 'toolset') return null;
+                    const m = item.manifest;
+                    const already = installed.some((t) => t.toolsetId === m.id);
+                    return (
+                      <button
+                        type="button"
+                        disabled={already || busy !== null}
+                        onClick={() => void install(m.id)}
+                      >
+                        {already ? 'Installed' : busy === m.id ? 'Loading…' : 'Install'}
+                      </button>
+                    );
+                  }}
+                />
+              </Tabs.Content>
+              <Tabs.Content value="custom" className="toolsets-custom-import">
+                <div>
+                  <h4>Import MCP configuration</h4>
+                  <p className="muted small">
+                    Choose a local JSON file or paste its contents. Gezel accepts VS Code’s{' '}
+                    <code>servers</code> format and the common <code>mcpServers</code> format used
+                    by Claude and Cursor.
+                  </p>
+                </div>
+                <label className="toolsets-custom-file">
+                  <span>Configuration file</span>
+                  <input
+                    type="file"
+                    accept=".json,.jsonc,application/json"
+                    onChange={(event) => void readCustomFile(event.currentTarget.files?.[0])}
+                  />
+                </label>
+                <label>
+                  <span>JSON</span>
+                  <textarea
+                    rows={14}
+                    spellCheck={false}
+                    value={customText}
+                    onChange={(event) => {
+                      setCustomText(event.target.value);
+                      if (customSourceName !== 'Pasted JSON') setCustomSourceName('Pasted JSON');
+                    }}
+                    placeholder={`{\n  "servers": {\n    "example": {\n      "command": "npx",\n      "args": ["-y", "@example/mcp-server"]\n    }\n  }\n}`}
+                  />
+                </label>
+                <p className="warning small">
+                  MCP servers can run code or contact external services. Import only configurations
+                  you trust. Environment values and HTTP headers are kept in Gezel’s secret store.
+                </p>
+                <div className="toolsets-custom-actions">
+                  <button type="button" className="home-link" onClick={() => setShowPicker(false)}>
+                    Cancel
+                  </button>
                   <button
                     type="button"
-                    disabled={already || busy !== null}
-                    onClick={() => void install(m.id)}
+                    disabled={!customText.trim() || busy !== null}
+                    onClick={() => void importCustomConfig()}
                   >
-                    {already ? 'Installed' : busy === m.id ? 'Loading…' : 'Install'}
+                    {busy === '__custom_import__' ? 'Importing…' : 'Import toolsets'}
                   </button>
-                );
-              }}
-            />
+                </div>
+              </Tabs.Content>
+            </Tabs.Root>
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>

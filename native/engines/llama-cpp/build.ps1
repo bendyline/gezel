@@ -51,6 +51,12 @@ if ($null -ne $bash) {
 $src = Join-Path $here '.upstream'
 $platform = 'win32-x64'
 
+# Keep hosted-runner checkout paths out of __FILE__, CodeView, and CUDA host
+# objects. The CL environment variable reaches every cl.exe invocation,
+# including the host compiler launched by nvcc.
+$pathMapFlag = "/pathmap:$src=llama.cpp"
+$env:CL = if ($env:CL) { "$pathMapFlag $env:CL" } else { $pathMapFlag }
+
 # -- 2. Resolve accelerator ----------------------------------------
 $backend = if ($env:LLAMA_BACKEND) { $env:LLAMA_BACKEND } else { 'auto' }
 if ($backend -eq 'auto') {
@@ -86,7 +92,10 @@ $cmakeFlags = @(
   '-DLLAMA_OPENSSL=OFF'
 )
 switch ($backend) {
-  'cuda'   { $cmakeFlags += '-DGGML_CUDA=ON' }
+  'cuda'   {
+    $cmakeFlags += '-DGGML_CUDA=ON'
+    $cmakeFlags += "-DCMAKE_CUDA_FLAGS=-Xcompiler=$pathMapFlag"
+  }
   'vulkan' { $cmakeFlags += '-DGGML_VULKAN=ON' }
   'cpu'    { }
   default  { throw "unknown LLAMA_BACKEND=$backend (valid: cuda, vulkan, cpu)" }

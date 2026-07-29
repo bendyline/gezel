@@ -86,4 +86,26 @@ describe('WorkspaceWatchManager', () => {
     await manager.reconcile();
     expect(manager.watched()).toEqual([]);
   });
+
+  it('treats canonical MCP config changes specially without suppressing index refreshes', async () => {
+    const refresh = vi.fn(async () => ({}) as never);
+    const onProjectMcpConfigChanged = vi.fn(async () => undefined);
+    manager = new WorkspaceWatchManager({
+      store,
+      indexManager: { refresh },
+      onProjectMcpConfigChanged,
+      debounceMs: 50,
+    });
+    const onEvent = (
+      manager as unknown as {
+        onEvent(projectId: string, filename: string): void;
+      }
+    ).onEvent.bind(manager);
+    onEvent('mcp-project', 'note.md');
+    onEvent('mcp-project', '.gezel/mcp.json');
+    await waitFor(() => onProjectMcpConfigChanged.mock.calls.length > 0);
+    await waitFor(() => refresh.mock.calls.length > 0);
+    expect(onProjectMcpConfigChanged).toHaveBeenCalledWith('mcp-project');
+    expect(refresh).toHaveBeenCalledWith('mcp-project');
+  });
 });

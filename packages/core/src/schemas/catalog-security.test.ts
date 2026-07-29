@@ -29,3 +29,40 @@ describe('npm toolset runtime validation', () => {
     expect(() => ToolsetRuntimeSchema.parse({ ...validRuntime, envHints: ['bad-name'] })).toThrow();
   });
 });
+
+describe('custom MCP runtime validation', () => {
+  it('accepts project-file references without persisting the live command', () => {
+    expect(
+      ToolsetRuntimeSchema.parse({
+        kind: 'custom-mcp',
+        serverName: 'workspace-tools',
+        transport: 'stdio',
+        source: { kind: 'project-file', relativePath: '.vscode/mcp.json' },
+      }),
+    ).toMatchObject({
+      kind: 'custom-mcp',
+      args: [],
+      envKeys: [],
+      headerKeys: [],
+    });
+  });
+
+  it('requires the executable or URL for explicit imports', () => {
+    expect(() =>
+      ToolsetRuntimeSchema.parse({
+        kind: 'custom-mcp',
+        serverName: 'local',
+        transport: 'stdio',
+        source: { kind: 'imported' },
+      }),
+    ).toThrow();
+    expect(() =>
+      ToolsetRuntimeSchema.parse({
+        kind: 'custom-mcp',
+        serverName: 'remote',
+        transport: 'streamable-http',
+        source: { kind: 'imported' },
+      }),
+    ).toThrow();
+  });
+});

@@ -20,15 +20,17 @@ vi.mock('./TaskTabContent.js', () => ({
 vi.mock('./tasks/NewTaskDialog.js', () => ({
   NewTaskDialog: ({
     open,
+    creationMode,
     defaultProjectId,
     onCreated,
   }: {
     open: boolean;
+    creationMode: string;
     defaultProjectId: string;
     onCreated: (t: unknown) => void;
   }) =>
     open ? (
-      <div data-testid="new-task-dialog" data-project={defaultProjectId}>
+      <div data-testid="new-task-dialog" data-project={defaultProjectId} data-mode={creationMode}>
         <button
           type="button"
           data-testid="dialog-create"
@@ -85,7 +87,7 @@ describe('TasksView', () => {
   it('renders the empty-state when no tasks exist', async () => {
     render(<TasksView />);
     await waitFor(() => {
-      expect(screen.getByText('No tasks have been created yet.')).toBeInTheDocument();
+      expect(screen.getByText('No one-time tasks have been created yet.')).toBeInTheDocument();
     });
     expect(screen.getByText(/Click a task to view it here\./)).not.toBeVisible();
   });
@@ -93,7 +95,7 @@ describe('TasksView', () => {
   it('uses a filtered empty-state when no tasks match the active filters', async () => {
     render(<TasksView />);
     await waitFor(() => {
-      expect(screen.getByText('No tasks have been created yet.')).toBeInTheDocument();
+      expect(screen.getByText('No one-time tasks have been created yet.')).toBeInTheDocument();
     });
 
     const statusSelect = screen
@@ -163,6 +165,37 @@ describe('TasksView', () => {
     });
   });
 
+  it('filters top-level tasks with radio-style task type keys', async () => {
+    vi.mocked(api.listTasks).mockResolvedValue({
+      tasks: [
+        makeTask({ ref: 'pj-alpha/1', title: 'One-off task' }),
+        makeTask({
+          ref: 'pj-alpha/2',
+          title: 'Weekly task',
+          cron: { expression: '0 9 * * 1' },
+        }),
+        makeTask({
+          ref: 'pj-alpha/3',
+          title: 'Overnight task',
+          nightShift: { enabled: true },
+        }),
+      ],
+    } as never);
+    render(<TasksView />);
+
+    expect(await screen.findByText('One-off task')).toBeInTheDocument();
+    expect(screen.queryByText('Weekly task')).not.toBeInTheDocument();
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('radio', { name: 'Scheduled tasks' }));
+    expect(await screen.findByText('Weekly task')).toBeInTheDocument();
+    expect(screen.queryByText('One-off task')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('radio', { name: 'Night Shift tasks' }));
+    expect(await screen.findByText('Overnight task')).toBeInTheDocument();
+    expect(screen.queryByText('Weekly task')).not.toBeInTheDocument();
+  });
+
   it('changing the status filter triggers a refetch with that status', async () => {
     render(<TasksView />);
     await waitFor(() => {
@@ -192,6 +225,21 @@ describe('TasksView', () => {
 
     const dialog = screen.getByTestId('new-task-dialog');
     expect(dialog).toHaveAttribute('data-project', 'pj-alpha');
+    expect(dialog).toHaveAttribute('data-mode', 'one-time');
+  });
+
+  it('opens scheduled and Night Shift creation from the New task split menu', async () => {
+    render(<TasksView />);
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole('menuitem', { name: /New scheduled task/ }));
+    expect(screen.getByTestId('new-task-dialog')).toHaveAttribute('data-mode', 'scheduled');
+
+    // Close through the stub's successful create, then open the other variant.
+    await user.click(screen.getByTestId('dialog-create'));
+    await waitFor(() => expect(screen.queryByTestId('new-task-dialog')).not.toBeInTheDocument());
+    await user.click(screen.getByRole('menuitem', { name: /New Night Shift task/ }));
+    expect(screen.getByTestId('new-task-dialog')).toHaveAttribute('data-mode', 'night-shift');
   });
 
   it('a created task closes the dialog, refreshes the list, and selects it', async () => {

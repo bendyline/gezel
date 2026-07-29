@@ -49,12 +49,13 @@ echo "[build] platform=$platform"
 # first-class target). On macOS arm64, Metal is enabled by default and
 # we leave it on — Accelerate too — because they're shipped with the
 # OS and Make small inference noticeably faster.
+source_map_flags="-ffile-prefix-map=$src=whisper.cpp -fmacro-prefix-map=$src=whisper.cpp -fdebug-prefix-map=$src=whisper.cpp"
 cmake_flags=(
   -DCMAKE_BUILD_TYPE=Release
   # Keep the CI checkout path out of __FILE__ assert strings; see the
   # longer note in native/engines/llama-cpp/build.sh. Unix-only.
-  "-DCMAKE_C_FLAGS=-ffile-prefix-map=$src=whisper.cpp"
-  "-DCMAKE_CXX_FLAGS=-ffile-prefix-map=$src=whisper.cpp"
+  "-DCMAKE_C_FLAGS=$source_map_flags"
+  "-DCMAKE_CXX_FLAGS=$source_map_flags"
   # Drops the unbundled libgomp.so.1 / VCOMP140.DLL load-time dependency
   # ggml's default OPENMP=ON bakes into libggml-base + libggml-cpu. See
   # the longer note in native/engines/llama-cpp/build.sh.
@@ -63,6 +64,10 @@ cmake_flags=(
   -DWHISPER_BUILD_TESTS=OFF
   -DWHISPER_BUILD_EXAMPLES=ON
 )
+if [[ "$os" == "Darwin" ]]; then
+  macos_deployment_target="${MACOSX_DEPLOYMENT_TARGET:-13.0}"
+  cmake_flags+=("-DCMAKE_OSX_DEPLOYMENT_TARGET=$macos_deployment_target")
+fi
 
 build_dir="$src/build-$platform"
 cmake -S "$src" -B "$build_dir" "${cmake_flags[@]}"

@@ -29,6 +29,8 @@ const IGNORE =
 export interface WorkspaceWatchManagerOptions {
   store: Store;
   indexManager: Pick<WorkspaceIndexManager, 'refresh'>;
+  /** Rebuild project MCP bridges when an approved project config changes. */
+  onProjectMcpConfigChanged?: (projectId: string) => void | Promise<void>;
   maxWatched?: number;
   debounceMs?: number;
   reconcileIntervalMs?: number;
@@ -37,12 +39,14 @@ export interface WorkspaceWatchManagerOptions {
 export class WorkspaceWatchManager {
   private readonly store: Store;
   private readonly indexManager: Pick<WorkspaceIndexManager, 'refresh'>;
+  private readonly onProjectMcpConfigChanged?: (projectId: string) => void | Promise<void>;
   private readonly maxWatched: number;
   private readonly debounceMs: number;
   private readonly reconcileIntervalMs: number;
 
   private readonly watchers = new Map<string, { dir: string; watcher: FSWatcher }>();
   private readonly debounces = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly mcpDebounces = new Map<string, ReturnType<typeof setTimeout>>();
   private reconcileTimer: ReturnType<typeof setInterval> | null = null;
   private startupTimer: ReturnType<typeof setTimeout> | null = null;
   private supported = true;
@@ -51,6 +55,7 @@ export class WorkspaceWatchManager {
   constructor(opts: WorkspaceWatchManagerOptions) {
     this.store = opts.store;
     this.indexManager = opts.indexManager;
+    this.onProjectMcpConfigChanged = opts.onProjectMcpConfigChanged;
     this.maxWatched = opts.maxWatched ?? MAX_WATCHED;
     this.debounceMs = opts.debounceMs ?? DEBOUNCE_MS;
     this.reconcileIntervalMs = opts.reconcileIntervalMs ?? RECONCILE_INTERVAL_MS;
@@ -76,6 +81,8 @@ export class WorkspaceWatchManager {
     this.reconcileTimer = null;
     for (const timer of this.debounces.values()) clearTimeout(timer);
     this.debounces.clear();
+    for (const timer of this.mcpDebounces.values()) clearTimeout(timer);
+    this.mcpDebounces.clear();
     for (const [projectId] of this.watchers) this.dropWatcher(projectId);
   }
 
@@ -127,6 +134,24 @@ export class WorkspaceWatchManager {
   private onEvent(projectId: string, filename: string | Buffer | null): void {
     if (this.stopped) return;
     const rel = typeof filename === 'string' ? filename : filename?.toString();
+    const normalizedRel = rel?.replaceAll('\\', '/');
+    const isMcpConfig =
+      normalizedRel === '.gezel/mcp.json' ||
+      normalizedRel === '.vscode/mcp.json' ||
+      normalizedRel === '.mcp.json';
+    if (isMcpConfig) {
+      const existing = this.mcpDebounces.get(projectId);
+      if (existing) clearTimeout(existing);
+      const timer = setTimeout(() => {
+        this.mcpDebounces.delete(projectId);
+        void Promise.resolve(this.onProjectMcpConfigChanged?.(projectId)).catch((err) =>
+          log.warn(`MCP config refresh for ${projectId} failed: ${describe(err)}`),
+        );
+      }, this.debounceMs);
+      unref(timer);
+      this.mcpDebounces.set(projectId, timer);
+      return;
+    }
     if (rel && IGNORE.test(rel)) return;
     const existing = this.debounces.get(projectId);
     if (existing) clearTimeout(existing);

@@ -28,6 +28,7 @@ import {
   createArtifactsContentContainer,
   createDocumentLinkProvider,
 } from '../components/SquisqIntegration/index.js';
+import { ToolsetsEditor } from '../components/ToolsetsEditor.js';
 import { normalizeMarkdownBaseline } from '../components/markdown-baseline.js';
 import { consumeCreate } from '../components/nav-intents.js';
 import { consumeOpenFile } from '../components/pending-open-file.js';
@@ -170,7 +171,10 @@ function projectTabIsVisible(
 // width (the output pane's share). Global like the chat-rail split so
 // the ratio is stable across projects + reloads. Clamped so neither
 // side can be squeezed to nothing.
-const OUTPUT_FRACTION_STORAGE_KEY = 'gezel:project-output-fraction';
+// v1 values were written while the CSS grid used unsupported multiplication,
+// so dragging appeared to do nothing and the stored number did not represent
+// a choice the user could see. Start v2 at the real 42% default.
+const OUTPUT_FRACTION_STORAGE_KEY = 'gezel:project-output-fraction:v2';
 const MIN_OUTPUT_FRACTION = 0.18;
 const MAX_OUTPUT_FRACTION = 0.7;
 const DEFAULT_OUTPUT_FRACTION = 0.42;
@@ -1203,7 +1207,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   return (
     <div
       ref={containerRef}
-      className={`two-col${sidebarCollapsed ? ' sidebar-collapsed' : ''}${detailOnly ? ' detail-only' : ''}${effectiveCompact ? ' is-compact' : ''}`}
+      className={`two-col${sidebarCollapsed && !detailOnly ? ' sidebar-collapsed' : ''}${detailOnly ? ' detail-only' : ''}${effectiveCompact ? ' is-compact' : ''}`}
     >
       {!detailOnly && (
         <NewProjectDialog
@@ -1449,7 +1453,9 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
               }`}
               style={
                 showOutputBeside
-                  ? { ['--project-output-fraction' as string]: outputFraction.toFixed(4) }
+                  ? {
+                      ['--project-output-width' as string]: `${(outputFraction * 100).toFixed(2)}%`,
+                    }
                   : undefined
               }
             >
@@ -1531,6 +1537,18 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                         <div className="project-about-history">
                           <HistoryView projectId={selected.id} />
                         </div>
+                      </section>
+
+                      <section
+                        id="project-about-toolsets"
+                        className="project-about-section project-about-anchor"
+                      >
+                        <h3 className="project-about-section-title">Toolsets</h3>
+                        <ToolsetsEditor
+                          scope={{ kind: 'project', projectId: selected.id }}
+                          subject={selected.name}
+                          hint="Available to every gezel working in this project. Project MCP files are discovered automatically."
+                        />
                       </section>
 
                       <section
@@ -1852,6 +1870,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                         <a href="#project-about-mission">Mission objectives</a>
                         <a href="#project-about-connections">Connections</a>
                         <a href="#project-about-history">History</a>
+                        <a href="#project-about-toolsets">Toolsets</a>
                         <a href="#project-about-settings">Settings</a>
                       </nav>
                     </div>

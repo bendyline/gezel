@@ -24,6 +24,18 @@ const workflowPath = fileURLToPath(
   new URL('../.github/workflows/build-native.yml', import.meta.url),
 );
 const workflow = readFileSync(workflowPath, 'utf8');
+const wrapperPaths = [
+  '../native/engines/llama-cpp/build.sh',
+  '../native/engines/llama-cpp/build.ps1',
+  '../native/engines/sd-cpp/build.sh',
+  '../native/engines/sd-cpp/build.ps1',
+  '../native/engines/whisper-cpp/build.sh',
+  '../native/engines/whisper-cpp/build.ps1',
+  '../native/engines/ds4/build.sh',
+  '../native/helpers/device-health/build.sh',
+  '../native/helpers/device-health/build.ps1',
+  '../native/helpers/service-host/build.ps1',
+].map((path) => [path, readFileSync(fileURLToPath(new URL(path, import.meta.url)), 'utf8')]);
 
 /** Every `{platform, variant, artifact}` entry in the build matrix. */
 function parseMatrix() {
@@ -131,4 +143,72 @@ test('Windows native signing passes resolved file paths to signtool', () => {
     /"\$target\.FullName"/,
     'PowerShell appends literal `.FullName` inside this interpolation form',
   );
+});
+
+test('macOS deployment compatibility is declared and checked before signing', () => {
+  assert.match(workflow, /^\s{2}MACOSX_DEPLOYMENT_TARGET: '13\.0'$/m);
+  const start = workflow.indexOf('      - name: Assert macOS deployment target');
+  const end = workflow.indexOf('      # ── Code-sign the engine binaries', start);
+  assert.notEqual(start, -1, 'could not find the macOS deployment-target gate');
+  assert.notEqual(end, -1, 'could not find the signing boundary after the macOS gate');
+  const step = workflow.slice(start, end);
+
+  assert.match(step, /vtool -show-build/);
+  assert.match(step, /version_gt "\$minos" "\$floor"/);
+  assert.match(step, /No Mach-O files found/);
+});
+
+test('compiled native payloads fail closed on hosted-runner path leaks', () => {
+  const start = workflow.indexOf('      - name: Assert no build-host paths');
+  const end = workflow.indexOf('      # ── Code-sign the engine binaries', start);
+  assert.notEqual(start, -1, 'could not find the build-host path gate');
+  assert.notEqual(end, -1, 'could not find the signing boundary after the path gate');
+  const step = workflow.slice(start, end);
+
+  assert.match(step, /matrix\.engine != 'uv'/);
+  assert.match(step, /\/home\/runner\/work\//);
+  assert.match(step, /\/Users\/runner\/work\//);
+  assert.match(step, /\[A-Za-z\]:\\\\a\\\\/);
+  assert.match(step, /\[A-Za-z\]:\/a\//);
+});
+
+test('every compiled native wrapper configures source path remapping', () => {
+  for (const [path, contents] of wrapperPaths) {
+    const expected = path.endsWith('.ps1') ? /\/pathmap:/ : /-ffile-prefix-map=/;
+    assert.match(contents, expected, `${path} does not configure source path remapping`);
+  }
+
+  for (const path of [
+    '../native/engines/llama-cpp/build.sh',
+    '../native/engines/sd-cpp/build.sh',
+    '../native/engines/whisper-cpp/build.sh',
+  ]) {
+    const contents = wrapperPaths.find(([candidate]) => candidate === path)?.[1] ?? '';
+    assert.match(contents, /CMAKE_OSX_DEPLOYMENT_TARGET/);
+  }
+
+  const llama = wrapperPaths.find(([path]) => path.includes('llama-cpp/build.sh'))?.[1] ?? '';
+  const sd = wrapperPaths.find(([path]) => path.includes('sd-cpp/build.sh'))?.[1] ?? '';
+  const ds4 = wrapperPaths.find(([path]) => path.includes('ds4/build.sh'))?.[1] ?? '';
+  assert.match(llama, /CMAKE_CUDA_FLAGS=.*-Xcompiler=-ffile-prefix-map=/);
+  assert.match(sd, /CMAKE_CUDA_FLAGS=.*-Xcompiler=-ffile-prefix-map=/);
+  assert.match(ds4, /NVCCFLAGS=.*source_map|nvcc_flags\+=.*-ffile-prefix-map=/);
+});
+
+test('native tar archives normalize ownership, ordering, and timestamps', () => {
+  const intermediate = workflow.slice(
+    workflow.indexOf('      - name: Pack build output'),
+    workflow.indexOf('      - uses: actions/upload-artifact', workflow.indexOf('      - name: Pack build output')),
+  );
+  assert.match(intermediate, /--uid 0 --gid 0 --uname root --gname root/);
+  assert.match(intermediate, /--owner=0 --group=0 --numeric-owner/);
+
+  const release = workflow.slice(
+    workflow.indexOf('      - name: Pack tarballs'),
+    workflow.indexOf('      - name: Validate archive sizes'),
+  );
+  assert.match(release, /source_date_epoch=.*git show/);
+  assert.match(release, /--sort=name/);
+  assert.match(release, /--mtime="@\$\{source_date_epoch\}"/);
+  assert.match(release, /--owner=0 --group=0 --numeric-owner/);
 });

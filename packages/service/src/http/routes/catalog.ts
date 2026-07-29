@@ -4,6 +4,7 @@ import {
   type GezelFrontmatter,
   GezelFrontmatterSchema,
   GezelGenderSchema,
+  ImportCustomMcpConfigRequestSchema,
   type InstalledToolset,
   type ToolsetConfigField,
   type ToolsetManifest,
@@ -15,6 +16,14 @@ import { BUILTIN_TOOLSETS, installNpmPackageToolset } from '@bendyline/gezel-cat
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { roleToolsetGroups } from '../../chat/role-tool-filter.js';
+import {
+  customMcpToolsetId,
+  deleteImportedMcpSecrets,
+  discoverProjectMcpToolsets,
+  importedRuntimeFor,
+  parseMcpConfigText,
+  storeImportedMcpSecrets,
+} from '../../toolsets/custom-mcp.js';
 import { isTrustedConstrainedToolset } from '../../toolsets/trust.js';
 import type { ServiceContext } from '../context.js';
 
@@ -169,7 +178,32 @@ export function catalogRoutes(ctx: ServiceContext): Hono {
   app.get('/installed-toolsets', async (c) => {
     const scope = scopeFromQuery(c.req.query());
     if ('error' in scope) return c.json({ error: scope.error }, 400);
-    const roster = await ctx.store.listInstalledToolsets(scope);
+    let roster = await ctx.store.listInstalledToolsets(scope);
+    let discoveryWarnings: Array<{ serverName?: string; message: string }> = [];
+    if (scope.kind === 'project') {
+      const workspaceDir = await ctx.store.projectWorkspaceDir(scope.projectId).catch(() => null);
+      if (workspaceDir) {
+        const discovered = await discoverProjectMcpToolsets(workspaceDir, scope.projectId);
+        discoveryWarnings = discovered.warnings;
+        const discoveredNames = new Set(
+          discovered.toolsets
+            .map((entry) => entry.installed.runtime)
+            .flatMap((runtime) => (runtime.kind === 'custom-mcp' ? [runtime.serverName] : [])),
+        );
+        // A canonical project file is the live source of truth. If the user
+        // previously imported the same named server manually, hide that stale
+        // copy so it is not started twice.
+        roster = [
+          ...roster.filter(
+            (entry) =>
+              entry.runtime.kind !== 'custom-mcp' ||
+              entry.runtime.source.kind !== 'imported' ||
+              !discoveredNames.has(entry.runtime.serverName),
+          ),
+          ...discovered.toolsets.map((entry) => entry.installed),
+        ];
+      }
+    }
     // Include the gezel's role default groups so the UI can render
     // an "inheriting role default" banner when the scope has no
     // built-in entries. Only computed for gezel scope.
@@ -183,7 +217,75 @@ export function catalogRoutes(ctx: ServiceContext): Hono {
       );
       roleDefault = { role, groupIds, groupNames };
     }
-    return c.json({ toolsets: roster, ...(roleDefault ? { roleDefault } : {}) });
+    return c.json({
+      toolsets: roster,
+      ...(roleDefault ? { roleDefault } : {}),
+      ...(discoveryWarnings.length > 0 ? { discoveryWarnings } : {}),
+    });
+  });
+
+  /**
+   * Import user-supplied MCP JSON into a normal toolset scope. Environment
+   * variables and headers are routed to SecretStore; the installed roster
+   * contains only the normalized command/URL plus secret field names.
+   */
+  app.post('/custom-toolsets/import', async (c) => {
+    const parsedBody = ImportCustomMcpConfigRequestSchema.safeParse(await c.req.json());
+    if (!parsedBody.success) {
+      return c.json(
+        { error: parsedBody.error.issues[0]?.message ?? 'invalid import request' },
+        400,
+      );
+    }
+    const body = parsedBody.data;
+    if (body.scope.kind === 'system') {
+      return c.json({ error: 'Custom toolsets cannot be installed into the system scope' }, 400);
+    }
+    if (body.scope.kind === 'gezel') {
+      const gezel = await ctx.store.getGezel(body.scope.gezelId);
+      if (!gezel) return c.json({ error: 'gezel not found' }, 404);
+    }
+    if (body.scope.kind === 'project') {
+      const project = await ctx.store.getProject(body.scope.projectId).catch(() => null);
+      if (!project) return c.json({ error: 'project not found' }, 404);
+    }
+    if (!resolveSecurityPolicy(await ctx.store.readConfig()).allowNonBuiltinToolsets) {
+      return c.json(
+        {
+          error:
+            'Security policy: external services are disabled, so custom MCP servers cannot be registered. Raise the security level in Settings → Security & Compliance.',
+        },
+        403,
+      );
+    }
+
+    let parsed: ReturnType<typeof parseMcpConfigText>;
+    try {
+      parsed = parseMcpConfigText(body.text);
+    } catch (error) {
+      return c.json({ error: error instanceof Error ? error.message : String(error) }, 400);
+    }
+
+    const roster = await ctx.store.listInstalledToolsets(body.scope);
+    let next = [...roster];
+    const imported: string[] = [];
+    const installedAt = new Date().toISOString();
+    for (const definition of parsed.servers) {
+      const toolsetId = customMcpToolsetId(body.scope, definition.name);
+      await storeImportedMcpSecrets(ctx.secrets, toolsetId, definition);
+      const record: InstalledToolset = {
+        toolsetId,
+        sourceId: 'custom',
+        version: 'custom',
+        installedAt,
+        runtime: importedRuntimeFor(definition, body.sourceName),
+      };
+      next = [...next.filter((entry) => entry.toolsetId !== toolsetId), record];
+      imported.push(definition.name);
+    }
+    await ctx.store.writeInstalledToolsets(body.scope, next);
+    await ctx.chat.resetClient();
+    return c.json({ ok: true as const, imported, warnings: parsed.warnings });
   });
 
   app.get('/:kind', async (c) => {
@@ -403,6 +505,10 @@ export function catalogRoutes(ctx: ServiceContext): Hono {
     const next = roster.filter((t) => t.toolsetId !== id);
     if (next.length === roster.length) {
       return c.json({ error: 'not installed' }, 404);
+    }
+    const removed = roster.find((entry) => entry.toolsetId === id);
+    if (removed?.runtime.kind === 'custom-mcp' && removed.runtime.source.kind === 'imported') {
+      await deleteImportedMcpSecrets(ctx.secrets, id);
     }
     await ctx.store.writeInstalledToolsets(scope, next);
     await ctx.chat.resetClient();

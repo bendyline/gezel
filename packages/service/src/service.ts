@@ -1396,7 +1396,11 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   });
   // FS watcher for the MRU-top workspaces — turns an on-disk change into a
   // near-immediate refresh instead of waiting for the polling tick.
-  const workspaceWatch = new WorkspaceWatchManager({ store, indexManager: workspaceIndex });
+  const workspaceWatch = new WorkspaceWatchManager({
+    store,
+    indexManager: workspaceIndex,
+    onProjectMcpConfigChanged: (projectId) => chat.resetProjectToolsets(projectId),
+  });
 
   // Email sync engine. Drives mailbox linking + sync passes + outbound send.
   const mail = new MailManager({

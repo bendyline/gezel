@@ -33,20 +33,70 @@ import {
  */
 const AUTO_ASSIGNEE = '__auto';
 
+export type TaskCreationMode = 'one-time' | 'scheduled' | 'night-shift';
+
+const MODE_COPY: Record<
+  TaskCreationMode,
+  {
+    title: string;
+    subtitle: string;
+    generalLabel: string;
+    generalDescription: string;
+    featuredLabel: string;
+    featuredTitle: string;
+    featuredTagline: string;
+    submitLabel: string;
+    footnote: string;
+  }
+> = {
+  'one-time': {
+    title: 'New Task',
+    subtitle: 'Pick a craftbook — a proven recipe your crew follows step by step — or start blank.',
+    generalLabel: GENERAL_TASK_CARD.label,
+    generalDescription: GENERAL_TASK_CARD.description,
+    featuredLabel: 'Recommended',
+    featuredTitle: 'Recommended',
+    featuredTagline: 'proven recipes for this kind of project',
+    submitLabel: 'Create task',
+    footnote: 'Lands ready to fire — nothing runs until you fire it.',
+  },
+  scheduled: {
+    title: 'New Scheduled Task',
+    subtitle: 'Choose a repeatable craftbook, then set when each fresh run should begin.',
+    generalLabel: 'Blank scheduled task',
+    generalDescription: 'Define a repeatable job from scratch and run a fresh copy on a cadence.',
+    featuredLabel: 'For schedules',
+    featuredTitle: 'Scheduled craftbooks',
+    featuredTagline: 'recipes identified as safe for recurring unattended runs',
+    submitLabel: 'Create schedule',
+    footnote: 'Starts active and creates a fresh task on each scheduled run.',
+  },
+  'night-shift': {
+    title: 'New Night Shift Task',
+    subtitle: 'Choose work your crew can pick up unattended during the Night Shift window.',
+    generalLabel: 'Blank Night Shift task',
+    generalDescription: 'Define a one-off job that waits for Night Shift before it begins.',
+    featuredLabel: 'For Night Shift',
+    featuredTitle: 'Night Shift craftbooks',
+    featuredTagline: 'recipes identified as safe for unattended overnight work',
+    submitLabel: 'Queue for Night Shift',
+    footnote: 'Starts active, but only runs while Night Shift is on.',
+  },
+};
+
 /**
  * Modal for creating a new task, mirroring the New Project dialog's
  * gallery layout: a category rail, a card gallery whose star section is
  * the craftbooks recommended for this project, and a right-hand pane
  * with the selected recipe's steps + the task's properties.
  *
- * Tasks land as inert drafts ("ready to fire") — creating one never
- * starts a gezel. The fire affordance lives on the task detail
- * (`TaskManager.activate` kicks off the entry step from there). The one
- * exception is a scheduled general task: cron hosts must be active to
- * tick, and their schedule — not creation — is what starts work.
+ * One-time tasks land as inert drafts ("ready to fire"). Scheduled mode
+ * creates an active host that clones a fresh child on each tick; Night Shift
+ * creates active work whose dispatch is gated to the configured shift.
  */
 export function NewTaskDialog({
   open,
+  creationMode = 'one-time',
   defaultProjectId,
   projects,
   gezels,
@@ -55,6 +105,7 @@ export function NewTaskDialog({
   onCreated,
 }: {
   open: boolean;
+  creationMode?: TaskCreationMode;
   defaultProjectId: string;
   projects: Project[];
   gezels: GezelSummary[];
@@ -63,6 +114,7 @@ export function NewTaskDialog({
   onClose: () => void;
   onCreated: (created: Task) => Promise<void> | void;
 }) {
+  const modeCopy = MODE_COPY[creationMode];
   const [projectId, setProjectId] = useState(defaultProjectId);
   // Gallery data — re-fetched per project (applicability + suggestions
   // depend on the project's type and GitHub/branch state).
@@ -150,8 +202,16 @@ export function NewTaskDialog({
   useEffect(() => {
     if (!open || !booksLoaded || railInitialized) return;
     setRailInitialized(true);
-    if (suggestedIds.size > 0) setActiveRail('recommended');
-  }, [open, booksLoaded, railInitialized, suggestedIds]);
+    const hasFeatured =
+      creationMode === 'one-time'
+        ? suggestedIds.size > 0
+        : books.some((book) =>
+            creationMode === 'scheduled'
+              ? book.manifest.runModes?.scheduled
+              : book.manifest.runModes?.nightShift,
+          );
+    if (hasFeatured) setActiveRail('recommended');
+  }, [open, booksLoaded, railInitialized, suggestedIds, creationMode, books]);
 
   const selectedBook = selectedBookId
     ? (books.find((b) => b.manifest.id === selectedBookId) ?? null)
@@ -208,9 +268,26 @@ export function NewTaskDialog({
   const normalizedQuery = query.trim().toLowerCase();
   const searching = normalizedQuery.length > 0;
 
-  const suggestedBooks = useMemo(
-    () => books.filter((b) => suggestedIds.has(b.manifest.id)),
-    [books, suggestedIds],
+  const suggestedBooks = useMemo(() => {
+    if (creationMode === 'one-time') {
+      return books.filter((b) => suggestedIds.has(b.manifest.id));
+    }
+    const key = creationMode === 'scheduled' ? 'scheduled' : 'nightShift';
+    return books
+      .filter((b) => b.manifest.runModes?.[key])
+      .sort((a, b) => {
+        const aRecommended = a.manifest.runModes?.[key] === 'recommended' ? 1 : 0;
+        const bRecommended = b.manifest.runModes?.[key] === 'recommended' ? 1 : 0;
+        return bRecommended - aRecommended || a.manifest.name.localeCompare(b.manifest.name);
+      });
+  }, [books, suggestedIds, creationMode]);
+  const isRecommended = useCallback(
+    (book: BookItem) => {
+      if (creationMode === 'one-time') return suggestedIds.has(book.manifest.id);
+      const key = creationMode === 'scheduled' ? 'scheduled' : 'nightShift';
+      return book.manifest.runModes?.[key] === 'recommended';
+    },
+    [creationMode, suggestedIds],
   );
   const filteredBooks = useMemo(() => {
     if (!searching) return books;
@@ -222,7 +299,7 @@ export function NewTaskDialog({
   }, [books, searching, normalizedQuery]);
   const generalMatches =
     !searching ||
-    `${GENERAL_TASK_CARD.label} ${GENERAL_TASK_CARD.description} blank fresh`
+    `${modeCopy.generalLabel} ${modeCopy.generalDescription} blank fresh`
       .toLowerCase()
       .includes(normalizedQuery);
 
@@ -242,8 +319,11 @@ export function NewTaskDialog({
       return [
         {
           id: 'recommended',
-          title: projectType ? `Recommended for ${projectType.label}` : 'Recommended',
-          tagline: 'proven recipes for this kind of project',
+          title:
+            creationMode === 'one-time' && projectType
+              ? `Recommended for ${projectType.label}`
+              : modeCopy.featuredTitle,
+          tagline: modeCopy.featuredTagline,
           books: suggestedBooks,
         },
       ];
@@ -260,7 +340,18 @@ export function NewTaskDialog({
       ];
     }
     return [{ id: 'all', title: 'All craftbooks', tagline: undefined, books }];
-  }, [searching, query, filteredBooks, activeRail, suggestedBooks, projectType, lenses, books]);
+  }, [
+    searching,
+    query,
+    filteredBooks,
+    activeRail,
+    suggestedBooks,
+    projectType,
+    lenses,
+    books,
+    creationMode,
+    modeCopy,
+  ]);
 
   const selectedNeeds: CraftbookToolsetNeed[] = selectedBook
     ? (missingToolsets[selectedBook.manifest.id] ?? [])
@@ -273,6 +364,11 @@ export function NewTaskDialog({
       setError('');
       if (!projectId) {
         setError('Pick a project.');
+        return;
+      }
+      const cronExpr = cron.trim();
+      if (creationMode === 'scheduled' && !cronExpr) {
+        setError('Enter a schedule.');
         return;
       }
 
@@ -296,21 +392,49 @@ export function NewTaskDialog({
         const stringified = stringifyParamValues(params);
         setBusy(true);
         try {
-          const created = await api.createTask(projectId, {
-            title: title.trim() || m.name,
-            description: composeCraftbookDescription(m, stringified),
-            craftbookId: m.id,
-            ...(selectedBook.item.sourceId
-              ? { craftbookSourceId: selectedBook.item.sourceId }
-              : {}),
-            ...(assignee ? { assignee } : {}),
-            status: 'draft',
-            ...(Object.keys(stringified).length > 0 ? { craftbookParams: stringified } : {}),
-          });
+          const created =
+            creationMode === 'scheduled'
+              ? await api.createTask(projectId, {
+                  title: title.trim() || m.name,
+                  description: `Recurring scheduled task. ${composeCraftbookDescription(m, stringified)} Each scheduled run creates a fresh task from this recipe.`,
+                  steps: [
+                    {
+                      name: 'Wait for schedule',
+                      prompt:
+                        'This host holds a recurring schedule. It does not perform the work itself; each tick creates a fresh child task.',
+                    },
+                  ],
+                  spawnsCraftbookId: m.id,
+                  ...(selectedBook.item.sourceId
+                    ? { spawnsCraftbookSourceId: selectedBook.item.sourceId }
+                    : {}),
+                  ...(assignee ? { assignee } : {}),
+                  cron: { expression: cronExpr, overlap: cronOverlap },
+                  ...(Object.keys(stringified).length > 0
+                    ? { spawnsCraftbookParams: stringified }
+                    : {}),
+                })
+              : await api.createTask(projectId, {
+                  title: title.trim() || m.name,
+                  description: composeCraftbookDescription(m, stringified),
+                  craftbookId: m.id,
+                  ...(selectedBook.item.sourceId
+                    ? { craftbookSourceId: selectedBook.item.sourceId }
+                    : {}),
+                  ...(assignee ? { assignee } : {}),
+                  ...(creationMode === 'one-time'
+                    ? { status: 'draft' as const }
+                    : { nightShift: { enabled: true }, dispatchEntry: true }),
+                  ...(Object.keys(stringified).length > 0 ? { craftbookParams: stringified } : {}),
+                });
           // Stamp invocation params as an entry-step note (best-effort),
           // mirroring the terminal launcher, so the gezel reads them via
           // `read_task_notes` when the task fires.
-          if (Object.keys(stringified).length > 0 && created.activeStepId) {
+          if (
+            creationMode !== 'scheduled' &&
+            Object.keys(stringified).length > 0 &&
+            created.activeStepId
+          ) {
             const lines = ['# Invocation parameters', ''];
             for (const [k, v] of Object.entries(stringified)) lines.push(`- **${k}**: ${v}`);
             await api
@@ -348,20 +472,33 @@ export function NewTaskDialog({
         .filter(Boolean)
         .map((name) => ({ name }));
       if (steps.length === 0) steps.push({ name: 'Main' });
-      const cronExpr = cron.trim();
       setBusy(true);
       try {
-        const created = await api.createTask(projectId, {
-          title: t,
-          description: description.trim(),
-          steps,
-          ...(assignee ? { assignee } : {}),
-          // Drafts cannot host a schedule — a cron task must be active to
-          // tick, and it is the schedule (not creation) that starts work.
-          ...(cronExpr
-            ? { cron: { expression: cronExpr, overlap: cronOverlap } }
-            : { status: 'draft' as const }),
-        });
+        const created =
+          creationMode === 'scheduled'
+            ? await api.createTask(projectId, {
+                title: t,
+                description: description.trim(),
+                steps: [
+                  {
+                    name: 'Wait for schedule',
+                    prompt:
+                      'This host holds a recurring schedule. It does not perform the work itself; each tick creates a fresh child task.',
+                  },
+                ],
+                spawnsSteps: steps,
+                ...(assignee ? { assignee } : {}),
+                cron: { expression: cronExpr, overlap: cronOverlap },
+              })
+            : await api.createTask(projectId, {
+                title: t,
+                description: description.trim(),
+                steps,
+                ...(assignee ? { assignee } : {}),
+                ...(creationMode === 'one-time'
+                  ? { status: 'draft' as const }
+                  : { nightShift: { enabled: true }, dispatchEntry: true }),
+              });
         await onCreated(created);
         onClose();
       } catch (err) {
@@ -372,6 +509,7 @@ export function NewTaskDialog({
     },
     [
       busy,
+      creationMode,
       projectId,
       selectedBook,
       missingToolsets,
@@ -392,7 +530,6 @@ export function NewTaskDialog({
       ? (selectedBook.manifest.paramSchema as SquisqAnnotatedSchema)
       : null;
   const createDisabled = busy || (selectedBook !== null && selectedNeeds.length > 0);
-  const scheduled = !selectedBook && cron.trim().length > 0;
 
   return (
     <Dialog.Root
@@ -408,12 +545,9 @@ export function NewTaskDialog({
             <header className="gz-npd-header">
               <div className="gz-npd-header-copy">
                 <Dialog.Title asChild>
-                  <h3>New Task</h3>
+                  <h3>{modeCopy.title}</h3>
                 </Dialog.Title>
-                <p className="gz-npd-header-sub">
-                  Pick a craftbook — a proven recipe your crew follows step by step — or start
-                  blank.
-                </p>
+                <p className="gz-npd-header-sub">{modeCopy.subtitle}</p>
               </div>
               <label className="gz-npd-search">
                 <span className="sr-only">Search craftbooks</span>
@@ -434,7 +568,7 @@ export function NewTaskDialog({
                     onClick={() => setActiveRail('recommended')}
                   >
                     <ProjectGlyph glyph="sprout" size={16} />
-                    <span className="gz-npd-rail-label">Recommended</span>
+                    <span className="gz-npd-rail-label">{modeCopy.featuredLabel}</span>
                     <span className="gz-npd-rail-count">{suggestedBooks.length}</span>
                   </button>
                 )}
@@ -468,8 +602,8 @@ export function NewTaskDialog({
                     </div>
                     <div className="gz-npd-grid">
                       <GalleryCard
-                        label={GENERAL_TASK_CARD.label}
-                        description={GENERAL_TASK_CARD.description}
+                        label={modeCopy.generalLabel}
+                        description={modeCopy.generalDescription}
                         glyph={GENERAL_TASK_CARD.glyph}
                         index={0}
                         active={selectedBookId === null}
@@ -496,7 +630,7 @@ export function NewTaskDialog({
                             glyph={craftbookGlyph(b.manifest)}
                             {...(b.item.iconSvg ? { iconSvg: b.item.iconSvg } : {})}
                             {...(b.item.logoUrl ? { logoUrl: b.item.logoUrl } : {})}
-                            suggested={suggestedIds.has(b.manifest.id)}
+                            suggested={isRecommended(b)}
                             index={index + 1}
                             active={b.manifest.id === selectedBookId}
                             onSelect={() => selectBook(b)}
@@ -544,7 +678,13 @@ export function NewTaskDialog({
                       </div>
                       <p className="gz-npd-hero-eyebrow">
                         Craftbook
-                        {suggestedIds.has(selectedBook.manifest.id) ? ' · recommended' : ''}
+                        {isRecommended(selectedBook)
+                          ? creationMode === 'night-shift'
+                            ? ' · recommended for Night Shift'
+                            : creationMode === 'scheduled'
+                              ? ' · recommended for schedules'
+                              : ' · recommended'
+                          : ''}
                       </p>
                       <h4 className="gz-npd-hero-name">{selectedBook.manifest.name}</h4>
                       <p className="gz-npd-hero-description">{selectedBook.manifest.description}</p>
@@ -582,12 +722,15 @@ export function NewTaskDialog({
                       <div className="gz-npd-hero-art" aria-hidden="true">
                         <ProjectGlyph glyph={GENERAL_TASK_CARD.glyph} size={34} />
                       </div>
-                      <p className="gz-npd-hero-eyebrow">Blank task</p>
-                      <h4 className="gz-npd-hero-name">{GENERAL_TASK_CARD.label}</h4>
-                      <p className="gz-npd-hero-description">
-                        Name the job, describe what success looks like, and list the steps. It lands
-                        ready to fire.
+                      <p className="gz-npd-hero-eyebrow">
+                        {creationMode === 'one-time'
+                          ? 'Blank task'
+                          : creationMode === 'scheduled'
+                            ? 'Blank schedule'
+                            : 'Blank Night Shift task'}
                       </p>
+                      <h4 className="gz-npd-hero-name">{modeCopy.generalLabel}</h4>
+                      <p className="gz-npd-hero-description">{modeCopy.generalDescription}</p>
                     </div>
                   )}
                   <div className="gz-npd-pane-form">
@@ -724,58 +867,52 @@ export function NewTaskDialog({
                         </small>
                       )}
                     </label>
-                    {!selectedBook && (
-                      <details className="gz-ntd-advanced">
-                        <summary>Schedule (advanced)</summary>
+                    {creationMode === 'scheduled' && (
+                      <div className="gz-ntd-schedule">
+                        <p className="gz-npd-give-eyebrow">Schedule</p>
                         <label>
-                          Cron expression <span className="muted">(5-field)</span>
+                          Cron expression <span className="muted">(UTC, 5-field)</span>
                           <input
                             value={cron}
                             placeholder="e.g. 0 9 * * 1 — every Monday 09:00"
                             onChange={(e) => setCron(e.target.value)}
                           />
                         </label>
-                        {cron.trim() && (
-                          <label>
-                            Overlap policy
-                            <Select.Root
-                              value={cronOverlap}
-                              onValueChange={(v) => setCronOverlap(v as TaskCronOverlap)}
-                            >
-                              <Select.Trigger>
-                                <Select.Value />
-                              </Select.Trigger>
-                              <Select.Content>
-                                <Select.Item value="skip">
-                                  skip — don't spawn if a prior run is still active
-                                </Select.Item>
-                                <Select.Item value="queue">
-                                  queue — always spawn, let the runner throttle
-                                </Select.Item>
-                                <Select.Item value="concurrent">
-                                  concurrent — spawn unconditionally
-                                </Select.Item>
-                              </Select.Content>
-                            </Select.Root>
-                          </label>
-                        )}
-                      </details>
+                        <label>
+                          Overlap policy
+                          <Select.Root
+                            value={cronOverlap}
+                            onValueChange={(v) => setCronOverlap(v as TaskCronOverlap)}
+                          >
+                            <Select.Trigger>
+                              <Select.Value />
+                            </Select.Trigger>
+                            <Select.Content>
+                              <Select.Item value="skip">
+                                skip — don't spawn if a prior run is still active
+                              </Select.Item>
+                              <Select.Item value="queue">
+                                queue — always spawn, let the runner throttle
+                              </Select.Item>
+                              <Select.Item value="concurrent">
+                                concurrent — spawn unconditionally
+                              </Select.Item>
+                            </Select.Content>
+                          </Select.Root>
+                        </label>
+                      </div>
                     )}
                   </div>
                   {error && <p className="error small">{error}</p>}
                 </div>
                 <div className="gz-npd-pane-footer">
-                  <p className="gz-ntd-footnote">
-                    {scheduled
-                      ? 'Scheduled tasks start active and run on their cadence.'
-                      : 'Lands ready to fire — nothing runs until you fire it.'}
-                  </p>
+                  <p className="gz-ntd-footnote">{modeCopy.footnote}</p>
                   <Dialog.Actions>
                     <button type="button" onClick={onClose} disabled={busy}>
                       Cancel
                     </button>
                     <button type="submit" className="primary" disabled={createDisabled}>
-                      {busy ? 'Creating…' : 'Create task'}
+                      {busy ? 'Creating…' : modeCopy.submitLabel}
                     </button>
                   </Dialog.Actions>
                 </div>

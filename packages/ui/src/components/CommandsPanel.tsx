@@ -258,7 +258,12 @@ export function CommandsPanel({ projectId, onStageCommand }: Props) {
             c.run.toLowerCase().includes(q) ||
             (c.description ? c.description.toLowerCase().includes(q) : false)
           );
-        });
+        })
+        .sort((a, b) =>
+          kind === 'npm-script' || kind === 'workspace-script'
+            ? a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
+            : 0,
+        );
       if (items.length > 0) groups.push({ kind, title, items });
     }
     return groups;
@@ -474,6 +479,32 @@ export function CommandsPanel({ projectId, onStageCommand }: Props) {
               </ul>
             </section>
           )}
+          {grouped.map((group) => (
+            <section key={group.kind} className="commands-panel-group">
+              <h4 className="commands-panel-group-title muted small">{group.title}</h4>
+              <ul className="commands-panel-list">
+                {group.items.map((cmd) => (
+                  <li key={`${cmd.kind}:${cmd.name}:${cmd.source}`}>
+                    <button
+                      type="button"
+                      className="commands-panel-item"
+                      onClick={() =>
+                        onStageCommand ? stageCommand(cmd.run) : void onCopy(cmd.run)
+                      }
+                      title={onStageCommand ? `Stage: ${cmd.run}` : `Copy: ${cmd.run}`}
+                    >
+                      <span className="commands-panel-item-name">{cmd.name}</span>
+                      {cmd.description && (
+                        <span className="commands-panel-item-desc muted small">
+                          {cmd.description}
+                        </span>
+                      )}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ))}
           {useSuggestedLayout ? (
             <>
               <section className="commands-panel-group">
@@ -539,32 +570,6 @@ export function CommandsPanel({ projectId, onStageCommand }: Props) {
               </ul>
             </section>
           )}
-          {grouped.map((group) => (
-            <section key={group.kind} className="commands-panel-group">
-              <h4 className="commands-panel-group-title muted small">{group.title}</h4>
-              <ul className="commands-panel-list">
-                {group.items.map((cmd) => (
-                  <li key={`${cmd.kind}:${cmd.name}:${cmd.source}`}>
-                    <button
-                      type="button"
-                      className="commands-panel-item"
-                      onClick={() =>
-                        onStageCommand ? stageCommand(cmd.run) : void onCopy(cmd.run)
-                      }
-                      title={onStageCommand ? `Stage: ${cmd.run}` : `Copy: ${cmd.run}`}
-                    >
-                      <span className="commands-panel-item-name">{cmd.name}</span>
-                      {cmd.description && (
-                        <span className="commands-panel-item-desc muted small">
-                          {cmd.description}
-                        </span>
-                      )}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          ))}
         </div>
       )}
       {toast && <output className="commands-panel-toast">{toast}</output>}

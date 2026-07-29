@@ -373,4 +373,92 @@ describe('NewTaskDialog', () => {
     expect(screen.getByTestId('toolset-setup')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Create task' })).toBeDisabled();
   });
+
+  it('curates scheduling candidates and creates a recurring craftbook host', async () => {
+    vi.mocked(api.listProjectCraftbooks).mockResolvedValue({
+      items: [
+        bookItem('weekly-review', 'Weekly Review', {
+          runModes: { scheduled: 'recommended' },
+        }),
+        bookItem('launch-check', 'Launch Check'),
+      ],
+      missingToolsets: {},
+      projectType: null,
+      suggestedIds: [],
+    } as never);
+    vi.mocked(api.createTask).mockResolvedValue({
+      ref: 'pj-alpha/7',
+      projectId: 'pj-alpha',
+      num: 7,
+      cron: { expression: '0 9 * * 1' },
+    } as Task);
+
+    renderDialog({ creationMode: 'scheduled' });
+    expect(await screen.findByText('Scheduled craftbooks')).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: 'Weekly Review' })).toBeInTheDocument();
+    expect(screen.queryByRole('radio', { name: 'Launch Check' })).not.toBeInTheDocument();
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('radio', { name: 'Weekly Review' }));
+    const cronLabel = screen.getByText(/^Cron expression/);
+    await user.type(
+      cronLabel.parentElement?.querySelector('input') as HTMLInputElement,
+      '0 9 * * 1',
+    );
+    await user.click(screen.getByRole('button', { name: 'Create schedule' }));
+
+    await waitFor(() => {
+      expect(api.createTask).toHaveBeenCalledWith(
+        'pj-alpha',
+        expect.objectContaining({
+          spawnsCraftbookId: 'weekly-review',
+          spawnsCraftbookSourceId: 'bundled',
+          cron: { expression: '0 9 * * 1', overlap: 'skip' },
+          steps: [expect.objectContaining({ name: 'Wait for schedule' })],
+        }),
+      );
+    });
+    expect(vi.mocked(api.createTask).mock.calls[0]?.[1]).not.toHaveProperty('craftbookId');
+  });
+
+  it('creates active work gated to Night Shift', async () => {
+    vi.mocked(api.listProjectCraftbooks).mockResolvedValue({
+      items: [
+        bookItem('deep-audit', 'Deep Audit', {
+          runModes: { nightShift: 'recommended' },
+        }),
+        bookItem('quick-note', 'Quick Note'),
+      ],
+      missingToolsets: {},
+      projectType: null,
+      suggestedIds: [],
+    } as never);
+    vi.mocked(api.createTask).mockResolvedValue({
+      ref: 'pj-alpha/8',
+      projectId: 'pj-alpha',
+      num: 8,
+      nightShift: { enabled: true },
+    } as Task);
+
+    renderDialog({ creationMode: 'night-shift' });
+    expect(await screen.findByText('Night Shift craftbooks')).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: 'Deep Audit' })).toBeInTheDocument();
+    expect(screen.queryByRole('radio', { name: 'Quick Note' })).not.toBeInTheDocument();
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('radio', { name: 'Deep Audit' }));
+    await user.click(screen.getByRole('button', { name: 'Queue for Night Shift' }));
+
+    await waitFor(() => {
+      expect(api.createTask).toHaveBeenCalledWith(
+        'pj-alpha',
+        expect.objectContaining({
+          craftbookId: 'deep-audit',
+          nightShift: { enabled: true },
+          dispatchEntry: true,
+        }),
+      );
+    });
+    expect(vi.mocked(api.createTask).mock.calls[0]?.[1]).not.toHaveProperty('status');
+  });
 });

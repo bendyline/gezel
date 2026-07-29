@@ -73,6 +73,9 @@ vi.mock('../components/ProjectChat.js', () => ({
 vi.mock('../components/ProjectTimeline.js', () => ({ ProjectTimeline: () => null }));
 vi.mock('../components/PromoteToTabButton.js', () => ({ PromoteToTabButton: () => null }));
 vi.mock('../components/PromptDialog.js', () => ({ PromptDialog: () => null }));
+vi.mock('../components/ToolsetsEditor.js', () => ({
+  ToolsetsEditor: () => <div data-testid="toolsets-editor" />,
+}));
 vi.mock('./HistoryView.js', () => ({ HistoryView: () => null }));
 vi.mock('./ProjectGithubView.js', () => ({ ProjectGithubView: () => null }));
 vi.mock('./ScriptsView.js', () => ({ ScriptsView: () => null }));
@@ -90,6 +93,8 @@ const PROJECTS: Project[] = [
 describe('ProjectsView', () => {
   beforeEach(() => {
     window.localStorage.removeItem('gezel.projectsSidebarCollapsed');
+    window.localStorage.removeItem('gezel:project-output-fraction');
+    window.localStorage.removeItem('gezel:project-output-fraction:v2');
     vi.mocked(api.listProjects).mockResolvedValue({ projects: PROJECTS } as never);
     vi.mocked(api.listGezels).mockResolvedValue({ gezels: [] } as never);
     vi.mocked(api.listCatalogItems).mockResolvedValue({ items: [] } as never);
@@ -148,6 +153,17 @@ describe('ProjectsView', () => {
     });
   });
 
+  it('does not apply the collapsed project-list grid to a detail-only project tab', async () => {
+    window.localStorage.setItem('gezel.projectsSidebarCollapsed', '1');
+
+    render(<ProjectsView forceProjectId="pj-alpha" />);
+
+    const projectChat = await screen.findByTestId('project-chat');
+    const layout = projectChat.closest('.two-col');
+    expect(layout).toHaveClass('detail-only');
+    expect(layout).not.toHaveClass('sidebar-collapsed');
+  });
+
   it('uses the bounded HTML-page search when opening a project', async () => {
     vi.mocked(api.listProjectWorkspaceHtmlPages).mockResolvedValue({
       files: [{ name: 'index.html', path: 'site/index.html', isDirectory: false }],
@@ -159,6 +175,28 @@ describe('ProjectsView', () => {
       expect(api.listProjectWorkspaceHtmlPages).toHaveBeenCalledWith('pj-alpha');
     });
     expect(api.listProjectWorkspace).not.toHaveBeenCalled();
+  });
+
+  it('resizes the output pane with a valid percentage grid track', async () => {
+    vi.mocked(api.listProjectWorkspaceHtmlPages).mockResolvedValue({
+      files: [{ name: 'index.html', path: 'index.html', isDirectory: false }],
+    });
+
+    render(<ProjectsView forceProjectId="pj-alpha" />);
+
+    const separator = await screen.findByRole('separator', { name: 'Resize output pane' });
+    const projectBody = separator.closest('.project-body') as HTMLDivElement;
+    Object.defineProperty(projectBody, 'clientWidth', { configurable: true, value: 1_000 });
+
+    expect(projectBody.style.getPropertyValue('--project-output-width')).toBe('42.00%');
+
+    fireEvent.mouseDown(separator, { clientX: 420 });
+    fireEvent.mouseMove(window, { clientX: 520 });
+
+    expect(projectBody.style.getPropertyValue('--project-output-width')).toBe('52.00%');
+    expect(window.localStorage.getItem('gezel:project-output-fraction:v2')).toBe('0.5200');
+
+    fireEvent.mouseUp(window);
   });
 
   it('indexes every section of the project About page', async () => {
@@ -174,6 +212,7 @@ describe('ProjectsView', () => {
       'Mission objectives',
       'Connections',
       'History',
+      'Toolsets',
       'Settings',
     ]);
     expect(links.map((link) => link.getAttribute('href'))).toEqual([
@@ -181,6 +220,7 @@ describe('ProjectsView', () => {
       '#project-about-mission',
       '#project-about-connections',
       '#project-about-history',
+      '#project-about-toolsets',
       '#project-about-settings',
     ]);
   });

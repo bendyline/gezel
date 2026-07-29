@@ -28,6 +28,7 @@ const FULL_DOC: CraftbookDoc = {
   entryStepId: 'fetch',
   triggers: ['scrape prices', 'price check'],
   command: 'scrape-prices',
+  runModes: { scheduled: 'recommended', nightShift: 'supported' },
   steps: [
     {
       id: 'fetch',

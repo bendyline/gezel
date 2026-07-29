@@ -2936,7 +2936,11 @@ body.app-resizing webview {
   margin: 0;
 }
 
-.side li button {
+/* Project and gezel rows also contain trailing actions triggers. Keep this
+   full-width treatment on each row's primary button only: applying it to an
+   actions trigger makes that compact button consume the rail and squeezes the
+   row label down to a few characters. */
+.side li button:not(.project-actions-trigger):not(.gezel-actions-trigger) {
   display: block;
   width: 100%;
   text-align: left;
@@ -2948,7 +2952,7 @@ body.app-resizing webview {
   cursor: pointer;
 }
 
-.side li button.active {
+.side li button:not(.project-actions-trigger):not(.gezel-actions-trigger).active {
   background: rgba(176, 114, 76, 0.15);
 }
 
@@ -7415,6 +7419,7 @@ button.danger {
   gap: 1rem;
   padding: 1rem;
   height: 100%;
+  min-width: 0;
   overflow: hidden;
 }
 
@@ -7460,11 +7465,57 @@ button.danger {
   cursor: not-allowed;
 }
 
+.tasks-kind-filter {
+  flex-shrink: 0;
+}
+
+/* Split creation key: the main action stays one click away while the narrow
+   attached key opens less-common task modes. Both halves share the normal
+   button radius on their outside corners and meet on a single seam. */
+.tasks-create-split {
+  display: inline-flex;
+  align-items: stretch;
+}
+
+.tasks-filters button.tasks-create-main {
+  border-radius: var(--radius-md) 0 0 var(--radius-md);
+}
+
+.tasks-filters button.tasks-create-more {
+  min-width: 2rem;
+  padding-inline: 0.55rem;
+  border-left: 1px solid color-mix(in srgb, var(--accent) 72%, var(--border));
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+}
+
+.tasks-create-menu .app-nav-menu-item {
+  display: flex;
+  min-width: 15rem;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.1rem;
+}
+
+.tasks-create-menu .app-nav-menu-item small {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.tasks-create-menu .app-nav-menu-item[data-highlighted] small {
+  color: inherit;
+}
+
 .tasks-layout {
   display: grid;
-  grid-template-columns: 280px 1fr;
+  /* `1fr` has an automatic min-content floor. The task header + workshop
+     bench can be much wider than the space beside the list, which used to
+     widen this whole grid past the project viewport and clip the right side.
+     Give the detail track a real zero floor; the bench owns its own
+     horizontal scroller. */
+  grid-template-columns: 280px minmax(0, 1fr);
   gap: 1rem;
   flex: 1;
+  min-width: 0;
   min-height: 0;
 }
 
@@ -7721,6 +7772,8 @@ button.danger {
 }
 
 .task-detail-panel {
+  min-width: 0;
+  overflow-x: hidden;
   overflow-y: auto;
   padding: 0 0.25rem;
 }
@@ -7729,6 +7782,7 @@ button.danger {
   display: flex;
   flex-direction: column;
   gap: 1rem;
+  min-width: 0;
   min-height: 0;
   flex: 1;
 }
@@ -7754,6 +7808,10 @@ button.danger {
   align-items: flex-start;
   gap: 1rem;
   flex-wrap: wrap;
+}
+
+.task-detail-header > :first-child {
+  min-width: 0;
 }
 
 /* The plan body is rendered as <pre> to preserve any intentional indent
@@ -7784,6 +7842,7 @@ button.danger {
 
 .task-detail h3 {
   margin: 0.2rem 0 0 0;
+  overflow-wrap: anywhere;
 }
 
 .task-detail-actions {
@@ -8472,6 +8531,7 @@ button.bench-step-foot:disabled {
   display: flex;
   align-items: stretch;
   gap: 0.6rem;
+  min-width: 0;
   /* Divider the Task/Chat tabs sit on: the active tab's open bottom overlaps
      this line (see .task-tab-btn.active) so it reads as a browser-style tab
      fused into the view below rather than a floating pill. */
@@ -13948,6 +14008,77 @@ a.license-button:hover {
   min-height: 0;
 }
 
+.toolsets-notice {
+  margin: 0.15rem 0 0;
+}
+
+.toolsets-picker-tabs {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.toolsets-picker-tabs > .gz-tabs-content {
+  flex: 1;
+  min-height: 0;
+}
+
+.toolsets-picker-tabs > .gz-tabs-content[data-state="inactive"] {
+  display: none;
+}
+
+.toolsets-custom-import {
+  width: min(42rem, 72vw);
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding-top: 0.25rem;
+}
+
+.toolsets-custom-import h4,
+.toolsets-custom-import p {
+  margin: 0;
+}
+
+.toolsets-custom-import label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  color: var(--text);
+  font-size: var(--text-sm);
+}
+
+.toolsets-custom-import textarea {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  min-height: 14rem;
+  padding: 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--text-xs);
+  line-height: 1.45;
+}
+
+.toolsets-custom-file input {
+  padding: 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+}
+
+.toolsets-custom-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 0.6rem;
+}
+
 /* Tab panels live inside the dialog's flex column — let the active
    panel grow so the catalog browser can fill the available height. */
 .new-gezel-dialog .gz-tabs-root,
@@ -14390,10 +14521,10 @@ a.license-button:hover {
   min-height: 0;
 }
 .project-body.has-output {
-  --project-output-fraction: 0.42;
+  --project-output-width: 42%;
   display: grid;
   grid-template-columns:
-    minmax(12rem, calc(var(--project-output-fraction) * 100%))
+    minmax(12rem, var(--project-output-width))
     6px
     minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr);
@@ -15984,23 +16115,13 @@ a.license-button:hover {
   background: color-mix(in srgb, var(--warning, #e8c34a) 6%, transparent);
 }
 
-.gz-ntd-advanced {
+.gz-ntd-schedule {
   padding: 0.5rem 0.7rem;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
 }
 
-.gz-ntd-advanced summary {
-  color: var(--text-muted);
-  font-size: var(--text-sm);
-  cursor: pointer;
-}
-
-.gz-ntd-advanced[open] summary {
-  margin-bottom: 0.5rem;
-}
-
-.gz-ntd-advanced label {
+.gz-ntd-schedule label {
   display: block;
   margin-top: 0.4rem;
 }
@@ -16927,10 +17048,9 @@ a.license-button:hover {
    * the tabs with the stable input band so both sit below the Send / terminal
    * toolbar instead of following the variable recipient + context rows. */
   align-items: flex-end;
-  /* Keep the tabs just clear of the window edge without weakening their
-   * attached seam against the composer. */
+  /* Keep the tabs just clear of the window's right edge. Their bottom
+   * alignment is owned by the mode-specific toggle margin below. */
   padding-right: 2px;
-  padding-bottom: 2px;
   /* Negative margin lets the active tab's left edge overlap the
    * composer's right border by 1px, giving the "tab attached to
    * panel" look. */

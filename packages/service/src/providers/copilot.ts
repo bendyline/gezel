@@ -253,6 +253,7 @@ export class CopilotProvider implements LLMProvider {
           command: extra.command,
           args: extra.args,
           env: extra.env,
+          ...(extra.cwd ? { cwd: extra.cwd } : {}),
           tools: ['*'],
         };
       }

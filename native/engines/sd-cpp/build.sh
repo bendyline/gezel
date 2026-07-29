@@ -76,12 +76,13 @@ if [[ "$backend" == "auto" ]]; then
   esac
 fi
 
+source_map_flags="-ffile-prefix-map=$src=stable-diffusion.cpp -fmacro-prefix-map=$src=stable-diffusion.cpp -fdebug-prefix-map=$src=stable-diffusion.cpp"
 cmake_flags=(
   -DCMAKE_BUILD_TYPE=Release
   # Keep the CI checkout path out of __FILE__ assert strings; see the
   # longer note in native/engines/llama-cpp/build.sh. Unix-only.
-  "-DCMAKE_C_FLAGS=-ffile-prefix-map=$src=stable-diffusion.cpp"
-  "-DCMAKE_CXX_FLAGS=-ffile-prefix-map=$src=stable-diffusion.cpp"
+  "-DCMAKE_C_FLAGS=$source_map_flags"
+  "-DCMAKE_CXX_FLAGS=$source_map_flags"
   # Drops the unbundled libgomp.so.1 / VCOMP140.DLL load-time dependency
   # ggml's default OPENMP=ON bakes into libggml-base + libggml-cpu, and
   # here into sd-server itself. See the longer note in
@@ -100,6 +101,10 @@ cmake_flags=(
   # and matches the no-frontend binaries we already ship from CI.
   -DSD_SERVER_BUILD_FRONTEND=OFF
 )
+if [[ "$os" == "Darwin" ]]; then
+  macos_deployment_target="${MACOSX_DEPLOYMENT_TARGET:-13.0}"
+  cmake_flags+=("-DCMAKE_OSX_DEPLOYMENT_TARGET=$macos_deployment_target")
+fi
 # NOTE: upstream removed the `SD_BUILD_SERVER` option (commit
 # .../examples/CMakeLists.txt now unconditionally
 # `add_subdirectory(server)`); passing it produces a "manually-
@@ -107,7 +112,12 @@ cmake_flags=(
 case "$backend" in
   metal)  cmake_flags+=(-DSD_METAL=ON) ;;
   vulkan) cmake_flags+=(-DSD_VULKAN=ON) ;;
-  cuda)   cmake_flags+=(-DSD_CUDA=ON) ;;
+  cuda)
+    cmake_flags+=(-DSD_CUDA=ON)
+    cmake_flags+=(
+      "-DCMAKE_CUDA_FLAGS=-Xcompiler=-ffile-prefix-map=$src=stable-diffusion.cpp -Xcompiler=-fmacro-prefix-map=$src=stable-diffusion.cpp -Xcompiler=-fdebug-prefix-map=$src=stable-diffusion.cpp"
+    )
+    ;;
   cpu)    : ;;
   *) echo "unknown SD_BACKEND=$backend (valid: metal, vulkan, cuda, cpu)" >&2; exit 1 ;;
 esac

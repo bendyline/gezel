@@ -766,6 +766,9 @@ export class TaskManager {
       ...(input.craftbookParams && Object.keys(input.craftbookParams).length > 0
         ? { craftbookParams: input.craftbookParams }
         : {}),
+      ...(input.spawnsCraftbookParams && Object.keys(input.spawnsCraftbookParams).length > 0
+        ? { spawnsCraftbookParams: input.spawnsCraftbookParams }
+        : {}),
       activeStepId,
       ...(input.parentTaskRef ? { parentTaskRef: input.parentTaskRef } : {}),
       ...(extras?.origin ? { origin: extras.origin } : {}),
@@ -2904,6 +2907,7 @@ export class TaskManager {
       assignee: inheritedAssignee,
       craftbook: childCraftbook,
       ...(childSources.length > 0 ? { sourceCraftbookIds: childSources } : {}),
+      ...(parent.spawnsCraftbookParams ? { craftbookParams: parent.spawnsCraftbookParams } : {}),
       // A child of a night-shift host is itself night-shift work — the
       // runner gates its dispatch to an active shift. The child is a plain
       // task (no cron/spawn), so `onceADay` doesn't carry over.

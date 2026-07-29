@@ -71,6 +71,11 @@ concurrency:
 
 env:
   CMAKE_MIN: '3.24'
+  # The app's declared macOS floor. Never let `macos-latest` or a newer Xcode
+  # silently raise LC_BUILD_VERSION again: native-v0.1.23 inherited macOS 26
+  # from the runner and therefore could not load on otherwise-supported Macs.
+  # Electron 44 also requires macOS 13+, so 13 is the durable product floor.
+  MACOSX_DEPLOYMENT_TARGET: '13.0'
   # Current LunarG SDK on both platforms. The tarball/installer ships the
   # SPIRV-Headers CMake config required by ggml-vulkan, and LunarG keeps the
   # 1.4 SDK backward-compatible with older Vulkan targets.
@@ -941,6 +946,77 @@ jobs:
           fi
           echo "[rpath] no absolute LC_RPATH entries in $out"
 
+      - name: Assert macOS deployment target
+        if: steps.preflight.outputs.pinned == 'true' && startsWith(matrix.platform, 'darwin')
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="${{ steps.outdir.outputs.dir }}"
+          floor="$MACOSX_DEPLOYMENT_TARGET"
+          bad=0
+          checked=0
+          version_gt() {
+            awk -v left="$1" -v right="$2" 'BEGIN {
+              split(left, l, ".")
+              split(right, r, ".")
+              for (i = 1; i <= 3; i++) {
+                lv = (l[i] == "" ? 0 : l[i]) + 0
+                rv = (r[i] == "" ? 0 : r[i]) + 0
+                if (lv > rv) exit 0
+                if (lv < rv) exit 1
+              }
+              exit 1
+            }'
+          }
+          while IFS= read -r -d '' f; do
+            file -b "$f" 2>/dev/null | grep -q Mach-O || continue
+            checked=$((checked + 1))
+            minos="$(vtool -show-build "$f" 2>/dev/null | awk '$1 == "minos" { print $2; exit }')"
+            if [[ -z "$minos" ]]; then
+              echo "::error::$(basename "$f") has no parseable LC_BUILD_VERSION minos"
+              bad=1
+            elif version_gt "$minos" "$floor"; then
+              echo "::error::$(basename "$f") requires macOS $minos, above the declared $floor floor"
+              bad=1
+            else
+              printf '[floor] %-42s macOS %s\n' "$(basename "$f")" "$minos"
+            fi
+          done < <(find "$out" -type f ! -type l -print0)
+          if (( checked == 0 )); then
+            echo "::error::No Mach-O files found under $out"
+            exit 1
+          fi
+          if (( bad )); then
+            echo "::error::Set MACOSX_DEPLOYMENT_TARGET/CMAKE_OSX_DEPLOYMENT_TARGET in the build; do not raise the declared floor to match runner drift."
+            exit 1
+          fi
+          echo "[floor] $checked Mach-O file(s) are compatible with macOS $floor"
+
+      # Release binaries should identify upstream source paths, not the
+      # ephemeral hosted-runner checkout. Compiler prefix maps are configured
+      # in every build wrapper; this gate makes that policy fail closed when
+      # a compiler family or a newly-added engine ignores them.
+      - name: Assert no build-host paths
+        if: steps.preflight.outputs.pinned == 'true' && matrix.engine != 'uv'
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="${{ steps.outdir.outputs.dir }}"
+          bad=0
+          while IFS= read -r -d '' f; do
+            [[ -f "$f" && ! -L "$f" ]] || continue
+            if LC_ALL=C grep -aEq '/home/runner/work/|/Users/runner/work/|[A-Za-z]:\\a\\|[A-Za-z]:/a/' "$f"; then
+              echo "::error::$(basename "$f") embeds a hosted-runner checkout path"
+              LC_ALL=C strings "$f" | grep -E -m 3 '/home/runner/work/|/Users/runner/work/|[A-Za-z]:\\a\\|[A-Za-z]:/a/' || true
+              bad=1
+            fi
+          done < <(find "$out" -type f -print0)
+          if (( bad )); then
+            echo "::error::Fix the engine's compiler prefix/path-map flags rather than exempting the file."
+            exit 1
+          fi
+          echo "[paths] no hosted-runner checkout paths in $out"
+
       # ── Code-sign the engine binaries (gated on secrets) ──────
       # Sign HERE — after the smoke test, before the sha is computed and
       # the artifact uploaded — so the release's SHA256SUMS reflects the
@@ -1214,7 +1290,16 @@ jobs:
           COPYFILE_DISABLE: '1'
         run: |
           set -euo pipefail
-          tar -C "${{ steps.outdir.outputs.dir }}" -czf native-payload.tar.gz .
+          # Normalize intermediate ownership on both libarchive bsdtar
+          # (macOS/Windows) and GNU tar (Linux). The final release tar step
+          # also normalizes ordering and timestamps on its GNU-tar runner.
+          if tar --version 2>/dev/null | grep -qi bsdtar; then
+            tar --uid 0 --gid 0 --uname root --gname root \
+              -C "${{ steps.outdir.outputs.dir }}" -czf native-payload.tar.gz .
+          else
+            tar --owner=0 --group=0 --numeric-owner \
+              -C "${{ steps.outdir.outputs.dir }}" -czf native-payload.tar.gz .
+          fi
           ls -la native-payload.tar.gz
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -1404,6 +1489,7 @@ jobs:
           set -euo pipefail
           tag="${{ github.ref_name }}"
           version="${tag#native-v}"
+          source_date_epoch="$(git show -s --format=%ct "$GITHUB_SHA")"
           mkdir -p release
           cd native/build
           for platform in */ ; do
@@ -1412,7 +1498,10 @@ jobs:
             if [[ "$platform" == win32-* ]]; then
               (cd "$platform" && zip -r "../../../release/${archive_name}.zip" .)
             else
-              tar -C "$platform" -czf "../../release/${archive_name}.tar.gz" .
+              tar --sort=name \
+                --mtime="@${source_date_epoch}" \
+                --owner=0 --group=0 --numeric-owner \
+                -C "$platform" -czf "../../release/${archive_name}.tar.gz" .
             fi
           done
           cd ../../

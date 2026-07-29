@@ -143,6 +143,8 @@ import type {
   HandboekRenderMode,
   HandboekToc,
   HealthResponse,
+  ImportCustomMcpConfigRequest,
+  ImportCustomMcpConfigResponse,
   InsertAtMarkerInProjectWorkspaceFileRequest,
   InstallPackageRequest,
   InstallPackageResponse,
@@ -2197,6 +2199,12 @@ export class GezelClient {
     return this.request('POST', `/api/catalog/toolset/${encodeURIComponent(id)}/install`, body);
   }
 
+  importCustomMcpConfig(
+    body: ImportCustomMcpConfigRequest,
+  ): Promise<ImportCustomMcpConfigResponse> {
+    return this.request('POST', '/api/catalog/custom-toolsets/import', body);
+  }
+
   getToolsetConfig(id: string): Promise<{
     values: Record<string, string>;
     secretsPresent: Record<string, boolean>;
@@ -2227,6 +2235,7 @@ export class GezelClient {
   listInstalledToolsets(scope: ToolsetsScope): Promise<{
     toolsets: InstalledToolset[];
     roleDefault?: { role: string | null; groupIds: string[]; groupNames: string[] };
+    discoveryWarnings?: Array<{ serverName?: string; message: string }>;
   }> {
     return this.request('GET', `/api/catalog/installed-toolsets?${toolsetsQueryString(scope)}`);
   }

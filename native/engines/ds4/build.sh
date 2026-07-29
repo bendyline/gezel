@@ -136,10 +136,13 @@ echo "[build] applied ds4 prefill client-cancel patch"
 
 # ── 3. Build (make-based; one GPU backend per platform) ────────────
 make_args=(ds4-server)
+source_map_flags="-ffile-prefix-map=$src=ds4 -fmacro-prefix-map=$src=ds4 -fdebug-prefix-map=$src=ds4"
+make_cc="${CC:-cc} $source_map_flags"
 case "$platform" in
   darwin-arm64)
     backend="metal"
-    # default target = Metal on Darwin; no extra flags
+    macos_deployment_target="${MACOSX_DEPLOYMENT_TARGET:-13.0}"
+    make_cc+=" -mmacosx-version-min=$macos_deployment_target"
     ;;
   linux-x64|linux-arm64)
     backend="cuda"
@@ -149,8 +152,23 @@ case "$platform" in
     else
       make_args+=("CUDA_ARCH=$cuda_arch")
     fi
+    # Upstream defaults CUDA release builds to `-g -lineinfo`, which embeds
+    # hosted-runner source paths and ships debug metadata we do not consume.
+    # Keep the release optimization/architecture flags while passing prefix
+    # maps to nvcc's host compiler for __FILE__ and debug-path hygiene.
+    native_cpu_flag="${NATIVE_CPU_FLAG:--march=native}"
+    nvcc_flags="-O3 --use_fast_math"
+    if [[ "$cuda_arch" != "spark" && -n "$cuda_arch" ]]; then
+      nvcc_flags+=" -arch=$cuda_arch"
+    fi
+    nvcc_flags+=" -Xcompiler=$native_cpu_flag -Xcompiler=-pthread"
+    nvcc_flags+=" -Xcompiler=-ffile-prefix-map=$src=ds4"
+    nvcc_flags+=" -Xcompiler=-fmacro-prefix-map=$src=ds4"
+    nvcc_flags+=" -Xcompiler=-fdebug-prefix-map=$src=ds4"
+    make_args+=("NVCCFLAGS=$nvcc_flags")
     ;;
 esac
+make_args+=("CC=$make_cc")
 echo "[build] platform=$platform backend=$backend  make ${make_args[*]}"
 
 jobs_flag="-j"

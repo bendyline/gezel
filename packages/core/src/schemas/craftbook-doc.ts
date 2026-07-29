@@ -4,6 +4,7 @@ import { TaskAssigneeSchema } from './assignee.js';
 import {
   CraftbookBasedOnSchema,
   CraftbookRequirementSchema,
+  CraftbookRunModesSchema,
   CraftbookScriptsSchema,
   CraftbookSpawnSchema,
   CraftbookToolsetNeedSchema,
@@ -41,6 +42,8 @@ export const CraftbookDocSchema = zod.object({
     .optional(),
   defaultAssignee: TaskAssigneeSchema.optional(),
   requirements: zod.array(CraftbookRequirementSchema).optional(),
+  /** Unattended launch modes this recipe is suitable for. */
+  runModes: CraftbookRunModesSchema.optional(),
   toolsets: zod.array(CraftbookToolsetNeedSchema).optional(),
   paramSchema: zod.record(zod.string(), zod.unknown()).optional(),
   /**

@@ -24,3 +24,28 @@ export const ToolsetsScopeSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('system') }),
 ]);
 export type ToolsetsScope = z.infer<typeof ToolsetsScopeSchema>;
+
+/** Explicit import of a VS Code/Claude-style MCP JSON configuration. */
+export const ImportCustomMcpConfigRequestSchema = z.object({
+  scope: ToolsetsScopeSchema,
+  text: z
+    .string()
+    .min(1)
+    .max(2 * 1024 * 1024),
+  /** Human-readable provenance only, e.g. `mcp.json` or `Pasted JSON`. */
+  sourceName: z.string().min(1).max(512).optional(),
+});
+export type ImportCustomMcpConfigRequest = z.infer<typeof ImportCustomMcpConfigRequestSchema>;
+
+export const CustomMcpImportWarningSchema = z.object({
+  serverName: z.string().optional(),
+  message: z.string(),
+});
+export type CustomMcpImportWarning = z.infer<typeof CustomMcpImportWarningSchema>;
+
+export const ImportCustomMcpConfigResponseSchema = z.object({
+  ok: z.literal(true),
+  imported: z.array(z.string()),
+  warnings: z.array(CustomMcpImportWarningSchema).default([]),
+});
+export type ImportCustomMcpConfigResponse = z.infer<typeof ImportCustomMcpConfigResponseSchema>;

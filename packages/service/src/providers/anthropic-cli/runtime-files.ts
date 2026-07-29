@@ -12,6 +12,7 @@ export interface ClaudeMcpServerEntry {
   command: string;
   args: string[];
   env: Record<string, string>;
+  cwd?: string;
 }
 
 /**

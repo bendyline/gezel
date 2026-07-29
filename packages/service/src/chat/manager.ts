@@ -168,6 +168,11 @@ import {
 import type { GateWorkspaceReader } from '../tasks/gate-eval.js';
 import { aggregateModelGateEvidence } from '../tasks/gate-telemetry.js';
 import { type GateScriptExecutor, gateMessageFingerprint } from '../tasks/step-gate.js';
+import {
+  discoverProjectMcpToolsets,
+  resolveImportedMcpRuntime,
+  resolveMcpDefinition,
+} from '../toolsets/custom-mcp.js';
 import { isTrustedConstrainedToolset } from '../toolsets/trust.js';
 import { humanizeToolCall, renderFullToolArgs, summarizeToolArgs } from './args-summary.js';
 import { extractReferencedArtifacts } from './artifact-references.js';
@@ -7543,6 +7548,26 @@ export class ChatManager {
     this.revokeSessionToken?.(`session:${sessionId}`);
   }
 
+  /**
+   * Rebuild only the sessions and terminal bridge belonging to one project.
+   * Used by the workspace watcher when a canonical MCP config changes.
+   */
+  async resetProjectToolsets(projectId: string): Promise<void> {
+    const resets: Promise<void>[] = [];
+    for (const [sessionId, state] of this.states) {
+      if (state.record.projectId !== projectId) continue;
+      if (this.inflight.has(sessionId)) {
+        this.runAfterSessionIdle(sessionId, () => {
+          void this.reset(sessionId);
+        });
+      } else {
+        resets.push(this.reset(sessionId));
+      }
+    }
+    resets.push(this.disposeProjectToolBridge(projectId));
+    await Promise.all(resets);
+  }
+
   /** Tear down a session's fixed-function MCP bridge pool, if any. */
   private async disposeFixedFunctionBridge(sessionId: string): Promise<void> {
     const pool = this.fixedFunctionBridges.get(sessionId);
@@ -10368,12 +10393,37 @@ export class ChatManager {
     // `browser_navigate`, but `@playwright/mcp` wasn't bootstrapped, so
     // the model emitted markup the salvage layer couldn't promote).
     // Reused below for the actual bridge spawning so we only read once.
-    const [perGezel, shared, system, perProject] = await Promise.all([
+    const [perGezel, shared, system, perProjectStored] = await Promise.all([
       this.store.listInstalledToolsets({ kind: 'gezel', gezelId: record.gezelId }),
       this.store.listInstalledToolsets({ kind: 'shared' }),
       this.store.listInstalledToolsets({ kind: 'system' }),
       this.store.listInstalledToolsets({ kind: 'project', projectId: record.projectId }),
     ]);
+    const projectWorkspaceDirForMcp = await this.store.projectWorkspaceDir(record.projectId);
+    const discoveredProjectMcp = await discoverProjectMcpToolsets(
+      projectWorkspaceDirForMcp,
+      record.projectId,
+    );
+    for (const warning of discoveredProjectMcp.warnings) {
+      log.warn(
+        `[chat] project MCP discovery${warning.serverName ? ` (${warning.serverName})` : ''}: ${warning.message}`,
+      );
+    }
+    const discoveredProjectMcpById = new Map(
+      discoveredProjectMcp.toolsets.map((entry) => [entry.installed.toolsetId, entry.definition]),
+    );
+    const discoveredProjectMcpNames = new Set(
+      discoveredProjectMcp.toolsets.map((entry) => entry.definition.name),
+    );
+    const perProject = [
+      ...perProjectStored.filter(
+        (entry) =>
+          entry.runtime.kind !== 'custom-mcp' ||
+          entry.runtime.source.kind !== 'imported' ||
+          !discoveredProjectMcpNames.has(entry.runtime.serverName),
+      ),
+      ...discoveredProjectMcp.toolsets.map((entry) => entry.installed),
+    ];
     // System-scope ids the user didn't explicitly install — same set the
     // bridge-spawn loop below uses to gate role-restricted system
     // toolsets. Computed here so the prompt-side and spawn-side gates
@@ -10397,10 +10447,19 @@ export class ChatManager {
     // the old single fallback line told users to bootstrap an already-
     // bootstrapped install (this exact confusion happened in the field).
     let browserAutomationRoleExcluded = false;
+    const providerSupportsHttpMcp =
+      record.providerName !== 'copilot' && record.providerName !== 'anthropic-cli';
     for (const t of [...perGezel, ...shared, ...system, ...perProject]) {
-      // Only npm-package runtimes actually spawn — hosted http-mcp is
-      // skipped at the bridge level (see comment below). Same gate
-      // here so the prompt doesn't promise tools that wouldn't load.
+      if (t.runtime.kind === 'http-mcp') {
+        if (providerSupportsHttpMcp) installedToolsetIds.add(t.toolsetId);
+        continue;
+      }
+      if (t.runtime.kind === 'custom-mcp') {
+        if (t.runtime.transport === 'stdio' || providerSupportsHttpMcp) {
+          installedToolsetIds.add(t.toolsetId);
+        }
+        continue;
+      }
       if (t.runtime.kind !== 'npm-package' || !t.installPath) continue;
       // Mirror the bridge-spawn gate for system-only toolsets
       // (today: @playwright/mcp). See `permitsBrowserAutomation`.
@@ -11274,11 +11333,56 @@ export class ChatManager {
 
     const seen = new Set<string>();
     const extras: NonNullable<SessionOpts['extraMcpServers']> = [];
+    const extraServerIds = new Set(['gezel']);
+    const reserveExtraServerId = (preferred: string, fallback: string): string => {
+      const clean = (value: string) =>
+        value
+          .trim()
+          .replace(/[^A-Za-z0-9._-]+/g, '-')
+          .replace(/^-+|-+$/g, '')
+          .slice(0, 128);
+      const base = clean(preferred) || clean(fallback) || 'custom-mcp';
+      let candidate = base;
+      let suffix = 2;
+      while (extraServerIds.has(candidate)) {
+        candidate = `${base.slice(0, 120)}-${suffix}`;
+        suffix += 1;
+      }
+      extraServerIds.add(candidate);
+      return candidate;
+    };
     const trustedConstrainedExtraIds = new Set<string>();
     const knownSecretValues = new Set<string>();
     for (const t of [...perGezel, ...shared, ...system, ...perProject]) {
       if (seen.has(t.toolsetId)) continue;
       seen.add(t.toolsetId);
+
+      if (t.runtime.kind === 'custom-mcp') {
+        try {
+          const discoveredDefinition = discoveredProjectMcpById.get(t.toolsetId);
+          const spec = discoveredDefinition
+            ? await resolveMcpDefinition(discoveredDefinition, {
+                workspaceDir: projectWorkspaceDirForMcp,
+                knownSecretValues,
+              })
+            : await resolveImportedMcpRuntime({
+                runtime: t.runtime,
+                toolsetId: t.toolsetId,
+                secrets: this.secrets,
+                workspaceDir: projectWorkspaceDirForMcp,
+                knownSecretValues,
+              });
+          extras.push({
+            id: reserveExtraServerId(t.runtime.serverName, t.toolsetId),
+            ...spec,
+          });
+        } catch (error) {
+          log.warn(
+            `[chat] custom MCP server "${t.runtime.serverName}" could not be configured: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+        continue;
+      }
 
       // http-mcp branch — hosted server, no subprocess. Resolved env
       // values become HTTP request headers. The bridge-spawn path
@@ -11288,7 +11392,7 @@ export class ChatManager {
         const headers = await this.resolveToolsetEnv(t, knownSecretValues);
         if (headers === null) continue; // required field missing — skip with warning
         extras.push({
-          id: t.toolsetId,
+          id: reserveExtraServerId(t.toolsetId, t.toolsetId),
           kind: 'http',
           transport: t.runtime.transport,
           url: t.runtime.url,
@@ -11384,8 +11488,9 @@ export class ChatManager {
       // a post-install symlink swap must not turn a catalog entry into an
       // arbitrary host executable.
       const runtimeEntry = await resolveInside(t.installPath, t.runtime.entry);
+      const extraServerId = reserveExtraServerId(t.toolsetId, t.toolsetId);
       extras.push({
-        id: t.toolsetId,
+        id: extraServerId,
         kind: 'stdio',
         command: 'node',
         args: [runtimeEntry, ...t.runtime.args, ...extraArgs],
@@ -11398,7 +11503,7 @@ export class ChatManager {
           runtime: t.runtime,
         })
       ) {
-        trustedConstrainedExtraIds.add(t.toolsetId);
+        trustedConstrainedExtraIds.add(extraServerId);
       }
     }
     // Centralized security ceiling: arbitrary third-party MCP toolsets bypass

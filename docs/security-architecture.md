@@ -343,6 +343,10 @@ Deep dive: [secrets-security.md](secrets-security.md). Summary of the controls:
 - **Not leaked to MCP children** — `filterMcpChildEnv` strips secret-shaped vars
   (`*_API_KEY`, `*TOKEN`, `GEZEL_TOKEN`, …) before spawning a third-party MCP server; the
   gezel-mcp server still gets its `GEZEL_*` via the explicit `spec.env`.
+- **Custom MCP imports** — environment values and HTTP headers pasted or selected through the
+  Toolsets UI are moved into `SecretStore`; only their field names remain in the installed
+  roster. Canonical project configs (`.gezel/mcp.json`, `.vscode/mcp.json`, `.mcp.json`) remain
+  project-owned and are re-read at session build without echoing their values through the API.
 - **Not exfiltratable by the model** — the outbound `fetch_url` screen refuses any request
   whose URL/headers/body contains a stored credential value (`collectProviderSecretValues`).
 - **System-scope credential** — the daemon root token never leaves process memory. The

@@ -3,6 +3,7 @@ import { TaskAssigneeSchema } from './assignee.js';
 import {
   CraftbookBasedOnSchema,
   CraftbookRequirementSchema,
+  CraftbookRunModesSchema,
   CraftbookScriptsSchema,
   CraftbookSpawnSchema,
   CraftbookStepSchema,
@@ -289,11 +290,66 @@ const BuiltinRuntimeSchema = z.object({
   toolsetGroupId: z.string(),
 });
 
+/**
+ * A user-supplied MCP server. Unlike catalog toolsets, these entries do not
+ * download a pinned package: they either point back at a project-owned MCP
+ * config file or carry the normalized command/URL from an explicit import.
+ *
+ * Environment variables and HTTP headers from explicit imports are stored in
+ * SecretStore. Only their field names are persisted here. Project-file
+ * entries are re-read from the approved project config at session-build time,
+ * so editing `.gezel/mcp.json`, `.vscode/mcp.json`, or `.mcp.json` takes effect
+ * without copying credentials into Gezel's ordinary JSON state.
+ */
+const CustomMcpRuntimeSchema = z
+  .object({
+    kind: z.literal('custom-mcp'),
+    serverName: z.string().min(1).max(256),
+    transport: z.enum(['stdio', 'streamable-http', 'sse']),
+    source: z.discriminatedUnion('kind', [
+      z.object({
+        kind: z.literal('project-file'),
+        relativePath: z.enum(['.gezel/mcp.json', '.vscode/mcp.json', '.mcp.json']),
+      }),
+      z.object({
+        kind: z.literal('imported'),
+        sourceName: z.string().min(1).max(512).optional(),
+      }),
+    ]),
+    command: z.string().min(1).max(4096).optional(),
+    args: z.array(z.string().max(16_384)).max(256).default([]),
+    cwd: z.string().max(4096).optional(),
+    envFile: z.string().max(4096).optional(),
+    url: z.string().max(16_384).optional(),
+    envKeys: z.array(z.string().min(1).max(256)).max(256).default([]),
+    headerKeys: z.array(z.string().min(1).max(256)).max(256).default([]),
+  })
+  .superRefine((runtime, ctx) => {
+    // Project-file records are lightweight references. Their live command or
+    // URL is deliberately not persisted and is recovered from the file.
+    if (runtime.source.kind === 'project-file') return;
+    if (runtime.transport === 'stdio' && !runtime.command) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['command'],
+        message: 'imported stdio MCP servers require a command',
+      });
+    }
+    if (runtime.transport !== 'stdio' && !runtime.url) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['url'],
+        message: 'imported HTTP MCP servers require a URL',
+      });
+    }
+  });
+
 export const ToolsetRuntimeSchema = z.discriminatedUnion('kind', [
   NpmPackageRuntimeSchema,
   HttpMcpRuntimeSchema,
   BinaryMcpRuntimeSchema,
   BuiltinRuntimeSchema,
+  CustomMcpRuntimeSchema,
 ]);
 export type ToolsetRuntime = z.infer<typeof ToolsetRuntimeSchema>;
 
@@ -556,6 +612,8 @@ export const CraftbookTemplateVersionManifestSchema = z.object({
     .optional(),
   /** Prerequisites for the craftbook to be offered (see CraftbookSchema). */
   requirements: z.array(CraftbookRequirementSchema).optional(),
+  /** Unattended launch modes this recipe is suitable for. */
+  runModes: CraftbookRunModesSchema.optional(),
   /**
    * Toolset (MCP/CLI/API) dependencies this craftbook declares. Drives the
    * launcher's install/config affordance and per-toolset auto-allow. See
@@ -616,6 +674,8 @@ export const CraftbookTemplateManifestSchema = z.object({
     .optional(),
   /** Applicability prerequisites (mirrored from the version manifest). */
   requirements: z.array(CraftbookRequirementSchema).optional(),
+  /** Unattended launch modes (mirrored from the version manifest). */
+  runModes: CraftbookRunModesSchema.optional(),
   /** Toolset dependencies (mirrored from the version manifest). */
   toolsets: z.array(CraftbookToolsetNeedSchema).optional(),
 });

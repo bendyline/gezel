@@ -5252,6 +5252,7 @@ export class Store {
       plan?: unknown;
       defaultAssignee?: unknown;
       basedOn?: unknown;
+      runModes?: unknown;
       releasedAt?: unknown;
     };
     let steps: Craftbook['steps'] | null;
@@ -5276,6 +5277,9 @@ export class Store {
       ...(typeof v.plan === 'string' ? { plan: v.plan } : {}),
       ...(v.defaultAssignee
         ? { defaultAssignee: v.defaultAssignee as Craftbook['defaultAssignee'] }
+        : {}),
+      ...(v.runModes && typeof v.runModes === 'object'
+        ? { runModes: v.runModes as Craftbook['runModes'] }
         : {}),
       steps,
       entryStepId: v.entryStepId,
@@ -5334,6 +5338,7 @@ export class Store {
       ...(book.basedOn ? { basedOn: book.basedOn } : {}),
       ...(book.plan !== undefined ? { plan: book.plan } : {}),
       ...(book.defaultAssignee ? { defaultAssignee: book.defaultAssignee } : {}),
+      ...(book.runModes ? { runModes: book.runModes } : {}),
       ...(book.scripts ? { bundledScripts: Object.keys(book.scripts).map((n) => `${n}.ts`) } : {}),
     };
     await writeFileAtomic(versionFile, `${JSON.stringify(versionManifest, null, 2)}\n`);
@@ -5447,6 +5452,7 @@ export class Store {
       paramSchema?: unknown;
       command?: unknown;
       requirements?: unknown;
+      runModes?: unknown;
       releasedAt?: unknown;
     };
     let steps: Craftbook['steps'] | null;
@@ -5481,6 +5487,9 @@ export class Store {
       ...(typeof v.command === 'string' ? { command: v.command } : {}),
       ...(Array.isArray(v.requirements)
         ? { requirements: v.requirements as Craftbook['requirements'] }
+        : {}),
+      ...(v.runModes && typeof v.runModes === 'object'
+        ? { runModes: v.runModes as Craftbook['runModes'] }
         : {}),
       ...(scripts ? { scripts } : {}),
       createdAt: typeof v.releasedAt === 'string' ? v.releasedAt : now,
@@ -5538,6 +5547,7 @@ export class Store {
       ...(book.paramSchema ? { paramSchema: book.paramSchema } : {}),
       ...(book.command ? { command: book.command } : {}),
       ...(book.requirements ? { requirements: book.requirements } : {}),
+      ...(book.runModes ? { runModes: book.runModes } : {}),
       ...(book.scripts ? { bundledScripts: Object.keys(book.scripts).map((n) => `${n}.ts`) } : {}),
     };
     await writeFileAtomic(

@@ -54,6 +54,11 @@ if ($null -ne $bash) {
 $src = Join-Path $here '.upstream'
 $platform = 'win32-x64'
 
+# Keep hosted-runner checkout paths out of __FILE__ strings and compiler
+# metadata for both the server and its bundled ggml/whisper DLLs.
+$pathMapFlag = "/pathmap:$src=whisper.cpp"
+$env:CL = if ($env:CL) { "$pathMapFlag $env:CL" } else { $pathMapFlag }
+
 # -- Preflight: required build tools -------------------------------
 # Without these, cmake invocations would otherwise fail mid-pipeline
 # in ways the rest of the script can't recover cleanly from. Surface

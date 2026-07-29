@@ -114,6 +114,12 @@ if ($null -ne $bash) {
 $src = Join-Path $here '.upstream'
 $platform = 'win32-x64'
 
+# Apply MSVC's production path mapping through CL so it covers every C/C++
+# translation unit CMake/Ninja starts. This keeps hosted-runner paths out of
+# __FILE__ strings and compiler metadata without changing source semantics.
+$pathMapFlag = "/pathmap:$src=stable-diffusion.cpp"
+$env:CL = if ($env:CL) { "$pathMapFlag $env:CL" } else { $pathMapFlag }
+
 # --- 2. Resolve accelerator ---
 $backend = if ($env:SD_BACKEND) { $env:SD_BACKEND } else { 'vulkan' }
 $cmakeFlags = @(
@@ -124,7 +130,7 @@ $cmakeFlags = @(
   '-DGGML_OPENMP=OFF',
   # stable-diffusion.cpp's generated translation unit exceeds COFF's default
   # section count on current MSVC. /bigobj raises that object-file limit.
-  '-DCMAKE_CXX_FLAGS=/bigobj',
+  "-DCMAKE_CXX_FLAGS=/bigobj $pathMapFlag",
   # See build.sh: upstream auto-builds the sdcpp-webui React frontend
   # whenever pnpm is on PATH, and gezel's own pnpm-workspace.yaml
   # confuses that install. Disable so the build is deterministic and

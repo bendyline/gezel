@@ -78,6 +78,7 @@ const DOC: CraftbookDoc = {
   id: 'doc-e2e',
   name: 'Doc E2E',
   description: 'End-to-end whole-document craftbook.',
+  runModes: { scheduled: 'recommended', nightShift: 'supported' },
   entryStepId: 'build',
   steps: [
     {
@@ -110,6 +111,10 @@ describe('craftbook document routes — end to end', () => {
     const doc = JSON.parse(((await get.json()) as { content: string }).content) as CraftbookDoc;
     expect(doc.scripts?.checkMarker).toContain('checkMarker');
     expect(doc.steps).toHaveLength(2);
+    expect(doc.runModes).toEqual({
+      scheduled: 'recommended',
+      nightShift: 'supported',
+    });
   });
 
   it('rejects a broken document with 422 + repair-grade errors, writing nothing', async () => {

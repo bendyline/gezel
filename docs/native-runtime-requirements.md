@@ -83,9 +83,15 @@ driver installs it into `System32`, so it is not provisioned.
 
 ## macOS
 
-No external requirements. Metal is part of the OS, the engines link only
-system frameworks plus their own bundled dylibs, and AppleClang links no
-OpenMP runtime.
+The bundled native engines require **macOS 13 Ventura or newer**. The floor is
+declared as `MACOSX_DEPLOYMENT_TARGET` in `build-native.yml`, passed explicitly
+through the engine build wrappers, and asserted from every shipped Mach-O
+`LC_BUILD_VERSION` before signing. This prevents a newer `macos-latest` runner
+or Xcode SDK from silently narrowing compatibility.
+
+There are no external runtime requirements beyond that OS floor. Metal is part
+of the OS, the engines link only system frameworks plus their own bundled
+dylibs, and AppleClang links no OpenMP runtime.
 
 ## What we deliberately do not depend on
 

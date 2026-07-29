@@ -120,6 +120,7 @@ export function craftbookRoutes(ctx: ServiceContext): Hono {
       ...(m.triggers ? { triggers: m.triggers } : {}),
       ...(m.hooks ? { hooks: m.hooks } : {}),
       ...(m.toolsets ? { toolsets: m.toolsets } : {}),
+      ...(m.runModes ? { runModes: m.runModes } : {}),
       ...(scripts ? { scripts } : {}),
       createdAt: m.releasedAt,
       updatedAt: m.releasedAt,
@@ -345,6 +346,7 @@ export function craftbookRoutes(ctx: ServiceContext): Hono {
       ...(body.basedOn ? { basedOn: body.basedOn } : {}),
       ...(body.plan ? { plan: body.plan } : {}),
       ...(body.defaultAssignee ? { defaultAssignee: body.defaultAssignee } : {}),
+      ...(body.runModes ? { runModes: body.runModes } : {}),
       steps,
       entryStepId,
       ...(body.scripts ? { scripts: body.scripts } : {}),
@@ -408,6 +410,11 @@ export function craftbookRoutes(ctx: ServiceContext): Hono {
       if (body.defaultAssignee === null) {
         delete (next as { defaultAssignee?: Craftbook['defaultAssignee'] }).defaultAssignee;
       } else next.defaultAssignee = body.defaultAssignee;
+    }
+    if (body.runModes !== undefined) {
+      if (body.runModes === null) {
+        delete next.runModes;
+      } else next.runModes = body.runModes;
     }
     if (body.steps !== undefined) {
       next.steps = expandStepDeliverables(body.steps);
