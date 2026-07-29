@@ -121,7 +121,7 @@ jobs:
               *)       expected+=("gezel-native-${version}-${key}.tar.gz") ;;
             esac
           done < <(node scripts/check-native-payload.mjs --list-keys)
-          expected+=('SHA256SUMS')
+          expected+=('SHA256SUMS' 'NATIVE_FILE_MANIFESTS.json')
           missing=0
           for name in "${expected[@]}"; do
             if ! jq -e --arg name "$name" '.assets[] | select(.name == $name)' <<<"$release" >/dev/null; then
@@ -129,7 +129,24 @@ jobs:
               missing=1
             fi
           done
-          exit "$missing"
+          if (( missing )); then exit 1; fi
+
+          # The Electron package may only reuse the bundled native tree when
+          # its source-bundled per-file pins describe this exact release.
+          # pin-native-release.mjs updates both files together; catch a missed
+          # pin before downloading or signing any installers.
+          node scripts/verify-native-file-manifest.mjs \
+            --manifest packages/service/src/engines/native-file-manifest.json \
+            --release "$version"
+          pinned_release="$(
+            sed -n "s/^export const NATIVE_ENGINE_RELEASE = '\\([^']*\\)';/\\1/p" \
+              packages/service/src/engines/native-manifest.ts
+          )"
+          if [[ "$pinned_release" != "$version" ]]; then
+            echo "::error::nativeTag ${NATIVE_TAG} does not match source-pinned native-v${pinned_release}"
+            echo "::error::Run scripts/pin-native-release.mjs ${NATIVE_TAG} before releasing Electron."
+            exit 1
+          fi
 
       - name: Determine release version
         id: version
@@ -244,7 +261,15 @@ jobs:
         # is supposed to carry. Missing-asset handling in the fetch script
         # is warn-and-skip by design (a platform need not ship every
         # variant), so without this a partial stage would package quietly.
-        run: node scripts/check-native-payload.mjs --root packages/app/native-bin
+        env:
+          NATIVE_TAG: ${{ inputs.nativeTag }}
+        run: |
+          version="${NATIVE_TAG#native-v}"
+          node scripts/check-native-payload.mjs --root packages/app/native-bin
+          node scripts/verify-native-file-manifest.mjs \
+            --root packages/app/native-bin \
+            --manifest packages/service/src/engines/native-file-manifest.json \
+            --release "$version"
 
       - name: Verify Authenticode on staged native binaries
         shell: pwsh
@@ -403,8 +428,12 @@ jobs:
         run: |
           $installer = Get-ChildItem 'packages/app/dist/installers/*.exe' | Select-Object -First 1
           if (-not $installer) { throw 'No Windows installer produced' }
-          node scripts/verify-installer-licenses.mjs $installer.FullName
-          if ($LASTEXITCODE -ne 0) { throw 'Windows installer legal-payload verification failed' }
+          $nativeVersion = '${{ inputs.nativeTag }}' -replace '^native-v', ''
+          node scripts/verify-installer-licenses.mjs $installer.FullName `
+            --native-source packages/app/native-bin `
+            --native-manifest packages/service/src/engines/native-file-manifest.json `
+            --native-release $nativeVersion
+          if ($LASTEXITCODE -ne 0) { throw 'Windows installer payload verification failed' }
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -461,7 +490,15 @@ jobs:
           ls -la packages/app/native-bin/
 
       - name: Verify staged native payload is complete
-        run: node scripts/check-native-payload.mjs --root packages/app/native-bin
+        env:
+          NATIVE_TAG: ${{ inputs.nativeTag }}
+        run: |
+          version="${NATIVE_TAG#native-v}"
+          node scripts/check-native-payload.mjs --root packages/app/native-bin
+          node scripts/verify-native-file-manifest.mjs \
+            --root packages/app/native-bin \
+            --manifest packages/service/src/engines/native-file-manifest.json \
+            --release "$version"
 
       - name: Verify Developer ID signatures on staged native binaries
         run: |
@@ -574,8 +611,9 @@ jobs:
 
           # Also verify the packaged .app payload directly: the deep check
           # covers every nested Mach-O (including asar-unpacked native-bin
-          # binaries electron-builder re-signed), proving the signing pass
-          # actually swept the whole bundle, not just the outer .pkg.
+          # binaries retained with their born-signed bytes), while the outer
+          # app signature seals their files and symlink metadata into the
+          # bundle. This proves the whole app, not just the outer .pkg.
           app=$(find packages/app/dist/installers -maxdepth 2 -name '*.app' -print -quit)
           test -n "$app"
           codesign --verify --strict --deep --verbose=2 "$app"
@@ -585,7 +623,12 @@ jobs:
           set -euo pipefail
           pkg=$(find packages/app/dist/installers -maxdepth 1 -name '*.pkg' -print -quit)
           test -n "$pkg"
-          node scripts/verify-installer-licenses.mjs "$pkg"
+          version="${{ inputs.nativeTag }}"
+          version="${version#native-v}"
+          node scripts/verify-installer-licenses.mjs "$pkg" \
+            --native-source packages/app/native-bin \
+            --native-manifest packages/service/src/engines/native-file-manifest.json \
+            --native-release "$version"
 
       - name: Tear down keychain
         if: always()
@@ -660,7 +703,15 @@ jobs:
           ls -la packages/app/native-bin/
 
       - name: Verify staged native payload is complete
-        run: node scripts/check-native-payload.mjs --root packages/app/native-bin
+        env:
+          NATIVE_TAG: ${{ inputs.nativeTag }}
+        run: |
+          version="${NATIVE_TAG#native-v}"
+          node scripts/check-native-payload.mjs --root packages/app/native-bin
+          node scripts/verify-native-file-manifest.mjs \
+            --root packages/app/native-bin \
+            --manifest packages/service/src/engines/native-file-manifest.json \
+            --release "$version"
 
       - name: Build + produce service bundle
         run: pnpm build:packaged
@@ -686,7 +737,12 @@ jobs:
           for installer in packages/app/dist/installers/*.deb packages/app/dist/installers/*.rpm; do
             [[ -f "$installer" ]] || continue
             found=1
-            node scripts/verify-installer-licenses.mjs "$installer"
+            version="${{ inputs.nativeTag }}"
+            version="${version#native-v}"
+            node scripts/verify-installer-licenses.mjs "$installer" \
+              --native-source packages/app/native-bin \
+              --native-manifest packages/service/src/engines/native-file-manifest.json \
+              --native-release "$version"
           done
           [[ "$found" == "1" ]]
 

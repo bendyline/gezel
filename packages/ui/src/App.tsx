@@ -436,12 +436,12 @@ function FullApp() {
             refreshPendingCount();
           }
           // Keep the sidebar "thinking" set live: a turn opens on user_message
-          // and closes on done/error. Mount seed + 20s reconcile cover turns we
+          // and closes on done/error/cancelled. Mount seed + 20s reconcile cover turns we
           // joined mid-flight.
           if (ev.type === 'user_message') {
             activeSessionsRef.current.set(env.sessionId, env.projectId);
             recomputeActiveProjects();
-          } else if (ev.type === 'done' || ev.type === 'error') {
+          } else if (ev.type === 'done' || ev.type === 'error' || ev.type === 'cancelled') {
             if (activeSessionsRef.current.delete(env.sessionId)) recomputeActiveProjects();
           }
           // Poisoned tracking: a failed turn poisons the session (optimistic

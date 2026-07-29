@@ -1,11 +1,11 @@
 /**
  * EngineStatusPill
  *
- * Always-visible status indicator for the active on-device engine
- * (llama.cpp, MLX, or DwarfStar). Sits in the app header alongside QueueMeter /
- * EngagementBadge / QuotaMeter. Hidden entirely when the active
- * provider isn't on-device — no point showing "On-device: idle"
- * when the user is on Copilot.
+ * Status indicators for every relevant on-device engine (llama.cpp,
+ * MLX, or DwarfStar). The configured default stays visible at rest;
+ * busy secondary engines appear alongside it when a gezel has a
+ * provider override. Sits in the app header beside QueueMeter /
+ * EngagementBadge / QuotaMeter.
  *
  * Two visual states:
  *   1. **Idle** — muted "On-device · model-name" badge.
@@ -19,13 +19,17 @@
  * loading the model.
  *
  * Drives off the same global `streamAllChatEvents` feed the rest of
- * the app uses. No new endpoint, no polling beyond the cheap 10s
- * config refresh.
+ * the app uses, plus the cheap queue / in-flight snapshots that keep
+ * cold model loads visible before phase events begin.
  */
 
 import type { ChatEventEnvelope, ProviderName, SessionGpuTask } from '@bendyline/gezel';
 import { CANONICAL_PROFILES, isKnownProfileId } from '@bendyline/gezel';
-import type { ConfigResponse, ProviderQueueState } from '@bendyline/gezel-client';
+import type {
+  ConfigResponse,
+  ProviderQueueState,
+  QueueStatusResponse,
+} from '@bendyline/gezel-client';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { streamSharedAllChatEvents } from '../shared-chat-events.js';
@@ -37,10 +41,25 @@ import {
   formatBytes,
   formatTokensPerSec,
 } from './engine-pill-stats.js';
+import { providerLabel } from './provider-label.js';
 import { type LiveTurnState, useOnDeviceLiveTurns } from './useOnDeviceLiveTurns.js';
 
 type LiveTurn = LiveTurnState;
 type TurnStats = TurnStatsEntry;
+type OnDeviceProvider = 'llama-cpp' | 'mlx' | 'ds4';
+type InflightTurn = {
+  sessionId: string;
+  gezelId: string;
+  projectId: string;
+  providerName: ProviderName;
+  model?: string;
+  userText: string;
+  startedAt: number;
+  elapsedMs: number;
+  lastProgressAgoMs?: number;
+};
+
+const ON_DEVICE_PROVIDER_ORDER: readonly OnDeviceProvider[] = ['llama-cpp', 'mlx', 'ds4'];
 
 /** Retention for per-turn stats in the rolling-average computation. */
 const STATS_WINDOW_MS = 60_000;
@@ -49,6 +68,108 @@ const STATS_MAX_ENTRIES = 40;
 
 export function EngineStatusPill() {
   const [config, setConfig] = useState<ConfigResponse | null>(null);
+  const [queueStatus, setQueueStatus] = useState<QueueStatusResponse | null>(null);
+  const [inflightTurns, setInflightTurns] = useState<InflightTurn[]>([]);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  const refreshConfig = useCallback(() => {
+    api
+      .getConfig()
+      .then((next) => {
+        if (mountedRef.current) setConfig(next);
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    refreshConfig();
+    const timer = setInterval(refreshConfig, 10_000);
+    return () => clearInterval(timer);
+  }, [refreshConfig]);
+
+  const refreshActivity = useCallback(() => {
+    void Promise.all([api.getQueueStatus(), api.listInflightTurns()])
+      .then(([status, inflight]) => {
+        if (!mountedRef.current) return;
+        setQueueStatus(status);
+        setInflightTurns((inflight.inflight ?? []) as InflightTurn[]);
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    refreshActivity();
+    const timer = setInterval(refreshActivity, 3_000);
+    return () => clearInterval(timer);
+  }, [refreshActivity]);
+
+  // Provider overrides can invoke a different local engine than the
+  // install-wide default. Keep one shared subscription open so a cold
+  // secondary engine is visible before its provider queue registers.
+  const liveTurns = useOnDeviceLiveTurns(true);
+  const defaultProvider = toOnDeviceProvider(config?.provider);
+  const visibleProviders = visibleOnDeviceProviders({
+    defaultProvider,
+    queueStatus,
+    inflightTurns,
+    liveTurns,
+  });
+
+  return (
+    <>
+      {/* The primary instance also owns GPU/media activity, preserving the
+          existing Image/Video pill even when the chat default is cloud. */}
+      <EngineStatusPillForProvider
+        provider={defaultProvider}
+        defaultProvider={defaultProvider}
+        config={config}
+        queueStatus={queueStatus}
+        inflightTurns={inflightTurns}
+        liveTurns={liveTurns}
+        includeMedia
+      />
+      {visibleProviders
+        .filter((provider) => provider !== defaultProvider)
+        .map((provider) => (
+          <EngineStatusPillForProvider
+            key={provider}
+            provider={provider}
+            defaultProvider={defaultProvider}
+            config={config}
+            queueStatus={queueStatus}
+            inflightTurns={inflightTurns}
+            liveTurns={liveTurns}
+            includeMedia={false}
+          />
+        ))}
+    </>
+  );
+}
+
+function EngineStatusPillForProvider({
+  provider: onDeviceProvider,
+  defaultProvider,
+  config,
+  queueStatus,
+  inflightTurns,
+  liveTurns: allLiveTurns,
+  includeMedia,
+}: {
+  provider: OnDeviceProvider | null;
+  defaultProvider: OnDeviceProvider | null;
+  config: ConfigResponse | null;
+  queueStatus: QueueStatusResponse | null;
+  inflightTurns: InflightTurn[];
+  liveTurns: Map<string, LiveTurn>;
+  includeMedia: boolean;
+}) {
   // Models actually present on disk for the active on-device provider.
   // Polled on the same 10s cadence as config so the pill reflects an
   // install finishing (or being deleted) without needing a page reload.
@@ -57,49 +178,6 @@ export function EngineStatusPill() {
   const [recentTurns, setRecentTurns] = useState<TurnStats[]>([]);
   // Static RAM footprint (bytes) once llama-cpp finishes loading the model.
   const [ramAllocBytes, setRamAllocBytes] = useState<number | undefined>(undefined);
-  // Live queue state for the llama-cpp provider. Polled from
-  // /api/queues every 3s while the provider is active. Drives both
-  // the inline "+N queued" tail on the pill and the Queue row in
-  // the dropdown. Polling matches QueueMeter's cadence — the
-  // endpoint is just in-memory counts, basically free.
-  const [queueState, setQueueState] = useState<ProviderQueueState | null>(null);
-  const [deviceHealth, setDeviceHealth] = useState<DeviceHealth | null>(null);
-  // Per-session backlog depth (summed across sessions) from the
-  // SessionQueue layer — messages queued behind an in-flight turn.
-  // This is a DIFFERENT queue from `queueState` above: those are
-  // provider-level request slots, these are conversation-level sends
-  // waiting their turn. The pill used to ignore this entirely, which
-  // is why it could read "Idle" while chats sat enqueued and why the
-  // backlog had no badge of its own. Polled from the same /api/queues
-  // tick. Lives independently of `queueState` because the backlog can
-  // be non-empty even when the provider queue is null (provider not
-  // yet initialized, or the in-flight turn already drained).
-  const [sessionBacklog, setSessionBacklog] = useState(0);
-  // In-flight turns from /api/sessions/inflight — the SAME authoritative
-  // signal the chat timeline's typing-dots ride on. This is the busy
-  // source of truth: `engine_phase` events (which drive `liveTurns`
-  // below) go silent during a slow cold model load, and the 90s idle
-  // sweeper then drops the turn — but it's still running, so the pill
-  // would flip to "Idle" mid-turn while the chat clearly shows dots.
-  // The server holds an inflight entry until the turn's `done`/`error`
-  // (its own 5-min watchdog clears a truly-wedged one), so polling it
-  // keeps the pill and the timeline from ever disagreeing. `count` is
-  // the number of live turns; `earliestStartedAt` seeds the elapsed
-  // clock when we have no phase label to borrow `startedAt` from.
-  const [inflight, setInflight] = useState<{ count: number; earliestStartedAt: number | null }>({
-    count: 0,
-    earliestStartedAt: null,
-  });
-  // Phase 1+ cache controller stats — populated alongside queueState
-  // from the same /api/queues poll. Null when no controller is wired
-  // or the active provider has no warm sessions; the popover hides
-  // the cache rows in either case.
-  const [cacheState, setCacheState] = useState<{
-    warmSessionCount: number;
-    totalBytes: number;
-    budgetBytes: number;
-    recentHitRate: number;
-  } | null>(null);
   // Active local media-engine work (image / video generation), keyed by
   // session so concurrent jobs and out-of-order `ended` events don't
   // clobber each other. Sourced from the global `gpu_swap` feed —
@@ -112,14 +190,7 @@ export function EngineStatusPill() {
   const [, setTick] = useState(0);
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
-  const mountedRef = useRef(true);
-
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
+  const popoverId = onDeviceProvider ?? 'media';
 
   // Click-outside closes the dropdown. Same pattern as QueueMeter.
   useEffect(() => {
@@ -140,108 +211,84 @@ export function EngineStatusPill() {
   // mousedown before it bubbles to window, which is why we need an
   // explicit signal.)
   useEffect(() => {
-    const close = () => setOpen(false);
+    const close = (event: Event) => {
+      if ((event as CustomEvent<{ source?: string }>).detail?.source === popoverId) return;
+      setOpen(false);
+    };
     window.addEventListener('gezel:close-header-popovers', close);
     return () => window.removeEventListener('gezel:close-header-popovers', close);
-  }, []);
+  }, [popoverId]);
 
-  // Initial config + auto-model resolution. Refresh on provider change
-  // events? Today we don't have a broadcast for that — the pill will
-  // re-evaluate on the next full app refresh. Cheap polling every 10s
-  // catches config changes from Settings without needing a bus.
-  const refreshConfig = useCallback(() => {
-    api
-      .getConfig()
-      .then((c) => {
-        if (!mountedRef.current) return;
-        setConfig(c);
-      })
-      .catch(() => {});
-  }, []);
-
-  useEffect(() => {
-    refreshConfig();
-    const t = setInterval(refreshConfig, 10_000);
-    return () => clearInterval(t);
-  }, [refreshConfig]);
-
-  const provider: ProviderName = config?.provider ?? 'copilot';
-  // Which on-device provider the pill is tracking right now. `null`
-  // when the active provider isn't on-device at all — the pill hides
-  // itself in that case.
-  const onDeviceProvider: 'llama-cpp' | 'mlx' | 'ds4' | null =
-    provider === 'llama-cpp'
-      ? 'llama-cpp'
-      : provider === 'mlx'
-        ? 'mlx'
-        : provider === 'ds4'
-          ? 'ds4'
-          : null;
-
-  // Poll queue status every 3s while an on-device provider is active.
-  // When the provider hasn't been initialized yet, `/api/queues`
-  // omits it and the state stays null (inline queue suffix hides).
-  useEffect(() => {
-    if (!onDeviceProvider && mediaActivity.size === 0) {
-      setQueueState(null);
-      setCacheState(null);
-      setDeviceHealth(null);
-      setSessionBacklog(0);
-      setInflight({ count: 0, earliestStartedAt: null });
-      return;
-    }
-    let cancelled = false;
-    const poll = async () => {
-      try {
-        // Both polls on the same 3s tick. /api/sessions/inflight is
-        // global (not provider-scoped), but the pill only renders for an
-        // active on-device provider, so a live turn is overwhelmingly on
-        // that engine; the rare cross-provider background turn isn't worth
-        // a provider filter the endpoint doesn't offer.
-        const [status, inf] = await Promise.all([api.getQueueStatus(), api.listInflightTurns()]);
-        if (cancelled) return;
-        const turns = inf.inflight ?? [];
-        setInflight({
-          count: turns.length,
-          earliestStartedAt: turns.length ? Math.min(...turns.map((t) => t.startedAt)) : null,
-        });
-        setQueueState(onDeviceProvider ? (status.providers[onDeviceProvider] ?? null) : null);
-        setDeviceHealth(status.deviceHealth ?? null);
-        // Sum the per-session backlog. `status.sessions` is global (not
-        // keyed by provider), but the on-device engine pill is only shown
-        // when an on-device provider is the active default, so these are
-        // the chats it's working through. This is the "chat queue
-        // backlog" surfaced as a badge + status below.
-        setSessionBacklog((status.sessions ?? []).reduce((n, s) => n + s.depth, 0));
-        // Cache stats keyed by providerName. Skip the entry entirely
-        // when warmSessionCount is 0 — the rows are noise without
-        // anything cached.
-        const entry = onDeviceProvider
-          ? status.cache?.find((c) => c.providerName === onDeviceProvider)
-          : undefined;
-        if (entry && entry.warmSessionCount > 0) {
-          setCacheState({
-            warmSessionCount: entry.warmSessionCount,
-            totalBytes: entry.totalBytes,
-            budgetBytes: entry.budgetBytes,
-            recentHitRate: entry.recentHitRate,
-          });
-        } else {
-          setCacheState(null);
+  const queueState: ProviderQueueState | null = onDeviceProvider
+    ? (queueStatus?.providers[onDeviceProvider] ?? null)
+    : null;
+  const deviceHealth: DeviceHealth | null = queueStatus?.deviceHealth ?? null;
+  const providerInflightTurns = useMemo(
+    () =>
+      onDeviceProvider
+        ? inflightTurns.filter((turn) => turn.providerName === onDeviceProvider)
+        : [],
+    [inflightTurns, onDeviceProvider],
+  );
+  const inflight = useMemo(
+    () => ({
+      count: providerInflightTurns.length,
+      earliestStartedAt: providerInflightTurns.length
+        ? Math.min(...providerInflightTurns.map((turn) => turn.startedAt))
+        : null,
+    }),
+    [providerInflightTurns],
+  );
+  const sessionBacklog = useMemo(
+    () =>
+      onDeviceProvider
+        ? (queueStatus?.sessions ?? []).reduce((total, session) => {
+            // `providerName` is additive on the queue response; tolerate
+            // an older daemon/client bundle during rolling upgrades.
+            const providerName = (session as typeof session & { providerName?: ProviderName })
+              .providerName;
+            return providerName === onDeviceProvider ||
+              (providerName === undefined && onDeviceProvider === defaultProvider)
+              ? total + session.depth
+              : total;
+          }, 0)
+        : 0,
+    [defaultProvider, onDeviceProvider, queueStatus?.sessions],
+  );
+  const cacheEntry = onDeviceProvider
+    ? queueStatus?.cache?.find((entry) => entry.providerName === onDeviceProvider)
+    : undefined;
+  const cacheState =
+    cacheEntry && cacheEntry.warmSessionCount > 0
+      ? {
+          warmSessionCount: cacheEntry.warmSessionCount,
+          totalBytes: cacheEntry.totalBytes,
+          budgetBytes: cacheEntry.budgetBytes,
+          recentHitRate: cacheEntry.recentHitRate,
         }
-      } catch {
-        /* non-fatal */
-      }
-    };
-    void poll();
-    const t = setInterval(() => void poll(), 3_000);
-    return () => {
-      cancelled = true;
-      clearInterval(t);
-    };
-  }, [onDeviceProvider, mediaActivity.size]);
+      : null;
+  const liveTurns = useMemo(() => {
+    if (!onDeviceProvider) return new Map<string, LiveTurn>();
+    const providerBySession = new Map(
+      inflightTurns.map((turn) => [turn.sessionId, turn.providerName] as const),
+    );
+    return new Map(
+      Array.from(allLiveTurns.entries()).filter(
+        ([sessionId, turn]) =>
+          turn.provider === onDeviceProvider ||
+          (turn.provider === undefined && providerBySession.get(sessionId) === onDeviceProvider),
+      ),
+    );
+  }, [allLiveTurns, inflightTurns, onDeviceProvider]);
 
-  const configuredDefault = onDeviceProvider ? config?.defaultModel?.[onDeviceProvider] : undefined;
+  const activeInflightModel = providerInflightTurns.reduce<InflightTurn | undefined>(
+    (newest, turn) =>
+      turn.model && (!newest || turn.startedAt > newest.startedAt) ? turn : newest,
+    undefined,
+  )?.model;
+  const configuredDefault =
+    activeInflightModel ??
+    (onDeviceProvider ? config?.defaultModel?.[onDeviceProvider] : undefined);
 
   // Fetch the installed-models list and refresh on the same 10s tick
   // as config. Two reasons we can't trust `configuredDefault` alone:
@@ -279,19 +326,21 @@ export function EngineStatusPill() {
     };
   }, [onDeviceProvider]);
 
-  // Only honour the configured default when its weights are on disk.
-  // Otherwise fall through to the first installed model, mirroring the
-  // supervisor's dispatch behavior.
+  // An in-flight session's pinned model wins over the install default.
+  // This is what lets a secondary llama.cpp pill say "Talkie" while the
+  // default DwarfStar pill continues to show its own model. For an idle
+  // provider, only honour the configured default when its weights are on
+  // disk; otherwise mirror the supervisor's first-installed fallback.
   const installedDefault = configuredDefault
     ? installedModels.find((m) => m.id === configuredDefault)
     : undefined;
-  const modelName = installedDefault?.name ?? installedModels[0]?.name;
-  const modelId = installedDefault?.id ?? installedModels[0]?.id;
-
-  // Live phase state via shared hook — QueueMeter reads the same
-  // state from its own mount of the hook, so the two surfaces never
-  // drift on which turn is running or what phase it's in.
-  const liveTurns = useOnDeviceLiveTurns(onDeviceProvider !== null);
+  const activeInstalledModel = activeInflightModel
+    ? installedModels.find((model) => model.id === activeInflightModel)
+    : undefined;
+  const modelName = activeInflightModel
+    ? (activeInstalledModel?.name ?? activeInflightModel)
+    : (installedDefault?.name ?? installedModels[0]?.name);
+  const modelId = activeInflightModel ?? installedDefault?.id ?? installedModels[0]?.id;
 
   // Pill-specific telemetry (per-turn stats + static RAM footprint).
   // Kept on its own subscription so QueueMeter — which doesn't need
@@ -343,11 +392,14 @@ export function EngineStatusPill() {
     return () => ctrl.abort();
   }, [onDeviceProvider]);
 
-  // Media-engine activity (image / video) from the global gpu_swap feed.
-  // ALWAYS subscribed — unlike the chat telemetry above this isn't gated
-  // on an on-device chat provider, because the image/video engines run
-  // independently of whichever model is answering chat.
+  // Media-engine activity belongs to the primary instance only. It remains
+  // independent of the chat provider, but secondary local-engine pills must
+  // not each duplicate the same Image/Video job.
   useEffect(() => {
+    if (!includeMedia) {
+      setMediaActivity(new Map());
+      return;
+    }
     const ctrl = new AbortController();
     void (async () => {
       try {
@@ -380,7 +432,7 @@ export function EngineStatusPill() {
       }
     })();
     return () => ctrl.abort();
-  }, []);
+  }, [includeMedia]);
 
   // Tick every second while anything is in-flight so "N s" counter
   // advances. Also keeps the rolling-window prune in sync with the
@@ -527,21 +579,11 @@ export function EngineStatusPill() {
     .filter(Boolean)
     .join(' ');
 
-  // Label reflects which on-device engine is actually routing chat.
-  // MLX is exclusive to Apple Silicon — read "This Mac" on darwin;
-  // llama.cpp is the default on Windows/Linux and the advanced
-  // fallback on Mac.
-  const platform = window.__GEZEL__?.platform;
-  const chatPillLabel =
-    onDeviceProvider === 'ds4'
-      ? 'DwarfStar'
-      : onDeviceProvider === 'mlx'
-        ? 'This Mac'
-        : platform === 'win32'
-          ? 'This Windows PC'
-          : platform === 'linux'
-            ? 'This Linux device'
-            : 'On-device';
+  // Shared provider naming keeps a secondary llama.cpp pill distinct from
+  // DwarfStar on macOS ("On-device" vs. "DwarfStar").
+  const chatPillLabel = onDeviceProvider
+    ? providerLabel(onDeviceProvider, window.__GEZEL__?.platform)
+    : 'On-device';
   // While a media engine runs, the pill's headline is the engine, not the
   // (paused) chat host — "Video" / "Image" instead of "This Mac".
   const platformPillLabel = activeMedia
@@ -555,7 +597,16 @@ export function EngineStatusPill() {
       <button
         type="button"
         className={engineActive ? 'engine-pill engine-pill-busy' : 'engine-pill'}
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => {
+          if (!open) {
+            window.dispatchEvent(
+              new CustomEvent('gezel:close-header-popovers', {
+                detail: { source: popoverId },
+              }),
+            );
+          }
+          setOpen((currentOpen) => !currentOpen);
+        }}
         aria-expanded={open}
         title={
           busy
@@ -566,14 +617,13 @@ export function EngineStatusPill() {
         <span className={dotClassName} aria-hidden />
         <span className="engine-pill-label">
           {busy ? (
-            showProgress ? (
-              <>
-                {/* A bare progress bar reads identically to the chat
-                    model's prompt-prefill bar — so during local image /
-                    video generation we keep the "Image" / "Video" word
-                    in front of it, otherwise the user can't tell media
-                    generation apart from normal chat processing. */}
-                {activeMedia && <span className="engine-pill-media-kind">{platformPillLabel}</span>}
+            <>
+              {/* Keep the concrete engine visible beside live progress.
+                  This is essential when a gezel override runs llama.cpp
+                  alongside an idle default DwarfStar engine: two anonymous
+                  progress bars would recreate the same ambiguity. */}
+              <span className="engine-pill-kind">{platformPillLabel}</span>
+              {showProgress ? (
                 <span
                   className="engine-pill-progress"
                   title={busyLabel}
@@ -589,10 +639,10 @@ export function EngineStatusPill() {
                     style={{ width: `${progressPct}%` }}
                   />
                 </span>
-              </>
-            ) : (
-              busyLabel
-            )
+              ) : (
+                busyLabel
+              )}
+            </>
           ) : (
             platformPillLabel
           )}
@@ -716,6 +766,46 @@ export function EngineStatusPill() {
       )}
     </div>
   );
+}
+
+function toOnDeviceProvider(provider: ProviderName | undefined): OnDeviceProvider | null {
+  return provider === 'llama-cpp' || provider === 'mlx' || provider === 'ds4' ? provider : null;
+}
+
+function visibleOnDeviceProviders({
+  defaultProvider,
+  queueStatus,
+  inflightTurns,
+  liveTurns,
+}: {
+  defaultProvider: OnDeviceProvider | null;
+  queueStatus: QueueStatusResponse | null;
+  inflightTurns: readonly InflightTurn[];
+  liveTurns: ReadonlyMap<string, LiveTurn>;
+}): OnDeviceProvider[] {
+  const visible = new Set<OnDeviceProvider>();
+  if (defaultProvider) visible.add(defaultProvider);
+
+  for (const provider of ON_DEVICE_PROVIDER_ORDER) {
+    const queue = queueStatus?.providers[provider];
+    if (queue && queue.running + queue.queuedInteractive + queue.queuedBackground > 0) {
+      visible.add(provider);
+    }
+  }
+  for (const turn of inflightTurns) {
+    const provider = toOnDeviceProvider(turn.providerName);
+    if (provider) visible.add(provider);
+  }
+  for (const turn of liveTurns.values()) {
+    if (turn.provider) visible.add(turn.provider);
+  }
+
+  return [
+    ...(defaultProvider && visible.has(defaultProvider) ? [defaultProvider] : []),
+    ...ON_DEVICE_PROVIDER_ORDER.filter(
+      (provider) => provider !== defaultProvider && visible.has(provider),
+    ),
+  ];
 }
 
 function pickCurrent(turns: Map<string, LiveTurn>): LiveTurn | null {

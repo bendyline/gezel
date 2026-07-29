@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -34,7 +34,7 @@ describe('Electron native reuse', () => {
       arch: 'x64',
       release: '9.9.9',
       manifest: {
-        schemaVersion: 1,
+        schemaVersion: 2,
         release: '9.9.9',
         platforms: {
           'win32-x64': {
@@ -45,6 +45,7 @@ describe('Electron native reuse', () => {
                 signature: 'bendyline',
               },
             },
+            symlinks: {},
           },
         },
       },
@@ -71,7 +72,7 @@ describe('Electron native reuse', () => {
       arch: 'x64',
       release: '9.9.9',
       manifest: {
-        schemaVersion: 1,
+        schemaVersion: 2,
         release: '9.9.9',
         platforms: {
           'win32-x64': {
@@ -82,6 +83,7 @@ describe('Electron native reuse', () => {
                 signature: 'bendyline',
               },
             },
+            symlinks: {},
           },
         },
       },
@@ -92,7 +94,8 @@ describe('Electron native reuse', () => {
     });
 
     expect(result.reused).toBe(false);
-    expect(result.reason).toContain('unexpected executable/loadable file');
+    expect(result.reason).toContain('executable/loadable file set mismatch');
+    expect(result.reason).toContain('unexpected: injected.dll');
   });
 
   it('assesses the signed parent app, never a bare native file, for notarization', async () => {
@@ -121,7 +124,7 @@ describe('Electron native reuse', () => {
       arch: 'arm64',
       release: '9.9.9',
       manifest: {
-        schemaVersion: 1,
+        schemaVersion: 2,
         release: '9.9.9',
         platforms: {
           'darwin-arm64': {
@@ -132,6 +135,7 @@ describe('Electron native reuse', () => {
                 signature: 'bendyline',
               },
             },
+            symlinks: {},
           },
         },
       },
@@ -145,5 +149,169 @@ describe('Electron native reuse', () => {
     expect(verifySignature.mock.calls[1]?.[1]).toMatchObject({
       requireNotarizedApp: true,
     });
+  });
+
+  it.runIf(process.platform !== 'win32')(
+    'accepts an exactly pinned internal SONAME symlink chain',
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), 'gezel-electron-native-links-'));
+      roots.push(root);
+      const dir = join(root, 'linux-x64');
+      await mkdir(dir, { recursive: true });
+      const bytes = Buffer.from('shared library fixture');
+      await writeFile(join(dir, 'libgezel.so.1.2.3'), bytes);
+      await symlink('libgezel.so.1.2.3', join(dir, 'libgezel.so.1'));
+      await symlink('libgezel.so.1', join(dir, 'libgezel.so'));
+
+      const result = await reuseVerifiedElectronNativeBinaries({
+        candidates: [root],
+        platform: 'linux',
+        arch: 'x64',
+        release: '9.9.9',
+        manifest: {
+          schemaVersion: 2,
+          release: '9.9.9',
+          platforms: {
+            'linux-x64': {
+              files: {
+                'libgezel.so.1.2.3': {
+                  sha256: createHash('sha256').update(bytes).digest('hex'),
+                  sizeBytes: bytes.length,
+                  signature: 'hash-only',
+                },
+              },
+              symlinks: {
+                'libgezel.so': 'libgezel.so.1',
+                'libgezel.so.1': 'libgezel.so.1.2.3',
+              },
+            },
+          },
+        },
+      });
+
+      expect(result.reused).toBe(true);
+      expect(result.nativeBinDir).toBe(root);
+    },
+  );
+
+  it.runIf(process.platform !== 'win32')(
+    'rejects an unpinned symlink even when it resolves to a pinned file',
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), 'gezel-electron-native-links-'));
+      roots.push(root);
+      const dir = join(root, 'linux-x64');
+      await mkdir(dir, { recursive: true });
+      const bytes = Buffer.from('shared library fixture');
+      await writeFile(join(dir, 'libgezel.so.1'), bytes);
+      await symlink('libgezel.so.1', join(dir, 'libgezel.so'));
+
+      const result = await reuseVerifiedElectronNativeBinaries({
+        candidates: [root],
+        platform: 'linux',
+        arch: 'x64',
+        release: '9.9.9',
+        manifest: {
+          schemaVersion: 2,
+          release: '9.9.9',
+          platforms: {
+            'linux-x64': {
+              files: {
+                'libgezel.so.1': {
+                  sha256: createHash('sha256').update(bytes).digest('hex'),
+                  sizeBytes: bytes.length,
+                  signature: 'hash-only',
+                },
+              },
+              symlinks: {},
+            },
+          },
+        },
+      });
+
+      expect(result.reused).toBe(false);
+      expect(result.reason).toContain('symlink set mismatch');
+      expect(result.reason).toContain('unexpected: libgezel.so');
+    },
+  );
+
+  it.runIf(process.platform !== 'win32')(
+    'rejects pinned symlinks with escaping targets',
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), 'gezel-electron-native-links-'));
+      roots.push(root);
+      const dir = join(root, 'linux-x64');
+      await mkdir(dir, { recursive: true });
+      const bytes = Buffer.from('shared library fixture');
+      await writeFile(join(dir, 'libgezel.so.1'), bytes);
+      await symlink('../outside.so', join(dir, 'libgezel.so'));
+
+      const result = await reuseVerifiedElectronNativeBinaries({
+        candidates: [root],
+        platform: 'linux',
+        arch: 'x64',
+        release: '9.9.9',
+        manifest: {
+          schemaVersion: 2,
+          release: '9.9.9',
+          platforms: {
+            'linux-x64': {
+              files: {
+                'libgezel.so.1': {
+                  sha256: createHash('sha256').update(bytes).digest('hex'),
+                  sizeBytes: bytes.length,
+                  signature: 'hash-only',
+                },
+              },
+              symlinks: {
+                'libgezel.so': '../outside.so',
+              },
+            },
+          },
+        },
+      });
+
+      expect(result.reused).toBe(false);
+      expect(result.reason).toContain('unsafe symlink target');
+    },
+  );
+
+  it.runIf(process.platform !== 'win32')('rejects pinned symlink cycles', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'gezel-electron-native-links-'));
+    roots.push(root);
+    const dir = join(root, 'linux-x64');
+    await mkdir(dir, { recursive: true });
+    const bytes = Buffer.from('shared library fixture');
+    await writeFile(join(dir, 'libgezel-real.so'), bytes);
+    await symlink('libgezel-b.so', join(dir, 'libgezel-a.so'));
+    await symlink('libgezel-a.so', join(dir, 'libgezel-b.so'));
+
+    const result = await reuseVerifiedElectronNativeBinaries({
+      candidates: [root],
+      platform: 'linux',
+      arch: 'x64',
+      release: '9.9.9',
+      manifest: {
+        schemaVersion: 2,
+        release: '9.9.9',
+        platforms: {
+          'linux-x64': {
+            files: {
+              'libgezel-real.so': {
+                sha256: createHash('sha256').update(bytes).digest('hex'),
+                sizeBytes: bytes.length,
+                signature: 'hash-only',
+              },
+            },
+            symlinks: {
+              'libgezel-a.so': 'libgezel-b.so',
+              'libgezel-b.so': 'libgezel-a.so',
+            },
+          },
+        },
+      },
+    });
+
+    expect(result.reused).toBe(false);
+    expect(result.reason).toContain('symlink cycle');
   });
 });

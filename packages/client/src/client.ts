@@ -449,6 +449,8 @@ export interface TaskRunnerState {
  */
 export interface SessionQueueState {
   sessionId: string;
+  /** Session-pinned provider, used to attribute this backlog to an engine. */
+  providerName?: ProviderName;
   depth: number;
   nextPreview: string;
   entries: Array<{
@@ -3334,6 +3336,8 @@ export class GezelClient {
       sessionId: string;
       gezelId: string;
       projectId: string;
+      providerName: ProviderName;
+      model?: string;
       userText: string;
       startedAt: number;
       elapsedMs: number;

@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { lstat, readdir, stat } from 'node:fs/promises';
-import { basename, join, relative, resolve, sep } from 'node:path';
+import { lstat, readdir, readlink } from 'node:fs/promises';
+import { basename, join, posix, relative, resolve, sep } from 'node:path';
 import { resolvePlatformKey } from '@bendyline/gezel/native';
 import pinnedManifestJson from './native-file-manifest.json';
 import { effectiveEngineRelease } from './native-manifest.js';
@@ -15,10 +15,15 @@ interface NativeFilePin {
   signature: FileSignatureExpectation;
 }
 
+interface NativePlatformPin {
+  files: Record<string, NativeFilePin>;
+  symlinks: Record<string, string>;
+}
+
 interface NativeFileManifest {
-  schemaVersion: 1;
+  schemaVersion: 2;
   release: string;
-  platforms: Record<string, { files: Record<string, NativeFilePin> }>;
+  platforms: Record<string, NativePlatformPin>;
 }
 
 const pinnedManifest = pinnedManifestJson as NativeFileManifest;
@@ -53,7 +58,7 @@ export async function reuseVerifiedElectronNativeBinaries(
   const arch = opts.arch ?? process.arch;
   const release = opts.release ?? effectiveEngineRelease();
   const manifest = opts.manifest ?? pinnedManifest;
-  if (manifest.schemaVersion !== 1 || manifest.release !== release) {
+  if (manifest.schemaVersion !== 2 || manifest.release !== release) {
     return {
       reused: false,
       reason: `no per-file native pins for release ${release}`,
@@ -106,7 +111,7 @@ export async function reuseVerifiedElectronNativeBinaries(
 async function verifyCandidate(opts: {
   root: string;
   platform: NodeJS.Platform;
-  entries: Array<[string, { files: Record<string, NativeFilePin> }]>;
+  entries: Array<[string, NativePlatformPin]>;
   verifySignature: typeof verifyCodeSignature;
 }): Promise<void> {
   const root = resolve(opts.root);
@@ -117,13 +122,22 @@ async function verifyCandidate(opts: {
 
   for (const [platformKey, platformPin] of opts.entries) {
     const platformDir = join(root, platformKey);
-    const actualNativeFiles = await listLoadableFiles(platformDir, opts.platform);
-    const expectedPaths = new Set(Object.keys(platformPin.files));
-    for (const actual of actualNativeFiles) {
-      if (!expectedPaths.has(actual)) {
-        throw new Error(`unexpected executable/loadable file: ${platformKey}/${actual}`);
-      }
+    const platformInfo = await lstat(platformDir);
+    if (!platformInfo.isDirectory() || platformInfo.isSymbolicLink()) {
+      throw new Error(`native platform root is not a real directory: ${platformKey}`);
     }
+    if (!isRecord(platformPin.files) || !isRecord(platformPin.symlinks)) {
+      throw new Error(`invalid native manifest entry: ${platformKey}`);
+    }
+    const actual = await listNativeEntries(platformDir, opts.platform);
+    assertSamePaths(
+      `${platformKey} executable/loadable file`,
+      Object.keys(platformPin.files),
+      actual.files,
+    );
+    assertSamePaths(`${platformKey} symlink`, Object.keys(platformPin.symlinks), [
+      ...actual.symlinks.keys(),
+    ]);
 
     for (const [relativePath, pin] of Object.entries(platformPin.files)) {
       if (!isSafeRelativePath(relativePath)) {
@@ -155,6 +169,24 @@ async function verifyCandidate(opts: {
         }
       }
     }
+
+    for (const [relativePath, target] of Object.entries(platformPin.symlinks)) {
+      if (!isSafeRelativePath(relativePath)) {
+        throw new Error(`unsafe pinned symlink path: ${relativePath}`);
+      }
+      if (!isSafeSymlinkTarget(target)) {
+        throw new Error(
+          `unsafe pinned symlink target: ${platformKey}/${relativePath} -> ${JSON.stringify(target)}`,
+        );
+      }
+      const actualTarget = actual.symlinks.get(relativePath);
+      if (actualTarget !== target) {
+        throw new Error(
+          `symlink target mismatch: ${platformKey}/${relativePath} expected ${JSON.stringify(target)}, got ${JSON.stringify(actualTarget)}`,
+        );
+      }
+      resolvePinnedSymlink(platformKey, relativePath, platformPin);
+    }
   }
 
   if (opts.platform === 'darwin') {
@@ -172,26 +204,44 @@ async function verifyCandidate(opts: {
   }
 }
 
-async function listLoadableFiles(root: string, platform: NodeJS.Platform): Promise<string[]> {
-  const out: string[] = [];
+async function listNativeEntries(
+  root: string,
+  platform: NodeJS.Platform,
+): Promise<{ files: string[]; symlinks: Map<string, string> }> {
+  const files: string[] = [];
+  const symlinks = new Map<string, string>();
   const visit = async (dir: string): Promise<void> => {
     for (const entry of await readdir(dir, { withFileTypes: true })) {
       const absolute = join(dir, entry.name);
-      if (entry.isSymbolicLink()) {
-        throw new Error(`symlink in native payload: ${relative(root, absolute)}`);
+      const path = relative(root, absolute).split(sep).join('/');
+      if (!isSafeRelativePath(path)) {
+        throw new Error(`unsafe native payload path: ${path}`);
       }
-      if (entry.isDirectory()) {
+      if (entry.isSymbolicLink()) {
+        const target = await readlink(absolute);
+        if (!isSafeSymlinkTarget(target)) {
+          throw new Error(
+            `unsafe symlink target in native payload: ${path} -> ${JSON.stringify(target)}`,
+          );
+        }
+        symlinks.set(path, target);
+      } else if (entry.isDirectory()) {
         await visit(absolute);
       } else if (entry.isFile()) {
-        const info = await stat(absolute);
+        const info = await lstat(absolute);
         if (isLoadableNativeFile(platform, entry.name, info.mode)) {
-          out.push(relative(root, absolute).split(sep).join('/'));
+          files.push(path);
         }
+      } else {
+        throw new Error(`unsupported native payload entry: ${path}`);
       }
     }
   };
   await visit(root);
-  return out.sort();
+  return {
+    files: files.sort(),
+    symlinks: new Map([...symlinks].sort(([a], [b]) => a.localeCompare(b))),
+  };
 }
 
 function isLoadableNativeFile(platform: NodeJS.Platform, name: string, mode: number): boolean {
@@ -206,8 +256,72 @@ function isSafeRelativePath(path: string): boolean {
     path.length > 0 &&
     !path.startsWith('/') &&
     !path.includes('\\') &&
-    path.split('/').every((segment) => segment.length > 0 && segment !== '.' && segment !== '..')
+    !path.includes('\0') &&
+    path
+      .split('/')
+      .every(
+        (segment) =>
+          segment.length > 0 && segment !== '.' && segment !== '..' && !segment.includes(':'),
+      )
   );
+}
+
+function isSafeSymlinkTarget(target: unknown): target is string {
+  return typeof target === 'string' && isSafeRelativePath(target);
+}
+
+function resolvePinnedSymlink(
+  platformKey: string,
+  start: string,
+  platformPin: NativePlatformPin,
+): string {
+  const seen = new Set<string>();
+  let current = start;
+  while (Object.hasOwn(platformPin.symlinks, current)) {
+    if (seen.has(current)) {
+      throw new Error(`symlink cycle in ${platformKey}: ${[...seen, current].join(' -> ')}`);
+    }
+    seen.add(current);
+    const target = platformPin.symlinks[current];
+    if (!isSafeSymlinkTarget(target)) {
+      throw new Error(
+        `unsafe pinned symlink target: ${platformKey}/${current} -> ${JSON.stringify(target)}`,
+      );
+    }
+    current = posix.normalize(posix.join(posix.dirname(current), target));
+    if (!isSafeRelativePath(current)) {
+      throw new Error(
+        `symlink escapes platform directory: ${platformKey}/${start} -> ${JSON.stringify(target)}`,
+      );
+    }
+  }
+  if (!Object.hasOwn(platformPin.files, current)) {
+    throw new Error(
+      `symlink does not terminate at a pinned regular file: ${platformKey}/${start} -> ${current}`,
+    );
+  }
+  return current;
+}
+
+function assertSamePaths(label: string, expected: string[], actual: string[]): void {
+  const expectedSorted = [...expected].sort();
+  const actualSorted = [...actual].sort();
+  if (
+    expectedSorted.length !== actualSorted.length ||
+    expectedSorted.some((value, index) => value !== actualSorted[index])
+  ) {
+    const missing = expectedSorted.filter((path) => !actualSorted.includes(path));
+    const unexpected = actualSorted.filter((path) => !expectedSorted.includes(path));
+    throw new Error(
+      `${label} set mismatch` +
+        `${missing.length > 0 ? `; missing: ${missing.join(', ')}` : ''}` +
+        `${unexpected.length > 0 ? `; unexpected: ${unexpected.join(', ')}` : ''}`,
+    );
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
 function enclosingMacApp(path: string): string | null {

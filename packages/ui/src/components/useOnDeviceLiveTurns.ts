@@ -24,6 +24,8 @@ import { streamSharedAllChatEvents } from '../shared-chat-events.js';
 
 export interface LiveTurnState {
   phase: 'starting' | 'loading_model' | 'prefill' | 'generating' | 'ready';
+  /** Concrete local engine that emitted the phase for this session. */
+  provider?: 'llama-cpp' | 'mlx' | 'ds4';
   /** Human-readable label from the phase event's `detail` (or a fallback). */
   label: string;
   /**
@@ -106,6 +108,7 @@ export function useOnDeviceLiveTurns(enabled: boolean): Map<string, LiveTurnStat
               }
               next.set(sessionId, {
                 phase,
+                provider: event.provider,
                 label: detail ?? phaseBaseLabel(phase),
                 gezelId,
                 startedAt: prior?.startedAt ?? Date.now(),
@@ -125,8 +128,10 @@ export function useOnDeviceLiveTurns(enabled: boolean): Map<string, LiveTurnStat
               // reported bug was the bail-out case where the old entry
               // persisted across turn boundaries indefinitely.
               const next = new Map(prev);
+              const prior = next.get(sessionId);
               next.set(sessionId, {
                 phase: 'prefill',
+                ...(prior?.provider ? { provider: prior.provider } : {}),
                 label: 'Preparing',
                 gezelId,
                 startedAt: Date.now(),

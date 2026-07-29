@@ -22,6 +22,7 @@ import { ConfirmDialog } from './ConfirmDialog.js';
 import { LicenseButton } from './LicenseButton.js';
 import { ExportModelBundleButton, ImportModelBundleButton } from './ModelBundleControls.js';
 import { RecommendedBadge } from './RecommendedBadge.js';
+import { approximateQuantizationLabel, quantizationTitle } from './model-quantization.js';
 
 interface MemoryProfile {
   totalRamBytes: number;
@@ -553,7 +554,6 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
                   <th>Name</th>
                   <th>Size</th>
                   <th>Quant</th>
-                  <th>Template</th>
                   <th>Fitness</th>
                   <th />
                 </tr>
@@ -622,18 +622,8 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
                         )}
                       </td>
                       <td>{formatBytes(m.approxSizeBytes)}</td>
-                      <td>{m.quantization ?? '—'}</td>
-                      <td>
-                        {m.chatTemplatePresent ? (
-                          <span className="home-status-pill home-status-ok">✓</span>
-                        ) : (
-                          <span
-                            className="home-status-pill home-status-warn"
-                            title="GGUF lacks tokenizer.chat_template — replies may be incoherent."
-                          >
-                            missing
-                          </span>
-                        )}
+                      <td title={quantizationTitle(m.quantization)}>
+                        {approximateQuantizationLabel(m.quantization)}
                       </td>
                       <td>
                         <span

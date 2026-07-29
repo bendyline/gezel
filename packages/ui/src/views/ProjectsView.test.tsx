@@ -89,6 +89,7 @@ const PROJECTS: Project[] = [
 
 describe('ProjectsView', () => {
   beforeEach(() => {
+    window.localStorage.removeItem('gezel.projectsSidebarCollapsed');
     vi.mocked(api.listProjects).mockResolvedValue({ projects: PROJECTS } as never);
     vi.mocked(api.listGezels).mockResolvedValue({ gezels: [] } as never);
     vi.mocked(api.listCatalogItems).mockResolvedValue({ items: [] } as never);
@@ -114,6 +115,19 @@ describe('ProjectsView', () => {
       expect(screen.getByText('Alpha')).toBeInTheDocument();
     });
     expect(screen.getByText('default')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Alpha' })).toHaveClass('project-rail-name');
+    expect(screen.getByRole('button', { name: 'Alpha' })).toHaveAttribute('title', 'Alpha');
+  });
+
+  it('shows labeled creation keys when the project list is collapsed', async () => {
+    render(<ProjectsView />);
+    await screen.findByText('Alpha');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse project list' }));
+
+    expect(screen.getByRole('button', { name: 'New Project' })).toHaveTextContent('+Project');
+    expect(screen.getByRole('button', { name: 'New Job' })).toHaveTextContent('+Job');
+    expect(screen.getByRole('button', { name: 'Expand project list' })).toBeInTheDocument();
   });
 
   it('also loads the gezels list (used for assignee pickers)', async () => {

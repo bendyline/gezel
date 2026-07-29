@@ -186,7 +186,7 @@ export function GezellenView() {
           window.dispatchEvent(new CustomEvent('gezel:gezel-updated', { detail: gezel }));
         }}
       />
-      <aside className="side">
+      <aside className="side gezels-side">
         <div className="area-toolbar">
           <button type="button" className="area-toolbar-btn" onClick={() => setShowCreate(true)}>
             + New Gezel

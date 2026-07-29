@@ -245,6 +245,15 @@ mac:
   gatekeeperAssess: false
   entitlements: entitlements.mac.plist
   entitlementsInherit: entitlements.mac.plist
+  # Native release Mach-O files are already Developer ID signed with hardened
+  # runtime before their hashes enter NATIVE_FILE_MANIFESTS.json. Re-signing
+  # them while wrapping the Electron app would change their bytes and defeat
+  # source-pinned reuse by standalone clients. Keep those inner signatures
+  # untouched; codesign still seals the complete native-bin tree (including
+  # symlink metadata) into the outer app signature, and release CI verifies
+  # both the per-file manifest and the final app with --strict --deep.
+  signIgnore:
+    - /Contents/Resources/app\.asar\.unpacked/native-bin/
   # Ship the LaunchDaemon plist + uninstall.sh inside the .app bundle
   # so the postinstall script can find them at known paths under
   # /Applications/Gezel.app/Contents/Resources/.

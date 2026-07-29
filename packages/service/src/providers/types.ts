@@ -270,6 +270,20 @@ export interface SessionOpts {
    */
   forceDirectFileWork?: boolean;
   /**
+   * Local bridge-backed providers: a successful call to one of these
+   * action tools is the terminal outcome for the turn. The provider
+   * appends one short closing line (preferably from `closingArg`) and
+   * returns without asking the model to analyze the completed action
+   * again. Used by lean game projects (`make_move`) where a continuation
+   * generation otherwise invites stale-board rumination and repeat moves.
+   */
+  terminalToolPolicy?: {
+    toolNames: string[];
+    closingArg?: string;
+    fallbackText: string;
+    maxClosingChars?: number;
+  };
+  /**
    * Authoritative expected output path paired with
    * {@link forceDirectFileWork}. This is especially important when the
    * clamp came from `ChatSession.expectedDeliverable` rather than wording

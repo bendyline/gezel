@@ -66,6 +66,9 @@
   --titlebar-pane-shadow: rgba(0, 0, 0, 0.18);
   --accent: #b0724c;
   --accent-hover: #996142;
+  /* Dark ink keeps selected text legible on both themes' medium-orange
+     accent fills. */
+  --accent-selection-ink: #231207;
   --text: #1c1c1c;
   --text-muted: #666;
   /* Tool icons use a warmer ink than body copy on light parchment.
@@ -1001,12 +1004,10 @@ html.embedded-chat #root {
   font-variant-numeric: tabular-nums;
 }
 
-/* Engine status pill — on-device (llama.cpp) only. Shows the current
-   model name at rest; spins + surfaces the live phase label
-   ("Processing prompt (47% · 6,144 tokens)", "Generating") while a
-   turn is in flight. Hidden entirely when the default provider is
-   not llama-cpp, so a Copilot / OpenAI user never sees it. Click
-   opens a popover with richer telemetry. */
+/* Engine status pills — one resting pill for the configured local default,
+   plus a temporary pill for each busy secondary local engine. Shows the
+   model name at rest; spins + surfaces live phase progress while a turn is
+   in flight. Click opens a provider-specific telemetry popover. */
 .engine-pill-root {
   position: relative;
   display: flex;
@@ -1096,9 +1097,9 @@ html.embedded-chat #root {
 .engine-pill-health-muted {
   opacity: 0.58;
 }
-/* "Image" / "Video" word kept in front of the progress bar during
-   local media generation so the bar isn't mistaken for chat prefill. */
-.engine-pill-media-kind {
+/* Concrete engine/workload name kept in front of live progress so two
+   simultaneous local-engine pills never become anonymous progress bars. */
+.engine-pill-kind {
   margin-right: 0.4rem;
 }
 
@@ -1225,6 +1226,7 @@ html.embedded-chat #root {
 .engine-pill-stats {
   display: grid;
   grid-template-columns: auto 1fr;
+  align-items: baseline;
   column-gap: 1rem;
   row-gap: 0.35rem;
   margin: 0;
@@ -1234,7 +1236,6 @@ html.embedded-chat #root {
   text-transform: uppercase;
   letter-spacing: 0.04em;
   opacity: 0.6;
-  align-self: start;
 }
 .engine-pill-stats dd {
   margin: 0;
@@ -2047,6 +2048,13 @@ html.embedded-chat #root {
   flex: 1;
   display: flex;
   min-height: 0;
+  /* Keep in-body elevation (selected sidebar tabs, sticky chat chrome, etc.)
+     below the titlebar's stacking context. Without this boundary, a body
+     child at z-index: 2 ties `.app-header` and wins by DOM order, covering
+     header popovers even when the popover itself has a much higher local
+     z-index. Portaled dialogs and menus remain outside this context. */
+  position: relative;
+  z-index: 0;
 }
 
 .app-main {
@@ -2387,9 +2395,12 @@ html.embedded-chat #root {
   align-items: center;
   gap: 0.15rem;
 }
-.project-rail-row > button {
+.project-rail-name {
   flex: 1 1 auto;
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .app-nav-menu-item.danger {
@@ -2398,6 +2409,12 @@ html.embedded-chat #root {
 .app-nav-menu-item.danger[data-disabled] {
   opacity: 0.5;
   cursor: default;
+}
+
+/* Per-gezel menus contain one short action, so they should size to their
+   label instead of inheriting the wider top-navigation menu minimum. */
+.gezel-actions-menu {
+  min-width: 0;
 }
 
 /* Gezel detail actions stay visible in the header. Compact row variants stay
@@ -2938,7 +2955,7 @@ body.app-resizing webview {
 /* ---------- Collapsible Projects sidebar ---------- */
 
 .two-col.sidebar-collapsed {
-  grid-template-columns: 48px minmax(0, 1fr);
+  grid-template-columns: 56px minmax(0, 1fr);
 }
 
 .side.collapsed {
@@ -2954,14 +2971,52 @@ body.app-resizing webview {
   margin-left: 0;
 }
 
-.side.collapsed .new-row {
-  justify-content: center;
+.side.collapsed .collapsed-create-row {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.35rem;
+  margin: 0.5rem 0 0.65rem;
 }
 
-.side.collapsed .new-row button.primary {
+.side.collapsed .collapsed-create-btn {
   width: 100%;
-  padding: 0.4rem 0;
-  text-align: center;
+  min-height: 2.75rem;
+  padding: 0.3rem 0.1rem;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.1rem;
+  border: 1px solid var(--key-border);
+  border-radius: var(--radius-md);
+  background: var(--key-bg);
+  box-shadow: var(--key-shadow);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.side.collapsed .collapsed-create-btn:hover {
+  border-color: var(--accent);
+  background: var(--key-bg-hover);
+}
+
+.side.collapsed .collapsed-create-btn:active {
+  transform: translateY(1px);
+  box-shadow: var(--key-pressed-shadow);
+}
+
+.collapsed-create-symbol {
+  color: var(--accent);
+  font-size: var(--text-xl);
+  font-weight: 600;
+  line-height: 0.9;
+}
+
+.collapsed-create-label {
+  color: var(--text-muted);
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  line-height: 1;
 }
 
 .side.collapsed li button {
@@ -5609,6 +5664,21 @@ button.danger {
   gap: 2px;
 }
 
+/* Keep the creation toolbar fixed while a long gezel roster scrolls within
+   the available pane height. */
+.gezels-side {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.gezels-side .gezel-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
 .side li .gezel-row {
   display: flex;
   align-items: center;
@@ -5663,6 +5733,15 @@ button.danger {
 .detail-header-text {
   flex: 1;
   min-width: 0;
+  padding-top: 2px;
+}
+
+.gezel-detail .detail-header h3 {
+  margin-bottom: 0;
+}
+
+.gezel-detail > .detail-header > .gezel-actions-trigger {
+  align-self: flex-start;
 }
 
 /* ---------- Iterate dialog ---------- */
@@ -9977,6 +10056,7 @@ button.bench-step-foot:disabled {
 /* Extra breathing room above the media section so it reads as separate from
    the more important chat-model setup above it. */
 .home-media-section {
+  --home-media-control-width: 30rem;
   padding-top: 10px;
 }
 
@@ -9989,12 +10069,19 @@ button.bench-step-foot:disabled {
   gap: 0.4rem;
   margin-top: 0.5rem;
   padding-left: 1rem;
+  width: min(100%, calc(var(--home-media-control-width) + 1rem));
+  box-sizing: border-box;
 }
 .home-media-row {
   display: flex;
   align-items: center;
   gap: 0.6rem;
   flex-wrap: wrap;
+  width: 100%;
+}
+.home-media-row > .home-media-btn {
+  width: 100%;
+  text-align: left;
 }
 
 /* Per-modality install progress — same green bar as the chat model banner
@@ -10004,7 +10091,7 @@ button.bench-step-foot:disabled {
   flex-direction: column;
   gap: 0.3rem;
   width: 100%;
-  max-width: 26rem;
+  max-width: var(--home-media-control-width);
 }
 
 /* Media download buttons — "Download all" and each per-modality pick share
@@ -10021,6 +10108,17 @@ button.bench-step-foot:disabled {
 .home-media-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+.home-media-btn-primary {
+  padding: 0.5rem 0.9rem;
+  background: var(--accent);
+  color: var(--accent-selection-ink);
+  border-color: color-mix(in srgb, var(--accent) 72%, var(--accent-selection-ink));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), 0 1px 2px rgba(60, 30, 10, 0.2);
+  font-weight: 600;
+}
+.home-media-btn-primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 88%, var(--titlebar-ink));
 }
 
 .home-probe {
@@ -10125,7 +10223,7 @@ button.bench-step-foot:disabled {
    session controls + composer below". */
 .gezel-chat-session-header {
   display: flex;
-  align-items: center;
+  align-items: stretch;
   gap: 0.4rem;
   padding: 0.4rem 0.6rem;
   border-top: 1px solid var(--border);
@@ -10177,6 +10275,14 @@ button.bench-step-foot:disabled {
 
 .session-row-meta {
   color: var(--text-muted);
+}
+
+.gezel-chat-session-menu .gz-select-item[data-highlighted] {
+  color: var(--accent-selection-ink);
+}
+
+.gezel-chat-session-menu .gz-select-item[data-highlighted] .session-row-meta {
+  color: inherit;
 }
 
 .gezel-chat-session-btn {
@@ -10439,6 +10545,21 @@ button.bench-step-foot:disabled {
   flex-direction: column;
   gap: 0.25rem;
 }
+.msg-warning-link {
+  appearance: none;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-family: var(--font-ui);
+  font-size: inherit;
+  text-decoration: underline;
+  text-underline-offset: 0.12em;
+  cursor: pointer;
+}
+.msg-warning-link:hover {
+  text-decoration-thickness: 2px;
+}
 
 .msg-image-gen-narrative {
   margin-top: 0.4rem;
@@ -10564,6 +10685,16 @@ button.bench-step-foot:disabled {
 
 .thinking-dots span:nth-child(3) {
   animation-delay: 0.36s;
+}
+
+.msg-thinking-activity {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.msg-thinking-activity .msg-live-inline-activity {
+  margin-top: 0;
 }
 
 @keyframes thinking-bounce {

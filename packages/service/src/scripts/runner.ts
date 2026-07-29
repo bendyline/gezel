@@ -373,19 +373,14 @@ export class ScriptRunner {
         run.error = `script timed out after ${timeoutMs}ms`;
       } else if (result.exitCode !== 0) {
         run.status = 'error';
-        // Prefer a self-explanatory refusal line over the bare exit code —
-        // it is the model's and the page's only retry/repair signal. Two
-        // stable shapes: the sandbox's own "[sandbox error] …" refusals,
-        // and the dispatcher's capability/engagement denials (which crash
-        // the child SDK with "Error: script attempted to call …").
-        const stderrLines = result.stderr.split('\n').map((line) => line.trimEnd());
-        const refusalLine = stderrLines.find(
-          (line) =>
-            line.startsWith('[sandbox error]') ||
-            line.startsWith('Error: script attempted to call') ||
-            line.startsWith('Error: script called'),
-        );
-        run.error = run.error ?? refusalLine ?? `script exited with code ${result.exitCode}`;
+        // Keep the script's thrown Error line. Script-backed tools use this
+        // field as their repair signal, so collapsing an illegal-move error
+        // (including its authoritative legal-move list) to "exited with
+        // code 1" leaves the model guessing from stale transcript state.
+        run.error =
+          run.error ??
+          extractScriptFailureFromStderr(result.stderr) ??
+          `script exited with code ${result.exitCode}`;
       } else {
         run.status = 'ok';
         if (outputSeen) {
@@ -646,6 +641,27 @@ export class ScriptRunner {
     const file = projectScriptRunFile(this.store.homePath, run.projectId, date, run.id);
     await writeFile(file, JSON.stringify(run, null, 2), 'utf8');
   }
+}
+
+/**
+ * Pull the actionable exception from a child script's stderr without
+ * surfacing its stack trace. Sandbox/capability refusals keep priority;
+ * ordinary user-script exceptions (Error, TypeError, RangeError, …) are
+ * the fallback. The first exception line is the thrown message Node prints.
+ */
+export function extractScriptFailureFromStderr(stderr: string): string | undefined {
+  const lines = stderr
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const refusal = lines.find(
+    (line) =>
+      line.startsWith('[sandbox error]') ||
+      line.startsWith('Error: script attempted to call') ||
+      line.startsWith('Error: script called'),
+  );
+  if (refusal) return refusal;
+  return lines.find((line) => /^(?:Error|[A-Za-z][A-Za-z0-9]*Error):\s+\S/.test(line));
 }
 
 function summarize(value: unknown): string {

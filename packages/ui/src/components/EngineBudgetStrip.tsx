@@ -92,9 +92,7 @@ export function EngineBudgetStrip({ provider, pollMs = 2000 }: Props) {
           style={{
             height: '100%',
             width: `${Math.min(100, Math.round(ratio * 100))}%`,
-            background: overBudget
-              ? 'var(--gz-color-warning, #cc7a00)'
-              : 'var(--gz-color-accent, #4a8df1)',
+            background: overBudget ? 'var(--warning)' : 'var(--success)',
             transition: 'width 0.4s ease-out',
           }}
         />

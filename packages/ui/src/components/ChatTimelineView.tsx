@@ -20,6 +20,7 @@ import { TerminalBubble } from './TerminalBubble.js';
 import { TerminalStreamingBubble } from './TerminalStreamingBubble.js';
 import {
   GhostQueuedBubble,
+  type InlineWarning,
   MessageBubble,
   RoleSuffix,
   StreamingBubble,
@@ -338,7 +339,7 @@ interface LiveSlot {
    * streaming bubble so the user isn't left guessing why a turn is
    * dragging or why the provider dropped into degraded mode.
    */
-  warnings?: string[];
+  warnings?: InlineWarning[];
 }
 
 export interface ChatTimelineViewProps {
@@ -1604,7 +1605,7 @@ export function ChatTimelineView({
         // model isn't making progress just because the SDK raised a
         // warning), so we don't touch lastActivityAt.
         const slot = liveRef.current.get(sessionId) ?? createSlot(gezelId, projectId, sessionId);
-        slot.warnings = [...(slot.warnings ?? []), event.message];
+        slot.warnings = [...(slot.warnings ?? []), event];
         liveRef.current.set(sessionId, slot);
         setLiveBump((n) => n + 1);
       } else if (event.type === 'queued') {
@@ -1765,6 +1766,15 @@ export function ChatTimelineView({
           liveRef.current.set(sessionId, slot);
           setLiveBump((n) => n + 1);
         }
+      } else if (event.type === 'cancelled') {
+        // A requested stop is ordinary control flow, not a failed turn.
+        // Retire the live bubble without attaching an error; the manager
+        // emits this event again after it persists any salvaged partial
+        // response, so the refresh below converges on the durable row.
+        if (liveRef.current.delete(sessionId)) {
+          setLiveBump((n) => n + 1);
+        }
+        void refreshLatest();
       } else if (event.type === 'done') {
         // Only retire the slot if it completed cleanly. An errored slot
         // stays visible until the next user_message replaces it.

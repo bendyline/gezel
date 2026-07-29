@@ -33,6 +33,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { setDefaultAutoSelectFamilyAttemptTimeout } from 'node:net';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { assertNativeFileManifest } from './native-file-manifest-lib.mjs';
 
 setDefaultAutoSelectFamilyAttemptTimeout(5000);
 
@@ -147,13 +148,12 @@ if (!nativeFilesResponse.ok) {
 }
 const nativeFilesBytes = Buffer.from(await nativeFilesResponse.arrayBuffer());
 const nativeFiles = JSON.parse(nativeFilesBytes.toString('utf8'));
-if (
-  nativeFiles?.schemaVersion !== 1 ||
-  nativeFiles?.release !== version ||
-  !nativeFiles.platforms ||
-  Object.keys(nativeFiles.platforms).length === 0
-) {
-  throw new Error('NATIVE_FILE_MANIFESTS.json has an invalid schema, release, or platform set');
+try {
+  assertNativeFileManifest(nativeFiles, { expectedRelease: version });
+} catch (error) {
+  throw new Error(
+    `NATIVE_FILE_MANIFESTS.json is invalid: ${error instanceof Error ? error.message : String(error)}`,
+  );
 }
 
 if (printOnly) {

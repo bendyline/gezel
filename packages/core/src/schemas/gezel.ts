@@ -731,6 +731,12 @@ export const ChatEventSchema = z.discriminatedUnion('type', [
     removedLines: z.number().int().nonnegative().optional(),
   }),
   z.object({ type: z.literal('error'), error: z.string() }),
+  /**
+   * The running turn was intentionally stopped through the cancellation
+   * surface. This is terminal for the live UI, but is deliberately not an
+   * error: it must not poison the session or render failure recovery UI.
+   */
+  z.object({ type: z.literal('cancelled') }),
   z.object({ type: z.literal('done') }),
   /**
    * Emitted when a turn ends up waiting in the provider queue for more
@@ -781,7 +787,21 @@ export const ChatEventSchema = z.discriminatedUnion('type', [
    * the streaming bubble so the user sees them immediately instead of
    * only finding out when the turn completes or times out.
    */
-  z.object({ type: z.literal('warning'), message: z.string() }),
+  z.object({
+    type: z.literal('warning'),
+    message: z.string(),
+    /**
+     * Optional in-app destination for a warning's inline action. Kept
+     * deliberately narrow: warnings are still readable prose when an older
+     * client ignores this additive field.
+     */
+    action: z
+      .object({
+        kind: z.literal('settings'),
+        section: z.enum(['llamaCpp', 'mlx', 'ds4']),
+      })
+      .optional(),
+  }),
   /**
    * Copilot-only: the model announced a phase transition via its
    * `report_intent` built-in tool (e.g. "Building cart checkout

@@ -52,6 +52,7 @@ import { computeToolBudgetChars } from './mcp-bridge.js';
 import { ProviderQueue, runInQueue } from './queue.js';
 import { RambleDetector } from './ramble-detector.js';
 import { StreamingSessionBase } from './streaming-session.js';
+import { terminalToolClosingText } from './terminal-tool-policy.js';
 import { ToolFailureTracker } from './tool-failure-tracker.js';
 import { ToolRepeatTracker } from './tool-repeat-tracker.js';
 import type {
@@ -264,6 +265,7 @@ export class OllamaProvider implements LLMProvider {
       ...(opts.profile ? { profile: opts.profile } : {}),
       ...(opts.activeCraftbookStep ? { activeCraftbookStep: opts.activeCraftbookStep } : {}),
       ...(opts.tuning ? { tuning: opts.tuning } : {}),
+      ...(opts.terminalToolPolicy ? { terminalToolPolicy: opts.terminalToolPolicy } : {}),
     });
   }
 
@@ -419,6 +421,7 @@ interface OllamaSessionDeps {
    * `think` when both are present.
    */
   tuning?: import('../model-profile/index.js').ResolvedTuning;
+  terminalToolPolicy?: NonNullable<SessionOpts['terminalToolPolicy']>;
 }
 
 /** See `MID_LOOP_COMPACT_RATIO` in llama-cpp/provider.ts. */
@@ -1441,6 +1444,7 @@ class OllamaSession extends StreamingSessionBase implements LLMSession {
         sourceFailureKind?: 'truncated' | 'not-persisted';
         transportFailure?: boolean;
       } | null = null;
+      let terminalActionClosing: string | null = null;
       for (const call of toolCalls) {
         const fn = call.function;
         const argsKey = stableArgsKey(fn.arguments);
@@ -1505,6 +1509,12 @@ class OllamaSession extends StreamingSessionBase implements LLMSession {
           }
         }
         const tracked = failureTracker.recordResult(fn.name, output);
+        terminalActionClosing ??= terminalToolClosingText(
+          this.deps.terminalToolPolicy,
+          fn.name,
+          fn.arguments ?? {},
+          output,
+        );
         const repeated = repeatTracker.recordCall(fn.name, fn.arguments ?? {}, tracked.output);
         this.messages.push({ role: 'tool', content: repeated.output });
         if (tracked.shouldAbort) {
@@ -1540,6 +1550,22 @@ class OllamaSession extends StreamingSessionBase implements LLMSession {
             : {}),
           ...(abortDueToFailureLoop.transportFailure ? { transportFailure: true } : {}),
         });
+      }
+      if (terminalActionClosing) {
+        this.messages.push({ role: 'assistant', content: terminalActionClosing });
+        fullText = terminalActionClosing;
+        if (lastPromptEvalCount > 0 || lastEvalCount > 0) {
+          this.emitUsage(
+            buildTurnUsage({
+              model: this.deps.model,
+              inputTokens: lastPromptEvalCount,
+              outputTokens: lastEvalCount,
+              durationMs: Date.now() - start,
+            }),
+          );
+        }
+        log.info('[ollama] terminal action tool succeeded; ending turn without regeneration');
+        return fullText;
       }
 
       const repeat = detectRepeatCall(callLog);

@@ -16,6 +16,7 @@ import {
   buildChatCodedFileNudge,
   buildContinuationNudge,
   buildDeriveRepairClampNudge,
+  buildFailedToolRecoveryNudge,
   buildProseDeliverableNudge,
   consultationIdleTimeoutMsForModel,
   deriveRepairClampEnabled,
@@ -29,6 +30,8 @@ import {
   isValidationRepairPrompt,
   messageExpressesModifyIntent,
   resolveMlxEffectiveNumCtx,
+  shouldRefreshLeanGameState,
+  unresolvedFailedToolCalls,
 } from './manager.js';
 
 describe('consultationIdleTimeoutMsForModel', () => {
@@ -333,9 +336,11 @@ describe('ChatManager — send + persistence', () => {
     // the aborted message carries what the model already streamed.
     const session = await manager.createSession({ gezelId: 'ada' });
     mock.scriptStreamThenHang('Partial answer the user already saw');
+    const received: string[] = [];
+    events.subscribe(session.id, (event) => received.push(event.type));
 
     const pending = manager.send(session.id, 'go').catch(() => {
-      /* cancel surfaces as error/done events, not a rejection here */
+      /* cancel surfaces as cancelled/done events, not a rejection here */
     });
     // Wait until the provider turn is genuinely in flight before
     // cancelling. The `send` call is recorded at the top of
@@ -356,6 +361,9 @@ describe('ChatManager — send + persistence', () => {
 
     const disk = await store.getSession('ada', session.id);
     expect(disk).not.toBeNull();
+    expect(disk!.lastTurnError).toBeUndefined();
+    expect(received).toContain('cancelled');
+    expect(received).not.toContain('error');
     const aborted = disk!.messages.at(-1)!;
     expect(aborted.role).toBe('assistant');
     expect(aborted.synthetic).toBe('turn-aborted');
@@ -426,6 +434,34 @@ describe('buildContinuationNudge', () => {
     const nudge = buildContinuationNudge("I'll do that now.");
 
     expect(nudge).toContain('stopped before taking the next concrete step');
+  });
+});
+
+describe('lean game turn recovery', () => {
+  it.each(['Can you take your turn?', 'Please make a move.', "It's black's turn.", 'Try again.'])(
+    'refreshes authoritative state for %j',
+    (prompt) => {
+      expect(shouldRefreshLeanGameState(prompt)).toBe(true);
+    },
+  );
+
+  it('does not refresh a page reaction that already carries legal moves', () => {
+    expect(
+      shouldRefreshLeanGameState('Board now:\n...\nLegal moves: b6-c5\nPlease make a move.'),
+    ).toBe(false);
+  });
+
+  it('treats a failed tool as corrective until the same tool later succeeds', () => {
+    const failed = {
+      name: 'make_move',
+      success: false,
+      errorMessage: 'Illegal move f6-e5. Legal moves: b6-c5',
+    };
+    expect(unresolvedFailedToolCalls([failed])).toEqual([failed]);
+    expect(buildFailedToolRecoveryNudge(unresolvedFailedToolCalls([failed]))).toContain(
+      'Legal moves: b6-c5',
+    );
+    expect(unresolvedFailedToolCalls([failed, { name: 'make_move', success: true }])).toEqual([]);
   });
 });
 
@@ -1089,15 +1125,18 @@ describe('ChatManager — inflight visibility + cancel', () => {
     const session = await manager.createSession({ gezelId: 'ada' });
     mock.script('hi');
     let snapshot: ReturnType<typeof manager.inflightInfo> = null;
+    let globalSnapshot: ReturnType<typeof manager.listInflight>[number] | undefined;
     events.subscribe(session.id, (e) => {
       if (e.type === 'delta' && !snapshot) {
         snapshot = manager.inflightInfo(session.id);
+        globalSnapshot = manager.listInflight().find((turn) => turn.sessionId === session.id);
       }
     });
     await manager.send(session.id, 'what is the capital of France?');
     expect(snapshot).toBeTruthy();
     expect(snapshot!.userText).toBe('what is the capital of France?');
     expect(snapshot!.elapsedMs).toBeGreaterThanOrEqual(0);
+    expect(globalSnapshot?.providerName).toBe('copilot');
     expect(manager.inflightInfo(session.id)).toBeNull();
   });
 
@@ -1105,7 +1144,7 @@ describe('ChatManager — inflight visibility + cancel', () => {
   // running" path is gone — `send()` now enqueues via SessionQueue
   // instead. The per-session queue tests below exercise that path.
 
-  it('cancelInflight clears the stuck turn and publishes error + done events', async () => {
+  it('cancelInflight clears the stuck turn and publishes cancelled + done events', async () => {
     const session = await manager.createSession({ gezelId: 'ada' });
     // Simulate a wedged turn that never finishes by pushing state manually.
     (
@@ -1122,7 +1161,8 @@ describe('ChatManager — inflight visibility + cancel', () => {
     const res = await manager.cancelInflight(session.id);
     expect(res.cancelled).toBe(true);
     expect(manager.inflightInfo(session.id)).toBeNull();
-    expect(received).toContain('error');
+    expect(received).toContain('cancelled');
+    expect(received).not.toContain('error');
     expect(received).toContain('done');
   });
 
@@ -4568,6 +4608,95 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
     expect(snap.diagnostics?.sessionRecordPath.endsWith('.json')).toBe(true);
     expect(snap.diagnostics?.logsDir.endsWith('logs')).toBe(true);
     expect(snap.diagnostics?.engineLogGlob).toBeUndefined();
+  });
+
+  it('uses persisted project script tools in a cold debug snapshot', async () => {
+    const project = await store.createProject({ name: 'Cold Checkers' });
+    await store.updateProject(project.id, {
+      leanProfile: true,
+      projectType: {
+        id: 'checkers',
+        version: '1.1.0',
+        source: 'bundled',
+        appliedAt: '2026-07-29T00:00:00.000Z',
+      },
+    });
+    const session = await manager.createSession({ gezelId: 'ada', projectId: project.id });
+    // The field incident was an MLX session; local tiers render their live
+    // tool roster into the prompt, while Copilot intentionally relies on
+    // its native function schema and omits this text block.
+    session.providerName = 'mlx';
+    session.scriptTools = [
+      {
+        name: 'get_board',
+        description: 'Read the current board and legal moves.',
+        script: 'game-store',
+        bind: { action: 'board' },
+      },
+      {
+        name: 'make_move',
+        description: 'Play a legal move.',
+        script: 'game-store',
+        bind: { action: 'ai_move' },
+      },
+    ];
+    await store.writeSession(session);
+
+    const snap = await manager.getSessionDebug(session.id);
+    expect(snap.registeredTools).toEqual(['get_board', 'make_move']);
+    expect(snap.systemPrompt).toContain('`get_board`');
+    expect(snap.systemPrompt).toContain('`make_move`');
+  });
+
+  it('preflights the current board and marks make_move terminal for a lean game follow-up', async () => {
+    const project = await store.createProject({ name: 'Live Checkers' });
+    await store.updateProject(project.id, {
+      mode: 'solo',
+      leanProfile: true,
+      projectType: {
+        id: 'checkers',
+        version: '1.1.0',
+        source: 'bundled',
+        appliedAt: '2026-07-29T00:00:00.000Z',
+      },
+    });
+    const run = vi.fn().mockResolvedValue({
+      id: 'board-run',
+      projectId: project.id,
+      scriptName: 'game-store',
+      startedAt: '2026-07-29T00:00:00.000Z',
+      finishedAt: '2026-07-29T00:00:00.010Z',
+      status: 'ok',
+      trigger: { kind: 'chat', sessionId: 'session', gezelId: 'ada' },
+      inputs: { action: 'board' },
+      calls: [],
+      logs: '',
+      output: {
+        board: 'fresh-board',
+        turn: 'ai',
+        legalMoves: 'b6-c5, d6-c5',
+      },
+    });
+    manager.setScriptRunner({ run } as unknown as Parameters<ChatManager['setScriptRunner']>[0]);
+    const session = await manager.createSession({ gezelId: 'ada', projectId: project.id });
+    mock.script('I moved.');
+
+    await manager.send(session.id, 'Can you take your turn?');
+
+    expect(run).toHaveBeenCalledWith(
+      expect.objectContaining({
+        projectId: project.id,
+        scriptName: 'game-store',
+        inputs: { action: 'board' },
+      }),
+    );
+    const sendCall = mock.calls.find((call) => call.kind === 'send');
+    expect(sendCall?.prompt).toContain('fresh-board');
+    expect(sendCall?.prompt).toContain('b6-c5, d6-c5');
+    const createCall = mock.calls.find((call) => call.kind === 'create');
+    expect(createCall?.opts?.terminalToolPolicy).toEqual(
+      expect.objectContaining({ toolNames: ['make_move'], closingArg: 'moveThought' }),
+    );
   });
 
   it('injects mission objectives into the solo-mode ambachtsman', async () => {

@@ -1,27 +1,10 @@
 import type { Project } from '@bendyline/gezel';
-import { useState } from 'react';
+import { type ReactElement, useState } from 'react';
 import { api } from '../api.js';
-import { DropdownMenu } from '../primitives/index.js';
+import { ContextMenu, DropdownMenu } from '../primitives/index.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
 
-/**
- * Per-project "⋯" actions menu. Exposes "Clear error indicator" when the
- * project is carrying a failed turn, plus the destructive Delete action
- * behind a confirmation dialog.
- *
- * Deletion is deliberately conservative about the user's files: the default
- * only removes the project record, leaving the workspace + artifacts on disk.
- * When (and only when) the project's workspace is gezel-internal, the dialog
- * offers an explicit opt-in to also delete those files. A project pointing at
- * an external `workingDir` never has that directory touched — the server is
- * the final backstop, but we also don't offer the option here.
- */
-export function ProjectActionsMenu({
-  project,
-  hasError = false,
-  onDeleted,
-  align = 'end',
-}: {
+interface ProjectActionProps {
   project: Pick<Project, 'id' | 'name' | 'workingDir' | 'github'>;
   /**
    * Whether the project currently shows the red failed-turn indicator.
@@ -30,8 +13,13 @@ export function ProjectActionsMenu({
    */
   hasError?: boolean;
   onDeleted?: (projectId: string) => void;
+}
+
+interface ProjectActionsMenuProps extends ProjectActionProps {
   align?: 'start' | 'center' | 'end';
-}) {
+}
+
+function useProjectActions({ project, onDeleted }: ProjectActionProps) {
   const [confirming, setConfirming] = useState(false);
   const [removeWorkspace, setRemoveWorkspace] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -79,6 +67,137 @@ export function ProjectActionsMenu({
     }
   };
 
+  return {
+    clearErrors,
+    confirming,
+    error,
+    hasInternalWorkspace,
+    isDefault,
+    openConfirm,
+    removeWorkspace,
+    runDelete,
+    setConfirming,
+    setRemoveWorkspace,
+  };
+}
+
+type ProjectActions = ReturnType<typeof useProjectActions>;
+
+function ProjectMenuItems({
+  actions,
+  hasError,
+  kind,
+}: {
+  actions: ProjectActions;
+  hasError: boolean;
+  kind: 'context' | 'dropdown';
+}) {
+  const Item = kind === 'context' ? ContextMenu.Item : DropdownMenu.Item;
+
+  return (
+    <>
+      {hasError && (
+        <Item
+          className="app-nav-menu-item"
+          onSelect={() => {
+            void actions.clearErrors();
+          }}
+        >
+          Clear error indicator
+        </Item>
+      )}
+      <Item
+        className="app-nav-menu-item danger"
+        disabled={actions.isDefault}
+        onSelect={() => {
+          if (actions.isDefault) return;
+          actions.openConfirm();
+        }}
+      >
+        Delete project…
+      </Item>
+    </>
+  );
+}
+
+/**
+ * Deletion is deliberately conservative about the user's files: the default
+ * only removes the project record, leaving the workspace + artifacts on disk.
+ * When (and only when) the project's workspace is gezel-internal, the dialog
+ * offers an explicit opt-in to also delete those files. A project pointing at
+ * an external `workingDir` never has that directory touched — the server is
+ * the final backstop, but we also don't offer the option here.
+ */
+function ProjectDeleteDialog({
+  actions,
+  project,
+}: {
+  actions: ProjectActions;
+  project: ProjectActionProps['project'];
+}) {
+  const {
+    confirming,
+    error,
+    hasInternalWorkspace,
+    removeWorkspace,
+    runDelete,
+    setConfirming,
+    setRemoveWorkspace,
+  } = actions;
+
+  return (
+    <ConfirmDialog
+      open={confirming}
+      title={`Delete "${project.name}"?`}
+      message={
+        <>
+          The project and its chats will be removed.{' '}
+          {hasInternalWorkspace ? (
+            <>
+              Its workspace files and artifacts are kept on disk unless you choose to remove them.
+            </>
+          ) : (
+            <>
+              Its workspace folder (<code>{project.workingDir ?? 'the linked repository'}</code>) is
+              left untouched — only the project record is removed.
+            </>
+          )}
+          {hasInternalWorkspace && (
+            <label className="project-delete-optout">
+              <input
+                type="checkbox"
+                checked={removeWorkspace}
+                onChange={(e) => setRemoveWorkspace(e.target.checked)}
+              />
+              <span>Also permanently delete the workspace files and artifacts</span>
+            </label>
+          )}
+          {error && <span className="project-delete-error">{error}</span>}
+        </>
+      }
+      confirmLabel={
+        hasInternalWorkspace && removeWorkspace ? 'Delete project + files' : 'Delete project'
+      }
+      danger
+      onConfirm={runDelete}
+      onCancel={() => setConfirming(false)}
+    />
+  );
+}
+
+/**
+ * Per-project "⋯" actions menu. Exposes "Clear error indicator" when the
+ * project is carrying a failed turn, plus the destructive Delete action
+ * behind a confirmation dialog.
+ */
+export function ProjectActionsMenu({
+  project,
+  hasError = false,
+  onDeleted,
+  align = 'end',
+}: ProjectActionsMenuProps) {
+  const actions = useProjectActions({ project, onDeleted });
+
   return (
     <>
       <DropdownMenu.Root>
@@ -99,66 +218,40 @@ export function ProjectActionsMenu({
         </DropdownMenu.Trigger>
         <DropdownMenu.Portal>
           <DropdownMenu.Content className="app-nav-menu" sideOffset={4} align={align}>
-            {hasError && (
-              <DropdownMenu.Item
-                className="app-nav-menu-item"
-                onSelect={() => {
-                  void clearErrors();
-                }}
-              >
-                Clear error indicator
-              </DropdownMenu.Item>
-            )}
-            <DropdownMenu.Item
-              className="app-nav-menu-item danger"
-              disabled={isDefault}
-              onSelect={() => {
-                if (isDefault) return;
-                openConfirm();
-              }}
-            >
-              Delete project…
-            </DropdownMenu.Item>
+            <ProjectMenuItems actions={actions} hasError={hasError} kind="dropdown" />
           </DropdownMenu.Content>
         </DropdownMenu.Portal>
       </DropdownMenu.Root>
 
-      <ConfirmDialog
-        open={confirming}
-        title={`Delete "${project.name}"?`}
-        message={
-          <>
-            The project and its chats will be removed.{' '}
-            {hasInternalWorkspace ? (
-              <>
-                Its workspace files and artifacts are kept on disk unless you choose to remove them.
-              </>
-            ) : (
-              <>
-                Its workspace folder (<code>{project.workingDir ?? 'the linked repository'}</code>)
-                is left untouched — only the project record is removed.
-              </>
-            )}
-            {hasInternalWorkspace && (
-              <label className="project-delete-optout">
-                <input
-                  type="checkbox"
-                  checked={removeWorkspace}
-                  onChange={(e) => setRemoveWorkspace(e.target.checked)}
-                />
-                <span>Also permanently delete the workspace files and artifacts</span>
-              </label>
-            )}
-            {error && <span className="project-delete-error">{error}</span>}
-          </>
-        }
-        confirmLabel={
-          hasInternalWorkspace && removeWorkspace ? 'Delete project + files' : 'Delete project'
-        }
-        danger
-        onConfirm={runDelete}
-        onCancel={() => setConfirming(false)}
-      />
+      <ProjectDeleteDialog actions={actions} project={project} />
+    </>
+  );
+}
+
+/**
+ * Right-click actions for a whole project row. This deliberately shares the
+ * same action list and confirmation flow as the visible "⋯" affordance.
+ */
+export function ProjectContextMenu({
+  children,
+  project,
+  hasError = false,
+  onDeleted,
+}: ProjectActionProps & { children: ReactElement }) {
+  const actions = useProjectActions({ project, onDeleted });
+
+  return (
+    <>
+      <ContextMenu.Root>
+        <ContextMenu.Trigger asChild>{children}</ContextMenu.Trigger>
+        <ContextMenu.Portal>
+          <ContextMenu.Content className="app-nav-menu">
+            <ProjectMenuItems actions={actions} hasError={hasError} kind="context" />
+          </ContextMenu.Content>
+        </ContextMenu.Portal>
+      </ContextMenu.Root>
+
+      <ProjectDeleteDialog actions={actions} project={project} />
     </>
   );
 }

@@ -8,6 +8,7 @@ import { LicenseButton } from './LicenseButton.js';
 import { ExportModelBundleButton, ImportModelBundleButton } from './ModelBundleControls.js';
 import { RecommendedBadge } from './RecommendedBadge.js';
 import { mlxFitsMemoryBudget } from './mlx-model-fit.js';
+import { approximateQuantizationLabel, quantizationTitle } from './model-quantization.js';
 
 interface MemoryProfile {
   totalRamBytes: number;
@@ -491,7 +492,6 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
                   <th>Size</th>
                   <th>Quant</th>
                   <th>Context</th>
-                  <th>Template</th>
                   <th />
                 </tr>
               </thead>
@@ -517,20 +517,10 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
                         )}
                       </td>
                       <td>{formatBytes(m.approxSizeBytes)}</td>
-                      <td>{m.quantization ?? '—'}</td>
-                      <td>{m.contextWindow ? m.contextWindow.toLocaleString() : '—'}</td>
-                      <td>
-                        {m.chatTemplatePresent ? (
-                          <span className="home-status-pill home-status-ok">✓</span>
-                        ) : (
-                          <span
-                            className="home-status-pill home-status-warn"
-                            title="tokenizer_config.json lacks chat_template — the engine will fall back to a generic template and replies may be incoherent."
-                          >
-                            missing
-                          </span>
-                        )}
+                      <td title={quantizationTitle(m.quantization)}>
+                        {approximateQuantizationLabel(m.quantization)}
                       </td>
+                      <td>{m.contextWindow ? m.contextWindow.toLocaleString() : '—'}</td>
                       <td>
                         <span style={{ marginRight: '0.75rem' }}>
                           <ExportModelBundleButton engine="mlx" id={m.id} />

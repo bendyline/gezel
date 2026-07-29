@@ -5,10 +5,11 @@
  * check: release CI proves the final EXE/PKG/DEB/RPM container retained it.
  */
 import { execFile, spawn } from 'node:child_process';
-import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, extname, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
+import { platformKeysFromRoot, verifyNativeFileTree } from './native-file-manifest-lib.mjs';
 import { verifyLicenseBundle } from './verify-packaged-licenses.mjs';
 
 const execFileP = promisify(execFile);
@@ -82,6 +83,24 @@ async function findManifests(root) {
   });
 }
 
+async function findNativeRoots(root) {
+  const matches = [];
+  async function visit(dir) {
+    for (const entry of await readdir(dir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const path = join(dir, entry.name);
+      const normalized = path.replaceAll('\\', '/');
+      if (normalized.endsWith('/app.asar.unpacked/native-bin')) {
+        matches.push(path);
+      } else {
+        await visit(path);
+      }
+    }
+  }
+  await visit(root);
+  return matches;
+}
+
 async function extract(artifact, output) {
   const extension = extname(artifact).toLowerCase();
   if (extension === '.exe') return extractNsis(artifact, output);
@@ -106,8 +125,22 @@ async function extract(artifact, output) {
 async function main() {
   const artifactArg = process.argv[2];
   if (!artifactArg) {
-    throw new Error('usage: node scripts/verify-installer-licenses.mjs <installer>');
+    throw new Error(
+      'usage: node scripts/verify-installer-licenses.mjs <installer> [--native-source <native-bin> --native-manifest <json> --native-release <version>]',
+    );
   }
+  const args = process.argv.slice(3);
+  const value = (name) => {
+    const index = args.indexOf(name);
+    return index >= 0 ? args[index + 1] : undefined;
+  };
+  const nativeSourceArg = value('--native-source');
+  const nativeManifestArg = value('--native-manifest');
+  const nativeRelease = value('--native-release');
+  if (!!nativeSourceArg !== !!nativeManifestArg) {
+    throw new Error('--native-source and --native-manifest must be provided together');
+  }
+
   const artifact = resolve(artifactArg);
   const scratch = await mkdtemp(join(tmpdir(), 'gezel-installer-licenses-'));
   try {
@@ -121,12 +154,40 @@ async function main() {
     console.log(
       `\u2713 ${basename(artifact)} contains ${roots.length} verified legal bundle${roots.length === 1 ? '' : 's'}.`,
     );
+
+    if (nativeSourceArg && nativeManifestArg) {
+      const nativeSource = resolve(nativeSourceArg);
+      const nativeManifest = JSON.parse(await readFile(resolve(nativeManifestArg), 'utf8'));
+      const platformKeys = await platformKeysFromRoot(nativeSource);
+      await verifyNativeFileTree({
+        root: nativeSource,
+        manifest: nativeManifest,
+        expectedRelease: nativeRelease,
+        platformKeys,
+      });
+
+      const packagedNativeRoots = await findNativeRoots(scratch);
+      if (packagedNativeRoots.length === 0) {
+        throw new Error(`${basename(artifact)} contains no app.asar.unpacked/native-bin directory`);
+      }
+      for (const packagedRoot of packagedNativeRoots) {
+        await verifyNativeFileTree({
+          root: packagedRoot,
+          manifest: nativeManifest,
+          expectedRelease: nativeRelease,
+          platformKeys,
+        });
+      }
+      console.log(
+        `\u2713 ${basename(artifact)} retained the pinned native files and symlinks in ${packagedNativeRoots.length} packaged tree${packagedNativeRoots.length === 1 ? '' : 's'}.`,
+      );
+    }
   } finally {
     await rm(scratch, { recursive: true, force: true });
   }
 }
 
 main().catch((error) => {
-  console.error(`\u2717 installer license verification failed: ${error.message}`);
+  console.error(`\u2717 installer payload verification failed: ${error.message}`);
   process.exitCode = 1;
 });

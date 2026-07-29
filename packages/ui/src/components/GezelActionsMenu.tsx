@@ -86,7 +86,11 @@ export function GezelActionsMenu({
           </button>
         </DropdownMenu.Trigger>
         <DropdownMenu.Portal>
-          <DropdownMenu.Content className="app-nav-menu" sideOffset={4} align="end">
+          <DropdownMenu.Content
+            className="app-nav-menu gezel-actions-menu"
+            sideOffset={4}
+            align="end"
+          >
             <DropdownMenu.Item className="app-nav-menu-item danger" onSelect={openConfirm}>
               {euphemism}…
             </DropdownMenu.Item>

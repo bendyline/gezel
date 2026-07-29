@@ -417,7 +417,12 @@ export function RecommendedMediaDownloads({ config }: { config: ConfigResponse |
         Optional local models for images, speech, and video — the recommended picks that fit this
         device. Browse the rest, or manage downloads, in Settings.
       </p>
-      <button type="button" className="home-media-btn" onClick={downloadAll} disabled={!anyPending}>
+      <button
+        type="button"
+        className="home-media-btn home-media-btn-primary"
+        onClick={downloadAll}
+        disabled={!anyPending}
+      >
         Download all recommended models
       </button>
       <div className="home-media-downloads">

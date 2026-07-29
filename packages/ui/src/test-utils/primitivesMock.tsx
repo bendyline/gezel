@@ -1,4 +1,4 @@
-import { type ReactNode, createContext, useContext, useId } from 'react';
+import { type ReactNode, createContext, useContext, useId, useState } from 'react';
 
 /**
  * Test-only replacement for `../primitives/index.js`. Renders the Radix
@@ -204,6 +204,40 @@ const DropdownMenu = {
   ),
 };
 
+const ContextMenuCtx = createContext<{ open: boolean; setOpen: (open: boolean) => void }>({
+  open: false,
+  setOpen: () => undefined,
+});
+
+const ContextMenu = {
+  Root: ({ children }: { children?: ReactNode }) => {
+    const [open, setOpen] = useState(false);
+    return <ContextMenuCtx.Provider value={{ open, setOpen }}>{children}</ContextMenuCtx.Provider>;
+  },
+  Trigger: ({ children }: { children?: ReactNode; asChild?: boolean }) => {
+    const { setOpen } = useContext(ContextMenuCtx);
+    return <div onContextMenu={() => setOpen(true)}>{children}</div>;
+  },
+  Portal: ({ children }: { children?: ReactNode }) => <>{children}</>,
+  Content: ({ children }: { children?: ReactNode }) => {
+    const { open } = useContext(ContextMenuCtx);
+    return open ? <div role="menu">{children}</div> : null;
+  },
+  Item: ({
+    children,
+    disabled,
+    onSelect,
+  }: {
+    children?: ReactNode;
+    disabled?: boolean;
+    onSelect?: () => void;
+  }) => (
+    <button type="button" role="menuitem" disabled={disabled} onClick={onSelect}>
+      {children}
+    </button>
+  ),
+};
+
 export const primitivesMock = {
   Select,
   Dialog,
@@ -212,8 +246,9 @@ export const primitivesMock = {
   Tooltip,
   Popover,
   DropdownMenu,
+  ContextMenu,
 };
 
 // Re-export under named keys so consumers can do:
 //   vi.mock('../primitives/index.js', () => primitivesMock);
-export { Select, Dialog, AlertDialog, Tabs, Tooltip, Popover, DropdownMenu };
+export { Select, Dialog, AlertDialog, Tabs, Tooltip, Popover, DropdownMenu, ContextMenu };

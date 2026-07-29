@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockApi } from '../test-utils/mockApi.js';
 
 vi.mock('../api.js', () => ({ api: createMockApi() }));
+vi.mock('../theme.js', () => ({ useEffectiveTheme: () => 'dark' }));
 // The SSE bridge would otherwise open a real EventSource loop per mount.
 vi.mock('../shared-chat-events.js', () => ({
   streamSharedProjectChatEvents: async function* () {
@@ -44,10 +45,10 @@ const MESSAGES: TimelineMessage[] = [
   }),
 ];
 
-function renderTimeline(onFocusSession = vi.fn()) {
+function renderTimeline(onFocusSession = vi.fn(), timelineMessages = MESSAGES) {
   const loadTimeline = vi.fn(
     async (): Promise<ListTimelineResponse> =>
-      ({ messages: MESSAGES, hasMore: false }) as ListTimelineResponse,
+      ({ messages: timelineMessages, hasMore: false }) as ListTimelineResponse,
   );
   render(
     <ChatTimelineView
@@ -116,5 +117,20 @@ describe('ChatTimelineView — jumping to a failed turn', () => {
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(document.querySelector('.timeline-focus-flash')).toBeNull();
     expect(onFocusSession).not.toHaveBeenCalled();
+  });
+
+  it('does not render failed-turn recovery UI for an intentionally stopped turn', async () => {
+    renderTimeline(vi.fn(), [
+      message({ content: 'please start', at: '2026-07-25T10:00:00.000Z' }),
+      message({
+        role: 'assistant',
+        content: 'Partial answer preserved before I stopped.',
+        at: '2026-07-25T10:00:01.000Z',
+      }),
+    ]);
+
+    await screen.findByText('Partial answer preserved before I stopped.');
+    expect(screen.queryByText(/Last turn failed:/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Continue' })).not.toBeInTheDocument();
   });
 });

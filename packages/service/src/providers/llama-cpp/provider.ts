@@ -76,6 +76,7 @@ import { isSseComment, readSseEvents } from '../openai-compatible/sse.js';
 import { ProviderQueue, defaultAmbientQuietMs, runInQueue } from '../queue.js';
 import { RambleDetector } from '../ramble-detector.js';
 import { type EnginePhaseEvent, StreamingSessionBase } from '../streaming-session.js';
+import { terminalToolClosingText } from '../terminal-tool-policy.js';
 import { ToolFailureTracker } from '../tool-failure-tracker.js';
 import { ToolRepeatTracker } from '../tool-repeat-tracker.js';
 import type {
@@ -1980,6 +1981,7 @@ export class LlamaCppProvider implements LLMProvider {
       ...(opts.profile ? { profile: opts.profile } : {}),
       ...(opts.activeCraftbookStep ? { activeCraftbookStep: opts.activeCraftbookStep } : {}),
       ...(opts.tuning ? { tuning: opts.tuning } : {}),
+      ...(opts.terminalToolPolicy ? { terminalToolPolicy: opts.terminalToolPolicy } : {}),
     });
   }
 
@@ -2250,6 +2252,7 @@ interface LlamaCppSessionDeps {
    * `enable_thinking` via `chat_template_kwargs`.
    */
   tuning?: import('../../model-profile/index.js').ResolvedTuning;
+  terminalToolPolicy?: NonNullable<SessionOpts['terminalToolPolicy']>;
 }
 
 /**
@@ -5335,6 +5338,7 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
           sourceFailureKind?: 'truncated' | 'not-persisted';
           transportFailure?: boolean;
         } | null = null;
+        let terminalActionClosing: string | null = null;
         const immediateFileWritePaths: string[] = [];
         const immediatePartialWritePaths: string[] = [];
         // Set when an immediate-write / continuation write this turn was
@@ -5716,6 +5720,12 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
             }
           }
           const tracked = failureTracker.recordResult(call.function.name, output);
+          terminalActionClosing ??= terminalToolClosingText(
+            this.deps.terminalToolPolicy,
+            call.function.name,
+            args,
+            output,
+          );
           const repeated = repeatTracker.recordCall(call.function.name, args, tracked.output);
           const paced = deliverableReadPaceTracker?.recordCall(call.function.name, repeated.output);
           this.messages.push({
@@ -5808,6 +5818,22 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
               }),
             );
           }
+          return fullText;
+        }
+        if (terminalActionClosing && !abortDueToFailureLoop) {
+          this.messages.push({ role: 'assistant', content: terminalActionClosing });
+          fullText = terminalActionClosing;
+          if (lastUsage && (lastUsage.prompt_tokens > 0 || lastUsage.completion_tokens > 0)) {
+            this.emitUsage(
+              buildTurnUsage({
+                model: this.deps.model,
+                inputTokens: lastUsage.prompt_tokens,
+                outputTokens: lastUsage.completion_tokens,
+                durationMs: Date.now() - start,
+              }),
+            );
+          }
+          log.info('[llama-cpp] terminal action tool succeeded; ending turn without regeneration');
           return fullText;
         }
         if (

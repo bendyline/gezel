@@ -587,6 +587,14 @@ type BuiltSessionOpts = SessionOpts & {
   toolCapWarnings?: string[];
 };
 
+interface InflightTurn {
+  userText: string;
+  startedAt: number;
+  abort?: AbortController;
+  /** Set by `cancelInflight`; remains attached to this exact turn object. */
+  cancelled?: boolean;
+}
+
 /**
  * One entry in the per-session `pendingSends` FIFO queue. When a
  * caller's send would collide with an in-flight turn, the queue
@@ -831,23 +839,7 @@ export class ChatManager {
    * elapsed") and the UI can surface + cancel it instead of getting
    * silently wedged. Cleared in the `finally` at the end of `send()`.
    */
-  private readonly inflight = new Map<
-    string,
-    { userText: string; startedAt: number; abort?: AbortController }
-  >();
-  /**
-   * Sessions whose in-flight turn was cancelled during its async prologue
-   * — after {@link runSendAndDrain} grabbed the `inflight` slot but before
-   * {@link runSend} wired the per-turn `AbortController` (the ensureState /
-   * auto-recall window). There's no controller to abort yet and no
-   * provider call in flight to tear down, so the request is parked here;
-   * `runSend` consumes it the instant it wires the controller and aborts
-   * before the provider call starts. Cleared at turn teardown so a parked
-   * cancel can never leak onto a later turn. Without this, a stop pressed
-   * while the prompt was still being built was silently dropped and the
-   * turn ran to completion against a cancel the user already issued.
-   */
-  private readonly cancelBeforeAbortWired = new Set<string>();
+  private readonly inflight = new Map<string, InflightTurn>();
   /**
    * Per-session FIFO queue of messages that arrived while the session
    * was already mid-turn. Before this existed, `send()` threw
@@ -1147,6 +1139,49 @@ export class ChatManager {
     this.scriptRunnerForHooks = runner;
   }
   private scriptRunnerForHooks?: import('../scripts/runner.js').ScriptRunner;
+
+  /**
+   * Fetch authoritative state for short game follow-ups before inference.
+   * The provider transcript may contain several older boards (and even an
+   * aborted assistant's imagined board), while the script-backed game file
+   * is the source of truth. This preflight is intentionally manager-owned
+   * so it works across MLX, llama.cpp/DS4, Ollama, and provider switches.
+   */
+  private async refreshLeanGameState(
+    record: ChatSession,
+    userText: string,
+  ): Promise<string | null> {
+    const runner = this.scriptRunnerForHooks;
+    const boardTool = record.scriptTools?.find((tool) => tool.name === 'get_board');
+    const hasMoveTool = record.scriptTools?.some((tool) => tool.name === 'make_move') ?? false;
+    if (!runner || !boardTool || !hasMoveTool || !shouldRefreshLeanGameState(userText)) return null;
+
+    const project = await this.store.getProject(record.projectId).catch(() => null);
+    if (!project?.leanProfile) return null;
+    try {
+      const run = await runner.run({
+        projectId: record.projectId,
+        scriptName: boardTool.script,
+        inputs: { ...(boardTool.bind ?? {}) },
+        trigger: { kind: 'chat', sessionId: record.id, gezelId: record.gezelId },
+      });
+      if (run.status !== 'ok' || run.output === undefined) {
+        log.warn(
+          `session ${record.id.slice(0, 8)}: pre-turn get_board failed (${run.error ?? run.status}); leaving the model to call the tool`,
+        );
+        return null;
+      }
+      log.info(`session ${record.id.slice(0, 8)}: authoritative game state refreshed before turn`);
+      return `[Latest game state — fetched from \`get_board\` immediately before this turn. This overrides every older board position in the transcript. Choose only from the legal moves below.]\n${JSON.stringify(run.output, null, 2)}`;
+    } catch (err) {
+      log.warn(
+        `session ${record.id.slice(0, 8)}: pre-turn get_board threw; leaving the model to call the tool: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+      return null;
+    }
+  }
 
   /**
    * Content index for the workspace-gestalt prompt block and index-enriched
@@ -1687,6 +1722,8 @@ export class ChatManager {
     sessionId: string;
     gezelId: string;
     projectId: string;
+    providerName: ProviderName;
+    model?: string;
     userText: string;
     startedAt: number;
     elapsedMs: number;
@@ -1697,6 +1734,8 @@ export class ChatManager {
       sessionId: string;
       gezelId: string;
       projectId: string;
+      providerName: ProviderName;
+      model?: string;
       userText: string;
       startedAt: number;
       elapsedMs: number;
@@ -1710,6 +1749,8 @@ export class ChatManager {
         sessionId,
         gezelId: state.record.gezelId,
         projectId: state.record.projectId,
+        providerName: state.record.providerName,
+        ...(state.record.model ? { model: state.record.model } : {}),
         userText: entry.userText,
         startedAt: entry.startedAt,
         elapsedMs: now - entry.startedAt,
@@ -1747,12 +1788,14 @@ export class ChatManager {
    */
   listQueued(): Array<{
     sessionId: string;
+    providerName?: ProviderName;
     depth: number;
     nextPreview: string;
     entries: Array<{ queueId: string; preview: string; enqueuedAt: string }>;
   }> {
     const out: Array<{
       sessionId: string;
+      providerName?: ProviderName;
       depth: number;
       nextPreview: string;
       entries: Array<{ queueId: string; preview: string; enqueuedAt: string }>;
@@ -1766,7 +1809,14 @@ export class ChatManager {
         preview: e.userText.length > 160 ? `${e.userText.slice(0, 157)}…` : e.userText,
         enqueuedAt: new Date(e.enqueuedAt).toISOString(),
       }));
-      out.push({ sessionId, depth: q.length, nextPreview, entries });
+      const providerName = this.states.get(sessionId)?.record.providerName;
+      out.push({
+        sessionId,
+        ...(providerName ? { providerName } : {}),
+        depth: q.length,
+        nextPreview,
+        entries,
+      });
     }
     return out;
   }
@@ -1877,7 +1927,7 @@ export class ChatManager {
   }
 
   /**
-   * Forcibly end an in-flight turn that's wedged. Publishes `error` +
+   * Forcibly end an in-flight turn that's wedged. Publishes `cancelled` +
    * `done` on the session's SSE bus (so UI listeners stop spinning),
    * clears the inflight entry, and disconnects the live LLM session so
    * the next `send()` rebuilds from scratch. The user message that was
@@ -1887,6 +1937,7 @@ export class ChatManager {
   async cancelInflight(sessionId: string): Promise<{ cancelled: boolean }> {
     const entry = this.inflight.get(sessionId);
     if (!entry) return { cancelled: false };
+    entry.cancelled = true;
     this.inflight.delete(sessionId);
     this.telemetry.noteTurnEnd(sessionId);
     // Do NOT clear the per-turn salvage buffers (tools / warnings /
@@ -1909,20 +1960,16 @@ export class ChatManager {
     // reliable "is there a live provider call to tear down?" signal:
     //  - wired: abort the controller and disconnect the session below.
     //  - not wired: the turn is still in its prologue (prompt build /
-    //    auto-recall). There's nothing to abort yet, so park the cancel
-    //    — runSend honors it the instant it wires the controller — and do
-    //    NOT disconnect the live session: the setup path still holds its
+    //    auto-recall). There's nothing to abort yet, so the cancel remains
+    //    marked on this turn object; runSend honors it the instant it wires
+    //    the controller. Do NOT disconnect the live session: setup still holds its
     //    `state.session` reference, and racing a `disconnect()` + null
     //    against runSend's `const session = state.session!` capture
     //    crashed the turn with a null session.
     const wired = entry.abort !== undefined;
     entry.abort?.abort();
-    if (!wired) this.cancelBeforeAbortWired.add(sessionId);
     const state = this.states.get(sessionId);
-    const errorEvent = {
-      type: 'error' as const,
-      error: 'Turn cancelled by user.',
-    };
+    const cancelledEvent = { type: 'cancelled' as const };
     const doneEvent = { type: 'done' as const };
     if (state) {
       const scope: PublishScope = {
@@ -1930,7 +1977,7 @@ export class ChatManager {
         gezelId: state.record.gezelId,
         projectId: state.record.projectId,
       };
-      this.events.publish(scope, errorEvent);
+      this.events.publish(scope, cancelledEvent);
       this.events.publish(scope, doneEvent);
       if (wired && state.session) {
         try {
@@ -1943,7 +1990,7 @@ export class ChatManager {
     } else {
       // No live state — still publish to the session bus so any UI
       // listener on the bare session stream stops spinning.
-      this.events.publishSessionOnly(sessionId, errorEvent);
+      this.events.publishSessionOnly(sessionId, cancelledEvent);
       this.events.publishSessionOnly(sessionId, doneEvent);
     }
     return { cancelled: true };
@@ -2044,12 +2091,17 @@ export class ChatManager {
     const gezel = await this.store.getGezel(record.gezelId);
     if (!gezel) throw new Error(`gezel ${record.gezelId} not found`);
 
-    // Live tool list — pulled from the session's MCP bridge if a warm
-    // session exists. Cold sessions (no first turn yet) report `[]`,
-    // which itself is informative: it tells the engineer the salvage
-    // layer would have had nothing to match against.
+    // Live tool list when warm; last-known persisted project-type tools
+    // when cold. A debug request often arrives after an app/service restart,
+    // when `states` is intentionally empty even though the session really
+    // had get_board/make_move. Reporting [] in that case falsely implicates
+    // a dropped bridge. Persisted scriptTools are the rebuild contract and
+    // therefore the accurate cold-session capability evidence.
     const liveSession = this.states.get(sessionId)?.session;
-    const registeredTools = liveSession?.getRegisteredToolNames?.() ?? [];
+    const liveRegisteredTools = liveSession?.getRegisteredToolNames?.();
+    const registeredTools = liveRegisteredTools ?? [
+      ...new Set((record.scriptTools ?? []).map((tool) => tool.name)),
+    ];
     // Build the prompt with the live tools when available — same
     // refresh logic the runtime applies right after session creation
     // (see `refreshSystemPromptForLiveTools`). This makes the debug
@@ -4594,12 +4646,13 @@ export class ChatManager {
       hidden?: boolean;
     },
   ): Promise<ChatMessage> {
-    this.inflight.set(sessionId, { userText, startedAt: Date.now() });
+    const inflightTurn: InflightTurn = { userText, startedAt: Date.now() };
+    this.inflight.set(sessionId, inflightTurn);
     const tag = sessionId.slice(0, 8);
     const startedAt = Date.now();
     log.debug(`runSend#${tag} ENTRY userTextLen=${userText.length}`);
     try {
-      const result = await this.runSend(sessionId, userText, opts);
+      const result = await this.runSend(sessionId, userText, inflightTurn, opts);
       log.debug(`runSend#${tag} EXIT ok afterMs=${Date.now() - startedAt}`);
       return result;
     } catch (err) {
@@ -4609,20 +4662,21 @@ export class ChatManager {
       );
       throw err;
     } finally {
-      this.finishSessionTurn(sessionId);
+      this.finishSessionTurn(sessionId, inflightTurn);
     }
   }
 
-  private finishSessionTurn(sessionId: string): void {
+  private finishSessionTurn(sessionId: string, finishedTurn: InflightTurn): void {
     // Release before flushing callbacks or draining. Both paths can call
     // send() synchronously, and must observe the just-finished session as
     // idle rather than enqueue behind a turn that no longer exists.
-    this.inflight.delete(sessionId);
-    // Drop any parked pre-wiring cancel. If the turn reached its provider
-    // phase it already consumed this; if it threw during setup (before
-    // runSend wired the controller) clearing here stops the request
-    // leaking onto the session's next turn.
-    this.cancelBeforeAbortWired.delete(sessionId);
+    if (this.inflight.get(sessionId) === finishedTurn) {
+      this.inflight.delete(sessionId);
+    }
+    // A cancelled adapter can take a moment to unwind after the UI starts a
+    // replacement turn. Never let the old turn's finally block clear or
+    // drain through that newer in-flight turn.
+    if (this.inflight.has(sessionId)) return;
     this.flushAfterSessionIdle(sessionId);
     this.drainNextQueued(sessionId);
   }
@@ -4731,6 +4785,7 @@ export class ChatManager {
   private async runSend(
     sessionId: string,
     userText: string,
+    inflightTurn: InflightTurn,
     opts?: {
       from?: { gezelId: string; gezelName: string };
       lane?: Lane;
@@ -4754,16 +4809,19 @@ export class ChatManager {
       }
     }
 
-    // All failure paths below must publish an `error` + `done` event to the
-    // session's SSE bus. If they don't, the UI sits on a thinking indicator
-    // forever because its only termination signal is `done`. Before the
-    // record is loaded we don't know the gezel/project, so we publish on
-    // the session bus only — project/global subscribers don't get a "this
-    // session is broken" signal they can't act on.
+    // All terminal paths below must publish a terminal event + `done` to
+    // the session's SSE bus. Intentional cancellation is distinct from an
+    // error so the UI can stop spinning without poisoning the session.
+    // Before the record is loaded we don't know the gezel/project, so we
+    // publish on the session bus only.
     const fail = (err: unknown): never => {
       const message = err instanceof Error ? err.message : String(err);
       log.error('error:', message);
-      this.events.publishSessionOnly(sessionId, { type: 'error', error: message });
+      if (inflightTurn.cancelled) {
+        this.events.publishSessionOnly(sessionId, { type: 'cancelled' });
+      } else {
+        this.events.publishSessionOnly(sessionId, { type: 'error', error: message });
+      }
       this.events.publishSessionOnly(sessionId, { type: 'done' });
       throw err;
     };
@@ -4950,14 +5008,16 @@ export class ChatManager {
     // waits another minute for the orphan turn to finish before
     // their next message can start.
     const turnAbort = new AbortController();
-    this.inflight.set(sessionId, { userText, startedAt: Date.now(), abort: turnAbort });
+    inflightTurn.abort = turnAbort;
+    if (!inflightTurn.cancelled) {
+      this.inflight.set(sessionId, inflightTurn);
+    }
     // Honor a stop pressed during the async prologue above (ensureState /
-    // auto-recall), before this controller existed. `cancelInflight`
-    // parked it rather than aborting a controller that wasn't wired yet;
-    // abort now so the upcoming `sendAndWait` sees an already-aborted
+    // auto-recall), before this controller existed. The cancellation flag
+    // lives on this exact turn object; abort now so `sendAndWait` sees an already-aborted
     // signal and unwinds before the provider call really starts, instead
     // of running the whole turn against a cancel the user already issued.
-    if (this.cancelBeforeAbortWired.delete(sessionId)) {
+    if (inflightTurn.cancelled) {
       turnAbort.abort();
     }
     /**
@@ -5217,6 +5277,10 @@ export class ChatManager {
       // depend on. Spliced identically here and in the history rebuild so a
       // restart doesn't invalidate the cached prefix.
       let promptForTurn = spliceIntoText(userText, pendingDigests);
+      const freshGameState = await this.refreshLeanGameState(state.record, userText);
+      if (freshGameState) {
+        promptForTurn = `${freshGameState}\n\n${promptForTurn}`;
+      }
       // Fail-fast budget (F3.1): a genuine USER message (no `from`) means the
       // human is engaged, so reset the task's unattended-spend accumulator —
       // a long interactive conversation must never trip. Autonomous sends
@@ -5569,6 +5633,12 @@ export class ChatManager {
             liveUnsub = subscribeLive(liveSession);
             finalContent = await liveSession.sendAndWait(promptForTurn, sendOpts);
           }
+        }
+        // A provider should reject when its signal is aborted, but keep the
+        // manager authoritative if an adapter returns after cancellation.
+        // Do not commit a late "successful" reply after the user stopped it.
+        if (inflightTurn.cancelled) {
+          throw new Error('Turn cancelled by user.');
         }
         log.debug(`response: ${debugOn ? finalContent : finalContent.slice(0, 80)}`);
 
@@ -6242,7 +6312,8 @@ export class ChatManager {
             promptForTurn = buildDeliverableEditNudge(advanceOutcome.unmetEditGate.file);
             continue;
           }
-          let stallReason: 'text' | 'tool-only' | 'voorman-idle' | null = null;
+          const unresolvedToolFailures = unresolvedFailedToolCalls(drained);
+          let stallReason: 'text' | 'tool-failed' | 'tool-only' | 'voorman-idle' | null = null;
           let voormanIdleVerdict: 'idle' | 'nothing-built' | null = null;
           const completedAsyncHandoff = drained.some(isSuccessfulAsyncHandoffToolCall);
           if (looksStalled(finalContent)) {
@@ -6268,6 +6339,8 @@ export class ChatManager {
               log.info(
                 `session ${sessionId}: async handoff completed — releasing sender so the parked recipient can start`,
               );
+            } else if (unresolvedToolFailures.length > 0) {
+              stallReason = 'tool-failed';
             } else if (drained.length > 0) {
               if (
                 await this.shouldReleaseAfterMutationTurnForValidation(
@@ -6342,7 +6415,9 @@ export class ChatManager {
                   )
                 : stallReason === 'tool-only'
                   ? CLOSING_SUMMARY_NUDGE
-                  : buildContinuationNudge(finalContent, state.record.messages);
+                  : stallReason === 'tool-failed'
+                    ? buildFailedToolRecoveryNudge(unresolvedToolFailures)
+                    : buildContinuationNudge(finalContent, state.record.messages);
             continue;
           }
         }
@@ -6480,6 +6555,7 @@ export class ChatManager {
       return lastAssistantMessage!;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+      const intentionallyCancelled = inflightTurn.cancelled === true;
       // The tool-loop guards (failure / repeat / deliverable-pacing) throw a
       // `TurnAbortError` whose `message` is a model-facing corrective and
       // whose `userMessage` is a plain summary for the human. The banner +
@@ -6489,8 +6565,10 @@ export class ChatManager {
       // already reads for a human — so `userMessage` falls back to it.
       const userMessage = err instanceof TurnAbortError ? err.userMessage : message;
       log.error('error:', message);
-      this.events.publish(scope, { type: 'error', error: userMessage });
-      this.events.publish(scope, { type: 'done' });
+      if (!intentionallyCancelled) {
+        this.events.publish(scope, { type: 'error', error: userMessage });
+        this.events.publish(scope, { type: 'done' });
+      }
       // Persist the error on the session record so a user who was away
       // when the error fired (and therefore missed the SSE event) sees
       // "last turn failed: …" on next reload instead of staring at
@@ -6518,7 +6596,9 @@ export class ChatManager {
         // real work leaves a faithful trace instead of a blank message.
         const salvagedContent = this.currentTurnContentText.get(sessionId) ?? '';
         const salvagedReasoning = this.states.get(sessionId)?.session?.getLastTurnReasoning?.();
-        state.record.lastTurnError = userMessage.slice(0, 500);
+        if (!intentionallyCancelled) {
+          state.record.lastTurnError = userMessage.slice(0, 500);
+        }
         const abortMessage: ChatMessage = {
           role: 'assistant',
           content: salvagedContent,
@@ -6533,9 +6613,17 @@ export class ChatManager {
         state.record.messages.push(abortMessage);
         state.record.lastActivityAt = nowIso();
         await this.store.writeSession(state.record);
+        if (intentionallyCancelled) {
+          // `cancelInflight` already emitted this pair immediately so the
+          // controls respond without waiting for provider teardown. Emit it
+          // again after persistence so timeline consumers can refresh the
+          // salvaged partial response from disk.
+          this.events.publish(scope, { type: 'cancelled' });
+          this.events.publish(scope, { type: 'done' });
+        }
       } catch (persistErr) {
         log.warn(
-          'failed to persist lastTurnError:',
+          'failed to persist aborted turn:',
           persistErr instanceof Error ? persistErr.message : persistErr,
         );
       }
@@ -6566,7 +6654,11 @@ export class ChatManager {
         return false;
       })();
       const consecutiveGuardAbort = previousAssistantAborted && !isTransportErrorMessage(message);
-      if (this.keurmeester && (isSilentStallAbort(message) || consecutiveGuardAbort)) {
+      if (
+        !intentionallyCancelled &&
+        this.keurmeester &&
+        (isSilentStallAbort(message) || consecutiveGuardAbort)
+      ) {
         const abortedTurnTools = this.currentTurnTools.get(sessionId) ?? [];
         const abortCtx = {
           trigger: 'turn_aborted' as const,
@@ -10181,11 +10273,19 @@ export class ChatManager {
       catalogDetail?.manifest.kind === 'chat-model' &&
       !this.warnedStaleModelSessions.has(record.id)
     ) {
-      const installed =
-        (await this.llamaCppModels?.resolveModel(resolvedCatalogId).catch(() => null)) ??
-        (await this.ds4Models?.resolveModel(resolvedCatalogId).catch(() => null)) ??
-        (await this.mlxModels?.resolveModel(resolvedCatalogId).catch(() => null)) ??
-        null;
+      let settingsSection: 'llamaCpp' | 'ds4' | 'mlx' = 'llamaCpp';
+      let installed: { catalogVersion?: string; quantization?: string } | null =
+        (await this.llamaCppModels?.resolveModel(resolvedCatalogId).catch(() => null)) ?? null;
+      if (!installed) {
+        settingsSection = 'ds4';
+        installed =
+          (await this.ds4Models?.resolveModel(resolvedCatalogId).catch(() => null)) ?? null;
+      }
+      if (!installed) {
+        settingsSection = 'mlx';
+        installed =
+          (await this.mlxModels?.resolveModel(resolvedCatalogId).catch(() => null)) ?? null;
+      }
       const installedVersion = installed?.catalogVersion;
       const currentVersion = catalogDetail.manifest.version;
       if (installed && installedVersion && currentVersion && installedVersion !== currentVersion) {
@@ -10201,7 +10301,8 @@ export class ChatManager {
         };
         this.events.publish(scope, {
           type: 'warning',
-          message: `The local weights for "${resolvedCatalogId}" are from an older catalog version (v${installedVersion}${installedQuant}); the catalog now ships v${currentVersion}. Settings adapt to the model automatically, so it runs fine — you're just on a superseded build. Download this model again from the model manager to get the current recommended weights.`,
+          message: `Updates are available for the '${resolvedCatalogId}' model. You can download a new model in Settings.`,
+          action: { kind: 'settings', section: settingsSection },
         });
       }
     }
@@ -11036,6 +11137,19 @@ export class ChatManager {
               }`,
             ),
           );
+      }
+      const scriptToolNames = new Set(scriptToolPlan.effective.map((tool) => tool.name));
+      if (
+        project?.leanProfile &&
+        scriptToolNames.has('get_board') &&
+        scriptToolNames.has('make_move')
+      ) {
+        opts.terminalToolPolicy = {
+          toolNames: ['make_move'],
+          closingArg: 'moveThought',
+          fallbackText: 'Move made — your turn.',
+          maxClosingChars: 180,
+        };
       }
       const mcpEnv: Record<string, string> = {
         GEZEL_BASE_URL: `${scheme}://127.0.0.1:${this.getPort()}`,
@@ -12703,6 +12817,44 @@ function isValidationRepairMutationTurn(
 ): boolean {
   if (!isValidationRepairPrompt(prompt)) return false;
   return hasSuccessfulWorkspaceMutation(toolCalls);
+}
+
+/**
+ * Game-page reactions already carry a freshly rendered board. Short manual
+ * follow-ups do not, so refresh them from the script store before inference.
+ */
+export function shouldRefreshLeanGameState(userText: string): boolean {
+  const text = userText.trim();
+  if (!text || /\b(?:board now|legal moves)\s*:/i.test(text)) return false;
+  return (
+    /\b(?:take|play|make)\b.{0,28}\b(?:turn|move)\b/i.test(text) ||
+    /\b(?:your|ai|black)(?:'s)?\s+turn\b/i.test(text) ||
+    /\b(?:try|go)\s+again\b/i.test(text)
+  );
+}
+
+type ToolOutcome = Pick<ChatMessageToolCall, 'name' | 'success' | 'errorMessage'>;
+
+/**
+ * Failures superseded by a later success of the same tool are resolved.
+ * Everything else needs correction, not the success-only closing nudge.
+ */
+export function unresolvedFailedToolCalls(calls: ReadonlyArray<ToolOutcome>): ToolOutcome[] {
+  return calls.filter(
+    (call, index) =>
+      !call.success &&
+      !calls.slice(index + 1).some((later) => later.name === call.name && later.success),
+  );
+}
+
+export function buildFailedToolRecoveryNudge(calls: ReadonlyArray<ToolOutcome>): string {
+  const details = calls
+    .slice(-3)
+    .map(
+      (call) => `- \`${call.name}\`: ${call.errorMessage?.trim() || 'the tool reported an error'}`,
+    )
+    .join('\n');
+  return `Your tool call failed and did not complete the action. Read the exact error below, correct the arguments or choose an explicitly listed valid option, then retry the action once. Do not summarize it as a success.\n${details}`;
 }
 
 /**

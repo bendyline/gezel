@@ -1388,6 +1388,15 @@ jobs:
           if (( bad )); then exit 1; fi
           echo "CUDA redistributables present in every -cuda key; ds4 resolves against them."
 
+      # Generate this before spending several minutes recompressing the merged
+      # tree. The manifest pins concrete native bytes and exact internal
+      # SONAME-link targets; unsafe, dangling, cyclic, or unpinned links fail
+      # here while the per-engine run artifacts are still available.
+      - name: Generate per-file native integrity manifest
+        env:
+          NATIVE_TAG: ${{ github.ref_name }}
+        run: node scripts/generate-native-file-manifests.mjs --root native/build --version "$NATIVE_TAG" --out release/NATIVE_FILE_MANIFESTS.json
+
       # ── Build tarballs per platform ───────────────────────────────
       - name: Pack tarballs
         id: pack
@@ -1425,7 +1434,8 @@ jobs:
           limit=$((2 * 1024 * 1024 * 1024))
           warn=$((limit * 3 / 4))
           over=0
-          for f in release/*; do
+          for f in release/*.tar.gz release/*.zip; do
+            [[ -f "$f" ]] || continue
             size=$(stat -c %s "$f")
             human=$(numfmt --to=iec-i --suffix=B "$size")
             if (( size >= limit )); then
@@ -1459,16 +1469,11 @@ jobs:
           done < <(node scripts/check-native-payload.mjs --list-keys)
           if ! diff -u \
             <(printf '%s\n' "${expected[@]}" | sort) \
-            <(find release -maxdepth 1 -type f -printf '%f\n' | sort); then
+            <(find release -maxdepth 1 -type f \( -name '*.tar.gz' -o -name '*.zip' \) -printf '%f\n' | sort); then
             echo "::error::Native draft archive set is incomplete or contains unexpected files."
             exit 1
           fi
           echo "Validated ${#expected[@]} required native release archives."
-
-      - name: Generate per-file native integrity manifest
-        env:
-          VERSION: ${{ steps.pack.outputs.version }}
-        run: node scripts/generate-native-file-manifests.mjs --root native/build --version "$VERSION" --out release/NATIVE_FILE_MANIFESTS.json
 
       - name: Generate SHA256SUMS
         run: |

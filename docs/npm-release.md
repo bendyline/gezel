@@ -143,8 +143,12 @@ The chain of trust is anchored in the **published package**:
 bakes in `NATIVE_ENGINE_RELEASE` (the `native-v*` tag this build trusts) and
 `SHA256SUMS_DIGEST` (the sha256 of that release's `SHA256SUMS` asset).
 [`native-file-manifest.json`](../packages/service/src/engines/native-file-manifest.json)
-also pins every executable and loadable library after signing/notarization.
-That second manifest lets a standalone CLI verify and reuse an Electron
+also pins every executable and loadable regular file after
+signing/notarization. Schema 2 records symlinks separately, including their
+exact relative target text. Links may form ordinary internal SONAME chains,
+but verification rejects absolute/escaping targets, dangling links, cycles,
+unexpected links, and links that do not terminate at a pinned regular native
+file. That second manifest lets a standalone CLI verify and reuse an Electron
 installation's extracted payload without trusting metadata supplied by the
 installation itself.
 [`resolver.ts`](../packages/service/src/engines/resolver.ts) verifies the
@@ -157,7 +161,12 @@ result must be `Accepted` before those exact signed bytes are hashed and
 packed. Bare command-line binaries cannot carry a stapled ticket and `spctl`
 cannot assess them as app bundles; `--macos-notarized` records the accepted
 release provenance when the hashes are pinned. Electron reuse separately
-assesses the signed/notarized parent `.app`.
+assesses the signed/notarized parent `.app`. Electron packaging deliberately
+does not re-sign `app.asar.unpacked/native-bin`: those Mach-O files were
+already signed before their hashes were published. The outer app signature
+still seals that tree, and release CI checks the per-file manifest in both the
+staged tree and the extracted finished installer before running deep
+signature verification.
 
 `0.1.19` predates the per-file manifest, so its checked-in platform set is
 intentionally empty and Electron reuse fails closed. The first native release
@@ -178,6 +187,11 @@ match a download — that defeats the mechanism. `bundledAssets.test.ts` fails
 the release if the pin is still the all-zeros placeholder, because a
 placeholder makes `isEnginePinned()` false and silently disables engine
 download for everyone who installed from npm.
+
+The Electron release workflow requires its `nativeTag` to match both pinned
+source files and refuses a native release without `NATIVE_FILE_MANIFESTS.json`.
+This makes the order explicit: publish the native release, run the pin command,
+review and commit the pins, then cut the Electron release.
 
 A GitHub token is **optional** for engine download. `bendyline/gezel` is
 public; a token, when present, only lifts GitHub's 60-request/hour

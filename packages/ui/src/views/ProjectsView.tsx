@@ -17,7 +17,7 @@ import { ConfirmDialog } from '../components/ConfirmDialog.js';
 import { ExportToolbarControls } from '../components/DocumentExport/index.js';
 import { type FileEntry, FileTree } from '../components/FileTree.js';
 import { HtmlPreviewFrame, type HtmlPreviewLogEntry } from '../components/HtmlPreviewFrame.js';
-import { ProjectActionsMenu } from '../components/ProjectActionsMenu.js';
+import { ProjectActionsMenu, ProjectContextMenu } from '../components/ProjectActionsMenu.js';
 import { ProjectChat } from '../components/ProjectChat.js';
 import { ProjectConnectionsTab } from '../components/ProjectConnectionsTab.js';
 import { ProjectGitStatusBar } from '../components/ProjectGitStatusBar.js';
@@ -1246,39 +1246,50 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
             </button>
           </div>
           {sidebarCollapsed && (
-            <div className="new-row">
+            <div className="new-row collapsed-create-row" aria-label="Create">
               <button
                 type="button"
-                className="primary"
+                className="collapsed-create-btn"
                 onClick={() => setCreateMode('crew')}
                 title="New Project"
+                aria-label="New Project"
               >
-                +
+                <span className="collapsed-create-symbol" aria-hidden="true">
+                  +
+                </span>
+                <span className="collapsed-create-label">Project</span>
               </button>
               <button
                 type="button"
+                className="collapsed-create-btn"
                 onClick={() => setCreateMode('solo')}
                 title="New Job (solo project)"
+                aria-label="New Job"
               >
-                ·
+                <span className="collapsed-create-symbol" aria-hidden="true">
+                  +
+                </span>
+                <span className="collapsed-create-label">Job</span>
               </button>
             </div>
           )}
           <ul>
             {projects.map((p) => (
-              <li key={p.id} className="project-rail-row">
-                <button
-                  type="button"
-                  className={selected?.id === p.id ? 'active' : ''}
-                  onClick={() => handleProjectRowClick(p.id)}
-                  title={sidebarCollapsed ? p.name : undefined}
-                >
-                  {sidebarCollapsed ? projectInitial(p.name) : p.name}
-                </button>
-                {!sidebarCollapsed && (
-                  <ProjectActionsMenu project={p} onDeleted={() => void refresh()} />
-                )}
-              </li>
+              <ProjectContextMenu key={p.id} project={p} onDeleted={() => void refresh()}>
+                <li className="project-rail-row">
+                  <button
+                    type="button"
+                    className={`project-rail-name${selected?.id === p.id ? ' active' : ''}`}
+                    onClick={() => handleProjectRowClick(p.id)}
+                    title={p.name}
+                  >
+                    {sidebarCollapsed ? projectInitial(p.name) : p.name}
+                  </button>
+                  {!sidebarCollapsed && (
+                    <ProjectActionsMenu project={p} onDeleted={() => void refresh()} />
+                  )}
+                </li>
+              </ProjectContextMenu>
             ))}
           </ul>
           {error && !sidebarCollapsed && <p className="error">{error}</p>}

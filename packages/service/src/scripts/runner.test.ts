@@ -9,7 +9,7 @@ import { Store } from '../fs/store.js';
 import type { MemoryManager } from '../memory/manager.js';
 import { MockProvider } from '../providers/mock.js';
 import { FileSecretStore } from '../secrets/file-store.js';
-import { ScriptRunner } from './runner.js';
+import { ScriptRunner, extractScriptFailureFromStderr } from './runner.js';
 
 const noopMemory = {
   search: async () => [],
@@ -56,6 +56,31 @@ async function writeScript(name: string, source: string): Promise<void> {
   await mkdir(dir, { recursive: true });
   await writeFile(join(dir, `${name}.ts`), source, 'utf8');
 }
+
+describe('extractScriptFailureFromStderr', () => {
+  it('preserves an ordinary thrown error while dropping its stack', () => {
+    const stderr = [
+      'Error: Illegal move f6-e5. Legal moves for black: d8-e7, f8-e7, b6-c5',
+      '    at file:///tmp/game-store.ts:42:11',
+      '    at async ModuleJob.run (node:internal/modules/esm/module_job:271:25)',
+    ].join('\n');
+
+    expect(extractScriptFailureFromStderr(stderr)).toBe(
+      'Error: Illegal move f6-e5. Legal moves for black: d8-e7, f8-e7, b6-c5',
+    );
+  });
+
+  it('keeps sandbox refusals ahead of incidental exceptions', () => {
+    const stderr = [
+      'TypeError: wrapper failed',
+      '[sandbox error] denyNet requires an enforceable OS network boundary',
+    ].join('\n');
+
+    expect(extractScriptFailureFromStderr(stderr)).toBe(
+      '[sandbox error] denyNet requires an enforceable OS network boundary',
+    );
+  });
+});
 
 it.runIf(process.platform !== 'darwin')(
   'fails closed with an actionable error when denyNet has no OS boundary',

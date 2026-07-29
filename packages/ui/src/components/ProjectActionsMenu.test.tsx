@@ -7,7 +7,7 @@ import { primitivesMock } from '../test-utils/primitivesMock.js';
 vi.mock('../api.js', () => ({ api: createMockApi() }));
 vi.mock('../primitives/index.js', () => primitivesMock);
 
-const { ProjectActionsMenu } = await import('./ProjectActionsMenu.js');
+const { ProjectActionsMenu, ProjectContextMenu } = await import('./ProjectActionsMenu.js');
 const { api } = await import('../api.js');
 
 const PROJECT = { id: 'p1', name: 'Alpha' } as Project;
@@ -35,5 +35,17 @@ describe('ProjectActionsMenu', () => {
     const event = cleared.mock.calls[0]?.[0] as CustomEvent<{ projectId: string }>;
     expect(event.detail).toEqual({ projectId: 'p1' });
     window.removeEventListener('gezel:session-error-cleared', cleared);
+  });
+
+  it('offers the same project actions from a row context menu', () => {
+    render(
+      <ProjectContextMenu project={PROJECT}>
+        <button type="button">Alpha project row</button>
+      </ProjectContextMenu>,
+    );
+
+    expect(screen.queryByRole('menuitem', { name: 'Delete project…' })).toBeNull();
+    fireEvent.contextMenu(screen.getByRole('button', { name: 'Alpha project row' }));
+    expect(screen.getByRole('menuitem', { name: 'Delete project…' })).toBeInTheDocument();
   });
 });

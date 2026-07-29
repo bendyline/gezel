@@ -1324,6 +1324,79 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     expect(requestCount).toBe(1);
   });
 
+  it('ends a lean game turn immediately after a successful terminal action tool', async () => {
+    let requestCount = 0;
+    globalThis.fetch = (async () => {
+      requestCount += 1;
+      return sseResponse([
+        {
+          choices: [
+            {
+              index: 0,
+              delta: {
+                tool_calls: [
+                  {
+                    index: 0,
+                    id: 'call_move',
+                    type: 'function',
+                    function: {
+                      name: 'make_move',
+                      arguments:
+                        '{"from":"b6","to":"c5","moveThought":"Center pressure — your turn."}',
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+        {
+          choices: [{ index: 0, finish_reason: 'tool_calls' }],
+          usage: { prompt_tokens: 20, completion_tokens: 5 },
+        },
+        '[DONE]',
+      ]);
+    }) as typeof fetch;
+
+    const provider = new LlamaCppProvider({ baseUrl: 'http://llama.test' });
+    const session = await provider.createSession({
+      systemMessage: 'Play from the current board.',
+      model: 'qwen',
+      terminalToolPolicy: {
+        toolNames: ['make_move'],
+        closingArg: 'moveThought',
+        fallbackText: 'Move made — your turn.',
+      },
+    });
+    const internal = session as unknown as {
+      deps: {
+        bridges: {
+          isEmpty: () => boolean;
+          getOpenAITools: () => Array<{
+            name: string;
+            description: string;
+            parameters: Record<string, unknown>;
+          }>;
+          hasTool: (name: string) => boolean;
+          callTool: (name: string, args: Record<string, unknown>) => Promise<string>;
+        };
+      };
+    };
+    internal.deps.bridges = {
+      isEmpty: () => false,
+      getOpenAITools: () => [
+        { name: 'make_move', description: 'Play a move.', parameters: { type: 'object' } },
+      ],
+      hasTool: (name: string) => name === 'make_move',
+      callTool: async () => 'run move-1 — status: ok',
+    };
+
+    const reply = await session.sendAndWait('Take your turn.');
+
+    expect(reply).toBe('Center pressure — your turn.');
+    expect(requestCount).toBe(1);
+  });
+
   it('narrows existing source edit turns to patch tools after reading the file', async () => {
     const bodies: Array<{
       messages: Array<{ role: string; content: string | null }>;

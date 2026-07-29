@@ -1,5 +1,6 @@
 export * as Dialog from './Dialog.js';
 export * as AlertDialog from './AlertDialog.js';
+export * as ContextMenu from './ContextMenu.js';
 export * as DropdownMenu from './DropdownMenu.js';
 export * as Popover from './Popover.js';
 export * as Select from './Select.js';

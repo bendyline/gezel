@@ -155,9 +155,22 @@ describe('ChatEventSchema', () => {
     );
     expect(ChatEventSchema.parse({ type: 'done' }).type).toBe('done');
     expect(ChatEventSchema.parse({ type: 'error', error: 'oops' }).type).toBe('error');
+    expect(ChatEventSchema.parse({ type: 'cancelled' }).type).toBe('cancelled');
     expect(
       ChatEventSchema.parse({ type: 'gezel_created', gezelId: 'sipho', name: 'Sipho' }).type,
     ).toBe('gezel_created');
+  });
+
+  it('accepts an in-app Settings action on a warning', () => {
+    expect(
+      ChatEventSchema.parse({
+        type: 'warning',
+        message: 'A model update is available in Settings.',
+        action: { kind: 'settings', section: 'mlx' },
+      }),
+    ).toMatchObject({
+      action: { kind: 'settings', section: 'mlx' },
+    });
   });
 });
 

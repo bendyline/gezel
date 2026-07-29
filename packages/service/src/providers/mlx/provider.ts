@@ -85,6 +85,7 @@ import {
   type EngineStatsEvent,
   StreamingSessionBase,
 } from '../streaming-session.js';
+import { terminalToolClosingText } from '../terminal-tool-policy.js';
 import { ToolFailureTracker } from '../tool-failure-tracker.js';
 import { ToolRepeatTracker } from '../tool-repeat-tracker.js';
 import type {
@@ -542,6 +543,7 @@ export class MlxProvider implements LLMProvider {
       ...(opts.activeCraftbookStep ? { activeCraftbookStep: opts.activeCraftbookStep } : {}),
       ...(opts.tuning ? { tuning: opts.tuning } : {}),
       ...(opts.forceDirectFileWork ? { forceDirectFileWork: true } : {}),
+      ...(opts.terminalToolPolicy ? { terminalToolPolicy: opts.terminalToolPolicy } : {}),
     });
   }
 
@@ -761,6 +763,7 @@ interface MlxSessionDeps {
   tuning?: import('../../model-profile/index.js').ResolvedTuning;
   /** Manager-authoritative direct file-work classification. */
   forceDirectFileWork?: boolean;
+  terminalToolPolicy?: NonNullable<SessionOpts['terminalToolPolicy']>;
 }
 
 /** See `MID_LOOP_COMPACT_RATIO` in llama-cpp/provider.ts. */
@@ -2824,6 +2827,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
           transportFailure?: boolean;
         } | null = null;
         let asyncFileHandoffCount = 0;
+        let terminalActionClosing: string | null = null;
         const immediateFileWritePaths: string[] = [];
         // Set when an immediate-write / continuation write this turn was
         // EOS-flushed (truncated mid-content) — drives the bail-vs-loop
@@ -2938,6 +2942,12 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
             }
           }
           const tracked = failureTracker.recordResult(call.function.name, output);
+          terminalActionClosing ??= terminalToolClosingText(
+            this.deps.terminalToolPolicy,
+            call.function.name,
+            args,
+            output,
+          );
           // Layer the same-args repeat tracker on top of the failure
           // tracker. The failure tracker catches "tool keeps erroring";
           // the repeat tracker catches "tool keeps succeeding with the
@@ -3002,6 +3012,29 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
               : {}),
             ...(abortDueToFailureLoop.transportFailure ? { transportFailure: true } : {}),
           });
+        }
+        if (terminalActionClosing) {
+          // The action itself is the terminal outcome. Do not spend another
+          // generation asking the model to re-analyze a board that changed
+          // under it; persist one short line and release the turn.
+          this.messages.push({ role: 'assistant', content: terminalActionClosing });
+          fullText = terminalActionClosing;
+          if (lastUsage && (lastUsage.prompt_tokens > 0 || lastUsage.completion_tokens > 0)) {
+            this.emitUsage({
+              model: this.deps.model,
+              inputTokens: lastUsage.prompt_tokens,
+              outputTokens: lastUsage.completion_tokens,
+              ...(lastUsage.cached_tokens !== undefined
+                ? { cachedInputTokens: lastUsage.cached_tokens }
+                : {}),
+              durationMs: Date.now() - start,
+              at: new Date().toISOString(),
+            });
+          }
+          log.info(
+            `turn#${seq} END terminal-tool-bail afterMs=${Date.now() - start} loopTurns=${turn + 1}`,
+          );
+          return fullText;
         }
         if (immediateFileWritePaths.length > 0) {
           // File was truncated mid-content and we still have continuation

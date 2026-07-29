@@ -1,4 +1,5 @@
 import type {
+  ChatEvent,
   ChatMessageToolCall,
   Question,
   SessionGpuTask,
@@ -29,6 +30,7 @@ import {
 } from 'react';
 import { api } from '../api.js';
 import { Tooltip } from '../primitives/index.js';
+import { requestSettingsSection } from '../settings-nav.js';
 import { useEffectiveTheme } from '../theme.js';
 import { AudioPlayer } from './AudioPlayer.js';
 import { DraftPlanCard } from './DraftPlanCard.js';
@@ -123,6 +125,9 @@ export interface ToolActivity {
   addedLines?: number;
   removedLines?: number;
 }
+
+export type InlineWarning = Extract<ChatEvent, { type: 'warning' }>;
+type WarningValue = string | InlineWarning;
 
 export interface MessageBubbleProps {
   role: 'user' | 'assistant';
@@ -1140,7 +1145,7 @@ export interface StreamingBubbleProps {
    * to tail server logs to learn that the provider dropped into
    * degraded mode or hit a rate limit.
    */
-  warnings?: string[];
+  warnings?: WarningValue[];
   /**
    * Cancel the in-flight turn. When provided, a small × button
    * renders alongside the thinking-dots so the user can stop a
@@ -1375,6 +1380,58 @@ export function StreamingStatusLine({
   );
 }
 
+function warningKey(warning: WarningValue): string {
+  if (typeof warning === 'string') return warning;
+  return `${warning.message}\0${warning.action?.kind ?? ''}\0${warning.action?.section ?? ''}`;
+}
+
+export function WarningBanner({ warnings }: { warnings: WarningValue[] }) {
+  const unique = Array.from(
+    new Map(warnings.map((warning) => [warningKey(warning), warning])).values(),
+  );
+
+  return (
+    <div className="msg-warning-banner">
+      {unique.map((value) => {
+        const warning: InlineWarning =
+          typeof value === 'string' ? { type: 'warning', message: value } : value;
+        const action = warning.action;
+        const settingsIndex = action ? warning.message.lastIndexOf('Settings') : -1;
+        return (
+          <div key={warningKey(warning)}>
+            ⚠{' '}
+            {action && settingsIndex >= 0 ? (
+              <>
+                {warning.message.slice(0, settingsIndex)}
+                <button
+                  type="button"
+                  className="msg-warning-link"
+                  onClick={() => {
+                    requestSettingsSection(action.section);
+                    window.dispatchEvent(
+                      new CustomEvent('gezel:navigate', {
+                        detail: {
+                          view: 'settings',
+                          section: action.section,
+                        },
+                      }),
+                    );
+                  }}
+                >
+                  Settings
+                </button>
+                {warning.message.slice(settingsIndex + 'Settings'.length)}
+              </>
+            ) : (
+              warning.message
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export function StreamingBubble({
   authorLabel,
   authorIcon,
@@ -1573,6 +1630,22 @@ export function StreamingBubble({
   // the model is idle, blocked on a peer's reply. Only honor it while
   // the turn hasn't failed — an errored turn's banner takes precedence.
   const awaiting = !failed && !!awaitingGezelName;
+  const showThinkingDots =
+    !failed &&
+    !queued &&
+    !awaiting &&
+    !liveToolArgs &&
+    (renderedSegments.length === 0 ||
+      renderedSegments[renderedSegments.length - 1]?.kind === 'tools');
+  const inlineWirePulse =
+    !failed && !queued && !awaiting && wirePulseCount !== undefined && wirePulseCount > 0 ? (
+      <span
+        className="msg-live-inline-activity"
+        title={`${wirePulseCount} wire pulse${wirePulseCount === 1 ? '' : 's'} since the last visible token — the engine is alive and generating`}
+      >
+        {formatWirePulses(wirePulseCount)}
+      </span>
+    ) : null;
   const stateCls = failed
     ? 'msg-failed'
     : queued
@@ -1771,41 +1844,26 @@ export function StreamingBubble({
                 <span className="msg-image-gen-narrative-prompt">{gpuSwapPrompt}</span>
               </div>
             )}
-            {!failed &&
-              !queued &&
-              !awaiting &&
-              !liveToolArgs &&
-              (renderedSegments.length === 0 ||
-                renderedSegments[renderedSegments.length - 1]?.kind === 'tools') && (
-                // Suppressed while `awaiting`: the model is idle on a
-                // peer's reply, so pulsing "thinking" dots would be a
-                // lie — the dimmed bubble + "Waiting on <name>" status
-                // carry the signal instead. Also suppressed while the
-                // live tool-args block is up: that block IS the activity
-                // signal, and dots under it would read as a second,
-                // contradictory "waiting" state.
+            {showThinkingDots && (
+              <div className="msg-thinking-activity">
+                {/* Suppressed while `awaiting`: the model is idle on a
+                    peer's reply, so pulsing "thinking" dots would be a
+                    lie — the dimmed bubble + "Waiting on <name>" status
+                    carry the signal instead. Also suppressed while the
+                    live tool-args block is up: that block IS the activity
+                    signal, and dots under it would read as a second,
+                    contradictory "waiting" state. */}
                 <div className="thinking-dots" aria-label="Thinking…">
                   <span />
                   <span />
                   <span />
                 </div>
-              )}
-            {!failed &&
-              !queued &&
-              !awaiting &&
-              wirePulseCount !== undefined &&
-              wirePulseCount > 0 && (
-                // Mirror of the header's wire-pulse counter, placed at the
-                // bottom of the body where the user is actually watching
-                // the caret blink — so "things are happening" is visible
-                // without glancing up. Same format as the header counter.
-                <span
-                  className="msg-live-inline-activity"
-                  title={`${wirePulseCount} wire pulse${wirePulseCount === 1 ? '' : 's'} since the last visible token — the engine is alive and generating`}
-                >
-                  {formatWirePulses(wirePulseCount)}
-                </span>
-              )}
+                {inlineWirePulse}
+              </div>
+            )}
+            {/* When visible text or tool arguments replace the thinking
+                dots, keep the activity count at the live edge of the body. */}
+            {!showThinkingDots && inlineWirePulse}
           </>
         )}
         {!failed && warnings && warnings.length > 0 && (
@@ -1814,11 +1872,7 @@ export function StreamingBubble({
           // the silence banner these signal something the user should
           // see immediately, not a "might be slow" reassurance.
           // Dedup so a chatty provider doesn't pile duplicate lines.
-          <div className="msg-warning-banner">
-            {Array.from(new Set(warnings)).map((w) => (
-              <div key={w}>⚠ {w}</div>
-            ))}
-          </div>
+          <WarningBanner warnings={warnings} />
         )}
         {!failed &&
           !queued &&
