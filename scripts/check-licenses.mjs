@@ -116,12 +116,6 @@ const REVIEWED_NON_PERMISSIVE = [
     rationale: 'Unmodified FFmpeg WebAssembly runtime distributed as part of the Gezel app.',
   },
   {
-    name: /^@img\/sharp-libvips-/,
-    versions: new Set(['1.3.2']),
-    license: 'LGPL-3.0-or-later',
-    rationale: 'Unmodified libvips platform runtime distributed as part of the Gezel app.',
-  },
-  {
     name: /^@resvg\/resvg-js(?:-.+)?$/,
     versions: new Set(['2.6.2']),
     license: 'MPL-2.0',
@@ -218,7 +212,7 @@ function run() {
 /**
  * Reviewed non-permissive licenses the EULA fails to mention. Matches on
  * the SPDX identifier rather than the package name — the EULA describes
- * components in prose ("the libvips image-processing runtime"), but every
+ * components in prose ("the resvg SVG renderer"), but every
  * entry states its license verbatim, which is the part that must not
  * drift.
  */

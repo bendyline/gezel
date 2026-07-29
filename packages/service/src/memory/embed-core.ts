@@ -78,10 +78,9 @@ type Pipeline = (
 ) => Promise<{ tolist: () => number[][] }>;
 
 /**
- * Thrown when the model itself can't be loaded (most commonly sharp's native
- * binary missing — see `pnpm setup:native`). Distinguished from a transient
+ * Thrown when the model itself can't be loaded. Distinguished from a transient
  * inference error so the host can permanently disable embeddings rather than
- * retry the ~20-line failure on every chunk.
+ * retry the full failure on every chunk.
  */
 export class PipelineLoadError extends Error {
   readonly code = 'PIPELINE_LOAD_FAILED';

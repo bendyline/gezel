@@ -4,7 +4,11 @@ import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { after, before, describe, it } from 'node:test';
 
-import { findMachOBinaries, isMachOMagic } from './sign-macho-tree.mjs';
+import {
+  findMachOBinaries,
+  isDistributionReadyDeveloperIdSignature,
+  isMachOMagic,
+} from './sign-macho-tree.mjs';
 
 const magic = (value) => {
   const buf = Buffer.alloc(4);
@@ -61,6 +65,46 @@ describe('findMachOBinaries', () => {
       found.some((p) => p.endsWith('alias.node')),
       false,
     );
+  });
+});
+
+describe('isDistributionReadyDeveloperIdSignature', () => {
+  const valid = [
+    'Executable=/tmp/node',
+    'Identifier=node',
+    'CodeDirectory v=20500 size=937904 flags=0x10000(runtime) hashes=29299+7 location=embedded',
+    'Authority=Developer ID Application: Node.js Foundation (HX7739G8FX)',
+    'Authority=Developer ID Certification Authority',
+    'Authority=Apple Root CA',
+    'Timestamp=Jun 23, 2026 at 6:43:00 AM',
+    'TeamIdentifier=HX7739G8FX',
+    'Runtime Version=15.0.0',
+  ].join('\n');
+
+  it('accepts a timestamped, hardened Developer ID signature with an Apple trust chain', () => {
+    assert.equal(isDistributionReadyDeveloperIdSignature(valid), true);
+  });
+
+  it('rejects ad-hoc signatures without a team or authorities', () => {
+    const adHoc = [
+      'Identifier=uv-8d713fe443e45729',
+      'CodeDirectory v=20400 size=123 flags=0x20002(adhoc,linker-signed) hashes=3+0',
+      'TeamIdentifier=not set',
+    ].join('\n');
+    assert.equal(isDistributionReadyDeveloperIdSignature(adHoc), false);
+  });
+
+  it('rejects Developer ID signatures missing a notarization prerequisite', () => {
+    const cases = [
+      valid.replace('flags=0x10000(runtime)', 'flags=0x0(none)'),
+      valid.replace(/^Timestamp=.+\n/m, ''),
+      valid.replace('TeamIdentifier=HX7739G8FX', 'TeamIdentifier=not set'),
+      valid.replace('Authority=Developer ID Certification Authority\n', ''),
+      valid.replace('Authority=Apple Root CA\n', ''),
+    ];
+    for (const details of cases) {
+      assert.equal(isDistributionReadyDeveloperIdSignature(details), false);
+    }
   });
 });
 

@@ -22,7 +22,7 @@ const log = createLogger('craftbook');
  * space shooter" find a "build an arcade game" book that shares no words.
  *
  * Embeddings are best-effort: when the native pipeline is unavailable
- * (`EmbeddingsDisabledError`, e.g. sharp not installed) we fall back to
+ * (`EmbeddingsDisabledError`, e.g. the local model runtime is unavailable) we fall back to
  * pure lexical ranking rather than failing — a degraded shortlist still
  * beats a 100-item dump.
  */

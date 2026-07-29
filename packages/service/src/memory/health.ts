@@ -11,7 +11,7 @@
  *   - Every 24h while the service is running
  *
  * Safe to no-op:
- *   - If transformers.js / sharp aren't installed, embeddings are disabled
+ *   - If Transformers.js or its ONNX runtime cannot load, embeddings are disabled
  *     and we skip the sweep entirely (otherwise we'd retry the same broken
  *     pipeline every cycle).
  */

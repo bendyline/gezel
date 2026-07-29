@@ -36,6 +36,7 @@ import { basename, dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import { pruneForeignBinariesWithReport } from './prune-foreign-binaries.mjs';
+import { stageSharpCompatibilityStub, verifySharpCompatibilityTree } from './sharp-compat.mjs';
 import { signMachOTree } from './sign-macho-tree.mjs';
 
 const exec = promisify(execFile);
@@ -170,6 +171,12 @@ async function main() {
   // the service actually loads, the verification spawn fails here rather than
   // shipping a bundle that breaks on a user's machine.
   await pruneForeignBinariesWithReport(target);
+
+  await stageSharpCompatibilityStub(target);
+  const sharpCompatibility = await verifySharpCompatibilityTree(target);
+  console.log(
+    `[sharp-compat] verified ${sharpCompatibility.stubs} no-image stub(s); no native Sharp/libvips payload`,
+  );
 
   console.log('[build-service-bundle] verifying the bundle imports cleanly');
   // Importing the service module resolves the whole dep graph, including
