@@ -28,7 +28,7 @@ import {
   InvalidGitHubUrlError,
   previewGitHubRepo,
 } from '../../github/repo-preview.js';
-import { resolvePnpmCommand } from '../../packages/pnpm.js';
+import { pnpmSpawnTarget, resolvePnpmCommand } from '../../packages/pnpm.js';
 import { resolveSystemLibraryPath } from '../../system-toolsets/resolve.js';
 import { detectMemoryProfile } from '../../system/memory.js';
 import type { ServiceContext } from '../context.js';
@@ -124,7 +124,8 @@ export function systemRoutes(ctx: ServiceContext): Hono {
         ? `${nodeDir}${delimiter}${process.env.PATH ?? ''}`
         : (process.env.PATH ?? '');
       const pnpm = resolvePnpmCommand(['exec', 'copilot', 'login']);
-      const child = spawn(pnpm.command, pnpm.args, {
+      const target = pnpmSpawnTarget(pnpm);
+      const child = spawn(target.command, target.args, {
         cwd: installDir,
         env: { ...process.env, PATH: extendedPath, FORCE_COLOR: '0' },
         stdio: ['ignore', 'pipe', 'pipe'],

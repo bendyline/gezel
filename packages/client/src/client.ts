@@ -901,6 +901,12 @@ export interface ConfigResponse {
    */
   showSystemTray?: boolean;
   /**
+   * Whether the packaged desktop app checks for updates on launch.
+   * Materialized on GET (defaults to `true` when unset). Turning this off
+   * does not disable the user-initiated tray action.
+   */
+  autoUpdateChecks?: boolean;
+  /**
    * When the tray is enabled, whether the window's close button quits the
    * whole app (and removes the tray icon) instead of hiding to the tray.
    * Materialized on GET (defaults to `false` when unset). Windows/Linux

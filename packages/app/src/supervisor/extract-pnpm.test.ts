@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { installPnpmIfNeeded } from './extract-pnpm.js';
+import { defaultPnpmBundleDir, installPnpmIfNeeded } from './extract-pnpm.js';
 
 let workRoot: string;
 let home: string;
@@ -31,6 +31,14 @@ async function writeBundle(version: string, content = '// fake pnpm entry\n'): P
 }
 
 describe('installPnpmIfNeeded', () => {
+  it('resolves packaged ASAR paths to the real unpacked directory', () => {
+    expect(
+      defaultPnpmBundleDir(
+        'file:///Applications/Gezel.app/Contents/Resources/app.asar/dist/main.js',
+      ),
+    ).toBe('/Applications/Gezel.app/Contents/Resources/app.asar.unpacked/dist/pnpm-bundle');
+  });
+
   it('returns no-bundle when the bundle directory does not exist', async () => {
     await rm(bundleDir, { recursive: true, force: true });
     const res = await installPnpmIfNeeded({ home, bundleDir });

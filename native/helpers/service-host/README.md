@@ -28,10 +28,11 @@ so the binary cannot even register services.
   backoff (parity with the Electron supervisor). On budget exhaustion
   the service stops with a service-specific error visible in
   services.msc.
-- Graceful stop: shares its hidden session-0 console with the child and
-  sends `CTRL_BREAK` (gezeld handles `SIGBREAK`), 3 s grace, then a
-  job-object kill of the whole process tree. The child lives in a
-  kill-on-close Job Object, so nothing survives the host.
+- Graceful stop: the child's stdin is an anonymous pipe whose write end
+  the host holds; closing it delivers EOF, which gezeld handles as a
+  shutdown request (`GEZEL_SHUTDOWN_ON_STDIN_EOF=1` opts it in). 10 s
+  grace, then a job-object kill of the whole process tree. The child
+  lives in a kill-on-close Job Object, so nothing survives the host.
 
 ## CLI
 
@@ -53,10 +54,21 @@ cmake --build .build && ctest --test-dir .build`.
 
 ## Invariants
 
-- The child spawn must never gain `CREATE_NO_WINDOW` /
-  `DETACHED_PROCESS` / `CREATE_NEW_CONSOLE` — a shared console is what
-  delivers CTRL_BREAK, and losing it silently turns every stop into a
-  hard kill.
+- The child's stdin must stay a host-held pipe. It is the only
+  graceful-stop channel that works in the shipping configuration, and
+  pointing stdin at `NUL` again would silently turn every stop into a
+  hard kill. The host must also close its write end on every path that
+  drops a child (stop *and* crash-respawn), or EOF never arrives.
+- `AllocConsole` fails on every start in the shipping configuration
+  (observed in v1.26210.15) with error **317** (`ERROR_MR_MID_NOT_FOUND`),
+  reproduced twice against a real service install. It is deliberately
+  logged rather than treated as fatal. Note it is *not* `ACCESS_DENIED`,
+  so the `restricted` service SID is not the cause — the console
+  subsystem simply is not available to a Session 0 service in a
+  non-interactive window station. Do not "fix" this by relaxing the SID
+  type: `sc sidtype GezelService restricted` is a deliberate security
+  control and would not bring the console back anyway. CTRL_BREAK is only
+  a best-effort secondary to the stdin channel.
 - The host never creates `C:\ProgramData\Gezel` (the installer owns its
   hardened ACL); a missing home stops the service with
   `ERROR_PATH_NOT_FOUND`.

@@ -78,8 +78,8 @@ async function main() {
     // virtual store. Required for Windows: when the tarball is extracted on
     // a filesystem that can't create symlinks without privilege (vanilla
     // user account), pnpm's default symlinked layout collapses into broken
-    // path copies and Node's resolver fails to find transitive deps of
-    // workspace packages (gray-matter via @bendyline/gezel was the canary).
+    // path copies and Node's resolver fails to find transitive dependencies
+    // of workspace packages.
     // The flat tree is ~10% larger on disk but extracts identically on
     // every OS. See:
     //   ~/.gezel/service/node_modules/@bendyline/gezel  on Linux: symlink

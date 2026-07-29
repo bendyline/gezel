@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { installNodeIfNeeded } from './extract-node.js';
+import { defaultNodeBundleDir, installNodeIfNeeded } from './extract-node.js';
 
 let workRoot: string;
 let home: string;
@@ -29,6 +29,14 @@ async function writeBundle(version: string, content = 'fake-node-binary'): Promi
 }
 
 describe('installNodeIfNeeded', () => {
+  it('resolves packaged ASAR paths to the real unpacked directory', () => {
+    expect(
+      defaultNodeBundleDir(
+        'file:///Applications/Gezel.app/Contents/Resources/app.asar/dist/main.js',
+      ),
+    ).toBe('/Applications/Gezel.app/Contents/Resources/app.asar.unpacked/dist/node-bundle');
+  });
+
   it('returns no-bundle when the bundle directory does not exist', async () => {
     await rm(bundleDir, { recursive: true, force: true });
     const res = await installNodeIfNeeded({ home, bundleDir });

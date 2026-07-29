@@ -1,5 +1,5 @@
-import matter from 'gray-matter';
 import { GezelFrontmatterSchema, type GezelSection, type ParsedGezel } from '../schemas/gezel.js';
+import { parseYamlFrontmatter, stringifyYamlFrontmatter } from './frontmatter.js';
 
 const HEADING_RE = /^(#{1,6})\s+(.+?)\s*$/;
 const TEMPLATE_RE = /\{\[\s*([a-zA-Z_][\w-]*)\s*([^\]]*)\]\}\s*$/;
@@ -14,7 +14,7 @@ const TEMPLATE_RE = /\{\[\s*([a-zA-Z_][\w-]*)\s*([^\]]*)\]\}\s*$/;
  * heading text.
  */
 export function parseGezelMarkdown(source: string): ParsedGezel {
-  const parsed = matter(source);
+  const parsed = parseYamlFrontmatter(source);
   const frontmatter = GezelFrontmatterSchema.parse({
     name: 'Untitled agent',
     ...parsed.data,
@@ -100,8 +100,8 @@ function parseParams(src: string): Record<string, string> {
 }
 
 /**
- * Serialize a ParsedGezel back to markdown. Round-trips frontmatter via
- * gray-matter and reconstructs sections with their template annotations.
+ * Serialize a ParsedGezel back to markdown and reconstruct sections with
+ * their template annotations.
  */
 export function serializeGezelMarkdown(parsed: ParsedGezel): string {
   const body = parsed.sections
@@ -113,7 +113,7 @@ export function serializeGezelMarkdown(parsed: ParsedGezel): string {
       return `${heading}${section.body}`.trimEnd();
     })
     .join('\n\n');
-  return matter.stringify(`${body}\n`, parsed.frontmatter);
+  return stringifyYamlFrontmatter(`${body}\n`, parsed.frontmatter);
 }
 
 function formatParams(params: Record<string, string> | undefined): string {

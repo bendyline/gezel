@@ -1,9 +1,10 @@
 /**
  * Windows code-signing for electron-builder — the `signtoolOptions.sign`
- * hook (called once per file electron-builder targets itself: `gezel.exe`
- * and the NSIS installer .exe) plus the `signFile`/`isValidlySigned`
- * helpers the afterPack sweep in `after-pack.cjs` uses to cover the rest
- * of the payload (our-built engine DLLs). We use
+ * hook (called for `gezel.exe`, the NSIS installer, and executable files
+ * electron-builder discovers in the unpacked payload) plus the
+ * `signFile`/`isValidlySigned` helpers the afterPack sweep in
+ * `after-pack.cjs` uses to cover the rest of the payload (our-built engine
+ * DLLs). We use
  * `signtool.exe` with the Azure Trusted Signing dlib so the signing key
  * lives in a cloud HSM, not on disk.
  *
@@ -59,7 +60,7 @@ function signingConfigured() {
 
 /**
  * Does this file already carry a signature that validates under the
- * default Authenticode policy? Used by the afterPack sweep to leave
+ * default Authenticode policy? Used by both signing passes to leave
  * upstream-signed binaries (node.exe/OpenJS, NVIDIA redistributables,
  * born-signed gezel-* engines) untouched.
  */
@@ -113,17 +114,20 @@ exports.default = async function sign(configuration) {
     console.log(`[sign] skipping (no Trusted Signing SDK env): ${configuration.path}`);
     return;
   }
-  // electron-builder does descend into app.asar.unpacked and calls this hook
-  // for what it finds there — including the vendored node.exe, whose OpenJS
-  // signature we must not clobber. The afterPack sweep already skips these;
-  // without the same guard here the two passes disagree and the release's
-  // "Verify Windows signatures" gate rejects the build. One allowlist,
-  // enforced everywhere it matters.
+  // electron-builder descends into app.asar.unpacked and calls this hook for
+  // what it finds there. Preserve explicitly exempt third-party files and
+  // every already-valid signature, just as afterPack does. Re-signing a
+  // born-signed native executable would keep Authenticode valid but change
+  // the source-pinned bytes recorded in NATIVE_FILE_MANIFESTS.json.
   if (isThirdPartyBinary(configuration.path)) {
     console.log(
       `[sign] left vendor binary untouched: ${path.basename(configuration.path)} ` +
         `(${thirdPartySource(configuration.path)})`,
     );
+    return;
+  }
+  if (isValidlySigned(configuration.path)) {
+    console.log(`[sign] preserved existing valid signature: ${path.basename(configuration.path)}`);
     return;
   }
   signFile(configuration.path);

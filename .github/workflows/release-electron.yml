@@ -171,6 +171,8 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'pnpm'
       - run: pnpm install --frozen-lockfile
+      - name: Stamp release version
+        run: node scripts/stamp-version.mjs --version "${{ needs.release-preflight.outputs.version }}"
       - name: Build workspace
         run: pnpm build
       - name: Typecheck
@@ -195,6 +197,11 @@ jobs:
         run: xvfb-run -a pnpm test:e2e:run
       - name: Generate production SBOM
         run: pnpm audit:sbom
+      - name: Verify release version propagation
+        run: |
+          node scripts/verify-release-version.mjs \
+            --version "${{ needs.release-preflight.outputs.version }}" \
+            --sbom artifacts/gezel.cdx.json
       - name: Production dependency vulnerability gate
         run: pnpm audit:vulnerabilities
       - name: Dependency license policy gate
@@ -309,6 +316,13 @@ jobs:
       - name: Build + produce service bundle
         run: pnpm build:packaged
 
+      - name: Verify release version propagation
+        shell: bash
+        run: |
+          node scripts/verify-release-version.mjs \
+            --version "${{ needs.release-preflight.outputs.version }}" \
+            --service-meta packages/app/dist/service-bundle.meta.json
+
       - name: Verify service host staged (Windows Service host)
         shell: pwsh
         run: |
@@ -360,6 +374,29 @@ jobs:
           AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+
+      - name: Smoke-test packaged Windows app
+        shell: pwsh
+        env:
+          GEZEL_PACKAGED_SMOKE: '1'
+          GEZEL_EXPECTED_VERSION: ${{ needs.release-preflight.outputs.version }}
+          GEZEL_HOME: ${{ runner.temp }}\gezel-packaged-smoke
+        run: |
+          $exe = Get-Item 'packages/app/dist/installers/win-unpacked/gezel.exe' -ErrorAction Stop
+          $arguments = @(
+            '--gezel-packaged-smoke'
+            "--gezel-expected-version=${{ needs.release-preflight.outputs.version }}"
+            "--gezel-home=${{ runner.temp }}\gezel-packaged-smoke"
+          )
+          $process = Start-Process -FilePath $exe.FullName -ArgumentList $arguments -PassThru
+          if (-not $process.WaitForExit(180000)) {
+            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+            throw 'Packaged Electron smoke test timed out after 180 seconds'
+          }
+          if ($process.ExitCode -ne 0) {
+            throw "Packaged Electron smoke test failed with exit code $($process.ExitCode)"
+          }
+          Write-Host "[packaged-smoke] Windows app imported and reached ready"
 
       - name: Verify Windows signatures
         shell: pwsh
@@ -582,6 +619,12 @@ jobs:
         env:
           GEZEL_MACOS_SIGN_BUNDLE: '1'
 
+      - name: Verify release version propagation
+        run: |
+          node scripts/verify-release-version.mjs \
+            --version "${{ needs.release-preflight.outputs.version }}" \
+            --service-meta packages/app/dist/service-bundle.meta.json
+
       - name: Package macOS installer
         # Raise fd limits — codesign opens all .app files concurrently and
         # hits EMFILE otherwise (same treatment qualla-internal uses).
@@ -617,6 +660,52 @@ jobs:
           app=$(find packages/app/dist/installers -maxdepth 2 -name '*.app' -print -quit)
           test -n "$app"
           codesign --verify --strict --deep --verbose=2 "$app"
+          node scripts/verify-macos-version-floor.mjs "$app" 13.5
+
+      - name: Smoke-test packaged macOS app
+        env:
+          GEZEL_PACKAGED_SMOKE: '1'
+          GEZEL_EXPECTED_VERSION: ${{ needs.release-preflight.outputs.version }}
+          GEZEL_HOME: ${{ runner.temp }}/gezel-packaged-smoke
+        run: |
+          set -euo pipefail
+          app=$(find packages/app/dist/installers -maxdepth 2 -name '*.app' -print -quit)
+          test -n "$app"
+          "$app/Contents/MacOS/Gezel" \
+            --gezel-packaged-smoke \
+            --gezel-expected-version="${{ needs.release-preflight.outputs.version }}" \
+            --gezel-home="${{ runner.temp }}/gezel-packaged-smoke" &
+          pid=$!
+          deadline=$((SECONDS + 180))
+          while kill -0 "$pid" 2>/dev/null; do
+            if (( SECONDS >= deadline )); then
+              echo "::error::packaged Electron smoke test timed out after 180 seconds"
+              kill -TERM "$pid" 2>/dev/null || true
+              sleep 2
+              kill -KILL "$pid" 2>/dev/null || true
+              wait "$pid" || true
+              exit 1
+            fi
+            sleep 1
+          done
+          wait "$pid"
+
+      - name: Verify macOS update metadata was generated
+        run: |
+          set -euo pipefail
+          pkg=$(find packages/app/dist/installers -maxdepth 1 -name '*.pkg' -print -quit)
+          zip=$(find packages/app/dist/installers -maxdepth 1 -name '*.zip' -print -quit)
+          blockmap=$(find packages/app/dist/installers -maxdepth 1 -name '*.zip.blockmap' -print -quit)
+          metadata=packages/app/dist/installers/latest-mac.yml
+          test -n "$pkg"
+          test -n "$zip"
+          test -n "$blockmap"
+          test -f "$metadata"
+          if ! grep -Fq "$(basename "$zip")" "$metadata"; then
+            echo "::error::$metadata does not reference $(basename "$zip")"
+            exit 1
+          fi
+          echo "verified PKG first-install artifact and ZIP-based macOS update feed"
 
       - name: Verify macOS installer legal payload
         run: |
@@ -640,6 +729,9 @@ jobs:
           name: macos-artifacts
           path: |
             packages/app/dist/installers/*.pkg
+            packages/app/dist/installers/*.zip
+            packages/app/dist/installers/*.zip.blockmap
+            packages/app/dist/installers/latest-mac.yml
           if-no-files-found: error
           retention-days: 7
 
@@ -716,6 +808,12 @@ jobs:
       - name: Build + produce service bundle
         run: pnpm build:packaged
 
+      - name: Verify release version propagation
+        run: |
+          node scripts/verify-release-version.mjs \
+            --version "${{ needs.release-preflight.outputs.version }}" \
+            --service-meta packages/app/dist/service-bundle.meta.json
+
       # electron-builder's rpm target shells out to `rpmbuild` via fpm.
       # The x64 `ubuntu-latest` image has historically shipped `rpm`,
       # but the new `ubuntu-24.04-arm` image does not — leaving it out
@@ -729,6 +827,40 @@ jobs:
 
       - name: Package Linux installer
         run: pnpm --filter @bendyline/gezel-app exec electron-builder --linux deb:${{ matrix.arch }} rpm:${{ matrix.arch }} --publish never
+
+      - name: Verify RPM dependency contract
+        run: |
+          set -euo pipefail
+          found=0
+          for installer in packages/app/dist/installers/*.rpm; do
+            [[ -f "$installer" ]] || continue
+            found=1
+            requirements=$(rpm -qpR "$installer")
+            if grep -Fxq 'libgtk-3-0' <<<"$requirements"; then
+              echo "::error::$installer declares Debian-only dependency libgtk-3-0"
+              exit 1
+            fi
+            if ! grep -Fxq 'gtk3' <<<"$requirements"; then
+              echo "::error::$installer does not declare the Fedora/RHEL gtk3 dependency"
+              exit 1
+            fi
+          done
+          [[ "$found" == "1" ]]
+
+      - name: Smoke-test packaged Linux app
+        env:
+          GEZEL_PACKAGED_SMOKE: '1'
+          GEZEL_EXPECTED_VERSION: ${{ needs.release-preflight.outputs.version }}
+          GEZEL_HOME: ${{ runner.temp }}/gezel-packaged-smoke
+        run: |
+          set -euo pipefail
+          executable=$(find packages/app/dist/installers -maxdepth 2 -type f -path '*-unpacked/gezel' -print -quit)
+          test -n "$executable"
+          timeout --signal=TERM --kill-after=10s 180s xvfb-run -a "$executable" \
+            --no-sandbox \
+            --gezel-packaged-smoke \
+            --gezel-expected-version="${{ needs.release-preflight.outputs.version }}" \
+            --gezel-home="${{ runner.temp }}/gezel-packaged-smoke"
 
       - name: Verify Linux installer legal payloads
         run: |
@@ -812,9 +944,20 @@ jobs:
       - name: Stage assets and generate SHA256SUMS
         run: |
           set -euo pipefail
-          mkdir -p artifacts/flat
-          find artifacts -mindepth 2 -type f -exec ln {} artifacts/flat/ \;
-          cd artifacts/flat
+          mkdir -p release-assets
+          declare -A seen=()
+          while IFS= read -r asset; do
+            name=$(basename "$asset")
+            if [[ -n "${seen[$name]:-}" ]]; then
+              echo "::error::release asset basename collision: $name"
+              echo "::error::first: ${seen[$name]}"
+              echo "::error::second: $asset"
+              exit 1
+            fi
+            seen[$name]="$asset"
+            ln "$asset" "release-assets/$name"
+          done < <(find artifacts -mindepth 2 -type f -print | sort)
+          cd release-assets
           find . -maxdepth 1 -type f ! -name SHA256SUMS \
             | sed 's|^\./||' | sort | xargs sha256sum > SHA256SUMS
           sha256sum -c SHA256SUMS
@@ -829,7 +972,7 @@ jobs:
       - name: Attest build provenance
         uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
         with:
-          subject-path: artifacts/flat/*
+          subject-path: release-assets/*
 
       - name: Refuse to modify a published release
         env:
@@ -863,4 +1006,4 @@ jobs:
           # set of files (hard links) plus SHA256SUMS, and it is exactly what
           # was attested above, so published assets and attested subjects
           # cannot drift apart.
-          files: artifacts/flat/*
+          files: release-assets/*

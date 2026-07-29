@@ -3,6 +3,7 @@ import { chmod, cp, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { verifyBundleManifest } from './bundle-manifest.js';
+import { redirectAsarToUnpacked } from './extract-bundle.js';
 
 export interface NodeInstallOptions {
   /** User home root — binary lands at `<home>/bin/node[.exe]`. */
@@ -28,7 +29,7 @@ export interface NodeInstallResult {
  */
 export function defaultNodeBundleDir(mainMetaUrl: string): string {
   const mainDir = dirname(fileURLToPath(mainMetaUrl));
-  return resolve(mainDir, 'node-bundle');
+  return redirectAsarToUnpacked(resolve(mainDir, 'node-bundle'));
 }
 
 /**

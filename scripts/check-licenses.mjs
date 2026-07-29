@@ -13,7 +13,19 @@
  * In CI:       same command; non-zero exit means a policy violation.
  */
 
+import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { readProductionLicenseInventory } from './production-dependency-inventory.mjs';
+
+/**
+ * The installer EULA names the non-permissive components by license so a
+ * user can see what they are agreeing to before the app is on disk. That
+ * list is prose, so nothing stops it drifting when a new copyleft
+ * dependency is reviewed in here — which is exactly how it went stale
+ * before. Every license in REVIEWED_NON_PERMISSIVE must be named there.
+ */
+const EULA_PATH = resolve(dirname(fileURLToPath(import.meta.url)), '../packages/app/EULA.txt');
 
 /**
  * Permissive licenses Gezel accepts without review. Everything in this
@@ -148,6 +160,23 @@ function run() {
     }
   }
 
+  const eulaGaps = eulaCoverageGaps();
+  if (eulaGaps.length > 0) {
+    console.error(
+      `✗ license audit failed — the installer EULA does not name ${eulaGaps.length} reviewed non-permissive license(s):`,
+    );
+    for (const gap of eulaGaps) {
+      console.error(`  - ${gap.license} (${gap.packages})`);
+    }
+    console.error('');
+    console.error(`Users agree to ${EULA_PATH} at install time, before NOTICE.md exists on disk,`);
+    console.error(
+      'so a component whose terms differ from the MIT License has to be named there too.',
+    );
+    console.error('Add it to the "Third-party components included with Gezel" section.');
+    process.exit(1);
+  }
+
   if (offenders.length === 0) {
     const totalPackages = Object.values(byLicense).reduce((n, pkgs) => n + pkgs.length, 0);
     const totalLicenses = Object.keys(byLicense).length;
@@ -184,6 +213,32 @@ function run() {
   );
   console.error('  4. Otherwise replace the dependency.');
   process.exit(1);
+}
+
+/**
+ * Reviewed non-permissive licenses the EULA fails to mention. Matches on
+ * the SPDX identifier rather than the package name — the EULA describes
+ * components in prose ("the libvips image-processing runtime"), but every
+ * entry states its license verbatim, which is the part that must not
+ * drift.
+ */
+function eulaCoverageGaps() {
+  let eula;
+  try {
+    eula = readFileSync(EULA_PATH, 'utf8');
+  } catch (err) {
+    console.error(`✗ could not read the installer EULA at ${EULA_PATH}: ${err.message}`);
+    process.exit(1);
+  }
+  const gaps = [];
+  for (const license of new Set(REVIEWED_NON_PERMISSIVE.map((rule) => rule.license))) {
+    if (eula.includes(license)) continue;
+    const packages = REVIEWED_NON_PERMISSIVE.filter((rule) => rule.license === license)
+      .map((rule) => String(rule.name))
+      .join(', ');
+    gaps.push({ license, packages });
+  }
+  return gaps;
 }
 
 function reviewedNonPermissive(name, versions, license) {

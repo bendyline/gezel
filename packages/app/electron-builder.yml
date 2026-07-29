@@ -150,9 +150,10 @@ asarUnpack:
 #      ~13 bytes; the hook restores the affected files from canonical
 #      source. Delete that half once electron-builder ships a fix.
 #   2. On Windows, an Authenticode sweep that signs every exe/dll in the
-#      packed payload lacking a valid signature — electron-builder's own
-#      pass never descends into extraFiles or the asar-unpacked payload
-#      (our-built engine DLLs).
+#      packed payload lacking a valid signature. electron-builder later
+#      traverses executable files in app.asar.unpacked too, so sign.cjs
+#      preserves the already-valid native signatures and their manifest-
+#      pinned bytes while this sweep covers DLLs its pass does not reach.
 afterPack: scripts/after-pack.cjs
 
 # electron-builder's built-in @electron/notarize integration notarizes both
@@ -235,8 +236,19 @@ nsis:
 # .app and final .pkg, gated on APPLE_ID/APP_SPECIFIC_PASSWORD/TEAM_ID.
 mac:
   artifactName: ${productName}-${version}-mac-${arch}.${ext}
+  # The native engines deliberately target the Accelerate ILP64 API introduced
+  # in macOS 13.3, while the pinned official Node 24 runtime declares 13.5.
+  # The product floor must be the highest requirement in the complete payload.
+  minimumSystemVersion: '13.5'
   target:
     - target: pkg
+      arch:
+        - arm64
+    # electron-updater's MacUpdater consumes a signed app ZIP and
+    # latest-mac.yml; it cannot install the privileged first-install PKG.
+    # Ship both: PKG for initial installation/system-service registration,
+    # ZIP for Squirrel.Mac application updates.
+    - target: zip
       arch:
         - arm64
   icon: assets/icon.icns
@@ -345,7 +357,8 @@ rpm:
   afterRemove: installer/linux/after-remove.sh
   depends:
     - libnotify
-    - libgtk-3-0
+    # Fedora/RHEL package and RPM provide name. `libgtk-3-0` is Debian-only.
+    - gtk3
     - libXScrnSaver
     - libXtst
     - libuuid

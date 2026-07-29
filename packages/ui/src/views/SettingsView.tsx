@@ -495,6 +495,19 @@ export function SettingsView() {
     }
   }, []);
 
+  const saveAutoUpdateChecks = useCallback(async (autoUpdateChecks: boolean) => {
+    setStatus('saving…');
+    try {
+      const res = await api.updateConfig({ autoUpdateChecks });
+      setConfig(res);
+      setStatus(
+        autoUpdateChecks ? 'automatic update checks enabled' : 'automatic update checks disabled',
+      );
+    } catch (err) {
+      setStatus(`save failed: ${(err as Error).message}`);
+    }
+  }, []);
+
   const saveQuitOnClose = useCallback(async (quitOnClose: boolean) => {
     setStatus('saving…');
     try {
@@ -3074,6 +3087,22 @@ export function SettingsView() {
                 </dl>
               )}
               <AutostartToggle />
+            </section>
+            <section style={{ marginBottom: '2rem' }}>
+              <h3>Updates</h3>
+              <p className="muted" style={{ marginTop: 0 }}>
+                Gezel checks public GitHub release metadata when the desktop app launches. No
+                personal data is sent. Turn this off to stop automatic checks; you can still choose
+                “Check for updates” from the tray menu.
+              </p>
+              <label className="debug-toggle">
+                <input
+                  type="checkbox"
+                  checked={config?.autoUpdateChecks !== false}
+                  onChange={(e) => void saveAutoUpdateChecks(e.target.checked)}
+                />
+                <span>Check for updates automatically when Gezel starts</span>
+              </label>
             </section>
             <section style={{ marginBottom: '2rem' }}>
               <h3>Advanced</h3>

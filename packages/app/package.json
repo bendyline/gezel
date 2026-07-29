@@ -2,7 +2,7 @@
   "name": "@bendyline/gezel-app",
   "version": "0.0.0",
   "private": true,
-  "description": "Gezel Electron shell — spawns gezeld and hosts the web UI.",
+  "description": "Gezel - your local AI crew",
   "license": "MIT",
   "homepage": "https://github.com/bendyline/gezel",
   "repository": {
@@ -23,7 +23,7 @@
     "dev": "tsup --watch",
     "start": "electron .",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --passWithNoTests && node --test ../../scripts/native-payload.test.mjs ../../scripts/native-file-manifest.test.mjs ../../scripts/sign-macho-tree.test.mjs ../../scripts/prune-foreign-binaries.test.mjs",
+    "test": "vitest run --passWithNoTests && node --test ../../scripts/native-payload.test.mjs ../../scripts/native-file-manifest.test.mjs ../../scripts/sign-macho-tree.test.mjs ../../scripts/prune-foreign-binaries.test.mjs ../../scripts/stamp-version.test.mjs ../../scripts/release-electron-contract.test.mjs",
     "test:e2e": "playwright test --reporter=line",
     "test:e2e:web": "playwright test --config playwright.web.config.ts --reporter=line",
     "package": "pnpm run build:packaged && electron-builder --publish never",

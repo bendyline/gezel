@@ -24,6 +24,18 @@ describe('resolveUpdaterPermission', () => {
     ).resolves.toEqual({ allowed: true, reason: 'allowed' });
   });
 
+  it('skips automatic launch checks when the update preference is disabled', async () => {
+    await expect(
+      resolveUpdaterPermission(async () => ({ autoUpdateChecks: false }), { automatic: true }),
+    ).resolves.toEqual({ allowed: false, reason: 'preference-disabled' });
+  });
+
+  it('allows a user-initiated check when automatic launch checks are disabled', async () => {
+    await expect(
+      resolveUpdaterPermission(async () => ({ autoUpdateChecks: false })),
+    ).resolves.toEqual({ allowed: true, reason: 'allowed' });
+  });
+
   it('denies an explicitly disabled app network capability', async () => {
     await expect(
       resolveUpdaterPermission(async () => ({

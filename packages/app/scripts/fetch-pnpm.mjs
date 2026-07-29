@@ -21,6 +21,8 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { x as extractTar } from 'tar';
 
+import { pruneForeignBinariesWithReport } from '../../../scripts/prune-foreign-binaries.mjs';
+
 // See fetch-node.mjs: Node's default 250ms per-address connect timeout
 // is too aggressive for Windows→Cloudflare TCP handshakes.
 setDefaultAutoSelectFamilyAttemptTimeout(5000);
@@ -147,6 +149,7 @@ async function main() {
   // Stage cache → dist on every build.
   await rm(distDir, { recursive: true, force: true });
   await cp(cacheDir, distDir, { recursive: true });
+  await pruneForeignBinariesWithReport(distDir);
   await writeFile(join(distDir, 'version.txt'), `${version}\n`, 'utf8');
 
   // The supervisor re-hashes both load-bearing JavaScript entrypoints

@@ -2,16 +2,16 @@ Gezel -- End User License Agreement
 
 Copyright (c) 2026 Bendyline LLC. All rights reserved.
 
-Gezel is licensed to you under the MIT License (full text below). By installing or using Gezel, you agree to the terms of that license and acknowledge the Additional Notes section in this document.
+Gezel itself is licensed to you under the MIT License (full text below). Gezel also bundles third-party components that carry their own licenses, some of which differ from the MIT License -- see "Third-party components included with Gezel" below. By installing or using Gezel, you agree to the MIT License and to the licenses of those bundled components, and you acknowledge the Additional Notes section in this document.
 
 ------------------------------------------------------------------------
 Additional Notes
 
 1. What Gezel does
 
-Gezel is a free, open-source, local-first app for working with AI. All gezel definitions, chat sessions with local AI, project files, and memories are stored on your computer. 
+Gezel is a free, open-source, local-first app for working with AI. All gezel definitions, chat sessions with local AI, project files, and memories are stored on your computer.
 
-When using the application, Bendyline LLC does not collect, store, or transmit your data. Gezel does faciliate the use of third-party software and connections at your direction, and these are subject to their respective terms.
+When using the application, Bendyline LLC does not collect, store, or transmit your data. Gezel does facilitate the use of third-party software and connections at your direction, and these are subject to their respective terms.
 
 Because Gezel is local-first by design, what you do with your gezels is your own - we have no view into it, and that's intentional.
 
@@ -25,11 +25,33 @@ Gezel routes chat messages to the language-model provider you configure (GitHub 
 
 While Gezel can work with cloud AI providers like OpenAI or Anthropic, it may use cloud AI in an inefficient or unbounded manner. If you connect Gezel to your cloud accounts, please make sure you have appropriate budget limits turned on.
 
-3. Auto-update
+3. Third-party components included with Gezel
+
+Gezel ships with open-source and third-party software that is licensed under its own terms rather than the MIT License above. Most of it is permissively licensed (MIT, Apache-2.0, BSD, ISC), but some of it is not. In particular:
+
+  - the bundled FFmpeg WebAssembly runtime is GPL-2.0-or-later;
+  - the libvips image-processing runtime is LGPL-3.0-or-later;
+  - the resvg SVG renderer is MPL-2.0;
+  - the GitHub Copilot CLI is proprietary, and its license does not permit
+    redistributing it on its own or modifying it.
+
+Where a bundled component's license conflicts with the MIT License above, that component's own license governs that component.
+
+The complete inventory - every bundled component, its license, and the full license text - is installed alongside Gezel:
+
+  Windows   <install folder>\resources\licenses\NOTICE.md
+  macOS     /Applications/Gezel.app/Contents/Resources/licenses/NOTICE.md
+  Linux     /opt/Gezel/resources/licenses/NOTICE.md
+
+You can also read it before installing, at:
+
+  https://github.com/bendyline/gezel/blob/main/NOTICE.md
+
+4. Auto-update
 
 Gezel checks for updates on launch by querying public GitHub release metadata. No personal data is sent in this check. You can disable auto-update by editing your settings.
 
-4. No warranty
+5. No warranty
 
 Gezel is provided "as is" without warranty of any kind. See the MIT license below for the full disclaimer.
 

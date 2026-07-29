@@ -1,7 +1,7 @@
-import matter from 'gray-matter';
 import type { CraftbookDoc, CraftbookDocError } from '../schemas/craftbook-doc.js';
 import type { NewCraftbookStep } from '../schemas/craftbook.js';
 import { slugifyStepId } from '../schemas/craftbook.js';
+import { parseYamlFrontmatter, stringifyYamlFrontmatter } from './frontmatter.js';
 import {
   FENCE,
   extractFirstFence,
@@ -49,8 +49,7 @@ import {
  * rather than positional so a small model can't mis-nest them, and the
  * step's structured fields ride in ONE fenced yaml block (fences survive
  * small-model generation far better than indented bullet grammars). The
- * yaml is parsed with gray-matter's engine — already a core dependency —
- * so flow-style JSON values are legal too.
+ * YAML is parsed from strings only; flow-style JSON values are legal too.
  *
  * Round-trip invariant: `parse(serialize(doc))` is deep-equal to `doc`
  * for any schema-valid doc. Load-bearing for the format A/B eval and the
@@ -115,7 +114,7 @@ export function parseCraftbookMarkdown(text: string): CraftbookMarkdownParse {
   let fm: Record<string, unknown>;
   let content: string;
   try {
-    const parsed = matter(text);
+    const parsed = parseYamlFrontmatter(text);
     fm = parsed.data as Record<string, unknown>;
     content = parsed.content;
   } catch (err) {
@@ -251,7 +250,7 @@ export function serializeCraftbookMarkdown(doc: CraftbookDoc): string {
   }
 
   const body = `${parts.join('\n\n')}\n`;
-  return Object.keys(fm).length > 0 ? matter.stringify(body, fm) : body;
+  return Object.keys(fm).length > 0 ? stringifyYamlFrontmatter(body, fm) : body;
 }
 
 /* ─────────────────────────── internals ──────────────────────────────── */
