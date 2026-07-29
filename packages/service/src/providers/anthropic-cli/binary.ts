@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { statSync } from 'node:fs';
 import { delimiter, join as pathJoin } from 'node:path';
+import { winShellSafe } from '../../packages/win-shell.js';
 
 /**
  * Resolved `claude` binary description.
@@ -113,7 +114,14 @@ export async function runVersionProbe(path: string, timeoutMs = 5000): Promise<s
     // returns EINVAL without `shell: true`. Plain `.exe` works without
     // and benefits from the more predictable no-shell path-quoting.
     const useShell = process.platform === 'win32' && /\.(cmd|bat)$/i.test(path);
-    const child = spawn(path, ['--version'], {
+    // Under `shell: true` Node concatenates without escaping, so the path
+    // has to be quoted here. `npm i -g` writes its shims next to the Node
+    // install — `C:\Program Files\nodejs\claude.cmd` for a default
+    // Windows Node — and an unquoted path splits at that space, leaving
+    // cmd to report `'C:\Program' is not recognized` and the probe to
+    // conclude the CLI is absent.
+    const target = winShellSafe(path, ['--version'], useShell);
+    const child = spawn(target.command, target.args, {
       stdio: ['ignore', 'pipe', 'pipe'],
       shell: useShell,
     });

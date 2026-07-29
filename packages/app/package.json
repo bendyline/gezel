@@ -2,7 +2,7 @@
   "name": "@bendyline/gezel-app",
   "version": "0.0.0",
   "private": true,
-  "description": "Gezel Electron shell — spawns gezeld and hosts the web UI.",
+  "description": "Gezel - your local AI crew",
   "license": "MIT",
   "homepage": "https://github.com/bendyline/gezel",
   "repository": {

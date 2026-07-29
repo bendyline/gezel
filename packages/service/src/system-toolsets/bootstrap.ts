@@ -12,6 +12,7 @@ import {
 import { systemToolsetsInstallDir } from '@bendyline/gezel/paths';
 import type { Store } from '../fs/store.js';
 import { resolvePnpmCommand } from '../packages/pnpm.js';
+import { winShellSafe } from '../packages/win-shell.js';
 import { SYSTEM_LOCKFILES } from './locks.js';
 import {
   CHROMIUM_REVISION,
@@ -513,19 +514,27 @@ async function readBoundedJson(response: Response, maxBytes: number): Promise<un
   }
 }
 
-function run(cmd: string, args: string[], cwd?: string, shell?: boolean): Promise<void> {
+function run(cmd: string, args: string[], cwd: string | undefined, shell: boolean): Promise<void> {
   return new Promise((resolve, reject) => {
-    // Windows: pnpm, tar, and most tools we invoke here are resolved via
-    // `.cmd` / `.bat` shims on PATH. Node's `spawn` without `shell` can't
-    // launch those — it throws `ENOENT` even though the user sees the
-    // command working in their terminal. `shell: true` delegates to
-    // cmd.exe which handles shim resolution. Args are internally
-    // constructed (never user-supplied), so shell injection isn't a
-    // concern here.
-    const child = spawn(cmd, args, {
+    // `shell` is a required parameter, not an optional with a
+    // platform-sniffing default. It used to be `shell ?? process.platform
+    // === 'win32'`, which meant any caller that omitted it silently
+    // shelled out on Windows — and under `shell: true` Node concatenates
+    // the command and args without escaping, so an interpreter path like
+    // `C:\Program Files\gezel\Gezel.exe` was split at the space and cmd
+    // reported `'C:\Program' is not recognized`. The caller resolves the
+    // right answer (resolvePnpmInvocation only asks for a shell for
+    // `.cmd`/`.bat` shims, which genuinely cannot be exec'd directly);
+    // this function must not second-guess it.
+    //
+    // stdio is 'inherit', so anything cmd.exe complains about lands
+    // straight in the daemon's stderr log with no prefix — worth knowing
+    // when reading service-stderr.log.
+    const target = winShellSafe(cmd, args, shell);
+    const child = spawn(target.command, target.args, {
       cwd,
       stdio: 'inherit',
-      shell: shell ?? process.platform === 'win32',
+      shell,
     });
     child.on('error', (err) => {
       // Translate the Node-level `ENOENT` into something a user (or a

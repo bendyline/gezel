@@ -2,7 +2,11 @@ import { SecurityPolicySchema, resolveSecurityPolicy } from '@bendyline/gezel';
 
 export type UpdaterPermission =
   | { allowed: true; reason: 'allowed' }
-  | { allowed: false; reason: 'policy-denied' | 'policy-unavailable'; error?: string };
+  | {
+      allowed: false;
+      reason: 'preference-disabled' | 'policy-denied' | 'policy-unavailable';
+      error?: string;
+    };
 
 /**
  * Resolve updater authorization without conflating two materially different
@@ -12,9 +16,12 @@ export type UpdaterPermission =
  *   normal fail-safe `lockdown` default (which permits app updates);
  * - a config that could not be loaded or validated is unknown, and app
  *   network must fail closed.
+ * - an automatic launch check also honors `autoUpdateChecks: false`; a
+ *   user-initiated check bypasses that preference but still honors policy.
  */
 export async function resolveUpdaterPermission(
   loadConfig?: () => Promise<unknown>,
+  options: { automatic?: boolean } = {},
 ): Promise<UpdaterPermission> {
   if (!loadConfig) {
     return { allowed: false, reason: 'policy-unavailable', error: 'API client unavailable' };
@@ -37,6 +44,13 @@ export async function resolveUpdaterPermission(
       reason: 'policy-unavailable',
       error: 'Configuration response was not an object',
     };
+  }
+
+  if (
+    options.automatic === true &&
+    (config as { autoUpdateChecks?: unknown }).autoUpdateChecks === false
+  ) {
+    return { allowed: false, reason: 'preference-disabled' };
   }
 
   const rawPolicy = (config as { securityPolicy?: unknown }).securityPolicy;

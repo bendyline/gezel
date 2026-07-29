@@ -2,6 +2,7 @@ import { type SpawnOptions, spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { type PnpmInvocation, resolvePnpmInvocation } from '@bendyline/gezel';
+import { winShellSafe } from './win-shell.js';
 
 /**
  * Single entry point for spawning pnpm from the service. Centralizes two
@@ -77,21 +78,21 @@ export function normalizeBundledPnpmPath(): string | undefined {
 }
 
 /**
- * Quote an argument for cmd.exe when spawning pnpm with `shell: true`
- * (the `.cmd` shim path on Windows). Inside double quotes cmd treats
- * &, |, <, >, ^, (, ) as literal — so a package spec's semver caret
- * survives — and embedded quotes are doubled. `%` (variable expansion)
- * fires even inside quotes, and control chars are never valid in a pnpm
- * arg, so reject those outright rather than try to escape them. Without
- * this, shell:true lets a spec like `foo & calc.exe` inject a command.
+ * Spawn-ready `{ command, args }` for a resolved pnpm invocation.
+ *
+ * Every site that calls `spawn(pnpm.command, pnpm.args, { shell:
+ * pnpm.shell })` must route through this instead. Node escapes nothing
+ * under `shell: true`, so an unquoted command or argument containing a
+ * space is split by cmd.exe — the failure mode being
+ * `'C:\Program' is not recognized`. Callers keep their own env/stdio;
+ * only the command and argv are rewritten, and only when a shell is
+ * actually in play.
  */
-function quoteWinShellArg(arg: string): string {
-  for (let i = 0; i < arg.length; i++) {
-    if (arg.charCodeAt(i) < 0x20 || arg[i] === '%') {
-      throw new Error(`unsafe pnpm argument for the Windows shell: ${JSON.stringify(arg)}`);
-    }
-  }
-  return `"${arg.replace(/"/g, '""')}"`;
+export function pnpmSpawnTarget(invocation: PnpmInvocation): {
+  command: string;
+  args: string[];
+} {
+  return winShellSafe(invocation.command, invocation.args, invocation.shell);
 }
 
 /**
@@ -106,7 +107,10 @@ export function runPnpm(args: string[], opts: RunPnpmOptions): Promise<PnpmResul
     const invocation = resolvePnpmCommand(rawArgs);
     // Only the Windows PATH/.cmd fallback needs cmd.exe. The bundled JS
     // route invokes Node directly and never passes through a shell.
-    const finalArgs = invocation.shell ? invocation.args.map(quoteWinShellArg) : invocation.args;
+    // Command AND args both go through the quoter — this used to quote
+    // only the args, which leaves a `.cmd` shim under a spaced path
+    // (C:\Program Files\...) to be split by cmd.exe.
+    const target = pnpmSpawnTarget(invocation);
     const spawnOpts: SpawnOptions = {
       cwd: opts.cwd,
       env: { ...process.env, ...opts.env } as NodeJS.ProcessEnv,
@@ -114,7 +118,7 @@ export function runPnpm(args: string[], opts: RunPnpmOptions): Promise<PnpmResul
       shell: invocation.shell,
     };
     if (opts.timeoutMs) spawnOpts.timeout = opts.timeoutMs;
-    const child = spawn(invocation.command, finalArgs, spawnOpts);
+    const child = spawn(target.command, target.args, spawnOpts);
 
     let stdout = '';
     let stderr = '';

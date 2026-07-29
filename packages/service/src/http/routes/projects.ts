@@ -43,7 +43,7 @@ import { ProjectDeleteError } from '../../fs/store.js';
 import { GitError, runGit } from '../../github/git.js';
 import { buildEnrichDeps } from '../../index-store/enrich.js';
 import { installPackage } from '../../packages/install.js';
-import { resolvePnpmCommand } from '../../packages/pnpm.js';
+import { pnpmSpawnTarget, resolvePnpmCommand } from '../../packages/pnpm.js';
 import { applyProjectType } from '../../project-type/apply.js';
 import { TypedProjectCreateError, createTypedProject } from '../../project-type/create.js';
 import { importGzlBundle, packProjectTypeBundle } from '../../project-type/gzl.js';
@@ -1017,7 +1017,8 @@ export function projectRoutes(ctx: ServiceContext): Hono {
 
     const result = await new Promise<{ ok: boolean; code: number | null; log: string }>(
       (resolve) => {
-        const child = spawn(pnpm.command, pnpm.args, {
+        const target = pnpmSpawnTarget(pnpm);
+        const child = spawn(target.command, target.args, {
           cwd: playwright.installPath,
           env: {
             ...process.env,

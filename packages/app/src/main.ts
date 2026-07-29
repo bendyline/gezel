@@ -1270,13 +1270,13 @@ async function initTray(): Promise<void> {
  */
 async function setupAutoUpdater(): Promise<void> {
   if (!app.isPackaged) return;
-  // Centralized security ceiling on app-level background egress. When the
-  // policy disables app network (super-lockdown), skip wiring the updater so
-  // no background check fires. A later manual check re-evaluates policy and
+  // Honor both the dedicated launch-check preference and the centralized
+  // security ceiling on app-level background egress. A later manual check
+  // intentionally bypasses the launch preference, re-evaluates policy, and
   // can initialize the updater if authorization has changed. A successfully
   // loaded config with no policy resolves to the default `lockdown` posture
   // (which permits app updates); an unreadable or invalid config fails closed.
-  const permission = await currentUpdaterPermission();
+  const permission = await currentUpdaterPermission({ automatic: true });
   if (!permission.allowed) {
     logUpdaterDenied(permission);
     return;
@@ -1332,12 +1332,18 @@ function ensureAutoUpdater(): import('electron-updater').AppUpdater | null {
   }
 }
 
-function currentUpdaterPermission(): Promise<UpdaterPermission> {
+function currentUpdaterPermission(
+  options: { automatic?: boolean } = {},
+): Promise<UpdaterPermission> {
   const client = apiClient;
-  return resolveUpdaterPermission(client ? () => client.getConfig() : undefined);
+  return resolveUpdaterPermission(client ? () => client.getConfig() : undefined, options);
 }
 
 function logUpdaterDenied(permission: Exclude<UpdaterPermission, { allowed: true }>): void {
+  if (permission.reason === 'preference-disabled') {
+    console.log('[updater] automatic launch check disabled in settings');
+    return;
+  }
   if (permission.reason === 'policy-denied') {
     console.log('[updater] disabled by security policy (app network off)');
     return;

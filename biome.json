@@ -29,6 +29,7 @@
       "ship-audit/**",
       "**/.upstream/**",
       "**/.vscode-test/**",
+      "native/helpers/service-host/.build/**",
       "temp/**",
       "packages/catalog/scripts/harvested-auth/**",
       "packages/eval-viewer/src/data/runs-index.json"

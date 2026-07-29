@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { statSync } from 'node:fs';
 import { delimiter, join as pathJoin } from 'node:path';
+import { winShellSafe } from '../../packages/win-shell.js';
 
 /**
  * Resolved `codex` binary description. `version` is the raw stdout of
@@ -111,7 +112,13 @@ export async function runVersionProbe(path: string, timeoutMs = 5000): Promise<s
     // more predictable no-shell path-quoting. Mirrors the same gate
     // in `anthropic-cli/binary.ts`.
     const useShell = process.platform === 'win32' && /\.(cmd|bat)$/i.test(path);
-    const child = spawn(path, ['--version'], {
+    // Quote the path when a shell is involved — see the matching note in
+    // `anthropic-cli/binary.ts`. `npm i -g @openai/codex` lands its shim
+    // beside Node, so on a default Windows install the path contains a
+    // space and an unquoted spawn makes the probe report the CLI as
+    // missing rather than reading its version.
+    const target = winShellSafe(path, ['--version'], useShell);
+    const child = spawn(target.command, target.args, {
       stdio: ['ignore', 'pipe', 'pipe'],
       shell: useShell,
     });

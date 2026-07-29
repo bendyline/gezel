@@ -1384,6 +1384,15 @@ export const GezelConfigSchema = z.object({
    */
   showSystemTray: z.boolean().optional(),
   /**
+   * Whether the packaged desktop app checks GitHub release metadata for
+   * updates when it launches. On by default. `false` suppresses only the
+   * automatic launch check; the user-initiated "Check for updates" tray
+   * action remains available (subject to the security policy).
+   *
+   * Read by the Electron main process, not the service. Absent = enabled.
+   */
+  autoUpdateChecks: z.boolean().optional(),
+  /**
    * When the system tray is enabled, controls what the window's close
    * (Red X) button does on Windows/Linux. Off by default → close-to-tray
    * (the window hides and Gezel stays resident in the tray). When `true`,

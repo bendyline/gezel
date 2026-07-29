@@ -88,6 +88,32 @@ describe('SettingsView', () => {
     });
   });
 
+  it('persists the automatic update-check preference from About settings', async () => {
+    vi.mocked(api.getConfig).mockResolvedValue({
+      provider: 'mock',
+      meesterGezelId: 'gz-meester',
+      hasGithubToken: true,
+      autoUpdateChecks: true,
+    } as never);
+    vi.mocked(api.updateConfig).mockResolvedValue({
+      provider: 'mock',
+      meesterGezelId: 'gz-meester',
+      hasGithubToken: true,
+      autoUpdateChecks: false,
+    } as never);
+
+    render(<SettingsView />);
+    fireEvent.click(await screen.findByTestId('settings-nav-about'));
+    const checkbox = await screen.findByRole('checkbox', {
+      name: 'Check for updates automatically when Gezel starts',
+    });
+    expect(checkbox).toBeChecked();
+
+    fireEvent.click(checkbox);
+
+    await waitFor(() => expect(api.updateConfig).toHaveBeenCalledWith({ autoUpdateChecks: false }));
+  });
+
   it('uses llama as the user-facing engine name on Mac', async () => {
     window.__GEZEL__ = { ...window.__GEZEL__, token: 'test-token', platform: 'darwin' };
     vi.mocked(api.getConfig).mockResolvedValue({

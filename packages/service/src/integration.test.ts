@@ -437,6 +437,18 @@ describe('config API', () => {
     expect(disabledRes.status).toBe(200);
     expect(await disabledRes.json()).toMatchObject({ resetTemplatesOnStartup: false });
   });
+
+  it('materializes and persists the automatic update-check preference', async () => {
+    const initialRes = await api('GET', '/api/config');
+    expect(await initialRes.json()).toMatchObject({ autoUpdateChecks: true });
+
+    const disabledRes = await api('PUT', '/api/config', { autoUpdateChecks: false });
+    expect(disabledRes.status).toBe(200);
+    expect(await disabledRes.json()).toMatchObject({ autoUpdateChecks: false });
+
+    const persistedRes = await api('GET', '/api/config');
+    expect(await persistedRes.json()).toMatchObject({ autoUpdateChecks: false });
+  });
 });
 
 describe('auth', () => {

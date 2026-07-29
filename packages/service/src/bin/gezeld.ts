@@ -22,18 +22,39 @@ async function main() {
     uiDir,
   });
 
+  // More than one channel can request a stop (the service host closes
+  // stdin *and* may send CTRL_BREAK), and `running.stop()` is not safe to
+  // run twice — latch the first request and ignore the rest.
+  let stopping = false;
   const shutdown = async (signal: string) => {
+    if (stopping) return;
+    stopping = true;
     process.stderr.write(`\ngezeld received ${signal}, shutting down\n`);
     await running.stop();
     process.exit(0);
   };
   process.on('SIGINT', () => void shutdown('SIGINT'));
   process.on('SIGTERM', () => void shutdown('SIGTERM'));
-  // Windows: gezel-service-host stops the GezelService child by sending
-  // CTRL_BREAK to its process group (Node surfaces it as SIGBREAK) —
-  // kill('SIGTERM') on Windows is an abrupt TerminateProcess, so this is
-  // the only graceful-stop path under the machine service.
+  // Windows: kill('SIGTERM') is an abrupt TerminateProcess, so a signal
+  // is not a usable stop channel under the machine service. CTRL_BREAK
+  // (surfaced as SIGBREAK) works only when the host has a console, which
+  // the restricted service SID prevents — so stdin EOF below is the
+  // primary path and this is the secondary.
   process.on('SIGBREAK', () => void shutdown('SIGBREAK'));
+
+  // gezel-service-host hands us the read end of a pipe as stdin and holds
+  // the write end; closing it is how the service requests a graceful
+  // stop. Opt-in via env because a foreground `gezel start` inherits a
+  // terminal whose stdin can end for reasons that are not a stop request.
+  if (process.env.GEZEL_SHUTDOWN_ON_STDIN_EOF === '1') {
+    process.stdin.on('end', () => void shutdown('stdin EOF'));
+    process.stdin.on('error', () => void shutdown('stdin error'));
+    // Flowing mode is what makes 'end' fire; resume() alone is enough
+    // since we never care about the bytes. unref() keeps this handle from
+    // being the reason the loop stays alive.
+    process.stdin.resume();
+    process.stdin.unref();
+  }
 
   const scheme = running.cert ? 'https' : 'http';
   process.stderr.write(

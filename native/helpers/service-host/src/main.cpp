@@ -15,9 +15,34 @@
 //     with 10 MB spawn-time rotation
 //   - restart on crash (3 restarts per 60 s sliding budget, no backoff —
 //     parity with the Electron supervisor's constants)
-//   - graceful stop: CTRL_BREAK to the child's process group (gezeld
-//     handles SIGBREAK), 3 s grace, then job-object kill of the whole
-//     process tree
+//   - graceful stop: close the child's stdin pipe (gezeld shuts down on
+//     EOF), plus CTRL_BREAK when a console happens to be available, then
+//     grace, then job-object kill of the whole process tree
+//
+// Graceful stop deliberately does NOT depend on a console. Observed on a
+// shipping install (v1.26210.15): AllocConsole fails on every service
+// start, so `g_console_ok` was always false and every stop — including
+// machine shutdown — went straight to the job-object kill with no chance
+// to flush.
+//
+// The measured failure is error 317 (ERROR_MR_MID_NOT_FOUND), reproduced
+// twice against a real GezelService install with the error captured
+// directly from AllocConsole. Note what it is NOT: ACCESS_DENIED. The
+// restricted service SID was the obvious suspect (a write-restricted
+// token must also satisfy write checks against its restricted SID list),
+// but that would surface as error 5. 317 instead points at the console
+// subsystem being unavailable to a Session 0 service in a
+// non-interactive window station at all — i.e. a console was never a
+// dependable stop channel here, SID type or not.
+//
+// The fix is independent of that diagnosis either way. stdin needs no
+// console, no window station, no desktop, and no privilege: the host
+// holds the write end of a pipe, and closing it delivers EOF to gezeld
+// whatever session or token it runs under. CTRL_BREAK is kept as a
+// belt-and-braces secondary for the case a console does exist; it is
+// never the only path. Do not relax the SID type to "fix" the console —
+// the restriction is a deliberate security control, and the evidence says
+// it was not what broke the console anyway.
 //
 // The pure path/env/rotation/budget logic is platform-neutral and
 // exercised by `--self-test` (wired into CTest); all Win32 service code
@@ -47,9 +72,14 @@ namespace {
 // [[maybe_unused]] keeps the cross-platform self-test build warning-clean.
 [[maybe_unused]] constexpr wchar_t kServiceName[] = L"GezelService";
 [[maybe_unused]] constexpr wchar_t kDefaultHome[] = L"C:\\ProgramData\\Gezel";
-// Parity with packages/app/src/supervisor/index.ts GRACEFUL_STOP_MS /
-// RESTART_BUDGET_COUNT / RESTART_BUDGET_WINDOW_MS.
-[[maybe_unused]] constexpr unsigned long kGraceMs = 3000;
+// The Electron supervisor uses 3 s (GRACEFUL_STOP_MS), but it stops a
+// user-scope daemon. This host stops the machine-scope one, whose flush
+// spans the session store, the sqlite-vec memory indexes, and the global
+// FTS db — and it only gets one attempt, at shutdown, with the job-object
+// kill waiting behind it. 10 s buys that flush without risking the SCM
+// timeout: the stop ladder re-reports STOP_PENDING every second, and the
+// default ServicesPipeTimeout is 30 s.
+[[maybe_unused]] constexpr unsigned long kGraceMs = 10000;
 [[maybe_unused]] constexpr unsigned long kPostKillWaitMs = 2000;
 constexpr int kRestartBudget = 3;
 constexpr unsigned long long kBudgetWindowMs = 60000;
@@ -94,6 +124,11 @@ std::vector<EnvEntry> env_overrides(const std::wstring& instdir, const std::wstr
       {L"GEZEL_HOME", home},
       {L"GEZEL_PORT", L"43935"},
       {L"GEZEL_SYSTEM_SCOPE", L"1"},
+      // Opt gezeld into treating stdin EOF as "shut down gracefully".
+      // Explicit rather than implicit: a foreground `gezel start` inherits
+      // a terminal whose stdin can end for unrelated reasons, and only the
+      // service host actually owns the write end of a dedicated pipe.
+      {L"GEZEL_SHUTDOWN_ON_STDIN_EOF", L"1"},
       {L"GEZEL_SHARED_ASSETS_DIR", home + L"\\assets"},
       {L"GEZEL_UI_DIR", unpacked + L"\\dist\\ui"},
       {L"GEZEL_PNPM_PATH", unpacked + L"\\dist\\pnpm-bundle\\bin\\pnpm.mjs"},
@@ -245,6 +280,7 @@ int self_test() {
       {L"GEZEL_HOME", L"C:\\ProgramData\\Gezel"},
       {L"GEZEL_PORT", L"43935"},
       {L"GEZEL_SYSTEM_SCOPE", L"1"},
+      {L"GEZEL_SHUTDOWN_ON_STDIN_EOF", L"1"},
       {L"GEZEL_SHARED_ASSETS_DIR", L"C:\\ProgramData\\Gezel\\assets"},
       {L"GEZEL_UI_DIR",
        L"C:\\Program Files\\Gezel\\resources\\app.asar.unpacked\\dist\\ui"},
@@ -452,36 +488,105 @@ struct Child {
   HANDLE process = nullptr;
   DWORD pid = 0;
   ULONGLONG started_at = 0;
+  // Host-held write end of the child's stdin pipe. Closing it is the
+  // graceful-stop signal; see stop_ladder. Always closed before the
+  // handle is dropped so a respawn never leaks a writer that would keep
+  // the previous generation's EOF from ever arriving.
+  HANDLE stdin_write = nullptr;
 };
+
+// Anonymous pipe whose read end the child inherits as stdin. Created per
+// spawn: a respawned gezeld needs a fresh pipe, and reusing one across
+// generations would hand the new child an already-EOF'd stdin.
+// `error_out` is captured at the failing call, before any cleanup or
+// allocation can overwrite the thread's last-error value — see the note
+// on the AllocConsole probe in svc_main for how that bites.
+bool make_stdin_pipe(HANDLE* read_end, HANDLE* write_end, DWORD* error_out) {
+  SECURITY_ATTRIBUTES sa{};
+  sa.nLength = sizeof(sa);
+  sa.bInheritHandle = TRUE;
+  HANDLE r = nullptr;
+  HANDLE w = nullptr;
+  if (!CreatePipe(&r, &w, &sa, 0)) {
+    *error_out = GetLastError();
+    return false;
+  }
+  // The host's write end must not reach the child (or any grandchild):
+  // an inherited duplicate would hold the pipe open and EOF would never
+  // arrive when the host closes its own copy.
+  if (!SetHandleInformation(w, HANDLE_FLAG_INHERIT, 0)) {
+    *error_out = GetLastError();
+    CloseHandle(r);
+    CloseHandle(w);
+    return false;
+  }
+  *read_end = r;
+  *write_end = w;
+  *error_out = 0;
+  return true;
+}
+
+void close_stdin_writer(Child* child) {
+  if (child->stdin_write) {
+    CloseHandle(child->stdin_write);
+    child->stdin_write = nullptr;
+  }
+}
 
 bool spawn_child(const std::wstring& cmdline, const std::wstring& env_block,
                  const std::wstring& home, HANDLE out_handle, HANDLE err_handle, HANDLE nul_handle,
                  HANDLE job, Child* child) {
+  // stdin is the graceful-stop channel. If the pipe cannot be created we
+  // fall back to NUL and lose only the graceful path — the job-object
+  // kill still contains the tree — so a pipe failure must not abort the
+  // spawn outright.
+  HANDLE stdin_read = nullptr;
+  HANDLE stdin_write = nullptr;
+  DWORD pipe_error = 0;
+  if (!make_stdin_pipe(&stdin_read, &stdin_write, &pipe_error)) {
+    host_log(L"CreatePipe for child stdin failed, error " + std::to_wstring(pipe_error) +
+             L"; graceful stop degraded to hard kill");
+    stdin_read = nul_handle;
+    stdin_write = nullptr;
+  }
+  const bool stdin_is_pipe = stdin_write != nullptr;
+
   SIZE_T attr_size = 0;
   InitializeProcThreadAttributeList(nullptr, 1, 0, &attr_size);
   std::vector<unsigned char> attr_buf(attr_size);
   auto* attrs = reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(attr_buf.data());
-  if (!InitializeProcThreadAttributeList(attrs, 1, 0, &attr_size)) return false;
-  HANDLE inherit[3] = {nul_handle, out_handle, err_handle};
+  const auto release_pipe = [&]() {
+    if (stdin_is_pipe) {
+      CloseHandle(stdin_read);
+      CloseHandle(stdin_write);
+    }
+  };
+  if (!InitializeProcThreadAttributeList(attrs, 1, 0, &attr_size)) {
+    release_pipe();
+    return false;
+  }
+  HANDLE inherit[3] = {stdin_read, out_handle, err_handle};
   if (!UpdateProcThreadAttribute(attrs, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, inherit,
                                  sizeof(inherit), nullptr, nullptr)) {
     DeleteProcThreadAttributeList(attrs);
+    release_pipe();
     return false;
   }
 
   STARTUPINFOEXW si{};
   si.StartupInfo.cb = sizeof(si);
   si.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
-  si.StartupInfo.hStdInput = nul_handle;
+  si.StartupInfo.hStdInput = stdin_read;
   si.StartupInfo.hStdOutput = out_handle;
   si.StartupInfo.hStdError = err_handle;
   si.lpAttributeList = attrs;
 
-  // Console strategy is LOAD-BEARING: the child must share the host's
-  // (hidden, session-0) console for GenerateConsoleCtrlEvent to reach
-  // it — that is gezeld's only graceful-stop path on Windows. Do NOT
-  // add CREATE_NO_WINDOW / DETACHED_PROCESS / CREATE_NEW_CONSOLE here:
-  // any of them silently turns every stop into a hard kill.
+  // Graceful stop rides on the stdin pipe above, NOT on the console —
+  // AllocConsole does not survive the restricted service SID, so the
+  // console path is a best-effort secondary. Keeping the child on the
+  // host's console (no CREATE_NO_WINDOW / DETACHED_PROCESS /
+  // CREATE_NEW_CONSOLE) only preserves that secondary; it is no longer
+  // the difference between graceful and hard stop.
   // CREATE_NEW_PROCESS_GROUP makes the child's pid a ctrl-event target
   // group; CREATE_SUSPENDED lets us jail it in the job before it can
   // spawn anything.
@@ -494,7 +599,13 @@ bool spawn_child(const std::wstring& cmdline, const std::wstring& env_block,
           CREATE_UNICODE_ENVIRONMENT,
       mutable_env.data(), home.c_str(), &si.StartupInfo, &pi);
   DeleteProcThreadAttributeList(attrs);
-  if (!ok) return false;
+  // The child now owns its inherited copy of the read end; the host must
+  // drop its own or the pipe would never fully close.
+  if (stdin_is_pipe) CloseHandle(stdin_read);
+  if (!ok) {
+    if (stdin_is_pipe) CloseHandle(stdin_write);
+    return false;
+  }
 
   if (job && !AssignProcessToJobObject(job, pi.hProcess)) {
     host_log(L"AssignProcessToJobObject failed; terminating child");
@@ -502,6 +613,7 @@ bool spawn_child(const std::wstring& cmdline, const std::wstring& env_block,
     ResumeThread(pi.hThread);
     CloseHandle(pi.hThread);
     CloseHandle(pi.hProcess);
+    if (stdin_is_pipe) CloseHandle(stdin_write);
     return false;
   }
   ResumeThread(pi.hThread);
@@ -509,18 +621,33 @@ bool spawn_child(const std::wstring& cmdline, const std::wstring& env_block,
   child->process = pi.hProcess;
   child->pid = pi.dwProcessId;
   child->started_at = GetTickCount64();
+  child->stdin_write = stdin_is_pipe ? stdin_write : nullptr;
   return true;
 }
 
 void stop_ladder(Child* child, HANDLE job) {
   if (child->process && WaitForSingleObject(child->process, 0) == WAIT_TIMEOUT) {
-    BOOL sent = FALSE;
+    // Primary signal: closing the host's write end delivers EOF on the
+    // child's stdin, which gezeld handles as a graceful shutdown. Works
+    // under the restricted service SID, in session 0, with no console.
+    const bool signalled_via_stdin = child->stdin_write != nullptr;
+    close_stdin_writer(child);
+    if (signalled_via_stdin) host_log(L"closed gezeld stdin (graceful stop requested)");
+
+    // Secondary: only reachable when a console exists, which it does not
+    // in the shipping restricted-SID configuration. Harmless when it
+    // does — gezeld's SIGBREAK and stdin-EOF handlers are the same
+    // idempotent shutdown path.
+    bool signalled_via_break = false;
     if (g_console_ok) {
-      sent = GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, child->pid);
-      host_log(sent ? L"sent CTRL_BREAK to gezeld" : L"CTRL_BREAK failed; hard stop");
+      signalled_via_break = GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, child->pid) != FALSE;
+      host_log(signalled_via_break ? L"sent CTRL_BREAK to gezeld"
+                                   : L"CTRL_BREAK failed (stdin EOF still pending)");
     }
-    if (sent) {
+
+    if (signalled_via_stdin || signalled_via_break) {
       const ULONGLONG deadline = GetTickCount64() + kGraceMs;
+      bool exited = false;
       for (;;) {
         const ULONGLONG now = GetTickCount64();
         if (now >= deadline) break;
@@ -528,11 +655,21 @@ void stop_ladder(Child* child, HANDLE job) {
         const DWORD wait = WaitForSingleObject(child->process, slice);
         report_status(SERVICE_STOP_PENDING, NO_ERROR, 0, 10000);
         if (wait == WAIT_OBJECT_0) {
-          host_log(L"gezeld exited gracefully");
+          host_log(L"gezeld exited gracefully after " +
+                   std::to_wstring(kGraceMs - (deadline - GetTickCount64())) + L"ms");
+          exited = true;
           break;
         }
       }
+      if (!exited) {
+        host_log(L"gezeld did not exit within " + std::to_wstring(kGraceMs) +
+                 L"ms of the stop request; falling back to job kill");
+      }
+    } else {
+      host_log(L"no graceful stop channel available; hard stop");
     }
+  } else {
+    close_stdin_writer(child);
   }
   // Unconditional sweep: even after a graceful child exit, grandchildren
   // (engine servers, ptys, python) may linger in the job.
@@ -606,6 +743,10 @@ void supervise(const std::wstring& cmdline, const std::wstring& env_block,
     // Sweep orphaned grandchildren BEFORE respawn — a stale engine
     // server would squat ports and model locks the new gezeld needs.
     if (job) TerminateJobObject(job, exit_code);
+    // Drop this generation's pipe writer before the next spawn creates a
+    // fresh one; leaking it would pin a dead child's pipe open for the
+    // life of the service.
+    close_stdin_writer(&child);
     CloseHandle(child.process);
 
     if (!budget.allow(GetTickCount64())) {
@@ -652,14 +793,31 @@ void WINAPI svc_main(DWORD, LPWSTR*) {
     return;
   }
 
-  // Services start without a console; create a hidden session-0 one so
-  // ctrl events can reach the child (see spawn_child).
-  if (AllocConsole() || GetLastError() == ERROR_ACCESS_DENIED) {
+  // Best-effort hidden session-0 console so CTRL_BREAK can reach the
+  // child. This is known to fail in the shipping restricted-SID
+  // configuration (see the header comment), which is why stop_ladder does
+  // not depend on it. Log the error code rather than a bare "failed": the
+  // previous message named no cause, so the reason had to be rediscovered
+  // from first principles.
+  //
+  // Capture the error into a local the instant AllocConsole returns,
+  // matching the capture-first pattern already used for the CreateProcess
+  // error below. Building the message inline as
+  // `... + std::to_wstring(GetLastError()) + ...` is not safe: the
+  // wstring temporaries allocate and operator+'s operands are only
+  // indeterminately sequenced, so an allocation can overwrite the
+  // thread's last-error value before it is read. (That hazard is real,
+  // though it was not what produced 317 — this form reports the same
+  // value, so 317 is genuinely what AllocConsole leaves behind here.)
+  const BOOL console_allocated = AllocConsole();
+  const DWORD console_error = console_allocated ? 0 : GetLastError();
+  if (console_allocated || console_error == ERROR_ACCESS_DENIED) {
     g_console_ok = true;
     SetConsoleCtrlHandler(nullptr, TRUE);
     SetConsoleCtrlHandler(host_ctrl_handler, TRUE);
   } else {
-    host_log(L"AllocConsole failed; graceful stop degraded to hard kill");
+    host_log(L"AllocConsole unavailable (error " + std::to_wstring(console_error) +
+             L"); using stdin EOF for graceful stop");
   }
 
   LPWCH raw_env = GetEnvironmentStringsW();

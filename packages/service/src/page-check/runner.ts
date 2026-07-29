@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { createLogger } from '@bendyline/gezel';
 import { playwrightBrowsersDir } from '@bendyline/gezel/paths';
 import type { Store } from '../fs/store.js';
-import { resolvePnpmCommand } from '../packages/pnpm.js';
+import { pnpmSpawnTarget, resolvePnpmCommand } from '../packages/pnpm.js';
 
 const log = createLogger('page-check');
 
@@ -183,7 +183,8 @@ async function runPageCheckInner(opts: RunPageCheckOptions): Promise<PageCheckOu
 
   try {
     const raw = await new Promise<{ log: string; failed?: string }>((resolve) => {
-      const child = spawnImpl(pnpm.command, pnpm.args, {
+      const target = pnpmSpawnTarget(pnpm);
+      const child = spawnImpl(target.command, target.args, {
         cwd: opts.installPath,
         env: { ...process.env, PLAYWRIGHT_BROWSERS_PATH: opts.browsersPath },
         stdio: ['ignore', 'pipe', 'pipe'],
