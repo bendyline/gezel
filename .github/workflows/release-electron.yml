@@ -662,6 +662,26 @@ jobs:
           codesign --verify --strict --deep --verbose=2 "$app"
           node scripts/verify-macos-version-floor.mjs "$app" 13.5
 
+          # The official Node runtime arrives signed/notarized by the Node.js
+          # Foundation, and fetch-node.mjs records its vendor bytes before
+          # packaging. electron-builder must preserve both: re-signing Node
+          # changes its sha256 and makes the supervisor reject it at startup.
+          node_bundle="$app/Contents/Resources/app.asar.unpacked/dist/node-bundle"
+          test -x "$node_bundle/node"
+          test -f "$node_bundle/sha256.txt"
+          (
+            cd "$node_bundle"
+            shasum -a 256 -c sha256.txt
+          )
+          codesign --verify --strict --check-notarization --verbose=2 "$node_bundle/node"
+          node_signature=$(codesign --display --verbose=4 "$node_bundle/node" 2>&1)
+          if ! grep -Fq 'TeamIdentifier=HX7739G8FX' <<<"$node_signature"; then
+            echo "::error::Packaged Node runtime no longer carries the Node.js Foundation signature"
+            echo "$node_signature"
+            exit 1
+          fi
+          echo "verified packaged Node bytes and upstream signature"
+
       - name: Smoke-test packaged macOS app
         env:
           GEZEL_PACKAGED_SMOKE: '1'

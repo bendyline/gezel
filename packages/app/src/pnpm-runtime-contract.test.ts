@@ -10,6 +10,7 @@ const windowsHost = repositoryFile('../../../native/helpers/service-host/src/mai
 const macLaunchDaemon = repositoryFile('../installer/com.bendyline.gezeld.plist');
 const linuxSystemd = repositoryFile('../installer/gezeld.service');
 const signingPolicy = repositoryFile('../scripts/third-party-binaries.cjs');
+const electronBuilderConfig = repositoryFile('../electron-builder.yml');
 const releaseWorkflow = repositoryFile('../../../.github/workflows/release-electron.yml');
 
 describe('bundled pnpm runtime contract', () => {
@@ -40,5 +41,16 @@ describe('bundled pnpm runtime contract', () => {
     expect(nodeCheck).toBeGreaterThanOrEqual(0);
     expect(nodeCheck).toBeLessThan(thirdPartySkip);
     expect(releaseWorkflow).toContain('O=OpenJS Foundation');
+  });
+
+  it('preserves and verifies the upstream macOS Node executable', () => {
+    expect(electronBuilderConfig).toContain(
+      '- /Contents/Resources/app\\.asar\\.unpacked/dist/node-bundle/node$',
+    );
+    expect(releaseWorkflow).toContain('shasum -a 256 -c sha256.txt');
+    expect(releaseWorkflow).toContain(
+      'codesign --verify --strict --check-notarization --verbose=2 "$node_bundle/node"',
+    );
+    expect(releaseWorkflow).toContain('TeamIdentifier=HX7739G8FX');
   });
 });
