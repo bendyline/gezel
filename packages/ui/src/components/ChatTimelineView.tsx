@@ -33,6 +33,7 @@ import {
   subscribeOptimisticUserMessages,
 } from './chat-optimistic-events.js';
 import { consumeFocusSessionError } from './pending-focus-session-error.js';
+import { compareTimelineRows, nextTerminalBottomGraceExpiry } from './timeline-row-order.js';
 import { buildTimelineThreads } from './timeline-threads.js';
 import { useNarrateAssistantReplies } from './useNarrateAssistantReplies.js';
 import { useRoleBasedNameOnlyMode } from './useRoleBasedNameOnlyMode.js';
@@ -555,8 +556,24 @@ export function ChatTimelineView({
    * the project's terminal channel (deduped by messageId).
    */
   const [terminalEntries, setTerminalEntries] = useState<TerminalTimelineEntry[]>([]);
+  // Bumped when a fresh terminal row's five-minute bottom-placement
+  // grace period ends. The timer lets ordering return to normal even
+  // when no new chat or terminal event arrives to trigger a render.
+  const [terminalOrderTick, setTerminalOrderTick] = useState(0);
   const [hasMore, setHasMore] = useState(false);
   const [oldestAt, setOldestAt] = useState<string | undefined>();
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: terminalOrderTick re-arms the timer for the next recent terminal row after each expiry.
+  useEffect(() => {
+    const now = Date.now();
+    const nextExpiry = nextTerminalBottomGraceExpiry(terminalEntries, now);
+    if (nextExpiry === undefined) return;
+    const timer = window.setTimeout(
+      () => setTerminalOrderTick((tick) => tick + 1),
+      Math.max(0, nextExpiry - Date.now() + 1),
+    );
+    return () => window.clearTimeout(timer);
+  }, [terminalEntries, terminalOrderTick]);
 
   // Phase 4 — warm-on-open. When the user focuses a session, ask the
   // daemon to pre-warm its prompt cache so the first message returns
@@ -2006,22 +2023,14 @@ export function ChatTimelineView({
       | { kind: 'terminal'; entry: TerminalTimelineEntry; at: string }
       | { kind: 'terminal-streaming'; runId: string; slot: TerminalLiveSlot; at: string }
     > = [...messageRows, ...streamingAsRows, ...terminalRows, ...terminalStreamingRows];
-    // Streaming rows always sort to the bottom — an in-progress chat
-    // or terminal command shouldn't appear sandwiched in the middle
-    // of the queue when its session has older messages above newer
-    // cross-session messages. Among streaming rows themselves,
-    // ordering falls back to `anchorAt` / `startedAt` so multiple
-    // concurrent in-flight rows interleave by start time.
-    const isStreamingKind = (k: string) => k === 'streaming' || k === 'terminal-streaming';
-    all.sort((a, b) => {
-      const aS = isStreamingKind(a.kind);
-      const bS = isStreamingKind(b.kind);
-      if (aS && !bS) return 1;
-      if (!aS && bS) return -1;
-      return a.at < b.at ? -1 : a.at > b.at ? 1 : 0;
-    });
+    // Active chat rows stay below persisted history. Fresh terminal
+    // commands and their output get the final lane for five minutes,
+    // so launching a command cannot push it above the pending chat
+    // task the user was already watching.
+    const now = Date.now();
+    all.sort((a, b) => compareTimelineRows(a, b, now));
     return all;
-  }, [messages, terminalEntries, liveBump, terminalLiveBump]);
+  }, [messages, terminalEntries, liveBump, terminalLiveBump, terminalOrderTick]);
 
   // Slack-style threading: fold the flat rows into turn-rooted thread
   // groups. Every user message (a human turn or a gezel→gezel handoff)

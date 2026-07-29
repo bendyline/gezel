@@ -625,38 +625,41 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
                       <td title={quantizationTitle(m.quantization)}>
                         {approximateQuantizationLabel(m.quantization)}
                       </td>
-                      <td>
-                        <span
-                          className={`home-status-pill${
-                            badge.tier === 'ok'
-                              ? ' home-status-ok'
-                              : badge.tier === 'warn'
-                                ? ' home-status-warn'
-                                : ''
-                          }`}
-                          title={badge.detail}
-                        >
-                          {badge.label}
-                        </span>
-                        <button
-                          type="button"
-                          className="home-link"
-                          disabled={badge.tier === 'probing'}
-                          style={{ marginLeft: '0.5rem' }}
-                          title="Run the fitness check (proeve): spawn, tool round-trip, decode speed, reasoning budget, and context fit."
-                          onClick={() => {
-                            void api
-                              .runModelFitnessProbe('llama-cpp', m.id)
-                              .then(() => refreshFitness())
-                              .catch(() => {});
-                          }}
-                        >
-                          {badge.tier === 'probing'
-                            ? 'Checking…'
-                            : entry && !entry.stale
-                              ? 'Re-run'
-                              : 'Run fitness check'}
-                        </button>
+                      <td className="model-fitness-table-cell">
+                        <div className="model-fitness-cell">
+                          <span
+                            className={`home-status-pill model-fitness-badge${
+                              badge.tier === 'probing' ? ' model-fitness-badge--probing' : ''
+                            }${
+                              badge.tier === 'ok'
+                                ? ' home-status-ok'
+                                : badge.tier === 'warn'
+                                  ? ' home-status-warn'
+                                  : ''
+                            }`}
+                            title={badge.detail}
+                          >
+                            {badge.label}
+                          </span>
+                          <button
+                            type="button"
+                            className="home-link"
+                            disabled={badge.tier === 'probing'}
+                            title="Run the fitness check (proeve): spawn, tool round-trip, decode speed, reasoning budget, and context fit."
+                            onClick={() => {
+                              void api
+                                .runModelFitnessProbe('llama-cpp', m.id)
+                                .then(() => refreshFitness())
+                                .catch(() => {});
+                            }}
+                          >
+                            {badge.tier === 'probing'
+                              ? 'Checking…'
+                              : entry && !entry.stale
+                                ? 'Re-run'
+                                : 'Run fitness check'}
+                          </button>
+                        </div>
                       </td>
                       <td>
                         <span style={{ marginRight: '0.75rem' }}>
