@@ -13,7 +13,7 @@
 #
 # Logs go to /var/log/install.log (PKG default) and to stderr (visible
 # in the macOS Installer.app's "Show Log" pane).
-set -euo pipefail
+set -Eeuo pipefail
 # Make every installer-created state file private by default. The launchd
 # plist applies the same umask to future daemon writes; runtime discovery
 # files are explicitly widened by gezeld after creation.
@@ -35,6 +35,20 @@ RUNTIME_PORT="${DATA_DIR}/runtime/port"
 RUNTIME_CERT="${DATA_DIR}/runtime/cert.pem"
 SERVICE_STDOUT="${DATA_DIR}/logs/service-stdout.log"
 SERVICE_STDERR="${DATA_DIR}/logs/service-stderr.log"
+
+report_unhandled_error() {
+  status="$1"
+  line="$2"
+  command="$3"
+  trap - ERR
+  echo "[gezel postinstall] ERROR: command failed at line ${line} (exit ${status}): ${command}" >&2
+  exit "$status"
+}
+
+# PackageKit otherwise reports only "an error occurred while running scripts".
+# Keep the exact failing line and command in /var/log/install.log so a failed
+# install is actionable without reproducing it on the user's machine.
+trap 'report_unhandled_error "$?" "$LINENO" "$BASH_COMMAND"' ERR
 
 echo "[gezel postinstall] starting (user=$(whoami))"
 

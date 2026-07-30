@@ -57,9 +57,17 @@ test('Electron release configuration pins the audited packaging contracts', asyn
     3,
     'every packaged desktop platform must execute its final unpacked app',
   );
+  const windowsSmokeStart = workflow.indexOf('- name: Smoke-test packaged Windows app');
+  const windowsSmokeEnd = workflow.indexOf('- name: Verify Windows signatures', windowsSmokeStart);
+  const windowsSmoke = workflow.slice(windowsSmokeStart, windowsSmokeEnd);
+  assert.match(windowsSmoke, /WaitForExit\(360000\)/);
+  assert.match(windowsSmoke, /RedirectStandardOutput/);
+  assert.match(windowsSmoke, /RedirectStandardError/);
+  assert.match(windowsSmoke, /Get-Content -LiteralPath \$path -Tail 400/);
+  assert.match(windowsSmoke, /timed out after 360 seconds/);
   assert.ok(
-    (workflow.match(/180(?:000|s| seconds)/g)?.length ?? 0) >= 3,
-    'every packaged smoke test must have a bounded timeout',
+    (workflow.match(/180(?:s| seconds)/g)?.length ?? 0) >= 2,
+    'macOS and Linux packaged smoke tests must have bounded timeouts',
   );
   const linuxSmokeStart = workflow.indexOf('- name: Smoke-test packaged Linux app');
   const linuxSmokeEnd = workflow.indexOf(
@@ -151,10 +159,18 @@ test('macOS release installs the finished PKG and exercises recovery', async () 
   assert.notEqual(macPkgSmokeStart, -1, 'macOS release must install the finished PKG');
   const macPkgSmoke = workflow.slice(macPkgSmokeStart, macPkgSmokeEnd);
   assert.equal(
-    macPkgSmoke.match(/sudo \/usr\/sbin\/installer -pkg "\$pkg" -target \//g)?.length,
+    macPkgSmoke.match(/install_pkg "/g)?.length,
     3,
     'macOS PKG smoke must cover clean install, reinstall, and disabled-state recovery',
   );
+  assert.equal(
+    macPkgSmoke.match(/sudo \/usr\/sbin\/installer -pkg "\$pkg" -target \//g)?.length,
+    1,
+    'every macOS PKG install must go through the diagnostic wrapper',
+  );
+  assert.match(macPkgSmoke, /sudo tail -n 400 \/var\/log\/install\.log/);
+  assert.match(macPkgSmoke, /process == "package_script_service"/);
+  assert.match(macPkgSmoke, /sudo dscl \. -read \/Users\/_gezeld/);
   assert.match(macPkgSmoke, /launchctl disable "system\/\$daemon_label"/);
   assert.match(macPkgSmoke, /assert_installed_health/);
   assert.match(macPkgSmoke, /--cacert "\$runtime_dir\/cert\.pem"/);

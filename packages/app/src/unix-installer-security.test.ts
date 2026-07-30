@@ -23,6 +23,17 @@ const linuxPostremove = installerFile('linux/after-remove.sh');
 const linuxUnit = installerFile('gezeld.service');
 
 describe('macOS machine-service filesystem security', () => {
+  it('records the exact command behind a PackageKit script failure', () => {
+    expect(macPostinstall).toContain('set -Eeuo pipefail');
+    expect(macPostinstall).toContain('report_unhandled_error()');
+    expect(macPostinstall).toContain(
+      'trap \'report_unhandled_error "$?" "$LINENO" "$BASH_COMMAND"\' ERR',
+    );
+    expect(macPostinstall).toContain(
+      '[gezel postinstall] ERROR: command failed at line ${line} (exit ${status}): ${command}',
+    );
+  });
+
   it('migrates private state while exposing runtime and read-only assets', () => {
     expect(macPostinstall).toContain('umask 077');
     expect(macPostinstall).toContain(

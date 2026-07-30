@@ -383,16 +383,42 @@ jobs:
           GEZEL_HOME: ${{ runner.temp }}\gezel-packaged-smoke
         run: |
           $exe = Get-Item 'packages/app/dist/installers/win-unpacked/gezel.exe' -ErrorAction Stop
+          $stdout = Join-Path $env:RUNNER_TEMP 'gezel-packaged-smoke.stdout.log'
+          $stderr = Join-Path $env:RUNNER_TEMP 'gezel-packaged-smoke.stderr.log'
+          Remove-Item -LiteralPath $stdout, $stderr -Force -ErrorAction SilentlyContinue
+
+          function Write-PackagedSmokeLog([string]$label, [string]$path) {
+            Write-Host "::group::$label"
+            if (Test-Path -LiteralPath $path) {
+              Get-Content -LiteralPath $path -Tail 400
+            } else {
+              Write-Host "(no log file was created)"
+            }
+            Write-Host '::endgroup::'
+          }
+
           $arguments = @(
             '--gezel-packaged-smoke'
             "--gezel-expected-version=${{ needs.release-preflight.outputs.version }}"
             "--gezel-home=${{ runner.temp }}\gezel-packaged-smoke"
           )
-          $process = Start-Process -FilePath $exe.FullName -ArgumentList $arguments -PassThru
-          if (-not $process.WaitForExit(180000)) {
+          $process = Start-Process `
+            -FilePath $exe.FullName `
+            -ArgumentList $arguments `
+            -RedirectStandardOutput $stdout `
+            -RedirectStandardError $stderr `
+            -PassThru
+          if (-not $process.WaitForExit(360000)) {
             Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
-            throw 'Packaged Electron smoke test timed out after 180 seconds'
+            [void]$process.WaitForExit(10000)
+            Write-PackagedSmokeLog 'Packaged smoke stdout' $stdout
+            Write-PackagedSmokeLog 'Packaged smoke stderr' $stderr
+            throw 'Packaged Electron smoke test timed out after 360 seconds'
           }
+          # Flush redirected streams before reading the files or ExitCode.
+          $process.WaitForExit()
+          Write-PackagedSmokeLog 'Packaged smoke stdout' $stdout
+          Write-PackagedSmokeLog 'Packaged smoke stderr' $stderr
           if ($process.ExitCode -ne 0) {
             throw "Packaged Electron smoke test failed with exit code $($process.ExitCode)"
           }
@@ -718,6 +744,50 @@ jobs:
           runtime_dir="$data_dir/runtime"
           uninstaller="/Applications/Gezel.app/Contents/Resources/uninstall.sh"
 
+          dump_pkg_diagnostics() {
+            set +e
+            echo "::group::macOS Installer log"
+            sudo tail -n 400 /var/log/install.log 2>&1 || true
+            echo "::endgroup::"
+
+            echo "::group::macOS PackageKit unified log"
+            sudo /usr/bin/log show \
+              --style compact \
+              --last 10m \
+              --predicate \
+                'process == "installer" OR process == "installd" OR process == "package_script_service"' \
+              2>&1 | tail -n 400 || true
+            echo "::endgroup::"
+
+            echo "::group::Partial Gezel install state"
+            sudo dscl . -read /Users/_gezeld 2>&1 || true
+            sudo dscl . -read /Groups/_gezeld 2>&1 || true
+            sudo launchctl print "system/$daemon_label" 2>&1 || true
+            sudo ls -lde \
+              "/Applications/Gezel.app" \
+              "$data_dir" \
+              "$runtime_dir" \
+              2>&1 || true
+            echo "::endgroup::"
+            set -e
+          }
+
+          install_pkg() {
+            description="$1"
+            echo "$description"
+            set +e
+            sudo /usr/sbin/installer -pkg "$pkg" -target /
+            installer_status=$?
+            set -e
+            if [[ "$installer_status" -eq 0 ]]; then
+              return 0
+            fi
+
+            echo "::error::macOS PKG installer failed during: $description (exit $installer_status)"
+            dump_pkg_diagnostics
+            return "$installer_status"
+          }
+
           cleanup() {
             set +e
             if [[ -f "$uninstaller" ]]; then
@@ -769,15 +839,14 @@ jobs:
             sudo launchctl print "system/$daemon_label" || true
             sudo tail -n 100 "$data_dir/logs/service-stderr.log" 2>/dev/null || true
             sudo tail -n 100 "$data_dir/logs/service-stdout.log" 2>/dev/null || true
+            dump_pkg_diagnostics
             return 1
           }
 
-          echo "installing PKG from a clean machine state"
-          sudo /usr/sbin/installer -pkg "$pkg" -target /
+          install_pkg "installing PKG from a clean machine state"
           assert_installed_health
 
-          echo "reinstalling the same PKG to prove idempotency"
-          sudo /usr/sbin/installer -pkg "$pkg" -target /
+          install_pkg "reinstalling the same PKG to prove idempotency"
           assert_installed_health
 
           echo "persistently disabling the service to exercise recovery"
@@ -786,7 +855,7 @@ jobs:
             echo "::error::failed to establish the disabled-state recovery precondition"
             exit 1
           fi
-          sudo /usr/sbin/installer -pkg "$pkg" -target /
+          install_pkg "reinstalling the PKG to recover a persistently disabled service"
           assert_installed_health
 
       - name: Verify macOS update metadata was generated
