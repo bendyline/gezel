@@ -401,7 +401,9 @@ export function TasksView({ projectId }: TasksViewProps = {}) {
                         aria-label={g.parent.status}
                       />
                       <span className="task-row-body">
-                        <span className="task-title">{g.parent.title}</span>
+                        <span className="task-title" title={g.parent.title}>
+                          {g.parent.title}
+                        </span>
                         <span className="task-row-meta">
                           <span className="task-ref">
                             {shortRef
@@ -419,9 +421,12 @@ export function TasksView({ projectId }: TasksViewProps = {}) {
                             </span>
                           )}
                           <span className="task-assignee">
-                            {g.parent.assignee.kind === 'user'
-                              ? 'You'
-                              : gezelName(g.parent.assignee.gezelId) || 'gezel'}
+                            {g.parent.origin?.kind === 'system-job' &&
+                            g.parent.origin.managedByGezelId
+                              ? `${gezelName(g.parent.origin.managedByGezelId) || 'gezel'} · system`
+                              : g.parent.assignee.kind === 'user'
+                                ? 'You'
+                                : gezelName(g.parent.assignee.gezelId) || 'gezel'}
                           </span>
                         </span>
                       </span>
@@ -442,15 +447,19 @@ export function TasksView({ projectId }: TasksViewProps = {}) {
                               aria-label={c.status}
                             />
                             <span className="task-row-body">
-                              <span className="task-title">{c.title}</span>
+                              <span className="task-title" title={c.title}>
+                                {c.title}
+                              </span>
                               <span className="task-row-meta">
                                 <span className="task-ref">
                                   {shortRef ? (c.ref.split('/').pop() ?? c.ref) : c.ref}
                                 </span>
                                 <span className="task-assignee">
-                                  {c.assignee.kind === 'user'
-                                    ? 'You'
-                                    : gezelName(c.assignee.gezelId) || 'gezel'}
+                                  {c.origin?.kind === 'system-job' && c.origin.managedByGezelId
+                                    ? `${gezelName(c.origin.managedByGezelId) || 'gezel'} · system`
+                                    : c.assignee.kind === 'user'
+                                      ? 'You'
+                                      : gezelName(c.assignee.gezelId) || 'gezel'}
                                 </span>
                               </span>
                             </span>

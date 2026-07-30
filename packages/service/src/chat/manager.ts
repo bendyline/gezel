@@ -8065,6 +8065,13 @@ export class ChatManager {
       providerName?: ProviderName;
       model?: string;
       /**
+       * Inject the selected `gezelId`'s real about.md into this one-shot.
+       * This is the generic counterpart to the historical Klerk and
+       * Keurmeester switches, used by autonomous project roles whose
+       * provider/model may still be pinned explicitly for privacy.
+       */
+      useGezelPersona?: boolean;
+      /**
        * When true, route this one-shot through the configured Klerk gezel —
        * a writerly utility persona used for about.md drafts, rewrites,
        * session summaries, and memory consolidation. The Klerk's
@@ -8113,14 +8120,14 @@ export class ChatManager {
     let { gezelId } = opts;
     let actorLabel = opts.actorLabel?.trim() || undefined;
     const config = await this.store.readConfig();
-    let klerkAbout: string | undefined;
+    let personaAbout: string | undefined;
     if (opts.useKlerk) {
       actorLabel ??= 'Klerk';
       if (config.klerkGezelId) {
         const klerk = await this.store.getGezel(config.klerkGezelId).catch(() => null);
         if (klerk) {
           gezelId = klerk.id;
-          klerkAbout = klerk.about?.trim() || undefined;
+          personaAbout = klerk.about?.trim() || undefined;
         }
       }
     }
@@ -8130,8 +8137,15 @@ export class ChatManager {
         const keurmeester = await this.store.getGezel(config.keurmeesterGezelId).catch(() => null);
         if (keurmeester) {
           gezelId = keurmeester.id;
-          klerkAbout = keurmeester.about?.trim() || undefined;
+          personaAbout = keurmeester.about?.trim() || undefined;
         }
+      }
+    }
+    if (opts.useGezelPersona && gezelId) {
+      const persona = await this.store.getGezel(gezelId).catch(() => null);
+      if (persona) {
+        personaAbout = persona.about?.trim() || undefined;
+        actorLabel ??= persona.name;
       }
     }
     if (!actorLabel && !gezelId) actorLabel = 'System';
@@ -8155,7 +8169,7 @@ export class ChatManager {
     // nor a persona model) and a smaller model is already resident on
     // the other local engine under a coexist GPU policy, run it there
     // so the big foreground model keeps streaming in parallel. The
-    // persona voice (klerkAbout, injected below) is preserved — only
+    // persona voice (personaAbout, injected below) is preserved — only
     // the compute engine changes. `selectEngineForTask` returns null
     // unless a strictly better resident target exists, so the default
     // path is unchanged. Routing is best-effort: any failure resolving
@@ -8189,7 +8203,7 @@ export class ChatManager {
 
     const baseSystem =
       'You respond to a single self-contained prompt. Follow the output format requested by the user exactly.';
-    const systemMessage = klerkAbout ? `${klerkAbout}\n\n---\n\n${baseSystem}` : baseSystem;
+    const systemMessage = personaAbout ? `${personaAbout}\n\n---\n\n${baseSystem}` : baseSystem;
     const session = await provider.createSession({
       systemMessage,
       model,

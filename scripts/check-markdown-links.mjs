@@ -12,7 +12,7 @@ const ignoredDirectories = new Set([
   'dist',
   'node_modules',
 ]);
-const ignoredRepoDirectories = new Set(['evals/runs', 'reports', 'runs']);
+const ignoredRepoDirectories = new Set(['evals/runs', 'reports', 'runs', 'ship-audit']);
 
 async function markdownFiles(root) {
   const files = [];

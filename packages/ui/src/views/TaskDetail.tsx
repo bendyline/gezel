@@ -15,6 +15,7 @@ import '@bendyline/squisq-editor-react/styles';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { AiToolbarButtons } from '../components/AiToolbarButtons.js';
+import { GezelIcon } from '../components/GezelIcon.js';
 import { PromoteToTabButton } from '../components/PromoteToTabButton.js';
 import { PromptDialog } from '../components/PromptDialog.js';
 import { TaskChatPane } from '../components/TaskChatPane.js';
@@ -477,6 +478,12 @@ export function TaskDetail({
   // skip the plan-readiness guardrails, and speak in the launcher's
   // language ("fire") instead of the plan-approval flow's.
   const curatedBook = !!task.sourceCraftbookIds?.some((s) => s.role === 'main');
+  const systemOwnerId =
+    task.origin?.kind === 'system-job' ? task.origin.managedByGezelId : undefined;
+  const isSystemJob = task.origin?.kind === 'system-job';
+  const systemOwner = systemOwnerId
+    ? gezels.find((gezel) => gezel.id === systemOwnerId)
+    : undefined;
   const planGuards =
     task.status === 'draft' && !curatedBook ? planGuardrails(summarizePlanDocument(task)) : [];
 
@@ -524,7 +531,10 @@ export function TaskDetail({
                 <Select.Value />
               </Select.Trigger>
               <Select.Content>
-                {STATUS_VALUES.map((s) => (
+                {(isSystemJob
+                  ? STATUS_VALUES.filter((status) => status === 'active' || status === 'paused')
+                  : STATUS_VALUES
+                ).map((s) => (
                   <Select.Item key={s} value={s}>
                     {s}
                   </Select.Item>
@@ -532,26 +542,46 @@ export function TaskDetail({
               </Select.Content>
             </Select.Root>
           )}
-          <Select.Root
-            value={task.assignee.kind === 'user' ? '__user' : task.assignee.gezelId}
-            disabled={busy}
-            onValueChange={(v) => {
-              void setAssignee(v === '__user' ? { kind: 'user' } : { kind: 'gezel', gezelId: v });
-            }}
-          >
-            <Select.Trigger>
-              <Select.Value />
-            </Select.Trigger>
-            <Select.Content>
-              <Select.Item value="__user">→ You</Select.Item>
-              {gezels.map((g) => (
-                <Select.Item key={g.id} value={g.id}>
-                  → {g.name}
-                  {g.role ? ` (${g.role})` : ''}
-                </Select.Item>
-              ))}
-            </Select.Content>
-          </Select.Root>
+          {isSystemJob ? (
+            <div
+              className="task-system-owner"
+              title="This gezel manages a service-run job. It does not open a duplicate chat turn."
+            >
+              {systemOwner && (
+                <GezelIcon
+                  svg={systemOwner.icon ?? null}
+                  poppetje={systemOwner.poppetje}
+                  iconOverride={systemOwner.iconOverride}
+                  name={systemOwner.name}
+                  size={22}
+                />
+              )}
+              <span>
+                {systemOwner?.name ?? 'Boekwachter'} <small>· system-run</small>
+              </span>
+            </div>
+          ) : (
+            <Select.Root
+              value={task.assignee.kind === 'user' ? '__user' : task.assignee.gezelId}
+              disabled={busy}
+              onValueChange={(v) => {
+                void setAssignee(v === '__user' ? { kind: 'user' } : { kind: 'gezel', gezelId: v });
+              }}
+            >
+              <Select.Trigger>
+                <Select.Value />
+              </Select.Trigger>
+              <Select.Content>
+                <Select.Item value="__user">→ You</Select.Item>
+                {gezels.map((g) => (
+                  <Select.Item key={g.id} value={g.id}>
+                    → {g.name}
+                    {g.role ? ` (${g.role})` : ''}
+                  </Select.Item>
+                ))}
+              </Select.Content>
+            </Select.Root>
+          )}
           {!standalone && <PromoteToTabButton target={{ kind: 'task', ref: task.ref }} />}
         </div>
       </header>
@@ -587,11 +617,11 @@ export function TaskDetail({
           selectedStepId={selectedStepId}
           onSelect={handleSelectStep}
           onAddStep={() => setAddStepOpen(true)}
-          busy={busy}
+          busy={busy || isSystemJob}
           gezels={gezels}
           taskStatus={task.status}
           onAssign={(stepId, assignee) => void updateStep(stepId, { assignee })}
-          {...(task.assignee ? { taskAssignee: task.assignee } : {})}
+          taskAssignee={systemOwnerId ? { kind: 'gezel', gezelId: systemOwnerId } : task.assignee}
         />
       </div>
 
@@ -600,7 +630,7 @@ export function TaskDetail({
           task={task}
           stepId={selectedStepId}
           gezels={gezels}
-          busy={busy}
+          busy={busy || isSystemJob}
           gateRejection={gateRejection}
           onActivate={activateStep}
           onComplete={completeStep}

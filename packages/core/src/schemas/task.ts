@@ -339,12 +339,25 @@ export const TaskSchema = z.object({
    * `TaskManager.create` extras.
    */
   origin: z
-    .object({
-      kind: z.literal('project-type-schedule'),
-      typeId: z.string(),
-      /** Schedule identity within the type — craftbook id, `#N`-suffixed on repeats. */
-      scheduleKey: z.string(),
-    })
+    .discriminatedUnion('kind', [
+      z.object({
+        kind: z.literal('project-type-schedule'),
+        typeId: z.string(),
+        /** Schedule identity within the type — craftbook id, `#N`-suffixed on repeats. */
+        scheduleKey: z.string(),
+      }),
+      z.object({
+        /**
+         * A durable control surface for work executed by the service
+         * itself. `managedByGezelId` is presentation/provenance only:
+         * the user assignee remains in place so TaskRunner never opens
+         * a duplicate model session for the system loop.
+         */
+        kind: z.literal('system-job'),
+        jobId: z.string(),
+        managedByGezelId: z.string().optional(),
+      }),
+    ])
     .optional(),
   cron: TaskCronSchema.optional(),
   nightShift: TaskNightShiftSchema.optional(),

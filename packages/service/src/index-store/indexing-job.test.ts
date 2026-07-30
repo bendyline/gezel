@@ -15,6 +15,12 @@ beforeEach(async () => {
   store = new Store({ home });
   await store.ensureLayout();
   await store.ensureDefaultProject();
+  const boekwachter = await store.createGezel({
+    name: 'Noor',
+    role: 'Boekwachter',
+    about: 'You keep the index concise.',
+  });
+  await store.writeConfig({ boekwachterGezelId: boekwachter.id });
   tasks = new TaskManager(store);
 });
 
@@ -31,6 +37,11 @@ describe('indexing job task', () => {
     expect(jobs).toHaveLength(1);
     expect(jobs[0]?.assignee).toEqual({ kind: 'user' });
     expect(jobs[0]?.status).toBe('active');
+    expect(jobs[0]?.origin).toEqual({
+      kind: 'system-job',
+      jobId: 'boekwachter-indexing',
+      managedByGezelId: 'noor',
+    });
   });
 
   it('pausing the task pauses the loops via IndexingJobControl', async () => {
@@ -55,6 +66,22 @@ describe('indexing job task', () => {
     expect(await control.isPaused()).toBe(false);
   });
 
+  it('cannot be reassigned or closed like a model-dispatched task', async () => {
+    await ensureIndexingJobTask(store, tasks);
+    const job = (await store.listProjectTasks('default')).find(
+      (task) => task.title === INDEXING_JOB_TITLE,
+    )!;
+
+    await expect(
+      tasks.update('default', job.num, {
+        assignee: { kind: 'gezel', gezelId: 'noor' },
+      }),
+    ).rejects.toThrow(/system jobs.*cannot be reassigned/i);
+    await expect(tasks.setStatus('default', job.num, 'complete')).rejects.toThrow(
+      /only be active or paused/i,
+    );
+  });
+
   it('note() appends a visible progress note to the job task', async () => {
     await ensureIndexingJobTask(store, tasks);
     const control = new IndexingJobControl(store, tasks);
@@ -65,6 +92,6 @@ describe('indexing job task', () => {
     const notes = await tasks.listNotes('default', job.num);
     expect(notes).toHaveLength(1);
     expect(notes[0]?.text).toContain('2 generated');
-    expect(notes[0]?.author).toMatchObject({ kind: 'gezel', name: 'Boekwachter' });
+    expect(notes[0]?.author).toMatchObject({ kind: 'gezel', gezelId: 'noor', name: 'Noor' });
   });
 });

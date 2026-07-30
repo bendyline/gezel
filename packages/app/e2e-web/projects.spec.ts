@@ -45,9 +45,11 @@ test.describe('projects IDE', () => {
     await page.evaluate(() => {
       document.documentElement.dataset.sidebarSide = 'right';
     });
-    const unfocusedProjectBorder = await activeProjectRow.evaluate(
-      (row) => getComputedStyle(row).borderTopColor,
-    );
+    const unfocusedProject = await activeProjectRow.evaluate((row) => {
+      const style = getComputedStyle(row);
+      return { borderTopColor: style.borderTopColor, boxShadow: style.boxShadow };
+    });
+    expect(unfocusedProject.boxShadow).toBe('none');
 
     const activeProjectButton = activeProjectRow.locator(':scope > .app-sidebar-item.active');
     await page.keyboard.press('Tab');
@@ -66,12 +68,14 @@ test.describe('projects IDE', () => {
       return {
         openEdgeColor,
         borderTopColor: rowStyle.borderTopColor,
+        rowShadow: rowStyle.boxShadow,
         buttonShadow: button ? getComputedStyle(button).boxShadow : null,
       };
     });
+    expect(activeProjectFocus.rowShadow).toBe('none');
     expect(activeProjectFocus.buttonShadow).toBe('none');
     expect(activeProjectFocus.openEdgeColor).toBe('rgba(0, 0, 0, 0)');
-    expect(activeProjectFocus.borderTopColor).not.toBe(unfocusedProjectBorder);
+    expect(activeProjectFocus.borderTopColor).not.toBe(unfocusedProject.borderTopColor);
 
     await setTheme(page, 'dark');
     await shot(page, 'ide-chat', {

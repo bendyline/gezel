@@ -865,6 +865,12 @@ export class TaskManager {
     return tasks.filter((t) => {
       if (filter.status && t.status !== filter.status) return false;
       if (filter.assigneeGezelId) {
+        if (
+          t.origin?.kind === 'system-job' &&
+          t.origin.managedByGezelId === filter.assigneeGezelId
+        ) {
+          return true;
+        }
         if (t.assignee.kind !== 'gezel') return false;
         if (t.assignee.gezelId !== filter.assigneeGezelId) return false;
       }
@@ -874,6 +880,11 @@ export class TaskManager {
 
   async update(projectId: string, num: number, patch: UpdateTaskRequest): Promise<Task> {
     const task = await this.requireTask(projectId, num);
+    if (task.origin?.kind === 'system-job' && patch.assignee !== undefined) {
+      throw new Error(
+        `task ${task.ref}: system jobs are managed by their designated gezel and cannot be reassigned`,
+      );
+    }
     const changed: string[] = [];
     const next: Task = { ...task, updatedAt: nowIso() };
     if (patch.title !== undefined && patch.title !== task.title) {
@@ -999,6 +1010,9 @@ export class TaskManager {
 
   async setStatus(projectId: string, num: number, status: TaskStatus): Promise<Task> {
     const task = await this.requireTask(projectId, num);
+    if (task.origin?.kind === 'system-job' && status !== 'active' && status !== 'paused') {
+      throw new Error(`task ${task.ref}: system jobs can only be active or paused`);
+    }
     // A draft is an authoring state, not a workflow transition: it is
     // either ACTIVATED (use `activate`, which kicks off the entry step) or
     // CANCELED. Nothing else may leave draft, and nothing may move back to it.

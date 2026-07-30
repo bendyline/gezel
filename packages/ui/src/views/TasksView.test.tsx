@@ -50,6 +50,7 @@ const { api } = await import('../api.js');
 const PROJECTS: Project[] = [{ id: 'pj-alpha', name: 'Alpha' } as Project];
 const GEZELS: GezelSummary[] = [
   { id: 'gz-maya', name: 'Maya', role: 'Researcher' } as GezelSummary,
+  { id: 'noor', name: 'Noor', role: 'Boekwachter' } as GezelSummary,
 ];
 
 function makeTask(overrides: Partial<Task> = {}): Task {
@@ -119,6 +120,28 @@ describe('TasksView', () => {
     await waitFor(() => {
       expect(screen.queryByText(/Click a task to view it here\./)).not.toBeInTheDocument();
     });
+  });
+
+  it('labels service-run indexing with the managing Boekwachter, not the user', async () => {
+    vi.mocked(api.listTasks).mockResolvedValue({
+      tasks: [
+        makeTask({
+          title: 'Boekwachter: workspace indexing & enrichment',
+          assignee: { kind: 'user' },
+          origin: {
+            kind: 'system-job',
+            jobId: 'boekwachter-indexing',
+            managedByGezelId: 'noor',
+          },
+        }),
+      ],
+    } as never);
+    render(<TasksView />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Noor · system')).toBeInTheDocument();
+    });
+    expect(screen.queryByText('You')).not.toBeInTheDocument();
   });
 
   it('clicking a task selects it and mounts TaskTabContent in the right pane', async () => {

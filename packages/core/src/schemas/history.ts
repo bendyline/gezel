@@ -94,6 +94,7 @@ export const HistoryEventKindSchema = z.enum([
   'tool.gated',
   'meester.changed',
   'klerk.changed',
+  'boekwachter.changed',
   'keurmeester.changed',
   /**
    * A third-party app completed a chat turn through the public

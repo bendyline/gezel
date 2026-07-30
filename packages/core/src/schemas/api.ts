@@ -564,6 +564,14 @@ export const GezelConfigSchema = z.object({
    */
   klerkGezelId: z.string().optional(),
   /**
+   * The gezel currently designated as "boekwachter" — the workshop's
+   * index-keeper. This is the preferred worker when a project includes
+   * them in its `gezelIds` roster. A project without any Boekwachter on
+   * that roster keeps structural indexing, but opts out of AI summaries,
+   * reviews, rollups, and digests.
+   */
+  boekwachterGezelId: z.string().optional(),
+  /**
    * The gezel currently designated as "keurmeester" — the quality
    * inspector summoned when a small/local model's recovery machinery
    * gives up. Runs on a frontier provider (see `config.keurmeester`).

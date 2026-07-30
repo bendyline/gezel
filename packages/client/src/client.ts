@@ -841,6 +841,7 @@ export interface ConfigResponse {
   };
   meesterGezelId?: string;
   klerkGezelId?: string;
+  boekwachterGezelId?: string;
   keurmeesterGezelId?: string;
   /** Keurmeester supervision — see `GezelConfigSchema.keurmeester` in core. */
   keurmeester?: {
@@ -1802,6 +1803,18 @@ export class GezelClient {
     config: ConfigResponse;
   }> {
     return this.request('POST', '/api/config/klerk', body);
+  }
+
+  /**
+   * Create a brand-new canonical Boekwachter gezel and make them the
+   * install-wide index-keeper. Project memberships transfer from the
+   * previous designation.
+   */
+  createNewBoekwachter(body: { name?: string } = {}): Promise<{
+    gezel: GezelResponse;
+    config: ConfigResponse;
+  }> {
+    return this.request('POST', '/api/config/boekwachter', body);
   }
 
   /**
