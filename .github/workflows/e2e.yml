@@ -28,16 +28,10 @@ jobs:
         surface: [browser, electron]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: pnpm/action-setup@008330803749db0355799c700092d9a85fd074e9 # v6.0.9
-        with:
-          version: ${{ env.PNPM_VERSION }}
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: ./.github/actions/setup-workspace
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: pnpm
-      - name: Reject local workspace links
-        run: pnpm check:local-links
-      - run: pnpm install --frozen-lockfile
+          pnpm-version: ${{ env.PNPM_VERSION }}
       - run: pnpm build
       - name: Install Chromium
         if: matrix.surface == 'browser'

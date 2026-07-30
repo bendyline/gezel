@@ -1,0 +1,121 @@
+name: 'Set up pnpm workspace'
+description: >-
+  Installs pnpm and Node, restores the pnpm store from the Actions cache with a
+  prefix fallback, installs dependencies with retries, and banks the store even
+  when the install fails.
+
+inputs:
+  node-version:
+    description: 'Node.js version passed to actions/setup-node.'
+    required: true
+  pnpm-version:
+    description: 'pnpm version passed to pnpm/action-setup.'
+    required: true
+  registry-url:
+    description: >-
+      Registry to configure in .npmrc. Only needed for publishing jobs — the
+      npm OIDC token exchange fires only when the resolved registry is exactly
+      registry.npmjs.org.
+    required: false
+    default: ''
+  check-local-links:
+    description: >-
+      Run pnpm check:local-links before installing, so a committed link:
+      override fails with a clear message instead of a confusing install.
+    required: false
+    default: 'true'
+
+outputs:
+  cache-hit:
+    description: 'True when the pnpm store was restored from an exact lockfile match.'
+    value: ${{ steps.restore.outputs.cache-hit }}
+
+runs:
+  using: composite
+  steps:
+    - uses: pnpm/action-setup@008330803749db0355799c700092d9a85fd074e9 # v6.0.9
+      with:
+        version: ${{ inputs.pnpm-version }}
+
+    # Deliberately no `cache:` input. setup-node's pnpm caching is exact-key
+    # only — its restore-keys fallback is gated behind an isManagedByYarnBerry
+    # branch — and its save step is `post-if: success()`, so a failed install
+    # banks nothing. A Windows release build hit exactly that doom loop: cold
+    # store, 1436 of 1441 packages downloaded, pnpm fetch timeout, every byte
+    # discarded because the post step never ran. The restore/save pair below
+    # gets both a prefix fallback and a save that survives failure.
+    - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      with:
+        node-version: ${{ inputs.node-version }}
+        registry-url: ${{ inputs.registry-url }}
+
+    # Resolved, never hardcoded: on Windows pnpm relocates the store onto the
+    # workspace drive when LOCALAPPDATA sits on a different one, and the runner
+    # checks out to D: while LOCALAPPDATA is on C:.
+    - name: Resolve pnpm store path
+      id: store
+      shell: bash
+      run: |
+        set -euo pipefail
+        echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+    - name: Restore pnpm store
+      id: restore
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.store.outputs.path }}
+        key: pnpm-store-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pnpm-lock.yaml') }}
+        restore-keys: pnpm-store-${{ runner.os }}-${{ runner.arch }}-
+
+    - name: Reject local workspace links
+      if: inputs.check-local-links == 'true'
+      shell: bash
+      run: pnpm check:local-links
+
+    # Retries in-process because the pnpm store persists on the runner between
+    # attempts: whatever the first attempt downloaded before timing out is
+    # already on disk, so a retry pays only for the remainder. This step never
+    # exits non-zero — it records the outcome and lets the save steps run, then
+    # the gate below fails the job. Plain expression conditions only; status
+    # functions inside composite actions are a sharper edge than they look.
+    - name: Install dependencies
+      id: install
+      shell: bash
+      run: |
+        set -uo pipefail
+        for attempt in 1 2 3; do
+          if pnpm install --frozen-lockfile; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$attempt" -lt 3 ]; then
+            echo "::warning::pnpm install attempt ${attempt} failed; retrying against the warm store"
+            sleep $((attempt * 20))
+          fi
+        done
+        echo "ok=false" >> "$GITHUB_OUTPUT"
+
+    - name: Save pnpm store
+      if: steps.install.outputs.ok == 'true' && steps.restore.outputs.cache-hit != 'true'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.store.outputs.path }}
+        key: ${{ steps.restore.outputs.cache-primary-key }}
+
+    # The failure path banks the partial store so the next run starts warm.
+    # Under its own key, not the primary one: an exact hit on a half-populated
+    # store would stop every later run from ever saving the complete one for
+    # this lockfile.
+    - name: Save partial pnpm store
+      if: steps.install.outputs.ok != 'true'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.store.outputs.path }}
+        key: ${{ steps.restore.outputs.cache-primary-key }}-partial-${{ github.run_id }}-${{ github.run_attempt }}
+
+    - name: Fail when dependencies did not install
+      if: steps.install.outputs.ok != 'true'
+      shell: bash
+      run: |
+        echo "::error::pnpm install failed after 3 attempts"
+        exit 1

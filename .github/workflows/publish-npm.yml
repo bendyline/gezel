@@ -73,17 +73,10 @@ jobs:
       - name: Require immutable full-length action pins
         run: node scripts/check-workflow-action-pins.mjs
 
-      - uses: pnpm/action-setup@008330803749db0355799c700092d9a85fd074e9 # v6.0.9
-        with:
-          version: ${{ env.PNPM_VERSION }}
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: ./.github/actions/setup-workspace
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: pnpm
-
-      - name: Reject local workspace links
-        run: pnpm check:local-links
-      - run: pnpm install --frozen-lockfile
+          pnpm-version: ${{ env.PNPM_VERSION }}
 
       - name: Check release toolchain
         run: pnpm check:release-toolchain
@@ -131,18 +124,14 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: pnpm/action-setup@008330803749db0355799c700092d9a85fd074e9 # v6.0.9
-        with:
-          version: ${{ env.PNPM_VERSION }}
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: ./.github/actions/setup-workspace
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: pnpm
+          pnpm-version: ${{ env.PNPM_VERSION }}
+          check-local-links: 'false'
           # Required for the OIDC token exchange — it only fires when the
           # resolved registry is exactly registry.npmjs.org.
           registry-url: 'https://registry.npmjs.org'
-
-      - run: pnpm install --frozen-lockfile
 
       # The tarballs must contain built output. `verify` ran in a different
       # job on a clean runner, so build again here rather than shipping
