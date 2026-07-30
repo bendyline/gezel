@@ -57,7 +57,7 @@ describe('GezellenView', () => {
     vi.mocked(api.generateGezelAbout).mockResolvedValue({} as never);
   });
 
-  it('lists gezels and auto-selects the first one in the detail pane', async () => {
+  it('lists gezellen and auto-selects the first one in the detail pane', async () => {
     render(<GezellenView />);
     await waitFor(() => {
       expect(screen.getByText('Maya')).toBeInTheDocument();
@@ -94,7 +94,7 @@ describe('GezellenView', () => {
     expect(screen.getByRole('button', { name: 'Actions for Bob' })).toBeInTheDocument();
   });
 
-  it('shows the empty placeholder when no gezels exist', async () => {
+  it('shows the empty placeholder when no gezellen exist', async () => {
     vi.mocked(api.listGezels).mockResolvedValue({ gezels: [] } as never);
     render(<GezellenView />);
     await waitFor(() => {

@@ -1608,7 +1608,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                           </label>
 
                           <label className="config-label" style={{ marginTop: '0.75rem' }}>
-                            Allow gezels to modify the workspace directory
+                            Allow gezellen to modify the workspace directory
                             <div className="new-row" style={{ alignItems: 'center' }}>
                               <input
                                 type="checkbox"
@@ -1628,8 +1628,8 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                               />
                               <span className="muted small">
                                 {selected.workingDir
-                                  ? 'Off by default for external dirs. Turn on only if you trust gezels to edit files at this path.'
-                                  : 'Internal workspace — on by default. Turn off to make this project read-only for gezels.'}
+                                  ? 'Off by default for external dirs. Turn on only if you trust gezellen to edit files at this path.'
+                                  : 'Internal workspace — on by default. Turn off to make this project read-only for gezellen.'}
                               </span>
                             </div>
                           </label>
@@ -2052,7 +2052,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                                 ? selected.workingDir
                                   ? 'Workspace directory is empty.'
                                   : 'No external working directory set. Use the internal workspace or set an external path under the Settings tab.'
-                                : 'No artifacts yet. Your gezels will store reports and outputs here.'}
+                                : 'No artifacts yet. Your gezellen will store reports and outputs here.'}
                             </p>
                           )}
                           <FileTree

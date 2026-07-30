@@ -6,7 +6,7 @@ import type { RecentTabInput } from './recent-tabs.js';
 /** Fixed display order + labels for the result groups in the palette. */
 const GROUP_ORDER: Array<{ kind: UnifiedSearchResultKind; label: string }> = [
   { kind: 'project', label: 'Projects' },
-  { kind: 'gezel', label: 'Gezels' },
+  { kind: 'gezel', label: 'Gezellen' },
   { kind: 'file', label: 'Files' },
   { kind: 'document', label: 'Documents' },
   { kind: 'content', label: 'Content' },

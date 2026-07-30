@@ -90,7 +90,7 @@ const EMAIL_PROVIDERS: { id: EmailProviderId; label: string }[] = [
 function emailProjectCopy(address: string): { about: string; mission: string } {
   const who = address || 'this mailbox';
   return {
-    about: `Email workspace for ${who}. Messages are synced here as searchable markdown files so gezels can triage the inbox, answer questions over your mail, and draft replies for your review.`,
+    about: `Email workspace for ${who}. Messages are synced here as searchable markdown files so gezellen can triage the inbox, answer questions over your mail, and draft replies for your review.`,
     mission: `Keep ${who} triaged and responsive: surface threads needing a reply, draft responses for approval, and never send without explicit consent.`,
   };
 }

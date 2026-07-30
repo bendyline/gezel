@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockApi } from '../test-utils/mockApi.js';
 import { primitivesMock } from '../test-utils/primitivesMock.js';
 
@@ -188,6 +188,90 @@ describe('HomeView', () => {
       expect(
         screen.queryByText(/Gezel updated, but its background service did not/),
       ).not.toBeInTheDocument();
+    });
+  });
+
+  describe('update banner', () => {
+    function stubUpdateBridge(state: unknown, install = vi.fn().mockResolvedValue({ ok: true })) {
+      const bridge = {
+        state: vi.fn().mockResolvedValue(state),
+        install,
+        onStateChanged: vi.fn(),
+      };
+      (window as unknown as { __GEZEL__: Record<string, unknown> }).__GEZEL__ = {
+        ...(window as unknown as { __GEZEL__: Record<string, unknown> }).__GEZEL__,
+        update: bridge,
+      };
+      return bridge;
+    }
+
+    afterEach(() => {
+      const g = window as unknown as { __GEZEL__: Record<string, unknown> };
+      g.__GEZEL__ = { ...g.__GEZEL__, update: undefined };
+    });
+
+    it('says nothing while there is no update', async () => {
+      stubUpdateBridge(null);
+      render(<HomeView />);
+      await screen.findByTestId('home-workshop');
+      expect(screen.queryByRole('button', { name: /install now/i })).not.toBeInTheDocument();
+    });
+
+    // A download in flight is not actionable, so it stays out of the way.
+    it('stays quiet while downloading', async () => {
+      stubUpdateBridge({ kind: 'downloading', version: '1.26212.4' });
+      render(<HomeView />);
+      await screen.findByTestId('home-workshop');
+      expect(screen.queryByRole('button', { name: /install now/i })).not.toBeInTheDocument();
+    });
+
+    // Assert on the banner's whole text rather than per-string queries: the
+    // headline interpolates the version, so React splits it across text nodes
+    // and getByText's element-level matching does not see it as one sentence.
+    it('warns that macOS will ask for an administrator password', async () => {
+      stubUpdateBridge({ kind: 'ready', version: '1.26212.4' });
+      render(<HomeView platform="darwin" />);
+
+      const banner = await screen.findByTestId('update-banner');
+      expect(banner).toHaveTextContent('Gezel 1.26212.4 is ready to install.');
+      expect(banner).toHaveTextContent('ask for an administrator password');
+    });
+
+    it('tells Windows and Linux users the app restarts instead', async () => {
+      stubUpdateBridge({ kind: 'ready', version: '1.26212.4' });
+      render(<HomeView platform="win32" />);
+
+      const banner = await screen.findByTestId('update-banner');
+      expect(banner).toHaveTextContent('Gezel will restart to finish installing.');
+      expect(banner).not.toHaveTextContent('administrator password');
+    });
+
+    it('hands the install to the shell when asked', async () => {
+      const install = vi.fn().mockResolvedValue({ ok: true });
+      stubUpdateBridge({ kind: 'ready', version: '1.26212.4' }, install);
+      render(<HomeView platform="darwin" />);
+
+      fireEvent.click(await screen.findByRole('button', { name: /install now/i }));
+      await waitFor(() => expect(install).toHaveBeenCalledTimes(1));
+    });
+
+    // The whole point of this banner: a failed update used to reach the user
+    // as nothing at all, just a console.warn in a window they never open.
+    it('offers a manual download when the update could not be installed', async () => {
+      stubUpdateBridge({
+        kind: 'error',
+        version: '1.26212.4',
+        message: 'Gatekeeper rejected the package',
+      });
+      render(<HomeView platform="darwin" />);
+
+      const banner = await screen.findByTestId('update-banner');
+      expect(banner).toHaveTextContent('Gezel could not install an update.');
+      expect(banner).toHaveTextContent('Gatekeeper rejected the package');
+      expect(screen.getByRole('link', { name: /get the latest release/i })).toHaveAttribute(
+        'href',
+        'https://github.com/bendyline/gezel/releases/latest',
+      );
     });
   });
 

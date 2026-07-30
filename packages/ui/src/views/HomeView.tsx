@@ -3,6 +3,7 @@ import { displayName, securityPolicyForLevel } from '@bendyline/gezel';
 import type { ProviderName } from '@bendyline/gezel';
 import type { ConfigResponse } from '@bendyline/gezel-client';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type { UpdateState } from '../api.js';
 import { api } from '../api.js';
 import gezelLogotypeUrl from '../assets/gezellogotype.png';
 import { FirstRunInstallBanner } from '../components/FirstRunInstallBanner.js';
@@ -318,22 +319,35 @@ export function HomeView({
     void runProbe(provider);
   }, [runProbe, provider]);
 
+  const updateState = useUpdateState();
+
   // Built once and rendered by whichever branch below wins. It used to live
   // only in the un-configured setup markup, which meant no configured user
   // ever saw a degraded-service notice — the workshop branch returns before
   // that JSX is reached.
-  const banner = fallbackReason ? (
-    <FallbackBanner reason={fallbackReason} code={fallbackCode} platform={platform} />
-  ) : null;
+  const banner = (
+    <>
+      {fallbackReason ? (
+        <FallbackBanner reason={fallbackReason} code={fallbackCode} platform={platform} />
+      ) : null}
+      <UpdateBanner state={updateState} platform={platform} />
+    </>
+  );
 
   // Hold the loading splash until the verdict has actually settled — never
   // guess first-run-vs-workshop while config is still loading or the probe is
   // mid-flight. This is what keeps "First run setup" from flashing past on a
   // slow cold boot before the probe confirms a model is already installed.
   if (!config || configured === null) {
+    // Deliberately no banner here. This branch lives for a few hundred
+    // milliseconds at boot, and rendering the banner in it only to hand the
+    // same element to a different parent a moment later tears the node down
+    // and rebuilds it — the banner visibly flickers, and a click landing in
+    // that window hits a detached button and is swallowed. Nothing is lost:
+    // the settled branches below render it as soon as there is a screen worth
+    // putting it on.
     return (
       <div className="home-view home-view-loading">
-        {banner}
         <IntroSection
           collapsed={false}
           onToggle={() => {}}
@@ -445,7 +459,7 @@ export function HomeView({
         <section className="setup-section">
           <h3>Experience</h3>
           <p className="muted" style={{ marginTop: 0 }}>
-            Tune how your gezels present themselves. Adjustable any time in Settings.
+            Tune how your gezellen present themselves. Adjustable any time in Settings.
           </p>
           <label className="debug-toggle">
             <input
@@ -489,6 +503,108 @@ export function HomeView({
 }
 
 // ─────────────────────────────────────────────────────────────────
+/**
+ * Subscribe to the Electron shell's update status.
+ *
+ * Lives in HomeView rather than inside the banner because the banner is
+ * rendered from a `banner` element that HomeView hands to a *different*
+ * parent depending on which branch wins (loading splash, workshop, or first-
+ * run setup). Moving between parents unmounts and remounts it, so state held
+ * inside the banner was lost — and refetched — every time the app settled
+ * from loading into the workshop, which made the banner flicker on startup.
+ * HomeView itself never unmounts across those transitions.
+ */
+function useUpdateState(): UpdateState | null {
+  const [state, setState] = useState<UpdateState | null>(null);
+  useEffect(() => {
+    const bridge = window.__GEZEL__?.update;
+    if (!bridge) return;
+    let live = true;
+    void bridge.state().then((s) => {
+      if (live) setState(s);
+    });
+    bridge.onStateChanged((s) => {
+      if (live) setState(s);
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
+  return state;
+}
+
+/**
+ * App-update status. Exists because every update outcome used to go only to
+ * the Electron console: a user whose update could not be applied — the normal
+ * case for a standard macOS account, where the app bundle is root-owned and
+ * nothing in the update path can elevate — had no way to learn that.
+ *
+ * On macOS "Install" opens a verified PKG so Installer.app can authenticate;
+ * elsewhere it defers to electron-updater's own elevating handoff.
+ */
+function UpdateBanner({ state, platform }: { state: UpdateState | null; platform?: string }) {
+  const [installing, setInstalling] = useState(false);
+  const [installError, setInstallError] = useState<string | null>(null);
+
+  if (!state || state.kind === 'downloading') return null;
+
+  if (state.kind === 'error') {
+    return (
+      <output className="app-fallback-banner" data-testid="update-banner">
+        <strong>Gezel could not install an update.</strong>
+        <span>
+          You can keep working. Download the latest version and run the installer to update
+          manually.{' '}
+          <a href="https://github.com/bendyline/gezel/releases/latest" rel="noreferrer">
+            Get the latest release
+          </a>
+        </span>
+        <details>
+          <summary>Technical details</summary>
+          <p>{state.message}</p>
+        </details>
+      </output>
+    );
+  }
+
+  return (
+    <output className="app-fallback-banner" data-testid="update-banner">
+      <strong>Gezel {state.version} is ready to install.</strong>
+      <span>
+        {platform === 'darwin'
+          ? 'Installing replaces Gezel and its background service together, so macOS will ask for an administrator password.'
+          : 'Gezel will restart to finish installing.'}
+      </span>
+      <div className="app-fallback-banner-actions">
+        <button
+          type="button"
+          className="primary"
+          disabled={installing}
+          onClick={() => {
+            setInstalling(true);
+            setInstallError(null);
+            void window.__GEZEL__?.update?.install().then((r) => {
+              if (!r.ok) {
+                setInstallError(r.error);
+                setInstalling(false);
+              }
+            });
+          }}
+        >
+          {installing ? 'Opening installer…' : 'Install now'}
+        </button>
+      </div>
+      {installError && (
+        <details open>
+          <summary>Could not open the installer</summary>
+          <p>{installError}</p>
+        </details>
+      )}
+    </output>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────
 // How to reinstall, per platform. The version-mismatch banner is the one
 // place we ask the user to rerun the installer, and "rerun the installer"
 // means a different artifact on each OS.
@@ -517,10 +633,10 @@ function FallbackBanner({
       <output className="app-fallback-banner">
         <strong>Gezel updated, but its background service did not.</strong>
         <span>
-          Everything still works and none of your gezels, projects, or chats are affected — but the
-          app and the service are on different versions, so newer features may misbehave until they
-          match. The service is installed for the whole machine, so only the installer can replace
-          it.
+          Everything still works and none of your gezellen, projects, or chats are affected — but
+          the app and the service are on different versions, so newer features may misbehave until
+          they match. The service is installed for the whole machine, so only the installer can
+          replace it.
           {platform && REINSTALL_HINT[platform] ? ` ${REINSTALL_HINT[platform]}` : ''}
         </span>
         <details>
@@ -574,7 +690,7 @@ function SecurityLevelSection({
     <section className={`setup-section${level ? ` engagement-mode-${level}` : ''}`}>
       <h3>Security &amp; compliance</h3>
       <p className="muted" style={{ marginTop: 0 }}>
-        How much should gezels be allowed to do? Pick a starting posture — you can fine-tune every
+        How much should gezellen be allowed to do? Pick a starting posture — you can fine-tune every
         capability later in Settings → Security &amp; Compliance.
       </p>
       <div

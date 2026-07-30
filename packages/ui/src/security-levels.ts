@@ -32,6 +32,6 @@ export const SECURITY_LEVEL_PRESETS: ReadonlyArray<SecurityLevelPreset> = [
     id: 'free',
     label: 'Unrestricted',
     description:
-      'Everything: internet research, the full toolset gallery, cloud providers, scripts, and file edits. The most capable posture — choose it when you trust the work and the gezels.',
+      'Everything: internet research, the full toolset gallery, cloud providers, scripts, and file edits. The most capable posture — choose it when you trust the work and the gezellen.',
   },
 ];

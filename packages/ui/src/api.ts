@@ -2,6 +2,15 @@ import type { GezmodelEngine, GezmodelImportReview } from '@bendyline/gezel';
 import { GezelClient } from '@bendyline/gezel-client';
 
 /**
+ * Where an app update has got to. Mirrors the union the Electron main process
+ * pushes over `gezel:update-state`.
+ */
+export type UpdateState =
+  | { kind: 'downloading'; version: string }
+  | { kind: 'ready'; version: string }
+  | { kind: 'error'; version?: string; message: string };
+
+/**
  * Build a client against the daemon that served this HTML. When the Electron
  * shell hosts us, it injects a preload variable with the token; otherwise we
  * fall back to a `?token=` query-string parameter (handy for local dev).
@@ -63,6 +72,17 @@ declare global {
         status(): Promise<{ ok: true; installed: boolean } | { ok: false; error: string }>;
         install(): Promise<{ ok: true } | { ok: false; error: string }>;
         uninstall(): Promise<{ ok: true } | { ok: false; error: string }>;
+      };
+      /**
+       * App update status from the Electron shell. On macOS `install` opens a
+       * downloaded, signature- and notarization-verified PKG so Installer.app
+       * can authenticate the user — Squirrel's in-place ZIP swap cannot
+       * elevate, and cannot refresh the machine service's own files.
+       */
+      update?: {
+        state(): Promise<UpdateState | null>;
+        install(): Promise<{ ok: true } | { ok: false; error: string }>;
+        onStateChanged(callback: (state: UpdateState) => void): void;
       };
       /**
        * Open the service's `~/.gezel/logs/` folder in the OS file

@@ -28,7 +28,7 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   write_document: 'Write document',
   delete_document: 'Delete document',
   // Team management
-  list_gezels: 'List gezels',
+  list_gezels: 'List gezellen',
   create_gezel: 'Create gezel',
   list_gilde: 'List gezel templates',
   create_gezel_from_gilde: 'Create gezel from template',

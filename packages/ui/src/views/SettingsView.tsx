@@ -466,7 +466,7 @@ export function SettingsView() {
   const resetTemplatesNow = useCallback(async () => {
     if (
       !window.confirm(
-        'Reset all template-based gezels back to their default instructions? Any edits you have made to their About section will be lost.',
+        'Reset all template-based gezellen back to their default instructions? Any edits you have made to their About section will be lost.',
       )
     ) {
       return;
@@ -1415,8 +1415,8 @@ export function SettingsView() {
             <section style={{ marginBottom: '2rem' }}>
               <h3>Meester</h3>
               <p className="muted" style={{ marginTop: 0 }}>
-                The Meester is your team concierge — they help you decide which gezels you need and
-                can spin them up through their MCP tools. Change which gezel wears the hat here;
+                The Meester is your team concierge — they help you decide which gezellen you need
+                and can spin them up through their MCP tools. Change which gezel wears the hat here;
                 their prompt is untouched when you do.
               </p>
               <div className="meester-picker">
@@ -1506,7 +1506,7 @@ export function SettingsView() {
                     </div>
                     <p className="muted small" style={{ margin: '0.35rem 0 0 0' }}>
                       A brand-new gezel will be spun up with the curated Meester prompt and set as
-                      your active guide. You can rename or tune them later in the Gezels tab.
+                      your active guide. You can rename or tune them later in the Gezellen tab.
                     </p>
                   </form>
                 )}
@@ -1517,7 +1517,7 @@ export function SettingsView() {
               <p className="muted" style={{ marginTop: 0 }}>
                 The Klerk is your workshop scribe — they handle utility text work (about.md drafts,
                 rewrites, end-of-session summaries, memory consolidation) so you can route grunt
-                tasks to a different model than your conversational gezels. Their{' '}
+                tasks to a different model than your conversational gezellen. Their{' '}
                 <code>provider</code> and <code>model</code> overrides on the gezel itself decide
                 what runs.
               </p>
@@ -1608,7 +1608,7 @@ export function SettingsView() {
                     </div>
                     <p className="muted small" style={{ margin: '0.35rem 0 0 0' }}>
                       A fresh gezel will be spun up with the curated Klerk prompt and set as your
-                      active scribe. Tune their model in the Gezels tab to point utility work at
+                      active scribe. Tune their model in the Gezellen tab to point utility work at
                       Sonnet, a local model, or whatever fits.
                     </p>
                   </form>
@@ -1853,8 +1853,8 @@ export function SettingsView() {
             <section style={{ marginBottom: '2rem' }}>
               <h3>Default provider</h3>
               <p className="muted" style={{ marginTop: 0 }}>
-                Which AI chat provider handles chat and one-shot generations. Individual gezels can
-                override this in their detail pane.
+                Which AI chat provider handles chat and one-shot generations. Individual gezellen
+                can override this in their detail pane.
               </p>
               <div className="provider-switch">
                 <button
@@ -2322,14 +2322,14 @@ export function SettingsView() {
               <p className="muted small" style={{ marginTop: 0 }}>
                 Copilot turns are capped at a hard wall-clock ceiling — if the ceiling fires before
                 the model signals <code>session.idle</code>, the turn ends with a &ldquo;Turn
-                stopped before finishing&rdquo; banner. Bump this if tool-heavy gezels (long shell
+                stopped before finishing&rdquo; banner. Bump this if tool-heavy gezellen (long shell
                 or Playwright chains) legitimately need longer. Leave blank to use the default (10
                 minutes).
               </p>
               <TimeoutRow
                 label="Hard turn timeout"
                 unit="minutes"
-                help="Total wall-clock cap from when the turn acquires its queue slot to when the model finishes. Default 10m. Raise for tool-heavy gezels that run long chains without streaming reply text between calls."
+                help="Total wall-clock cap from when the turn acquires its queue slot to when the model finishes. Default 10m. Raise for tool-heavy gezellen that run long chains without streaming reply text between calls."
                 value={copilotTurnTimeoutDraft}
                 onChange={setCopilotTurnTimeoutDraft}
                 configValue={config?.copilotTurnTimeoutMin}
@@ -2773,7 +2773,7 @@ export function SettingsView() {
             <p className="muted" style={{ fontSize: '0.85rem', marginTop: '0.25rem' }}>
               Per-gezel override lives in the gezel's frontmatter as{' '}
               <code>claudePermissionMode</code>. <code>acceptEdits</code> is a sensible default for
-              chat-driven gezels; flip <code>bypassPermissions</code> on builders you trust to run
+              chat-driven gezellen; flip <code>bypassPermissions</code> on builders you trust to run
               shell commands without a prompt.
             </p>
 
@@ -2831,7 +2831,7 @@ export function SettingsView() {
             <p className="muted" style={{ fontSize: '0.85rem', marginTop: '0.25rem' }}>
               Each pool slot holds one <code>claude</code> process pinned to a chat session; turn 2+
               of a session skips the cold-start cost. More slots = lower per-turn latency for
-              parallel gezels, more memory (~100–200 MB per warm process). When at cap, the
+              parallel gezellen, more memory (~100–200 MB per warm process). When at cap, the
               least-recently-used non-busy worker is evicted.
             </p>
 
@@ -2973,7 +2973,7 @@ export function SettingsView() {
           <section className="provider-card">
             <h3>Web search</h3>
             <p className="muted" style={{ marginTop: 0 }}>
-              Powers the <code>web_search</code> MCP tool that gezels use to discover URLs. Picks
+              Powers the <code>web_search</code> MCP tool that gezellen use to discover URLs. Picks
               one search backend; configure a key only for the providers you choose.
             </p>
             <div className="new-row" style={{ alignItems: 'center', marginTop: '0.5rem' }}>
@@ -3679,7 +3679,7 @@ const ENGAGEMENT_MODES: {
     id: 'scheduled',
     label: 'Scheduled + Reactive',
     description:
-      'Chat works and scheduled tasks still fire. No proactive nudges and no cross-gezel messaging between gezels.',
+      'Chat works and scheduled tasks still fire. No proactive nudges and no cross-gezel messaging between gezellen.',
   },
   {
     id: 'reactive',

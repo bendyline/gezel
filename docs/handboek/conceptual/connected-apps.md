@@ -7,7 +7,7 @@ summary: Editors and other programs can talk to your crew through standard AI en
 
 # Connected apps
 
-Gezel isn't only a place you visit — it can also serve your models and gezels to *other* programs on your computer. A code editor, a writing tool, or a browser extension that knows how to talk to an AI service can talk to gezel instead, and get your local models with all of gezel's know-how applied.
+Gezel isn't only a place you visit — it can also serve your models and gezellen to *other* programs on your computer. A code editor, a writing tool, or a browser extension that knows how to talk to an AI service can talk to gezel instead, and get your local models with all of gezel's know-how applied.
 
 Everything described here lives in **Settings → Connected Apps**.
 

@@ -548,6 +548,12 @@ html.embedded-chat #root {
   color: var(--text-muted);
 }
 
+.app-fallback-banner-actions {
+  display: flex;
+  gap: 0.4rem;
+  margin-top: 0.4rem;
+}
+
 .app-fallback-banner details {
   margin-top: 0.15rem;
   font-size: 0.78rem;
@@ -3327,9 +3333,7 @@ body.app-resizing webview {
 /* Sidebar rows can contain trailing action triggers. Keep this generic
    full-width treatment off those compact actions and off `.gezel-row`,
    which owns a horizontal portrait/text layout further below. */
-.side
-  li
-  button:not(.project-actions-trigger):not(.gezel-actions-trigger):not(.gezel-row) {
+.side li button:not(.project-actions-trigger):not(.gezel-actions-trigger):not(.gezel-row) {
   display: block;
   width: 100%;
   text-align: left;
@@ -3341,9 +3345,7 @@ body.app-resizing webview {
   cursor: pointer;
 }
 
-.side
-  li
-  button:not(.project-actions-trigger):not(.gezel-actions-trigger):not(.gezel-row).active {
+.side li button:not(.project-actions-trigger):not(.gezel-actions-trigger):not(.gezel-row).active {
   background: rgba(176, 114, 76, 0.15);
 }
 

@@ -237,7 +237,7 @@ describe('SettingsView', () => {
     expect(screen.getByTestId('model-picker-openai')).toBeInTheDocument();
   });
 
-  it('lists gezels for the Meester picker', async () => {
+  it('lists gezellen for the Meester picker', async () => {
     render(<SettingsView />);
     await waitFor(() => {
       expect(api.listGezels).toHaveBeenCalled();

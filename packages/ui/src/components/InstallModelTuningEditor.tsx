@@ -209,7 +209,7 @@ function PresetPicker({
       >
         <strong>Preset</strong>{' '}
         <span className="muted">
-          — applies to every gezel using {modelId}. Individual gezels can override below in their
+          — applies to every gezel using {modelId}. Individual gezellen can override below in their
           detail pane.
         </span>
       </label>

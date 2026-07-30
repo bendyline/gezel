@@ -52,6 +52,17 @@ contextBridge.exposeInMainWorld('__GEZEL__', {
     install: () => ipcRenderer.invoke('gezel:autostart:install'),
     uninstall: () => ipcRenderer.invoke('gezel:autostart:uninstall'),
   },
+  // App updates. `state` is the pull for a freshly-mounted renderer;
+  // `onStateChanged` is the push for transitions while it is open. `install`
+  // opens the verified installer on macOS (Installer.app raises the admin
+  // prompt) and defers to electron-updater elsewhere.
+  update: {
+    state: () => ipcRenderer.invoke('gezel:update:state'),
+    install: () => ipcRenderer.invoke('gezel:update:install'),
+    onStateChanged: (callback) => {
+      ipcRenderer.on('gezel:update-state', (_event, state) => callback(state));
+    },
+  },
   // Open the service's `~/.gezel/logs/` folder in the OS file manager.
   // Used by Settings → General. Returns an error string (empty on
   // success) mirroring Electron's `shell.openPath` convention.

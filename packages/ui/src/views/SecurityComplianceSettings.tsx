@@ -21,7 +21,7 @@ const TOGGLES: ReadonlyArray<{
   {
     key: 'allowFileEdits',
     label: 'Edit files',
-    help: 'Gate the file-adjacent model powers: git tools and shared-document writes from scripts. Workspace file writes are decided per project — internal workspaces stay writable, folders you opened stay read-only until you opt them in via each project\'s "Allow gezels to modify the workspace directory" switch.',
+    help: 'Gate the file-adjacent model powers: git tools and shared-document writes from scripts. Workspace file writes are decided per project — internal workspaces stay writable, folders you opened stay read-only until you opt them in via each project\'s "Allow gezellen to modify the workspace directory" switch.',
   },
   {
     key: 'allowExternalChat',
@@ -31,12 +31,12 @@ const TOGGLES: ReadonlyArray<{
   {
     key: 'allowExternalServices',
     label: 'External services',
-    help: 'Let gezels reach the open web — search, page fetches, and downloading third-party toolsets. Off keeps everything local; manual GitHub pulls and model downloads are unaffected.',
+    help: 'Let gezellen reach the open web — search, page fetches, and downloading third-party toolsets. Off keeps everything local; manual GitHub pulls and model downloads are unaffected.',
   },
   {
     key: 'allowScriptExecution',
     label: 'Execute scripts',
-    help: 'Let gezels run scripts they write and run craftbook script steps. Off still lets the app itself run npm / Node CLIs / MCP servers.',
+    help: 'Let gezellen run scripts they write and run craftbook script steps. Off still lets the app itself run npm / Node CLIs / MCP servers.',
   },
   {
     key: 'allowAppNetwork',
@@ -106,7 +106,7 @@ export function SecurityComplianceSettings({
     <section className={`engagement-mode-panel engagement-mode-${level}`}>
       <h3>Security &amp; Compliance</h3>
       <p className="muted" style={{ marginTop: 0 }}>
-        One control over what gezels are allowed to do — edits, cloud providers, the open web, and
+        One control over what gezellen are allowed to do — edits, cloud providers, the open web, and
         script execution. Slide toward lockdown to make Gezel safe to try; loosen it as you build
         trust. Locked-down work still flows into the artifacts sandbox, so reviews, prototypes, and
         documents keep working.

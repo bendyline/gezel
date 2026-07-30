@@ -135,7 +135,7 @@ describe('ProjectsView', () => {
     expect(screen.getByRole('button', { name: 'Expand project list' })).toBeInTheDocument();
   });
 
-  it('also loads the gezels list (used for assignee pickers)', async () => {
+  it('also loads the gezellen list (used for assignee pickers)', async () => {
     render(<ProjectsView />);
     await waitFor(() => {
       expect(api.listGezels).toHaveBeenCalled();

@@ -83,7 +83,7 @@ export function ProjectCrewRoster({
         </ul>
       ) : (
         <p className="muted small project-crew-empty">
-          No gezels are assigned to this project yet.
+          No gezellen are assigned to this project yet.
         </p>
       )}
     </section>

@@ -414,8 +414,8 @@ export function FirstRunInstallBanner({ config, onConfigChanged, onModelInstalle
         </div>
         <p className="first-run-banner-body">
           Gezel is downloading a local AI model so your conversations run on this device. Usually{' '}
-          {formatDownloadTime(state.sizeBytes)} on fast Internet. You can start working with gezels
-          as soon as this finishes.
+          {formatDownloadTime(state.sizeBytes)} on fast Internet. You can start working with
+          gezellen as soon as this finishes.
         </p>
         <FirstRunProgressBar progress={state.progress} />
       </output>
