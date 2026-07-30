@@ -19,6 +19,7 @@ import type { ChatEventBus } from '../chat/events.js';
 import type { ChatManager } from '../chat/manager.js';
 import { writeFileAtomic } from '../fs/atomic.js';
 import type { Store } from '../fs/store.js';
+import { resolveProjectBoekwachter } from '../gezels/autonomous-roles.js';
 import type { ContentIndex } from '../index-store/content-index.js';
 import { PROJECT_TYPE_MIN_SCORE, detectProjectType } from '../project-type/detect.js';
 import {
@@ -369,11 +370,13 @@ export class WorkspaceIndexManager {
   private async runScan(projectId: string): Promise<void> {
     const workspaceDir = await this.store.projectWorkspaceDir(projectId);
     if (!(await workspaceLooksReal(workspaceDir))) return;
+    const boekwachter = await resolveProjectBoekwachter(this.store, projectId).catch(() => null);
     this.events?.publishGlobalEvent({
       type: 'index_progress',
       phase: 'scan',
       state: 'started',
       projectId,
+      ...(boekwachter ? { gezelId: boekwachter.id, gezelName: boekwachter.name } : {}),
     });
     const started = Date.now();
     const [npmScripts, workspaceScripts, vscodeConfigs, binResult, files, skills, instructions] =
@@ -418,6 +421,7 @@ export class WorkspaceIndexManager {
       state: 'ended',
       projectId,
       detail: `${files.length} files in ${Math.round(durationMs / 100) / 10}s`,
+      ...(boekwachter ? { gezelId: boekwachter.id, gezelName: boekwachter.name } : {}),
     });
 
     const importDeps: ImportSyncDeps = {

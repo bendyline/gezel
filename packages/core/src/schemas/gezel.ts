@@ -1144,6 +1144,10 @@ export const ChatEventSchema = z.discriminatedUnion('type', [
     projectId: z.string().optional(),
     detail: z.string().optional(),
     pending: z.number().int().nonnegative().optional(),
+    /** The concrete autonomous gezel doing this work, when the project has one. */
+    gezelId: z.string().optional(),
+    /** Snapshot of their display name so transient progress remains human-readable. */
+    gezelName: z.string().optional(),
   }),
 ]);
 export type ChatEvent = z.infer<typeof ChatEventSchema>;

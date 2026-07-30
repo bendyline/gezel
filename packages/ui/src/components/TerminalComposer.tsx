@@ -224,6 +224,16 @@ export function TerminalComposer({
     [projectId, workingDir, onSent],
   );
 
+  // The toolbar action is the pointer-friendly twin of Enter. Read directly
+  // from Monaco so it always submits the current buffer, then return focus to
+  // the editor for the next command.
+  const fire = useCallback(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    void submit(editor.getValue());
+    editor.focus();
+  }, [submit]);
+
   // Up at the first line: walk back through history.
   const historyPrev = useCallback(() => {
     if (historyRef.current.length === 0) return;
@@ -245,7 +255,7 @@ export function TerminalComposer({
       {/* Toolbar — mirrors the squisq editor's top toolbar so the terminal
        * reads as a symmetric sibling of the chat editor. Holds the three
        * galleries (commands / scripts / tasks); picking from any of them
-       * stages the line into the input for review. */}
+       * stages the line into the input for review, while Fire runs it. */}
       <div className="terminal-composer-toolbar">
         {GALLERIES.map((gallery) => (
           <Popover.Root
@@ -292,6 +302,14 @@ export function TerminalComposer({
             </Popover.Content>
           </Popover.Root>
         ))}
+        <button
+          type="button"
+          className="terminal-toolbar-btn terminal-toolbar-fire-btn"
+          title="Run command (Enter)"
+          onClick={fire}
+        >
+          Fire
+        </button>
       </div>
       {contextRow}
       <div className="terminal-composer-input-wrap">

@@ -1334,6 +1334,7 @@ export class Store {
     const configPatch: Partial<Record<keyof GezelConfig, unknown>> = {};
     if (config.meesterGezelId === id) configPatch.meesterGezelId = null;
     if (config.klerkGezelId === id) configPatch.klerkGezelId = null;
+    if (config.boekwachterGezelId === id) configPatch.boekwachterGezelId = null;
     if (config.keurmeesterGezelId === id) configPatch.keurmeesterGezelId = null;
     if (Object.keys(configPatch).length > 0) await this.writeConfig(configPatch);
 

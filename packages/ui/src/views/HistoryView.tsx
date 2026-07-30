@@ -23,6 +23,9 @@ const KINDS: Array<{ value: string; label: string }> = [
   { value: 'document.deleted', label: 'Document deleted' },
   { value: 'tool.called', label: 'Tool called' },
   { value: 'meester.changed', label: 'Meester changed' },
+  { value: 'klerk.changed', label: 'Klerk changed' },
+  { value: 'boekwachter.changed', label: 'Boekwachter changed' },
+  { value: 'keurmeester.changed', label: 'Keurmeester changed' },
   { value: 'task.created', label: 'Task created' },
   { value: 'task.updated', label: 'Task updated' },
   { value: 'task.about.updated', label: 'Task description updated' },
@@ -296,6 +299,8 @@ const KIND_LABELS: Record<string, string> = {
   'tool.called': 'Tool call',
   'meester.changed': 'Meester changed',
   'klerk.changed': 'Klerk changed',
+  'boekwachter.changed': 'Boekwachter changed',
+  'keurmeester.changed': 'Keurmeester changed',
   'v1.chat.completion': 'App chat',
 };
 

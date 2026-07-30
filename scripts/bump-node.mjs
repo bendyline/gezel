@@ -6,7 +6,7 @@ import { createHash } from 'node:crypto';
  * `packages/app/src/node-version.ts`.
  *
  * Usage:
- *   node scripts/bump-node.mjs 24.18.0
+ *   node scripts/bump-node.mjs <version>
  *
  * Run this, review the diff, commit. The PR is the audit trail for
  * the new sha256s.

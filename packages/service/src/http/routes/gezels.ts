@@ -18,6 +18,7 @@ import {
 } from '@bendyline/gezel';
 import { Hono } from 'hono';
 import { generateGezelAbout } from '../../about/generator.js';
+import { ensureDefaultBoekwachter } from '../../gezels/autonomous-roles.js';
 import { ensureGezel, resolveGildeTemplateForRole } from '../../gezels/ensure.js';
 import { resetTemplateGezels } from '../../gezels/reset-templates.js';
 import { deriveGezelRoster, filterRoster, rankProjectsForGezel } from '../../gezels/roster.js';
@@ -89,7 +90,21 @@ export function gezelRoutes(ctx: ServiceContext): Hono {
     const sessions = await ctx.chat.listSessions({ gezelId: id });
     for (const session of sessions) await ctx.chat.deleteSession(session.id);
 
+    const wasBoekwachter = (await ctx.store.readConfig()).boekwachterGezelId === id;
+    const boekwachterProjectIds = wasBoekwachter
+      ? (await ctx.store.listProjects())
+          .filter((project) => project.gezelIds?.includes(id))
+          .map((project) => project.id)
+      : [];
     const removed = await ctx.store.deleteGezel(id);
+    if (wasBoekwachter) {
+      // Like the Meester, the Boekwachter is an ensured product role. The
+      // replacement is canonical and inherits only the old one's projects,
+      // preserving every explicit project opt-out.
+      await ensureDefaultBoekwachter(ctx.store, ctx.catalog, {
+        recruitProjectIds: boekwachterProjectIds,
+      });
+    }
     return c.json({ ok: true as const, ...removed });
   });
 

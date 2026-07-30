@@ -15,7 +15,7 @@ import type { GezelClient } from '@bendyline/gezel-client';
 import type { Store } from '@bendyline/gezel-service';
 
 export interface SeedWorld {
-  gezelIds: { ada: string; bram: string; cleo: string };
+  gezelIds: { ada: string; bram: string; cleo: string; noor: string };
   meesterId: string | null;
   projectId: string;
   taskRefs: string[];
@@ -51,12 +51,23 @@ export async function seed(
     gender: 'female',
     role: 'Reviewer',
   });
+  const noor = await client.createGezel({
+    name: 'Noor de Wit',
+    gender: 'female',
+    role: 'Boekwachter',
+  });
 
   // Pin the displayed meester/klerk to deterministic gezels so the prominent
   // home / composer / greeting frames don't churn on the auto-provisioned
   // (randomly-named) meester. updateConfig merges, so this is a safe partial
   // patch. Reassigning (vs renaming) sidesteps the renameGezel id-reslug bug.
-  await client.updateConfig({ meesterGezelId: ada.id, klerkGezelId: bram.id }).catch(() => {});
+  await client
+    .updateConfig({
+      meesterGezelId: ada.id,
+      klerkGezelId: bram.id,
+      boekwachterGezelId: noor.id,
+    })
+    .catch(() => {});
 
   const project = await client.createProject({
     name: 'Fixture Project',
@@ -64,6 +75,7 @@ export async function seed(
     about: ABOUT,
     missionObjectives: MISSION,
   });
+  await client.addGezelToProject(project.id, noor.id);
 
   const taskRefs: string[] = [];
   const t1 = await client.createTask(project.id, {
@@ -152,7 +164,7 @@ export async function seed(
   }
 
   return {
-    gezelIds: { ada: ada.id, bram: bram.id, cleo: cleo.id },
+    gezelIds: { ada: ada.id, bram: bram.id, cleo: cleo.id, noor: noor.id },
     meesterId,
     projectId: project.id,
     taskRefs,
