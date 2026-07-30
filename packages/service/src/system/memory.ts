@@ -5,6 +5,7 @@ import type { MachineMemoryUsage } from '@bendyline/gezel';
 import type { DeviceHealthStatusSnapshot } from '@bendyline/gezel/native';
 import { detectLlamaGpuVram } from '../providers/llama-cpp/devices.js';
 import { autoDetectBudgetBytes } from '../providers/native/capacity-budget.js';
+import type { GezelProcessMemorySnapshot } from './gezel-process-memory.js';
 
 const exec = promisify(execFile);
 
@@ -140,6 +141,8 @@ export interface SampleMachineMemoryUsageOptions {
   deviceHealth?: DeviceHealthStatusSnapshot;
   /** Capacity broker reservation across resident Gezel local-engine replicas. */
   engineCommittedBytes?: number;
+  /** macOS physical footprint for gezeld + same-home engine processes. */
+  gezelProcessMemory?: GezelProcessMemorySnapshot | null;
   /**
    * CPU inference deliberately uses main RAM even when a discrete GPU exists.
    * The UI should describe the pool actually backing the selected backend.
@@ -156,10 +159,11 @@ export interface SampleMachineMemoryUsageOptions {
  * RAM counters into the live memory strip's portable wire shape.
  *
  * Driver telemetry reliably gives aggregate GPU use but not portable
- * per-process VRAM. Gezel's portion is therefore the local-engine broker's
- * resident reservation, clamped to the measured used pool. On UMA / CPU
- * hosts the daemon RSS is added because it occupies that same main-memory
- * pool. The remainder is labelled "Other", never as an exact process audit.
+ * per-process VRAM. On macOS, physical-footprint sampling observes gezeld and
+ * same-home engine processes directly, including Metal allocations. UMA/CPU
+ * hosts without that sample fall back to the broker reservation + daemon RSS;
+ * discrete GPUs retain the reservation estimate. The remainder is labelled
+ * "Other", never as an exact process audit.
  */
 export function sampleMachineMemoryUsage(
   opts: SampleMachineMemoryUsageOptions,
@@ -178,13 +182,24 @@ export function sampleMachineMemoryUsage(
     const freeRamBytes = clamp(finiteNonNegative(opts.freeRamBytes ?? freemem()), 0, totalRamBytes);
     const usedBytes = Math.max(0, totalRamBytes - freeRamBytes);
     const serviceRssBytes = finiteNonNegative(opts.serviceRssBytes ?? process.memoryUsage().rss);
+    const observedBytes =
+      opts.gezelProcessMemory &&
+      Number.isFinite(opts.gezelProcessMemory.bytes) &&
+      opts.gezelProcessMemory.bytes >= 0
+        ? clamp(opts.gezelProcessMemory.bytes, 0, usedBytes)
+        : null;
     const gezelBytesEstimated = clamp(engineBytes + serviceRssBytes, 0, usedBytes);
+    const gezelBytesAttributed = observedBytes ?? gezelBytesEstimated;
     return {
       kind: opts.forceMainMemory === true && !unified ? 'ram' : 'unified',
       totalBytes: totalRamBytes,
       usedBytes,
       gezelBytesEstimated,
-      otherBytes: Math.max(0, usedBytes - gezelBytesEstimated),
+      gezelBytesObserved: observedBytes,
+      engineReservedBytes: engineBytes,
+      gezelEngineProcessCount: opts.gezelProcessMemory?.engineProcessCount ?? 0,
+      orphanedGezelEngineProcessCount: opts.gezelProcessMemory?.orphanedEngineProcessCount ?? 0,
+      otherBytes: Math.max(0, usedBytes - gezelBytesAttributed),
       freeBytes: Math.max(0, totalRamBytes - usedBytes),
       sampledAt,
       source: 'system-memory',
@@ -232,6 +247,10 @@ export function sampleMachineMemoryUsage(
     totalBytes,
     usedBytes,
     gezelBytesEstimated,
+    gezelBytesObserved: null,
+    engineReservedBytes: engineBytes,
+    gezelEngineProcessCount: 0,
+    orphanedGezelEngineProcessCount: 0,
     otherBytes: usedBytes === null ? null : Math.max(0, usedBytes - gezelBytesEstimated),
     freeBytes: usedBytes === null ? null : Math.max(0, totalBytes - usedBytes),
     sampledAt,

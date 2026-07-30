@@ -9,19 +9,6 @@ const REPORT_FLUSH_MS = 800;
 /** Bound on service posts per mounted preview — a console.error loop must not DOS the daemon. */
 const REPORT_MAX_FLUSHES = 10;
 
-/**
- * The app shell is cross-origin isolated so browser video/GIF export can use
- * SharedArrayBuffer. A preview iframe is deliberately sandboxed without
- * `allow-same-origin`, which gives it an opaque origin; under the shell's COEP
- * that navigation must therefore be credentialless or Chromium blocks it.
- *
- * React's iframe typings do not yet include the standards-track attribute.
- * Keep it in a spread until @types/react catches up. The iframe renders once
- * without `src` while its capability is minted, so this attribute is present
- * before navigation begins. Preview authority stays in the short-lived URL.
- */
-const CREDENTIALLESS_IFRAME_PROPS = { credentialless: '' } as const;
-
 /** Flatten a shim `detail` payload into the wire entry's one-line message. */
 function shimDetailToMessage(entry: HtmlPreviewLogEntry): string {
   const d = entry.detail;
@@ -325,7 +312,6 @@ export function HtmlPreviewFrame({
       ref={iframeRef}
       key={`${src ?? 'loading'}:${refreshKey ?? ''}`}
       title={title}
-      {...CREDENTIALLESS_IFRAME_PROPS}
       {...(src ? { src } : {})}
       sandbox="allow-scripts"
       referrerPolicy="no-referrer"

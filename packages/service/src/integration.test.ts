@@ -75,9 +75,10 @@ describe('health', () => {
     const data = (await res.json()) as Record<string, unknown>;
     expect(data.ok).toBe(true);
     expect(data.version).toBeDefined();
-    expect(res.headers.get('cross-origin-opener-policy')).toBe('same-origin');
-    expect(res.headers.get('cross-origin-embedder-policy')).toBe('credentialless');
-    expect(res.headers.get('content-security-policy')).toContain("'wasm-unsafe-eval'");
+    expect(res.headers.get('cross-origin-opener-policy')).toBeNull();
+    expect(res.headers.get('cross-origin-embedder-policy')).toBeNull();
+    expect(res.headers.get('content-security-policy')).toContain("script-src 'self'");
+    expect(res.headers.get('content-security-policy')).not.toContain("'wasm-unsafe-eval'");
   });
 });
 

@@ -1,12 +1,13 @@
 import type { Stats } from 'node:fs';
-import { mkdir, rename, rm, stat } from 'node:fs/promises';
+import { mkdir, readFile, rename, rm, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, relative } from 'node:path';
 import type { ProjectFileEntry } from '@bendyline/gezel';
 import { type ExternalFolders, gezelPaths } from '@bendyline/gezel/paths';
 import type { HistoryManager } from '../history/manager.js';
 import { writeFileAtomic } from './atomic.js';
+import { mimeTypeForFilename } from './media-types.js';
 import { safeJoin } from './safe-paths.js';
-import { listDirEntries, safeReadTextFile, walkDir } from './tree.js';
+import { listDirEntries, safeReadTextFile, safeResolveRead, walkDir } from './tree.js';
 
 export interface DocumentsStoreOptions {
   home: string;
@@ -62,6 +63,19 @@ export class DocumentsStore {
 
   async readDocument(filePath: string): Promise<string | null> {
     return safeReadTextFile(this.documentsDir(), filePath);
+  }
+
+  async readDocumentBinary(filePath: string): Promise<{ data: Buffer; mimeType: string } | null> {
+    const full = await safeResolveRead(this.documentsDir(), filePath);
+    if (!full) return null;
+    try {
+      return {
+        data: await readFile(full),
+        mimeType: mimeTypeForFilename(filePath),
+      };
+    } catch {
+      return null;
+    }
   }
 
   async writeDocument(filePath: string, content: string): Promise<void> {

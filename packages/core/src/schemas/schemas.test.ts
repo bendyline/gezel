@@ -6,6 +6,7 @@ import {
   CreateProjectRequestSchema,
   CreateTaskRequestSchema,
   CreateTypedProjectRequestSchema,
+  DocumentMediaExportRequestSchema,
   FileReviewReplySchema,
   GezelConfigSchema,
   GezelFrontmatterSchema,
@@ -19,6 +20,27 @@ import {
   projectAllowsAmbientWork,
   taskRef,
 } from './index.js';
+
+describe('DocumentMediaExportRequestSchema', () => {
+  it('accepts Store-backed native media exports and rejects traversal', () => {
+    expect(
+      DocumentMediaExportRequestSchema.parse({
+        markdown: '# Brief',
+        selectedFile: 'notes/brief.md',
+        format: 'mp4',
+        source: { kind: 'documents' },
+      }).format,
+    ).toBe('mp4');
+    expect(() =>
+      DocumentMediaExportRequestSchema.parse({
+        markdown: '# Brief',
+        selectedFile: '../outside.md',
+        format: 'gif',
+        source: { kind: 'project-artifacts', projectId: 'project-1' },
+      }),
+    ).toThrow();
+  });
+});
 
 describe('GezelFrontmatterSchema', () => {
   it('parses valid frontmatter', () => {

@@ -22,10 +22,11 @@ function percent(bytes: number, totalBytes: number): number {
 /**
  * Stacked live view of the physical memory pool backing local inference.
  *
- * The endpoint intentionally reports Gezel as an estimate: resident engine
- * reservations are portable, while exact per-process VRAM is not. Aggregate
- * used/free figures come from the OS on UMA/CPU hosts and the GPU driver on
- * discrete cards.
+ * macOS reports Gezel's observed physical footprint (including Metal-backed
+ * allocations) separately from the engine broker's capacity reservation.
+ * Platforms without portable per-process accelerator accounting retain the
+ * reservation estimate. Aggregate used/free figures come from the OS on
+ * UMA/CPU hosts and the GPU driver on discrete cards.
  */
 export function MachineMemoryStrip({ pollMs = 1_000 }: Props) {
   const [usage, setUsage] = useState<MachineMemoryUsage | null>(null);
@@ -72,11 +73,23 @@ export function MachineMemoryStrip({ pollMs = 1_000 }: Props) {
     usage.usedBytes === null
       ? `${formatBytes(usage.totalBytes)} total`
       : `${formatBytes(usage.usedBytes)} of ${formatBytes(usage.totalBytes)} used`;
-  const gezelPercent = percent(usage.gezelBytesEstimated, usage.totalBytes);
+  const observed = typeof usage.gezelBytesObserved === 'number';
+  const gezelBytes = usage.gezelBytesObserved ?? usage.gezelBytesEstimated;
+  const gezelPercent = percent(gezelBytes, usage.totalBytes);
   const otherPercent = usage.otherBytes === null ? 0 : percent(usage.otherBytes, usage.totalBytes);
   const ariaSummary = [
     `${label}: ${usedSummary}`,
-    `Gezel estimated ${formatBytes(usage.gezelBytesEstimated)}`,
+    observed
+      ? `Gezel observed footprint ${formatBytes(gezelBytes)}`
+      : `Gezel estimated ${formatBytes(gezelBytes)}`,
+    observed && usage.engineReservedBytes > 0
+      ? `models reserve about ${formatBytes(usage.engineReservedBytes)}`
+      : null,
+    usage.orphanedGezelEngineProcessCount > 0
+      ? `${usage.orphanedGezelEngineProcessCount} leftover Gezel engine ${
+          usage.orphanedGezelEngineProcessCount === 1 ? 'process' : 'processes'
+        } from an earlier service session`
+      : null,
     usage.otherBytes === null
       ? 'other use unavailable'
       : `other use ${formatBytes(usage.otherBytes)}`,
@@ -111,7 +124,8 @@ export function MachineMemoryStrip({ pollMs = 1_000 }: Props) {
       <div className="machine-memory-legend">
         <span>
           <i className="machine-memory-swatch machine-memory-swatch-gezel" aria-hidden />
-          Gezel ~{formatBytes(usage.gezelBytesEstimated)}
+          Gezel {observed ? '' : '~'}
+          {formatBytes(gezelBytes)}
         </span>
         {usage.otherBytes !== null ? (
           <span>
@@ -128,6 +142,18 @@ export function MachineMemoryStrip({ pollMs = 1_000 }: Props) {
           </span>
         )}
       </div>
+      {observed && usage.engineReservedBytes > 0 && (
+        <div className="machine-memory-note">
+          Models reserve ~{formatBytes(usage.engineReservedBytes)} for capacity planning
+        </div>
+      )}
+      {usage.orphanedGezelEngineProcessCount > 0 && (
+        <div className="machine-memory-note">
+          Includes {usage.orphanedGezelEngineProcessCount} leftover Gezel engine{' '}
+          {usage.orphanedGezelEngineProcessCount === 1 ? 'process' : 'processes'} from an earlier
+          service session
+        </div>
+      )}
       {usage.deviceNames.length > 0 && (
         <div className="machine-memory-note machine-memory-device">
           {usage.deviceNames.join(', ')}

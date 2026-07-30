@@ -23,18 +23,31 @@ test.describe('app shell', () => {
         if (!sidebar) throw new Error('Sidebar not found');
         const homeRect = home.getBoundingClientRect();
         const sidebarRect = sidebar.getBoundingClientRect();
+        const homeStyle = getComputedStyle(home);
         const bridgeStyle = getComputedStyle(home, '::after');
         const bridgeWidth = Number.parseFloat(bridgeStyle.width);
+        const bridgeTransform =
+          bridgeStyle.transform === 'none' ? new DOMMatrix() : new DOMMatrix(bridgeStyle.transform);
         return {
           seamOffset:
             currentSide === 'right'
               ? homeRect.left - bridgeWidth - sidebarRect.left
               : homeRect.right + bridgeWidth - sidebarRect.right,
+          topOffset:
+            Number.parseFloat(homeStyle.borderTopWidth) +
+            Number.parseFloat(bridgeStyle.top) +
+            bridgeTransform.m42,
+          bottomOffset:
+            -Number.parseFloat(homeStyle.borderBottomWidth) -
+            Number.parseFloat(bridgeStyle.bottom) +
+            bridgeTransform.m42,
         };
       }, side);
       /* The inset divider itself is 1px wide, so either edge may resolve to
          that boundary depending on the mirrored sidebar direction. */
       expect(Math.abs(bridge.seamOffset)).toBeLessThan(1.1);
+      expect(Math.abs(bridge.topOffset)).toBeLessThan(0.1);
+      expect(Math.abs(bridge.bottomOffset)).toBeLessThan(0.1);
     }
     await page.evaluate(() => {
       document.documentElement.dataset.sidebarSide = 'right';

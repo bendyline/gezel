@@ -17,7 +17,7 @@ describe('HtmlPreviewFrame security boundary', () => {
     });
   });
 
-  it('loads the opaque sandbox without credentials under the app shell COEP', async () => {
+  it('loads the preview in an opaque script-only sandbox', async () => {
     render(
       <HtmlPreviewFrame
         projectId="checkers"
@@ -34,7 +34,6 @@ describe('HtmlPreviewFrame security boundary', () => {
       ),
     );
     const frame = screen.getByTitle('Dashboard');
-    expect(frame).toHaveAttribute('credentialless');
     expect(frame).toHaveAttribute('sandbox', 'allow-scripts');
   });
 });

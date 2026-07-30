@@ -82,16 +82,25 @@ export type MachineMemoryKind = z.infer<typeof MachineMemoryKindSchema>;
 /**
  * Lightweight, authenticated machine-memory telemetry for status surfaces.
  *
- * Gezel attribution is an estimate derived from resident engine reservations
- * plus the daemon's RSS on shared/main-memory hosts. GPU APIs expose aggregate
- * card usage consistently but do not expose portable per-process accounting,
- * so callers must retain the `gezelBytesEstimated` wording in user-facing UI.
+ * On macOS, `gezelBytesObserved` is the combined physical footprint of gezeld
+ * and same-home engine processes — the metric Activity Monitor uses, including
+ * Metal-backed allocations. Other platforms retain the portable reservation
+ * estimate because GPU APIs do not expose consistent per-process accounting.
+ * `engineReservedBytes` stays separate: it is capacity planning, not observed
+ * use.
  */
 export const MachineMemoryUsageSchema = z.object({
   kind: MachineMemoryKindSchema,
   totalBytes: z.number().nonnegative(),
   usedBytes: z.number().nonnegative().nullable(),
+  /** Portable reservation + daemon-RSS fallback estimate. */
   gezelBytesEstimated: z.number().nonnegative(),
+  /** Observed same-home process footprint when the platform exposes it. */
+  gezelBytesObserved: z.number().nonnegative().nullable(),
+  /** Capacity-broker reservation for local chat-model replicas. */
+  engineReservedBytes: z.number().nonnegative(),
+  gezelEngineProcessCount: z.number().int().nonnegative(),
+  orphanedGezelEngineProcessCount: z.number().int().nonnegative(),
   otherBytes: z.number().nonnegative().nullable(),
   freeBytes: z.number().nonnegative().nullable(),
   sampledAt: z.string(),
@@ -2206,6 +2215,45 @@ export const WriteDocumentRequestSchema = z.object({
   content: z.string(),
 });
 export type WriteDocumentRequest = z.infer<typeof WriteDocumentRequestSchema>;
+
+const DocumentMediaExportPathSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(1_024)
+  .refine(
+    (value) => {
+      const normalized = value.replace(/\\/g, '/');
+      return (
+        !normalized.startsWith('/') &&
+        !/^[A-Za-z]:\//.test(normalized) &&
+        normalized.split('/').every((segment) => segment !== '..')
+      );
+    },
+    { message: 'must be a relative path without .. segments' },
+  );
+
+export const DocumentMediaExportSourceSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('documents') }),
+  z.object({
+    kind: z.literal('project-artifacts'),
+    projectId: z.string().trim().min(1),
+  }),
+]);
+export type DocumentMediaExportSource = z.infer<typeof DocumentMediaExportSourceSchema>;
+
+/**
+ * Body for native MP4/GIF document export. The daemon renders the supplied
+ * current editor text while resolving media sidecars from the selected
+ * document's Store-backed directory.
+ */
+export const DocumentMediaExportRequestSchema = z.object({
+  markdown: z.string().max(5_000_000),
+  selectedFile: DocumentMediaExportPathSchema,
+  format: z.enum(['mp4', 'gif']),
+  source: DocumentMediaExportSourceSchema,
+});
+export type DocumentMediaExportRequest = z.infer<typeof DocumentMediaExportRequestSchema>;
 
 export const CreateDocumentFolderRequestSchema = z.object({
   path: z.string().min(1),

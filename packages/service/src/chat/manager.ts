@@ -7903,6 +7903,7 @@ export class ChatManager {
       // their next turn; the engine pool evicts the stale model lazily.
       return;
     }
+    await this.shutdownOwnedEngineRouter();
     for (const [name, provider] of this.providers) {
       try {
         await provider.shutdown();
@@ -8529,6 +8530,38 @@ export class ChatManager {
   private engineRouterInitPromise: Promise<
     import('../providers/native/engine-router.js').EngineRouter | null
   > | null = null;
+
+  /**
+   * Shut down the production-owned lazy engine router, including a router
+   * whose construction is still in flight. Pooled local providers do not live
+   * in {@link providers}, so omitting this step lets their native children
+   * outlive gezeld and become PPID-1 orphans.
+   *
+   * An explicitly injected {@link engineRouter} remains caller-owned (mostly
+   * a test seam) and is deliberately left alone.
+   */
+  private async shutdownOwnedEngineRouter(): Promise<void> {
+    let router = this.engineRouterCache;
+    const pending = this.engineRouterInitPromise;
+    if (!router && pending) {
+      try {
+        router = await pending;
+      } catch {
+        // A failed construction owns no resident providers, but clear the
+        // rejected one-flight so a live hard reset can try again later.
+      }
+    }
+    this.engineRouterCache = null;
+    this.engineRouterInitPromise = null;
+    if (!router) return;
+    try {
+      await router.shutdown();
+    } catch (err) {
+      log.warn(
+        `engine router shutdown failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
 
   /**
    * Resolve (or build) the router. Returns `null` only when no local

@@ -264,16 +264,6 @@ function fallbackLicenseMaterials(input) {
     ];
   }
 
-  const standards = {
-    'GPL-2.0-or-later': ['GPL-2.0.txt'],
-  }[reportedLicense];
-  if (standards) {
-    return [
-      { name: 'PACKAGE-ATTRIBUTION.txt', content: Buffer.from(header) },
-      ...standards.map((name) => ({ source: join(repoRoot, 'legal', 'licenses', name), name })),
-    ];
-  }
-
   const canonical = canonicalByLicense.get(reportedLicense);
   if (canonical?.length) {
     return [

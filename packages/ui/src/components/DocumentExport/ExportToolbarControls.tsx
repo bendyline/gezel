@@ -2,22 +2,19 @@
  * DocBlocks-style Export control for Squisq's EditorShell toolbar.
  *
  * Gezel owns host concerns (durable quick-export preferences, local document
- * storage, theme, and the same-origin ffmpeg runtime). Squisq owns document
- * conversion plus the MP4/GIF configuration and encoding UI.
+ * storage, and native MP4/GIF routing). Squisq owns document conversion and
+ * the daemon-side rendered-media pipeline.
  */
 
+import type { DocumentMediaExportSource } from '@bendyline/gezel';
 import { useEditorContext } from '@bendyline/squisq-editor-react';
-import { PLAYER_BUNDLE } from '@bendyline/squisq-react/standalone-source';
-import { VideoExportModal } from '@bendyline/squisq-video-react';
-import { markdownToDoc, resolveAudioMapping } from '@bendyline/squisq/doc';
-import { parseMarkdown } from '@bendyline/squisq/markdown';
 import { getThemeSummaries } from '@bendyline/squisq/schemas';
 import type { ContentContainer } from '@bendyline/squisq/storage';
 import { getTransformStyleSummaries } from '@bendyline/squisq/transform';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { api } from '../../api.js';
 import { Dialog, DropdownMenu } from '../../primitives/index.js';
 import { ExportDialog } from './ExportDialog.js';
-import { createContainerMediaProvider } from './container-media-provider.js';
 import type { ExportOptions } from './export-options.js';
 import {
   DEFAULT_OPTIONS,
@@ -26,18 +23,15 @@ import {
   saveExportOptions,
   syncLastExportOptions,
 } from './export-options.js';
-import { GEZEL_FFMPEG_WASM_CONFIG } from './ffmpeg-wasm-config.js';
-import { runExport } from './run-export.js';
+import { downloadBlob, runExport } from './run-export.js';
 
 export interface ExportToolbarControlsProps {
   /** Path of the currently-open file — drives the document download filename. */
   selectedFile: string | null;
   /** Container for local images, media, and narration timing sidecars. */
   mediaContainer?: ContentContainer | null;
-  /** Hide MP4/GIF entries on hosts where media export is unavailable. */
-  hideVideo?: boolean;
-  /** Resolved Gezel theme for Squisq's portaled media-export dialog. */
-  colorScheme?: 'light' | 'dark';
+  /** Store scope the daemon uses to resolve MP4/GIF media sidecars. */
+  mediaSource?: DocumentMediaExportSource;
 }
 
 function exportErrorMessage(caught: unknown): string {
@@ -68,32 +62,23 @@ function quickLabel(opts: ExportOptions): string {
 export function ExportToolbarControls({
   selectedFile,
   mediaContainer,
-  hideVideo = false,
-  colorScheme = 'light',
+  mediaSource,
 }: ExportToolbarControlsProps) {
   const { markdownSource } = useEditorContext();
   const [menuOpen, setMenuOpen] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [videoModalOpen, setVideoModalOpen] = useState(false);
-  const [videoOutputFormat, setVideoOutputFormat] = useState<'mp4' | 'gif'>('mp4');
-  const [videoDoc, setVideoDoc] = useState<ReturnType<typeof markdownToDoc> | null>(null);
-  const [videoLoading, setVideoLoading] = useState(false);
-  const [videoLoadError, setVideoLoadError] = useState<string | null>(null);
+  const [mediaExporting, setMediaExporting] = useState<'mp4' | 'gif' | null>(null);
+  const [mediaExportError, setMediaExportError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
   const [lastOptions, setLastOptions] = useState<ExportOptions | null>(() =>
     loadLastExportOptions(),
   );
-  const videoRequestRef = useRef(0);
-
-  const mediaProvider = useMemo(
-    () => (mediaContainer ? createContainerMediaProvider(mediaContainer) : null),
-    [mediaContainer],
-  );
+  const mediaAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
-    return () => mediaProvider?.dispose();
-  }, [mediaProvider]);
+    return () => mediaAbortRef.current?.abort();
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -117,44 +102,46 @@ export function ExportToolbarControls({
     setExportError(null);
   }, [exporting]);
 
-  const handleOpenVideoModal = useCallback(
+  const handleMediaExport = useCallback(
     async (outputFormat: 'mp4' | 'gif') => {
-      const requestId = videoRequestRef.current + 1;
-      videoRequestRef.current = requestId;
+      if (!selectedFile || !mediaSource) return;
+      const controller = new AbortController();
+      mediaAbortRef.current?.abort();
+      mediaAbortRef.current = controller;
       setMenuOpen(false);
-      setVideoOutputFormat(outputFormat);
-      setVideoModalOpen(true);
-      setVideoDoc(null);
-      setVideoLoadError(null);
-      setVideoLoading(true);
+      setMediaExporting(outputFormat);
+      setMediaExportError(null);
 
       try {
-        let nextDoc = markdownToDoc(parseMarkdown(markdownSource));
-        if (mediaContainer) {
-          nextDoc = await resolveAudioMapping(nextDoc, mediaContainer);
-        }
-        if (videoRequestRef.current === requestId) setVideoDoc(nextDoc);
+        const blob = await api.exportDocumentMedia(
+          {
+            markdown: markdownSource,
+            selectedFile,
+            format: outputFormat,
+            source: mediaSource,
+          },
+          controller.signal,
+        );
+        if (controller.signal.aborted) return;
+        const tail = selectedFile.split('/').pop() ?? selectedFile;
+        const stem = tail.replace(/\.[^.]+$/, '') || 'document';
+        downloadBlob(blob, `${stem}.${outputFormat}`);
+        setMediaExporting(null);
       } catch (caught: unknown) {
-        if (videoRequestRef.current === requestId) {
-          setVideoLoadError(
-            caught instanceof Error && caught.message
-              ? `Media export could not be prepared: ${caught.message}`
-              : 'Media export could not be prepared.',
-          );
-        }
+        if (controller.signal.aborted) return;
+        setMediaExportError(exportErrorMessage(caught));
       } finally {
-        if (videoRequestRef.current === requestId) setVideoLoading(false);
+        if (mediaAbortRef.current === controller) mediaAbortRef.current = null;
       }
     },
-    [markdownSource, mediaContainer],
+    [markdownSource, mediaSource, selectedFile],
   );
 
-  const handleCloseVideoModal = useCallback(() => {
-    videoRequestRef.current += 1;
-    setVideoModalOpen(false);
-    setVideoDoc(null);
-    setVideoLoadError(null);
-    setVideoLoading(false);
+  const handleCloseMediaExport = useCallback(() => {
+    mediaAbortRef.current?.abort();
+    mediaAbortRef.current = null;
+    setMediaExporting(null);
+    setMediaExportError(null);
   }, []);
 
   const handleExport = useCallback(
@@ -223,18 +210,18 @@ export function ExportToolbarControls({
             <DropdownMenu.Item className="app-nav-menu-item" onSelect={handleOpenDialog}>
               Export…
             </DropdownMenu.Item>
-            {!hideVideo && (
+            {selectedFile && mediaSource && (
               <>
                 <div className="gezel-export-menu-divider" role="separator" tabIndex={-1} />
                 <DropdownMenu.Item
                   className="app-nav-menu-item"
-                  onSelect={() => void handleOpenVideoModal('mp4')}
+                  onSelect={() => void handleMediaExport('mp4')}
                 >
                   Export video…
                 </DropdownMenu.Item>
                 <DropdownMenu.Item
                   className="app-nav-menu-item"
-                  onSelect={() => void handleOpenVideoModal('gif')}
+                  onSelect={() => void handleMediaExport('gif')}
                 >
                   Export animated GIF…
                 </DropdownMenu.Item>
@@ -254,43 +241,29 @@ export function ExportToolbarControls({
         />
       )}
 
-      {videoModalOpen && (videoLoading || videoLoadError) && (
-        <Dialog.Root open onOpenChange={(open) => !open && handleCloseVideoModal()}>
+      {(mediaExporting || mediaExportError) && (
+        <Dialog.Root open onOpenChange={(open) => !open && handleCloseMediaExport()}>
           <Dialog.Portal>
             <Dialog.Overlay />
             <Dialog.Content className="gezel-export-loading-dialog">
               <Dialog.Title>
-                {videoOutputFormat === 'gif' ? 'Export animated GIF' : 'Export video'}
+                {mediaExporting === 'gif' ? 'Exporting animated GIF' : 'Exporting video'}
               </Dialog.Title>
               <p
-                className={videoLoadError ? 'error' : 'muted'}
-                role={videoLoadError ? 'alert' : undefined}
+                className={mediaExportError ? 'error' : 'muted'}
+                role={mediaExportError ? 'alert' : 'status'}
               >
-                {videoLoadError ?? 'Preparing document media…'}
+                {mediaExportError ??
+                  'Rendering with the ffmpeg installed on this computer. This can take a while…'}
               </p>
               <Dialog.Actions>
-                <button type="button" onClick={handleCloseVideoModal}>
-                  {videoLoadError ? 'Close' : 'Cancel'}
+                <button type="button" onClick={handleCloseMediaExport}>
+                  {mediaExportError ? 'Close' : 'Cancel'}
                 </button>
               </Dialog.Actions>
             </Dialog.Content>
           </Dialog.Portal>
         </Dialog.Root>
-      )}
-
-      {videoModalOpen && videoDoc && !videoLoading && !videoLoadError && (
-        <VideoExportModal
-          doc={videoDoc}
-          playerScript={PLAYER_BUNDLE}
-          {...(mediaProvider ? { mediaProvider } : {})}
-          colorScheme={colorScheme}
-          defaultConfig={{
-            outputFormat: videoOutputFormat,
-            audioPolicy: 'best-effort',
-            ffmpegWasm: GEZEL_FFMPEG_WASM_CONFIG,
-          }}
-          onClose={handleCloseVideoModal}
-        />
       )}
     </>
   );

@@ -34,7 +34,10 @@ export function TerminalBubble({ entry }: { entry: TerminalTimelineEntry }) {
   const folder = formatFolderLabel(displayDir);
   if (entry.msgKind === 'command') {
     return (
-      <div className="msg msg-user terminal-group terminal-group-command">
+      <div
+        className="msg msg-user terminal-group terminal-group-command"
+        data-terminal-message-id={entry.messageId}
+      >
         <div className="msg-header terminal-group-header">
           <span className="terminal-folder-pill" title="Working folder">
             {folder}
@@ -61,7 +64,10 @@ export function TerminalBubble({ entry }: { entry: TerminalTimelineEntry }) {
         ? 'exit 0'
         : `exit ${entry.exitCode}`;
   return (
-    <div className="msg msg-assistant terminal-group terminal-group-output">
+    <div
+      className="msg msg-assistant terminal-group terminal-group-output"
+      data-terminal-message-id={entry.messageId}
+    >
       <div className="msg-header terminal-group-header">
         <span className="terminal-folder-pill" title="Working folder">
           {folder}

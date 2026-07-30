@@ -29,7 +29,6 @@ While Gezel can work with cloud AI providers like OpenAI or Anthropic, it may us
 
 Gezel ships with open-source and third-party software that is licensed under its own terms rather than the MIT License above. Most of it is permissively licensed (MIT, Apache-2.0, BSD, ISC), but some of it is not. In particular:
 
-  - the bundled FFmpeg WebAssembly runtime is GPL-2.0-or-later;
   - the resvg SVG renderer is MPL-2.0;
   - the NVIDIA CUDA runtime libraries bundled with the CUDA engine builds are
     proprietary, under the NVIDIA CUDA Toolkit EULA.

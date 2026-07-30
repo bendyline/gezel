@@ -165,7 +165,7 @@ export function DocumentDetail({ path, standalone = false }: DocumentDetailProps
                 <ExportToolbarControls
                   selectedFile={path}
                   mediaContainer={container}
-                  colorScheme={editorTheme}
+                  mediaSource={{ kind: 'documents' }}
                 />
               )}
             </>

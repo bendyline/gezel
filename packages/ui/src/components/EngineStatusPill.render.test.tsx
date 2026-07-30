@@ -160,6 +160,10 @@ describe('EngineStatusPill — simultaneous local engines', () => {
       totalBytes: 24 * GiB,
       usedBytes: 9 * GiB,
       gezelBytesEstimated: 5 * GiB,
+      gezelBytesObserved: null,
+      engineReservedBytes: 5 * GiB,
+      gezelEngineProcessCount: 0,
+      orphanedGezelEngineProcessCount: 0,
       otherBytes: 4 * GiB,
       freeBytes: 15 * GiB,
       sampledAt: '2026-07-29T12:00:00.000Z',
@@ -182,5 +186,45 @@ describe('EngineStatusPill — simultaneous local engines', () => {
     expect(screen.getByText('Gezel ~5.0 GiB')).toBeInTheDocument();
     expect(screen.getByText('Other 4.0 GiB')).toBeInTheDocument();
     expect(screen.getByText(/Test GPU/)).toBeInTheDocument();
+  });
+
+  it('separates observed macOS footprint, model reservation, and orphaned engines', async () => {
+    const user = userEvent.setup();
+    const GiB = 1024 ** 3;
+    vi.mocked(api.getMachineMemoryUsage).mockResolvedValue({
+      kind: 'unified',
+      totalBytes: 128 * GiB,
+      usedBytes: 100 * GiB,
+      gezelBytesEstimated: 36 * GiB,
+      gezelBytesObserved: 76 * GiB,
+      engineReservedBytes: 36 * GiB,
+      gezelEngineProcessCount: 2,
+      orphanedGezelEngineProcessCount: 2,
+      otherBytes: 24 * GiB,
+      freeBytes: 28 * GiB,
+      sampledAt: '2026-07-29T12:00:00.000Z',
+      source: 'system-memory',
+      deviceNames: [],
+    });
+    render(<EngineStatusPill />);
+
+    await user.click(
+      await screen.findByRole('button', {
+        name: /DwarfStar.*DeepSeek V4 Flash/i,
+      }),
+    );
+
+    expect(
+      await screen.findByRole('img', {
+        name: /Gezel observed footprint 76\.0 GiB, models reserve about 36\.0 GiB, 2 leftover Gezel engine processes/i,
+      }),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Gezel 76.0 GiB')).toBeInTheDocument();
+    expect(screen.getByText('Models reserve ~36.0 GiB for capacity planning')).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Includes 2 leftover Gezel engine processes from an earlier service session',
+      ),
+    ).toBeInTheDocument();
   });
 });

@@ -28,6 +28,7 @@ import { configRoutes } from './routes/config.js';
 import { connectorRoutes } from './routes/connectors.js';
 import { craftbookRoutes } from './routes/craftbooks.js';
 import { credentialRoutes } from './routes/credentials.js';
+import { documentMediaExportRoutes } from './routes/document-media-export.js';
 import { documentRoutes } from './routes/documents.js';
 import { ds4Routes } from './routes/ds4.js';
 import { enginesRoutes } from './routes/engines.js';
@@ -205,7 +206,7 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
         'content-security-policy',
         [
           "default-src 'self'",
-          "script-src 'self' 'wasm-unsafe-eval'",
+          "script-src 'self'",
           "style-src 'self' 'unsafe-inline'",
           "img-src 'self' data: blob: https:",
           "font-src 'self' data:",
@@ -220,12 +221,6 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
         ].join('; '),
       );
       c.res.headers.set('x-frame-options', 'DENY');
-      // Browser MP4 fallback and animated-GIF export use ffmpeg.wasm, whose
-      // execution paths require SharedArrayBuffer. `credentialless` preserves
-      // cross-origin isolation without breaking blob-backed frame capture or
-      // public media embedded in documents.
-      c.res.headers.set('cross-origin-opener-policy', 'same-origin');
-      c.res.headers.set('cross-origin-embedder-policy', 'credentialless');
     }
     c.res.headers.set('x-content-type-options', 'nosniff');
     c.res.headers.set('referrer-policy', 'no-referrer');
@@ -472,6 +467,7 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   app.route('/api/cache', cacheRoutes(ctx));
   app.route('/api/ai', aiRoutes(ctx));
   app.route('/api/documents', documentRoutes(ctx));
+  app.route('/api/document-media-export', documentMediaExportRoutes(ctx));
   app.route('/api/search', searchRoutes(ctx));
   app.route('/api/folders', folderRoutes(ctx));
   app.route('/api/models', modelsRoutes(ctx));

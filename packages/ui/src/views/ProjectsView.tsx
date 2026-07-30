@@ -2295,7 +2295,7 @@ function ProjectMarkdownArtifactEditor({
             <ExportToolbarControls
               selectedFile={path}
               mediaContainer={container}
-              colorScheme={editorTheme}
+              mediaSource={{ kind: 'project-artifacts', projectId }}
             />
           </>
         }

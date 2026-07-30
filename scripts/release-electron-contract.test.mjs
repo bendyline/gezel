@@ -8,17 +8,35 @@ const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, '..');
 
 test('Electron release configuration pins the audited packaging contracts', async () => {
-  const [builder, workflow, tsup, main, stamp, corePackage, lockfile, frontmatter] =
-    await Promise.all([
-      readFile(join(root, 'packages', 'app', 'electron-builder.yml'), 'utf8'),
-      readFile(join(root, '.github', 'workflows', 'release-electron.yml'), 'utf8'),
-      readFile(join(root, 'packages', 'app', 'tsup.config.ts'), 'utf8'),
-      readFile(join(root, 'packages', 'app', 'src', 'main.ts'), 'utf8'),
-      readFile(join(root, 'scripts', 'stamp-version.mjs'), 'utf8'),
-      readFile(join(root, 'packages', 'core', 'package.json'), 'utf8'),
-      readFile(join(root, 'pnpm-lock.yaml'), 'utf8'),
-      readFile(join(root, 'packages', 'core', 'src', 'markdown', 'frontmatter.ts'), 'utf8'),
-    ]);
+  const [
+    builder,
+    workflow,
+    tsup,
+    main,
+    stamp,
+    corePackage,
+    lockfile,
+    frontmatter,
+    metainfo,
+    installerVerifier,
+    appPackage,
+    rootPackage,
+    readme,
+  ] = await Promise.all([
+    readFile(join(root, 'packages', 'app', 'electron-builder.yml'), 'utf8'),
+    readFile(join(root, '.github', 'workflows', 'release-electron.yml'), 'utf8'),
+    readFile(join(root, 'packages', 'app', 'tsup.config.ts'), 'utf8'),
+    readFile(join(root, 'packages', 'app', 'src', 'main.ts'), 'utf8'),
+    readFile(join(root, 'scripts', 'stamp-version.mjs'), 'utf8'),
+    readFile(join(root, 'packages', 'core', 'package.json'), 'utf8'),
+    readFile(join(root, 'pnpm-lock.yaml'), 'utf8'),
+    readFile(join(root, 'packages', 'core', 'src', 'markdown', 'frontmatter.ts'), 'utf8'),
+    readFile(join(root, 'packages', 'app', 'assets', 'com.bendyline.gezel.metainfo.xml'), 'utf8'),
+    readFile(join(root, 'scripts', 'verify-installer-licenses.mjs'), 'utf8'),
+    readFile(join(root, 'packages', 'app', 'package.json'), 'utf8'),
+    readFile(join(root, 'package.json'), 'utf8'),
+    readFile(join(root, 'README.md'), 'utf8'),
+  ]);
 
   assert.match(tsup, /noExternal:/);
   assert.match(tsup, /@bendyline\\\/gezel-client/);
@@ -43,11 +61,55 @@ test('Electron release configuration pins the audited packaging contracts', asyn
     (workflow.match(/180(?:000|s| seconds)/g)?.length ?? 0) >= 3,
     'every packaged smoke test must have a bounded timeout',
   );
+  const linuxSmokeStart = workflow.indexOf('- name: Smoke-test packaged Linux app');
+  const linuxSmokeEnd = workflow.indexOf(
+    '- name: Verify Linux installer legal payloads',
+    linuxSmokeStart,
+  );
+  const linuxSmoke = workflow.slice(linuxSmokeStart, linuxSmokeEnd);
+  assert.match(linuxSmoke, /sudo apt-get install -y/);
+  assert.match(linuxSmoke, /executable=\/opt\/Gezel\/gezel/);
+  assert.doesNotMatch(
+    linuxSmoke,
+    /--no-sandbox/,
+    'the Linux release smoke must exercise Chromium sandbox startup',
+  );
 
   assert.match(builder, /minimumSystemVersion: '13\.5'/);
   assert.match(builder, /- target: pkg[\s\S]*?- target: zip/);
   assert.match(workflow, /latest-mac\.yml/);
   assert.match(workflow, /packages\/app\/dist\/installers\/\*\.zip\.blockmap/);
+
+  assert.equal(
+    builder.match(
+      /assets\/com\.bendyline\.gezel\.metainfo\.xml=\/usr\/share\/metainfo\/com\.bendyline\.gezel\.metainfo\.xml/g,
+    )?.length,
+    2,
+    'both deb and rpm packages must install Gezel AppStream metadata',
+  );
+  assert.match(metainfo, /<id>\s*com\.bendyline\.gezel\s*<\/id>/);
+  assert.match(metainfo, /<metadata_license>\s*MIT\s*<\/metadata_license>/);
+  assert.match(metainfo, /<project_license>\s*MIT\s*<\/project_license>/);
+  assert.match(metainfo, /<launchable\s+type="desktop-id">\s*gezel\.desktop\s*<\/launchable>/);
+  assert.match(installerVerifier, /verifyLinuxAppStreamMetadata/);
+  assert.match(installerVerifier, /declares the MIT project license in AppStream metadata/);
+  assert.match(
+    workflow,
+    /appstreamcli validate packages\/app\/assets\/com\.bendyline\.gezel\.metainfo\.xml/,
+  );
+
+  const productTagline = 'Your crew of AI companions';
+  const productDescription =
+    'Build a crew of named AI companions with distinct roles and tools, then put them to work on your projects. Gezel stores their conversations, memory, and work on your computer as ordinary files.';
+  assert.ok(builder.includes(`synopsis: ${productTagline}`));
+  assert.ok(builder.includes(`description: ${productDescription}`));
+  assert.ok(metainfo.includes(`<summary>${productTagline}</summary>`));
+  assert.equal(JSON.parse(appPackage).description, productDescription);
+  assert.equal(JSON.parse(rootPackage).description, productDescription);
+  assert.match(
+    readme,
+    /Gezel helps you build a crew of named AI companions with distinct roles and tools/,
+  );
 
   const rpmSection = builder.slice(builder.indexOf('\nrpm:'), builder.length);
   assert.match(rpmSection, /^\s{4}- gtk3$/m);

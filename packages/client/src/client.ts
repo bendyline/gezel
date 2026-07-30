@@ -70,6 +70,7 @@ import type {
   DeviceSafetyPolicyConfig,
   DiffFilesRequest,
   DiffFilesResponse,
+  DocumentMediaExportRequest,
   DraftScriptRequest,
   DraftScriptResponse,
   DriveIndexEnrichmentRequest,
@@ -5142,6 +5143,40 @@ export class GezelClient {
       headers: { Authorization: `Bearer ${this.token}` },
     });
     if (!res.ok) throw new Error(`document fetch failed: ${res.status}`);
+    return res.blob();
+  }
+
+  /**
+   * Render the current document text to MP4/GIF through gezeld. The daemon
+   * uses Squisq's native renderer and an ffmpeg discovered from the host
+   * environment; no browser-side ffmpeg.wasm runtime is downloaded.
+   */
+  async exportDocumentMedia(
+    request: DocumentMediaExportRequest,
+    signal?: AbortSignal,
+  ): Promise<Blob> {
+    const url = `${this.baseUrl}/api/document-media-export`;
+    const res = await this.fetchImpl(url, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        Authorization: `Bearer ${this.token}`,
+      },
+      body: JSON.stringify(request),
+      signal,
+    });
+    if (!res.ok) {
+      const fallback = `document media export failed (${res.status})`;
+      const error = await res
+        .json()
+        .then((body) =>
+          body && typeof body === 'object' && 'error' in body && typeof body.error === 'string'
+            ? body.error
+            : fallback,
+        )
+        .catch(() => fallback);
+      throw new Error(error);
+    }
     return res.blob();
   }
 

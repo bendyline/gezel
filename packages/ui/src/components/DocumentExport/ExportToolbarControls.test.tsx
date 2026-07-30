@@ -2,46 +2,25 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+Object.defineProperty(URL, 'createObjectURL', {
+  configurable: true,
+  value: vi.fn(() => 'blob:document-media-export'),
+});
+Object.defineProperty(URL, 'revokeObjectURL', {
+  configurable: true,
+  value: vi.fn(),
+});
+
 const apiMock = {
   getConfig: vi.fn(),
   updateConfig: vi.fn(),
+  exportDocumentMedia: vi.fn(),
 };
 const runExportMock = vi.fn();
-const resolveAudioMappingMock = vi.fn(async (doc: unknown, _container: unknown) => doc);
 
 vi.mock('../../api.js', () => ({ api: apiMock }));
 vi.mock('@bendyline/squisq-editor-react', () => ({
   useEditorContext: () => ({ markdownSource: '# Current draft' }),
-}));
-vi.mock('@bendyline/squisq-react/standalone-source', () => ({
-  PLAYER_BUNDLE: 'player-source',
-}));
-vi.mock('@bendyline/squisq-video-react', () => ({
-  VideoExportModal: ({
-    defaultConfig,
-    colorScheme,
-    mediaProvider,
-  }: {
-    defaultConfig: { outputFormat?: string; ffmpegWasm?: { coreURL?: string } };
-    colorScheme: string;
-    mediaProvider?: unknown;
-  }) => (
-    <div
-      data-testid="video-export-modal"
-      data-format={defaultConfig.outputFormat}
-      data-has-ffmpeg={Boolean(defaultConfig.ffmpegWasm?.coreURL)}
-      data-theme={colorScheme}
-      data-has-media={Boolean(mediaProvider)}
-    />
-  ),
-}));
-vi.mock('@bendyline/squisq/doc', () => ({
-  markdownToDoc: () => ({ blocks: [] }),
-  resolveAudioMapping: (doc: unknown, container: unknown) =>
-    resolveAudioMappingMock(doc, container),
-}));
-vi.mock('@bendyline/squisq/markdown', () => ({
-  parseMarkdown: () => ({ children: [] }),
 }));
 vi.mock('@bendyline/squisq/schemas', () => ({
   getThemeSummaries: () => [{ id: 'standard', name: 'Standard', description: 'Standard theme' }],
@@ -78,16 +57,17 @@ describe('ExportToolbarControls', () => {
     apiMock.updateConfig.mockResolvedValue({});
     runExportMock.mockReset();
     runExportMock.mockResolvedValue(undefined);
-    resolveAudioMappingMock.mockClear();
+    apiMock.exportDocumentMedia.mockReset();
+    apiMock.exportDocumentMedia.mockResolvedValue(new Blob(['native-media']));
   });
 
-  it('renders an explicit Export button and offers document, video, and GIF actions', async () => {
+  it('offers document, video, and GIF actions for a Store-backed document', async () => {
     const user = userEvent.setup();
     render(
       <ExportToolbarControls
         selectedFile="notes/brief.md"
         mediaContainer={mediaContainer}
-        colorScheme="dark"
+        mediaSource={{ kind: 'documents' }}
       />,
     );
 
@@ -100,25 +80,30 @@ describe('ExportToolbarControls', () => {
     expect(screen.getByRole('menuitem', { name: 'Export animated GIF…' })).toBeInTheDocument();
   });
 
-  it('opens Squisq directly in its GIF preset with the offline runtime and Gezel theme', async () => {
+  it('routes GIF export through the daemon native renderer', async () => {
     const user = userEvent.setup();
     render(
       <ExportToolbarControls
         selectedFile="notes/brief.md"
         mediaContainer={mediaContainer}
-        colorScheme="dark"
+        mediaSource={{ kind: 'documents' }}
       />,
     );
 
     await user.click(screen.getByRole('button', { name: 'Export document' }));
     await user.click(await screen.findByRole('menuitem', { name: 'Export animated GIF…' }));
 
-    const modal = await screen.findByTestId('video-export-modal');
-    expect(modal).toHaveAttribute('data-format', 'gif');
-    expect(modal).toHaveAttribute('data-has-ffmpeg', 'true');
-    expect(modal).toHaveAttribute('data-theme', 'dark');
-    expect(modal).toHaveAttribute('data-has-media', 'true');
-    expect(resolveAudioMappingMock).toHaveBeenCalledWith({ blocks: [] }, mediaContainer);
+    await waitFor(() =>
+      expect(apiMock.exportDocumentMedia).toHaveBeenCalledWith(
+        {
+          markdown: '# Current draft',
+          selectedFile: 'notes/brief.md',
+          format: 'gif',
+          source: { kind: 'documents' },
+        },
+        expect.any(AbortSignal),
+      ),
+    );
   });
 
   it('shows and runs the last document export as a one-click quick action', async () => {
@@ -147,6 +132,7 @@ describe('ExportToolbarControls', () => {
 
     await user.click(screen.getByRole('button', { name: 'Export document' }));
     await user.click(await screen.findByRole('menuitem', { name: 'Export…' }));
+    expect(screen.getByRole('radio', { name: 'PowerPoint' })).toBeInTheDocument();
     await user.click(screen.getByRole('radio', { name: 'Word' }));
     await user.click(screen.getByRole('button', { name: 'Export' }));
 

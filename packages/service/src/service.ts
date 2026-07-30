@@ -104,6 +104,7 @@ import { openSecretStore } from './secrets/index.js';
 import { seedSecretsFromEnvFile } from './secrets/seed.js';
 import { runSystemBootstrap } from './system-toolsets/bootstrap.js';
 import { SystemStatusBus } from './system-toolsets/status-bus.js';
+import { reapOrphanedGezelEngineProcesses } from './system/gezel-process-cleanup.js';
 import { SystemIdleState } from './system/idle-state.js';
 import { detectMemoryProfile } from './system/memory.js';
 import { dispatchTaskEntry } from './tasks/entry-dispatch.js';
@@ -297,6 +298,27 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     runtimeDir,
     lockPath: join(runtimeDir, 'lock'),
   });
+  // The per-engine supervisor only reaps its own engine family before a
+  // launch. Sweep all clearly-Gezel, same-home PPID-1 engines once at service
+  // boot so starting a DS4 chat also clears an abandoned MLX/Python server
+  // (and vice versa). Acquiring the home lock first proves no live same-home
+  // daemon can be racing this cleanup.
+  try {
+    const cleanup = await reapOrphanedGezelEngineProcesses({ home });
+    if (cleanup.targetedPids.length > 0) {
+      const remaining =
+        cleanup.remainingPids.length > 0
+          ? `; still present after cleanup: ${cleanup.remainingPids.join(', ')}`
+          : '';
+      log.info(
+        `[engines] startup reaped ${cleanup.targetedPids.length} orphan(s) from prior service sessions: ${cleanup.targetedPids.join(', ')}${remaining}`,
+      );
+    }
+  } catch (err) {
+    log.warn(
+      `[engines] startup orphan sweep failed (continuing): ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
   const migratedSharedModels = await migrateLegacySystemModels(home);
   if (migratedSharedModels > 0) {
     log.info(

@@ -1,6 +1,6 @@
 # Gezel
 
-Gezel is a local-first desktop workshop for assembling a crew of named AI companions, giving them projects and tools, and keeping their work and memory on your machine.
+Gezel helps you build a crew of named AI companions with distinct roles and tools, then put them to work on your projects. Their conversations, memory, and work are stored on your computer as ordinary files.
 
 ![Gezel first-run experience](docs/assets/gezel-first-run.png)
 

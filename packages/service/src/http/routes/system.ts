@@ -31,6 +31,7 @@ import {
 } from '../../github/repo-preview.js';
 import { pnpmSpawnTarget, resolvePnpmCommand } from '../../packages/pnpm.js';
 import { resolveSystemLibraryPath } from '../../system-toolsets/resolve.js';
+import { sampleDarwinGezelProcessMemoryCached } from '../../system/gezel-process-memory.js';
 import {
   detectMemoryProfile,
   detectMemoryProfileCached,
@@ -80,10 +81,15 @@ export function systemRoutes(ctx: ServiceContext): Hono {
       forceMainMemory || profile.source === 'system-ram-fallback' || unifiedMemory
         ? undefined
         : await ctx.gpuArbiter.getDeviceHealthStatus(1_000);
+    const gezelProcessMemory =
+      profile.platform === 'darwin' && (forceMainMemory || unifiedMemory)
+        ? await sampleDarwinGezelProcessMemoryCached({ home: ctx.home })
+        : null;
     const snapshot = sampleMachineMemoryUsage({
       profile,
       ...(deviceHealth ? { deviceHealth } : {}),
       engineCommittedBytes: ctx.chat.peekEngineStatus()?.committedBytes ?? 0,
+      gezelProcessMemory,
       forceMainMemory,
     });
     return c.json(MachineMemoryUsageSchema.parse(snapshot));

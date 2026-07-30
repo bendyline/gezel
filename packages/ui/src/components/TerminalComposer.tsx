@@ -1,3 +1,4 @@
+import type { RunTerminalCommandResponse } from '@bendyline/gezel';
 import { type ReactNode, Suspense, lazy, useCallback, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { Popover } from '../primitives/index.js';
@@ -142,7 +143,7 @@ export function TerminalComposer({
   projectId: string;
   workingDir: string;
   /** Optional hook the parent can use to flip a UX state on submit. */
-  onSent?: (input: string) => void;
+  onSent?: (input: string, result: RunTerminalCommandResponse) => void;
   /**
    * Optional seed value for the input. Read once at mount (standard
    * useState initial-value semantics) so changes after mount don't
@@ -209,8 +210,8 @@ export function TerminalComposer({
       }
       historyIdxRef.current = -1;
       try {
-        await api.runTerminalCommand(projectId, { workingDir, input: trimmed });
-        onSent?.(trimmed);
+        const result = await api.runTerminalCommand(projectId, { workingDir, input: trimmed });
+        onSent?.(trimmed, result);
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
         // Belt-and-braces: if the error banner mounting drifted focus, snap it back.

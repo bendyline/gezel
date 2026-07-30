@@ -35,11 +35,44 @@ describe('sampleMachineMemoryUsage', () => {
       totalBytes: 64 * GiB,
       usedBytes: 44 * GiB,
       gezelBytesEstimated: 12 * GiB,
+      gezelBytesObserved: null,
+      engineReservedBytes: 10 * GiB,
+      gezelEngineProcessCount: 0,
+      orphanedGezelEngineProcessCount: 0,
       otherBytes: 32 * GiB,
       freeBytes: 20 * GiB,
       sampledAt: 'now',
       source: 'system-memory',
       deviceNames: [],
+    });
+  });
+
+  it('prefers observed macOS process footprint over the capacity reservation', () => {
+    const usage = sampleMachineMemoryUsage({
+      profile: profile({
+        platform: 'darwin',
+        gpuVramBytes: null,
+        source: 'darwin-unified',
+      }),
+      engineCommittedBytes: 10 * GiB,
+      gezelProcessMemory: {
+        bytes: 30 * GiB,
+        engineProcessCount: 2,
+        orphanedEngineProcessCount: 1,
+      },
+      serviceRssBytes: 2 * GiB,
+      freeRamBytes: 20 * GiB,
+      sampledAt: 'now',
+    });
+
+    expect(usage).toMatchObject({
+      usedBytes: 44 * GiB,
+      gezelBytesEstimated: 12 * GiB,
+      gezelBytesObserved: 30 * GiB,
+      engineReservedBytes: 10 * GiB,
+      gezelEngineProcessCount: 2,
+      orphanedGezelEngineProcessCount: 1,
+      otherBytes: 14 * GiB,
     });
   });
 
@@ -99,6 +132,8 @@ describe('sampleMachineMemoryUsage', () => {
       totalBytes: 24 * GiB,
       usedBytes: 9 * GiB,
       gezelBytesEstimated: 5 * GiB,
+      gezelBytesObserved: null,
+      engineReservedBytes: 5 * GiB,
       otherBytes: 4 * GiB,
       freeBytes: 15 * GiB,
       source: 'device-health',

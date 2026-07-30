@@ -421,6 +421,19 @@ export interface ChatTimelineViewProps {
    */
   terminalRefreshKey?: number;
   /**
+   * The most recent terminal command submitted from the composer beside
+   * this timeline. Unlike background terminal activity, a local submission
+   * should always bring its own command row into view, even when the user
+   * had scrolled up to read older history. `runId` makes repeated identical
+   * commands distinct; the row itself is resolved by thread + input because
+   * persisted terminal entries intentionally do not expose run ids.
+   */
+  terminalSubmission?: {
+    runId: string;
+    threadId: string;
+    input: string;
+  };
+  /**
    * Fired when the terminal SSE channel reports a `workingDirChanged`
    * event — i.e. the shell behind a thread cd'd to a new path. The
    * parent (ProjectChat) updates its `terminalWorkingDir` display
@@ -490,6 +503,7 @@ export function ChatTimelineView({
   streamUrl,
   terminalStreamUrl,
   terminalRefreshKey,
+  terminalSubmission,
   onTerminalWorkingDirChanged,
   showProjectName,
   inflightScope,
@@ -683,6 +697,30 @@ export function ChatTimelineView({
    * Kept in state (not a ref) so the button can render the live state.
    */
   const [pinnedToBottom, setPinnedToBottom] = useState(true);
+  /**
+   * A prompt submitted from the composer attached to this timeline. It is
+   * deliberately separate from ordinary row growth: background messages
+   * preserve the reader's scroll position, while the user's own send always
+   * lands in view with a small response runway beneath it.
+   */
+  const [submissionAnchor, setSubmissionAnchor] = useState<
+    | {
+        kind: 'chat';
+        key: string;
+        sessionId: string;
+        content: string;
+        at: string;
+      }
+    | {
+        kind: 'terminal';
+        key: string;
+        runId: string;
+        threadId: string;
+        input: string;
+      }
+    | null
+  >(null);
+  const [alignedSubmissionKey, setAlignedSubmissionKey] = useState<string | null>(null);
   const paginatingRef = useRef(false);
   /**
    * Sticky context header — surfaces the user message + assistant
@@ -756,6 +794,8 @@ export function ChatTimelineView({
     // ref so the first post-reload render counts as "grew" and
     // triggers the anchor-to-bottom.
     setPinnedToBottom(true);
+    setSubmissionAnchor(null);
+    setAlignedSubmissionKey(null);
     lastRowCountRef.current = 0;
     lastScrollHeightRef.current = 0;
     void (async () => {
@@ -1267,6 +1307,22 @@ export function ChatTimelineView({
     };
   }, [terminalRefreshKey, loadTimeline]);
 
+  // A terminal submission can arrive after its SSE command row (the service
+  // persists and broadcasts before the POST resolves) or before the fallback
+  // snapshot above. Recording the intent independently lets the alignment
+  // effect below handle both orderings and retry when rows change.
+  useEffect(() => {
+    if (!terminalSubmission) return;
+    setSubmissionAnchor({
+      kind: 'terminal',
+      key: `terminal:${terminalSubmission.runId}`,
+      runId: terminalSubmission.runId,
+      threadId: terminalSubmission.threadId,
+      input: terminalSubmission.input,
+    });
+    setAlignedSubmissionKey(null);
+  }, [terminalSubmission]);
+
   const refreshLatest = useCallback(async () => {
     try {
       const res = await loadTimeline({ limit: PAGE_SIZE });
@@ -1397,6 +1453,17 @@ export function ChatTimelineView({
         });
         setLiveBump((n) => n + 1);
       }
+      // This event is published only by the local composer after the send
+      // was accepted. Bring that prompt into view even if the reader had
+      // intentionally unpinned the timeline while inspecting older rows.
+      setSubmissionAnchor({
+        kind: 'chat',
+        key: `chat:${message.sessionId}:${message.at}`,
+        sessionId: message.sessionId,
+        content: message.content,
+        at: message.at,
+      });
+      setAlignedSubmissionKey(null);
     });
   }, [inflightProjectId, inflightGezelId, synthesizeUserTimelineMessage]);
 
@@ -2152,6 +2219,66 @@ export function ChatTimelineView({
     if (!pinnedToBottom) return;
     el.scrollTo({ top: el.scrollHeight, behavior: 'instant' as ScrollBehavior });
   }, [rows, pinnedToBottom]);
+
+  /**
+   * Align a locally-submitted prompt after its row has rendered. The target
+   * may be nested inside a threaded group, so derive its scroll position from
+   * viewport rectangles rather than `offsetTop` (whose offset parent would be
+   * the thread, not the timeline). The temporary runway rendered below makes
+   * room for the first part of the response instead of pinning the prompt
+   * against the composer's top edge.
+   *
+   * This effect follows the ordinary bottom-anchor effect so a local send wins
+   * when both react to the same row insertion. It runs only once per accepted
+   * submission; streaming deltas can then use normal pinned-follow behavior.
+   */
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || !submissionAnchor || alignedSubmissionKey === submissionAnchor.key) return;
+
+    let target: HTMLElement | null = null;
+    if (submissionAnchor.kind === 'chat') {
+      const submittedAt = Date.parse(submissionAnchor.at);
+      const candidate = messages
+        .filter(
+          (message) =>
+            message.sessionId === submissionAnchor.sessionId &&
+            message.role === 'user' &&
+            message.content === submissionAnchor.content,
+        )
+        .sort((a, b) => {
+          const aDistance = Math.abs(Date.parse(a.at) - submittedAt);
+          const bDistance = Math.abs(Date.parse(b.at) - submittedAt);
+          return aDistance - bDistance;
+        })[0];
+      if (candidate) {
+        const id = cssAttrValue(`msg:${candidate.sessionId}:${candidate.at}:${candidate.role}`);
+        target = el.querySelector<HTMLElement>(`[data-msg-id="${id}"]`);
+      }
+    } else {
+      const candidate = [...terminalEntries]
+        .reverse()
+        .find(
+          (entry) =>
+            entry.threadId === submissionAnchor.threadId &&
+            entry.msgKind === 'command' &&
+            (entry.content === submissionAnchor.input ||
+              entry.resolvedFrom === submissionAnchor.input),
+        );
+      if (candidate) {
+        const id = cssAttrValue(candidate.messageId);
+        target = el.querySelector<HTMLElement>(`[data-terminal-message-id="${id}"]`);
+      }
+    }
+    if (!target) return;
+
+    const timelineRect = el.getBoundingClientRect();
+    const targetRect = target.getBoundingClientRect();
+    const top = Math.max(0, el.scrollTop + targetRect.top - timelineRect.top - 12);
+    setPinnedToBottom(true);
+    el.scrollTo({ top });
+    setAlignedSubmissionKey(submissionAnchor.key);
+  }, [messages, terminalEntries, submissionAnchor, alignedSubmissionKey]);
 
   /**
    * Scroll to a session's failed-turn banner (falling back to that
@@ -3129,6 +3256,15 @@ export function ChatTimelineView({
     activeContextStatus.numCtx > 0
       ? Math.round((100 * activeContextStatus.estimatedTokens) / activeContextStatus.numCtx)
       : null;
+  const submissionStillRunning =
+    submissionAnchor?.kind === 'chat'
+      ? liveRef.current.has(submissionAnchor.sessionId)
+      : submissionAnchor?.kind === 'terminal'
+        ? terminalLiveRef.current.has(submissionAnchor.runId)
+        : false;
+  const showResponseRunway =
+    submissionAnchor !== null &&
+    (alignedSubmissionKey !== submissionAnchor.key || submissionStillRunning);
 
   return (
     <div className="chat-timeline-viewport">
@@ -3178,6 +3314,7 @@ export function ChatTimelineView({
           </div>
         )}
         {els}
+        {showResponseRunway && <div className="timeline-response-runway" aria-hidden="true" />}
       </div>
       {!pinnedToBottom && (
         <button

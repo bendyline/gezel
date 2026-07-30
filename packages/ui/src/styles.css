@@ -2784,8 +2784,9 @@ html.embedded-chat #root {
    status and action controls remain on the same piece of paper; document
    navigation applies it directly to the selected tree row. */
 .app-sidebar-scroll {
-  /* Rail padding + the tab's transparent inner border + the sidebar seam. */
-  --sidebar-tab-bridge-size: calc(0.4rem + 2px);
+  /* Rail padding + the tab's transparent inner border. The sidebar divider
+     is inset, so including it again makes the bridge overshoot by 1px. */
+  --sidebar-tab-bridge-size: calc(0.4rem + 1px);
   --sidebar-tab-border: color-mix(in srgb, var(--accent) 38%, var(--border));
   --sidebar-tab-surface: var(--bg);
 }
@@ -2827,17 +2828,20 @@ html.embedded-chat #root {
   pointer-events: none;
 }
 
-/* Button rows paint the correctly sized bridge one pixel below their border
-   box. Lift the whole shape without changing its height. */
+/* Absolutely positioned children resolve against the button's padding box.
+   Extend through both 1px borders so the bridge's bottom edge does not stop
+   one pixel above the selected tab's bottom border. */
 .app-sidebar-item.active::after {
+  top: -1px;
   bottom: -1px;
-  transform: translateY(-1px);
 }
 
-/* Flex row wrappers resolve their bridge one pixel shorter than the bordered
-   row itself; extend only those wrappers at the bottom. */
+/* Flex row wrappers use the same padding-box origin. Their bottom was already
+   extended; include the top border too so project/gezel connectors do not
+   begin one pixel below the selected row's top edge. */
 .app-sidebar-proj-row.active::after,
 .app-sidebar-gezel-row.active::after {
+  top: -1px;
   bottom: -1px;
 }
 
@@ -12521,7 +12525,9 @@ body.chat-rail-resizing webview {
   --compose-frame-bg: color-mix(in srgb, var(--panel) 88%, var(--surface));
   --compose-frame-border: color-mix(in srgb, var(--accent) 62%, var(--border));
   --compose-toolbar-bg: color-mix(in srgb, var(--panel) 97%, var(--chat-bubble-bg));
-  margin: 0 0.25rem 0.25rem;
+  /* Clear the outer rail's rounded lower-left corner while preserving the
+     tighter right inset beside the reference rail. */
+  margin: 0 0.25rem 0.25rem 0.5rem;
   border: 1px solid var(--compose-frame-border);
   border-radius: var(--radius-md);
   background: var(--compose-frame-bg);
@@ -12656,6 +12662,16 @@ body.chat-rail-resizing webview {
   border-radius: var(--radius-sm);
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid var(--border);
+}
+
+/* A short-lived tail below a prompt submitted from the composer attached to
+   this timeline. It gives the first response lines somewhere to appear instead
+   of wedging the new prompt directly against the composer. The element is
+   removed when the chat turn / terminal run settles. */
+.timeline-response-runway {
+  flex: 0 0 clamp(4.5rem, 22vh, 10rem);
+  width: 100%;
+  pointer-events: none;
 }
 
 /* Floating toggle for "pinned to bottom" mode — small circular button
@@ -17870,6 +17886,10 @@ a.license-button:hover {
   display: flex;
   align-items: stretch;
   gap: 0;
+  /* Follow the roster + timeline content gutter instead of letting the
+   * composer frame sit flush against the project pane's left edge. Keep the
+   * right edge untouched so the attached @/> tabs retain their alignment. */
+  margin-left: 0.75rem;
   /* Keep the framed control from sitting directly on the project pane's
    * bottom edge. This belongs to the shell so it clears both the composer
    * and its attached chat/terminal tabs without adding space inside them. */
@@ -18044,7 +18064,9 @@ a.license-button:hover {
   flex-direction: column;
   gap: 2px;
   /* The tabs belong to the outer one-pixel frame, not the nested editor
-   * surface, so both modes land flush on the frame's bottom edge. */
+   * surface. Lift the stack clear of the composer's rounded bottom corner
+   * while preserving its one-pixel attachment to the right edge. */
+  margin-bottom: 8px;
 }
 
 .project-chat-compose-toggle button {

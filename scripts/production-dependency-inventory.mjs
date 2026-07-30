@@ -42,6 +42,19 @@ function runPnpm(args) {
  */
 const NON_SHIPPING_PROJECTS = ['@bendyline/gezel-evals', '@bendyline/gezel-eval-viewer'];
 
+/**
+ * Production declarations that never reach a released artifact.
+ *
+ * `@bendyline/squisq-editor-react` imports only the tree-shakable
+ * `@bendyline/squisq-video-react/cover-image` entry. Upstream currently keeps
+ * the browser encoder and `@ffmpeg/core` in that package's production
+ * dependency graph even though the cover-image entry excludes it and Gezel no
+ * longer publishes the core assets. The emitted UI is the shipping authority;
+ * `tests/published/bundledAssets.test.ts` guards that the ffmpeg runtime stays
+ * absent.
+ */
+const DECLARED_BUT_NOT_SHIPPED = new Set(['@ffmpeg/core']);
+
 /** Read pnpm's exact production package/version/license inventory. */
 export function readProductionLicenseInventory() {
   const raw = runPnpm([
@@ -54,6 +67,13 @@ export function readProductionLicenseInventory() {
   const inventory = JSON.parse(raw);
   if (!inventory || typeof inventory !== 'object' || Array.isArray(inventory)) {
     throw new Error('pnpm returned an invalid production dependency inventory');
+  }
+  for (const [license, packages] of Object.entries(inventory)) {
+    if (!Array.isArray(packages)) {
+      throw new Error(`pnpm returned an invalid package list for license ${license}`);
+    }
+    inventory[license] = packages.filter((pkg) => !DECLARED_BUT_NOT_SHIPPED.has(pkg.name));
+    if (inventory[license].length === 0) delete inventory[license];
   }
   return inventory;
 }

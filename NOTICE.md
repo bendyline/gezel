@@ -59,15 +59,16 @@ attribution file is taken from the exact Electron distribution being packaged.
 
 These are developed in the neighbouring [Squisq](https://github.com/bendyline/squisq)
 repository and linked into the workspace. Their license matches Squisq's
-(MIT). Core sibling packages are pinned through the root `pnpm.overrides`
-map; the video adapter is pinned directly by the UI package.
+(MIT). Consuming packages pin every Squisq dependency exactly.
 
 - `@bendyline/squisq` — MIT
+- `@bendyline/squisq-cli` — MIT
 - `@bendyline/squisq-react` — MIT
 - `@bendyline/squisq-editor-react` — MIT
 - `@bendyline/squisq-formats` — MIT
-- `@bendyline/squisq-video-react` — MIT (its FFmpeg runtime is a separate
-  dependency with separate terms; see the reviewed components below)
+- `@bendyline/squisq-video` — MIT
+- `@bendyline/squisq-video-react` — MIT (Gezel's editor consumes only its
+  cover-image entry; the browser encoder and FFmpeg runtime are not shipped)
 
 ### Reviewed unmodified component redistributions
 
@@ -78,8 +79,6 @@ changes fail the production license gate until reviewed again. Redistribution
 does not alter the upstream license terms, and packaged artifacts must retain
 the applicable upstream license and notice material.
 
-- `@ffmpeg/core@0.12.9` — GPL-2.0-or-later, pulled in by
-  `@bendyline/squisq-video-react`.
 - `@resvg/resvg-js@2.6.2` and its platform binaries — MPL-2.0.
 
 `pnpm audit:licenses` encodes these as narrow reviewed exceptions. It remains
@@ -304,8 +303,8 @@ project, [Hochschule für Gestaltung Schwäbisch Gmünd](https://www.hfg-gmuend.
 ## Proprietary and non-permissive components
 
 Most of Gezel's own **code** dependencies (npm packages and native engines) are
-permissively licensed (MIT / Apache-2.0 / BSD / ISC). The reviewed FFmpeg and
-resvg component redistributions are documented above. One proprietary
+permissively licensed (MIT / Apache-2.0 / BSD / ISC). The reviewed resvg
+component redistribution is documented above. One proprietary
 component is redistributed:
 
 - **NVIDIA CUDA runtime** (`libcudart`, `libcublas`, `libcublasLt` on Linux;

@@ -26,6 +26,20 @@ test.describe('projects IDE', () => {
     await openProject(page, world!.projectId);
 
     await expect(page.getByTestId('project-tab-chat')).toBeVisible({ timeout: 15_000 });
+    const activeProjectBridge = await page
+      .locator('.app-sidebar-proj-row.active')
+      .evaluate((row) => {
+        const rowStyle = getComputedStyle(row);
+        const bridgeStyle = getComputedStyle(row, '::after');
+        return {
+          topOffset:
+            Number.parseFloat(rowStyle.borderTopWidth) + Number.parseFloat(bridgeStyle.top),
+          bottomOffset:
+            -Number.parseFloat(rowStyle.borderBottomWidth) - Number.parseFloat(bridgeStyle.bottom),
+        };
+      });
+    expect(Math.abs(activeProjectBridge.topOffset)).toBeLessThan(0.1);
+    expect(Math.abs(activeProjectBridge.bottomOffset)).toBeLessThan(0.1);
 
     for (const t of TABS) {
       const trigger = page.getByTestId(`project-tab-${t.value}`);

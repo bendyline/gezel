@@ -2,7 +2,7 @@
   "name": "@bendyline/gezel-app",
   "version": "0.0.0",
   "private": true,
-  "description": "Gezel - your local AI crew",
+  "description": "Build a crew of named AI companions with distinct roles and tools, then put them to work on your projects. Gezel stores their conversations, memory, and work on your computer as ordinary files.",
   "license": "MIT",
   "homepage": "https://github.com/bendyline/gezel",
   "repository": {

@@ -548,6 +548,11 @@ function ProjectChatBody({
   // Live SSE normally paints it first; this key closes the narrow gap where
   // a stream frame is lost while the command itself was safely stored.
   const [terminalRefreshKey, setTerminalRefreshKey] = useState(0);
+  const [terminalSubmission, setTerminalSubmission] = useState<{
+    runId: string;
+    threadId: string;
+    input: string;
+  } | null>(null);
 
   // Stage a command into the terminal for the user to review + run.
   // Called by the CommandsPanel craftbook launcher (threaded through
@@ -634,6 +639,7 @@ function ProjectChatBody({
               setTerminalPickerDisplay(next);
             }}
             terminalRefreshKey={terminalRefreshKey}
+            {...(terminalSubmission ? { terminalSubmission } : {})}
             emptyPlaceholder={
               isVoorman
                 ? `Talk to ${selectedGezel.name} about running "${project.name}" — planning tasks, delegating, or checking progress.`
@@ -714,7 +720,14 @@ function ProjectChatBody({
                     projectId={project.id}
                     workingDir={terminalThreadDir}
                     initialInput={terminalInitialInput}
-                    onSent={() => setTerminalRefreshKey((key) => key + 1)}
+                    onSent={(input, result) => {
+                      setTerminalSubmission({
+                        runId: result.runId,
+                        threadId: result.threadId,
+                        input,
+                      });
+                      setTerminalRefreshKey((key) => key + 1);
+                    }}
                     onChatEscape={(seed) => {
                       // Queue the seed for the ChatComposer that's
                       // about to mount, then flip mode. The composer's

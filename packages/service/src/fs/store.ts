@@ -3897,6 +3897,15 @@ export class Store {
     return this.documents.readDocument(filePath);
   }
 
+  /**
+   * Read a shared-library document sidecar as raw bytes. Native document
+   * media export uses this for images, narration, and embedded clips while
+   * keeping all user-state access behind Store.
+   */
+  async readDocumentBinary(filePath: string): Promise<{ data: Buffer; mimeType: string } | null> {
+    return this.documents.readDocumentBinary(filePath);
+  }
+
   async writeDocument(filePath: string, content: string): Promise<void> {
     await this.documents.writeDocument(filePath, content);
   }
