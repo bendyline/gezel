@@ -26,8 +26,9 @@ export type {
   DetectResult,
   GpuVendorHint,
   LlamaBackend,
+  ResolvedLlamaBinary,
 } from './llama-backend.js';
-export { detectLlamaBackend } from './llama-backend.js';
+export { detectLlamaBackend, resolveAvailableLlamaBinary } from './llama-backend.js';
 export type {
   DiscoverInput,
   DiscoverResult,

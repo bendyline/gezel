@@ -228,6 +228,99 @@ describe('discoverNativeBinaries — Linux + AMD Vulkan', () => {
   });
 });
 
+describe('discoverNativeBinaries — Linux ARM64 packaging fallback', () => {
+  it('uses the CPU build when Vulkan is detected but no ARM64 Vulkan build is bundled', () => {
+    const cpuBin = stageBinary(
+      nativeBinDir,
+      'linux-arm64-cpu',
+      'gezel-llama-server',
+      'linux',
+    );
+
+    const result = discoverNativeBinaries({
+      home,
+      nativeBinDirOverride: nativeBinDir,
+      platform: 'linux',
+      arch: 'arm64',
+      llamaProbeOverride: {
+        fileExists: (p) => p === '/usr/lib/aarch64-linux-gnu/libvulkan.so.1',
+      },
+    });
+
+    expect(process.env.GEZEL_LLAMA_SERVER_BIN).toBe(cpuBin);
+    expect(process.env.GEZEL_LLAMA_SERVER_BACKEND).toBe('cpu');
+    expect(process.env.GEZEL_LLAMA_DETECTED_BACKEND).toBe('vulkan');
+    expect(result.llamaBackend).toMatchObject({
+      backend: 'cpu',
+      detectedBackend: 'vulkan',
+    });
+    expect(result.llamaBackend?.reason).toContain('no bundled vulkan binary, using cpu');
+    expect(result.binaries.find((b) => b.name === 'llama-server')).toMatchObject({
+      source: 'discovered',
+      path: cpuBin,
+      variant: 'cpu',
+    });
+  });
+
+  it('does not silently replace an explicit Vulkan override with CPU', () => {
+    stageBinary(nativeBinDir, 'linux-arm64-cpu', 'gezel-llama-server', 'linux');
+
+    const result = discoverNativeBinaries({
+      home,
+      nativeBinDirOverride: nativeBinDir,
+      platform: 'linux',
+      arch: 'arm64',
+      llamaCppBackendOverride: 'vulkan',
+      llamaProbeOverride: {
+        fileExists: (p) => p === '/usr/lib/aarch64-linux-gnu/libvulkan.so.1',
+      },
+    });
+
+    expect(process.env.GEZEL_LLAMA_SERVER_BIN).toBeUndefined();
+    expect(process.env.GEZEL_LLAMA_SERVER_BACKEND).toBeUndefined();
+    expect(process.env.GEZEL_LLAMA_DETECTED_BACKEND).toBe('vulkan');
+    expect(result.binaries.find((b) => b.name === 'llama-server')).toMatchObject({
+      source: 'not-found',
+      variant: 'vulkan',
+    });
+  });
+});
+
+describe('discoverNativeBinaries — automatic backend cascade', () => {
+  it('falls back from CUDA to Vulkan before CPU when the CUDA build is absent', () => {
+    const vulkanBin = stageBinary(
+      nativeBinDir,
+      'linux-x64-vulkan',
+      'gezel-llama-server',
+      'linux',
+    );
+    stageBinary(nativeBinDir, 'linux-x64-cpu', 'gezel-llama-server', 'linux');
+
+    const result = discoverNativeBinaries({
+      home,
+      nativeBinDirOverride: nativeBinDir,
+      platform: 'linux',
+      arch: 'x64',
+      llamaProbeOverride: {
+        fileExists: (p) => p === '/usr/lib/x86_64-linux-gnu/libcuda.so.1',
+      },
+    });
+
+    expect(process.env.GEZEL_LLAMA_SERVER_BIN).toBe(vulkanBin);
+    expect(process.env.GEZEL_LLAMA_SERVER_BACKEND).toBe('vulkan');
+    expect(process.env.GEZEL_LLAMA_DETECTED_BACKEND).toBe('cuda');
+    expect(result.llamaBackend).toMatchObject({
+      backend: 'vulkan',
+      detectedBackend: 'cuda',
+    });
+    expect(result.binaries.find((b) => b.name === 'llama-server')).toMatchObject({
+      source: 'discovered',
+      path: vulkanBin,
+      variant: 'vulkan',
+    });
+  });
+});
+
 describe('discoverNativeBinaries — override', () => {
   it('honours config.llamaCppBackendOverride for the chosen variant', () => {
     // CUDA driver present, but user pinned CPU. Should resolve the

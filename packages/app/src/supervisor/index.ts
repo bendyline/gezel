@@ -13,7 +13,11 @@ import {
   readRuntime,
   resolveDaemonEntry,
 } from '@bendyline/gezel-client/node';
-import { LLAMA_ENGINE_VERSION, detectLlamaBackend } from '@bendyline/gezel/native';
+import {
+  LLAMA_ENGINE_VERSION,
+  detectLlamaBackend,
+  resolveAvailableLlamaBinary,
+} from '@bendyline/gezel/native';
 import { gezelPaths } from '@bendyline/gezel/paths';
 import { defaultBundlePaths, extractBundleIfNeeded, readBundleMeta } from './extract-bundle.js';
 import { defaultNodeBundleDir, installNodeIfNeeded } from './extract-node.js';
@@ -594,12 +598,21 @@ export async function connectOrStart(opts: ConnectOptions): Promise<SupervisedSe
     if (probe.vendorHint) {
       process.env.GEZEL_LLAMA_DETECTED_VENDOR = probe.vendorHint;
     }
-    const bin = resolveNativeBinaryPath('llama-server', import.meta.url, probe.backend);
-    if (bin) {
-      process.env.GEZEL_LLAMA_SERVER_BIN = bin;
-      process.env.GEZEL_LLAMA_SERVER_BACKEND = probe.backend;
+    const resolved = resolveAvailableLlamaBinary(
+      probe.backend,
+      (backend) => resolveNativeBinaryPath('llama-server', import.meta.url, backend),
+      override === undefined || override === 'auto',
+    );
+    if (resolved) {
+      process.env.GEZEL_LLAMA_SERVER_BIN = resolved.path;
+      process.env.GEZEL_LLAMA_SERVER_BACKEND = resolved.backend;
+      if (resolved.fallbackFrom) {
+        opts.logger?.info?.(
+          `[supervisor] no bundled llama-server for ${resolved.fallbackFrom}; using ${resolved.backend} fallback: ${resolved.path}`,
+        );
+      }
       opts.logger?.info?.(
-        `[supervisor] bundled llama-server (${probe.backend}${probe.cached ? ', cached' : ''}${override && override !== 'auto' ? `, override=${override}, detected=${probe.detectedBackend}` : ''}): ${bin}`,
+        `[supervisor] bundled llama-server (${resolved.backend}${probe.cached ? ', cached' : ''}${override && override !== 'auto' ? `, override=${override}, detected=${probe.detectedBackend}` : ''}): ${resolved.path}`,
       );
     } else {
       opts.logger?.info?.(

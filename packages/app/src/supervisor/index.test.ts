@@ -45,6 +45,13 @@ const ctx = vi.hoisted(() => ({
     home: string;
   },
   processAlive: true,
+  llamaProbe: {
+    backend: 'cpu' as 'cuda' | 'vulkan' | 'metal' | 'cpu',
+    detectedBackend: 'cpu' as 'cuda' | 'vulkan' | 'metal' | 'cpu',
+    cached: false,
+    reason: 'mock',
+  },
+  nativeLlamaPaths: {} as Partial<Record<'cuda' | 'vulkan' | 'metal' | 'cpu', string>>,
 }));
 
 vi.mock('./extract-pnpm.js', () => ({
@@ -69,7 +76,12 @@ vi.mock('./extract-bundle.js', () => ({
   extractBundleIfNeeded: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock('./native-bin.js', () => ({
-  resolveNativeBinaryPath: () => null,
+  resolveNativeBinaryPath: vi.fn(
+    (binaryName: string, _mainMetaUrl: string, variant?: string) =>
+      binaryName === 'llama-server' && variant
+        ? (ctx.nativeLlamaPaths[variant as keyof typeof ctx.nativeLlamaPaths] ?? null)
+        : null,
+  ),
   nativeBinDir: () => '/mock/native-bin',
 }));
 // Probe + cache-bust key live in core (`@bendyline/gezel/native`)
@@ -81,12 +93,31 @@ vi.mock('./native-bin.js', () => ({
 // deterministic CPU verdict in tests.
 vi.mock('@bendyline/gezel/native', () => ({
   LLAMA_ENGINE_VERSION: 'mock-engine',
-  detectLlamaBackend: () => ({
-    backend: 'cpu',
-    detectedBackend: 'cpu',
-    cached: false,
-    reason: 'mock',
-  }),
+  detectLlamaBackend: () => ctx.llamaProbe,
+  resolveAvailableLlamaBinary: (
+    preferredBackend: 'cuda' | 'vulkan' | 'metal' | 'cpu',
+    resolveBinary: (backend: 'cuda' | 'vulkan' | 'metal' | 'cpu') => string | null,
+    allowFallbacks: boolean,
+  ) => {
+    const fallbackOrder = {
+      cuda: ['cuda', 'vulkan', 'cpu'],
+      vulkan: ['vulkan', 'cpu'],
+      metal: ['metal', 'cpu'],
+      cpu: ['cpu'],
+    } as const;
+    const candidates = allowFallbacks ? fallbackOrder[preferredBackend] : [preferredBackend];
+    for (const backend of candidates) {
+      const path = resolveBinary(backend);
+      if (path) {
+        return {
+          backend,
+          path,
+          ...(backend === preferredBackend ? {} : { fallbackFrom: preferredBackend }),
+        };
+      }
+    }
+    return null;
+  },
 }));
 vi.mock('./mode.js', () => ({ resolveMode: vi.fn() }));
 vi.mock('./system-service.js', () => ({
@@ -124,6 +155,7 @@ vi.mock('@bendyline/gezel-service', () => ({
 const { SupervisedService, connectOrStart, gracefullyStop, healthWithTimeout, stopProcessByPid } =
   await import('./index.js');
 const { resolveMode } = await import('./mode.js');
+const { resolveNativeBinaryPath } = await import('./native-bin.js');
 const { discoverOrSpawn } = await import('@bendyline/gezel-client/node');
 const { readBundleMeta } = await import('./extract-bundle.js');
 
@@ -139,6 +171,7 @@ const ENV_KEYS = [
   'GEZEL_LLAMA_SERVER_BACKEND',
   'GEZEL_WHISPER_SERVER_BIN',
   'GEZEL_UV_BIN',
+  'GEZEL_NATIVE_BIN_DIR',
 ];
 let envSnapshot: Record<string, string | undefined>;
 let testHome: string;
@@ -152,6 +185,13 @@ beforeEach(async () => {
   ctx.runtime = null;
   ctx.systemRuntime = null;
   ctx.processAlive = true;
+  ctx.llamaProbe = {
+    backend: 'cpu',
+    detectedBackend: 'cpu',
+    cached: false,
+    reason: 'mock',
+  };
+  ctx.nativeLlamaPaths = {};
   // "We can't read our own bundle version" is the default, which makes every
   // version check a no-op. Reset explicitly: `vi.clearAllMocks()` clears call
   // records but leaves implementations in place, so a test that stubs a
@@ -559,6 +599,36 @@ describe('Branch 3 — embedded', () => {
     expect(svc.token).toBe('embedded-token');
     expect(svc.cert).toBe('EMBEDDED-CERT-PEM');
     expect(svc.fallbackReason).toBeNull();
+    await svc.shutdown();
+  });
+});
+
+describe('native llama-server selection', () => {
+  it('falls back from CUDA to Vulkan and reports the effective backend', async () => {
+    ctx.llamaProbe = {
+      backend: 'cuda',
+      detectedBackend: 'cuda',
+      cached: false,
+      reason: 'mock CUDA driver',
+    };
+    ctx.nativeLlamaPaths = {
+      vulkan: '/mock/native-bin/linux-x64-vulkan/gezel-llama-server',
+      cpu: '/mock/native-bin/linux-x64-cpu/gezel-llama-server',
+    };
+    vi.mocked(resolveMode).mockResolvedValue({ kind: 'embedded' });
+
+    const svc = await connectOrStart(baseOpts({ forceEmbedded: true }));
+
+    expect(process.env.GEZEL_LLAMA_SERVER_BIN).toBe(
+      '/mock/native-bin/linux-x64-vulkan/gezel-llama-server',
+    );
+    expect(process.env.GEZEL_LLAMA_SERVER_BACKEND).toBe('vulkan');
+    expect(process.env.GEZEL_LLAMA_DETECTED_BACKEND).toBe('cuda');
+    const llamaVariants = vi
+      .mocked(resolveNativeBinaryPath)
+      .mock.calls.filter(([name]) => name === 'llama-server')
+      .map(([, , variant]) => variant);
+    expect(llamaVariants).toEqual(['cuda', 'vulkan']);
     await svc.shutdown();
   });
 });
