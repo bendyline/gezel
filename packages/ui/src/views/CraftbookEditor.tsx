@@ -46,10 +46,10 @@ function toUpdateBody(book: Craftbook) {
 
 /**
  * The craftbook editor — the design-mode sibling of `TaskDetail`. Header +
- * shared StepTracker (reorderable, no lifecycle status) + per-step panel +
- * an AI-assist tab. Local craftbooks are editable; bundled/project books
- * render read-only with a "Copy to edit" affordance (the PATCH route
- * refuses non-local books anyway).
+ * shared workshop-bench StepTracker (reorderable, no lifecycle status) +
+ * docked per-step panel + an AI-assist tab. Local craftbooks are editable;
+ * bundled/project books render read-only with a "Copy to edit" affordance
+ * (the PATCH route refuses non-local books anyway).
  */
 export function CraftbookEditor({ craftbookId, source, onChanged }: CraftbookEditorProps) {
   const [book, setBook] = useState<Craftbook | null>(null);
@@ -226,15 +226,23 @@ export function CraftbookEditor({ craftbookId, source, onChanged }: CraftbookEdi
         {error && <p className="error small">{error}</p>}
       </header>
 
-      <StepTracker
-        steps={book.steps}
-        selectedStepId={selectedStepId}
-        onSelect={setSelectedStepId}
-        entryStepId={book.entryStepId}
-        busy={busy}
-        ariaLabel="Craftbook steps"
-        {...(readOnly ? {} : { onAddStep, onReorder })}
-      />
+      <div
+        className={`task-bench-row craftbook-bench-row${
+          selectedStepId !== null ? ' has-docked-panel has-selected-step' : ''
+        }`}
+      >
+        <StepTracker
+          steps={book.steps}
+          selectedStepId={selectedStepId}
+          onSelect={setSelectedStepId}
+          entryStepId={book.entryStepId}
+          busy={busy}
+          ariaLabel="Craftbook steps"
+          addLabel="Add step"
+          variant="bench"
+          {...(readOnly ? {} : { onAddStep, onReorder })}
+        />
+      </div>
 
       <CraftbookStepPanel
         craftbookId={book.id}

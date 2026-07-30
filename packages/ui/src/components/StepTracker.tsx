@@ -52,10 +52,11 @@ interface StepTrackerProps<T extends StepTrackerStep> {
   ariaLabel?: string;
   addLabel?: string;
   /**
-   * `compact` (default) is the original chain-of-circles tracker — used by
-   * the craftbook design editor. `bench` is the workshop rail: numbered
-   * steps with pegs/figures standing on a wooden beam, assignee captions
-   * above and status words below. Pair with {@link stepOf}.
+   * `compact` (default) is the original chain-of-circles tracker. `bench`
+   * is the workshop rail used by tasks and craftbook design: numbered steps
+   * with pegs/figures standing on a wooden beam, assignee captions above
+   * and status words below. Pair with {@link stepOf} when those decorations
+   * are available.
    */
   variant?: 'compact' | 'bench';
   /** Bench-variant decoration per step. Ignored in `compact`. */

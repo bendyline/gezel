@@ -85,12 +85,21 @@ test.describe('chat surface', () => {
       const railRect = element.parentElement?.getBoundingClientRect();
       const recipient = element.querySelector<HTMLElement>('.chat-composer-to');
       const session = element.querySelector<HTMLElement>('.gezel-chat-session-header');
-      if (!railRect || !recipient || !session) {
+      const sessionSelect = session?.querySelector<HTMLElement>('.gezel-chat-session-select');
+      const editor = element.querySelector<HTMLElement>('.squisq-wysiwyg-editor');
+      const toolbar = element.querySelector<HTMLElement>('.squisq-toolbar');
+      if (!railRect || !recipient || !session || !sessionSelect || !editor || !toolbar) {
         throw new Error('Meester composer frame fixture did not render');
       }
+      const chatPaperProbe = document.createElement('span');
+      chatPaperProbe.style.background = 'var(--chat-bubble-bg)';
+      element.append(chatPaperProbe);
+      const composeHeaderProbe = document.createElement('span');
+      composeHeaderProbe.style.background = 'var(--chat-compose-header-bg)';
+      element.append(composeHeaderProbe);
       const recipientRect = recipient.getBoundingClientRect();
       const sessionRect = session.getBoundingClientRect();
-      return {
+      const result = {
         background: style.backgroundColor,
         borderWidth: style.borderTopWidth,
         radius: Number.parseFloat(style.borderTopLeftRadius),
@@ -98,7 +107,15 @@ test.describe('chat surface', () => {
         insetRight: railRect.right - rect.right,
         recipientInside: recipientRect.left >= rect.left && recipientRect.right <= rect.right,
         sessionInside: sessionRect.left >= rect.left && sessionRect.right <= rect.right,
+        sessionBackground: getComputedStyle(sessionSelect).backgroundColor,
+        chatPaperBackground: getComputedStyle(chatPaperProbe).backgroundColor,
+        editorBackground: getComputedStyle(editor).backgroundColor,
+        toolbarBackground: getComputedStyle(toolbar).backgroundColor,
+        composeHeaderBackground: getComputedStyle(composeHeaderProbe).backgroundColor,
       };
+      chatPaperProbe.remove();
+      composeHeaderProbe.remove();
+      return result;
     });
 
     expect(frame.background).not.toBe('rgba(0, 0, 0, 0)');
@@ -108,6 +125,10 @@ test.describe('chat surface', () => {
     expect(frame.insetRight).toBeGreaterThan(1);
     expect(frame.recipientInside).toBe(true);
     expect(frame.sessionInside).toBe(true);
+    expect(frame.sessionBackground).toBe(frame.chatPaperBackground);
+    expect(frame.background).toBe(frame.composeHeaderBackground);
+    expect(frame.toolbarBackground).toBe(frame.composeHeaderBackground);
+    expect(frame.editorBackground).not.toBe(frame.composeHeaderBackground);
 
     await expect(composer.getByRole('toolbar', { name: /toolbar/i })).toBeVisible();
     await expect(composer.getByRole('button', { name: /^Send$/ })).toBeVisible();

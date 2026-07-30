@@ -435,8 +435,8 @@
             53
           ],
           "p": ".github/workflows",
-          "h": "fc1980fb56a59982314b292e26d18945c5f48bee352b1d18d3d5abd015afe749",
-          "w": 1038,
+          "h": "3ac393d985cc502d1c80db5b88528086e3a1a49b8fc55b03620808d184869b76",
+          "w": 1043,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -502,8 +502,8 @@
             38.5,
             40.1
           ],
-          "h": "d2ee7301b437c15be698c428cb487c22374160b7aff272006f03bbcde204664f",
-          "w": 415,
+          "h": "2afaadf14665a4bdaa345bff95e9871a934b647a9131327f9618524599ba412e",
+          "w": 416,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -515,8 +515,8 @@
             40.7,
             38.6
           ],
-          "h": "741d829deb4b076071402aaf992b4baea144743fa61cac2a03c4f22a139ef236",
-          "w": 425,
+          "h": "28725ce246f84521baeaeb3286429227462f36beb92842f6d272d947e4252126",
+          "w": 435,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -567,8 +567,8 @@
             42.2,
             35.1
           ],
-          "h": "dc1e30c8fe3b847ce81ca86b440dddd0d8902975da92d6369bef8913fd2587fc",
-          "w": 415,
+          "h": "38db5bacc6d03faa5c220a9fb3bdfa180d65e0edcf22b9a984070c471c7a3ec6",
+          "w": 414,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -580,7 +580,7 @@
             21.5,
             28.6
           ],
-          "h": "18b413afe605bc59dcb217abd3730933f512b04d5dd1bb93451636368a290cd4",
+          "h": "9c5bdb24a79716b65053858d92ac8cc9f6053619c319edded925488a214412e0",
           "w": 86,
           "a": "2026-07-29T12:45:34.302Z"
         },
@@ -789,6 +789,20 @@
           "h": "325d47dc5a37d9cb460d949afb599825b3f1c25201cbd3663316b4ddcf203959",
           "w": 79,
           "a": "2026-07-29T12:45:34.302Z"
+        },
+        {
+          "k": "block",
+          "id": "docs/handboek/conceptual/connected-apps.md",
+          "r": [
+            2604.7,
+            3573.3,
+            23.9,
+            15
+          ],
+          "p": "docs/handboek/conceptual",
+          "h": "8bdf627711571e204e12c1a062bd41a2695e33c0e93ed9cd26545d084084f16a",
+          "w": 38,
+          "a": "2026-07-30T13:03:54.427Z"
         },
         {
           "k": "block",
@@ -4348,6 +4362,20 @@
         },
         {
           "k": "block",
+          "id": "evals/src/bin/perf-matrix.ts",
+          "r": [
+            3380.1,
+            3373.3,
+            32.1,
+            29.9
+          ],
+          "p": "evals/src/bin",
+          "h": "420f0d151969a72103af7bce9a45fd634823e0540c8fec0c239006423ab31111",
+          "w": 221,
+          "a": "2026-07-30T13:03:54.427Z"
+        },
+        {
+          "k": "block",
           "id": "evals/src/bin/preflight.ts",
           "r": [
             3456,
@@ -4457,6 +4485,20 @@
           "h": "eb91a888b26a72b0e8eabe129924d619f05a3c7e8981378d0f867e4fadeb950b",
           "w": 178,
           "a": "2026-07-29T12:45:34.302Z"
+        },
+        {
+          "k": "block",
+          "id": "evals/src/bin/warm-models.ts",
+          "r": [
+            3414.3,
+            3384.1,
+            21.1,
+            19.2
+          ],
+          "p": "evals/src/bin",
+          "h": "07dc806ed25eb3247dd0db61229cdb84bde38a6349e24cef1abd8d30880bf9db",
+          "w": 52,
+          "a": "2026-07-30T13:03:54.427Z"
         },
         {
           "k": "block",
@@ -4944,8 +4986,8 @@
             43.9
           ],
           "p": "evals/src",
-          "h": "d48e020f37619920a30eac1098df8b1f3bc27fdbb3e0638bbc58537119ba4eda",
-          "w": 353,
+          "h": "acd15ff8a6f810b9a29e2fcb812bfbe5efb08007b2d713f707b2835694e7a3e8",
+          "w": 463,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -4972,8 +5014,8 @@
             24.9
           ],
           "p": "evals/src",
-          "h": "4638e8bc83a490abe5bad4a1d19dc7c0ee000495a02df59742a13c52e93a1166",
-          "w": 117,
+          "h": "61c80fd2470376cefda90f89315f3b4b6c24368c5c7d4f05e3bc1deb38ae5ff9",
+          "w": 187,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -5856,7 +5898,8 @@
           "p": "legal/licenses",
           "h": "edaef632cbb643e4e7a221717a6c441a4c1a7c918e6e4d56debc3d8739b233f6",
           "w": 339,
-          "a": "2026-07-29T12:45:34.302Z"
+          "a": "2026-07-29T12:45:34.302Z",
+          "d": "2026-07-30T13:03:54.427Z"
         },
         {
           "k": "block",
@@ -5898,8 +5941,8 @@
             15.4
           ],
           "p": "legal/licenses",
-          "h": "57174e2d1c0d5336ad9891b41bbc8f10467520b5387538139eee00260ca26bcd",
-          "w": 12,
+          "h": "847b5b2ed36bfc00de3d0c78cf9e359c4df9b077166095633e4e3fece81151ab",
+          "w": 7,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -7018,9 +7061,23 @@
             23.5
           ],
           "p": "packages/app",
-          "h": "8ded6fdb857c589993078ece0ab96d382d753917213a08a9ba6d1d5406623cb6",
-          "w": 76,
+          "h": "2d364cb487f81fb124baa0c2019ab4be587b4f724b29aa7f1ad637ba926516ba",
+          "w": 75,
           "a": "2026-07-29T12:45:34.302Z"
+        },
+        {
+          "k": "block",
+          "id": "packages/app/assets/com.bendyline.gezel.metainfo.xml",
+          "r": [
+            -11.5,
+            83.8,
+            21.5,
+            16.2
+          ],
+          "p": "packages/app/assets",
+          "h": "f771b37959b418610036bd19807ee04e8a198415ceb0a109db2845e47ccee4bb",
+          "w": 32,
+          "a": "2026-07-30T13:03:54.427Z"
         },
         {
           "k": "block",
@@ -7186,8 +7243,8 @@
             31
           ],
           "p": "packages/app",
-          "h": "5948a4d04ba1acfa1d9fc3637b40d38a8d97095c55f94e42d1aba8e0d970c1f8",
-          "w": 373,
+          "h": "44b5d813875714a06ef790fc0ac3580d069ba69e1df4931621c4330506d542b0",
+          "w": 404,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -7242,8 +7299,8 @@
             27.8
           ],
           "p": "packages/app/installer/linux",
-          "h": "7adf40e72e617b410f4e44cf486d57dadd87402a5f7c502e03f710cec5846aac",
-          "w": 222,
+          "h": "0fb0903279749aedbe12429900e0a4cf1b556fb3a21b116e92c9947e86e83d9b",
+          "w": 291,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -7256,8 +7313,8 @@
             17.6
           ],
           "p": "packages/app/installer/linux",
-          "h": "8db7f4e208ff83f800972eee6b15f55309b787b991392a811aee8768d181f7fc",
-          "w": 28,
+          "h": "5dcd2f57136204733b4cce92359608f9aee110142504ddab9fead31a40ae51ae",
+          "w": 48,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -7270,8 +7327,8 @@
             34.7
           ],
           "p": "packages/app/installer/macos-pkg-scripts",
-          "h": "faabd9be03f5f80ab4e303e3a22f8a97b6a4e09acd16dd5889c09eed2e413f37",
-          "w": 242,
+          "h": "76a9b8f17e7b72943a6d0116d0e52f57a5c738fbce6ec960bf64fb07ed583065",
+          "w": 245,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -7284,8 +7341,8 @@
             47.5
           ],
           "p": "packages/app/installer",
-          "h": "eca5333dd4fe1273f477d63eb613736ef29a320158a1376d78d1cd97373a0f2d",
-          "w": 434,
+          "h": "e5535f5548cdcc066816edbff2e2329d652e4e7eb7b28655ca9c1fb5c909282b",
+          "w": 443,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -8362,8 +8419,8 @@
             27
           ],
           "p": "packages/app/ux-screenshots",
-          "h": "e205c0e83f27321e87a3e4eac80fa2ce2dd6eb7977e261f0054c18698e237017",
-          "w": 39,
+          "h": "1141d3b1473470328761f0df1af727d4b3950a43c3b46568b65aed3135b4e397",
+          "w": 5,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -9468,8 +9525,8 @@
             68.1
           ],
           "p": "packages/client/src",
-          "h": "ba6d5cbc5f7b866c09b34b78c6641ff799c09d3700a826e34c46187f967ee8ab",
-          "w": 6080,
+          "h": "c96b3c65458631717a75ac7f96de27ce60ccee2555759b5d1b9196f7a942fbde",
+          "w": 6117,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -10742,8 +10799,8 @@
             64.2
           ],
           "p": "packages/core/src/schemas",
-          "h": "b813e4a4b02768907409cd043dd355a23cb8825cbe3214a3a93e768f2aa040d2",
-          "w": 5913,
+          "h": "d117ef4a66b269fa1d829139560fcde06cf078022c3355ee84e5cb7731b8b83d",
+          "w": 5969,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -10924,8 +10981,8 @@
             32.8
           ],
           "p": "packages/core/src/schemas",
-          "h": "a41a4249e6d6c182e861bc09a1a335e53a5e4a1d0582c9c26d1127e6fbad31a9",
-          "w": 278,
+          "h": "0d37b84d60fda192230181556c396dcf114fb1c1984a58e50547b42389ca2bcb",
+          "w": 286,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -11988,8 +12045,8 @@
             54.6
           ],
           "p": "packages/mcp/src",
-          "h": "525c930a262fb0d27c97b4308bdace3eebe9e029f37216ad95930ebcb727a286",
-          "w": 9722,
+          "h": "876b6c9f216e1c8d70699af0e7bee2077dbc937c4fada24b1a46c23c0c1f9d1d",
+          "w": 9719,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -14060,8 +14117,8 @@
             30
           ],
           "p": "packages/service/src/fs",
-          "h": "b6ff09f03f583591cf2cdb072c4a858ec41d874d50b1c09ab1ac2fb76d7e6191",
-          "w": 189,
+          "h": "6b95f33c9b6a24f70befd0b01bfb015d898530656cdec1a4a858f00d81f4c58b",
+          "w": 203,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -14144,8 +14201,8 @@
             63.7
           ],
           "p": "packages/service/src/fs",
-          "h": "9198ae0775433d9383dd71e022dad09a7600da2ac909ec1ebd1a99b568ad043a",
-          "w": 5895,
+          "h": "5e2d71ddf494ef5b1d7ba4e515f98d18b972eaa0593dde86590a28cd6c6b815f",
+          "w": 5904,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -14707,8 +14764,8 @@
             30.3
           ],
           "p": "packages/service/src/http",
-          "h": "dbd7a4e49ceaef5b0982deae86e450a01b02967f859bff579ee97af2d3c90ab5",
-          "w": 243,
+          "h": "270543a0b92bb70c4b23d2e814b512d9fd174f90e9c63edb80f0497f7f062330",
+          "w": 249,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -14755,6 +14812,20 @@
         },
         {
           "k": "block",
+          "id": "packages/service/src/http/ollama-emulation.ts",
+          "r": [
+            854.9,
+            1670,
+            30.6,
+            33.2
+          ],
+          "p": "packages/service/src/http",
+          "h": "39fbac21d77838c94f4739c2c307fbb256d142fdfff149977cca7b605ff557da",
+          "w": 226,
+          "a": "2026-07-30T13:03:54.427Z"
+        },
+        {
+          "k": "block",
           "id": "packages/service/src/http/openai-compat/chat-target.ts",
           "r": [
             1005.8,
@@ -14769,6 +14840,20 @@
         },
         {
           "k": "block",
+          "id": "packages/service/src/http/openai-compat/error-envelope.ts",
+          "r": [
+            1099.6,
+            1788.5,
+            21.2,
+            19.9
+          ],
+          "p": "packages/service/src/http/openai-compat",
+          "h": "a4f820b8e99e9b889e48018db06fd53e7eba225bf696ee122db09e6f0016d681",
+          "w": 49,
+          "a": "2026-07-30T13:03:54.427Z"
+        },
+        {
+          "k": "block",
           "id": "packages/service/src/http/openai-compat/openapi.ts",
           "r": [
             1037.2,
@@ -14777,9 +14862,23 @@
             49.8
           ],
           "p": "packages/service/src/http/openai-compat",
-          "h": "58e082c8bb7aaf24737c96fba2b30eb6ec22f78871bb20db0befd47f61cfe9d8",
-          "w": 583,
+          "h": "ec1ad19257d4f44fe1dc19b7229e415a8b461da34d122ed7bc4434b927ae70bd",
+          "w": 610,
           "a": "2026-07-29T12:45:34.302Z"
+        },
+        {
+          "k": "block",
+          "id": "packages/service/src/http/openai-compat/request-tuning.ts",
+          "r": [
+            1082.4,
+            1905.6,
+            24.5,
+            23.6
+          ],
+          "p": "packages/service/src/http/openai-compat",
+          "h": "e0f23fbdbf5ac2f3a18e1958c4e1c619ec32329f3966e7d92340a354be5945f5",
+          "w": 96,
+          "a": "2026-07-30T13:03:54.427Z"
         },
         {
           "k": "block",
@@ -14791,8 +14890,8 @@
             31.7
           ],
           "p": "packages/service/src/http/openai-compat",
-          "h": "a91c1147c8912f748c5823c34b6aa853a150ce8dcc20af2996c4ddcd47e0d484",
-          "w": 291,
+          "h": "44bfa753bc6c42ed5339f3e0c3514bfba86e9367cc4ecdec9908772c6879ce2c",
+          "w": 324,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -14805,8 +14904,8 @@
             43.5
           ],
           "p": "packages/service/src/http/openai-compat",
-          "h": "72eb6ee8a481251619efb7f46dcb1261cb04bdedc9ed5784e66a5bd0234b791f",
-          "w": 514,
+          "h": "4646617965b5eaa3f452fac2cfc53bc3029e8530fcd5697582c53ed8c9a69662",
+          "w": 551,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -14973,8 +15072,8 @@
             55.5
           ],
           "p": "packages/service/src/http/routes",
-          "h": "19423ec108f3f7cf74d3d74b00c4a2a8fa0bde7739336e5a2e6cebc461547fff",
-          "w": 701,
+          "h": "9aae55569baf016b375283fe68a8af9bf07b4286333af07e622ecae96b29d782",
+          "w": 720,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -15018,6 +15117,20 @@
           "h": "a40536798313a946f8c85d6357e100c36a0ac47053b61c59544ad968ef92babc",
           "w": 91,
           "a": "2026-07-29T12:45:34.302Z"
+        },
+        {
+          "k": "block",
+          "id": "packages/service/src/http/routes/document-media-export.ts",
+          "r": [
+            845.7,
+            2030.9,
+            28.2,
+            36.6
+          ],
+          "p": "packages/service/src/http/routes",
+          "h": "1472d80575df1291e928930ef473545dc6a3811ddf8872188d54b1a82b7abbcf",
+          "w": 227,
+          "a": "2026-07-30T13:03:54.427Z"
         },
         {
           "k": "block",
@@ -15351,8 +15464,8 @@
             31.2
           ],
           "p": "packages/service/src/http/routes",
-          "h": "b4cf6d1eb08bb0213cfe6fd4ce64be69264b3a89681656dc5729061a3335aa8a",
-          "w": 272,
+          "h": "56b2af9dd3a3f40d82ecc872d00460109e6b75434905a616fcfce0d34b754500",
+          "w": 861,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -15659,8 +15772,8 @@
             37.9
           ],
           "p": "packages/service/src/http/routes",
-          "h": "88c154ae4d740a95829ad0744e59ffbcdbb7a4ee7c47904c2c4a5052c3ee9013",
-          "w": 451,
+          "h": "19a06c32982cb192b666e66f4e5d40516d81b4a938c8029f5e4b02a5d6e524bc",
+          "w": 457,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -15757,8 +15870,8 @@
             32.5
           ],
           "p": "packages/service/src/http/routes",
-          "h": "fc0d0238861548ccb6599ae8ba033f38ad47984de8c16ad45854152f231312a1",
-          "w": 424,
+          "h": "372d020e344fef895d9ec0dbf524566d34e0bdabbf7e3d1abf601ab66faf45c5",
+          "w": 434,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -15827,8 +15940,8 @@
             22
           ],
           "p": "packages/service/src/http/routes",
-          "h": "75b7026a47cb35a845e98ffa914cf51720e7b6acf9155165260f98ca7bd1d790",
-          "w": 91,
+          "h": "228e2c8313342a6da0ccd7e979b52e497ecb581dd7e8406ace072ae05005168b",
+          "w": 120,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -15897,8 +16010,8 @@
             39.3
           ],
           "p": "packages/service/src/http",
-          "h": "f9d4037cf448104d64d4b5964e72ecfaf71eacb300b50d315637520441cb4102",
-          "w": 691,
+          "h": "bcd1fff56f8a5b5b96525f2c1c81c5b3b0f98c958ba4536f0189cc612e4a290a",
+          "w": 695,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -19131,8 +19244,8 @@
             51.1
           ],
           "p": "packages/service/src/providers/native",
-          "h": "e9019b3ee91d3cc52ebfa6e3a764796de329d10c49f7a7d4b6304591a11948f2",
-          "w": 988,
+          "h": "902c105ab691c8c237d6cfa9a55c8cf041a11948e2d5f7ab162233f769042d27",
+          "w": 994,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -19929,9 +20042,23 @@
             33.4
           ],
           "p": "packages/service/src/rendering",
-          "h": "9d85632e23d355301405e72fe0d6f94c949c5fd527d04cc195300c727bd7a5b6",
-          "w": 375,
+          "h": "2f735e7eaba9a9c9234edae9ede4485a737b63bbdab51f71813ba680e7ad26e8",
+          "w": 329,
           "a": "2026-07-29T12:45:34.302Z"
+        },
+        {
+          "k": "block",
+          "id": "packages/service/src/rendering/managed-chromium.ts",
+          "r": [
+            408.6,
+            2459.7,
+            25.4,
+            24.8
+          ],
+          "p": "packages/service/src/rendering",
+          "h": "f48db9ba37f8bbbcac4a17a86cd038bf26fddcfbbed853210a89fd6c467db0b5",
+          "w": 95,
+          "a": "2026-07-30T13:03:54.427Z"
         },
         {
           "k": "block",
@@ -20419,8 +20546,8 @@
             66.9
           ],
           "p": "packages/service/src",
-          "h": "c08b891f953137a2322a921ac30b31841a84eddf01d6f269898145e7a340f7ed",
-          "w": 2092,
+          "h": "3d8e89bdae764334f4665beb852c5d3ae23f3cfd71cf0677ab6e45c8f2b3a5f9",
+          "w": 2150,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -20565,6 +20692,34 @@
         },
         {
           "k": "block",
+          "id": "packages/service/src/system/gezel-process-cleanup.ts",
+          "r": [
+            1153.1,
+            1372.9,
+            23.8,
+            25.3
+          ],
+          "p": "packages/service/src/system",
+          "h": "5f79c20dbfd7150bfb6482ac3ec08cc1702ce311c34bca538a7996cf0eb4f5c2",
+          "w": 94,
+          "a": "2026-07-30T13:03:54.427Z"
+        },
+        {
+          "k": "block",
+          "id": "packages/service/src/system/gezel-process-memory.ts",
+          "r": [
+            1058.8,
+            2118.5,
+            30.3,
+            25.5
+          ],
+          "p": "packages/service/src/system",
+          "h": "8450ae6e8bcf1c1ebd037f8dd91a4e4d9463e32b583fb6543fdeb0e105b5e9c4",
+          "w": 161,
+          "a": "2026-07-30T13:03:54.427Z"
+        },
+        {
+          "k": "block",
           "id": "packages/service/src/system/idle-state.ts",
           "r": [
             1145.5,
@@ -20587,8 +20742,8 @@
             26.9
           ],
           "p": "packages/service/src/system",
-          "h": "d343ab1a00b4db7feb45daf500fd01537afac0017c602baa4ec7d08ce55f2f07",
-          "w": 271,
+          "h": "754ac1b508dda3105664f78b0e3dd98ec86c66c71361c51cee664e0abf76a840",
+          "w": 290,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -21245,8 +21400,8 @@
             21.2
           ],
           "p": "packages/service",
-          "h": "08aa67c500adff20cc9c08d5fc9d7e1d7a90e5e85b70f5fcc5e7c9bf2968b2bd",
-          "w": 120,
+          "h": "84300efdf72f6b4a120389aaf0981beebfde20498151b7b2b64b5178e83d24a2",
+          "w": 129,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -21903,8 +22058,8 @@
             59
           ],
           "p": "packages/ui/src/components",
-          "h": "d5915ea32e24803a2feee3f65d266a22a57aed232c29cdb169b8ae0aeaaf1b42",
-          "w": 3652,
+          "h": "d4ea16c949c38e2a5271c1a225490e0cc55acb4ba5a91a05d3fbd9e3b9ac086f",
+          "w": 3789,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -21959,8 +22114,8 @@
             29.4
           ],
           "p": "packages/ui/src/components",
-          "h": "770ea1d36f8ff0a12032ff9f0834639996f595eebd53d100810a9ed5a7d1caed",
-          "w": 486,
+          "h": "d40815fbbd96755a49a7eaa74801979b0de913f3be198e90daa1428789400f9c",
+          "w": 518,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -22071,8 +22226,8 @@
             27.4
           ],
           "p": "packages/ui/src/components/DocumentExport",
-          "h": "11dc904a42d1c4d7b18214326baadfa20af8c2bd1141e6b26697f7ab1c38b91a",
-          "w": 316,
+          "h": "416285329f7fff7c59aa6f885d86695e7ff347a07919228f007e358f735a2add",
+          "w": 289,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -22087,7 +22242,8 @@
           "p": "packages/ui/src/components/DocumentExport",
           "h": "2363cba92149b8fa1bc2c6a43d9fc711fcd757cc6f5b4fd2726450c51083088d",
           "w": 89,
-          "a": "2026-07-29T19:21:08.377Z"
+          "a": "2026-07-29T19:21:08.377Z",
+          "d": "2026-07-30T13:03:54.427Z"
         },
         {
           "k": "block",
@@ -22115,7 +22271,8 @@
           "p": "packages/ui/src/components/DocumentExport",
           "h": "91fe56fa49d21ad9e121e5c62256144c58c40126641b17cd63726217e43ec74b",
           "w": 13,
-          "a": "2026-07-29T19:21:08.377Z"
+          "a": "2026-07-29T19:21:08.377Z",
+          "d": "2026-07-30T13:03:54.427Z"
         },
         {
           "k": "block",
@@ -22141,7 +22298,7 @@
             35.6
           ],
           "p": "packages/ui/src/components/DocumentExport",
-          "h": "0b55ba6bb5637557157f505808229b3d9fafdf13f78ec3035b444de0e940e7cb",
+          "h": "46d67876e16d7257e7db89e400ac9ac9159d31e1b920ab3e0439c2e3df2c5fe9",
           "w": 343,
           "a": "2026-07-29T12:45:34.302Z"
         },
@@ -22995,8 +23152,8 @@
             31.4
           ],
           "p": "packages/ui/src/components",
-          "h": "ce22c9487a0271e62e2d1a065e47e911ef2e03859723e4d3f9801a8a915cc8c8",
-          "w": 336,
+          "h": "1b3735bf755041fb381e8478ec18bf090efa2ca5a709119916fc67427458ef2a",
+          "w": 322,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -23121,8 +23278,8 @@
             23
           ],
           "p": "packages/ui/src/components",
-          "h": "bc8c4aea41bbc49c4ab7a628bcc877955466cea81accabae04acd03475c31fea",
-          "w": 140,
+          "h": "4d787ba8435333babb4947c98ac08a662989bddd1fde5db9746753bfbf77e695",
+          "w": 162,
           "a": "2026-07-29T23:34:21.233Z"
         },
         {
@@ -23289,8 +23446,8 @@
             41.3
           ],
           "p": "packages/ui/src/components",
-          "h": "6c61f23cf59318bef54009917302380a9f25ad4a39515d9480be769ddf792dbc",
-          "w": 763,
+          "h": "df345e5fcaed5850fa3c2bf798909e9d538e0fa4849dfe75937bf306aa8ee0f9",
+          "w": 776,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -23373,8 +23530,8 @@
             25
           ],
           "p": "packages/ui/src/components",
-          "h": "4c09c447e1e917ac5ef2db781b10819d81df884cf59c4871853c38b608d88af8",
-          "w": 179,
+          "h": "d3dd908fab549543c11dfd56e1b410b0f04fb534ed57bb83332c83549140b78a",
+          "w": 186,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -23611,8 +23768,8 @@
             47.5
           ],
           "p": "packages/ui/src/components",
-          "h": "30736d11c0619bc2a22636ef0b8e14529cb2dd0dc00c03bece25b313768b7031",
-          "w": 405,
+          "h": "e4ed9041aa65a643113782f73c4a264b5a473594cc78476459fa7c94e86cf40a",
+          "w": 406,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -23681,7 +23838,7 @@
             25.9
           ],
           "p": "packages/ui/src/components",
-          "h": "29a0facc0c2267b8a261a905f9608dd26631e38ec9fe6ae16ffbbbcd289b5b99",
+          "h": "9ba08a93cb6ec7c867c794573b42b84df86b1f151cbc1eaa20c131549b7d03be",
           "w": 199,
           "a": "2026-07-29T12:45:34.302Z"
         },
@@ -23695,8 +23852,8 @@
             26.9
           ],
           "p": "packages/ui/src/components",
-          "h": "738fd1b969e1b0cc7b8986a957cff3136cd2c23ef1a0a4a9f8207dded9cb8ca3",
-          "w": 110,
+          "h": "3658f640f6438149b9467c4cc8e8842dea1fd20499fa5ad6986eb75878f0b042",
+          "w": 116,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -23709,8 +23866,8 @@
             36.8
           ],
           "p": "packages/ui/src/components",
-          "h": "825d89a759b1b5a89364d8a373c3f874e44ce4c4ff923571236e19509abd4c74",
-          "w": 311,
+          "h": "86f6c839dc58a1536d3463a89414e7e07533c5c82e6e1c2b557c094b7f158f00",
+          "w": 312,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -25334,8 +25491,8 @@
             29.1
           ],
           "p": "packages/ui/src/views",
-          "h": "be72311bd2b49276451deac829ddf80e2073f379fbd2e5eb1e6262d57bdda85a",
-          "w": 291,
+          "h": "fcf36c01addb2d1757bc68d86c17cf8189beda67fbc2042c1018eff8c86d8b79",
+          "w": 299,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -25390,7 +25547,7 @@
             26.3
           ],
           "p": "packages/ui/src/views",
-          "h": "21bc423d5550a317aeb40981fc97d0ade9fc1b07356de2cc7825ed59196a75ab",
+          "h": "9905e54f381234e9e86142c4cd9ac14753e49054d24a0e4fe3eca999445022d5",
           "w": 178,
           "a": "2026-07-29T12:45:34.302Z"
         },
@@ -25502,8 +25659,8 @@
             37.6
           ],
           "p": "packages/ui/src/views",
-          "h": "6681d0e27c827672a60040672042a33ae1a18c582ecc2e23793bd4f00f7a1d66",
-          "w": 372,
+          "h": "19a430a6dba86b4a5a3f9b74c3248b845cb11015aa2198a382054424748f7032",
+          "w": 374,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -25628,7 +25785,7 @@
             58.8
           ],
           "p": "packages/ui/src/views",
-          "h": "f04506d6614191717c7204c9e8fee69c373089d6a97cac6502734c2271dd70b5",
+          "h": "2833602614a8553d5e4f3d997cf0473df27d0bdb2aea89ebd016295bddc7bfc3",
           "w": 2781,
           "a": "2026-07-29T12:45:34.302Z"
         },
@@ -25992,8 +26149,8 @@
             19.9
           ],
           "p": "packages/ui",
-          "h": "236886f4bdc4c7219619dfc9ff4107ceff9dfc45f3498cfa2c5e8a031d4daf7b",
-          "w": 107,
+          "h": "f811a6ed93b4ce665690c99ed20446e491b94879da81aefa946d83cf6564b4d3",
+          "w": 26,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -26076,8 +26233,8 @@
             32.5
           ],
           "p": "packages/vscode/src",
-          "h": "3d0dbbb6cdddfc1b1084bc7dcd44f122adf96e99b6af5f0f82cd1a084b07f985",
-          "w": 171,
+          "h": "2dc6b2bd120acf1f85e27cbc737048009b7273cacb8282d50525deccce2f3985",
+          "w": 170,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -26299,8 +26456,8 @@
             21.8,
             21.7
           ],
-          "h": "b533a64cb73c758d29959a4066adcad846361b66a4c42fb1fa485e2ae067293e",
-          "w": 69,
+          "h": "8e92fb3d9e248d6f0a2ce3764ba6d41a56146a4f1bf461251610b2a2c2553cb3",
+          "w": 70,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -26439,8 +26596,8 @@
             36.6
           ],
           "p": "scripts",
-          "h": "48a4fbe3039f70d414f59af7d5dbe9bb8b73e9a9f9712433e74e9c40ff347ff6",
-          "w": 249,
+          "h": "d2a47efd634363acf3975c73698dfd690eea21b1b2f3fcb05eef78fb0af6fb1a",
+          "w": 243,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -26537,8 +26694,8 @@
             34.9
           ],
           "p": "scripts",
-          "h": "4415ed40fb7564ca14cf17f675efb5a46ef7fa34596f39c370cbcee4ed9e8955",
-          "w": 325,
+          "h": "e9c3163777e71b92996d8a1e43536243ead5c5489da17a844e7c6694d6f30373",
+          "w": 352,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -26691,8 +26848,8 @@
             22.9
           ],
           "p": "scripts",
-          "h": "d793218ffb162e081f9dbb40d1aa4a4dc2b5008cdb1034d01e24000a4de86677",
-          "w": 75,
+          "h": "94547663986efb564ecd1afe53650b6d0a02241cd0f74fbc407c9663c21b0ef9",
+          "w": 204,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -26761,8 +26918,8 @@
             25.4
           ],
           "p": "scripts",
-          "h": "fffaf291e12c632b09d5f236ba642daa118f718f08c1d00e7e7dd8906d22a28a",
-          "w": 107,
+          "h": "789ced37cb59eb834c86ac1c869deb356b3675d59e46a98530fbb7d4ab1ecffd",
+          "w": 140,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -26789,8 +26946,8 @@
             28.9
           ],
           "p": "scripts",
-          "h": "0514c66e21ec28a716873be49f91a0ce1c69cbbdc405f37a667795d4d22fcb68",
-          "w": 86,
+          "h": "c0bc087afc0dbe85b9b33a493585ce7ee5edd01b9fc57ac55839ccd528c14ed6",
+          "w": 106,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -26929,8 +27086,8 @@
             43
           ],
           "p": "scripts",
-          "h": "c7f677ffa254bd036fa89a7826683de72b31520746ff7c1388d1889fccd352ac",
-          "w": 486,
+          "h": "abd15e0a76e29653342fd7c0f3ad42129c512198041f331cb3c842326c544fed",
+          "w": 476,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -26971,8 +27128,8 @@
             23.9
           ],
           "p": "scripts",
-          "h": "8516776963cea0847c74e537078944a8d748b798113d2ff680e83a6fa0bfbbd0",
-          "w": 194,
+          "h": "f37da4a42de229265ec4f42eb5ee496792cc49b72075c5423dc6a1e964818b83",
+          "w": 240,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {

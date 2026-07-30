@@ -90,9 +90,7 @@ export function MachineMemoryStrip({ pollMs = 1_000 }: Props) {
           usage.orphanedGezelEngineProcessCount === 1 ? 'process' : 'processes'
         } from an earlier service session`
       : null,
-    usage.otherBytes === null
-      ? 'other use unavailable'
-      : `other use ${formatBytes(usage.otherBytes)}`,
+    usage.otherBytes === null ? null : `other use ${formatBytes(usage.otherBytes)}`,
     usage.freeBytes === null ? null : `free ${formatBytes(usage.freeBytes)}`,
   ]
     .filter(Boolean)
@@ -127,13 +125,11 @@ export function MachineMemoryStrip({ pollMs = 1_000 }: Props) {
           Gezel {observed ? '' : '~'}
           {formatBytes(gezelBytes)}
         </span>
-        {usage.otherBytes !== null ? (
+        {usage.otherBytes !== null && (
           <span>
             <i className="machine-memory-swatch machine-memory-swatch-other" aria-hidden />
             Other {formatBytes(usage.otherBytes)}
           </span>
-        ) : (
-          <span className="machine-memory-legend-muted">Other use unavailable</span>
         )}
         {usage.freeBytes !== null && (
           <span>

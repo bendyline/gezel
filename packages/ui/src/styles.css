@@ -79,16 +79,24 @@
   --chat-bubble-bg: var(--gezel-paper-reading);
   --chat-handoff-bg: var(--gezel-paper-handoff);
   --chat-handoff-border: rgba(112, 98, 90, 0.32);
-  /* Thread selection is chat chrome, not app canvas: keep its trigger and
-     portaled menu cooler than the yellow parchment behind them. */
-  --chat-thread-bg: var(--gezel-paper-control);
-  --chat-thread-menu-bg: var(--gezel-paper-control-deep);
+  /* The recipient, thread, and action rows form one warm header band above
+     the lighter writing surface. */
+  --chat-compose-header-bg: color-mix(in srgb, var(--panel) 68%, var(--surface));
+  /* Thread selection belongs to the chat surface: keep its trigger on the
+     same warm reading paper as the conversation, with a subtly deeper menu.
+     Generic control gray reads blue beside the parchment composer. */
+  --chat-thread-bg: var(--chat-bubble-bg);
+  --chat-thread-menu-bg: color-mix(in srgb, var(--chat-bubble-bg) 82%, var(--surface));
   /* In light mode `--surface` is a deeper, more saturated step than
      the canvas, used for inset cards / inputs that should read as
      pressed-into the page. Dark mode keeps the usual additive
      elevation. */
   --surface: var(--gezel-paper-inset);
   --surface-shadow: 0 1px 2px rgba(0, 0, 0, 0.05), 0 6px 18px rgba(0, 0, 0, 0.06);
+  /* Sandboxed previews make their scrollbar track transparent, so the iframe
+     backing becomes the visible tray. Keep it white for ordinary light web
+     pages and swap to the app canvas in dark mode. */
+  --preview-frame-bg: #fff;
   /* Shadow the elevated main pane casts onto the recessed navigation rail
      along their shared seam. Darker in dark mode where a faint black
      gradient would vanish into the near-black panel. */
@@ -240,6 +248,7 @@
     --scrollbar-thumb: rgba(224, 184, 151, 0.28);
     --scrollbar-thumb-hover: rgba(224, 184, 151, 0.5);
     --scrollbar-track: rgba(255, 255, 255, 0.04);
+    --preview-frame-bg: var(--gezel-paper-canvas);
     --tray-bg: #131416;
     --tray-border: rgba(0, 0, 0, 0.55);
     --tray-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.5), inset 0 -1px 0 rgba(255, 255, 255, 0.03);
@@ -301,6 +310,7 @@
   --scrollbar-thumb: rgba(224, 184, 151, 0.28);
   --scrollbar-thumb-hover: rgba(224, 184, 151, 0.5);
   --scrollbar-track: rgba(255, 255, 255, 0.04);
+  --preview-frame-bg: var(--gezel-paper-canvas);
   --tray-bg: #131416;
   --tray-border: rgba(0, 0, 0, 0.55);
   --tray-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.5), inset 0 -1px 0 rgba(255, 255, 255, 0.03);
@@ -2828,12 +2838,14 @@ html.embedded-chat #root {
   pointer-events: none;
 }
 
-/* Absolutely positioned children resolve against the button's padding box.
-   Extend through both 1px borders so the bridge's bottom edge does not stop
-   one pixel above the selected tab's bottom border. */
-.app-sidebar-item.active::after {
-  top: -1px;
-  bottom: -1px;
+/* At high pixel densities Chromium rasterizes the padding-box bridge one CSS
+   pixel inside each horizontal border. The 1x Electron surface aligns without
+   an extension; only dense displays need to include the tab borders. */
+@media (min-resolution: 1.5dppx) {
+  .app-sidebar-item.active::after {
+    top: -1px;
+    bottom: -1px;
+  }
 }
 
 /* Flex row wrappers use the same padding-box origin. Their bottom was already
@@ -2847,7 +2859,7 @@ html.embedded-chat #root {
 
 /* Wrapper-owned selections suppress the old button-shaped selection inside
    them. Keeping one elevation layer avoids a doubled border/shadow while the
-   nested button retains its full hit target and focus treatment. */
+   nested button retains its full hit target. */
 .app-sidebar-proj-row.active > .app-sidebar-item.active,
 .app-sidebar-gezel-row.active > .app-sidebar-item.active {
   position: static;
@@ -2997,6 +3009,25 @@ html.embedded-chat #root {
 .app-sidebar-item.active:focus-visible,
 :root[data-sidebar-side="right"] .app-sidebar-item.active:focus-visible {
   box-shadow: var(--focus-ring);
+}
+
+/* Project/gezel rows own the connected tab surface, so their focus treatment
+   must follow that surface too. Strengthen the wrapper + bridge border and
+   leave the pane-side edge open instead of outlining the nested name button. */
+.app-sidebar-proj-row.active:has(> .app-sidebar-item.active:focus-visible),
+.app-sidebar-gezel-row.active:has(> .app-sidebar-item.active:focus-visible) {
+  --sidebar-tab-border: var(--accent);
+}
+
+.app-sidebar-proj-row.active > .app-sidebar-item.active:focus-visible,
+.app-sidebar-gezel-row.active > .app-sidebar-item.active:focus-visible,
+:root[data-sidebar-side="right"]
+  .app-sidebar-proj-row.active
+  > .app-sidebar-item.active:focus-visible,
+:root[data-sidebar-side="right"]
+  .app-sidebar-gezel-row.active
+  > .app-sidebar-item.active:focus-visible {
+  box-shadow: none;
 }
 
 /* Collapsed (icon-only, ~40px) mode: hide text + chrome, center icons. */
@@ -4756,6 +4787,14 @@ button.danger {
   font-family: var(--gezel-chat-font, var(--font-display)) !important;
 }
 
+/* Replies sit one quiet step below Squisq's 16px document default so the
+   conversation stays proportional to the surrounding timeline chrome.
+   Keep user-authored message text at the document default above. */
+.msg-assistant > .msg-body-rendered .squisq-linear-content,
+.msg-from-gezel > .msg-body-rendered .squisq-linear-content {
+  font-size: calc(15px * var(--gezel-font-scale, 1)) !important;
+}
+
 /* Chat replies are a conversation, not a centered document: Squisq's
    page layout gives each section an auto-centered 740px reading measure,
    which floats short replies ~150px off the bubble's left edge. Keep the
@@ -5293,12 +5332,10 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
 /* Light-mode WYSIWYG surface — squisq's stock skin paints
    `.squisq-wysiwyg-editor` bright `#fff` over a `.squisq-wysiwyg-container`
    gray `#dcd8d0`. Both clash with the gezellig cream palette and read as
-   a stark white slab dropped into the warm composer. Match the typing
-   surface to the chat-bubble light surface (`#f6f1e7` — see
-   `CHAT_BUBBLE_LIGHT_SURFACE` in [chat-bubbles.tsx](src/components/chat-bubbles.tsx))
-   so the input visually reads as a draft bubble, soften the container
-   to the panel cream, and trade the heavy 14px shadow for a subtle
-   1px settle that doesn't compete with the toolbar's sage wash. */
+   a stark white slab dropped into the warm composer. Keep the typing surface
+   on light draft paper, soften the container to the panel cream, and trade the
+   heavy 14px shadow for a subtle 1px settle that doesn't compete with the
+   toolbar's warm header band. */
 .squisq-editor-shell[data-theme="light"] .squisq-wysiwyg-editor,
 [data-theme="light"] .squisq-wysiwyg-editor {
   background: #f6f1e7;
@@ -12519,12 +12556,12 @@ body.chat-rail-resizing webview {
 
 /* Give the Meester composer the same quiet, self-contained compose surface as
    project chat. The small inset keeps all four rounded corners legible inside
-   the larger conversation rail, while one shared paper wash carries behind
-   the recipient pill, thread picker, toolbar, and draft. */
+   the larger conversation rail, while a deeper paper band groups the
+   recipient, thread picker, and toolbar above the lighter draft. */
 .home-workshop-conversation .chat-composer {
-  --compose-frame-bg: color-mix(in srgb, var(--panel) 88%, var(--surface));
+  --compose-frame-bg: var(--chat-compose-header-bg);
   --compose-frame-border: color-mix(in srgb, var(--accent) 62%, var(--border));
-  --compose-toolbar-bg: color-mix(in srgb, var(--panel) 97%, var(--chat-bubble-bg));
+  --compose-toolbar-bg: var(--chat-compose-header-bg);
   /* Clear the outer rail's rounded lower-left corner while preserving the
      tighter right inset beside the reference rail. */
   margin: 0 0.25rem 0.25rem 0.5rem;
@@ -15404,7 +15441,7 @@ a.license-button:hover {
   width: 100%;
   height: 100%;
   border: 0;
-  background: #fff;
+  background: var(--preview-frame-bg);
 }
 
 /* Thin "debug tools" strip pinned to the bottom of the pane. Controls are
@@ -17906,6 +17943,13 @@ a.license-button:hover {
   --compose-header-offset: calc(1.75rem + 8px);
 }
 
+/* Chat mode gets the same deeper header band as Home. Terminal mode keeps its
+ * existing frame and toolbar treatment when `.chat-composer` is absent. */
+.project-chat-compose-shell:has(.chat-composer) {
+  --compose-frame-bg: var(--chat-compose-header-bg);
+  --compose-toolbar-bg: var(--chat-compose-header-bg);
+}
+
 .project-chat-compose-main {
   flex: 1;
   min-width: 0;
@@ -20295,7 +20339,12 @@ a.license-button:hover {
   flex-direction: column;
   gap: 12px;
   min-height: 0;
-  padding: 12px 4px;
+}
+.craftbook-tab {
+  padding: 0;
+}
+.craftbook-editor {
+  padding: 12px 4px 4rem;
 }
 .craftbook-editor-header {
   display: flex;
@@ -20312,6 +20361,21 @@ a.license-button:hover {
   font-size: 1.1rem;
   font-weight: 600;
   min-width: 220px;
+}
+.craftbook-bench-row {
+  gap: 0;
+  border-bottom: 0;
+}
+.craftbook-bench-row > .bench-scroll {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+/* The selected step's caption is the tab for the settings page below, just
+   like it is in Task detail. Pull the page through the bench's bottom padding
+   + margin and this editor's 12px flex gap, so the two borders meet instead
+   of the settings page rising over the step labels. */
+.craftbook-editor > .task-step-panel:not(.empty) {
+  margin-top: calc(-1.65rem - 1px);
 }
 .craftbook-editor-tabs {
   border-bottom: 1px solid var(--border, #333);

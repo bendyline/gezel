@@ -10,6 +10,8 @@ import { settle } from './helpers/determinism.js';
 import { gotoHome, openProject } from './helpers/nav.js';
 import { shot } from './helpers/shot.js';
 
+const MODE_TAB_BOTTOM_INSET_PX = 8;
+
 async function gotoProject(page: import('@playwright/test').Page, projectId: string) {
   await gotoHome(page);
   await openProject(page, projectId);
@@ -60,11 +62,16 @@ test('keeps terminal composer geometry aligned with chat', async ({ page, world 
     const activeTab = element.parentElement?.querySelector<HTMLElement>(
       '.project-chat-compose-toggle button.active',
     );
+    const editor = element.querySelector<HTMLElement>('.squisq-wysiwyg-editor');
+    const toolbar = element.querySelector<HTMLElement>('.squisq-toolbar');
+    const composeHeaderProbe = document.createElement('span');
+    composeHeaderProbe.style.background = 'var(--chat-compose-header-bg)';
+    element.append(composeHeaderProbe);
     const toolbarRect = toolbarHeader?.getBoundingClientRect();
     const tabRect = activeTab?.getBoundingClientRect();
     const borderLeftWidth = Number.parseFloat(style.borderLeftWidth);
     const borderRightWidth = Number.parseFloat(style.borderRightWidth);
-    return {
+    const result = {
       borderWidth: style.borderRightWidth,
       borderColor: style.borderRightColor,
       shellPaddingBottom: shellStyle.paddingBottom,
@@ -72,7 +79,13 @@ test('keeps terminal composer geometry aligned with chat', async ({ page, world 
       activeTabLeft: tabRect?.left ?? Number.NaN,
       toolbarInsetLeft: (toolbarRect?.left ?? Number.NaN) - (frameRect.left + borderLeftWidth),
       toolbarInsetRight: frameRect.right - borderRightWidth - (toolbarRect?.right ?? Number.NaN),
+      frameBackground: style.backgroundColor,
+      editorBackground: editor ? getComputedStyle(editor).backgroundColor : '',
+      toolbarBackground: toolbar ? getComputedStyle(toolbar).backgroundColor : '',
+      composeHeaderBackground: getComputedStyle(composeHeaderProbe).backgroundColor,
     };
+    composeHeaderProbe.remove();
+    return result;
   });
   expect(frameTreatment.borderWidth).toBe('1px');
   expect(frameTreatment.borderColor).not.toBe('rgba(127, 127, 127, 0.25)');
@@ -80,6 +93,9 @@ test('keeps terminal composer geometry aligned with chat', async ({ page, world 
   expect(frameTreatment.activeTabLeft).toBeCloseTo(frameTreatment.frameRight - 1, 0);
   expect(frameTreatment.toolbarInsetLeft).toBeCloseTo(1, 0);
   expect(frameTreatment.toolbarInsetRight).toBeCloseTo(1, 0);
+  expect(frameTreatment.frameBackground).toBe(frameTreatment.composeHeaderBackground);
+  expect(frameTreatment.toolbarBackground).toBe(frameTreatment.composeHeaderBackground);
+  expect(frameTreatment.editorBackground).not.toBe(frameTreatment.composeHeaderBackground);
 
   const chatHeight = await shell.evaluate((element) => element.getBoundingClientRect().height);
   const chatModeAlignment = await shell.evaluate((element) => {
@@ -114,7 +130,10 @@ test('keeps terminal composer geometry aligned with chat', async ({ page, world 
   });
   expect(chatModeAlignment).not.toBeNull();
   expect(chatModeAlignment!.tabsTop).toBeGreaterThanOrEqual(chatModeAlignment!.toolbarBottom);
-  expect(chatModeAlignment!.tabsBottom).toBeCloseTo(chatModeAlignment!.frameBottom, 0);
+  expect(chatModeAlignment!.frameBottom - chatModeAlignment!.tabsBottom).toBeCloseTo(
+    MODE_TAB_BOTTOM_INSET_PX,
+    0,
+  );
 
   await switchToTerminal(page);
 
@@ -156,7 +175,10 @@ test('keeps terminal composer geometry aligned with chat', async ({ page, world 
   expect(terminalModeAlignment!.tabsTop).toBeGreaterThanOrEqual(
     terminalModeAlignment!.toolbarBottom,
   );
-  expect(terminalModeAlignment!.tabsBottom).toBeCloseTo(terminalModeAlignment!.frameBottom, 0);
+  expect(terminalModeAlignment!.frameBottom - terminalModeAlignment!.tabsBottom).toBeCloseTo(
+    MODE_TAB_BOTTOM_INSET_PX,
+    0,
+  );
 });
 
 test('aligns the output and reference split grips', async ({ page, world }) => {
@@ -181,6 +203,36 @@ test('aligns the output and reference split grips', async ({ page, world }) => {
   );
 
   expect(referenceCenter).toBeCloseTo(outputCenter, 0);
+});
+
+test('themes the backing behind output preview scrollbar trays', async ({ page, world }) => {
+  await gotoProject(page, world!.projectId);
+
+  const colors = await page.evaluate(() => {
+    const root = document.documentElement;
+    const previousTheme = root.getAttribute('data-theme');
+    const frame = document.createElement('iframe');
+    frame.className = 'project-output-iframe';
+    const tokenProbe = document.createElement('span');
+    tokenProbe.style.background = 'var(--preview-frame-bg)';
+    document.body.append(frame, tokenProbe);
+
+    root.setAttribute('data-theme', 'light');
+    const light = getComputedStyle(frame).backgroundColor;
+    root.setAttribute('data-theme', 'dark');
+    const dark = getComputedStyle(frame).backgroundColor;
+    const darkToken = getComputedStyle(tokenProbe).backgroundColor;
+
+    frame.remove();
+    tokenProbe.remove();
+    if (previousTheme) root.setAttribute('data-theme', previousTheme);
+    else root.removeAttribute('data-theme');
+    return { light, dark, darkToken };
+  });
+
+  expect(colors.light).toBe('rgb(255, 255, 255)');
+  expect(colors.dark).toBe(colors.darkToken);
+  expect(colors.dark).not.toBe(colors.light);
 });
 
 test('mounts, submits on Enter, newlines on Shift+Enter', async ({ page, world }) => {

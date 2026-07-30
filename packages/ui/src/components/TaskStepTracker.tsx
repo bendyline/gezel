@@ -54,9 +54,9 @@ const STATUS_WORD: Record<StepStatus, string> = {
  * from the task when the step sets none), a status word, and — for the
  * step in hand — the assignee's carved poppetje standing on the rail.
  *
- * The craftbook editor uses the same StepTracker in `compact` design mode
- * (no status, with drag-reorder). Activating/completing a step is the
- * per-step panel's responsibility.
+ * The craftbook editor uses the same bench in design mode (plain pegs, no
+ * lifecycle status, with drag-reorder). Activating/completing a task step is
+ * the per-step panel's responsibility.
  */
 export function TaskStepTracker({
   steps,

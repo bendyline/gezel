@@ -13,8 +13,8 @@ vi.mock('../components/MarkdownField.js', () => ({
   MarkdownField: () => <div>Description field</div>,
 }));
 vi.mock('../components/StepTracker.js', () => ({
-  StepTracker: (props: { onAddStep?: () => void }) => (
-    <div>
+  StepTracker: (props: { onAddStep?: () => void; variant?: string }) => (
+    <div data-testid="step-tracker" data-variant={props.variant}>
       Step tracker
       {props.onAddStep && (
         <button type="button" onClick={props.onAddStep}>
@@ -68,6 +68,11 @@ describe('CraftbookEditor', () => {
       );
     });
     expect(screen.getByText('Step panel')).toBeInTheDocument();
+    expect(screen.getByTestId('step-tracker')).toHaveAttribute('data-variant', 'bench');
+    expect(screen.getByTestId('step-tracker').parentElement).toHaveClass(
+      'craftbook-bench-row',
+      'has-docked-panel',
+    );
   });
 
   it('adds a uniquely identified step to an editable craftbook', async () => {

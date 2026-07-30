@@ -188,6 +188,39 @@ describe('EngineStatusPill — simultaneous local engines', () => {
     expect(screen.getByText(/Test GPU/)).toBeInTheDocument();
   });
 
+  it('omits other use when the GPU driver cannot report it', async () => {
+    const user = userEvent.setup();
+    const GiB = 1024 ** 3;
+    vi.mocked(api.getMachineMemoryUsage).mockResolvedValue({
+      kind: 'vram',
+      totalBytes: 96 * GiB,
+      usedBytes: null,
+      gezelBytesEstimated: 19.1 * GiB,
+      gezelBytesObserved: null,
+      engineReservedBytes: 19.1 * GiB,
+      gezelEngineProcessCount: 0,
+      orphanedGezelEngineProcessCount: 0,
+      otherBytes: null,
+      freeBytes: null,
+      sampledAt: '2026-07-29T12:00:00.000Z',
+      source: 'capacity-only',
+      deviceNames: ['AMD Radeon AI PRO R9700'],
+    });
+    render(<EngineStatusPill />);
+
+    await user.click(
+      await screen.findByRole('button', {
+        name: /DwarfStar.*DeepSeek V4 Flash/i,
+      }),
+    );
+
+    const strip = await screen.findByRole('img', {
+      name: /VRAM: 96\.0 GiB total, Gezel estimated 19\.1 GiB/i,
+    });
+    expect(strip).not.toHaveAccessibleName(/other use/i);
+    expect(screen.queryByText(/Other use unavailable/i)).not.toBeInTheDocument();
+  });
+
   it('separates observed macOS footprint, model reservation, and orphaned engines', async () => {
     const user = userEvent.setup();
     const GiB = 1024 ** 3;
