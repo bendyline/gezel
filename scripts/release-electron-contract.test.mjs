@@ -104,8 +104,17 @@ test('Electron release configuration pins the audited packaging contracts', asyn
   assert.ok(builder.includes(`synopsis: ${productTagline}`));
   assert.ok(builder.includes(`description: ${productDescription}`));
   assert.ok(metainfo.includes(`<summary>${productTagline}</summary>`));
-  assert.equal(JSON.parse(appPackage).description, productDescription);
   assert.equal(JSON.parse(rootPackage).description, productDescription);
+  // packages/app is the deliberate exception: electron-builder stamps its
+  // description into the NSIS installer's FileDescription, which Windows shows
+  // as the UAC "Program name". Marketing copy there titles the elevation prompt
+  // with a paragraph, so that field tracks productName instead — asserted by
+  // scripts/windows-branding-contract.test.mjs.
+  assert.notEqual(
+    JSON.parse(appPackage).description,
+    productDescription,
+    'packages/app description is the Windows UAC program name, not marketing copy',
+  );
   assert.match(
     readme,
     /Gezel helps you build a crew of named AI companions with distinct roles and tools/,
