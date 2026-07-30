@@ -5,12 +5,17 @@ import { ModelNotInstalledError } from '../../providers/types.js';
 import type {
   ExternalToolCall,
   ExternalToolSpec,
+  ImageAttachment,
   ProviderName,
   TurnUsage,
 } from '../../providers/types.js';
 import type { ServiceContext } from '../context.js';
 import type { ChatTarget } from '../openai-compat/chat-target.js';
 import { resolveChatTarget } from '../openai-compat/chat-target.js';
+import {
+  type OllamaRequestOptions,
+  overlayOllamaRequestTuning,
+} from '../openai-compat/request-tuning.js';
 import {
   type ChatCompletionRequest,
   flattenTranscriptIntoPrompt,
@@ -35,19 +40,17 @@ import {
  * The same router also backs the opt-in **Ollama emulation listener**
  * (loopback port 11434, unauthenticated — see
  * [ollama-emulation.ts](../ollama-emulation.ts)), mounted there under
- * `/api` so stock Ollama clients' `{host}/api/tags` + `{host}/api/chat`
- * paths line up.
+ * `/api` so stock Ollama clients' `{host}/api/*` paths line up.
  *
- * Scope: `/tags` (list) + `/chat` (NDJSON, with tool calling). The
- * chat route shares `/v1/chat/completions`' semantics: `gezel:<ref>`
- * targets and the serving-gezel fallback (persona + per-gezel tuning),
- * per-model tuning always, the behavior profile gated by the
- * `supportingBehaviors` switch, and caller-executed tools via
- * `SessionOpts.externalTools`. Message `images` (bare base64, Ollama's
- * multimodal shape) attach to the in-flight prompt like `/v1`'s
- * image_url parts. Generate, pull, show, copy, delete are out of
- * scope — apps that need those should use gezel's own
- * `/v1/models/ensure` (download) and `/v1/models` (list).
+ * Surface: `/tags`, `/chat` (NDJSON, tools + images + options/format),
+ * `/generate` (single-turn), `/embed` + legacy `/embeddings`, `/show`,
+ * `/ps`. Chat and generate share `/v1/chat/completions`' semantics:
+ * `gezel:<ref>` targets and the serving-gezel fallback (persona +
+ * per-gezel tuning), per-model tuning with the request's
+ * `options`/`format` overlaid on top, the behavior profile gated by
+ * the `supportingBehaviors` switch, and caller-executed tools. Pull,
+ * copy, delete are out of scope — use gezel's own `/v1/models/ensure`
+ * (download) and `/v1/models` (list).
  */
 const OllamaToolCallSchema = z.object({
   function: z.object({
@@ -83,11 +86,59 @@ const OllamaToolSchema = z.object({
   }),
 });
 
+/**
+ * Ollama's per-request `options`. Only sampling-shaped keys are typed
+ * and honored (overlaid onto resolved tuning); engine-level knobs the
+ * pool owns (`num_ctx`, `num_thread`, `num_gpu`, …) are stripped by
+ * the schema and ignored.
+ */
+const OllamaOptionsSchema = z.object({
+  temperature: z.number().optional(),
+  top_p: z.number().optional(),
+  top_k: z.number().int().optional(),
+  min_p: z.number().optional(),
+  num_predict: z.number().int().optional(),
+  seed: z.number().int().optional(),
+  repeat_penalty: z.number().optional(),
+  presence_penalty: z.number().optional(),
+  frequency_penalty: z.number().optional(),
+});
+
+/** Ollama structured output: `'json'` or a bare JSON schema object. */
+const OllamaFormatSchema = z.union([z.literal('json'), z.record(z.string(), z.unknown())]);
+
 const OllamaChatRequestSchema = z.object({
   model: z.string().min(1),
   messages: z.array(OllamaMessageSchema).min(1),
   stream: z.boolean().optional(),
   tools: z.array(OllamaToolSchema).optional(),
+  options: OllamaOptionsSchema.optional(),
+  format: OllamaFormatSchema.optional(),
+});
+
+const OllamaGenerateRequestSchema = z.object({
+  model: z.string().min(1),
+  prompt: z.string().min(1),
+  system: z.string().optional(),
+  images: z.array(z.string().min(1)).optional(),
+  stream: z.boolean().optional(),
+  options: OllamaOptionsSchema.optional(),
+  format: OllamaFormatSchema.optional(),
+});
+
+const OllamaEmbedRequestSchema = z.object({
+  model: z.string().min(1),
+  input: z.union([z.string(), z.array(z.string()).min(1)]),
+});
+
+const OllamaLegacyEmbeddingsRequestSchema = z.object({
+  model: z.string().min(1),
+  prompt: z.string().min(1),
+});
+
+const OllamaShowRequestSchema = z.object({
+  model: z.string().optional(),
+  name: z.string().optional(),
 });
 
 type OllamaMessages = z.infer<typeof OllamaChatRequestSchema>['messages'];
@@ -108,6 +159,8 @@ interface OllamaTagsModel {
   };
 }
 
+type OllamaDoneReason = 'stop' | 'length';
+
 interface OllamaChatStreamChunk {
   model: string;
   created_at: string;
@@ -117,7 +170,7 @@ interface OllamaChatStreamChunk {
     tool_calls?: Array<{ function: { name: string; arguments: Record<string, unknown> } }>;
   };
   done: boolean;
-  done_reason?: 'stop';
+  done_reason?: OllamaDoneReason;
   total_duration?: number;
   prompt_eval_count?: number;
   eval_count?: number;
@@ -153,6 +206,16 @@ function sniffImageMime(base64: string): string {
 function toImageUrlPart(image: string): { type: 'image_url'; image_url: { url: string } } {
   const url = image.startsWith('data:') ? image : `data:${sniffImageMime(image)};base64,${image}`;
   return { type: 'image_url', image_url: { url } };
+}
+
+/** Bare-base64 → ImageAttachment for the single-turn /generate path. */
+function toAttachment(image: string, index: number): ImageAttachment {
+  const mimeType = sniffImageMime(image);
+  return {
+    base64: image,
+    mimeType,
+    filename: `image-${index}.${mimeType.split('/').pop() ?? 'bin'}`,
+  };
 }
 
 /**
@@ -245,8 +308,71 @@ function usageFields(usage: TurnUsage | null): Record<string, number> {
   };
 }
 
+/** Truncation inference — same heuristic as /v1 (see streaming.ts). */
+function doneReason(usage: TurnUsage | null, cap: number | undefined): OllamaDoneReason {
+  if (cap !== undefined && cap > 0 && usage !== null && usage.outputTokens >= cap) return 'length';
+  return 'stop';
+}
+
+interface EndpointsConfigSlice {
+  servingGezelId?: string;
+  supportingBehaviors?: boolean;
+}
+
+async function readEndpointsConfig(ctx: ServiceContext): Promise<EndpointsConfigSlice> {
+  return ctx.store
+    .readConfig()
+    .then((cfg) => cfg.openaiEndpoints ?? {})
+    .catch(() => ({}));
+}
+
+/**
+ * Shared target resolution for chat + generate + show: `gezel:<ref>` →
+ * that gezel; `<provider>:<model>` → the model; anything else → the
+ * serving gezel when designated. Returns null for "model not found"
+ * (caller 404s in Ollama's flat-error shape); throws on a bad gezel
+ * ref (caller 404s with the message).
+ */
+async function resolveOllamaTarget(
+  ctx: ServiceContext,
+  model: string,
+  endpointsConfig: EndpointsConfigSlice,
+): Promise<ChatTarget | null> {
+  const gezelRef = parseGezelModelRef(model);
+  if (gezelRef !== null) return resolveChatTarget({ kind: 'gezel', ref: gezelRef }, ctx);
+  const modelTarget = resolveModelTarget(model);
+  if (modelTarget) {
+    return { provider: modelTarget.provider, model: modelTarget.model, systemPrefix: '' };
+  }
+  if (endpointsConfig.servingGezelId) {
+    return resolveChatTarget({ kind: 'gezel', ref: endpointsConfig.servingGezelId }, ctx);
+  }
+  return null;
+}
+
 export function ollamaCompatRoutes(ctx: ServiceContext): Hono {
   const app = new Hono();
+
+  const logCompletion = (
+    appId: string,
+    model: string,
+    provider: ProviderName,
+    usage: TurnUsage | null,
+  ): void => {
+    void ctx.history
+      .log({
+        kind: 'v1.chat.completion',
+        summary: `${appId} · chat completion (${model})`,
+        details: {
+          appId,
+          surface: 'ollama',
+          model,
+          provider,
+          ...(usage ? { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens } : {}),
+        },
+      })
+      .catch(() => {});
+  };
 
   /**
    * `GET /tags` — Ollama's "what models are installed" endpoint.
@@ -317,6 +443,230 @@ export function ollamaCompatRoutes(ctx: ServiceContext): Hono {
     return c.json({ models: [...servingEntry, ...buckets.flat()] });
   });
 
+  /** `GET /ps` — running models. Engine residency isn't surfaced yet; an empty list is valid. */
+  app.get('/ps', (c) => c.json({ models: [] }));
+
+  /**
+   * `POST /show` — model metadata. Minimal but honest: enough shape
+   * for clients that read `model_info.<arch>.context_length`
+   * (LangChain's ChatOllama) and `capabilities`.
+   */
+  app.post('/show', async (c) => {
+    let parsed: z.infer<typeof OllamaShowRequestSchema>;
+    try {
+      parsed = OllamaShowRequestSchema.parse(await c.req.json());
+    } catch {
+      return c.json({ error: 'invalid request body' }, 400);
+    }
+    const modelField = parsed.model ?? parsed.name;
+    if (!modelField) return c.json({ error: 'model is required' }, 400);
+    const endpointsConfig = await readEndpointsConfig(ctx);
+    let target: ChatTarget | null;
+    try {
+      target = await resolveOllamaTarget(ctx, modelField, endpointsConfig);
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 404);
+    }
+    if (!target) return c.json({ error: `model "${modelField}" not found` }, 404);
+    let contextWindow: number | undefined;
+    try {
+      const models = await ctx.chat.listModelsForProvider(target.provider);
+      contextWindow = models.find((m) => m.id === target.model)?.contextWindow;
+    } catch {
+      /* provider unavailable — serve the generic shape */
+    }
+    return c.json({
+      modelfile: '',
+      parameters: '',
+      template: '',
+      details: {
+        parent_model: '',
+        format: '',
+        family: 'gezel',
+        families: ['gezel'],
+        parameter_size: '',
+        quantization_level: '',
+      },
+      model_info: {
+        'general.architecture': 'gezel',
+        ...(contextWindow ? { 'gezel.context_length': contextWindow } : {}),
+      },
+      capabilities: ['completion', 'tools'],
+    });
+  });
+
+  /**
+   * `POST /embed` (and the legacy `POST /embeddings` single-prompt
+   * form) — Ollama's embeddings endpoints, backed by
+   * `LLMProvider.createEmbedding` like `/v1/embeddings`.
+   */
+  app.post('/embed', async (c) => {
+    let parsed: z.infer<typeof OllamaEmbedRequestSchema>;
+    try {
+      parsed = OllamaEmbedRequestSchema.parse(await c.req.json());
+    } catch {
+      return c.json({ error: 'invalid request body' }, 400);
+    }
+    const target = resolveModelTarget(parsed.model);
+    if (!target) return c.json({ error: `model "${parsed.model}" not found` }, 404);
+    try {
+      const provider = await ctx.chat.getProvider(target.provider);
+      if (!provider.createEmbedding) {
+        return c.json({ error: `provider "${target.provider}" does not support embeddings` }, 400);
+      }
+      const result = await provider.createEmbedding({
+        input: parsed.input,
+        ...(target.model ? { model: target.model } : {}),
+      });
+      return c.json({ model: parsed.model, embeddings: result.vectors });
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+  });
+
+  app.post('/embeddings', async (c) => {
+    let parsed: z.infer<typeof OllamaLegacyEmbeddingsRequestSchema>;
+    try {
+      parsed = OllamaLegacyEmbeddingsRequestSchema.parse(await c.req.json());
+    } catch {
+      return c.json({ error: 'invalid request body' }, 400);
+    }
+    const target = resolveModelTarget(parsed.model);
+    if (!target) return c.json({ error: `model "${parsed.model}" not found` }, 404);
+    try {
+      const provider = await ctx.chat.getProvider(target.provider);
+      if (!provider.createEmbedding) {
+        return c.json({ error: `provider "${target.provider}" does not support embeddings` }, 400);
+      }
+      const result = await provider.createEmbedding({
+        input: parsed.prompt,
+        ...(target.model ? { model: target.model } : {}),
+      });
+      return c.json({ embedding: result.vectors[0] ?? [] });
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+  });
+
+  /**
+   * `POST /generate` — Ollama's single-turn completion. Same target
+   * resolution, tuning overlay, and observability as `/chat`; the
+   * response text rides `response` instead of `message.content`.
+   */
+  app.post('/generate', async (c) => {
+    let parsed: z.infer<typeof OllamaGenerateRequestSchema>;
+    try {
+      parsed = OllamaGenerateRequestSchema.parse(await c.req.json());
+    } catch (err) {
+      const message =
+        err instanceof ZodError
+          ? err.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ')
+          : 'invalid JSON body';
+      return c.json({ error: message }, 400);
+    }
+    const endpointsConfig = await readEndpointsConfig(ctx);
+    let target: ChatTarget | null;
+    try {
+      target = await resolveOllamaTarget(ctx, parsed.model, endpointsConfig);
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 404);
+    }
+    if (!target) return c.json({ error: `model "${parsed.model}" not found` }, 404);
+
+    let provider: Awaited<ReturnType<typeof ctx.chat.getProviderForModel>>;
+    try {
+      provider = await ctx.chat.getProviderForModel(target.provider, target.model);
+    } catch (err) {
+      if (err instanceof ModelNotInstalledError) return c.json({ error: err.message }, 404);
+      throw err;
+    }
+
+    const defaults = await ctx.chat
+      .resolveModelSessionDefaults(target.provider, target.model, target.tuningOverrides ?? {})
+      .catch(() => null);
+    const tuning = defaults
+      ? overlayOllamaRequestTuning(defaults.tuning, parsed.options, parsed.format)
+      : null;
+    const lengthCap = tuning?.sampling.maxTokens;
+
+    const systemMessage = [target.systemPrefix, parsed.system ?? '']
+      .filter((s) => s.trim().length > 0)
+      .join('\n\n---\n\n');
+    const session = await provider.createSession({
+      systemMessage,
+      ...(target.model ? { model: target.model } : {}),
+      ...(tuning ? { tuning } : {}),
+      ...(defaults && endpointsConfig.supportingBehaviors !== false
+        ? { profile: defaults.profile }
+        : {}),
+    });
+    const usageRef: { value: TurnUsage | null } = { value: null };
+    session.onUsage((u) => {
+      usageRef.value = u;
+      ctx.chat.recordExternalUsage(target.provider, u);
+    });
+    const appId = c.get('auth')?.appId ?? 'unauthenticated';
+    const attachments = (parsed.images ?? []).map(toAttachment);
+    const sendOpts = attachments.length > 0 ? { attachments } : undefined;
+
+    if (parsed.stream === false) {
+      try {
+        const response = await session.sendAndWait(parsed.prompt, sendOpts);
+        logCompletion(appId, parsed.model, target.provider, usageRef.value);
+        return c.json({
+          model: parsed.model,
+          created_at: new Date().toISOString(),
+          response,
+          done: true,
+          done_reason: doneReason(usageRef.value, lengthCap),
+          ...usageFields(usageRef.value),
+        });
+      } finally {
+        await session.disconnect().catch(() => {});
+      }
+    }
+
+    return honoStream(c, async (writer) => {
+      writer.onAbort(async () => {
+        await session.disconnect().catch(() => {});
+      });
+      c.res.headers.set('content-type', 'application/x-ndjson');
+      const unsubDelta = session.onDelta((chunk) => {
+        if (!chunk) return;
+        void writer
+          .write(
+            `${JSON.stringify({
+              model: parsed.model,
+              created_at: new Date().toISOString(),
+              response: chunk,
+              done: false,
+            })}\n`,
+          )
+          .catch(() => {});
+      });
+      try {
+        await session.sendAndWait(parsed.prompt, sendOpts);
+        logCompletion(appId, parsed.model, target.provider, usageRef.value);
+        await writer.write(
+          `${JSON.stringify({
+            model: parsed.model,
+            created_at: new Date().toISOString(),
+            response: '',
+            done: true,
+            done_reason: doneReason(usageRef.value, lengthCap),
+            ...usageFields(usageRef.value),
+          })}\n`,
+        );
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        await writer.write(`${JSON.stringify({ error: message })}\n`).catch(() => {});
+      } finally {
+        unsubDelta();
+        await session.disconnect().catch(() => {});
+      }
+    });
+  });
+
   /**
    * `POST /chat` — Ollama-style chat. NDJSON streaming when `stream`
    * is unset or true (Ollama's default is streaming); single-shot when
@@ -340,41 +690,15 @@ export function ollamaCompatRoutes(ctx: ServiceContext): Hono {
       return c.json({ error: message }, 400);
     }
 
-    const endpointsConfig: { servingGezelId?: string; supportingBehaviors?: boolean } =
-      await ctx.store
-        .readConfig()
-        .then((cfg) => cfg.openaiEndpoints ?? {})
-        .catch(() => ({}));
+    const endpointsConfig = await readEndpointsConfig(ctx);
 
-    // Target resolution mirrors /v1/chat/completions: `gezel:<ref>`
-    // routes through that gezel; `<provider>:<model>` goes straight to
-    // the model; anything else falls back to the serving gezel when
-    // one is designated, else 404s loudly.
-    let target: ChatTarget;
+    let target: ChatTarget | null;
     try {
-      const gezelRef = parseGezelModelRef(parsed.model);
-      if (gezelRef !== null) {
-        target = await resolveChatTarget({ kind: 'gezel', ref: gezelRef }, ctx);
-      } else {
-        const modelTarget = resolveModelTarget(parsed.model);
-        if (modelTarget) {
-          target = {
-            provider: modelTarget.provider,
-            model: modelTarget.model,
-            systemPrefix: '',
-          };
-        } else if (endpointsConfig.servingGezelId) {
-          target = await resolveChatTarget(
-            { kind: 'gezel', ref: endpointsConfig.servingGezelId },
-            ctx,
-          );
-        } else {
-          return c.json({ error: `model "${parsed.model}" not found` }, 404);
-        }
-      }
+      target = await resolveOllamaTarget(ctx, parsed.model, endpointsConfig);
     } catch (err) {
       return c.json({ error: err instanceof Error ? err.message : String(err) }, 404);
     }
+    if (!target) return c.json({ error: `model "${parsed.model}" not found` }, 404);
 
     let translated: ReturnType<typeof translateMessagesWithPrefix>;
     try {
@@ -422,33 +746,42 @@ export function ollamaCompatRoutes(ctx: ServiceContext): Hono {
     const { systemMessage, prompt, priorMessages, attachments } = translated;
     const sendOpts = attachments.length > 0 ? { attachments } : undefined;
 
-    // Same session defaults as /v1/chat/completions: tuning always,
-    // behavior profile gated by the Connected Apps switch.
+    // Same session defaults as /v1/chat/completions: tuning always
+    // (with the request's options/format overlaid on top), behavior
+    // profile gated by the Connected Apps switch.
     const defaults = await ctx.chat
       .resolveModelSessionDefaults(target.provider, target.model, target.tuningOverrides ?? {})
       .catch(() => null);
+    const tuning = defaults
+      ? overlayOllamaRequestTuning(defaults.tuning, parsed.options, parsed.format)
+      : null;
+    const lengthCap = tuning?.sampling.maxTokens;
 
     const session = await provider.createSession({
       systemMessage,
       ...(target.model ? { model: target.model } : {}),
       ...(priorMessages.length > 0 ? { priorMessages } : {}),
       ...(externalTools && externalTools.length > 0 ? { externalTools } : {}),
-      ...(defaults ? { tuning: defaults.tuning } : {}),
+      ...(tuning ? { tuning } : {}),
       ...(defaults && endpointsConfig.supportingBehaviors !== false
         ? { profile: defaults.profile }
         : {}),
     });
 
+    const usageRef: { value: TurnUsage | null } = { value: null };
+    session.onUsage((u) => {
+      usageRef.value = u;
+      ctx.chat.recordExternalUsage(target.provider, u);
+    });
+    const appId = c.get('auth')?.appId ?? 'unauthenticated';
+
     const streamingRequested = parsed.stream !== false;
 
     if (!streamingRequested) {
-      const usageRef: { value: TurnUsage | null } = { value: null };
-      const unsubUsage = session.onUsage((u) => {
-        usageRef.value = u;
-      });
       try {
         const content = await session.sendAndWait(prompt, sendOpts);
         const captured = session.capturedToolCalls?.() ?? [];
+        logCompletion(appId, parsed.model, target.provider, usageRef.value);
         return c.json({
           model: parsed.model,
           created_at: new Date().toISOString(),
@@ -458,11 +791,10 @@ export function ollamaCompatRoutes(ctx: ServiceContext): Hono {
             ...(captured.length > 0 ? { tool_calls: toOllamaToolCalls(captured) } : {}),
           },
           done: true,
-          done_reason: 'stop',
+          done_reason: doneReason(usageRef.value, lengthCap),
           ...usageFields(usageRef.value),
         });
       } finally {
-        unsubUsage();
         await session.disconnect().catch(() => {});
       }
     }
@@ -474,10 +806,6 @@ export function ollamaCompatRoutes(ctx: ServiceContext): Hono {
       });
       c.res.headers.set('content-type', 'application/x-ndjson');
 
-      const usageRef: { value: TurnUsage | null } = { value: null };
-      const unsubUsage = session.onUsage((u) => {
-        usageRef.value = u;
-      });
       const unsubDelta = session.onDelta((chunk) => {
         if (!chunk) return;
         const line: OllamaChatStreamChunk = {
@@ -492,6 +820,7 @@ export function ollamaCompatRoutes(ctx: ServiceContext): Hono {
       try {
         await session.sendAndWait(prompt, sendOpts);
         const captured = session.capturedToolCalls?.() ?? [];
+        logCompletion(appId, parsed.model, target.provider, usageRef.value);
         if (captured.length > 0) {
           const toolLine: OllamaChatStreamChunk = {
             model: parsed.model,
@@ -513,7 +842,7 @@ export function ollamaCompatRoutes(ctx: ServiceContext): Hono {
           created_at: new Date().toISOString(),
           message: { role: 'assistant', content: '' },
           done: true,
-          done_reason: 'stop',
+          done_reason: doneReason(usageRef.value, lengthCap),
           ...usageFields(usageRef.value),
         };
         await writer.write(`${JSON.stringify(tail)}\n`);
@@ -522,7 +851,6 @@ export function ollamaCompatRoutes(ctx: ServiceContext): Hono {
         await writer.write(`${JSON.stringify({ error: message })}\n`).catch(() => {});
       } finally {
         unsubDelta();
-        unsubUsage();
         await session.disconnect().catch(() => {});
       }
     });

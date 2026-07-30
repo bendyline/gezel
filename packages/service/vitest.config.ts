@@ -54,11 +54,20 @@ const INTEGRATION_SUITES = [
  * outgrow what the allocator hands back under full-suite pressure. Liftoff,
  * the baseline tier, never builds that graph, and grammar parse speed is
  * irrelevant to tests — so pin wasm to baseline in workers. Production keeps
- * tier-up. Guarded by src/test-pool.test.ts. Vitest 4 removed
- * `poolOptions` — this is the top-level `execArgv`, set per project because a
- * root-level one does not reach the workers.
+ * tier-up.
+ *
+ * `--no-wasm-tier-up` alone is not enough under full-suite pressure: Liftoff's
+ * initial grammar compilation still defaults to as many as 128 parallel V8
+ * compilation tasks per worker. That reproduced the same native Zone OOM on a
+ * 4-vCPU Linux runner on 2026-07-30, with content-indexer.test.ts as the only
+ * file whose fork vanished. Compile one WASM function at a time in tests to
+ * bound that native-memory spike.
+ *
+ * Guarded by src/test-pool.test.ts. Vitest 4 removed `poolOptions` — these are
+ * top-level `execArgv`, set per project because root-level values do not reach
+ * the workers.
  */
-const WORKER_EXEC_ARGV = ['--no-wasm-tier-up'];
+const WORKER_EXEC_ARGV = ['--no-wasm-tier-up', '--wasm-num-compilation-tasks=1'];
 
 /**
  * Embedding defaults for tests:

@@ -190,7 +190,7 @@ describe('POST /v1/chat/completions — tool calling (round-trip)', () => {
     expect(body.error.code).toBe('model_not_found');
   });
 
-  it('tool_choice is still rejected with 400 tool_choice_not_supported_v1', async () => {
+  it('string tool_choice is accepted (honored via the tuning layer)', async () => {
     const res = await v1('POST', '/v1/chat/completions', {
       body: {
         model: 'copilot:mock-fast',
@@ -200,9 +200,7 @@ describe('POST /v1/chat/completions — tool calling (round-trip)', () => {
       },
       token: rootToken,
     });
-    expect(res.status).toBe(400);
-    const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe('tool_choice_not_supported_v1');
+    expect(res.status).toBe(200);
   });
 
   it('rejects an assistant-as-last-message request', async () => {

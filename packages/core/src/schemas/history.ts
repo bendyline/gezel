@@ -96,6 +96,14 @@ export const HistoryEventKindSchema = z.enum([
   'klerk.changed',
   'keurmeester.changed',
   /**
+   * A third-party app completed a chat turn through the public
+   * OpenAI-compatible surface (`/v1/chat/completions`) or the Ollama
+   * facade/emulation. `details` carries `{ appId, surface, model,
+   * provider, inputTokens?, outputTokens? }` — `appId` is
+   * `'unauthenticated'` for the no-auth Ollama emulation listener.
+   */
+  'v1.chat.completion',
+  /**
    * A Keurmeester consult produced a verdict. `details` carries
    * `{ caseId, trigger, failureClass, action, applied, taskRef?, stepId? }`
    * — the full case record (prompt sizes, signals, debug payloads)

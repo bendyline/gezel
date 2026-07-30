@@ -32,7 +32,7 @@ export interface NonStreamingChatResult {
           function: { name: string; arguments: string };
         }>;
       };
-      finish_reason: 'stop' | 'tool_calls';
+      finish_reason: 'stop' | 'tool_calls' | 'length';
     },
   ];
   usage: {
@@ -40,6 +40,30 @@ export interface NonStreamingChatResult {
     completion_tokens: number;
     total_tokens: number;
   };
+}
+
+/**
+ * Truncation detection: providers don't surface the engine's own finish
+ * reason through `LLMSession`, so we infer `length` from usage — the
+ * turn consumed at least the effective output cap. Callers that
+ * auto-continue on `length` (agent loops, long-form writers) need this;
+ * reporting truncation as `stop` silently ends their loop mid-thought.
+ */
+function inferFinishReason(
+  hasToolCalls: boolean,
+  usage: TurnUsage | null,
+  lengthCapTokens: number | undefined,
+): 'stop' | 'tool_calls' | 'length' {
+  if (hasToolCalls) return 'tool_calls';
+  if (
+    lengthCapTokens !== undefined &&
+    lengthCapTokens > 0 &&
+    usage !== null &&
+    usage.outputTokens >= lengthCapTokens
+  ) {
+    return 'length';
+  }
+  return 'stop';
 }
 
 function toOpenAIToolCalls(
@@ -58,13 +82,20 @@ function toOpenAIToolCalls(
  * we fall back to zero when the provider doesn't emit one
  * (some local engines on short prompts).
  */
+export interface RunNonStreamingOpts {
+  attachments?: ImageAttachment[];
+  /** Effective output-token cap — reaching it reports `finish_reason: 'length'`. */
+  lengthCapTokens?: number;
+}
+
 export async function runNonStreaming(
   session: LLMSession,
   prompt: string,
   echoModel: string,
   nowSeconds: () => number,
-  attachments?: ImageAttachment[],
+  opts: RunNonStreamingOpts = {},
 ): Promise<NonStreamingChatResult> {
+  const { attachments, lengthCapTokens } = opts;
   // Wrapped so TypeScript's control-flow narrowing doesn't infer
   // `usage` as `never` after the post-callback null check — closures
   // that assign to a captured variable confuse the analyzer.
@@ -91,7 +122,7 @@ export async function runNonStreaming(
             content,
             ...(hasToolCalls ? { tool_calls: toOpenAIToolCalls(captured) } : {}),
           },
-          finish_reason: hasToolCalls ? ('tool_calls' as const) : ('stop' as const),
+          finish_reason: inferFinishReason(hasToolCalls, usageRef.value, lengthCapTokens),
         },
       ],
       usage: {
@@ -124,6 +155,8 @@ export interface RunStreamingOpts {
    * matching OpenAI's default.
    */
   includeUsage?: boolean;
+  /** Effective output-token cap — reaching it reports `finish_reason: 'length'`. */
+  lengthCapTokens?: number;
 }
 
 /**
@@ -148,7 +181,7 @@ export async function runStreaming(
   nowSeconds: () => number,
   opts: RunStreamingOpts = {},
 ): Promise<void> {
-  const { attachments, includeUsage = false } = opts;
+  const { attachments, includeUsage = false, lengthCapTokens } = opts;
   const id = `chatcmpl-${randomUUID()}`;
   const created = nowSeconds();
   // Spread onto every non-final chunk when the caller opted into usage
@@ -256,7 +289,7 @@ export async function runStreaming(
           {
             index: 0,
             delta: {},
-            finish_reason: hasToolCalls ? 'tool_calls' : 'stop',
+            finish_reason: inferFinishReason(hasToolCalls, usageRef.value, lengthCapTokens),
           },
         ],
         ...nullUsage,

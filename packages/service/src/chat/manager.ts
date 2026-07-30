@@ -155,6 +155,7 @@ import {
   type SendAndWaitOpts,
   type SessionOpts,
   SessionResumeError,
+  type TurnUsage,
 } from '../providers/types.js';
 import type { MlxRuntimeStatusBus } from '../python/mlx-runtime-status-bus.js';
 import { getPairedRemoteFetch } from '../remotes/pinned-fetch.js';
@@ -9028,6 +9029,17 @@ export class ChatManager {
       sessionId: `v1:${randomUUID()}`,
     });
     return provider;
+  }
+
+  /**
+   * Record token usage from a session the manager does NOT own — the
+   * stateless surfaces (`/v1/chat/completions`, the Ollama facade and
+   * emulation) create provider sessions directly, so without this hook
+   * third-party inference would be invisible to the Usage tab and
+   * quota accounting.
+   */
+  recordExternalUsage(providerName: ProviderName, turn: TurnUsage): void {
+    this.usageTracker.recordTurn(providerName, turn);
   }
 
   /**

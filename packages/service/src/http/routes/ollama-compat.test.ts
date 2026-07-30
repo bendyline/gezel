@@ -194,6 +194,132 @@ describe('POST /ollama/v1/chat — tool calling (Ollama-native shapes)', () => {
   });
 });
 
+describe('POST /ollama/v1/chat — options + format overlay, done_reason', () => {
+  let mockCopilot: MockProvider;
+
+  beforeAll(async () => {
+    const provider = await svc.context.chat.getProvider('copilot');
+    if (!(provider instanceof MockProvider)) throw new Error('expected MockProvider');
+    mockCopilot = provider;
+  });
+
+  it('overlays options onto tuning and infers done_reason=length at the cap', async () => {
+    const before = mockCopilot.calls.length;
+    const res = await call('POST', '/ollama/v1/chat', {
+      body: {
+        model: 'copilot:mock-fast',
+        messages: [{ role: 'user', content: 'talk' }],
+        options: { temperature: 0.3, top_k: 40, num_predict: 1 },
+        format: 'json',
+        stream: false,
+      },
+      token: rootToken,
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { done_reason?: string };
+    // MockProvider reports outputTokens = reply length in chars ≥ 1.
+    expect(body.done_reason).toBe('length');
+    const create = mockCopilot.calls.slice(before).find((c) => c.kind === 'create');
+    const tuning = create?.opts?.tuning as
+      | { sampling: Record<string, unknown>; output: Record<string, unknown> }
+      | undefined;
+    expect(tuning?.sampling).toMatchObject({ temperature: 0.3, topK: 40, maxTokens: 1 });
+    expect(tuning?.output.responseFormat).toBe('json_object');
+  });
+});
+
+describe('POST /ollama/v1/generate — single-turn completion', () => {
+  it('returns the Ollama generate envelope', async () => {
+    const res = await call('POST', '/ollama/v1/generate', {
+      body: {
+        model: 'copilot:mock-fast',
+        prompt: 'say something',
+        system: 'be brief',
+        stream: false,
+      },
+      token: rootToken,
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      response: string;
+      done: boolean;
+      done_reason?: string;
+    };
+    expect(body.response).toContain('say something');
+    expect(body.done).toBe(true);
+    expect(body.done_reason).toBe('stop');
+  });
+
+  it('streams NDJSON response chunks', async () => {
+    const res = await call('POST', '/ollama/v1/generate', {
+      body: { model: 'copilot:mock-fast', prompt: 'stream me' },
+      token: rootToken,
+    });
+    expect(res.status).toBe(200);
+    const lines = (await res.text())
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l));
+    expect(lines[lines.length - 1]?.done).toBe(true);
+    const reassembled = lines
+      .filter((l) => l.done === false)
+      .map((l) => l.response ?? '')
+      .join('');
+    expect(reassembled).toContain('stream me');
+  });
+});
+
+describe('Ollama auxiliary endpoints — show / embed / embeddings / ps', () => {
+  it('GET /ps returns an empty running-models list', async () => {
+    const res = await call('GET', '/ollama/v1/ps', { token: rootToken });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ models: [] });
+  });
+
+  it('POST /show returns model metadata with capabilities', async () => {
+    const res = await call('POST', '/ollama/v1/show', {
+      body: { model: 'copilot:mock-fast' },
+      token: rootToken,
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      capabilities: string[];
+      model_info: Record<string, unknown>;
+    };
+    expect(body.capabilities).toContain('tools');
+    expect(body.model_info['general.architecture']).toBe('gezel');
+  });
+
+  it('POST /show 404s an unknown model', async () => {
+    const res = await call('POST', '/ollama/v1/show', {
+      body: { model: 'definitely-not-a-model' },
+      token: rootToken,
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it('POST /embed returns one vector per input', async () => {
+    const res = await call('POST', '/ollama/v1/embed', {
+      body: { model: 'copilot:mock-embedding', input: ['aap', 'noot'] },
+      token: rootToken,
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { embeddings: number[][] };
+    expect(body.embeddings).toHaveLength(2);
+    expect(body.embeddings[0]?.length).toBeGreaterThan(0);
+  });
+
+  it('POST /embeddings (legacy) returns a single vector', async () => {
+    const res = await call('POST', '/ollama/v1/embeddings', {
+      body: { model: 'copilot:mock-embedding', prompt: 'mies' },
+      token: rootToken,
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { embedding: number[] };
+    expect(body.embedding.length).toBeGreaterThan(0);
+  });
+});
+
 describe('POST /ollama/v1/chat — images (Ollama bare-base64 shape)', () => {
   // 1x1 transparent PNG — starts with the iVBOR magic the mime sniffer keys on.
   const PNG_1X1 =

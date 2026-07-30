@@ -83,6 +83,31 @@ describe('translateMessages — developer role', () => {
   });
 });
 
+describe('translateMessages — tool message content parts', () => {
+  it('accepts a content-part array on tool results and concatenates text parts', () => {
+    const result = translateMessages([
+      { role: 'user', content: 'check the weather' },
+      {
+        role: 'assistant',
+        content: '',
+        tool_calls: [
+          { id: 'call_1', type: 'function', function: { name: 'get_weather', arguments: '{}' } },
+        ],
+      },
+      {
+        role: 'tool',
+        tool_call_id: 'call_1',
+        content: [
+          { type: 'text', text: 'sunny,' },
+          { type: 'text', text: '21C' },
+        ],
+      },
+    ]);
+    const toolEntry = result.priorMessages.find((m) => m.role === 'tool');
+    expect(toolEntry).toMatchObject({ content: 'sunny,\n21C', toolCallId: 'call_1' });
+  });
+});
+
 describe('flattenTranscriptIntoPrompt', () => {
   it('returns the input unchanged when there is no history', () => {
     const input = {

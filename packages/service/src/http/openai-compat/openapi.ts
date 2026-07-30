@@ -243,6 +243,17 @@ export function buildOpenApiDoc(version: string): OpenApiDoc {
           },
         },
       },
+      '/v1/models/{id}': {
+        get: {
+          summary: 'Retrieve one model entry by its qualified id.',
+          security: [{ bearerAuth: ['openai'] }],
+          parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+          responses: {
+            '200': { description: 'The model entry.' },
+            '404': { description: 'Unknown model id.' },
+          },
+        },
+      },
       '/v1/models/ensure': {
         post: {
           summary: 'Make sure a local model is downloaded and ready.',
@@ -428,17 +439,33 @@ export function buildOpenApiDoc(version: string): OpenApiDoc {
                 'OpenAI function-tool definitions. Advertised to the model but not executed; captured calls return with finish_reason=tool_calls. Rejected with 400 for providers without external-tools support.',
               items: { type: 'object' },
             },
+            tool_choice: {
+              description:
+                'String forms (auto / required / none) are honored via the tuning layer. The function-pinning object form is rejected with 400.',
+            },
+            response_format: {
+              type: 'object',
+              description:
+                'json_object and json_schema are honored via the tuning layer (llama.cpp json_schema, OpenAI strict mode). Copilot/CLI backends ignore tuning.',
+            },
             temperature: {
               type: 'number',
               minimum: 0,
               maximum: 2,
-              description: 'Rejected with 400 — sampling is set per-model via tuning.',
+              description:
+                'Overlaid onto the model’s resolved tuning as the topmost layer. Applied by tuning-consuming providers (local engines, OpenAI, Anthropic); Copilot/CLI backends ignore it.',
             },
             max_tokens: {
               type: 'integer',
               minimum: 1,
-              description: 'Rejected with 400 — sampling is set per-model via tuning.',
+              description:
+                'Output cap, overlaid onto resolved tuning. `max_completion_tokens` wins when both are sent. Reaching the cap reports finish_reason=length.',
             },
+            max_completion_tokens: { type: 'integer', minimum: 1 },
+            top_p: { type: 'number', minimum: 0, maximum: 1 },
+            presence_penalty: { type: 'number', minimum: -2, maximum: 2 },
+            frequency_penalty: { type: 'number', minimum: -2, maximum: 2 },
+            seed: { type: 'integer' },
           },
         },
         ChatCompletionResponse: {
@@ -463,7 +490,7 @@ export function buildOpenApiDoc(version: string): OpenApiDoc {
                       tool_calls: { type: 'array', items: { type: 'object' } },
                     },
                   },
-                  finish_reason: { type: 'string', enum: ['stop', 'tool_calls'] },
+                  finish_reason: { type: 'string', enum: ['stop', 'tool_calls', 'length'] },
                 },
               },
             },

@@ -95,7 +95,10 @@ const MessageSchema = z.discriminatedUnion('role', [
   }),
   z.object({
     role: z.literal('tool'),
-    content: z.string(),
+    // OpenAI allows content-part arrays on tool results too; text parts
+    // concatenate, image parts are not meaningful on a tool result and
+    // are dropped by the splitter.
+    content: ContentSchema,
     tool_call_id: z.string().min(1),
   }),
 ]);
@@ -111,17 +114,19 @@ export const ChatCompletionRequestSchema = z.object({
    * empty `choices` array. Without it, no usage appears in the stream.
    */
   stream_options: z.object({ include_usage: z.boolean().optional() }).optional(),
+  // Per-request sampling. Overlaid onto the model's resolved tuning as
+  // the topmost layer (see openai-compat/request-tuning.ts), then
+  // applied by every tuning-consuming provider (local engines, OpenAI,
+  // Anthropic). Copilot and the CLI providers ignore tuning — same as
+  // UI sessions on those backends.
   temperature: z.number().min(0).max(2).optional(),
   max_tokens: z.number().int().positive().optional(),
-  // The modern replacement for `max_tokens` — parsed so the sampling
-  // guard can name it in the 400 instead of silently stripping it.
+  /** The modern replacement for `max_tokens`; wins when both are sent. */
   max_completion_tokens: z.number().int().positive().optional(),
   top_p: z.number().min(0).max(1).optional(),
-  // Parsed only so the route can return a friendly 400 naming them — the
-  // `sampling_params_not_supported_v1` guard in v1-chat.ts rejects the
-  // sampling fields rather than honoring them per-request (not yet wired):
   presence_penalty: z.number().min(-2).max(2).optional(),
   frequency_penalty: z.number().min(-2).max(2).optional(),
+  seed: z.number().int().optional(),
   /** Parsed so the route can reject n>1 loudly — gezel returns one choice. */
   n: z.number().int().positive().optional(),
   user: z.string().optional(),
@@ -132,9 +137,40 @@ export const ChatCompletionRequestSchema = z.object({
    * halts and we return the calls in OpenAI's tool_calls shape.
    */
   tools: z.array(ToolSchema).optional(),
-  /** Reserved for tool_choice steering — not honored in v1; accepted for forward-compat. */
-  tool_choice: z.unknown().optional(),
-  response_format: z.unknown().optional(),
+  /**
+   * Tool-choice steering. The string forms map onto the tuning layer's
+   * `toolChoice` (auto / required / none). The function-pinning object
+   * form is parsed but rejected at the route — no provider path exists
+   * for "force THIS tool" yet.
+   */
+  tool_choice: z
+    .union([
+      z.enum(['auto', 'none', 'required']),
+      z.object({
+        type: z.literal('function'),
+        function: z.object({ name: z.string().min(1) }),
+      }),
+    ])
+    .optional(),
+  /**
+   * Structured outputs. Overlaid onto the tuning layer's `output`
+   * block: `json_object` → responseFormat, `json_schema` → jsonSchema
+   * (llama.cpp `json_schema`, OpenAI strict mode). `text` is a no-op.
+   */
+  response_format: z
+    .discriminatedUnion('type', [
+      z.object({ type: z.literal('text') }),
+      z.object({ type: z.literal('json_object') }),
+      z.object({
+        type: z.literal('json_schema'),
+        json_schema: z.object({
+          name: z.string().optional(),
+          schema: z.record(z.string(), z.unknown()),
+          strict: z.boolean().optional(),
+        }),
+      }),
+    ])
+    .optional(),
 });
 
 export type ChatCompletionRequest = z.infer<typeof ChatCompletionRequestSchema>;
@@ -311,7 +347,8 @@ export function translateMessages(
     if (msg.role === 'tool') {
       conversation.push({
         kind: 'tool',
-        content: msg.content,
+        // Text parts concatenate; images on a tool result are dropped.
+        content: splitContent(msg.content).text,
         toolCallId: msg.tool_call_id,
       });
       continue;

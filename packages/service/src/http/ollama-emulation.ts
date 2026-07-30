@@ -53,6 +53,28 @@ export function buildOllamaEmulationApp(ctx: ServiceContext): Hono {
   app.use('*', opaqueServerErrors(log));
   app.use('*', hostGuard());
 
+  // Cheap backstop against a runaway local process flooding the
+  // unauthenticated listener: cap concurrent POSTs (inference) at a
+  // level no legitimate client reaches. The provider queues already
+  // serialize actual engine work — this bounds queue depth and memory,
+  // not throughput. Streaming responses decrement when the handler
+  // hands back its Response, so the cap tracks request STARTS; that's
+  // sufficient for a flood backstop.
+  let inflight = 0;
+  const MAX_INFLIGHT = 16;
+  app.use('*', async (c, next) => {
+    if (c.req.method !== 'POST') return next();
+    if (inflight >= MAX_INFLIGHT) {
+      return c.json({ error: 'too many concurrent requests — try again shortly' }, 429);
+    }
+    inflight++;
+    try {
+      return await next();
+    } finally {
+      inflight--;
+    }
+  });
+
   // Reachability probes stock clients use before their first real call.
   app.get('/', (c) => c.text('Ollama is running'));
   app.get('/api/version', (c) => c.json({ version: '0.5.0' }));

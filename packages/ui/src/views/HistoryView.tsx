@@ -33,6 +33,7 @@ const KINDS: Array<{ value: string; label: string }> = [
   { value: 'task.step.completed', label: 'Task step completed' },
   { value: 'task.tick', label: 'Task cron tick' },
   { value: 'task.canceled', label: 'Task canceled' },
+  { value: 'v1.chat.completion', label: 'App chat (connected apps)' },
   { value: 'debug.bridge.failed', label: 'Debug: MCP bridge failed to start' },
 ];
 
@@ -295,6 +296,7 @@ const KIND_LABELS: Record<string, string> = {
   'tool.called': 'Tool call',
   'meester.changed': 'Meester changed',
   'klerk.changed': 'Klerk changed',
+  'v1.chat.completion': 'App chat',
 };
 
 function kindLabel(kind: string): string {

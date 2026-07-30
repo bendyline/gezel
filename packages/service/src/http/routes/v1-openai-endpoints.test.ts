@@ -209,3 +209,124 @@ describe('session defaults — tuning always, profile gated by supportingBehavio
     expect(opts.profile).toBeUndefined();
   });
 });
+
+describe('per-request overlays (sampling / response_format / tool_choice)', () => {
+  let mockCopilot: MockProvider;
+
+  beforeAll(async () => {
+    const provider = await svc.context.chat.getProvider('copilot');
+    if (!(provider instanceof MockProvider)) throw new Error('expected MockProvider');
+    mockCopilot = provider;
+  });
+
+  async function createOptsFor(extra: Record<string, unknown>): Promise<{
+    tuning?: {
+      sampling: Record<string, unknown>;
+      output: Record<string, unknown>;
+      toolChoice?: string;
+    };
+  }> {
+    const before = mockCopilot.calls.length;
+    const res = await call('POST', '/v1/chat/completions', {
+      body: {
+        model: 'copilot:mock-fast',
+        messages: [{ role: 'user', content: 'hi' }],
+        ...extra,
+      },
+      token: rootToken,
+    });
+    expect(res.status).toBe(200);
+    const create = mockCopilot.calls.slice(before).find((c) => c.kind === 'create');
+    return (create?.opts ?? {}) as never;
+  }
+
+  it('overlays sampling params as the topmost tuning layer', async () => {
+    const opts = await createOptsFor({
+      temperature: 0.25,
+      top_p: 0.5,
+      max_completion_tokens: 123,
+      presence_penalty: 0.1,
+      frequency_penalty: -0.2,
+      seed: 7,
+    });
+    expect(opts.tuning?.sampling).toMatchObject({
+      temperature: 0.25,
+      topP: 0.5,
+      maxTokens: 123,
+      presencePenalty: 0.1,
+      frequencyPenalty: -0.2,
+      seed: 7,
+    });
+  });
+
+  it('max_completion_tokens wins over max_tokens when both are sent', async () => {
+    const opts = await createOptsFor({ max_tokens: 50, max_completion_tokens: 60 });
+    expect(opts.tuning?.sampling.maxTokens).toBe(60);
+  });
+
+  it('maps response_format json_schema onto the tuning output block', async () => {
+    const schema = { type: 'object', properties: { answer: { type: 'string' } } };
+    const opts = await createOptsFor({
+      response_format: { type: 'json_schema', json_schema: { name: 'reply', schema } },
+    });
+    expect(opts.tuning?.output.jsonSchema).toEqual(schema);
+  });
+
+  it('maps response_format json_object and string tool_choice', async () => {
+    const opts = await createOptsFor({
+      response_format: { type: 'json_object' },
+      tool_choice: 'required',
+      tools: [{ type: 'function', function: { name: 'do_thing' } }],
+    });
+    expect(opts.tuning?.output.responseFormat).toBe('json_object');
+    expect(opts.tuning?.toolChoice).toBe('required');
+  });
+});
+
+describe('GET /v1/models/{id} (retrieve)', () => {
+  it('returns the entry for a known qualified id', async () => {
+    const res = await call('GET', '/v1/models/copilot:mock-fast', { token: rootToken });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { id: string; object: string; owned_by: string };
+    expect(body).toMatchObject({ id: 'copilot:mock-fast', object: 'model', owned_by: 'copilot' });
+  });
+
+  it('404s an unknown id with the OpenAI envelope', async () => {
+    const res = await call('GET', '/v1/models/nope:missing', { token: rootToken });
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe('model_not_found');
+  });
+});
+
+describe('observability — usage tracking + history events', () => {
+  it('records app turns in the usage tracker and logs v1.chat.completion', async () => {
+    const res = await call('POST', '/v1/chat/completions', {
+      body: {
+        model: 'copilot:mock-fast',
+        messages: [{ role: 'user', content: 'count me' }],
+      },
+      token: rootToken,
+    });
+    expect(res.status).toBe(200);
+
+    const usage = await call('GET', '/api/usage', { token: rootToken });
+    expect(usage.status).toBe(200);
+    const usageBody = (await usage.json()) as {
+      providers: { copilot?: { totalTurns: number; totalTokensOut: number } };
+    };
+    expect(usageBody.providers.copilot?.totalTurns ?? 0).toBeGreaterThan(0);
+    expect(usageBody.providers.copilot?.totalTokensOut ?? 0).toBeGreaterThan(0);
+
+    const history = await call('GET', '/api/history?kind=v1.chat.completion', {
+      token: rootToken,
+    });
+    expect(history.status).toBe(200);
+    const historyBody = (await history.json()) as {
+      entries: Array<{ kind: string; details?: { appId?: string; model?: string } }>;
+    };
+    const entry = historyBody.entries.find((e) => e.kind === 'v1.chat.completion');
+    expect(entry).toBeDefined();
+    expect(entry?.details?.model).toBe('copilot:mock-fast');
+  });
+});

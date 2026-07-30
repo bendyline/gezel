@@ -7,11 +7,13 @@ import {
   ExternalToolsUnsupportedError,
   ModelNotInstalledError,
   type SessionOpts,
+  type TurnUsage,
 } from '../../providers/types.js';
 import type { LLMSession } from '../../providers/types.js';
 import type { ServiceContext } from '../context.js';
 import { resolveChatTarget } from '../openai-compat/chat-target.js';
 import type { ChatTarget } from '../openai-compat/chat-target.js';
+import { overlayOpenAiRequestTuning } from '../openai-compat/request-tuning.js';
 import { runNonStreaming, runStreaming } from '../openai-compat/streaming.js';
 import {
   type ChatCompletionRequest,
@@ -34,11 +36,11 @@ const log = createLogger('v1-chat');
  * sessions, project state, MCP tool wiring, or any project history —
  * this surface is for third-party apps that just want inference.
  *
- * Tool calling, structured outputs, and embeddings are intentionally
- * NOT in v1. Requests carrying `tools` / `tool_choice` /
- * `response_format` return a clear 400 with `code:
- * tool_calling_not_supported_v1` so the app can fall back gracefully
- * instead of silently receiving plain text.
+ * Honored per request: `tools` (caller-executed; providers without
+ * external-tool support 400), string-form `tool_choice`, sampling
+ * params + `response_format` (overlaid onto the model's resolved
+ * tuning), `stream_options.include_usage`, and multimodal image_url
+ * data URIs. Embeddings live at `/v1/embeddings`.
  *
  * Auth is layered at mount time: `bearerAuth(tokenStore)` +
  * `requireScope('openai')`. The root token (scope `root`) also
@@ -93,57 +95,22 @@ export function v1ChatRoutes(ctx: ServiceContext): Hono {
     // `ExternalToolsUnsupportedError` from createSession as defense in
     // depth, mapped to the same 400 below.
     //
-    // `tool_choice` and `response_format` are still v1-deferred —
-    // accepting them silently would let callers assume gezel honors
-    // them; the rejection makes the limitation explicit.
-    if (parsed.tool_choice !== undefined) {
+    // Per-request sampling, response_format, and the STRING forms of
+    // tool_choice are honored: they overlay onto the model's resolved
+    // tuning as the topmost layer (see openai-compat/request-tuning.ts)
+    // and flow through SessionOpts.tuning to every tuning-consuming
+    // provider. The one remaining rejection is the function-pinning
+    // tool_choice object — no provider path exists for "force THIS
+    // tool" yet, and accepting it silently would let a caller assume
+    // the pinned tool must fire.
+    if (typeof parsed.tool_choice === 'object' && parsed.tool_choice !== null) {
       return c.json(
         {
           error: {
-            message: 'tool_choice is not supported in gezel /v1 yet.',
+            message:
+              'tool_choice with a pinned function is not supported in gezel /v1 yet — use "auto", "required", or "none".',
             type: 'invalid_request_error',
-            code: 'tool_choice_not_supported_v1',
-          },
-        },
-        400,
-      );
-    }
-    if (parsed.response_format !== undefined) {
-      return c.json(
-        {
-          error: {
-            message: 'response_format is not supported in gezel /v1 yet.',
-            type: 'invalid_request_error',
-            code: 'structured_outputs_not_supported_v1',
-          },
-        },
-        400,
-      );
-    }
-
-    // Per-request sampling parameters aren't threaded to the providers yet —
-    // sampling is applied per-model via catalog/frontmatter tuning, and each
-    // provider builds its own request body. Accepting these silently would
-    // let a caller believe gezel honors them (same rationale as tool_choice /
-    // response_format above), so we reject explicitly with the offending
-    // names. Per-request sampling is a roadmap item.
-    const unsupportedSampling = (
-      [
-        'temperature',
-        'max_tokens',
-        'max_completion_tokens',
-        'top_p',
-        'presence_penalty',
-        'frequency_penalty',
-      ] as const
-    ).filter((k) => parsed[k] !== undefined);
-    if (unsupportedSampling.length > 0) {
-      return c.json(
-        {
-          error: {
-            message: `These sampling parameters aren't honored by gezel /v1 yet: ${unsupportedSampling.join(', ')}. Omit them — sampling is currently set per-model via tuning; per-request sampling is on the roadmap.`,
-            type: 'invalid_request_error',
-            code: 'sampling_params_not_supported_v1',
+            code: 'tool_choice_function_not_supported_v1',
           },
         },
         400,
@@ -266,25 +233,62 @@ export function v1ChatRoutes(ctx: ServiceContext): Hono {
       // Per-model session defaults, mirroring what a UI session on the
       // same model would get. `tuning` (catalog sampling, thinking /
       // instruct folds, per-gezel overrides for gezel: targets) applies
-      // unconditionally — it's "what the model is". The behavior
-      // `profile` (ramble detection, preamble folding, transcript
-      // shaping) is the supporting layer the Connected Apps switch
-      // gates. Best-effort: a resolver failure serves engine defaults
-      // rather than failing the request.
+      // unconditionally — it's "what the model is" — with the caller's
+      // per-request knobs overlaid on top. The behavior `profile`
+      // (ramble detection, preamble folding, transcript shaping) is the
+      // supporting layer the Connected Apps switch gates. Best-effort:
+      // a resolver failure serves engine defaults rather than failing
+      // the request.
       const defaults = await ctx.chat
         .resolveModelSessionDefaults(target.provider, target.model, target.tuningOverrides ?? {})
         .catch(() => null);
+      const tuning = defaults ? overlayOpenAiRequestTuning(defaults.tuning, parsed) : null;
       const supportingBehaviors = endpointsConfig.supportingBehaviors !== false;
+      // Effective output cap for finish_reason: 'length' inference —
+      // per-request max_tokens wins, else the resolved tuning cap.
+      const lengthCapTokens = tuning?.sampling.maxTokens;
 
       const sessionOpts: SessionOpts = {
         systemMessage,
         ...(target.model ? { model: target.model } : {}),
         ...(priorMessages.length > 0 ? { priorMessages } : {}),
         ...(externalTools && externalTools.length > 0 ? { externalTools } : {}),
-        ...(defaults ? { tuning: defaults.tuning } : {}),
+        ...(tuning ? { tuning } : {}),
         ...(defaults && supportingBehaviors ? { profile: defaults.profile } : {}),
       };
       session = await provider.createSession(sessionOpts);
+
+      // Observability for a surface that otherwise leaves no trace:
+      // token usage feeds the Usage tab, and each completed turn lands
+      // one history event with the calling app's id (the emulation
+      // listener has no auth context — those turns log as
+      // 'unauthenticated').
+      const usageRef: { value: TurnUsage | null } = { value: null };
+      session.onUsage((u) => {
+        usageRef.value = u;
+        ctx.chat.recordExternalUsage(target.provider, u);
+      });
+      const appId = c.get('auth')?.appId ?? 'unauthenticated';
+      const logCompletion = (): void => {
+        void ctx.history
+          .log({
+            kind: 'v1.chat.completion',
+            summary: `${appId} · chat completion (${parsed.model})`,
+            details: {
+              appId,
+              surface: 'openai',
+              model: parsed.model,
+              provider: target.provider,
+              ...(usageRef.value
+                ? {
+                    inputTokens: usageRef.value.inputTokens,
+                    outputTokens: usageRef.value.outputTokens,
+                  }
+                : {}),
+            },
+          })
+          .catch(() => {});
+      };
 
       // Per-app audit (which app made which call) is deferred to a
       // later phase that adds a `v1.chat.completion` kind to the
@@ -328,8 +332,10 @@ export function v1ChatRoutes(ctx: ServiceContext): Hono {
               {
                 ...(attachments.length > 0 ? { attachments } : {}),
                 ...(parsed.stream_options?.include_usage === true ? { includeUsage: true } : {}),
+                ...(lengthCapTokens !== undefined ? { lengthCapTokens } : {}),
               },
             );
+            logCompletion();
           } catch (err) {
             // Stream is already open — surface as a final SSE chunk
             // formatted as an OpenAI error envelope. The OpenAI SDK
@@ -373,8 +379,12 @@ export function v1ChatRoutes(ctx: ServiceContext): Hono {
         prompt,
         parsed.model,
         () => Math.floor(Date.now() / 1000),
-        attachments,
+        {
+          ...(attachments.length > 0 ? { attachments } : {}),
+          ...(lengthCapTokens !== undefined ? { lengthCapTokens } : {}),
+        },
       );
+      logCompletion();
       return c.json(response);
     } catch (err) {
       if (session) await session.disconnect().catch(() => {});

@@ -68,11 +68,17 @@ async function registerAndApproveApp(
 }
 
 describe('POST /v1/chat/completions — auth', () => {
-  it('rejects requests with no token', async () => {
+  it('rejects requests with no token — OpenAI error envelope', async () => {
     const res = await v1('POST', '/v1/chat/completions', {
       body: { model: 'copilot:mock-fast', messages: [{ role: 'user', content: 'hi' }] },
     });
     expect(res.status).toBe(401);
+    const body = (await res.json()) as {
+      error: { message: string; type: string; code: string };
+    };
+    expect(body.error.code).toBe('invalid_api_key');
+    expect(body.error.type).toBe('invalid_request_error');
+    expect(body.error.message).toContain('Connected Apps');
   });
 
   it('rejects requests with the wrong scope', async () => {
@@ -91,8 +97,9 @@ describe('POST /v1/chat/completions — auth', () => {
       token: wrongScopeToken,
     });
     expect(res.status).toBe(403);
-    const body = (await res.json()) as { error: string };
-    expect(body.error).toBe('missing_scope:openai');
+    const body = (await res.json()) as { error: { type: string; code: string } };
+    expect(body.error.code).toBe('missing_scope:openai');
+    expect(body.error.type).toBe('permission_error');
   });
 
   it('accepts the root token', async () => {
@@ -211,7 +218,7 @@ describe('POST /v1/chat/completions — request validation', () => {
     expect(res.status).toBe(200);
   });
 
-  it('returns 400 + structured_outputs_not_supported_v1 when response_format is present', async () => {
+  it('accepts response_format (honored via the tuning overlay)', async () => {
     const res = await v1('POST', '/v1/chat/completions', {
       body: {
         model: 'copilot:mock-fast',
@@ -220,12 +227,10 @@ describe('POST /v1/chat/completions — request validation', () => {
       },
       token: rootToken,
     });
-    expect(res.status).toBe(400);
-    const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe('structured_outputs_not_supported_v1');
+    expect(res.status).toBe(200);
   });
 
-  it('returns 400 + sampling_params_not_supported_v1 when a sampling param is present', async () => {
+  it('accepts per-request sampling params (honored via the tuning overlay)', async () => {
     const res = await v1('POST', '/v1/chat/completions', {
       body: {
         model: 'copilot:mock-fast',
@@ -234,10 +239,21 @@ describe('POST /v1/chat/completions — request validation', () => {
       },
       token: rootToken,
     });
+    expect(res.status).toBe(200);
+  });
+
+  it('rejects the function-pinning tool_choice form', async () => {
+    const res = await v1('POST', '/v1/chat/completions', {
+      body: {
+        model: 'copilot:mock-fast',
+        messages: [{ role: 'user', content: 'hi' }],
+        tool_choice: { type: 'function', function: { name: 'do_thing' } },
+      },
+      token: rootToken,
+    });
     expect(res.status).toBe(400);
-    const body = (await res.json()) as { error: { code: string; message: string } };
-    expect(body.error.code).toBe('sampling_params_not_supported_v1');
-    expect(body.error.message).toContain('temperature');
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe('tool_choice_function_not_supported_v1');
   });
 
   it('returns 404 model_not_found when the model prefix is unknown', async () => {
@@ -294,19 +310,22 @@ describe('POST /v1/chat/completions — request validation', () => {
     expect(body.error.type).toBe('invalid_request_error');
   });
 
-  it('rejects max_completion_tokens with the same 400 as max_tokens', async () => {
+  it('accepts max_completion_tokens and reports finish_reason=length at the cap', async () => {
+    // MockProvider reports outputTokens = reply length in chars, so a
+    // 1-token cap is always reached — the truncation heuristic fires.
     const res = await v1('POST', '/v1/chat/completions', {
       body: {
         model: 'copilot:mock-fast',
         messages: [{ role: 'user', content: 'hi' }],
-        max_completion_tokens: 512,
+        max_completion_tokens: 1,
       },
       token: rootToken,
     });
-    expect(res.status).toBe(400);
-    const body = (await res.json()) as { error: { code: string; message: string } };
-    expect(body.error.code).toBe('sampling_params_not_supported_v1');
-    expect(body.error.message).toContain('max_completion_tokens');
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      choices: Array<{ finish_reason: string }>;
+    };
+    expect(body.choices[0]?.finish_reason).toBe('length');
   });
 
   it('rejects n>1 loudly instead of silently returning one choice', async () => {

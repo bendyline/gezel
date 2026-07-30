@@ -245,6 +245,16 @@ Changing the meester from Settings **does not touch that gezel's `about.md`**. I
 
 Per-install default via `config.provider`. Per-gezel override via frontmatter. `ChatManager.providerFor(gezelId)` resolves the precedence.
 
+### OpenAI-compatible endpoints (Connected Apps)
+
+Gezel serves third-party local apps through a public inference facade, controlled from Settings → Connected Apps and stored under `config.openaiEndpoints`:
+
+- **`/v1/*`** on the main daemon port (canonical 43935) — OpenAI-shaped chat/models/embeddings, gated by bearer auth + the per-app consent flow (`/v1/apps/register`). Stateless: one fresh provider session per request; callers replay their own history. Requests resolve `<provider>:<model>` or `gezel:<ref>` targets; unknown model strings fall back to the configured **serving gezel** (persona + frontmatter tuning apply). Per-model resolved tuning always applies, with the caller's per-request sampling/`response_format`/`tool_choice` overlaid on top ([request-tuning.ts](packages/service/src/http/openai-compat/request-tuning.ts)); the behavior **profile** (ramble detection, transcript shaping) is gated by the `supportingBehaviors` switch. Tools are caller-executed (advertise-and-halt via `SessionOpts.externalTools`); providers that run their own tool loop (Copilot, CLI providers) reject tools loudly and get history flattened into the prompt (they ignore `priorMessages`).
+- **`/ollama/v1/*`** — the same engine speaking Ollama's dialect (tags/chat/generate/show/embed/ps, object-form tool arguments, bare-base64 images).
+- **Ollama emulation** ([ollama-emulation.ts](packages/service/src/http/ollama-emulation.ts)) — an opt-in (`emulateOllama`, default OFF), **unauthenticated** plain-HTTP loopback listener on port 11434 so apps that auto-discover Ollama find gezel. Inference surfaces only; refuses to bind when real Ollama owns the port. Never mount product `/api/*` routes there.
+
+Completed app turns land in history as `v1.chat.completion` and feed the UsageTracker via `ChatManager.recordExternalUsage`. A master `enabled: false` gates every surface plus new app registrations ([openai-endpoints-gate.ts](packages/service/src/http/openai-endpoints-gate.ts)).
+
 ### MCP Bridge
 
 Each OpenAI or Mock session that has `mcpServer` set spawns the `@bendyline/gezel-mcp` subprocess via stdio, lists its tools, and translates them into OpenAI function-tool shape. When the model emits a `function_call`, the bridge invokes it and feeds the string result back as a `function_call_output`. The gezel-mcp server itself talks back to the running service over HTTP via the env vars it's given (`GEZEL_BASE_URL`, `GEZEL_TOKEN`, `GEZEL_AGENT_ID`, `GEZEL_PROJECT_ID`, `GEZEL_HOME`).
