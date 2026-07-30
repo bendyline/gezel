@@ -85,6 +85,16 @@ test('Electron release configuration pins the audited packaging contracts', asyn
 
   assert.match(builder, /minimumSystemVersion: '13\.5'/);
   assert.match(builder, /- target: pkg[\s\S]*?- target: zip/);
+  const pkgSectionStart = builder.indexOf('\npkg:');
+  const pkgSectionEnd = builder.indexOf('\n# ── Linux', pkgSectionStart);
+  assert.notEqual(pkgSectionStart, -1, 'electron-builder must define macOS PKG options');
+  assert.notEqual(pkgSectionEnd, -1, 'macOS PKG options must remain a distinct config section');
+  const pkgSection = builder.slice(pkgSectionStart, pkgSectionEnd);
+  assert.match(
+    pkgSection,
+    /^\s{2}isRelocatable: false$/m,
+    'the system-service PKG must always install Gezel.app at /Applications',
+  );
   assert.match(workflow, /latest-mac\.yml/);
   assert.match(workflow, /packages\/app\/dist\/installers\/\*\.zip\.blockmap/);
 

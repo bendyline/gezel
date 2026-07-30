@@ -342,6 +342,11 @@ pkg:
   installLocation: /Applications
   allowAnywhere: false
   allowCurrentUserHome: false
+  # The LaunchDaemon and postinstall contract both use the canonical
+  # /Applications/Gezel.app path. Leaving electron-builder's default (`true`)
+  # lets PackageKit discover another copy of Gezel.app — including the packed
+  # build tree in CI — and install over that copy instead of /Applications.
+  isRelocatable: false
   # The postinstall script registers the LaunchDaemon. electron-builder
   # finds `preinstall`, `postinstall` files in this directory and wraps
   # them into the PKG payload.
