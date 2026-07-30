@@ -1475,7 +1475,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                   aria-orientation="vertical"
                   aria-label="Resize output pane"
                   tabIndex={0}
-                  className="chat-rail-grip"
+                  className="chat-rail-grip project-output-grip"
                   onMouseDown={onOutputGripMouseDown}
                   onKeyDown={onOutputGripKeyDown}
                 />

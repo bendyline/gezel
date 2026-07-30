@@ -188,6 +188,8 @@ describe('Sidebar', () => {
       />,
     );
     await screen.findByText('Alpha');
+    const alphaActions = screen.getByRole('button', { name: 'Actions for Alpha' });
+    expect(alphaActions.nextElementSibling).toHaveClass('app-sidebar-proj-signal');
     // p1 is pending + poisoned + active → intervene (pending) wins.
     expect(
       screen.getByRole('button', { name: /Resolve 2 pending questions in Alpha/ }),
@@ -384,8 +386,9 @@ describe('Sidebar', () => {
     // The "+" must NOT navigate to the full Documents pane.
     expect(onOpenArea).not.toHaveBeenCalled();
 
-    const pathInput = await screen.findByPlaceholderText('e.g. guidelines/coding.md');
-    fireEvent.change(pathInput, { target: { value: 'notes.md' } });
+    const pathInput = await screen.findByPlaceholderText('e.g. guidelines/coding');
+    expect(screen.getByText('.md')).toBeInTheDocument();
+    fireEvent.change(pathInput, { target: { value: 'notes' } });
     fireEvent.click(screen.getByRole('button', { name: 'Create' }));
 
     await waitFor(() => {

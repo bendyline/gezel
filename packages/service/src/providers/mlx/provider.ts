@@ -288,6 +288,7 @@ export class MlxProvider implements LLMProvider {
   readonly name = 'mlx' as const;
   readonly queue: ProviderQueue;
   readonly supportsExternalTools = true;
+  readonly supportsPriorMessages = true;
   private readonly supervisor?: NativeEngineSupervisor;
   private readonly externalBaseUrl?: string;
   private readonly defaultModel: string;

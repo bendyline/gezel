@@ -86,6 +86,17 @@ const DEFAULT_RESPONSES: Record<string, unknown> = {
     source: 'darwin-unified',
     usableBytes: 112_000_000_000,
   },
+  getMachineMemoryUsage: {
+    kind: 'unified',
+    totalBytes: 128_000_000_000,
+    usedBytes: 48_000_000_000,
+    gezelBytesEstimated: 12_000_000_000,
+    otherBytes: 36_000_000_000,
+    freeBytes: 80_000_000_000,
+    sampledAt: '2026-07-29T12:00:00.000Z',
+    source: 'system-memory',
+    deviceNames: [],
+  },
   getQueueStatus: {
     providers: {},
     taskRunner: { pendingCount: 0, pendingByGezel: {}, pendingByProject: {} },

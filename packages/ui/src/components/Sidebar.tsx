@@ -287,6 +287,7 @@ export function Sidebar({
     // SSE bridge when a project is deleted anywhere, so the row drops live.
     window.addEventListener('gezel:project-deleted', onProject);
     window.addEventListener('gezel:document-created', onDoc);
+    window.addEventListener('gezel:document-renamed', onDoc);
     window.addEventListener('gezel:document-deleted', onDoc);
     document.addEventListener('visibilitychange', onVisible);
     return () => {
@@ -297,6 +298,7 @@ export function Sidebar({
       window.removeEventListener('gezel:project-created', onProject);
       window.removeEventListener('gezel:project-deleted', onProject);
       window.removeEventListener('gezel:document-created', onDoc);
+      window.removeEventListener('gezel:document-renamed', onDoc);
       window.removeEventListener('gezel:document-deleted', onDoc);
       document.removeEventListener('visibilitychange', onVisible);
     };
@@ -530,6 +532,11 @@ export function Sidebar({
                     </span>
                     <span className="app-sidebar-item-label">{p.name}</span>
                   </button>
+                  <ProjectActionsMenu
+                    project={p}
+                    hasError={!!poisoned}
+                    onDeleted={() => void refreshProjects()}
+                  />
                   {/* Right-aligned per-project signal, by precedence:
                       needs-intervention > poisoned > working > status light.
                       The wrapper is a fixed-width centering box so every
@@ -615,11 +622,6 @@ export function Sidebar({
                       </Tooltip.Hint>
                     )}
                   </span>
-                  <ProjectActionsMenu
-                    project={p}
-                    hasError={!!poisoned}
-                    onDeleted={() => void refreshProjects()}
-                  />
                 </li>
               );
             })
@@ -773,8 +775,9 @@ export function Sidebar({
       <NewPathDialog
         open={showNewDoc}
         title="New document"
-        placeholder="e.g. guidelines/coding.md"
+        placeholder="e.g. guidelines/coding"
         submitLabel="Create"
+        suffix=".md"
         onSubmit={handleCreateDocument}
         onCancel={() => setShowNewDoc(false)}
       />

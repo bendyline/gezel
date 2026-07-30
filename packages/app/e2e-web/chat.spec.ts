@@ -72,36 +72,26 @@ test.describe('chat surface', () => {
     expect(geometry.argsOverflow).toBe('ellipsis');
   });
 
-  test('composer overflow actions are visible outside the editor shell', async ({ page }) => {
-    // Reproduce the compact composer where Squisq folds formatting actions
-    // into its ellipsis menu. The menu is absolutely positioned outside the
-    // toolbar header, so the editor shell must not clip it.
+  test('composer keeps the toolbar while hiding document-formatting actions', async ({ page }) => {
     await gotoHome(page);
 
     const chat = page.getByTestId('meester-chat');
     const composer = chat.getByTestId('chat-composer');
-    await composer.evaluate((element) => {
-      element.style.width = '520px';
-      element.style.maxWidth = '520px';
-    });
-    const trigger = chat.getByRole('button', { name: 'More actions' });
-    await expect(trigger).toBeVisible();
-    await trigger.click();
+    await expect(composer.getByRole('toolbar', { name: /toolbar/i })).toBeVisible();
+    await expect(composer.getByRole('button', { name: /^Send$/ })).toBeVisible();
+    await expect(composer.getByRole('button', { name: /^Bold/ })).toBeHidden();
+    await expect(composer.getByRole('button', { name: 'More actions' })).toBeHidden();
 
-    const menu = chat.locator('.squisq-toolbar-overflow-menu');
+    const insert = composer.getByRole('button', { name: 'Insert' });
+    await insert.click();
+    const menu = page.getByRole('menu');
     await expect(menu).toBeVisible();
-    const items = menu.locator('.squisq-toolbar-overflow-item');
-    expect(await items.count()).toBeGreaterThan(0);
 
-    // DOM visibility alone does not catch ancestor overflow clipping. Verify
-    // the painted first item wins hit-testing at its center point.
-    const firstItem = items.first();
-    const hitTestable = await firstItem.evaluate((item) => {
-      const rect = item.getBoundingClientRect();
-      const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
-      return hit === item || (hit !== null && item.contains(hit));
-    });
-    expect(hitTestable).toBe(true);
+    const [triggerBox, menuBox] = await Promise.all([insert.boundingBox(), menu.boundingBox()]);
+    expect(triggerBox).not.toBeNull();
+    expect(menuBox).not.toBeNull();
+    expect(menuBox!.y + menuBox!.height).toBeLessThanOrEqual(triggerBox!.y - 3);
+    expect(menuBox!.y).toBeGreaterThanOrEqual(8);
   });
 
   test('timeline, composer, bubbles (seeded exchange)', async ({ page }) => {

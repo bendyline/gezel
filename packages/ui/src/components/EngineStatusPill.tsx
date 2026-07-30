@@ -33,6 +33,7 @@ import type {
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { streamSharedAllChatEvents } from '../shared-chat-events.js';
+import { MachineMemoryStrip } from './MachineMemoryStrip.js';
 import { type DeviceHealth, presentDeviceHealth } from './engine-pill-device-health.js';
 import {
   type TurnStatsEntry,
@@ -734,10 +735,14 @@ function EngineStatusPillForProvider({
             )}
             {ramAllocBytes !== undefined && !activeMedia && (
               <>
-                <dt>Memory</dt>
+                <dt>Model allocation</dt>
                 <dd>{formatBytes(ramAllocBytes)}</dd>
               </>
             )}
+            <dt>Memory</dt>
+            <dd className="engine-pill-memory">
+              <MachineMemoryStrip />
+            </dd>
             <dt>Status</dt>
             <dd>{statusText}</dd>
             {healthPresentation && (

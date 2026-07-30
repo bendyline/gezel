@@ -5,7 +5,7 @@ import type {
 } from '@bendyline/gezel';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
-import { Popover, Select, Tooltip } from '../primitives/index.js';
+import { DropdownChevron, Popover, Select, Tooltip } from '../primitives/index.js';
 import { statusChipPhrase } from './github/gitCopy.js';
 import { GIT_CHANGED_EVENT, useGitSync } from './github/useGitSync.js';
 
@@ -60,6 +60,29 @@ const PROJECT_STATUS_OPTIONS: ReadonlyArray<{ value: ProjectStatus; label: strin
   { value: 'readonly', label: 'Read-only' },
   { value: 'inactive', label: 'Inactive' },
 ];
+
+function EditsLockIcon({ unlocked = false }: { unlocked?: boolean }) {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" aria-hidden="true" focusable="false">
+      <rect x="3" y="7" width="10" height="7" rx="1.25" stroke="currentColor" strokeWidth="1.5" />
+      {unlocked ? (
+        <path
+          d="M5 7V5a3 3 0 0 1 5.75-1.2"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+        />
+      ) : (
+        <path
+          d="M5 7V5a3 3 0 0 1 6 0v2"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+        />
+      )}
+    </svg>
+  );
+}
 
 /**
  * Secondary project controls moved behind an ellipsis by the status bar's
@@ -131,7 +154,7 @@ function ProjectControlsOverflow({
                   }}
                 >
                   <span className="project-writes-select-icon" aria-hidden>
-                    ✎
+                    <EditsLockIcon unlocked />
                   </span>
                   <span>Turn edits on</span>
                 </button>
@@ -266,6 +289,7 @@ export function ProjectGitStatusBar({
       onOpenGitHub?.();
     },
     onConflicts: () => onOpenGitHub?.(),
+    onAuth: () => onOpenGitHub?.(),
   });
 
   const onSync = useCallback(async () => {
@@ -390,9 +414,7 @@ export function ProjectGitStatusBar({
                   ⎇
                 </span>
                 <span className="project-git-branch-name">{branch ?? '(detached)'}</span>
-                <span className="project-git-chevron" aria-hidden>
-                  ▾
-                </span>
+                <DropdownChevron className="project-git-chevron" />
               </button>
               {branchMenuOpen && (
                 <div className="project-git-branch-menu" role="menu">
@@ -668,7 +690,7 @@ export function ProjectGitStatusBar({
                 aria-label="Gezel file edits for this project"
               >
                 <span className="project-writes-select-icon" aria-hidden>
-                  {gezelWritesOn ? '✎' : '🔒'}
+                  <EditsLockIcon unlocked={gezelWritesOn} />
                 </span>
                 <Select.Value />
               </Select.Trigger>
@@ -694,7 +716,7 @@ export function ProjectGitStatusBar({
             aria-label="Gezel file edits are off for this project."
           >
             <span className="project-lockdown-chip-icon" aria-hidden>
-              🔒
+              <EditsLockIcon />
             </span>
             <span className="project-lockdown-chip-label">edits off</span>
           </span>

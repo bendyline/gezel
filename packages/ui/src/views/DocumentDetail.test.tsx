@@ -215,6 +215,16 @@ describe('DocumentDetail', () => {
       expect(screen.getByTestId('editor-shell')).toBeInTheDocument();
     });
     expect(screen.queryByTestId('ai-toolbar')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('export-toolbar')).not.toBeInTheDocument();
+  });
+
+  it('treats extensionless library documents as markdown and shows Export in the toolbar', async () => {
+    render(<DocumentDetail path="test" />);
+    await waitFor(() => {
+      expect(screen.getByTestId('editor-shell')).toBeInTheDocument();
+    });
+    expect(screen.getByTestId('ai-toolbar')).toBeInTheDocument();
+    expect(screen.getByTestId('export-toolbar')).toBeInTheDocument();
   });
 
   it('renders the promote-to-tab button by default and hides it in standalone mode', async () => {

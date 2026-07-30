@@ -1,6 +1,6 @@
 import { createLogger } from '@bendyline/gezel';
 import { ProviderQueue } from '../queue.js';
-import { SessionResumeError } from '../types.js';
+import { ExternalToolsUnsupportedError, SessionResumeError } from '../types.js';
 import type { LLMProvider, LLMSession, ModelInfo, ProviderName, SessionOpts } from '../types.js';
 import { type ClaudeBinary, resolveClaudeBinary } from './binary.js';
 import { AnthropicCliSession, type SessionDeps } from './session.js';
@@ -169,6 +169,13 @@ export class AnthropicCliProvider implements LLMProvider {
   }
 
   async createSession(opts: SessionOpts): Promise<LLMSession> {
+    // See the class docstring: the CLI's inner tool loop can't halt and
+    // hand control back, so caller-supplied tools must be refused, not
+    // silently dropped. Guarded before initialize() so the rejection
+    // doesn't depend on a resolvable binary.
+    if (opts.externalTools && opts.externalTools.length > 0) {
+      throw new ExternalToolsUnsupportedError(this.name);
+    }
     await this.initialize();
     if (!this.resolved) throw new Error('[anthropic-cli] binary not resolved');
     // ChatManager always populates `claudeCliContext` for normal session

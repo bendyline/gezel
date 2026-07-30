@@ -112,8 +112,8 @@ export interface GitStatus {
 export class MissingPatError extends Error {
   constructor() {
     super(
-      'No GitHub credentials found. Sign in with the GitHub CLI (gh auth login) ' +
-        'or install the "github" toolset in Settings → Toolsets.',
+      "No GitHub credentials found. Sign in from the project's GitHub tab, " +
+        'use the GitHub CLI, or install the "github" toolset in Settings → Toolsets.',
     );
     this.name = 'MissingPatError';
   }
@@ -693,10 +693,17 @@ export class GitManager {
       if (!(await isGitInstalled())) throw new GitNotInstalledError();
       const { baseArgs, redact } = await this.patArgs();
       await this.ensureFetchRefspec(resolved.dir);
-      const { stdout, stderr } = await runGit([...baseArgs, 'fetch', 'origin'], {
-        cwd: resolved.dir,
-        redact,
-      });
+      let result: Awaited<ReturnType<typeof runGit>>;
+      try {
+        result = await runGit([...baseArgs, 'fetch', 'origin'], {
+          cwd: resolved.dir,
+          redact,
+        });
+      } catch (err) {
+        if (this.classifyFetchError(err).state === 'auth') throw new MissingPatError();
+        throw err;
+      }
+      const { stdout, stderr } = result;
       // `git fetch` reports advanced refs on stderr; empty means
       // already-up-to-date. Stdout is usually empty either way.
       const fetched = stderr.trim().length > 0 || stdout.trim().length > 0;

@@ -94,4 +94,8 @@ export class Ds4Provider implements LLMProvider {
   get supportsExternalTools(): LLMProvider['supportsExternalTools'] {
     return this.inner.supportsExternalTools;
   }
+
+  get supportsPriorMessages(): LLMProvider['supportsPriorMessages'] {
+    return this.inner.supportsPriorMessages;
+  }
 }

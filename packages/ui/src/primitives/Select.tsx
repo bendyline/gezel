@@ -1,5 +1,6 @@
 import * as RadixSelect from '@radix-ui/react-select';
 import type { CSSProperties, ReactNode } from 'react';
+import { DropdownChevron } from './DropdownChevron.js';
 
 export const Root = RadixSelect.Root;
 export const Value = RadixSelect.Value;
@@ -7,19 +8,6 @@ export const Portal = RadixSelect.Portal;
 export const Group = RadixSelect.Group;
 export const Label = RadixSelect.Label;
 export const Separator = RadixSelect.Separator;
-
-/** The trigger's down-caret, as a true equilateral triangle.
- *  The Unicode glyph this replaces (▾ U+25BE) renders squat and
- *  baseline-offset in most UI fonts, so the caret read as lopsided next
- *  to a square-cornered trigger. Side 10, height 10·√3/2 ≈ 8.66, centred
- *  in a 12×12 box — same reasoning as the greeting band's Chevron. */
-function Caret() {
-  return (
-    <svg aria-hidden="true" width="10" height="10" viewBox="0 0 12 12" fill="currentColor">
-      <polygon points="1,1.67 11,1.67 6,10.33" />
-    </svg>
-  );
-}
 
 export function Trigger(props: RadixSelect.SelectTriggerProps) {
   const { className, children, ...rest } = props;
@@ -30,7 +18,7 @@ export function Trigger(props: RadixSelect.SelectTriggerProps) {
     >
       {children}
       <RadixSelect.Icon className="gz-select-icon" aria-hidden>
-        <Caret />
+        <DropdownChevron />
       </RadixSelect.Icon>
     </RadixSelect.Trigger>
   );

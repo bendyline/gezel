@@ -55,6 +55,7 @@ const RECENT_THRESHOLD_MS = 24 * 60 * 60 * 1000;
 const LATE_REPLY_GAP_MS = 3 * 60 * 1000;
 const SCROLL_NEAR_BOTTOM_PX = 80;
 const SCROLL_NEAR_TOP_PX = 80;
+const SCROLLBAR_IDLE_MS = 700;
 /** How long the flash ring stays on a row a navigation jumped to. */
 const FOCUS_FLASH_MS = 2000;
 /**
@@ -668,6 +669,7 @@ export function ChatTimelineView({
     >
   >(new Map());
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const scrollbarIdleTimerRef = useRef<number | null>(null);
   /**
    * "Pinned to bottom" mode: when true, any new row auto-scrolls the
    * viewport to the bottom, so the timeline acts like a terminal that
@@ -2403,6 +2405,10 @@ export function ChatTimelineView({
         cancelAnimationFrame(stickyRecomputeRafRef.current);
         stickyRecomputeRafRef.current = null;
       }
+      if (scrollbarIdleTimerRef.current !== null) {
+        window.clearTimeout(scrollbarIdleTimerRef.current);
+        scrollbarIdleTimerRef.current = null;
+      }
     };
   }, []);
 
@@ -2410,6 +2416,14 @@ export function ChatTimelineView({
     scheduleStickyRecompute();
     const el = scrollRef.current;
     if (!el) return;
+    el.classList.add('chat-timeline-scrolling');
+    if (scrollbarIdleTimerRef.current !== null) {
+      window.clearTimeout(scrollbarIdleTimerRef.current);
+    }
+    scrollbarIdleTimerRef.current = window.setTimeout(() => {
+      scrollRef.current?.classList.remove('chat-timeline-scrolling');
+      scrollbarIdleTimerRef.current = null;
+    }, SCROLLBAR_IDLE_MS);
     const distFromBottom = el.scrollHeight - (el.scrollTop + el.clientHeight);
     const nearBottom = distFromBottom <= SCROLL_NEAR_BOTTOM_PX;
     // Only flip state when it actually changes — otherwise every
@@ -2732,6 +2746,9 @@ export function ChatTimelineView({
           ? { toolCalls: m.toolCalls, projectId: m.projectId }
           : {})}
         {...(m.reasoning ? { reasoning: m.reasoning } : {})}
+        {...(m.reasoningDurationMs !== undefined
+          ? { reasoningDurationMs: m.reasoningDurationMs }
+          : {})}
         {...(m.attemptedToolCalls && m.attemptedToolCalls.length > 0
           ? { attemptedToolCalls: m.attemptedToolCalls }
           : {})}

@@ -14,6 +14,7 @@ import {
 import type { ServiceContext } from './context.js';
 import { v1Cors } from './cors.js';
 import { hostGuard } from './host-guard.js';
+import { requireOpenAiEndpointsEnabled } from './openai-endpoints-gate.js';
 import { PreviewCapabilityStore } from './preview-capability.js';
 import { aiRoutes } from './routes/ai.js';
 import { askRoutes } from './routes/asks.js';
@@ -508,6 +509,13 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   app.route('/api/timeline', timelineRoutes(ctx));
   app.route('/events/chat', chatEventsRoutes(ctx));
 
+  // Master switch for the OpenAI-compatible facade (Settings →
+  // Connected Apps). Gates inference surfaces AND new app registrations
+  // below; the rest of `/v1/apps/*` (list/approve/revoke) stays
+  // reachable so the panel works while the facade is off.
+  const openaiEndpointsGate = requireOpenAiEndpointsEnabled(ctx);
+  app.use('/v1/apps/register', openaiEndpointsGate);
+
   // `/v1/apps/*` is the public registration + consent surface. Routes
   // inside declare their own auth (some unauth, some root-only, some
   // per-app); see `routes/v1-apps.ts` for the per-endpoint matrix.
@@ -525,6 +533,7 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   // openai scope match `/v1/*`. CORS is also enabled so browser apps
   // targeting Ollama can swap baseUrl without origin grief.
   app.use('/ollama/v1/*', v1Cors());
+  app.use('/ollama/v1/*', openaiEndpointsGate);
   app.use('/ollama/v1/*', bearerAuth(ctx.tokenStore));
   app.use('/ollama/v1/*', requireScope('openai'));
   app.route('/ollama/v1', ollamaCompatRoutes(ctx));
@@ -535,6 +544,7 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   // `/v1/apps/register`; the desktop/CLI discovery credential explicitly
   // carries `openai`. Session/MCP tokens do not reach this facade, while the
   // process-local root remains the deliberate wildcard.
+  app.use('/v1/chat/*', openaiEndpointsGate);
   app.use('/v1/chat/*', bearerAuth(ctx.tokenStore));
   app.use('/v1/chat/*', requireScope('openai'));
   app.route('/v1/chat', v1ChatRoutes(ctx));
@@ -546,20 +556,26 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   app.use('/v1/remote/*', requireScope('remote-inference'));
   app.route('/v1/remote', v1RemoteRoutes(ctx));
 
+  app.use('/v1/embeddings', openaiEndpointsGate);
   app.use('/v1/embeddings', bearerAuth(ctx.tokenStore));
   app.use('/v1/embeddings', requireScope('openai'));
+  app.use('/v1/embeddings/*', openaiEndpointsGate);
   app.use('/v1/embeddings/*', bearerAuth(ctx.tokenStore));
   app.use('/v1/embeddings/*', requireScope('openai'));
   app.route('/v1/embeddings', v1EmbeddingsRoutes(ctx));
 
+  app.use('/v1/gezels', openaiEndpointsGate);
   app.use('/v1/gezels', bearerAuth(ctx.tokenStore));
   app.use('/v1/gezels', requireScope('openai'));
+  app.use('/v1/gezels/*', openaiEndpointsGate);
   app.use('/v1/gezels/*', bearerAuth(ctx.tokenStore));
   app.use('/v1/gezels/*', requireScope('openai'));
   app.route('/v1/gezels', v1GezelsRoutes(ctx));
 
+  app.use('/v1/models', openaiEndpointsGate);
   app.use('/v1/models', bearerAuth(ctx.tokenStore));
   app.use('/v1/models', requireScope('openai'));
+  app.use('/v1/models/*', openaiEndpointsGate);
   app.use('/v1/models/*', bearerAuth(ctx.tokenStore));
   app.use('/v1/models/*', requireScope('openai'));
   // `/v1/models/ensure*` MUST mount BEFORE the bare `/v1/models` route

@@ -39,6 +39,50 @@ describe('discoverNpmScripts', () => {
     expect(test.description).toBe('vitest run');
   });
 
+  it('uses the packageManager declaration for pnpm projects', async () => {
+    await writeFile(
+      join(root, 'package.json'),
+      JSON.stringify({
+        name: 'demo',
+        packageManager: 'pnpm@11.15.1+sha512.deadbeef',
+        scripts: { build: 'tsup' },
+      }),
+    );
+    // A stale npm lockfile must not override the explicit declaration.
+    await writeFile(join(root, 'package-lock.json'), '{}');
+
+    const out = await discoverNpmScripts(root);
+    expect(out.find((c) => c.name === 'build')?.run).toBe('pnpm run build');
+  });
+
+  it('prefers pnpm when its workspace infrastructure predominates', async () => {
+    await writeFile(
+      join(root, 'package.json'),
+      JSON.stringify({ name: 'demo', scripts: { test: 'vitest run' } }),
+    );
+    await writeFile(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - packages/*\n');
+    await writeFile(join(root, 'pnpm-lock.yaml'), 'lockfileVersion: "9.0"\n');
+    // Repositories sometimes retain a stale package-lock during migration.
+    await writeFile(join(root, 'package-lock.json'), '{}');
+
+    const out = await discoverNpmScripts(root);
+    expect(out.find((c) => c.name === 'test')?.run).toBe('pnpm run test');
+  });
+
+  it('inherits package-manager infrastructure from a monorepo parent', async () => {
+    const packageDir = join(root, 'packages', 'ui');
+    await mkdir(packageDir, { recursive: true });
+    await writeFile(
+      join(packageDir, 'package.json'),
+      JSON.stringify({ name: 'ui', scripts: { build: 'vite build' } }),
+    );
+    await writeFile(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - packages/*\n');
+    await writeFile(join(root, 'pnpm-lock.yaml'), 'lockfileVersion: "9.0"\n');
+
+    const out = await discoverNpmScripts(packageDir);
+    expect(out.find((c) => c.name === 'build')?.run).toBe('pnpm run build');
+  });
+
   it('returns empty when no scripts block', async () => {
     await writeFile(join(root, 'package.json'), JSON.stringify({ name: 'empty' }));
     expect(await discoverNpmScripts(root)).toEqual([]);

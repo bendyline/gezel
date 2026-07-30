@@ -1,0 +1,37 @@
+import { fireEvent, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { describe, expect, it, vi } from 'vitest';
+import { FileTree } from './FileTree.js';
+
+const NOTE = { path: 'notes.md', name: 'notes.md', isDirectory: false };
+
+describe('FileTree row actions', () => {
+  it('offers Rename and Delete from the three-dots menu', async () => {
+    const user = userEvent.setup();
+    const onSelect = vi.fn();
+    const onRename = vi.fn();
+    const onDelete = vi.fn();
+    render(
+      <FileTree entries={[NOTE]} onSelect={onSelect} onRename={onRename} onDelete={onDelete} />,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Actions for notes.md' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Rename…' }));
+
+    expect(onRename).toHaveBeenCalledWith(NOTE);
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it('offers the same actions from the row context menu', async () => {
+    const user = userEvent.setup();
+    const onDelete = vi.fn();
+    render(<FileTree entries={[NOTE]} onSelect={vi.fn()} onRename={vi.fn()} onDelete={onDelete} />);
+
+    const row = screen.getByRole('button', { name: 'notes.md' }).closest('.tree-row');
+    expect(row).not.toBeNull();
+    fireEvent.contextMenu(row!);
+    await user.click(await screen.findByRole('menuitem', { name: 'Delete…' }));
+
+    expect(onDelete).toHaveBeenCalledWith(NOTE);
+  });
+});

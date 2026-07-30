@@ -240,6 +240,12 @@ export interface MessageBubbleProps {
    */
   reasoning?: string;
   /**
+   * Observed span of the provider's streamed reasoning chunks. Omitted
+   * when the provider only exposes reasoning after the turn, since total
+   * response latency would incorrectly include queueing and tool work.
+   */
+  reasoningDurationMs?: number;
+  /**
    * Tool-call bodies the salvage layer couldn't parse on this turn.
    * When the visible content is empty AND this is non-empty, the
    * bubble derives a "what the model was trying to do" summary from
@@ -385,6 +391,7 @@ export function MessageBubble({
   onTaskReference,
   toolCalls,
   reasoning,
+  reasoningDurationMs,
   attemptedToolCalls,
   projectId,
   intents,
@@ -592,7 +599,7 @@ export function MessageBubble({
         <ToolHistoryExpando tools={toolCalls} projectId={projectId} />
       )}
       {!isUser && reasoning && reasoning.trim().length > 0 && (
-        <ReasoningExpando reasoning={reasoning} />
+        <ReasoningExpando reasoning={reasoning} durationMs={reasoningDurationMs} />
       )}
       {!isUser && attemptedToolCalls && attemptedToolCalls.length > 0 && (
         <AttemptedToolCallsExpando attempts={attemptedToolCalls} />
@@ -2649,13 +2656,33 @@ export function ToolHistoryExpando({
  * (half-quoted code, dangling lists, partial fences from a turn that
  * got cut short) and we don't want a rendering pass to swallow it.
  */
-function ReasoningExpando({ reasoning }: { reasoning: string }) {
+export function countReasoningWords(reasoning: string): number {
+  const trimmed = reasoning.trim();
+  return trimmed ? trimmed.split(/\s+/u).length : 0;
+}
+
+function ReasoningExpando({
+  reasoning,
+  durationMs,
+}: {
+  reasoning: string;
+  durationMs?: number;
+}) {
   const trimmed = reasoning.trim();
   if (!trimmed) return null;
+  const wordCount = countReasoningWords(trimmed);
+  const duration =
+    durationMs !== undefined && Number.isFinite(durationMs) && durationMs > 0
+      ? formatDurationShort(Math.round(durationMs))
+      : null;
   return (
     <details className="msg-reasoning">
       <summary>
         <span className="msg-reasoning-label">Thinking</span>
+        <span className="msg-reasoning-meta">
+          · {wordCount} {wordCount === 1 ? 'word' : 'words'}
+          {duration ? ` · ${duration}` : ''}
+        </span>
       </summary>
       <pre className="msg-reasoning-body">{trimmed}</pre>
     </details>

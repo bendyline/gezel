@@ -59,7 +59,12 @@ describe('LlamaCppSettings', () => {
 
     const policy = await screen.findByRole('group', { name: 'Machine health mode' });
     expect(screen.getByRole('heading', { name: 'Machine health' })).toBeInTheDocument();
-    expect(screen.getByLabelText('Manage temperature')).toHaveValue(80);
+    const temperature = screen.getByRole('slider', { name: 'Manage temperature' });
+    expect(temperature).toHaveValue('80');
+    expect(temperature).toHaveAttribute('min', '40');
+    expect(temperature).toHaveAttribute('max', '95');
+    expect(temperature).toHaveAttribute('aria-valuetext', '80 degrees Celsius');
+    expect(screen.getByText(/105°C emergency cutoff/)).toBeInTheDocument();
 
     await user.click(within(policy).getByRole('button', { name: /Manage/ }));
 
@@ -84,8 +89,10 @@ describe('LlamaCppSettings', () => {
       />,
     );
 
-    const input = await screen.findByLabelText('Manage temperature');
+    const input = await screen.findByRole('slider', { name: 'Manage temperature' });
     fireEvent.change(input, { target: { value: '90' } });
+    expect(input).toHaveAttribute('aria-valuetext', '90 degrees Celsius');
+    expect(screen.getByLabelText('Manage temperature: 90 degrees Celsius')).toBeInTheDocument();
     fireEvent.blur(input);
 
     await waitFor(() => {

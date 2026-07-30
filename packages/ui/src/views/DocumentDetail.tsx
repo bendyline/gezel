@@ -15,7 +15,11 @@ import { useSerializedAutosave } from '../hooks/useSerializedAutosave.js';
 import { useEffectiveTheme } from '../theme.js';
 
 function isMarkdown(name: string): boolean {
-  return /\.(md|markdown|mdx)$/i.test(name);
+  const basename = name.slice(name.lastIndexOf('/') + 1);
+  // The Documents UI allows friendly names without requiring an extension.
+  // Those entries still open in the Markdown editor and should receive the
+  // same editor features as an explicit .md file.
+  return !basename.includes('.') || /\.(md|markdown|mdx)$/i.test(basename);
 }
 
 interface DocumentDetailProps {

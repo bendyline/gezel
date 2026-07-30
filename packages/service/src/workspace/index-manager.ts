@@ -60,11 +60,10 @@ import { discoverWorkspaceSkills } from './skill-scanner.js';
 
 const log = createLogger('index');
 
-// Bumped from 1 to 2 when oclif shape extraction landed (the on-disk
-// shape gained a sibling `shapes.json` file + `shapeCount` field on
-// meta). Pre-bump indexes parse fine but trigger a re-scan so the
-// shape data lands.
-const INDEX_VERSION = 3;
+// Bumped whenever command discovery semantics change. Version 4 refreshes
+// package-script commands so pnpm workspaces no longer keep stale
+// `npm run …` launch rows from older indexes.
+const INDEX_VERSION = 4;
 
 const STARTUP_DELAY_MS = 8_000;
 const TICK_INTERVAL_MS = 60_000;

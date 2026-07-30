@@ -17,6 +17,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { FileMap, type MapRendererKind, defaultRenderer } from '../components/FileMap/FileMap.js';
 import { townStyleForBlock, townStyleLabel } from '../components/FileMap/iso/town-style.js';
+import { DropdownChevron } from '../primitives/index.js';
 import { useEffectiveTheme } from '../theme.js';
 
 const log = createLogger('filemap');
@@ -553,7 +554,8 @@ export function FileMapView({ projectId }: { projectId: string }) {
                           aria-expanded={connectedOpen}
                           onClick={() => setConnectedOpen((o) => !o)}
                         >
-                          Connected ({connected.length}) ▾
+                          <span>Connected ({connected.length})</span>
+                          <DropdownChevron />
                         </button>
                       )}
                       <button

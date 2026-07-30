@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { ModelNotInstalledError } from '../../providers/types.js';
 import type { ProviderName, TurnUsage } from '../../providers/types.js';
 import type { ServiceContext } from '../context.js';
-import { resolveModelTarget } from '../openai-compat/translate.js';
+import { flattenTranscriptIntoPrompt, resolveModelTarget } from '../openai-compat/translate.js';
 
 /**
  * `/ollama/v1/*` — minimal Ollama-compatible facade.
@@ -144,7 +144,8 @@ export function ollamaCompatRoutes(ctx: ServiceContext): Hono {
     if (!last.content.trim()) {
       return c.json({ error: 'last message content is empty' }, 400);
     }
-    const priorMessages = conversation.slice(0, -1);
+    let prompt = last.content;
+    let priorMessages = conversation.slice(0, -1);
 
     // Model-aware resolve — local providers route through the engine
     // pool so any installed local model can be named per request.
@@ -157,6 +158,19 @@ export function ollamaCompatRoutes(ctx: ServiceContext): Hono {
         return c.json({ error: err.message }, 404);
       }
       throw err;
+    }
+    // Same stateless-history guard as /v1/chat/completions: providers
+    // that ignore SessionOpts.priorMessages (Copilot, CLI providers)
+    // get the transcript folded into the prompt instead of losing it.
+    if (provider.supportsPriorMessages !== true && priorMessages.length > 0) {
+      const flattened = flattenTranscriptIntoPrompt({
+        systemMessage: '',
+        prompt,
+        priorMessages,
+        attachments: [],
+      });
+      prompt = flattened.prompt;
+      priorMessages = [];
     }
     const session = await provider.createSession({
       systemMessage: systems.join('\n\n'),
@@ -172,7 +186,7 @@ export function ollamaCompatRoutes(ctx: ServiceContext): Hono {
         usageRef.value = u;
       });
       try {
-        const content = await session.sendAndWait(last.content);
+        const content = await session.sendAndWait(prompt);
         return c.json({
           model: parsed.model,
           created_at: new Date().toISOString(),
@@ -215,7 +229,7 @@ export function ollamaCompatRoutes(ctx: ServiceContext): Hono {
       });
 
       try {
-        await session.sendAndWait(last.content);
+        await session.sendAndWait(prompt);
         const tail: OllamaChatStreamChunk = {
           model: parsed.model,
           created_at: new Date().toISOString(),

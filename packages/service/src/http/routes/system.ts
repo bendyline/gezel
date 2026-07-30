@@ -10,6 +10,7 @@ import {
   type GitHubRepoPreviewResponse,
   type GitHubRepoSummary,
   type GitHubReposResponse,
+  MachineMemoryUsageSchema,
   createLogger,
 } from '@bendyline/gezel';
 import { Octokit } from '@octokit/rest';
@@ -30,7 +31,11 @@ import {
 } from '../../github/repo-preview.js';
 import { pnpmSpawnTarget, resolvePnpmCommand } from '../../packages/pnpm.js';
 import { resolveSystemLibraryPath } from '../../system-toolsets/resolve.js';
-import { detectMemoryProfile } from '../../system/memory.js';
+import {
+  detectMemoryProfile,
+  detectMemoryProfileCached,
+  sampleMachineMemoryUsage,
+} from '../../system/memory.js';
 import type { ServiceContext } from '../context.js';
 
 const log = createLogger('http');
@@ -48,6 +53,40 @@ export function systemRoutes(ctx: ServiceContext): Hono {
     const idle = Number(body.idleSeconds);
     if (Number.isFinite(idle)) ctx.systemIdle.report(idle);
     return c.json({ ok: true });
+  });
+
+  /**
+   * Live memory pool behind local inference. This endpoint is intentionally
+   * cheap enough to poll while the engine dropdown is open: accelerator
+   * capacity is cached, device telemetry is coalesced by DeviceHealthGate,
+   * and main-memory use comes from node:os.
+   */
+  app.get('/memory/usage', async (c) => {
+    const [profile, config] = await Promise.all([
+      detectMemoryProfileCached(),
+      ctx.store.readConfig(),
+    ]);
+    const configuredBackend =
+      config.llamaCppBackendOverride && config.llamaCppBackendOverride !== 'auto'
+        ? config.llamaCppBackendOverride
+        : (process.env.GEZEL_LLAMA_SERVER_BACKEND ?? process.env.GEZEL_LLAMA_DETECTED_BACKEND);
+    const forceMainMemory = configuredBackend === 'cpu';
+    const unifiedMemory =
+      profile.source === 'darwin-unified' ||
+      (profile.gpuVramBytes !== null && profile.gpuVramBytes >= profile.totalRamBytes * 0.75);
+    // Main/UMA memory comes directly from node:os. Avoid spawning any SMI
+    // adapter on Mac and CPU-only hosts, where it cannot improve this sample.
+    const deviceHealth =
+      forceMainMemory || profile.source === 'system-ram-fallback' || unifiedMemory
+        ? undefined
+        : await ctx.gpuArbiter.getDeviceHealthStatus(1_000);
+    const snapshot = sampleMachineMemoryUsage({
+      profile,
+      ...(deviceHealth ? { deviceHealth } : {}),
+      engineCommittedBytes: ctx.chat.peekEngineStatus()?.committedBytes ?? 0,
+      forceMainMemory,
+    });
+    return c.json(MachineMemoryUsageSchema.parse(snapshot));
   });
 
   /**

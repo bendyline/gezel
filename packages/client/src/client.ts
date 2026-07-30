@@ -180,6 +180,7 @@ import type {
   ListTasksResponse,
   ListTerminalThreadsResponse,
   ListTimelineResponse,
+  MachineMemoryUsage,
   MapAttackSurfaceResponse,
   MapRepoRequest,
   MapRepoResponse,
@@ -2324,6 +2325,10 @@ export class GezelClient {
     gpuVendor?: 'amd' | 'nvidia' | 'intel';
   }> {
     return this.request('GET', '/api/system/memory');
+  }
+
+  getMachineMemoryUsage(): Promise<MachineMemoryUsage> {
+    return this.request('GET', '/api/system/memory/usage');
   }
 
   deleteOllamaModel(name: string): Promise<{ ok: true }> {
@@ -5131,6 +5136,13 @@ export class GezelClient {
 
   createDocumentFolder(folderPath: string): Promise<{ ok: true; path: string }> {
     return this.request('POST', '/api/documents/mkdir', { path: folderPath });
+  }
+
+  renameDocument(
+    fromPath: string,
+    toPath: string,
+  ): Promise<{ ok: true; fromPath: string; toPath: string }> {
+    return this.request('POST', '/api/documents/rename', { fromPath, toPath });
   }
 
   // ── tasks (per-project, stable numeric IDs) ──

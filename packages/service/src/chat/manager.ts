@@ -928,6 +928,18 @@ export class ChatManager {
    */
   private readonly currentTurnContentText = new Map<string, string>();
   /**
+   * First/last arrival times for private-reasoning chunks in the current
+   * iteration. Their difference is an observed stream span rather than
+   * an estimate based on total turn latency, so queueing, tool execution,
+   * and visible-answer generation are never mislabeled as thinking time.
+   * A single chunk intentionally produces no duration: there is no span
+   * to measure.
+   */
+  private readonly currentTurnReasoningTiming = new Map<
+    string,
+    { firstDeltaAt: number; lastDeltaAt: number }
+  >();
+  /**
    * Session ids already warned that their installed model weights are
    * stale relative to the catalog (downloaded at an older catalog
    * version than the one supplying this session's tuning/behaviors).
@@ -4955,6 +4967,7 @@ export class ChatManager {
     this.currentTurnIntents.set(sessionId, []);
     this.currentTurnContentChars.set(sessionId, 0);
     this.currentTurnContentText.set(sessionId, '');
+    this.currentTurnReasoningTiming.delete(sessionId);
     // Reset the warning buffer too — emitWarning calls during this
     // turn (mid-loop compaction notices, fabricated-tool-use
     // detections) get persisted onto the assistant message via this
@@ -5075,6 +5088,16 @@ export class ChatManager {
         // persisted separately on `ChatMessage.reasoning`. `noteHeartbeat`
         // bumps the liveness clock so a long think doesn't read as an idle
         // stall, without counting as streamed visible content.
+        const observedAt = Date.now();
+        const timing = this.currentTurnReasoningTiming.get(sessionId);
+        if (timing) {
+          timing.lastDeltaAt = observedAt;
+        } else {
+          this.currentTurnReasoningTiming.set(sessionId, {
+            firstDeltaAt: observedAt,
+            lastDeltaAt: observedAt,
+          });
+        }
         this.telemetry.noteHeartbeat(sessionId);
         this.events.publish(scope, { type: 'reasoning_delta', content: chunk });
       });
@@ -5673,7 +5696,16 @@ export class ChatManager {
         // dropping it. Providers that hide reasoning server-side leave
         // the getter undefined or returning '' — skip silently then.
         const reasoning = liveSession.getLastTurnReasoning?.();
-        if (reasoning && reasoning.length > 0) assistantMessage.reasoning = reasoning;
+        if (reasoning && reasoning.length > 0) {
+          assistantMessage.reasoning = reasoning;
+          const timing = this.currentTurnReasoningTiming.get(sessionId);
+          if (timing && timing.lastDeltaAt > timing.firstDeltaAt) {
+            assistantMessage.reasoningDurationMs = timing.lastDeltaAt - timing.firstDeltaAt;
+          }
+        }
+        // A continuation is a new assistant iteration with its own
+        // reasoning trace, so do not let the prior span bleed into it.
+        this.currentTurnReasoningTiming.delete(sessionId);
         // Capture malformed-tool-call bodies the salvage layer gave up
         // on after exhausting its retry budget. Without this the
         // diagnostic disappears into provider logs — a debug bundle
@@ -6631,6 +6663,7 @@ export class ChatManager {
         // real work leaves a faithful trace instead of a blank message.
         const salvagedContent = this.currentTurnContentText.get(sessionId) ?? '';
         const salvagedReasoning = this.states.get(sessionId)?.session?.getLastTurnReasoning?.();
+        const reasoningTiming = this.currentTurnReasoningTiming.get(sessionId);
         if (!intentionallyCancelled) {
           state.record.lastTurnError = userMessage.slice(0, 500);
         }
@@ -6641,7 +6674,15 @@ export class ChatManager {
           synthetic: 'turn-aborted',
           warnings: [message, ...drainedWarnings],
           ...(salvagedReasoning && salvagedReasoning.length > 0
-            ? { reasoning: salvagedReasoning }
+            ? {
+                reasoning: salvagedReasoning,
+                ...(reasoningTiming && reasoningTiming.lastDeltaAt > reasoningTiming.firstDeltaAt
+                  ? {
+                      reasoningDurationMs:
+                        reasoningTiming.lastDeltaAt - reasoningTiming.firstDeltaAt,
+                    }
+                  : {}),
+              }
             : {}),
           ...(drainedTools.length > 0 ? { toolCalls: drainedTools } : {}),
         };
@@ -6743,6 +6784,7 @@ export class ChatManager {
       this.currentTurnWarnings.delete(sessionId);
       this.currentTurnContentChars.delete(sessionId);
       this.currentTurnContentText.delete(sessionId);
+      this.currentTurnReasoningTiming.delete(sessionId);
       this.telemetry.noteTurnEnd(sessionId);
     }
   }
@@ -9047,6 +9089,16 @@ export class ChatManager {
     const router = await this.getEngineRouter();
     if (!router) return null;
     return router.snapshot();
+  }
+
+  /**
+   * Read the already-live local-engine pool without constructing the router.
+   * Hot status endpoints use this path so opening a telemetry popover never
+   * initializes local inference as a side effect.
+   */
+  peekEngineStatus(): import('../providers/native/provider-pool.js').PoolSnapshot | null {
+    const router = this.engineRouter ?? this.engineRouterCache;
+    return router?.snapshot() ?? null;
   }
 
   /**

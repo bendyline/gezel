@@ -21,7 +21,7 @@ export const GIT_COPY = {
   saveToast: 'Saved.',
   syncButtonTitle: 'Get new changes from GitHub and send yours',
   syncUpToDate: "You're already up to date.",
-  syncAuth: 'GitHub needs you to sign in again. Open Settings → Toolsets to reconnect.',
+  syncAuth: 'GitHub needs you to sign in again. Open the GitHub tab to reconnect.',
   syncOffline: "Couldn't reach GitHub — check your connection and try again.",
   syncGenericError: 'Sync didn’t go through. Try again in a moment.',
   needsSaveTitle: 'Save your changes first',

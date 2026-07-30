@@ -10,6 +10,9 @@
  */
 
 import { execFile as nodeExecFile } from 'node:child_process';
+import { DEVICE_HARD_TEMPERATURE_C } from '../device-safety.js';
+
+export { DEVICE_HARD_TEMPERATURE_C } from '../device-safety.js';
 
 export type DeviceSafetyMode = 'off' | 'observe' | 'guard';
 export type DeviceTelemetryFailurePolicy = 'allow' | 'block';
@@ -47,9 +50,6 @@ export const DEFAULT_DEVICE_SAFETY_POLICY: ResolvedDeviceSafetyPolicy = {
   consecutiveHealthySamples: 3,
   onTelemetryFailure: 'allow',
 };
-
-/** New GPU work is never admitted above this temperature unless safety is explicitly off. */
-export const DEVICE_HARD_TEMPERATURE_C = 95;
 
 export interface DeviceHealthReading {
   vendor: DeviceVendor;
@@ -673,21 +673,21 @@ export class DeviceHealthGate {
    * processes, while admission can still force a fresh sample after it ages.
    */
   async status(maxAgeMs = 5_000): Promise<DeviceHealthStatusSnapshot> {
-    if (this.policy.mode === 'off') {
-      return {
-        state: 'off',
-        mode: 'off',
-        sampledAt: this.lastSample?.sampledAt ?? null,
-        sources: this.lastSample?.sources ?? [],
-        readings: this.lastSample?.readings ?? [],
-        reasons: [],
-        summary: 'Device safety is off',
-      };
-    }
     const sample =
       this.lastSample && this.now() - this.lastSampleAt <= maxAgeMs
         ? this.lastSample
         : await this.sampleDevice();
+    if (this.policy.mode === 'off') {
+      return {
+        state: 'off',
+        mode: 'off',
+        sampledAt: sample.sampledAt,
+        sources: [...sample.sources],
+        readings: sample.readings.map((reading) => ({ ...reading })),
+        reasons: [],
+        summary: 'Device safety is off',
+      };
+    }
     const decision = evaluateDeviceHealth(sample, this.policy, this.cooling);
     const state: DeviceHealthState = !decision.telemetryAvailable
       ? 'unavailable'

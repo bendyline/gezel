@@ -1,5 +1,6 @@
-import { mkdir, rm, stat } from 'node:fs/promises';
-import { dirname } from 'node:path';
+import type { Stats } from 'node:fs';
+import { mkdir, rename, rm, stat } from 'node:fs/promises';
+import { dirname, isAbsolute, relative } from 'node:path';
 import type { ProjectFileEntry } from '@bendyline/gezel';
 import { type ExternalFolders, gezelPaths } from '@bendyline/gezel/paths';
 import type { HistoryManager } from '../history/manager.js';
@@ -12,7 +13,7 @@ export interface DocumentsStoreOptions {
   external?: ExternalFolders;
   history?: HistoryManager;
   /**
-   * Notified on every write/delete — including overwrites of an existing
+   * Notified on every write/delete/rename — including overwrites of an existing
    * document, which deliberately emit NO history event (the `!existed`
    * gate below). The global search index relies on this hook to see edits.
    */
@@ -109,10 +110,71 @@ export class DocumentsStore {
     await mkdir(full, { recursive: true });
   }
 
+  async renameDocument(fromPath: string, toPath: string): Promise<void> {
+    const fromFull = this.resolveWritePath(fromPath);
+    const toFull = this.resolveWritePath(toPath);
+    if (fromFull === this.documentsDir() || toFull === this.documentsDir()) {
+      throw new Error('the documents root cannot be renamed');
+    }
+    if (fromFull === toFull) return;
+
+    let sourceStat: Stats;
+    try {
+      sourceStat = await stat(fromFull);
+    } catch {
+      throw new DocumentPathNotFoundError(fromPath);
+    }
+    if (await pathExists(toFull)) throw new DocumentPathExistsError(toPath);
+
+    if (sourceStat.isDirectory()) {
+      const relativeTarget = relative(fromFull, toFull);
+      if (relativeTarget && !relativeTarget.startsWith('..') && !isAbsolute(relativeTarget)) {
+        throw new Error('a folder cannot be moved inside itself');
+      }
+    }
+
+    const descendantFiles = sourceStat.isDirectory()
+      ? (await walkDir(fromFull)).filter((entry) => !entry.isDirectory).map((entry) => entry.path)
+      : [];
+
+    await mkdir(dirname(toFull), { recursive: true });
+    await rename(fromFull, toFull);
+
+    if (sourceStat.isDirectory()) {
+      for (const childPath of descendantFiles) {
+        this.notifyChange('delete', `${fromPath}/${childPath}`);
+        this.notifyChange('write', `${toPath}/${childPath}`);
+      }
+    } else {
+      this.notifyChange('delete', fromPath);
+      this.notifyChange('write', toPath);
+    }
+
+    await this.history?.log({
+      kind: 'document.renamed',
+      summary: `Renamed ${fromPath} → ${toPath}`,
+      details: { fromPath, toPath, isDirectory: sourceStat.isDirectory() },
+    });
+  }
+
   private resolveWritePath(filePath: string): string {
     const full = safeJoin(this.documentsDir(), filePath);
     if (!full) throw new Error('path traversal blocked');
     return full;
+  }
+}
+
+export class DocumentPathExistsError extends Error {
+  constructor(path: string) {
+    super(`A document or folder already exists at ${path}`);
+    this.name = 'DocumentPathExistsError';
+  }
+}
+
+export class DocumentPathNotFoundError extends Error {
+  constructor(path: string) {
+    super(`No document or folder exists at ${path}`);
+    this.name = 'DocumentPathNotFoundError';
   }
 }
 

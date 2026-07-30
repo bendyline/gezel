@@ -13,7 +13,7 @@ import { CatalogArtwork } from '../../components/CatalogArtwork.js';
 import { GezelJsonEditor } from '../../components/GezelJsonEditor.js';
 import { GitHubSignInChip } from '../../components/GithubSignInChip.js';
 import { connectMailboxOAuth } from '../../components/mail-link.js';
-import { Dialog } from '../../primitives/index.js';
+import { Dialog, DropdownChevron } from '../../primitives/index.js';
 import { NewProjectPaneHero, type PaneSelection } from './NewProjectDetailPane.js';
 import {
   PROJECT_CATEGORIES,
@@ -1118,23 +1118,12 @@ function GitHubRepoCombobox({
               inputRef.current?.focus();
             }}
           >
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
+            <DropdownChevron
               style={{
                 transform: open ? 'rotate(180deg)' : 'none',
                 transition: 'transform 0.12s',
               }}
-            >
-              <polyline points="6 9 12 15 18 9" />
-            </svg>
+            />
           </button>
         )}
       </div>

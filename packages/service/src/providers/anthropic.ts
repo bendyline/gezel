@@ -88,6 +88,7 @@ export class AnthropicProvider implements LLMProvider {
   readonly name = 'anthropic' as const;
   readonly queue: ProviderQueue;
   readonly supportsExternalTools = true;
+  readonly supportsPriorMessages = true;
   private anthropic: Anthropic | null = null;
   private readonly apiKey: string;
   private readonly defaultModel: string;

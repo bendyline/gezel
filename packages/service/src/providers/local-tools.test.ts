@@ -34,6 +34,29 @@ describe('Local providers advertise supportsExternalTools = true', () => {
   });
 });
 
+/**
+ * Same gate for `supportsPriorMessages`: dropping the flag would make
+ * the stateless `/v1` + Ollama-facade routes flatten history into the
+ * prompt for engines that honor real turn arrays — degraded quality
+ * with no error anywhere.
+ */
+describe('Local providers advertise supportsPriorMessages = true', () => {
+  it('LlamaCppProvider', () => {
+    const provider = new LlamaCppProvider({ baseUrl: 'http://127.0.0.1:0' });
+    expect(provider.supportsPriorMessages).toBe(true);
+  });
+
+  it('MlxProvider', () => {
+    const provider = new MlxProvider({ baseUrl: 'http://127.0.0.1:0' });
+    expect(provider.supportsPriorMessages).toBe(true);
+  });
+
+  it('OllamaProvider', () => {
+    const provider = new OllamaProvider({});
+    expect(provider.supportsPriorMessages).toBe(true);
+  });
+});
+
 describe('MlxProvider engine request lock', () => {
   it('serializes backend requests even when callers enter concurrently', async () => {
     const provider = new MlxProvider({ baseUrl: 'http://127.0.0.1:0' });

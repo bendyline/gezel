@@ -207,14 +207,14 @@ describe('evaluateDeviceHealth', () => {
     expect(evaluateDeviceHealth(sample([]), strict, false).admissible).toBe(false);
   });
 
-  it('marks temperatures above 95C as a hard block', () => {
+  it('marks temperatures above 105C as a hard block', () => {
     const observe = resolveDeviceSafetyPolicy({ mode: 'observe' }, {});
     const decision = evaluateDeviceHealth(
-      sample([{ vendor: 'nvidia', deviceId: '0', temperatureC: 96 }]),
+      sample([{ vendor: 'nvidia', deviceId: '0', temperatureC: 106 }]),
       observe,
     );
     expect(decision.hardBlocked).toBe(true);
-    expect(decision.reasons).toContainEqual(expect.stringContaining('hard 95C safety limit'));
+    expect(decision.reasons).toContainEqual(expect.stringContaining('hard 105C safety limit'));
   });
 });
 
@@ -264,10 +264,10 @@ describe('DeviceHealthGate', () => {
     expect(sleeps).toBe(0);
   });
 
-  it('observe mode still gates new GPU work above 95C', async () => {
+  it('observe mode still gates new GPU work above 105C', async () => {
     const samples = [
-      sample([{ vendor: 'amd', deviceId: '0', temperatureC: 96 }]),
-      sample([{ vendor: 'amd', deviceId: '0', temperatureC: 95 }]),
+      sample([{ vendor: 'amd', deviceId: '0', temperatureC: 106 }]),
+      sample([{ vendor: 'amd', deviceId: '0', temperatureC: 105 }]),
     ];
     let now = 0;
     let calls = 0;
@@ -309,6 +309,33 @@ describe('DeviceHealthGate', () => {
       readings: [{ temperatureC: 82, thermalMarginC: 5 }],
     });
     await gate.status();
+    expect(calls).toBe(1);
+  });
+
+  it('keeps read-only telemetry available when the admission policy is off', async () => {
+    let calls = 0;
+    const gate = new DeviceHealthGate({
+      probe: {
+        sample: async () => {
+          calls += 1;
+          return sample([
+            {
+              vendor: 'nvidia',
+              deviceId: '0',
+              memoryUsedMb: 4096,
+              memoryTotalMb: 16384,
+            },
+          ]);
+        },
+      },
+      policy: { mode: 'off' },
+    });
+
+    await expect(gate.status()).resolves.toMatchObject({
+      state: 'off',
+      mode: 'off',
+      readings: [{ memoryUsedMb: 4096, memoryTotalMb: 16384 }],
+    });
     expect(calls).toBe(1);
   });
 

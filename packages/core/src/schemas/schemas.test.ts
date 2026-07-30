@@ -145,6 +145,25 @@ describe('ChatMessageSchema', () => {
       ChatMessageSchema.parse({ role: 'system', content: 'x', at: '2026-01-01' }),
     ).toThrow();
   });
+
+  it('accepts a non-negative observed reasoning duration', () => {
+    const parsed = ChatMessageSchema.parse({
+      role: 'assistant',
+      content: 'hello',
+      at: '2026-01-01',
+      reasoning: 'I should answer clearly.',
+      reasoningDurationMs: 1_250,
+    });
+    expect(parsed.reasoningDurationMs).toBe(1_250);
+    expect(() =>
+      ChatMessageSchema.parse({
+        role: 'assistant',
+        content: 'hello',
+        at: '2026-01-01',
+        reasoningDurationMs: -1,
+      }),
+    ).toThrow();
+  });
 });
 
 describe('ChatEventSchema', () => {

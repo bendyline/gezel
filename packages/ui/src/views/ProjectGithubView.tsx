@@ -1,7 +1,9 @@
-import type { GitStatusResponse, ProjectDetail } from '@bendyline/gezel';
+import type { GitHubIdentity, GitStatusResponse, ProjectDetail } from '@bendyline/gezel';
+import { GezelApiError } from '@bendyline/gezel-client';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { ConfirmDialog } from '../components/ConfirmDialog.js';
+import { GitHubSignInChip } from '../components/GithubSignInChip.js';
 import { CodeReviewView } from '../components/github/CodeReviewView.js';
 import { ConflictResolutionView } from '../components/github/ConflictResolutionView.js';
 import { GitChangesView } from '../components/github/GitChangesView.js';
@@ -94,6 +96,15 @@ export function ProjectGitHubView({ project, onProjectChange }: Props) {
     await refreshStatus();
   }, [sync, refreshStatus]);
 
+  const handleGitHubIdentityChange = useCallback(
+    (identity: GitHubIdentity | null) => {
+      if (!identity) return;
+      setAuthIssue(false);
+      void refreshStatus();
+    },
+    [refreshStatus],
+  );
+
   // biome-ignore lint/correctness/useExhaustiveDependencies: project.id change must re-fire the reset + refresh.
   useEffect(() => {
     setError(null);
@@ -126,8 +137,10 @@ export function ProjectGitHubView({ project, onProjectChange }: Props) {
       api
         .fetchProjectGit(project.id)
         .then(() => refreshStatus())
-        .catch(() => {
-          /* offline — the nudge just doesn't update */
+        .catch((err) => {
+          if (isMissingGitHubAuth(err)) setAuthIssue(true);
+          // Offline and other passive-fetch failures stay quiet — the
+          // freshness nudge simply does not update.
         });
     void fetchRemote();
     const interval = window.setInterval(() => void fetchRemote(), 300_000);
@@ -167,15 +180,14 @@ export function ProjectGitHubView({ project, onProjectChange }: Props) {
         {busy && <span className="status">{busy}</span>}
       </div>
 
-      {missingCreds && (
+      {(missingCreds || authIssue) && (
         <div className="github-banner gh-banner-warn">
-          No GitHub sign-in found. Public repos will clone, but private repos and PR listings need
-          credentials. Sign in with the GitHub CLI (<code>gh auth login</code>) or install the{' '}
-          <strong>GitHub</strong> toolset in Settings → Toolsets.
+          {authIssue
+            ? 'GitHub needs you to sign in again.'
+            : 'No GitHub sign-in found. Public repositories still work; sign in for private repositories, pull requests, and sending changes.'}{' '}
+          <GitHubSignInChip onChange={handleGitHubIdentityChange} compact />
         </div>
       )}
-
-      {authIssue && <div className="github-banner gh-banner-warn">{GIT_COPY.syncAuth}</div>}
 
       {!mergeInProgress && behind > 0 && !nudgeDismissed && (
         <div className="github-banner gh-banner-nudge">
@@ -296,4 +308,11 @@ export function ProjectGitHubView({ project, onProjectChange }: Props) {
       />
     </div>
   );
+}
+
+function isMissingGitHubAuth(err: unknown): boolean {
+  if (!(err instanceof GezelApiError) || !err.details || typeof err.details !== 'object') {
+    return false;
+  }
+  return 'code' in err.details && err.details.code === 'MISSING_PAT';
 }

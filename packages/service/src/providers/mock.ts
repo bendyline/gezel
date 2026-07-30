@@ -58,6 +58,10 @@ export class MockProvider implements LLMProvider {
   readonly queue: ProviderQueue = new ProviderQueue({ concurrency: 1 });
   /** MockProvider implements `SessionOpts.externalTools` for tests. */
   readonly supportsExternalTools = true;
+  /** Sessions record `opts.priorMessages` for assertions, so the mock
+   *  counts as honoring explicit history — /v1 passes it through
+   *  rather than flattening. */
+  readonly supportsPriorMessages = true;
   /**
    * When set, every {@link MockSession} this provider hands out
    * exposes `numCtx` + `estimatePromptChars()` matching this config
@@ -69,6 +73,8 @@ export class MockProvider implements LLMProvider {
    */
   ollamaContextConfig?: { numCtx: number; promptChars: () => number };
   private readonly responseQueue: string[] = [];
+  /** Private-reasoning chunks to emit before the next scripted reply. */
+  private readonly reasoningQueue: string[][] = [];
   private readonly toolCallQueue: ScriptedToolCall[][] = [];
   private resumeFailureQueued = false;
   /** Error message to throw from the next `sendAndWait`, if any. */
@@ -121,6 +127,20 @@ export class MockProvider implements LLMProvider {
    */
   script(...responses: string[]): void {
     for (const r of responses) this.responseQueue.push(r);
+  }
+
+  /**
+   * Queue private-reasoning chunks for the next turn. Keeping chunks
+   * separate lets ChatManager tests exercise the same timing path as
+   * token-streaming providers.
+   */
+  scriptReasoning(...chunks: string[]): void {
+    this.reasoningQueue.push(chunks);
+  }
+
+  /** @internal */
+  nextScriptedReasoning(): string[] {
+    return this.reasoningQueue.shift() ?? [];
   }
 
   /**
@@ -297,6 +317,7 @@ export class MockProvider implements LLMProvider {
 
 class MockSession extends StreamingSessionBase implements LLMSession {
   private disconnected = false;
+  private lastTurnReasoning: string | undefined;
   /**
    * Mirrors the surface real `OllamaSession` exposes, so tests for
    * the context-pressure check (`ChatManager.checkContextPressure`)
@@ -339,6 +360,7 @@ class MockSession extends StreamingSessionBase implements LLMSession {
 
     // Reset captured calls — each turn surfaces only its own emissions.
     this._capturedExternalCalls = [];
+    this.lastTurnReasoning = undefined;
 
     const scriptedFailure = this.provider.nextScriptedSendFailure();
     if (scriptedFailure) {
@@ -362,6 +384,12 @@ class MockSession extends StreamingSessionBase implements LLMSession {
     const delay = this.provider.nextScriptedSendDelay();
     if (delay > 0) {
       await new Promise<void>((resolve) => setTimeout(resolve, delay));
+    }
+
+    const reasoningChunks = this.provider.nextScriptedReasoning();
+    if (reasoningChunks.length > 0) {
+      this.lastTurnReasoning = reasoningChunks.join('');
+      for (const chunk of reasoningChunks) this.emitReasoningDelta(chunk);
     }
 
     // External tools mode: when the session was created with
@@ -424,6 +452,10 @@ class MockSession extends StreamingSessionBase implements LLMSession {
       return { openaiPreviousResponseId: this.sessionId };
     }
     return { copilotSessionId: this.sessionId };
+  }
+
+  getLastTurnReasoning(): string | undefined {
+    return this.lastTurnReasoning;
   }
 
   getRegisteredToolNames(): string[] {

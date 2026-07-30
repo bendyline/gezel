@@ -455,6 +455,12 @@ export const TimelineMessageSchema = z.object({
    */
   reasoning: z.string().optional(),
   /**
+   * Mirrors `ChatMessage.reasoningDurationMs` — the observed span of
+   * streamed private-reasoning chunks. Omitted when the provider did
+   * not expose enough timing data to measure it honestly.
+   */
+  reasoningDurationMs: z.number().int().nonnegative().optional(),
+  /**
    * Mirrors `ChatMessage.attemptedToolCalls` — tool-call bodies the
    * salvage layer couldn't parse. The bubble renders an "Attempted
    * call" expander when present, and the empty-bubble placeholder

@@ -73,6 +73,14 @@ const MessageSchema = z.discriminatedUnion('role', [
     content: ContentSchema,
     name: z.string().optional(),
   }),
+  // OpenAI's successor to `system` (o-series and newer SDK stacks emit
+  // it). Translated identically to `system` — gezel providers have a
+  // single system-message channel.
+  z.object({
+    role: z.literal('developer'),
+    content: ContentSchema,
+    name: z.string().optional(),
+  }),
   z.object({
     role: z.literal('user'),
     content: ContentSchema,
@@ -96,14 +104,26 @@ export const ChatCompletionRequestSchema = z.object({
   model: z.string().min(1, 'model is required'),
   messages: z.array(MessageSchema).min(1, 'messages must contain at least one entry'),
   stream: z.boolean().optional(),
+  /**
+   * OpenAI's `stream_options`. `include_usage: true` opts into the
+   * spec's usage-reporting shape: every chunk carries `usage: null`
+   * and one extra pre-`[DONE]` chunk carries the final usage with an
+   * empty `choices` array. Without it, no usage appears in the stream.
+   */
+  stream_options: z.object({ include_usage: z.boolean().optional() }).optional(),
   temperature: z.number().min(0).max(2).optional(),
   max_tokens: z.number().int().positive().optional(),
+  // The modern replacement for `max_tokens` — parsed so the sampling
+  // guard can name it in the 400 instead of silently stripping it.
+  max_completion_tokens: z.number().int().positive().optional(),
   top_p: z.number().min(0).max(1).optional(),
   // Parsed only so the route can return a friendly 400 naming them — the
-  // `sampling_params_not_supported_v1` guard in v1-chat.ts rejects all five
+  // `sampling_params_not_supported_v1` guard in v1-chat.ts rejects the
   // sampling fields rather than honoring them per-request (not yet wired):
   presence_penalty: z.number().min(-2).max(2).optional(),
   frequency_penalty: z.number().min(-2).max(2).optional(),
+  /** Parsed so the route can reject n>1 loudly — gezel returns one choice. */
+  n: z.number().int().positive().optional(),
   user: z.string().optional(),
   /**
    * Caller-supplied tool definitions. Forwarded to the provider as
@@ -280,7 +300,7 @@ export function translateMessages(
   const conversation: ConversationEntry[] = [];
 
   for (const msg of messages) {
-    if (msg.role === 'system') {
+    if (msg.role === 'system' || msg.role === 'developer') {
       const split = splitContent(msg.content);
       // Image parts on a system message are dropped — providers
       // don't honor images for system messages, and silently
@@ -378,6 +398,51 @@ export function translateMessages(
     priorMessages,
     attachments,
   };
+}
+
+/**
+ * Fold `priorMessages` into the prompt text for providers that don't
+ * honor explicit history (`LLMProvider.supportsPriorMessages` unset —
+ * Copilot and the CLI providers, whose SDK/subprocess owns its own
+ * transcript). Without this, a stateless OpenAI-shaped caller replaying
+ * the full conversation each request would silently lose everything but
+ * the last message.
+ *
+ * The transcript is rendered as labeled turns above the in-flight
+ * prompt. Lossy by design — the provider sees the history as text, not
+ * as real turns — but honest history beats silent amnesia. Attachments
+ * are untouched (they already ride only on the in-flight prompt).
+ */
+export function flattenTranscriptIntoPrompt(input: TranslatedSessionInput): TranslatedSessionInput {
+  if (input.priorMessages.length === 0) return input;
+
+  const lines: string[] = [];
+  for (const m of input.priorMessages) {
+    if (m.role === 'tool') {
+      lines.push(`Tool result (${m.toolCallId}): ${m.content}`);
+    } else if (m.role === 'assistant' && 'toolCalls' in m && m.toolCalls.length > 0) {
+      const calls = m.toolCalls.map((tc) => `${tc.name}(${tc.arguments})`).join(', ');
+      lines.push(`Assistant: ${m.content}${m.content ? '\n' : ''}[called tools: ${calls}]`);
+    } else {
+      lines.push(`${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`);
+    }
+  }
+
+  const transcript = [
+    'Conversation so far (replayed because this backend does not accept explicit history):',
+    '',
+    ...lines,
+    '',
+  ].join('\n');
+
+  // Tool-result-last requests arrive with an empty prompt (the tool
+  // result itself is the trigger); give the model an explicit
+  // continuation instruction so the flattened turn still reads as one.
+  const prompt = input.prompt.trim()
+    ? `${transcript}\nUser: ${input.prompt}`
+    : `${transcript}\nContinue the conversation from the results above.`;
+
+  return { ...input, prompt, priorMessages: [] };
 }
 
 /**

@@ -1,4 +1,5 @@
 import type { ProjectDetail } from '@bendyline/gezel';
+import { GezelApiError } from '@bendyline/gezel-client';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -49,6 +50,7 @@ describe('ProjectGitHubView', () => {
     vi.mocked(api.fetchProjectGit).mockResolvedValue({ ok: true, fetched: false } as never);
     vi.mocked(api.getProject).mockResolvedValue(PROJECT as never);
     vi.mocked(api.cloneProjectGit).mockResolvedValue({ ok: true } as never);
+    vi.mocked(api.getGitHubIdentity).mockResolvedValue({ signedIn: false } as never);
   });
 
   it('defaults to the Changes sub-tab with a change-count badge', async () => {
@@ -113,6 +115,29 @@ describe('ProjectGitHubView', () => {
     await waitFor(() => {
       expect(screen.getByText(/No GitHub sign-in found/)).toBeInTheDocument();
     });
+    expect(await screen.findByRole('button', { name: 'Sign in' })).toBeInTheDocument();
+  });
+
+  it('turns a background-fetch auth failure into an in-tab sign-in action', async () => {
+    vi.mocked(api.getProjectGitStatus).mockResolvedValue({
+      exists: true,
+      branch: 'main',
+      hasPat: true,
+      credentialSource: 'pat',
+    } as never);
+    vi.mocked(api.fetchProjectGit).mockRejectedValue(
+      new GezelApiError('fetch needs authentication', 400, {
+        error: 'No GitHub credentials found',
+        code: 'MISSING_PAT',
+      }),
+    );
+
+    render(<ProjectGitHubView project={PROJECT} onProjectChange={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByText('GitHub needs you to sign in again.')).toBeInTheDocument();
+    });
+    expect(await screen.findByRole('button', { name: 'Sign in' })).toBeInTheDocument();
   });
 
   it('hides the credentials banner when the GitHub CLI is signed in (no PAT)', async () => {

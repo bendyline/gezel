@@ -5,9 +5,11 @@ import { realpath } from 'node:fs/promises';
  * Thin wrapper around the `git` CLI. Lives here (not in a library) so we
  * stay consistent with how the package installer already shells out to npm.
  *
- * Runs git with `GIT_TERMINAL_PROMPT=0` so a missing or invalid PAT fails
- * fast instead of hanging on a stdin prompt — important because we run
- * inside the service with no attached TTY.
+ * Runs git with every supported interactive credential path disabled so
+ * a missing or invalid PAT fails fast instead of opening a terminal or
+ * Git Credential Manager window. This is important because we run inside
+ * the service, where authentication must be initiated explicitly by the
+ * Gezel UI rather than by a background git command.
  */
 
 export interface RunGitResult {
@@ -84,10 +86,14 @@ export async function runGit(args: string[], opts: RunGitOptions = {}): Promise<
   const { cleanedArgs, configEnv } = relocateSecretGitConfig(args);
   const env: Record<string, string> = {
     ...filterEnv(process.env),
+    ...(opts.env ?? {}),
+    ...configEnv,
+    // Keep this safety set last: callers may add environment variables,
+    // but a service-owned git command must never become interactive.
     GIT_TERMINAL_PROMPT: '0',
     GIT_ASKPASS: '/bin/true',
-    ...configEnv,
-    ...(opts.env ?? {}),
+    GCM_INTERACTIVE: '0',
+    GCM_GUI_PROMPT: '0',
   };
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   // gezel only ever runs git against repos it created and manages,
@@ -97,7 +103,13 @@ export async function runGit(args: string[], opts: RunGitOptions = {}): Promise<
   // bare-repo operation (clone idempotency check, worktree add/remove,
   // remote set-url). Prepended as a `-c` override on each invocation, so
   // it beats global config without mutating the user's gitconfig.
-  const gitArgs = ['-c', 'safe.bareRepository=all', ...cleanedArgs];
+  const gitArgs = [
+    '-c',
+    'safe.bareRepository=all',
+    '-c',
+    'credential.interactive=false',
+    ...cleanedArgs,
+  ];
   return new Promise<RunGitResult>((resolve, reject) => {
     const child = spawn('git', gitArgs, {
       cwd: opts.cwd,

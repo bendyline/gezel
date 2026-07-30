@@ -33,6 +33,54 @@ test('keeps terminal composer geometry aligned with chat', async ({ page, world 
   await gotoProject(page, world!.projectId);
 
   const shell = page.locator('.project-chat-compose-shell');
+  const frame = shell.locator('.project-chat-compose-main');
+  const toolbar = page.getByRole('toolbar', { name: /toolbar/i });
+  await expect(toolbar).toBeVisible();
+  await expect(page.getByTestId('chat-send')).toBeVisible();
+  await expect(page.getByRole('button', { name: /^Bold/ })).toBeHidden();
+  const insert = page.getByRole('button', { name: 'Insert' });
+  await expect(insert).toBeVisible();
+
+  await insert.click();
+  const insertMenu = page.getByRole('menu');
+  await expect(insertMenu).toBeVisible();
+  const [insertBox, menuBox] = await Promise.all([insert.boundingBox(), insertMenu.boundingBox()]);
+  expect(insertBox).not.toBeNull();
+  expect(menuBox).not.toBeNull();
+  expect(menuBox!.y + menuBox!.height).toBeLessThanOrEqual(insertBox!.y - 3);
+  expect(menuBox!.y).toBeGreaterThanOrEqual(8);
+  await page.keyboard.press('Escape');
+  await expect(insertMenu).toBeHidden();
+
+  const frameTreatment = await frame.evaluate((element) => {
+    const style = getComputedStyle(element);
+    const frameRect = element.getBoundingClientRect();
+    const shellStyle = getComputedStyle(element.parentElement!);
+    const toolbarHeader = element.querySelector<HTMLElement>('.squisq-editor-header');
+    const activeTab = element.parentElement?.querySelector<HTMLElement>(
+      '.project-chat-compose-toggle button.active',
+    );
+    const toolbarRect = toolbarHeader?.getBoundingClientRect();
+    const tabRect = activeTab?.getBoundingClientRect();
+    const borderLeftWidth = Number.parseFloat(style.borderLeftWidth);
+    const borderRightWidth = Number.parseFloat(style.borderRightWidth);
+    return {
+      borderWidth: style.borderRightWidth,
+      borderColor: style.borderRightColor,
+      shellPaddingBottom: shellStyle.paddingBottom,
+      frameRight: frameRect.right,
+      activeTabLeft: tabRect?.left ?? Number.NaN,
+      toolbarInsetLeft: (toolbarRect?.left ?? Number.NaN) - (frameRect.left + borderLeftWidth),
+      toolbarInsetRight: frameRect.right - borderRightWidth - (toolbarRect?.right ?? Number.NaN),
+    };
+  });
+  expect(frameTreatment.borderWidth).toBe('1px');
+  expect(frameTreatment.borderColor).not.toBe('rgba(127, 127, 127, 0.25)');
+  expect(frameTreatment.shellPaddingBottom).toBe('4px');
+  expect(frameTreatment.activeTabLeft).toBeCloseTo(frameTreatment.frameRight - 1, 0);
+  expect(frameTreatment.toolbarInsetLeft).toBeCloseTo(1, 0);
+  expect(frameTreatment.toolbarInsetRight).toBeCloseTo(1, 0);
+
   const chatHeight = await shell.evaluate((element) => element.getBoundingClientRect().height);
   const chatModeAlignment = await shell.evaluate((element) => {
     const tabs = element.querySelector<HTMLElement>('.project-chat-compose-toggle');
@@ -42,11 +90,15 @@ test('keeps terminal composer geometry aligned with chat', async ({ page, world 
     const tabsRect = tabs.getBoundingClientRect();
     const sendRect = send.getBoundingClientRect();
     const inputRect = input.getBoundingClientRect();
+    const frameRect = element
+      .querySelector<HTMLElement>('.project-chat-compose-main')
+      ?.getBoundingClientRect();
     return {
       tabsTop: tabsRect.top,
       tabsBottom: tabsRect.bottom,
       toolbarBottom: sendRect.bottom,
       inputBottom: inputRect.bottom,
+      frameBottom: frameRect?.bottom ?? Number.NaN,
     };
   });
   const sessionRow = page.locator('.gezel-chat-session-header');
@@ -62,7 +114,7 @@ test('keeps terminal composer geometry aligned with chat', async ({ page, world 
   });
   expect(chatModeAlignment).not.toBeNull();
   expect(chatModeAlignment!.tabsTop).toBeGreaterThanOrEqual(chatModeAlignment!.toolbarBottom);
-  expect(chatModeAlignment!.tabsBottom).toBeCloseTo(chatModeAlignment!.inputBottom, 0);
+  expect(chatModeAlignment!.tabsBottom).toBeCloseTo(chatModeAlignment!.frameBottom, 0);
 
   await switchToTerminal(page);
 
@@ -75,11 +127,15 @@ test('keeps terminal composer geometry aligned with chat', async ({ page, world 
     const tabsRect = tabs.getBoundingClientRect();
     const toolbarRect = toolbar.getBoundingClientRect();
     const inputRect = input.getBoundingClientRect();
+    const frameRect = element
+      .querySelector<HTMLElement>('.project-chat-compose-main')
+      ?.getBoundingClientRect();
     return {
       tabsTop: tabsRect.top,
       tabsBottom: tabsRect.bottom,
       toolbarBottom: toolbarRect.bottom,
       inputBottom: inputRect.bottom,
+      frameBottom: frameRect?.bottom ?? Number.NaN,
     };
   });
   const folderRow = page.locator('.project-chat-compose-main .folder-tree-switcher');
@@ -100,7 +156,31 @@ test('keeps terminal composer geometry aligned with chat', async ({ page, world 
   expect(terminalModeAlignment!.tabsTop).toBeGreaterThanOrEqual(
     terminalModeAlignment!.toolbarBottom,
   );
-  expect(terminalModeAlignment!.tabsBottom).toBeCloseTo(terminalModeAlignment!.inputBottom, 0);
+  expect(terminalModeAlignment!.tabsBottom).toBeCloseTo(terminalModeAlignment!.frameBottom, 0);
+});
+
+test('aligns the output and reference split grips', async ({ page, world }) => {
+  await gotoProject(page, world!.projectId);
+
+  const showOutput = page.getByRole('button', { name: 'Show output pane' });
+  if (await showOutput.isVisible()) await showOutput.click();
+
+  const outputGrip = page.getByRole('separator', { name: 'Resize output pane' });
+  const referenceGrip = page.getByRole('separator', { name: 'Resize reference panel' });
+  await expect(outputGrip).toBeVisible();
+  await expect(referenceGrip).toBeVisible();
+
+  const [outputCenter, referenceCenter] = await Promise.all(
+    [outputGrip, referenceGrip].map((grip) =>
+      grip.evaluate((element) => {
+        const rect = element.getBoundingClientRect();
+        const paintedTop = Number.parseFloat(getComputedStyle(element, '::before').top);
+        return rect.top + paintedTop;
+      }),
+    ),
+  );
+
+  expect(referenceCenter).toBeCloseTo(outputCenter, 0);
 });
 
 test('mounts, submits on Enter, newlines on Shift+Enter', async ({ page, world }) => {
@@ -121,12 +201,20 @@ test('mounts, submits on Enter, newlines on Shift+Enter', async ({ page, world }
   await expect(editor.locator('.view-line')).toHaveCount(2);
 });
 
-test('preserves wide output columns in a horizontally scrollable pane', async ({ page, world }) => {
+test('lets ordinary-height output flow while preserving a horizontal scrollbar', async ({
+  page,
+  world,
+}) => {
   await openTerminal(page, world!.projectId);
+  const fixtureRows = Array.from(
+    { length: 30 },
+    (_, index) =>
+      `terminal-output-fixture-${String(index + 1).padStart(2, '0')}${' '.repeat(49)}7/29/2026  3:47 PM${' '.repeat(20)}${30357 + index}`,
+  );
   const fixtureOutput = [
     `Name${' '.repeat(76)}LastWriteTime${' '.repeat(28)}Length`,
     `${'-'.repeat(80)}  ${'-'.repeat(40)}  ${'-'.repeat(12)}`,
-    `terminal-output-fixture${' '.repeat(57)}7/29/2026  3:47 PM${' '.repeat(20)}30357`,
+    ...fixtureRows,
   ].join('\n');
   await page.getByTestId('chat-timeline').evaluate((timeline, text) => {
     const bubble = document.createElement('div');
@@ -172,15 +260,20 @@ test('preserves wide output columns in a horizontally scrollable pane', async ({
     return {
       whiteSpace: getComputedStyle(body).whiteSpace,
       overflowX: getComputedStyle(viewport).overflowX,
+      overflowY: getComputedStyle(viewport).overflowY,
       scrollWidth: viewport.scrollWidth,
       clientWidth: viewport.clientWidth,
+      scrollHeight: viewport.scrollHeight,
+      clientHeight: viewport.clientHeight,
       tabIndex: viewport.tabIndex,
     };
   });
   expect(layout).not.toBeNull();
   expect(layout!.whiteSpace).toBe('pre');
   expect(layout!.overflowX).toBe('auto');
+  expect(layout!.overflowY).toBe('auto');
   expect(layout!.scrollWidth).toBeGreaterThan(layout!.clientWidth);
+  expect(layout!.scrollHeight).toBeLessThanOrEqual(layout!.clientHeight + 1);
   expect(layout!.tabIndex).toBe(0);
 
   const bubble = page
@@ -189,7 +282,8 @@ test('preserves wide output columns in a horizontally scrollable pane', async ({
     .last();
   await shot(page, 'wide-output', {
     area: 'terminal',
-    description: 'Wide terminal output preserves fixed columns and exposes a horizontal scrollbar',
+    description:
+      'Ordinary-height terminal output flows in history while wide columns scroll horizontally',
     clip: bubble,
     selector: '.terminal-group-output',
   });

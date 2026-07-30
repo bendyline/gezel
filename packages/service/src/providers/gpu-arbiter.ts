@@ -229,8 +229,8 @@ export class GpuArbiter {
   }
 
   /** Latest normalized machine-health snapshot for the authenticated UI. */
-  async getDeviceHealthStatus(): Promise<DeviceHealthStatusSnapshot | undefined> {
-    return this.healthGate?.status();
+  async getDeviceHealthStatus(maxAgeMs?: number): Promise<DeviceHealthStatusSnapshot | undefined> {
+    return this.healthGate?.status(maxAgeMs);
   }
 }
 

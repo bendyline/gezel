@@ -1,6 +1,6 @@
 import { createLogger } from '@bendyline/gezel';
 import { ProviderQueue } from '../queue.js';
-import { SessionResumeError } from '../types.js';
+import { ExternalToolsUnsupportedError, SessionResumeError } from '../types.js';
 import type { LLMProvider, LLMSession, ModelInfo, ProviderName, SessionOpts } from '../types.js';
 import { type CodexBinary, resolveCodexBinary } from './binary.js';
 import type { CodexPermissionMode, CodexReasoningEffort } from './invoker.js';
@@ -151,6 +151,13 @@ export class CodexCliProvider implements LLMProvider {
   }
 
   async createSession(opts: SessionOpts): Promise<LLMSession> {
+    // Same contract as the Anthropic CLI provider: the Codex CLI owns
+    // its tool loop, so caller-supplied tools are refused loudly.
+    // Guarded before initialize() so the rejection doesn't depend on a
+    // resolvable binary.
+    if (opts.externalTools && opts.externalTools.length > 0) {
+      throw new ExternalToolsUnsupportedError(this.name);
+    }
     await this.initialize();
     if (!this.resolved) throw new Error('[codex-cli] binary not resolved');
     // Like the Anthropic CLI provider, ChatManager always populates

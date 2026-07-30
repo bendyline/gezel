@@ -78,6 +78,7 @@ export class OpenAIProvider implements LLMProvider {
   readonly name = 'openai' as const;
   readonly queue: ProviderQueue;
   readonly supportsExternalTools = true;
+  readonly supportsPriorMessages = true;
   private openai: OpenAI | null = null;
   private readonly apiKey: string;
   private readonly organization?: string;

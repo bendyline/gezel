@@ -3776,7 +3776,7 @@ server.tool(
     title: z
       .string()
       .optional()
-      .describe('Optional task title. Defaults to the craftbook name + timestamp.'),
+      .describe('Optional task title. Defaults to the craftbook name.'),
     description: z
       .string()
       .optional()
@@ -3801,8 +3801,11 @@ server.tool(
           ],
         };
       }
+      const craftbookName =
+        projectCraftbooks.items.find((item) => item.manifest.id === craftbookId)?.manifest.name ??
+        craftbookId;
       const created = await api.createTask(resolvedProject, {
-        title: title ?? `${craftbookId} — ${new Date().toISOString().slice(0, 16)}`,
+        title: title ?? craftbookName,
         description: description ?? `Run the ${craftbookId} craftbook against this project.`,
         craftbookId,
         ...(version ? { craftbookVersion: version } : {}),

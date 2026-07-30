@@ -11,12 +11,19 @@ type SearchMode = 'search' | 'quick-open';
 
 const DEBOUNCE_MS = 150;
 
+function quickOpenShortcutLabel(): string {
+  const platform =
+    window.__GEZEL__?.platform ??
+    (typeof navigator === 'undefined' ? '' : navigator.platform || navigator.userAgent);
+  return platform === 'darwin' || /Mac/i.test(platform) ? '⌘P' : 'Ctrl+P';
+}
+
 /**
  * Unified search box that lives in the center of the titlebar. Searches across
  * projects (names, files, content), gezels, documents, code symbols, and
- * memories; selecting a result navigates there. ⌘P focuses it in quick-open
- * (name/file) mode, ⌘K in full-search mode — both via the `gezel:focus-search`
- * event dispatched from `App`.
+ * memories; selecting a result navigates there. Command/Ctrl+P focuses it in
+ * quick-open (name/file) mode, Command/Ctrl+K in full-search mode — both via
+ * the `gezel:focus-search` event dispatched from `App`.
  */
 export function TitlebarSearch() {
   const [query, setQuery] = useState('');
@@ -26,6 +33,7 @@ export function TitlebarSearch() {
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const modeRef = useRef<SearchMode>('search');
+  const quickOpenShortcut = quickOpenShortcutLabel();
 
   const groups: SearchGroup[] = useMemo(() => groupResults(results), [results]);
   const flat = useMemo(() => flattenGroups(groups), [groups]);
@@ -62,7 +70,7 @@ export function TitlebarSearch() {
     };
   }, [query]);
 
-  // Focus shortcut from App (⌘P / ⌘K). Stores the mode and focuses the input.
+  // Focus shortcut from App (Command/Ctrl+P or K). Stores the mode and focuses the input.
   useEffect(() => {
     const onFocusSearch = (e: Event) => {
       const detail = (e as CustomEvent<{ mode?: SearchMode }>).detail;
@@ -149,7 +157,7 @@ export function TitlebarSearch() {
             type="text"
             className="titlebar-search-input"
             data-testid="titlebar-search-input"
-            placeholder="Search projects, files, docs…  ⌘P"
+            placeholder={`Search projects, files, docs…  ${quickOpenShortcut}`}
             aria-label="Search"
             value={query}
             spellCheck={false}

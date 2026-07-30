@@ -3919,6 +3919,10 @@ export class Store {
     await this.documents.createDocumentFolder(folderPath);
   }
 
+  async renameDocument(fromPath: string, toPath: string): Promise<void> {
+    await this.documents.renameDocument(fromPath, toPath);
+  }
+
   // ---------- chat sessions ----------
 
   async writeSession(session: ChatSession): Promise<void> {
@@ -4244,6 +4248,9 @@ export class Store {
           ...(m.pendingQuestionId ? { pendingQuestionId: m.pendingQuestionId } : {}),
           ...(m.warnings && m.warnings.length > 0 ? { warnings: m.warnings } : {}),
           ...(m.reasoning ? { reasoning: m.reasoning } : {}),
+          ...(m.reasoningDurationMs !== undefined
+            ? { reasoningDurationMs: m.reasoningDurationMs }
+            : {}),
           ...(m.attemptedToolCalls && m.attemptedToolCalls.length > 0
             ? { attemptedToolCalls: m.attemptedToolCalls }
             : {}),

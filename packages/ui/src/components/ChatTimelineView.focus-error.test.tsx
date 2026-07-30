@@ -1,5 +1,5 @@
 import type { ListTimelineResponse, TimelineMessage } from '@bendyline/gezel';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockApi } from '../test-utils/mockApi.js';
 
@@ -132,5 +132,23 @@ describe('ChatTimelineView — jumping to a failed turn', () => {
     await screen.findByText('Partial answer preserved before I stopped.');
     expect(screen.queryByText(/Last turn failed:/)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Continue' })).not.toBeInTheDocument();
+  });
+
+  it('keeps the scrollbar visible briefly while the timeline is scrolling', async () => {
+    renderTimeline();
+    const timeline = await screen.findByTestId('chat-timeline');
+    vi.useFakeTimers();
+    try {
+      fireEvent.scroll(timeline);
+      expect(timeline).toHaveClass('chat-timeline-scrolling');
+
+      act(() => vi.advanceTimersByTime(699));
+      expect(timeline).toHaveClass('chat-timeline-scrolling');
+
+      act(() => vi.advanceTimersByTime(1));
+      expect(timeline).not.toHaveClass('chat-timeline-scrolling');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

@@ -278,6 +278,126 @@ describe('POST /v1/chat/completions — request validation', () => {
     const body = (await res.json()) as { error: { code: string } };
     expect(body.error.code).toBe('invalid_body');
   });
+
+  it('returns 400 invalid_json (not 500) when the body is not JSON at all', async () => {
+    const res = await httpFetch(`${baseUrl}/v1/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${rootToken}`,
+      },
+      body: '{"model": "copilot:mock-fast", "messages": [',
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { code: string; type: string } };
+    expect(body.error.code).toBe('invalid_json');
+    expect(body.error.type).toBe('invalid_request_error');
+  });
+
+  it('rejects max_completion_tokens with the same 400 as max_tokens', async () => {
+    const res = await v1('POST', '/v1/chat/completions', {
+      body: {
+        model: 'copilot:mock-fast',
+        messages: [{ role: 'user', content: 'hi' }],
+        max_completion_tokens: 512,
+      },
+      token: rootToken,
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { code: string; message: string } };
+    expect(body.error.code).toBe('sampling_params_not_supported_v1');
+    expect(body.error.message).toContain('max_completion_tokens');
+  });
+
+  it('rejects n>1 loudly instead of silently returning one choice', async () => {
+    const res = await v1('POST', '/v1/chat/completions', {
+      body: {
+        model: 'copilot:mock-fast',
+        messages: [{ role: 'user', content: 'hi' }],
+        n: 3,
+      },
+      token: rootToken,
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe('n_not_supported_v1');
+  });
+
+  it('accepts n=1 (the OpenAI default) without complaint', async () => {
+    const res = await v1('POST', '/v1/chat/completions', {
+      body: {
+        model: 'copilot:mock-fast',
+        messages: [{ role: 'user', content: 'hi' }],
+        n: 1,
+      },
+      token: rootToken,
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it('accepts the developer role and treats it as a system message', async () => {
+    const res = await v1('POST', '/v1/chat/completions', {
+      body: {
+        model: 'copilot:mock-fast',
+        messages: [
+          { role: 'developer', content: 'be terse' },
+          { role: 'user', content: 'hi there' },
+        ],
+      },
+      token: rootToken,
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      choices: Array<{ message: { content: string } }>;
+    };
+    expect(body.choices[0]?.message.content).toContain('hi there');
+  });
+});
+
+describe('POST /v1/chat/completions — stream_options.include_usage', () => {
+  async function streamDataLines(body: Record<string, unknown>): Promise<string[]> {
+    const res = await v1('POST', '/v1/chat/completions', { body, token: rootToken });
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    return text
+      .split(/\n/)
+      .filter((line) => line.startsWith('data: '))
+      .map((line) => line.slice('data: '.length));
+  }
+
+  it('omits usage entirely when stream_options is absent (OpenAI default)', async () => {
+    const dataLines = await streamDataLines({
+      model: 'copilot:mock-fast',
+      messages: [{ role: 'user', content: 'no usage please' }],
+      stream: true,
+    });
+    const chunks = dataLines.filter((d) => d !== '[DONE]').map((d) => JSON.parse(d));
+    for (const chunk of chunks) {
+      expect('usage' in chunk).toBe(false);
+    }
+  });
+
+  it('emits usage:null on chunks plus a final empty-choices usage chunk when requested', async () => {
+    const dataLines = await streamDataLines({
+      model: 'copilot:mock-fast',
+      messages: [{ role: 'user', content: 'count my tokens' }],
+      stream: true,
+      stream_options: { include_usage: true },
+    });
+    expect(dataLines[dataLines.length - 1]).toBe('[DONE]');
+    const chunks = dataLines.filter((d) => d !== '[DONE]').map((d) => JSON.parse(d));
+    const usageChunk = chunks[chunks.length - 1];
+    expect(usageChunk.choices).toEqual([]);
+    expect(usageChunk.usage.total_tokens).toBe(
+      usageChunk.usage.prompt_tokens + usageChunk.usage.completion_tokens,
+    );
+    for (const chunk of chunks.slice(0, -1)) {
+      expect(chunk.usage).toBeNull();
+    }
+    // The finish_reason chunk is the second-to-last (before the usage chunk).
+    const finishChunk = chunks[chunks.length - 2];
+    expect(finishChunk.choices[0].finish_reason).toBe('stop');
+  });
 });
 
 describe('GET /v1/models', () => {

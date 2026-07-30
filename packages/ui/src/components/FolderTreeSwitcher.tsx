@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
+import { DropdownChevron } from '../primitives/index.js';
 import { formatFolderLabel } from './terminal-folder-label.js';
 
 interface FolderNode {
@@ -97,7 +98,7 @@ export function FolderTreeSwitcher({
         aria-expanded={open}
       >
         <span className="folder-tree-trigger-value">{currentLabel}</span>
-        <span className="folder-tree-trigger-caret">▾</span>
+        <DropdownChevron className="folder-tree-trigger-caret" />
       </button>
       {open && (
         // biome-ignore lint/a11y/useSemanticElements: a native <select> can't render the indented project-tree layout this picker needs (variable depth, custom row styling, hover affordances).

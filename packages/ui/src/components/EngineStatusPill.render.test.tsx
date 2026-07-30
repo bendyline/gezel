@@ -151,4 +151,36 @@ describe('EngineStatusPill — simultaneous local engines', () => {
       );
     });
   });
+
+  it('shows the live inference-memory pool while the dropdown is open', async () => {
+    const user = userEvent.setup();
+    const GiB = 1024 ** 3;
+    vi.mocked(api.getMachineMemoryUsage).mockResolvedValue({
+      kind: 'vram',
+      totalBytes: 24 * GiB,
+      usedBytes: 9 * GiB,
+      gezelBytesEstimated: 5 * GiB,
+      otherBytes: 4 * GiB,
+      freeBytes: 15 * GiB,
+      sampledAt: '2026-07-29T12:00:00.000Z',
+      source: 'device-health',
+      deviceNames: ['Test GPU'],
+    });
+    render(<EngineStatusPill />);
+
+    await user.click(
+      await screen.findByRole('button', {
+        name: /DwarfStar.*DeepSeek V4 Flash/i,
+      }),
+    );
+
+    expect(
+      await screen.findByRole('img', {
+        name: /VRAM: 9\.0 GiB of 24\.0 GiB used, Gezel estimated 5\.0 GiB/i,
+      }),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Gezel ~5.0 GiB')).toBeInTheDocument();
+    expect(screen.getByText('Other 4.0 GiB')).toBeInTheDocument();
+    expect(screen.getByText(/Test GPU/)).toBeInTheDocument();
+  });
 });

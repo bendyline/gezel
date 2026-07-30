@@ -70,6 +70,37 @@ export const HealthResponseSchema = z.object({
 export type HealthResponse = z.infer<typeof HealthResponseSchema>;
 
 /**
+ * Live memory pool used by local inference.
+ *
+ * `unified` covers Apple Silicon and other UMA devices where the accelerator
+ * and CPU share system memory. `ram` is the same physical pool, but selected
+ * because the active local backend is CPU-only rather than GPU-accelerated.
+ */
+export const MachineMemoryKindSchema = z.enum(['vram', 'unified', 'ram']);
+export type MachineMemoryKind = z.infer<typeof MachineMemoryKindSchema>;
+
+/**
+ * Lightweight, authenticated machine-memory telemetry for status surfaces.
+ *
+ * Gezel attribution is an estimate derived from resident engine reservations
+ * plus the daemon's RSS on shared/main-memory hosts. GPU APIs expose aggregate
+ * card usage consistently but do not expose portable per-process accounting,
+ * so callers must retain the `gezelBytesEstimated` wording in user-facing UI.
+ */
+export const MachineMemoryUsageSchema = z.object({
+  kind: MachineMemoryKindSchema,
+  totalBytes: z.number().nonnegative(),
+  usedBytes: z.number().nonnegative().nullable(),
+  gezelBytesEstimated: z.number().nonnegative(),
+  otherBytes: z.number().nonnegative().nullable(),
+  freeBytes: z.number().nonnegative().nullable(),
+  sampledAt: z.string(),
+  source: z.enum(['device-health', 'system-memory', 'capacity-only']),
+  deviceNames: z.array(z.string()),
+});
+export type MachineMemoryUsage = z.infer<typeof MachineMemoryUsageSchema>;
+
+/**
  * Non-secret metadata about the user's GitHub auth state. The token itself
  * lives in the SecretStore (see `applyCredentialPatch`); this slot holds
  * the parts the UI wants to render without unmasking the token (login,
@@ -530,6 +561,27 @@ export const GezelConfigSchema = z.object({
    * See packages/service/src/keurmeester/prompt.ts.
    */
   keurmeesterGezelId: z.string().optional(),
+  /**
+   * The public OpenAI-compatible facade (`/v1/*` + `/ollama/v1/*`) that
+   * third-party apps (VS Code, browser tools) call. Managed from
+   * Settings → Connected Apps.
+   *
+   *   - `enabled` — master switch. `false` gates the inference routes
+   *     AND new app registrations with `403 openai_endpoints_disabled`;
+   *     already-issued tokens stay stored but are refused while off.
+   *     Unset/`true` → on (per-app consent remains the primary gate).
+   *   - `servingGezelId` — the gezel who answers when a caller's
+   *     `model` string is missing from gezel's namespace (e.g. a
+   *     hardcoded "gpt-4o"). Resolved like a `gezel:<id>` target: the
+   *     gezel's persona + provider/model tuning apply. Unset → unknown
+   *     models keep failing loudly with `404 model_not_found`.
+   */
+  openaiEndpoints: z
+    .object({
+      enabled: z.boolean().optional(),
+      servingGezelId: z.string().optional(),
+    })
+    .optional(),
   /**
    * Ollama-only: override the `num_ctx` sent on every /api/chat request.
    * Unset → service picks a parameter-size-aware default (8192 baseline).
@@ -2144,6 +2196,12 @@ export const CreateDocumentFolderRequestSchema = z.object({
   path: z.string().min(1),
 });
 export type CreateDocumentFolderRequest = z.infer<typeof CreateDocumentFolderRequestSchema>;
+
+export const RenameDocumentRequestSchema = z.object({
+  fromPath: z.string().trim().min(1),
+  toPath: z.string().trim().min(1),
+});
+export type RenameDocumentRequest = z.infer<typeof RenameDocumentRequestSchema>;
 
 export const ChatHistoryResponseSchema = z.object({
   gezelId: z.string(),

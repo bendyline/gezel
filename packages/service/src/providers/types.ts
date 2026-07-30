@@ -164,10 +164,13 @@ export interface SessionOpts {
    */
   onToolCall?: (info: ToolCallEvent) => void | Promise<void>;
   /**
-   * Prior transcript to seed a stateless provider (Ollama) with. Populated
-   * by ChatManager whenever providerName === 'ollama'. Ignored by Copilot
-   * (server-side session handles history) and OpenAI (previous_response_id
-   * handles it).
+   * Prior transcript to seed a stateless provider with. Honored by the
+   * providers that build each request's message array themselves
+   * (Ollama, llama.cpp, MLX, OpenAI-without-previous_response_id,
+   * Anthropic, remote) — they advertise `LLMProvider.supportsPriorMessages`.
+   * Ignored by Copilot (server-side session handles history) and the
+   * CLI providers (subprocess owns its transcript); stateless routes
+   * must flatten history into the prompt for those instead.
    *
    * Tool-calling history: `role: 'tool'` entries carry the result of a
    * prior tool invocation (the callee's response). `role: 'assistant'`
@@ -971,6 +974,18 @@ export interface LLMProvider {
    * unset until the external-tools path lands per-provider.
    */
   readonly supportsExternalTools?: boolean;
+  /**
+   * True when sessions honor {@link SessionOpts.priorMessages} — i.e. a
+   * fresh session seeded with explicit history actually replays that
+   * history to the model. Stateless surfaces (`/v1/chat/completions`,
+   * the Ollama facade) check this: when a provider leaves it unset
+   * (Copilot, whose SDK owns history server-side per session id, and
+   * the CLI providers, whose subprocess owns its own transcript), the
+   * route flattens the prior turns into the prompt text instead of
+   * passing `priorMessages` — otherwise the conversation history is
+   * silently dropped and every turn looks like the first.
+   */
+  readonly supportsPriorMessages?: boolean;
 }
 
 export interface EmbeddingInput {

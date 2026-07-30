@@ -1,6 +1,8 @@
 import { execFile } from 'node:child_process';
-import { platform as osPlatform, totalmem } from 'node:os';
+import { freemem, platform as osPlatform, totalmem } from 'node:os';
 import { promisify } from 'node:util';
+import type { MachineMemoryUsage } from '@bendyline/gezel';
+import type { DeviceHealthStatusSnapshot } from '@bendyline/gezel/native';
 import { detectLlamaGpuVram } from '../providers/llama-cpp/devices.js';
 import { autoDetectBudgetBytes } from '../providers/native/capacity-budget.js';
 
@@ -25,6 +27,14 @@ export interface MemoryProfile {
   /** GPU vendor when a GPU backs the budget — lets the UI say "AMD GPU". */
   gpuVendor?: GpuVendor;
 }
+
+interface CachedMemoryProfile {
+  at: number;
+  value: MemoryProfile;
+}
+
+let cachedMemoryProfile: CachedMemoryProfile | null = null;
+let pendingMemoryProfile: Promise<MemoryProfile> | null = null;
 
 /**
  * Detect the memory available for local LLM inference. Platform-aware:
@@ -101,6 +111,141 @@ export async function detectMemoryProfile(): Promise<MemoryProfile> {
     // conservative — 50% of system RAM is a safer ceiling than 60%.
     usableBytes: Math.floor(totalRam * 0.5),
   };
+}
+
+/**
+ * Capacity changes only on GPU hot-plug / VM reconfiguration, while the live
+ * strip may poll once a second. Keep the expensive nvidia-smi / llama device
+ * discovery out of that hot path and refresh the profile occasionally.
+ */
+export async function detectMemoryProfileCached(maxAgeMs = 60_000): Promise<MemoryProfile> {
+  const now = Date.now();
+  if (cachedMemoryProfile && now - cachedMemoryProfile.at <= maxAgeMs) {
+    return cachedMemoryProfile.value;
+  }
+  if (pendingMemoryProfile) return pendingMemoryProfile;
+  pendingMemoryProfile = detectMemoryProfile()
+    .then((value) => {
+      cachedMemoryProfile = { at: Date.now(), value };
+      return value;
+    })
+    .finally(() => {
+      pendingMemoryProfile = null;
+    });
+  return pendingMemoryProfile;
+}
+
+export interface SampleMachineMemoryUsageOptions {
+  profile: MemoryProfile;
+  deviceHealth?: DeviceHealthStatusSnapshot;
+  /** Capacity broker reservation across resident Gezel local-engine replicas. */
+  engineCommittedBytes?: number;
+  /**
+   * CPU inference deliberately uses main RAM even when a discrete GPU exists.
+   * The UI should describe the pool actually backing the selected backend.
+   */
+  forceMainMemory?: boolean;
+  /** Test seams; production defaults come from node:os / process.memoryUsage. */
+  freeRamBytes?: number;
+  serviceRssBytes?: number;
+  sampledAt?: string;
+}
+
+/**
+ * Combine stable capacity detection, cached accelerator health, and cheap OS
+ * RAM counters into the live memory strip's portable wire shape.
+ *
+ * Driver telemetry reliably gives aggregate GPU use but not portable
+ * per-process VRAM. Gezel's portion is therefore the local-engine broker's
+ * resident reservation, clamped to the measured used pool. On UMA / CPU
+ * hosts the daemon RSS is added because it occupies that same main-memory
+ * pool. The remainder is labelled "Other", never as an exact process audit.
+ */
+export function sampleMachineMemoryUsage(
+  opts: SampleMachineMemoryUsageOptions,
+): MachineMemoryUsage {
+  const profile = opts.profile;
+  const totalRamBytes = profile.totalRamBytes;
+  const unified =
+    profile.source === 'darwin-unified' ||
+    (profile.gpuVramBytes !== null && profile.gpuVramBytes >= totalRamBytes * 0.75);
+  const mainMemory =
+    opts.forceMainMemory === true || profile.source === 'system-ram-fallback' || unified;
+  const engineBytes = finiteNonNegative(opts.engineCommittedBytes);
+  const sampledAt = opts.sampledAt ?? new Date().toISOString();
+
+  if (mainMemory) {
+    const freeRamBytes = clamp(finiteNonNegative(opts.freeRamBytes ?? freemem()), 0, totalRamBytes);
+    const usedBytes = Math.max(0, totalRamBytes - freeRamBytes);
+    const serviceRssBytes = finiteNonNegative(opts.serviceRssBytes ?? process.memoryUsage().rss);
+    const gezelBytesEstimated = clamp(engineBytes + serviceRssBytes, 0, usedBytes);
+    return {
+      kind: opts.forceMainMemory === true && !unified ? 'ram' : 'unified',
+      totalBytes: totalRamBytes,
+      usedBytes,
+      gezelBytesEstimated,
+      otherBytes: Math.max(0, usedBytes - gezelBytesEstimated),
+      freeBytes: Math.max(0, totalRamBytes - usedBytes),
+      sampledAt,
+      source: 'system-memory',
+      deviceNames: [],
+    };
+  }
+
+  const memoryReadings = (opts.deviceHealth?.readings ?? []).filter(
+    (reading) =>
+      typeof reading.memoryTotalMb === 'number' &&
+      Number.isFinite(reading.memoryTotalMb) &&
+      reading.memoryTotalMb > 0,
+  );
+  const measuredTotalBytes =
+    memoryReadings.length > 0
+      ? memoryReadings.reduce((sum, reading) => sum + (reading.memoryTotalMb ?? 0), 0) * 1024 ** 2
+      : null;
+  const totalBytes = measuredTotalBytes ?? profile.gpuVramBytes ?? 0;
+  const hasCompleteUsedReading =
+    memoryReadings.length > 0 &&
+    memoryReadings.every(
+      (reading) =>
+        typeof reading.memoryUsedMb === 'number' &&
+        Number.isFinite(reading.memoryUsedMb) &&
+        reading.memoryUsedMb >= 0,
+    );
+  const usedBytes = hasCompleteUsedReading
+    ? clamp(
+        memoryReadings.reduce((sum, reading) => sum + (reading.memoryUsedMb ?? 0), 0) * 1024 ** 2,
+        0,
+        totalBytes,
+      )
+    : null;
+  const gezelBytesEstimated = clamp(engineBytes, 0, usedBytes ?? totalBytes);
+  const deviceNames = [
+    ...new Set(
+      memoryReadings
+        .map((reading) => reading.name?.trim())
+        .filter((name): name is string => !!name),
+    ),
+  ];
+
+  return {
+    kind: 'vram',
+    totalBytes,
+    usedBytes,
+    gezelBytesEstimated,
+    otherBytes: usedBytes === null ? null : Math.max(0, usedBytes - gezelBytesEstimated),
+    freeBytes: usedBytes === null ? null : Math.max(0, totalBytes - usedBytes),
+    sampledAt,
+    source: memoryReadings.length > 0 ? 'device-health' : 'capacity-only',
+    deviceNames,
+  };
+}
+
+function finiteNonNegative(value: number | undefined): number {
+  return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, value) : 0;
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
 }
 
 async function probeNvidiaVram(): Promise<number | null> {

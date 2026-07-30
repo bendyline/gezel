@@ -101,8 +101,9 @@ describe('preview route — type source', () => {
     expect(res.headers.get('content-type')).toContain('text/html');
     const body = await res.text();
     expect(body).toContain('DASHBOARD');
-    // The HTML preview shim is injected.
+    // The HTML preview shims are injected.
     expect(body).toContain('__gezelPreviewLog');
+    expect(body).toContain('__gezel-preview-frame');
   });
 
   it('serves a relative asset (css) from the pages tree', async () => {

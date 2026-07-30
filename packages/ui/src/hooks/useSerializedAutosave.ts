@@ -29,6 +29,13 @@ interface AutosaveRegistryEntry {
 // instead of creating a second request stream that could race it.
 const controllerRegistry = new Map<string, AutosaveRegistryEntry>();
 
+/** Flush a mounted or cleanup-pending lane by its stable resource key. */
+export async function flushSerializedAutosave(resourceKey: string): Promise<void> {
+  const entry = controllerRegistry.get(resourceKey);
+  if (!entry) return;
+  await entry.controller.flush();
+}
+
 /**
  * A single-resource, latest-value-wins save lane.
  *

@@ -1,5 +1,6 @@
+import { DEVICE_HARD_TEMPERATURE_C } from '@bendyline/gezel';
 import type { ConfigResponse } from '@bendyline/gezel-client';
-import { useCallback, useEffect, useState } from 'react';
+import { type CSSProperties, useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
 
 type UserDeviceSafetyMode = 'observe' | 'guard';
@@ -92,6 +93,13 @@ export function MachineHealthSettings({ config, onConfigChanged, platform }: Pro
 
   if (!supportsMachineHealth(platform)) return null;
 
+  const temperature = Number(temperatureDraft);
+  const temperatureProgress =
+    ((Math.min(MAX_MANAGE_TEMPERATURE_C, Math.max(MIN_MANAGE_TEMPERATURE_C, temperature)) -
+      MIN_MANAGE_TEMPERATURE_C) /
+      (MAX_MANAGE_TEMPERATURE_C - MIN_MANAGE_TEMPERATURE_C)) *
+    100;
+
   return (
     <section className="machine-health-settings" aria-labelledby="machine-health-heading">
       <h4 id="machine-health-heading">Machine health</h4>
@@ -133,32 +141,56 @@ export function MachineHealthSettings({ config, onConfigChanged, platform }: Pro
 
       <div className="machine-health-temperature-row">
         <label htmlFor="machine-health-temperature">Manage temperature</label>
-        <span className="machine-health-temperature-control">
-          <input
-            id="machine-health-temperature"
-            type="number"
-            inputMode="numeric"
-            min={MIN_MANAGE_TEMPERATURE_C}
-            max={MAX_MANAGE_TEMPERATURE_C}
-            step={1}
-            value={temperatureDraft}
-            disabled={saving}
-            aria-describedby="machine-health-temperature-help"
-            onChange={(event) => setTemperatureDraft(event.target.value)}
-            onBlur={saveTemperature}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') event.currentTarget.blur();
-            }}
-          />
-          <span aria-hidden="true">°C</span>
-        </span>
+        <div className="machine-health-temperature-control">
+          <div className="machine-health-temperature-slider-wrap">
+            <input
+              id="machine-health-temperature"
+              className="machine-health-temperature-slider"
+              type="range"
+              min={MIN_MANAGE_TEMPERATURE_C}
+              max={MAX_MANAGE_TEMPERATURE_C}
+              step={1}
+              value={temperatureDraft}
+              disabled={saving}
+              aria-describedby="machine-health-temperature-help"
+              aria-valuetext={`${temperatureDraft} degrees Celsius`}
+              style={
+                {
+                  '--machine-health-temperature-progress': `${temperatureProgress}%`,
+                } as CSSProperties
+              }
+              onChange={(event) => setTemperatureDraft(event.target.value)}
+              onPointerUp={(event) => event.currentTarget.blur()}
+              onBlur={saveTemperature}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') event.currentTarget.blur();
+              }}
+            />
+            <div className="machine-health-temperature-scale" aria-hidden="true">
+              <span>{MIN_MANAGE_TEMPERATURE_C}°</span>
+              <span className="machine-health-temperature-default">
+                {DEFAULT_MANAGE_TEMPERATURE_C}° default
+              </span>
+              <span>{MAX_MANAGE_TEMPERATURE_C}°</span>
+            </div>
+          </div>
+          <output
+            className="machine-health-temperature-value"
+            htmlFor="machine-health-temperature"
+            aria-label={`Manage temperature: ${temperatureDraft} degrees Celsius`}
+          >
+            <span className="machine-health-temperature-value-number">{temperatureDraft}</span>
+            <span aria-hidden="true">°C</span>
+          </output>
+        </div>
       </div>
       <p
         id="machine-health-temperature-help"
         className="muted small machine-health-temperature-help"
       >
         In Manage mode, new accelerator work waits above this temperature and resumes after a 5°C
-        cooldown. The default is 80°C. Both modes retain the 95°C emergency cutoff.
+        cooldown. The default is 80°C. Both modes retain the {DEVICE_HARD_TEMPERATURE_C}°C emergency
+        cutoff.
       </p>
 
       {saving && <output className="muted small machine-health-save-state">Saving…</output>}

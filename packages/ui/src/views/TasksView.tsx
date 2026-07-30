@@ -1,7 +1,7 @@
 import type { GezelSummary, Project, Task, TaskStatus } from '@bendyline/gezel';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
-import { DropdownMenu, Select } from '../primitives/index.js';
+import { DropdownChevron, DropdownMenu, Select } from '../primitives/index.js';
 import { TaskTabContent } from './TaskTabContent.js';
 import { NewTaskDialog, type TaskCreationMode } from './tasks/NewTaskDialog.js';
 
@@ -316,7 +316,7 @@ export function TasksView({ projectId }: TasksViewProps = {}) {
                   aria-label="More task types"
                   disabled={!(projectFilter || projects[0])}
                 >
-                  ▾
+                  <DropdownChevron />
                 </button>
               </DropdownMenu.Trigger>
               <DropdownMenu.Portal>

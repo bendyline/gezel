@@ -156,6 +156,7 @@ export class OllamaProvider implements LLMProvider {
   readonly name = 'ollama' as const;
   readonly queue: ProviderQueue;
   readonly supportsExternalTools = true;
+  readonly supportsPriorMessages = true;
   private readonly baseUrl: string;
   private readonly defaultModel: string;
   /** Mid-stream silence cap, per session. See `streamingIdleMs` in

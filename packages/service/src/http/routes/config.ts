@@ -236,6 +236,10 @@ export function configRoutes(ctx: ServiceContext): Hono {
       // config.json, so gates still apply — but the UI would render the
       // default `free` slider position regardless of the stored policy).
       securityPolicy: config.securityPolicy,
+      // OpenAI-compatible endpoint controls (Settings → Connected Apps).
+      // Hand-pick into the whitelist like everything above, or the panel's
+      // toggle/dropdown would render defaults on the next GET.
+      openaiEndpoints: config.openaiEndpoints,
       remoteServing: {
         ...(config.remoteServing ?? {}),
         enabled: ctx.remoteServing.status().listening,
@@ -544,6 +548,10 @@ export function configRoutes(ctx: ServiceContext): Hono {
       // user changes them, even though config.json is correct. Same
       // echo-bug class as the llama-cpp / tuning fields above.
       securityPolicy: updated.securityPolicy,
+      // Same echo-bug class as securityPolicy above: without this, the
+      // Connected Apps toggle/dropdown revert visually the instant the
+      // user changes them.
+      openaiEndpoints: updated.openaiEndpoints,
       remoteServing: {
         ...(updated.remoteServing ?? {}),
         enabled: ctx.remoteServing.status().listening,

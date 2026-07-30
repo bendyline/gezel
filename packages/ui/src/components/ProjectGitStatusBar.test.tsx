@@ -219,4 +219,21 @@ describe('ProjectGitStatusBar', () => {
     });
     expect(screen.getByText(/Save your changes first/)).toBeInTheDocument();
   });
+
+  it('hands authentication failures off to the GitHub tab', async () => {
+    vi.mocked(api.syncProjectGit).mockResolvedValue({
+      state: 'auth',
+      pulled: 0,
+      pushed: 0,
+    } as never);
+    const onOpenGitHub = vi.fn();
+    render(<ProjectGitStatusBar projectId="pj-1" onOpenGitHub={onOpenGitHub} />);
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Sync' }));
+
+    await waitFor(() => {
+      expect(onOpenGitHub).toHaveBeenCalled();
+    });
+    expect(screen.getByText(/GitHub needs you to sign in again/)).toBeInTheDocument();
+  });
 });

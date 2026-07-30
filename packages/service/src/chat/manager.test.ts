@@ -203,6 +203,34 @@ describe('ChatManager — send + persistence', () => {
     expect(disk!.lastActivityAt).not.toBe(session.createdAt);
   });
 
+  it('persists the observed reasoning stream span and exposes it in the timeline', async () => {
+    const session = await manager.createSession({ gezelId: 'ada' });
+    mock.scriptReasoning('First I should inspect the request. ', 'Then I can answer.');
+    mock.script('A concise answer');
+    let clock = 10_000;
+    const now = vi.spyOn(Date, 'now').mockImplementation(() => {
+      clock += 10;
+      return clock;
+    });
+
+    try {
+      await manager.send(session.id, 'please reason about this');
+    } finally {
+      now.mockRestore();
+    }
+
+    const disk = await store.getSession('ada', session.id);
+    const assistant = disk?.messages.find((message) => message.role === 'assistant');
+    expect(assistant?.reasoning).toBe('First I should inspect the request. Then I can answer.');
+    expect(assistant?.reasoningDurationMs).toBeGreaterThan(0);
+
+    const timeline = await store.listTimeline({ projectId: 'default', limit: 100 });
+    const timelineAssistant = timeline.messages.find(
+      (message) => message.sessionId === session.id && message.role === 'assistant',
+    );
+    expect(timelineAssistant?.reasoningDurationMs).toBe(assistant?.reasoningDurationMs);
+  });
+
   it('skips stale missing-deliverable messages once the workspace file exists', async () => {
     const session = await manager.createSession({ gezelId: 'ada' });
     await store.writeProjectWorkspaceFile(
