@@ -705,6 +705,90 @@ jobs:
           done
           wait "$pid"
 
+      - name: Smoke-test macOS PKG install and recovery
+        env:
+          GEZEL_EXPECTED_VERSION: ${{ needs.release-preflight.outputs.version }}
+        run: |
+          set -euo pipefail
+          pkg=$(find packages/app/dist/installers -maxdepth 1 -name '*.pkg' -print -quit)
+          test -n "$pkg"
+
+          daemon_label=com.bendyline.gezeld
+          data_dir="/Library/Application Support/Gezel"
+          runtime_dir="$data_dir/runtime"
+          uninstaller="/Applications/Gezel.app/Contents/Resources/uninstall.sh"
+
+          cleanup() {
+            set +e
+            if [[ -f "$uninstaller" ]]; then
+              sudo /bin/bash "$uninstaller" --purge-data
+            else
+              # The installer can fail after creating script-owned state but
+              # before the app payload is available. Keep the ephemeral runner
+              # clean even in that partial state.
+              sudo launchctl bootout "system/$daemon_label" 2>/dev/null || true
+              sudo launchctl enable "system/$daemon_label" 2>/dev/null || true
+              sudo rm -f "/Library/LaunchDaemons/$daemon_label.plist"
+              sudo rm -rf "/Applications/Gezel.app" "$data_dir"
+              sudo dscl . -delete /Users/_gezeld 2>/dev/null || true
+              sudo dscl . -delete /Groups/_gezeld 2>/dev/null || true
+            fi
+            return 0
+          }
+          trap cleanup EXIT
+
+          assert_installed_health() {
+            deadline=$((SECONDS + 90))
+            while (( SECONDS < deadline )); do
+              if sudo launchctl print "system/$daemon_label" >/dev/null 2>&1 && \
+                 [[ -s "$runtime_dir/port" ]] && [[ -s "$runtime_dir/cert.pem" ]]; then
+                port=$(awk 'NR == 1 { print $1 }' "$runtime_dir/port")
+                if [[ "$port" =~ ^[0-9]+$ ]]; then
+                  if health=$(
+                    /usr/bin/curl \
+                      --fail \
+                      --silent \
+                      --show-error \
+                      --connect-timeout 2 \
+                      --max-time 3 \
+                      --cacert "$runtime_dir/cert.pem" \
+                      "https://127.0.0.1:${port}/api/health" 2>/dev/null
+                  ); then
+                    if grep -Fq '"ok":true' <<<"$health" && \
+                       grep -Fq "\"version\":\"$GEZEL_EXPECTED_VERSION\"" <<<"$health"; then
+                      echo "verified installed PKG health: $health"
+                      return 0
+                    fi
+                  fi
+                fi
+              fi
+              sleep 1
+            done
+
+            echo "::error::installed PKG did not expose expected service health"
+            sudo launchctl print "system/$daemon_label" || true
+            sudo tail -n 100 "$data_dir/logs/service-stderr.log" 2>/dev/null || true
+            sudo tail -n 100 "$data_dir/logs/service-stdout.log" 2>/dev/null || true
+            return 1
+          }
+
+          echo "installing PKG from a clean machine state"
+          sudo /usr/sbin/installer -pkg "$pkg" -target /
+          assert_installed_health
+
+          echo "reinstalling the same PKG to prove idempotency"
+          sudo /usr/sbin/installer -pkg "$pkg" -target /
+          assert_installed_health
+
+          echo "persistently disabling the service to exercise recovery"
+          sudo launchctl disable "system/$daemon_label"
+          if ! sudo launchctl print-disabled system | grep -Fq "\"$daemon_label\" => disabled"; then
+            echo "::error::failed to establish the disabled-state recovery precondition"
+            exit 1
+          fi
+          sudo /usr/sbin/installer -pkg "$pkg" -target /
+          assert_installed_health
+
       - name: Verify macOS update metadata was generated
         run: |
           set -euo pipefail

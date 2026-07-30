@@ -37,6 +37,12 @@ DAEMON_USER="_gezeld"
 echo "[gezel uninstall] stopping GezelService"
 launchctl bootout "system/${DAEMON_LABEL}" 2>/dev/null || true
 
+# `launchctl disable` persists independently of the plist and app payload.
+# Clear any installer safety quarantine so a later reinstall starts from the
+# platform default instead of inheriting a stale "Service is disabled" error.
+echo "[gezel uninstall] clearing persistent launchd override"
+launchctl enable "system/${DAEMON_LABEL}" 2>/dev/null || true
+
 echo "[gezel uninstall] removing LaunchDaemon plist"
 rm -f "$PLIST"
 
