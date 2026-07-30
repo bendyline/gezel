@@ -1,4 +1,4 @@
-import type { GezelDetail, ProjectForGezel } from '@bendyline/gezel';
+import { type GezelDetail, type ProjectForGezel, pronounFormsForGender } from '@bendyline/gezel';
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
 import { Select } from '../primitives/index.js';
@@ -185,10 +185,10 @@ function GezelChatBody({
   // messages yet. Keeps the per-gezel-tab framing ("what they're up to
   // in this project") since the composer pill already surfaces who the
   // user is talking to.
-  const emptyPlaceholder = useMemo(
-    () => `Talk to ${gezel.name} about what they're working on in this project.`,
-    [gezel.name],
-  );
+  const emptyPlaceholder = useMemo(() => {
+    const pronouns = pronounFormsForGender(gezel.gender);
+    return `Talk to ${gezel.name} about what ${pronouns.subject} ${pronouns.presentBe} working on in this project.`;
+  }, [gezel.name, gezel.gender]);
 
   // Composer placeholder picks from the role-aware pool so the copy
   // nudges the user toward the right kind of conversation. Voorman
@@ -199,10 +199,11 @@ function GezelChatBody({
       pickChatPlaceholder({
         role: project.precedence === 'voorman' ? 'voorman' : 'other',
         gezelName: gezel.name,
+        gezelGender: gezel.gender,
         projectName: project.projectName,
         fixedFunctionTool: gezel.fixedFunction?.tool,
       }),
-    [project.precedence, project.projectName, gezel.name, gezel.fixedFunction?.tool],
+    [project.precedence, project.projectName, gezel.name, gezel.gender, gezel.fixedFunction?.tool],
   );
 
   return (
@@ -279,10 +280,11 @@ function GezelChatAllProjectsBody({ gezel }: { gezel: GezelDetail }) {
       pickChatPlaceholder({
         role: 'other',
         gezelName: gezel.name,
+        gezelGender: gezel.gender,
         projectName: focused ? undefined : 'default',
         fixedFunctionTool: gezel.fixedFunction?.tool,
       }),
-    [gezel.name, focused, gezel.fixedFunction?.tool],
+    [gezel.name, gezel.gender, focused, gezel.fixedFunction?.tool],
   );
 
   const composerProjectId = focused?.projectId ?? 'default';

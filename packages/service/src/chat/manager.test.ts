@@ -4863,6 +4863,15 @@ describe('describeDelegateFailureForAsker', () => {
     expect(msg).toMatch(/don't change your own tool arguments/i);
   });
 
+  it('uses the target gezel assigned pronouns in the asker-facing summary', () => {
+    const female = describeDelegateFailureForAsker('Lyudmyla', RAMBLE_ABORT, 'female');
+    expect(female).toContain('she spent her whole turn');
+    expect(female).not.toContain('they spent their whole turn');
+
+    const male = describeDelegateFailureForAsker('Adam', RAMBLE_ABORT, 'male');
+    expect(male).toContain('he spent his whole turn');
+  });
+
   it('never forwards the delegate-facing second-person remediation to the asker', () => {
     const msg = describeDelegateFailureForAsker('Adam', RAMBLE_ABORT);
     // The coaching that caused Laxmi to thrash + fabricate a write_file.

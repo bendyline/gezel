@@ -172,7 +172,7 @@ export function GezellenView() {
   );
 
   return (
-    <div className="two-col" data-testid="gezels-view">
+    <div className="two-col gezellen-view" data-testid="gezels-view">
       <NewGezelDialog
         open={showCreate}
         onClose={() => setShowCreate(false)}

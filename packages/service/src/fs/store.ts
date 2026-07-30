@@ -77,6 +77,7 @@ import {
   nowIso,
   parseGezelMarkdown,
   pickKokoroVoiceForGender,
+  pronounFormsForGender,
   serializeGezelMarkdown,
 } from '@bendyline/gezel';
 import {
@@ -1274,7 +1275,10 @@ export class Store {
     // misleading. The about pane / editor route refuses to write into
     // these gezels too — see the http routes and the UI gating.
     if (!input.frontmatter?.fixedFunction) {
-      await writeFileAtomic(join(dir, 'about.md'), input.about ?? defaultAboutMarkdown(input.name));
+      await writeFileAtomic(
+        join(dir, 'about.md'),
+        input.about ?? defaultAboutMarkdown(input.name, gender),
+      );
     }
     // Generate-and-persist the poppetje before reading the detail, so
     // the create response carries the figure for the UI to render
@@ -1999,7 +2003,10 @@ export class Store {
     });
     await writeFileAtomic(join(dir, 'gezel.md'), source);
     if (!input.canonical) {
-      await writeFileAtomic(join(dir, 'about.md'), input.about ?? defaultAboutMarkdown(input.name));
+      await writeFileAtomic(
+        join(dir, 'about.md'),
+        input.about ?? defaultAboutMarkdown(input.name, gender),
+      );
     }
     // Poppetje lands in app-data keyed by the encoded id (not the repo).
     await this.poppetjes.get(encodedId, input.name, gender);
@@ -5803,10 +5810,11 @@ export function pickRoleBasedName(role: string | undefined, taken: ReadonlySet<s
   throw new Error('roleBasedName collision overflow for roleless gezel');
 }
 
-function defaultAboutMarkdown(name: string): string {
+function defaultAboutMarkdown(name: string, gender?: GezelGender): string {
+  const pronouns = pronounFormsForGender(gender);
   return `# ${name}
 
-Write a few paragraphs about this agent: who they are, what they're good at, how they should behave, and anything a task runner should know to work with them well. This content is injected into the system prompt whenever a task uses this agent.
+Write a few paragraphs about this agent: who ${pronouns.subject} ${pronouns.presentBe}, what ${pronouns.subject} ${pronouns.presentBe} good at, how ${pronouns.subject} should behave, and anything a task runner should know to work with ${pronouns.object} well. This content is injected into the system prompt whenever a task uses this agent.
 `;
 }
 

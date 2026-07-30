@@ -942,6 +942,17 @@ describe('project tasks storage', () => {
     expect(list).toHaveLength(1);
   });
 
+  it.each([
+    ['male', 'who he is', 'work with him well'],
+    ['female', 'who she is', 'work with her well'],
+    ['non-binary', 'who they are', 'work with them well'],
+  ] as const)('writes %s pronouns into the default about prompt', async (gender, who, object) => {
+    const created = await store.createGezel({ name: `Default ${gender}`, gender });
+
+    expect(created.about).toContain(who);
+    expect(created.about).toContain(object);
+  });
+
   it('readTask migrates a legacy phases/activePhaseId task to craftbook', async () => {
     await store.createProject({ name: 'Alpha' });
     // Task shape from before the `phases` → `craftbook` rename.

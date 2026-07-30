@@ -43,6 +43,7 @@ import {
   profileKind,
   projectGezelId,
   projectWorkspaceWritable,
+  pronounFormsForGender,
   pronounsForGender,
   resolveExecutionDensity,
   resolveSandboxCopilot,
@@ -2922,6 +2923,7 @@ export class ChatManager {
         fromSessionId: resolvedFromSessionId,
         toGezelId: target.id,
         toName: target.name,
+        toGender: target.gender,
         fromGezelId: args.fromGezelId,
         fromGezelName: fromName,
         projectId,
@@ -3022,6 +3024,7 @@ export class ChatManager {
                 reason: describeDelegateFailureForAsker(
                   target.name,
                   err instanceof Error ? err.message : String(err),
+                  target.gender,
                 ),
               });
             }
@@ -3293,6 +3296,7 @@ export class ChatManager {
           message: describeDelegateFailureForAsker(
             targetDisplayName,
             err instanceof Error ? err.message : String(err),
+            target.gender,
           ),
         };
       }
@@ -3311,7 +3315,11 @@ export class ChatManager {
           return {
             outcome: 'error',
             reason: 'target-error',
-            message: describeDelegateFailureForAsker(targetDisplayName, result.error),
+            message: describeDelegateFailureForAsker(
+              targetDisplayName,
+              result.error,
+              target.gender,
+            ),
           };
         case 'timeout':
           return {
@@ -3324,12 +3332,14 @@ export class ChatManager {
             // actively working.
             message: `${targetDisplayName} went quiet for ${Math.round(timeoutMs / 1000)} s with no progress and may be stuck mid-answer.`,
           };
-        case 'session-gone':
+        case 'session-gone': {
+          const targetPronouns = pronounFormsForGender(target.gender);
           return {
             outcome: 'error',
             reason: 'target-deleted',
-            message: `${targetDisplayName}'s session was deleted before they could reply.`,
+            message: `${targetDisplayName}'s session was deleted before ${targetPronouns.subject} could reply.`,
           };
+        }
       }
     } finally {
       this.inflightAsks.delete(args.fromSessionId);
@@ -3579,6 +3589,7 @@ export class ChatManager {
       fromSessionId: string;
       toGezelId: string;
       toName: string;
+      toGender?: GezelGender;
       fromGezelId: string;
       fromGezelName: string;
       projectId: string;
@@ -3611,7 +3622,8 @@ export class ChatManager {
       // user just sees "I asked Maya and never heard back" with no in-app
       // explanation when the listener eventually expires.
       const idleMinutes = Math.round(idleTimeoutMs / 60_000);
-      const reason = `Reply from ${args.toName} went quiet for ${idleMinutes} min with no progress — they may be paused, deleted, or stuck mid-turn.`;
+      const targetPronouns = pronounFormsForGender(args.toGender);
+      const reason = `Reply from ${args.toName} went quiet for ${idleMinutes} min with no progress — ${targetPronouns.subject} may be paused, deleted, or stuck mid-turn.`;
       this.events.publish(
         {
           sessionId: args.fromSessionId,
@@ -3668,7 +3680,7 @@ export class ChatManager {
         fired = true;
         clearTimeout(idleTimeout);
         unsubscribe?.();
-        const reason = describeDelegateFailureForAsker(args.toName, event.error);
+        const reason = describeDelegateFailureForAsker(args.toName, event.error, args.toGender);
         this.events.publish(
           {
             sessionId: args.fromSessionId,
@@ -12265,7 +12277,11 @@ function clampAskTimeout(ms: number): number {
  * delegate-facing "call write_file NOW" remediation back to a caller who
  * merely delegated.
  */
-export function describeDelegateFailureForAsker(targetName: string, raw: string): string {
+export function describeDelegateFailureForAsker(
+  targetName: string,
+  raw: string,
+  targetGender?: GezelGender,
+): string {
   const text = (raw ?? '').trim();
   // Ramble / planning-budget abort family. Every local provider emits
   // "aborting — the gezel emitted N characters of prose this turn
@@ -12273,7 +12289,8 @@ export function describeDelegateFailureForAsker(targetName: string, raw: string)
   // ramble-detector.ts + the mlx / llama-cpp / ollama providers). Match
   // on the stable lead clause rather than the full second-person tail.
   if (/emitted\s+\d+\s+characters of prose this turn|\bStop planning\b/i.test(text)) {
-    return `${targetName} couldn't complete the request — they spent their whole turn planning without producing the deliverable. This is ${targetName}'s failure, not a problem with your call (it was delivered fine), so don't change your own tool arguments. Retry with a smaller, more concrete ask, reassign to a different gezel, or surface the blocker to the user.`;
+    const pronouns = pronounFormsForGender(targetGender);
+    return `${targetName} couldn't complete the request — ${pronouns.subject} spent ${pronouns.possessiveAdjective} whole turn planning without producing the deliverable. This is ${targetName}'s failure, not a problem with your call (it was delivered fine), so don't change your own tool arguments. Retry with a smaller, more concrete ask, reassign to a different gezel, or surface the blocker to the user.`;
   }
   // Generic downstream failure: preserve the underlying cause but make
   // ownership explicit so the asker doesn't read it as its own arg error.
@@ -14363,8 +14380,9 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
     }
     if (displayedVoormanName) {
       const voormanPronouns = voormanGender ? ` (${pronounsForGender(voormanGender)})` : '';
+      const voormanPronounForms = pronounFormsForGender(voormanGender);
       projectContext += isSolo
-        ? ` The ambachtsman of this job is **${displayedVoormanName}**${voormanPronouns} — they handle the entire project themselves; team-management tools are intentionally not available here.`
+        ? ` The ambachtsman of this job is **${displayedVoormanName}**${voormanPronouns} — ${voormanPronounForms.subject} will handle the entire project ${voormanPronounForms.reflexive}; team-management tools are intentionally not available here.`
         : ` The voorman of this project is **${displayedVoormanName}**${voormanPronouns}.`;
     }
     if (project.about && project.about.trim().length > 0) {

@@ -1,3 +1,5 @@
+import { type GezelGender, type GezelPronounForms, pronounFormsForGender } from '@bendyline/gezel';
+
 /**
  * Compose a Squisq-editor placeholder for the chat composer. Different
  * roles get different hints:
@@ -16,6 +18,8 @@ export type ChatPlaceholderRole = 'meester' | 'voorman' | 'other';
 interface Args {
   role: ChatPlaceholderRole;
   gezelName: string;
+  /** Assigned gezel gender; absent legacy values use neutral they/them. */
+  gezelGender?: GezelGender;
   /** Required for voorman role; ignored for others. */
   projectName?: string;
   /**
@@ -29,7 +33,9 @@ interface Args {
   fixedFunctionTool?: string;
 }
 
-const MEESTER_VARIANTS: ReadonlyArray<(name: string) => string> = [
+type NamedVariant = (name: string, pronouns: GezelPronounForms) => string;
+
+const MEESTER_VARIANTS: ReadonlyArray<NamedVariant> = [
   (name) =>
     `Talk with ${name} about project ideas, to catch up on existing projects, or to spin up a new gezel.`,
   (name) => `Ask ${name} what you should work on next — or just say what's on your mind.`,
@@ -37,25 +43,29 @@ const MEESTER_VARIANTS: ReadonlyArray<(name: string) => string> = [
     `${name} knows the whole team. Ask what everyone's doing, delegate something new, or just vent about a stuck project.`,
   (name) =>
     `Got a half-baked idea? ${name} will help shape it into something your gezels can actually start on.`,
-  (name) => `Ask ${name} who's working on what, or hand them something new to route.`,
+  (name, pronouns) =>
+    `Ask ${name} who's working on what, or hand ${pronouns.object} something new to route.`,
 ];
 
-const VOORMAN_VARIANTS: ReadonlyArray<(name: string, project: string) => string> = [
+const VOORMAN_VARIANTS: ReadonlyArray<
+  (name: string, project: string, pronouns: GezelPronounForms) => string
+> = [
   (name, project) => `Talk with ${name} about ${project}.`,
   (name, project) => `Ask ${name} how ${project} is going, nudge a stuck task, or rework the plan.`,
-  (name, project) =>
-    `${name} runs ${project}. Check in on progress, change direction, or approve their latest move.`,
-  (name, project) =>
-    `What's blocking ${project}? Ask ${name} — they either know or can go find out.`,
+  (name, project, pronouns) =>
+    `${name} runs ${project}. Check in on progress, change direction, or approve ${pronouns.possessiveAdjective} latest move.`,
+  (name, project, pronouns) =>
+    `What's blocking ${project}? Ask ${name} — ${pronouns.subject} will either know or can go find out.`,
   (name, project) => `Give ${name} a new brief for ${project}, or ask where the last thing landed.`,
 ];
 
-const OTHER_VARIANTS: ReadonlyArray<(name: string) => string> = [
+const OTHER_VARIANTS: ReadonlyArray<NamedVariant> = [
   (name) => `Talk with ${name}.`,
-  (name) =>
-    `Ask ${name} a question, hand them something to work on, or just see what they're up to.`,
-  (name) => `${name} is here when you need them. Fire away.`,
-  (name) => `Catch ${name} up on what you want next, or ask what they've shipped.`,
+  (name, pronouns) =>
+    `Ask ${name} a question, hand ${pronouns.object} something to work on, or just see what ${pronouns.subject} ${pronouns.presentBe} up to.`,
+  (name, pronouns) => `${name} is here when you need ${pronouns.object}. Fire away.`,
+  (name, pronouns) =>
+    `Catch ${name} up on what you want next, or ask what ${pronouns.subject} ${pronouns.presentHave} shipped.`,
 ];
 
 /**
@@ -86,9 +96,9 @@ const GENERATOR_GENERIC: ReadonlyArray<(name: string) => string> = [
     `${name} forwards whatever you type straight to one tool — there's no chat in the middle. Describe exactly what you want; keywords are fine.`,
 ];
 
-const QUIRKY_UNIVERSAL: ReadonlyArray<(name: string) => string> = [
+const QUIRKY_UNIVERSAL: ReadonlyArray<NamedVariant> = [
   (name) => `Go ahead, ${name} is listening.`,
-  (name) => `${name} has been waiting patiently. Ask them anything.`,
+  (name, pronouns) => `${name} has been waiting patiently. Ask ${pronouns.object} anything.`,
   (name) => `No wrong questions. ${name} has probably heard weirder.`,
   (name) => `Don't be shy — ${name} has seen it all.`,
 ];
@@ -100,6 +110,7 @@ const QUIRKY_UNIVERSAL: ReadonlyArray<(name: string) => string> = [
  */
 export function pickChatPlaceholder(args: Args): string {
   const { role, gezelName } = args;
+  const pronouns = pronounFormsForGender(args.gezelGender);
   // Fixed-function generators get directive copy and skip the quirky/
   // conversational pools entirely — "ask them anything" is misleading
   // for a gezel that only forwards text to one tool.
@@ -111,21 +122,21 @@ export function pickChatPlaceholder(args: Args): string {
   // ~15% chance to serve a quirky universal variant, regardless of role.
   if (Math.random() < 0.15) {
     const q = QUIRKY_UNIVERSAL[Math.floor(Math.random() * QUIRKY_UNIVERSAL.length)];
-    if (q) return sentenceCase(q(gezelName));
+    if (q) return sentenceCase(q(gezelName, pronouns));
   }
   if (role === 'meester') {
     const pick = MEESTER_VARIANTS[Math.floor(Math.random() * MEESTER_VARIANTS.length)];
-    return sentenceCase(pick ? pick(gezelName) : `Talk with ${gezelName}.`);
+    return sentenceCase(pick ? pick(gezelName, pronouns) : `Talk with ${gezelName}.`);
   }
   if (role === 'voorman') {
     const project = args.projectName ?? 'this project';
     const pick = VOORMAN_VARIANTS[Math.floor(Math.random() * VOORMAN_VARIANTS.length)];
     return sentenceCase(
-      pick ? pick(gezelName, project) : `Talk with ${gezelName} about ${project}.`,
+      pick ? pick(gezelName, project, pronouns) : `Talk with ${gezelName} about ${project}.`,
     );
   }
   const pick = OTHER_VARIANTS[Math.floor(Math.random() * OTHER_VARIANTS.length)];
-  return sentenceCase(pick ? pick(gezelName) : `Talk with ${gezelName}.`);
+  return sentenceCase(pick ? pick(gezelName, pronouns) : `Talk with ${gezelName}.`);
 }
 
 /**

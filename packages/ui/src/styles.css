@@ -1894,6 +1894,32 @@ html.embedded-chat #root {
   margin-left: -4px;
 }
 
+/* Document names use the action column while it is dormant. Revealing the
+   menu covers the trailing characters in place, so the row never shifts. */
+.documents-tree-list .tree-row {
+  position: relative;
+  --tree-action-overlay-bg: var(--bg);
+}
+.documents-tree-list .tree-row:hover {
+  --tree-action-overlay-bg: color-mix(in srgb, var(--bg) 92%, var(--text));
+}
+.documents-tree-list .tree-row-selected {
+  --tree-action-overlay-bg: color-mix(in srgb, var(--bg) 85%, var(--accent));
+}
+.documents-tree-list .tree-actions-trigger {
+  position: absolute;
+  z-index: 2;
+  right: 4px;
+  pointer-events: none;
+}
+.documents-tree-list .tree-row:hover .tree-actions-trigger,
+.documents-tree-list .tree-row:focus-within .tree-actions-trigger,
+.documents-tree-list .tree-actions-trigger[data-state="open"] {
+  background: var(--tree-action-overlay-bg);
+  box-shadow: -0.45rem 0 0 var(--tree-action-overlay-bg);
+  pointer-events: auto;
+}
+
 .documents-detail {
   overflow: auto;
   min-height: 0;
@@ -2398,12 +2424,14 @@ html.embedded-chat #root {
   font-weight: 600;
 }
 
-/* Project row: the name button flexes, followed by the hover actions and
-   the right-aligned signal (status light / working / needs input). */
+/* Project row: the name button flexes all the way to the right-aligned signal.
+   The hover action overlays the tail of the name instead of permanently
+   reserving space for an invisible button. */
 .app-sidebar-proj-row {
   position: relative;
   display: flex;
   align-items: center;
+  --project-action-overlay-bg: var(--panel);
 }
 .app-sidebar-proj-row > .app-sidebar-item {
   width: auto;
@@ -2563,6 +2591,7 @@ html.embedded-chat #root {
   border-radius: var(--radius-md, 6px);
   cursor: pointer;
   opacity: 0;
+  pointer-events: none;
   transition: opacity 0.12s ease;
 }
 .app-sidebar-proj-row:hover .project-actions-trigger,
@@ -2570,21 +2599,42 @@ html.embedded-chat #root {
 .project-actions-trigger[data-state="open"],
 .project-actions-trigger:focus-visible {
   opacity: 1;
+  pointer-events: auto;
 }
 .project-actions-trigger:hover,
 .project-actions-trigger[data-state="open"] {
   color: var(--fg, inherit);
   background: rgba(127, 127, 127, 0.14);
 }
-.app-sidebar-proj-row .project-actions-trigger {
-  margin-right: 0.15rem;
+/* Keep the status signal's column intact, but let the project name flow below
+   the hidden action trigger. Once revealed, an opaque patch covers the last
+   few characters rather than reflowing the row. */
+.app-sidebar-proj-row > .project-actions-trigger {
+  position: absolute;
+  z-index: 3;
+  right: calc(22px + 0.55rem);
+  left: auto;
+  margin-right: 0;
+}
+.app-sidebar-proj-row:hover {
+  --project-action-overlay-bg: color-mix(in srgb, var(--panel) 92%, var(--accent));
+}
+.app-sidebar-proj-row.active {
+  --project-action-overlay-bg: var(--sidebar-tab-surface);
+}
+.app-sidebar-proj-row:hover > .project-actions-trigger,
+.app-sidebar-proj-row > .project-actions-trigger[data-state="open"],
+.app-sidebar-proj-row > .project-actions-trigger:focus-visible {
+  background: var(--project-action-overlay-bg);
+  box-shadow: -0.4rem 0 0 var(--project-action-overlay-bg);
 }
 
-/* Projects-view rail row: name button + hover actions on one line. */
+/* Projects-view rail: the name also owns the full resting width, with its
+   action menu painted over the trailing text only while visible. */
 .project-rail-row {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 0.15rem;
 }
 .project-rail-name {
   flex: 1 1 auto;
@@ -2592,6 +2642,26 @@ html.embedded-chat #root {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.project-rail-row > .project-actions-trigger {
+  position: absolute;
+  z-index: 2;
+  right: 0.2rem;
+}
+.project-rail-row:hover > .project-actions-trigger,
+.project-rail-row > .project-actions-trigger[data-state="open"],
+.project-rail-row > .project-actions-trigger:focus-visible {
+  background: var(--bg);
+  box-shadow: -0.4rem 0 0 var(--bg);
+}
+.project-rail-name.active + .project-actions-trigger {
+  --project-action-overlay-bg: color-mix(in srgb, var(--bg) 85%, var(--accent));
+}
+.project-rail-row:hover > .project-rail-name.active + .project-actions-trigger,
+.project-rail-name.active + .project-actions-trigger[data-state="open"],
+.project-rail-name.active + .project-actions-trigger:focus-visible {
+  background: var(--project-action-overlay-bg);
+  box-shadow: -0.4rem 0 0 var(--project-action-overlay-bg);
 }
 
 .app-nav-menu-item.danger {
@@ -3198,6 +3268,20 @@ body.app-resizing webview {
   min-height: 0;
 }
 
+/* The Gezellen roster needs to remain full-bleed, while each gezel's page
+   should sit inside the same canvas inset as standalone app pages. Replace
+   the generic split-view gutter with padding on the detail column so all
+   four edges get equal breathing room. A slightly narrower roster returns
+   that space to the detail page when the global navigation rail is open. */
+.two-col.gezellen-view {
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 0;
+}
+
+.gezellen-view > section {
+  padding: 1rem 1.25rem;
+}
+
 /* Make the main column a flex column so its tab panels can fill the
    available height. Without this, `.project-chat`'s `flex: 1` in the
    chat tab collapses to its intrinsic content height, leaving a big
@@ -3231,11 +3315,12 @@ body.app-resizing webview {
   margin: 0;
 }
 
-/* Project and gezel rows also contain trailing actions triggers. Keep this
-   full-width treatment on each row's primary button only: applying it to an
-   actions trigger makes that compact button consume the rail and squeezes the
-   row label down to a few characters. */
-.side li button:not(.project-actions-trigger):not(.gezel-actions-trigger) {
+/* Sidebar rows can contain trailing action triggers. Keep this generic
+   full-width treatment off those compact actions and off `.gezel-row`,
+   which owns a horizontal portrait/text layout further below. */
+.side
+  li
+  button:not(.project-actions-trigger):not(.gezel-actions-trigger):not(.gezel-row) {
   display: block;
   width: 100%;
   text-align: left;
@@ -3247,7 +3332,9 @@ body.app-resizing webview {
   cursor: pointer;
 }
 
-.side li button:not(.project-actions-trigger):not(.gezel-actions-trigger).active {
+.side
+  li
+  button:not(.project-actions-trigger):not(.gezel-actions-trigger):not(.gezel-row).active {
   background: rgba(176, 114, 76, 0.15);
 }
 

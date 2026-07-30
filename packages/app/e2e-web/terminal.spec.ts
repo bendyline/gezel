@@ -263,18 +263,33 @@ test('mounts, submits on Enter, newlines on Shift+Enter', async ({ page, world }
   await expect(editor.locator('.view-line')).toHaveCount(2);
 });
 
-test('switches to a blank chat composer when a fresh terminal draft starts with @', async ({
+test('keeps keyboard focus while switching between terminal and blank chat', async ({
   page,
   world,
 }) => {
   const terminalEditor = await openTerminal(page, world!.projectId);
-  await terminalEditor.click();
+  await expect(terminalEditor.locator('textarea.inputarea')).toBeFocused();
   await page.keyboard.type('@');
 
   await expect(page.getByRole('tab', { name: 'AI chat' })).toHaveAttribute('aria-selected', 'true');
-  const chatEditor = page.getByTestId('chat-composer').locator('.squisq-wysiwyg-editor').first();
+  const chatComposer = page.getByTestId('chat-composer');
+  const chatEditor = chatComposer.locator('.squisq-wysiwyg-editor').first();
   await expect(chatEditor).toBeVisible();
   await expect(chatEditor).toHaveText('');
+  await expect(chatEditor).toBeFocused();
+
+  await page.keyboard.type('keep typing');
+  await expect(chatEditor).toHaveText('keep typing');
+
+  await chatEditor.fill('');
+  await page.keyboard.type('> ');
+  await expect(page.getByRole('tab', { name: 'Terminal' })).toHaveAttribute(
+    'aria-selected',
+    'true',
+  );
+  await expect(terminalEditor.locator('textarea.inputarea')).toBeFocused();
+  await page.keyboard.type('echo focus-followed');
+  await expect(terminalEditor.locator('.view-lines')).toHaveText('echo focus-followed');
 });
 
 test('lets ordinary-height output flow while preserving a horizontal scrollbar', async ({

@@ -17,22 +17,44 @@ vi.mock('./GezelIcon.js', () => ({ GezelIcon: () => <span /> }));
 vi.mock('./GezelMediaProvider.js', () => ({
   createGezelMediaProvider: () => ({ dispose: vi.fn() }),
 }));
-vi.mock('@bendyline/squisq-editor-react', () => ({
-  EditorShell: ({
-    toolbarSlotRight,
-    onChange,
-  }: {
-    toolbarSlotRight?: React.ReactNode;
-    onChange?: (value: string) => void;
-  }) => (
-    <div>
-      <button type="button" onClick={() => onChange?.('Hello from the test')}>
-        Fill draft
-      </button>
-      {toolbarSlotRight}
-    </div>
-  ),
-}));
+vi.mock('@bendyline/squisq-editor-react', async () => {
+  const { useState } = await import('react');
+  return {
+    EditorShell: ({
+      initialMarkdown = '',
+      placeholder,
+      toolbarSlotRight,
+      onChange,
+    }: {
+      initialMarkdown?: string;
+      placeholder?: string;
+      toolbarSlotRight?: React.ReactNode;
+      onChange?: (value: string) => void;
+    }) => {
+      // Match Squisq's mount-time-only placeholder configuration so this
+      // mock catches regressions where a recipient change merely updates a
+      // prop without refreshing the underlying Tiptap editor.
+      const [mountedPlaceholder] = useState(placeholder);
+      const [draft, setDraft] = useState(initialMarkdown);
+      return (
+        <div>
+          <span data-testid="editor-placeholder">{mountedPlaceholder}</span>
+          <span data-testid="editor-draft">{draft}</span>
+          <button
+            type="button"
+            onClick={() => {
+              setDraft('Hello from the test');
+              onChange?.('Hello from the test');
+            }}
+          >
+            Fill draft
+          </button>
+          {toolbarSlotRight}
+        </div>
+      );
+    },
+  };
+});
 
 describe('ChatComposer server-authoritative cancellation', () => {
   beforeEach(() => {
@@ -245,6 +267,35 @@ describe('ChatComposer recipient picker', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Talk to Ada' }));
 
     expect(onPrimaryRecipientChange).toHaveBeenCalledWith('ada');
+  });
+
+  it('refreshes the recipient placeholder without losing the current draft', () => {
+    const { rerender } = render(
+      <ChatComposer
+        gezelId="tomas"
+        gezelName="Tomas"
+        projectId="default"
+        sessionId="session-1"
+        placeholder="Ask Tomas a question."
+      />,
+    );
+
+    expect(screen.getByTestId('editor-placeholder').textContent).toBe('Ask Tomas a question.');
+    fireEvent.click(screen.getByRole('button', { name: 'Fill draft' }));
+    expect(screen.getByTestId('editor-draft').textContent).toBe('Hello from the test');
+
+    rerender(
+      <ChatComposer
+        gezelId="ada"
+        gezelName="Ada"
+        projectId="default"
+        sessionId="session-1"
+        placeholder="Ask Ada a question."
+      />,
+    );
+
+    expect(screen.getByTestId('editor-placeholder').textContent).toBe('Ask Ada a question.');
+    expect(screen.getByTestId('editor-draft').textContent).toBe('Hello from the test');
   });
 
   it('adds a secondary recipient to the To line and fans the message out', async () => {

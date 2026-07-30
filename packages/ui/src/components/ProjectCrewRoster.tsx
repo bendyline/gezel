@@ -47,7 +47,7 @@ export function ProjectCrewRoster({
       aria-labelledby="project-crew-settings-title"
     >
       <h3 id="project-crew-settings-title" className="project-crew-settings-title">
-        Assigned gezels
+        Assigned gezellen
       </h3>
       <p className="muted small project-crew-settings-hint">
         The crew attached to this project. Change the lead below; task and conversation assignments

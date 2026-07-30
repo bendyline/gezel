@@ -45,6 +45,51 @@ describe('pickChatPlaceholder', () => {
     spy.mockRestore();
   });
 
+  it.each([
+    ['male', 0.6, 'need him'],
+    ['female', 0.6, 'need her'],
+    ['non-binary', 0.6, 'need them'],
+    [undefined, 0.6, 'need them'],
+    ['female', 0.3, 'hand her'],
+    ['female', 0.9, 'she has shipped'],
+  ] as const)('uses %s pronouns in worker copy', (gezelGender, poolPick, expected) => {
+    const spy = vi.spyOn(Math, 'random').mockReturnValueOnce(0.2).mockReturnValueOnce(poolPick);
+    const text = pickChatPlaceholder({
+      role: 'other',
+      gezelName: 'Lyudmyla',
+      gezelGender,
+    });
+    expect(text).toContain(expected);
+    spy.mockRestore();
+  });
+
+  it('uses assigned possessive and subject pronouns in voorman copy', () => {
+    const possessiveSpy = vi
+      .spyOn(Math, 'random')
+      .mockReturnValueOnce(0.2)
+      .mockReturnValueOnce(0.5);
+    expect(
+      pickChatPlaceholder({
+        role: 'voorman',
+        gezelName: 'Lyudmyla',
+        gezelGender: 'female',
+        projectName: 'Launch',
+      }),
+    ).toContain('approve her latest move');
+    possessiveSpy.mockRestore();
+
+    const subjectSpy = vi.spyOn(Math, 'random').mockReturnValueOnce(0.2).mockReturnValueOnce(0.7);
+    expect(
+      pickChatPlaceholder({
+        role: 'voorman',
+        gezelName: 'Owen',
+        gezelGender: 'male',
+        projectName: 'Launch',
+      }),
+    ).toContain('he will either know');
+    subjectSpy.mockRestore();
+  });
+
   it('gives image generators directive copy and skips the quirky pool', () => {
     // Even with random in the quirky band, a fixed-function tool wins.
     const spy = vi.spyOn(Math, 'random').mockReturnValue(0.01);

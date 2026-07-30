@@ -1,5 +1,5 @@
 import type { GezelSummary, ProjectDetail } from '@bendyline/gezel';
-import { displayName } from '@bendyline/gezel';
+import { displayName, pronounFormsForGender } from '@bendyline/gezel';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { ChatComposer } from './ChatComposer.js';
@@ -166,6 +166,11 @@ function ProjectChatBody({
   // Per the design: this toggle ONLY lives on per-project chat —
   // Meester (HomeView) and per-gezel (GezelChatTab) do not get it.
   const [composeMode, setComposeMode] = useState<'chat' | 'terminal'>('chat');
+  const [chatFocusRequestKey, setChatFocusRequestKey] = useState(0);
+  const switchToChat = useCallback(() => {
+    setChatFocusRequestKey((key) => key + 1);
+    setComposeMode('chat');
+  }, []);
   // Two pieces of state for the terminal pane, separated on purpose:
   //
   //   - `terminalThreadDir` — the folder used for routing. Sent on
@@ -264,11 +269,20 @@ function ProjectChatBody({
       pickChatPlaceholder({
         role: isVoorman ? 'voorman' : 'other',
         gezelName: selectedGezel.name,
+        gezelGender: selectedGezel.gender,
         projectName: project.name,
         fixedFunctionTool: selectedGezel.fixedFunction?.tool,
       }),
-    [isVoorman, selectedGezel.name, project.name, selectedGezel.fixedFunction?.tool],
+    [
+      isVoorman,
+      selectedGezel.name,
+      selectedGezel.gender,
+      project.name,
+      selectedGezel.fixedFunction?.tool,
+    ],
   );
+
+  const selectedGezelPronouns = pronounFormsForGender(selectedGezel.gender);
 
   return (
     <ChatReferences
@@ -310,7 +324,7 @@ function ProjectChatBody({
             emptyPlaceholder={
               isVoorman
                 ? `Talk to ${selectedGezel.name} about running "${project.name}" — planning tasks, delegating, or checking progress.`
-                : `Chat with ${selectedGezel.name} about what they're working on in "${project.name}".`
+                : `Chat with ${selectedGezel.name} about what ${selectedGezelPronouns.subject} ${selectedGezelPronouns.presentBe} working on in "${project.name}".`
             }
           />
           <div className="project-chat-compose-shell">
@@ -328,6 +342,7 @@ function ProjectChatBody({
                   gezelIconOverride={selectedGezel.iconOverride}
                   recipientGezels={recipientGezels}
                   onPrimaryRecipientChange={onSelectGezel}
+                  focusRequestKey={chatFocusRequestKey}
                   projectId={project.id}
                   sessionId={sessionId || undefined}
                   onSessionCreated={(sid) => {
@@ -398,7 +413,7 @@ function ProjectChatBody({
                     });
                     setTerminalRefreshKey((key) => key + 1);
                   }}
-                  onChatEscape={() => setComposeMode('chat')}
+                  onChatEscape={switchToChat}
                 />
               )}
             </div>
@@ -410,7 +425,7 @@ function ProjectChatBody({
                   aria-selected={composeMode === 'chat'}
                   aria-label="AI chat"
                   className={composeMode === 'chat' ? 'active' : ''}
-                  onClick={() => setComposeMode('chat')}
+                  onClick={switchToChat}
                   title="AI chat (@-mention to talk to a gezel)"
                 >
                   @

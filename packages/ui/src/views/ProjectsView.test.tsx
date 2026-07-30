@@ -174,7 +174,7 @@ describe('ProjectsView', () => {
 
     fireEvent.click(screen.getByRole('tab', { name: 'Settings' }));
 
-    const roster = await screen.findByRole('region', { name: 'Assigned gezels' });
+    const roster = await screen.findByRole('region', { name: 'Assigned gezellen' });
     expect(within(roster).getAllByRole('listitem')).toHaveLength(2);
     expect(within(roster).getByText('Tomas')).toBeInTheDocument();
     expect(within(roster).getByText('⭐ voorman')).toBeInTheDocument();
@@ -330,7 +330,7 @@ describe('ProjectsView', () => {
     const toc = await screen.findByRole('navigation', { name: 'About sections' });
     const links = within(toc).getAllByRole('link');
     expect(links.map((link) => link.textContent)).toEqual([
-      'Assigned gezels',
+      'Assigned gezellen',
       'About this project',
       'Mission objectives',
       'Connections',

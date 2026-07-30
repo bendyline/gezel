@@ -1854,7 +1854,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
 
                       <nav className="project-about-toc" aria-label="About sections">
                         <div className="project-about-toc-title">On this page</div>
-                        <a href="#project-about-crew">Assigned gezels</a>
+                        <a href="#project-about-crew">Assigned gezellen</a>
                         <a href="#project-about-overview">About this project</a>
                         <a href="#project-about-mission">Mission objectives</a>
                         <a href="#project-about-connections">Connections</a>

@@ -79,9 +79,16 @@ export function MeesterConversation({
       pickChatPlaceholder({
         role: activeGezelId === meesterGezelId ? 'meester' : 'other',
         gezelName: activeGezelName,
+        gezelGender: selectedGezel?.gender,
         fixedFunctionTool: selectedGezel?.fixedFunction?.tool,
       }),
-    [activeGezelId, activeGezelName, meesterGezelId, selectedGezel?.fixedFunction?.tool],
+    [
+      activeGezelId,
+      activeGezelName,
+      meesterGezelId,
+      selectedGezel?.gender,
+      selectedGezel?.fixedFunction?.tool,
+    ],
   );
 
   return (
