@@ -11,6 +11,7 @@
       "**/dist/**",
       "**/dist-embedded/**",
       "**/dist-e2e/**",
+      "**/.build/**",
       "**/node_modules/**",
       "**/.cache/**",
       "**/.gezel/**",
