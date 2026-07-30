@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { defaultNodeBundleDir, installNodeIfNeeded } from './extract-node.js';
 
@@ -30,11 +31,16 @@ async function writeBundle(version: string, content = 'fake-node-binary'): Promi
 
 describe('installNodeIfNeeded', () => {
   it('resolves packaged ASAR paths to the real unpacked directory', () => {
-    expect(
-      defaultNodeBundleDir(
-        'file:///Applications/Gezel.app/Contents/Resources/app.asar/dist/main.js',
-      ),
-    ).toBe('/Applications/Gezel.app/Contents/Resources/app.asar.unpacked/dist/node-bundle');
+    const packagedMain =
+      process.platform === 'win32'
+        ? 'C:\\Program Files\\Gezel\\resources\\app.asar\\dist\\main.js'
+        : '/Applications/Gezel.app/Contents/Resources/app.asar/dist/main.js';
+    const expectedBundle =
+      process.platform === 'win32'
+        ? 'C:\\Program Files\\Gezel\\resources\\app.asar.unpacked\\dist\\node-bundle'
+        : '/Applications/Gezel.app/Contents/Resources/app.asar.unpacked/dist/node-bundle';
+
+    expect(defaultNodeBundleDir(pathToFileURL(packagedMain).href)).toBe(expectedBundle);
   });
 
   it('returns no-bundle when the bundle directory does not exist', async () => {

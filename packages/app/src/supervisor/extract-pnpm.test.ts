@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { defaultPnpmBundleDir, installPnpmIfNeeded } from './extract-pnpm.js';
 
@@ -32,11 +33,16 @@ async function writeBundle(version: string, content = '// fake pnpm entry\n'): P
 
 describe('installPnpmIfNeeded', () => {
   it('resolves packaged ASAR paths to the real unpacked directory', () => {
-    expect(
-      defaultPnpmBundleDir(
-        'file:///Applications/Gezel.app/Contents/Resources/app.asar/dist/main.js',
-      ),
-    ).toBe('/Applications/Gezel.app/Contents/Resources/app.asar.unpacked/dist/pnpm-bundle');
+    const packagedMain =
+      process.platform === 'win32'
+        ? 'C:\\Program Files\\Gezel\\resources\\app.asar\\dist\\main.js'
+        : '/Applications/Gezel.app/Contents/Resources/app.asar/dist/main.js';
+    const expectedBundle =
+      process.platform === 'win32'
+        ? 'C:\\Program Files\\Gezel\\resources\\app.asar.unpacked\\dist\\pnpm-bundle'
+        : '/Applications/Gezel.app/Contents/Resources/app.asar.unpacked/dist/pnpm-bundle';
+
+    expect(defaultPnpmBundleDir(pathToFileURL(packagedMain).href)).toBe(expectedBundle);
   });
 
   it('returns no-bundle when the bundle directory does not exist', async () => {
