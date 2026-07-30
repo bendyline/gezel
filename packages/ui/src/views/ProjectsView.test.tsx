@@ -142,6 +142,128 @@ describe('ProjectsView', () => {
     });
   });
 
+  it('shows the assigned project crew at the top of Settings', async () => {
+    vi.mocked(api.listGezels).mockResolvedValue({
+      gezels: [
+        {
+          id: 'tomas',
+          name: 'Tomas',
+          role: 'Meester',
+          updatedAt: '2026-07-30T00:00:00.000Z',
+        },
+        {
+          id: 'yusuf',
+          name: 'Yusuf',
+          role: 'Developer',
+          updatedAt: '2026-07-30T00:00:00.000Z',
+        },
+      ],
+    } as never);
+    vi.mocked(api.getProject).mockResolvedValue({
+      id: 'pj-alpha',
+      name: 'Alpha',
+      packages: [],
+      allowGezelWrites: false,
+      voormanGezelId: 'tomas',
+      gezelIds: ['tomas', 'yusuf'],
+    } as never);
+
+    render(<ProjectsView forceProjectId="pj-alpha" />);
+    await screen.findByTestId('project-chat');
+    expect(screen.queryByText('More gezels…')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Settings' }));
+
+    const roster = await screen.findByRole('region', { name: 'Assigned gezels' });
+    expect(within(roster).getAllByRole('listitem')).toHaveLength(2);
+    expect(within(roster).getByText('Tomas')).toBeInTheDocument();
+    expect(within(roster).getByText('⭐ voorman')).toBeInTheDocument();
+    expect(within(roster).getByText('Yusuf')).toBeInTheDocument();
+    expect(within(roster).getByText('Developer')).toBeInTheDocument();
+  });
+
+  it('shows credential destinations without editable origin fields', async () => {
+    vi.mocked(api.listAvailableCredentials).mockResolvedValue({
+      credentials: [
+        {
+          name: 'github.token',
+          label: 'GitHub personal access token',
+          stored: true,
+          allowedOrigins: ['https://api.github.com'],
+          originSource: 'provider',
+          defaultOrigins: ['https://api.github.com'],
+        },
+        {
+          name: 'webhook.bearer',
+          label: 'Webhook bearer token',
+          stored: true,
+          allowedOrigins: [],
+          originSource: 'webhook',
+          defaultOrigins: [],
+        },
+        {
+          name: 'openai.key',
+          label: 'OpenAI API key',
+          stored: false,
+          allowedOrigins: ['https://api.openai.com'],
+          originSource: 'provider',
+          defaultOrigins: ['https://api.openai.com'],
+        },
+      ],
+    } as never);
+    vi.mocked(api.updateProject).mockResolvedValue({
+      id: 'pj-alpha',
+      name: 'Alpha',
+      packages: [],
+      allowGezelWrites: false,
+      grantedCredentials: ['github.token'],
+    } as never);
+
+    render(<ProjectsView forceProjectId="pj-alpha" />);
+    await screen.findByTestId('project-chat');
+    fireEvent.click(screen.getByRole('tab', { name: 'Settings' }));
+
+    expect(await screen.findByText(/Restricted to api\.github\.com/)).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Granted credentials' })).toBeInTheDocument();
+    expect(screen.queryByText('Allowed HTTPS origins')).not.toBeInTheDocument();
+    expect(screen.queryByText('openai.key')).not.toBeInTheDocument();
+    const webhookGrant = screen.getByRole('checkbox', { name: /webhook\.bearer/ });
+    expect(webhookGrant).toBeDisabled();
+    expect(
+      screen.getByText(/Configure an HTTPS webhook URL in Settings → Channels first/),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('checkbox', { name: /github\.token/ }));
+    await waitFor(() => {
+      expect(api.updateProject).toHaveBeenCalledWith('pj-alpha', {
+        grantedCredentials: ['github.token'],
+      });
+    });
+  });
+
+  it('hides credential grants when no credentials are configured', async () => {
+    vi.mocked(api.listAvailableCredentials).mockResolvedValue({
+      credentials: [
+        {
+          name: 'github.token',
+          label: 'GitHub personal access token',
+          stored: false,
+          allowedOrigins: ['https://api.github.com'],
+          originSource: 'provider',
+          defaultOrigins: ['https://api.github.com'],
+        },
+      ],
+    } as never);
+
+    render(<ProjectsView forceProjectId="pj-alpha" />);
+    await screen.findByTestId('project-chat');
+    fireEvent.click(screen.getByRole('tab', { name: 'Settings' }));
+    await waitFor(() => expect(api.listAvailableCredentials).toHaveBeenCalled());
+
+    expect(screen.queryByRole('heading', { name: 'Granted credentials' })).not.toBeInTheDocument();
+    expect(screen.queryByText('github.token')).not.toBeInTheDocument();
+  });
+
   it('with forceProjectId, loads that project directly via getProject', async () => {
     render(<ProjectsView forceProjectId="pj-alpha" />);
     await waitFor(() => {
@@ -208,6 +330,7 @@ describe('ProjectsView', () => {
     const toc = await screen.findByRole('navigation', { name: 'About sections' });
     const links = within(toc).getAllByRole('link');
     expect(links.map((link) => link.textContent)).toEqual([
+      'Assigned gezels',
       'About this project',
       'Mission objectives',
       'Connections',
@@ -216,6 +339,7 @@ describe('ProjectsView', () => {
       'Settings',
     ]);
     expect(links.map((link) => link.getAttribute('href'))).toEqual([
+      '#project-about-crew',
       '#project-about-overview',
       '#project-about-mission',
       '#project-about-connections',

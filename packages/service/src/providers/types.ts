@@ -600,6 +600,13 @@ export interface SendAndWaitOpts {
     ambient?: boolean;
     sessionId?: string;
     gezelId?: string;
+    /** Project scope for queue UI context; no scheduler semantics. */
+    projectId?: string;
+    /**
+     * Human-readable owner for service work that has no persisted gezel.
+     * Display-only; it has no scheduler or prompt-affinity semantics.
+     */
+    actorLabel?: string;
     /**
      * Short, human-readable label for what this turn is doing —
      * e.g. "atari/3 · plan", "summary", "icon · Maya". Surfaced in

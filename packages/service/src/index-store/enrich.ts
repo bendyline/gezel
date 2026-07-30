@@ -110,6 +110,7 @@ export async function buildEnrichDeps(
       .oneShotCompletion(prompt, 30_000, {
         providerName,
         model,
+        actorLabel: 'Boekwachter',
         jobLabel: 'index enrichment',
         ...(opts.ambient ? { ambient: true } : {}),
       })
@@ -119,6 +120,7 @@ export async function buildEnrichDeps(
       .oneShotCompletion(prompt, 60_000, {
         providerName,
         model,
+        actorLabel: 'Boekwachter',
         jobLabel: 'index review',
         ...(opts.ambient ? { ambient: true } : {}),
       })

@@ -67,7 +67,7 @@ interface GezelOption {
   provider?: string;
 }
 
-const NO_SERVING_GEZEL = '__NONE__';
+const AUTOMATIC_FALLBACK_GEZEL = '__AUTOMATIC__';
 
 /**
  * Backends that run their own tool loop (agent runtimes, not raw model
@@ -93,6 +93,7 @@ export function ConnectedAppsPanel() {
   const [gezels, setGezels] = useState<GezelOption[]>([]);
   const [endpointsStatus, setEndpointsStatus] = useState<string | null>(null);
   const [defaultProvider, setDefaultProvider] = useState<string>('copilot');
+  const [meesterGezelId, setMeesterGezelId] = useState<string | undefined>();
 
   const refresh = useCallback(async () => {
     try {
@@ -124,6 +125,7 @@ export function ConnectedAppsPanel() {
       .then((cfg) => {
         setEndpoints(cfg.openaiEndpoints ?? {});
         setDefaultProvider(cfg.provider ?? 'copilot');
+        setMeesterGezelId(cfg.meesterGezelId);
       })
       .catch(() => {});
     api
@@ -169,10 +171,12 @@ export function ConnectedAppsPanel() {
   );
 
   const endpointsEnabled = endpoints.enabled !== false;
-  const servingGezel = gezels.find((g) => g.id === endpoints.servingGezelId);
+  const configuredFallbackGezel = gezels.find((g) => g.id === endpoints.servingGezelId);
+  const automaticFallbackGezel = gezels.find((g) => g.id === meesterGezelId) ?? gezels[0];
+  const fallbackGezel = configuredFallbackGezel ?? automaticFallbackGezel;
   const resolveProvider = (g: GezelOption) => g.provider ?? defaultProvider;
-  const servingLacksAppTools =
-    servingGezel !== undefined && NO_APP_TOOLS_PROVIDERS.has(resolveProvider(servingGezel));
+  const fallbackLacksAppTools =
+    fallbackGezel !== undefined && NO_APP_TOOLS_PROVIDERS.has(resolveProvider(fallbackGezel));
 
   const decide = useCallback(
     async (grantId: string, action: 'approve' | 'deny') => {
@@ -278,13 +282,13 @@ export function ConnectedAppsPanel() {
           </p>
         )}
         <div className="connected-apps-serving">
-          <span id="serving-gezel-label">Serving gezel</span>
+          <span id="serving-gezel-label">Fallback gezel</span>
           <Select.Root
-            value={endpoints.servingGezelId ?? NO_SERVING_GEZEL}
+            value={configuredFallbackGezel ? configuredFallbackGezel.id : AUTOMATIC_FALLBACK_GEZEL}
             onValueChange={(v) =>
               void saveEndpoints({
                 ...endpoints,
-                servingGezelId: v === NO_SERVING_GEZEL ? undefined : v,
+                servingGezelId: v === AUTOMATIC_FALLBACK_GEZEL ? undefined : v,
               })
             }
             disabled={!endpointsEnabled}
@@ -293,7 +297,10 @@ export function ConnectedAppsPanel() {
               <Select.Value />
             </Select.Trigger>
             <Select.Content>
-              <Select.Item value={NO_SERVING_GEZEL}>None — apps must name a model</Select.Item>
+              <Select.Item value={AUTOMATIC_FALLBACK_GEZEL}>
+                Automatic
+                {automaticFallbackGezel ? ` — ${automaticFallbackGezel.name}` : ''}
+              </Select.Item>
               {gezels.map((g) => (
                 <Select.Item key={g.id} value={g.id}>
                   {g.name}
@@ -305,13 +312,13 @@ export function ConnectedAppsPanel() {
           </Select.Root>
         </div>
         <p className="muted small">
-          {servingGezel
-            ? `Requests that don't name one of your models are answered by ${servingGezel.name} — their character and model settings apply.`
-            : 'When an app asks for a model gezel doesn’t know (like "gpt-4o"), the request is refused. Pick a gezel to answer those requests instead.'}
+          Apps receive your gezels as model choices, including their names and roles. If an app asks
+          for something else, {fallbackGezel?.name ?? 'your default gezel'} answers with their
+          character and model settings.
         </p>
-        {servingGezel && servingLacksAppTools && (
+        {fallbackGezel && fallbackLacksAppTools && (
           <p className="small connected-apps-caution">
-            {servingGezel.name} runs on {resolveProvider(servingGezel)}, which can't accept tools
+            {fallbackGezel.name} runs on {resolveProvider(fallbackGezel)}, which can't accept tools
             sent by apps — editors that use tools will get an error. For full compatibility, pick a
             gezel on a local model or a direct API provider.
           </p>

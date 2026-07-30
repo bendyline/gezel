@@ -29,7 +29,10 @@ describe('ToolsetsEditor custom MCP import', () => {
     );
     await waitFor(() => expect(api.listInstalledToolsets).toHaveBeenCalled());
 
-    fireEvent.click(screen.getByRole('button', { name: '+ Add toolset' }));
+    expect(screen.getByText('Additional project toolsets')).toBeInTheDocument();
+    const addToolsetButton = screen.getByRole('button', { name: '+ Add toolset' });
+    expect(addToolsetButton).not.toHaveClass('home-link');
+    fireEvent.click(addToolsetButton);
     fireEvent.click(screen.getByRole('tab', { name: 'Custom MCP' }));
     const text = '{"servers":{"local-tools":{"command":"node","args":["server.js"]}}}';
     fireEvent.change(screen.getByLabelText('JSON'), { target: { value: text } });

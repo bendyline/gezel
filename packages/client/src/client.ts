@@ -419,6 +419,10 @@ export interface ProviderQueueState {
   active: Array<{
     sessionId?: string;
     gezelId?: string;
+    /** Project that owns this queued work, when it is session-scoped. */
+    projectId?: string;
+    /** Display owner for service work that is not attached to a persisted gezel. */
+    actorLabel?: string;
     /**
      * Short, human-readable label describing what this turn is doing
      * — e.g. "atari/3 · plan", "summary", "icon · Maya". Set by the
@@ -437,6 +441,10 @@ export interface ProviderQueueState {
     lane: 'interactive' | 'background';
     sessionId?: string;
     gezelId?: string;
+    /** Project that owns this queued work, when it is session-scoped. */
+    projectId?: string;
+    /** Display owner for service work that is not attached to a persisted gezel. */
+    actorLabel?: string;
     /** See active[].job. */
     job?: string;
     /** Housekeeping work that yields until the provider is otherwise idle. */
@@ -1119,10 +1127,10 @@ export interface ConfigResponse {
   nativeVision?: Record<string, boolean>;
   /**
    * OpenAI-compatible endpoint controls (Settings → Connected Apps).
-   * `enabled` unset means ON; `servingGezelId` designates the gezel who
-   * answers requests naming an unknown model; `supportingBehaviors`
-   * (unset = on) applies gezel's per-model behavior profile to app
-   * sessions — model tuning applies regardless. See
+   * `enabled` unset means ON; `servingGezelId` optionally overrides the
+   * Meester/first-gezel fallback for requests naming an unknown model;
+   * `supportingBehaviors` (unset = on) applies gezel's per-model
+   * behavior profile to app sessions — model tuning applies regardless. See
    * `GezelConfig.openaiEndpoints` in core schemas.
    */
   openaiEndpoints?: {
@@ -5524,6 +5532,10 @@ export class GezelClient {
       name: string;
       label: string;
       stored: boolean;
+      /** Effective destinations enforced by script HTTP. */
+      allowedOrigins: string[];
+      originSource: 'provider' | 'webhook' | 'project';
+      /** @deprecated Use `allowedOrigins`. */
       defaultOrigins: string[];
     }>;
   }> {

@@ -75,7 +75,7 @@ describe('macOS machine-service filesystem security', () => {
     );
     expect(macPostinstall).toContain('[ "$daemon_hidden" != "1" ]');
     expect(macPlist).toMatch(/<key>Umask<\/key>\s*<integer>63<\/integer>/);
-    expect(macPlist).toMatch(/<key>GEZEL_PORT<\/key>\s*<string>43935<\/string>/);
+    expect(macPlist).toMatch(/<key>GEZEL_PORT<\/key>\s*<string>6228<\/string>/);
     expect(macPlist).toMatch(
       /<key>GEZEL_SHARED_ASSETS_DIR<\/key>\s*<string>\/Library\/Application Support\/Gezel\/assets<\/string>/,
     );
@@ -137,7 +137,7 @@ describe('Linux machine-service filesystem security', () => {
     expect(linuxPostinstall).toContain('assert_not_symlink "$ASSETS_DIR/models"');
     expect(linuxPostinstall).toContain('assert_not_symlink "$SERVICE_TREE"');
     expect(linuxUnit).toContain('UMask=0077');
-    expect(linuxUnit).toContain('Environment=GEZEL_PORT=43935');
+    expect(linuxUnit).toContain('Environment=GEZEL_PORT=6228');
     expect(linuxUnit).toContain('Environment=GEZEL_SHARED_ASSETS_DIR=/var/lib/gezel/assets');
   });
 

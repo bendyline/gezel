@@ -13,7 +13,7 @@
  * just reads in-memory counts.
  */
 
-import type { GezelSummary } from '@bendyline/gezel';
+import { type GezelSummary, type Project, displayName } from '@bendyline/gezel';
 import type {
   ConfigResponse,
   ProviderQueueState,
@@ -21,9 +21,11 @@ import type {
 } from '@bendyline/gezel-client';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
+import { GezelIcon } from './GezelIcon.js';
 import { queueOpenSession } from './pending-open-session.js';
 import { providerLabel } from './provider-label.js';
 import { type LiveTurnState, useOnDeviceLiveTurns } from './useOnDeviceLiveTurns.js';
+import { useRoleBasedNameOnlyMode } from './useRoleBasedNameOnlyMode.js';
 
 type ProviderName = 'copilot' | 'openai' | 'ollama' | 'llama-cpp' | 'mlx' | 'ds4';
 
@@ -55,6 +57,85 @@ function isBusy(state: ProviderQueueState): boolean {
 
 function totalQueued(state: ProviderQueueState): number {
   return state.queuedInteractive + state.queuedBackground;
+}
+
+interface QueueActorIdentity {
+  gezel?: GezelSummary;
+  label: string;
+}
+
+interface QueueActorContext {
+  actor: QueueActorIdentity;
+  projectId?: string;
+}
+
+function resolveQueueActor(
+  gezelId: string | undefined,
+  actorLabel: string | undefined,
+  gezels: Map<string, GezelSummary>,
+): QueueActorIdentity {
+  if (gezelId) {
+    const remote = /^dev:([^:]+):/.exec(gezelId);
+    if (remote) return { label: `Remote · ${remote[1]!.slice(0, 8)}` };
+    const gezel = gezels.get(gezelId);
+    if (gezel) return { gezel, label: gezel.name };
+  }
+  return { label: actorLabel?.trim() || 'System' };
+}
+
+function providerRepresentative(
+  state: ProviderQueueState,
+  gezels: Map<string, GezelSummary>,
+): QueueActorContext {
+  const turn = state.active[0] ?? state.pending[0];
+  return {
+    actor: resolveQueueActor(turn?.gezelId, turn?.actorLabel, gezels),
+    ...(turn?.projectId ? { projectId: turn.projectId } : {}),
+  };
+}
+
+function queueActorRole(actor: QueueActorIdentity): string | undefined {
+  return actor.gezel?.role?.trim() || actor.gezel?.roleBasedName?.trim() || undefined;
+}
+
+function queueProjectLabel(
+  projectId: string | undefined,
+  projects: Map<string, Project>,
+): string | undefined {
+  if (!projectId) return undefined;
+  const remote = /^dev:[^:]+:(.+)$/.exec(projectId);
+  const localId = remote?.[1] ?? projectId;
+  return projects.get(localId)?.name ?? localId;
+}
+
+function queueActorTooltip(
+  actor: QueueActorIdentity,
+  projectId: string | undefined,
+  projects: Map<string, Project>,
+  provider?: ProviderName,
+): string {
+  const lines = [actor.label];
+  const role = queueActorRole(actor);
+  const project = queueProjectLabel(projectId, projects);
+  if (role) lines.push(`Role: ${role}`);
+  if (project) lines.push(`Project: ${project}`);
+  if (provider) lines.push(`Provider: ${getPlatformPillLabel(provider)}`);
+  return lines.join('\n');
+}
+
+function queueJobContext(
+  job: string | undefined,
+  projectId: string | undefined,
+  project: string | undefined,
+): string | undefined {
+  const label = job?.trim();
+  if (!label) return undefined;
+  for (const prefix of [projectId, project]) {
+    if (!prefix) continue;
+    if (label === prefix) return undefined;
+    if (label.startsWith(`${prefix} · `)) return label.slice(prefix.length + 3);
+  }
+  return label;
 }
 
 function formatMs(ms: number): string {
@@ -116,10 +197,153 @@ function QueueItemOpenButton({
   );
 }
 
+function QueueChipIdentity({
+  provider,
+  actor,
+  projectId,
+  projects,
+  boringMode,
+}: {
+  provider: ProviderName;
+  actor: QueueActorIdentity;
+  projectId: string | undefined;
+  projects: Map<string, Project>;
+  boringMode: boolean;
+}) {
+  if (!boringMode) {
+    const { gezel } = actor;
+    const tooltip = queueActorTooltip(actor, projectId, projects, provider);
+    return (
+      <>
+        <span className="queue-meter-chip-avatar" aria-hidden="true">
+          <GezelIcon
+            svg={gezel?.icon}
+            poppetje={gezel?.poppetje}
+            iconOverride={gezel?.iconOverride}
+            name={actor.label}
+            size={20}
+            variant="icon"
+            title={tooltip}
+          />
+        </span>
+        <span
+          className={`queue-meter-chip-gezel-name${gezel ? '' : ' queue-meter-chip-gezel-name-service'}`}
+          title={tooltip}
+        >
+          {actor.label}
+        </span>
+      </>
+    );
+  }
+
+  return (
+    <span className="queue-meter-chip-label">
+      {/* Full + short labels rendered together; the chip's container
+          query in styles.css shows whichever fits. The full provider
+          label remains available on hover in compact mode. */}
+      <span className="queue-meter-chip-label-full" title={getPlatformPillLabel(provider)}>
+        {getPlatformPillLabel(provider)}
+      </span>
+      <span className="queue-meter-chip-label-short" title={getPlatformPillLabel(provider)}>
+        {getCompactPillLabel(provider)}
+      </span>
+    </span>
+  );
+}
+
+type QueueMarkerKind = 'active' | 'preparing' | 'interactive' | 'background' | 'task';
+
+function QueueItemMarker({
+  gezelId,
+  actorLabel,
+  gezels,
+  boringMode,
+  kind,
+}: {
+  gezelId: string | undefined;
+  actorLabel: string | undefined;
+  gezels: Map<string, GezelSummary>;
+  boringMode: boolean;
+  kind: QueueMarkerKind;
+}) {
+  const actor = resolveQueueActor(gezelId, actorLabel, gezels);
+  if (!boringMode) {
+    const { gezel } = actor;
+    return (
+      <span className="queue-meter-panel-item-marker" aria-hidden="true">
+        <GezelIcon
+          svg={gezel?.icon}
+          poppetje={gezel?.poppetje}
+          iconOverride={gezel?.iconOverride}
+          name={actor.label}
+          size={24}
+          variant="icon"
+          pulsing={kind === 'active' || kind === 'preparing'}
+          title={actor.label}
+        />
+      </span>
+    );
+  }
+
+  if (kind === 'active') {
+    return <span className="queue-meter-panel-status-dot" aria-hidden="true" />;
+  }
+
+  const interactive = kind === 'interactive' || kind === 'preparing';
+  const title =
+    kind === 'preparing' ? 'preparing' : kind === 'task' ? 'task handoff' : `${kind} lane`;
+  return (
+    <span className="queue-meter-panel-lane" title={title}>
+      {interactive ? '•' : '·'}
+    </span>
+  );
+}
+
+function QueueItemIdentity({
+  gezelId,
+  actorLabel,
+  projectId,
+  gezels,
+  projects,
+  boringMode,
+  job,
+  phase,
+  extra,
+}: {
+  gezelId: string | undefined;
+  actorLabel: string | undefined;
+  projectId: string | undefined;
+  gezels: Map<string, GezelSummary>;
+  projects: Map<string, Project>;
+  boringMode: boolean;
+  job?: string | undefined;
+  phase?: string | undefined;
+  extra?: string | undefined;
+}) {
+  const actor = resolveQueueActor(gezelId, actorLabel, gezels);
+  const role = queueActorRole(actor);
+  const project = queueProjectLabel(projectId, projects);
+  const visibleJob = queueJobContext(job, projectId, project);
+  const context = [role, project, visibleJob, phase, extra].filter((value): value is string =>
+    Boolean(value),
+  );
+  return (
+    <span className="queue-meter-panel-gezel" title={queueActorTooltip(actor, projectId, projects)}>
+      <span className="queue-meter-panel-gezel-name">
+        {actor.gezel ? displayName(actor.gezel, boringMode) : actor.label}
+      </span>
+      {context.length > 0 && (
+        <span className="queue-meter-panel-context muted">{context.join(' · ')}</span>
+      )}
+    </span>
+  );
+}
+
 export function QueueMeter() {
   const [status, setStatus] = useState<QueueStatusResponse | null>(null);
   const [open, setOpen] = useState(false);
   const [gezels, setGezels] = useState<Map<string, GezelSummary>>(new Map());
+  const [projects, setProjects] = useState<Map<string, Project>>(new Map());
   // Configured active provider — derived from /api/config rather than
   // `status.providers`, which only lists providers that have *finished*
   // initializing. During an on-device model load (the "Preparing"
@@ -129,6 +353,7 @@ export function QueueMeter() {
   // Mirrors EngineStatusPill, which stays visible across the same gap.
   const [activeProvider, setActiveProvider] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const boringMode = useRoleBasedNameOnlyMode();
 
   const refresh = useCallback(() => {
     api
@@ -150,6 +375,10 @@ export function QueueMeter() {
     api
       .listGezels()
       .then((r) => setGezels(new Map(r.gezels.map((g) => [g.id, g]))))
+      .catch(() => {});
+    api
+      .listProjects()
+      .then((r) => setProjects(new Map(r.projects.map((p) => [p.id, p]))))
       .catch(() => {});
   }, []);
 
@@ -230,31 +459,64 @@ export function QueueMeter() {
   if (busyProviders.length === 0 && taskRunnerPending === 0 && preparingTurns.length === 0)
     return null;
 
+  let queueButtonTitle = 'AI chat queue — click for details';
+  if (!boringMode) {
+    const firstBusy = busyProviders[0];
+    if (firstBusy) {
+      const representative = providerRepresentative(firstBusy.state, gezels);
+      queueButtonTitle = `${queueActorTooltip(
+        representative.actor,
+        representative.projectId,
+        projects,
+        firstBusy.name,
+      )}\nClick for queue details`;
+    } else {
+      const preparing = preparingTurns[0]?.[1];
+      if (preparing && onDeviceProvider) {
+        queueButtonTitle = `${queueActorTooltip(
+          resolveQueueActor(preparing.gezelId, undefined, gezels),
+          preparing.projectId,
+          projects,
+          onDeviceProvider,
+        )}\nClick for queue details`;
+      }
+    }
+  }
+
   return (
     <div className="queue-meter" ref={rootRef}>
       <button
         type="button"
         className={`queue-meter-button${open ? ' queue-meter-button-open' : ''}`}
         onClick={() => setOpen((v) => !v)}
-        title="AI chat queue — click for details"
+        aria-label="AI chat queue — click for details"
+        title={queueButtonTitle}
       >
         {busyProviders.map(({ name, state }) => {
           const queued = totalQueued(state);
+          const representative = providerRepresentative(state, gezels);
           return (
-            <span key={name} className="queue-meter-chip">
-              <span className="queue-meter-chip-label">
-                {/* Full + short labels rendered together; the chip's
-                    container query in styles.css shows whichever fits.
-                    Title attribute always shows the full form so a
-                    user hovering the compact "Windows" still sees the
-                    canonical "This Windows PC". */}
-                <span className="queue-meter-chip-label-full" title={getPlatformPillLabel(name)}>
-                  {getPlatformPillLabel(name)}
-                </span>
-                <span className="queue-meter-chip-label-short" title={getPlatformPillLabel(name)}>
-                  {getCompactPillLabel(name)}
-                </span>
-              </span>
+            <span
+              key={name}
+              className="queue-meter-chip"
+              title={
+                boringMode
+                  ? getPlatformPillLabel(name)
+                  : queueActorTooltip(
+                      representative.actor,
+                      representative.projectId,
+                      projects,
+                      name,
+                    )
+              }
+            >
+              <QueueChipIdentity
+                provider={name}
+                actor={representative.actor}
+                projectId={representative.projectId}
+                projects={projects}
+                boringMode={boringMode}
+              />
               <span className="queue-meter-chip-counts">
                 {state.running}
                 {queued > 0 ? `+${queued}` : ''}
@@ -267,21 +529,26 @@ export function QueueMeter() {
             stacked up waiting for it. Reuses the same label treatment as
             a busy chip; the count is the number of waiting turns. */}
         {preparingTurns.length > 0 && onDeviceProvider && (
-          <span className="queue-meter-chip queue-meter-chip-preparing">
-            <span className="queue-meter-chip-label">
-              <span
-                className="queue-meter-chip-label-full"
-                title={getPlatformPillLabel(onDeviceProvider)}
-              >
-                {getPlatformPillLabel(onDeviceProvider)}
-              </span>
-              <span
-                className="queue-meter-chip-label-short"
-                title={getPlatformPillLabel(onDeviceProvider)}
-              >
-                {getCompactPillLabel(onDeviceProvider)}
-              </span>
-            </span>
+          <span
+            className="queue-meter-chip queue-meter-chip-preparing"
+            title={
+              boringMode
+                ? getPlatformPillLabel(onDeviceProvider)
+                : queueActorTooltip(
+                    resolveQueueActor(preparingTurns[0]?.[1].gezelId, undefined, gezels),
+                    preparingTurns[0]?.[1].projectId,
+                    projects,
+                    onDeviceProvider,
+                  )
+            }
+          >
+            <QueueChipIdentity
+              provider={onDeviceProvider}
+              actor={resolveQueueActor(preparingTurns[0]?.[1].gezelId, undefined, gezels)}
+              projectId={preparingTurns[0]?.[1].projectId}
+              projects={projects}
+              boringMode={boringMode}
+            />
             <span className="queue-meter-chip-counts">{preparingTurns.length}</span>
           </span>
         )}
@@ -296,9 +563,11 @@ export function QueueMeter() {
         <QueueMeterPanel
           status={status}
           gezels={gezels}
+          projects={projects}
           liveTurns={liveTurns}
           preparingTurns={preparingTurns}
           onDeviceProvider={onDeviceProvider}
+          boringMode={boringMode}
           onClose={() => setOpen(false)}
           onItemChanged={refresh}
         />
@@ -310,14 +579,17 @@ export function QueueMeter() {
 function QueueMeterPanel({
   status,
   gezels,
+  projects,
   liveTurns,
   preparingTurns,
   onDeviceProvider,
+  boringMode,
   onClose,
   onItemChanged,
 }: {
   status: QueueStatusResponse;
   gezels: Map<string, GezelSummary>;
+  projects: Map<string, Project>;
   /** Per-session phase state for on-device (llama-cpp) turns. Empty
    *  map on non-on-device installs. */
   liveTurns: Map<string, LiveTurnState>;
@@ -330,6 +602,8 @@ function QueueMeterPanel({
   /** Active on-device provider, or null when the active provider is a
    *  cloud one. Labels the preparing section. */
   onDeviceProvider: ProviderName | null;
+  /** Boring mode keeps the provider/status treatment and suppresses character art. */
+  boringMode: boolean;
   onClose: () => void;
   /** Fired after the user cancels or reorders a queued item so the
    *  parent can refresh the snapshot without waiting for the 3s poll. */
@@ -382,16 +656,25 @@ function QueueMeterPanel({
               >
                 <QueueItemOpenButton
                   sessionId={sessionId}
-                  actor={describeActor(turn.gezelId, gezels)}
+                  actor={describeActor(turn.gezelId, undefined, gezels, boringMode)}
                   onClose={onClose}
                 />
-                <span className="queue-meter-panel-lane" title="preparing">
-                  •
-                </span>
-                <span className="queue-meter-panel-gezel">
-                  {describeActor(turn.gezelId, gezels)}
-                  <span className="queue-meter-panel-phase muted"> · {turn.label}</span>
-                </span>
+                <QueueItemMarker
+                  gezelId={turn.gezelId}
+                  actorLabel={undefined}
+                  gezels={gezels}
+                  boringMode={boringMode}
+                  kind="preparing"
+                />
+                <QueueItemIdentity
+                  gezelId={turn.gezelId}
+                  actorLabel={undefined}
+                  projectId={turn.projectId}
+                  gezels={gezels}
+                  projects={projects}
+                  boringMode={boringMode}
+                  phase={turn.label}
+                />
                 <span className="queue-meter-panel-time muted">
                   {formatMs(Math.max(0, Date.now() - turn.startedAt))}
                 </span>
@@ -465,26 +748,27 @@ function QueueMeterPanel({
                     >
                       <QueueItemOpenButton
                         sessionId={a.sessionId}
-                        actor={describeActor(a.gezelId, gezels)}
+                        actor={describeActor(a.gezelId, a.actorLabel, gezels, boringMode)}
                         onClose={onClose}
                       />
-                      <span className="queue-meter-panel-status-dot" aria-hidden />
-                      <span className="queue-meter-panel-gezel">
-                        {describeActor(a.gezelId, gezels)}
-                        {a.job && <span className="queue-meter-panel-job muted"> · {a.job}</span>}
-                        {phase && (
-                          <span className="queue-meter-panel-phase muted"> · {phase.label}</span>
-                        )}
-                        {cacheEntry && (
-                          <span
-                            className="queue-meter-panel-cache muted"
-                            title={`Cache hot: ${cacheEntry.tokenCount.toLocaleString('en-US')} tokens`}
-                          >
-                            {' '}
-                            · cached
-                          </span>
-                        )}
-                      </span>
+                      <QueueItemMarker
+                        gezelId={a.gezelId}
+                        actorLabel={a.actorLabel}
+                        gezels={gezels}
+                        boringMode={boringMode}
+                        kind="active"
+                      />
+                      <QueueItemIdentity
+                        gezelId={a.gezelId}
+                        actorLabel={a.actorLabel}
+                        projectId={a.projectId}
+                        gezels={gezels}
+                        projects={projects}
+                        boringMode={boringMode}
+                        job={a.job}
+                        phase={phase?.label}
+                        extra={cacheEntry ? 'cached' : undefined}
+                      />
                       <span className="queue-meter-panel-time muted">
                         {formatMs(a.runningForMs)}
                       </span>
@@ -508,22 +792,26 @@ function QueueMeterPanel({
                     >
                       <QueueItemOpenButton
                         sessionId={p.sessionId}
-                        actor={describeActor(p.gezelId, gezels)}
+                        actor={describeActor(p.gezelId, p.actorLabel, gezels, boringMode)}
                         onClose={onClose}
                       />
-                      <span className="queue-meter-panel-lane" title={`${p.lane} lane`}>
-                        {p.lane === 'interactive' ? '•' : '·'}
-                      </span>
-                      <span className="queue-meter-panel-gezel">
-                        {describeActor(p.gezelId, gezels)}
-                        {p.job && <span className="queue-meter-panel-job muted"> · {p.job}</span>}
-                        {p.ambient && deferred > 0 && (
-                          <span className="queue-meter-panel-job muted">
-                            {' '}
-                            · deferred until idle
-                          </span>
-                        )}
-                      </span>
+                      <QueueItemMarker
+                        gezelId={p.gezelId}
+                        actorLabel={p.actorLabel}
+                        gezels={gezels}
+                        boringMode={boringMode}
+                        kind={p.lane}
+                      />
+                      <QueueItemIdentity
+                        gezelId={p.gezelId}
+                        actorLabel={p.actorLabel}
+                        projectId={p.projectId}
+                        gezels={gezels}
+                        projects={projects}
+                        boringMode={boringMode}
+                        job={p.job}
+                        extra={p.ambient && deferred > 0 ? 'deferred until idle' : undefined}
+                      />
                       <span className="queue-meter-panel-time muted">{formatMs(p.waitedMs)}</span>
                       <span className="queue-meter-panel-actions">
                         <button
@@ -589,8 +877,16 @@ function QueueMeterPanel({
           <ul className="queue-meter-panel-list">
             {Object.entries(status.taskRunner.pendingByGezel).map(([gezelId, count]) => (
               <li key={gezelId} className="queue-meter-panel-item queue-meter-panel-item-pending">
-                <span className="queue-meter-panel-lane">·</span>
-                <span className="queue-meter-panel-gezel">{describeActor(gezelId, gezels)}</span>
+                <QueueItemMarker
+                  gezelId={gezelId}
+                  actorLabel={undefined}
+                  gezels={gezels}
+                  boringMode={boringMode}
+                  kind="task"
+                />
+                <span className="queue-meter-panel-gezel">
+                  {describeActor(gezelId, undefined, gezels, boringMode)}
+                </span>
                 <span className="queue-meter-panel-time muted">×{count}</span>
               </li>
             ))}
@@ -601,13 +897,12 @@ function QueueMeterPanel({
   );
 }
 
-function describeActor(gezelId: string | undefined, gezels: Map<string, GezelSummary>): string {
-  if (!gezelId) return 'unknown';
-  // Remote model execution: a paired client's turn arrives with its ids
-  // origin-namespaced as `dev:<deviceId>:<realId>` (so affinity stays per
-  // tenant). Surface it as a remote row rather than a raw, unresolvable id.
-  const remote = /^dev:([^:]+):/.exec(gezelId);
-  if (remote) return `Remote · ${remote[1]!.slice(0, 8)}`;
-  const gezel = gezels.get(gezelId);
-  return gezel?.name ?? gezelId;
+function describeActor(
+  gezelId: string | undefined,
+  actorLabel: string | undefined,
+  gezels: Map<string, GezelSummary>,
+  boringMode: boolean,
+): string {
+  const actor = resolveQueueActor(gezelId, actorLabel, gezels);
+  return actor.gezel ? displayName(actor.gezel, boringMode) : actor.label;
 }

@@ -25,7 +25,7 @@ export default defineConfig({
   use: {
     // Overridden per-worker by the daemon fixture; a valid placeholder so
     // relative page.goto('/') type-checks before the override resolves.
-    baseURL: 'http://127.0.0.1:43935',
+    baseURL: 'http://127.0.0.1:6228',
     browserName: 'chromium',
     reducedMotion: 'reduce',
     colorScheme: 'light',

@@ -520,6 +520,38 @@ describe('ProviderQueue — affinity', () => {
 });
 
 describe('ProviderQueue — snapshot accuracy', () => {
+  it('carries explicit non-gezel actor labels through pending and active snapshots', async () => {
+    const q = new ProviderQueue({ concurrency: 1 });
+    const releaseActive = await q.acquire({
+      lane: 'background',
+      projectId: 'library',
+      actorLabel: 'Boekwachter',
+      job: 'index enrichment',
+    });
+    const pending = q.acquire({
+      lane: 'background',
+      projectId: 'maintenance',
+      actorLabel: 'System',
+      job: 'maintenance',
+    });
+    await flush();
+
+    expect(q.describe().active[0]).toMatchObject({
+      projectId: 'library',
+      actorLabel: 'Boekwachter',
+      job: 'index enrichment',
+    });
+    expect(q.describe().pending[0]).toMatchObject({
+      projectId: 'maintenance',
+      actorLabel: 'System',
+      job: 'maintenance',
+    });
+
+    releaseActive();
+    const releasePending = await pending;
+    releasePending();
+  });
+
   it('counts are consistent across acquire/release waves', async () => {
     const q = new ProviderQueue({ concurrency: 3 });
     // Fill every slot (interactive) + queue 2 more (background).

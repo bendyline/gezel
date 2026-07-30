@@ -199,3 +199,80 @@ describe('ChatComposer server-authoritative cancellation', () => {
     expect(streamSignal?.aborted).toBe(false);
   });
 });
+
+describe('ChatComposer recipient picker', () => {
+  const gezels = [
+    { id: 'tomas', name: 'Tomas', role: 'Meester', updatedAt: '2026-07-30T00:00:00.000Z' },
+    { id: 'ada', name: 'Ada', role: 'Developer', updatedAt: '2026-07-30T00:00:00.000Z' },
+  ];
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(api.getChatSessionInflight).mockResolvedValue({ inflight: null });
+    vi.mocked(api.sendToChatSession).mockResolvedValue({
+      accepted: true,
+      sessionId: 'session-1',
+    });
+    vi.mocked(streamChatEvents).mockImplementation((opts) =>
+      (async function* waitForAbort() {
+        await new Promise<void>((_, reject) => {
+          const abort = () => {
+            const error = new Error('aborted');
+            error.name = 'AbortError';
+            reject(error);
+          };
+          if (opts.signal?.aborted) abort();
+          else opts.signal?.addEventListener('abort', abort, { once: true });
+        });
+      })(),
+    );
+  });
+
+  it('uses the row action to replace the primary recipient', async () => {
+    const onPrimaryRecipientChange = vi.fn();
+    render(
+      <ChatComposer
+        gezelId="tomas"
+        gezelName="Tomas"
+        projectId="default"
+        sessionId="session-1"
+        recipientGezels={gezels}
+        onPrimaryRecipientChange={onPrimaryRecipientChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Choose recipients' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Talk to Ada' }));
+
+    expect(onPrimaryRecipientChange).toHaveBeenCalledWith('ada');
+  });
+
+  it('adds a secondary recipient to the To line and fans the message out', async () => {
+    render(
+      <ChatComposer
+        gezelId="tomas"
+        gezelName="Tomas"
+        projectId="default"
+        sessionId="session-1"
+        recipientGezels={gezels}
+        onPrimaryRecipientChange={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Choose recipients' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Add Ada to recipients' }));
+
+    expect(screen.getByRole('button', { name: 'Remove Ada from recipients' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Add Ada to recipients' })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Fill draft' }));
+    fireEvent.click(screen.getByRole('button', { name: /^send$/i }));
+
+    await waitFor(() => {
+      expect(api.sendToChatSession).toHaveBeenCalledWith('session-1', {
+        message: 'Hello from the test',
+        mentions: ['ada'],
+      });
+    });
+  });
+});

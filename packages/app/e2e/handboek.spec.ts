@@ -82,7 +82,11 @@ test('handboek opens from the sidebar, renders an article, and plays as video', 
   await expect(page.getByTestId('handboek-doc')).toHaveCount(0);
 
   const scrubber = player.getByRole('slider');
-  expect(Number(await scrubber.getAttribute('aria-valuemax'))).toBeGreaterThan(0);
+  // The player is visible one render before its audio-sync effect publishes
+  // the synthetic document duration, so wait for that initialization.
+  await expect
+    .poll(async () => Number(await scrubber.getAttribute('aria-valuemax')), { timeout: 15_000 })
+    .toBeGreaterThan(0);
   await expect
     .poll(async () => Number(await scrubber.getAttribute('aria-valuenow')), { timeout: 15_000 })
     .toBeGreaterThan(0);

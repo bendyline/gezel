@@ -49,6 +49,8 @@ function mapWireQueueToB(
     lane,
     ...(q.sessionId ? { sessionId: ns(q.sessionId) } : {}),
     ...(q.gezelId ? { gezelId: ns(q.gezelId) } : {}),
+    ...(q.projectId ? { projectId: ns(q.projectId) } : {}),
+    ...(q.actorLabel ? { actorLabel: q.actorLabel } : {}),
     ...(q.job ? { job: q.job } : {}),
     affinity: q.affinity,
     signal,

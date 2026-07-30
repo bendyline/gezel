@@ -68,7 +68,7 @@ describe('CLI grant token storage', () => {
     homes.push(home);
     process.env.GEZEL_HOME = home;
 
-    const first = fileTokenStorage('https://127.0.0.1:43935');
+    const first = fileTokenStorage('https://127.0.0.1:6228');
     const second = fileTokenStorage('https://remote.example');
     await first.save('gezel-cli', 'local-token');
     await second.save('gezel-cli', 'remote-token');

@@ -165,7 +165,7 @@ function resolveToken(): string {
   const fromQuery = new URLSearchParams(window.location.search).get('token');
   if (fromQuery) {
     // One-time token URL — `gezel start --web` prints
-    // `http://127.0.0.1:43935/?token=…`. Persist it so reloads and
+    // `http://127.0.0.1:6228/?token=…`. Persist it so reloads and
     // client-side navigation stay authed (the fixed canonical port gives
     // a stable origin, so localStorage survives across launches), then
     // scrub it from the URL so the secret doesn't linger in the address

@@ -32,14 +32,14 @@ describe('connect verification codes', () => {
       appId: 'vscode',
       appName: 'Visual Studio Code',
       scopes: ['product', 'openai'],
-      baseUrl: 'http://127.0.0.1:43935',
+      baseUrl: 'http://127.0.0.1:6228',
       fetch: fetchImpl,
       onVerificationCode,
     });
 
     expect(onVerificationCode).toHaveBeenCalledWith('XA2-M6N');
     expect(authorized).toEqual({
-      baseUrl: 'http://127.0.0.1:43935',
+      baseUrl: 'http://127.0.0.1:6228',
       token: 'product-token',
       fetch: fetchImpl,
     });
@@ -53,7 +53,7 @@ describe('connect verification codes', () => {
         appName: 'Missing Handler',
         scopes: ['openai'],
         requireVerificationCode: true,
-        baseUrl: 'http://127.0.0.1:43935',
+        baseUrl: 'http://127.0.0.1:6228',
         fetch: fetchImpl,
       }),
     ).rejects.toMatchObject({ code: 'verification_code_handler_required' });
@@ -86,7 +86,7 @@ describe('connect verification codes', () => {
       appName: 'Stateful App',
       scopes: ['openai'],
       requireVerificationCode: true,
-      baseUrl: 'http://127.0.0.1:43935',
+      baseUrl: 'http://127.0.0.1:6228',
       fetch: fetchImpl,
       onVerificationCode,
       tokenStorage: { save },
@@ -117,7 +117,7 @@ describe('connect verification codes', () => {
         scopes: ['openai'],
         requireVerificationCode: true,
         onVerificationCode: () => {},
-        baseUrl: 'http://127.0.0.1:43935',
+        baseUrl: 'http://127.0.0.1:6228',
         fetch: fetchImpl,
       }),
     ).rejects.toMatchObject({ code: 'verification_not_supported' });
@@ -146,7 +146,7 @@ describe('connect verification codes', () => {
         appId: 'expired-app',
         appName: 'Expired App',
         scopes: ['cli'],
-        baseUrl: 'http://127.0.0.1:43935',
+        baseUrl: 'http://127.0.0.1:6228',
         fetch: fetchImpl,
         onVerificationCode: () => {},
       }),

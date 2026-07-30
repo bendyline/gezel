@@ -31,7 +31,7 @@ import type { PairedRemote } from './registry.js';
 const log = createLogger('remote-pairing');
 
 export interface PairRemoteInput {
-  /** B's base URL, e.g. `https://192.168.1.50:43936`. */
+  /** B's base URL, e.g. `https://192.168.1.50:6229`. */
   baseUrl: string;
   displayName?: string;
   approvalTimeoutSec?: number;

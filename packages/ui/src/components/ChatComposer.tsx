@@ -1,10 +1,11 @@
 import { EditorShell, type MentionCandidate } from '@bendyline/squisq-editor-react';
 import '@bendyline/squisq-editor-react/styles';
-import { parseTaskRef } from '@bendyline/gezel';
+import { type GezelSummary, displayName, parseTaskRef } from '@bendyline/gezel';
 import { streamChatEvents } from '@bendyline/gezel-client';
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { useEffectiveTheme } from '../theme.js';
+import { ChatRecipientPicker } from './ChatRecipientPicker.js';
 import { GezelIcon } from './GezelIcon.js';
 import { createGezelMediaProvider } from './GezelMediaProvider.js';
 import type { ToolActivity } from './chat-bubbles.js';
@@ -64,6 +65,13 @@ export interface ChatComposerProps {
   gezelPoppetje?: import('@bendyline/gezel').Poppetje | null;
   /** When true and a custom icon.svg exists, render that instead of the poppetje. */
   gezelIconOverride?: boolean;
+  /**
+   * When provided with `onPrimaryRecipientChange`, renders the address-book
+   * `+` on the To line. Name/face clicks replace the primary recipient; each
+   * row's smaller `+` adds that gezel to this composer's fan-out list.
+   */
+  recipientGezels?: GezelSummary[];
+  onPrimaryRecipientChange?: (gezelId: string) => void;
   projectId: string;
   /**
    * Active session id. When undefined, the composer lazy-creates a session
@@ -177,6 +185,8 @@ export function ChatComposer({
   gezelIcon,
   gezelPoppetje,
   gezelIconOverride,
+  recipientGezels,
+  onPrimaryRecipientChange,
   projectId,
   sessionId,
   onSessionCreated,
@@ -264,6 +274,21 @@ export function ChatComposer({
   // hit Send — previously the row was static on the primary and users had
   // no feedback that mentions were even being parsed.
   const [mentioned, setMentioned] = useState<MentionToken[]>([]);
+  // Recipients chosen from the To-line picker are independent of inline
+  // @-mentions. They use the same server fan-out field at send time, but stay
+  // visible across turns until the user removes one or replaces the primary.
+  const [additionalRecipientIds, setAdditionalRecipientIds] = useState<string[]>([]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the active (gezel, project) address is the deliberate reset trigger.
+  useEffect(() => {
+    setAdditionalRecipientIds([]);
+  }, [gezelId, projectId]);
+  const additionalRecipients = useMemo(() => {
+    const byId = new Map((recipientGezels ?? []).map((gezel) => [gezel.id, gezel]));
+    return additionalRecipientIds.flatMap((id) => {
+      const gezel = byId.get(id);
+      return gezel ? [gezel] : [];
+    });
+  }, [additionalRecipientIds, recipientGezels]);
   const [engagementMode, setEngagementMode] = useState<
     'proactive' | 'scheduled' | 'reactive' | 'off'
   >('proactive');
@@ -649,7 +674,9 @@ export function ChatComposer({
       // service can fan out to each mentioned gezel's own session. The
       // primary recipient (`gezelId`) is excluded server-side — no
       // double-delivery if the user @-mentioned the current chat target.
-      const mentionIds = extractMentions(userText);
+      const mentionIds = [
+        ...new Set([...extractMentions(userText), ...additionalRecipientIds]),
+      ].filter((id) => id !== gezelId);
       // Passive CC bundle (project-chat voorman-CC after a pivot).
       // Filter out the primary just in case the parent passed it
       // through stale state — sending a CC to yourself is a no-op
@@ -717,6 +744,7 @@ export function ChatComposer({
     settleLocalTurn,
     syncInflight,
     onToolActivity,
+    additionalRecipientIds,
     // Both are read at send-time on every invocation — without them
     // a pivot that updates `passiveCcGezelIds` after the composer
     // first mounted would still send with the stale (empty) list,
@@ -822,8 +850,43 @@ export function ChatComposer({
           size={18}
         />
         <span className="chat-composer-to-name">{gezelName}</span>
+        {additionalRecipients.map((recipient) => {
+          const rendered = displayName(
+            { name: recipient.name, roleBasedName: recipient.roleBasedName },
+            roleBasedNameOnlyMode,
+          );
+          return (
+            <span key={recipient.id} className="chat-composer-to-recipient">
+              <GezelIcon
+                svg={recipient.icon ?? null}
+                poppetje={recipient.poppetje}
+                iconOverride={recipient.iconOverride}
+                name={rendered}
+                size={18}
+              />
+              <span className="chat-composer-to-name">{rendered}</span>
+              <button
+                type="button"
+                className="chat-composer-recipient-remove"
+                aria-label={`Remove ${rendered} from recipients`}
+                title={`Remove ${rendered}`}
+                onClick={() =>
+                  setAdditionalRecipientIds((current) =>
+                    current.filter((recipientId) => recipientId !== recipient.id),
+                  )
+                }
+              >
+                ×
+              </button>
+            </span>
+          );
+        })}
         {mentioned
-          .filter((m) => m.id !== gezelId || m.projectId !== undefined)
+          .filter(
+            (m) =>
+              (m.id !== gezelId || m.projectId !== undefined) &&
+              !additionalRecipientIds.includes(m.id),
+          )
           .map((m) => (
             <span
               key={m.rawId}
@@ -833,6 +896,25 @@ export function ChatComposer({
               @{m.label}
             </span>
           ))}
+        {recipientGezels && onPrimaryRecipientChange && recipientGezels.length > 0 && (
+          <ChatRecipientPicker
+            gezels={recipientGezels}
+            primaryGezelId={gezelId}
+            additionalRecipientIds={additionalRecipientIds}
+            roleBasedNameOnlyMode={roleBasedNameOnlyMode}
+            onSelectPrimary={(nextGezelId) => {
+              setAdditionalRecipientIds([]);
+              onPrimaryRecipientChange(nextGezelId);
+            }}
+            onAddRecipient={(nextGezelId) =>
+              setAdditionalRecipientIds((current) =>
+                nextGezelId === gezelId || current.includes(nextGezelId)
+                  ? current
+                  : [...current, nextGezelId],
+              )
+            }
+          />
+        )}
       </div>
       {belowAddressLine}
       <div className="chat-editor-wrap">

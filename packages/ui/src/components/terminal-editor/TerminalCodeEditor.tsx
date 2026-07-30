@@ -33,8 +33,8 @@ export interface TerminalCodeEditorProps {
   onHistoryPrev(): void;
   /** Down at the last line (suggest widget closed). */
   onHistoryNext(): void;
-  /** Leading `@` on a fresh draft — hand control back to the chat composer. */
-  onChatEscape?(value: string): void;
+  /** Leading `@` on a fresh draft — hand control back to an empty chat composer. */
+  onChatEscape?(): void;
   onReady?(): void;
 }
 
@@ -201,10 +201,10 @@ const TerminalCodeEditor = forwardRef<TerminalCodeEditorHandle, TerminalCodeEdit
             const value = model.getValue();
             const prevLen = prevLenRef.current;
             prevLenRef.current = value.length;
-            // Fresh draft starting with `@` → hand back to the chat composer
-            // (the mention sigil). Carry the typed content over.
+            // Fresh draft starting with `@` → hand back to the chat composer.
+            // The sigil is a mode switch here, not chat draft content.
             if (onChatEscapeRef.current && prevLen <= 1 && value.startsWith('@')) {
-              onChatEscapeRef.current(value);
+              onChatEscapeRef.current();
               return;
             }
             onChangeRef.current?.(value);

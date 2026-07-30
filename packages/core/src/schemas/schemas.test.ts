@@ -318,20 +318,20 @@ describe('UpdateProjectRequestSchema', () => {
     expect(() => UpdateProjectRequestSchema.parse({ tabVisibility: { chat: false } })).toThrow();
   });
 
-  it('accepts exact HTTPS credential origins and rejects paths or insecure origins', () => {
+  it('accepts exact HTTPS toolset origins and rejects paths or insecure origins', () => {
     expect(
       UpdateProjectRequestSchema.parse({
-        credentialAllowedOrigins: { 'github.token': ['https://api.github.com'] },
+        credentialAllowedOrigins: { 'vendor.token': ['https://api.vendor.test'] },
       }).credentialAllowedOrigins,
-    ).toEqual({ 'github.token': ['https://api.github.com'] });
+    ).toEqual({ 'vendor.token': ['https://api.vendor.test'] });
     expect(() =>
       UpdateProjectRequestSchema.parse({
-        credentialAllowedOrigins: { 'github.token': ['http://api.github.com'] },
+        credentialAllowedOrigins: { 'vendor.token': ['http://api.vendor.test'] },
       }),
     ).toThrow();
     expect(() =>
       UpdateProjectRequestSchema.parse({
-        credentialAllowedOrigins: { 'github.token': ['https://api.github.com/repos'] },
+        credentialAllowedOrigins: { 'vendor.token': ['https://api.vendor.test/items'] },
       }),
     ).toThrow();
   });

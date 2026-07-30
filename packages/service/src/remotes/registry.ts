@@ -15,7 +15,7 @@ import { readSecurityJson, writeSecurityJson } from '../fs/security-json.js';
 export interface PairedRemote {
   /** Stable id A assigns to this server = its full identity fingerprint. */
   remoteId: string;
-  /** Base URL A reaches the server at, e.g. `https://192.168.1.50:43936`. */
+  /** Base URL A reaches the server at, e.g. `https://192.168.1.50:6229`. */
   baseUrl: string;
   /** Human label shown in A's model picker / Remote Servers panel. */
   displayName: string;

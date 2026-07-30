@@ -12,11 +12,12 @@ import type { ImageAttachment, ProviderName } from '../../providers/types.js';
  * dropped — sampling is set per-model via tuning, not per-request (yet).
  * `tools` IS honored (forwarded to the provider as external tools).
  *
- * The `model` field carries the gezel provider+model id. Two shapes:
+ * The `model` field carries a selectable gezel or provider+model id:
+ *   - `"gezel:<id-or-name>"` — a named gezel; persona and configured
+ *     provider/model settings apply.
  *   - `"<provider>:<model>"` — fully qualified, e.g. `"llama-cpp:qwen3-4b"`.
- *   - `"<model>"` — bare; the caller relied on a configured default.
- *     Resolved against the user's `config.defaultModel.<provider>` once
- *     the route picks a provider.
+ *   - `"<provider>"` — bare provider; that provider chooses its default.
+ * Other strings are handled by the route's gezel fallback policy.
  *
  * The actual resolution lives in {@link resolveModelTarget}.
  */
@@ -206,9 +207,9 @@ const KNOWN_PROVIDERS: readonly ProviderName[] = [
  * separators are also accepted (`"llama-cpp/qwen3-4b"`) since some
  * OpenAI client libraries normalize colons.
  *
- * Returns `null` when the prefix is unknown — callers should map this
- * to a `404 model_not_found` so the caller can react to the typo
- * without guessing.
+ * Returns `null` when the prefix is unknown. Each public surface then
+ * applies its own fallback policy (chat uses the fallback gezel;
+ * embeddings still returns `404 model_not_found`).
  */
 /**
  * Detect a `gezel:<id-or-name>` model reference. Returns the bare ref

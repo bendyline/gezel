@@ -100,7 +100,7 @@ describe('Windows machine-service installer security', () => {
 
   it('compiles the service environment contract into the service host', () => {
     expect(serviceHost).toContain('L"GEZEL_SYSTEM_SCOPE", L"1"');
-    expect(serviceHost).toContain('L"GEZEL_PORT", L"43935"');
+    expect(serviceHost).toContain('L"GEZEL_PORT", L"6228"');
     expect(serviceHost).toContain('L"GEZEL_SHARED_ASSETS_DIR", home + L"\\\\assets"');
     expect(serviceHost).toContain('L"ELECTRON_RUN_AS_NODE", L"1"');
     expect(serviceHost).toContain('{L"TEMP", home + L"\\\\tmp"}');

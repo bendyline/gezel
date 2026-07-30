@@ -105,7 +105,7 @@ export class GezelApp {
     return (await res.json()) as EmbeddingsResponse;
   }
 
-  /** List available models across every configured provider. */
+  /** List selectable gezels plus models across every configured provider. */
   async models(): Promise<ModelListResponse> {
     const res = await this.fetchFn(`${this.baseUrl}/v1/models`, {
       headers: { Authorization: `Bearer ${this.token}` },

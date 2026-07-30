@@ -5588,6 +5588,7 @@ export class ChatManager {
             ...(opts?.ambient ? { ambient: true } : {}),
             sessionId,
             gezelId: state.record.gezelId,
+            projectId: state.record.projectId,
             ...(turnJob ? { job: turnJob } : {}),
             ...(continuations > 0 ? { affinity: false } : {}),
             ...(isAskTarget ? { bypassQueue: true } : {}),
@@ -8074,6 +8075,11 @@ export class ChatManager {
        */
       useKeurmeester?: boolean;
       /**
+       * Display owner for service work that is not attached to a persisted
+       * gezel. Carried into provider queue snapshots without affecting routing.
+       */
+      actorLabel?: string;
+      /**
        * Short label describing the job — surfaced in the QueueMeter so
        * the user can see what a busy gezel is actually doing. Examples:
        * "icon · Maya", "summary · session ae463fc7", "about · Reviewer",
@@ -8093,22 +8099,30 @@ export class ChatManager {
   ): Promise<string> {
     oneShotLog.info(`requesting completion (${prompt.length} chars, ${timeoutMs}ms timeout)`);
     let { gezelId } = opts;
+    let actorLabel = opts.actorLabel?.trim() || undefined;
     const config = await this.store.readConfig();
     let klerkAbout: string | undefined;
-    if (opts.useKlerk && config.klerkGezelId) {
-      const klerk = await this.store.getGezel(config.klerkGezelId).catch(() => null);
-      if (klerk) {
-        gezelId = klerk.id;
-        klerkAbout = klerk.about?.trim() || undefined;
+    if (opts.useKlerk) {
+      actorLabel ??= 'Klerk';
+      if (config.klerkGezelId) {
+        const klerk = await this.store.getGezel(config.klerkGezelId).catch(() => null);
+        if (klerk) {
+          gezelId = klerk.id;
+          klerkAbout = klerk.about?.trim() || undefined;
+        }
       }
     }
-    if (opts.useKeurmeester && config.keurmeesterGezelId) {
-      const keurmeester = await this.store.getGezel(config.keurmeesterGezelId).catch(() => null);
-      if (keurmeester) {
-        gezelId = keurmeester.id;
-        klerkAbout = keurmeester.about?.trim() || undefined;
+    if (opts.useKeurmeester) {
+      actorLabel ??= 'Keurmeester';
+      if (config.keurmeesterGezelId) {
+        const keurmeester = await this.store.getGezel(config.keurmeesterGezelId).catch(() => null);
+        if (keurmeester) {
+          gezelId = keurmeester.id;
+          klerkAbout = keurmeester.about?.trim() || undefined;
+        }
       }
     }
+    if (!actorLabel && !gezelId) actorLabel = 'System';
     const providerName = opts.providerName ?? (await this.resolveProviderName(gezelId));
     let model = opts.model ?? config.defaultModel?.[providerName];
     let reasoningEffort = config.defaultReasoningEffort?.[providerName];
@@ -8184,6 +8198,7 @@ export class ChatManager {
           lane: 'background',
           ...(opts.ambient ? { ambient: true } : {}),
           ...(gezelId ? { gezelId } : {}),
+          ...(actorLabel ? { actorLabel } : {}),
           ...(opts.jobLabel ? { job: opts.jobLabel } : {}),
         },
       });

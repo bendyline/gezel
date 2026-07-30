@@ -123,23 +123,23 @@ import { WorkspaceWatchManager } from './workspace/watch-manager.js';
 const log = createLogger('service');
 
 /**
- * Canonical well-known port for the Gezel daemon's public surface (the
+ * Canonical fixed port for the Gezel daemon's public surface (the
  * OpenAI-compatible `/v1/*` API and everything else served alongside it).
- * `43935` spells "GEZEL" on a phone keypad (G-E-Z-E-L → 4-3-9-3-5) and
- * sits in the IANA registered range, *below* the OS ephemeral-allocation
- * window — so the OS won't have already handed it out to some other
- * process's outbound socket.
+ * `6228` spells "MAAT" on a phone keypad (M-A-A-T → 6-2-2-8). "Maat" is
+ * Dutch for a mate, companion, or fellow worker — a close sibling to
+ * "gezel". It sits in the IANA User Port range and below the default
+ * ephemeral-allocation windows on Windows, macOS, and Linux.
  *
  * The user-facing daemons (standalone `gezeld` and the embedded desktop
  * service) try to claim this so third-party OpenAI-compatible clients —
  * the ones we don't ship and can't teach to read the runtime files — get
- * a stable `https://127.0.0.1:43935/v1` base URL. It's a strong default,
+ * a stable `https://127.0.0.1:6228/v1` base URL. It's a strong default,
  * not a guarantee: if the port is taken the daemon falls back to an
  * ephemeral port, and the *actual* bound port is always written to
  * `~/.gezel/runtime/port` for first-party discovery. Force an exact port
  * (no fallback) with `--port` / `GEZEL_PORT`.
  */
-export const DEFAULT_PORT = 43935;
+export const DEFAULT_PORT = 6228;
 
 export interface StartServiceOptions {
   home?: string;
@@ -1686,7 +1686,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   //     that and FAIL on collision — a silently-relocated named port makes
   //     the advertised base URL a lie.
   //   - `preferCanonicalPort` (standalone daemon + embedded desktop): try
-  //     the well-known DEFAULT_PORT so third-party OpenAI-compatible clients
+  //     the canonical DEFAULT_PORT so third-party OpenAI-compatible clients
   //     get a stable base URL, but fall back to an ephemeral port if it's
   //     taken so we never fail to boot.
   //   - neither (tests, library embedders): pure ephemeral — no contention

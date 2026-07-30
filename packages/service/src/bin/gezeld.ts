@@ -12,7 +12,7 @@ async function main() {
   // (`file.startsWith(uiDir)`) doesn't false-negative on every request.
   const rawUiDir = process.env.GEZEL_UI_DIR ?? findBundledUi();
   const uiDir = rawUiDir ? normalize(rawUiDir) : undefined;
-  // No explicit GEZEL_PORT → claim the canonical well-known port (with
+  // No explicit GEZEL_PORT → claim the canonical fixed port (with
   // ephemeral fallback) so third-party OpenAI-compatible clients have a
   // stable base URL. A valid GEZEL_PORT forces that exact port.
   const explicitPort = Number.isFinite(portArg) ? portArg : undefined;

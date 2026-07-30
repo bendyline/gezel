@@ -158,7 +158,11 @@ describe('buildEnrichDeps enricher override', () => {
     expect(oneShotCompletion).toHaveBeenCalledWith(
       'p',
       expect.any(Number),
-      expect.objectContaining({ providerName: 'mlx', model: 'big-executor' }),
+      expect.objectContaining({
+        providerName: 'mlx',
+        model: 'big-executor',
+        actorLabel: 'Boekwachter',
+      }),
     );
   });
 
@@ -225,6 +229,7 @@ describe('buildEnrichDeps enricher override', () => {
       expect.objectContaining({
         providerName: 'mlx',
         model: 'big-executor',
+        actorLabel: 'Boekwachter',
         jobLabel: 'index review',
       }),
     );

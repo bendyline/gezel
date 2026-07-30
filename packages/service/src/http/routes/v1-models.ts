@@ -1,15 +1,17 @@
 import { Hono } from 'hono';
 import type { ProviderName } from '../../providers/types.js';
 import type { ServiceContext } from '../context.js';
+import { resolveFallbackGezelId } from '../openai-compat/chat-target.js';
 
 /**
  * `/v1/models` — OpenAI-compatible model directory aggregated across
- * every gezel provider that's currently configured, plus the retrieve
+ * the user's gezels and every configured provider, plus the retrieve
  * form (`GET /v1/models/{id}`) OpenAI SDKs call after listing.
  *
- * Each entry's `id` is the qualified `<provider>:<model>` string that
- * `/v1/chat/completions` accepts. The `owned_by` field surfaces the
- * provider name so client UIs can group by source.
+ * Gezel entries use `gezel:<name>` ids and carry `name` + `role`
+ * metadata for richer clients. Raw model entries use qualified
+ * `<provider>:<model>` ids. Both shapes are accepted by
+ * `/v1/chat/completions`; the effective fallback gezel leads the list.
  *
  * Providers that haven't been credentialed (e.g. `openai` without an
  * API key) throw on `listModels` — we swallow those silently and emit
@@ -35,33 +37,43 @@ interface OpenAIModelEntry {
   /** Gezel-specific extras useful to richer clients; ignored by strict OpenAI SDKs. */
   context_window?: number;
   supports_reasoning?: boolean;
+  gezel_id?: string;
+  name?: string;
+  role?: string;
+  is_fallback?: boolean;
 }
 
 async function buildModelEntries(
   ctx: ServiceContext,
   created: number,
 ): Promise<OpenAIModelEntry[]> {
-  // When a serving gezel is designated (Settings → Connected Apps),
-  // list them FIRST — clients that pick the top entry from the model
-  // list land on the gezel the user chose to answer outside apps.
-  const servingEntry: OpenAIModelEntry[] = [];
-  try {
-    const config = await ctx.store.readConfig();
-    const servingGezelId = config.openaiEndpoints?.servingGezelId;
-    if (servingGezelId) {
-      const gezel = await ctx.store.getGezel(servingGezelId).catch(() => null);
-      if (gezel) {
-        servingEntry.push({
-          id: `gezel:${gezel.name}`,
-          object: 'model',
-          created,
-          owned_by: 'gezel',
-        });
-      }
-    }
-  } catch {
-    /* config unreadable — serve the provider roster alone */
-  }
+  // Advertise every gezel as a selectable OpenAI "model". Keep the
+  // effective fallback first because a number of generic clients pick
+  // the first entry by default. Names are the human-readable routing
+  // id; `gezel_id` remains stable metadata for richer integrations.
+  const config = await ctx.store.readConfig().catch(() => null);
+  const gezels = await ctx.store.listGezels().catch(() => []);
+  const fallbackGezelId = await resolveFallbackGezelId(
+    ctx,
+    config?.openaiEndpoints?.servingGezelId,
+  );
+  const gezelEntries = [...gezels]
+    .sort((a, b) => {
+      if (a.id === fallbackGezelId) return -1;
+      if (b.id === fallbackGezelId) return 1;
+      return a.name.localeCompare(b.name);
+    })
+    .map<OpenAIModelEntry>((gezel) => ({
+      id: `gezel:${gezel.name}`,
+      object: 'model',
+      created,
+      owned_by: 'gezel',
+      gezel_id: gezel.id,
+      name: gezel.name,
+      ...(gezel.role ? { role: gezel.role } : {}),
+      ...(gezel.id === fallbackGezelId ? { is_fallback: true } : {}),
+    }));
+
   const buckets = await Promise.all(
     PROVIDERS_TO_ENUMERATE.map(async (provider) => {
       try {
@@ -81,7 +93,7 @@ async function buildModelEntries(
       }
     }),
   );
-  return [...servingEntry, ...buckets.flat()];
+  return [...gezelEntries, ...buckets.flat()];
 }
 
 export function v1ModelsRoutes(ctx: ServiceContext): Hono {

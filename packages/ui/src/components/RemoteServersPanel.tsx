@@ -177,7 +177,7 @@ export function RemoteServersPanel() {
           <p className="muted small">
             ⚠️ Other devices on your network can request inference on this machine once you approve
             their pairing (Connected Apps → Paired devices). They reach only inference — never your
-            projects or files. Listening on port {servingPort ?? 43936}.
+            projects or files. Listening on port {servingPort ?? 6229}.
           </p>
         ) : (
           <p className="muted small">Off — no other device can run models here.</p>
@@ -195,7 +195,7 @@ export function RemoteServersPanel() {
         <div className="remote-pair-form">
           <input
             type="text"
-            placeholder="https://192.168.1.50:43936"
+            placeholder="https://192.168.1.50:6229"
             value={pairUrl}
             onChange={(e) => setPairUrl(e.target.value)}
           />

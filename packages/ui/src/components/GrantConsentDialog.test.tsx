@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../api.js', () => ({
   api: {
-    getBaseUrl: () => 'http://127.0.0.1:43935',
+    getBaseUrl: () => 'http://127.0.0.1:6228',
     authHeader: () => ({ Authorization: 'Bearer desktop-token' }),
   },
 }));

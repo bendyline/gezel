@@ -256,14 +256,14 @@ describe('POST /v1/chat/completions — request validation', () => {
     expect(body.error.code).toBe('tool_choice_function_not_supported_v1');
   });
 
-  it('returns 404 model_not_found when the model prefix is unknown', async () => {
+  it('routes an unknown model prefix through the automatic fallback gezel', async () => {
     const res = await v1('POST', '/v1/chat/completions', {
       body: { model: 'unknownprovider:foo', messages: [{ role: 'user', content: 'hi' }] },
       token: rootToken,
     });
-    expect(res.status).toBe(404);
-    const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe('model_not_found');
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { model: string };
+    expect(body.model).toBe('unknownprovider:foo');
   });
 
   it('returns 404 model_not_found for an uninstalled local model id (no auto-download)', async () => {

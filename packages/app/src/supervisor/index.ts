@@ -1200,7 +1200,7 @@ async function startEmbeddedRaw(
     uiDir: opts.uiDir,
     home: opts.home,
     // The embedded desktop service is the daemon third-party clients
-    // connect to — claim the canonical well-known port (with ephemeral
+    // connect to — claim the canonical fixed port (with ephemeral
     // fallback) so it has a stable base URL.
     preferCanonicalPort: true,
     onRestartRequested,

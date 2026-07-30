@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { join, posix, win32 } from 'node:path';
 
 /** Canonical port reserved for the machine-wide Gezel service. */
-export const SYSTEM_SERVICE_PORT = 43935;
+export const SYSTEM_SERVICE_PORT = 6228;
 
 /**
  * Platform-specific home used by the Electron-installed machine service.

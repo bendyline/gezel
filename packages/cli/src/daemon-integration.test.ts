@@ -56,7 +56,7 @@ beforeAll(async () => {
       // no network dependency, which keeps this test CI-friendly.
       GEZEL_MOCK_PROVIDER: '1',
       // Force an ephemeral port. Without GEZEL_PORT the daemon now claims
-      // the canonical well-known port (43935); pinning to 0 keeps this
+      // the canonical fixed port (6228); pinning to 0 keeps this
       // cross-process test hermetic and off the shared port so it can't
       // race a real local daemon or another spawning suite.
       GEZEL_PORT: '0',

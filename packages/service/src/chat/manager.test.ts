@@ -168,6 +168,23 @@ describe('ChatManager — session lifecycle', () => {
 });
 
 describe('ChatManager — send + persistence', () => {
+  it('threads the session project into interactive provider queue metadata', async () => {
+    const project = await store.createProject({ name: 'Spanish lessons' });
+    const session = await manager.createSession({ gezelId: 'ada', projectId: project.id });
+    mock.script('Ready');
+
+    await manager.send(session.id, 'Start the lesson');
+
+    const send = mock.calls.find(
+      (call) => call.kind === 'send' && call.sendOpts?.queue?.lane === 'interactive',
+    );
+    expect(send?.sendOpts?.queue).toMatchObject({
+      sessionId: session.id,
+      gezelId: 'ada',
+      projectId: project.id,
+    });
+  });
+
   it('threads the authoritative direct-file clamp into provider session options', async () => {
     const griet = await store.createGezel({ name: 'Griet', role: 'Boekwachter' });
     const grietId = griet.parsed.frontmatter.id;
@@ -2730,6 +2747,20 @@ describe('ChatManager — per-session message queue', () => {
     const [mA, mB] = await Promise.all([pA, pB]);
     expect(mA.content).toBe('slow-reply-A');
     expect(mB.content).toBe('reply-B');
+  });
+});
+
+describe('ChatManager — one-shot attribution', () => {
+  it('labels service-owned work as System when no gezel or subsystem actor is supplied', async () => {
+    mock.script('done');
+
+    await manager.oneShotCompletion('maintenance', 1_000, { jobLabel: 'maintenance' });
+
+    const send = mock.calls.find((call) => call.kind === 'send');
+    expect(send?.sendOpts?.queue).toMatchObject({
+      actorLabel: 'System',
+      job: 'maintenance',
+    });
   });
 });
 

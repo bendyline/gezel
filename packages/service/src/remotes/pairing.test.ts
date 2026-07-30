@@ -84,10 +84,10 @@ describe('remote pairing trust', () => {
       }),
     );
     await expect(
-      inspectRemoteIdentity('https://192.0.2.10:43936/', fetchIdentity as typeof fetch),
+      inspectRemoteIdentity('https://192.0.2.10:6229/', fetchIdentity as typeof fetch),
     ).resolves.toMatchObject({ fingerprint: identity.fingerprint });
     expect(fetchIdentity).toHaveBeenCalledWith(
-      'https://192.0.2.10:43936/v1/identity',
+      'https://192.0.2.10:6229/v1/identity',
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
 
@@ -95,7 +95,7 @@ describe('remote pairing trust', () => {
       new Response(JSON.stringify({ ...identity, sig: 'bm90LWEtc2lnbmF0dXJl' })),
     );
     await expect(
-      inspectRemoteIdentity('https://192.0.2.10:43936', fetchIdentity as typeof fetch),
+      inspectRemoteIdentity('https://192.0.2.10:6229', fetchIdentity as typeof fetch),
     ).rejects.toThrow(/signature/);
   });
 
@@ -103,7 +103,7 @@ describe('remote pairing trust', () => {
     const identity = await signedIdentity();
     const remote: PairedRemote = {
       remoteId: identity.fingerprint,
-      baseUrl: 'https://192.0.2.10:43936',
+      baseUrl: 'https://192.0.2.10:6229',
       displayName: 'Remote',
       token: 'TOKEN',
       pinnedIdentityKey: identity.publicKeyPem,
@@ -141,7 +141,7 @@ describe('remote pairing trust', () => {
     const identity = await signedIdentity();
     const remote: PairedRemote = {
       remoteId: identity.fingerprint,
-      baseUrl: 'https://192.0.2.10:43936',
+      baseUrl: 'https://192.0.2.10:6229',
       displayName: 'Remote',
       token: 'TOKEN',
       pinnedIdentityKey: identity.publicKeyPem,

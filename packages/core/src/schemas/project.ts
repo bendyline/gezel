@@ -339,7 +339,11 @@ export const ProjectSchema = z.object({
    * and `secrets/registry.ts` for resolution.
    */
   grantedCredentials: z.array(z.string()).optional(),
-  /** Exact HTTPS origins each granted credential may be sent to. */
+  /**
+   * Advanced exact-origin bindings for toolset credentials. Built-in provider
+   * credentials are service-pinned and webhook credentials follow the
+   * configured webhook URL, so entries for those names are ignored.
+   */
   credentialAllowedOrigins: z.record(z.string(), z.array(HttpsOriginSchema)).optional(),
   /**
    * Explicit user override of the project's type (an id from the bundled

@@ -97,6 +97,13 @@ const CloseIcon = () => (
   </svg>
 );
 
+const CameraIcon = () => (
+  <svg {...ICON_SVG_PROPS} aria-hidden="true">
+    <path d="M5 5 6.2 3.5H9.8L11 5H12.5A1 1 0 0 1 13.5 6V12A1 1 0 0 1 12.5 13H3.5A1 1 0 0 1 2.5 12V6A1 1 0 0 1 3.5 5H5Z" />
+    <circle cx="8" cy="9" r="2.25" />
+  </svg>
+);
+
 /** Compact stand-in for the selected page label when the toolbar is narrow. */
 const OutputPageIcon = () => (
   <svg {...ICON_SVG_PROPS} aria-hidden="true">
@@ -603,7 +610,7 @@ export function ProjectOutputPane({
             title="Send a screenshot + browser state to the chat"
             aria-label="Send a debug frame to the chat"
           >
-            {capturing ? '…' : '📷'}
+            <CameraIcon />
           </button>
         )}
       </div>

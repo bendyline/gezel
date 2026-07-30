@@ -3447,7 +3447,19 @@ function renderDivider(args: {
         {taskRef && <> · task {taskRef}</>}
       </span>
       {handoff && handoffName && (
-        <span className="timeline-divider-handoff">↪ handoff from {handoffName}</span>
+        <span className="timeline-divider-handoff">
+          <svg
+            className="timeline-divider-handoff-icon"
+            viewBox="0 0 16 16"
+            fill="none"
+            aria-hidden="true"
+            focusable="false"
+          >
+            <path d="M2.5 4.25v2.1a4.4 4.4 0 0 0 4.4 4.4H13" />
+            <path d="m10.5 8.25 2.75 2.5-2.75 2.5" />
+          </svg>
+          handoff from {handoffName}
+        </span>
       )}
     </button>
   );

@@ -141,10 +141,12 @@ test('keeps terminal composer geometry aligned with chat', async ({ page, world 
   const terminalModeAlignment = await shell.evaluate((element) => {
     const tabs = element.querySelector<HTMLElement>('.project-chat-compose-toggle');
     const toolbar = element.querySelector<HTMLElement>('.terminal-composer-toolbar');
+    const folder = element.querySelector<HTMLElement>('.folder-tree-switcher');
     const input = element.querySelector<HTMLElement>('.terminal-composer-input-wrap');
-    if (!tabs || !toolbar || !input) return null;
+    if (!tabs || !toolbar || !folder || !input) return null;
     const tabsRect = tabs.getBoundingClientRect();
     const toolbarRect = toolbar.getBoundingClientRect();
+    const folderRect = folder.getBoundingClientRect();
     const inputRect = input.getBoundingClientRect();
     const frameRect = element
       .querySelector<HTMLElement>('.project-chat-compose-main')
@@ -152,8 +154,13 @@ test('keeps terminal composer geometry aligned with chat', async ({ page, world 
     return {
       tabsTop: tabsRect.top,
       tabsBottom: tabsRect.bottom,
+      toolbarTop: toolbarRect.top,
       toolbarBottom: toolbarRect.bottom,
+      folderTop: folderRect.top,
+      folderBottom: folderRect.bottom,
+      inputTop: inputRect.top,
       inputBottom: inputRect.bottom,
+      inputHeight: inputRect.height,
       frameBottom: frameRect?.bottom ?? Number.NaN,
     };
   });
@@ -172,6 +179,9 @@ test('keeps terminal composer geometry aligned with chat', async ({ page, world 
   expect.soft(folderRowHeight).toBeCloseTo(sessionRowHeight, 0);
   expect.soft(folderRowPadding).toEqual(sessionRowPadding);
   expect(terminalModeAlignment).not.toBeNull();
+  expect(terminalModeAlignment!.toolbarBottom).toBeCloseTo(terminalModeAlignment!.folderTop, 0);
+  expect(terminalModeAlignment!.folderBottom).toBeCloseTo(terminalModeAlignment!.inputTop, 0);
+  expect(terminalModeAlignment!.inputHeight).toBeGreaterThan(120);
   expect(terminalModeAlignment!.tabsTop).toBeGreaterThanOrEqual(
     terminalModeAlignment!.toolbarBottom,
   );
@@ -251,6 +261,20 @@ test('mounts, submits on Enter, newlines on Shift+Enter', async ({ page, world }
   await page.keyboard.press('Shift+Enter');
   await page.keyboard.type('b');
   await expect(editor.locator('.view-line')).toHaveCount(2);
+});
+
+test('switches to a blank chat composer when a fresh terminal draft starts with @', async ({
+  page,
+  world,
+}) => {
+  const terminalEditor = await openTerminal(page, world!.projectId);
+  await terminalEditor.click();
+  await page.keyboard.type('@');
+
+  await expect(page.getByRole('tab', { name: 'AI chat' })).toHaveAttribute('aria-selected', 'true');
+  const chatEditor = page.getByTestId('chat-composer').locator('.squisq-wysiwyg-editor').first();
+  await expect(chatEditor).toBeVisible();
+  await expect(chatEditor).toHaveText('');
 });
 
 test('lets ordinary-height output flow while preserving a horizontal scrollbar', async ({

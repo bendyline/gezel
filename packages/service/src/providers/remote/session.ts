@@ -157,6 +157,8 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
         lane: opts?.queue?.lane ?? 'interactive',
         ...(opts?.queue?.sessionId ? { sessionId: opts.queue.sessionId } : {}),
         ...(opts?.queue?.gezelId ? { gezelId: opts.queue.gezelId } : {}),
+        ...(opts?.queue?.projectId ? { projectId: opts.queue.projectId } : {}),
+        ...(opts?.queue?.actorLabel ? { actorLabel: opts.queue.actorLabel } : {}),
         ...(opts?.queue?.job ? { job: opts.queue.job } : {}),
         affinity: opts?.queue?.affinity ?? true,
       },

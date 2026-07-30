@@ -79,6 +79,8 @@ export const WireQueueHintsSchema = z.object({
   lane: z.enum(['interactive', 'background']),
   sessionId: z.string().optional(),
   gezelId: z.string().optional(),
+  projectId: z.string().optional(),
+  actorLabel: z.string().optional(),
   job: z.string().optional(),
   affinity: z.boolean(),
 });

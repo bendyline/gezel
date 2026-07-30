@@ -1,4 +1,8 @@
 import { Hono } from 'hono';
+import {
+  type CredentialOriginSource,
+  resolveCredentialOriginPolicy,
+} from '../../secrets/origins.js';
 import type { ProviderCredentialName } from '../../secrets/types.js';
 import type { ServiceContext } from '../context.js';
 
@@ -12,55 +16,46 @@ const PROVIDER_CREDENTIALS: Array<{
   shortName: string;
   secretName: ProviderCredentialName;
   label: string;
-  defaultOrigins: string[];
 }> = [
   {
     shortName: 'github.token',
     secretName: 'githubToken',
     label: 'GitHub personal access token',
-    defaultOrigins: ['https://api.github.com'],
   },
   {
     shortName: 'openai.key',
     secretName: 'openaiApiKey',
     label: 'OpenAI API key',
-    defaultOrigins: ['https://api.openai.com'],
   },
   {
     shortName: 'openai.organization',
     secretName: 'openaiOrganization',
     label: 'OpenAI organization header',
-    defaultOrigins: ['https://api.openai.com'],
   },
   {
     shortName: 'anthropic.key',
     secretName: 'anthropicApiKey',
     label: 'Anthropic API key',
-    defaultOrigins: ['https://api.anthropic.com'],
   },
   {
     shortName: 'webhook.bearer',
     secretName: 'webhookBearerToken',
     label: 'Webhook bearer token',
-    defaultOrigins: [],
   },
   {
     shortName: 'webhook.basic',
     secretName: 'webhookBasicAuth',
     label: 'Webhook basic auth',
-    defaultOrigins: [],
   },
   {
     shortName: 'brave.key',
     secretName: 'braveSearchApiKey',
     label: 'Brave Search API key',
-    defaultOrigins: ['https://api.search.brave.com'],
   },
   {
     shortName: 'tavily.key',
     secretName: 'tavilyApiKey',
     label: 'Tavily API key',
-    defaultOrigins: ['https://api.tavily.com'],
   },
 ];
 
@@ -72,15 +67,23 @@ export function credentialRoutes(ctx: ServiceContext): Hono {
       name: string;
       label: string;
       stored: boolean;
+      allowedOrigins: string[];
+      originSource: CredentialOriginSource;
+      /** @deprecated Compatibility for clients predating destination policies. */
       defaultOrigins: string[];
     }> = [];
+    const config = await ctx.store.readConfig();
+    const webhookUrl = config.channels?.webhook?.url;
     for (const p of PROVIDER_CREDENTIALS) {
       const stored = await ctx.secrets.has({ kind: 'providerCredential', name: p.secretName });
+      const originPolicy = resolveCredentialOriginPolicy(p.shortName, { webhookUrl });
       out.push({
         name: p.shortName,
         label: p.label,
         stored,
-        defaultOrigins: p.defaultOrigins,
+        allowedOrigins: originPolicy.origins,
+        originSource: originPolicy.source,
+        defaultOrigins: originPolicy.origins,
       });
     }
     return c.json({ credentials: out });

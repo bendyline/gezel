@@ -1,5 +1,6 @@
+import { poppetjeFromSeed } from '@bendyline/gezel';
 import type { ConfigResponse, QueueStatusResponse } from '@bendyline/gezel-client';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockApi } from '../test-utils/mockApi.js';
@@ -29,6 +30,42 @@ const PREPARING_STATUS: QueueStatusResponse = {
   at: '',
 };
 
+const ALEJANDRO = {
+  id: 'gez-1',
+  name: 'Alejandro',
+  role: 'Language Trainer',
+  roleBasedName: 'researcher',
+  poppetje: poppetjeFromSeed(7, { key: 'gez-1', name: 'Alejandro' }),
+  updatedAt: '',
+};
+
+const ACTIVE_STATUS: QueueStatusResponse = {
+  providers: {
+    'llama-cpp': {
+      running: 1,
+      queuedInteractive: 0,
+      queuedBackground: 0,
+      concurrency: 4,
+      interactiveConcurrency: 4,
+      backgroundConcurrency: 1,
+      active: [
+        {
+          sessionId: 'sess-1',
+          gezelId: 'gez-1',
+          projectId: 'project-7',
+          job: 'project-7',
+          runningForMs: 12_000,
+        },
+      ],
+      pending: [],
+    },
+  },
+  taskRunner: { pendingCount: 0, pendingByGezel: {}, pendingByProject: {} },
+  sessions: [],
+  cache: [],
+  at: '',
+};
+
 function liveTurn(overrides: Partial<LiveTurnState> = {}): LiveTurnState {
   return {
     phase: 'prefill',
@@ -45,8 +82,133 @@ describe('QueueMeter — preparing window', () => {
     vi.mocked(api.getConfig).mockResolvedValue({ provider: 'llama-cpp' } as ConfigResponse);
     vi.mocked(api.getQueueStatus).mockResolvedValue(PREPARING_STATUS);
     vi.mocked(api.listGezels).mockResolvedValue({
-      gezels: [{ id: 'gez-1', name: 'Alejandro' }],
+      gezels: [ALEJANDRO],
     } as never);
+    vi.mocked(api.listProjects).mockResolvedValue({
+      projects: [{ id: 'project-7', name: 'Spanish lessons' }],
+    } as never);
+  });
+
+  it('shows the active gezel identity, role, and project in the pill hover and queue row', async () => {
+    vi.mocked(api.getConfig).mockResolvedValue({
+      provider: 'llama-cpp',
+      roleBasedNameOnlyMode: false,
+      showPoppetjes: true,
+    } as ConfigResponse);
+    vi.mocked(api.getQueueStatus).mockResolvedValue(ACTIVE_STATUS);
+
+    const { container } = render(<QueueMeter />);
+    const button = await screen.findByRole('button', {
+      name: 'AI chat queue — click for details',
+    });
+
+    await waitFor(() => {
+      expect(container.querySelector('.queue-meter-chip .gezel-icon-poppetje')).not.toBeNull();
+      expect(button).toHaveAttribute('title', expect.stringContaining('Role: Language Trainer'));
+      expect(button).toHaveAttribute('title', expect.stringContaining('Project: Spanish lessons'));
+    });
+    expect(button).toHaveTextContent('Alejandro');
+    expect(button).not.toHaveTextContent('On-device');
+
+    await userEvent.click(button);
+    await waitFor(() => {
+      expect(
+        container.querySelector('.queue-meter-panel-item .gezel-icon-poppetje'),
+      ).not.toBeNull();
+    });
+    const panel = await screen.findByLabelText('AI chat queue');
+    expect(within(panel).getByText('Alejandro')).toBeInTheDocument();
+    expect(within(panel).getByText('Language Trainer · Spanish lessons')).toBeInTheDocument();
+    expect(within(panel).queryByText(/project-7/)).not.toBeInTheDocument();
+  });
+
+  it('keeps provider labels and plain status markers in boring mode', async () => {
+    vi.mocked(api.getConfig).mockResolvedValue({
+      provider: 'llama-cpp',
+      roleBasedNameOnlyMode: true,
+      showPoppetjes: true,
+    } as ConfigResponse);
+    vi.mocked(api.getQueueStatus).mockResolvedValue(ACTIVE_STATUS);
+
+    const { container } = render(<QueueMeter />);
+    const button = await screen.findByRole('button', {
+      name: 'AI chat queue — click for details',
+    });
+
+    await waitFor(() => {
+      expect(button.querySelector('.queue-meter-chip-label')).not.toBeNull();
+      expect(container.querySelector('.queue-meter-chip .gezel-icon')).toBeNull();
+    });
+    expect(button).not.toHaveTextContent('Alejandro');
+
+    await userEvent.click(button);
+    expect(await screen.findByText(/researcher/)).toBeInTheDocument();
+    expect(container.querySelector('.queue-meter-panel-item .gezel-icon')).toBeNull();
+    expect(container.querySelector('.queue-meter-panel-status-dot')).not.toBeNull();
+  });
+
+  it('attributes built-in queue work to its named system actor', async () => {
+    vi.mocked(api.getConfig).mockResolvedValue({
+      provider: 'llama-cpp',
+      roleBasedNameOnlyMode: false,
+      showPoppetjes: true,
+    } as ConfigResponse);
+    vi.mocked(api.getQueueStatus).mockResolvedValue({
+      ...ACTIVE_STATUS,
+      providers: {
+        'llama-cpp': {
+          ...ACTIVE_STATUS.providers['llama-cpp']!,
+          active: [
+            {
+              sessionId: 'index-enrichment',
+              actorLabel: 'Boekwachter',
+              job: 'index enrichment',
+              runningForMs: 16_000,
+            },
+          ],
+        },
+      },
+    });
+
+    const { container } = render(<QueueMeter />);
+    const button = await screen.findByRole('button', {
+      name: 'AI chat queue — click for details',
+    });
+
+    await waitFor(() => expect(button).toHaveTextContent('Boekwachter'));
+    expect(button).not.toHaveTextContent(/This (Windows|Linux|Mac)/);
+    expect(button.querySelector('.queue-meter-chip .gezel-icon-fallback')).not.toBeNull();
+    expect(screen.queryByText(/Unknown/i)).not.toBeInTheDocument();
+
+    await userEvent.click(button);
+    const panel = await screen.findByLabelText('AI chat queue');
+    expect(within(panel).getByText('Boekwachter')).toBeInTheDocument();
+    expect(within(panel).getByText(/index enrichment/)).toBeInTheDocument();
+  });
+
+  it('uses System as the final fallback for unattributed service work', async () => {
+    vi.mocked(api.getConfig).mockResolvedValue({
+      provider: 'llama-cpp',
+      roleBasedNameOnlyMode: false,
+      showPoppetjes: true,
+    } as ConfigResponse);
+    vi.mocked(api.getQueueStatus).mockResolvedValue({
+      ...ACTIVE_STATUS,
+      providers: {
+        'llama-cpp': {
+          ...ACTIVE_STATUS.providers['llama-cpp']!,
+          active: [{ job: 'maintenance', runningForMs: 1_000 }],
+        },
+      },
+    });
+
+    render(<QueueMeter />);
+    const button = await screen.findByRole('button', {
+      name: 'AI chat queue — click for details',
+    });
+
+    await waitFor(() => expect(button).toHaveTextContent('System'));
+    expect(screen.queryByText(/Unknown/i)).not.toBeInTheDocument();
   });
 
   it('stays visible while the on-device engine is still loading', async () => {
@@ -58,20 +220,30 @@ describe('QueueMeter — preparing window', () => {
     // The chip surfaces even though `status.providers['llama-cpp']` is
     // absent — the regression was that this went dark during preparing.
     await waitFor(() => {
-      expect(screen.getByTitle('AI chat queue — click for details')).toBeInTheDocument();
+      expect(
+        screen.getByRole('button', { name: 'AI chat queue — click for details' }),
+      ).toBeInTheDocument();
     });
   });
 
   it('lists the waiting turn with its gezel + phase and a cancel control', async () => {
-    mockLiveTurns.set('sess-1', liveTurn({ gezelId: 'gez-1', label: 'Loading model' }));
+    mockLiveTurns.set(
+      'sess-1',
+      liveTurn({ gezelId: 'gez-1', projectId: 'project-7', label: 'Loading model' }),
+    );
 
     render(<QueueMeter />);
-    const button = await screen.findByTitle('AI chat queue — click for details');
+    const button = await screen.findByRole('button', {
+      name: 'AI chat queue — click for details',
+    });
     await userEvent.click(button);
 
     // Gezel name resolved from the listGezels map, plus the live phase.
-    expect(await screen.findByText('Alejandro')).toBeInTheDocument();
-    expect(screen.getByText(/Loading model/)).toBeInTheDocument();
+    const panel = await screen.findByLabelText('AI chat queue');
+    expect(within(panel).getByText('Alejandro')).toBeInTheDocument();
+    expect(
+      within(panel).getByText('Language Trainer · Spanish lessons · Loading model'),
+    ).toBeInTheDocument();
 
     // Cancel targets the session id, not a provider-queue entry id —
     // there's no provider queue yet during preparing.
@@ -96,7 +268,9 @@ describe('QueueMeter — preparing window', () => {
     const dispatch = vi.spyOn(window, 'dispatchEvent');
 
     render(<QueueMeter />);
-    await userEvent.click(await screen.findByTitle(/AI chat queue/));
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'AI chat queue — click for details' }),
+    );
     await userEvent.click(await screen.findByRole('button', { name: 'Open chat with Alejandro' }));
 
     await waitFor(() => expect(api.getChatSession).toHaveBeenCalledWith('sess-1'));
@@ -166,7 +340,9 @@ describe('QueueMeter — preparing window', () => {
     });
 
     render(<QueueMeter />);
-    await userEvent.click(await screen.findByTitle('AI chat queue — click for details'));
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'AI chat queue — click for details' }),
+    );
 
     const providerSummary = await screen.findByText(/0 \/ 1 in flight/);
     expect(providerSummary).toHaveTextContent('0 / 1 in flight · 2 deferred until idle');

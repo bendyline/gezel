@@ -12,9 +12,9 @@ import { type RunningService, startService } from '../../service.js';
  *   - `openaiEndpoints.enabled: false` gates every inference surface AND
  *     new app registrations with `403 openai_endpoints_disabled`, while
  *     the panel's own management surface (`GET /v1/apps`) stays up.
- *   - `openaiEndpoints.servingGezelId` routes requests naming an
- *     unknown model (a client's hardcoded "gpt-4o") through the chosen
- *     gezel instead of failing with 404.
+ *   - `openaiEndpoints.servingGezelId` optionally overrides the
+ *     Meester-backed fallback for requests naming an unknown model (a
+ *     client's hardcoded "gpt-4o").
  */
 let svc: RunningService;
 let baseUrl: string;
@@ -118,7 +118,7 @@ describe('servingGezelId fallback', () => {
 
   beforeAll(async () => {
     const created = await call('POST', '/api/gezels', {
-      body: { name: 'Poortwachter', role: 'Concierge' },
+      body: { name: 'Poortwachter', role: 'Concierge', model: 'mock-reasoning' },
       token: rootToken,
     });
     expect(created.status).toBe(201);
@@ -130,19 +130,34 @@ describe('servingGezelId fallback', () => {
     await setEndpointsConfig({});
   });
 
-  it('without a serving gezel, unknown models still 404 loudly', async () => {
+  it('without an override, unknown models fall back to the default Meester', async () => {
     await setEndpointsConfig({});
     const res = await call('POST', '/v1/chat/completions', {
       body: { model: 'gpt-4o', messages: [{ role: 'user', content: 'hi' }] },
       token: rootToken,
     });
-    expect(res.status).toBe(404);
-    const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe('model_not_found');
+    expect(res.status).toBe(200);
   });
 
-  it('routes unknown model strings through the serving gezel', async () => {
+  it('uses an explicitly named provider model instead of the fallback gezel model', async () => {
     await setEndpointsConfig({ servingGezelId: gezelId });
+    const provider = await svc.context.chat.getProvider('copilot');
+    if (!(provider instanceof MockProvider)) throw new Error('expected MockProvider');
+    const before = provider.calls.length;
+    const res = await call('POST', '/v1/chat/completions', {
+      body: { model: 'copilot:mock-fast', messages: [{ role: 'user', content: 'be quick' }] },
+      token: rootToken,
+    });
+    expect(res.status).toBe(200);
+    const create = provider.calls.slice(before).find((call) => call.kind === 'create');
+    expect(create?.opts?.model).toBe('mock-fast');
+  });
+
+  it('routes unknown model strings through the configured fallback gezel', async () => {
+    await setEndpointsConfig({ servingGezelId: gezelId });
+    const provider = await svc.context.chat.getProvider('copilot');
+    if (!(provider instanceof MockProvider)) throw new Error('expected MockProvider');
+    const before = provider.calls.length;
     const res = await call('POST', '/v1/chat/completions', {
       body: { model: 'gpt-4o', messages: [{ role: 'user', content: 'who answers?' }] },
       token: rootToken,
@@ -155,16 +170,35 @@ describe('servingGezelId fallback', () => {
     // The caller's model string round-trips unchanged in the envelope.
     expect(body.model).toBe('gpt-4o');
     expect(body.choices[0]?.message.content).toContain('who answers?');
+    const create = provider.calls.slice(before).find((call) => call.kind === 'create');
+    expect(create?.opts?.model).toBe('mock-reasoning');
   });
 
-  it('lists the serving gezel first in /v1/models', async () => {
+  it('lists every gezel with name and role metadata, with the fallback first', async () => {
     await setEndpointsConfig({ servingGezelId: gezelId });
     const res = await call('GET', '/v1/models', { token: rootToken });
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
-      data: Array<{ id: string; owned_by: string }>;
+      data: Array<{
+        id: string;
+        owned_by: string;
+        name?: string;
+        role?: string;
+        is_fallback?: boolean;
+      }>;
     };
-    expect(body.data[0]).toMatchObject({ id: 'gezel:Poortwachter', owned_by: 'gezel' });
+    expect(body.data[0]).toMatchObject({
+      id: 'gezel:Poortwachter',
+      owned_by: 'gezel',
+      name: 'Poortwachter',
+      role: 'Concierge',
+      is_fallback: true,
+    });
+    const gezelList = await call('GET', '/v1/gezels', { token: rootToken });
+    const gezelBody = (await gezelList.json()) as { data: Array<{ name: string }> };
+    for (const gezel of gezelBody.data) {
+      expect(body.data.some((entry) => entry.id === `gezel:${gezel.name}`)).toBe(true);
+    }
   });
 });
 
