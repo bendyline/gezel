@@ -1,4 +1,3 @@
-import { spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdir, open, readFile, rm, writeFile } from 'node:fs/promises';
@@ -11,8 +10,7 @@ import {
 } from '@bendyline/gezel-catalog';
 import { systemToolsetsInstallDir } from '@bendyline/gezel/paths';
 import type { Store } from '../fs/store.js';
-import { resolvePnpmCommand } from '../packages/pnpm.js';
-import { winShellSafe } from '../packages/win-shell.js';
+import { resolvePnpmCommand, spawnPnpm } from '../packages/pnpm.js';
 import { SYSTEM_LOCKFILES } from './locks.js';
 import {
   CHROMIUM_REVISION,
@@ -384,7 +382,7 @@ async function installOne(
         '--frozen-lockfile',
         '--ignore-scripts',
       ]);
-      await run(pnpm.command, pnpm.args, pkgDir, pnpm.shell);
+      await run(pnpm, pkgDir);
 
       await publishStagedNpmInstall(staging, target, backup);
       return { installPath: join(target, 'package') };
@@ -514,27 +512,18 @@ async function readBoundedJson(response: Response, maxBytes: number): Promise<un
   }
 }
 
-function run(cmd: string, args: string[], cwd: string | undefined, shell: boolean): Promise<void> {
+function run(
+  invocation: ReturnType<typeof resolvePnpmCommand>,
+  cwd: string | undefined,
+): Promise<void> {
   return new Promise((resolve, reject) => {
-    // `shell` is a required parameter, not an optional with a
-    // platform-sniffing default. It used to be `shell ?? process.platform
-    // === 'win32'`, which meant any caller that omitted it silently
-    // shelled out on Windows — and under `shell: true` Node concatenates
-    // the command and args without escaping, so an interpreter path like
-    // `C:\Program Files\gezel\Gezel.exe` was split at the space and cmd
-    // reported `'C:\Program' is not recognized`. The caller resolves the
-    // right answer (resolvePnpmInvocation only asks for a shell for
-    // `.cmd`/`.bat` shims, which genuinely cannot be exec'd directly);
-    // this function must not second-guess it.
-    //
-    // stdio is 'inherit', so anything cmd.exe complains about lands
-    // straight in the daemon's stderr log with no prefix — worth knowing
-    // when reading service-stderr.log.
-    const target = winShellSafe(cmd, args, shell);
-    const child = spawn(target.command, target.args, {
+    // `spawnPnpm` owns both Windows quoting and CREATE_NO_WINDOW. The latter
+    // is load-bearing for the machine service: an ordinary Node console
+    // process launched in non-interactive Session 0 can terminate with
+    // STATUS_DLL_INIT_FAILED (0xC0000142) before pnpm starts.
+    const child = spawnPnpm(invocation, {
       cwd,
       stdio: 'inherit',
-      shell,
     });
     child.on('error', (err) => {
       // Translate the Node-level `ENOENT` into something a user (or a
@@ -544,14 +533,17 @@ function run(cmd: string, args: string[], cwd: string | undefined, shell: boolea
         const hint = pnpmEnv
           ? `GEZEL_PNPM_PATH=${pnpmEnv} could not be launched; check that it exists and that GEZEL_NODE_PATH names a working Node runtime when it is a JavaScript entrypoint.`
           : `GEZEL_PNPM_PATH is unset; the daemon's launcher did not provide a path to the bundled pnpm.`;
-        reject(new Error(`Could not run '${cmd}' (${err.message}). ${hint}`));
+        reject(new Error(`Could not run '${invocation.command}' (${err.message}). ${hint}`));
         return;
       }
       reject(err);
     });
     child.on('exit', (code) => {
       if (code === 0) resolve();
-      else reject(new Error(`${cmd} ${args.join(' ')} exited with code ${code}`));
+      else
+        reject(
+          new Error(`${invocation.command} ${invocation.args.join(' ')} exited with code ${code}`),
+        );
     });
   });
 }

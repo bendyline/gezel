@@ -262,6 +262,10 @@ async function readNodeHelp(nodeBin: string): Promise<string> {
     const child = spawn(nodeBin, ['--help'], {
       stdio: ['ignore', 'pipe', 'pipe'],
       env: sandboxEnv(process.env),
+      // Bundled Node is a console-subsystem executable. The machine service
+      // has no interactive console, so keep even this capability probe
+      // headless on Windows (ignored elsewhere).
+      windowsHide: true,
     });
     let stdout = '';
     let stderr = '';
@@ -293,6 +297,10 @@ async function runSandboxChild(
       // here prevents an unrelated process-group kill from closing a
       // short-lived derive/script child with a null exit code.
       detached: process.platform !== 'win32',
+      // Required when the command resolves to bundled Node under the
+      // machine-wide Session 0 service. Without CREATE_NO_WINDOW the child
+      // can fail during DLL initialization before user code runs.
+      windowsHide: true,
       // Allowlist-scrub the env — inheriting everything leaked tokens
       // (GEZEL_TOKEN, OPENAI_API_KEY, GITHUB_PERSONAL_ACCESS_TOKEN,
       // etc.) into the sandboxed script, letting it `fetch` them

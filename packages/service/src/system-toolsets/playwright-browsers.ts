@@ -1,9 +1,8 @@
-import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { playwrightBrowsersDir } from '@bendyline/gezel/paths';
-import { pnpmSpawnTarget, resolvePnpmCommand } from '../packages/pnpm.js';
+import { resolvePnpmCommand, spawnPnpm } from '../packages/pnpm.js';
 import type { SystemStatusBus } from './status-bus.js';
 
 /**
@@ -58,15 +57,13 @@ export async function ensureChromiumInstalled(args: {
     'chromium',
   ]);
   return new Promise((resolve) => {
-    const target = pnpmSpawnTarget(pnpm);
-    const child = spawn(target.command, target.args, {
+    const child = spawnPnpm(pnpm, {
       cwd: args.playwrightInstallPath,
       env: {
         ...process.env,
         PLAYWRIGHT_BROWSERS_PATH: browsersDir,
       },
       stdio: ['ignore', 'pipe', 'pipe'],
-      shell: pnpm.shell,
     });
     let stderrTail = '';
     const onChunk = (chunk: Buffer) => {

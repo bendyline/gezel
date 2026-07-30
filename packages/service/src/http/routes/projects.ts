@@ -1,4 +1,3 @@
-import { spawn } from 'node:child_process';
 import { mkdir, readFile, readdir, rm, stat } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import {
@@ -43,7 +42,7 @@ import { ProjectDeleteError } from '../../fs/store.js';
 import { GitError, runGit } from '../../git/git.js';
 import { buildEnrichDeps } from '../../index-store/enrich.js';
 import { installPackage } from '../../packages/install.js';
-import { pnpmSpawnTarget, resolvePnpmCommand } from '../../packages/pnpm.js';
+import { resolvePnpmCommand, spawnPnpm } from '../../packages/pnpm.js';
 import { applyProjectType } from '../../project-type/apply.js';
 import { TypedProjectCreateError, createTypedProject } from '../../project-type/create.js';
 import { importGzlBundle, packProjectTypeBundle } from '../../project-type/gzl.js';
@@ -1017,15 +1016,13 @@ export function projectRoutes(ctx: ServiceContext): Hono {
 
     const result = await new Promise<{ ok: boolean; code: number | null; log: string }>(
       (resolve) => {
-        const target = pnpmSpawnTarget(pnpm);
-        const child = spawn(target.command, target.args, {
+        const child = spawnPnpm(pnpm, {
           cwd: playwright.installPath,
           env: {
             ...process.env,
             PLAYWRIGHT_BROWSERS_PATH: playwrightBrowsersDir(ctx.home),
           },
           stdio: ['ignore', 'pipe', 'pipe'],
-          shell: pnpm.shell,
         });
         let log = '';
         const cap = (chunk: Buffer) => {
