@@ -230,12 +230,7 @@ describe('discoverNativeBinaries — Linux + AMD Vulkan', () => {
 
 describe('discoverNativeBinaries — Linux ARM64 packaging fallback', () => {
   it('uses the CPU build when Vulkan is detected but no ARM64 Vulkan build is bundled', () => {
-    const cpuBin = stageBinary(
-      nativeBinDir,
-      'linux-arm64-cpu',
-      'gezel-llama-server',
-      'linux',
-    );
+    const cpuBin = stageBinary(nativeBinDir, 'linux-arm64-cpu', 'gezel-llama-server', 'linux');
 
     const result = discoverNativeBinaries({
       home,
@@ -288,12 +283,7 @@ describe('discoverNativeBinaries — Linux ARM64 packaging fallback', () => {
 
 describe('discoverNativeBinaries — automatic backend cascade', () => {
   it('falls back from CUDA to Vulkan before CPU when the CUDA build is absent', () => {
-    const vulkanBin = stageBinary(
-      nativeBinDir,
-      'linux-x64-vulkan',
-      'gezel-llama-server',
-      'linux',
-    );
+    const vulkanBin = stageBinary(nativeBinDir, 'linux-x64-vulkan', 'gezel-llama-server', 'linux');
     stageBinary(nativeBinDir, 'linux-x64-cpu', 'gezel-llama-server', 'linux');
 
     const result = discoverNativeBinaries({

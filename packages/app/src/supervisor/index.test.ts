@@ -76,11 +76,10 @@ vi.mock('./extract-bundle.js', () => ({
   extractBundleIfNeeded: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock('./native-bin.js', () => ({
-  resolveNativeBinaryPath: vi.fn(
-    (binaryName: string, _mainMetaUrl: string, variant?: string) =>
-      binaryName === 'llama-server' && variant
-        ? (ctx.nativeLlamaPaths[variant as keyof typeof ctx.nativeLlamaPaths] ?? null)
-        : null,
+  resolveNativeBinaryPath: vi.fn((binaryName: string, _mainMetaUrl: string, variant?: string) =>
+    binaryName === 'llama-server' && variant
+      ? (ctx.nativeLlamaPaths[variant as keyof typeof ctx.nativeLlamaPaths] ?? null)
+      : null,
   ),
   nativeBinDir: () => '/mock/native-bin',
 }));

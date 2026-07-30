@@ -2538,10 +2538,27 @@ describe('ChatManager — sendWithMentions (@-mention fan-out)', () => {
 });
 
 describe('ChatManager — per-session message queue', () => {
+  let previousMemoryExtractionSetting: string | undefined;
+
+  beforeEach(() => {
+    previousMemoryExtractionSetting = process.env.GEZEL_DISABLE_MEMORY_EXTRACTION;
+    // These tests exercise only the per-session chat queue. Letting the
+    // asynchronous memory extractor share MockProvider's response queue makes
+    // reply ownership timing-dependent under suite load.
+    process.env.GEZEL_DISABLE_MEMORY_EXTRACTION = '1';
+  });
+
+  afterEach(() => {
+    if (previousMemoryExtractionSetting === undefined) {
+      delete process.env.GEZEL_DISABLE_MEMORY_EXTRACTION;
+    } else {
+      process.env.GEZEL_DISABLE_MEMORY_EXTRACTION = previousMemoryExtractionSetting;
+    }
+  });
+
   it('back-to-back sends on one session run in FIFO order', async () => {
     const session = await manager.createSession({ gezelId: 'ada' });
-    // Script 4 replies: assistant-A, NONE (memory extract), assistant-B, NONE.
-    mock.script('reply-A', 'NONE', 'reply-B', 'NONE');
+    mock.script('reply-A', 'reply-B');
     // Hold A's turn for 100ms so B is guaranteed to arrive while A is
     // still running. That forces B into the queue rather than both
     // resolving synchronously on microtask-settle.
@@ -2574,7 +2591,7 @@ describe('ChatManager — per-session message queue', () => {
 
   it('three concurrent sends drain in FIFO order', async () => {
     const session = await manager.createSession({ gezelId: 'ada' });
-    mock.script('r1', 'NONE', 'r2', 'NONE', 'r3', 'NONE');
+    mock.script('r1', 'r2', 'r3');
     mock.scriptSendDelay(30);
     mock.scriptSendDelay(30);
     mock.scriptSendDelay(30);
@@ -2592,7 +2609,7 @@ describe('ChatManager — per-session message queue', () => {
 
   it('user_message event for B fires only after A completes', async () => {
     const session = await manager.createSession({ gezelId: 'ada' });
-    mock.script('reply-A', 'NONE', 'reply-B', 'NONE');
+    mock.script('reply-A', 'reply-B');
     mock.scriptSendDelay(80);
 
     const recorded: string[] = [];
@@ -2621,7 +2638,7 @@ describe('ChatManager — per-session message queue', () => {
 
   it('archiving a session rejects messages queued against it', async () => {
     const session = await manager.createSession({ gezelId: 'ada' });
-    mock.script('reply-A', 'NONE');
+    mock.script('reply-A');
     mock.scriptSendDelay(100);
 
     const pA = manager.send(session.id, 'userA');
@@ -2640,11 +2657,9 @@ describe('ChatManager — per-session message queue', () => {
 
   it('consecutive coalescable sends merge into one turn instead of queuing separately', async () => {
     const session = await manager.createSession({ gezelId: 'ada' });
-    // Scripts for: A's turn, A's memory extract, merged-BCD turn, its
-    // memory extract. Four total. If merging DIDN'T happen, we'd need
-    // 8 scripts (one turn per queued message + memory extract each) —
-    // the `userTurns.length === 2` assertion later catches the miss.
-    mock.script('reply-A', 'NONE', 'merged-reply', 'NONE');
+    // Scripts for A's turn and the merged BCD turn. If merging did not
+    // happen, the transcript assertion below would expose the extra turns.
+    mock.script('reply-A', 'merged-reply');
     mock.scriptSendDelay(100);
     // First send is a plain (non-coalescable) user message that
     // holds the inflight slot.
@@ -2688,7 +2703,7 @@ describe('ChatManager — per-session message queue', () => {
 
   it('does NOT coalesce across a user message (non-coalescable breaks the chain)', async () => {
     const session = await manager.createSession({ gezelId: 'ada' });
-    mock.script('reply-1', 'NONE', 'reply-2', 'NONE', 'reply-3', 'NONE');
+    mock.script('reply-1', 'reply-2', 'reply-3', 'reply-4');
     mock.scriptSendDelay(40);
     mock.scriptSendDelay(40);
     mock.scriptSendDelay(40);
@@ -2711,7 +2726,7 @@ describe('ChatManager — per-session message queue', () => {
 
   it('does NOT coalesce a gezel→gezel handoff into a user follow-up', async () => {
     const session = await manager.createSession({ gezelId: 'ada' });
-    mock.script('r1', 'NONE', 'r2', 'NONE', 'r3', 'NONE');
+    mock.script('r1', 'r2', 'r3');
     mock.scriptSendDelay(40);
     mock.scriptSendDelay(40);
     mock.scriptSendDelay(40);
@@ -2738,7 +2753,7 @@ describe('ChatManager — per-session message queue', () => {
     // exceeded `sendWithBusyRetry`'s old 20s backoff ceiling and
     // dropped B on the floor.
     const session = await manager.createSession({ gezelId: 'ada' });
-    mock.script('slow-reply-A', 'NONE', 'reply-B', 'NONE');
+    mock.script('slow-reply-A', 'reply-B');
     mock.scriptSendDelay(250);
 
     const pA = manager.send(session.id, 'userA');

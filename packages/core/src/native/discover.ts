@@ -200,8 +200,7 @@ export function discoverNativeBinaries(input: DiscoverInput): DiscoverResult {
       binaries.push({ name: 'llama-server', source: 'no-native-bin-dir', variant: probe.backend });
     } else {
       const allowFallbacks =
-        input.llamaCppBackendOverride === undefined ||
-        input.llamaCppBackendOverride === 'auto';
+        input.llamaCppBackendOverride === undefined || input.llamaCppBackendOverride === 'auto';
       const resolved = resolveAvailableLlamaBinary(
         probe.backend,
         (backend) =>
@@ -222,8 +221,7 @@ export function discoverNativeBinaries(input: DiscoverInput): DiscoverResult {
         process.env.GEZEL_LLAMA_SERVER_BACKEND = resolved.backend;
         if (resolved.fallbackFrom) {
           result.llamaBackend.backend = resolved.backend;
-          result.llamaBackend.reason =
-            `${probe.reason}; no bundled ${resolved.fallbackFrom} binary, using ${resolved.backend}`;
+          result.llamaBackend.reason = `${probe.reason}; no bundled ${resolved.fallbackFrom} binary, using ${resolved.backend}`;
           log?.info?.(
             `[native] no bundled llama-server for ${resolved.fallbackFrom}; using ${resolved.backend} fallback: ${resolved.path}`,
           );
