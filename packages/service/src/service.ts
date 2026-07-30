@@ -43,6 +43,7 @@ import { ModelFitnessManager } from './fitness/manager.js';
 import { type FitnessEngine, runFitnessProbe } from './fitness/probe.js';
 import { ActivityTracker } from './fs/activity-tracker.js';
 import { Store } from './fs/store.js';
+import { ensureDefaultBoekwachter } from './gezels/autonomous-roles.js';
 import { GitManager } from './git/manager.js';
 import { CodeReviewManager } from './git/reviews.js';
 import { GitHubPrs } from './github/prs.js';
@@ -421,6 +422,10 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   const memory = new MemoryManager(store);
   const tasks = new TaskManager(store, history);
   const catalog = new CatalogService(undefined, { localRoot: home });
+  // The Boekwachter is a full, catalog-backed gezel. This runs after catalog
+  // construction (unlike the Store-owned Meester/Klerk ensures above) so the
+  // canonical gilde about.md and template provenance are preserved.
+  await ensureDefaultBoekwachter(store, catalog);
   const secrets = await openSecretStore(home);
   log.info(`[secrets] backend=${secrets.backend}`);
   await seedSecretsFromEnvFile(secrets);

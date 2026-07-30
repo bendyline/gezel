@@ -46,7 +46,7 @@ vi.mock('../components/DeviceSummary.js', () => ({
   DeviceSummary: () => <div data-testid="device-summary">device</div>,
 }));
 vi.mock('../components/FirstRunInstallBanner.js', () => ({
-  FirstRunInstallBanner: () => null,
+  FirstRunInstallBanner: () => <div data-testid="first-run-install-banner" />,
 }));
 vi.mock('../components/GezelIcon.js', () => ({
   GezelIcon: ({ name, pulsing }: { name: string; pulsing?: boolean }) => (
@@ -303,6 +303,33 @@ describe('HomeView', () => {
     await waitFor(() => {
       expect(screen.getByTestId('home-workshop')).toBeInTheDocument();
     });
+    expect(screen.queryByText('First run setup')).not.toBeInTheDocument();
+  });
+
+  it.each(['mlx', 'llama-cpp'] as const)(
+    'keeps a healthy %s engine with no installed models in first run',
+    async (provider) => {
+      vi.mocked(api.getConfig).mockResolvedValue({
+        provider,
+        meesterGezelId: 'gz-meester',
+        defaultModel: { [provider]: 'recommended-model' },
+      } as never);
+      vi.mocked(api.testProvider).mockResolvedValue({ ok: true, modelCount: 0 } as never);
+
+      render(<HomeView />);
+
+      expect(await screen.findByText('First run setup')).toBeInTheDocument();
+      expect(screen.getByTestId('first-run-install-banner')).toBeInTheDocument();
+      expect(screen.queryByTestId('home-workshop')).not.toBeInTheDocument();
+    },
+  );
+
+  it('does not require a locally installed model when a cloud provider is connected', async () => {
+    vi.mocked(api.testProvider).mockResolvedValue({ ok: true, modelCount: 0 } as never);
+
+    render(<HomeView />);
+
+    expect(await screen.findByTestId('home-workshop')).toBeInTheDocument();
     expect(screen.queryByText('First run setup')).not.toBeInTheDocument();
   });
 

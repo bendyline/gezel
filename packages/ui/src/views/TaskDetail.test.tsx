@@ -79,7 +79,10 @@ const TASK: Task = {
   createdBy: { kind: 'user' },
 } as unknown as Task;
 
-const GEZELS: GezelSummary[] = [{ id: 'gz-maya', name: 'Maya' } as GezelSummary];
+const GEZELS: GezelSummary[] = [
+  { id: 'gz-maya', name: 'Maya' } as GezelSummary,
+  { id: 'noor', name: 'Noor', role: 'Boekwachter' } as GezelSummary,
+];
 
 const NOTE: TaskNote = {
   id: 'note-1',
@@ -163,6 +166,25 @@ describe('TaskDetail', () => {
     await waitFor(() => {
       expect(api.setTaskAssignee).toHaveBeenCalledWith('pj-alpha', 42, { kind: 'user' });
     });
+  });
+
+  it('shows a system job as managed by its real gezel without a reassignment control', () => {
+    const systemTask = {
+      ...TASK,
+      assignee: { kind: 'user' },
+      origin: {
+        kind: 'system-job',
+        jobId: 'boekwachter-indexing',
+        managedByGezelId: 'noor',
+      },
+    } as Task;
+    render(
+      <TaskDetail task={systemTask} gezels={GEZELS} projectName="Alpha" onChanged={vi.fn()} />,
+    );
+
+    expect(screen.getByText('Noor')).toBeInTheDocument();
+    expect(screen.getByText('· system-run')).toBeInTheDocument();
+    expect(screen.queryByText('→ You')).not.toBeInTheDocument();
   });
 
   it('Post note calls appendTaskNote with the editor draft and current step id', async () => {

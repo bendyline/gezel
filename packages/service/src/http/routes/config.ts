@@ -1,6 +1,11 @@
 import { UpdateConfigRequestSchema, createLogger, resolveSandboxCopilot } from '@bendyline/gezel';
 import { Hono } from 'hono';
 import { z } from 'zod';
+import {
+  createFreshBoekwachter,
+  transferBoekwachterMembership,
+} from '../../gezels/autonomous-roles.js';
+import { ensureIndexingJobTask } from '../../index-store/indexing-job.js';
 import { getCliDetections } from '../../providers/cli-detection.js';
 import { resolveGpuPolicy } from '../../providers/gpu-arbiter.js';
 import type { ProviderCredentialName, SecretStore } from '../../secrets/types.js';
@@ -114,6 +119,10 @@ const CreateKlerkRequestSchema = z.object({
   name: z.string().min(1).optional(),
 });
 
+const CreateBoekwachterRequestSchema = z.object({
+  name: z.string().min(1).optional(),
+});
+
 const CreateKeurmeesterRequestSchema = z.object({
   name: z.string().min(1).optional(),
 });
@@ -169,6 +178,7 @@ export function configRoutes(ctx: ServiceContext): Hono {
       firstRunInstallError: config.firstRunInstallError,
       meesterGezelId: config.meesterGezelId,
       klerkGezelId: config.klerkGezelId,
+      boekwachterGezelId: config.boekwachterGezelId,
       keurmeesterGezelId: config.keurmeesterGezelId,
       keurmeester: config.keurmeester,
       debugMode: config.debugMode === true,
@@ -355,6 +365,25 @@ export function configRoutes(ctx: ServiceContext): Hono {
       });
     }
     if (
+      body.boekwachterGezelId !== undefined &&
+      body.boekwachterGezelId !== previous.boekwachterGezelId
+    ) {
+      await transferBoekwachterMembership(
+        ctx.store,
+        previous.boekwachterGezelId,
+        body.boekwachterGezelId,
+      );
+      await ensureIndexingJobTask(ctx.store, ctx.tasks);
+      await ctx.history.log({
+        kind: 'boekwachter.changed',
+        summary: `Boekwachter set to ${await designationName(body.boekwachterGezelId)}`,
+        details: {
+          previousGezelId: previous.boekwachterGezelId,
+          gezelId: body.boekwachterGezelId,
+        },
+      });
+    }
+    if (
       body.keurmeesterGezelId !== undefined &&
       body.keurmeesterGezelId !== previous.keurmeesterGezelId
     ) {
@@ -515,6 +544,10 @@ export function configRoutes(ctx: ServiceContext): Hono {
       firstRunCompleted: updated.firstRunCompleted,
       firstRunInstallError: updated.firstRunInstallError,
       meesterGezelId: updated.meesterGezelId,
+      klerkGezelId: updated.klerkGezelId,
+      boekwachterGezelId: updated.boekwachterGezelId,
+      keurmeesterGezelId: updated.keurmeesterGezelId,
+      keurmeester: updated.keurmeester,
       debugMode: updated.debugMode === true,
       showAdvancedFeatures: updated.showAdvancedFeatures === true,
       resetTemplatesOnStartup: updated.resetTemplatesOnStartup === true,
@@ -618,6 +651,7 @@ export function configRoutes(ctx: ServiceContext): Hono {
           defaultReasoningEffort: updated.defaultReasoningEffort,
           meesterGezelId: updated.meesterGezelId,
           klerkGezelId: updated.klerkGezelId,
+          boekwachterGezelId: updated.boekwachterGezelId,
         },
       },
       201,
@@ -663,6 +697,48 @@ export function configRoutes(ctx: ServiceContext): Hono {
           defaultReasoningEffort: updated.defaultReasoningEffort,
           meesterGezelId: updated.meesterGezelId,
           klerkGezelId: updated.klerkGezelId,
+          boekwachterGezelId: updated.boekwachterGezelId,
+        },
+      },
+      201,
+    );
+  });
+
+  /**
+   * Create a fresh canonical Boekwachter, transfer the projects that had
+   * the previous designation, and make the new gezel the install-wide
+   * default for this autonomous role.
+   */
+  app.post('/boekwachter', async (c) => {
+    const body = CreateBoekwachterRequestSchema.parse(await c.req.json().catch(() => ({})));
+    const previous = await ctx.store.readConfig();
+    const created = await createFreshBoekwachter(ctx.store, ctx.catalog, body.name);
+    await transferBoekwachterMembership(ctx.store, previous.boekwachterGezelId, created.id);
+    await ensureIndexingJobTask(ctx.store, ctx.tasks);
+    await ctx.history.log({
+      kind: 'boekwachter.changed',
+      summary: `Boekwachter set to ${created.name}`,
+      details: {
+        previousGezelId: previous.boekwachterGezelId,
+        gezelId: created.id,
+      },
+    });
+    const updated = await ctx.store.readConfig();
+    const creds = await readCredentialView(ctx.secrets);
+    return c.json(
+      {
+        gezel: created,
+        config: {
+          provider: updated.provider ?? 'copilot',
+          ...creds,
+          ollamaBaseUrl: updated.ollamaBaseUrl,
+          autoStartOllama: updated.autoStartOllama ?? true,
+          defaultModel: updated.defaultModel,
+          defaultReasoningEffort: updated.defaultReasoningEffort,
+          meesterGezelId: updated.meesterGezelId,
+          klerkGezelId: updated.klerkGezelId,
+          boekwachterGezelId: updated.boekwachterGezelId,
+          keurmeesterGezelId: updated.keurmeesterGezelId,
         },
       },
       201,
@@ -708,6 +784,7 @@ export function configRoutes(ctx: ServiceContext): Hono {
           defaultReasoningEffort: updated.defaultReasoningEffort,
           meesterGezelId: updated.meesterGezelId,
           klerkGezelId: updated.klerkGezelId,
+          boekwachterGezelId: updated.boekwachterGezelId,
           keurmeesterGezelId: updated.keurmeesterGezelId,
         },
       },

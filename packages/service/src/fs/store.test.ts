@@ -113,7 +113,11 @@ describe('agents', () => {
     const created = await store.createGezel({ name: 'Maya' });
     await store.createProject({ name: 'Maya Project' });
     await store.updateProject('maya-project', { voormanGezelId: created.id });
-    await store.writeConfig({ klerkGezelId: created.id, keurmeesterGezelId: created.id });
+    await store.writeConfig({
+      klerkGezelId: created.id,
+      boekwachterGezelId: created.id,
+      keurmeesterGezelId: created.id,
+    });
 
     const removed = await store.deleteGezel(created.id);
     expect(removed).toEqual({ id: 'maya', name: 'Maya' });
@@ -125,6 +129,7 @@ describe('agents', () => {
     expect(project?.gezelIds).not.toContain(created.id);
     const config = await store.readConfig();
     expect(config.klerkGezelId).toBeUndefined();
+    expect(config.boekwachterGezelId).toBeUndefined();
     expect(config.keurmeesterGezelId).toBeUndefined();
   });
 

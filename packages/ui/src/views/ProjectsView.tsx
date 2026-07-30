@@ -484,6 +484,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
     pageTools?: string[];
   } | null>(null);
   const [gezels, setGezels] = useState<GezelSummary[]>([]);
+  const [boekwachterGezelId, setBoekwachterGezelId] = useState<string | undefined>();
   const [workingDirDraft, setWorkingDirDraft] = useState('');
   const [showAllowWritesConfirm, setShowAllowWritesConfirm] = useState(false);
   const [writesJournal, setWritesJournal] = useState<
@@ -545,7 +546,42 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
       .catch((err) => {
         console.error('[ProjectsView] listGezels failed', err);
       });
+    api
+      .getConfig()
+      .then((config) => setBoekwachterGezelId(config.boekwachterGezelId))
+      .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    const onConfigUpdated = (event: Event) => {
+      const detail = (event as CustomEvent<{ boekwachterGezelId?: string }>).detail;
+      setBoekwachterGezelId(detail?.boekwachterGezelId);
+    };
+    window.addEventListener('gezel:config-updated', onConfigUpdated);
+    return () => window.removeEventListener('gezel:config-updated', onConfigUpdated);
+  }, []);
+
+  const addProjectGezel = useCallback(
+    async (gezelId: string) => {
+      if (!selected) return;
+      const result = await api.addGezelToProject(selected.id, gezelId);
+      setSelected((current) =>
+        current?.id === selected.id ? { ...current, gezelIds: result.gezelIds } : current,
+      );
+    },
+    [selected],
+  );
+
+  const removeProjectGezel = useCallback(
+    async (gezelId: string) => {
+      if (!selected) return;
+      const result = await api.removeGezelFromProject(selected.id, gezelId);
+      setSelected((current) =>
+        current?.id === selected.id ? { ...current, gezelIds: result.gezelIds } : current,
+      );
+    },
+    [selected],
+  );
 
   const refreshFiles = useCallback(async (id: string) => {
     const [ws, art] = await Promise.all([
@@ -1497,7 +1533,13 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                 <div className="project-body-content">
                   {tab === 'about' && (
                     <div className="project-about-page">
-                      <ProjectCrewRoster project={selected} gezels={gezels} />
+                      <ProjectCrewRoster
+                        project={selected}
+                        gezels={gezels}
+                        boekwachterGezelId={boekwachterGezelId}
+                        onAddGezel={addProjectGezel}
+                        onRemoveGezel={removeProjectGezel}
+                      />
 
                       <ProjectDocEditor
                         key={`${selected.id}:about`}

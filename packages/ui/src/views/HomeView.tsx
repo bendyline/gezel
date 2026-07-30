@@ -1,5 +1,5 @@
 import type { HealthResponse, Project, SecurityPresetLevel } from '@bendyline/gezel';
-import { displayName, securityPolicyForLevel } from '@bendyline/gezel';
+import { displayName, isLocalProvider, securityPolicyForLevel } from '@bendyline/gezel';
 import type { ProviderName } from '@bendyline/gezel';
 import type { ConfigResponse } from '@bendyline/gezel-client';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -262,19 +262,21 @@ export function HomeView({
 
   useEffect(() => () => cancelOllamaRetries(), [cancelOllamaRetries]);
 
-  // For Ollama, "ready" is stronger than just reaching the server — we also
-  // need at least one model installed, otherwise the first chat would fail
-  // with a cryptic error. The onboarding flow stays on the Setup section
-  // (now rendering the model picker inline) until a model exists.
-  const ollamaNeedsModel = provider === 'ollama' && probe.kind === 'ok' && probe.modelCount === 0;
+  // A healthy local engine is not yet usable without a model on disk. Keep
+  // every local provider in onboarding until its inventory is non-empty so
+  // the first-run download affordance remains visible. Cloud/frontier
+  // providers are different: an empty list can be a valid API response and
+  // must not send an already-connected user back through first run.
+  const localProviderNeedsModel =
+    isLocalProvider(provider) && probe.kind === 'ok' && probe.modelCount === 0;
 
   // Settle the sticky verdict off *terminal* probes only. A re-probe flips
   // `probe` back to 'probing' (e.g. after a first-run model install), but we
   // leave the last verdict standing so the view doesn't bounce.
   useEffect(() => {
-    if (probe.kind === 'ok') setConfigured(!ollamaNeedsModel);
+    if (probe.kind === 'ok') setConfigured(!localProviderNeedsModel);
     else if (probe.kind === 'fail') setConfigured(false);
-  }, [probe.kind, ollamaNeedsModel]);
+  }, [probe.kind, localProviderNeedsModel]);
 
   // Credential providers with no creds (OpenAI / Anthropic before a key is
   // saved) are never auto-probed — there's nothing to wait for, so resolve

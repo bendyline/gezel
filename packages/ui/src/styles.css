@@ -3160,6 +3160,14 @@ html.embedded-chat #root {
     drop-shadow(3px 5px 9px var(--sidebar-seam-shadow));
 }
 
+/* The shared inset highlight reads as a stray gray arc against dark project
+   tabs. Their filter shadow already supplies elevation, so keep the surface
+   clean and let the actual perimeter be the only top edge. */
+.app-sidebar-proj-row.active,
+:root[data-sidebar-side="right"] .app-sidebar-proj-row.active {
+  box-shadow: none;
+}
+
 :root[data-sidebar-side="right"] .app-sidebar-item.active::after,
 :root[data-sidebar-side="right"] .app-sidebar-tree .tree-row.tree-row-selected::after {
   right: auto;
@@ -3778,6 +3786,43 @@ button.danger {
 
 .project-crew-empty {
   margin: 0;
+}
+
+.project-autonomous-role {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.85rem;
+  margin-top: 0.75rem;
+  padding: 0.65rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--surface) 82%, transparent);
+}
+
+.project-autonomous-role-active {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+}
+
+.project-autonomous-role-copy {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.project-autonomous-role-title {
+  font-size: var(--text-sm);
+  font-weight: 650;
+}
+
+.project-autonomous-role .subtle {
+  flex: 0 0 auto;
+}
+
+.project-autonomous-role-error {
+  margin: 0.4rem 0 0;
 }
 
 /* History carries a master/detail split that wants a bounded height —
@@ -8811,6 +8856,24 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
   cursor: pointer;
 }
 
+.task-system-owner {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: 32px;
+  padding: 0.25rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--key-bg);
+  color: var(--text);
+  font-size: var(--text-sm);
+}
+
+.task-system-owner small {
+  color: var(--muted);
+  font-size: var(--text-2xs);
+}
+
 .task-description {
   color: var(--muted);
   margin: 0;
@@ -12633,9 +12696,10 @@ button.bench-step-foot:disabled {
   transform: translate(-50%, -50%);
   background: color-mix(in srgb, var(--border) 72%, var(--text-muted));
   border-radius: 1px;
+  opacity: 0;
   box-shadow: 1px 0 0 color-mix(in srgb, var(--surface) 65%, transparent), 0 1px 2px
     color-mix(in srgb, var(--text) 12%, transparent);
-  transition: background 0.15s, box-shadow 0.15s;
+  transition: opacity 0.15s ease-out, background 0.15s, box-shadow 0.15s;
 }
 
 .chat-rail-grip::before {
@@ -12653,6 +12717,7 @@ button.bench-step-foot:disabled {
 .chat-rail-grip:active::before,
 .chat-rail-grip:active::after {
   background: var(--accent);
+  opacity: 1;
   box-shadow: 1px 0 0 color-mix(in srgb, var(--surface) 72%, transparent), 0 1px 3px
     color-mix(in srgb, var(--accent) 28%, transparent);
 }
@@ -18563,8 +18628,7 @@ a.license-button:hover {
  * `.squisq-toolbar` carries in gezel per theme — warm tint in dark, sage in
  * light (see the `.squisq-toolbar` overrides above, and the light-theme rule
  * below for why that one can't just reuse the same rgba).
- * Holds the command-gallery button; more affordances (working folder, …)
- * can land alongside it. */
+ * Holds the command galleries and the right-aligned Fire action. */
 .terminal-composer-toolbar {
   /* 35px = the squisq chat toolbar's rendered height in the real app
    * (its tabs + buttons run a touch taller than the bare view-tab
@@ -18578,8 +18642,7 @@ a.license-button:hover {
   background: rgba(176, 114, 76, 0.08);
 }
 
-/* Command-gallery trigger (and the template for any future toolbar button):
- * a compact, chrome-free pill that warms on hover / when its popover is open. */
+/* Compact toolbar button that warms on hover / when its popover is open. */
 .terminal-toolbar-btn {
   display: inline-flex;
   align-items: center;
@@ -18602,6 +18665,18 @@ a.license-button:hover {
 }
 .terminal-toolbar-btn svg {
   flex: 0 0 auto;
+}
+.terminal-toolbar-fire-btn {
+  margin-left: auto;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 38%, transparent);
+  color: var(--text);
+  font-weight: 600;
+}
+.terminal-toolbar-fire-btn:hover {
+  background: color-mix(in srgb, var(--accent) 24%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 54%, transparent);
+  color: var(--text);
 }
 [data-theme="light"] .terminal-toolbar-btn:hover,
 [data-theme="light"] .terminal-toolbar-btn[data-state="open"] {
@@ -21812,6 +21887,19 @@ button.linklike {
   min-width: 0;
   max-width: min(240px, 22vw);
   overflow: hidden;
+  font-family: inherit;
+  line-height: 1.35;
+}
+button.boekwachter-pill {
+  cursor: pointer;
+}
+button.boekwachter-pill:hover {
+  border-color: color-mix(in srgb, var(--titlebar-ink) 45%, transparent);
+  background: color-mix(in srgb, var(--titlebar) 88%, var(--titlebar-ink));
+}
+button.boekwachter-pill:focus-visible {
+  outline: 2px solid var(--focus-ring, var(--accent));
+  outline-offset: 2px;
 }
 .boekwachter-pill-label {
   min-width: 0;
@@ -21828,6 +21916,15 @@ button.linklike {
   background: var(--accent, #c9722e);
   animation: boekwachter-pulse 1.6s ease-in-out infinite;
   flex: 0 0 auto;
+}
+.boekwachter-pill-avatar {
+  display: inline-flex;
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  overflow: hidden;
+  border-radius: 50%;
+  animation: boekwachter-pulse 1.6s ease-in-out infinite;
 }
 @keyframes boekwachter-pulse {
   0%,

@@ -25,9 +25,7 @@ test.describe('app shell', () => {
       },
       {
         trigger: page.getByTestId('sidebar-group-documents'),
-        tab: page.locator(
-          '.app-sidebar-group[data-group="documents"] > .app-sidebar-group-header',
-        ),
+        tab: page.locator('.app-sidebar-group[data-group="documents"] > .app-sidebar-group-header'),
       },
       {
         trigger: page.getByTestId('sidebar-group-gezels'),
@@ -86,7 +84,9 @@ test.describe('app shell', () => {
     });
     await page.keyboard.press('Tab');
     await home.focus();
-    await expect.poll(() => home.evaluate((element) => element.matches(':focus-visible'))).toBe(true);
+    await expect
+      .poll(() => home.evaluate((element) => element.matches(':focus-visible')))
+      .toBe(true);
     const focusedHome = await home.evaluate((element) => {
       const style = getComputedStyle(element);
       return {

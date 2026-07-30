@@ -3,8 +3,10 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
   type ChatSessionSummary,
+  type GezelDetail,
   type HistoryEvent,
   type Project,
+  type ProviderName,
   createLogger,
   isProactiveAllowed,
 } from '@bendyline/gezel';
@@ -12,14 +14,16 @@ import { projectLocalDir } from '@bendyline/gezel/paths';
 import type { ChatEventBus } from '../chat/events.js';
 import { writeFileAtomic } from '../fs/atomic.js';
 import type { Store } from '../fs/store.js';
+import { resolveProjectBoekwachter } from '../gezels/autonomous-roles.js';
 import { runGit } from '../git/git.js';
 import { inspectGitWorkdir } from '../git/inspect.js';
 import type { HistoryManager } from '../history/manager.js';
+import { resolveEnrichTarget } from '../index-store/enrich.js';
 
 /**
  * Weekly "what changed" digest per project — the temporal deep pass. Sources
  * the last seven days of commits (any git workingDir, GitHub-linked or not),
- * history events, and chat-session activity, asks the Klerk for a short
+ * history events, and chat-session activity, asks the project's Boekwachter for a short
  * narrative, and lands it in the artifacts drawer under reports/ where both
  * the user and gezels can read it.
  *
@@ -43,7 +47,14 @@ const ONE_SHOT_TIMEOUT_MS = 180_000;
 export type DigestOneShot = (
   prompt: string,
   timeoutMs: number,
-  opts: { useKlerk: boolean; jobLabel: string },
+  opts: {
+    gezelId: string;
+    useGezelPersona: boolean;
+    actorLabel: string;
+    providerName: ProviderName;
+    model: string;
+    jobLabel: string;
+  },
 ) => Promise<string>;
 
 interface DigestState {
@@ -77,6 +88,8 @@ export interface ProjectDigestGeneratorOptions {
   onSweep?: (result: DigestSweepResult) => void;
   /** Chat event bus for `index_progress` heartbeats (optional in tests). */
   events?: Pick<ChatEventBus, 'publishGlobalEvent'>;
+  /** Test seam; production resolves roster membership for each project. */
+  resolveBoekwachter?: (projectId: string) => Promise<GezelDetail | null>;
 }
 
 export class ProjectDigestGenerator {
@@ -91,6 +104,7 @@ export class ProjectDigestGenerator {
 
   private readonly onSweep?: (result: DigestSweepResult) => void;
   private readonly events: Pick<ChatEventBus, 'publishGlobalEvent'> | undefined;
+  private readonly resolveBoekwachter: (projectId: string) => Promise<GezelDetail | null>;
 
   private startupTimer: ReturnType<typeof setTimeout> | null = null;
   private sweepTimer: ReturnType<typeof setInterval> | null = null;
@@ -107,6 +121,9 @@ export class ProjectDigestGenerator {
     this.isChatActive = opts.isChatActive ?? (() => false);
     this.onSweep = opts.onSweep;
     this.events = opts.events;
+    this.resolveBoekwachter =
+      opts.resolveBoekwachter ??
+      ((projectId) => resolveProjectBoekwachter(this.store, projectId).catch(() => null));
   }
 
   start(): void {
@@ -152,9 +169,11 @@ export class ProjectDigestGenerator {
           log.debug('digest sweep yielded to newly active live chat');
           break;
         }
+        const boekwachter = await this.resolveBoekwachter(project.id);
+        if (!boekwachter) continue;
         result.projects++;
         try {
-          const generated = await this.generateForProject(project);
+          const generated = await this.generateForProject(project, boekwachter);
           if (generated) result.generated++;
           else result.skipped++;
         } catch (err) {
@@ -169,7 +188,7 @@ export class ProjectDigestGenerator {
     }
   }
 
-  private async generateForProject(project: Project): Promise<boolean> {
+  private async generateForProject(project: Project, boekwachter: GezelDetail): Promise<boolean> {
     const now = this.now();
     const week = isoWeek(now);
     const from = new Date(now.getTime() - WINDOW_MS).toISOString();
@@ -211,10 +230,16 @@ export class ProjectDigestGenerator {
       return false;
     }
 
+    const target = await resolveEnrichTarget(this.store, { boekwachter });
+    if (!target) return false;
     const prompt = buildDigestPrompt(project.name, week, commits, events, sessions);
     const narrative = (
       await this.oneShot(prompt, ONE_SHOT_TIMEOUT_MS, {
-        useKlerk: true,
+        gezelId: boekwachter.id,
+        useGezelPersona: true,
+        actorLabel: boekwachter.name,
+        providerName: target.providerName,
+        model: target.model,
         jobLabel: `weekly digest · ${project.name}`,
       })
     ).trim();
@@ -250,6 +275,8 @@ export class ProjectDigestGenerator {
       state: 'ended',
       projectId: project.id,
       detail: `weekly digest ${week}`,
+      gezelId: boekwachter.id,
+      gezelName: boekwachter.name,
     });
     return true;
   }
