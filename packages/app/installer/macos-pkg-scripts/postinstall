@@ -99,7 +99,10 @@ daemon_user_gid=$(dscl . -read "/Users/${DAEMON_USER}" PrimaryGroupID | awk '$1 
 daemon_group_gid=$(dscl . -read "/Groups/${DAEMON_USER}" PrimaryGroupID | awk '$1 == "PrimaryGroupID:" { print $2 }')
 daemon_shell=$(dscl . -read "/Users/${DAEMON_USER}" UserShell | awk '$1 == "UserShell:" { print $2 }')
 daemon_home=$(dscl . -read "/Users/${DAEMON_USER}" NFSHomeDirectory | awk '$1 == "NFSHomeDirectory:" { print $2 }')
-daemon_hidden=$(dscl . -read "/Users/${DAEMON_USER}" IsHidden | awk '$1 == "IsHidden:" { print $2 }')
+# macOS 26 renders native attributes as `dsAttrTypeNative:IsHidden: 1`;
+# older releases use `IsHidden: 1`. Accept either label without weakening
+# the requirement that the stored value itself is exactly 1.
+daemon_hidden=$(dscl . -read "/Users/${DAEMON_USER}" IsHidden | awk '$1 ~ /(^|:)IsHidden:$/ { print $2 }')
 if ! [[ "$daemon_uid" =~ ^[0-9]+$ && "$daemon_user_gid" =~ ^[0-9]+$ && "$daemon_group_gid" =~ ^[0-9]+$ ]]; then
   abort_bad_service_identity "UID/GID identity is incomplete or non-numeric"
 fi

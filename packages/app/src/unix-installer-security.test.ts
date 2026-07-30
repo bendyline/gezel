@@ -69,6 +69,9 @@ describe('macOS machine-service filesystem security', () => {
     expect(macPostinstall).toContain('daemon_shell=$(dscl . -read');
     expect(macPostinstall).toContain('[ "$daemon_shell" != "/usr/bin/false" ]');
     expect(macPostinstall).toContain('[ "$daemon_home" != "/var/empty" ]');
+    expect(macPostinstall).toContain(
+      'daemon_hidden=$(dscl . -read "/Users/${DAEMON_USER}" IsHidden | awk \'$1 ~ /(^|:)IsHidden:$/ { print $2 }\')',
+    );
     expect(macPostinstall).toContain('[ "$daemon_hidden" != "1" ]');
     expect(macPlist).toMatch(/<key>Umask<\/key>\s*<integer>63<\/integer>/);
     expect(macPlist).toMatch(/<key>GEZEL_PORT<\/key>\s*<string>43935<\/string>/);
