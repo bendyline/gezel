@@ -142,9 +142,19 @@ export function pickChatPlaceholder(args: Args): string {
 /**
  * Placeholders are sentences, and several templates open with the gezel's
  * name — which can be a lowercase fallback like "your meester". Capitalize
- * the first character so the sentence never starts lowercase, wherever the
- * name lands in the template.
+ * each sentence's first character so it never starts lowercase, wherever the
+ * name lands in the template. Abbreviations are not sentence boundaries.
  */
 function sentenceCase(s: string): string {
-  return s.charAt(0).toUpperCase() + s.slice(1);
+  const abbreviationAtEnd = /\b(?:e\.g|i\.e|etc|vs|approx|no|fig|Mr|Mrs|Ms|Dr|St)\.$/iu;
+
+  return s.replace(
+    /(^|[.?!]["')\]]?\s+)(["'(\[]*)(\p{Ll})/gu,
+    (match, boundary: string, openingPunctuation: string, letter: string, offset: number) => {
+      if (boundary.startsWith('.') && abbreviationAtEnd.test(s.slice(0, offset + 1))) {
+        return match;
+      }
+      return `${boundary}${openingPunctuation}${letter.toUpperCase()}`;
+    },
+  );
 }
