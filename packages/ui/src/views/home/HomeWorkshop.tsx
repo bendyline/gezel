@@ -7,7 +7,7 @@ import type {
   Task,
 } from '@bendyline/gezel';
 import type { ConfigResponse } from '@bendyline/gezel-client';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../../api.js';
 import { streamSharedAllChatEvents } from '../../shared-chat-events.js';
 import { GreetingBand, type HomeGreetingTab } from './GreetingBand.js';
@@ -31,6 +31,7 @@ export function HomeWorkshop({
   meesterIcon,
   meesterPoppetje,
   meesterIconOverride,
+  banner,
   onNavigate,
 }: {
   config: ConfigResponse | null;
@@ -40,6 +41,14 @@ export function HomeWorkshop({
   meesterIcon: string | null;
   meesterPoppetje: PoppetjeStruct | null;
   meesterIconOverride: boolean;
+  /**
+   * Service-health banner from HomeView, rendered above the greeting band.
+   * It has to be threaded through rather than left in HomeView's own JSX:
+   * once the user is configured, HomeView returns this component and never
+   * reaches the markup where the banner used to live, so every degraded
+   * service notice was invisible to everyone past first-run setup.
+   */
+  banner?: ReactNode;
   onNavigate?: (view: HomeNavView) => void;
 }) {
   // Collapsed state is a persisted preference (server config, so it
@@ -179,6 +188,7 @@ export function HomeWorkshop({
 
   return (
     <div className="home-workshop" data-testid="home-workshop">
+      {banner}
       <GreetingBand
         chips={chips}
         meesterName={meesterName}

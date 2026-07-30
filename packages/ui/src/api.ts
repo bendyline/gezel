@@ -13,11 +13,20 @@ declare global {
       baseUrl?: string;
       platform?: 'darwin' | 'win32' | 'linux' | string;
       /**
-       * Set by the Electron supervisor when it fell back to embedded mode
-       * after repeated spawn failures. The UI shows a persistent banner so
-       * the user understands why packaged-mode behavior degraded.
+       * Set by the Electron supervisor when the service situation is
+       * degraded — usually because it fell back to embedded mode after
+       * repeated spawn failures. The UI shows a persistent banner so the
+       * user understands why packaged-mode behavior changed.
        */
       fallbackReason?: string | null;
+      /**
+       * Which degraded situation `fallbackReason` describes. Not every one
+       * is an embedded fallback: `system-service-version-mismatch` means we
+       * stayed connected to the machine service but it is running a
+       * different release than this app, which only the installer can fix.
+       * The banner branches on this so the copy matches what happened.
+       */
+      fallbackCode?: string | null;
       /**
        * How the Electron shell connected to gezeld this launch. "Cold"
        * modes (embedded, local-spawn-*) mean the service just booted and

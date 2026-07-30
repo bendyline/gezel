@@ -125,6 +125,7 @@ const { SupervisedService, connectOrStart, gracefullyStop, healthWithTimeout, st
   await import('./index.js');
 const { resolveMode } = await import('./mode.js');
 const { discoverOrSpawn } = await import('@bendyline/gezel-client/node');
+const { readBundleMeta } = await import('./extract-bundle.js');
 
 // Env keys the supervisor's prelude mutates. We snapshot at the start
 // of each test and restore at the end so test order doesn't leak.
@@ -151,6 +152,11 @@ beforeEach(async () => {
   ctx.runtime = null;
   ctx.systemRuntime = null;
   ctx.processAlive = true;
+  // "We can't read our own bundle version" is the default, which makes every
+  // version check a no-op. Reset explicitly: `vi.clearAllMocks()` clears call
+  // records but leaves implementations in place, so a test that stubs a
+  // shipped version would otherwise leak it into the rest of the file.
+  vi.mocked(readBundleMeta).mockResolvedValue(null);
 });
 
 afterEach(async () => {
@@ -191,6 +197,15 @@ function makeFakeChild(): ChildProcess {
     return true;
   });
   return ee as unknown as ChildProcess;
+}
+
+/**
+ * A shipped-bundle sidecar carrying the version under test. Only `version`
+ * matters to the version checks; the digest fields are filler so the stub
+ * satisfies `BundleMeta`.
+ */
+function bundleMeta(version: string) {
+  return { version, sha256: 'stub-sha', sizeBytes: 1, fileCount: 1 };
 }
 
 function baseOpts(overrides: Partial<Parameters<typeof connectOrStart>[0]> = {}) {
@@ -275,6 +290,108 @@ describe('Branch 1.5 — system-service', () => {
       code: 'system-service-unhealthy',
       sourceMode: 'system-service',
     });
+    await svc.shutdown();
+  });
+
+  // The machine service's gezeld tree is written only by the platform
+  // installer, so an app-only update (macOS ZIP via Squirrel) leaves it on
+  // the previous release. We cannot stop or replace it, and falling back to
+  // embedded would point the user at a different GEZEL_HOME — so we stay
+  // connected and raise a banner instead.
+  it('flags a version mismatch but stays connected to the system service', async () => {
+    vi.mocked(resolveMode).mockResolvedValue({
+      kind: 'system-service',
+      baseUrl: 'https://127.0.0.1:5555',
+      token: 'svc-tok',
+      cert: 'CERT',
+      serviceHome: '/Library/Application Support/Gezel',
+    });
+    vi.mocked(readBundleMeta).mockResolvedValue(bundleMeta('1.26211.23'));
+    ctx.health = () => Promise.resolve({ ok: true, version: '1.26210.19' });
+
+    const svc = await connectOrStart(baseOpts({ packaged: true }));
+
+    expect(svc.mode).toBe('system-service');
+    expect(svc.baseUrl).toBe('https://127.0.0.1:5555');
+    expect(svc.fallbackReason).toMatchObject({
+      code: 'system-service-version-mismatch',
+      sourceMode: 'system-service',
+    });
+    // Both versions must reach the user — "they disagree" alone is not
+    // actionable when deciding whether to rerun the installer.
+    expect(svc.fallbackReason?.message).toContain('1.26210.19');
+    expect(svc.fallbackReason?.message).toContain('1.26211.23');
+    expect(discoverOrSpawn).not.toHaveBeenCalled();
+    await svc.shutdown();
+  });
+
+  it('stays quiet when the system service matches the shipped version', async () => {
+    vi.mocked(resolveMode).mockResolvedValue({
+      kind: 'system-service',
+      baseUrl: 'https://127.0.0.1:5555',
+      token: 'svc-tok',
+      cert: 'CERT',
+      serviceHome: '/var/lib/gezel',
+    });
+    vi.mocked(readBundleMeta).mockResolvedValue(bundleMeta('1.26211.23'));
+    ctx.health = () => Promise.resolve({ ok: true, version: '1.26211.23' });
+
+    const svc = await connectOrStart(baseOpts({ packaged: true }));
+
+    expect(svc.mode).toBe('system-service');
+    expect(svc.fallbackReason).toBeNull();
+    await svc.shutdown();
+  });
+
+  // Dev workspaces move version-to-version constantly and any system service
+  // present is a leftover from a real install, so the check would be noise.
+  it('skips the version check outside packaged mode', async () => {
+    vi.mocked(resolveMode).mockResolvedValue({
+      kind: 'system-service',
+      baseUrl: 'https://127.0.0.1:5555',
+      token: 'svc-tok',
+      cert: null,
+      serviceHome: '/var/lib/gezel',
+    });
+    vi.mocked(readBundleMeta).mockResolvedValue(bundleMeta('9.9.9'));
+    ctx.health = () => Promise.resolve({ ok: true, version: '1.0.0' });
+
+    const svc = await connectOrStart(baseOpts({ packaged: false }));
+
+    expect(svc.mode).toBe('system-service');
+    expect(svc.fallbackReason).toBeNull();
+    await svc.shutdown();
+  });
+
+  // Rerunning the installer is how a user resolves this banner, so the
+  // reconnect that follows has to clear it rather than carry the boot-time
+  // verdict for the rest of the session.
+  it('clears the mismatch once the service reports a matching version', async () => {
+    vi.mocked(resolveMode).mockResolvedValue({
+      kind: 'system-service',
+      baseUrl: 'https://127.0.0.1:5555',
+      token: 'svc-tok',
+      cert: 'CERT',
+      serviceHome: '/Library/Application Support/Gezel',
+    });
+    vi.mocked(readBundleMeta).mockResolvedValue(bundleMeta('1.26211.23'));
+    ctx.health = () => Promise.resolve({ ok: true, version: '1.26210.19' });
+    const svc = await connectOrStart(baseOpts({ packaged: true }));
+    expect(svc.fallbackReason?.code).toBe('system-service-version-mismatch');
+
+    ctx.systemRuntime = {
+      port: 5555,
+      baseUrl: 'https://127.0.0.1:5555',
+      token: 'svc-tok',
+      cert: 'CERT',
+      home: '/Library/Application Support/Gezel',
+    };
+    ctx.health = () => Promise.resolve({ ok: true, version: '1.26211.23' });
+
+    await svc.restart('after reinstall');
+
+    expect(svc.mode).toBe('system-service');
+    expect(svc.fallbackReason).toBeNull();
     await svc.shutdown();
   });
 });

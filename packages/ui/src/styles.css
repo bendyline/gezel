@@ -534,6 +534,15 @@ html.embedded-chat #root {
   line-height: 1.4;
 }
 
+/* The workshop is a full-bleed flex column with `overflow: hidden`, so a
+   banner dropped in as its first child would otherwise be shrunk toward
+   zero by flex sizing and clipped. Hold its natural height and inset it
+   from the bled-out top edge. */
+.home-workshop > .app-fallback-banner {
+  flex: none;
+  margin-top: 0.75rem;
+}
+
 .app-fallback-banner > span,
 .app-fallback-banner details {
   color: var(--text-muted);
@@ -4659,6 +4668,10 @@ button.danger {
 
 .placeholder {
   color: #888;
+}
+
+.project-loading {
+  padding-inline-start: 1rem;
 }
 
 .error {

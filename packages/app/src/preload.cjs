@@ -19,6 +19,7 @@ try {
 const token = conn?.token ?? '';
 const baseUrl = conn?.baseUrl ?? readArg('--gezel-url=') ?? '';
 const fallbackReason = conn?.fallbackReason ?? null;
+const fallbackCode = conn?.fallbackCode ?? null;
 const mode = conn?.mode ?? null;
 
 // Register at preload evaluation time so an OS open-file handoff sent as soon
@@ -35,6 +36,7 @@ contextBridge.exposeInMainWorld('__GEZEL__', {
   baseUrl,
   platform: process.platform,
   fallbackReason,
+  fallbackCode,
   mode,
   // Opens the native OS folder picker and resolves to the chosen absolute
   // path, or null if the user cancelled.

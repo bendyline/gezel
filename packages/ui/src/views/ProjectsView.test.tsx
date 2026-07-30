@@ -275,6 +275,14 @@ describe('ProjectsView', () => {
     });
   });
 
+  it('insets the detail-only loading state from the project pane edge', () => {
+    vi.mocked(api.getProject).mockReturnValue(new Promise(() => {}) as never);
+
+    render(<ProjectsView forceProjectId="pj-alpha" />);
+
+    expect(screen.getByText('Loading project…')).toHaveClass('project-loading');
+  });
+
   it('does not apply the collapsed project-list grid to a detail-only project tab', async () => {
     window.localStorage.setItem('gezel.projectsSidebarCollapsed', '1');
 

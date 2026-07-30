@@ -2189,7 +2189,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
             </div>
           </>
         ) : (
-          <p className="placeholder">Loading project…</p>
+          <p className="placeholder project-loading">Loading project…</p>
         )}
       </section>
     </div>

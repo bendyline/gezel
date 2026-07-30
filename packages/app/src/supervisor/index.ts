@@ -39,6 +39,7 @@ export type ConnectionMode = Mode['kind'];
 
 export type ServiceFallbackCode =
   | 'system-service-unhealthy'
+  | 'system-service-version-mismatch'
   | 'adopted-daemon-stale'
   | 'adopted-daemon-unhealthy'
   | 'packaged-spawn-failed'
@@ -47,7 +48,16 @@ export type ServiceFallbackCode =
   | 'restart-budget-exhausted'
   | 'restart-failed';
 
-/** Machine-readable internally; the preload exposes only `message` today. */
+/**
+ * A degraded service situation worth telling the user about, surfaced as a
+ * persistent banner. Most codes mean "we fell back to embedded"; the
+ * exception is `system-service-version-mismatch`, where we stayed connected
+ * to the machine service on purpose and the banner is asking the user to
+ * rerun the installer. Branch on `code`, not on the mode, when the copy
+ * matters — see `FallbackBanner` in the UI.
+ *
+ * `code` and `message` both cross to the renderer via the preload bridge.
+ */
 export interface ServiceFallbackReason {
   code: ServiceFallbackCode;
   sourceMode: ConnectionMode;
@@ -282,10 +292,17 @@ export class SupervisedService extends EventEmitter {
     if (!home) throw new Error('System-service restart is missing its service home');
     const runtime = await readSystemServiceRuntime(home);
     if (!runtime) throw new Error(`System-service runtime is unavailable at ${home}`);
-    await healthWithTimeout(buildHealthClient(runtime.baseUrl, runtime.token, runtime.cert));
+    const health = await healthWithTimeout(
+      buildHealthClient(runtime.baseUrl, runtime.token, runtime.cert),
+    );
     this._baseUrl = runtime.baseUrl;
     this._token = runtime.token;
     this._cert = runtime.cert;
+    // Re-evaluate the skew rather than carrying the boot-time verdict
+    // forward. Rerunning the installer is exactly how a user resolves this
+    // banner, and the reconnect that follows should clear it — otherwise
+    // the warning outlives the problem until the app is fully restarted.
+    this._fallbackReason = await systemServiceVersionSkew(health.version, home, this.opts);
     this.emit('restart');
   }
 
@@ -630,10 +647,11 @@ export async function connectOrStart(opts: ConnectOptions): Promise<SupervisedSe
     // gets a working app instead of an indefinite spinner.
     const client = buildHealthClient(mode.baseUrl, mode.token, mode.cert);
     try {
-      await healthWithTimeout(client);
+      const health = await healthWithTimeout(client);
       opts.logger?.info?.(`[supervisor] connected to system service at ${mode.baseUrl}`);
       return new SupervisedService('system-service', mode.baseUrl, mode.token, mode.cert, opts, {
         systemServiceHome: mode.serviceHome,
+        fallbackReason: await systemServiceVersionSkew(health.version, mode.serviceHome, opts),
       });
     } catch (err) {
       opts.logger?.warn?.(
@@ -839,6 +857,58 @@ async function isAdoptDaemonStaleForDev(
     );
     return false;
   }
+}
+
+/**
+ * Version negotiation for an adopted machine service. Returns the banner
+ * reason when the daemon and this app disagree, or null when they match.
+ *
+ * The system service runs gezeld out of the installer-owned tree
+ * (`/Library/Application Support/Gezel/service`, `C:\ProgramData\Gezel\
+ * service`, `/var/lib/gezel/service`), and the platform installer is the
+ * only thing that ever writes it — `extractBundleIfNeeded` targets
+ * `gezelPaths(opts.home).install`, the per-user tree, and never runs on
+ * this branch. An app-only update therefore leaves the daemon behind:
+ * electron-updater hands Squirrel.Mac a new .app, the shell and the
+ * bundled UI move forward, and gezeld keeps executing the previous
+ * release's code. Before this check the mismatch was invisible.
+ *
+ * Unlike `local-adopt` below, we cannot repair it. That branch SIGTERMs
+ * the stale pid and respawns from our own bundle; here the process belongs
+ * to launchd / systemd / the SCM under a service account, we have no
+ * permission to stop it, the service manager would restart it anyway, and
+ * what it re-executed would be the same root-owned tree.
+ *
+ * Falling back to embedded would be worse than the skew rather than
+ * better: the machine service reads the system-scope home, while an
+ * embedded boot comes up against `opts.home` (`~/.gezel`). Every gezel,
+ * project, and session the user has would appear to vanish. So we stay
+ * connected and say plainly that the installer needs to run again.
+ *
+ * Packaged only. In dev the workspace version moves constantly and any
+ * system service present is a leftover from a real install, so firing
+ * there would be noise. Also null when our own bundle metadata is
+ * unreadable — same conservative stance `local-adopt` takes.
+ */
+async function systemServiceVersionSkew(
+  daemonVersion: string,
+  serviceHome: string,
+  opts: ConnectOptions,
+): Promise<ServiceFallbackReason | null> {
+  if (!opts.packaged) return null;
+  const shipped = await shippedServiceVersion();
+  if (!shipped || daemonVersion === shipped) return null;
+  opts.logger?.warn?.(
+    `[supervisor] system service at ${serviceHome} is v${daemonVersion} but this app ships ` +
+      `v${shipped}; staying connected (its tree is installer-owned) and flagging it in the UI`,
+  );
+  return {
+    code: 'system-service-version-mismatch',
+    sourceMode: 'system-service',
+    message:
+      `The Gezel background service is running version ${daemonVersion}, but this copy of ` +
+      `Gezel expects version ${shipped}. Its files at ${serviceHome} are only replaced by the installer.`,
+  };
 }
 
 /**

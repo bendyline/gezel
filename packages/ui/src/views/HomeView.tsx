@@ -56,10 +56,12 @@ const OLLAMA_MAX_RETRIES = 720;
  */
 export function HomeView({
   fallbackReason,
+  fallbackCode,
   platform,
   onNavigate,
 }: {
   fallbackReason?: string | null;
+  fallbackCode?: string | null;
   platform?: string;
   onNavigate?: (
     view:
@@ -316,6 +318,14 @@ export function HomeView({
     void runProbe(provider);
   }, [runProbe, provider]);
 
+  // Built once and rendered by whichever branch below wins. It used to live
+  // only in the un-configured setup markup, which meant no configured user
+  // ever saw a degraded-service notice — the workshop branch returns before
+  // that JSX is reached.
+  const banner = fallbackReason ? (
+    <FallbackBanner reason={fallbackReason} code={fallbackCode} platform={platform} />
+  ) : null;
+
   // Hold the loading splash until the verdict has actually settled — never
   // guess first-run-vs-workshop while config is still loading or the probe is
   // mid-flight. This is what keeps "First run setup" from flashing past on a
@@ -323,6 +333,7 @@ export function HomeView({
   if (!config || configured === null) {
     return (
       <div className="home-view home-view-loading">
+        {banner}
         <IntroSection
           collapsed={false}
           onToggle={() => {}}
@@ -356,6 +367,7 @@ export function HomeView({
         meesterIcon={meesterIcon}
         meesterPoppetje={meesterPoppetje}
         meesterIconOverride={meesterIconOverride}
+        banner={banner}
         onNavigate={onNavigate}
       />
     );
@@ -363,7 +375,7 @@ export function HomeView({
 
   return (
     <div className="home-view">
-      {fallbackReason && <FallbackBanner reason={fallbackReason} platform={platform} />}
+      {banner}
       {/* ── 1. Intro ─────────────────────────────────────────────── */}
       <IntroSection
         collapsed={collapseIntro ?? false}
@@ -477,7 +489,48 @@ export function HomeView({
 }
 
 // ─────────────────────────────────────────────────────────────────
-function FallbackBanner({ reason, platform }: { reason: string; platform?: string }) {
+// How to reinstall, per platform. The version-mismatch banner is the one
+// place we ask the user to rerun the installer, and "rerun the installer"
+// means a different artifact on each OS.
+const REINSTALL_HINT: Record<string, string> = {
+  darwin: 'Run the Gezel PKG again and approve Installer’s administrator prompt.',
+  win32: 'Run the Gezel installer again and approve the Windows administrator prompt.',
+  linux: 'Reinstall the Gezel .deb or .rpm package.',
+};
+
+function FallbackBanner({
+  reason,
+  code,
+  platform,
+}: {
+  reason: string;
+  code?: string | null;
+  platform?: string;
+}) {
+  // The machine service is healthy and holding the user's data — it is just
+  // running a different release than this app. Saying "background work is
+  // paused" here would be wrong on both counts, and the fix (rerun the
+  // installer) is nothing like "reopen Gezel". See the supervisor's
+  // `systemServiceVersionSkew` for why the app cannot repair this itself.
+  if (code === 'system-service-version-mismatch') {
+    return (
+      <output className="app-fallback-banner">
+        <strong>Gezel updated, but its background service did not.</strong>
+        <span>
+          Everything still works and none of your gezels, projects, or chats are affected — but the
+          app and the service are on different versions, so newer features may misbehave until they
+          match. The service is installed for the whole machine, so only the installer can replace
+          it.
+          {platform && REINSTALL_HINT[platform] ? ` ${REINSTALL_HINT[platform]}` : ''}
+        </span>
+        <details>
+          <summary>Technical details</summary>
+          <p>{reason}</p>
+        </details>
+      </output>
+    );
+  }
+
   return (
     <output className="app-fallback-banner">
       <strong>Background work is temporarily paused.</strong>

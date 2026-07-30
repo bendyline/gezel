@@ -126,6 +126,71 @@ describe('HomeView', () => {
     expect(screen.getByTestId('chat-composer')).toBeInTheDocument();
   });
 
+  // A skewed machine service is healthy and still holding the user's data —
+  // the generic "background work is paused" copy would be wrong about both,
+  // and its advice (reopen Gezel) does not fix a version mismatch.
+  describe('service banner', () => {
+    it('tells the user to reinstall when the app and service versions differ', async () => {
+      render(
+        <HomeView
+          fallbackReason="The Gezel background service is running version 1.26210.19, but this copy of Gezel expects version 1.26211.23."
+          fallbackCode="system-service-version-mismatch"
+          platform="darwin"
+        />,
+      );
+
+      // Wait for the *configured* branch specifically. The regression this
+      // pins: an onboarded user renders the workshop, which returned before
+      // the banner markup and swallowed every service notice. Asserting only
+      // on the banner would pass against the loading branch that precedes it.
+      await screen.findByTestId('home-workshop');
+
+      expect(
+        screen.getByText(/Gezel updated, but its background service did not/),
+      ).toBeInTheDocument();
+      expect(screen.getByText(/Run the Gezel PKG again/)).toBeInTheDocument();
+      expect(screen.queryByText(/Background work is temporarily paused/)).not.toBeInTheDocument();
+      // Both versions stay reachable in the details disclosure.
+      expect(screen.getByText(/1\.26210\.19/)).toBeInTheDocument();
+    });
+
+    it('names the right installer per platform', async () => {
+      const { unmount } = render(
+        <HomeView
+          fallbackReason="skew"
+          fallbackCode="system-service-version-mismatch"
+          platform="linux"
+        />,
+      );
+      await screen.findByText(/Reinstall the Gezel \.deb or \.rpm package/);
+      unmount();
+
+      render(
+        <HomeView
+          fallbackReason="skew"
+          fallbackCode="system-service-version-mismatch"
+          platform="win32"
+        />,
+      );
+      await screen.findByText(/Run the Gezel installer again/);
+    });
+
+    it('keeps the paused-background copy for an embedded fallback', async () => {
+      render(
+        <HomeView
+          fallbackReason="System service was unavailable: SCM stopped"
+          fallbackCode="system-service-unhealthy"
+          platform="darwin"
+        />,
+      );
+
+      await screen.findByText(/Background work is temporarily paused/);
+      expect(
+        screen.queryByText(/Gezel updated, but its background service did not/),
+      ).not.toBeInTheDocument();
+    });
+  });
+
   it('holds the loading splash while the probe is in flight — never flashes First run setup', async () => {
     // A probe that stays pending lets us inspect the intermediate state. The
     // regression this guards: a slow cold-boot probe used to drop the splash

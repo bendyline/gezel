@@ -581,6 +581,7 @@ function FullApp() {
   }, [openArea, commitSelection]);
 
   const fallbackReason = window.__GEZEL__?.fallbackReason ?? null;
+  const fallbackCode = window.__GEZEL__?.fallbackCode ?? null;
 
   return (
     <div className="app">
@@ -700,6 +701,7 @@ function FullApp() {
           {selection === null ? (
             <HomeView
               fallbackReason={fallbackReason}
+              fallbackCode={fallbackCode}
               platform={window.__GEZEL__?.platform}
               onNavigate={(v) => {
                 if (v === 'home') commitSelection(null);

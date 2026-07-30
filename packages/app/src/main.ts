@@ -626,6 +626,9 @@ ipcMain.on('gezel:current-connection', (event) => {
         token: connection.token,
         baseUrl: connection.baseUrl,
         fallbackReason: connection.fallbackReason?.message ?? null,
+        // The code, not just the message: some reasons need their own banner
+        // copy rather than the generic "background work is paused" framing.
+        fallbackCode: connection.fallbackReason?.code ?? null,
         mode: connection.mode,
       }
     : null;
