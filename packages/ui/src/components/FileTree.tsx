@@ -1,4 +1,5 @@
 import { type ReactNode, useState } from 'react';
+import { ContextMenu, DropdownMenu } from '../primitives/index.js';
 
 export interface FileEntry {
   name: string;
@@ -17,7 +18,9 @@ export interface FileTreeProps {
   entries: FileEntry[];
   selectedPath?: string;
   onSelect: (entry: FileEntry) => void;
-  /** Optional per-row delete button. If omitted the button is not rendered. */
+  /** Optional per-row rename action, exposed through ⋯ and right-click menus. */
+  onRename?: (entry: FileEntry) => void;
+  /** Optional per-row delete action, exposed through ⋯ and right-click menus. */
   onDelete?: (entry: FileEntry) => void;
   /** Depth at which child nodes are initially collapsed. Default 2. */
   defaultExpandedDepth?: number;
@@ -82,6 +85,7 @@ export function FileTree({
   entries,
   selectedPath,
   onSelect,
+  onRename,
   onDelete,
   defaultExpandedDepth = 2,
   iconFor = defaultIconFor,
@@ -97,6 +101,7 @@ export function FileTree({
           depth={0}
           selectedPath={selectedPath}
           onSelect={onSelect}
+          onRename={onRename}
           onDelete={onDelete}
           defaultExpandedDepth={defaultExpandedDepth}
           iconFor={iconFor}
@@ -112,6 +117,7 @@ interface TreeItemProps {
   depth: number;
   selectedPath?: string;
   onSelect: (entry: FileEntry) => void;
+  onRename?: (entry: FileEntry) => void;
   onDelete?: (entry: FileEntry) => void;
   defaultExpandedDepth: number;
   iconFor: (entry: FileEntry) => ReactNode;
@@ -123,6 +129,7 @@ function TreeItem({
   depth,
   selectedPath,
   onSelect,
+  onRename,
   onDelete,
   defaultExpandedDepth,
   iconFor,
@@ -134,68 +141,121 @@ function TreeItem({
     path: node.path,
     isDirectory: node.isDirectory,
   };
+  const hasActions = Boolean(onRename || onDelete);
+
+  const row = (
+    <div
+      className={`tree-row${selectedPath === node.path ? ' tree-row-selected' : ''}`}
+      style={{ paddingLeft: `${depth * 16 + 4}px` }}
+    >
+      {node.isDirectory ? (
+        <button
+          type="button"
+          className="tree-toggle"
+          onClick={() => setExpanded(!expanded)}
+          aria-expanded={expanded}
+          aria-label={expanded ? `Collapse ${node.name}` : `Expand ${node.name}`}
+        >
+          {/* Rotating chevron matching the sidebar group caret, so folder
+              toggles read consistently with the section headers (\u25B8 \u2192 \u2304)
+              rather than a filled triangle. */}
+          <span className={`tree-toggle-caret${expanded ? ' expanded' : ''}`} aria-hidden="true">
+            <svg
+              width={14}
+              height={14}
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2.2}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              focusable="false"
+              aria-hidden="true"
+            >
+              <polyline points="9 6 15 12 9 18" />
+            </svg>
+          </span>
+        </button>
+      ) : (
+        <span className="tree-toggle-spacer" />
+      )}
+      <button
+        type="button"
+        className="tree-label"
+        onClick={() => {
+          // Files always select. Folders select only when the host opts
+          // in via `selectableFolders`; otherwise the label toggles
+          // expansion (the chevron handles expansion in both modes).
+          if (!node.isDirectory || selectableFolders) onSelect(entry);
+          else setExpanded(!expanded);
+        }}
+      >
+        {iconFor(entry)} {node.name}
+      </button>
+      {hasActions && (
+        <DropdownMenu.Root>
+          <DropdownMenu.Trigger asChild>
+            <button
+              type="button"
+              className="tree-actions-trigger"
+              aria-label={`Actions for ${node.name}`}
+              title={`Actions for ${node.name}`}
+            >
+              <span aria-hidden="true">⋯</span>
+            </button>
+          </DropdownMenu.Trigger>
+          <DropdownMenu.Portal>
+            <DropdownMenu.Content
+              className="app-nav-menu tree-actions-menu"
+              sideOffset={4}
+              align="end"
+            >
+              {onRename && (
+                <DropdownMenu.Item className="app-nav-menu-item" onSelect={() => onRename(entry)}>
+                  Rename…
+                </DropdownMenu.Item>
+              )}
+              {onDelete && (
+                <DropdownMenu.Item
+                  className="app-nav-menu-item danger"
+                  onSelect={() => onDelete(entry)}
+                >
+                  Delete…
+                </DropdownMenu.Item>
+              )}
+            </DropdownMenu.Content>
+          </DropdownMenu.Portal>
+        </DropdownMenu.Root>
+      )}
+    </div>
+  );
 
   return (
     <div>
-      <div
-        className={`tree-row${selectedPath === node.path ? ' tree-row-selected' : ''}`}
-        style={{ paddingLeft: `${depth * 16 + 4}px` }}
-      >
-        {node.isDirectory ? (
-          <button
-            type="button"
-            className="tree-toggle"
-            onClick={() => setExpanded(!expanded)}
-            aria-expanded={expanded}
-            aria-label={expanded ? `Collapse ${node.name}` : `Expand ${node.name}`}
-          >
-            {/* Rotating chevron matching the sidebar group caret, so folder
-                toggles read consistently with the section headers (\u25B8 \u2192 \u2304)
-                rather than a filled triangle. */}
-            <span className={`tree-toggle-caret${expanded ? ' expanded' : ''}`} aria-hidden="true">
-              <svg
-                width={14}
-                height={14}
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={2.2}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                focusable="false"
-                aria-hidden="true"
-              >
-                <polyline points="9 6 15 12 9 18" />
-              </svg>
-            </span>
-          </button>
-        ) : (
-          <span className="tree-toggle-spacer" />
-        )}
-        <button
-          type="button"
-          className="tree-label"
-          onClick={() => {
-            // Files always select. Folders select only when the host opts
-            // in via `selectableFolders`; otherwise the label toggles
-            // expansion (the chevron handles expansion in both modes).
-            if (!node.isDirectory || selectableFolders) onSelect(entry);
-            else setExpanded(!expanded);
-          }}
-        >
-          {iconFor(entry)} {node.name}
-        </button>
-        {onDelete && (
-          <button
-            type="button"
-            className="tree-delete"
-            onClick={() => onDelete(entry)}
-            title="Delete"
-          >
-            &times;
-          </button>
-        )}
-      </div>
+      {hasActions ? (
+        <ContextMenu.Root>
+          <ContextMenu.Trigger asChild>{row}</ContextMenu.Trigger>
+          <ContextMenu.Portal>
+            <ContextMenu.Content className="app-nav-menu tree-actions-menu">
+              {onRename && (
+                <ContextMenu.Item className="app-nav-menu-item" onSelect={() => onRename(entry)}>
+                  Rename…
+                </ContextMenu.Item>
+              )}
+              {onDelete && (
+                <ContextMenu.Item
+                  className="app-nav-menu-item danger"
+                  onSelect={() => onDelete(entry)}
+                >
+                  Delete…
+                </ContextMenu.Item>
+              )}
+            </ContextMenu.Content>
+          </ContextMenu.Portal>
+        </ContextMenu.Root>
+      ) : (
+        row
+      )}
       {node.isDirectory && expanded && node.children.length > 0 && (
         <div>
           {node.children.map((child) => (
@@ -205,6 +265,7 @@ function TreeItem({
               depth={depth + 1}
               selectedPath={selectedPath}
               onSelect={onSelect}
+              onRename={onRename}
               onDelete={onDelete}
               defaultExpandedDepth={defaultExpandedDepth}
               iconFor={iconFor}

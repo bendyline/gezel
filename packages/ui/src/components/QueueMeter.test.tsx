@@ -126,4 +126,51 @@ describe('QueueMeter — preparing window', () => {
 
     expect(container.querySelector('.queue-meter')).toBeNull();
   });
+
+  it('labels ambient queue work as deferred until idle', async () => {
+    vi.mocked(api.getQueueStatus).mockResolvedValue({
+      providers: {
+        'llama-cpp': {
+          running: 0,
+          queuedInteractive: 0,
+          queuedBackground: 2,
+          ambientHeld: 2,
+          concurrency: 1,
+          interactiveConcurrency: 1,
+          backgroundConcurrency: 1,
+          active: [],
+          pending: [
+            {
+              id: 1,
+              lane: 'background',
+              gezelId: 'gez-1',
+              job: 'memory · abc12345',
+              ambient: true,
+              waitedMs: 30_000,
+            },
+            {
+              id: 2,
+              lane: 'background',
+              gezelId: 'gez-1',
+              job: 'summary · def67890',
+              ambient: true,
+              waitedMs: 20_000,
+            },
+          ],
+        },
+      },
+      taskRunner: { pendingCount: 0, pendingByGezel: {}, pendingByProject: {} },
+      sessions: [],
+      cache: [],
+      at: '',
+    });
+
+    render(<QueueMeter />);
+    await userEvent.click(await screen.findByTitle('AI chat queue — click for details'));
+
+    const providerSummary = await screen.findByText(/0 \/ 1 in flight/);
+    expect(providerSummary).toHaveTextContent('0 / 1 in flight · 2 deferred until idle');
+    expect(screen.queryByText(/2 queued/)).not.toBeInTheDocument();
+    expect(screen.getAllByText(/deferred until idle/)).toHaveLength(3);
+  });
 });

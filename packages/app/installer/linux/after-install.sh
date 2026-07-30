@@ -18,6 +18,9 @@ SERVICE_TREE="$DATA_DIR/service"
 UNIT_SRC=/opt/Gezel/gezeld.service
 UNIT_DST=/etc/systemd/system/gezeld.service
 ELECTRON_EXE=/opt/Gezel/gezel
+CHROME_SANDBOX=/opt/Gezel/chrome-sandbox
+APPARMOR_PROFILE_SOURCE=/opt/Gezel/resources/apparmor-profile
+APPARMOR_PROFILE_TARGET=/etc/apparmor.d/gezel
 UNPACKED_DIR=/opt/Gezel/resources/app.asar.unpacked/dist
 EXTRACT_CLI="$UNPACKED_DIR/extract-service-bundle.js"
 BUNDLE_TARBALL="$UNPACKED_DIR/service-bundle.tar.gz"
@@ -199,14 +202,80 @@ ELECTRON_RUN_AS_NODE=1 "$ELECTRON_EXE" "$EXTRACT_CLI" \
 find "$SERVICE_TREE" -xdev -exec chown --no-dereference "$GEZEL_USER:$GEZEL_USER" -- {} +
 find "$SERVICE_TREE" -xdev ! -type l -exec chmod go-rwx {} +
 
-# 3. Install the systemd unit (root:root 644, standard).
+# 3. Preserve electron-builder's standard Linux desktop integration. Supplying
+# our own afterInstall hook replaces electron-builder's default hook entirely,
+# so these responsibilities must live here too.
+if command -v update-alternatives >/dev/null 2>&1; then
+  # Remove an old direct symlink before registering the managed alternative.
+  if [ -L /usr/bin/gezel ] &&
+    [ -e /usr/bin/gezel ] &&
+    [ "$(readlink /usr/bin/gezel)" != /etc/alternatives/gezel ]; then
+    rm -f /usr/bin/gezel
+  fi
+  update-alternatives --install /usr/bin/gezel gezel "$ELECTRON_EXE" 100 ||
+    ln -sf "$ELECTRON_EXE" /usr/bin/gezel
+else
+  ln -sf "$ELECTRON_EXE" /usr/bin/gezel
+fi
+
+# Chromium needs either working unprivileged user namespaces or its root-owned
+# SUID helper. Ubuntu 24+ permits the namespace path only for applications with
+# an AppArmor userns profile, which is installed immediately below.
+if [ ! -f "$CHROME_SANDBOX" ] || [ -L "$CHROME_SANDBOX" ]; then
+  echo "[gezel after-install] ERROR: Chromium sandbox helper is missing or unsafe: $CHROME_SANDBOX" >&2
+  exit 1
+fi
+chown root:root "$CHROME_SANDBOX"
+if [ -L /proc/self/ns/user ] &&
+  command -v unshare >/dev/null 2>&1 &&
+  unshare --user true; then
+  chmod 0755 "$CHROME_SANDBOX"
+else
+  chmod 4755 "$CHROME_SANDBOX"
+fi
+
+# electron-builder ships this generated profile in resources/. Loading it
+# grants only the user-namespace permission Chromium requires; the application
+# otherwise remains unconfined. Older AppArmor versions that cannot parse the
+# abi/4.0 profile do not enforce Ubuntu's userns restriction and safely skip it.
+if command -v apparmor_status >/dev/null 2>&1 &&
+  apparmor_status --enabled >/dev/null 2>&1; then
+  if [ ! -f "$APPARMOR_PROFILE_SOURCE" ] || [ -L "$APPARMOR_PROFILE_SOURCE" ]; then
+    echo "[gezel after-install] ERROR: AppArmor profile is missing or unsafe: $APPARMOR_PROFILE_SOURCE" >&2
+    exit 1
+  fi
+  if [ -L "$APPARMOR_PROFILE_TARGET" ]; then
+    echo "[gezel after-install] ERROR: AppArmor profile target is a symlink: $APPARMOR_PROFILE_TARGET" >&2
+    exit 1
+  fi
+  if command -v apparmor_parser >/dev/null 2>&1 &&
+    apparmor_parser --skip-kernel-load --debug "$APPARMOR_PROFILE_SOURCE" >/dev/null 2>&1; then
+    install -o root -g root -m 0644 "$APPARMOR_PROFILE_SOURCE" "$APPARMOR_PROFILE_TARGET"
+
+    # Live profile updates are neither possible nor meaningful in a chroot.
+    if ! { [ -x /usr/bin/ischroot ] && /usr/bin/ischroot; }; then
+      apparmor_parser --replace --write-cache --skip-read-cache "$APPARMOR_PROFILE_TARGET"
+    fi
+  else
+    echo "[gezel after-install] AppArmor does not support the bundled userns profile; skipping it"
+  fi
+fi
+
+if command -v update-mime-database >/dev/null 2>&1; then
+  update-mime-database /usr/share/mime || true
+fi
+if command -v update-desktop-database >/dev/null 2>&1; then
+  update-desktop-database /usr/share/applications || true
+fi
+
+# 4. Install the systemd unit (root:root 644, standard).
 if [ ! -f "$UNIT_SRC" ]; then
   echo "[gezel after-install] ERROR: unit file missing at $UNIT_SRC" >&2
   exit 1
 fi
 install -m 644 "$UNIT_SRC" "$UNIT_DST"
 
-# 4. Enable + start. Tolerate systems without systemctl (e.g. running
+# 5. Enable + start. Tolerate systems without systemctl (e.g. running
 # inside a chroot during package builds) — the install still succeeds
 # and the service starts on first reboot under systemd.
 if command -v systemctl >/dev/null 2>&1; then

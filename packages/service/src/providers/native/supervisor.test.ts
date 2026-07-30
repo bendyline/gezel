@@ -127,6 +127,35 @@ describe('NativeEngineSupervisor', () => {
     );
   });
 
+  it('launches native engines without a Windows console window', async () => {
+    let spawnOptions: Parameters<typeof import('node:child_process').spawn>[2] | undefined;
+    const child = makeFakeChild(4242);
+    const fakeSpawn = ((...args: Parameters<typeof import('node:child_process').spawn>) => {
+      spawnOptions = args[2];
+      return child as unknown as ReturnType<typeof import('node:child_process').spawn>;
+    }) as typeof import('node:child_process').spawn;
+    const sup = new NativeEngineSupervisor({
+      resolveLaunch: async () => ({
+        command: 'fake-engine.exe',
+        args: [],
+        baseUrl: 'http://127.0.0.1:9999',
+      }),
+      spawn: fakeSpawn,
+      fetchImpl: async () => new Response('ok', { status: 200 }),
+      idleTimeoutMs: 0,
+      healthIntervalMs: 10_000_000,
+      onLog: () => {},
+      psRunner: async () => [],
+    });
+
+    await sup.ensureRunning();
+    expect(spawnOptions).toMatchObject({
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+    });
+    await sup.stop();
+  });
+
   it('parses PPID from the production ps snapshot shape', () => {
     expect(
       parseNativeProcessSnapshot(`

@@ -4,6 +4,7 @@ import type { QuotaBucket } from '../chat/usage.js';
 import { ProviderQueue, runInQueue } from './queue.js';
 import { StreamingSessionBase } from './streaming-session.js';
 import {
+  ExternalToolsUnsupportedError,
   type ImageAttachment,
   type LLMProvider,
   type LLMSession,
@@ -173,6 +174,13 @@ export class CopilotProvider implements LLMProvider {
   }
 
   async createSession(opts: SessionOpts): Promise<LLMSession> {
+    // The Copilot SDK runs its own tool loop; caller-supplied tools can't
+    // be advertised-but-not-executed. Refuse loudly — silently dropping
+    // them would hand the caller plain text with no tool calls and no
+    // signal why (the exact failure `/v1` promises not to have).
+    if (opts.externalTools && opts.externalTools.length > 0) {
+      throw new ExternalToolsUnsupportedError(this.name);
+    }
     await this.initialize();
     if (!this.client) throw new Error('[copilot] client not initialized');
     const sessionConfig = await this.buildSessionConfig(opts);

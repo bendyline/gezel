@@ -435,6 +435,12 @@ export class NativeEngineSupervisor {
         env: { ...process.env, ...(launch.env ?? {}) },
         ...(launch.cwd ? { cwd: launch.cwd } : {}),
         stdio: ['ignore', 'pipe', 'pipe'],
+        // Native engines are console-subsystem executables on Windows.
+        // The machine-wide daemon runs in non-interactive Session 0, where
+        // allowing CreateProcess to allocate a console can fail with EPERM.
+        // CREATE_NO_WINDOW (Node's windowsHide option) keeps the launch
+        // headless; the option is ignored on other platforms.
+        windowsHide: true,
       });
     } catch (err) {
       throw nativeSpawnError(this.logPrefix, launch, err);

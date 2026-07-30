@@ -1,26 +1,26 @@
 import type {
-  GithubPullComment,
-  GithubPullDetail,
-  GithubPullFile,
-  GithubPullSummary,
+  GitHubPullComment,
+  GitHubPullDetail,
+  GitHubPullFile,
+  GitHubPullSummary,
   ProjectDetail,
 } from '@bendyline/gezel';
 import { Octokit } from '@octokit/rest';
-import { MissingPatError, NoGithubLinkError } from './manager.js';
-import type { GitHubManager } from './manager.js';
-import { parseGithubUrl } from './url.js';
+import { MissingPatError, NoGitHubLinkError } from '../git/manager.js';
+import type { GitManager } from '../git/manager.js';
+import { parseGitHubUrl } from './url.js';
 
 /**
  * GitHub REST queries used by the UI to render the PR list/detail panels.
- * Authenticates with the same credential chain the GitHubManager uses for
+ * Authenticates with the same credential chain the GitManager uses for
  * clones — stored toolset PAT, GH_TOKEN/GITHUB_TOKEN env vars, or the
  * signed-in GitHub CLI — so a `gh auth login` user configures nothing.
  */
 
 const REVIEW_PATCH_LIMIT = 8_000;
 
-export class GithubPrs {
-  constructor(private readonly manager: GitHubManager) {}
+export class GitHubPrs {
+  constructor(private readonly manager: GitManager) {}
 
   private async client(): Promise<Octokit> {
     const token = await this.manager.getToken();
@@ -32,13 +32,13 @@ export class GithubPrs {
   }
 
   private repoOf(project: ProjectDetail): { owner: string; repo: string } {
-    if (!project.github) throw new NoGithubLinkError(project.id);
-    const parsed = parseGithubUrl(project.github.url);
+    if (!project.github) throw new NoGitHubLinkError(project.id);
+    const parsed = parseGitHubUrl(project.github.url);
     if (!parsed) throw new Error(`Could not parse GitHub URL: ${project.github.url}`);
     return { owner: parsed.owner, repo: parsed.repo };
   }
 
-  async listPullRequests(project: ProjectDetail): Promise<GithubPullSummary[]> {
+  async listPullRequests(project: ProjectDetail): Promise<GitHubPullSummary[]> {
     const octo = await this.client();
     const { owner, repo } = this.repoOf(project);
     const res = await octo.pulls.list({
@@ -61,7 +61,7 @@ export class GithubPrs {
     }));
   }
 
-  async getPullRequest(project: ProjectDetail, num: number): Promise<GithubPullDetail> {
+  async getPullRequest(project: ProjectDetail, num: number): Promise<GitHubPullDetail> {
     const octo = await this.client();
     const { owner, repo } = this.repoOf(project);
     const { data: p } = await octo.pulls.get({ owner, repo, pull_number: num });
@@ -84,7 +84,7 @@ export class GithubPrs {
     };
   }
 
-  async listFiles(project: ProjectDetail, num: number): Promise<GithubPullFile[]> {
+  async listFiles(project: ProjectDetail, num: number): Promise<GitHubPullFile[]> {
     const octo = await this.client();
     const { owner, repo } = this.repoOf(project);
     const res = await octo.pulls.listFiles({ owner, repo, pull_number: num, per_page: 100 });
@@ -99,14 +99,14 @@ export class GithubPrs {
     }));
   }
 
-  async listComments(project: ProjectDetail, num: number): Promise<GithubPullComment[]> {
+  async listComments(project: ProjectDetail, num: number): Promise<GitHubPullComment[]> {
     const octo = await this.client();
     const { owner, repo } = this.repoOf(project);
     const [issueComments, reviewComments] = await Promise.all([
       octo.issues.listComments({ owner, repo, issue_number: num, per_page: 100 }),
       octo.pulls.listReviewComments({ owner, repo, pull_number: num, per_page: 100 }),
     ]);
-    const merged: GithubPullComment[] = [
+    const merged: GitHubPullComment[] = [
       ...issueComments.data.map((c) => ({
         id: c.id,
         author: c.user?.login ?? '?',

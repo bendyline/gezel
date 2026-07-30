@@ -252,6 +252,45 @@ describe('ChatManager — heavy-provider memory extraction debounce', () => {
     },
     TEST_TIMEOUT_MS,
   );
+
+  it(
+    'coalesces later turns while one extraction is queued or running',
+    async () => {
+      const session = await manager.createSession({ gezelId: 'ada' });
+      await sendUntilCadenceMet(session.id);
+
+      // Park the first extraction after it fires. In production this is
+      // the time it spends waiting behind the provider queue's ambient
+      // gate or running on a slow local model.
+      mock.scriptSendDelay(20_000);
+      await vi.advanceTimersByTimeAsync(15_000);
+      await vi.waitFor(() => expect(backgroundSends()).toHaveLength(1), {
+        timeout: 1_000,
+        interval: 1,
+      });
+
+      // Add another full cadence window while the cursor still reflects
+      // the first snapshot. Each turn sees extraction as due, but they
+      // must coalesce into one follow-up rather than enqueue duplicates.
+      for (let i = 0; i < 5; i++) {
+        mock.script(`during-extraction-${i}`);
+        await manager.send(session.id, `later turn ${i}`);
+      }
+      expect(backgroundSends()).toHaveLength(1);
+
+      // Let the original settle. It advances only through its original
+      // 10-message snapshot, so the coalesced follow-up remains due and
+      // gets one fresh debounce window.
+      await vi.advanceTimersByTimeAsync(20_000);
+      await manager.drainBackground();
+      expect(backgroundSends()).toHaveLength(1);
+
+      await vi.advanceTimersByTimeAsync(15_000);
+      await manager.drainBackground();
+      expect(backgroundSends()).toHaveLength(2);
+    },
+    TEST_TIMEOUT_MS,
+  );
 });
 
 // Cloud providers should NOT be debounced — extraction is ~1s and

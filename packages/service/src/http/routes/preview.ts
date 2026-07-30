@@ -115,9 +115,43 @@ var _ce=console.error;console.error=function(){try{send('console.error',{args:Ar
 })();</script>`;
 
 /**
+ * Embedded-preview scrollbar treatment. The opaque-origin iframe prevents
+ * the parent renderer from reaching into `contentDocument`, so the preview
+ * route installs this tiny style + behavior shim alongside the log shim.
+ *
+ * The frame keeps its native scrollbar gutter (no content-width jump), but
+ * makes the track/thumb transparent while idle. Hover, keyboard focus, or a
+ * captured scroll event reveals every scroll container in the page; active
+ * scrolling holds the reveal for 700ms after the final event. The root class
+ * is only added when `parent !== window`, so opening the capability URL in a
+ * normal browser preserves the page's ordinary scrollbar behavior.
+ */
+export const PREVIEW_SCROLLBAR_SHIM = `<style>
+html.__gezel-preview-frame,html.__gezel-preview-frame *{scrollbar-color:transparent transparent!important}
+html.__gezel-preview-frame:hover,html.__gezel-preview-frame:hover *,html.__gezel-preview-frame:focus-within,html.__gezel-preview-frame:focus-within *,html.__gezel-preview-frame.__gezel-preview-scrolling,html.__gezel-preview-frame.__gezel-preview-scrolling *{scrollbar-color:color-mix(in srgb,currentColor 48%,transparent) transparent!important}
+html.__gezel-preview-frame::-webkit-scrollbar-track,html.__gezel-preview-frame *::-webkit-scrollbar-track{background:transparent!important}
+html.__gezel-preview-frame::-webkit-scrollbar-thumb,html.__gezel-preview-frame *::-webkit-scrollbar-thumb{background:transparent!important}
+html.__gezel-preview-frame:hover::-webkit-scrollbar-thumb,html.__gezel-preview-frame:hover *::-webkit-scrollbar-thumb,html.__gezel-preview-frame:focus-within::-webkit-scrollbar-thumb,html.__gezel-preview-frame:focus-within *::-webkit-scrollbar-thumb,html.__gezel-preview-frame.__gezel-preview-scrolling::-webkit-scrollbar-thumb,html.__gezel-preview-frame.__gezel-preview-scrolling *::-webkit-scrollbar-thumb{background:color-mix(in srgb,currentColor 48%,transparent)!important}
+html.__gezel-preview-frame:hover::-webkit-scrollbar-thumb:hover,html.__gezel-preview-frame:hover *::-webkit-scrollbar-thumb:hover{background:color-mix(in srgb,currentColor 68%,transparent)!important}
+html.__gezel-preview-frame::-webkit-scrollbar-button,html.__gezel-preview-frame *::-webkit-scrollbar-button{width:0!important;height:0!important}
+@media(forced-colors:active){html.__gezel-preview-frame,html.__gezel-preview-frame *{scrollbar-color:auto!important}}
+</style><script>(function(){
+if(parent===window)return;
+var root=document.documentElement,timer=0;
+root.classList.add('__gezel-preview-frame');
+addEventListener('scroll',function(){
+root.classList.add('__gezel-preview-scrolling');
+if(timer)clearTimeout(timer);
+timer=setTimeout(function(){root.classList.remove('__gezel-preview-scrolling');timer=0;},700);
+},true);
+addEventListener('pagehide',function(){if(timer)clearTimeout(timer);},false);
+})();</script>`;
+
+/**
  * Prepare an HTML response for the sandboxed preview iframe:
  *
- *   1. Inject the log-capture shim at the earliest viable point.
+ *   1. Inject the log-capture and embedded-scrollbar shims at the
+ *      earliest viable point.
  *   2. Mark every `<script src=…>` tag `crossorigin="anonymous"`
  *      unless it already carries a `crossorigin` attribute. Combined
  *      with the narrow `Access-Control-Allow-Origin: null` header the preview
@@ -126,14 +160,15 @@ var _ce=console.error;console.error=function(){try{send('console.error',{args:Ar
  *      Without this pair, the null-origin iframe sees every runtime
  *      error as the useless `"Script error."`.
  */
-function injectLogShim(html: string): string {
+function injectPreviewShims(html: string): string {
   let out = html;
   const headMatch = out.match(/<head[^>]*>/i);
+  const shims = PREVIEW_LOG_SHIM + PREVIEW_SCROLLBAR_SHIM;
   if (headMatch) {
     const at = (headMatch.index ?? 0) + headMatch[0].length;
-    out = out.slice(0, at) + PREVIEW_LOG_SHIM + out.slice(at);
+    out = out.slice(0, at) + shims + out.slice(at);
   } else {
-    out = PREVIEW_LOG_SHIM + out;
+    out = shims + out;
   }
   out = out.replace(/<script\b([^>]*)>/gi, (match, rawAttrs: string) => {
     // Only touch external scripts — inline `<script>` blocks don't
@@ -213,7 +248,7 @@ export function previewRoutes(ctx: ServiceContext, capabilities: PreviewCapabili
       if (!buf) return c.json({ error: 'not found' }, 404);
       const mime = mimeTypeForPath(filePath);
       if (mime.startsWith('text/html')) {
-        return c.body(injectLogShim(buf.toString('utf8')), 200, previewHeaders(mime));
+        return c.body(injectPreviewShims(buf.toString('utf8')), 200, previewHeaders(mime));
       }
       return c.body(new Uint8Array(buf), 200, previewHeaders(mime));
     }
@@ -236,7 +271,7 @@ export function previewRoutes(ctx: ServiceContext, capabilities: PreviewCapabili
       }
       const mime = mimeTypeForPath(filePath);
       if (mime.startsWith('text/html')) {
-        const html = injectLogShim((await readFile(full)).toString('utf8'));
+        const html = injectPreviewShims((await readFile(full)).toString('utf8'));
         return c.body(html, 200, previewHeaders(mime));
       }
       const buf = await readFile(full);

@@ -8,8 +8,8 @@ describe('gezelChatTheme', () => {
     expect(gezelChatTheme.persistentLayers).toBeUndefined();
   });
 
-  it('uses the neutral light-brown reading surface', () => {
-    expect(GEZEL_LIGHT_SURFACE.background).toBe('#f2efed');
-    expect(GEZEL_LIGHT_SURFACE.backgroundLight).toBe('#ece8e6');
+  it('uses the warm mushroom-beige reading surface', () => {
+    expect(GEZEL_LIGHT_SURFACE.background).toBe('#f1e9e1');
+    expect(GEZEL_LIGHT_SURFACE.backgroundLight).toBe('#e8dfd7');
   });
 });

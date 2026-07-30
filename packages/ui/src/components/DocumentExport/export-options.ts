@@ -1,9 +1,12 @@
 /**
- * Export option types + localStorage persistence for the "quick-export"
- * shortcut. Ported from docblocks's matching module so the affordance
- * — first export uses the dialog, subsequent exports skip straight to
- * the previous format — lands identically here.
+ * Export option types + persistence for the "quick-export" shortcut.
+ *
+ * localStorage is the immediate cache. Gezel config is the durable source of
+ * truth because the embedded daemon can bind a different loopback port each
+ * launch, which changes the browser origin and strands localStorage.
  */
+
+import { api } from '../../api.js';
 
 export type ExportFormat = 'docx' | 'pdf' | 'pptx' | 'md' | 'html';
 
@@ -61,21 +64,68 @@ export const DEFAULT_OPTIONS: ExportOptions = {
   htmlBundle: 'single',
 };
 
+const FORMATS = new Set<ExportFormat>(['docx', 'pdf', 'pptx', 'md', 'html']);
+const PAGE_SIZES = new Set<ExportOptions['pageSize']>(['letter', 'a4']);
+const HTML_STYLES = new Set<HtmlStyle>(['rendered', 'plain']);
+const HTML_BUNDLES = new Set<HtmlBundle>(['single', 'zip']);
+
+export function normalizeExportOptions(value: unknown): ExportOptions | null {
+  if (!value || typeof value !== 'object') return null;
+  const parsed = value as Partial<ExportOptions>;
+  if (!parsed.format || !FORMATS.has(parsed.format)) return null;
+
+  const merged = { ...DEFAULT_OPTIONS, ...parsed };
+  if (
+    typeof merged.themeId !== 'string' ||
+    !merged.themeId ||
+    typeof merged.transformStyle !== 'string' ||
+    !merged.transformStyle ||
+    !PAGE_SIZES.has(merged.pageSize) ||
+    !HTML_STYLES.has(merged.htmlStyle) ||
+    !HTML_BUNDLES.has(merged.htmlBundle)
+  ) {
+    return null;
+  }
+  return merged;
+}
+
+function cacheExportOptions(options: ExportOptions): void {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(options));
+  } catch {
+    // ignore quota / privacy-mode failures
+  }
+}
+
 export function loadLastExportOptions(): ExportOptions | null {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as Partial<ExportOptions>;
-    return { ...DEFAULT_OPTIONS, ...parsed };
+    return normalizeExportOptions(JSON.parse(raw));
   } catch {
     return null;
   }
 }
 
-export function saveExportOptions(options: ExportOptions): void {
+export async function saveExportOptions(options: ExportOptions): Promise<void> {
+  cacheExportOptions(options);
+  await api.updateConfig({ documentExportOptions: options }).catch(() => {});
+}
+
+/**
+ * Reconcile the current-origin cache with the durable server preference.
+ * A missing/unreachable server preserves the local cache so browser-only
+ * development and short boot races remain usable.
+ */
+export async function syncLastExportOptions(): Promise<ExportOptions | null> {
+  const cached = loadLastExportOptions();
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(options));
+    const config = await api.getConfig();
+    const durable = normalizeExportOptions(config.documentExportOptions);
+    if (!durable) return cached;
+    cacheExportOptions(durable);
+    return durable;
   } catch {
-    // ignore quota / privacy-mode failures
+    return cached;
   }
 }

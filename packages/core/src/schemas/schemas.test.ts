@@ -6,6 +6,7 @@ import {
   CreateProjectRequestSchema,
   CreateTaskRequestSchema,
   CreateTypedProjectRequestSchema,
+  DocumentMediaExportRequestSchema,
   FileReviewReplySchema,
   GezelConfigSchema,
   GezelFrontmatterSchema,
@@ -19,6 +20,27 @@ import {
   projectAllowsAmbientWork,
   taskRef,
 } from './index.js';
+
+describe('DocumentMediaExportRequestSchema', () => {
+  it('accepts Store-backed native media exports and rejects traversal', () => {
+    expect(
+      DocumentMediaExportRequestSchema.parse({
+        markdown: '# Brief',
+        selectedFile: 'notes/brief.md',
+        format: 'mp4',
+        source: { kind: 'documents' },
+      }).format,
+    ).toBe('mp4');
+    expect(() =>
+      DocumentMediaExportRequestSchema.parse({
+        markdown: '# Brief',
+        selectedFile: '../outside.md',
+        format: 'gif',
+        source: { kind: 'project-artifacts', projectId: 'project-1' },
+      }),
+    ).toThrow();
+  });
+});
 
 describe('GezelFrontmatterSchema', () => {
   it('parses valid frontmatter', () => {
@@ -143,6 +165,25 @@ describe('ChatMessageSchema', () => {
     ).toBe('assistant');
     expect(() =>
       ChatMessageSchema.parse({ role: 'system', content: 'x', at: '2026-01-01' }),
+    ).toThrow();
+  });
+
+  it('accepts a non-negative observed reasoning duration', () => {
+    const parsed = ChatMessageSchema.parse({
+      role: 'assistant',
+      content: 'hello',
+      at: '2026-01-01',
+      reasoning: 'I should answer clearly.',
+      reasoningDurationMs: 1_250,
+    });
+    expect(parsed.reasoningDurationMs).toBe(1_250);
+    expect(() =>
+      ChatMessageSchema.parse({
+        role: 'assistant',
+        content: 'hello',
+        at: '2026-01-01',
+        reasoningDurationMs: -1,
+      }),
     ).toThrow();
   });
 });
@@ -367,6 +408,26 @@ describe('UpdateTaskRequestSchema', () => {
   });
 });
 
+describe('openaiEndpoints config', () => {
+  it('parses the Connected Apps endpoint controls and tolerates absence', () => {
+    const cfg = GezelConfigSchema.parse({
+      openaiEndpoints: {
+        enabled: false,
+        servingGezelId: 'mira',
+        supportingBehaviors: false,
+        emulateOllama: true,
+      },
+    });
+    expect(cfg.openaiEndpoints?.enabled).toBe(false);
+    expect(cfg.openaiEndpoints?.servingGezelId).toBe('mira');
+    expect(cfg.openaiEndpoints?.supportingBehaviors).toBe(false);
+    expect(cfg.openaiEndpoints?.emulateOllama).toBe(true);
+    // Absent block parses — unset means the facade is on with no
+    // serving gezel, and the whole config must not fail over it.
+    expect(GezelConfigSchema.parse({}).openaiEndpoints).toBeUndefined();
+  });
+});
+
 describe('fileReviews config + reply contract', () => {
   it('parses the fileReviews config block and defaults enabled to true', () => {
     const cfg = GezelConfigSchema.parse({
@@ -391,6 +452,38 @@ describe('fileReviews config + reply contract', () => {
     ).toThrow();
     expect(() =>
       FileReviewReplySchema.parse({ notes_md: '', issues: [], health: 5, health_reason: 'r' }),
+    ).toThrow();
+  });
+});
+
+describe('document export preferences', () => {
+  it('accepts the complete quick-export settings block', () => {
+    const cfg = GezelConfigSchema.parse({
+      documentExportOptions: {
+        format: 'html',
+        themeId: 'gezellig',
+        transformStyle: 'documentary',
+        pageSize: 'a4',
+        htmlStyle: 'rendered',
+        htmlBundle: 'zip',
+      },
+    });
+
+    expect(cfg.documentExportOptions).toEqual({
+      format: 'html',
+      themeId: 'gezellig',
+      transformStyle: 'documentary',
+      pageSize: 'a4',
+      htmlStyle: 'rendered',
+      htmlBundle: 'zip',
+    });
+  });
+
+  it('rejects partial or unknown export settings', () => {
+    expect(() =>
+      GezelConfigSchema.parse({
+        documentExportOptions: { format: 'pdf', pageSize: 'tabloid' },
+      }),
     ).toThrow();
   });
 });

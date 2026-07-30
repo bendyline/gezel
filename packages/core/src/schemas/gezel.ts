@@ -612,6 +612,13 @@ export const ChatMessageSchema = z.object({
    */
   reasoning: z.string().optional(),
   /**
+   * Observed wall-clock span of the streamed private-reasoning trace,
+   * measured from the first `reasoning_delta` to the last. Optional
+   * because older messages and providers that only expose reasoning at
+   * commit time have no trustworthy phase timing.
+   */
+  reasoningDurationMs: z.number().int().nonnegative().optional(),
+  /**
    * Tool-call bodies the model emitted that the salvage layer
    * couldn't parse — the literal text from `<|tool_call|>` markers
    * (or prose-shaped `name(args)` attempts) that failed both the

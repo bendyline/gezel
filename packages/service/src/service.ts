@@ -43,14 +43,19 @@ import { ModelFitnessManager } from './fitness/manager.js';
 import { type FitnessEngine, runFitnessProbe } from './fitness/probe.js';
 import { ActivityTracker } from './fs/activity-tracker.js';
 import { Store } from './fs/store.js';
-import { GitHubManager } from './github/manager.js';
-import { GithubPrs } from './github/prs.js';
+import { GitManager } from './git/manager.js';
+import { CodeReviewManager } from './git/reviews.js';
+import { GitHubPrs } from './github/prs.js';
 import { createGrantManager, parseAutoApproveAppIds } from './grants/manager.js';
 import { GrowthEngine } from './growth/engine.js';
 import { createDaemonDeviceInfo } from './handboek/daemon-device.js';
 import { createHandboekEngine } from './handboek/engine.js';
 import { type LoopbackCert, generateLoopbackCert } from './http/cert.js';
 import type { ServiceContext } from './http/context.js';
+import {
+  buildOllamaEmulationApp,
+  createOllamaEmulationController,
+} from './http/ollama-emulation.js';
 import { PreviewCapabilityStore } from './http/preview-capability.js';
 import { buildRemoteApp } from './http/remote-server.js';
 import { type UnexpectedHttpErrorHandler, buildApp, buildPreviewApp } from './http/server.js';
@@ -99,6 +104,7 @@ import { openSecretStore } from './secrets/index.js';
 import { seedSecretsFromEnvFile } from './secrets/seed.js';
 import { runSystemBootstrap } from './system-toolsets/bootstrap.js';
 import { SystemStatusBus } from './system-toolsets/status-bus.js';
+import { reapOrphanedGezelEngineProcesses } from './system/gezel-process-cleanup.js';
 import { SystemIdleState } from './system/idle-state.js';
 import { detectMemoryProfile } from './system/memory.js';
 import { dispatchTaskEntry } from './tasks/entry-dispatch.js';
@@ -180,6 +186,13 @@ export interface StartServiceOptions {
    * failing health signal instead of relying on log scraping.
    */
   onUnexpectedHttpError?: UnexpectedHttpErrorHandler;
+  /**
+   * Test seam: bind the opt-in Ollama emulation listener to this port
+   * instead of the well-known 11434 (`0` = ephemeral). Production
+   * launches leave it unset — emulating Ollama anywhere else defeats
+   * the point.
+   */
+  ollamaEmulationPort?: number;
 }
 
 export interface RunningService {
@@ -285,6 +298,27 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     runtimeDir,
     lockPath: join(runtimeDir, 'lock'),
   });
+  // The per-engine supervisor only reaps its own engine family before a
+  // launch. Sweep all clearly-Gezel, same-home PPID-1 engines once at service
+  // boot so starting a DS4 chat also clears an abandoned MLX/Python server
+  // (and vice versa). Acquiring the home lock first proves no live same-home
+  // daemon can be racing this cleanup.
+  try {
+    const cleanup = await reapOrphanedGezelEngineProcesses({ home });
+    if (cleanup.targetedPids.length > 0) {
+      const remaining =
+        cleanup.remainingPids.length > 0
+          ? `; still present after cleanup: ${cleanup.remainingPids.join(', ')}`
+          : '';
+      log.info(
+        `[engines] startup reaped ${cleanup.targetedPids.length} orphan(s) from prior service sessions: ${cleanup.targetedPids.join(', ')}${remaining}`,
+      );
+    }
+  } catch (err) {
+    log.warn(
+      `[engines] startup orphan sweep failed (continuing): ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
   const migratedSharedModels = await migrateLegacySystemModels(home);
   if (migratedSharedModels > 0) {
     log.info(
@@ -923,8 +957,8 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
 
   const channels = new ChannelManager({ store, secrets, history, debug });
 
-  const github = new GitHubManager(home, store, secrets);
-  const githubPrs = new GithubPrs(github);
+  const git = new GitManager(home, store, secrets);
+  const gitHubPrs = new GitHubPrs(git);
   const renderer = new ImageRenderer({ home });
 
   // Image-generation provider manager. Lazy-builds the underlying
@@ -1343,11 +1377,6 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   // Content index (code/doc intelligence) — backs the code-intel MCP tools and
   // is refreshed by the workspace indexer's tick.
   const contentIndex = new ContentIndex(store, home);
-  // Finding delegation is task-backed: successful completion closes the
-  // linked finding (and its rooftop fire); cancellation returns it to open.
-  tasks.setTaskSettledHook(async ({ projectId, task, outcome }) => {
-    await contentIndex.settleFindingsForTask(projectId, task.ref, outcome);
-  });
   // Post-construction injection (ChatManager is built ~500 lines earlier):
   // powers the workspace-gestalt prompt block and index-enriched recall.
   chat.setContentIndex(contentIndex);
@@ -1358,6 +1387,32 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     catalog,
     contentIndex,
     events: chatEvents,
+  });
+  // Code reviews: snapshot-driven review tasks kicked off from the GitHub
+  // tab's Review panel; records live in per-project code-reviews.json.
+  const codeReviews = new CodeReviewManager({
+    home,
+    store,
+    git,
+    tasks,
+    taskRunner,
+    history,
+    catalog,
+    chat,
+    contentIndex,
+    workspaceIndex,
+  });
+  // Terminal-task fan-out, one callee per feature, each isolated so a
+  // failing settle never starves the others: finding delegation closes
+  // the linked finding (cancel reopens it); code reviews flip their
+  // record to complete/canceled.
+  tasks.setTaskSettledHook(async ({ projectId, task, outcome }) => {
+    await contentIndex
+      .settleFindingsForTask(projectId, task.ref, outcome)
+      .catch((err) => log.warn(`[service] finding settle failed for ${task.ref}: ${String(err)}`));
+    await codeReviews
+      .settleForTask(projectId, task.ref, outcome)
+      .catch((err) => log.warn(`[service] review settle failed for ${task.ref}: ${String(err)}`));
   });
   // Global search index (session transcripts + history mirror + documents):
   // change hooks enqueue into the single-writer manager; the read facade is
@@ -1507,6 +1562,20 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     },
   });
 
+  // Opt-in unauthenticated Ollama-compat listener (port 11434). Same
+  // deferred-fetch shape as remote serving: the controller is created
+  // before the context literal (config route needs it), the app after.
+  const ollamaEmulationFetchRef: { value?: Parameters<typeof serve>[0]['fetch'] } = {};
+  const ollamaEmulation = createOllamaEmulationController({
+    fetch: () => {
+      if (!ollamaEmulationFetchRef.value) {
+        throw new Error('ollama emulation cannot start before the HTTP app is ready');
+      }
+      return ollamaEmulationFetchRef.value;
+    },
+    ...(opts.ollamaEmulationPort !== undefined ? { port: opts.ollamaEmulationPort } : {}),
+  });
+
   // The meester's occasional status report — dynamic Home greeting +
   // dashboard + follow-up draft tasks. Constructed before the context
   // literal so the run-now HTTP route can reach it; started with the
@@ -1546,8 +1615,9 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     catalog,
     handboek,
     secrets,
-    github,
-    githubPrs,
+    git,
+    gitHubPrs,
+    codeReviews,
     mail,
     connectors,
     connectorActions,
@@ -1575,6 +1645,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     deviceIdentity,
     remotes,
     remoteServing,
+    ollamaEmulation,
     ...(cert ? { tlsCertSha256: cert.sha256Hex, tlsCertPem: cert.certPem } : {}),
     ensureModel,
     startedAt: nowIso(),
@@ -1607,6 +1678,8 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   });
   const remoteApp = buildRemoteApp(context);
   remoteFetchRef.value = remoteApp.fetch.bind(remoteApp);
+  const ollamaEmulationApp = buildOllamaEmulationApp(context);
+  ollamaEmulationFetchRef.value = ollamaEmulationApp.fetch.bind(ollamaEmulationApp);
 
   // Port selection, by caller intent:
   //   - explicit `opts.port` (from `--port` / `GEZEL_PORT`): bind exactly
@@ -1723,6 +1796,13 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     log.error(
       `[service] failed to start remote serving: ${err instanceof Error ? err.message : err}`,
     );
+  });
+  // Same contract for the Ollama emulation: non-fatal at boot (usually
+  // means real Ollama grabbed 11434 since the toggle was set) — the
+  // daemon still serves everything else; the toggle stays set and binds
+  // on the next launch/config change once the port frees up.
+  await ollamaEmulation.reconfigure(config.openaiEndpoints).catch((err) => {
+    log.warn(`[service] ollama emulation not started: ${err instanceof Error ? err.message : err}`);
   });
 
   scheduler.start();
@@ -1913,6 +1993,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
       clearInterval(idleSummarizerTimer);
       await channels.stop();
       await remoteServing.stop();
+      await ollamaEmulation.stop();
       await closePairedRemoteFetches(remotes);
       if (previewServer) {
         await new Promise<void>((resolve) => {

@@ -1,11 +1,9 @@
-import { existsSync } from 'node:fs';
-import { readdir } from 'node:fs/promises';
-import { join } from 'node:path';
 import { type Layer, type RenderImageRequest, createLogger } from '@bendyline/gezel';
 import { playwrightBrowsersDir } from '@bendyline/gezel/paths';
 import type { Browser, BrowserContext } from 'playwright-core';
 import { sanitizeSvg } from '../icon/sanitize.js';
 import { parseColor, toCssRgba } from './color.js';
+import { resolveManagedChromiumBinary } from './managed-chromium.js';
 import { defaultPixelScale, pixelArtToHtml } from './pixel-art.js';
 
 const log = createLogger('rendering');
@@ -189,7 +187,7 @@ export class ImageRenderer {
   private async launchBrowser(): Promise<Browser> {
     const browsersDir = playwrightBrowsersDir(this.home);
     process.env.PLAYWRIGHT_BROWSERS_PATH ||= browsersDir;
-    const executablePath = await resolveChromiumBinary(browsersDir);
+    const executablePath = await resolveManagedChromiumBinary(browsersDir);
     if (!executablePath) {
       throw new Error(
         `[renderer] Chromium not found under ${browsersDir}. The system-toolset bootstrap downloads it on first boot — wait for the Home screen's Playwright pill to turn green and retry.`,
@@ -327,48 +325,4 @@ function escapeAttr(s: string): string {
 
 function escapeHtml(s: string): string {
   return s.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
-}
-
-/**
- * Find the Chromium binary installed by the system-toolset bootstrap.
- * We take whichever `chromium-*` dir carries Playwright's own
- * `INSTALLATION_COMPLETE` marker — that's the exact revision the
- * `@playwright/mcp` toolset pulled down, so there's no version-drift
- * risk between our `playwright-core` node module and the on-disk
- * browser. Returns `null` when the bootstrap hasn't finished yet or the
- * dir is missing; callers surface that as "not ready" rather than
- * silently triggering a second download.
- */
-async function resolveChromiumBinary(browsersDir: string): Promise<string | null> {
-  if (!existsSync(browsersDir)) return null;
-  let entries: string[];
-  try {
-    entries = await readdir(browsersDir);
-  } catch {
-    return null;
-  }
-  const candidates = entries
-    .filter((e) => e.startsWith('chromium-'))
-    .sort()
-    .reverse();
-  for (const name of candidates) {
-    const root = join(browsersDir, name);
-    if (!existsSync(join(root, 'INSTALLATION_COMPLETE'))) continue;
-    const bin = chromiumBinaryPath(root);
-    if (bin && existsSync(bin)) return bin;
-  }
-  return null;
-}
-
-function chromiumBinaryPath(chromiumDir: string): string | null {
-  switch (process.platform) {
-    case 'darwin':
-      return join(chromiumDir, 'chrome-mac', 'Chromium.app', 'Contents', 'MacOS', 'Chromium');
-    case 'win32':
-      return join(chromiumDir, 'chrome-win', 'chrome.exe');
-    case 'linux':
-      return join(chromiumDir, 'chrome-linux', 'chrome');
-    default:
-      return null;
-  }
 }

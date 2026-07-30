@@ -113,4 +113,31 @@ describe('POST /v1/embeddings', () => {
     const body = (await res.json()) as { error: { code: string } };
     expect(body.error.code).toBe('encoding_format_not_supported');
   });
+
+  it('returns 400 invalid_body (OpenAI envelope, not the internal 422) on a schema mismatch', async () => {
+    const res = await v1('POST', '/v1/embeddings', {
+      body: { model: 'copilot:mock-embedding' },
+      token: rootToken,
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { code: string; type: string; message: string } };
+    expect(body.error.code).toBe('invalid_body');
+    expect(body.error.type).toBe('invalid_request_error');
+    expect(body.error.message).toContain('input');
+  });
+
+  it('returns 400 invalid_json (not 500) when the body is not JSON at all', async () => {
+    const res = await httpFetch(`${baseUrl}/v1/embeddings`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${rootToken}`,
+      },
+      body: '{"model": "copilot:mock-embedding", "input": [',
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { code: string; type: string } };
+    expect(body.error.code).toBe('invalid_json');
+    expect(body.error.type).toBe('invalid_request_error');
+  });
 });

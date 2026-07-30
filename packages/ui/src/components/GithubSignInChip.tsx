@@ -1,7 +1,7 @@
-import type { GithubIdentity } from '@bendyline/gezel';
+import type { GitHubIdentity } from '@bendyline/gezel';
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
-import { GithubDeviceCodeModal } from './GithubDeviceCodeModal.js';
+import { GitHubDeviceCodeModal } from './GithubDeviceCodeModal.js';
 
 /**
  * Inline pill rendered next to anything that needs a GitHub identity
@@ -19,18 +19,18 @@ import { GithubDeviceCodeModal } from './GithubDeviceCodeModal.js';
  * Project dialog uses it to gate auto-fill) pass `onChange` and read
  * the latest identity from there.
  */
-export function GithubSignInChip({
+export function GitHubSignInChip({
   onChange,
   compact = false,
 }: {
-  onChange?: (identity: GithubIdentity | null) => void;
+  onChange?: (identity: GitHubIdentity | null) => void;
   /** Smaller chip variant for tight rows. */
   compact?: boolean;
 }) {
   const [state, setState] = useState<
     | { kind: 'loading' }
     | { kind: 'signed-out' }
-    | { kind: 'signed-in'; identity: GithubIdentity }
+    | { kind: 'signed-in'; identity: GitHubIdentity }
     | { kind: 'error'; message: string }
   >({ kind: 'loading' });
   const [showSignIn, setShowSignIn] = useState(false);
@@ -38,9 +38,9 @@ export function GithubSignInChip({
 
   const refresh = useCallback(async () => {
     try {
-      const res = await api.getGithubIdentity();
+      const res = await api.getGitHubIdentity();
       if (res.signedIn) {
-        const identity: GithubIdentity = {
+        const identity: GitHubIdentity = {
           login: res.login,
           ...(res.name ? { name: res.name } : {}),
           ...(res.avatarUrl ? { avatarUrl: res.avatarUrl } : {}),
@@ -63,7 +63,7 @@ export function GithubSignInChip({
   }, [refresh]);
 
   const handleSignedIn = useCallback(
-    (identity: GithubIdentity) => {
+    (identity: GitHubIdentity) => {
       setState({ kind: 'signed-in', identity });
       onChange?.(identity);
       setShowSignIn(false);
@@ -74,7 +74,7 @@ export function GithubSignInChip({
   const signOut = useCallback(async () => {
     setShowMenu(false);
     try {
-      await api.githubLogout();
+      await api.gitHubLogout();
     } finally {
       setState({ kind: 'signed-out' });
       onChange?.(null);
@@ -110,7 +110,7 @@ export function GithubSignInChip({
           Sign in
         </button>
         {showSignIn && (
-          <GithubDeviceCodeModal onClose={() => setShowSignIn(false)} onSignedIn={handleSignedIn} />
+          <GitHubDeviceCodeModal onClose={() => setShowSignIn(false)} onSignedIn={handleSignedIn} />
         )}
       </>
     );

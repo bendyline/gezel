@@ -27,7 +27,7 @@ export async function craftbookContextForProject(
 ): Promise<CraftbookRequirementContext> {
   const project = await store.getProject(projectId).catch(() => null);
   return {
-    hasGithub: !!project?.github?.url,
+    hasGitHub: !!project?.github?.url,
     branch: project?.github?.branch ?? null,
   };
 }

@@ -1,5 +1,5 @@
 import { createLogger } from '@bendyline/gezel';
-import { isGitInstalled, runGit } from '../github/git.js';
+import { isGitInstalled, runGit } from '../git/git.js';
 import type { IndexStore } from './index-store.js';
 
 /**

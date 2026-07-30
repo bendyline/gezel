@@ -1,4 +1,4 @@
-import { type ReactNode, createContext, useContext, useId, useState } from 'react';
+import { type ReactNode, type SVGProps, createContext, useContext, useId, useState } from 'react';
 
 /**
  * Test-only replacement for `../primitives/index.js`. Renders the Radix
@@ -204,6 +204,14 @@ const DropdownMenu = {
   ),
 };
 
+const DropdownChevron = ({ className, ...props }: Omit<SVGProps<SVGSVGElement>, 'children'>) => (
+  <svg
+    {...props}
+    className={className ? `gz-dropdown-chevron ${className}` : 'gz-dropdown-chevron'}
+    aria-hidden="true"
+  />
+);
+
 const ContextMenuCtx = createContext<{ open: boolean; setOpen: (open: boolean) => void }>({
   open: false,
   setOpen: () => undefined,
@@ -246,9 +254,20 @@ export const primitivesMock = {
   Tooltip,
   Popover,
   DropdownMenu,
+  DropdownChevron,
   ContextMenu,
 };
 
 // Re-export under named keys so consumers can do:
 //   vi.mock('../primitives/index.js', () => primitivesMock);
-export { Select, Dialog, AlertDialog, Tabs, Tooltip, Popover, DropdownMenu, ContextMenu };
+export {
+  Select,
+  Dialog,
+  AlertDialog,
+  Tabs,
+  Tooltip,
+  Popover,
+  DropdownMenu,
+  DropdownChevron,
+  ContextMenu,
+};

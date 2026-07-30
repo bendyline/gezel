@@ -17,7 +17,23 @@ export interface ChatTarget {
    * for `gezel:` routes; an empty string for raw model routes.
    */
   systemPrefix: string;
+  /**
+   * The gezel's frontmatter tuning knobs, present only for `gezel:`
+   * routes. Fed into `ChatManager.resolveModelSessionDefaults` so a
+   * gezel-targeted `/v1` request applies the same per-gezel sampling
+   * overrides, tuning-profile pick, and reasoning effort a UI session
+   * on that gezel would.
+   */
+  tuningOverrides?: {
+    tuning?: NonNullable<GezelDetailForTarget['parsed']>['frontmatter']['tuning'];
+    tuningProfileId?: string;
+    suggestedProfileId?: string;
+    reasoningEffort?: string;
+  };
 }
+
+/** Structural slice of `Store.getGezel`'s return the target resolver reads. */
+type GezelDetailForTarget = NonNullable<Awaited<ReturnType<ServiceContext['store']['getGezel']>>>;
 
 export type ChatTargetInput =
   | { kind: 'gezel'; ref: string }
@@ -62,10 +78,17 @@ export async function resolveChatTarget(
     gezel.parsed.frontmatter.model ?? (config.defaultModel?.[provider] as string | undefined);
 
   const persona = gezel.about?.trim() ?? '';
+  const fm = gezel.parsed.frontmatter;
   return {
     provider,
     model,
     systemPrefix: persona,
+    tuningOverrides: {
+      ...(fm.tuning ? { tuning: fm.tuning } : {}),
+      ...(fm.tuningProfile ? { tuningProfileId: fm.tuningProfile } : {}),
+      ...(fm.suggestedTuningProfile ? { suggestedProfileId: fm.suggestedTuningProfile } : {}),
+      ...(fm.reasoningEffort ? { reasoningEffort: fm.reasoningEffort } : {}),
+    },
   };
 }
 

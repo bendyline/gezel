@@ -9,8 +9,8 @@ vi.mock('../api.js', () => ({ api: createMockApi() }));
 // jsdom can't drive — the view's own logic (TOC, selection, mode
 // toggle, article fetch) is what this file covers.
 vi.mock('@bendyline/squisq-react', () => ({
-  LinearDocView: ({ doc }: { doc: unknown }) => (
-    <div data-testid="linear-doc-view">
+  LinearDocView: ({ doc, className }: { doc: unknown; className?: string }) => (
+    <div data-testid="linear-doc-view" className={className}>
       {doc ? 'doc' : 'no-doc'}
       <a href="../conceptual/the-crew.md">crew link</a>
       <a href="craftbook/research-report">book link</a>
@@ -122,7 +122,7 @@ describe('HandboekView', () => {
     await waitFor(() => {
       expect(api.getHandboekArticle).toHaveBeenCalledWith('welcome');
     });
-    expect(await screen.findByTestId('linear-doc-view')).toBeInTheDocument();
+    expect(await screen.findByTestId('linear-doc-view')).toHaveClass('gezel-article-view');
     expect(screen.getByRole('heading', { level: 2, name: 'What is gezel?' })).toBeInTheDocument();
   });
 

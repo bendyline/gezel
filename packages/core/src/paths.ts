@@ -259,6 +259,11 @@ export function projectFindingLifecycleFile(root: string, projectId: string): st
   return join(projectLocalDir(root, projectId), 'finding-lifecycle.json');
 }
 
+/** Durable per-project code-review records (the GitHub tab's Review panel). Always local. */
+export function projectCodeReviewsFile(root: string, projectId: string): string {
+  return join(projectLocalDir(root, projectId), 'code-reviews.json');
+}
+
 /** Per-project documents folder — holds about.md, missionObjectives.md, etc. */
 export function projectDocsDir(
   root: string,
@@ -293,7 +298,7 @@ export function projectMemoriesDir(
  *
  * Pre-Phase-2: this was where every github-linked project's clone landed.
  * Post-Phase-2: new projects clone into the workspace directly; this path
- * is kept around to (a) adopt legacy clones in `GitHubManager.resolveCheckout`
+ * is kept around to (a) adopt legacy clones in `GitManager.resolveCheckout`
  * and (b) feed the one-shot `Store.migrateLegacyGhCheckouts` migration that
  * moves legacy `gh/` clones into `workspace/`. New code should not assume
  * a clone lives here.

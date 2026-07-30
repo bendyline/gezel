@@ -120,6 +120,62 @@ describe('POST /api/documents/mkdir', () => {
   });
 });
 
+describe('POST /api/documents/rename', () => {
+  it('renames a document without rewriting its contents', async () => {
+    await api('PUT', '/api/documents/write', {
+      path: 'rename/source.md',
+      content: '# Keep me',
+    });
+
+    const renameRes = await api('POST', '/api/documents/rename', {
+      fromPath: 'rename/source.md',
+      toPath: 'rename/destination.md',
+    });
+    expect(renameRes.status).toBe(200);
+
+    expect((await api('GET', '/api/documents/read?path=rename/source.md')).status).toBe(404);
+    const renamed = await api('GET', '/api/documents/read?path=rename/destination.md');
+    expect(renamed.status).toBe(200);
+    expect(((await renamed.json()) as { content: string }).content).toBe('# Keep me');
+  });
+
+  it('renames a folder and all documents beneath it', async () => {
+    await api('PUT', '/api/documents/write', {
+      path: 'rename-folder/before/nested.md',
+      content: 'nested',
+    });
+
+    const renameRes = await api('POST', '/api/documents/rename', {
+      fromPath: 'rename-folder/before',
+      toPath: 'rename-folder/after',
+    });
+    expect(renameRes.status).toBe(200);
+    expect(
+      (await api('GET', '/api/documents/read?path=rename-folder/before/nested.md')).status,
+    ).toBe(404);
+    expect(
+      (await api('GET', '/api/documents/read?path=rename-folder/after/nested.md')).status,
+    ).toBe(200);
+  });
+
+  it('rejects a rename that would overwrite an existing path', async () => {
+    await api('PUT', '/api/documents/write', {
+      path: 'rename-conflict/one.md',
+      content: 'one',
+    });
+    await api('PUT', '/api/documents/write', {
+      path: 'rename-conflict/two.md',
+      content: 'two',
+    });
+
+    const renameRes = await api('POST', '/api/documents/rename', {
+      fromPath: 'rename-conflict/one.md',
+      toPath: 'rename-conflict/two.md',
+    });
+    expect(renameRes.status).toBe(409);
+  });
+});
+
 describe('DELETE /api/documents/delete', () => {
   it('round-trip: write, read, delete, then read returns 404', async () => {
     await api('PUT', '/api/documents/write', {

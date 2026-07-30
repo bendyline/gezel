@@ -23,6 +23,7 @@ export * from './poppetje/index.js';
 export * from './project-types/taxonomy.js';
 export * from './roles/index.js';
 export * from './deliverable.js';
+export * from './device-safety.js';
 export * from './craftbook-collapse.js';
 export * from './craftbook-doc.js';
 export * from './skills/index.js';

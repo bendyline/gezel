@@ -29,7 +29,10 @@ export function workspaceFromClient(
 ): CraftbookEvalWorkspace {
   const readCache = new Map<string, Promise<string | null>>();
   const bytesCache = new Map<string, Promise<Uint8Array | null>>();
+  const artifactReadCache = new Map<string, Promise<string | null>>();
+  const artifactBytesCache = new Map<string, Promise<Uint8Array | null>>();
   let listCache: Promise<string[]> | undefined;
+  let artifactListCache: Promise<string[]> | undefined;
   return {
     async read(file: string): Promise<string | null> {
       let cached = readCache.get(file);
@@ -74,6 +77,42 @@ export function workspaceFromClient(
           }
         })();
         bytesCache.set(file, cached);
+      }
+      return cached;
+    },
+    // Artifact-drawer accessors — what lets `artifact: true` checks (a
+    // review report, an audit deliverable) evaluate instead of failing
+    // closed in the runtime evaluator's reader swap.
+    async readArtifact(file: string): Promise<string | null> {
+      let cached = artifactReadCache.get(file);
+      if (!cached) {
+        cached = client
+          .readProjectArtifact(projectId, file)
+          .then((res) => res.content)
+          .catch(() => null);
+        artifactReadCache.set(file, cached);
+      }
+      return cached;
+    },
+    async listArtifacts(): Promise<string[]> {
+      if (!artifactListCache) {
+        artifactListCache = client
+          .listProjectArtifacts(projectId, undefined, true)
+          .then((listing) =>
+            listing.files.filter((file) => !file.isDirectory).map((file) => file.path),
+          )
+          .catch(() => []);
+      }
+      return artifactListCache;
+    },
+    async readArtifactBytes(file: string): Promise<Uint8Array | null> {
+      let cached = artifactBytesCache.get(file);
+      if (!cached) {
+        cached = client
+          .fetchProjectArtifactBlob(projectId, file)
+          .then(async (blob) => new Uint8Array(await blob.arrayBuffer()))
+          .catch(() => null);
+        artifactBytesCache.set(file, cached);
       }
       return cached;
     },

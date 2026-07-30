@@ -488,8 +488,8 @@ export function toolRoutes(ctx: ServiceContext): Hono {
     if (body.pr && project.github) {
       try {
         const [detail, files] = await Promise.all([
-          ctx.githubPrs.getPullRequest(project, body.pr).catch(() => null),
-          ctx.githubPrs.listFiles(project, body.pr),
+          ctx.gitHubPrs.getPullRequest(project, body.pr).catch(() => null),
+          ctx.gitHubPrs.listFiles(project, body.pr),
         ]);
         const { overlay, phantomBlocks } = buildPrOverlay({
           prNumber: body.pr,

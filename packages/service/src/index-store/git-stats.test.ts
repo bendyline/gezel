@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { isGitInstalled, runGit } from '../github/git.js';
+import { isGitInstalled, runGit } from '../git/git.js';
 import {
   GIT_META_COMMITS,
   GIT_META_LAST_COMMIT,

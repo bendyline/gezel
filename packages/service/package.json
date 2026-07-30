@@ -58,6 +58,7 @@
     "@bendyline/gezel-script-stdlib": "workspace:*",
     "@bendyline/gezel-sdk": "workspace:*",
     "@bendyline/squisq": "2.5.0",
+    "@bendyline/squisq-cli": "2.5.0",
     "@bendyline/squisq-formats": "2.3.10",
     "@hono/node-server": "^2.0.11",
     "@huggingface/transformers": "^4.2.0",

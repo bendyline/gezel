@@ -1,4 +1,4 @@
-import type { GithubFileDiffResponse, GithubWorkingChange } from '@bendyline/gezel';
+import type { GitFileDiffResponse, GitWorkingChange } from '@bendyline/gezel';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../../api.js';
 import { ConfirmDialog } from '../ConfirmDialog.js';
@@ -6,7 +6,7 @@ import { ChangedFileList } from './ChangedFileList.js';
 import { GitDiffView } from './GitDiffView.js';
 import { SaveChangesBox } from './SaveChangesBox.js';
 import { GIT_COPY, changeKindWord, friendlyDate, plural } from './gitCopy.js';
-import { GITHUB_CHANGED_EVENT, notifyGithubChanged } from './useGitSync.js';
+import { GIT_CHANGED_EVENT, notifyGitChanged } from './useGitSync.js';
 
 /**
  * The Changes sub-tab: changed files + save box on the left, the
@@ -21,6 +21,11 @@ interface Props {
   syncing: boolean;
   lastSyncedAt?: string;
   showToast: (kind: 'ok' | 'err', text: string) => void;
+  /** Kick off a commit review of the unsaved changes (shell owns the flow). */
+  onReviewRequested?: () => void;
+  /** Kick off a branch-vs-main review — offered when everything is saved. */
+  onBranchReviewRequested?: () => void;
+  reviewBusy?: boolean;
 }
 
 export function GitChangesView({
@@ -29,19 +34,22 @@ export function GitChangesView({
   syncing,
   lastSyncedAt,
   showToast,
+  onReviewRequested,
+  onBranchReviewRequested,
+  reviewBusy,
 }: Props) {
-  const [changes, setChanges] = useState<GithubWorkingChange[] | null>(null);
+  const [changes, setChanges] = useState<GitWorkingChange[] | null>(null);
   const [truncatedList, setTruncatedList] = useState(false);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
-  const [diff, setDiff] = useState<GithubFileDiffResponse | null>(null);
+  const [diff, setDiff] = useState<GitFileDiffResponse | null>(null);
   const [busy, setBusy] = useState<'' | 'save' | 'discard'>('');
-  const [confirmDiscard, setConfirmDiscard] = useState<GithubWorkingChange | null>(null);
+  const [confirmDiscard, setConfirmDiscard] = useState<GitWorkingChange | null>(null);
   const [confirmDiscardAll, setConfirmDiscardAll] = useState(false);
-  const diffCacheRef = useRef(new Map<string, GithubFileDiffResponse>());
+  const diffCacheRef = useRef(new Map<string, GitFileDiffResponse>());
 
   const refresh = useCallback(async () => {
     try {
-      const res = await api.getProjectGithubChanges(projectId);
+      const res = await api.getProjectGitChanges(projectId);
       diffCacheRef.current.clear();
       setChanges(res.changes);
       setTruncatedList(res.truncated);
@@ -61,10 +69,10 @@ export function GitChangesView({
     const onChanged = (e: Event) => {
       if ((e as CustomEvent).detail?.projectId === projectId) void refresh();
     };
-    window.addEventListener(GITHUB_CHANGED_EVENT, onChanged);
+    window.addEventListener(GIT_CHANGED_EVENT, onChanged);
     return () => {
       window.clearInterval(interval);
-      window.removeEventListener(GITHUB_CHANGED_EVENT, onChanged);
+      window.removeEventListener(GIT_CHANGED_EVENT, onChanged);
     };
   }, [refresh, projectId]);
 
@@ -82,7 +90,7 @@ export function GitChangesView({
     let cancelled = false;
     setDiff(null);
     void api
-      .getProjectGithubFileDiff(projectId, selectedPath)
+      .getProjectGitFileDiff(projectId, selectedPath)
       .then((d) => {
         diffCacheRef.current.set(selectedPath, d);
         if (!cancelled) setDiff(d);
@@ -107,10 +115,10 @@ export function GitChangesView({
     async (message: string, alsoSync: boolean) => {
       setBusy('save');
       try {
-        await api.commitProjectGithub(projectId, message);
+        await api.commitProjectGit(projectId, message);
         showToast('ok', GIT_COPY.saveToast);
         await refresh();
-        notifyGithubChanged(projectId);
+        notifyGitChanged(projectId);
         if (alsoSync) onSyncRequested();
       } catch (err) {
         showToast('err', `Save failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -125,10 +133,10 @@ export function GitChangesView({
     async (args: { paths?: string[]; all?: boolean }) => {
       setBusy('discard');
       try {
-        const res = await api.discardProjectGithubChanges(projectId, args);
+        const res = await api.discardProjectGitChanges(projectId, args);
         showToast('ok', `Undid ${plural(res.discarded, 'change')}.`);
         await refresh();
-        notifyGithubChanged(projectId);
+        notifyGitChanged(projectId);
       } catch (err) {
         showToast('err', `Undo failed: ${err instanceof Error ? err.message : String(err)}`);
       } finally {
@@ -153,6 +161,11 @@ export function GitChangesView({
         <button type="button" onClick={onSyncRequested} disabled={syncing}>
           {syncing ? 'Syncing…' : 'Sync'}
         </button>
+        {onBranchReviewRequested && (
+          <button type="button" onClick={onBranchReviewRequested} disabled={reviewBusy === true}>
+            ✨ {GIT_COPY.reviewPrButton}
+          </button>
+        )}
         {lastSyncedAt && <p className="muted small">Last synced {friendlyDate(lastSyncedAt)}</p>}
       </div>
     );
@@ -163,6 +176,17 @@ export function GitChangesView({
       <div className="gh-changes-rail">
         <div className="gh-changes-rail-header">
           <strong>{plural(changes.length, 'changed file')}</strong>
+          {onReviewRequested && (
+            <button
+              type="button"
+              className="gh-review-rail-button small"
+              onClick={onReviewRequested}
+              disabled={busy !== '' || reviewBusy === true}
+              title={GIT_COPY.reviewCommitHint}
+            >
+              {GIT_COPY.reviewRailButton}
+            </button>
+          )}
           <button
             type="button"
             className="gh-changes-discard-all small"

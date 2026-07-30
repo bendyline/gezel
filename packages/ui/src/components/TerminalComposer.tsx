@@ -1,7 +1,8 @@
-import { Suspense, lazy, useCallback, useRef, useState } from 'react';
+import type { RunTerminalCommandResponse } from '@bendyline/gezel';
+import { type ReactNode, Suspense, lazy, useCallback, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { Popover } from '../primitives/index.js';
-import { CommandsPanel } from './CommandsPanel.js';
+import { CommandsPanel, type CommandsPanelSection } from './CommandsPanel.js';
 import type { TerminalCodeEditorHandle } from './terminal-editor/TerminalCodeEditor.js';
 import { useTerminalCompletionSources } from './terminal-editor/use-terminal-completion-sources.js';
 
@@ -28,6 +29,91 @@ const pendingTerminalCommands = new Map<string, string>();
 export function queueTerminalCommand(projectId: string, command: string): void {
   pendingTerminalCommands.set(projectId, command);
 }
+
+/**
+ * The toolbar's three galleries. Splitting one "Commands" button into three
+ * separates three genuinely different questions — how do I use a terminal at
+ * all, what does this repo already know how to run, and what work can a gezel
+ * pick up — so a first-time user isn't handed a mixed list and left to sort
+ * out which is which. All three render the same `CommandsPanel`, scoped.
+ */
+const GALLERIES: Array<{
+  section: Exclude<CommandsPanelSection, 'all'>;
+  label: string;
+  title: string;
+  icon: ReactNode;
+}> = [
+  {
+    section: 'commands',
+    label: 'Commands',
+    title: 'Everyday terminal commands, and the tools installed on this machine',
+    icon: (
+      <>
+        <path
+          d="M2.5 4 L6 8 L2.5 12"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <path d="M8 12 H13.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      </>
+    ),
+  },
+  {
+    section: 'scripts',
+    label: 'Scripts',
+    title: 'Scripts this project already defines — package.json, scripts/, launches',
+    icon: (
+      <>
+        <rect
+          x="3"
+          y="2"
+          width="10"
+          height="12"
+          rx="1.5"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.4"
+        />
+        <path
+          d="M5.5 5.5h5M5.5 8h5M5.5 10.5h3"
+          stroke="currentColor"
+          strokeWidth="1.3"
+          strokeLinecap="round"
+        />
+      </>
+    ),
+  },
+  {
+    section: 'tasks',
+    label: 'Tasks',
+    title: 'Craftbooks and workspace skills a gezel can run for you',
+    icon: (
+      <>
+        <path
+          d="M2.5 4.5 L4 6 L6.5 3"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <path d="M8.5 5 H14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+        <path
+          d="M2.5 11 L4 12.5 L6.5 9.5"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <path d="M8.5 11.5 H14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      </>
+    ),
+  },
+];
 
 /**
  * Shell-flavored input backed by a Monaco editor (see `TerminalCodeEditor`),
@@ -57,7 +143,7 @@ export function TerminalComposer({
   projectId: string;
   workingDir: string;
   /** Optional hook the parent can use to flip a UX state on submit. */
-  onSent?: (input: string) => void;
+  onSent?: (input: string, result: RunTerminalCommandResponse) => void;
   /**
    * Optional seed value for the input. Read once at mount (standard
    * useState initial-value semantics) so changes after mount don't
@@ -88,9 +174,10 @@ export function TerminalComposer({
     return initialInput ?? '';
   });
   const [error, setError] = useState<string | null>(null);
-  // Command-gallery popover (the toolbar's "Commands" button). Reuses the
-  // right-rail CommandsPanel so the two surfaces stay one implementation.
-  const [galleryOpen, setGalleryOpen] = useState(false);
+  // Which of the toolbar's three gallery popovers is open (null = none). One
+  // slot rather than three booleans, so opening one closes the others. Each
+  // reuses the right-rail CommandsPanel so the surfaces stay one implementation.
+  const [openGallery, setOpenGallery] = useState<CommandsPanelSection | null>(null);
   const editorRef = useRef<TerminalCodeEditorHandle>(null);
   const historyRef = useRef<string[]>([]);
   const historyIdxRef = useRef<number>(-1);
@@ -102,7 +189,7 @@ export function TerminalComposer({
   // just-staged command can be run without an extra click.
   const stageFromGallery = useCallback((command: string) => {
     editorRef.current?.setValue(command);
-    setGalleryOpen(false);
+    setOpenGallery(null);
   }, []);
 
   // Fetch + cache the project's commands / craftbooks / tools and feed them to
@@ -123,8 +210,8 @@ export function TerminalComposer({
       }
       historyIdxRef.current = -1;
       try {
-        await api.runTerminalCommand(projectId, { workingDir, input: trimmed });
-        onSent?.(trimmed);
+        const result = await api.runTerminalCommand(projectId, { workingDir, input: trimmed });
+        onSent?.(trimmed, result);
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
         // Belt-and-braces: if the error banner mounting drifted focus, snap it back.
@@ -153,58 +240,55 @@ export function TerminalComposer({
   return (
     <div className="terminal-composer">
       {/* Toolbar — mirrors the squisq editor's top toolbar so the terminal
-       * reads as a symmetric sibling of the chat editor. Holds the command
-       * gallery: a popover of craftbooks / scripts / commands that stages
-       * the picked one into the input for review. */}
+       * reads as a symmetric sibling of the chat editor. Holds the three
+       * galleries (commands / scripts / tasks); picking from any of them
+       * stages the line into the input for review. */}
       <div className="terminal-composer-toolbar">
-        <Popover.Root open={galleryOpen} onOpenChange={setGalleryOpen}>
-          <Popover.Trigger asChild>
-            <button
-              type="button"
-              className="terminal-toolbar-btn"
-              title="Browse craftbooks, scripts, and commands"
-              aria-label="Browse craftbooks, scripts, and commands"
-            >
-              <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
-                <rect x="2" y="2" width="5" height="5" rx="1.2" fill="currentColor" />
-                <rect
-                  x="9"
-                  y="2"
-                  width="5"
-                  height="5"
-                  rx="1.2"
-                  fill="currentColor"
-                  opacity="0.55"
-                />
-                <rect
-                  x="2"
-                  y="9"
-                  width="5"
-                  height="5"
-                  rx="1.2"
-                  fill="currentColor"
-                  opacity="0.55"
-                />
-                <rect x="9" y="9" width="5" height="5" rx="1.2" fill="currentColor" />
-              </svg>
-              Commands
-            </button>
-          </Popover.Trigger>
-          <Popover.Content
-            className="terminal-commands-popover"
-            side="top"
-            align="start"
-            onCloseAutoFocus={(e) => {
-              // Keep focus on the terminal input rather than bouncing back
-              // to the toolbar button, so a just-staged command can be run
-              // with Enter straight away.
-              e.preventDefault();
-              editorRef.current?.focus();
-            }}
+        {GALLERIES.map((gallery) => (
+          <Popover.Root
+            key={gallery.section}
+            open={openGallery === gallery.section}
+            onOpenChange={(o) => setOpenGallery(o ? gallery.section : null)}
           >
-            <CommandsPanel projectId={projectId} onStageCommand={stageFromGallery} />
-          </Popover.Content>
-        </Popover.Root>
+            <Popover.Trigger asChild>
+              <button
+                type="button"
+                className="terminal-toolbar-btn"
+                title={gallery.title}
+                aria-label={gallery.title}
+              >
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 16 16"
+                  aria-hidden="true"
+                  focusable="false"
+                >
+                  {gallery.icon}
+                </svg>
+                {gallery.label}
+              </button>
+            </Popover.Trigger>
+            <Popover.Content
+              className="terminal-commands-popover"
+              side="top"
+              align="start"
+              onCloseAutoFocus={(e) => {
+                // Keep focus on the terminal input rather than bouncing back
+                // to the toolbar button, so a just-staged command can be run
+                // with Enter straight away.
+                e.preventDefault();
+                editorRef.current?.focus();
+              }}
+            >
+              <CommandsPanel
+                projectId={projectId}
+                section={gallery.section}
+                onStageCommand={stageFromGallery}
+              />
+            </Popover.Content>
+          </Popover.Root>
+        ))}
       </div>
       <div className="terminal-composer-input-wrap">
         <span className="terminal-prompt-sigil">&gt;</span>

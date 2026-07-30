@@ -14,6 +14,7 @@ confirmModulesPurge: false
 minimumReleaseAgeExclude:
   - "@anthropic-ai/sdk@0.113.0"
   - "@bendyline/gilde"
+  - "@bendyline/squisq-cli@2.5.0"
   - "@bendyline/squisq-editor-react@2.5.0"
   - "@bendyline/squisq-formats@2.3.10"
   - "@bendyline/squisq-react@2.5.0"

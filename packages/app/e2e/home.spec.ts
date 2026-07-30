@@ -106,13 +106,21 @@ test('renders the workshop in dark (dusk) mode', async () => {
     await page.getByRole('tab').first().click();
   }
 
+  await expect(page.getByTestId('home-workshop')).toBeVisible();
+
+  // The day surface stays on the shared mushroom-beige foundation tone rather
+  // than drifting back to yellow parchment or to the old flat greige.
+  const dayPaper = await page.evaluate(() => {
+    const el = document.querySelector('.home-workshop');
+    return el ? getComputedStyle(el).getPropertyValue('--paper').trim() : '';
+  });
+  expect(dayPaper).toBe('#efe6dc');
+
   // Flip the app's explicit-dark trigger ([data-theme="dark"] on <html>),
   // exercising the `.home-workshop` dusk token override.
   await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'dark'));
-  await expect(page.getByTestId('home-workshop')).toBeVisible();
 
-  // The scoped dusk override must actually win: --paper flips from the day
-  // value (#f1e9e5) to the dusk value (#1f1c18) on the workshop root.
+  // The scoped dusk override must actually win.
   const paper = await page.evaluate(() => {
     const el = document.querySelector('.home-workshop');
     return el ? getComputedStyle(el).getPropertyValue('--paper').trim() : '';

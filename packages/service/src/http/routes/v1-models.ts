@@ -30,7 +30,7 @@ interface OpenAIModelEntry {
   id: string;
   object: 'model';
   created: number;
-  owned_by: ProviderName;
+  owned_by: ProviderName | 'gezel';
   /** Gezel-specific extras useful to richer clients; ignored by strict OpenAI SDKs. */
   context_window?: number;
   supports_reasoning?: boolean;
@@ -41,6 +41,27 @@ export function v1ModelsRoutes(ctx: ServiceContext): Hono {
 
   app.get('/', async (c) => {
     const created = Math.floor(Date.now() / 1000);
+    // When a serving gezel is designated (Settings → Connected Apps),
+    // list them FIRST — clients that pick the top entry from the model
+    // list land on the gezel the user chose to answer outside apps.
+    const servingEntry: OpenAIModelEntry[] = [];
+    try {
+      const config = await ctx.store.readConfig();
+      const servingGezelId = config.openaiEndpoints?.servingGezelId;
+      if (servingGezelId) {
+        const gezel = await ctx.store.getGezel(servingGezelId).catch(() => null);
+        if (gezel) {
+          servingEntry.push({
+            id: `gezel:${gezel.name}`,
+            object: 'model',
+            created,
+            owned_by: 'gezel',
+          });
+        }
+      }
+    } catch {
+      /* config unreadable — serve the provider roster alone */
+    }
     const buckets = await Promise.all(
       PROVIDERS_TO_ENUMERATE.map(async (provider) => {
         try {
@@ -61,7 +82,7 @@ export function v1ModelsRoutes(ctx: ServiceContext): Hono {
       }),
     );
 
-    const data = buckets.flat();
+    const data = [...servingEntry, ...buckets.flat()];
     return c.json({ object: 'list', data });
   });
 

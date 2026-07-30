@@ -182,6 +182,7 @@ export function configRoutes(ctx: ServiceContext): Hono {
       autoUpdateChecks: config.autoUpdateChecks !== false,
       quitOnClose: config.quitOnClose === true,
       themePref: config.themePref,
+      documentExportOptions: config.documentExportOptions,
       sidebarSide: config.sidebarSide,
       homeGreetingCollapsed: config.homeGreetingCollapsed === true,
       workshopTempo: config.workshopTempo ?? 'bedrijvig',
@@ -235,6 +236,10 @@ export function configRoutes(ctx: ServiceContext): Hono {
       // config.json, so gates still apply — but the UI would render the
       // default `free` slider position regardless of the stored policy).
       securityPolicy: config.securityPolicy,
+      // OpenAI-compatible endpoint controls (Settings → Connected Apps).
+      // Hand-pick into the whitelist like everything above, or the panel's
+      // toggle/dropdown would render defaults on the next GET.
+      openaiEndpoints: config.openaiEndpoints,
       remoteServing: {
         ...(config.remoteServing ?? {}),
         enabled: ctx.remoteServing.status().listening,
@@ -296,6 +301,25 @@ export function configRoutes(ctx: ServiceContext): Hono {
         return c.json(
           {
             error: 'remote-serving-failed',
+            message: err instanceof Error ? err.message : String(err),
+          },
+          409,
+        );
+      }
+    }
+    // Ollama emulation follows the remote-serving contract: the live
+    // listener must track config, and a bind failure (usually real
+    // Ollama already on 11434) reverts the toggle and surfaces an
+    // actionable 409 instead of persisting a switch that lies.
+    if (body.openaiEndpoints !== undefined) {
+      try {
+        await ctx.ollamaEmulation.reconfigure(updated.openaiEndpoints);
+      } catch (err) {
+        await ctx.store.writeConfig({ openaiEndpoints: previous.openaiEndpoints });
+        await ctx.ollamaEmulation.reconfigure(previous.openaiEndpoints).catch(() => undefined);
+        return c.json(
+          {
+            error: 'ollama-emulation-failed',
             message: err instanceof Error ? err.message : String(err),
           },
           409,
@@ -502,6 +526,7 @@ export function configRoutes(ctx: ServiceContext): Hono {
       autoUpdateChecks: updated.autoUpdateChecks !== false,
       quitOnClose: updated.quitOnClose === true,
       themePref: updated.themePref,
+      documentExportOptions: updated.documentExportOptions,
       sidebarSide: updated.sidebarSide,
       homeGreetingCollapsed: updated.homeGreetingCollapsed === true,
       workshopTempo: updated.workshopTempo ?? 'bedrijvig',
@@ -542,6 +567,10 @@ export function configRoutes(ctx: ServiceContext): Hono {
       // user changes them, even though config.json is correct. Same
       // echo-bug class as the llama-cpp / tuning fields above.
       securityPolicy: updated.securityPolicy,
+      // Same echo-bug class as securityPolicy above: without this, the
+      // Connected Apps toggle/dropdown revert visually the instant the
+      // user changes them.
+      openaiEndpoints: updated.openaiEndpoints,
       remoteServing: {
         ...(updated.remoteServing ?? {}),
         enabled: ctx.remoteServing.status().listening,

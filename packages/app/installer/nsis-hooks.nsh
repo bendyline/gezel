@@ -176,6 +176,15 @@
 !macroend
 
 !macro customInstall
+  ; electron-builder records InstallLocation under its own INSTALL_REGISTRY_KEY
+  ; (HKLM\SOFTWARE\<app guid>), which is what its upgrade detection reads back,
+  ; but it never writes one into the Add/Remove Programs key.  Uninstall works
+  ; without it — UninstallString carries the full path — yet Settings > Installed
+  ; apps shows no location, and inventory tooling that reads ARP (winget, Intune,
+  ; SCCM) sees a blank.  registryAddInstallInfo has already created this key by
+  ; the time customInstall runs, so this only adds the missing value.
+  WriteRegStr SHELL_CONTEXT "${UNINSTALL_REGISTRY_KEY}" InstallLocation "$INSTDIR"
+
   !insertmacro InstallVCRedist
 
   DetailPrint "Installing least-privileged GezelService..."

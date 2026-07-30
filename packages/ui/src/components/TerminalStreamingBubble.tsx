@@ -1,5 +1,5 @@
-import { type KeyboardEvent, useEffect, useMemo, useState } from 'react';
-import { type AnsiRenderer, createAnsiRenderer } from './AnsiOutput.js';
+import { type KeyboardEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { AnsiOutput } from './AnsiOutput.js';
 import { formatFolderLabel } from './terminal-folder-label.js';
 
 export interface TerminalStreamingAwaitingInput {
@@ -7,15 +7,19 @@ export interface TerminalStreamingAwaitingInput {
   mode: 'text' | 'password' | 'yes-no';
 }
 
+/** A small tolerance avoids disabling follow mode on fractional scroll positions. */
+const LIVE_TAIL_THRESHOLD_PX = 24;
+// Scroll containers need a tab stop so keyboard users can reach both axes.
+const KEYBOARD_SCROLL_PROPS = { tabIndex: 0 } as const;
+
 /**
  * Live "growing" output bubble shown while a terminal run is
  * mid-flight. Mirrors the static `TerminalBubble`'s output-row
  * layout (folder pill, "Terminal output" label, body `<pre>`)
  * with two differences:
  *
- *   - Content is fed incrementally through a stateful
- *     `createAnsiRenderer()` so partial CSI sequences arriving
- *     across separate chunks buffer correctly.
+ *   - Content is accumulated by the parent and re-rendered as a complete
+ *     ANSI-bearing buffer, so chunk boundaries cannot leak partial escapes.
  *   - A small "running…" elapsed-time indicator replaces the
  *     final exit-code pill until the run completes (at which
  *     point the parent ChatTimelineView drops the slot and the
@@ -48,15 +52,25 @@ export function TerminalStreamingBubble({
 }) {
   const folder = formatFolderLabel(cwd);
 
-  // Stateful ANSI renderer that survives the lifetime of THIS
-  // streaming row. Re-feed the full content on each render — the
-  // renderer is cheap and keeping it stateful across renders is
-  // what makes partial CSI sequences buffer correctly across
-  // chunk boundaries (a chunk ending in `\x1b[31` and the next
-  // starting with `m` collapse into one styled span).
-  const renderer = useMemo<AnsiRenderer>(() => createAnsiRenderer(), []);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: renderer is intentionally stable across renders; content drives the redraw.
-  const nodes = useMemo(() => renderer.feed(content), [content]);
+  const outputRef = useRef<HTMLElement>(null);
+  const followLiveTailRef = useRef(true);
+
+  // The parent supplies the complete accumulated output on every render.
+  // Keep the newest line visible while the user is following the tail, but
+  // leave their scroll position alone once they deliberately move upward.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: content is the signal that the scroll layout grew; the effect intentionally reads the viewport, not the text.
+  useLayoutEffect(() => {
+    const output = outputRef.current;
+    if (!output || !followLiveTailRef.current) return;
+    output.scrollTop = output.scrollHeight;
+  }, [content]);
+
+  const onOutputScroll = () => {
+    const output = outputRef.current;
+    if (!output) return;
+    const distanceFromBottom = output.scrollHeight - output.clientHeight - output.scrollTop;
+    followLiveTailRef.current = distanceFromBottom <= LIVE_TAIL_THRESHOLD_PX;
+  };
 
   return (
     <div className="msg msg-assistant terminal-group terminal-group-output terminal-group-streaming">
@@ -77,7 +91,18 @@ export function TerminalStreamingBubble({
           </button>
         )}
       </div>
-      <pre className="terminal-output-body">{nodes}</pre>
+      <section
+        ref={outputRef}
+        className="terminal-output-viewport"
+        aria-label="Live terminal output"
+        aria-busy="true"
+        {...KEYBOARD_SCROLL_PROPS}
+        onScroll={onOutputScroll}
+      >
+        <pre className="terminal-output-body">
+          <AnsiOutput text={content} />
+        </pre>
+      </section>
       {awaitingInput && onSendInput && (
         <InteractiveReplyInput awaitingInput={awaitingInput} onSubmit={onSendInput} />
       )}

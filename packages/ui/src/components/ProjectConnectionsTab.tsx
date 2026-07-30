@@ -1,6 +1,8 @@
 import type { ProjectDetail } from '@bendyline/gezel';
-import { useCallback, useEffect, useState } from 'react';
+import { type CSSProperties, useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
+import { ProjectGlyph, type ProjectGlyphId } from '../views/projects/new-project-meta.js';
+import { CatalogArtwork } from './CatalogArtwork.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
 import { connectOAuth } from './connector-link.js';
 
@@ -16,6 +18,35 @@ interface ConnManifest {
   };
   secretShape?: { kind?: string; label?: string; required?: boolean };
   completeness?: string;
+  tags?: string[];
+}
+
+interface ConnectorOption extends ConnManifest {
+  iconSvg?: string;
+  logoUrl?: string;
+}
+
+function connectorGlyph(connector: ConnManifest): ProjectGlyphId {
+  const identity = `${connector.id} ${(connector.tags ?? []).join(' ')}`.toLowerCase();
+  if (identity.includes('wiki')) return 'sheet';
+  if (identity.includes('calendar')) return 'calendar';
+  if (/(mail|gmail|imap|email)/.test(identity)) return 'envelope';
+  if (/(github|git)/.test(identity)) return 'branch';
+  if (/(issue|linear)/.test(identity)) return 'bubbles';
+  if (/(airtable|record|data)/.test(identity)) return 'chart';
+  return 'dots';
+}
+
+function connectorCredentialLabel(connector: ConnManifest): string {
+  const kind = connector.secretShape?.kind;
+  if (kind === 'oauth2') return 'OAuth';
+  if (kind === 'imap') return 'Mail login';
+  if (!connector.secretShape?.required) return 'Optional token';
+  return connector.secretShape?.label ?? 'API token';
+}
+
+function connectorCoverageLabel(connector: ConnManifest): string {
+  return connector.completeness === 'window' ? 'Recent window' : 'Full mirror';
 }
 
 /**
@@ -41,8 +72,9 @@ export function ProjectConnectionsTab({
   >([]);
 
   const [adding, setAdding] = useState(false);
-  const [types, setTypes] = useState<ConnManifest[]>([]);
-  const [selected, setSelected] = useState<ConnManifest | null>(null);
+  const [loadingTypes, setLoadingTypes] = useState(false);
+  const [types, setTypes] = useState<ConnectorOption[]>([]);
+  const [selected, setSelected] = useState<ConnectorOption | null>(null);
   const [config, setConfig] = useState<Record<string, string>>({});
   const [displayName, setDisplayName] = useState('');
   const [credential, setCredential] = useState('');
@@ -117,14 +149,24 @@ export function ProjectConnectionsTab({
 
   const openAdd = useCallback(async () => {
     setAdding(true);
+    setLoadingTypes(true);
+    setTypes([]);
     setSelected(null);
     setError('');
     setNotice('');
     try {
       const res = await api.listConnectorTypes();
-      setTypes(res.items.map((i) => i.manifest as unknown as ConnManifest));
+      setTypes(
+        res.items.map((item) => ({
+          ...(item.manifest as unknown as ConnManifest),
+          ...(item.iconSvg ? { iconSvg: item.iconSvg } : {}),
+          ...(item.logoUrl ? { logoUrl: item.logoUrl } : {}),
+        })),
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoadingTypes(false);
     }
   }, []);
 
@@ -265,6 +307,17 @@ export function ProjectConnectionsTab({
 
   const bindings = status?.bindings ?? [];
   const kind = selected?.secretShape?.kind;
+  const selectConnector = (connector: ConnectorOption) => {
+    if (connector.id === selected?.id) return;
+    setSelected(connector);
+    setConfig({});
+    setDisplayName('');
+    setCredential('');
+    setImapHost('');
+    setImapPort('');
+    setImapSecure(true);
+    setError('');
+  };
 
   return (
     <div className="settings-section">
@@ -360,118 +413,174 @@ export function ProjectConnectionsTab({
         </div>
       )}
 
-      {adding && !selected && (
-        <div className="gz-mail-link-form">
-          <span className="gz-type-field-label">Choose a connector</span>
-          <ul className="settings-list">
-            {types.map((t) => (
-              <li key={t.id}>
-                <div>
-                  <strong>{t.name}</strong>
-                  <div className="small muted">{t.description}</div>
-                </div>
-                <button type="button" className="primary" onClick={() => setSelected(t)}>
-                  Select
-                </button>
-              </li>
-            ))}
-          </ul>
-          <div className="gz-mail-link-actions">
-            <button type="button" onClick={closeAdd}>
-              Cancel
-            </button>
+      {adding && (
+        <div className="gz-connector-picker">
+          <div className="gz-connector-picker-heading">
+            <div>
+              <strong>Choose a connector</strong>
+              <p className="muted small">
+                Pick a source to mirror into this project's searchable files.
+              </p>
+            </div>
+            <span className="gz-connector-picker-count">
+              {loadingTypes ? 'Loading…' : `${types.length} available`}
+            </span>
           </div>
-        </div>
-      )}
 
-      {adding && selected && (
-        <div className="gz-mail-link-form">
-          <strong>{selected.name}</strong>
-          <label>
-            Display name <span className="muted">(optional)</span>
-            <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
-          </label>
-          {Object.entries(selected.configSchema?.properties ?? {})
-            .filter(([, prop]) => prop.const === undefined)
-            .map(([key, prop]) => (
-              <label key={key}>
-                {prop.title ?? key}
-                <input
-                  value={config[key] ?? ''}
-                  onChange={(e) => setConfig((c) => ({ ...c, [key]: e.target.value }))}
-                  placeholder={prop.type === 'array' ? 'comma,separated' : ''}
-                />
-              </label>
-            ))}
-
-          {kind === 'oauth2' ? (
-            <p className="muted small">
-              You'll authorize this connector in your browser — a window opens when you click
-              Connect.
-            </p>
-          ) : kind === 'imap' ? (
-            <>
-              <label>
-                IMAP host
-                <input
-                  value={imapHost}
-                  onChange={(e) => setImapHost(e.target.value)}
-                  placeholder="imap.example.com"
-                />
-              </label>
-              <div className="gz-imap-row">
-                <label className="gz-imap-port">
-                  Port <span className="muted">(optional)</span>
-                  <input
-                    value={imapPort}
-                    onChange={(e) => setImapPort(e.target.value)}
-                    placeholder="993"
-                  />
-                </label>
-                <label className="gz-imap-tls">
-                  <input
-                    type="checkbox"
-                    checked={imapSecure}
-                    onChange={(e) => setImapSecure(e.target.checked)}
-                  />
-                  Use TLS
-                </label>
-              </div>
-              <label>
-                Password / app password
-                <input
-                  type="password"
-                  value={credential}
-                  onChange={(e) => setCredential(e.target.value)}
-                  autoComplete="off"
-                />
-              </label>
-            </>
+          {loadingTypes ? (
+            <div className="gz-connector-picker-empty muted small">Gathering connectors…</div>
+          ) : types.length === 0 ? (
+            <div className="gz-connector-picker-empty muted small">
+              No connector types are available.
+            </div>
           ) : (
-            <label>
-              {selected.secretShape?.label ?? 'API key / token'}{' '}
-              {!selected.secretShape?.required && <span className="muted">(optional)</span>}
-              <input
-                type="password"
-                value={credential}
-                onChange={(e) => setCredential(e.target.value)}
-                autoComplete="off"
-              />
-            </label>
+            <div className="gz-connector-grid" role="radiogroup" aria-label="Connector type">
+              {types.map((connector, index) => (
+                <button
+                  key={connector.id}
+                  type="button"
+                  // biome-ignore lint/a11y/useSemanticElements: cards form one visual radio group; native inputs would duplicate the interactive surface.
+                  role="radio"
+                  aria-checked={selected?.id === connector.id}
+                  aria-label={connector.name}
+                  className={`gz-npd-card gz-connector-card${
+                    selected?.id === connector.id ? ' active' : ''
+                  }`}
+                  onClick={() => selectConnector(connector)}
+                  style={{ '--card-i': Math.min(index, 11) } as CSSProperties}
+                >
+                  <span className="gz-npd-card-mark">
+                    <CatalogArtwork
+                      iconSvg={connector.iconSvg}
+                      logoUrl={connector.logoUrl}
+                      svgClassName="gz-npd-card-mark-svg"
+                      fallback={<ProjectGlyph glyph={connectorGlyph(connector)} size={19} />}
+                    />
+                  </span>
+                  <span className="gz-npd-card-name">{connector.name}</span>
+                  <span className="gz-npd-card-description">{connector.description}</span>
+                  <span className="gz-connector-card-meta" aria-hidden="true">
+                    <span>{connectorCredentialLabel(connector)}</span>
+                    <span>{connectorCoverageLabel(connector)}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
           )}
 
-          <div className="gz-mail-link-actions">
+          {selected && (
+            <div
+              className="gz-mail-link-form gz-connector-config"
+              aria-label={`${selected.name} setup`}
+            >
+              <div className="gz-connector-config-heading">
+                <span className="gz-connector-config-mark">
+                  <CatalogArtwork
+                    iconSvg={selected.iconSvg}
+                    logoUrl={selected.logoUrl}
+                    svgClassName="gz-npd-card-mark-svg"
+                    fallback={<ProjectGlyph glyph={connectorGlyph(selected)} size={19} />}
+                  />
+                </span>
+                <div>
+                  <strong>Set up {selected.name}</strong>
+                  <div className="small muted">
+                    {connectorCredentialLabel(selected)} · {connectorCoverageLabel(selected)}
+                  </div>
+                </div>
+              </div>
+
+              <div className="gz-connector-config-fields">
+                <label>
+                  Display name <span className="muted">(optional)</span>
+                  <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
+                </label>
+                {Object.entries(selected.configSchema?.properties ?? {})
+                  .filter(([, prop]) => prop.const === undefined)
+                  .map(([key, prop]) => (
+                    <label key={key}>
+                      {prop.title ?? key}
+                      <input
+                        value={config[key] ?? ''}
+                        onChange={(e) => setConfig((c) => ({ ...c, [key]: e.target.value }))}
+                        placeholder={prop.type === 'array' ? 'comma,separated' : ''}
+                      />
+                    </label>
+                  ))}
+
+                {kind === 'oauth2' ? (
+                  <p className="muted small gz-connector-oauth-note">
+                    You'll authorize this connector in your browser — a window opens when you click
+                    Connect.
+                  </p>
+                ) : kind === 'imap' ? (
+                  <>
+                    <label>
+                      IMAP host
+                      <input
+                        value={imapHost}
+                        onChange={(e) => setImapHost(e.target.value)}
+                        placeholder="imap.example.com"
+                      />
+                    </label>
+                    <div className="gz-imap-row">
+                      <label className="gz-imap-port">
+                        Port <span className="muted">(optional)</span>
+                        <input
+                          value={imapPort}
+                          onChange={(e) => setImapPort(e.target.value)}
+                          placeholder="993"
+                        />
+                      </label>
+                      <label className="gz-imap-tls">
+                        <input
+                          type="checkbox"
+                          checked={imapSecure}
+                          onChange={(e) => setImapSecure(e.target.checked)}
+                        />
+                        Use TLS
+                      </label>
+                    </div>
+                    <label>
+                      Password / app password
+                      <input
+                        type="password"
+                        value={credential}
+                        onChange={(e) => setCredential(e.target.value)}
+                        autoComplete="off"
+                      />
+                    </label>
+                  </>
+                ) : (
+                  <label>
+                    {selected.secretShape?.label ?? 'API key / token'}{' '}
+                    {!selected.secretShape?.required && <span className="muted">(optional)</span>}
+                    <input
+                      type="password"
+                      value={credential}
+                      onChange={(e) => setCredential(e.target.value)}
+                      autoComplete="off"
+                    />
+                  </label>
+                )}
+              </div>
+            </div>
+          )}
+
+          <div className="gz-mail-link-actions gz-connector-picker-actions">
             <button type="button" onClick={closeAdd} disabled={busy === 'add'}>
               Cancel
             </button>
-            <button
-              type="button"
-              className="primary"
-              onClick={() => void handleBind()}
-              disabled={busy === 'add'}
-            >
-              {busy === 'add' ? 'Working…' : kind === 'oauth2' ? 'Connect' : 'Add'}
-            </button>
+            {selected && (
+              <button
+                type="button"
+                className="primary"
+                onClick={() => void handleBind()}
+                disabled={busy === 'add'}
+              >
+                {busy === 'add' ? 'Working…' : kind === 'oauth2' ? 'Connect' : 'Add'}
+              </button>
+            )}
           </div>
         </div>
       )}

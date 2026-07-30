@@ -314,7 +314,15 @@ jobs:
           if ($verified -eq 0) { throw 'No first-party native binaries were signature-verified' }
 
       - name: Build + produce service bundle
+        # The bundle is sealed into service-bundle.tar.gz here, and neither the
+        # afterPack sweep nor "Verify Windows signatures" below can see inside a
+        # tarball. scripts/verify-pe-tree.mjs therefore audits the tree while it
+        # is still loose: every PE binary must be validly signed or on the
+        # third-party allowlist. REQUIRE=1 so a runner without the Windows SDK
+        # fails the release instead of silently verifying nothing.
         run: pnpm build:packaged
+        env:
+          GEZEL_REQUIRE_BUNDLE_PE_VERIFY: '1'
 
       - name: Verify release version propagation
         shell: bash
@@ -842,8 +850,11 @@ jobs:
       # exactly the bug that bit a local arm64 build. Installing on
       # both arches is idempotent and removes the implicit
       # runner-image assumption.
-      - name: Install rpm and cpio (for RPM builds and verification)
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends rpm cpio
+      - name: Install RPM and AppStream tooling
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends rpm cpio appstream
+
+      - name: Validate Linux AppStream metadata
+        run: appstreamcli validate packages/app/assets/com.bendyline.gezel.metainfo.xml
 
       - name: Package Linux installer
         run: pnpm --filter @bendyline/gezel-app exec electron-builder --linux deb:${{ matrix.arch }} rpm:${{ matrix.arch }} --publish never
@@ -874,10 +885,12 @@ jobs:
           GEZEL_HOME: ${{ runner.temp }}/gezel-packaged-smoke
         run: |
           set -euo pipefail
-          executable=$(find packages/app/dist/installers -maxdepth 2 -type f -path '*-unpacked/gezel' -print -quit)
-          test -n "$executable"
+          installer=$(find packages/app/dist/installers -maxdepth 1 -type f -name '*.deb' -print -quit)
+          test -n "$installer"
+          sudo apt-get install -y "$(realpath "$installer")"
+          executable=/opt/Gezel/gezel
+          test -x "$executable"
           timeout --signal=TERM --kill-after=10s 180s xvfb-run -a "$executable" \
-            --no-sandbox \
             --gezel-packaged-smoke \
             --gezel-expected-version="${{ needs.release-preflight.outputs.version }}" \
             --gezel-home="${{ runner.temp }}/gezel-packaged-smoke"

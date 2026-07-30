@@ -1,7 +1,7 @@
 import type {
   CatalogItemSummary,
-  GithubIdentity,
-  GithubRepoSummary,
+  GitHubIdentity,
+  GitHubRepoSummary,
   ProjectDetail,
   ProjectTypeCategory,
 } from '@bendyline/gezel';
@@ -11,9 +11,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../../api.js';
 import { CatalogArtwork } from '../../components/CatalogArtwork.js';
 import { GezelJsonEditor } from '../../components/GezelJsonEditor.js';
-import { GithubSignInChip } from '../../components/GithubSignInChip.js';
+import { GitHubSignInChip } from '../../components/GithubSignInChip.js';
 import { connectMailboxOAuth } from '../../components/mail-link.js';
-import { Dialog } from '../../primitives/index.js';
+import { Dialog, DropdownChevron } from '../../primitives/index.js';
 import { NewProjectPaneHero, type PaneSelection } from './NewProjectDetailPane.js';
 import {
   PROJECT_CATEGORIES,
@@ -199,8 +199,8 @@ export function NewProjectDialog({
     fixUrl?: string;
   } | null>(null);
   const [previewBusy, setPreviewBusy] = useState(false);
-  const [githubIdentity, setGithubIdentity] = useState<GithubIdentity | null>(null);
-  const [githubRepos, setGithubRepos] = useState<GithubRepoSummary[]>([]);
+  const [githubIdentity, setGitHubIdentity] = useState<GitHubIdentity | null>(null);
+  const [githubRepos, setGitHubRepos] = useState<GitHubRepoSummary[]>([]);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   // Track which previewed URL last filled the about/mission fields, so
@@ -258,18 +258,18 @@ export function NewProjectDialog({
   // service caches for 5 min, so re-opening the dialog is cheap.
   useEffect(() => {
     if (!open || !githubIdentity) {
-      setGithubRepos([]);
+      setGitHubRepos([]);
       return;
     }
     let cancelled = false;
     void api
-      .listGithubRepos()
+      .listGitHubRepos()
       .then((res) => {
         if (cancelled) return;
-        setGithubRepos(res.repos);
+        setGitHubRepos(res.repos);
       })
       .catch(() => {
-        if (!cancelled) setGithubRepos([]);
+        if (!cancelled) setGitHubRepos([]);
       });
     return () => {
       cancelled = true;
@@ -299,7 +299,7 @@ export function NewProjectDialog({
       setRepoUrlHint(null);
       return;
     }
-    if (!isLikelyGithubPath(path)) {
+    if (!isLikelyGitHubPath(path)) {
       setRepoUrlHint({
         message: 'Looks incomplete — enter owner/repo (e.g. bendyline/squisq).',
       });
@@ -320,7 +320,7 @@ export function NewProjectDialog({
     setRepoUrlHint(null);
     setPreviewBusy(true);
     try {
-      const preview = await api.previewGithubRepo(toGithubUrl(path));
+      const preview = await api.previewGitHubRepo(toGitHubUrl(path));
       // Fill the (now-above) Name field the moment the repo resolves,
       // before the slower About/Mission draft — so a failed or empty
       // README draft still leaves the project named.
@@ -583,8 +583,8 @@ export function NewProjectDialog({
           return;
         }
       }
-      const wantsGithub = kind === 'github';
-      if (wantsGithub && repo && !isLikelyGithubPath(repo)) {
+      const wantsGitHub = kind === 'github';
+      if (wantsGitHub && repo && !isLikelyGitHubPath(repo)) {
         setError("GitHub repo doesn't look right — leave it blank or use owner/repo.");
         return;
       }
@@ -599,7 +599,7 @@ export function NewProjectDialog({
           about: a,
           missionObjectives: m,
           ...(isSolo ? { mode: 'solo' as const } : {}),
-          ...(wantsGithub && repo ? { github: { url: toGithubUrl(repo) } } : {}),
+          ...(wantsGitHub && repo ? { github: { url: toGitHubUrl(repo) } } : {}),
         });
         let finalProject = created;
         if (kind === 'folder' && folderPath.trim()) {
@@ -775,9 +775,9 @@ export function NewProjectDialog({
                           <span>
                             GitHub repository <span className="muted">(optional)</span>
                           </span>
-                          <GithubSignInChip onChange={setGithubIdentity} compact />
+                          <GitHubSignInChip onChange={setGitHubIdentity} compact />
                         </span>
-                        <GithubRepoCombobox
+                        <GitHubRepoCombobox
                           value={repoUrl}
                           onChange={setRepoUrl}
                           onBlur={() => void handleRepoBlur()}
@@ -1021,7 +1021,7 @@ export function NewProjectDialog({
  * trigger the repo-preview path (same effect as tabbing out of the
  * field).
  */
-function GithubRepoCombobox({
+function GitHubRepoCombobox({
   value,
   onChange,
   onBlur,
@@ -1033,7 +1033,7 @@ function GithubRepoCombobox({
   onChange: (next: string) => void;
   onBlur: () => void;
   onSelect: (url: string) => void;
-  repos: GithubRepoSummary[];
+  repos: GitHubRepoSummary[];
   disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
@@ -1086,7 +1086,7 @@ function GithubRepoCombobox({
             // The fixed `github.com/` prefix means the field holds a
             // bare owner/repo — strip any scheme + host a user pastes
             // (https://github.com/foo/bar → foo/bar) so it folds in.
-            onChange(stripGithubPrefix(e.target.value));
+            onChange(stripGitHubPrefix(e.target.value));
             if (!open) setOpen(true);
           }}
           onFocus={() => setOpen(true)}
@@ -1118,23 +1118,12 @@ function GithubRepoCombobox({
               inputRef.current?.focus();
             }}
           >
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
+            <DropdownChevron
               style={{
                 transform: open ? 'rotate(180deg)' : 'none',
                 transition: 'transform 0.12s',
               }}
-            >
-              <polyline points="6 9 12 15 18 9" />
-            </svg>
+            />
           </button>
         )}
       </div>
@@ -1173,7 +1162,7 @@ function GithubRepoCombobox({
  * scheme + host (`https://github.com/foo/bar` → `foo/bar`) instead of
  * complaining that it "doesn't look like a GitHub URL".
  */
-function stripGithubPrefix(input: string): string {
+function stripGitHubPrefix(input: string): string {
   return input
     .replace(/^\s*https?:\/\//i, '')
     .replace(/^www\./i, '')
@@ -1182,8 +1171,8 @@ function stripGithubPrefix(input: string): string {
 }
 
 /** Bare `owner/repo` → the canonical clone URL, or '' when incomplete. */
-function toGithubUrl(path: string): string {
-  const slug = stripGithubPrefix(path)
+function toGitHubUrl(path: string): string {
+  const slug = stripGitHubPrefix(path)
     .trim()
     .replace(/\.git$/i, '')
     .replace(/\/+$/, '');
@@ -1192,13 +1181,13 @@ function toGithubUrl(path: string): string {
 
 /**
  * Cheap client-side check before we hit the backend's repo-preview
- * endpoint. The server-side parser ({@link parseGithubUrl}) is the
+ * endpoint. The server-side parser ({@link parseGitHubUrl}) is the
  * authority — this just gates the network round-trip + autofill flow.
  * Accepts a bare `owner/repo` (what the prefixed field stores) as well
  * as a full URL, since paste happens before the strip lands.
  */
-function isLikelyGithubPath(input: string): boolean {
-  const slug = stripGithubPrefix(input)
+function isLikelyGitHubPath(input: string): boolean {
+  const slug = stripGitHubPrefix(input)
     .trim()
     .replace(/\.git$/i, '')
     .replace(/\/+$/, '');

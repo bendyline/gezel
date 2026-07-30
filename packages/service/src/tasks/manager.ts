@@ -179,9 +179,13 @@ function interpolateContext(text: string, context: Record<string, string>): stri
 /**
  * Apply {@link interpolateContext} across the text-bearing fields of a
  * child craftbook's steps: name/description/prompt plus the file paths in
- * `advanceWhen` and every gate check. Mutates in place (the steps are a
- * fresh per-child snapshot). Non-fatal by construction — only string
- * fields are touched.
+ * `advanceWhen` and every gate check. The step objects themselves are
+ * fresh snapshot copies, but their NESTED `advanceWhen`/`gate` are still
+ * aliased to the source book (`snapshotCraftbookForTask` shallow-spreads
+ * each step) — so those are replaced copy-on-write, never mutated in
+ * place, or the substitution would write through into the resolver's
+ * template and leak one task's params into the next. Non-fatal by
+ * construction — only string fields are touched.
  */
 function interpolateStepsContext(
   steps: TaskCraftbookStep[],
@@ -193,11 +197,21 @@ function interpolateStepsContext(
     if (step.description) step.description = interpolateContext(step.description, context);
     if (step.prompt) step.prompt = interpolateContext(step.prompt, context);
     if (step.advanceWhen?.file) {
-      step.advanceWhen.file = interpolateContext(step.advanceWhen.file, context);
+      step.advanceWhen = {
+        ...step.advanceWhen,
+        file: interpolateContext(step.advanceWhen.file, context),
+      };
     }
     const gate = step.gate as { checks?: Array<Record<string, unknown>> } | undefined;
-    for (const check of gate?.checks ?? []) {
-      if (typeof check.file === 'string') check.file = interpolateContext(check.file, context);
+    if (gate?.checks?.some((check) => typeof check.file === 'string')) {
+      step.gate = {
+        ...gate,
+        checks: gate.checks.map((check) =>
+          typeof check.file === 'string'
+            ? { ...check, file: interpolateContext(check.file, context) }
+            : check,
+        ),
+      } as typeof step.gate;
     }
   }
 }
@@ -724,6 +738,13 @@ export class TaskManager {
       : undefined;
 
     const craftbook = snapshotCraftbookForTask(mainBook, now);
+    // Land invocation params in the recipe itself, exactly like fanout
+    // children do with their per-item context: `{{reviewId}}` in step
+    // prompts and gate/advanceWhen file paths becomes concrete BEFORE
+    // the snapshot is written, so gates and observable-progress see the
+    // resolved paths. Unknown placeholders survive untouched; books
+    // without `{{}}` are unaffected.
+    if (input.craftbookParams) interpolateStepsContext(craftbook.steps, input.craftbookParams);
     const spawnsCraftbook = spawnBook ? snapshotCraftbookForTask(spawnBook, now) : undefined;
     const activeStepId = craftbook.entryStepId;
     if (!isDraft) {

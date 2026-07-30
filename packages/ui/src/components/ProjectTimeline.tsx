@@ -31,6 +31,7 @@ export function ProjectTimeline({
   emptyPlaceholder,
   onTerminalWorkingDirChanged,
   terminalRefreshKey,
+  terminalSubmission,
 }: {
   projectId: string;
   gezelId?: string;
@@ -43,6 +44,11 @@ export function ProjectTimeline({
   emptyPlaceholder?: string;
   onTerminalWorkingDirChanged?: (threadId: string, newWorkingDir: string) => void;
   terminalRefreshKey?: number;
+  terminalSubmission?: {
+    runId: string;
+    threadId: string;
+    input: string;
+  };
 }) {
   const loadTimeline = useCallback(
     (opts: { limit: number; before?: string }) =>
@@ -166,6 +172,7 @@ export function ProjectTimeline({
       streamUrl={streamUrl}
       {...(gezelId || taskRef ? {} : { terminalStreamUrl })}
       {...(terminalRefreshKey !== undefined ? { terminalRefreshKey } : {})}
+      {...(terminalSubmission ? { terminalSubmission } : {})}
       {...(gezelId || taskRef || !onTerminalWorkingDirChanged
         ? {}
         : { onTerminalWorkingDirChanged })}

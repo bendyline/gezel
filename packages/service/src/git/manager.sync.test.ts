@@ -5,10 +5,10 @@ import { join } from 'node:path';
 import type { ProjectDetail } from '@bendyline/gezel';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Store } from '../fs/store.js';
+import { AmbientGitHubAuth } from '../github/ambient.js';
 import type { SecretKey, SecretStore, SecretStoreBackend } from '../secrets/types.js';
-import { AmbientGithubAuth } from './ambient.js';
 import { isGitInstalled, runGit } from './git.js';
-import { GitHubManager } from './manager.js';
+import { GitManager } from './manager.js';
 
 // Each case builds a real bare remote, shared clone, worktree, and colleague
 // clone. They finish quickly in isolation, but their many git subprocesses can
@@ -51,12 +51,12 @@ class InMemorySecrets implements SecretStore {
 let home: string;
 let scratch: string;
 let store: Store;
-let manager: GitHubManager;
+let manager: GitManager;
 let gitAvailable = true;
 
 /** No ambient credentials — keeps tests hermetic on machines signed into gh. */
-function stubAmbient(): AmbientGithubAuth {
-  return new AmbientGithubAuth({ env: {}, ghToken: async () => null });
+function stubAmbient(): AmbientGitHubAuth {
+  return new AmbientGitHubAuth({ env: {}, ghToken: async () => null });
 }
 
 beforeEach(async () => {
@@ -65,7 +65,7 @@ beforeEach(async () => {
   scratch = await mkdtemp(join(tmpdir(), 'gezel-sync-scratch-'));
   store = new Store({ home });
   await store.ensureLayout();
-  manager = new GitHubManager(home, store, new InMemorySecrets(), stubAmbient());
+  manager = new GitManager(home, store, new InMemorySecrets(), stubAmbient());
 });
 
 afterEach(async () => {
@@ -152,7 +152,7 @@ async function upstreamHead(fix: Fixture): Promise<string> {
 
 const lf = (s: string) => s.replace(/\r\n/g, '\n');
 
-describe('GitHubManager — changes listing + diffs + discard', () => {
+describe('GitManager — changes listing + diffs + discard', () => {
   it('lists modified / untracked / deleted changes with stats', async () => {
     if (!gitAvailable) return;
     const fix = await setupFixture();
@@ -261,7 +261,7 @@ describe('GitHubManager — changes listing + diffs + discard', () => {
   });
 });
 
-describe('GitHubManager.sync — state machine', () => {
+describe('GitManager.sync — state machine', () => {
   it('pulls when the remote is ahead (fast-forward)', async () => {
     if (!gitAvailable) return;
     const fix = await setupFixture();
@@ -348,7 +348,7 @@ describe('GitHubManager.sync — state machine', () => {
   });
 });
 
-describe('GitHubManager — conflict resolution flow', () => {
+describe('GitManager — conflict resolution flow', () => {
   /** Drive the fixture into a both-modified conflict on README.md. */
   async function setupConflict(): Promise<Fixture> {
     const fix = await setupFixture();
@@ -467,7 +467,7 @@ describe('GitHubManager — conflict resolution flow', () => {
     if (!gitAvailable) return;
     const fix = await setupConflict();
     // A fresh manager instance over the same home = restarted service.
-    const reborn = new GitHubManager(home, store, new InMemorySecrets(), stubAmbient());
+    const reborn = new GitManager(home, store, new InMemorySecrets(), stubAmbient());
     const ms = await reborn.mergeState(fix.project);
     expect(ms.inMerge).toBe(true);
     expect(ms.conflicts[0]?.path).toBe('README.md');

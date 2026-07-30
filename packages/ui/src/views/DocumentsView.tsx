@@ -4,10 +4,16 @@ import { api } from '../api.js';
 import { ConfirmDialog } from '../components/ConfirmDialog.js';
 import { type FileEntry, FileTree } from '../components/FileTree.js';
 import { NewPathDialog } from '../components/NewPathDialog.js';
+import { flushSerializedAutosave } from '../hooks/useSerializedAutosave.js';
 import { useEffectiveTheme } from '../theme.js';
 import { DocumentDetail } from './DocumentDetail.js';
 
 const SELECTED_DOC_STORAGE_KEY = 'gezel:documents:selectedPath';
+
+function renameSuffix(entry: FileEntry | null): string | undefined {
+  if (!entry || entry.isDirectory) return undefined;
+  return !entry.name.includes('.') || /\.md$/i.test(entry.name) ? '.md' : undefined;
+}
 
 function loadSelectedPath(): string | null {
   try {
@@ -41,6 +47,8 @@ export function DocumentsView() {
   // when the action is launched from a selected folder, empty from the toolbar.
   const [newPathPrefix, setNewPathPrefix] = useState('');
   const [deleteTarget, setDeleteTarget] = useState<FileEntry | null>(null);
+  const [renameTarget, setRenameTarget] = useState<FileEntry | null>(null);
+  const [renameError, setRenameError] = useState<string | null>(null);
   // Selected document for the right pane. Persisted in localStorage so the
   // selection survives switching to another tab and back (TabContent
   // remounts on key change) and across app restarts.
@@ -97,10 +105,21 @@ export function DocumentsView() {
     setDeleteTarget(entry);
   }, []);
 
+  const renameDocument = useCallback((entry: FileEntry) => {
+    setRenameError(null);
+    setRenameTarget(entry);
+  }, []);
+
   const confirmDelete = useCallback(async () => {
     const entry = deleteTarget;
     if (!entry) return;
     try {
+      if (
+        selectedPath &&
+        (selectedPath === entry.path || selectedPath.startsWith(`${entry.path}/`))
+      ) {
+        await flushSerializedAutosave(`document:${selectedPath}`);
+      }
       await api.deleteDocument(entry.path);
       window.dispatchEvent(
         new CustomEvent('gezel:document-deleted', { detail: { path: entry.path } }),
@@ -120,6 +139,55 @@ export function DocumentsView() {
       setDeleteTarget(null);
     }
   }, [deleteTarget, refresh, selectedPath, setSelectedPath]);
+
+  const confirmRename = useCallback(
+    async (newName: string) => {
+      const entry = renameTarget;
+      if (!entry) return;
+      const cleanName = newName.trim();
+      if (!cleanName || /[\\/]/.test(cleanName)) {
+        setRenameError('Enter a name without slashes.');
+        return;
+      }
+      const slash = entry.path.lastIndexOf('/');
+      const parent = slash >= 0 ? entry.path.slice(0, slash + 1) : '';
+      const toPath = `${parent}${cleanName}`;
+      if (toPath === entry.path) {
+        setRenameTarget(null);
+        setRenameError(null);
+        return;
+      }
+
+      try {
+        if (
+          selectedPath &&
+          (selectedPath === entry.path || selectedPath.startsWith(`${entry.path}/`))
+        ) {
+          await flushSerializedAutosave(`document:${selectedPath}`);
+        }
+        await api.renameDocument(entry.path, toPath);
+        await refresh();
+
+        if (
+          selectedPath &&
+          (selectedPath === entry.path || selectedPath.startsWith(`${entry.path}/`))
+        ) {
+          setSelectedPath(`${toPath}${selectedPath.slice(entry.path.length)}`);
+        }
+
+        window.dispatchEvent(
+          new CustomEvent('gezel:document-renamed', {
+            detail: { fromPath: entry.path, toPath, isDirectory: entry.isDirectory },
+          }),
+        );
+        setRenameTarget(null);
+        setRenameError(null);
+      } catch (err) {
+        setRenameError((err as Error).message || 'Rename failed.');
+      }
+    },
+    [refresh, renameTarget, selectedPath, setSelectedPath],
+  );
 
   const openNewDoc = useCallback((prefix = '') => {
     setNewPathPrefix(prefix);
@@ -218,9 +286,10 @@ export function DocumentsView() {
       <NewPathDialog
         open={showNewDoc}
         title="New document"
-        placeholder="e.g. guidelines/coding.md"
+        placeholder="e.g. guidelines/coding"
         submitLabel="Create"
         initialValue={newPathPrefix}
+        suffix=".md"
         onSubmit={handleCreateDoc}
         onCancel={closeNewDoc}
       />
@@ -232,6 +301,21 @@ export function DocumentsView() {
         initialValue={newPathPrefix}
         onSubmit={handleCreateFolder}
         onCancel={closeNewFolder}
+      />
+      <NewPathDialog
+        open={renameTarget !== null}
+        title={renameTarget?.isDirectory ? 'Rename folder' : 'Rename document'}
+        fieldLabel="Name"
+        placeholder="New name"
+        submitLabel="Rename"
+        initialValue={renameTarget?.name ?? ''}
+        suffix={renameSuffix(renameTarget)}
+        error={renameError}
+        onSubmit={confirmRename}
+        onCancel={() => {
+          setRenameTarget(null);
+          setRenameError(null);
+        }}
       />
       <div className="documents-split">
         <aside className="documents-tree">
@@ -270,6 +354,7 @@ export function DocumentsView() {
               <FileTree
                 entries={entries}
                 onSelect={(e) => selectDocument(e)}
+                onRename={(e) => renameDocument(e)}
                 onDelete={(e) => deleteDocument(e)}
                 selectedPath={selectedPath ?? undefined}
                 selectableFolders

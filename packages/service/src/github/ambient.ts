@@ -44,7 +44,7 @@ export interface AmbientAuthOptions {
   missTtlMs?: number;
 }
 
-export class AmbientGithubAuth {
+export class AmbientGitHubAuth {
   private readonly env: Record<string, string | undefined>;
   private readonly ghTokenOverride?: () => Promise<string | null>;
   private readonly tokenTtlMs: number;

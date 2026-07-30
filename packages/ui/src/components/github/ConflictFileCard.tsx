@@ -1,4 +1,4 @@
-import type { GithubConflictKind, GithubConflictVersionsResponse } from '@bendyline/gezel';
+import type { GitConflictKind, GitConflictVersionsResponse } from '@bendyline/gezel';
 import { useEffect, useState } from 'react';
 import { api } from '../../api.js';
 import { GIT_COPY } from './gitCopy.js';
@@ -15,7 +15,7 @@ export type Resolution = 'mine' | 'theirs' | 'combined';
 interface Props {
   projectId: string;
   path: string;
-  kind: GithubConflictKind;
+  kind: GitConflictKind;
   busy: boolean;
   onResolve: (choice: 'mine' | 'theirs' | 'custom', content?: string) => void | Promise<void>;
 }
@@ -27,7 +27,7 @@ type AiState =
   | { step: 'editing'; content: string };
 
 export function ConflictFileCard({ projectId, path, kind, busy, onResolve }: Props) {
-  const [versions, setVersions] = useState<GithubConflictVersionsResponse | null>(null);
+  const [versions, setVersions] = useState<GitConflictVersionsResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [ai, setAi] = useState<AiState>({ step: 'idle' });
 
@@ -37,7 +37,7 @@ export function ConflictFileCard({ projectId, path, kind, busy, onResolve }: Pro
     setAi({ step: 'idle' });
     let cancelled = false;
     void api
-      .getProjectGithubConflictVersions(projectId, path)
+      .getProjectGitConflictVersions(projectId, path)
       .then((v) => {
         if (!cancelled) setVersions(v);
       })
@@ -52,7 +52,7 @@ export function ConflictFileCard({ projectId, path, kind, busy, onResolve }: Pro
   const combine = async () => {
     setAi({ step: 'combining' });
     try {
-      const res = await api.aiResolveProjectGithubConflict(projectId, path);
+      const res = await api.aiResolveProjectGitConflict(projectId, path);
       setAi({ step: 'preview', content: res.merged });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));

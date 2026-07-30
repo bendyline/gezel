@@ -2,6 +2,9 @@ import type { TerminalTimelineEntry } from '@bendyline/gezel';
 import { AnsiOutput } from './AnsiOutput.js';
 import { formatFolderLabel } from './terminal-folder-label.js';
 
+// Scroll containers need a tab stop so keyboard users can reach both axes.
+const KEYBOARD_SCROLL_PROPS = { tabIndex: 0 } as const;
+
 /**
  * Renders one row from a terminal thread inside the project timeline.
  *
@@ -31,7 +34,10 @@ export function TerminalBubble({ entry }: { entry: TerminalTimelineEntry }) {
   const folder = formatFolderLabel(displayDir);
   if (entry.msgKind === 'command') {
     return (
-      <div className="msg msg-user terminal-group terminal-group-command">
+      <div
+        className="msg msg-user terminal-group terminal-group-command"
+        data-terminal-message-id={entry.messageId}
+      >
         <div className="msg-header terminal-group-header">
           <span className="terminal-folder-pill" title="Working folder">
             {folder}
@@ -58,7 +64,10 @@ export function TerminalBubble({ entry }: { entry: TerminalTimelineEntry }) {
         ? 'exit 0'
         : `exit ${entry.exitCode}`;
   return (
-    <div className="msg msg-assistant terminal-group terminal-group-output">
+    <div
+      className="msg msg-assistant terminal-group terminal-group-output"
+      data-terminal-message-id={entry.messageId}
+    >
       <div className="msg-header terminal-group-header">
         <span className="terminal-folder-pill" title="Working folder">
           {folder}
@@ -83,9 +92,15 @@ export function TerminalBubble({ entry }: { entry: TerminalTimelineEntry }) {
       {entry.errorMessage && entry.exitCode === -1 && (
         <div className="terminal-error-banner">{entry.errorMessage}</div>
       )}
-      <pre className="terminal-output-body">
-        {entry.content ? <AnsiOutput text={entry.content} /> : isFailed ? '(no output)' : ''}
-      </pre>
+      <section
+        className="terminal-output-viewport"
+        aria-label="Terminal output"
+        {...KEYBOARD_SCROLL_PROPS}
+      >
+        <pre className="terminal-output-body">
+          {entry.content ? <AnsiOutput text={entry.content} /> : isFailed ? '(no output)' : ''}
+        </pre>
+      </section>
     </div>
   );
 }

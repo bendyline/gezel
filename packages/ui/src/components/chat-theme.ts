@@ -17,8 +17,8 @@ import { type Theme, resolveTheme } from '@bendyline/squisq/schemas';
 
 export const GEZEL_CHAT_THEME_ID = 'gezellig';
 
-// Light-mode reading surface: a very pale greige-brown that keeps the warmth
-// of paper without a yellow cast. `background` must stay
+// Light-mode reading surface: a pale mushroom beige from the shared Gezel
+// paper family. It stays warm without taking on a yellow cast. `background` must stay
 // matched to the light `--chat-bubble-bg` token in styles.css so the Squisq
 // interior and its outer bubble remain one continuous surface.
 // `backgroundLight` is the slightly deeper inset tone used for code blocks.
@@ -26,8 +26,8 @@ export const GEZEL_CHAT_THEME_ID = 'gezellig';
 // Home intro's embedded Handboek page so gezel's reading surfaces never drift.
 export const GEZEL_LIGHT_SURFACE: SurfaceScheme = {
   id: 'gezel-chat-light',
-  background: '#f2efed',
-  backgroundLight: '#ece8e6',
+  background: '#f1e9e1',
+  backgroundLight: '#e8dfd7',
   text: LIGHT_SURFACE.text,
   textMuted: LIGHT_SURFACE.textMuted,
 };

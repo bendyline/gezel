@@ -5,6 +5,7 @@ import { PersistentShell } from './persistent-shell.js';
 
 const bashAvailable = process.platform !== 'win32' && existsSync('/bin/bash');
 const itPosix = bashAvailable ? it : it.skip;
+const itWindows = process.platform === 'win32' ? it : it.skip;
 
 describe('PersistentShell (POSIX)', () => {
   itPosix('echoes simple command output and captures cwd', async () => {
@@ -203,4 +204,47 @@ describe('PersistentShell (POSIX)', () => {
       shell.kill();
     }
   });
+});
+
+describe('PersistentShell (Windows)', () => {
+  itWindows(
+    'finishes initialization before accepting and streaming the first command',
+    async () => {
+      const shell = await PersistentShell.start({ cwd: tmpdir(), commandTimeoutMs: 10_000 });
+      try {
+        const chunks: string[] = [];
+        const run = shell.run(
+          'Write-Output BUILD-START; Start-Sleep -Milliseconds 700; Write-Output BUILD-END',
+          {
+            onChunk: (chunk) => chunks.push(chunk),
+          },
+        );
+
+        // If initialization left a prompt-producing line queued, this run
+        // resolves almost immediately and the actual command continues
+        // unobserved. It must still be in flight while the simulated build
+        // is sleeping.
+        const early = await Promise.race([
+          run.then(() => 'finished' as const),
+          new Promise<'running'>((resolve) => setTimeout(() => resolve('running'), 250)),
+        ]);
+        expect(early).toBe('running');
+
+        const result = await run;
+        const streamed = chunks.join('');
+        expect(result.output).toContain('BUILD-START');
+        expect(result.output).toContain('BUILD-END');
+        expect(streamed).toContain('BUILD-START');
+        expect(streamed).toContain('BUILD-END');
+        expect(result.output).not.toContain('$null');
+        expect(result.output).not.toContain('>>');
+        expect(result.newCwd).not.toContain(String.fromCharCode(0x1b));
+        expect(result.newCwd).not.toMatch(/\[[0-9;]*m/);
+        expect(result.durationMs).toBeGreaterThanOrEqual(600);
+      } finally {
+        shell.kill();
+        await shell.whenExited();
+      }
+    },
+  );
 });

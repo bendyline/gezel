@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
-import { z } from 'zod';
+import { ZodError, z } from 'zod';
 import type { ServiceContext } from '../context.js';
 import { resolveModelTarget } from '../openai-compat/translate.js';
 
@@ -28,7 +28,42 @@ export function v1EmbeddingsRoutes(ctx: ServiceContext): Hono {
   const app = new Hono();
 
   app.post('/', async (c) => {
-    const parsed = EmbeddingsRequestSchema.parse(await c.req.json());
+    // Same request-boundary handling as /v1/chat/completions: malformed
+    // JSON and schema mismatches are the caller's mistake — 400 with the
+    // OpenAI error envelope, never the internal 422/500 shapes.
+    let raw: unknown;
+    try {
+      raw = await c.req.json();
+    } catch {
+      return c.json(
+        {
+          error: {
+            message: 'Request body is not valid JSON.',
+            type: 'invalid_request_error',
+            code: 'invalid_json',
+          },
+        },
+        400,
+      );
+    }
+    let parsed: z.infer<typeof EmbeddingsRequestSchema>;
+    try {
+      parsed = EmbeddingsRequestSchema.parse(raw);
+    } catch (err) {
+      if (err instanceof ZodError) {
+        return c.json(
+          {
+            error: {
+              message: err.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '),
+              type: 'invalid_request_error',
+              code: 'invalid_body',
+            },
+          },
+          400,
+        );
+      }
+      throw err;
+    }
 
     if (parsed.encoding_format === 'base64') {
       return c.json(

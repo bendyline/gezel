@@ -138,7 +138,7 @@ export class MailManager {
 
   constructor(private readonly opts: MailManagerOptions) {}
 
-  /** Serialize state-mutating work per project (mirrors GitHubManager). */
+  /** Serialize state-mutating work per project (mirrors GitManager). */
   private withLock<T>(projectId: string, fn: () => Promise<T>): Promise<T> {
     const prev = this.locks.get(projectId) ?? Promise.resolve();
     const next = prev.then(fn, fn);

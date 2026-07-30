@@ -1,9 +1,11 @@
 import {
   CreateDocumentFolderRequestSchema,
+  RenameDocumentRequestSchema,
   SearchDocumentsRequestSchema,
   WriteDocumentRequestSchema,
 } from '@bendyline/gezel';
 import { Hono } from 'hono';
+import { DocumentPathExistsError, DocumentPathNotFoundError } from '../../fs/documents-store.js';
 import { realpathContained, safeJoin } from '../../fs/safe-paths.js';
 import type { ServiceContext } from '../context.js';
 
@@ -107,6 +109,22 @@ export function documentRoutes(ctx: ServiceContext): Hono {
     const body = CreateDocumentFolderRequestSchema.parse(await c.req.json());
     await ctx.store.createDocumentFolder(body.path);
     return c.json({ ok: true, path: body.path });
+  });
+
+  app.post('/rename', async (c) => {
+    const body = RenameDocumentRequestSchema.parse(await c.req.json());
+    try {
+      await ctx.store.renameDocument(body.fromPath, body.toPath);
+      return c.json({ ok: true, fromPath: body.fromPath, toPath: body.toPath });
+    } catch (error) {
+      if (error instanceof DocumentPathExistsError) {
+        return c.json({ error: error.message }, 409);
+      }
+      if (error instanceof DocumentPathNotFoundError) {
+        return c.json({ error: error.message }, 404);
+      }
+      throw error;
+    }
   });
 
   return app;

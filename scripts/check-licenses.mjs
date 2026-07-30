@@ -110,12 +110,6 @@ const KNOWN_UNKNOWN = {
  */
 const REVIEWED_NON_PERMISSIVE = [
   {
-    name: /^@ffmpeg\/core$/,
-    versions: new Set(['0.12.9']),
-    license: 'GPL-2.0-or-later',
-    rationale: 'Unmodified FFmpeg WebAssembly runtime distributed as part of the Gezel app.',
-  },
-  {
     name: /^@resvg\/resvg-js(?:-.+)?$/,
     versions: new Set(['2.6.2']),
     license: 'MPL-2.0',

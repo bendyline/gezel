@@ -16,7 +16,7 @@ import {
   useState,
 } from 'react';
 import { api } from '../api.js';
-import { DropdownMenu } from '../primitives/index.js';
+import { DropdownChevron, DropdownMenu } from '../primitives/index.js';
 import { useEffectiveTheme } from '../theme.js';
 import { CommandsPanel } from './CommandsPanel.js';
 import { HtmlPreviewFrame } from './HtmlPreviewFrame.js';
@@ -662,6 +662,9 @@ function TaskRailCard({
     );
 
   const cb = task.craftbook;
+  const legacyTitleMatch = /^(.*) — \d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.exec(task.title);
+  const legacyGeneratedTitle = cb && legacyTitleMatch?.[1] === cb.id;
+  const displayTitle = legacyGeneratedTitle ? cb.name : task.title;
   return (
     <div className="chat-rail-task">
       <header className="chat-rail-task-header">
@@ -670,7 +673,7 @@ function TaskRailCard({
           {task.status}
         </span>
       </header>
-      <h4 className="chat-rail-task-title">{task.title}</h4>
+      <h4 className="chat-rail-task-title">{displayTitle}</h4>
       {task.description && <p className="chat-rail-task-desc">{task.description}</p>}
       {cb && (
         <>
@@ -726,22 +729,7 @@ function TaskTabMenu({
           aria-selected={selected}
         >
           <span>Tasks</span>
-          <svg
-            className="chat-rail-section-tab-chevron"
-            width="12"
-            height="12"
-            viewBox="0 0 12 12"
-            fill="none"
-            aria-hidden="true"
-          >
-            <path
-              d="m3 4.5 3 3 3-3"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
+          <DropdownChevron className="chat-rail-section-tab-chevron" />
         </button>
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>

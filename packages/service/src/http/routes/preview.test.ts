@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { PREVIEW_LOG_SHIM } from './preview.js';
+import { PREVIEW_LOG_SHIM, PREVIEW_SCROLLBAR_SHIM } from './preview.js';
 
 /**
  * The preview log shim is browser JS injected as a string into every
@@ -160,5 +160,94 @@ describe('PREVIEW_LOG_SHIM', () => {
     expect(posted[0]!.detail.filename).toContain('/preview/[capability]/');
     expect(posted[0]!.detail.stack).toContain('/preview/[capability]/');
     expect(posted[1]!.detail.args?.[1]).toContain('/preview/[capability]/');
+  });
+});
+
+describe('PREVIEW_SCROLLBAR_SHIM', () => {
+  it('hides embedded scrollbar chrome at rest and reveals it for interaction', () => {
+    expect(PREVIEW_SCROLLBAR_SHIM).toContain('scrollbar-color:transparent transparent');
+    expect(PREVIEW_SCROLLBAR_SHIM).toContain(':hover');
+    expect(PREVIEW_SCROLLBAR_SHIM).toContain(':focus-within');
+    expect(PREVIEW_SCROLLBAR_SHIM).toContain('__gezel-preview-scrolling');
+    expect(PREVIEW_SCROLLBAR_SHIM).toContain('@media(forced-colors:active)');
+  });
+
+  it('holds the scrolling state for 700ms and clears it after the idle timer', () => {
+    const classes = new Set<string>();
+    const listeners: Record<string, () => void> = {};
+    let scheduled: { callback: () => void; delay: number } | null = null;
+    const fakeWindow = {};
+    const script = PREVIEW_SCROLLBAR_SHIM.match(/<script>([\s\S]*)<\/script>/)?.[1];
+    expect(script).toBeTruthy();
+    const run = new Function(
+      'window',
+      'parent',
+      'document',
+      'addEventListener',
+      'setTimeout',
+      'clearTimeout',
+      script!,
+    );
+
+    run(
+      fakeWindow,
+      {},
+      {
+        documentElement: {
+          classList: {
+            add: (name: string) => classes.add(name),
+            remove: (name: string) => classes.delete(name),
+          },
+        },
+      },
+      (type: string, listener: () => void) => {
+        listeners[type] = listener;
+      },
+      (callback: () => void, delay: number) => {
+        scheduled = { callback, delay };
+        return 1;
+      },
+      () => {},
+    );
+
+    expect(classes.has('__gezel-preview-frame')).toBe(true);
+    listeners.scroll?.();
+    expect(classes.has('__gezel-preview-scrolling')).toBe(true);
+    expect(scheduled).toMatchObject({ delay: 700 });
+    (scheduled as { callback: () => void } | null)?.callback();
+    expect(classes.has('__gezel-preview-scrolling')).toBe(false);
+  });
+
+  it('does not alter scrollbars when the preview is opened as a top-level page', () => {
+    const classes = new Set<string>();
+    const fakeWindow = {};
+    const script = PREVIEW_SCROLLBAR_SHIM.match(/<script>([\s\S]*)<\/script>/)?.[1];
+    const run = new Function(
+      'window',
+      'parent',
+      'document',
+      'addEventListener',
+      'setTimeout',
+      'clearTimeout',
+      script!,
+    );
+
+    run(
+      fakeWindow,
+      fakeWindow,
+      {
+        documentElement: {
+          classList: {
+            add: (name: string) => classes.add(name),
+            remove: (name: string) => classes.delete(name),
+          },
+        },
+      },
+      () => {},
+      () => 1,
+      () => {},
+    );
+
+    expect(classes.size).toBe(0);
   });
 });

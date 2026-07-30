@@ -18,7 +18,13 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { NATIVE_PAYLOAD, allPlatformKeys, expectedBinaries } from './native-payload.mjs';
+import {
+  ENGINE_FOR_BINARY,
+  NATIVE_PAYLOAD,
+  allPlatformKeys,
+  expectedBinaries,
+  platformKeysForEngine,
+} from './native-payload.mjs';
 
 const workflowPath = fileURLToPath(
   new URL('../.github/workflows/build-native.yml', import.meta.url),
@@ -113,6 +119,46 @@ test('each platform key lists exactly the binaries its matrix legs emit', () => 
 test('no platform key is declared with an empty binary list', () => {
   for (const key of allPlatformKeys()) {
     assert.ok(NATIVE_PAYLOAD[key].length > 0, `${key} declares no binaries`);
+  }
+});
+
+test('every staged binary is classified as an upstream engine or first-party', () => {
+  // generate-sbom.mjs turns this mapping into the native components of the
+  // published SBOM. An unclassified binary would be silently absent from it,
+  // which is the failure mode the July 2026 audit found (the SBOM listed npm
+  // packages only). Fail here instead, where the omission is obvious.
+  const staged = new Set(Object.values(NATIVE_PAYLOAD).flat());
+  for (const binary of staged) {
+    assert.ok(
+      binary in ENGINE_FOR_BINARY,
+      `${binary} is staged but not classified in ENGINE_FOR_BINARY — give it an engine id, or null if we build it ourselves`,
+    );
+  }
+  for (const binary of Object.keys(ENGINE_FOR_BINARY)) {
+    assert.ok(staged.has(binary), `ENGINE_FOR_BINARY lists ${binary}, which nothing stages`);
+  }
+});
+
+test('platformKeysForEngine reports where each engine actually ships', () => {
+  // ds4 is GPU-only and llama-cpp is the sole multi-variant engine; both are
+  // documented in native-payload.mjs's header, so a regression in either is a
+  // regression in what the SBOM claims ships where.
+  assert.deepEqual(platformKeysForEngine('ds4'), [
+    'darwin-arm64',
+    'linux-x64-cuda',
+    'linux-arm64-cuda',
+  ]);
+  assert.ok(
+    platformKeysForEngine('llama-cpp').every((key) => /-(?:cpu|vulkan|cuda|metal)$/.test(key)),
+    'llama-cpp ships only under variant-suffixed keys',
+  );
+  assert.deepEqual(platformKeysForEngine('not-an-engine'), []);
+
+  for (const engineId of new Set(Object.values(ENGINE_FOR_BINARY).filter(Boolean))) {
+    assert.ok(
+      platformKeysForEngine(engineId).length > 0,
+      `${engineId} is mapped but ships on no platform key`,
+    );
   }
 });
 

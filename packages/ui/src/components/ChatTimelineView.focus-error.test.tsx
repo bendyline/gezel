@@ -1,5 +1,9 @@
-import type { ListTimelineResponse, TimelineMessage } from '@bendyline/gezel';
-import { render, screen, waitFor } from '@testing-library/react';
+import type {
+  ListTimelineResponse,
+  TerminalTimelineEntry,
+  TimelineMessage,
+} from '@bendyline/gezel';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockApi } from '../test-utils/mockApi.js';
 
@@ -16,6 +20,7 @@ vi.mock('./GezelIcon.js', () => ({
 }));
 
 const { ChatTimelineView } = await import('./ChatTimelineView.js');
+const { publishOptimisticUserMessage } = await import('./chat-optimistic-events.js');
 const { queueFocusSessionError } = await import('./pending-focus-session-error.js');
 
 function message(overrides: Partial<TimelineMessage>): TimelineMessage {
@@ -132,5 +137,110 @@ describe('ChatTimelineView — jumping to a failed turn', () => {
     await screen.findByText('Partial answer preserved before I stopped.');
     expect(screen.queryByText(/Last turn failed:/)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Continue' })).not.toBeInTheDocument();
+  });
+
+  it('keeps the scrollbar visible briefly while the timeline is scrolling', async () => {
+    renderTimeline();
+    const timeline = await screen.findByTestId('chat-timeline');
+    vi.useFakeTimers();
+    try {
+      fireEvent.scroll(timeline);
+      expect(timeline).toHaveClass('chat-timeline-scrolling');
+
+      act(() => vi.advanceTimersByTime(699));
+      expect(timeline).toHaveClass('chat-timeline-scrolling');
+
+      act(() => vi.advanceTimersByTime(1));
+      expect(timeline).not.toHaveClass('chat-timeline-scrolling');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('brings a locally submitted chat prompt into view even when the reader was unpinned', async () => {
+    renderTimeline(vi.fn(), [
+      message({ sessionId: 's1', content: 'older context', at: '2026-07-25T09:00:00.000Z' }),
+    ]);
+    await screen.findByText('older context');
+    const timeline = screen.getByTestId('chat-timeline');
+    Object.defineProperties(timeline, {
+      scrollTop: { configurable: true, writable: true, value: 100 },
+      scrollHeight: { configurable: true, value: 1_000 },
+      clientHeight: { configurable: true, value: 400 },
+    });
+    fireEvent.scroll(timeline);
+    await screen.findByRole('button', { name: 'Jump to newest and follow' });
+    vi.mocked(timeline.scrollTo).mockClear();
+
+    act(() => {
+      publishOptimisticUserMessage({
+        sessionId: 's1',
+        gezelId: 'g1',
+        projectId: 'p1',
+        content: 'new prompt from me',
+        at: '2026-07-25T11:00:00.000Z',
+      });
+    });
+
+    await screen.findByText('new prompt from me');
+    await waitFor(() => expect(timeline.scrollTo).toHaveBeenCalledWith({ top: 88 }));
+    expect(document.querySelector('.timeline-response-runway')).toBeInTheDocument();
+  });
+
+  it('brings an acknowledged terminal command into view', async () => {
+    const command: TerminalTimelineEntry = {
+      threadId: 'terminal-1',
+      projectId: 'p1',
+      workingDir: '',
+      threadCreatedAt: '2026-07-25T11:00:00.000Z',
+      threadLastActivityAt: '2026-07-25T11:00:00.000Z',
+      messageId: 'terminal-message-1',
+      msgKind: 'command',
+      content: 'pnpm test',
+      resolvedFrom: 'test',
+      at: '2026-07-25T11:00:00.000Z',
+    };
+    const loadTimeline = vi.fn(
+      async (): Promise<ListTimelineResponse> =>
+        ({
+          messages: [],
+          terminalEntries: [command],
+          hasMore: false,
+        }) as ListTimelineResponse,
+    );
+    const props = {
+      scopeKey: 'project:p1',
+      activeSessionId: undefined,
+      loadTimeline,
+      streamUrl: () => 'https://example.invalid/events',
+      inflightScope: { projectId: 'p1' },
+    };
+    const view = render(<ChatTimelineView {...props} />);
+    const commandRow = await waitFor(() => {
+      const el = document.querySelector('[data-terminal-message-id="terminal-message-1"]');
+      if (!el) throw new Error('terminal command not rendered yet');
+      return el;
+    });
+    expect(commandRow).toHaveTextContent('pnpm test');
+    const timeline = screen.getByTestId('chat-timeline');
+    Object.defineProperty(timeline, 'scrollTop', {
+      configurable: true,
+      writable: true,
+      value: 100,
+    });
+    vi.mocked(timeline.scrollTo).mockClear();
+
+    view.rerender(
+      <ChatTimelineView
+        {...props}
+        terminalSubmission={{
+          runId: 'run-1',
+          threadId: 'terminal-1',
+          input: 'test',
+        }}
+      />,
+    );
+
+    await waitFor(() => expect(timeline.scrollTo).toHaveBeenCalledWith({ top: 88 }));
   });
 });

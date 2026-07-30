@@ -1,9 +1,9 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { GithubPullFile, MapBlock } from '@bendyline/gezel';
+import type { GitHubPullFile, MapBlock } from '@bendyline/gezel';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { isGitInstalled, runGit } from '../github/git.js';
+import { isGitInstalled, runGit } from '../git/git.js';
 import { indexWorkspaceContent } from '../index-store/content-indexer.js';
 import { refreshGitStats, resetGitProbeForTests } from '../index-store/git-stats.js';
 import { IndexStore } from '../index-store/index-store.js';
@@ -232,7 +232,7 @@ describe('buildPrOverlay', () => {
     additions = 1,
     deletions = 0,
     previousFilename?: string,
-  ): GithubPullFile => ({
+  ): GitHubPullFile => ({
     filename,
     status,
     additions,

@@ -9,8 +9,9 @@ import type { EngineBinaryRegistry } from '../engines/registry.js';
 import type { ModelFitnessManager } from '../fitness/manager.js';
 import type { JobManager } from '../folders/job-manager.js';
 import type { Store } from '../fs/store.js';
-import type { GitHubManager } from '../github/manager.js';
-import type { GithubPrs } from '../github/prs.js';
+import type { GitManager } from '../git/manager.js';
+import type { CodeReviewManager } from '../git/reviews.js';
+import type { GitHubPrs } from '../github/prs.js';
 import type { GrantManager } from '../grants/manager.js';
 import type { GrowthEngine } from '../growth/engine.js';
 import type { HandboekEngine } from '../handboek/engine.js';
@@ -50,6 +51,7 @@ import type { TaskRunner } from '../tasks/runner.js';
 import type { TerminalEventBus } from '../terminal/events.js';
 import type { TerminalManager } from '../terminal/manager.js';
 import type { WorkspaceIndexManager } from '../workspace/index-manager.js';
+import type { OllamaEmulationController } from './ollama-emulation.js';
 import type { TokenStore } from './token-store.js';
 
 export interface ServiceContext {
@@ -80,8 +82,10 @@ export interface ServiceContext {
    */
   handboek: HandboekEngine;
   secrets: SecretStore;
-  github: GitHubManager;
-  githubPrs: GithubPrs;
+  git: GitManager;
+  gitHubPrs: GitHubPrs;
+  /** Snapshot-driven code reviews (the GitHub tab's Review panel). */
+  codeReviews: CodeReviewManager;
   mail: MailManager;
   connectors: ConnectorManager;
   connectorActions: ConnectorActionManager;
@@ -191,6 +195,11 @@ export interface ServiceContext {
   remotes: RemotesRegistry;
   /** Live owner of the optional LAN listener. */
   remoteServing: RemoteServingController;
+  /**
+   * Live owner of the opt-in, unauthenticated Ollama-compatible
+   * loopback listener (port 11434). See http/ollama-emulation.ts.
+   */
+  ollamaEmulation: OllamaEmulationController;
   /**
    * Hex SHA-256 of the daemon's current TLS cert DER, when serving HTTPS.
    * `/v1/identity` signs this with the device identity key so a paired client

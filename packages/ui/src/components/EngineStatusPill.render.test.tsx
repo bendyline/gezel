@@ -1,5 +1,6 @@
 import type { ConfigResponse, QueueStatusResponse } from '@bendyline/gezel-client';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockApi } from '../test-utils/mockApi.js';
 import { providerLabel } from './provider-label.js';
@@ -54,6 +55,7 @@ describe('EngineStatusPill — simultaneous local engines', () => {
         ds4: 'deepseek-v4-flash',
         'llama-cpp': 'talkie-1930-13b-q4',
       },
+      deviceSafety: { mode: 'observe' },
     } as ConfigResponse);
     vi.mocked(api.getQueueStatus).mockResolvedValue({
       providers: {
@@ -63,6 +65,15 @@ describe('EngineStatusPill — simultaneous local engines', () => {
       taskRunner: { pendingCount: 0, pendingByGezel: {}, pendingByProject: {} },
       sessions: [],
       cache: [],
+      deviceHealth: {
+        state: 'healthy',
+        mode: 'observe',
+        sampledAt: '2026-07-29T12:00:00.000Z',
+        sources: ['test'],
+        readings: [{ vendor: 'nvidia', deviceId: '0', temperatureC: 61 }],
+        reasons: [],
+        summary: 'device telemetry healthy (test)',
+      },
       at: '',
     } as QueueStatusResponse);
     vi.mocked(api.listInflightTurns).mockResolvedValue({
@@ -103,5 +114,117 @@ describe('EngineStatusPill — simultaneous local engines', () => {
     expect(talkie).toHaveClass('engine-pill-busy');
     expect(talkie).toHaveTextContent(providerLabel('llama-cpp', window.__GEZEL__?.platform));
     expect(talkie.querySelector('.engine-pill-progress')).toBeInTheDocument();
+  });
+
+  it('persists the Observe/Manage choice from the engine pill', async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.updateConfig).mockResolvedValue({
+      provider: 'ds4',
+      defaultModel: {
+        ds4: 'deepseek-v4-flash',
+        'llama-cpp': 'talkie-1930-13b-q4',
+      },
+      deviceSafety: { mode: 'guard' },
+    } as ConfigResponse);
+    render(<EngineStatusPill />);
+
+    await user.click(
+      await screen.findByRole('button', {
+        name: /DwarfStar.*DeepSeek V4 Flash/i,
+      }),
+    );
+    const policy = screen.getByRole('group', { name: 'Machine health policy' });
+    expect(within(policy).getByRole('button', { name: 'Observe' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+
+    await user.click(within(policy).getByRole('button', { name: 'Manage' }));
+
+    await waitFor(() => {
+      expect(api.updateConfig).toHaveBeenCalledWith({
+        deviceSafety: { mode: 'guard' },
+      });
+      expect(within(policy).getByRole('button', { name: 'Manage' })).toHaveAttribute(
+        'aria-pressed',
+        'true',
+      );
+    });
+  });
+
+  it('shows the live inference-memory pool while the dropdown is open', async () => {
+    const user = userEvent.setup();
+    const GiB = 1024 ** 3;
+    vi.mocked(api.getMachineMemoryUsage).mockResolvedValue({
+      kind: 'vram',
+      totalBytes: 24 * GiB,
+      usedBytes: 9 * GiB,
+      gezelBytesEstimated: 5 * GiB,
+      gezelBytesObserved: null,
+      engineReservedBytes: 5 * GiB,
+      gezelEngineProcessCount: 0,
+      orphanedGezelEngineProcessCount: 0,
+      otherBytes: 4 * GiB,
+      freeBytes: 15 * GiB,
+      sampledAt: '2026-07-29T12:00:00.000Z',
+      source: 'device-health',
+      deviceNames: ['Test GPU'],
+    });
+    render(<EngineStatusPill />);
+
+    await user.click(
+      await screen.findByRole('button', {
+        name: /DwarfStar.*DeepSeek V4 Flash/i,
+      }),
+    );
+
+    expect(
+      await screen.findByRole('img', {
+        name: /VRAM: 9\.0 GiB of 24\.0 GiB used, Gezel estimated 5\.0 GiB/i,
+      }),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Gezel ~5.0 GiB')).toBeInTheDocument();
+    expect(screen.getByText('Other 4.0 GiB')).toBeInTheDocument();
+    expect(screen.getByText(/Test GPU/)).toBeInTheDocument();
+  });
+
+  it('separates observed macOS footprint, model reservation, and orphaned engines', async () => {
+    const user = userEvent.setup();
+    const GiB = 1024 ** 3;
+    vi.mocked(api.getMachineMemoryUsage).mockResolvedValue({
+      kind: 'unified',
+      totalBytes: 128 * GiB,
+      usedBytes: 100 * GiB,
+      gezelBytesEstimated: 36 * GiB,
+      gezelBytesObserved: 76 * GiB,
+      engineReservedBytes: 36 * GiB,
+      gezelEngineProcessCount: 2,
+      orphanedGezelEngineProcessCount: 2,
+      otherBytes: 24 * GiB,
+      freeBytes: 28 * GiB,
+      sampledAt: '2026-07-29T12:00:00.000Z',
+      source: 'system-memory',
+      deviceNames: [],
+    });
+    render(<EngineStatusPill />);
+
+    await user.click(
+      await screen.findByRole('button', {
+        name: /DwarfStar.*DeepSeek V4 Flash/i,
+      }),
+    );
+
+    expect(
+      await screen.findByRole('img', {
+        name: /Gezel observed footprint 76\.0 GiB, models reserve about 36\.0 GiB, 2 leftover Gezel engine processes/i,
+      }),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Gezel 76.0 GiB')).toBeInTheDocument();
+    expect(screen.getByText('Models reserve ~36.0 GiB for capacity planning')).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Includes 2 leftover Gezel engine processes from an earlier service session',
+      ),
+    ).toBeInTheDocument();
   });
 });

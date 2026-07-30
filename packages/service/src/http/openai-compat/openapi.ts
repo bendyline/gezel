@@ -406,15 +406,39 @@ export function buildOpenApiDoc(version: string): OpenApiDoc {
                 type: 'object',
                 required: ['role', 'content'],
                 properties: {
-                  role: { type: 'string', enum: ['system', 'user', 'assistant'] },
+                  role: {
+                    type: 'string',
+                    enum: ['system', 'developer', 'user', 'assistant', 'tool'],
+                  },
                   content: { type: 'string' },
                   name: { type: 'string' },
+                  tool_calls: { type: 'array', items: { type: 'object' } },
+                  tool_call_id: { type: 'string' },
                 },
               },
             },
             stream: { type: 'boolean' },
-            temperature: { type: 'number', minimum: 0, maximum: 2 },
-            max_tokens: { type: 'integer', minimum: 1 },
+            stream_options: {
+              type: 'object',
+              properties: { include_usage: { type: 'boolean' } },
+            },
+            tools: {
+              type: 'array',
+              description:
+                'OpenAI function-tool definitions. Advertised to the model but not executed; captured calls return with finish_reason=tool_calls. Rejected with 400 for providers without external-tools support.',
+              items: { type: 'object' },
+            },
+            temperature: {
+              type: 'number',
+              minimum: 0,
+              maximum: 2,
+              description: 'Rejected with 400 — sampling is set per-model via tuning.',
+            },
+            max_tokens: {
+              type: 'integer',
+              minimum: 1,
+              description: 'Rejected with 400 — sampling is set per-model via tuning.',
+            },
           },
         },
         ChatCompletionResponse: {
@@ -436,9 +460,10 @@ export function buildOpenApiDoc(version: string): OpenApiDoc {
                     properties: {
                       role: { type: 'string', enum: ['assistant'] },
                       content: { type: 'string' },
+                      tool_calls: { type: 'array', items: { type: 'object' } },
                     },
                   },
-                  finish_reason: { type: 'string', enum: ['stop'] },
+                  finish_reason: { type: 'string', enum: ['stop', 'tool_calls'] },
                 },
               },
             },

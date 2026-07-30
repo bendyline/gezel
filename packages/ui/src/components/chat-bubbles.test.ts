@@ -1,6 +1,11 @@
 import { parseMarkdown } from '@bendyline/squisq/markdown';
 import { describe, expect, it } from 'vitest';
-import { isRawHtmlDump, toHtmlCodeFence } from './chat-bubbles.js';
+import {
+  countReasoningWords,
+  isRawHtmlDump,
+  isStalledSilence,
+  toHtmlCodeFence,
+} from './chat-bubbles.js';
 
 /** Parse `md` and run the raw-HTML-dump heuristic the way RenderedMarkdown does. */
 function dump(md: string): boolean {
@@ -54,5 +59,26 @@ describe('toHtmlCodeFence', () => {
     const node = children[0] as { type?: string; value?: string };
     expect(node.type).toBe('code');
     expect(node.value).toContain('still inside the block');
+  });
+});
+
+describe('isStalledSilence', () => {
+  it('does not call a turn stalled before it has made progress', () => {
+    expect(isStalledSilence(300, false)).toBe(false);
+  });
+
+  it('calls a previously-progressing turn stalled after the threshold', () => {
+    expect(isStalledSilence(120, true)).toBe(true);
+    expect(isStalledSilence(119, true)).toBe(false);
+  });
+});
+
+describe('countReasoningWords', () => {
+  it('counts whitespace-delimited words across lines', () => {
+    expect(countReasoningWords('  First thought.\nThen a second one.  ')).toBe(6);
+  });
+
+  it('returns zero for an empty reasoning trace', () => {
+    expect(countReasoningWords(' \n\t ')).toBe(0);
   });
 });

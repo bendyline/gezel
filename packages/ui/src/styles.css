@@ -29,7 +29,40 @@
   --text-lg: 1rem; /* emphasized body, dialog/panel sub-headings */
   --text-xl: 1.1rem; /* panel & dialog section headings */
 
-  /* Core palette */
+  /* Gezel foundation palette.
+     These are the small set of authored colors for app chrome. Component
+     rules consume the semantic aliases below (--bg, --panel, --surface,
+     --text, --accent, etc.); scoped surfaces such as Home may derive nearby
+     tones from these primitives, but should not start a parallel palette. */
+  --gezel-paper-canvas: #eae5d6;
+  --gezel-paper-workshop: #efe6dc;
+  --gezel-paper-panel: #f3eddf;
+  --gezel-paper-reading: #f1e9e1;
+  --gezel-paper-reading-inset: #e8dfd7;
+  --gezel-paper-handoff: #efebe8;
+  --gezel-paper-control: #ece8e5;
+  --gezel-paper-control-deep: #e4dfdc;
+  --gezel-paper-inset: #ddd3bd;
+  --gezel-ink: #1c1c1c;
+  --gezel-ink-muted: #666;
+  --gezel-ink-warm: #2a2520;
+  --gezel-ink-warm-muted: #5a4f42;
+  --gezel-ink-warm-quiet: #8b7e6b;
+  --gezel-sage: #667f62;
+  --gezel-sage-muted: #8a9a76;
+  --gezel-sage-deep: #5c6a4a;
+  --gezel-sage-forest: #3d4d3a;
+  --gezel-sage-soft: #d6dec6;
+  --gezel-terra: #b0724c;
+  --gezel-terra-hover: #996142;
+  --gezel-terra-raised: #9c6440;
+  --gezel-terra-bright: #c97553;
+  --gezel-terra-deep: #9a4e30;
+  --gezel-terra-soft: #f0d4bf;
+  --gezel-cream-ink: #f3ede0;
+  --gezel-toolbar-ink: #5c4937;
+
+  /* Semantic palette */
   --border: rgba(127, 127, 127, 0.25);
   /* Warm canvas/parchment tone — sits gracefully under the sage-green
      titlebar and the warm-brown accent. The panel stays brighter so
@@ -37,24 +70,24 @@
      by a small step so the chrome doesn't read as stark white sitting
      in cream — it should feel like nested paper, not a contrast
      boundary. */
-  --bg: #eae5d6;
-  --home-workshop-paper: #f1e9e5;
-  --panel: #f3eddf;
-  /* Chat prose sits on a quiet greige-brown in light mode. Keep this
+  --bg: var(--gezel-paper-canvas);
+  --home-workshop-paper: var(--gezel-paper-workshop);
+  --panel: var(--gezel-paper-panel);
+  /* Chat prose sits on a quiet mushroom beige in light mode. Keep this
      matched to `GEZEL_LIGHT_SURFACE.background` in chat-theme.ts so the
      Squisq interior and its outer bubble remain one continuous surface. */
-  --chat-bubble-bg: #f2efed;
-  --chat-handoff-bg: #efebe8;
+  --chat-bubble-bg: var(--gezel-paper-reading);
+  --chat-handoff-bg: var(--gezel-paper-handoff);
   --chat-handoff-border: rgba(112, 98, 90, 0.32);
   /* Thread selection is chat chrome, not app canvas: keep its trigger and
      portaled menu cooler than the yellow parchment behind them. */
-  --chat-thread-bg: #ece8e5;
-  --chat-thread-menu-bg: #e4dfdc;
+  --chat-thread-bg: var(--gezel-paper-control);
+  --chat-thread-menu-bg: var(--gezel-paper-control-deep);
   /* In light mode `--surface` is a deeper, more saturated step than
      the canvas, used for inset cards / inputs that should read as
      pressed-into the page. Dark mode keeps the usual additive
      elevation. */
-  --surface: #ddd3bd;
+  --surface: var(--gezel-paper-inset);
   --surface-shadow: 0 1px 2px rgba(0, 0, 0, 0.05), 0 6px 18px rgba(0, 0, 0, 0.06);
   /* Shadow the elevated main pane casts onto the recessed navigation rail
      along their shared seam. Darker in dark mode where a faint black
@@ -64,21 +97,21 @@
      from the sidebar seam so the top edge can carry more depth without
      making the vertical divider feel heavy. */
   --titlebar-pane-shadow: rgba(0, 0, 0, 0.18);
-  --accent: #b0724c;
-  --accent-hover: #996142;
+  --accent: var(--gezel-terra);
+  --accent-hover: var(--gezel-terra-hover);
   /* Dark ink keeps selected text legible on both themes' medium-orange
      accent fills. */
   --accent-selection-ink: #231207;
-  --text: #1c1c1c;
-  --text-muted: #666;
+  --text: var(--gezel-ink);
+  --text-muted: var(--gezel-ink-muted);
   /* Tool icons use a warmer ink than body copy on light parchment.
      Applied only by light-theme toolbar rules so dark-mode contrast and
      active-state colors keep their existing treatments. */
-  --toolbar-icon-ink: #5c4937;
+  --toolbar-icon-ink: var(--gezel-toolbar-ink);
 
   /* Brand palette */
-  --titlebar: #667f62;
-  --titlebar-ink: #f3ede0;
+  --titlebar: var(--gezel-sage);
+  --titlebar-ink: var(--gezel-cream-ink);
   /* Veil alpha that mutes the wood-grain titlebar texture. The grain is
      screened over --titlebar, then this near-opaque sage green is laid on
      top at `normal` blend so only a whisper of grain shows through across
@@ -90,7 +123,7 @@
      and contrasts strongly with the cream-tan tab background. Dark
      mode keeps cream (no flip needed — the lifted tab is dark and
      the original cream already pops). */
-  --logo-active-fill: #3d4d3a;
+  --logo-active-fill: var(--gezel-sage-forest);
 
   /* Semantic colors */
   --success: #27ae60;
@@ -135,7 +168,7 @@
      "Controls: keys in trays"). A tray is a shallow recess routed into the
      bench; keys are raised, mostly-square caps; the chosen key sits pressed
      and latched. Shadows model one soft light source from above. */
-  --tray-bg: #ddd3bd;
+  --tray-bg: var(--gezel-paper-inset);
   --tray-border: rgba(92, 74, 55, 0.22);
   --tray-shadow: inset 0 1px 3px rgba(60, 45, 30, 0.16), inset 0 -1px 0 rgba(255, 255, 255, 0.35);
   --key-bg: linear-gradient(to bottom, #f7f1e2, #ece4d0);
@@ -143,7 +176,7 @@
   --key-border: rgba(92, 74, 55, 0.3);
   --key-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6), 0 1px 2px rgba(60, 45, 30, 0.18), 0 2px 3px
     rgba(60, 45, 30, 0.08);
-  --key-pressed-bg: linear-gradient(to bottom, #9c6440, #b0724c);
+  --key-pressed-bg: linear-gradient(to bottom, var(--gezel-terra-raised), var(--gezel-terra));
   --key-pressed-border: #8f5a3a;
   --key-pressed-ink: #fff6ea;
   --key-pressed-shadow: inset 0 1px 2px rgba(60, 30, 10, 0.28);
@@ -168,23 +201,24 @@
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #141517;
-    --home-workshop-paper: #1f1c18;
-    --panel: #1c1d20;
-    --chat-bubble-bg: var(--panel);
+  :root:not([data-theme="light"]) {
+    --gezel-paper-canvas: #141517;
+    --gezel-paper-workshop: #1f1c18;
+    --gezel-paper-panel: #1c1d20;
+    --gezel-paper-reading: var(--gezel-paper-panel);
+    --gezel-paper-control: var(--gezel-paper-canvas);
+    --gezel-paper-control-deep: #1f2124;
+    --gezel-paper-inset: #1f2124;
+    --gezel-ink: #f0f0f0;
+    --gezel-ink-muted: #999;
+    --gezel-terra: #c0875d;
+    --gezel-terra-hover: #d5a07a;
+    --gezel-terra-raised: #b07a50;
     --chat-handoff-bg: rgba(176, 114, 76, 0.08);
     --chat-handoff-border: rgba(176, 114, 76, 0.45);
-    --chat-thread-bg: var(--bg);
-    --chat-thread-menu-bg: var(--surface);
-    --surface: #1f2124;
     --surface-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.35);
     --sidebar-seam-shadow: rgba(0, 0, 0, 0.28);
     --titlebar-pane-shadow: rgba(0, 0, 0, 0.46);
-    --text: #f0f0f0;
-    --text-muted: #999;
-    --accent: #c0875d;
-    --accent-hover: #d5a07a;
     --success: #6ad38f;
     --success-bg: rgba(106, 211, 143, 0.15);
     --warning: #f0a04b;
@@ -214,7 +248,6 @@
     --key-border: rgba(255, 255, 255, 0.08);
     --key-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 1px 2px rgba(0, 0, 0, 0.5), 0 2px 3px
       rgba(0, 0, 0, 0.25);
-    --key-pressed-bg: linear-gradient(to bottom, #b07a50, #c0875d);
     --key-pressed-border: rgba(30, 15, 5, 0.7);
     --key-pressed-ink: #231207;
     --key-pressed-shadow: inset 0 1px 2px rgba(30, 15, 5, 0.38);
@@ -228,73 +261,27 @@
      Without this, an OS in dark mode keeps painting <select> with a
      dark-grey background even though the rest of the UI is parchment. */
   color-scheme: light;
-  --bg: #eae5d6;
-  --home-workshop-paper: #f1e9e5;
-  --panel: #f3eddf;
-  --chat-bubble-bg: #f2efed;
-  --chat-handoff-bg: #efebe8;
-  --chat-handoff-border: rgba(112, 98, 90, 0.32);
-  --chat-thread-bg: #ece8e5;
-  --chat-thread-menu-bg: #e4dfdc;
-  --surface: #ddd3bd;
-  --surface-shadow: 0 1px 2px rgba(0, 0, 0, 0.05), 0 6px 18px rgba(0, 0, 0, 0.06);
-  --sidebar-seam-shadow: rgba(0, 0, 0, 0.1);
-  --titlebar-pane-shadow: rgba(0, 0, 0, 0.18);
-  --text: #1c1c1c;
-  --text-muted: #666;
-  --accent: #b0724c;
-  --accent-hover: #996142;
-  --success: #27ae60;
-  --success-bg: rgba(39, 174, 96, 0.12);
-  --warning: #e67e22;
-  --warning-bg: rgba(230, 126, 34, 0.12);
-  --danger: #c0392b;
-  --danger-bg: rgba(192, 57, 43, 0.12);
-  --diff-add: #1e7e44;
-  --diff-add-bg: rgba(39, 174, 96, 0.1);
-  --diff-rem: #b03a2e;
-  --diff-rem-bg: rgba(192, 57, 43, 0.08);
-  --diff-hunk: #3a5fbf;
-  --diff-surface: rgba(0, 0, 0, 0.04);
-  --diff-border: rgba(0, 0, 0, 0.12);
-  --diff-gutter: rgba(0, 0, 0, 0.35);
-  --diff-sep: rgba(0, 0, 0, 0.45);
-  --logo-active-fill: #3d4d3a;
-  --scrollbar-thumb: rgba(112, 98, 90, 0.42);
-  --scrollbar-thumb-hover: rgba(112, 98, 90, 0.62);
-  --scrollbar-track: rgba(112, 98, 90, 0.08);
-  --tray-bg: #ddd3bd;
-  --tray-border: rgba(92, 74, 55, 0.22);
-  --tray-shadow: inset 0 1px 3px rgba(60, 45, 30, 0.16), inset 0 -1px 0 rgba(255, 255, 255, 0.35);
-  --key-bg: linear-gradient(to bottom, #f7f1e2, #ece4d0);
-  --key-bg-hover: linear-gradient(to bottom, #fbf6e9, #f0e8d5);
-  --key-border: rgba(92, 74, 55, 0.3);
-  --key-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6), 0 1px 2px rgba(60, 45, 30, 0.18), 0 2px 3px
-    rgba(60, 45, 30, 0.08);
-  --key-pressed-bg: linear-gradient(to bottom, #9c6440, #b0724c);
-  --key-pressed-border: #8f5a3a;
-  --key-pressed-ink: #fff6ea;
-  --key-pressed-shadow: inset 0 1px 2px rgba(60, 30, 10, 0.28);
 }
 
 [data-theme="dark"] {
   color-scheme: dark;
-  --bg: #141517;
-  --home-workshop-paper: #1f1c18;
-  --panel: #1c1d20;
-  --chat-bubble-bg: var(--panel);
+  --gezel-paper-canvas: #141517;
+  --gezel-paper-workshop: #1f1c18;
+  --gezel-paper-panel: #1c1d20;
+  --gezel-paper-reading: var(--gezel-paper-panel);
+  --gezel-paper-control: var(--gezel-paper-canvas);
+  --gezel-paper-control-deep: #1f2124;
+  --gezel-paper-inset: #1f2124;
+  --gezel-ink: #f0f0f0;
+  --gezel-ink-muted: #999;
+  --gezel-terra: #c0875d;
+  --gezel-terra-hover: #d5a07a;
+  --gezel-terra-raised: #b07a50;
   --chat-handoff-bg: rgba(176, 114, 76, 0.08);
   --chat-handoff-border: rgba(176, 114, 76, 0.45);
-  --chat-thread-bg: var(--bg);
-  --chat-thread-menu-bg: var(--surface);
-  --surface: #1f2124;
   --surface-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.35);
   --sidebar-seam-shadow: rgba(0, 0, 0, 0.28);
   --titlebar-pane-shadow: rgba(0, 0, 0, 0.46);
-  --text: #f0f0f0;
-  --text-muted: #999;
-  --accent: #c0875d;
-  --accent-hover: #d5a07a;
   --success: #6ad38f;
   --success-bg: rgba(106, 211, 143, 0.15);
   --warning: #f0a04b;
@@ -322,7 +309,6 @@
   --key-border: rgba(255, 255, 255, 0.08);
   --key-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 1px 2px rgba(0, 0, 0, 0.5), 0 2px 3px
     rgba(0, 0, 0, 0.25);
-  --key-pressed-bg: linear-gradient(to bottom, #b07a50, #c0875d);
   --key-pressed-border: rgba(30, 15, 5, 0.7);
   --key-pressed-ink: #231207;
   --key-pressed-shadow: inset 0 1px 2px rgba(30, 15, 5, 0.38);
@@ -437,7 +423,7 @@ select:focus-visible {
   border: 1px solid rgba(0, 0, 0, 0.2);
   border-radius: var(--radius-sm);
   padding: 0.35rem 1.75rem 0.35rem 0.6rem;
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path fill='%23f3ede0' d='M3 5h10L8 11z'/></svg>");
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path d='m3.5 5.5 4.5 4 4.5-4' fill='none' stroke='%23f3ede0' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'/></svg>");
   background-repeat: no-repeat;
   background-position: right 0.55rem center;
   background-size: 0.7rem;
@@ -1241,6 +1227,125 @@ html.embedded-chat #root {
   margin: 0;
   font-variant-numeric: tabular-nums;
   word-break: break-word;
+}
+.engine-pill-memory {
+  min-width: 14rem;
+}
+.machine-memory-strip {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.machine-memory-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  font-size: var(--text-xs);
+}
+.machine-memory-heading > :last-child,
+.machine-memory-context {
+  color: var(--text-muted);
+}
+.machine-memory-bar {
+  display: flex;
+  width: 100%;
+  height: 0.55rem;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--surface) 75%, var(--panel));
+  box-shadow: inset 0 1px 2px color-mix(in srgb, var(--text) 12%, transparent);
+}
+.machine-memory-bar-unknown {
+  background: repeating-linear-gradient(
+      -45deg,
+      transparent 0,
+      transparent 4px,
+      color-mix(in srgb, var(--border) 35%, transparent) 4px,
+      color-mix(in srgb, var(--border) 35%, transparent) 6px
+    ), color-mix(in srgb, var(--surface) 75%, var(--panel));
+}
+.machine-memory-segment {
+  display: block;
+  height: 100%;
+  min-width: 0;
+  transition: width 240ms ease-out;
+}
+.machine-memory-segment-gezel {
+  background: var(--accent);
+}
+.machine-memory-segment-other {
+  background: color-mix(in srgb, var(--warning) 62%, var(--surface));
+}
+.machine-memory-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.65rem;
+  color: var(--text-muted);
+  font-size: 0.68rem;
+  line-height: 1.25;
+}
+.machine-memory-legend > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+.machine-memory-swatch {
+  width: 0.48rem;
+  height: 0.48rem;
+  border: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
+  border-radius: 2px;
+}
+.machine-memory-swatch-gezel {
+  border-color: color-mix(in srgb, var(--accent) 70%, var(--border));
+  background: var(--accent);
+}
+.machine-memory-swatch-other {
+  background: color-mix(in srgb, var(--warning) 62%, var(--surface));
+}
+.machine-memory-swatch-free {
+  background: color-mix(in srgb, var(--surface) 75%, var(--panel));
+}
+.machine-memory-legend-muted,
+.machine-memory-note,
+.machine-memory-unavailable {
+  color: var(--text-muted);
+}
+.machine-memory-note {
+  font-size: 0.66rem;
+  line-height: 1.3;
+}
+.machine-memory-device {
+  overflow-wrap: anywhere;
+}
+.machine-memory-unavailable {
+  font-size: var(--text-xs);
+}
+.engine-pill-health-policy {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.3rem;
+}
+.engine-pill-health-mode .gz-key {
+  padding: 0.25rem 0.55rem;
+  font-size: 0.72rem;
+}
+.engine-pill-health-mode {
+  min-inline-size: 0;
+  margin: 0;
+}
+.engine-pill-health-policy-note,
+.engine-pill-health-policy-error {
+  font-size: 0.7rem;
+  line-height: 1.35;
+}
+.engine-pill-health-policy-note {
+  color: var(--text-muted);
+}
+.engine-pill-health-policy-error {
+  color: var(--danger);
 }
 .engine-pill-empty {
   margin: 0.5rem 0 0 0;
@@ -2232,8 +2337,8 @@ html.embedded-chat #root {
   font-weight: 600;
 }
 
-/* Project row: the name button flexes, a right-aligned signal sits in the
-   gutter (status light / animated "thinking" / "needs input"). */
+/* Project row: the name button flexes, followed by the hover actions and
+   the right-aligned signal (status light / working / needs input). */
 .app-sidebar-proj-row {
   position: relative;
   display: flex;
@@ -2244,35 +2349,52 @@ html.embedded-chat #root {
   flex: 1 1 auto;
   min-width: 0;
 }
-/* Fixed-width centering box: whichever signal variant renders, its visual
-   is centered here, so all variants share the same center x regardless of
-   their intrinsic width (dot 0.5rem vs. thinking dots vs. 1.05rem circle). */
+/* Match the group header's 22px add button + 0.2rem outer margin so every
+   signal variant shares its center x with the New project "+" above it. */
 .app-sidebar-proj-signal {
   flex: 0 0 auto;
-  width: 1.6rem;
+  width: 22px;
+  height: 22px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  margin-right: 0.35rem;
+  margin: 0.2rem;
 }
 
 /* Status light — reuses the top-bar status-dot color mapping. */
 .project-row-status {
+  width: 1.4rem;
+  height: 1.4rem;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  cursor: pointer;
+}
+.project-row-status::before {
+  content: "";
   width: 0.5rem;
   height: 0.5rem;
   border-radius: 50%;
   background: var(--muted);
 }
-.project-row-status-active {
+.project-row-status:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.project-row-status-active::before {
   background: rgba(80, 180, 100, 0.95);
   box-shadow: 0 0 0 2px rgba(80, 180, 100, 0.18);
 }
-.project-row-status-stable {
+.project-row-status-stable::before {
   background: rgba(120, 170, 220, 0.95);
   box-shadow: 0 0 0 2px rgba(120, 170, 220, 0.18);
 }
-.project-row-status-readonly,
-.project-row-status-inactive {
+.project-row-status-readonly::before,
+.project-row-status-inactive::before {
   background: var(--muted);
 }
 
@@ -2662,6 +2784,8 @@ html.embedded-chat #root {
    status and action controls remain on the same piece of paper; document
    navigation applies it directly to the selected tree row. */
 .app-sidebar-scroll {
+  /* Rail padding + the tab's transparent inner border. The sidebar divider
+     is inset, so including it again makes the bridge overshoot by 1px. */
   --sidebar-tab-bridge-size: calc(0.4rem + 1px);
   --sidebar-tab-border: color-mix(in srgb, var(--accent) 38%, var(--border));
   --sidebar-tab-surface: var(--bg);
@@ -2693,14 +2817,32 @@ html.embedded-chat #root {
 .app-sidebar-tree .tree-row.tree-row-selected::after {
   content: "";
   position: absolute;
-  top: -1px;
-  bottom: -1px;
+  /* The pseudo-element is positioned from the tab's padding box. */
+  top: 0;
+  bottom: 0;
   right: calc(-1 * var(--sidebar-tab-bridge-size));
   width: var(--sidebar-tab-bridge-size);
   background: var(--sidebar-tab-surface);
   border-top: 1px solid var(--sidebar-tab-border);
   border-bottom: 1px solid var(--sidebar-tab-border);
   pointer-events: none;
+}
+
+/* Absolutely positioned children resolve against the button's padding box.
+   Extend through both 1px borders so the bridge's bottom edge does not stop
+   one pixel above the selected tab's bottom border. */
+.app-sidebar-item.active::after {
+  top: -1px;
+  bottom: -1px;
+}
+
+/* Flex row wrappers use the same padding-box origin. Their bottom was already
+   extended; include the top border too so project/gezel connectors do not
+   begin one pixel below the selected row's top edge. */
+.app-sidebar-proj-row.active::after,
+.app-sidebar-gezel-row.active::after {
+  top: -1px;
+  bottom: -1px;
 }
 
 /* Wrapper-owned selections suppress the old button-shaped selection inside
@@ -3979,24 +4121,47 @@ button.danger {
   text-overflow: ellipsis;
 }
 
-.tree-delete {
+.tree-actions-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  flex: 0 0 auto;
+  padding: 0;
   background: none;
-  border: none;
-  color: #888;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  color: var(--text-muted);
   cursor: pointer;
-  font-size: 1rem;
+  font-family: var(--font-ui);
+  font-size: var(--text-lg);
   line-height: 1;
-  padding: 0 4px;
   opacity: 0;
-  flex-shrink: 0;
 }
 
-.tree-row:hover .tree-delete {
+.tree-row:hover .tree-actions-trigger,
+.tree-row:focus-within .tree-actions-trigger,
+.tree-actions-trigger[data-state="open"] {
   opacity: 1;
 }
 
-.tree-delete:hover {
-  color: #c0392b;
+.tree-actions-trigger:hover,
+.tree-actions-trigger[data-state="open"] {
+  color: var(--text);
+  background: var(--key-bg-hover);
+  border-color: var(--border);
+}
+
+.tree-actions-trigger:focus-visible {
+  opacity: 1;
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.tree-actions-menu.app-nav-menu {
+  min-width: 9rem;
+  z-index: 1100;
 }
 
 .reveal-btn {
@@ -4023,193 +4188,161 @@ button.danger {
   overflow: hidden;
 }
 
-/* ── Document Export — toolbar "…" menu + dialog ─────────────────── */
+/* ── Document Export — DocBlocks-style toolbar button + shared primitives ── */
 
-.gezel-toolbar-menu {
-  position: relative;
-  display: inline-block;
-}
-.gezel-toolbar-menu-trigger {
-  background: transparent;
-  color: inherit;
+.gezel-export-trigger.squisq-toolbar-button {
+  width: auto;
+  min-width: 5.25rem;
+  gap: 0.4rem;
+  padding: 2px 0.65rem 0;
   border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 0.25rem 0.6rem;
-  font: inherit;
-  font-size: 0.85rem;
-  cursor: pointer;
-  letter-spacing: 0.05em;
+  border-radius: var(--radius-md);
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
 }
-.gezel-toolbar-menu-trigger:hover {
+
+.gezel-export-trigger.squisq-toolbar-button svg {
+  width: 17px;
+  height: 17px;
+  flex: 0 0 auto;
+}
+
+.gezel-export-trigger.squisq-toolbar-button[aria-expanded="true"] {
   border-color: var(--accent);
+  background: color-mix(in oklch, var(--accent) 16%, transparent);
 }
-.gezel-toolbar-menu-dropdown {
-  position: absolute;
-  top: calc(100% + 0.35rem);
-  right: 0;
-  min-width: 220px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
-  padding: 0.3rem;
-  z-index: 50;
-  display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
+
+.gezel-export-menu.app-nav-menu {
+  min-width: 16rem;
+  z-index: 1100;
 }
-.gezel-toolbar-menu-item {
-  background: transparent;
-  color: inherit;
-  border: none;
-  border-radius: 5px;
-  padding: 0.45rem 0.7rem;
-  font: inherit;
-  font-size: 0.9rem;
-  text-align: left;
-  cursor: pointer;
+
+.gezel-export-menu .app-nav-menu-item {
+  font-size: var(--text-md);
   white-space: nowrap;
 }
-.gezel-toolbar-menu-item:hover:not(:disabled) {
-  background: rgba(243, 237, 224, 0.08);
-}
-.gezel-toolbar-menu-item:disabled {
+
+.gezel-export-menu .app-nav-menu-item[data-disabled] {
   opacity: 0.5;
   cursor: wait;
 }
-.gezel-toolbar-menu-divider {
+
+.gezel-export-menu-divider {
   height: 1px;
   background: var(--border);
-  margin: 0.2rem 0;
+  margin: 0.25rem 0;
 }
 
-.gezel-dialog-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.55);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
+.gezel-export-dialog.gz-dialog {
+  width: min(34rem, calc(100vw - 2rem));
+  min-width: 0;
+  padding: 0;
+  overflow: hidden;
 }
-.gezel-dialog {
-  background: var(--surface);
-  color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
-  min-width: 420px;
-  max-width: 560px;
-  max-height: 85vh;
+
+.gezel-export-dialog form {
   display: flex;
+  min-height: 0;
+  max-height: 85vh;
   flex-direction: column;
 }
-.gezel-dialog-header {
+
+.gezel-export-dialog-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0.85rem 1.1rem;
+  gap: 1rem;
+  padding: 0.9rem 1.1rem;
   border-bottom: 1px solid var(--border);
 }
-.gezel-dialog-title {
-  margin: 0;
-  font-size: 1.05rem;
-}
-.gezel-dialog-close {
+
+.gezel-export-dialog-close {
+  width: 1.8rem;
+  height: 1.8rem;
+  flex: 0 0 auto;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-md);
   background: transparent;
-  color: inherit;
-  border: none;
-  font-size: 1.4rem;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--text-xl);
   line-height: 1;
-  padding: 0.1rem 0.35rem;
   cursor: pointer;
-  opacity: 0.7;
 }
-.gezel-dialog-close:hover {
-  opacity: 1;
+
+.gezel-export-dialog-close:hover {
+  background: var(--key-bg-hover);
+  color: var(--text);
 }
-.gezel-dialog-body {
-  padding: 1rem 1.1rem;
-  overflow-y: auto;
+
+.gezel-export-dialog-body {
   display: flex;
+  min-height: 0;
+  overflow-y: auto;
   flex-direction: column;
   gap: 1rem;
+  padding: 1rem 1.1rem;
 }
+
 .gezel-export-field {
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
 }
+
 .gezel-export-label {
-  font-size: 0.85rem;
+  font-size: var(--text-sm);
   font-weight: 600;
-  opacity: 0.85;
+  color: var(--text);
 }
+
 .gezel-export-hint {
-  font-size: 0.78rem;
-  opacity: 0.7;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
 }
-.gezel-export-chips {
-  display: flex;
+
+.gezel-export-choice-tray.gz-tray {
+  width: 100%;
+  justify-content: flex-start;
   flex-wrap: wrap;
-  gap: 0.35rem;
 }
-.gezel-export-chip {
-  background: transparent;
-  color: inherit;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 0.3rem 0.8rem;
-  font: inherit;
-  font-size: 0.85rem;
+
+.gezel-export-choice-tray .gz-key {
+  position: relative;
+}
+
+.gezel-export-choice-radio {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
   cursor: pointer;
-  transition: border-color 0.15s, background 0.15s;
 }
-.gezel-export-chip:hover {
-  border-color: var(--accent);
+
+.gezel-export-choice-tray .gz-key:has(.gezel-export-choice-radio:focus-visible) {
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
-.gezel-export-chip--active {
-  background: var(--accent);
-  color: #fff;
-  border-color: var(--accent);
-}
+
 .gezel-export-select {
   background: var(--panel);
   color: inherit;
   border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 0.35rem 0.5rem;
+  border-radius: var(--radius-md);
+  padding: 0.4rem 0.5rem;
   font: inherit;
-  font-size: 0.9rem;
+  font-size: var(--text-md);
 }
-.gezel-export-footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: 0.5rem;
+
+.gezel-export-dialog .gz-dialog-actions {
+  margin: 0;
   padding: 0.8rem 1.1rem;
   border-top: 1px solid var(--border);
 }
-.gezel-export-btn {
-  background: transparent;
-  color: inherit;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 0.4rem 1rem;
-  font: inherit;
-  font-size: 0.9rem;
-  cursor: pointer;
-}
-.gezel-export-btn:hover:not(:disabled) {
-  border-color: var(--accent);
-}
-.gezel-export-btn--primary {
-  background: var(--accent);
-  color: #fff;
-  border-color: var(--accent);
-}
-.gezel-export-btn:disabled {
-  opacity: 0.5;
-  cursor: wait;
+
+.gezel-export-loading-dialog.gz-dialog {
+  width: min(28rem, calc(100vw - 2rem));
+  min-width: 0;
 }
 
 .placeholder {
@@ -4988,21 +5121,70 @@ button.danger {
 }
 
 .chat-editor-wrap {
-  /* Do not set `overflow: hidden` here — Squisq's Toolbar "···"
-     overflow menu opens upward from the composer toolbar and needs
-     to escape this wrapper to stay visible. Any internal clipping
-     should live on the Squisq surfaces themselves, not on this
-     host-side container. */
+  /* Keep editor-owned overlays (mentions and Monaco suggestions) free to
+     escape the compose surface. Internal clipping belongs to Squisq's
+     content panes, not this host wrapper. */
 }
 
 /* EditorShell sets overflow:hidden inline to contain document-sized editor
-   surfaces. In chat mode that also clips the toolbar's absolutely-positioned
-   "More actions" menu in both directions: down is outside the header and up
-   is outside the shell. The inner editor content still owns its own scrolling,
-   so let only chat shells expose toolbar popovers. `!important` is required to
-   beat EditorShell's inline overflow declaration. */
+   surfaces. Chat embeds need their mention/autocomplete overlays to escape
+   that shell. The inner editor content still owns its own scrolling, so let
+   only chat shells expose those overlays. `!important` is required to beat
+   EditorShell's inline overflow declaration. */
 .chat-editor-wrap .squisq-editor-shell[data-host-mode="chat"] {
   overflow: visible !important;
+  background: transparent;
+}
+
+/* Squisq chat mode intentionally keeps the toolbar as a host-action rail,
+   retains the Insert menu, and omits its document-formatting controls. These
+   child/overflow selectors are a compatibility brace for Squisq 2.5.0; newer
+   linked builds express the split through `showFormattingControls` and
+   `showInsertControls`. Keeping the actions lane leaves Insert on the left
+   and Send pinned at the right. */
+.chat-editor-wrap .squisq-toolbar-actions > :not(:has(button[aria-label="Insert"])),
+.chat-editor-wrap .squisq-toolbar-overflow {
+  display: none;
+}
+
+.chat-editor-wrap
+  .squisq-toolbar-actions
+  > :has(button[aria-label="Insert"])
+  .squisq-toolbar-separator {
+  display: none;
+}
+
+/* Squisq 2.5.0 always places its body-portaled Insert menu below the trigger,
+   which sends a bottom-docked chat composer's menu out of the viewport. Anchor
+   that compatibility build above the active chat Insert button. Newer Squisq
+   builds detect viewport collisions themselves, so this remains a harmless
+   host-side brace until the pinned package catches up. */
+.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"] {
+  anchor-name: --chat-insert-trigger;
+}
+
+body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
+  > .squisq-insert-menu {
+  top: auto !important;
+  bottom: anchor(--chat-insert-trigger top);
+  max-height: calc(anchor(--chat-insert-trigger top) - 8px);
+  margin-bottom: 4px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* The composer toolbar is supporting chrome, not the main event. Set it one
+   pixel inside the thematic compose frame and pull its fill almost all the
+   way back to paper while preserving the rail, its Send/Stop slot, and the
+   seam above the draft. */
+.chat-editor-wrap .squisq-editor-shell[data-host-mode="chat"] .squisq-editor-header {
+  margin-inline: 1px;
+  background: transparent;
+  border-bottom-color: color-mix(in srgb, var(--border) 82%, transparent);
+}
+
+.chat-editor-wrap .squisq-editor-shell[data-host-mode="chat"] .squisq-toolbar {
+  background: var(--compose-toolbar-bg) !important;
 }
 
 /* Squisq's `.squisq-editor-content` has `overflow: hidden` — when the
@@ -5369,6 +5551,48 @@ button.danger {
   display: block;
   width: 100%;
   margin-top: 0.25rem;
+}
+
+.new-path-input-row {
+  display: flex;
+  align-items: stretch;
+  width: 100%;
+  margin-top: 0.25rem;
+  overflow: hidden;
+  background: var(--bg, var(--panel));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.new-path-input-row:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.gz-dialog label .new-path-input-row > input {
+  flex: 1;
+  min-width: 0;
+  margin-top: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+
+.gz-dialog label .new-path-input-row > input:focus-visible {
+  outline: none;
+}
+
+.new-path-input-suffix {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  padding: 0 0.65rem;
+  color: var(--text-muted);
+  background: var(--key-bg);
+  border-left: 1px solid var(--border);
+  font-family: var(--font-ui);
+  font-size: var(--text-md);
+  user-select: none;
 }
 
 .name-row {
@@ -6135,6 +6359,179 @@ button.danger {
   font-family: var(--font-ui);
 }
 
+/* Machine health is a device-level policy: the mode is a prominent binary
+   choice, while temperature uses a key-on-a-track slider for quick scanning
+   and precise one-degree keyboard adjustment. */
+.machine-health-settings {
+  margin-bottom: 2rem;
+}
+
+.machine-health-mode {
+  min-inline-size: 0;
+  margin: 0.25rem 0 0.8rem;
+}
+
+.machine-health-mode .gz-key {
+  min-width: 8.5rem;
+}
+
+.machine-health-mode .gz-key small {
+  font-size: var(--text-xs);
+  font-weight: 400;
+  opacity: 0.8;
+}
+
+.machine-health-temperature-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 0.9rem;
+}
+
+.machine-health-temperature-row > label {
+  min-width: 9.5rem;
+  font-weight: 500;
+}
+
+.machine-health-temperature-control {
+  display: grid;
+  grid-template-columns: minmax(13rem, 26rem) auto;
+  align-items: center;
+  gap: 0.75rem;
+  width: min(100%, 31rem);
+}
+
+.machine-health-temperature-slider-wrap {
+  min-width: 0;
+}
+
+.settings-panel .machine-health-temperature-slider {
+  appearance: none;
+  width: 100%;
+  height: 0.55rem;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--tray-border);
+  border-radius: var(--radius-sm);
+  background: linear-gradient(
+    to right,
+    var(--accent) 0,
+    var(--accent) var(--machine-health-temperature-progress),
+    var(--tray-bg) var(--machine-health-temperature-progress),
+    var(--tray-bg) 100%
+  );
+  box-shadow: inset 0 1px 3px rgba(60, 45, 30, 0.18);
+  cursor: pointer;
+}
+
+.settings-panel .machine-health-temperature-slider::-webkit-slider-thumb {
+  appearance: none;
+  width: 1.05rem;
+  height: 1.45rem;
+  border: 2px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--key-bg);
+  box-shadow: var(--key-shadow);
+}
+
+.settings-panel .machine-health-temperature-slider::-moz-range-track {
+  height: 0.45rem;
+  border: 1px solid var(--tray-border);
+  border-radius: var(--radius-sm);
+  background: var(--tray-bg);
+  box-shadow: inset 0 1px 3px rgba(60, 45, 30, 0.18);
+}
+
+.settings-panel .machine-health-temperature-slider::-moz-range-progress {
+  height: 0.45rem;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+}
+
+.settings-panel .machine-health-temperature-slider::-moz-range-thumb {
+  width: 0.9rem;
+  height: 1.25rem;
+  border: 2px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--key-bg);
+  box-shadow: var(--key-shadow);
+}
+
+.settings-panel .machine-health-temperature-slider:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+}
+
+.settings-panel .machine-health-temperature-slider:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.machine-health-temperature-scale {
+  position: relative;
+  display: flex;
+  justify-content: space-between;
+  margin-top: 0.35rem;
+  color: var(--text-muted);
+  font-size: var(--text-2xs);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.machine-health-temperature-default {
+  position: absolute;
+  left: 72.727%;
+  transform: translateX(-50%);
+}
+
+.machine-health-temperature-value {
+  display: inline-flex;
+  align-items: baseline;
+  justify-content: center;
+  min-width: 4.25rem;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--key-border);
+  border-radius: var(--radius-md);
+  background: var(--key-bg);
+  box-shadow: var(--key-shadow);
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.machine-health-temperature-value-number {
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+
+.settings-panel .machine-health-temperature-help {
+  margin: 0.3rem 0 0 10.25rem;
+}
+
+.settings-panel .machine-health-off-note,
+.settings-panel .machine-health-save-state {
+  display: block;
+  margin: 0.5rem 0 0;
+}
+
+@media (max-width: 640px) {
+  .machine-health-temperature-row {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 0.35rem;
+  }
+
+  .machine-health-temperature-control {
+    grid-template-columns: minmax(0, 1fr) auto;
+    width: 100%;
+  }
+
+  .settings-panel .machine-health-temperature-help {
+    margin-left: 0;
+  }
+}
+
 /* Connected apps read like a small permissions ledger: one app per ruled
    line, with the revocation action kept in a predictable final column. */
 .grant-verification {
@@ -6179,6 +6576,23 @@ button.danger {
   align-items: flex-end;
   justify-content: flex-end;
   gap: var(--space-sm);
+}
+
+.connected-apps-serving {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+  font-size: var(--text-sm);
+}
+
+.connected-apps-serving > span {
+  color: var(--text-muted);
+}
+
+.connected-apps-caution {
+  color: var(--warning);
+  max-width: 60ch;
 }
 
 .connected-apps-table-wrap {
@@ -6734,7 +7148,6 @@ button.danger {
 
 .project-git-chevron {
   color: var(--muted);
-  font-size: 0.7rem;
 }
 
 .project-git-branch-menu {
@@ -7173,9 +7586,16 @@ button.danger {
 }
 
 .project-writes-select-icon {
-  line-height: 1;
-  font-size: 0.85rem;
+  display: inline-flex;
+  align-items: center;
   flex: 0 0 auto;
+}
+
+.project-writes-select-icon svg,
+.project-lockdown-chip-icon svg {
+  display: block;
+  width: 0.9rem;
+  height: 0.9rem;
 }
 
 .project-writes-select-off.gz-select-trigger {
@@ -7207,8 +7627,9 @@ button.danger {
 }
 
 .project-lockdown-chip-icon {
-  line-height: 1;
-  font-size: 0.85rem;
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
 }
 
 @keyframes project-index-pulse {
@@ -8240,7 +8661,7 @@ button.danger {
   font-size: 0.84rem;
   color: var(--text);
   background-color: transparent;
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path fill='%238b7e6b' d='M3 5h10L8 11z'/></svg>");
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path d='m3.5 5.5 4.5 4 4.5-4' fill='none' stroke='%238b7e6b' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'/></svg>");
   background-repeat: no-repeat;
   background-position: right 0.3rem center;
   background-size: 0.6rem;
@@ -9023,25 +9444,25 @@ button.bench-step-foot:disabled {
    ────────────────────────────────────────────────────────────────── */
 .home-workshop {
   /* Paper & ink */
-  /* A pale mushroom-brown keeps the workshop warm without the old
-     yellow parchment cast. The darker paper steps remain available
-     for inset controls and rules. */
+  /* A pale mushroom beige puts a little brown warmth back into the
+     workshop without reviving the old yellow parchment cast. The
+     darker paper steps remain available for inset controls and rules. */
   --paper: var(--home-workshop-paper);
-  --paper-2: #ece2cd;
-  --paper-3: #e2d5b9;
-  --ink: #2a2520;
-  --ink-2: #5a4f42;
-  --ink-3: #8b7e6b;
-  --rule: #c8b994;
+  --paper-2: color-mix(in srgb, var(--gezel-paper-workshop) 72%, var(--gezel-paper-inset));
+  --paper-3: color-mix(in srgb, var(--gezel-paper-workshop) 42%, var(--gezel-paper-inset));
+  --ink: var(--gezel-ink-warm);
+  --ink-2: var(--gezel-ink-warm-muted);
+  --ink-3: var(--gezel-ink-warm-quiet);
+  --rule: color-mix(in srgb, var(--gezel-paper-inset) 82%, var(--gezel-terra));
   /* Sage (structure) */
-  --sage: #8a9a76;
-  --sage-deep: #5c6a4a;
+  --sage: var(--gezel-sage-muted);
+  --sage-deep: var(--gezel-sage-deep);
   --sage-ink: #2f3a23;
-  --sage-soft: #d6dec6;
+  --sage-soft: var(--gezel-sage-soft);
   /* Terracotta (action / heat) */
-  --terra: #c97553;
-  --terra-deep: #9a4e30;
-  --terra-soft: #f0d4bf;
+  --terra: var(--gezel-terra-bright);
+  --terra-deep: var(--gezel-terra-deep);
+  --terra-soft: var(--gezel-terra-soft);
   /* Craft hues */
   --ochre: #c89248;
   --indigo: #4d6b9a;
@@ -9049,14 +9470,15 @@ button.bench-step-foot:disabled {
   --moss: #6b8a5a;
   --slate: #6b7480;
   --live: #9ed084;
-  /* Derived home surfaces (accent multiplier fixed at 1 = "Balanced") */
-  --home-card: #fbf6ea;
-  --home-surf2: #f5ecd6;
+  /* Derived home surfaces stay on the foundation paper ramp. White lifts
+     cards without adding yellow; the inset tone supplies the brown depth. */
+  --home-card: color-mix(in srgb, var(--gezel-paper-workshop) 52%, white);
+  --home-surf2: color-mix(in srgb, var(--gezel-paper-workshop) 76%, var(--gezel-paper-inset));
   --home-border: var(--paper-3);
   --home-hair: var(--rule);
-  --home-user: #efe6d2;
-  --home-amber: rgba(201, 117, 83, 0.07);
-  --home-amber-bd: rgba(201, 117, 83, 0.3);
+  --home-user: color-mix(in srgb, var(--gezel-paper-workshop) 58%, var(--gezel-paper-inset));
+  --home-amber: color-mix(in srgb, var(--gezel-terra-bright) 7%, transparent);
+  --home-amber-bd: color-mix(in srgb, var(--gezel-terra-bright) 30%, transparent);
   /* Provenance mono — JetBrains isn't bundled; system mono is fine at 11px. */
   --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 
@@ -9067,9 +9489,16 @@ button.bench-step-foot:disabled {
   display: flex;
   flex-direction: column;
   color: var(--ink);
-  background: radial-gradient(1200px 600px at 80% -10%, rgba(138, 154, 118, 0.1), transparent 60%),
-    radial-gradient(900px 500px at -10% 110%, rgba(201, 117, 83, 0.06), transparent 60%),
-    var(--paper);
+  background: radial-gradient(
+      1200px 600px at 80% -10%,
+      color-mix(in srgb, var(--gezel-sage-muted) 10%, transparent),
+      transparent 60%
+    ),
+    radial-gradient(
+      900px 500px at -10% 110%,
+      color-mix(in srgb, var(--gezel-terra-bright) 6%, transparent),
+      transparent 60%
+    ), var(--paper);
   overflow: hidden;
 }
 
@@ -9605,6 +10034,56 @@ button.bench-step-foot:disabled {
 .home-intro-doc .squisq-linear {
   height: auto;
   overflow: visible;
+}
+
+/* Article reading scale. Squisq's page renderer assigns fixed rem sizes to
+   each content pattern, so changing only the inherited root size leaves prose,
+   feature splits, and headings mismatched. Keep one host class on every
+   scrolling article view and reduce the common editorial roles together.
+   Presentation/video mode deliberately retains Squisq's full display scale. */
+.gezel-article-view .squisq-linear-content {
+  font-size: var(--text-md) !important;
+}
+
+.gezel-article-view .squisq-page-prose,
+.gezel-article-view .squisq-page-feature-body,
+.gezel-article-view .squisq-page-items li,
+.gezel-article-view .squisq-page-table {
+  font-size: 0.95rem;
+}
+
+.gezel-article-view .squisq-page-feature-title {
+  font-size: 1.55rem;
+}
+
+.gezel-article-view .squisq-page-prose h1 {
+  font-size: 1.9rem;
+}
+
+.gezel-article-view .squisq-page-prose h2 {
+  font-size: 1.5rem;
+}
+
+.gezel-article-view .squisq-page-prose h3 {
+  font-size: 1.2rem;
+}
+
+.gezel-article-view .squisq-page-prose :is(h4, h5, h6) {
+  font-size: 1.05rem;
+}
+
+.gezel-article-view
+  .squisq-page
+  :is(.squisq-page-cards-title, .squisq-page-items-title, .squisq-page-table-title) {
+  font-size: 1.7rem;
+}
+
+.gezel-article-view .squisq-page-callout-title {
+  font-size: 1.2rem;
+}
+
+.gezel-article-view .squisq-page-card-title {
+  font-size: 1.15rem;
 }
 
 .home-intro-player {
@@ -10223,8 +10702,9 @@ button.bench-step-foot:disabled {
 }
 
 .home-status-warn {
-  color: #ffc764;
-  border-color: rgba(255, 199, 100, 0.4);
+  color: color-mix(in srgb, var(--warning) 45%, var(--text));
+  border-color: color-mix(in srgb, var(--warning) 50%, var(--border));
+  background: var(--warning-bg);
 }
 
 /* Amber-tinted pill that tells the user verbose diagnostics are being
@@ -10279,14 +10759,14 @@ button.bench-step-foot:disabled {
 /* Session switcher header — thin row sandwiched between the timeline
    above and the composer below. Shows the active session for the
    current (gezel, project) and offers + New / Archive. The divider
-   sits on top so the visual separation reads as "feed ends here,
-   session controls + composer below". */
+   sits below the controls so the recipient and thread read as one
+   context header above the editor. */
 .gezel-chat-session-header {
   display: flex;
   align-items: stretch;
   gap: 0.4rem;
-  padding: 0.4rem 0.6rem;
-  border-top: 1px solid var(--border);
+  padding: 0.4rem 0.6rem 0.4rem 0.25rem;
+  border-bottom: 1px solid var(--border);
   background: rgba(255, 255, 255, 0.02);
   flex-shrink: 0;
 }
@@ -10301,6 +10781,7 @@ button.bench-step-foot:disabled {
 
 .gz-select-trigger.gezel-chat-session-select {
   background: var(--chat-thread-bg, var(--bg));
+  text-align: left;
 }
 
 .gz-select-content.gezel-chat-session-menu {
@@ -10498,8 +10979,6 @@ button.bench-step-foot:disabled {
 
 .project-chat-more-caret {
   color: var(--text-muted);
-  font-size: var(--text-2xs);
-  line-height: 1;
 }
 
 .gz-popover.project-chat-more-popover {
@@ -11578,6 +12057,12 @@ button.bench-step-foot:disabled {
   color: var(--text);
   font-weight: 500;
 }
+.msg-reasoning-meta {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+  font-weight: 400;
+}
 .msg-reasoning-body {
   margin: 0.45rem 0 0;
   padding: 0.55rem 0.7rem;
@@ -11749,29 +12234,54 @@ button.bench-step-foot:disabled {
   position: relative;
 }
 
-.chat-rail-grip::before {
-  /* Subtle visible track so it's discoverable without being noisy. */
+.chat-rail-grip::before,
+.chat-rail-grip::after {
+  /* Compact twin rails: the full-height element remains the generous
+     drag target, while only this small centered grip is visible. */
   content: "";
   position: absolute;
-  top: 20%;
-  bottom: 20%;
-  left: 50%;
+  top: 50%;
   width: 2px;
-  transform: translateX(-50%);
-  background: var(--border);
+  height: 28px;
+  transform: translate(-50%, -50%);
+  background: color-mix(in srgb, var(--border) 72%, var(--text-muted));
   border-radius: 1px;
-  transition: background 0.15s;
+  box-shadow: 1px 0 0 color-mix(in srgb, var(--surface) 65%, transparent), 0 1px 2px
+    color-mix(in srgb, var(--text) 12%, transparent);
+  transition: background 0.15s, box-shadow 0.15s;
+}
+
+.chat-rail-grip::before {
+  left: calc(50% - 2px);
+}
+
+.chat-rail-grip::after {
+  left: calc(50% + 2px);
+}
+
+/* The project output split and the nested reference split occupy different
+   height tracks: the reference rail starts below the gezel roster. ProjectChat
+   measures that variable-height roster band (including wrapped rows) and
+   supplies half of it here, keeping both painted handles on one horizontal
+   axis while their full-height drag targets stay put. */
+.project-body.has-output .project-chat .chat-rail-grip::before,
+.project-body.has-output .project-chat .chat-rail-grip::after {
+  top: calc(50% - var(--project-chat-grip-offset, 0px));
 }
 
 .chat-rail-grip:hover::before,
+.chat-rail-grip:hover::after,
 .chat-rail-grip:focus-visible::before,
-.chat-rail-grip:active::before {
+.chat-rail-grip:focus-visible::after,
+.chat-rail-grip:active::before,
+.chat-rail-grip:active::after {
   background: var(--accent);
+  box-shadow: 1px 0 0 color-mix(in srgb, var(--surface) 72%, transparent), 0 1px 3px
+    color-mix(in srgb, var(--accent) 28%, transparent);
 }
 
 .chat-rail-grip:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: -1px;
+  outline: none;
 }
 
 /* While a resize drag is in flight, neutralize iframes / webviews
@@ -11884,8 +12394,7 @@ body.chat-rail-resizing webview {
   background: color-mix(in srgb, var(--chat-bubble-bg, var(--panel)) 96%, transparent);
   border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
   border-top: none;
-  border-bottom: none;
-  box-shadow: 0 6px 10px -4px rgba(0, 0, 0, 0.45);
+  box-shadow: none;
   font-size: 0.82rem;
   line-height: 1.3;
   /* Backdrop so anything leaking through the 4% transparent edge
@@ -12008,9 +12517,46 @@ body.chat-rail-resizing webview {
   overflow: hidden;
 }
 
+/* Give the Meester composer the same quiet, self-contained compose surface as
+   project chat. The small inset keeps all four rounded corners legible inside
+   the larger conversation rail, while one shared paper wash carries behind
+   the recipient pill, thread picker, toolbar, and draft. */
+.home-workshop-conversation .chat-composer {
+  --compose-frame-bg: color-mix(in srgb, var(--panel) 88%, var(--surface));
+  --compose-frame-border: color-mix(in srgb, var(--accent) 62%, var(--border));
+  --compose-toolbar-bg: color-mix(in srgb, var(--panel) 97%, var(--chat-bubble-bg));
+  /* Clear the outer rail's rounded lower-left corner while preserving the
+     tighter right inset beside the reference rail. */
+  margin: 0 0.25rem 0.25rem 0.5rem;
+  border: 1px solid var(--compose-frame-border);
+  border-radius: var(--radius-md);
+  background: var(--compose-frame-bg);
+}
+
 /* ── Interleaved chat timeline (project + global Meester views) ── */
 
+/* Typed colors let Chromium interpolate the native scrollbar paint even
+   though its WebKit scrollbar pseudo-elements have uneven transition
+   support across versions. The pseudo-element transition below remains
+   as a graceful fallback. */
+@property --chat-scrollbar-thumb-color {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: transparent;
+}
+
+@property --chat-scrollbar-track-color {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: transparent;
+}
+
 .chat-timeline {
+  --chat-scrollbar-thumb: color-mix(in srgb, var(--scrollbar-thumb) 62%, transparent);
+  --chat-scrollbar-thumb-hover: color-mix(in srgb, var(--scrollbar-thumb-hover) 74%, transparent);
+  --chat-scrollbar-track: color-mix(in srgb, var(--scrollbar-track) 45%, transparent);
+  --chat-scrollbar-thumb-color: transparent;
+  --chat-scrollbar-track-color: transparent;
   display: flex;
   flex-direction: column;
   gap: 0.9rem;
@@ -12026,6 +12572,82 @@ body.chat-rail-resizing webview {
   min-width: 0;
   scroll-behavior: smooth;
   min-height: 12rem;
+  /* Preserve the scrollbar gutter so content never shifts, but keep its
+     chrome quiet until the user is interacting with this chat pane. */
+  scrollbar-color: var(--chat-scrollbar-thumb-color) var(--chat-scrollbar-track-color);
+  transition: --chat-scrollbar-thumb-color 160ms ease-out, --chat-scrollbar-track-color 160ms
+    ease-out;
+}
+
+.chat-timeline-viewport:hover .chat-timeline,
+.chat-timeline-viewport:focus-within .chat-timeline,
+.chat-timeline.chat-timeline-scrolling {
+  --chat-scrollbar-thumb-color: var(--chat-scrollbar-thumb);
+  --chat-scrollbar-track-color: var(--chat-scrollbar-track);
+}
+
+.chat-timeline::-webkit-scrollbar {
+  width: 8px;
+}
+
+.chat-timeline::-webkit-scrollbar-track,
+.chat-timeline::-webkit-scrollbar-thumb {
+  background-color: var(--chat-scrollbar-track-color);
+  border-color: transparent;
+  transition: background-color 160ms ease-out, border-color 160ms ease-out;
+}
+
+.chat-timeline::-webkit-scrollbar-thumb {
+  background-color: var(--chat-scrollbar-thumb-color);
+}
+
+/* Native up/down buttons make the dormant gutter look active even when the
+   thumb is hidden. Collapse them for this pane; wheel, track, drag, touch,
+   keyboard, and the jump-to-bottom control remain available. */
+.chat-timeline::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+  background: transparent;
+}
+
+.chat-timeline-viewport:hover .chat-timeline::-webkit-scrollbar-track,
+.chat-timeline-viewport:focus-within .chat-timeline::-webkit-scrollbar-track,
+.chat-timeline.chat-timeline-scrolling::-webkit-scrollbar-track {
+  background-color: var(--chat-scrollbar-track-color);
+  border-top-color: color-mix(in srgb, var(--border) 35%, transparent);
+  border-bottom-color: color-mix(in srgb, var(--border) 35%, transparent);
+}
+
+.chat-timeline-viewport:hover .chat-timeline::-webkit-scrollbar-thumb,
+.chat-timeline-viewport:focus-within .chat-timeline::-webkit-scrollbar-thumb,
+.chat-timeline.chat-timeline-scrolling::-webkit-scrollbar-thumb {
+  background-color: var(--chat-scrollbar-thumb-color);
+  border-color: transparent;
+  background-clip: padding-box;
+}
+
+.chat-timeline-viewport:hover .chat-timeline::-webkit-scrollbar-thumb:hover,
+.chat-timeline-viewport:focus-within .chat-timeline::-webkit-scrollbar-thumb:hover,
+.chat-timeline.chat-timeline-scrolling::-webkit-scrollbar-thumb:hover {
+  background-color: var(--chat-scrollbar-thumb-hover);
+  background-clip: padding-box;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-timeline {
+    transition: none;
+  }
+  .chat-timeline::-webkit-scrollbar-track,
+  .chat-timeline::-webkit-scrollbar-thumb {
+    transition: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .chat-timeline {
+    scrollbar-color: auto;
+  }
 }
 
 .chat-timeline-loading,
@@ -12040,6 +12662,16 @@ body.chat-rail-resizing webview {
   border-radius: var(--radius-sm);
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid var(--border);
+}
+
+/* A short-lived tail below a prompt submitted from the composer attached to
+   this timeline. It gives the first response lines somewhere to appear instead
+   of wedging the new prompt directly against the composer. The element is
+   removed when the chat turn / terminal run settles. */
+.timeline-response-runway {
+  flex: 0 0 clamp(4.5rem, 22vh, 10rem);
+  width: 100%;
+  pointer-events: none;
 }
 
 /* Floating toggle for "pinned to bottom" mode — small circular button
@@ -12487,8 +13119,11 @@ button.timeline-session-divider-continuing::before {
   gap: 0.5rem;
   border: 1px solid var(--border);
   border-radius: 6px;
-  background: var(--surface);
+  /* Keep the context pane a distinct sheet without the heavy recessed
+     contrast of `--surface` in light mode. */
+  background: color-mix(in srgb, var(--panel) 76%, var(--surface));
   padding: 0.5rem;
+  margin: 2px;
   min-height: 0;
   overflow: hidden;
 }
@@ -12567,7 +13202,6 @@ button.timeline-session-divider-continuing::before {
 }
 
 .chat-rail-section-tab-chevron {
-  flex: 0 0 auto;
   transition: transform 140ms ease-out;
 }
 
@@ -12729,6 +13363,18 @@ button.timeline-session-divider-continuing::before {
 
 .commands-panel-item-name {
   font-weight: 500;
+}
+
+/* The OS primer lists the literal line you'd type, so it reads as terminal
+ * text rather than as a friendly command label. */
+.commands-panel-item-code {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: var(--text-xs);
+  font-weight: 400;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
 }
 
 .commands-panel-item-desc {
@@ -12973,6 +13619,21 @@ button.timeline-session-divider-continuing::before {
 .chat-rail-ref-kind-workspace {
   background: rgba(255, 199, 100, 0.12);
   color: #d7b86b;
+}
+
+/* The amber above is tuned for the dark panel; on parchment it lands around
+   1.9:1 against the reference header and reads as disabled text. Re-ink to a
+   dark ochre (~5.4:1) and give the chip a fill that survives a light surface. */
+[data-theme="light"] .chat-rail-ref-kind-workspace {
+  background: rgba(176, 114, 40, 0.18);
+  color: #7a5410;
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) .chat-rail-ref-kind-workspace {
+    background: rgba(176, 114, 40, 0.18);
+    color: #7a5410;
+  }
 }
 
 .chat-rail-ref-path {
@@ -13222,6 +13883,21 @@ button.timeline-session-divider-continuing::before {
   }
 }
 
+/* A short, narrow window cannot spare enough vertical room for the
+   accessory pane below the conversation. Keep the timeline and composer
+   usable by suppressing the pane (and its split grip) at that size. */
+@media (max-width: 1100px) and (max-height: 720px) {
+  .chat-rail-body {
+    grid-template-rows: minmax(0, 1fr);
+    gap: 0;
+  }
+
+  .chat-rail-grip,
+  .chat-rail-side {
+    display: none;
+  }
+}
+
 /* ── Ollama settings ── */
 
 .ollama-settings {
@@ -13271,6 +13947,34 @@ button.timeline-session-divider-continuing::before {
   font-size: 0.75rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
+}
+
+/* The fitness status and its action form one compact row. Nudge the row a
+   couple of pixels left so the bordered badge aligns optically with the
+   plain FITNESS heading, then let flexbox own the inter-control spacing. */
+.ollama-model-table td.model-fitness-table-cell {
+  padding-left: 0.35rem;
+}
+
+.model-fitness-cell {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  white-space: nowrap;
+}
+
+.model-fitness-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--radius-sm);
+  line-height: 1.25;
+}
+
+.model-fitness-badge--probing {
+  color: color-mix(in srgb, var(--accent) 58%, var(--text));
+  background: color-mix(in srgb, var(--accent) 16%, var(--panel));
+  border-color: color-mix(in srgb, var(--accent) 62%, var(--border));
+  font-weight: 500;
 }
 
 /* Model identifiers (HF repo paths, install tags, pull names) used to render
@@ -14358,9 +15062,16 @@ a.license-button:hover {
   cursor: not-allowed;
 }
 
-/* Holds the SVG caret. inline-flex (not inline) so the glyph box has no
-   baseline descender under it — otherwise the triangle sits high in the
-   trigger and reads as off-centre even though it's symmetric. */
+/* Shared open-V indicator for selects and custom dropdown triggers. */
+.gz-dropdown-chevron {
+  display: block;
+  width: 0.75rem;
+  height: 0.75rem;
+  flex: 0 0 auto;
+  overflow: visible;
+}
+
+/* Holds the shared dropdown chevron clear of the selected value. */
 .gz-select-icon {
   display: inline-flex;
   align-items: center;
@@ -14576,9 +15287,37 @@ a.license-button:hover {
   border-bottom: 1px solid var(--border);
 }
 .project-output-picker {
-  font-size: 0.8rem;
+  font-size: var(--text-xs);
   max-width: 18rem;
   min-width: 0;
+  overflow: hidden;
+}
+
+/* A selected path may be much wider than the output pane. Keep the value on
+   one line and let it surrender space to the caret and trailing actions. */
+.project-output-picker > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The action buttons already collapse at OUTPUT_TOOLBAR_COMPACT_PX. At the
+   same breakpoint, replace the selected path with a page glyph so the picker
+   stays recognizable without taking over the toolbar. The Select primitive
+   supplies the adjacent caret. */
+.project-output-picker.is-compact {
+  flex: 0 0 auto;
+  max-width: none;
+  padding: 0.25rem;
+  gap: 0.25rem;
+}
+
+.project-output-picker-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
 }
 .project-output-toolbar-spacer {
   flex: 1 1 auto;
@@ -14847,7 +15586,9 @@ a.license-button:hover {
 
 .gz-tabs-trigger:focus-visible {
   outline: 2px solid var(--accent, #b0724c);
-  outline-offset: 2px;
+  /* Tab lists scroll horizontally, so an outward focus ring is clipped at
+     the scrollport's top edge. Draw it inward to keep all four sides visible. */
+  outline-offset: -2px;
   border-radius: 3px;
 }
 
@@ -16233,6 +16974,169 @@ a.license-button:hover {
   gap: 0.5rem;
 }
 
+/* Connector bin — the same compact, selectable gallery language used by
+   New Project and New Task, adapted to an inline settings tray. */
+.gz-connector-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  padding: 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--panel) 70%, var(--surface));
+}
+
+.gz-connector-picker-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.gz-connector-picker-heading p {
+  margin: 0.2rem 0 0;
+}
+
+.gz-connector-picker-count {
+  flex: 0 0 auto;
+  padding: 0.15rem 0.4rem;
+  border: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 0.68rem;
+  line-height: 1.3;
+}
+
+.gz-connector-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(10.25rem, 1fr));
+  gap: 0.55rem;
+}
+
+.gz-npd-card.gz-connector-card {
+  min-width: 0;
+  min-height: 7rem;
+  gap: 0.35rem;
+  padding: 0.7rem 0.75rem;
+  border-radius: var(--radius-md);
+}
+
+.gz-connector-card .gz-npd-card-mark {
+  width: 2.3rem;
+  height: 2.3rem;
+  border-radius: var(--radius-md);
+}
+
+.gz-connector-card .gz-npd-card-name {
+  overflow: hidden;
+  max-width: 100%;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gz-connector-card .gz-npd-card-description {
+  width: 100%;
+}
+
+.gz-connector-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  width: 100%;
+  margin-top: auto;
+  padding-top: 0.2rem;
+}
+
+.gz-connector-card-meta > span {
+  padding: 1px 4px;
+  border: 1px solid color-mix(in srgb, var(--border) 76%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent) 4%, var(--panel));
+  color: var(--text-muted);
+  font-size: 0.62rem;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+
+.gz-connector-card.active .gz-connector-card-meta > span {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  color: color-mix(in srgb, var(--accent) 72%, var(--text));
+}
+
+.gz-connector-picker-empty {
+  display: grid;
+  min-height: 6rem;
+  place-items: center;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.gz-mail-link-form.gz-connector-config {
+  gap: 0.75rem;
+  padding: 0.8rem;
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--accent) 3%, var(--surface));
+  animation: gz-npd-card-in 160ms ease-out;
+}
+
+.gz-connector-config-heading {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.gz-connector-config-mark {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 2.3rem;
+  height: 2.3rem;
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--accent) 13%, var(--panel));
+  color: var(--accent);
+  overflow: hidden;
+}
+
+.gz-connector-config-mark img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.gz-connector-config-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: 0.65rem 0.8rem;
+}
+
+.gz-connector-config-fields > label {
+  min-width: 0;
+}
+
+.gz-connector-oauth-note {
+  align-self: center;
+  margin: 0;
+}
+
+.gz-connector-picker-actions {
+  padding-top: 0.75rem;
+  border-top: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
+}
+
+@media (max-width: 700px) {
+  .gz-connector-grid,
+  .gz-connector-config-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .gz-connector-picker-heading {
+    align-items: center;
+  }
+}
+
 .gz-github-repo-combobox {
   position: relative;
 }
@@ -16470,6 +17374,13 @@ a.license-button:hover {
   font-size: 0.85rem;
 }
 
+.terminal-group-output {
+  padding: 0.65rem 0.75rem 0.75rem;
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--surface) 45%, transparent);
+}
+
 .terminal-group-header {
   display: flex;
   align-items: center;
@@ -16495,13 +17406,13 @@ a.license-button:hover {
 }
 
 .terminal-exit-ok {
-  background: rgba(64, 160, 64, 0.18);
-  color: rgba(150, 220, 150, 1);
+  background: var(--success-bg);
+  color: color-mix(in srgb, var(--success) 55%, var(--text));
 }
 
 .terminal-exit-fail {
-  background: rgba(200, 80, 80, 0.18);
-  color: rgba(240, 160, 160, 1);
+  background: var(--danger-bg);
+  color: color-mix(in srgb, var(--danger) 55%, var(--text));
 }
 
 .terminal-truncated-pill {
@@ -16651,17 +17562,45 @@ a.license-button:hover {
   font-style: italic;
 }
 
+.terminal-output-viewport {
+  margin: 0;
+  border-radius: 0.4rem;
+  box-sizing: border-box;
+  max-width: 100%;
+  min-width: 0;
+  /* Let ordinary command results become part of the timeline instead of
+   * nesting a second vertical scroller after only a couple dozen lines.
+   * Truly enormous output still caps here, while spatial/wide terminal
+   * layouts retain their independent horizontal scrollbar. */
+  max-height: 96rem;
+  overflow-x: auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.terminal-output-viewport:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 60%, transparent);
+  outline-offset: 2px;
+}
+
 .terminal-output-body {
   margin: 0;
   padding: 0.5rem 0.75rem;
   background: var(--color-surface-2, #1c1c1c);
-  border-radius: 0.4rem;
   font-family: inherit;
   font-size: 0.8rem;
-  white-space: pre-wrap;
-  word-break: break-word;
-  max-height: 24rem;
-  overflow-y: auto;
+  line-height: 1.35;
+  tab-size: 4;
+  /* Terminal layout is spatial: tables, progress meters, and TUI-like
+   * output use columns deliberately. Preserve every line exactly and keep
+   * overflow inside its viewport instead of reflowing it as chat prose. */
+  white-space: pre;
+  overflow-wrap: normal;
+  word-break: normal;
+  box-sizing: border-box;
+  width: max-content;
+  min-width: 100%;
 }
 
 /* Light-mode terminal surfaces — `--color-*` tokens above are undefined
@@ -16938,18 +17877,26 @@ a.license-button:hover {
   font-size: 0.78rem;
 }
 
-/* Composer mode toggle (AI chat ⇄ Terminal). Rendered as a
- * vertical strip of small tabs attached to the RIGHT edge of the
- * fixed-height input band, below the Send / terminal toolbar. The
- * active tab visually "connects" to the composer via overlapping
- * left border. Labels are a monospace `@` (chat) and `>` (terminal)
- * so the toggle reads as the same symbols the user types to escape
- * between modes (`@florian …` → chat, `> ls` → terminal).
+/* Composer mode toggle (AI chat ⇄ Terminal). A quiet one-pixel frame owns
+ * the complete compose surface; the active `@` / `>` tab cuts through its
+ * right edge to read as part of that frame. The glyphs mirror the escape
+ * syntax users can type (`@florian …` → chat, `> ls` → terminal), while
  * aria-label carries the longer human text. */
 .project-chat-compose-shell {
   display: flex;
   align-items: stretch;
   gap: 0;
+  /* Follow the roster + timeline content gutter instead of letting the
+   * composer frame sit flush against the project pane's left edge. Keep the
+   * right edge untouched so the attached @/> tabs retain their alignment. */
+  margin-left: 0.75rem;
+  /* Keep the framed control from sitting directly on the project pane's
+   * bottom edge. This belongs to the shell so it clears both the composer
+   * and its attached chat/terminal tabs without adding space inside them. */
+  padding-bottom: 4px;
+  --compose-frame-bg: color-mix(in srgb, var(--panel) 88%, var(--surface));
+  --compose-frame-border: color-mix(in srgb, var(--accent) 62%, var(--border));
+  --compose-toolbar-bg: color-mix(in srgb, var(--panel) 97%, var(--chat-bubble-bg));
   /* Vertical offset from the compose-main top down to the context-dropdown
    * row (chat: the session picker; terminal: the `/` folder picker). In
    * chat mode this space is occupied by the "To:" pill; terminal has no
@@ -16965,6 +17912,14 @@ a.license-button:hover {
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
+  border: 1px solid var(--compose-frame-border);
+  border-radius: var(--radius-md);
+  background: var(--compose-frame-bg);
+  /* Sit above inactive mode tabs in their 1px overlap so those tabs read as
+   * tucked behind the composer instead of drawing a stray left border over
+   * its edge. The active tab is raised back above this surface below. */
+  position: relative;
+  z-index: 1;
   /* Chat mode is intentionally floorless: the composer sizes to its
    * content (TO row + thread picker + toolbar + Squisq editor) so the
    * timeline above claims ALL remaining height. A fixed floor here used
@@ -17056,7 +18011,10 @@ a.license-button:hover {
    * panel" look. */
   margin-left: -1px;
   position: relative;
-  z-index: 1;
+  /* Keep this wrapper out of its own stacking context: the active button
+   * needs to rise above compose-main while its inactive sibling stays
+   * underneath it. */
+  z-index: auto;
 }
 
 /* Right edge of the composer is flush so the tabs attached on
@@ -17086,35 +18044,36 @@ a.license-button:hover {
   background: transparent;
 }
 
-/* `.chat-composer` ships with 4px of right padding that lives
- * OUTSIDE Squisq's editor border. With the tabs glued to the
- * right edge of the compose-main column, that padding shows up
- * as a visible gap between the editor and the tabs. Zero it out
- * in this surface only — other places that embed the chat
- * composer keep the breathing room. */
+/* Match the terminal rail to the restrained chat toolbar so switching modes
+ * changes the toolset, not the visual weight of the compose frame. */
+.project-chat-compose-main .terminal-composer-toolbar {
+  background: var(--compose-toolbar-bg) !important;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
+}
+
+/* `.chat-composer` ships with 4px of horizontal padding outside Squisq.
+ * Remove it here so the editor reaches the compose frame; the toolbar header
+ * then owns the precise one-pixel inset above. Other chat embeds keep their
+ * usual breathing room. */
 .project-chat-compose-main .chat-composer {
-  padding-right: 0;
+  padding-inline: 0;
 }
 
 .project-chat-compose-toggle {
   display: inline-flex;
   flex-direction: column;
   gap: 2px;
-  /* ChatComposer keeps a 4px breathing-space below Squisq's visible editor.
-   * Mirror that inset here so the tabs meet the editor's bottom edge rather
-   * than the outer composer wrapper. Terminal has no such inset. */
-  margin-bottom: 0.25rem;
-}
-
-.project-chat-compose-mode-bar-terminal .project-chat-compose-toggle {
-  margin-bottom: 0;
+  /* The tabs belong to the outer one-pixel frame, not the nested editor
+   * surface. Lift the stack clear of the composer's rounded bottom corner
+   * while preserving its one-pixel attachment to the right edge. */
+  margin-bottom: 8px;
 }
 
 .project-chat-compose-toggle button {
-  background: var(--color-surface-2, #2a2a2a);
-  color: var(--color-muted, #888);
-  border: 1px solid var(--color-border, #333);
-  border-radius: 0 0.35rem 0.35rem 0;
+  background: var(--surface);
+  color: var(--text-muted);
+  border: 1px solid var(--compose-frame-border);
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
   padding: 0.35rem 0.4rem;
   cursor: pointer;
   font-size: 0.85rem;
@@ -17126,55 +18085,20 @@ a.license-button:hover {
 }
 
 .project-chat-compose-toggle button.active {
-  background: var(--color-surface, #1a1a1a);
-  color: var(--color-fg, #ddd);
+  background: var(--compose-frame-bg);
+  color: var(--text);
+  position: relative;
+  z-index: 2;
   /* Left border of the active tab matches the composer's
    * background, hiding the composer's right border directly behind
    * it so the tab visually merges with the panel. */
-  border-left-color: var(--color-surface, #1a1a1a);
+  border-left-color: var(--compose-frame-bg);
   font-weight: 600;
 }
 
 .project-chat-compose-toggle button:not(.active):hover {
-  background: var(--color-surface, #1a1a1a);
-  color: var(--color-fg, #ddd);
-}
-
-/* Light-mode override — the `--color-*` tokens above are never
- * defined, so the dark fallbacks ship in both themes. In light mode
- * that paints the @/> tabs as dark-gray slabs against the cream
- * composer; warm them up to match the rest of the chat chrome. The
- * active tab uses the same `#f6f1e7` surface as the WYSIWYG editor
- * so it visually merges with the panel it's anchored to. */
-[data-theme="light"] .project-chat-compose-toggle button {
-  background: var(--surface, #ddd3bd);
-  color: var(--text-muted, #666);
-  border-color: rgba(176, 114, 76, 0.32);
-}
-[data-theme="light"] .project-chat-compose-toggle button.active {
-  background: #f6f1e7;
-  color: var(--text, #1c1c1c);
-  border-left-color: #f6f1e7;
-}
-[data-theme="light"] .project-chat-compose-toggle button:not(.active):hover {
-  background: #ece3cf;
-  color: var(--text, #1c1c1c);
-}
-@media (prefers-color-scheme: light) {
-  :root:not([data-theme="dark"]) .project-chat-compose-toggle button {
-    background: var(--surface, #ddd3bd);
-    color: var(--text-muted, #666);
-    border-color: rgba(176, 114, 76, 0.32);
-  }
-  :root:not([data-theme="dark"]) .project-chat-compose-toggle button.active {
-    background: #f6f1e7;
-    color: var(--text, #1c1c1c);
-    border-left-color: #f6f1e7;
-  }
-  :root:not([data-theme="dark"]) .project-chat-compose-toggle button:not(.active):hover {
-    background: #ece3cf;
-    color: var(--text, #1c1c1c);
-  }
+  background: color-mix(in srgb, var(--surface) 76%, var(--compose-frame-bg));
+  color: var(--text);
 }
 
 /* Terminal composer + folder tree (per-project terminal mode) */
@@ -17190,9 +18114,10 @@ a.license-button:hover {
 
 /* Toolbar pinned to the top of the terminal composer. Mirrors the squisq
  * editor's top toolbar (above the chat editor) so the terminal surface
- * reads as a symmetric sibling: the same ~32px height and the exact same
- * translucent wash `.squisq-toolbar` carries in gezel per theme — warm
- * tint in dark, sage in light (see the `.squisq-toolbar` overrides above).
+ * reads as a symmetric sibling: the same ~32px height and the same wash
+ * `.squisq-toolbar` carries in gezel per theme — warm tint in dark, sage in
+ * light (see the `.squisq-toolbar` overrides above, and the light-theme rule
+ * below for why that one can't just reuse the same rgba).
  * Holds the command-gallery button; more affordances (working folder, …)
  * can land alongside it. */
 .terminal-composer-toolbar {
@@ -17258,12 +18183,17 @@ a.license-button:hover {
   flex-direction: column;
   overflow: hidden;
 }
+/* The same sage wash `.squisq-toolbar` carries — but that toolbar composites
+ * over squisq's opaque white shell (`.squisq-editor-shell { background: #fff }`)
+ * while this one sits on a transparent composer over parchment, so the identical
+ * rgba rendered as a visibly darker, more saturated green. Lay the wash over the
+ * same white base so both toolbars land on one colour. */
 [data-theme="light"] .terminal-composer-toolbar {
-  background: rgba(88, 138, 63, 0.22);
+  background: linear-gradient(rgba(88, 138, 63, 0.22), rgba(88, 138, 63, 0.22)) #fff;
 }
 @media (prefers-color-scheme: light) {
   :root:not([data-theme="dark"]) .terminal-composer-toolbar {
-    background: rgba(88, 138, 63, 0.22);
+    background: linear-gradient(rgba(88, 138, 63, 0.22), rgba(88, 138, 63, 0.22)) #fff;
   }
 }
 
@@ -17372,7 +18302,7 @@ a.license-button:hover {
   color: var(--color-muted, #777);
 }
 
-/* Single-line picker: `Folder: [current ▾] ⟳`. The bordered box +
+/* Single-line picker: `Folder: [current + chevron] ⟳`. The bordered box +
  * scroll behavior that used to live on the container now belongs
  * to .folder-tree-popup, which only mounts while picking. */
 .folder-tree-switcher {
@@ -17411,22 +18341,21 @@ a.license-button:hover {
 
 .folder-tree-trigger-caret {
   color: var(--color-muted, #777);
-  font-size: 0.6rem;
 }
 
 /* Wide-row treatment when the picker lives at the top of the
  * per-project terminal composer. Mirrors `.gezel-chat-session-header`
  * (the thread-picker row above the chat editor) so the chat /
  * terminal modes have visually parallel "selector" rows.
- *  - subtle top border + lighter background, matching session row
+ *  - subtle bottom border + lighter background, matching session row
  *  - "Folder:" label hidden (the wide trigger carries enough context)
  *  - trigger stretches to fill the row, caret right-aligned */
 .project-chat-compose-main .folder-tree-switcher {
   /* Use the same inset as `.gezel-chat-session-header`: the `/` trigger gets
    * the same breathing room as the thread dropdown, and the equal block
    * padding keeps both context rows the same height across a mode switch. */
-  padding: 0.4rem 0.6rem;
-  border-top: 1px solid var(--color-border, #333);
+  padding: 0.4rem 0.6rem 0.4rem 0.25rem;
+  border-bottom: 1px solid var(--color-border, #333);
   background: rgba(255, 255, 255, 0.02);
   font-size: 0.8rem;
 }
@@ -18336,10 +19265,170 @@ a.license-button:hover {
   padding: 1.5rem;
 }
 
+/* Code review sub-tab: kickoff cards + running status + history on the
+   left, the finished report on the right. Same two-pane grid family as
+   the Changes layout. */
+.gh-review-layout {
+  display: grid;
+  grid-template-columns: minmax(280px, 340px) 1fr;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  align-items: start;
+  min-height: 0;
+  flex: 1;
+}
+
+.gh-review-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-height: 0;
+}
+
+.gh-review-kickoff-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.gh-review-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  padding: 0.6rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.gh-review-card p {
+  margin: 0;
+}
+
+.gh-review-status-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  padding: 0.6rem 0.75rem;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.gh-review-status-running {
+  border-color: var(--accent);
+}
+
+.gh-review-status-attention {
+  border-color: var(--warning);
+  background: var(--warning-bg);
+}
+
+.gh-review-status-main {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  flex: 1;
+  min-width: 0;
+}
+
+.gh-review-stop {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  flex: 0 0 auto;
+}
+
+.gh-review-stop:hover:not(:disabled) {
+  color: var(--danger);
+}
+
+.gh-review-history {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.gh-review-history-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  text-align: left;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  padding: 0.4rem 0.6rem;
+}
+
+.gh-review-history-item.is-selected {
+  background: var(--surface);
+}
+
+.gh-review-history-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gh-review-outcome-chip {
+  flex: 0 0 auto;
+  padding: 0.05rem 0.4rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.68rem;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  background: var(--surface);
+}
+
+.gh-review-outcome-complete {
+  color: var(--diff-add);
+  background: var(--diff-add-bg);
+  border-color: transparent;
+}
+
+.gh-review-outcome-error {
+  color: var(--danger);
+  background: var(--danger-bg);
+  border-color: transparent;
+}
+
+.gh-review-report {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  padding: 0.75rem;
+  min-height: 12rem;
+  min-width: 0;
+  overflow-y: auto;
+}
+
+.gh-review-report-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.gh-review-rail-button {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+}
+
+.gh-review-rail-button:hover:not(:disabled) {
+  color: var(--accent);
+}
+
 /* Compact widths: stack the two-pane layouts. */
 @media (max-width: 860px) {
   .gh-changes-layout,
-  .gh-timeline-layout {
+  .gh-timeline-layout,
+  .gh-review-layout {
     grid-template-columns: 1fr;
     flex: 0 0 auto;
   }
@@ -19668,6 +20757,9 @@ a.license-button:hover {
   flex: 0 0 auto;
 }
 .filemap-fileview-connected-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   border: 1px solid var(--border, rgba(127, 127, 127, 0.3));
   background: none;
   color: inherit;

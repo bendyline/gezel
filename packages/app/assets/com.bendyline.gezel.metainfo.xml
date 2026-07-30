@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>com.bendyline.gezel</id>
+  <metadata_license>MIT</metadata_license>
+  <project_license>MIT</project_license>
+  <name>Gezel</name>
+  <summary>Your crew of AI companions</summary>
+  <description>
+    <p>
+      Build a crew of named AI companions with distinct roles and tools, then
+      put them to work on your projects.
+    </p>
+    <p>
+      Gezel stores their conversations, memory, and work on your computer as
+      ordinary files.
+    </p>
+  </description>
+  <launchable type="desktop-id">gezel.desktop</launchable>
+  <provides>
+    <binary>gezel</binary>
+  </provides>
+  <url type="homepage">https://github.com/bendyline/gezel</url>
+  <url type="bugtracker">https://github.com/bendyline/gezel/issues</url>
+  <developer id="com.bendyline">
+    <name>Bendyline LLC</name>
+  </developer>
+  <categories>
+    <category>Office</category>
+  </categories>
+  <content_rating type="oars-1.1" />
+</component>

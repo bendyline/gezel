@@ -1,4 +1,4 @@
-import type { GithubWorkingChange } from '@bendyline/gezel';
+import type { GitWorkingChange } from '@bendyline/gezel';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../../api.js';
 import { GIT_COPY, autoSaveMessage } from './gitCopy.js';
@@ -16,7 +16,7 @@ const ALSO_SYNC_KEY = 'gezel:git-also-sync';
 
 interface Props {
   projectId: string;
-  changes: GithubWorkingChange[];
+  changes: GitWorkingChange[];
   busy: boolean;
   onSave: (message: string, alsoSync: boolean) => void | Promise<void>;
 }
@@ -49,7 +49,7 @@ export function SaveChangesBox({ projectId, changes, busy, onSave }: Props) {
       const seq = ++suggestSeqRef.current;
       setSuggesting(true);
       try {
-        const res = await api.suggestProjectGithubMessage(projectId);
+        const res = await api.suggestProjectGitMessage(projectId);
         if (seq !== suggestSeqRef.current) return; // stale response
         if (!force && userEditedRef.current) return; // user typed meanwhile
         if (res.message) {

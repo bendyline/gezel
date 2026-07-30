@@ -3773,10 +3773,7 @@ server.tool(
       .string()
       .describe('Craftbook id from list_craftbooks (e.g. "pull-request-review", "ship").'),
     project: z.string().optional().describe('Project id or name. Defaults to the current project.'),
-    title: z
-      .string()
-      .optional()
-      .describe('Optional task title. Defaults to the craftbook name + timestamp.'),
+    title: z.string().optional().describe('Optional task title. Defaults to the craftbook name.'),
     description: z
       .string()
       .optional()
@@ -3801,8 +3798,11 @@ server.tool(
           ],
         };
       }
+      const craftbookName =
+        projectCraftbooks.items.find((item) => item.manifest.id === craftbookId)?.manifest.name ??
+        craftbookId;
       const created = await api.createTask(resolvedProject, {
-        title: title ?? `${craftbookId} — ${new Date().toISOString().slice(0, 16)}`,
+        title: title ?? craftbookName,
         description: description ?? `Run the ${craftbookId} craftbook against this project.`,
         craftbookId,
         ...(version ? { craftbookVersion: version } : {}),
@@ -9350,7 +9350,7 @@ server.tool(
   async ({ project }) => {
     const resolved = project ? await resolveProjectId(project) : projectId;
     try {
-      const res = await api.listProjectGithubPulls(resolved);
+      const res = await api.listProjectGitHubPulls(resolved);
       if (!res.pulls.length) {
         return { content: [{ type: 'text' as const, text: 'No open pull requests.' }] };
       }
@@ -9379,7 +9379,7 @@ server.tool(
   async ({ project, number }) => {
     const resolved = project ? await resolveProjectId(project) : projectId;
     try {
-      const pr = await api.getProjectGithubPull(resolved, number);
+      const pr = await api.getProjectGitHubPull(resolved, number);
       const lines = [
         `#${pr.number} — ${pr.title}`,
         `Author: ${pr.author}`,
@@ -9411,7 +9411,7 @@ server.tool(
   async ({ project, number }) => {
     const resolved = project ? await resolveProjectId(project) : projectId;
     try {
-      const res = await api.listProjectGithubPullFiles(resolved, number);
+      const res = await api.listProjectGitHubPullFiles(resolved, number);
       if (!res.files.length) {
         return { content: [{ type: 'text' as const, text: 'No file changes in this PR.' }] };
       }
@@ -9440,7 +9440,7 @@ server.tool(
   async ({ project, number }) => {
     const resolved = project ? await resolveProjectId(project) : projectId;
     try {
-      const res = await api.getProjectGithubPullDiff(resolved, number);
+      const res = await api.getProjectGitHubPullDiff(resolved, number);
       return { content: [{ type: 'text' as const, text: res.diff || '(empty diff)' }] };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -9462,7 +9462,7 @@ server.tool(
   async ({ project, number }) => {
     const resolved = project ? await resolveProjectId(project) : projectId;
     try {
-      const res = await api.listProjectGithubPullComments(resolved, number);
+      const res = await api.listProjectGitHubPullComments(resolved, number);
       if (!res.comments.length) {
         return { content: [{ type: 'text' as const, text: 'No comments on this PR.' }] };
       }
@@ -9492,7 +9492,7 @@ server.tool(
   async ({ project, number, body }) => {
     const resolved = project ? await resolveProjectId(project) : projectId;
     try {
-      const res = await api.createProjectGithubPullComment(resolved, number, body);
+      const res = await api.createProjectGitHubPullComment(resolved, number, body);
       return {
         content: [{ type: 'text' as const, text: `Posted comment ${res.id} — ${res.url}` }],
       };
@@ -9508,7 +9508,7 @@ server.tool(
 
 server.tool(
   'github_pr_create',
-  'Open a new pull request. `head` is the source branch (or `owner:branch` for cross-fork PRs); `base` is the target branch. Returns the new PR number + URL. Push the branch with `commitProjectGithub` + `pushProjectGithub` first.',
+  'Open a new pull request. `head` is the source branch (or `owner:branch` for cross-fork PRs); `base` is the target branch. Returns the new PR number + URL. Push the branch with `commitProjectGit` + `pushProjectGit` first.',
   {
     project: z.string().optional(),
     title: z.string().min(1),
@@ -9520,7 +9520,7 @@ server.tool(
   async ({ project, title, head, base, body, draft }) => {
     const resolved = project ? await resolveProjectId(project) : projectId;
     try {
-      const res = await api.createProjectGithubPullRequest(resolved, {
+      const res = await api.createProjectGitHubPullRequest(resolved, {
         title,
         head,
         base,
@@ -9551,7 +9551,7 @@ server.tool(
   async ({ project, branch, limit }) => {
     const resolved = project ? await resolveProjectId(project) : projectId;
     try {
-      const res = await api.listProjectGithubWorkflowRuns(resolved, branch, limit);
+      const res = await api.listProjectGitHubWorkflowRuns(resolved, branch, limit);
       if (!res.runs.length) {
         return {
           content: [{ type: 'text' as const, text: `No workflow runs for branch ${branch}.` }],
@@ -9582,7 +9582,7 @@ server.tool(
   async ({ project, ref }) => {
     const resolved = project ? await resolveProjectId(project) : projectId;
     try {
-      const res = await api.getProjectGithubChecks(resolved, ref);
+      const res = await api.getProjectGitHubChecks(resolved, ref);
       const header = `State: ${res.state} (${res.checks.length} check(s))`;
       if (!res.checks.length) {
         return {

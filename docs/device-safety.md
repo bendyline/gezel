@@ -51,10 +51,17 @@ Configure `deviceSafety` in `config.json` or through `PUT /api/config`:
 
 - `off`: no probes and no admission control.
 - `observe` (product default): surface health and warnings without delaying
-  work.
+  work below the hard cutoff.
 - `guard`: pause new GPU work when thresholds are exceeded. Once cooling
   begins, the lower resume threshold must pass for consecutive samples before
   work continues.
+
+Regardless of whether the user selects Observe or Manage (`guard` internally),
+Gezel does not admit new GPU work while a reported temperature is above
+95 degrees C. Observe resumes as soon as all reported temperatures are at or
+below 95 degrees C; Manage continues to use the lower configured resume
+threshold and consecutive healthy samples. Existing in-flight work is not
+interrupted.
 
 `onTelemetryFailure: "allow"` keeps unsupported consumer devices usable.
 Unattended installations that require fail-closed behavior can select `block`.
@@ -92,6 +99,7 @@ AMD cooldown.
 The local-engine pill receives the latest authenticated health snapshot through
 `GET /api/queues` on its existing poll cadence. It shows:
 
+- an Observe/Manage control that persists the shared machine-health policy;
 - temperature when available;
 - warm, cooling, or safety-paused state;
 - thermal margin in the details popover;

@@ -310,6 +310,27 @@ function FullApp() {
     return () => window.removeEventListener('gezel:document-deleted', onDeleted);
   }, [commitSelection]);
 
+  // Document rename → keep a directly-open document (or a document inside a
+  // renamed folder) attached to its new path instead of leaving a stale tab.
+  useEffect(() => {
+    const onRenamed = (e: Event) => {
+      const detail = (e as CustomEvent<{ fromPath?: string; toPath?: string }>).detail;
+      if (!detail?.fromPath || !detail.toPath) return;
+      const sel = selectionRef.current;
+      if (
+        sel?.kind === 'document' &&
+        (sel.path === detail.fromPath || sel.path.startsWith(`${detail.fromPath}/`))
+      ) {
+        commitSelection({
+          ...sel,
+          path: `${detail.toPath}${sel.path.slice(detail.fromPath.length)}`,
+        });
+      }
+    };
+    window.addEventListener('gezel:document-renamed', onRenamed);
+    return () => window.removeEventListener('gezel:document-renamed', onRenamed);
+  }, [commitSelection]);
+
   // Auto-close the Questions overlay once the queue drains. Esc also
   // closes it so the user can dismiss without reaching for the mouse.
   useEffect(() => {

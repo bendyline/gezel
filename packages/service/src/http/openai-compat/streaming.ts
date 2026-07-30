@@ -114,6 +114,18 @@ export interface SSEWriter {
   writeSSE(message: { data: string; event?: string }): Promise<void>;
 }
 
+export interface RunStreamingOpts {
+  attachments?: ImageAttachment[];
+  /**
+   * OpenAI `stream_options.include_usage` semantics. When true, every
+   * chunk carries `usage: null` and a dedicated final chunk (empty
+   * `choices`) carries the real usage right before `[DONE]`. When
+   * false/absent, no usage field appears anywhere in the stream —
+   * matching OpenAI's default.
+   */
+  includeUsage?: boolean;
+}
+
 /**
  * Drive a streaming chat completion. Pipes `LLMSession.onDelta` deltas
  * out as OpenAI-shaped chunks, terminates with a final `finish_reason`
@@ -134,10 +146,15 @@ export async function runStreaming(
   echoModel: string,
   sink: SSEWriter,
   nowSeconds: () => number,
-  attachments?: ImageAttachment[],
+  opts: RunStreamingOpts = {},
 ): Promise<void> {
+  const { attachments, includeUsage = false } = opts;
   const id = `chatcmpl-${randomUUID()}`;
   const created = nowSeconds();
+  // Spread onto every non-final chunk when the caller opted into usage
+  // reporting — OpenAI's contract is `usage: null` on all chunks except
+  // the dedicated final usage chunk.
+  const nullUsage = includeUsage ? { usage: null } : {};
   // Wrapped so TypeScript's control-flow narrowing doesn't infer
   // `usage` as `never` after the post-callback null check — closures
   // that assign to a captured variable confuse the analyzer.
@@ -165,6 +182,7 @@ export async function runStreaming(
               finish_reason: null,
             },
           ],
+          ...nullUsage,
         }),
       })
       .catch(() => {
@@ -188,6 +206,7 @@ export async function runStreaming(
             finish_reason: null,
           },
         ],
+        ...nullUsage,
       }),
     });
 
@@ -221,11 +240,12 @@ export async function runStreaming(
               finish_reason: null,
             },
           ],
+          ...nullUsage,
         }),
       });
     }
 
-    // Final chunk: finish_reason=stop (or tool_calls), plus usage when available.
+    // Final content chunk: finish_reason=stop (or tool_calls).
     await sink.writeSSE({
       data: JSON.stringify({
         id,
@@ -239,17 +259,29 @@ export async function runStreaming(
             finish_reason: hasToolCalls ? 'tool_calls' : 'stop',
           },
         ],
-        ...(usageRef.value
-          ? {
-              usage: {
-                prompt_tokens: usageRef.value.inputTokens,
-                completion_tokens: usageRef.value.outputTokens,
-                total_tokens: usageRef.value.inputTokens + usageRef.value.outputTokens,
-              },
-            }
-          : {}),
+        ...nullUsage,
       }),
     });
+    if (includeUsage) {
+      // Dedicated usage chunk per OpenAI's stream_options contract:
+      // empty choices, real usage, right before [DONE]. Zero-fallback
+      // when the provider never emitted usage (some local engines on
+      // short prompts) — the field must be present once requested.
+      await sink.writeSSE({
+        data: JSON.stringify({
+          id,
+          object: 'chat.completion.chunk',
+          created,
+          model: echoModel,
+          choices: [],
+          usage: {
+            prompt_tokens: usageRef.value?.inputTokens ?? 0,
+            completion_tokens: usageRef.value?.outputTokens ?? 0,
+            total_tokens: (usageRef.value?.inputTokens ?? 0) + (usageRef.value?.outputTokens ?? 0),
+          },
+        }),
+      });
+    }
     await sink.writeSSE({ data: '[DONE]' });
   } finally {
     unsubDelta();

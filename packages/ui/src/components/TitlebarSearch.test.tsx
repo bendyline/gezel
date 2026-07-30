@@ -23,6 +23,7 @@ const RESULTS: UnifiedSearchResult[] = [
 ];
 
 beforeEach(() => {
+  window.__GEZEL__ = { ...window.__GEZEL__!, platform: 'win32' };
   vi.mocked(api.search).mockResolvedValue({ results: RESULTS, truncated: false });
   vi.mocked(api.quickOpen).mockResolvedValue({ results: RESULTS, truncated: false });
 });
@@ -42,6 +43,16 @@ async function typeQuery(value: string) {
 }
 
 describe('TitlebarSearch', () => {
+  it('uses the native platform modifier in the shortcut hint', () => {
+    const { unmount } = render(<TitlebarSearch />);
+    expect(screen.getByPlaceholderText(/Ctrl\+P$/)).toBeInTheDocument();
+    unmount();
+
+    window.__GEZEL__ = { ...window.__GEZEL__!, platform: 'darwin' };
+    render(<TitlebarSearch />);
+    expect(screen.getByPlaceholderText(/⌘P$/)).toBeInTheDocument();
+  });
+
   it('renders grouped results after typing', async () => {
     render(<TitlebarSearch />);
     await typeQuery('space');

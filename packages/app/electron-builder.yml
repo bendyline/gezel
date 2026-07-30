@@ -183,16 +183,38 @@ win:
       arch:
         - x64
   icon: assets/icon.ico
+  # Also decides the install folder and the uninstaller filename, which is why
+  # they are lowercase: electron-builder sets AppInfo.productFilename from
+  # `executableName` when present (falling back to productName), and NSIS uses
+  # that one value for the exe, `$INSTDIR` (C:\Program Files\gezel), and
+  # "Uninstall gezel.exe". There is no separate install-directory option, so
+  # "Gezel\ containing gezel.exe" is not expressible — set this to `Gezel` and
+  # the binary becomes Gezel.exe too. Left lowercase deliberately; note that
+  # NTFS preserves an existing folder's case, so flipping it would only affect
+  # machines installing for the first time.
   executableName: gezel
   # Signing options moved under signtoolOptions in electron-builder 26.
+  #
+  # `publisherName` must match the CN on the Authenticode certificate exactly —
+  # electron-updater compares it against the downloaded installer's signature
+  # before running it, so a mismatch silently breaks auto-update.
+  #
+  # The publisher shown in Add/Remove Programs is a DIFFERENT value:
+  # electron-builder derives it from `author.name` in packages/app/package.json
+  # (AppInfo.companyName), not from this field. Both now read "Bendyline LLC";
+  # keep them in step, and note that author.name also becomes the Vendor and
+  # Maintainer on the Linux .deb/.rpm.
   signtoolOptions:
     publisherName: 'Bendyline LLC'
     sign: scripts/sign.cjs
     signingHashAlgorithms:
       - sha256
   # The first-party service host sits next to the Electron exe in
-  # $INSTDIR (C:\Program Files\Gezel\gezel-service-host.exe) so the NSIS
-  # hooks can register it as GezelService's ImagePath. It is built by
+  # $INSTDIR (C:\Program Files\gezel\gezel-service-host.exe) so the NSIS
+  # hooks can register it as GezelService's ImagePath. The install folder is
+  # lowercase because electron-builder derives it from `executableName` below
+  # (AppInfo.productFilename), not from productName — see `executableName`.
+  # It is built by
   # the native pipeline (native/helpers/service-host/), arrives in
   # native-bin/ born-signed from the native release, and the afterPack
   # sweep leaves validly-signed files untouched — installer bytes stay
@@ -333,8 +355,8 @@ linux:
         - arm64
   icon: assets/icon.png
   category: Office
-  synopsis: Local-first team of AI gezels
-  description: Assemble a crew of named AI agents that live on your disk.
+  synopsis: Your crew of AI companions
+  description: Build a crew of named AI companions with distinct roles and tools, then put them to work on your projects. Gezel stores their conversations, memory, and work on your computer as ordinary files.
   # The systemd unit file ships into /opt/Gezel/gezeld.service so the
   # afterInstall script can copy it into /etc/systemd/system/ as root.
   extraFiles:
@@ -344,6 +366,12 @@ linux:
 deb:
   afterInstall: installer/linux/after-install.sh
   afterRemove: installer/linux/after-remove.sh
+  # Ubuntu App Center does not use the non-standard `License` field that fpm
+  # writes into the Debian control record. It reads AppStream metadata instead.
+  # Install the upstream metainfo file at its standard system location so the
+  # sideload screen can identify Gezel's project license as MIT.
+  fpm:
+    - assets/com.bendyline.gezel.metainfo.xml=/usr/share/metainfo/com.bendyline.gezel.metainfo.xml
   # Depends on systemd being present — virtually all modern desktop
   # distros use it. List explicitly so package managers refuse to
   # install on init-system-other systems instead of silently failing.
@@ -362,6 +390,9 @@ deb:
 rpm:
   afterInstall: installer/linux/after-install.sh
   afterRemove: installer/linux/after-remove.sh
+  # Keep both native Linux package formats discoverable by AppStream clients.
+  fpm:
+    - assets/com.bendyline.gezel.metainfo.xml=/usr/share/metainfo/com.bendyline.gezel.metainfo.xml
   depends:
     - libnotify
     # Fedora/RHEL package and RPM provide name. `libgtk-3-0` is Debian-only.

@@ -1,26 +1,19 @@
 /**
- * Toolbar-right slot content for `EditorShell`.
+ * DocBlocks-style Export control for Squisq's EditorShell toolbar.
  *
- * Renders a "…" overflow menu containing:
- *   - Quick-export action (only when a previous export's options are
- *     persisted) — reruns the last format without showing the dialog.
- *   - Export… — opens {@link ExportDialog} for format + options.
- *   - Export Video… — opens squisq's {@link VideoExportModal}.
- *
- * Must be rendered inside `<EditorProvider>` so `useEditorContext()`
- * can read the live markdown source. Mirrors docblocks's
- * `ExportToolbarControls` 1:1.
+ * Gezel owns host concerns (durable quick-export preferences, local document
+ * storage, and native MP4/GIF routing). Squisq owns document conversion and
+ * the daemon-side rendered-media pipeline.
  */
 
+import type { DocumentMediaExportSource } from '@bendyline/gezel';
 import { useEditorContext } from '@bendyline/squisq-editor-react';
-import { PLAYER_BUNDLE } from '@bendyline/squisq-react/standalone-source';
-import { VideoExportModal } from '@bendyline/squisq-video-react';
-import { markdownToDoc } from '@bendyline/squisq/doc';
-import { parseMarkdown } from '@bendyline/squisq/markdown';
 import { getThemeSummaries } from '@bendyline/squisq/schemas';
 import type { ContentContainer } from '@bendyline/squisq/storage';
 import { getTransformStyleSummaries } from '@bendyline/squisq/transform';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { api } from '../../api.js';
+import { Dialog, DropdownMenu } from '../../primitives/index.js';
 import { ExportDialog } from './ExportDialog.js';
 import type { ExportOptions } from './export-options.js';
 import {
@@ -28,16 +21,22 @@ import {
   FORMAT_EXTENSIONS,
   loadLastExportOptions,
   saveExportOptions,
+  syncLastExportOptions,
 } from './export-options.js';
-import { runExport } from './run-export.js';
+import { downloadBlob, runExport } from './run-export.js';
 
 export interface ExportToolbarControlsProps {
-  /** Path of the currently-open file — drives the download filename. */
+  /** Path of the currently-open file — drives the document download filename. */
   selectedFile: string | null;
-  /** Container for resolving local image references during export. */
+  /** Container for local images, media, and narration timing sidecars. */
   mediaContainer?: ContentContainer | null;
-  /** Hide the Video export entry. Set when the player-bundle path can't reach video infra. */
-  hideVideo?: boolean;
+  /** Store scope the daemon uses to resolve MP4/GIF media sidecars. */
+  mediaSource?: DocumentMediaExportSource;
+}
+
+function exportErrorMessage(caught: unknown): string {
+  const detail = caught instanceof Error ? caught.message.trim() : '';
+  return detail ? `Export failed: ${detail}` : 'Export failed. The document was not exported.';
 }
 
 function quickLabel(opts: ExportOptions): string {
@@ -48,70 +47,116 @@ function quickLabel(opts: ExportOptions): string {
     parts.push('rendered');
   }
   if (opts.themeId !== 'standard' && (opts.format !== 'html' || opts.htmlStyle === 'rendered')) {
-    const theme = getThemeSummaries().find((t) => t.id === opts.themeId);
+    const theme = getThemeSummaries().find((candidate) => candidate.id === opts.themeId);
     if (theme) parts.push(theme.name);
   }
   if (opts.format === 'pptx' && opts.transformStyle) {
-    const transform = getTransformStyleSummaries().find((t) => t.id === opts.transformStyle);
+    const transform = getTransformStyleSummaries().find(
+      (candidate) => candidate.id === opts.transformStyle,
+    );
     if (transform) parts.push(transform.name);
   }
-  if (parts.length > 0) {
-    return `Export ${ext} with ${parts.join(' + ')}`;
-  }
-  return `Export ${ext}`;
+  return parts.length > 0 ? `Export ${ext} with ${parts.join(' + ')}` : `Export ${ext}`;
 }
 
 export function ExportToolbarControls({
   selectedFile,
   mediaContainer,
-  hideVideo = false,
+  mediaSource,
 }: ExportToolbarControlsProps) {
   const { markdownSource } = useEditorContext();
   const [menuOpen, setMenuOpen] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [videoModalOpen, setVideoModalOpen] = useState(false);
+  const [mediaExporting, setMediaExporting] = useState<'mp4' | 'gif' | null>(null);
+  const [mediaExportError, setMediaExportError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
-
-  const lastOptions = loadLastExportOptions();
-
-  const doc = useMemo(() => {
-    if (!videoModalOpen) return null;
-    const mdDoc = parseMarkdown(markdownSource);
-    return markdownToDoc(mdDoc);
-  }, [videoModalOpen, markdownSource]);
+  const [exportError, setExportError] = useState<string | null>(null);
+  const [lastOptions, setLastOptions] = useState<ExportOptions | null>(() =>
+    loadLastExportOptions(),
+  );
+  const mediaAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
-    if (!menuOpen) return;
-    const onPointerDown = (e: PointerEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setMenuOpen(false);
-      }
-    };
-    document.addEventListener('pointerdown', onPointerDown);
-    return () => document.removeEventListener('pointerdown', onPointerDown);
-  }, [menuOpen]);
+    return () => mediaAbortRef.current?.abort();
+  }, []);
 
-  const handleToggleMenu = useCallback(() => setMenuOpen((p) => !p), []);
+  useEffect(() => {
+    let cancelled = false;
+    void syncLastExportOptions().then((options) => {
+      if (!cancelled) setLastOptions(options);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const handleOpenDialog = useCallback(() => {
     setMenuOpen(false);
+    setExportError(null);
     setDialogOpen(true);
   }, []);
-  const handleCloseDialog = useCallback(() => setDialogOpen(false), []);
-  const handleOpenVideoModal = useCallback(() => {
-    setMenuOpen(false);
-    setVideoModalOpen(true);
+
+  const handleCloseDialog = useCallback(() => {
+    if (exporting) return;
+    setDialogOpen(false);
+    setExportError(null);
+  }, [exporting]);
+
+  const handleMediaExport = useCallback(
+    async (outputFormat: 'mp4' | 'gif') => {
+      if (!selectedFile || !mediaSource) return;
+      const controller = new AbortController();
+      mediaAbortRef.current?.abort();
+      mediaAbortRef.current = controller;
+      setMenuOpen(false);
+      setMediaExporting(outputFormat);
+      setMediaExportError(null);
+
+      try {
+        const blob = await api.exportDocumentMedia(
+          {
+            markdown: markdownSource,
+            selectedFile,
+            format: outputFormat,
+            source: mediaSource,
+          },
+          controller.signal,
+        );
+        if (controller.signal.aborted) return;
+        const tail = selectedFile.split('/').pop() ?? selectedFile;
+        const stem = tail.replace(/\.[^.]+$/, '') || 'document';
+        downloadBlob(blob, `${stem}.${outputFormat}`);
+        setMediaExporting(null);
+      } catch (caught: unknown) {
+        if (controller.signal.aborted) return;
+        setMediaExportError(exportErrorMessage(caught));
+      } finally {
+        if (mediaAbortRef.current === controller) mediaAbortRef.current = null;
+      }
+    },
+    [markdownSource, mediaSource, selectedFile],
+  );
+
+  const handleCloseMediaExport = useCallback(() => {
+    mediaAbortRef.current?.abort();
+    mediaAbortRef.current = null;
+    setMediaExporting(null);
+    setMediaExportError(null);
   }, []);
-  const handleCloseVideoModal = useCallback(() => setVideoModalOpen(false), []);
 
   const handleExport = useCallback(
-    async (opts: ExportOptions) => {
+    async (options: ExportOptions) => {
       setExporting(true);
+      setExportError(null);
+      setLastOptions(options);
       try {
-        await runExport(markdownSource, selectedFile, opts, mediaContainer);
+        await saveExportOptions(options);
+        await runExport(markdownSource, selectedFile, options, mediaContainer);
+        setDialogOpen(false);
+      } catch (caught: unknown) {
+        setExportError(exportErrorMessage(caught));
       } finally {
         setExporting(false);
-        setDialogOpen(false);
       }
     },
     [markdownSource, selectedFile, mediaContainer],
@@ -121,9 +166,12 @@ export function ExportToolbarControls({
     if (!lastOptions) return;
     setMenuOpen(false);
     setExporting(true);
+    setExportError(null);
     try {
-      saveExportOptions(lastOptions);
       await runExport(markdownSource, selectedFile, lastOptions, mediaContainer);
+    } catch (caught: unknown) {
+      setExportError(exportErrorMessage(caught));
+      setDialogOpen(true);
     } finally {
       setExporting(false);
     }
@@ -131,60 +179,110 @@ export function ExportToolbarControls({
 
   return (
     <>
-      <div className="gezel-toolbar-menu" ref={menuRef}>
-        <button
-          type="button"
-          className="gezel-toolbar-menu-trigger"
-          onClick={handleToggleMenu}
-          aria-label="More actions"
-          title="More actions"
-        >
-          &middot;&middot;&middot;
-        </button>
-
-        {menuOpen && (
-          <div className="gezel-toolbar-menu-dropdown">
+      <DropdownMenu.Root open={menuOpen} onOpenChange={setMenuOpen}>
+        <DropdownMenu.Trigger asChild>
+          <button
+            type="button"
+            className="squisq-toolbar-button gezel-export-trigger"
+            aria-label="Export document"
+            title="Export document"
+            disabled={exporting}
+          >
+            <ShareGlyph />
+            <span>Export</span>
+          </button>
+        </DropdownMenu.Trigger>
+        <DropdownMenu.Portal>
+          <DropdownMenu.Content
+            className="app-nav-menu gezel-export-menu"
+            sideOffset={4}
+            align="end"
+          >
             {lastOptions && (
-              <button
-                type="button"
-                className="gezel-toolbar-menu-item"
-                onClick={handleQuickExport}
+              <DropdownMenu.Item
+                className="app-nav-menu-item"
+                onSelect={() => void handleQuickExport()}
                 disabled={exporting}
               >
                 {quickLabel(lastOptions)}
-              </button>
+              </DropdownMenu.Item>
             )}
-            <button type="button" className="gezel-toolbar-menu-item" onClick={handleOpenDialog}>
+            <DropdownMenu.Item className="app-nav-menu-item" onSelect={handleOpenDialog}>
               Export…
-            </button>
-            {!hideVideo && (
+            </DropdownMenu.Item>
+            {selectedFile && mediaSource && (
               <>
-                <div className="gezel-toolbar-menu-divider" />
-                <button
-                  type="button"
-                  className="gezel-toolbar-menu-item"
-                  onClick={handleOpenVideoModal}
+                <div className="gezel-export-menu-divider" role="separator" tabIndex={-1} />
+                <DropdownMenu.Item
+                  className="app-nav-menu-item"
+                  onSelect={() => void handleMediaExport('mp4')}
                 >
-                  Export Video…
-                </button>
+                  Export video…
+                </DropdownMenu.Item>
+                <DropdownMenu.Item
+                  className="app-nav-menu-item"
+                  onSelect={() => void handleMediaExport('gif')}
+                >
+                  Export animated GIF…
+                </DropdownMenu.Item>
               </>
             )}
-          </div>
-        )}
-      </div>
+          </DropdownMenu.Content>
+        </DropdownMenu.Portal>
+      </DropdownMenu.Root>
 
       {dialogOpen && (
         <ExportDialog
           initial={lastOptions ?? DEFAULT_OPTIONS}
           exporting={exporting}
-          onExport={handleExport}
+          error={exportError}
+          onExport={(options) => void handleExport(options)}
           onClose={handleCloseDialog}
         />
       )}
 
-      {videoModalOpen && doc && (
-        <VideoExportModal doc={doc} playerScript={PLAYER_BUNDLE} onClose={handleCloseVideoModal} />
+      {(mediaExporting || mediaExportError) && (
+        <Dialog.Root open onOpenChange={(open) => !open && handleCloseMediaExport()}>
+          <Dialog.Portal>
+            <Dialog.Overlay />
+            <Dialog.Content className="gezel-export-loading-dialog">
+              <Dialog.Title>
+                {mediaExporting === 'gif' ? 'Exporting animated GIF' : 'Exporting video'}
+              </Dialog.Title>
+              <p
+                className={mediaExportError ? 'error' : 'muted'}
+                role={mediaExportError ? 'alert' : 'status'}
+              >
+                {mediaExportError ??
+                  'Rendering with the ffmpeg installed on this computer. This can take a while…'}
+              </p>
+              <Dialog.Actions>
+                <button type="button" onClick={handleCloseMediaExport}>
+                  {mediaExportError ? 'Close' : 'Cancel'}
+                </button>
+              </Dialog.Actions>
+            </Dialog.Content>
+          </Dialog.Portal>
+        </Dialog.Root>
       )}
     </>
+  );
+}
+
+function ShareGlyph() {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M8 10.5V1.75" />
+      <path d="M5.25 4.5 8 1.75l2.75 2.75" />
+      <path d="M4.25 6.75h-1a1.5 1.5 0 0 0-1.5 1.5v4.5a1.5 1.5 0 0 0 1.5 1.5h9.5a1.5 1.5 0 0 0 1.5-1.5v-4.5a1.5 1.5 0 0 0-1.5-1.5h-1" />
+    </svg>
   );
 }

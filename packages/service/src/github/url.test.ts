@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { authenticatedCloneUrl, parseGithubUrl, sameGithubRepo, sharedCloneKey } from './url.js';
+import { authenticatedCloneUrl, parseGitHubUrl, sameGitHubRepo, sharedCloneKey } from './url.js';
 
-describe('parseGithubUrl', () => {
+describe('parseGitHubUrl', () => {
   it('parses an https URL with .git suffix', () => {
-    const p = parseGithubUrl('https://github.com/octocat/Hello-World.git');
+    const p = parseGitHubUrl('https://github.com/octocat/Hello-World.git');
     expect(p).toMatchObject({
       host: 'github.com',
       owner: 'octocat',
@@ -14,18 +14,18 @@ describe('parseGithubUrl', () => {
   });
 
   it('parses an https URL without .git suffix', () => {
-    const p = parseGithubUrl('https://github.com/octocat/Hello-World');
+    const p = parseGitHubUrl('https://github.com/octocat/Hello-World');
     expect(p?.repo).toBe('Hello-World');
     expect(p?.cloneUrl).toBe('https://github.com/octocat/Hello-World.git');
   });
 
   it('parses a trailing-slashed URL', () => {
-    const p = parseGithubUrl('https://github.com/octocat/Hello-World/');
+    const p = parseGitHubUrl('https://github.com/octocat/Hello-World/');
     expect(p?.repo).toBe('Hello-World');
   });
 
   it('parses an ssh-style URL', () => {
-    const p = parseGithubUrl('git@github.com:octocat/Hello-World.git');
+    const p = parseGitHubUrl('git@github.com:octocat/Hello-World.git');
     expect(p).toMatchObject({
       host: 'github.com',
       owner: 'octocat',
@@ -34,12 +34,12 @@ describe('parseGithubUrl', () => {
   });
 
   it('parses a schemeless URL', () => {
-    const p = parseGithubUrl('github.com/octocat/Hello-World');
+    const p = parseGitHubUrl('github.com/octocat/Hello-World');
     expect(p?.host).toBe('github.com');
   });
 
   it('handles enterprise hosts', () => {
-    const p = parseGithubUrl('https://github.bendyline.com/teams/internal.git');
+    const p = parseGitHubUrl('https://github.bendyline.com/teams/internal.git');
     expect(p?.host).toBe('github.bendyline.com');
     expect(p?.owner).toBe('teams');
     expect(p?.repo).toBe('internal');
@@ -47,16 +47,16 @@ describe('parseGithubUrl', () => {
 
   it('returns null for clearly non-repo URLs', () => {
     // Only one path segment after the host — not a repo.
-    expect(parseGithubUrl('https://example.com/whatever')).toBeNull();
-    expect(parseGithubUrl('not a url')).toBeNull();
-    expect(parseGithubUrl('')).toBeNull();
+    expect(parseGitHubUrl('https://example.com/whatever')).toBeNull();
+    expect(parseGitHubUrl('not a url')).toBeNull();
+    expect(parseGitHubUrl('')).toBeNull();
   });
 });
 
-describe('sameGithubRepo', () => {
+describe('sameGitHubRepo', () => {
   it('treats https and ssh forms as equal', () => {
     expect(
-      sameGithubRepo(
+      sameGitHubRepo(
         'https://github.com/octocat/Hello-World.git',
         'git@github.com:octocat/Hello-World.git',
       ),
@@ -65,7 +65,7 @@ describe('sameGithubRepo', () => {
 
   it('is case-insensitive on owner/repo', () => {
     expect(
-      sameGithubRepo(
+      sameGitHubRepo(
         'https://github.com/Octocat/HELLO-world',
         'git@github.com:octocat/hello-WORLD.git',
       ),
@@ -74,7 +74,7 @@ describe('sameGithubRepo', () => {
 
   it('rejects different repos', () => {
     expect(
-      sameGithubRepo(
+      sameGitHubRepo(
         'https://github.com/octocat/Hello-World',
         'https://github.com/octocat/Goodbye-World',
       ),
@@ -83,7 +83,7 @@ describe('sameGithubRepo', () => {
 
   it('rejects different hosts', () => {
     expect(
-      sameGithubRepo(
+      sameGitHubRepo(
         'https://github.com/octocat/Hello-World',
         'https://github.bendyline.com/octocat/Hello-World',
       ),
@@ -144,7 +144,7 @@ describe('sharedCloneKey', () => {
     expect(a).not.toBe(b);
   });
 
-  it('case-insensitive on owner/repo (matches sameGithubRepo)', () => {
+  it('case-insensitive on owner/repo (matches sameGitHubRepo)', () => {
     const a = sharedCloneKey('https://github.com/BendyLine/Squisq');
     const b = sharedCloneKey('https://github.com/bendyline/squisq');
     expect(a).toBe(b);
@@ -155,7 +155,7 @@ describe('sharedCloneKey', () => {
   });
 
   it('treats gitlab-shaped URLs as github-like (permissive parser)', () => {
-    // `parseGithubUrl` accepts any `host/owner/repo` shape via its
+    // `parseGitHubUrl` accepts any `host/owner/repo` shape via its
     // schemeless regex — gitlab URLs share the same shape as github
     // and get the full slug-with-host key. This is fine because the
     // key only needs to be STABLE per repo; the github-specific

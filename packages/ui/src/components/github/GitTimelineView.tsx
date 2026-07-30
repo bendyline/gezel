@@ -1,4 +1,4 @@
-import type { GithubCommitDetailResponse, GithubLogEntry } from '@bendyline/gezel';
+import type { GitCommitDetailResponse, GitLogEntry } from '@bendyline/gezel';
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../../api.js';
 import { GitDiffView } from './GitDiffView.js';
@@ -18,15 +18,15 @@ interface Props {
 }
 
 export function GitTimelineView({ projectId }: Props) {
-  const [commits, setCommits] = useState<GithubLogEntry[] | null>(null);
+  const [commits, setCommits] = useState<GitLogEntry[] | null>(null);
   const [hasMore, setHasMore] = useState(false);
   const [selectedSha, setSelectedSha] = useState<string | null>(null);
-  const [detail, setDetail] = useState<GithubCommitDetailResponse | null>(null);
+  const [detail, setDetail] = useState<GitCommitDetailResponse | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
 
   const load = useCallback(
     async (skip: number) => {
-      const res = await api.getProjectGithubLog(projectId, { limit: PAGE_SIZE, skip });
+      const res = await api.getProjectGitLog(projectId, { limit: PAGE_SIZE, skip });
       setHasMore(res.hasMore);
       setCommits((prev) => (skip === 0 ? res.commits : [...(prev ?? []), ...res.commits]));
     },
@@ -48,7 +48,7 @@ export function GitTimelineView({ projectId }: Props) {
     let cancelled = false;
     setDetail(null);
     void api
-      .getProjectGithubCommit(projectId, selectedSha)
+      .getProjectGitCommit(projectId, selectedSha)
       .then((d) => {
         if (!cancelled) setDetail(d);
       })

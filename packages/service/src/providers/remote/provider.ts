@@ -43,6 +43,7 @@ export class RemoteGezelProvider implements LLMProvider {
   /** A's RemoteSession runs its OWN local tool loop, so this provider is not
    *  in capture-and-return mode from the caller's perspective. */
   readonly supportsExternalTools = false;
+  readonly supportsPriorMessages = true;
   private readonly log = createLogger('remote-provider');
   private cachedModels: ModelInfo[] | null = null;
 

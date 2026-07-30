@@ -18,10 +18,12 @@ vi.mock('../components/FileTree.js', () => ({
   FileTree: ({
     entries,
     onSelect,
+    onRename,
     onDelete,
   }: {
     entries: FileEntry[];
     onSelect: (e: FileEntry) => void;
+    onRename: (e: FileEntry) => void;
     onDelete: (e: FileEntry) => void;
   }) => (
     <ul data-testid="file-tree">
@@ -32,6 +34,9 @@ vi.mock('../components/FileTree.js', () => ({
           </button>
           <button type="button" onClick={() => onDelete(e)} data-testid={`delete-${e.path}`}>
             delete
+          </button>
+          <button type="button" onClick={() => onRename(e)} data-testid={`rename-${e.path}`}>
+            rename
           </button>
         </li>
       ))}
@@ -138,6 +143,7 @@ describe('DocumentsView', () => {
     vi.mocked(api.deleteDocument).mockResolvedValue({ ok: true } as never);
     vi.mocked(api.writeDocument).mockResolvedValue({ ok: true } as never);
     vi.mocked(api.createDocumentFolder).mockResolvedValue({ ok: true } as never);
+    vi.mocked(api.renameDocument).mockResolvedValue({ ok: true } as never);
     // Reset localStorage between tests so a stale selectedPath from a
     // prior test doesn't leak in.
     window.localStorage.clear();
@@ -212,8 +218,9 @@ describe('DocumentsView', () => {
 
     fireEvent.click(screen.getByTestId('fv-new-doc'));
 
-    const pathInput = await screen.findByPlaceholderText('e.g. guidelines/coding.md');
+    const pathInput = await screen.findByPlaceholderText('e.g. guidelines/coding');
     expect(pathInput).toHaveValue('guidelines/');
+    expect(screen.getByText('.md')).toBeInTheDocument();
   });
 
   it('renders right-aligned Font Awesome creation actions', async () => {
@@ -240,8 +247,8 @@ describe('DocumentsView', () => {
     await user.click(screen.getByRole('button', { name: 'New document' }));
 
     // The new-doc dialog renders a Path input.
-    const pathInput = screen.getByPlaceholderText('e.g. guidelines/coding.md');
-    await user.type(pathInput, 'newdoc.md');
+    const pathInput = screen.getByPlaceholderText('e.g. guidelines/coding');
+    await user.type(pathInput, 'newdoc');
 
     // After typing, the second listDocuments queues up. The next
     // listDocuments call should also include the freshly written doc.
@@ -285,6 +292,37 @@ describe('DocumentsView', () => {
     // Dialog closes after delete completes.
     await waitFor(() => {
       expect(screen.queryByTestId('confirm-dialog')).not.toBeInTheDocument();
+    });
+  });
+
+  it('renames a Markdown document in place and preserves the selected document', async () => {
+    vi.mocked(api.listDocuments).mockResolvedValue({ files: FAKE_ENTRIES } as never);
+    window.localStorage.setItem('gezel:documents:selectedPath', 'mission.md');
+    render(<DocumentsView />);
+    await screen.findByTestId('document-detail');
+
+    fireEvent.click(screen.getByTestId('rename-mission.md'));
+
+    const nameInput = await screen.findByRole('textbox', { name: 'Name' });
+    expect(nameInput).toHaveValue('mission');
+    expect(screen.getByText('.md')).toBeInTheDocument();
+
+    const user = userEvent.setup();
+    await user.clear(nameInput);
+    await user.type(nameInput, 'brief');
+    vi.mocked(api.listDocuments).mockResolvedValue({
+      files: [
+        ...FAKE_ENTRIES.filter((entry) => entry.path !== 'mission.md'),
+        { path: 'brief.md', name: 'brief.md', isDirectory: false },
+      ],
+    } as never);
+    await user.click(screen.getByRole('button', { name: 'Rename' }));
+
+    await waitFor(() => {
+      expect(api.renameDocument).toHaveBeenCalledWith('mission.md', 'brief.md');
+    });
+    await waitFor(() => {
+      expect(window.localStorage.getItem('gezel:documents:selectedPath')).toBe('brief.md');
     });
   });
 

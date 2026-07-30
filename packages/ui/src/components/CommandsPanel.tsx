@@ -13,9 +13,26 @@ import { Popover } from '../primitives/index.js';
 import { CraftbookParamForm } from './CraftbookParamForm.js';
 import { CraftbookToolsetSetup } from './CraftbookToolsetSetup.js';
 import { craftbookCommandName, renderCraftbookCommand } from './craftbook-command.js';
+import { osCommandGroups } from './os-commands.js';
+
+/**
+ * Which slice of the panel to render. The terminal toolbar opens one popover
+ * per slice so the three answer three different questions:
+ *
+ * - `commands` — "how do I drive a terminal at all?" (the OS primer + the
+ *   CLIs installed on this machine)
+ * - `scripts` — "what can I run in THIS repo?" (npm scripts, scripts/, launches)
+ * - `tasks` — "what work can a gezel pick up?" (craftbooks, workspace skills)
+ *
+ * `all` keeps the original single-list behaviour and is what the chat rail's
+ * Commands tab uses.
+ */
+export type CommandsPanelSection = 'commands' | 'scripts' | 'tasks' | 'all';
 
 interface Props {
   projectId: string;
+  /** Slice of the panel to render. Defaults to the full list. */
+  section?: CommandsPanelSection;
   /**
    * Stage a command string into the project-chat terminal for the user
    * to review + run (the craftbook command launcher). Absent → the
@@ -24,29 +41,60 @@ interface Props {
   onStageCommand?: (command: string) => void;
 }
 
+/**
+ * The terminal's shell platform, resolved once per page. The Electron preload
+ * injects it; the browser-served UI asks the daemon. Cached at module level so
+ * three simultaneously-mounted panels share one request.
+ */
+let platformPromise: Promise<string | undefined> | null = null;
+function loadTerminalPlatform(): Promise<string | undefined> {
+  const injected = window.__GEZEL__?.platform;
+  if (injected) return Promise.resolve(injected);
+  platformPromise ??= api
+    .health()
+    .then((h) => h.platform)
+    .catch(() => undefined);
+  return platformPromise;
+}
+
 /** A craftbook declares params iff its paramSchema has ≥1 property. */
 function craftbookHasParams(m: CraftbookTemplateManifest): boolean {
   const props = (m.paramSchema as { properties?: Record<string, unknown> } | undefined)?.properties;
   return !!props && Object.keys(props).length > 0;
 }
 
-const GROUP_ORDER: Array<{ kind: DiscoveredCommand['kind']; title: string }> = [
-  { kind: 'npm-script', title: 'npm scripts' },
-  { kind: 'workspace-script', title: 'Scripts folder' },
-  { kind: 'vscode-launch', title: 'VSCode launch' },
-  { kind: 'bin', title: 'Installed CLIs' },
+const GROUP_ORDER: Array<{
+  kind: DiscoveredCommand['kind'];
+  title: string;
+  section: 'commands' | 'scripts';
+}> = [
+  { kind: 'npm-script', title: 'npm scripts', section: 'scripts' },
+  { kind: 'workspace-script', title: 'Scripts folder', section: 'scripts' },
+  { kind: 'vscode-launch', title: 'VSCode launch', section: 'scripts' },
+  { kind: 'bin', title: 'Tools on this machine', section: 'commands' },
 ];
 
 /**
- * Lists every command the indexer discovered in the project's
- * workspace, grouped by source. Click → copy `run` to clipboard.
+ * Lists everything runnable in a project's workspace — the discovered
+ * commands and scripts, the applicable craftbooks and skills, and a fixed
+ * primer of everyday terminal operations — grouped by source. Click → stage
+ * into the terminal input, or copy `run` to the clipboard when no terminal is
+ * wired.
  *
  * Polls the workspace-index status every 30s; when meta.scannedAt
  * advances, re-fetches the full index. The first mount on a
  * never-indexed project kicks off a forced refresh so the panel
- * doesn't sit empty waiting for the next sweep.
+ * doesn't sit empty waiting for the next sweep. A panel scoped to a
+ * `section` only fetches the sources that section renders, so the
+ * terminal's three toolbar popovers don't each pay for all of them.
  */
-export function CommandsPanel({ projectId, onStageCommand }: Props) {
+export function CommandsPanel({ projectId, section = 'all', onStageCommand }: Props) {
+  const showCommands = section === 'all' || section === 'commands';
+  const showScripts = section === 'all' || section === 'scripts';
+  const showTasks = section === 'all' || section === 'tasks';
+  // The workspace index backs both the scripts groups and the machine-tools
+  // group; only the pure-tasks panel can skip it entirely.
+  const needsIndex = showCommands || showScripts;
   const [index, setIndex] = useState<WorkspaceCommandIndex | null>(null);
   const [craftbooks, setCraftbooks] = useState<CatalogItemSummary[]>([]);
   // Craftbook id → required toolsets it declares that aren't installed.
@@ -60,6 +108,9 @@ export function CommandsPanel({ projectId, onStageCommand }: Props) {
   // the rest behind this toggle.
   const [showAllCraftbooks, setShowAllCraftbooks] = useState(false);
   const [skills, setSkills] = useState<DiscoveredSkill[]>([]);
+  // False until the first craftbook fetch settles, so a tasks-scoped panel can
+  // say "looking…" instead of flashing its empty state.
+  const [tasksLoaded, setTasksLoaded] = useState(false);
   // Bash→JS translations awaiting review before they're written to disk.
   const [pendingImports, setPendingImports] = useState<PendingImportItem[]>([]);
   const [filter, setFilter] = useState('');
@@ -71,6 +122,23 @@ export function CommandsPanel({ projectId, onStageCommand }: Props) {
   const [state, setState] = useState<'fresh' | 'stale' | 'indexing' | 'never'>('never');
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  // Drives which shell the primer is written for. Undefined until resolved —
+  // `osCommandGroups` treats that as bash, the right guess for everything but
+  // Windows and a one-render correction there.
+  const [platform, setPlatform] = useState<string | undefined>(
+    () => window.__GEZEL__?.platform ?? undefined,
+  );
+
+  useEffect(() => {
+    if (!showCommands || platform) return;
+    let cancelled = false;
+    void loadTerminalPlatform().then((p) => {
+      if (!cancelled) setPlatform(p);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [showCommands, platform]);
 
   // Load the index whenever the on-disk scannedAt advances.
   const loadIndex = useCallback(async () => {
@@ -85,6 +153,12 @@ export function CommandsPanel({ projectId, onStageCommand }: Props) {
         setError(message);
       }
     }
+  }, [projectId]);
+
+  // Workspace skills (.claude/skills and friends). Polled alongside the
+  // craftbooks rather than piggy-backing on the index refresh, so a panel
+  // scoped to `tasks` — which never fetches the index — still lists them.
+  const loadSkills = useCallback(async () => {
     try {
       const skillsRes = await api.getProjectSkills(projectId);
       setSkills(skillsRes.skills);
@@ -107,6 +181,8 @@ export function CommandsPanel({ projectId, onStageCommand }: Props) {
       setSuggestedIds(new Set(res.suggestedIds ?? []));
     } catch {
       /* craftbooks are best-effort */
+    } finally {
+      setTasksLoaded(true);
     }
   }, [projectId]);
   // (loaded on mount + every 30s by the status poll below)
@@ -211,11 +287,15 @@ export function CommandsPanel({ projectId, onStageCommand }: Props) {
   useEffect(() => {
     let cancelled = false;
     const tick = async () => {
-      // Re-check craftbook applicability (cheap; reflects branch/GitHub
-      // changes that don't trigger a workspace re-scan).
-      if (!cancelled) void loadCraftbooks();
-      // Surface any new bash→JS import proposals awaiting review.
-      if (!cancelled) void loadPendingImports();
+      if (showTasks && !cancelled) {
+        // Re-check craftbook applicability (cheap; reflects branch/GitHub
+        // changes that don't trigger a workspace re-scan).
+        void loadCraftbooks();
+        void loadSkills();
+        // Surface any new bash→JS import proposals awaiting review.
+        void loadPendingImports();
+      }
+      if (!needsIndex) return;
       try {
         const status = await api.getProjectIndexStatus(projectId);
         if (cancelled) return;
@@ -238,7 +318,16 @@ export function CommandsPanel({ projectId, onStageCommand }: Props) {
       cancelled = true;
       window.clearInterval(id);
     };
-  }, [projectId, scannedAt, loadIndex, loadCraftbooks, loadPendingImports]);
+  }, [
+    projectId,
+    scannedAt,
+    needsIndex,
+    showTasks,
+    loadIndex,
+    loadCraftbooks,
+    loadSkills,
+    loadPendingImports,
+  ]);
 
   const grouped = useMemo(() => {
     if (!index) return [];
@@ -248,7 +337,8 @@ export function CommandsPanel({ projectId, onStageCommand }: Props) {
       title: string;
       items: DiscoveredCommand[];
     }> = [];
-    for (const { kind, title } of GROUP_ORDER) {
+    for (const { kind, title, section: groupSection } of GROUP_ORDER) {
+      if (groupSection === 'commands' ? !showCommands : !showScripts) continue;
       const items = index.commands
         .filter((c) => c.kind === kind)
         .filter((c) => {
@@ -267,7 +357,23 @@ export function CommandsPanel({ projectId, onStageCommand }: Props) {
       if (items.length > 0) groups.push({ kind, title, items });
     }
     return groups;
-  }, [index, filter]);
+  }, [index, filter, showCommands, showScripts]);
+
+  // The fixed OS primer, filtered by the same query as everything else.
+  const primerGroups = useMemo(() => {
+    if (!showCommands) return [];
+    const q = filter.trim().toLowerCase();
+    return osCommandGroups(platform)
+      .map((g) => ({
+        title: g.title,
+        items: q
+          ? g.items.filter(
+              (it) => it.run.toLowerCase().includes(q) || it.description.toLowerCase().includes(q),
+            )
+          : g.items,
+      }))
+      .filter((g) => g.items.length > 0);
+  }, [showCommands, platform, filter]);
 
   const onCopy = useCallback(async (run: string) => {
     try {
@@ -385,6 +491,29 @@ export function CommandsPanel({ projectId, onStageCommand }: Props) {
     );
   };
 
+  // The everyday-terminal primer. Same click contract as everything else:
+  // stage the line for review, or copy it when no terminal is wired.
+  const primerBlock = primerGroups.map((group) => (
+    <section key={`primer:${group.title}`} className="commands-panel-group">
+      <h4 className="commands-panel-group-title muted small">{group.title}</h4>
+      <ul className="commands-panel-list">
+        {group.items.map((cmd) => (
+          <li key={`primer:${cmd.run}`}>
+            <button
+              type="button"
+              className="commands-panel-item"
+              onClick={() => (onStageCommand ? stageCommand(cmd.run) : void onCopy(cmd.run))}
+              title={onStageCommand ? `Stage: ${cmd.run}` : `Copy: ${cmd.run}`}
+            >
+              <span className="commands-panel-item-name commands-panel-item-code">{cmd.run}</span>
+              <span className="commands-panel-item-desc muted small">{cmd.description}</span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </section>
+  ));
+
   // Partition the (filtered) craftbooks into the curated suggested subset and
   // the rest. The two-section "Suggested + Show all" layout only applies when
   // a type resolved, there's something to suggest, and the user isn't
@@ -398,13 +527,32 @@ export function CommandsPanel({ projectId, onStageCommand }: Props) {
   );
   const useSuggestedLayout = !isSearching && projectType !== null && suggestedBooks.length > 0;
 
-  const showEmpty =
-    state !== 'indexing' &&
-    index !== null &&
-    totalCount === 0 &&
-    craftbooks.length === 0 &&
-    skills.length === 0;
-  const showLoading = state === 'indexing' || (state === 'never' && index === null);
+  // Per-section tallies for the toolbar's right-hand count. `all` keeps the
+  // original "N commands" reading of the whole index.
+  const binCount = index?.commands.filter((c) => c.kind === 'bin').length ?? 0;
+  const scriptCount = totalCount - binCount;
+  const primerCount = osCommandGroups(platform).reduce((n, g) => n + g.items.length, 0);
+  const taskCount = craftbooks.length + skills.length;
+  const [countLabel, countNoun]: [number, string] =
+    section === 'commands'
+      ? [primerCount + binCount, 'command']
+      : section === 'scripts'
+        ? [scriptCount, 'script']
+        : section === 'tasks'
+          ? [taskCount, 'task']
+          : [totalCount, 'command'];
+
+  // Only the index-backed sections have a "still scanning" state; the primer
+  // is static and the task sources land in one round-trip.
+  const indexBusy = needsIndex && (state === 'indexing' || (state === 'never' && index === null));
+  const showLoading = section === 'tasks' ? !tasksLoaded : indexBusy;
+  const hasAnything =
+    grouped.length > 0 ||
+    primerGroups.length > 0 ||
+    filteredCraftbooks.length > 0 ||
+    filteredSkills.length > 0 ||
+    pendingImports.length > 0;
+  const showEmpty = !showLoading && !hasAnything;
 
   return (
     <div className="commands-panel">
@@ -417,14 +565,14 @@ export function CommandsPanel({ projectId, onStageCommand }: Props) {
           aria-label="Filter commands"
         />
         <span className="commands-panel-state muted small" title={scannedAt ?? ''}>
-          {state === 'indexing' || state === 'never'
+          {indexBusy
             ? // "never" resolves within moments of the panel opening — both
               // states read as one human activity, not an index status code.
               'looking…'
-            : state === 'stale'
+            : needsIndex && state === 'stale'
               ? 'refreshing…'
-              : totalCount > 0
-                ? `${totalCount} command${totalCount === 1 ? '' : 's'}`
+              : countLabel > 0
+                ? `${countLabel} ${countNoun}${countLabel === 1 ? '' : 's'}`
                 : ''}
         </span>
       </div>
@@ -432,18 +580,24 @@ export function CommandsPanel({ projectId, onStageCommand }: Props) {
       {showLoading && (
         <p className="commands-panel-empty muted small">Looking through your workspace…</p>
       )}
-      {showEmpty && (
-        <p className="commands-panel-empty muted small">
-          No commands found yet. Add a script to <code>package.json</code> or drop a file in
-          <code> scripts/</code>.
-        </p>
-      )}
-      {(grouped.length > 0 ||
-        filteredCraftbooks.length > 0 ||
-        filteredSkills.length > 0 ||
-        pendingImports.length > 0) && (
+      {showEmpty &&
+        (isSearching ? (
+          <p className="commands-panel-empty muted small">Nothing matches “{filter.trim()}”.</p>
+        ) : section === 'tasks' ? (
+          <p className="commands-panel-empty muted small">
+            No tasks are available for this project yet. Craftbooks show up here once one applies to
+            this workspace.
+          </p>
+        ) : (
+          <p className="commands-panel-empty muted small">
+            No {section === 'scripts' ? 'scripts' : 'commands'} found yet. Add a script to{' '}
+            <code>package.json</code> or drop a file in
+            <code> scripts/</code>.
+          </p>
+        ))}
+      {hasAnything && (
         <div className="commands-panel-groups">
-          {pendingImports.length > 0 && (
+          {showTasks && pendingImports.length > 0 && (
             <section className="commands-panel-group">
               <h4 className="commands-panel-group-title muted small">
                 Imports to review ({pendingImports.length})
@@ -479,6 +633,9 @@ export function CommandsPanel({ projectId, onStageCommand }: Props) {
               </ul>
             </section>
           )}
+          {/* The primer leads its own tab — it IS the answer there — but sits
+              last in the combined rail, below the project's real work. */}
+          {section === 'commands' && primerBlock}
           {grouped.map((group) => (
             <section key={group.kind} className="commands-panel-group">
               <h4 className="commands-panel-group-title muted small">{group.title}</h4>
@@ -532,6 +689,7 @@ export function CommandsPanel({ projectId, onStageCommand }: Props) {
               )}
             </>
           ) : (
+            showTasks &&
             filteredCraftbooks.length > 0 && (
               <section className="commands-panel-group">
                 <h4 className="commands-panel-group-title muted small">Craftbooks</h4>
@@ -541,7 +699,7 @@ export function CommandsPanel({ projectId, onStageCommand }: Props) {
               </section>
             )
           )}
-          {filteredSkills.length > 0 && (
+          {showTasks && filteredSkills.length > 0 && (
             <section className="commands-panel-group">
               <h4 className="commands-panel-group-title muted small">Skills (workspace)</h4>
               <ul className="commands-panel-list">
@@ -570,6 +728,7 @@ export function CommandsPanel({ projectId, onStageCommand }: Props) {
               </ul>
             </section>
           )}
+          {section !== 'commands' && primerBlock}
         </div>
       )}
       {toast && <output className="commands-panel-toast">{toast}</output>}

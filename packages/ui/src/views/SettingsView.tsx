@@ -614,7 +614,7 @@ export function SettingsView() {
     if (err) setStatus(`couldn't open logs folder: ${err}`);
   }, []);
 
-  const saveGithubToken = useCallback(async () => {
+  const saveGitHubToken = useCallback(async () => {
     if (!tokenDraft.trim()) return;
     setStatus('saving…');
     try {
@@ -628,7 +628,7 @@ export function SettingsView() {
     }
   }, [tokenDraft, runCopilotProbe]);
 
-  const clearGithubToken = useCallback(async () => {
+  const clearGitHubToken = useCallback(async () => {
     setStatus('clearing…');
     try {
       const res = await api.updateConfig({ githubToken: '' });
@@ -2294,7 +2294,7 @@ export function SettingsView() {
                       </code>{' '}
                       <button
                         type="button"
-                        onClick={clearGithubToken}
+                        onClick={clearGitHubToken}
                         style={{ marginLeft: '0.5rem' }}
                       >
                         Clear
@@ -2309,7 +2309,7 @@ export function SettingsView() {
                       onChange={(e) => setTokenDraft(e.target.value)}
                       style={{ flex: 1 }}
                     />
-                    <button type="button" onClick={saveGithubToken} disabled={!tokenDraft.trim()}>
+                    <button type="button" onClick={saveGitHubToken} disabled={!tokenDraft.trim()}>
                       Save
                     </button>
                   </div>

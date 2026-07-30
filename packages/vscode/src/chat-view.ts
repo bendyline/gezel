@@ -107,12 +107,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     // runtime style injection (Radix uses `style=""`); fonts may be
     // self-hosted (the chat bundle ships ~15 WOFF2s under
     // `dist/webview/embedded/assets/`) or `data:` for any future
-    // inlined icons. `worker-src` lets the bundle spawn module
-    // workers — squisq-video-react ships a small encoder worker that
-    // would otherwise be blocked by `default-src 'none'`. `blob:` is
-    // included because Vite's worker bootstrap may use an inlined
-    // blob URL on first load. The previous `frame-src` for the
-    // loopback daemon is gone — there's no iframe anymore.
+    // inlined icons. `worker-src` preserves support for Vite module
+    // workers used by embedded UI dependencies; `blob:` is included
+    // because Vite's worker bootstrap may use an inlined blob URL on
+    // first load. The previous `frame-src` for the loopback daemon is
+    // gone — there's no iframe anymore.
     const csp = [
       "default-src 'none'",
       `script-src 'nonce-${nonce}' ${webview.cspSource}`,

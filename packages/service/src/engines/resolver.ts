@@ -234,7 +234,7 @@ export async function* resolveEngine(
   // reinstate a hard gate here: users who install from npm have no `gh`
   // login, and requiring one would make on-device engines unreachable for
   // every consumer outside this repo.
-  const token = opts.token !== undefined ? opts.token : await resolveGithubToken();
+  const token = opts.token !== undefined ? opts.token : await resolveGitHubToken();
 
   const baseFetch = opts.fetchImpl ?? globalThis.fetch;
   const tag = `native-v${version}`;
@@ -444,7 +444,7 @@ function stampEnv(
   if (engine === 'llama-server' && variant) process.env.GEZEL_LLAMA_SERVER_BACKEND = variant;
 }
 
-async function resolveGithubToken(): Promise<string | null> {
+async function resolveGitHubToken(): Promise<string | null> {
   if (process.env.GEZEL_GITHUB_TOKEN) return process.env.GEZEL_GITHUB_TOKEN;
   if (process.env.GITHUB_TOKEN) return process.env.GITHUB_TOKEN;
   try {

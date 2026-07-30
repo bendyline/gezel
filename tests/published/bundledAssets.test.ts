@@ -32,6 +32,11 @@ describe('service bundled assets', () => {
   it('stages the handboek content', () => {
     expect(existsSync(resolve(service.dist, 'handboek-content'))).toBe(true);
   });
+
+  it('does not ship the browser ffmpeg runtime', () => {
+    expect(existsSync(resolve(service.dist, 'ui/ffmpeg-core/ffmpeg-core.js'))).toBe(false);
+    expect(existsSync(resolve(service.dist, 'ui/ffmpeg-core/ffmpeg-core.wasm'))).toBe(false);
+  });
 });
 
 describe('native engine release pin', () => {

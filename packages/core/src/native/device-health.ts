@@ -10,6 +10,9 @@
  */
 
 import { execFile as nodeExecFile } from 'node:child_process';
+import { DEVICE_HARD_TEMPERATURE_C } from '../device-safety.js';
+
+export { DEVICE_HARD_TEMPERATURE_C } from '../device-safety.js';
 
 export type DeviceSafetyMode = 'off' | 'observe' | 'guard';
 export type DeviceTelemetryFailurePolicy = 'allow' | 'block';
@@ -71,6 +74,8 @@ export interface DeviceHealthSample {
 
 export interface DeviceHealthDecision {
   admissible: boolean;
+  /** True when a reading crossed the non-optional emergency temperature cutoff. */
+  hardBlocked: boolean;
   telemetryAvailable: boolean;
   reasons: string[];
   summary: string;
@@ -570,6 +575,7 @@ export function evaluateDeviceHealth(
   if (policy.mode === 'off') {
     return {
       admissible: true,
+      hardBlocked: false,
       telemetryAvailable: sample.readings.length > 0,
       reasons: [],
       summary: 'device safety is off',
@@ -580,6 +586,7 @@ export function evaluateDeviceHealth(
     const reasons = admissible ? [] : ['device telemetry unavailable'];
     return {
       admissible,
+      hardBlocked: false,
       telemetryAvailable: false,
       reasons,
       summary: admissible
@@ -589,12 +596,19 @@ export function evaluateDeviceHealth(
   }
 
   const reasons: string[] = [];
+  let hardBlocked = false;
   const temperatureLimit = cooling ? policy.resumeTemperatureC : policy.maxStartTemperatureC;
   for (const reading of sample.readings) {
     const label = `${reading.vendor}:${reading.name ?? reading.deviceId}`;
     if (reading.temperatureC !== undefined && reading.temperatureC > temperatureLimit) {
       reasons.push(
         `${label} temperature ${reading.temperatureC}C exceeds ${temperatureLimit}C ${cooling ? 'resume' : 'start'} limit`,
+      );
+    }
+    if (reading.temperatureC !== undefined && reading.temperatureC > DEVICE_HARD_TEMPERATURE_C) {
+      hardBlocked = true;
+      reasons.push(
+        `${label} temperature ${reading.temperatureC}C exceeds hard ${DEVICE_HARD_TEMPERATURE_C}C safety limit`,
       );
     }
     if (reading.thermalMarginC !== undefined && reading.thermalMarginC < policy.minThermalMarginC) {
@@ -607,6 +621,7 @@ export function evaluateDeviceHealth(
   }
   return {
     admissible: reasons.length === 0,
+    hardBlocked,
     telemetryAvailable: true,
     reasons,
     summary:
@@ -628,7 +643,6 @@ export class DeviceHealthGate {
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly now: () => number;
   private cooling = false;
-  private lastAllowedAt: number | null = null;
   private pendingAdmission?: Promise<DeviceHealthDecision>;
   private pendingSample?: Promise<DeviceHealthSample>;
   private lastSample?: DeviceHealthSample;
@@ -647,7 +661,6 @@ export class DeviceHealthGate {
   setPolicy(policy: DeviceSafetyPolicyInput): void {
     this.policy = resolveDeviceSafetyPolicy(policy);
     if (this.policy.mode === 'off') this.cooling = false;
-    this.lastAllowedAt = null;
   }
 
   getPolicy(): ResolvedDeviceSafetyPolicy {
@@ -660,27 +673,27 @@ export class DeviceHealthGate {
    * processes, while admission can still force a fresh sample after it ages.
    */
   async status(maxAgeMs = 5_000): Promise<DeviceHealthStatusSnapshot> {
-    if (this.policy.mode === 'off') {
-      return {
-        state: 'off',
-        mode: 'off',
-        sampledAt: this.lastSample?.sampledAt ?? null,
-        sources: this.lastSample?.sources ?? [],
-        readings: this.lastSample?.readings ?? [],
-        reasons: [],
-        summary: 'Device safety is off',
-      };
-    }
     const sample =
       this.lastSample && this.now() - this.lastSampleAt <= maxAgeMs
         ? this.lastSample
         : await this.sampleDevice();
+    if (this.policy.mode === 'off') {
+      return {
+        state: 'off',
+        mode: 'off',
+        sampledAt: sample.sampledAt,
+        sources: [...sample.sources],
+        readings: sample.readings.map((reading) => ({ ...reading })),
+        reasons: [],
+        summary: 'Device safety is off',
+      };
+    }
     const decision = evaluateDeviceHealth(sample, this.policy, this.cooling);
     const state: DeviceHealthState = !decision.telemetryAvailable
       ? 'unavailable'
       : decision.admissible
         ? 'healthy'
-        : this.admissionBlocked
+        : decision.hardBlocked || this.admissionBlocked
           ? 'blocked'
           : this.cooling
             ? 'cooling'
@@ -700,19 +713,10 @@ export class DeviceHealthGate {
     if (this.policy.mode === 'off') {
       return {
         admissible: true,
+        hardBlocked: false,
         telemetryAvailable: false,
         reasons: [],
         summary: 'device safety is off',
-      };
-    }
-    // resolveBaseUrl() and acquireLease() can run back-to-back for one turn.
-    // Reuse a fresh healthy decision so the second call does not add latency.
-    if (!this.cooling && this.lastAllowedAt !== null && this.now() - this.lastAllowedAt < 2_000) {
-      return {
-        admissible: true,
-        telemetryAvailable: true,
-        reasons: [],
-        summary: 'recent device-health admission reused',
       };
     }
     if (!this.pendingAdmission) {
@@ -731,13 +735,26 @@ export class DeviceHealthGate {
       const sample = await this.sampleDevice();
       const decision = evaluateDeviceHealth(sample, this.policy, this.cooling);
       if (this.policy.mode === 'observe') {
-        if (!decision.admissible || !decision.telemetryAvailable) {
-          this.log(`[device-health] observe ${context}: ${decision.summary}`);
+        if (!decision.hardBlocked) {
+          if (!decision.admissible || !decision.telemetryAvailable) {
+            this.log(`[device-health] observe ${context}: ${decision.summary}`);
+          }
+          if (this.cooling) {
+            this.log(
+              `[device-health] ${context}: temperature returned to ${DEVICE_HARD_TEMPERATURE_C}C or below; admitting work`,
+            );
+          }
+          this.cooling = false;
+          this.admissionBlocked = false;
+          return { ...decision, admissible: true };
         }
-        if (decision.telemetryAvailable) this.lastAllowedAt = this.now();
-        return { ...decision, admissible: true };
-      }
-      if (decision.admissible) {
+        healthySamples = 0;
+        this.cooling = true;
+        if (!loggedWaiting) {
+          this.log(`[device-health] ${context}: hard temperature gate — ${decision.summary}`);
+          loggedWaiting = true;
+        }
+      } else if (decision.admissible) {
         healthySamples += 1;
         const required = this.cooling ? this.policy.consecutiveHealthySamples : 1;
         if (healthySamples >= required) {
@@ -748,7 +765,6 @@ export class DeviceHealthGate {
           }
           this.cooling = false;
           this.admissionBlocked = false;
-          if (decision.telemetryAvailable) this.lastAllowedAt = this.now();
           return decision;
         }
       } else {

@@ -425,13 +425,16 @@ function QueueMeterPanel({
         if (!state) return null;
         const running = state.running;
         const queued = state.queuedInteractive + state.queuedBackground;
+        const deferred = Math.min(queued, state.ambientHeld ?? 0);
+        const readyQueued = queued - deferred;
         return (
           <section key={name} className="queue-meter-panel-section">
             <header className="queue-meter-panel-provider">
               <span className="queue-meter-panel-provider-name">{getPlatformPillLabel(name)}</span>
               <span className="muted small">
                 {running} / {state.concurrency} in flight
-                {queued > 0 ? ` · ${queued} queued` : ''}
+                {readyQueued > 0 ? ` · ${readyQueued} queued` : ''}
+                {deferred > 0 ? ` · ${deferred} deferred until idle` : ''}
               </span>
             </header>
             {state.active.length === 0 && queued === 0 ? (
@@ -514,6 +517,12 @@ function QueueMeterPanel({
                       <span className="queue-meter-panel-gezel">
                         {describeActor(p.gezelId, gezels)}
                         {p.job && <span className="queue-meter-panel-job muted"> · {p.job}</span>}
+                        {p.ambient && deferred > 0 && (
+                          <span className="queue-meter-panel-job muted">
+                            {' '}
+                            · deferred until idle
+                          </span>
+                        )}
                       </span>
                       <span className="queue-meter-panel-time muted">{formatMs(p.waitedMs)}</span>
                       <span className="queue-meter-panel-actions">

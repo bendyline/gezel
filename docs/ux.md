@@ -38,12 +38,15 @@ pacing of a transition. If a first-time user can't quite put a finger on
 
 ## What that translates into
 
-- **Color** lives in [packages/ui/src/styles.css](../packages/ui/src/styles.css)
-  as CSS variables (`--bg`, `--surface`, `--panel`, `--border`, `--text`,
-  `--text-muted`, `--accent`, `--success`, `--warning`, `--danger`). Both
-  light and dark modes are supported. When the branding pass lands, those
-  variables are the single surface to change — do not introduce hardcoded
-  hex values in components.
+- **Color** lives in [packages/ui/src/styles.css](../packages/ui/src/styles.css).
+  The `--gezel-*` foundation palette is the authored source for paper, ink,
+  sage, and terracotta tones; theme-resolving semantic aliases (`--bg`,
+  `--surface`, `--panel`, `--border`, `--text`, `--text-muted`, `--accent`,
+  `--success`, `--warning`, `--danger`) are what component rules consume.
+  Scoped surfaces may derive a nearby tone with `color-mix()` but must not
+  start a parallel palette. Hardcoded colors are reserved for domain visuals
+  whose color carries data or content (diffs, terminal ANSI, Village artwork,
+  poppetjes), not app chrome.
 - **Motion** is slow-ish and soft: ~120–160ms ease-out for overlay and
   dialog in/out. Nothing snaps or bounces. See the `gz-overlay` /
   `gz-dialog` keyframes for the canonical cadence; match it elsewhere.
@@ -297,6 +300,15 @@ link that lands on the same article.
 "generating…") over blocking spinners. A pulsing icon (see
 `.gezel-icon--pulse`) is the canonical "this thing is working in the
 background" signal.
+
+**Terminal output.** Terminal text is spatial, not prose: preserve whitespace
+and columns exactly, and contain overflow in a keyboard-focusable viewport with
+horizontal and vertical scrolling. Never reflow output to fit a chat bubble.
+Live output follows the newest line while the reader is at the bottom; scrolling
+up pauses that follow behavior until they return to the tail. The timeline's
+lightweight ANSI rendering is the durable transcript view. Full-screen TUIs that
+depend on cursor movement or the alternate screen belong in a dedicated live
+terminal surface backed by a terminal emulator, not in every historical bubble.
 
 **Errors.** Inline, close to the thing that failed, `.error` class. Don't
 use toasts for errors. If the operation is dismissable, show the error

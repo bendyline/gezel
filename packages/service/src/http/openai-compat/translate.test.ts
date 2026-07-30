@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { ChatCompletionRequestSchema, resolveModelTarget, translateMessages } from './translate.js';
+import {
+  ChatCompletionRequestSchema,
+  flattenTranscriptIntoPrompt,
+  resolveModelTarget,
+  translateMessages,
+} from './translate.js';
 
 describe('ChatCompletionRequestSchema', () => {
   it('accepts a minimal valid request', () => {
@@ -34,6 +39,99 @@ describe('ChatCompletionRequestSchema', () => {
       stream: true,
     });
     expect(result.success).toBe(true);
+  });
+
+  it('parses max_completion_tokens, n, and stream_options (route guards decide their fate)', () => {
+    const result = ChatCompletionRequestSchema.safeParse({
+      model: 'copilot:gpt-4o',
+      messages: [{ role: 'user', content: 'hi' }],
+      max_completion_tokens: 512,
+      n: 3,
+      stream: true,
+      stream_options: { include_usage: true },
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.max_completion_tokens).toBe(512);
+      expect(result.data.n).toBe(3);
+      expect(result.data.stream_options?.include_usage).toBe(true);
+    }
+  });
+
+  it('accepts the developer role (OpenAI successor to system)', () => {
+    const result = ChatCompletionRequestSchema.safeParse({
+      model: 'copilot:gpt-4o',
+      messages: [
+        { role: 'developer', content: 'be terse' },
+        { role: 'user', content: 'hi' },
+      ],
+    });
+    expect(result.success).toBe(true);
+  });
+});
+
+describe('translateMessages — developer role', () => {
+  it('folds developer messages into the system message like system messages', () => {
+    const result = translateMessages([
+      { role: 'developer', content: 'be terse' },
+      { role: 'system', content: 'be kind' },
+      { role: 'user', content: 'hi' },
+    ]);
+    expect(result.systemMessage).toBe('be terse\n\nbe kind');
+    expect(result.prompt).toBe('hi');
+    expect(result.priorMessages).toEqual([]);
+  });
+});
+
+describe('flattenTranscriptIntoPrompt', () => {
+  it('returns the input unchanged when there is no history', () => {
+    const input = {
+      systemMessage: 'sys',
+      prompt: 'hi',
+      priorMessages: [],
+      attachments: [],
+    };
+    expect(flattenTranscriptIntoPrompt(input)).toBe(input);
+  });
+
+  it('folds user/assistant history into the prompt and clears priorMessages', () => {
+    const result = flattenTranscriptIntoPrompt({
+      systemMessage: 'sys',
+      prompt: 'and now?',
+      priorMessages: [
+        { role: 'user', content: 'what is 2+2?' },
+        { role: 'assistant', content: '4' },
+      ],
+      attachments: [],
+    });
+    expect(result.priorMessages).toEqual([]);
+    expect(result.systemMessage).toBe('sys');
+    expect(result.prompt).toContain('User: what is 2+2?');
+    expect(result.prompt).toContain('Assistant: 4');
+    // The in-flight turn comes last, after the history block.
+    expect(result.prompt.endsWith('User: and now?')).toBe(true);
+  });
+
+  it('renders tool results and assistant tool calls as labeled text', () => {
+    const result = flattenTranscriptIntoPrompt({
+      systemMessage: '',
+      prompt: '',
+      priorMessages: [
+        { role: 'user', content: 'check the weather' },
+        {
+          role: 'assistant',
+          content: '',
+          toolCalls: [{ id: 'call_1', name: 'get_weather', arguments: '{"city":"Delft"}' }],
+        },
+        { role: 'tool', content: 'sunny, 21C', toolCallId: 'call_1' },
+      ],
+      attachments: [],
+    });
+    expect(result.prompt).toContain('get_weather({"city":"Delft"})');
+    expect(result.prompt).toContain('Tool result (call_1): sunny, 21C');
+    // Empty in-flight prompt (tool-result-last request) gets an explicit
+    // continuation instruction instead of a dangling "User:" line.
+    expect(result.prompt).toContain('Continue the conversation');
   });
 });
 

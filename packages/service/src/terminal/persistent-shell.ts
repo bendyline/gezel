@@ -82,10 +82,11 @@ export interface PersistentShellOptions {
  * Trade-offs (intentional, per the v1 plan):
  *  - PTY merges stdout and stderr; we surface a single `output`
  *    string. The on-disk schema's `stderr` field is left empty.
- *  - Output is batched per command (sentinel arrival), not streamed.
- *    Long-running commands stay silent until completion or timeout.
- *  - We set `TERM=dumb` + `NO_COLOR=1` and strip residual ANSI codes
- *    server-side. No xterm.js / no color rendering in the UI.
+ *  - Output streams best-effort through `onChunk`, then resolves with
+ *    the canonical capped buffer when the sentinel arrives.
+ *  - We advertise `xterm-256color` and preserve ANSI for the UI's
+ *    lightweight renderer. Cursor-heavy full-screen TUIs still need a
+ *    dedicated terminal emulator rather than a timeline bubble.
  *  - On per-command timeout we kill the entire shell — the pool
  *    spawns a fresh one on the next call. The user loses any shell
  *    state (env vars, cwd) accumulated in this session. The
@@ -132,6 +133,10 @@ export class PersistentShell {
   private currentCwd: string;
   private currentRun: {
     sentinel: string;
+    /** Exact text written to the shell for this run. On Windows the
+     *  interactive line editor echoes it; we use this to keep prompt/input
+     *  paint out of both live chunks and the final transcript. */
+    command: string;
     ring: OutputRingBuffer;
     started: number;
     timer: NodeJS.Timeout;
@@ -172,6 +177,8 @@ export class PersistentShell {
     streamState: 'streaming' | 'done' | 'disabled';
     /** Position in cumulative ring text past which we haven't streamed. */
     streamCursor: number;
+    /** Windows-only offset immediately after the echoed input line. */
+    windowsOutputStart?: number;
   } | null = null;
 
   private constructor(
@@ -312,13 +319,20 @@ export class PersistentShell {
       spec.platform === 'posix'
         ? `bind 'set enable-bracketed-paste off' 2>/dev/null; export PS1=''; export PS2=''; PROMPT_COMMAND='printf "\\n%s|%s|%s\\n" "${shellSentinel}" "$?" "$PWD"'; :`
         : [
+            // PowerShell must receive initialization as ONE logical line.
+            // A multi-line write prompts after each completed line, so the
+            // prompt-function definition used to emit the readiness sentinel
+            // while a trailing `$null` line was still queued. The first user
+            // command then consumed that stale prompt and appeared to finish
+            // successfully in a few milliseconds while its real output was
+            // dropped with no active run.
             ...spec.initLines,
-            // Windows: redefine the prompt function so PROMPT itself
-            // emits the sentinel after every command. `$LASTEXITCODE`
-            // is undefined for cmdlets — coalesce to 0.
-            `function prompt { "\`n${shellSentinel}|" + ($LASTEXITCODE,0 -ne $null)[0] + "|" + (Get-Location).Path + "\`n" }`,
-            '$null',
-          ].join(shell.lineSeparator());
+            // Capture `$?` before the prompt body itself changes it. Reset
+            // `$LASTEXITCODE` after every prompt so a later failing cmdlet
+            // cannot inherit the exit code of an older native executable.
+            `function global:prompt { $gezelSuccess = $?; $gezelLastExit = $global:LASTEXITCODE; $gezelExit = if ($gezelSuccess) { 0 } elseif ($null -ne $gezelLastExit -and $gezelLastExit -ne 0) { [int]$gezelLastExit } else { 1 }; $global:LASTEXITCODE = 0; [Console]::Write("\`n${shellSentinel}|$gezelExit|$((Get-Location).Path)\`n"); return '' }`,
+            '$global:LASTEXITCODE = 0',
+          ].join('; ');
 
     // Drive the init script through the same run pipeline so we get
     // sentinel-gated readiness with no extra special-casing. The
@@ -400,7 +414,10 @@ export class PersistentShell {
   feedInput(text: string): boolean {
     if (this.exited) return false;
     try {
-      this.pty.write(text + (this.platform === 'win32' ? '\r\n' : '\n'));
+      // ConPTY's interactive input terminator is CR, matching the Enter key.
+      // Sending CRLF submits on CR and then feeds LF into PSReadLine as a
+      // second keypress, which surfaces a spurious `>>` continuation prompt.
+      this.pty.write(text + (this.platform === 'win32' ? '\r' : '\n'));
       return true;
     } catch (err) {
       log.warn(`feedInput failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -495,6 +512,7 @@ export class PersistentShell {
 
       this.currentRun = {
         sentinel,
+        command,
         ring,
         started,
         timer,
@@ -570,7 +588,11 @@ export class PersistentShell {
     if (!m) return;
 
     const exitCode = Number(m[1]);
-    const newCwd = (m[2] ?? '').trim();
+    // PowerShell/PSReadLine may restore its input color immediately after
+    // rendering `prompt`, before the marker's terminating newline reaches
+    // ConPTY. Keep terminal styling bytes out of persistent cwd state and
+    // folder labels (where they otherwise render literally as `�[93m`).
+    const newCwd = stripControlCharacters(stripAnsi(m[2] ?? '')).trim();
     const sentinelStart = m.index;
 
     const rawBefore = text.slice(0, sentinelStart);
@@ -579,7 +601,10 @@ export class PersistentShell {
     // echo path is usually empty and stripWriteEcho is a no-op;
     // we still call it as a defense against the rare edge case
     // where stty -echo didn't take effect.
-    const echoCleaned = stripWriteEcho(rawBefore, this.currentRun.sentinel);
+    const echoCleaned =
+      this.platform === 'win32'
+        ? stripWindowsWriteEcho(rawBefore, this.currentRun.command)
+        : stripWriteEcho(rawBefore, this.currentRun.sentinel);
     const output = this.cleanOutput(echoCleaned);
     const { truncated } = this.currentRun.ring.value();
     const durationMs = Date.now() - this.currentRun.started;
@@ -669,6 +694,19 @@ export class PersistentShell {
     }
     if (text.length <= run.streamCursor) return;
 
+    // PowerShell's interactive line editor paints the prompt + submitted
+    // command into ConPTY before real process output. Hold live delivery
+    // until that echoed line is complete, then begin after it. This also
+    // absorbs any late prompt-color bytes emitted just after the preceding
+    // sentinel.
+    if (this.platform === 'win32' && run.windowsOutputStart === undefined) {
+      const outputStart = findWindowsOutputStart(text, run.command);
+      if (outputStart === null) return;
+      run.windowsOutputStart = outputStart;
+      run.streamCursor = outputStart;
+      if (text.length <= run.streamCursor) return;
+    }
+
     // If the OUTPUT sentinel is in the new bytes, stream only up
     // to its start (with the leading `\n` from the printf format
     // trimmed off too). Mark done so subsequent handleData calls
@@ -708,7 +746,9 @@ export class PersistentShell {
   }
 
   private lineSeparator(): string {
-    return this.platform === 'win32' ? '\r\n' : '\n';
+    // A PTY receives keystrokes, not a text file. Enter is CR on ConPTY;
+    // CRLF injects a second PSReadLine keypress and can open a `>>` prompt.
+    return this.platform === 'win32' ? '\r' : '\n';
   }
 }
 
@@ -741,6 +781,57 @@ function stripWriteEcho(rawBefore: string, sentinel: string): string {
   return rawBefore.slice(eol + 1);
 }
 
+/**
+ * Locate real PowerShell output after PSReadLine's painted prompt + command
+ * echo. Returns null until the echoed input line is complete so streaming
+ * never flashes the prompt or ANSI-colored command before removing it.
+ */
+function findWindowsOutputStart(raw: string, command: string): number | null {
+  const firstCommandLine = command.split(/\r?\n/, 1)[0]?.trim() ?? '';
+  if (!firstCommandLine) return 0;
+
+  let lineStart = 0;
+  while (lineStart < raw.length) {
+    const lineEnd = raw.indexOf('\n', lineStart);
+    if (lineEnd === -1) return null;
+    const line = stripControlCharacters(
+      stripAnsi(raw.slice(lineStart, lineEnd)).replace(/\r/g, ''),
+    );
+    if (line.includes(firstCommandLine)) {
+      let outputStart = lineEnd + 1;
+      // Older CRLF writes could leave one or more continuation prompts.
+      // Skip them in persisted history too, while preserving any real line.
+      for (;;) {
+        const nextEnd = raw.indexOf('\n', outputStart);
+        if (nextEnd === -1) {
+          const tail = stripAnsi(raw.slice(outputStart)).replace(/\r/g, '').trim();
+          return tail === '>>' ? null : outputStart;
+        }
+        const nextLine = stripAnsi(raw.slice(outputStart, nextEnd)).replace(/\r/g, '').trim();
+        if (nextLine !== '>>') return outputStart;
+        outputStart = nextEnd + 1;
+      }
+    }
+    lineStart = lineEnd + 1;
+  }
+  return null;
+}
+
+/** Remove PowerShell's prompt/input paint from the final transcript. */
+function stripWindowsWriteEcho(rawBefore: string, command: string): string {
+  const outputStart = findWindowsOutputStart(rawBefore, command);
+  return outputStart === null ? rawBefore : rawBefore.slice(outputStart);
+}
+
+function stripControlCharacters(value: string): string {
+  let clean = '';
+  for (const char of value) {
+    const code = char.charCodeAt(0);
+    if (code >= 0x20 && code !== 0x7f) clean += char;
+  }
+  return clean;
+}
+
 function pickPlatformShell(): {
   file: string;
   args: string[];
@@ -753,7 +844,6 @@ function pickPlatformShell(): {
       args: ['-NoLogo', '-NoProfile'],
       initLines: [
         '$ErrorActionPreference = "Continue"',
-        'function prompt { "" }',
         '$OutputEncoding = [System.Text.Encoding]::UTF8',
         '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8',
       ],

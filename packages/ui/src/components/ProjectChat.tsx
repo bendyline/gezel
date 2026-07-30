@@ -1,9 +1,9 @@
 import type { GezelSummary, ProjectDetail, Task } from '@bendyline/gezel';
 import { displayName } from '@bendyline/gezel';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { crewLeadLabelLower } from '../labels.js';
-import { Popover } from '../primitives/index.js';
+import { DropdownChevron, Popover } from '../primitives/index.js';
 import { ChatComposer, queueComposerPrefill } from './ChatComposer.js';
 import { ChatReferences } from './ChatReferences.js';
 import { FolderTreeSwitcher } from './FolderTreeSwitcher.js';
@@ -36,6 +36,8 @@ export function ProjectChat({
   project: ProjectDetail;
   compact?: boolean;
 }) {
+  const projectChatRef = useRef<HTMLDivElement>(null);
+  const rosterRef = useRef<HTMLDivElement>(null);
   const [gezels, setGezels] = useState<GezelSummary[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [selectedId, setSelectedId] = useState<string>('');
@@ -198,6 +200,27 @@ export function ProjectChat({
 
   const selected = gezels.find((g) => g.id === selectedId);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies(gezels.length): the roster refs do not exist during the empty loading render; a population-count change is the deliberate re-measure trigger.
+  useLayoutEffect(() => {
+    const projectChat = projectChatRef.current;
+    const roster = rosterRef.current;
+    if (!projectChat || !roster) return;
+
+    const syncGripOffset = () => {
+      const rowGap = Number.parseFloat(getComputedStyle(projectChat).rowGap) || 0;
+      const rosterBand = roster.getBoundingClientRect().height + rowGap;
+      projectChat.style.setProperty('--project-chat-grip-offset', `${rosterBand / 2}px`);
+    };
+
+    syncGripOffset();
+    if (typeof ResizeObserver === 'undefined') return;
+
+    const observer = new ResizeObserver(syncGripOffset);
+    observer.observe(projectChat);
+    observer.observe(roster);
+    return () => observer.disconnect();
+  }, [gezels.length]);
+
   if (gezels.length === 0) {
     return (
       <p className="muted">No gezels available to chat with yet. Create one from the Gezels tab.</p>
@@ -205,8 +228,8 @@ export function ProjectChat({
   }
 
   return (
-    <div className="project-chat">
-      <div className="project-chat-roster">
+    <div ref={projectChatRef} className="project-chat">
+      <div ref={rosterRef} className="project-chat-roster">
         {isSolo ? (
           soloLead ? (
             <button
@@ -393,9 +416,7 @@ function MoreGezels({
           ) : (
             <span>More gezels…</span>
           )}
-          <span className="project-chat-more-caret" aria-hidden>
-            ▾
-          </span>
+          <DropdownChevron className="project-chat-more-caret" />
         </button>
       </Popover.Trigger>
       <Popover.Content className="project-chat-more-popover" align="start">
@@ -527,6 +548,11 @@ function ProjectChatBody({
   // Live SSE normally paints it first; this key closes the narrow gap where
   // a stream frame is lost while the command itself was safely stored.
   const [terminalRefreshKey, setTerminalRefreshKey] = useState(0);
+  const [terminalSubmission, setTerminalSubmission] = useState<{
+    runId: string;
+    threadId: string;
+    input: string;
+  } | null>(null);
 
   // Stage a command into the terminal for the user to review + run.
   // Called by the CommandsPanel craftbook launcher (threaded through
@@ -613,6 +639,7 @@ function ProjectChatBody({
               setTerminalPickerDisplay(next);
             }}
             terminalRefreshKey={terminalRefreshKey}
+            {...(terminalSubmission ? { terminalSubmission } : {})}
             emptyPlaceholder={
               isVoorman
                 ? `Talk to ${selectedGezel.name} about running "${project.name}" — planning tasks, delegating, or checking progress.`
@@ -693,7 +720,14 @@ function ProjectChatBody({
                     projectId={project.id}
                     workingDir={terminalThreadDir}
                     initialInput={terminalInitialInput}
-                    onSent={() => setTerminalRefreshKey((key) => key + 1)}
+                    onSent={(input, result) => {
+                      setTerminalSubmission({
+                        runId: result.runId,
+                        threadId: result.threadId,
+                        input,
+                      });
+                      setTerminalRefreshKey((key) => key + 1);
+                    }}
                     onChatEscape={(seed) => {
                       // Queue the seed for the ChatComposer that's
                       // about to mount, then flip mode. The composer's
@@ -707,9 +741,7 @@ function ProjectChatBody({
                 </>
               )}
             </div>
-            <div
-              className={`project-chat-compose-mode-bar${composeMode === 'terminal' ? ' project-chat-compose-mode-bar-terminal' : ''}`}
-            >
+            <div className="project-chat-compose-mode-bar">
               <div className="project-chat-compose-toggle" role="tablist">
                 <button
                   type="button"

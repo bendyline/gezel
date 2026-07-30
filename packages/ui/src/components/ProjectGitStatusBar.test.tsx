@@ -28,12 +28,12 @@ const BASE_STATUS = {
 
 describe('ProjectGitStatusBar', () => {
   beforeEach(() => {
-    vi.mocked(api.getProjectGithubStatus).mockResolvedValue(BASE_STATUS as never);
+    vi.mocked(api.getProjectGitStatus).mockResolvedValue(BASE_STATUS as never);
     vi.mocked(api.getProjectIndexStatus).mockResolvedValue({ state: 'fresh' } as never);
   });
 
   it('shows the plain-language status chip instead of counters', async () => {
-    vi.mocked(api.getProjectGithubStatus).mockResolvedValue({
+    vi.mocked(api.getProjectGitStatus).mockResolvedValue({
       ...BASE_STATUS,
       changesCount: 3,
       ahead: 2,
@@ -98,16 +98,16 @@ describe('ProjectGitStatusBar', () => {
   });
 
   it('flags a waiting merge and clicks through to the GitHub tab', async () => {
-    vi.mocked(api.getProjectGithubStatus).mockResolvedValue({
+    vi.mocked(api.getProjectGitStatus).mockResolvedValue({
       ...BASE_STATUS,
       mergeInProgress: true,
       conflictedCount: 1,
     } as never);
-    const onOpenGithub = vi.fn();
-    render(<ProjectGitStatusBar projectId="pj-1" onOpenGithub={onOpenGithub} />);
+    const onOpenGitHub = vi.fn();
+    render(<ProjectGitStatusBar projectId="pj-1" onOpenGitHub={onOpenGitHub} />);
     const chip = await screen.findByText('Sync needs your help');
     await userEvent.click(chip);
-    expect(onOpenGithub).toHaveBeenCalled();
+    expect(onOpenGitHub).toHaveBeenCalled();
   });
 
   it('keeps one Sync button and no Save/Share buttons', async () => {
@@ -120,7 +120,7 @@ describe('ProjectGitStatusBar', () => {
   });
 
   it('hides ambient Git actions and the default edits-on control in compact mode', async () => {
-    vi.mocked(api.getProjectGithubStatus).mockResolvedValue({
+    vi.mocked(api.getProjectGitStatus).mockResolvedValue({
       ...BASE_STATUS,
       changesCount: 1,
       dirty: true,
@@ -188,7 +188,7 @@ describe('ProjectGitStatusBar', () => {
   });
 
   it('Sync calls the one-verb endpoint and toasts the plain-language result', async () => {
-    vi.mocked(api.syncProjectGithub).mockResolvedValue({
+    vi.mocked(api.syncProjectGit).mockResolvedValue({
       state: 'synced',
       pulled: 0,
       pushed: 2,
@@ -197,7 +197,7 @@ describe('ProjectGitStatusBar', () => {
     const sync = await screen.findByRole('button', { name: 'Sync' });
     await userEvent.click(sync);
     await waitFor(() => {
-      expect(api.syncProjectGithub).toHaveBeenCalledWith('pj-1');
+      expect(api.syncProjectGit).toHaveBeenCalledWith('pj-1');
     });
     await waitFor(() => {
       expect(screen.getByText('Sent 2 saved changes to GitHub.')).toBeInTheDocument();
@@ -205,18 +205,35 @@ describe('ProjectGitStatusBar', () => {
   });
 
   it('hands needs-save off to the GitHub tab', async () => {
-    vi.mocked(api.syncProjectGithub).mockResolvedValue({
+    vi.mocked(api.syncProjectGit).mockResolvedValue({
       state: 'needs-save',
       pulled: 0,
       pushed: 0,
     } as never);
-    const onOpenGithub = vi.fn();
-    render(<ProjectGitStatusBar projectId="pj-1" onOpenGithub={onOpenGithub} />);
+    const onOpenGitHub = vi.fn();
+    render(<ProjectGitStatusBar projectId="pj-1" onOpenGitHub={onOpenGitHub} />);
     const sync = await screen.findByRole('button', { name: 'Sync' });
     await userEvent.click(sync);
     await waitFor(() => {
-      expect(onOpenGithub).toHaveBeenCalled();
+      expect(onOpenGitHub).toHaveBeenCalled();
     });
     expect(screen.getByText(/Save your changes first/)).toBeInTheDocument();
+  });
+
+  it('hands authentication failures off to the GitHub tab', async () => {
+    vi.mocked(api.syncProjectGit).mockResolvedValue({
+      state: 'auth',
+      pulled: 0,
+      pushed: 0,
+    } as never);
+    const onOpenGitHub = vi.fn();
+    render(<ProjectGitStatusBar projectId="pj-1" onOpenGitHub={onOpenGitHub} />);
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Sync' }));
+
+    await waitFor(() => {
+      expect(onOpenGitHub).toHaveBeenCalled();
+    });
+    expect(screen.getByText(/GitHub needs you to sign in again/)).toBeInTheDocument();
   });
 });

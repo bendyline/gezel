@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
 import { open, readFile, readdir, stat } from 'node:fs/promises';
-import { join, relative } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 import type { CommandShape, DiscoveredCommand } from '@bendyline/gezel';
 import { extractOclifShapes } from './oclif.js';
 
@@ -39,22 +39,85 @@ const MAX_FILES = 20_000;
 /** Tokens shorter than this aren't useful for filename autocomplete. */
 const MIN_TOKEN_LEN = 2;
 
-/** ── npm scripts ──────────────────────────────────────────────────── */
+/** ── package scripts ──────────────────────────────────────────────── */
+
+export type WorkspacePackageManager = 'npm' | 'pnpm';
+
+/**
+ * Pick the script runner that owns a workspace.
+ *
+ * `package.json#packageManager` is authoritative when present. Otherwise
+ * inspect the nearest directory with package-manager infrastructure,
+ * walking upward so a package opened directly inside a pnpm monorepo still
+ * inherits the root's `pnpm-workspace.yaml` / lockfile. A directory with
+ * both lockfiles is scored by its signals; pnpm's workspace marker makes it
+ * predominant over a stale package-lock.
+ */
+export async function detectWorkspacePackageManager(
+  workspaceDir: string,
+  rootDeclared?: unknown,
+): Promise<WorkspacePackageManager> {
+  const rootManager = declaredPackageManager(rootDeclared);
+  if (rootManager) return rootManager;
+
+  let dir = workspaceDir;
+  for (;;) {
+    if (dir !== workspaceDir) {
+      const declared = await readDeclaredPackageManager(dir);
+      if (declared) return declared;
+    }
+
+    const pnpmScore =
+      (existsSync(join(dir, 'pnpm-workspace.yaml')) ? 2 : 0) +
+      (existsSync(join(dir, 'pnpm-lock.yaml')) ? 1 : 0);
+    const npmScore =
+      (existsSync(join(dir, 'package-lock.json')) ? 1 : 0) +
+      (existsSync(join(dir, 'npm-shrinkwrap.json')) ? 1 : 0);
+    if (pnpmScore > 0 || npmScore > 0) {
+      return pnpmScore > npmScore ? 'pnpm' : 'npm';
+    }
+
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return 'npm';
+}
 
 export async function discoverNpmScripts(workspaceDir: string): Promise<DiscoveredCommand[]> {
   try {
     const raw = await readFile(join(workspaceDir, 'package.json'), 'utf8');
-    const parsed = JSON.parse(raw) as { scripts?: Record<string, string> };
+    const parsed = JSON.parse(raw) as {
+      scripts?: Record<string, string>;
+      packageManager?: unknown;
+    };
     if (!parsed.scripts || typeof parsed.scripts !== 'object') return [];
+    const packageManager = await detectWorkspacePackageManager(workspaceDir, parsed.packageManager);
     return Object.entries(parsed.scripts).map(([name, cmd]) => ({
       name,
       kind: 'npm-script' as const,
       source: 'package.json',
-      run: `npm run ${name}`,
+      run: `${packageManager} run ${name}`,
       ...(typeof cmd === 'string' ? { description: truncate(cmd, COMMAND_DESCRIPTION_CAP) } : {}),
     }));
   } catch {
     return [];
+  }
+}
+
+function declaredPackageManager(value: unknown): WorkspacePackageManager | null {
+  if (typeof value !== 'string') return null;
+  const name = value.trim().split('@', 1)[0]?.toLowerCase();
+  return name === 'npm' || name === 'pnpm' ? name : null;
+}
+
+async function readDeclaredPackageManager(dir: string): Promise<WorkspacePackageManager | null> {
+  try {
+    const raw = await readFile(join(dir, 'package.json'), 'utf8');
+    const parsed = JSON.parse(raw) as { packageManager?: unknown };
+    return declaredPackageManager(parsed.packageManager);
+  } catch {
+    return null;
   }
 }
 

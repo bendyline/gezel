@@ -1477,6 +1477,7 @@ export class LlamaCppProvider implements LLMProvider {
   readonly name = 'llama-cpp' as const;
   readonly queue: ProviderQueue;
   readonly supportsExternalTools = true;
+  readonly supportsPriorMessages = true;
   private readonly supervisor?: NativeEngineSupervisor;
   /** Explicit base URL when no supervisor is managing the process. */
   private readonly externalBaseUrl?: string;

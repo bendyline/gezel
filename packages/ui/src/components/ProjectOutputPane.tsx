@@ -97,6 +97,16 @@ const CloseIcon = () => (
   </svg>
 );
 
+/** Compact stand-in for the selected page label when the toolbar is narrow. */
+const OutputPageIcon = () => (
+  <svg {...ICON_SVG_PROPS} aria-hidden="true">
+    <path d="M4 2.5H9.5L12 5V13.5H4Z" />
+    <path d="M9.5 2.5V5H12" />
+    <path d="M6 8H10" />
+    <path d="M6 10.5H9" />
+  </svg>
+);
+
 /**
  * The "⋯" overflow menu the toolbar collapses into when narrow. Opens a
  * dropdown of the same actions as labelled rows. Closes on outside
@@ -474,8 +484,21 @@ export function ProjectOutputPane({
     <div className="project-output-toolbar" ref={toolbarRef}>
       {targets.length > 0 && (
         <Select.Root value={selectedTarget?.id} onValueChange={(id) => setPickedPath(id)}>
-          <Select.Trigger className="project-output-picker">
-            <Select.Value placeholder={detecting ? 'Detecting…' : 'Select a target…'} />
+          <Select.Trigger
+            className={`project-output-picker${compactToolbar ? ' is-compact' : ''}`}
+            aria-label={
+              selectedTarget
+                ? `Choose output page. Current page: ${selectedTarget.label}`
+                : 'Choose output page'
+            }
+          >
+            {compactToolbar ? (
+              <span className="project-output-picker-icon" aria-hidden="true">
+                <OutputPageIcon />
+              </span>
+            ) : (
+              <Select.Value placeholder={detecting ? 'Detecting…' : 'Select a target…'} />
+            )}
           </Select.Trigger>
           <Select.Content>
             {targets.map((t) => (

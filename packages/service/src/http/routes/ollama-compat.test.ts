@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createTrustingFetch } from '@bendyline/gezel-client/node';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { MockProvider } from '../../providers/mock.js';
 import { type RunningService, startService } from '../../service.js';
 
 let svc: RunningService;
@@ -113,6 +114,126 @@ describe('POST /ollama/v1/chat — NDJSON streaming', () => {
     expect(middleChunks.length).toBeGreaterThan(0);
     const reassembled = middleChunks.map((c) => c.message?.content ?? '').join('');
     expect(reassembled).toContain('narrate');
+  });
+});
+
+describe('POST /ollama/v1/chat — tool calling (Ollama-native shapes)', () => {
+  let mockCopilot: MockProvider;
+
+  beforeAll(async () => {
+    const provider = await svc.context.chat.getProvider('copilot');
+    if (!(provider instanceof MockProvider)) {
+      throw new Error('expected MockProvider for copilot in test env');
+    }
+    mockCopilot = provider;
+  });
+
+  it('returns captured calls as message.tool_calls with OBJECT arguments + done_reason', async () => {
+    mockCopilot.scriptExternalToolCalls([
+      { id: 'call_1', name: 'get_weather', arguments: '{"city":"Delft"}' },
+    ]);
+    const res = await call('POST', '/ollama/v1/chat', {
+      body: {
+        model: 'copilot:mock-fast',
+        messages: [{ role: 'user', content: 'weather in Delft?' }],
+        tools: [
+          {
+            type: 'function',
+            function: {
+              name: 'get_weather',
+              parameters: { type: 'object', properties: { city: { type: 'string' } } },
+            },
+          },
+        ],
+        stream: false,
+      },
+      token: rootToken,
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      message: {
+        tool_calls?: Array<{ function: { name: string; arguments: Record<string, unknown> } }>;
+      };
+      done: boolean;
+      done_reason?: string;
+    };
+    // Ollama's wire shape: object arguments, no ids.
+    expect(body.message.tool_calls).toEqual([
+      { function: { name: 'get_weather', arguments: { city: 'Delft' } } },
+    ]);
+    expect(body.done).toBe(true);
+    expect(body.done_reason).toBe('stop');
+  });
+
+  it('accepts an Ollama-style tool-result follow-up turn (object args in history)', async () => {
+    mockCopilot.script('It is sunny in Delft.');
+    const before = mockCopilot.calls.length;
+    const res = await call('POST', '/ollama/v1/chat', {
+      body: {
+        model: 'copilot:mock-fast',
+        messages: [
+          { role: 'user', content: 'weather in Delft?' },
+          {
+            role: 'assistant',
+            content: '',
+            tool_calls: [{ function: { name: 'get_weather', arguments: { city: 'Delft' } } }],
+          },
+          { role: 'tool', content: 'sunny, 21C', tool_name: 'get_weather' },
+        ],
+        stream: false,
+      },
+      token: rootToken,
+    });
+    expect(res.status).toBe(200);
+    // The transcript reached the session as real prior turns: the
+    // assistant turn carries string-encoded arguments and the tool
+    // result consumed its synthesized id.
+    const create = mockCopilot.calls.slice(before).find((c) => c.kind === 'create');
+    const priors = (create?.opts?.priorMessages ?? []) as Array<Record<string, unknown>>;
+    expect(priors.some((m) => m.role === 'tool' && m.toolCallId === 'call_0')).toBe(true);
+  });
+});
+
+describe('POST /ollama/v1/chat — images (Ollama bare-base64 shape)', () => {
+  // 1x1 transparent PNG — starts with the iVBOR magic the mime sniffer keys on.
+  const PNG_1X1 =
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+
+  it('attaches last-message images to the prompt with a sniffed mime type', async () => {
+    const provider = await svc.context.chat.getProvider('copilot');
+    if (!(provider instanceof MockProvider)) {
+      throw new Error('expected MockProvider for copilot in test env');
+    }
+    const before = provider.calls.length;
+    const res = await call('POST', '/ollama/v1/chat', {
+      body: {
+        model: 'copilot:mock-fast',
+        messages: [{ role: 'user', content: 'what is in this picture?', images: [PNG_1X1] }],
+        stream: false,
+      },
+      token: rootToken,
+    });
+    expect(res.status).toBe(200);
+    const send = provider.calls.slice(before).find((c) => c.kind === 'send');
+    const attachments = (send?.sendOpts?.attachments ?? []) as Array<{
+      base64: string;
+      mimeType: string;
+    }>;
+    expect(attachments).toHaveLength(1);
+    expect(attachments[0]?.mimeType).toBe('image/png');
+    expect(attachments[0]?.base64).toBe(PNG_1X1);
+  });
+
+  it('accepts an image-only message (no text) as a valid prompt', async () => {
+    const res = await call('POST', '/ollama/v1/chat', {
+      body: {
+        model: 'copilot:mock-fast',
+        messages: [{ role: 'user', content: '', images: [PNG_1X1] }],
+        stream: false,
+      },
+      token: rootToken,
+    });
+    expect(res.status).toBe(200);
   });
 });
 

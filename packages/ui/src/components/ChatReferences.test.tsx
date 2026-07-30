@@ -93,6 +93,27 @@ describe('ChatReferences responsive split', () => {
 });
 
 describe('ChatReferences task picker', () => {
+  it('replaces legacy generated ISO titles with the craftbook name', async () => {
+    activeWidth = CHAT_RAIL_MIN_SPLIT_PX;
+    const user = userEvent.setup();
+    apiMocks.getTaskByRef.mockResolvedValue(task('project-1/1', 'craftbook-1 — 2026-07-28T13:19'));
+
+    render(
+      <ChatReferences chatKey="project-1" projectId="project-1">
+        {({ onTaskReference }) => (
+          <button type="button" onClick={() => onTaskReference('project-1/1')}>
+            Add task reference
+          </button>
+        )}
+      </ChatReferences>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Add task reference' }));
+
+    expect(await screen.findByRole('heading', { name: 'Review' })).toBeInTheDocument();
+    expect(screen.queryByText('craftbook-1 — 2026-07-28T13:19')).not.toBeInTheDocument();
+  });
+
   it('selects referenced tasks from a dropdown in the Tasks tab', async () => {
     activeWidth = CHAT_RAIL_MIN_SPLIT_PX;
     const user = userEvent.setup();

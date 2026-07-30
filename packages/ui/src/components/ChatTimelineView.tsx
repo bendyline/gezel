@@ -33,6 +33,7 @@ import {
   subscribeOptimisticUserMessages,
 } from './chat-optimistic-events.js';
 import { consumeFocusSessionError } from './pending-focus-session-error.js';
+import { compareTimelineRows, nextTerminalBottomGraceExpiry } from './timeline-row-order.js';
 import { buildTimelineThreads } from './timeline-threads.js';
 import { useNarrateAssistantReplies } from './useNarrateAssistantReplies.js';
 import { useRoleBasedNameOnlyMode } from './useRoleBasedNameOnlyMode.js';
@@ -54,6 +55,7 @@ const RECENT_THRESHOLD_MS = 24 * 60 * 60 * 1000;
 const LATE_REPLY_GAP_MS = 3 * 60 * 1000;
 const SCROLL_NEAR_BOTTOM_PX = 80;
 const SCROLL_NEAR_TOP_PX = 80;
+const SCROLLBAR_IDLE_MS = 700;
 /** How long the flash ring stays on a row a navigation jumped to. */
 const FOCUS_FLASH_MS = 2000;
 /**
@@ -182,7 +184,7 @@ interface TerminalLiveSlot {
   /** Folder-pill display string (project-relative or absolute). */
   cwd: string;
   /** Concatenated `outputChunk` payloads. The streaming bubble
-   *  feeds this to a stateful `AnsiOutput` renderer. */
+   *  re-renders this complete buffer through `AnsiOutput`. */
   content: string;
   /** Set by `inputRequested` SSE events; cleared by the next
    *  `outputChunk` (which implies the shell got our input and
@@ -215,6 +217,8 @@ interface LiveSlot {
    * does show the banner after the threshold elapses.
    */
   lastActivityAt: number;
+  /** True only after this turn emits an actual provider/model progress signal. */
+  hasProgress: boolean;
   /**
    * Most-recent `at` we've seen for any message in this session, used to
    * place the streaming row chronologically. Updated when the streaming
@@ -342,6 +346,25 @@ interface LiveSlot {
   warnings?: InlineWarning[];
 }
 
+/**
+ * Find clean live slots that survived locally even though the service no
+ * longer reports their turns as in flight. Object identity protects slots
+ * created or replaced while the reconciliation request was in flight.
+ */
+export function staleLiveSessionIds(
+  current: ReadonlyMap<string, { error?: string }>,
+  observed: ReadonlyMap<string, object>,
+  inflight: ReadonlySet<string>,
+): string[] {
+  const stale: string[] = [];
+  for (const [sessionId, observedSlot] of observed) {
+    const currentSlot = current.get(sessionId);
+    if (!currentSlot || currentSlot !== observedSlot) continue;
+    if (!currentSlot.error && !inflight.has(sessionId)) stale.push(sessionId);
+  }
+  return stale;
+}
+
 export interface ChatTimelineViewProps {
   /** Stable cache key — changing it clears all state and re-loads. */
   scopeKey: string;
@@ -397,6 +420,19 @@ export interface ChatTimelineViewProps {
    * a persisted command invisible until the project is reopened.
    */
   terminalRefreshKey?: number;
+  /**
+   * The most recent terminal command submitted from the composer beside
+   * this timeline. Unlike background terminal activity, a local submission
+   * should always bring its own command row into view, even when the user
+   * had scrolled up to read older history. `runId` makes repeated identical
+   * commands distinct; the row itself is resolved by thread + input because
+   * persisted terminal entries intentionally do not expose run ids.
+   */
+  terminalSubmission?: {
+    runId: string;
+    threadId: string;
+    input: string;
+  };
   /**
    * Fired when the terminal SSE channel reports a `workingDirChanged`
    * event — i.e. the shell behind a thread cd'd to a new path. The
@@ -467,6 +503,7 @@ export function ChatTimelineView({
   streamUrl,
   terminalStreamUrl,
   terminalRefreshKey,
+  terminalSubmission,
   onTerminalWorkingDirChanged,
   showProjectName,
   inflightScope,
@@ -555,8 +592,24 @@ export function ChatTimelineView({
    * the project's terminal channel (deduped by messageId).
    */
   const [terminalEntries, setTerminalEntries] = useState<TerminalTimelineEntry[]>([]);
+  // Bumped when a fresh terminal row's five-minute bottom-placement
+  // grace period ends. The timer lets ordering return to normal even
+  // when no new chat or terminal event arrives to trigger a render.
+  const [terminalOrderTick, setTerminalOrderTick] = useState(0);
   const [hasMore, setHasMore] = useState(false);
   const [oldestAt, setOldestAt] = useState<string | undefined>();
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: terminalOrderTick re-arms the timer for the next recent terminal row after each expiry.
+  useEffect(() => {
+    const now = Date.now();
+    const nextExpiry = nextTerminalBottomGraceExpiry(terminalEntries, now);
+    if (nextExpiry === undefined) return;
+    const timer = window.setTimeout(
+      () => setTerminalOrderTick((tick) => tick + 1),
+      Math.max(0, nextExpiry - Date.now() + 1),
+    );
+    return () => window.clearTimeout(timer);
+  }, [terminalEntries, terminalOrderTick]);
 
   // Phase 4 — warm-on-open. When the user focuses a session, ask the
   // daemon to pre-warm its prompt cache so the first message returns
@@ -630,6 +683,7 @@ export function ChatTimelineView({
     >
   >(new Map());
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const scrollbarIdleTimerRef = useRef<number | null>(null);
   /**
    * "Pinned to bottom" mode: when true, any new row auto-scrolls the
    * viewport to the bottom, so the timeline acts like a terminal that
@@ -643,6 +697,30 @@ export function ChatTimelineView({
    * Kept in state (not a ref) so the button can render the live state.
    */
   const [pinnedToBottom, setPinnedToBottom] = useState(true);
+  /**
+   * A prompt submitted from the composer attached to this timeline. It is
+   * deliberately separate from ordinary row growth: background messages
+   * preserve the reader's scroll position, while the user's own send always
+   * lands in view with a small response runway beneath it.
+   */
+  const [submissionAnchor, setSubmissionAnchor] = useState<
+    | {
+        kind: 'chat';
+        key: string;
+        sessionId: string;
+        content: string;
+        at: string;
+      }
+    | {
+        kind: 'terminal';
+        key: string;
+        runId: string;
+        threadId: string;
+        input: string;
+      }
+    | null
+  >(null);
+  const [alignedSubmissionKey, setAlignedSubmissionKey] = useState<string | null>(null);
   const paginatingRef = useRef(false);
   /**
    * Sticky context header — surfaces the user message + assistant
@@ -716,6 +794,8 @@ export function ChatTimelineView({
     // ref so the first post-reload render counts as "grew" and
     // triggers the anchor-to-bottom.
     setPinnedToBottom(true);
+    setSubmissionAnchor(null);
+    setAlignedSubmissionKey(null);
     lastRowCountRef.current = 0;
     lastScrollHeightRef.current = 0;
     void (async () => {
@@ -768,6 +848,7 @@ export function ChatTimelineView({
                 entry.lastProgressAgoMs != null
                   ? Date.now() - entry.lastProgressAgoMs
                   : entry.startedAt,
+              hasProgress: entry.lastProgressAgoMs != null,
               anchorAt: lastForSession ? bumpIso(lastForSession.at) : new Date().toISOString(),
               ...(lastForSession
                 ? {
@@ -1226,6 +1307,22 @@ export function ChatTimelineView({
     };
   }, [terminalRefreshKey, loadTimeline]);
 
+  // A terminal submission can arrive after its SSE command row (the service
+  // persists and broadcasts before the POST resolves) or before the fallback
+  // snapshot above. Recording the intent independently lets the alignment
+  // effect below handle both orderings and retry when rows change.
+  useEffect(() => {
+    if (!terminalSubmission) return;
+    setSubmissionAnchor({
+      kind: 'terminal',
+      key: `terminal:${terminalSubmission.runId}`,
+      runId: terminalSubmission.runId,
+      threadId: terminalSubmission.threadId,
+      input: terminalSubmission.input,
+    });
+    setAlignedSubmissionKey(null);
+  }, [terminalSubmission]);
+
   const refreshLatest = useCallback(async () => {
     try {
       const res = await loadTimeline({ limit: PAGE_SIZE });
@@ -1262,6 +1359,46 @@ export function ChatTimelineView({
     }
   }, [loadTimeline]);
 
+  // SSE remains the low-latency path, but a dropped `done` envelope must
+  // not leave a permanent thinking/stalled bubble. Reconcile the local
+  // slots against the service's authoritative in-flight set.
+  useEffect(() => {
+    let stopped = false;
+    let checking = false;
+    const reconcile = async () => {
+      if (checking || liveRef.current.size === 0) return;
+      checking = true;
+      const observed = new Map(liveRef.current);
+      try {
+        const response = await api.listInflightTurns({
+          ...(inflightProjectId !== undefined ? { projectId: inflightProjectId } : {}),
+          ...(inflightGezelId !== undefined ? { gezelId: inflightGezelId } : {}),
+        });
+        if (stopped) return;
+        const active = new Set(response.inflight.map((entry) => entry.sessionId));
+        const stale = staleLiveSessionIds(liveRef.current, observed, active);
+        if (stale.length === 0) return;
+        for (const sessionId of stale) {
+          liveRef.current.delete(sessionId);
+          pendingNarrationRef.current.delete(sessionId);
+        }
+        setLiveBump((n) => n + 1);
+        void refreshLatest();
+      } catch {
+        // Non-fatal. A later poll or the normal `done` event will converge.
+      } finally {
+        checking = false;
+      }
+    };
+    const timer = window.setInterval(() => {
+      void reconcile();
+    }, 5_000);
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+    };
+  }, [inflightProjectId, inflightGezelId, refreshLatest]);
+
   useEffect(() => {
     return subscribeOptimisticUserMessages((message) => {
       if (inflightProjectId !== undefined && message.projectId !== inflightProjectId) return;
@@ -1295,6 +1432,7 @@ export function ChatTimelineView({
           segments: [],
           startedAt: slotStart,
           lastActivityAt: slotStart,
+          hasProgress: false,
           anchorAt: bumpIso(message.at),
           ...(lastForSession
             ? { sessionTitle: lastForSession.sessionTitle }
@@ -1315,6 +1453,17 @@ export function ChatTimelineView({
         });
         setLiveBump((n) => n + 1);
       }
+      // This event is published only by the local composer after the send
+      // was accepted. Bring that prompt into view even if the reader had
+      // intentionally unpinned the timeline while inspecting older rows.
+      setSubmissionAnchor({
+        kind: 'chat',
+        key: `chat:${message.sessionId}:${message.at}`,
+        sessionId: message.sessionId,
+        content: message.content,
+        at: message.at,
+      });
+      setAlignedSubmissionKey(null);
     });
   }, [inflightProjectId, inflightGezelId, synthesizeUserTimelineMessage]);
 
@@ -1449,6 +1598,7 @@ export function ChatTimelineView({
             segments: [],
             startedAt: slotStart,
             lastActivityAt: slotStart,
+            hasProgress: false,
             anchorAt: bumpIso(event.message.at),
             ...(lastForSession
               ? { sessionTitle: lastForSession.sessionTitle }
@@ -1488,6 +1638,7 @@ export function ChatTimelineView({
           slot.segments.push({ kind: 'text', content: event.content });
         }
         slot.lastActivityAt = now;
+        slot.hasProgress = true;
         // First delta means the provider actually started this turn —
         // drop the "queued" indicator if we had one. Also resets
         // the wire-pulse dot accumulator since we just got real
@@ -1518,6 +1669,7 @@ export function ChatTimelineView({
         const slot = liveRef.current.get(sessionId) ?? createSlot(gezelId, projectId, sessionId);
         slot.liveReasoning = (slot.liveReasoning ?? '') + event.content;
         slot.lastActivityAt = Date.now();
+        slot.hasProgress = true;
         delete slot.queueAhead;
         slot.wirePulseCount = 0;
         delete slot.thinkingProgress;
@@ -1550,6 +1702,7 @@ export function ChatTimelineView({
           tail,
         };
         slot.lastActivityAt = Date.now();
+        slot.hasProgress = true;
         delete slot.queueAhead;
         liveRef.current.set(sessionId, slot);
         setLiveBump((n) => n + 1);
@@ -1564,6 +1717,8 @@ export function ChatTimelineView({
         // so the queue-wait is over — drop any stale `queueAhead`.
         const slot = liveRef.current.get(sessionId) ?? createSlot(gezelId, projectId, sessionId);
         slot.wirePulseCount = (slot.wirePulseCount ?? 0) + 1;
+        slot.lastActivityAt = Date.now();
+        slot.hasProgress = true;
         delete slot.queueAhead;
         liveRef.current.set(sessionId, slot);
         setLiveBump((n) => n + 1);
@@ -1578,6 +1733,7 @@ export function ChatTimelineView({
         const slot = liveRef.current.get(sessionId) ?? createSlot(gezelId, projectId, sessionId);
         slot.segments.push({ kind: 'intent', label: event.label });
         slot.lastActivityAt = Date.now();
+        slot.hasProgress = true;
         slot.wirePulseCount = 0;
         delete slot.queueAhead;
         liveRef.current.set(sessionId, slot);
@@ -1593,6 +1749,7 @@ export function ChatTimelineView({
         // reasoning stretches.
         const slot = liveRef.current.get(sessionId) ?? createSlot(gezelId, projectId, sessionId);
         slot.lastActivityAt = Date.now();
+        slot.hasProgress = true;
         slot.wirePulseCount = 0;
         slot.thinkingLabel = event.label;
         delete slot.queueAhead;
@@ -1668,6 +1825,7 @@ export function ChatTimelineView({
         // continues writing" instead of all tools stacked at the top.
         slot.segments.push({ kind: 'tool', tool });
         slot.lastActivityAt = Date.now();
+        slot.hasProgress = true;
         slot.wirePulseCount = 0;
         // The finished tool row supersedes the live tool-args block.
         delete slot.liveToolArgs;
@@ -1712,6 +1870,7 @@ export function ChatTimelineView({
         if (existing) {
           existing.segments = [];
           existing.lastActivityAt = Date.now();
+          existing.hasProgress = true;
           existing.anchorAt = bumpIso(event.message.at);
           existing.wirePulseCount = 0;
           // Drop the live think-phase block: the just-committed message
@@ -1815,6 +1974,7 @@ export function ChatTimelineView({
         // back between turns once the engine is warm.
         const slot = liveRef.current.get(sessionId) ?? createSlot(gezelId, projectId, sessionId);
         slot.lastActivityAt = Date.now();
+        slot.hasProgress = true;
         if (event.phase === 'ready') {
           delete slot.thinkingLabel;
           delete slot.thinkingProgress;
@@ -1946,6 +2106,7 @@ export function ChatTimelineView({
           segments: [],
           startedAt: now,
           lastActivityAt: now,
+          hasProgress: false,
           anchorAt: lastForSession ? bumpIso(lastForSession.at) : nowIso(),
           ...(lastForSession ? { sessionTitle: lastForSession.sessionTitle } : {}),
           ...(lastForSession ? { sessionCreatedAt: lastForSession.sessionCreatedAt } : {}),
@@ -2006,22 +2167,14 @@ export function ChatTimelineView({
       | { kind: 'terminal'; entry: TerminalTimelineEntry; at: string }
       | { kind: 'terminal-streaming'; runId: string; slot: TerminalLiveSlot; at: string }
     > = [...messageRows, ...streamingAsRows, ...terminalRows, ...terminalStreamingRows];
-    // Streaming rows always sort to the bottom — an in-progress chat
-    // or terminal command shouldn't appear sandwiched in the middle
-    // of the queue when its session has older messages above newer
-    // cross-session messages. Among streaming rows themselves,
-    // ordering falls back to `anchorAt` / `startedAt` so multiple
-    // concurrent in-flight rows interleave by start time.
-    const isStreamingKind = (k: string) => k === 'streaming' || k === 'terminal-streaming';
-    all.sort((a, b) => {
-      const aS = isStreamingKind(a.kind);
-      const bS = isStreamingKind(b.kind);
-      if (aS && !bS) return 1;
-      if (!aS && bS) return -1;
-      return a.at < b.at ? -1 : a.at > b.at ? 1 : 0;
-    });
+    // Active chat rows stay below persisted history. Fresh terminal
+    // commands and their output get the final lane for five minutes,
+    // so launching a command cannot push it above the pending chat
+    // task the user was already watching.
+    const now = Date.now();
+    all.sort((a, b) => compareTimelineRows(a, b, now));
     return all;
-  }, [messages, terminalEntries, liveBump, terminalLiveBump]);
+  }, [messages, terminalEntries, liveBump, terminalLiveBump, terminalOrderTick]);
 
   // Slack-style threading: fold the flat rows into turn-rooted thread
   // groups. Every user message (a human turn or a gezel→gezel handoff)
@@ -2066,6 +2219,66 @@ export function ChatTimelineView({
     if (!pinnedToBottom) return;
     el.scrollTo({ top: el.scrollHeight, behavior: 'instant' as ScrollBehavior });
   }, [rows, pinnedToBottom]);
+
+  /**
+   * Align a locally-submitted prompt after its row has rendered. The target
+   * may be nested inside a threaded group, so derive its scroll position from
+   * viewport rectangles rather than `offsetTop` (whose offset parent would be
+   * the thread, not the timeline). The temporary runway rendered below makes
+   * room for the first part of the response instead of pinning the prompt
+   * against the composer's top edge.
+   *
+   * This effect follows the ordinary bottom-anchor effect so a local send wins
+   * when both react to the same row insertion. It runs only once per accepted
+   * submission; streaming deltas can then use normal pinned-follow behavior.
+   */
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || !submissionAnchor || alignedSubmissionKey === submissionAnchor.key) return;
+
+    let target: HTMLElement | null = null;
+    if (submissionAnchor.kind === 'chat') {
+      const submittedAt = Date.parse(submissionAnchor.at);
+      const candidate = messages
+        .filter(
+          (message) =>
+            message.sessionId === submissionAnchor.sessionId &&
+            message.role === 'user' &&
+            message.content === submissionAnchor.content,
+        )
+        .sort((a, b) => {
+          const aDistance = Math.abs(Date.parse(a.at) - submittedAt);
+          const bDistance = Math.abs(Date.parse(b.at) - submittedAt);
+          return aDistance - bDistance;
+        })[0];
+      if (candidate) {
+        const id = cssAttrValue(`msg:${candidate.sessionId}:${candidate.at}:${candidate.role}`);
+        target = el.querySelector<HTMLElement>(`[data-msg-id="${id}"]`);
+      }
+    } else {
+      const candidate = [...terminalEntries]
+        .reverse()
+        .find(
+          (entry) =>
+            entry.threadId === submissionAnchor.threadId &&
+            entry.msgKind === 'command' &&
+            (entry.content === submissionAnchor.input ||
+              entry.resolvedFrom === submissionAnchor.input),
+        );
+      if (candidate) {
+        const id = cssAttrValue(candidate.messageId);
+        target = el.querySelector<HTMLElement>(`[data-terminal-message-id="${id}"]`);
+      }
+    }
+    if (!target) return;
+
+    const timelineRect = el.getBoundingClientRect();
+    const targetRect = target.getBoundingClientRect();
+    const top = Math.max(0, el.scrollTop + targetRect.top - timelineRect.top - 12);
+    setPinnedToBottom(true);
+    el.scrollTo({ top });
+    setAlignedSubmissionKey(submissionAnchor.key);
+  }, [messages, terminalEntries, submissionAnchor, alignedSubmissionKey]);
 
   /**
    * Scroll to a session's failed-turn banner (falling back to that
@@ -2319,6 +2532,10 @@ export function ChatTimelineView({
         cancelAnimationFrame(stickyRecomputeRafRef.current);
         stickyRecomputeRafRef.current = null;
       }
+      if (scrollbarIdleTimerRef.current !== null) {
+        window.clearTimeout(scrollbarIdleTimerRef.current);
+        scrollbarIdleTimerRef.current = null;
+      }
     };
   }, []);
 
@@ -2326,6 +2543,14 @@ export function ChatTimelineView({
     scheduleStickyRecompute();
     const el = scrollRef.current;
     if (!el) return;
+    el.classList.add('chat-timeline-scrolling');
+    if (scrollbarIdleTimerRef.current !== null) {
+      window.clearTimeout(scrollbarIdleTimerRef.current);
+    }
+    scrollbarIdleTimerRef.current = window.setTimeout(() => {
+      scrollRef.current?.classList.remove('chat-timeline-scrolling');
+      scrollbarIdleTimerRef.current = null;
+    }, SCROLLBAR_IDLE_MS);
     const distFromBottom = el.scrollHeight - (el.scrollTop + el.clientHeight);
     const nearBottom = distFromBottom <= SCROLL_NEAR_BOTTOM_PX;
     // Only flip state when it actually changes — otherwise every
@@ -2648,6 +2873,9 @@ export function ChatTimelineView({
           ? { toolCalls: m.toolCalls, projectId: m.projectId }
           : {})}
         {...(m.reasoning ? { reasoning: m.reasoning } : {})}
+        {...(m.reasoningDurationMs !== undefined
+          ? { reasoningDurationMs: m.reasoningDurationMs }
+          : {})}
         {...(m.attemptedToolCalls && m.attemptedToolCalls.length > 0
           ? { attemptedToolCalls: m.attemptedToolCalls }
           : {})}
@@ -2712,6 +2940,7 @@ export function ChatTimelineView({
         segments={slot.segments}
         startedAt={slot.startedAt}
         lastActivityAt={slot.lastActivityAt}
+        hasProgress={slot.hasProgress}
         {...(providerForGezel(slot.gezelId) === 'ollama'
           ? { onProbeOllama: () => api.ollamaProbe() }
           : {})}
@@ -3027,6 +3256,15 @@ export function ChatTimelineView({
     activeContextStatus.numCtx > 0
       ? Math.round((100 * activeContextStatus.estimatedTokens) / activeContextStatus.numCtx)
       : null;
+  const submissionStillRunning =
+    submissionAnchor?.kind === 'chat'
+      ? liveRef.current.has(submissionAnchor.sessionId)
+      : submissionAnchor?.kind === 'terminal'
+        ? terminalLiveRef.current.has(submissionAnchor.runId)
+        : false;
+  const showResponseRunway =
+    submissionAnchor !== null &&
+    (alignedSubmissionKey !== submissionAnchor.key || submissionStillRunning);
 
   return (
     <div className="chat-timeline-viewport">
@@ -3076,6 +3314,7 @@ export function ChatTimelineView({
           </div>
         )}
         {els}
+        {showResponseRunway && <div className="timeline-response-runway" aria-hidden="true" />}
       </div>
       {!pinnedToBottom && (
         <button

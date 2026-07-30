@@ -1,36 +1,42 @@
 import { spawn } from 'node:child_process';
 import { delimiter, dirname } from 'node:path';
 import {
-  type GithubIdentity,
-  type GithubIdentityResponse,
-  GithubLoginPollRequestSchema,
-  type GithubLoginPollResponse,
-  type GithubLoginStartResponse,
-  GithubRepoPreviewRequestSchema,
-  type GithubRepoPreviewResponse,
-  type GithubRepoSummary,
-  type GithubReposResponse,
+  type GitHubIdentity,
+  type GitHubIdentityResponse,
+  GitHubLoginPollRequestSchema,
+  type GitHubLoginPollResponse,
+  type GitHubLoginStartResponse,
+  GitHubRepoPreviewRequestSchema,
+  type GitHubRepoPreviewResponse,
+  type GitHubRepoSummary,
+  type GitHubReposResponse,
+  MachineMemoryUsageSchema,
   createLogger,
 } from '@bendyline/gezel';
 import { Octokit } from '@octokit/rest';
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import {
-  clearGithubToken,
-  fetchGithubIdentity,
-  getStoredGithubToken,
-  storeGithubToken,
+  clearGitHubToken,
+  fetchGitHubIdentity,
+  getStoredGitHubToken,
+  storeGitHubToken,
 } from '../../github/identity.js';
 import { pollDeviceFlow, startDeviceFlow } from '../../github/oauth.js';
 import {
-  GithubAccessDeniedError,
-  GithubRepoNotFoundError,
-  InvalidGithubUrlError,
-  previewGithubRepo,
+  GitHubAccessDeniedError,
+  GitHubRepoNotFoundError,
+  InvalidGitHubUrlError,
+  previewGitHubRepo,
 } from '../../github/repo-preview.js';
 import { pnpmSpawnTarget, resolvePnpmCommand } from '../../packages/pnpm.js';
 import { resolveSystemLibraryPath } from '../../system-toolsets/resolve.js';
-import { detectMemoryProfile } from '../../system/memory.js';
+import { sampleDarwinGezelProcessMemoryCached } from '../../system/gezel-process-memory.js';
+import {
+  detectMemoryProfile,
+  detectMemoryProfileCached,
+  sampleMachineMemoryUsage,
+} from '../../system/memory.js';
 import type { ServiceContext } from '../context.js';
 
 const log = createLogger('http');
@@ -48,6 +54,45 @@ export function systemRoutes(ctx: ServiceContext): Hono {
     const idle = Number(body.idleSeconds);
     if (Number.isFinite(idle)) ctx.systemIdle.report(idle);
     return c.json({ ok: true });
+  });
+
+  /**
+   * Live memory pool behind local inference. This endpoint is intentionally
+   * cheap enough to poll while the engine dropdown is open: accelerator
+   * capacity is cached, device telemetry is coalesced by DeviceHealthGate,
+   * and main-memory use comes from node:os.
+   */
+  app.get('/memory/usage', async (c) => {
+    const [profile, config] = await Promise.all([
+      detectMemoryProfileCached(),
+      ctx.store.readConfig(),
+    ]);
+    const configuredBackend =
+      config.llamaCppBackendOverride && config.llamaCppBackendOverride !== 'auto'
+        ? config.llamaCppBackendOverride
+        : (process.env.GEZEL_LLAMA_SERVER_BACKEND ?? process.env.GEZEL_LLAMA_DETECTED_BACKEND);
+    const forceMainMemory = configuredBackend === 'cpu';
+    const unifiedMemory =
+      profile.source === 'darwin-unified' ||
+      (profile.gpuVramBytes !== null && profile.gpuVramBytes >= profile.totalRamBytes * 0.75);
+    // Main/UMA memory comes directly from node:os. Avoid spawning any SMI
+    // adapter on Mac and CPU-only hosts, where it cannot improve this sample.
+    const deviceHealth =
+      forceMainMemory || profile.source === 'system-ram-fallback' || unifiedMemory
+        ? undefined
+        : await ctx.gpuArbiter.getDeviceHealthStatus(1_000);
+    const gezelProcessMemory =
+      profile.platform === 'darwin' && (forceMainMemory || unifiedMemory)
+        ? await sampleDarwinGezelProcessMemoryCached({ home: ctx.home })
+        : null;
+    const snapshot = sampleMachineMemoryUsage({
+      profile,
+      ...(deviceHealth ? { deviceHealth } : {}),
+      engineCommittedBytes: ctx.chat.peekEngineStatus()?.committedBytes ?? 0,
+      gezelProcessMemory,
+      forceMainMemory,
+    });
+    return c.json(MachineMemoryUsageSchema.parse(snapshot));
   });
 
   /**
@@ -201,10 +246,10 @@ export function systemRoutes(ctx: ServiceContext): Hono {
   //        going through the keyring on every navigation; cached
   //        in-memory for IDENTITY_CACHE_MS to keep the UI snappy.
   //
-  // The token also feeds the existing GitHubManager (clones, pulls,
-  // PR queries) — `storeGithubToken` writes to both secret slots.
+  // The token also feeds the existing GitManager (clones, pulls,
+  // PR queries) — `storeGitHubToken` writes to both secret slots.
 
-  let identityCache: { at: number; identity: GithubIdentity | null } | null = null;
+  let identityCache: { at: number; identity: GitHubIdentity | null } | null = null;
   const IDENTITY_CACHE_MS = 60_000;
 
   const invalidateIdentityCache = () => {
@@ -215,13 +260,13 @@ export function systemRoutes(ctx: ServiceContext): Hono {
   // exactly once per open, but a user clicking through "create" multiple
   // times in a row shouldn't hammer GitHub. 5 min is long enough to be
   // useful, short enough that a brand-new repo shows up after a coffee.
-  let reposCache: { at: number; token: string; repos: GithubRepoSummary[] } | null = null;
+  let reposCache: { at: number; token: string; repos: GitHubRepoSummary[] } | null = null;
   const REPOS_CACHE_MS = 5 * 60_000;
 
   app.post('/github-login/start', async (c) => {
     try {
       const start = await startDeviceFlow();
-      const body: GithubLoginStartResponse = {
+      const body: GitHubLoginStartResponse = {
         deviceCode: start.deviceCode,
         userCode: start.userCode,
         verificationUri: start.verificationUri,
@@ -236,30 +281,30 @@ export function systemRoutes(ctx: ServiceContext): Hono {
   });
 
   app.post('/github-login/poll', async (c) => {
-    const { deviceCode } = GithubLoginPollRequestSchema.parse(await c.req.json());
+    const { deviceCode } = GitHubLoginPollRequestSchema.parse(await c.req.json());
     let result: Awaited<ReturnType<typeof pollDeviceFlow>>;
     try {
       result = await pollDeviceFlow(deviceCode);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      const body: GithubLoginPollResponse = { status: 'not_configured', error: message };
+      const body: GitHubLoginPollResponse = { status: 'not_configured', error: message };
       return c.json(body);
     }
     if (result.status !== 'success') {
-      const body: GithubLoginPollResponse = result;
+      const body: GitHubLoginPollResponse = result;
       return c.json(body);
     }
-    let identity: GithubIdentity;
+    let identity: GitHubIdentity;
     try {
-      identity = await fetchGithubIdentity(result.accessToken);
+      identity = await fetchGitHubIdentity(result.accessToken);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return c.json({
         status: 'denied',
         error: `Token acquired but identity fetch failed: ${message}`,
-      } as GithubLoginPollResponse);
+      } as GitHubLoginPollResponse);
     }
-    await storeGithubToken(ctx.secrets, result.accessToken);
+    await storeGitHubToken(ctx.secrets, result.accessToken);
     await ctx.store.writeConfig({
       githubAuth: {
         kind: 'oauth',
@@ -271,7 +316,7 @@ export function systemRoutes(ctx: ServiceContext): Hono {
       },
     });
     invalidateIdentityCache();
-    const body: GithubLoginPollResponse = {
+    const body: GitHubLoginPollResponse = {
       status: 'success',
       identity,
       scopes: result.scopes,
@@ -280,7 +325,7 @@ export function systemRoutes(ctx: ServiceContext): Hono {
   });
 
   app.post('/github-logout', async (c) => {
-    await clearGithubToken(ctx.secrets);
+    await clearGitHubToken(ctx.secrets);
     await ctx.store.writeConfig({ githubAuth: null });
     invalidateIdentityCache();
     reposCache = null;
@@ -294,16 +339,16 @@ export function systemRoutes(ctx: ServiceContext): Hono {
    * URL hasn't been linked to anything yet.
    */
   app.post('/github-repo-preview', async (c) => {
-    const { url } = GithubRepoPreviewRequestSchema.parse(await c.req.json());
-    const token = await getStoredGithubToken(ctx.secrets);
+    const { url } = GitHubRepoPreviewRequestSchema.parse(await c.req.json());
+    const token = await getStoredGitHubToken(ctx.secrets);
     try {
-      const preview: GithubRepoPreviewResponse = await previewGithubRepo(token, url);
+      const preview: GitHubRepoPreviewResponse = await previewGitHubRepo(token, url);
       return c.json(preview);
     } catch (err) {
-      if (err instanceof InvalidGithubUrlError) {
+      if (err instanceof InvalidGitHubUrlError) {
         return c.json({ error: err.message, code: 'INVALID_URL' }, 400);
       }
-      if (err instanceof GithubRepoNotFoundError) {
+      if (err instanceof GitHubRepoNotFoundError) {
         return c.json(
           {
             error: err.message,
@@ -314,7 +359,7 @@ export function systemRoutes(ctx: ServiceContext): Hono {
           404,
         );
       }
-      if (err instanceof GithubAccessDeniedError) {
+      if (err instanceof GitHubAccessDeniedError) {
         return c.json(
           {
             error: err.message,
@@ -340,14 +385,14 @@ export function systemRoutes(ctx: ServiceContext): Hono {
    * multiple times in a row only hits GitHub once.
    */
   app.get('/github-repos', async (c) => {
-    const token = await getStoredGithubToken(ctx.secrets);
+    const token = await getStoredGitHubToken(ctx.secrets);
     if (!token) {
-      const body: GithubReposResponse = { repos: [] };
+      const body: GitHubReposResponse = { repos: [] };
       return c.json(body);
     }
     const now = Date.now();
     if (reposCache && reposCache.token === token && now - reposCache.at < REPOS_CACHE_MS) {
-      const body: GithubReposResponse = { repos: reposCache.repos };
+      const body: GitHubReposResponse = { repos: reposCache.repos };
       return c.json(body);
     }
     try {
@@ -357,7 +402,7 @@ export function systemRoutes(ctx: ServiceContext): Hono {
         per_page: 100,
         affiliation: 'owner,collaborator,organization_member',
       });
-      const repos: GithubRepoSummary[] = data.map((r) => ({
+      const repos: GitHubRepoSummary[] = data.map((r) => ({
         fullName: r.full_name,
         url: r.html_url,
         ...(r.description ? { description: r.description } : {}),
@@ -365,12 +410,12 @@ export function systemRoutes(ctx: ServiceContext): Hono {
         ...(r.pushed_at ? { pushedAt: r.pushed_at } : {}),
       }));
       reposCache = { at: now, token, repos };
-      const body: GithubReposResponse = { repos };
+      const body: GitHubReposResponse = { repos };
       return c.json(body);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       log.warn(`[github-repos] fetch failed: ${message}`);
-      const body: GithubReposResponse = { repos: [] };
+      const body: GitHubReposResponse = { repos: [] };
       return c.json(body);
     }
   });
@@ -379,21 +424,21 @@ export function systemRoutes(ctx: ServiceContext): Hono {
     const now = Date.now();
     if (identityCache && now - identityCache.at < IDENTITY_CACHE_MS) {
       const cached = identityCache.identity;
-      const body: GithubIdentityResponse = cached
+      const body: GitHubIdentityResponse = cached
         ? { signedIn: true, ...cached }
         : { signedIn: false };
       return c.json(body);
     }
-    const token = await getStoredGithubToken(ctx.secrets);
+    const token = await getStoredGitHubToken(ctx.secrets);
     if (!token) {
       identityCache = { at: now, identity: null };
-      const body: GithubIdentityResponse = { signedIn: false };
+      const body: GitHubIdentityResponse = { signedIn: false };
       return c.json(body);
     }
     try {
-      const identity = await fetchGithubIdentity(token);
+      const identity = await fetchGitHubIdentity(token);
       identityCache = { at: now, identity };
-      const body: GithubIdentityResponse = { signedIn: true, ...identity };
+      const body: GitHubIdentityResponse = { signedIn: true, ...identity };
       return c.json(body);
     } catch (err) {
       // Token is set but the API call failed — likely revoked or
@@ -401,7 +446,7 @@ export function systemRoutes(ctx: ServiceContext): Hono {
       // throw the token away (might be a transient network issue).
       identityCache = { at: now, identity: null };
       const message = err instanceof Error ? err.message : String(err);
-      return c.json({ signedIn: false, error: message } as GithubIdentityResponse & {
+      return c.json({ signedIn: false, error: message } as GitHubIdentityResponse & {
         error: string;
       });
     }

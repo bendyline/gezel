@@ -1,6 +1,6 @@
 import type { HealthResponse } from '@bendyline/gezel';
 import type { ConfigResponse } from '@bendyline/gezel-client';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockApi } from '../test-utils/mockApi.js';
@@ -23,6 +23,7 @@ const BASE_HEALTH = {
 
 describe('LlamaCppSettings', () => {
   beforeEach(() => {
+    window.__GEZEL__ = { ...window.__GEZEL__!, platform: 'linux' };
     vi.mocked(api.listLlamaCppModels).mockResolvedValue({
       models: [
         { id: 'llama-3-8b', name: 'Llama 3 8B', sizeMb: 4500, status: 'installed' } as never,
@@ -48,6 +49,77 @@ describe('LlamaCppSettings', () => {
     expect(screen.getByText('2')).toBeInTheDocument();
     expect(screen.getByRole('option', { name: /First local model/ })).toBeInTheDocument();
     expect(screen.getByRole('option', { name: /Llama 3 8B \(llama-3-8b\)/ })).toBeInTheDocument();
+  });
+
+  it('shows machine-health controls on Windows and persists Manage mode', async () => {
+    const user = userEvent.setup();
+    render(
+      <LlamaCppSettings config={BASE_CONFIG} onConfigChanged={vi.fn()} health={BASE_HEALTH} />,
+    );
+
+    const policy = await screen.findByRole('group', { name: 'Machine health mode' });
+    expect(screen.getByRole('heading', { name: 'Machine health' })).toBeInTheDocument();
+    const temperature = screen.getByRole('slider', { name: 'Manage temperature' });
+    expect(temperature).toHaveValue('80');
+    expect(temperature).toHaveAttribute('min', '40');
+    expect(temperature).toHaveAttribute('max', '95');
+    expect(temperature).toHaveAttribute('aria-valuetext', '80 degrees Celsius');
+    expect(screen.getByText(/105°C emergency cutoff/)).toBeInTheDocument();
+
+    await user.click(within(policy).getByRole('button', { name: /Manage/ }));
+
+    await waitFor(() => {
+      expect(api.updateConfig).toHaveBeenCalledWith({
+        deviceSafety: { mode: 'guard' },
+      });
+    });
+  });
+
+  it('persists the Manage threshold with a five-degree resume margin', async () => {
+    render(
+      <LlamaCppSettings
+        config={
+          {
+            ...BASE_CONFIG,
+            deviceSafety: { mode: 'guard', maxStartTemperatureC: 80 },
+          } as ConfigResponse
+        }
+        onConfigChanged={vi.fn()}
+        health={BASE_HEALTH}
+      />,
+    );
+
+    const input = await screen.findByRole('slider', { name: 'Manage temperature' });
+    fireEvent.change(input, { target: { value: '90' } });
+    expect(input).toHaveAttribute('aria-valuetext', '90 degrees Celsius');
+    expect(screen.getByLabelText('Manage temperature: 90 degrees Celsius')).toBeInTheDocument();
+    fireEvent.blur(input);
+
+    await waitFor(() => {
+      expect(api.updateConfig).toHaveBeenCalledWith({
+        deviceSafety: {
+          mode: 'guard',
+          maxStartTemperatureC: 90,
+          resumeTemperatureC: 85,
+        },
+      });
+    });
+  });
+
+  it('hides machine-health controls on macOS', async () => {
+    window.__GEZEL__ = { ...window.__GEZEL__!, platform: 'darwin' };
+    render(
+      <LlamaCppSettings
+        config={BASE_CONFIG}
+        onConfigChanged={vi.fn()}
+        health={{ ...BASE_HEALTH, platform: 'darwin' } as HealthResponse}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(/Local models:/)).toBeInTheDocument();
+    });
+    expect(screen.queryByRole('heading', { name: 'Machine health' })).not.toBeInTheDocument();
   });
 
   it('selecting a default model patches config.defaultModel.llama-cpp', async () => {

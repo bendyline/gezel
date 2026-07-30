@@ -240,6 +240,12 @@ export interface MessageBubbleProps {
    */
   reasoning?: string;
   /**
+   * Observed span of the provider's streamed reasoning chunks. Omitted
+   * when the provider only exposes reasoning after the turn, since total
+   * response latency would incorrectly include queueing and tool work.
+   */
+  reasoningDurationMs?: number;
+  /**
    * Tool-call bodies the salvage layer couldn't parse on this turn.
    * When the visible content is empty AND this is non-empty, the
    * bubble derives a "what the model was trying to do" summary from
@@ -385,6 +391,7 @@ export function MessageBubble({
   onTaskReference,
   toolCalls,
   reasoning,
+  reasoningDurationMs,
   attemptedToolCalls,
   projectId,
   intents,
@@ -592,7 +599,7 @@ export function MessageBubble({
         <ToolHistoryExpando tools={toolCalls} projectId={projectId} />
       )}
       {!isUser && reasoning && reasoning.trim().length > 0 && (
-        <ReasoningExpando reasoning={reasoning} />
+        <ReasoningExpando reasoning={reasoning} durationMs={reasoningDurationMs} />
       )}
       {!isUser && attemptedToolCalls && attemptedToolCalls.length > 0 && (
         <AttemptedToolCallsExpando attempts={attemptedToolCalls} />
@@ -1036,6 +1043,8 @@ export interface StreamingBubbleProps {
    * arrived yet.
    */
   lastActivityAt?: number;
+  /** Whether this turn has emitted an actual provider/model progress signal. */
+  hasProgress?: boolean;
   /**
    * When set, the slow banner gets a "Check Ollama" button that
    * fires this callback and renders the result inline. Lets the
@@ -1449,6 +1458,7 @@ export function StreamingBubble({
   error,
   queueAhead,
   lastActivityAt,
+  hasProgress,
   onProbeOllama,
   onReEngage,
   wirePulseCount,
@@ -1595,14 +1605,14 @@ export function StreamingBubble({
   // been updated.
   const silentFor = useElapsedSeconds(lastActivityAt ?? startedAt);
   // Has the turn produced ANY signal yet (a delta, a tool event)? Before
-  // the first token, `lastActivityAt` is null and `silentFor` counts from
-  // turn start — so a legitimately slow COLD start (a 284B DeepSeek model
-  // streaming experts from disk takes ~3 min to first token) would trip the
-  // "stalled/wedged" tier even though the model is prefilling, not wedged.
+  // the first token, `silentFor` counts from turn start — so a legitimately
+  // slow COLD start (a 284B DeepSeek model streaming experts from disk takes
+  // ~3 min to first token) would trip the "stalled/wedged" tier even though
+  // the model is prefilling, not wedged.
   // A turn can only be "wedged mid-turn" if it was mid-turn — i.e. it
   // streamed something and THEN went quiet. Until then, the reassuring
   // "still working / first load is slow" copy is the honest signal.
-  const streamedThisTurn = lastActivityAt != null;
+  const stalledSilence = isStalledSilence(silentFor, hasProgress === true);
   // Inline diagnostic state for the slow-banner's "Check Ollama"
   // button. `null` = idle (haven't probed); object = result of last
   // probe. Re-clicking the button re-probes and overwrites.
@@ -1896,7 +1906,7 @@ export function StreamingBubble({
             // doubly wrong (silent ≠ slow ≠ contended).
             <div className="msg-slow-banner">
               <div>
-                {silentFor >= STALLED_AFTER_S && streamedThisTurn ? (
+                {stalledSilence ? (
                   <>
                     This turn looks stalled — no signal for {formatElapsedLong(silentFor)}. The
                     model may have wedged mid-turn; you can stop it and ask it to pick up where it
@@ -1915,7 +1925,7 @@ export function StreamingBubble({
                   </>
                 )}
               </div>
-              {silentFor >= STALLED_AFTER_S && streamedThisTurn && onReEngage && (
+              {stalledSilence && onReEngage && (
                 <div className="msg-slow-banner-probe">
                   <button
                     type="button"
@@ -2151,6 +2161,11 @@ const SILENCE_BANNER_AFTER_S = 30;
  * threshold for now; a server-side stall signal can replace it later.
  */
 const STALLED_AFTER_S = 120;
+
+/** The stalled tier is valid only after this turn has made observable progress. */
+export function isStalledSilence(silentFor: number | null, hasProgress: boolean): boolean {
+  return silentFor !== null && silentFor >= STALLED_AFTER_S && hasProgress;
+}
 
 /**
  * Per-tool-call "details" disclosure: the full, untruncated arguments
@@ -2641,13 +2656,33 @@ export function ToolHistoryExpando({
  * (half-quoted code, dangling lists, partial fences from a turn that
  * got cut short) and we don't want a rendering pass to swallow it.
  */
-function ReasoningExpando({ reasoning }: { reasoning: string }) {
+export function countReasoningWords(reasoning: string): number {
+  const trimmed = reasoning.trim();
+  return trimmed ? trimmed.split(/\s+/u).length : 0;
+}
+
+function ReasoningExpando({
+  reasoning,
+  durationMs,
+}: {
+  reasoning: string;
+  durationMs?: number;
+}) {
   const trimmed = reasoning.trim();
   if (!trimmed) return null;
+  const wordCount = countReasoningWords(trimmed);
+  const duration =
+    durationMs !== undefined && Number.isFinite(durationMs) && durationMs > 0
+      ? formatDurationShort(Math.round(durationMs))
+      : null;
   return (
     <details className="msg-reasoning">
       <summary>
         <span className="msg-reasoning-label">Thinking</span>
+        <span className="msg-reasoning-meta">
+          · {wordCount} {wordCount === 1 ? 'word' : 'words'}
+          {duration ? ` · ${duration}` : ''}
+        </span>
       </summary>
       <pre className="msg-reasoning-body">{trimmed}</pre>
     </details>

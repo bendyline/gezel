@@ -75,6 +75,10 @@ describe('health', () => {
     const data = (await res.json()) as Record<string, unknown>;
     expect(data.ok).toBe(true);
     expect(data.version).toBeDefined();
+    expect(res.headers.get('cross-origin-opener-policy')).toBeNull();
+    expect(res.headers.get('cross-origin-embedder-policy')).toBeNull();
+    expect(res.headers.get('content-security-policy')).toContain("script-src 'self'");
+    expect(res.headers.get('content-security-policy')).not.toContain("'wasm-unsafe-eval'");
   });
 });
 
@@ -94,6 +98,28 @@ describe('operational API surface', () => {
   it('keeps control-plane routes behind bearer authentication', async () => {
     const res = await httpFetch(`${baseUrl}/api/config`);
     expect(res.status).toBe(401);
+  });
+
+  it('round-trips durable document export preferences', async () => {
+    const documentExportOptions = {
+      format: 'docx',
+      themeId: 'standard',
+      transformStyle: 'documentary',
+      pageSize: 'a4',
+      htmlStyle: 'plain',
+      htmlBundle: 'single',
+    };
+    const update = await api('PUT', '/api/config', { documentExportOptions });
+    expect(update.status).toBe(200);
+    expect((await update.json()) as Record<string, unknown>).toMatchObject({
+      documentExportOptions,
+    });
+
+    const read = await api('GET', '/api/config');
+    expect(read.status).toBe(200);
+    expect((await read.json()) as Record<string, unknown>).toMatchObject({
+      documentExportOptions,
+    });
   });
 });
 

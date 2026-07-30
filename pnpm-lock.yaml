@@ -466,6 +466,9 @@ importers:
       '@bendyline/squisq':
         specifier: 2.5.0
         version: 2.5.0(supports-color@8.1.1)
+      '@bendyline/squisq-cli':
+        specifier: 2.5.0
+        version: 2.5.0(supports-color@8.1.1)
       '@bendyline/squisq-formats':
         specifier: 2.3.10
         version: 2.3.10(supports-color@8.1.1)
@@ -610,9 +613,6 @@ importers:
       '@bendyline/squisq-react':
         specifier: 2.5.0
         version: 2.5.0(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(supports-color@8.1.1)
-      '@bendyline/squisq-video-react':
-        specifier: 2.3.0
-        version: 2.3.0(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(supports-color@8.1.1)
       '@radix-ui/react-alert-dialog':
         specifier: ^1.1.20
         version: 1.1.20(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
@@ -789,6 +789,11 @@ packages:
 
   '@bendyline/gilde@0.1.5':
     resolution: {integrity: sha512-HP728bEdeGgAM5c9jExOVdDEgz7uZicHWmuE/LiubAcHOQbsrt3aPULLt0lUNfYXrAmodjXaT1YKIA/452nxTw==}
+
+  '@bendyline/squisq-cli@2.5.0':
+    resolution: {integrity: sha512-qizUjSqBt2VK4Vmt8Sqej7JAlavb1jBzakHy9n3bqkA0BP+woC33Q//By/7SiH51Rlx00djotvT5sPo9XKB3Qg==}
+    engines: {node: ^22.22.2 || ^24.15.0 || >=26.0.0}
+    hasBin: true
 
   '@bendyline/squisq-editor-react@2.5.0':
     resolution: {integrity: sha512-9IEDimjVXmPQY9TUx03Y1ELGfB6QtlN8QLKa+Yza64SIFiWbYOw2YVD6gFobJk7XwddzMz0mb6mxwxBOlMVryA==}
@@ -3908,6 +3913,10 @@ packages:
 
   comma-separated-tokens@2.0.3:
     resolution: {integrity: sha512-Fu4hJdvzeylCfQPp9SGWidpzrMs7tTrlu6Vb8XGaRGck8QSNZJJp538Wrb60Lax4fPwR64ViY468OIUTbRlGZg==}
+
+  commander@12.1.0:
+    resolution: {integrity: sha512-Vw8qHK3bZM9y/P10u3Vib8o/DdkvA2OtPtZvD871QKjy74Wj1WSKFILMPRPSdUSx5RFK1arlJzEtA4PkFgnbuA==}
+    engines: {node: '>=18'}
 
   commander@15.0.0:
     resolution: {integrity: sha512-z67u4ZhzCL/Tydu1lJARtEZYWbWaN7oYLHbsuzocr6y4N6WZAagG3RQ4FW61V1/0+jImpj293XfrcYnd1qxtPg==}
@@ -7866,6 +7875,16 @@ snapshots:
 
   '@bendyline/gilde@0.1.5': {}
 
+  '@bendyline/squisq-cli@2.5.0(supports-color@8.1.1)':
+    dependencies:
+      '@bendyline/squisq': 2.5.0(supports-color@8.1.1)
+      '@bendyline/squisq-formats': 2.3.10(supports-color@8.1.1)
+      '@bendyline/squisq-video': 2.2.9(supports-color@8.1.1)
+      commander: 12.1.0
+      playwright-core: 1.61.1
+    transitivePeerDependencies:
+      - supports-color
+
   '@bendyline/squisq-editor-react@2.5.0(monaco-editor@0.50.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(supports-color@8.1.1)':
     dependencies:
       '@bendyline/squisq': 2.5.0(supports-color@8.1.1)
@@ -10964,6 +10983,8 @@ snapshots:
       delayed-stream: 1.0.0
 
   comma-separated-tokens@2.0.3: {}
+
+  commander@12.1.0: {}
 
   commander@15.0.0: {}
 

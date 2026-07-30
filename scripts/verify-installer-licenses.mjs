@@ -13,6 +13,8 @@ import { platformKeysFromRoot, verifyNativeFileTree } from './native-file-manife
 import { verifyLicenseBundle } from './verify-packaged-licenses.mjs';
 
 const execFileP = promisify(execFile);
+const LINUX_METAINFO_PATH = join('usr', 'share', 'metainfo', 'com.bendyline.gezel.metainfo.xml');
+const LINUX_DESKTOP_PATH = join('usr', 'share', 'applications', 'gezel.desktop');
 
 async function walk(root, predicate) {
   const matches = [];
@@ -122,6 +124,49 @@ async function extract(artifact, output) {
   throw new Error(`unsupported installer type: ${extension || '(none)'}`);
 }
 
+async function verifyLinuxAppStreamMetadata(artifact, root) {
+  const extension = extname(artifact).toLowerCase();
+  if (extension !== '.deb' && extension !== '.rpm') return;
+
+  const relativePath = LINUX_METAINFO_PATH.replaceAll('\\', '/');
+  let metadata;
+  try {
+    metadata = await readFile(join(root, LINUX_METAINFO_PATH), 'utf8');
+  } catch (error) {
+    if (error?.code === 'ENOENT') {
+      throw new Error(`${basename(artifact)} contains no ${relativePath}`);
+    }
+    throw error;
+  }
+
+  const requiredMetadata = [
+    ['component id', /<id>\s*com\.bendyline\.gezel\s*<\/id>/],
+    ['metadata license', /<metadata_license>\s*MIT\s*<\/metadata_license>/],
+    ['project license', /<project_license>\s*MIT\s*<\/project_license>/],
+    ['desktop launchable', /<launchable\s+type="desktop-id">\s*gezel\.desktop\s*<\/launchable>/],
+  ];
+  for (const [label, pattern] of requiredMetadata) {
+    if (!pattern.test(metadata)) {
+      throw new Error(`${relativePath} has no valid ${label}`);
+    }
+  }
+
+  try {
+    await readFile(join(root, LINUX_DESKTOP_PATH), 'utf8');
+  } catch (error) {
+    if (error?.code === 'ENOENT') {
+      throw new Error(
+        `${relativePath} refers to missing ${LINUX_DESKTOP_PATH.replaceAll('\\', '/')}`,
+      );
+    }
+    throw error;
+  }
+
+  console.log(
+    `\u2713 ${basename(artifact)} declares the MIT project license in AppStream metadata.`,
+  );
+}
+
 async function main() {
   const artifactArg = process.argv[2];
   if (!artifactArg) {
@@ -145,6 +190,7 @@ async function main() {
   const scratch = await mkdtemp(join(tmpdir(), 'gezel-installer-licenses-'));
   try {
     await extract(artifact, scratch);
+    await verifyLinuxAppStreamMetadata(artifact, scratch);
     const manifests = await findManifests(scratch);
     if (manifests.length === 0) {
       throw new Error(`${basename(artifact)} contains no resources/licenses/manifest.json`);

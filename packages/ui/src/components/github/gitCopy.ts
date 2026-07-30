@@ -4,7 +4,12 @@
  * "GitHub's version" not theirs) stays consistent across surfaces.
  */
 
-import type { GithubChangeKind, GithubSyncResponse, GithubWorkingChange } from '@bendyline/gezel';
+import type {
+  CodeReviewKind,
+  GitChangeKind,
+  GitSyncResponse,
+  GitWorkingChange,
+} from '@bendyline/gezel';
 
 export const GIT_COPY = {
   changesEmptyTitle: 'All changes saved ✓',
@@ -16,7 +21,7 @@ export const GIT_COPY = {
   saveToast: 'Saved.',
   syncButtonTitle: 'Get new changes from GitHub and send yours',
   syncUpToDate: "You're already up to date.",
-  syncAuth: 'GitHub needs you to sign in again. Open Settings → Toolsets to reconnect.',
+  syncAuth: 'GitHub needs you to sign in again. Open the GitHub tab to reconnect.',
   syncOffline: "Couldn't reach GitHub — check your connection and try again.",
   syncGenericError: 'Sync didn’t go through. Try again in a moment.',
   needsSaveTitle: 'Save your changes first',
@@ -50,9 +55,43 @@ export const GIT_COPY = {
   diffBig: 'This is a big change — showing the first part.',
   diffShowAll: 'Show everything',
   timelineEmpty: 'No saves yet. When you save changes, they’ll show up here.',
+  reviewTabLabel: 'Code review',
+  reviewCommitButton: 'Review my changes',
+  reviewCommitHint: 'Checks your unsaved work against your last save.',
+  reviewPrButton: 'Review this branch',
+  reviewPrHint: 'Checks everything on this branch against the main branch.',
+  reviewRailButton: '✨ Review…',
+  reviewRunning: 'is looking over the changes…',
+  reviewNeedsAttention: 'The review hit a snag and needs a look.',
+  reviewStop: 'Stop review…',
+  reviewStopTitle: 'Stop this review?',
+  reviewStopBody:
+    'The reviewer will stop and no report will be written. The changes themselves are untouched.',
+  reviewStopConfirm: 'Stop review',
+  reviewAlreadyRunning: 'A review of that kind is already running — one at a time.',
+  reviewNothingCommit: 'There are no unsaved changes to review.',
+  reviewNothingPr: 'This branch has nothing new compared to the main branch.',
+  reviewNoDefaultBranch: "Couldn't work out the repo's main branch — sync once and try again.",
+  reviewDetachedHead: 'Switch to a branch first, then review.',
+  reviewStartedToast: 'Review started.',
+  reviewCanceledToast: 'Review stopped.',
+  reviewOpenInArtifacts: 'Open in artifacts',
+  reviewReportMissing:
+    "The review finished but no report was written. The reviewer's task notes may say why.",
+  reviewReportLoading: 'Loading the report…',
+  reviewHistoryEmpty: 'No reviews yet. Run one before you save or open a pull request.',
 } as const;
 
-const KIND_WORDS: Record<GithubChangeKind, string> = {
+const REVIEW_KIND_WORDS: Record<CodeReviewKind, string> = {
+  commit: 'Unsaved changes',
+  pr: 'Branch',
+};
+
+export function reviewKindWord(kind: CodeReviewKind): string {
+  return REVIEW_KIND_WORDS[kind] ?? 'Changes';
+}
+
+const KIND_WORDS: Record<GitChangeKind, string> = {
   modified: 'Edited',
   added: 'New',
   deleted: 'Deleted',
@@ -60,7 +99,7 @@ const KIND_WORDS: Record<GithubChangeKind, string> = {
   conflicted: 'Needs attention',
 };
 
-export function changeKindWord(kind: GithubChangeKind): string {
+export function changeKindWord(kind: GitChangeKind): string {
   return KIND_WORDS[kind] ?? 'Edited';
 }
 
@@ -69,7 +108,7 @@ export function plural(n: number, noun: string): string {
 }
 
 /** "Updated README.md and 2 more files" — the no-AI save fallback. */
-export function autoSaveMessage(changes: GithubWorkingChange[]): string {
+export function autoSaveMessage(changes: GitWorkingChange[]): string {
   if (changes.length === 0) return 'Saved changes';
   const first = changes[0]!;
   const name = first.path.split('/').pop() ?? first.path;
@@ -86,7 +125,7 @@ export function autoSaveMessage(changes: GithubWorkingChange[]): string {
 }
 
 /** "Got 3 new changes from GitHub. Sent 2 saved changes." */
-export function syncedToast(result: GithubSyncResponse): string {
+export function syncedToast(result: GitSyncResponse): string {
   const parts: string[] = [];
   if (result.pulled > 0) parts.push(`Got ${plural(result.pulled, 'new change')} from GitHub.`);
   if (result.pushed > 0) parts.push(`Sent ${plural(result.pushed, 'saved change')} to GitHub.`);

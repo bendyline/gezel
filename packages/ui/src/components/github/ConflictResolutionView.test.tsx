@@ -30,11 +30,11 @@ function renderView(overrides: Partial<Parameters<typeof ConflictResolutionView>
 
 describe('ConflictResolutionView', () => {
   beforeEach(() => {
-    vi.mocked(api.getProjectGithubMergeState).mockResolvedValue({
+    vi.mocked(api.getProjectGitMergeState).mockResolvedValue({
       inMerge: true,
       conflicts: TWO_CONFLICTS,
     } as never);
-    vi.mocked(api.getProjectGithubConflictVersions).mockResolvedValue({
+    vi.mocked(api.getProjectGitConflictVersions).mockResolvedValue({
       path: 'README.md',
       base: 'base text',
       ours: 'our text',
@@ -42,16 +42,16 @@ describe('ConflictResolutionView', () => {
       binary: false,
       tooLarge: false,
     } as never);
-    vi.mocked(api.resolveProjectGithubConflict).mockResolvedValue({
+    vi.mocked(api.resolveProjectGitConflict).mockResolvedValue({
       ok: true,
       remaining: 1,
     } as never);
-    vi.mocked(api.completeProjectGithubMerge).mockResolvedValue({
+    vi.mocked(api.completeProjectGitMerge).mockResolvedValue({
       ok: true,
       sha: 'abc',
     } as never);
-    vi.mocked(api.abandonProjectGithubMerge).mockResolvedValue({ ok: true } as never);
-    vi.mocked(api.aiResolveProjectGithubConflict).mockResolvedValue({
+    vi.mocked(api.abandonProjectGitMerge).mockResolvedValue({ ok: true } as never);
+    vi.mocked(api.aiResolveProjectGitConflict).mockResolvedValue({
       path: 'README.md',
       merged: 'combined text',
     } as never);
@@ -80,7 +80,7 @@ describe('ConflictResolutionView', () => {
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: 'Keep my version' }));
     await waitFor(() => {
-      expect(api.resolveProjectGithubConflict).toHaveBeenCalledWith('pj-1', {
+      expect(api.resolveProjectGitConflict).toHaveBeenCalledWith('pj-1', {
         path: 'README.md',
         choice: 'mine',
       });
@@ -99,7 +99,7 @@ describe('ConflictResolutionView', () => {
     expect(finish).toBeEnabled();
     await user.click(finish);
     await waitFor(() => {
-      expect(api.completeProjectGithubMerge).toHaveBeenCalledWith('pj-1');
+      expect(api.completeProjectGitMerge).toHaveBeenCalledWith('pj-1');
     });
   });
 
@@ -113,7 +113,7 @@ describe('ConflictResolutionView', () => {
     });
     await user.click(screen.getByRole('button', { name: 'Use this' }));
     await waitFor(() => {
-      expect(api.resolveProjectGithubConflict).toHaveBeenCalledWith('pj-1', {
+      expect(api.resolveProjectGitConflict).toHaveBeenCalledWith('pj-1', {
         path: 'README.md',
         choice: 'custom',
         content: 'combined text',
@@ -129,7 +129,7 @@ describe('ConflictResolutionView', () => {
     expect(screen.getByText('Stop syncing?')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Yes, cancel sync' }));
     await waitFor(() => {
-      expect(api.abandonProjectGithubMerge).toHaveBeenCalledWith('pj-1');
+      expect(api.abandonProjectGitMerge).toHaveBeenCalledWith('pj-1');
     });
     expect(props.onExited).toHaveBeenCalled();
   });
@@ -142,7 +142,7 @@ describe('ConflictResolutionView', () => {
   });
 
   it('exits immediately when no merge is actually in progress', async () => {
-    vi.mocked(api.getProjectGithubMergeState).mockResolvedValue({
+    vi.mocked(api.getProjectGitMergeState).mockResolvedValue({
       inMerge: false,
       conflicts: [],
     } as never);

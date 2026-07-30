@@ -2,7 +2,7 @@ import {
   type ComposedCodeContext,
   type FileMapResponse,
   type FileMapScope,
-  type GithubPullSummary,
+  type GitHubPullSummary,
   type MapBlock,
   type MapBuilding,
   type MapPrChange,
@@ -17,6 +17,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { FileMap, type MapRendererKind, defaultRenderer } from '../components/FileMap/FileMap.js';
 import { townStyleForBlock, townStyleLabel } from '../components/FileMap/iso/town-style.js';
+import { DropdownChevron } from '../primitives/index.js';
 import { useEffectiveTheme } from '../theme.js';
 
 const log = createLogger('filemap');
@@ -88,7 +89,7 @@ export function FileMapView({ projectId }: { projectId: string }) {
   const [selected, setSelected] = useState<MapBlock | null>(null);
   const [sourceReveal, setSourceReveal] = useState<SourceRevealRequest | null>(null);
   const [scope, setScope] = useState<FileMapScope>('core');
-  const [pulls, setPulls] = useState<GithubPullSummary[]>([]);
+  const [pulls, setPulls] = useState<GitHubPullSummary[]>([]);
   const [pr, setPr] = useState<number | null>(null);
   const [ageLens, setAgeLens] = useState(false);
   const [renderer, setRenderer] = useState<MapRendererKind>(() => defaultRenderer());
@@ -264,7 +265,7 @@ export function FileMapView({ projectId }: { projectId: string }) {
   useEffect(() => {
     let cancelled = false;
     api
-      .listProjectGithubPulls(projectId)
+      .listProjectGitHubPulls(projectId)
       .then((r) => {
         if (!cancelled) setPulls(r.pulls);
       })
@@ -553,7 +554,8 @@ export function FileMapView({ projectId }: { projectId: string }) {
                           aria-expanded={connectedOpen}
                           onClick={() => setConnectedOpen((o) => !o)}
                         >
-                          Connected ({connected.length}) ▾
+                          <span>Connected ({connected.length})</span>
+                          <DropdownChevron />
                         </button>
                       )}
                       <button

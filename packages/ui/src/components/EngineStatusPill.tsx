@@ -33,6 +33,7 @@ import type {
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { streamSharedAllChatEvents } from '../shared-chat-events.js';
+import { MachineMemoryStrip } from './MachineMemoryStrip.js';
 import { type DeviceHealth, presentDeviceHealth } from './engine-pill-device-health.js';
 import {
   type TurnStatsEntry,
@@ -47,6 +48,7 @@ import { type LiveTurnState, useOnDeviceLiveTurns } from './useOnDeviceLiveTurns
 type LiveTurn = LiveTurnState;
 type TurnStats = TurnStatsEntry;
 type OnDeviceProvider = 'llama-cpp' | 'mlx' | 'ds4';
+type UserDeviceSafetyMode = 'observe' | 'guard';
 type InflightTurn = {
   sessionId: string;
   gezelId: string;
@@ -70,6 +72,8 @@ export function EngineStatusPill() {
   const [config, setConfig] = useState<ConfigResponse | null>(null);
   const [queueStatus, setQueueStatus] = useState<QueueStatusResponse | null>(null);
   const [inflightTurns, setInflightTurns] = useState<InflightTurn[]>([]);
+  const [deviceSafetySaving, setDeviceSafetySaving] = useState(false);
+  const [deviceSafetyError, setDeviceSafetyError] = useState<string | null>(null);
   const mountedRef = useRef(true);
 
   useEffect(() => {
@@ -110,6 +114,32 @@ export function EngineStatusPill() {
     return () => clearInterval(timer);
   }, [refreshActivity]);
 
+  const updateDeviceSafetyMode = useCallback(
+    async (mode: UserDeviceSafetyMode) => {
+      if (deviceSafetySaving || config?.deviceSafety?.mode === mode) return;
+      setDeviceSafetySaving(true);
+      setDeviceSafetyError(null);
+      try {
+        const next = await api.updateConfig({
+          deviceSafety: {
+            ...(config?.deviceSafety ?? {}),
+            mode,
+          },
+        });
+        if (!mountedRef.current) return;
+        setConfig(next);
+        refreshActivity();
+      } catch (error) {
+        if (!mountedRef.current) return;
+        setDeviceSafetyError(error instanceof Error ? error.message : String(error));
+        refreshConfig();
+      } finally {
+        if (mountedRef.current) setDeviceSafetySaving(false);
+      }
+    },
+    [config?.deviceSafety, deviceSafetySaving, refreshActivity, refreshConfig],
+  );
+
   // Provider overrides can invoke a different local engine than the
   // install-wide default. Keep one shared subscription open so a cold
   // secondary engine is visible before its provider queue registers.
@@ -134,6 +164,9 @@ export function EngineStatusPill() {
         inflightTurns={inflightTurns}
         liveTurns={liveTurns}
         includeMedia
+        deviceSafetySaving={deviceSafetySaving}
+        deviceSafetyError={deviceSafetyError}
+        onDeviceSafetyModeChange={updateDeviceSafetyMode}
       />
       {visibleProviders
         .filter((provider) => provider !== defaultProvider)
@@ -147,6 +180,9 @@ export function EngineStatusPill() {
             inflightTurns={inflightTurns}
             liveTurns={liveTurns}
             includeMedia={false}
+            deviceSafetySaving={deviceSafetySaving}
+            deviceSafetyError={deviceSafetyError}
+            onDeviceSafetyModeChange={updateDeviceSafetyMode}
           />
         ))}
     </>
@@ -161,6 +197,9 @@ function EngineStatusPillForProvider({
   inflightTurns,
   liveTurns: allLiveTurns,
   includeMedia,
+  deviceSafetySaving,
+  deviceSafetyError,
+  onDeviceSafetyModeChange,
 }: {
   provider: OnDeviceProvider | null;
   defaultProvider: OnDeviceProvider | null;
@@ -169,6 +208,9 @@ function EngineStatusPillForProvider({
   inflightTurns: InflightTurn[];
   liveTurns: Map<string, LiveTurn>;
   includeMedia: boolean;
+  deviceSafetySaving: boolean;
+  deviceSafetyError: string | null;
+  onDeviceSafetyModeChange: (mode: UserDeviceSafetyMode) => Promise<void>;
 }) {
   // Models actually present on disk for the active on-device provider.
   // Polled on the same 10s cadence as config so the pill reflects an
@@ -223,6 +265,7 @@ function EngineStatusPillForProvider({
     ? (queueStatus?.providers[onDeviceProvider] ?? null)
     : null;
   const deviceHealth: DeviceHealth | null = queueStatus?.deviceHealth ?? null;
+  const deviceSafetyMode = config?.deviceSafety?.mode ?? deviceHealth?.mode ?? 'observe';
   const providerInflightTurns = useMemo(
     () =>
       onDeviceProvider
@@ -692,10 +735,14 @@ function EngineStatusPillForProvider({
             )}
             {ramAllocBytes !== undefined && !activeMedia && (
               <>
-                <dt>Memory</dt>
+                <dt>Model allocation</dt>
                 <dd>{formatBytes(ramAllocBytes)}</dd>
               </>
             )}
+            <dt>Memory</dt>
+            <dd className="engine-pill-memory">
+              <MachineMemoryStrip />
+            </dd>
             <dt>Status</dt>
             <dd>{statusText}</dd>
             {healthPresentation && (
@@ -704,6 +751,44 @@ function EngineStatusPillForProvider({
                 <dd>{healthPresentation.detail}</dd>
               </>
             )}
+            <dt>Health policy</dt>
+            <dd className="engine-pill-health-policy">
+              <fieldset className="gz-tray engine-pill-health-mode">
+                <legend className="sr-only">Machine health policy</legend>
+                <button
+                  type="button"
+                  aria-pressed={deviceSafetyMode === 'observe'}
+                  className={`gz-key${deviceSafetyMode === 'observe' ? ' gz-key-active' : ''}`}
+                  disabled={deviceSafetySaving}
+                  onClick={() => void onDeviceSafetyModeChange('observe')}
+                >
+                  Observe
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={deviceSafetyMode === 'guard'}
+                  className={`gz-key${deviceSafetyMode === 'guard' ? ' gz-key-active' : ''}`}
+                  disabled={deviceSafetySaving}
+                  onClick={() => void onDeviceSafetyModeChange('guard')}
+                >
+                  Manage
+                </button>
+              </fieldset>
+              <span className="engine-pill-health-policy-note">
+                {deviceSafetySaving
+                  ? 'Saving\u2026'
+                  : deviceSafetyMode === 'guard'
+                    ? 'Gezel waits for safe temperature and throttle readings.'
+                    : deviceSafetyMode === 'off'
+                      ? 'Machine health management is off.'
+                      : 'Gezel reports machine health without pausing below the 95\u00b0C hard limit.'}
+              </span>
+              {deviceSafetyError && (
+                <span className="engine-pill-health-policy-error" role="alert">
+                  {deviceSafetyError}
+                </span>
+              )}
+            </dd>
             {activeMedia && (
               <>
                 <dt>Note</dt>

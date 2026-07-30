@@ -12,6 +12,7 @@ export type ShotArea =
   | 'shell'
   | 'home'
   | 'chat'
+  | 'terminal'
   | 'projects'
   | 'gezels'
   | 'tasks'
@@ -31,6 +32,7 @@ export const SHOT_REGISTRY: Record<ShotArea, string[]> = {
     'sidebar-collapsed',
     'sidebar-meester',
     'engine-pill-ds4',
+    'sidebar-project-status-tooltip',
   ],
   home: ['workshop', 'greeting-band', 'meester-chat'],
   chat: [
@@ -41,6 +43,7 @@ export const SHOT_REGISTRY: Record<ShotArea, string[]> = {
     'assistant-bubble',
     'references-pane',
   ],
+  terminal: ['wide-output'],
   projects: [
     'ide-chat',
     'ide-tasks',

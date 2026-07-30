@@ -18,6 +18,7 @@ function position(source: string, needle: string): number {
 const macPostinstall = installerFile('macos-pkg-scripts/postinstall');
 const macPlist = installerFile('com.bendyline.gezeld.plist');
 const linuxPostinstall = installerFile('linux/after-install.sh');
+const linuxPostremove = installerFile('linux/after-remove.sh');
 const linuxUnit = installerFile('gezeld.service');
 
 describe('macOS machine-service filesystem security', () => {
@@ -69,6 +70,9 @@ describe('macOS machine-service filesystem security', () => {
     expect(macPostinstall).toContain('daemon_shell=$(dscl . -read');
     expect(macPostinstall).toContain('[ "$daemon_shell" != "/usr/bin/false" ]');
     expect(macPostinstall).toContain('[ "$daemon_home" != "/var/empty" ]');
+    expect(macPostinstall).toContain(
+      'daemon_hidden=$(dscl . -read "/Users/${DAEMON_USER}" IsHidden | awk \'$1 ~ /(^|:)IsHidden:$/ { print $2 }\')',
+    );
     expect(macPostinstall).toContain('[ "$daemon_hidden" != "1" ]');
     expect(macPlist).toMatch(/<key>Umask<\/key>\s*<integer>63<\/integer>/);
     expect(macPlist).toMatch(/<key>GEZEL_PORT<\/key>\s*<string>43935<\/string>/);
@@ -135,5 +139,26 @@ describe('Linux machine-service filesystem security', () => {
     expect(linuxUnit).toContain('UMask=0077');
     expect(linuxUnit).toContain('Environment=GEZEL_PORT=43935');
     expect(linuxUnit).toContain('Environment=GEZEL_SHARED_ASSETS_DIR=/var/lib/gezel/assets');
+  });
+
+  it('preserves Chromium sandbox and AppArmor setup in the custom package hooks', () => {
+    expect(linuxPostinstall).toContain('update-alternatives --install');
+    expect(linuxPostinstall).toContain('CHROME_SANDBOX=/opt/Gezel/chrome-sandbox');
+    expect(linuxPostinstall).toContain('chown root:root "$CHROME_SANDBOX"');
+    expect(linuxPostinstall).toContain('unshare --user true');
+    expect(linuxPostinstall).toContain('chmod 0755 "$CHROME_SANDBOX"');
+    expect(linuxPostinstall).toContain('chmod 4755 "$CHROME_SANDBOX"');
+    expect(linuxPostinstall).toContain(
+      'APPARMOR_PROFILE_SOURCE=/opt/Gezel/resources/apparmor-profile',
+    );
+    expect(linuxPostinstall).toContain('APPARMOR_PROFILE_TARGET=/etc/apparmor.d/gezel');
+    expect(linuxPostinstall).toContain('apparmor_parser --skip-kernel-load --debug');
+    expect(linuxPostinstall).toContain('apparmor_parser --replace --write-cache --skip-read-cache');
+    expect(linuxPostinstall).toContain('update-mime-database /usr/share/mime');
+    expect(linuxPostinstall).toContain('update-desktop-database /usr/share/applications');
+
+    expect(linuxPostremove).toContain('update-alternatives --remove gezel "$ELECTRON_EXE"');
+    expect(linuxPostremove).toContain('apparmor_parser --remove "$APPARMOR_PROFILE_TARGET"');
+    expect(linuxPostremove).toContain('rm -f "$APPARMOR_PROFILE_TARGET"');
   });
 });

@@ -11,12 +11,12 @@ each production package to the exact text shipped for it.
 
 ## Runtime dependencies
 
-These ship in the Electron app or the `gezeld` daemon.
+These ship in the Electron app or the `gezeld` daemon. Two optional toolsets
+— the GitHub Copilot CLI and the Playwright MCP server — are deliberately
+*not* among them; see **Installed on demand** below.
 
 | Package | License | Homepage |
 |---|---|---|
-| [@github/copilot-sdk](https://github.com/github/copilot-sdk) | MIT | github/copilot-sdk |
-| [@github/copilot](https://github.com/github/copilot-cli) (pulled in transitively by the SDK) | **Proprietary** — GitHub Copilot CLI License | github/copilot-cli |
 | [@hono/node-server](https://github.com/honojs/node-server) | MIT | honojs/node-server |
 | [@modelcontextprotocol/sdk](https://modelcontextprotocol.io) | MIT | modelcontextprotocol.io |
 | [@napi-rs/keyring](https://github.com/napi-rs/node-keyring) | MIT | napi-rs/node-keyring |
@@ -59,15 +59,16 @@ attribution file is taken from the exact Electron distribution being packaged.
 
 These are developed in the neighbouring [Squisq](https://github.com/bendyline/squisq)
 repository and linked into the workspace. Their license matches Squisq's
-(MIT). Core sibling packages are pinned through the root `pnpm.overrides`
-map; the video adapter is pinned directly by the UI package.
+(MIT). Consuming packages pin every Squisq dependency exactly.
 
 - `@bendyline/squisq` — MIT
+- `@bendyline/squisq-cli` — MIT
 - `@bendyline/squisq-react` — MIT
 - `@bendyline/squisq-editor-react` — MIT
 - `@bendyline/squisq-formats` — MIT
-- `@bendyline/squisq-video-react` — MIT (its FFmpeg runtime is a separate
-  dependency with separate terms; see the reviewed components below)
+- `@bendyline/squisq-video` — MIT
+- `@bendyline/squisq-video-react` — MIT (Gezel's editor consumes only its
+  cover-image entry; the browser encoder and FFmpeg runtime are not shipped)
 
 ### Reviewed unmodified component redistributions
 
@@ -78,8 +79,6 @@ changes fail the production license gate until reviewed again. Redistribution
 does not alter the upstream license terms, and packaged artifacts must retain
 the applicable upstream license and notice material.
 
-- `@ffmpeg/core@0.12.9` — GPL-2.0-or-later, pulled in by
-  `@bendyline/squisq-video-react`.
 - `@resvg/resvg-js@2.6.2` and its platform binaries — MPL-2.0.
 
 `pnpm audit:licenses` encodes these as narrow reviewed exceptions. It remains
@@ -179,6 +178,39 @@ weights are third-party and carry their own licenses.
 
 ---
 
+## Installed on demand
+
+Some optional toolsets are **not** bundled into any installer. When a user
+enables the feature that needs one, Gezel installs it from the public npm
+registry into that user's own Gezel home (`system-toolsets/`), using the
+bundled pnpm and a version+integrity set pinned in
+[`packages/service/src/system-toolsets/locks.ts`](packages/service/src/system-toolsets/locks.ts).
+
+Gezel does **not** redistribute these packages — they are fetched from npm at
+the user's direction, and each is governed by its own license as published by
+its author. The install is pinned rather than floating so every machine
+resolves the exact versions reviewed at release time.
+
+| Package | Installed for | License |
+|---|---|---|
+| [@github/copilot-sdk](https://github.com/github/copilot-sdk) | GitHub Copilot chat provider | MIT |
+| [@github/copilot](https://github.com/github/copilot-cli) and its `@github/copilot-{darwin,linux,linuxmusl,win32}-{arm64,x64}` binary siblings, pulled in transitively by the SDK | GitHub Copilot chat provider | **Proprietary** — GitHub Copilot CLI License |
+| [@playwright/mcp](https://github.com/microsoft/playwright-mcp) | browser-automation MCP toolset | Apache-2.0 |
+
+Enabling the Playwright toolset additionally downloads a **Chromium** build
+(~281 MB) from Playwright's own CDN into `~/.gezel/playwright-browsers/`, via
+`playwright install chromium`. That browser is not bundled either, and carries
+Chromium's own BSD-3-Clause license plus the third-party notices shipped inside
+it. It is a separate copy from the Chromium inside Electron listed under
+**Bundled application runtimes** above.
+
+Because none of the above is present in any installer, none of it appears in
+the CycloneDX SBOM published with each release or in the `resources/licenses/`
+bundle installed alongside the app — both inventory only what Gezel actually
+redistributes.
+
+---
+
 ## Catalog models
 
 The model catalog (the external
@@ -271,14 +303,10 @@ project, [Hochschule für Gestaltung Schwäbisch Gmünd](https://www.hfg-gmuend.
 ## Proprietary and non-permissive components
 
 Most of Gezel's own **code** dependencies (npm packages and native engines) are
-permissively licensed (MIT / Apache-2.0 / BSD / ISC). The reviewed FFmpeg and
-resvg component redistributions are documented above. There are also two
-proprietary exceptions:
+permissively licensed (MIT / Apache-2.0 / BSD / ISC). The reviewed resvg
+component redistribution is documented above. One proprietary
+component is redistributed:
 
-- **`@github/copilot`** (and its platform-specific binary siblings
-  `@github/copilot-{darwin,linux,win32}-{arm64,x64}`), pulled in transitively
-  by `@github/copilot-sdk`, are distributed under the **GitHub Copilot CLI
-  License** — a proprietary, free-of-charge license from GitHub.
 - **NVIDIA CUDA runtime** (`libcudart`, `libcublas`, `libcublasLt` on Linux;
   `cudart`/`cublas` DLLs on Windows) is bundled beside the **CUDA variants** of
   the `llama-server` and `ds4-server` engines so they run without a local CUDA
@@ -289,11 +317,18 @@ proprietary exceptions:
   machine. The Metal (macOS), CPU, and Vulkan builds bundle no proprietary
   components.
 
-Separately, some **catalog models** ship under non-OSI licenses with
+Separately, the **GitHub Copilot CLI** (`@github/copilot` and its
+platform-specific binary siblings, pulled in transitively by
+`@github/copilot-sdk`) is proprietary, under the free-of-charge **GitHub
+Copilot CLI License**. Gezel does not redistribute it: it is installed from
+npm into the user's own Gezel home only when they enable the Copilot
+provider — see **Installed on demand** above.
+
+Some **catalog models** likewise ship under non-OSI licenses with
 acceptable-use or commercial restrictions (Llama Community License,
 NVIDIA Open Model License, FLUX.1 [dev] Non-Commercial, the RAIL
 licenses, and Mistral's MIT-Modified). Gezel
-does not redistribute those weights, but see the **Catalog models**
+does not redistribute those weights either, but see the **Catalog models**
 section above before relying on any of them commercially.
 
 ---
