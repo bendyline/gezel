@@ -9,21 +9,13 @@ import type { ChatManager } from '../chat/manager.js';
 import type { Store } from '../fs/store.js';
 import { isMemoryKind } from '../memory/daily-markdown.js';
 import type { MemoryManager } from '../memory/manager.js';
+import { resolveCredentialOriginPolicy } from '../secrets/origins.js';
 import type { CredentialRegistry } from '../secrets/registry.js';
 import type { TaskManager } from '../tasks/manager.js';
 import { assertPublicUrl } from '../utils/ssrf.js';
 
 const SCRIPT_HTTP_TIMEOUT_MS = 30_000;
 const SCRIPT_HTTP_MAX_RESPONSE_BYTES = 1_000_000;
-
-const DEFAULT_CREDENTIAL_ORIGINS: Readonly<Record<string, readonly string[]>> = {
-  'github.token': ['https://api.github.com'],
-  'openai.key': ['https://api.openai.com'],
-  'openai.organization': ['https://api.openai.com'],
-  'anthropic.key': ['https://api.anthropic.com'],
-  'brave.key': ['https://api.search.brave.com'],
-  'tavily.key': ['https://api.tavily.com'],
-};
 
 /**
  * The dispatcher maps RPC method names (`fs.read`, `llm.oneShot`,
@@ -586,34 +578,29 @@ async function assertCredentialOriginAllowed(
     throw new Error('http.authed does not allow credentials embedded in the URL');
   }
 
-  const project = await store.getProject(projectId);
-  const configured = project?.credentialAllowedOrigins?.[credentialName];
-  const origins = configured ?? DEFAULT_CREDENTIAL_ORIGINS[credentialName] ?? [];
-  const allowed = new Set(
-    origins
-      .map((value) => normalizeHttpsOrigin(value))
-      .filter((value): value is string => value !== null),
-  );
+  let originPolicy = resolveCredentialOriginPolicy(credentialName);
+  if (originPolicy.source === 'webhook') {
+    const config = await store.readConfig();
+    originPolicy = resolveCredentialOriginPolicy(credentialName, {
+      webhookUrl: config.channels?.webhook?.url,
+    });
+  } else if (originPolicy.source === 'project') {
+    const project = await store.getProject(projectId);
+    originPolicy = resolveCredentialOriginPolicy(credentialName, {
+      projectOrigins: project?.credentialAllowedOrigins,
+    });
+  }
+
+  const allowed = new Set(originPolicy.origins);
   if (!allowed.has(url.origin)) {
     throw new Error(
-      `credential "${credentialName}" is not allowed for origin "${url.origin}". Add that exact HTTPS origin to the project credential grant first.`,
+      `credential "${credentialName}" is not allowed for origin "${url.origin}". Configure the credential's HTTPS destination first.`,
     );
   }
-  // Built-in destinations must stay public. An explicitly configured exact
-  // origin may intentionally be a self-hosted LAN service; the user has named
-  // that destination in the project grant, so do not make local-first use
-  // cases impossible after the exfiltration boundary is already exact.
-  if (configured === undefined) await assertPublicUrl(url.href);
-}
-
-function normalizeHttpsOrigin(raw: string): string | null {
-  try {
-    const url = new URL(raw);
-    if (url.protocol !== 'https:' || url.username || url.password) return null;
-    return url.origin;
-  } catch {
-    return null;
-  }
+  // Built-in providers stay public. Webhook and toolset destinations were
+  // explicitly configured and may intentionally point at a self-hosted LAN
+  // service, but remain pinned to that exact origin.
+  if (!originPolicy.permitsPrivateNetwork) await assertPublicUrl(url.href);
 }
 
 async function fetchScriptHttp(

@@ -1,13 +1,13 @@
 /**
  * Runtime backend detection for the bundled llama-server.
  *
- * Phase 2 ships multiple llama-server variants per platform — CUDA
- * + Vulkan + CPU on Linux/Windows, Metal on macOS — and this module
- * picks which one to launch on a given host. The probe is pure
- * filesystem / linker inspection; it does NOT spawn a GPU workload.
- * A binary that loads cleanly here might still fail at first
- * inference if the driver is broken — the supervisor handles that
- * by falling through to the next variant on launch failure.
+ * Phase 2 ships multiple llama-server variants by platform and
+ * architecture — CUDA, Vulkan, CPU, or Metal — and this module picks
+ * which one to launch on a given host. The probe is pure filesystem /
+ * linker inspection; it does NOT spawn a GPU workload. Binary
+ * availability fallback is handled by `resolveAvailableLlamaBinary`;
+ * failures after a selected binary starts are surfaced by the native
+ * engine supervisor.
  *
  * Usage from the Electron supervisor:
  *
@@ -129,6 +129,60 @@ export interface DetectResult {
    * meaningless because Apple Silicon is unified memory).
    */
   vendorHint?: GpuVendorHint;
+}
+
+export interface ResolvedLlamaBinary {
+  /** Backend the selected binary was built for. */
+  backend: LlamaBackend;
+  /** Absolute path returned by the caller's binary resolver. */
+  path: string;
+  /**
+   * Present when automatic backend selection had to use the CPU build
+   * because the detected GPU variant was not bundled for this platform.
+   */
+  fallbackFrom?: LlamaBackend;
+}
+
+/**
+ * Resolve the preferred llama-server build, with optional lower-tier
+ * fallbacks.
+ *
+ * Detection and packaging support are deliberately separate: a machine can
+ * expose a Vulkan loader even when the release does not ship a Vulkan build
+ * for its architecture (for example Linux ARM64 under Parallels). In auto
+ * mode, that should still produce a working on-device engine by selecting the
+ * next bundled build in CUDA → Vulkan → CPU order. Explicit user overrides
+ * pass `allowFallbacks=false`
+ * so a missing pinned backend remains an actionable configuration error.
+ *
+ * Returning the backend together with the path prevents callers from launching
+ * a CPU binary while incorrectly advertising it as Vulkan or CUDA.
+ */
+export function resolveAvailableLlamaBinary(
+  preferredBackend: LlamaBackend,
+  resolveBinary: (backend: LlamaBackend) => string | null,
+  allowFallbacks: boolean,
+): ResolvedLlamaBinary | null {
+  const fallbackOrder: Record<LlamaBackend, LlamaBackend[]> = {
+    cuda: ['cuda', 'vulkan', 'cpu'],
+    vulkan: ['vulkan', 'cpu'],
+    metal: ['metal', 'cpu'],
+    cpu: ['cpu'],
+  };
+  const candidates = allowFallbacks ? fallbackOrder[preferredBackend] : [preferredBackend];
+
+  for (const backend of candidates) {
+    const path = resolveBinary(backend);
+    if (path) {
+      return {
+        backend,
+        path,
+        ...(backend === preferredBackend ? {} : { fallbackFrom: preferredBackend }),
+      };
+    }
+  }
+
+  return null;
 }
 
 /**

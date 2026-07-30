@@ -111,7 +111,7 @@ std::wstring build_child_cmdline(const std::wstring& instdir, const std::wstring
 }
 
 // The service environment contract, formerly NSSM's AppEnvironmentExtra
-// in installer/nsis-hooks.nsh. GEZEL_PORT=43935 reserves the canonical
+// in installer/nsis-hooks.nsh. GEZEL_PORT=6228 reserves the canonical
 // machine-service endpoint; CLI-owned fallback daemons use ephemeral ports.
 // GEZEL_SYSTEM_SCOPE=1 tells gezeld the runtime auth-token is a cross-account
 // client credential. The TEMP/TMP overrides matter too — without them
@@ -122,7 +122,7 @@ std::vector<EnvEntry> env_overrides(const std::wstring& instdir, const std::wstr
   return {
       {L"ELECTRON_RUN_AS_NODE", L"1"},
       {L"GEZEL_HOME", home},
-      {L"GEZEL_PORT", L"43935"},
+      {L"GEZEL_PORT", L"6228"},
       {L"GEZEL_SYSTEM_SCOPE", L"1"},
       // Opt gezeld into treating stdin EOF as "shut down gracefully".
       // Explicit rather than implicit: a foreground `gezel start` inherits
@@ -278,7 +278,7 @@ int self_test() {
   const std::vector<std::pair<std::wstring, std::wstring>> expected_env = {
       {L"ELECTRON_RUN_AS_NODE", L"1"},
       {L"GEZEL_HOME", L"C:\\ProgramData\\Gezel"},
-      {L"GEZEL_PORT", L"43935"},
+      {L"GEZEL_PORT", L"6228"},
       {L"GEZEL_SYSTEM_SCOPE", L"1"},
       {L"GEZEL_SHUTDOWN_ON_STDIN_EOF", L"1"},
       {L"GEZEL_SHARED_ASSETS_DIR", L"C:\\ProgramData\\Gezel\\assets"},

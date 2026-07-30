@@ -279,6 +279,39 @@ mac:
   gatekeeperAssess: false
   entitlements: entitlements.mac.plist
   entitlementsInherit: entitlements.mac.plist
+  # Drop electron-builder's stock privacy usage strings. It injects five of
+  # them into every macOS app, and shipping them was making Gezel claim reach
+  # it does not have: a July 2026 audit of v1.26211.23 found the installed
+  # Info.plist telling users "This app needs access to the camera" and
+  # "…to Bluetooth" for hardware nothing in the product touches.
+  #
+  # Gezel captures no live media at all. There is no getUserMedia,
+  # MediaRecorder, mediaDevices, desktopCapturer, Web Bluetooth, WebUSB or
+  # Web Serial call anywhere in the app, the renderer, or the daemon, and no
+  # record affordance in the UI. Speech-to-text is real, but it transcribes
+  # *files*: `POST /api/audio/transcribe` and the `transcribe_audio` MCP tool
+  # take base64 bytes or a project artifact path, never a microphone stream.
+  #
+  # So there is no honest string to write here — a plausible-sounding
+  # "Gezel transcribes what you say…" would be a worse lie than the
+  # placeholder. A key that is absent is also never shown: macOS only surfaces
+  # a usage description when the app actually requests that device.
+  #
+  # `null` is the documented removal: extendInfo is deep-assigned over the
+  # generated plist, then app-builder-lib deletes every null/undefined key
+  # (macPackager.js — "for (const [k, v] of Object.entries(appPlist))").
+  #
+  # SHARP EDGE: macOS *terminates* an app that touches the microphone or
+  # camera with no usage string. The day voice input lands, the matching key
+  # has to come back with real copy in the same change.
+  # scripts/macos-privacy-strings.test.mjs fails the build if a capture API
+  # appears without one, so this cannot rot silently.
+  extendInfo:
+    NSMicrophoneUsageDescription: null
+    NSCameraUsageDescription: null
+    NSAudioCaptureUsageDescription: null
+    NSBluetoothAlwaysUsageDescription: null
+    NSBluetoothPeripheralUsageDescription: null
   # Native release Mach-O files are already Developer ID signed with hardened
   # runtime before their hashes enter NATIVE_FILE_MANIFESTS.json. Re-signing
   # them while wrapping the Electron app would change their bytes and defeat

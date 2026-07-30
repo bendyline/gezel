@@ -494,7 +494,7 @@ export const GezelConfigSchema = z.object({
       enabled: z.boolean().default(false),
       /** Interface to bind the LAN listener to. Default `0.0.0.0`. */
       bindAddress: z.string().optional(),
-      /** Port for the LAN listener. Default 43936 (loopback stays on 43935). */
+      /** Port for the LAN listener. Default 6229 (loopback stays on 6228). */
       port: z.number().int().positive().optional(),
       /**
        * How remote turns compete with this device's own local work in the
@@ -564,6 +564,14 @@ export const GezelConfigSchema = z.object({
    */
   klerkGezelId: z.string().optional(),
   /**
+   * The gezel currently designated as "boekwachter" — the workshop's
+   * index-keeper. This is the preferred worker when a project includes
+   * them in its `gezelIds` roster. A project without any Boekwachter on
+   * that roster keeps structural indexing, but opts out of AI summaries,
+   * reviews, rollups, and digests.
+   */
+  boekwachterGezelId: z.string().optional(),
+  /**
    * The gezel currently designated as "keurmeester" — the quality
    * inspector summoned when a small/local model's recovery machinery
    * gives up. Runs on a frontier provider (see `config.keurmeester`).
@@ -579,11 +587,12 @@ export const GezelConfigSchema = z.object({
    *     AND new app registrations with `403 openai_endpoints_disabled`;
    *     already-issued tokens stay stored but are refused while off.
    *     Unset/`true` → on (per-app consent remains the primary gate).
-   *   - `servingGezelId` — the gezel who answers when a caller's
-   *     `model` string is missing from gezel's namespace (e.g. a
-   *     hardcoded "gpt-4o"). Resolved like a `gezel:<id>` target: the
-   *     gezel's persona + provider/model tuning apply. Unset → unknown
-   *     models keep failing loudly with `404 model_not_found`.
+   *   - `servingGezelId` — optional override for the fallback gezel who
+   *     answers when a caller's `model` string is missing from gezel's
+   *     namespace (e.g. a hardcoded "gpt-4o"). Resolved like a
+   *     `gezel:<id>` target: persona + provider/model tuning apply.
+   *     Unset or stale → the Meester (then the first available gezel),
+   *     so public inference always has a gezel-backed fallback.
    *   - `supportingBehaviors` — whether `/v1` sessions get the resolved
    *     per-model behavior PROFILE (ramble detection, preamble folding,
    *     transcript shaping, family-specific fixes). Unset/`true` → on.
@@ -2875,7 +2884,10 @@ export const UpdateProjectRequestSchema = z.object({
    * authorized. `[]` revokes all grants.
    */
   grantedCredentials: z.array(z.string()).optional(),
-  /** Replace the per-credential HTTPS-origin bindings used by script HTTP. */
+  /**
+   * Replace advanced HTTPS-origin bindings for toolset credentials. Built-in
+   * provider and webhook destinations are controlled by the service.
+   */
   credentialAllowedOrigins: z.record(z.string(), z.array(HttpsOriginSchema)).optional(),
   /**
    * Explicit override of the project's type (an id from the project-type

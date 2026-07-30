@@ -1,10 +1,12 @@
-import type { Poppetje as PoppetjeStruct } from '@bendyline/gezel';
+import { type GezelSummary, type Poppetje as PoppetjeStruct, displayName } from '@bendyline/gezel';
 import { useEffect, useMemo, useState } from 'react';
+import { api } from '../../api.js';
 import { ChatComposer } from '../../components/ChatComposer.js';
 import { ChatReferences } from '../../components/ChatReferences.js';
 import { GlobalTimeline } from '../../components/GlobalTimeline.js';
 import { SessionSwitcher } from '../../components/SessionSwitcher.js';
 import { pickChatPlaceholder } from '../../components/chat-placeholder.js';
+import { useRoleBasedNameOnlyMode } from '../../components/useRoleBasedNameOnlyMode.js';
 
 /**
  * The meester conversation in the workshop's main column. Reuses the
@@ -30,16 +32,63 @@ export function MeesterConversation({
 }) {
   const [sessionId, setSessionId] = useState<string>('');
   const [sessionRefreshKey, setSessionRefreshKey] = useState(0);
+  const [gezels, setGezels] = useState<GezelSummary[]>([]);
+  const [selectedGezelId, setSelectedGezelId] = useState(meesterGezelId);
+  const [projectId, setProjectId] = useState('default');
+  const roleBasedNameOnlyMode = useRoleBasedNameOnlyMode();
 
   // Reset the focused session if the meester changes (rare).
-  // biome-ignore lint/correctness/useExhaustiveDependencies: meesterGezelId is the reset trigger.
   useEffect(() => {
     setSessionId('');
+    setSelectedGezelId(meesterGezelId);
+    setProjectId('default');
+    api
+      .listGezels()
+      .then((response) => setGezels(response.gezels))
+      .catch(() => setGezels([]));
   }, [meesterGezelId]);
 
+  const selectedGezel = gezels.find((gezel) => gezel.id === selectedGezelId);
+  const activeGezelId = selectedGezelId || meesterGezelId;
+  const activeGezelName = selectedGezel
+    ? displayName(
+        { name: selectedGezel.name, roleBasedName: selectedGezel.roleBasedName },
+        roleBasedNameOnlyMode,
+      )
+    : activeGezelId === meesterGezelId
+      ? meesterName
+      : activeGezelId;
+  const activeGezelIcon = selectedGezel
+    ? (selectedGezel.icon ?? null)
+    : activeGezelId === meesterGezelId
+      ? meesterIcon
+      : null;
+  const activeGezelPoppetje = selectedGezel
+    ? (selectedGezel.poppetje ?? null)
+    : activeGezelId === meesterGezelId
+      ? meesterPoppetje
+      : null;
+  const activeGezelIconOverride = selectedGezel
+    ? (selectedGezel.iconOverride ?? false)
+    : activeGezelId === meesterGezelId
+      ? meesterIconOverride
+      : false;
+
   const composerPlaceholder = useMemo(
-    () => pickChatPlaceholder({ role: 'meester', gezelName: meesterName }),
-    [meesterName],
+    () =>
+      pickChatPlaceholder({
+        role: activeGezelId === meesterGezelId ? 'meester' : 'other',
+        gezelName: activeGezelName,
+        gezelGender: selectedGezel?.gender,
+        fixedFunctionTool: selectedGezel?.fixedFunction?.tool,
+      }),
+    [
+      activeGezelId,
+      activeGezelName,
+      meesterGezelId,
+      selectedGezel?.gender,
+      selectedGezel?.fixedFunction?.tool,
+    ],
   );
 
   return (
@@ -49,19 +98,29 @@ export function MeesterConversation({
           <>
             <GlobalTimeline
               activeSessionId={sessionId || undefined}
-              onFocusSession={(sid) => setSessionId(sid)}
+              onFocusSession={(sid, gezelId, focusedProjectId) => {
+                setSelectedGezelId(gezelId);
+                setProjectId(focusedProjectId);
+                setSessionId(sid);
+              }}
               onToolActivity={onToolActivity}
               onArtifactReference={onArtifactReference}
               onTaskReference={onTaskReference}
               emptyPlaceholder={emptyPlaceholder}
             />
             <ChatComposer
-              gezelId={meesterGezelId}
-              gezelName={meesterName}
-              gezelIcon={meesterIcon}
-              gezelPoppetje={meesterPoppetje}
-              gezelIconOverride={meesterIconOverride}
-              projectId="default"
+              gezelId={activeGezelId}
+              gezelName={activeGezelName}
+              gezelIcon={activeGezelIcon}
+              gezelPoppetje={activeGezelPoppetje}
+              gezelIconOverride={activeGezelIconOverride}
+              recipientGezels={gezels}
+              onPrimaryRecipientChange={(gezelId) => {
+                setSelectedGezelId(gezelId);
+                setProjectId('default');
+                setSessionId('');
+              }}
+              projectId={projectId}
               sessionId={sessionId || undefined}
               onSessionCreated={(sid) => {
                 setSessionId(sid);
@@ -71,9 +130,10 @@ export function MeesterConversation({
               placeholder={composerPlaceholder}
               belowAddressLine={
                 <SessionSwitcher
-                  gezelId={meesterGezelId}
-                  projectId="default"
+                  gezelId={activeGezelId}
+                  projectId={projectId}
                   sessionId={sessionId || undefined}
+                  gezelName={activeGezelName}
                   onSessionIdChange={(next) => setSessionId(next ?? '')}
                   refreshKey={sessionRefreshKey}
                 />

@@ -4,10 +4,12 @@
 # /Applications/. Sets up the _gezeld system user, the system-scope data
 # directory, and bootstraps the LaunchDaemon.
 #
-# Idempotent: re-runs (e.g. on upgrade) skip work that's already done.
+# Idempotent: re-runs (e.g. on upgrade or after an interrupted install)
+# converge the account, filesystem, service registration, and health state.
 # Failures inside this script are surfaced to the installer UI as a
-# generic "installation failed" — the install itself is treated as
-# transactional, so rolling back is the user's job (they can rerun).
+# generic "installation failed". PackageKit may roll back the app payload,
+# but script side effects such as users, data directories, and launchd
+# overrides persist; every successful rerun must therefore repair them.
 #
 # Logs go to /var/log/install.log (PKG default) and to stderr (visible
 # in the macOS Installer.app's "Show Log" pane).
@@ -29,6 +31,10 @@ UNPACKED_DIR="/Applications/Gezel.app/Contents/Resources/app.asar.unpacked/dist"
 EXTRACT_CLI="${UNPACKED_DIR}/extract-service-bundle.js"
 BUNDLE_TARBALL="${UNPACKED_DIR}/service-bundle.tar.gz"
 BUNDLE_META="${UNPACKED_DIR}/service-bundle.meta.json"
+RUNTIME_PORT="${DATA_DIR}/runtime/port"
+RUNTIME_CERT="${DATA_DIR}/runtime/cert.pem"
+SERVICE_STDOUT="${DATA_DIR}/logs/service-stdout.log"
+SERVICE_STDERR="${DATA_DIR}/logs/service-stderr.log"
 
 echo "[gezel postinstall] starting (user=$(whoami))"
 
@@ -49,6 +55,50 @@ abort_bad_service_identity() {
   launchctl disable "system/${DAEMON_LABEL}" 2>/dev/null || true
   launchctl bootout "system/${DAEMON_LABEL}" 2>/dev/null || true
   exit 1
+}
+
+dump_service_diagnostics() {
+  launchctl print "system/${DAEMON_LABEL}" >&2 || true
+  for log_path in "$SERVICE_STDERR" "$SERVICE_STDOUT"; do
+    if [ -f "$log_path" ]; then
+      echo "[gezel postinstall] --- tail ${log_path} ---" >&2
+      tail -n 80 "$log_path" >&2 || true
+    fi
+  done
+}
+
+wait_for_service_health() {
+  health_deadline=$((SECONDS + 60))
+  while [ "$SECONDS" -lt "$health_deadline" ]; do
+    if launchctl print "system/${DAEMON_LABEL}" >/dev/null 2>&1 && \
+       [ -s "$RUNTIME_PORT" ] && [ -s "$RUNTIME_CERT" ]; then
+      runtime_port=$(awk 'NR == 1 { print $1 }' "$RUNTIME_PORT")
+      if [[ "$runtime_port" =~ ^[0-9]+$ ]] && \
+         [ "$runtime_port" -ge 1 ] && [ "$runtime_port" -le 65535 ]; then
+        if health_response=$(
+          /usr/bin/curl \
+            --fail \
+            --silent \
+            --show-error \
+            --connect-timeout 2 \
+            --max-time 3 \
+            --cacert "$RUNTIME_CERT" \
+            "https://127.0.0.1:${runtime_port}/api/health" 2>/dev/null
+        ); then
+          if printf '%s\n' "$health_response" |
+             grep -Eq '"ok"[[:space:]]*:[[:space:]]*true'; then
+            echo "[gezel postinstall] service health verified on port ${runtime_port}"
+            return 0
+          fi
+        fi
+      fi
+    fi
+    sleep 1
+  done
+
+  echo "[gezel postinstall] ERROR: ${DAEMON_LABEL} did not become healthy within 60 seconds" >&2
+  dump_service_diagnostics
+  return 1
 }
 
 # 1. Create the _gezeld system user/group if missing. macOS reserves
@@ -211,7 +261,7 @@ cp "$PLIST_SRC" "$PLIST_DST"
 chown root:wheel "$PLIST_DST"
 chmod 644 "$PLIST_DST"
 
-# 4. Bootstrap and start the already-stopped service.
+# 4. Enable, bootstrap, and start the already-stopped service.
 #
 # Idempotency notes — this whole block has to survive being run twice
 # in one install transaction. macOS PackageKit runs postinstall a
@@ -228,6 +278,12 @@ chmod 644 "$PLIST_DST"
 # install path has already loaded the same plist — in that case the
 # desired end state (service is loaded) is already true, so we treat
 # it as success rather than failing the install transaction.
+#
+# A prior safety abort deliberately persists `launchctl disable`. Clear that
+# quarantine only now, after the daemon identity, private data tree, service
+# bundle, and plist have all passed validation. `bootstrap` refuses a disabled
+# service, so enable must precede it for interrupted-install recovery to work.
+launchctl enable "system/${DAEMON_LABEL}"
 bootstrap_err=$(launchctl bootstrap system "$PLIST_DST" 2>&1) || {
   if launchctl print "system/${DAEMON_LABEL}" >/dev/null 2>&1; then
     echo "[gezel postinstall] bootstrap reported '${bootstrap_err}' but service is loaded; continuing"
@@ -237,8 +293,10 @@ bootstrap_err=$(launchctl bootstrap system "$PLIST_DST" 2>&1) || {
   fi
 }
 
-launchctl enable "system/${DAEMON_LABEL}"
-launchctl kickstart -k "system/${DAEMON_LABEL}" || true
+kickstart_err=$(launchctl kickstart -k "system/${DAEMON_LABEL}" 2>&1) || {
+  echo "[gezel postinstall] kickstart reported '${kickstart_err}'; waiting for health" >&2
+}
+wait_for_service_health
 
 echo "[gezel postinstall] GezelService installed and started."
 exit 0

@@ -50,7 +50,7 @@ const STATUS_TOOLTIP =
   'Read-only or Inactive — ambient gezel work pauses. Chat still works.';
 
 const WRITES_TOOLTIP =
-  "Whether gezels may create, edit, and delete files in this project's workspace. " +
+  "Whether gezellen may create, edit, and delete files in this project's workspace. " +
   'Internal workspaces default to on; a project opened from an existing folder defaults to off ' +
   '(turning it on asks for confirmation first). Gezels can always write reports into artifacts.';
 
@@ -712,7 +712,7 @@ export function ProjectGitStatusBar({
         {!onAllowWritesChange && !gezelWritesOn && (
           <span
             className="project-lockdown-chip"
-            title='Gezel file edits are off for this project. Enable "Allow gezels to modify the workspace directory" in Project → Settings.'
+            title='Gezel file edits are off for this project. Enable "Allow gezellen to modify the workspace directory" in Project → Settings.'
             aria-label="Gezel file edits are off for this project."
           >
             <span className="project-lockdown-chip-icon" aria-hidden>

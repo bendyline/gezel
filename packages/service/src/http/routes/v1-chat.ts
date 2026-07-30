@@ -11,7 +11,7 @@ import {
 } from '../../providers/types.js';
 import type { LLMSession } from '../../providers/types.js';
 import type { ServiceContext } from '../context.js';
-import { resolveChatTarget } from '../openai-compat/chat-target.js';
+import { resolveChatTarget, resolveFallbackGezelId } from '../openai-compat/chat-target.js';
 import type { ChatTarget } from '../openai-compat/chat-target.js';
 import { overlayOpenAiRequestTuning } from '../openai-compat/request-tuning.js';
 import { runNonStreaming, runStreaming } from '../openai-compat/streaming.js';
@@ -158,24 +158,25 @@ export function v1ChatRoutes(ctx: ServiceContext): Hono {
         const modelTarget = resolveModelTarget(parsed.model);
         if (!modelTarget) {
           // Unknown model string (e.g. a client's hardcoded "gpt-4o").
-          // When the user has designated a serving gezel (Settings →
-          // Connected Apps), route through them — persona + tuning apply
-          // exactly like a `gezel:<id>` target. Without one, unknown
-          // models keep failing loudly so typos stay visible.
-          const servingGezelId = endpointsConfig.servingGezelId;
-          if (!servingGezelId) {
+          // Route through the configured fallback gezel, or the Meester
+          // when no explicit override is set. Persona + tuning apply
+          // exactly like a `gezel:<id>` target, so every connected app
+          // has a useful front door even when it cannot choose one of
+          // the gezel entries advertised by GET /v1/models.
+          const fallbackGezelId = await resolveFallbackGezelId(ctx, endpointsConfig.servingGezelId);
+          if (!fallbackGezelId) {
             return c.json(
               {
                 error: {
-                  message: `Unknown model "${parsed.model}". Expected "<provider>:<model>" or "gezel:<id-or-name>" — see /v1/models, /v1/gezels.`,
+                  message: `Unknown model "${parsed.model}", and no gezel is available to answer it.`,
                   type: 'invalid_request_error',
-                  code: 'model_not_found',
+                  code: 'gezel_not_found',
                 },
               },
               404,
             );
           }
-          target = await resolveChatTarget({ kind: 'gezel', ref: servingGezelId }, ctx);
+          target = await resolveChatTarget({ kind: 'gezel', ref: fallbackGezelId }, ctx);
         } else {
           target = {
             provider: modelTarget.provider,

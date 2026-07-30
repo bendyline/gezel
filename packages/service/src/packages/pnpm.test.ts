@@ -1,8 +1,9 @@
+import { EventEmitter } from 'node:events';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { normalizeBundledPnpmPath, resolvePnpmCommand } from './pnpm.js';
+import { normalizeBundledPnpmPath, resolvePnpmCommand, spawnPnpm } from './pnpm.js';
 
 const originalPnpmPath = process.env.GEZEL_PNPM_PATH;
 const originalNodePath = process.env.GEZEL_NODE_PATH;
@@ -33,6 +34,81 @@ describe('resolvePnpmCommand', () => {
       shell: false,
       mode: 'node-script',
     });
+  });
+});
+
+describe('spawnPnpm', () => {
+  it('forces bundled Node to launch headlessly for the Windows machine service', () => {
+    let captured:
+      | {
+          command: string;
+          args: readonly string[];
+          options: import('node:child_process').SpawnOptions;
+        }
+      | undefined;
+    const spawnImpl = ((
+      command: string,
+      args: readonly string[],
+      options: import('node:child_process').SpawnOptions,
+    ) => {
+      captured = { command, args, options };
+      return new EventEmitter();
+    }) as unknown as typeof import('node:child_process').spawn;
+
+    spawnPnpm(
+      {
+        command: 'C:\\Program Files\\gezel\\node.exe',
+        args: ['C:\\Program Files\\gezel\\pnpm.mjs', 'install'],
+        shell: false,
+        mode: 'node-script',
+      },
+      { cwd: workRoot, stdio: 'inherit' },
+      spawnImpl,
+    );
+
+    expect(captured).toEqual({
+      command: 'C:\\Program Files\\gezel\\node.exe',
+      args: ['C:\\Program Files\\gezel\\pnpm.mjs', 'install'],
+      options: {
+        cwd: workRoot,
+        stdio: 'inherit',
+        shell: false,
+        windowsHide: true,
+      },
+    });
+  });
+
+  it('keeps cmd quoting and the headless launch policy in one spawn boundary', () => {
+    let captured:
+      | {
+          command: string;
+          args: readonly string[];
+          options: import('node:child_process').SpawnOptions;
+        }
+      | undefined;
+    const spawnImpl = ((
+      command: string,
+      args: readonly string[],
+      options: import('node:child_process').SpawnOptions,
+    ) => {
+      captured = { command, args, options };
+      return new EventEmitter();
+    }) as unknown as typeof import('node:child_process').spawn;
+
+    spawnPnpm(
+      {
+        command: 'C:\\Program Files\\nodejs\\pnpm.cmd',
+        args: ['install', '--prod'],
+        shell: true,
+        mode: 'executable',
+      },
+      { cwd: workRoot },
+      spawnImpl,
+    );
+
+    expect(captured?.command).toBe('"C:\\Program Files\\nodejs\\pnpm.cmd"');
+    expect(captured?.args).toEqual(['"install"', '"--prod"']);
+    expect(captured?.options).toMatchObject({ shell: true, windowsHide: true });
   });
 });
 

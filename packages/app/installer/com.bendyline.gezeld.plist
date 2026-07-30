@@ -20,7 +20,7 @@
     first-party client credential. It is mode 0o644 so logged-in desktop
     clients can read it; the daemon root token never leaves process memory.
     GEZEL_SYSTEM_SCOPE=1 selects this split runtime policy.
-    GEZEL_PORT=43935 reserves the canonical machine-service endpoint; any
+    GEZEL_PORT=6228 reserves the canonical machine-service endpoint; any
     user-owned CLI fallback runs on a discoverable ephemeral port.
 -->
 <plist version="1.0">
@@ -41,7 +41,7 @@
         <key>GEZEL_HOME</key>
         <string>/Library/Application Support/Gezel</string>
         <key>GEZEL_PORT</key>
-        <string>43935</string>
+        <string>6228</string>
         <key>GEZEL_SYSTEM_SCOPE</key>
         <string>1</string>
         <key>GEZEL_SHARED_ASSETS_DIR</key>

@@ -1,7 +1,8 @@
-import type { ChatEventEnvelope } from '@bendyline/gezel';
+import type { ChatEventEnvelope, GezelSummary } from '@bendyline/gezel';
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { streamSharedAllChatEvents } from '../shared-chat-events.js';
+import { GezelIcon } from './GezelIcon.js';
 
 /**
  * Transient header pill showing what the boekwachter (background indexing)
@@ -23,6 +24,9 @@ const LINGER_MS = 8_000;
 
 export function BoekwachterPill() {
   const [message, setMessage] = useState<string | null>(null);
+  const [workerId, setWorkerId] = useState<string | null>(null);
+  const [workerName, setWorkerName] = useState<string | null>(null);
+  const [worker, setWorker] = useState<GezelSummary | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -40,6 +44,16 @@ export function BoekwachterPill() {
           const label = PHASE_LABEL[ev.phase] ?? ev.phase;
           const project = ev.projectId ? ` ${ev.projectId}` : '';
           setMessage(`${label}${project}${ev.detail ? ` — ${ev.detail}` : ''}`);
+          setWorkerId(ev.gezelId ?? null);
+          setWorkerName(ev.gezelName ?? null);
+          if (ev.gezelId) {
+            void api
+              .getGezel(ev.gezelId)
+              .then((gezel) => setWorker(gezel))
+              .catch(() => setWorker(null));
+          } else {
+            setWorker(null);
+          }
           if (timerRef.current) clearTimeout(timerRef.current);
           timerRef.current = setTimeout(() => setMessage(null), LINGER_MS);
         }
@@ -54,19 +68,56 @@ export function BoekwachterPill() {
   }, []);
 
   if (!message) return null;
-  return (
-    <output
-      className="boekwachter-pill"
-      aria-label={`Boekwachter: ${message}`}
-      title={`Background indexing (boekwachter): ${message}`}
-    >
-      <span className="boekwachter-pill-dot" aria-hidden="true" />
+  const name = worker?.name ?? workerName;
+  const label = name ? `${name}: ${message}` : `Indexing: ${message}`;
+  const contents = (
+    <>
+      {worker ? (
+        <span className="boekwachter-pill-avatar" aria-hidden="true">
+          <GezelIcon
+            svg={worker.icon ?? null}
+            poppetje={worker.poppetje}
+            iconOverride={worker.iconOverride}
+            name={worker.name}
+            size={18}
+          />
+        </span>
+      ) : (
+        <span className="boekwachter-pill-dot" aria-hidden="true" />
+      )}
       <span className="boekwachter-pill-label boekwachter-pill-label-full" aria-hidden="true">
-        Boekwachter: {message}
+        {label}
       </span>
       <span className="boekwachter-pill-label boekwachter-pill-label-short" aria-hidden="true">
         Indexing
       </span>
-    </output>
+      <output className="sr-only" aria-live="polite">
+        {label}
+      </output>
+    </>
+  );
+  if (!workerId) {
+    return (
+      <div className="boekwachter-pill" title={`Background structural indexing: ${message}`}>
+        {contents}
+      </div>
+    );
+  }
+  return (
+    <button
+      type="button"
+      className="boekwachter-pill"
+      aria-label={`Open ${name ?? 'Boekwachter'} — ${message}`}
+      title={`${name ?? 'Boekwachter'} is ${message}. Open gezel.`}
+      onClick={() =>
+        window.dispatchEvent(
+          new CustomEvent('gezel:open-tab', {
+            detail: { kind: 'gezel', id: workerId, activate: true },
+          }),
+        )
+      }
+    >
+      {contents}
+    </button>
   );
 }

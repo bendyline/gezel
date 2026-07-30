@@ -10,8 +10,8 @@ const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]', '::1']);
 
 /**
  * Extract the hostname from a `Host` header value, dropping any `:port`.
- *   `127.0.0.1:43935` → `127.0.0.1`
- *   `[::1]:43935`     → `[::1]`
+ *   `127.0.0.1:6228` → `127.0.0.1`
+ *   `[::1]:6228`     → `[::1]`
  *   `localhost`       → `localhost`
  */
 function hostnameOf(host: string): string {
@@ -23,17 +23,17 @@ function hostnameOf(host: string): string {
 /**
  * DNS-rebinding guard for the loopback daemon.
  *
- * The daemon binds `127.0.0.1` only, but now that it claims a *well-known*
- * port (43935) the port is no longer a secret. A malicious web page can
- * point a hostname it controls at `127.0.0.1` (DNS rebinding) and have the
- * victim's browser issue requests to us — and the browser puts the
+ * The daemon binds `127.0.0.1` only, but now that it claims a fixed,
+ * documented port (6228), the port is no longer a secret. A malicious web
+ * page can point a hostname it controls at `127.0.0.1` (DNS rebinding) and
+ * have the victim's browser issue requests to us — and the browser puts the
  * attacker's hostname in the `Host` header, not ours. Reject any request
  * whose Host isn't a loopback literal so only pages actually served from
  * `127.0.0.1`/`localhost` (our own UI) can reach the API.
  *
  * This does NOT break legitimate cross-origin `/v1/*` apps: a page at
- * `http://localhost:3000` fetching `http://127.0.0.1:43935/v1/...` sends
- * `Host: 127.0.0.1:43935` (the addressed server) and `Origin:
+ * `http://localhost:3000` fetching `http://127.0.0.1:6228/v1/...` sends
+ * `Host: 127.0.0.1:6228` (the addressed server) and `Origin:
  * http://localhost:3000`. We check Host (loopback → allowed); CORS handles
  * Origin separately.
  *

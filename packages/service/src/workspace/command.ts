@@ -92,6 +92,10 @@ export async function runWorkspaceCommand(
       // external command`. The Node 24 deprecation DEP0190 also flags
       // shell:true with args as a quoting/injection footgun.
       shell: process.platform === 'win32' && needsShellExpansion(command),
+      // The machine-wide daemon runs in non-interactive Session 0. Keep
+      // console-subsystem build tools headless so CreateProcess does not
+      // attempt console/DLL initialization there. Ignored off Windows.
+      windowsHide: true,
     });
 
     let timedOut = false;

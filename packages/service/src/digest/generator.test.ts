@@ -1,6 +1,7 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { GezelDetail } from '@bendyline/gezel';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Store } from '../fs/store.js';
 import { HistoryManager } from '../history/manager.js';
@@ -9,11 +10,19 @@ import { type DigestOneShot, ProjectDigestGenerator, isoWeek } from './generator
 let home: string;
 let store: Store;
 let history: HistoryManager;
+const BOOK = {
+  id: 'noor',
+  name: 'Noor',
+  role: 'Boekwachter',
+  about: 'Keep the weekly record concise.',
+  parsed: { frontmatter: { name: 'Noor' } },
+} as unknown as GezelDetail;
 
 beforeEach(async () => {
   home = await mkdtemp(join(tmpdir(), 'gezel-digest-'));
   history = new HistoryManager(home);
   store = new Store({ home, history });
+  await store.writeConfig({ defaultModel: { mlx: 'digest-test-model' } });
 });
 
 afterEach(async () => {
@@ -21,7 +30,12 @@ afterEach(async () => {
 });
 
 function makeGenerator(oneShot: ReturnType<typeof vi.fn>): ProjectDigestGenerator {
-  return new ProjectDigestGenerator({ store, history, oneShot: oneShot as DigestOneShot });
+  return new ProjectDigestGenerator({
+    store,
+    history,
+    oneShot: oneShot as DigestOneShot,
+    resolveBoekwachter: async () => BOOK,
+  });
 }
 
 async function seedProject(): Promise<string> {
@@ -56,7 +70,7 @@ describe('ProjectDigestGenerator', () => {
   it('writes a reports/ artifact + history event for an active week, idempotently', async () => {
     const projectId = await seedProject();
     const oneShot = vi.fn(
-      async (_prompt: string, _timeoutMs: number, _opts: { useKlerk: boolean }) =>
+      async (_prompt: string, _timeoutMs: number, _opts: { useGezelPersona: boolean }) =>
         'The crew tweaked the mission and planned the roof.',
     );
     const gen = makeGenerator(oneShot);
@@ -64,7 +78,13 @@ describe('ProjectDigestGenerator', () => {
     const first = await gen.sweep();
     expect(first.generated).toBe(1);
     expect(oneShot).toHaveBeenCalledTimes(1);
-    expect(oneShot.mock.calls[0]?.[2]).toMatchObject({ useKlerk: true });
+    expect(oneShot.mock.calls[0]?.[2]).toMatchObject({
+      gezelId: 'noor',
+      actorLabel: 'Noor',
+      useGezelPersona: true,
+      providerName: 'mlx',
+      model: 'digest-test-model',
+    });
 
     const week = isoWeek(new Date());
     const artifact = await store.readProjectArtifact(projectId, `reports/digest-${week}.md`);
@@ -118,6 +138,7 @@ describe('ProjectDigestGenerator', () => {
       history,
       oneShot: oneShot as DigestOneShot,
       isPaused: () => true,
+      resolveBoekwachter: async () => BOOK,
     });
     expect((await paused.sweep()).generated).toBe(0);
     expect(oneShot).not.toHaveBeenCalled();
@@ -132,6 +153,7 @@ describe('ProjectDigestGenerator', () => {
       history,
       oneShot: oneShot as DigestOneShot,
       isChatActive: () => active,
+      resolveBoekwachter: async () => BOOK,
     });
 
     expect((await gen.sweep()).generated).toBe(0);

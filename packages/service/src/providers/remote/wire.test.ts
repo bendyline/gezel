@@ -8,10 +8,19 @@ describe('remote wire contract', () => {
       model: 'llama-cpp:qwen2.5-72b',
       systemMessage: 'You are helpful.',
       prompt: 'hello',
-      queue: { lane: 'interactive', sessionId: 's1', gezelId: 'g1', affinity: true },
+      queue: {
+        lane: 'interactive',
+        sessionId: 's1',
+        gezelId: 'g1',
+        projectId: 'p1',
+        actorLabel: 'Mira',
+        affinity: true,
+      },
     });
     expect(parsed.priorMessages).toEqual([]);
     expect(parsed.queue.lane).toBe('interactive');
+    expect(parsed.queue.projectId).toBe('p1');
+    expect(parsed.queue.actorLabel).toBe('Mira');
   });
 
   it('carries tools, layers, tuning, and prior tool-call history', () => {

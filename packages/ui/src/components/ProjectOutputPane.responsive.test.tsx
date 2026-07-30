@@ -64,4 +64,20 @@ describe('ProjectOutputPane responsive toolbar', () => {
     expect(picker.querySelector('.project-output-picker-icon')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'More output actions' })).toBeInTheDocument();
   });
+
+  it('renders the debug-frame action with a flat SVG camera icon', () => {
+    render(
+      <ProjectOutputPane
+        projectId="project"
+        htmlFiles={[]}
+        typePage={{ entry: 'report.html', label: longPageLabel }}
+        onClose={() => {}}
+        onDebugFrame={() => {}}
+      />,
+    );
+
+    const capture = screen.getByRole('button', { name: 'Send a debug frame to the chat' });
+    expect(capture.querySelector('svg')).toBeInTheDocument();
+    expect(capture).not.toHaveTextContent('📷');
+  });
 });

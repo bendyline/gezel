@@ -16,7 +16,11 @@ const SECTIONS = [
     name: 'general',
     desc: 'Settings — General (theme, engagement, window behavior)',
   },
-  { id: 'team', name: 'team', desc: 'Settings — Your Team (meester / klerk pickers)' },
+  {
+    id: 'team',
+    name: 'team',
+    desc: 'Settings — Your Team (meester / klerk / boekwachter pickers)',
+  },
   {
     id: 'folders',
     name: 'folders',

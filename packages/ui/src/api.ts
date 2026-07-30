@@ -2,6 +2,15 @@ import type { GezmodelEngine, GezmodelImportReview } from '@bendyline/gezel';
 import { GezelClient } from '@bendyline/gezel-client';
 
 /**
+ * Where an app update has got to. Mirrors the union the Electron main process
+ * pushes over `gezel:update-state`.
+ */
+export type UpdateState =
+  | { kind: 'downloading'; version: string }
+  | { kind: 'ready'; version: string }
+  | { kind: 'error'; version?: string; message: string };
+
+/**
  * Build a client against the daemon that served this HTML. When the Electron
  * shell hosts us, it injects a preload variable with the token; otherwise we
  * fall back to a `?token=` query-string parameter (handy for local dev).
@@ -13,11 +22,20 @@ declare global {
       baseUrl?: string;
       platform?: 'darwin' | 'win32' | 'linux' | string;
       /**
-       * Set by the Electron supervisor when it fell back to embedded mode
-       * after repeated spawn failures. The UI shows a persistent banner so
-       * the user understands why packaged-mode behavior degraded.
+       * Set by the Electron supervisor when the service situation is
+       * degraded — usually because it fell back to embedded mode after
+       * repeated spawn failures. The UI shows a persistent banner so the
+       * user understands why packaged-mode behavior changed.
        */
       fallbackReason?: string | null;
+      /**
+       * Which degraded situation `fallbackReason` describes. Not every one
+       * is an embedded fallback: `system-service-version-mismatch` means we
+       * stayed connected to the machine service but it is running a
+       * different release than this app, which only the installer can fix.
+       * The banner branches on this so the copy matches what happened.
+       */
+      fallbackCode?: string | null;
       /**
        * How the Electron shell connected to gezeld this launch. "Cold"
        * modes (embedded, local-spawn-*) mean the service just booted and
@@ -54,6 +72,17 @@ declare global {
         status(): Promise<{ ok: true; installed: boolean } | { ok: false; error: string }>;
         install(): Promise<{ ok: true } | { ok: false; error: string }>;
         uninstall(): Promise<{ ok: true } | { ok: false; error: string }>;
+      };
+      /**
+       * App update status from the Electron shell. On macOS `install` opens a
+       * downloaded, signature- and notarization-verified PKG so Installer.app
+       * can authenticate the user — Squirrel's in-place ZIP swap cannot
+       * elevate, and cannot refresh the machine service's own files.
+       */
+      update?: {
+        state(): Promise<UpdateState | null>;
+        install(): Promise<{ ok: true } | { ok: false; error: string }>;
+        onStateChanged(callback: (state: UpdateState) => void): void;
       };
       /**
        * Open the service's `~/.gezel/logs/` folder in the OS file
@@ -165,7 +194,7 @@ function resolveToken(): string {
   const fromQuery = new URLSearchParams(window.location.search).get('token');
   if (fromQuery) {
     // One-time token URL — `gezel start --web` prints
-    // `http://127.0.0.1:43935/?token=…`. Persist it so reloads and
+    // `http://127.0.0.1:6228/?token=…`. Persist it so reloads and
     // client-side navigation stay authed (the fixed canonical port gives
     // a stable origin, so localStorage survives across launches), then
     // scrub it from the URL so the secret doesn't linger in the address

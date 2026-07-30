@@ -48,7 +48,7 @@ The main workspace packages are:
 | [`@bendyline/gezel`](packages/core) | Shared schemas, path helpers, and core types |
 | [`@bendyline/gezel-client`](packages/client) | Typed HTTP and event-stream client |
 | [`@bendyline/gezel-service`](packages/service) | `gezeld`: API, state, providers, memory, and task execution |
-| [`@bendyline/gezel-mcp`](packages/mcp) | MCP server that gives gezels their tools |
+| [`@bendyline/gezel-mcp`](packages/mcp) | MCP server that gives gezellen their tools |
 | [`@bendyline/gezel-ui`](packages/ui) | React application served by the daemon |
 | [`@bendyline/gezel-app`](packages/app) | Electron shell, supervisor, and installers |
 | [`@bendyline/gezel-cli`](packages/cli) | Headless `gezel` command-line client |

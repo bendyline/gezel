@@ -43,6 +43,7 @@ import {
   profileKind,
   projectGezelId,
   projectWorkspaceWritable,
+  pronounFormsForGender,
   pronounsForGender,
   resolveExecutionDensity,
   resolveSandboxCopilot,
@@ -2922,6 +2923,7 @@ export class ChatManager {
         fromSessionId: resolvedFromSessionId,
         toGezelId: target.id,
         toName: target.name,
+        toGender: target.gender,
         fromGezelId: args.fromGezelId,
         fromGezelName: fromName,
         projectId,
@@ -3022,6 +3024,7 @@ export class ChatManager {
                 reason: describeDelegateFailureForAsker(
                   target.name,
                   err instanceof Error ? err.message : String(err),
+                  target.gender,
                 ),
               });
             }
@@ -3293,6 +3296,7 @@ export class ChatManager {
           message: describeDelegateFailureForAsker(
             targetDisplayName,
             err instanceof Error ? err.message : String(err),
+            target.gender,
           ),
         };
       }
@@ -3311,7 +3315,11 @@ export class ChatManager {
           return {
             outcome: 'error',
             reason: 'target-error',
-            message: describeDelegateFailureForAsker(targetDisplayName, result.error),
+            message: describeDelegateFailureForAsker(
+              targetDisplayName,
+              result.error,
+              target.gender,
+            ),
           };
         case 'timeout':
           return {
@@ -3324,12 +3332,14 @@ export class ChatManager {
             // actively working.
             message: `${targetDisplayName} went quiet for ${Math.round(timeoutMs / 1000)} s with no progress and may be stuck mid-answer.`,
           };
-        case 'session-gone':
+        case 'session-gone': {
+          const targetPronouns = pronounFormsForGender(target.gender);
           return {
             outcome: 'error',
             reason: 'target-deleted',
-            message: `${targetDisplayName}'s session was deleted before they could reply.`,
+            message: `${targetDisplayName}'s session was deleted before ${targetPronouns.subject} could reply.`,
           };
+        }
       }
     } finally {
       this.inflightAsks.delete(args.fromSessionId);
@@ -3579,6 +3589,7 @@ export class ChatManager {
       fromSessionId: string;
       toGezelId: string;
       toName: string;
+      toGender?: GezelGender;
       fromGezelId: string;
       fromGezelName: string;
       projectId: string;
@@ -3611,7 +3622,8 @@ export class ChatManager {
       // user just sees "I asked Maya and never heard back" with no in-app
       // explanation when the listener eventually expires.
       const idleMinutes = Math.round(idleTimeoutMs / 60_000);
-      const reason = `Reply from ${args.toName} went quiet for ${idleMinutes} min with no progress — they may be paused, deleted, or stuck mid-turn.`;
+      const targetPronouns = pronounFormsForGender(args.toGender);
+      const reason = `Reply from ${args.toName} went quiet for ${idleMinutes} min with no progress — ${targetPronouns.subject} may be paused, deleted, or stuck mid-turn.`;
       this.events.publish(
         {
           sessionId: args.fromSessionId,
@@ -3668,7 +3680,7 @@ export class ChatManager {
         fired = true;
         clearTimeout(idleTimeout);
         unsubscribe?.();
-        const reason = describeDelegateFailureForAsker(args.toName, event.error);
+        const reason = describeDelegateFailureForAsker(args.toName, event.error, args.toGender);
         this.events.publish(
           {
             sessionId: args.fromSessionId,
@@ -5588,6 +5600,7 @@ export class ChatManager {
             ...(opts?.ambient ? { ambient: true } : {}),
             sessionId,
             gezelId: state.record.gezelId,
+            projectId: state.record.projectId,
             ...(turnJob ? { job: turnJob } : {}),
             ...(continuations > 0 ? { affinity: false } : {}),
             ...(isAskTarget ? { bypassQueue: true } : {}),
@@ -8052,6 +8065,13 @@ export class ChatManager {
       providerName?: ProviderName;
       model?: string;
       /**
+       * Inject the selected `gezelId`'s real about.md into this one-shot.
+       * This is the generic counterpart to the historical Klerk and
+       * Keurmeester switches, used by autonomous project roles whose
+       * provider/model may still be pinned explicitly for privacy.
+       */
+      useGezelPersona?: boolean;
+      /**
        * When true, route this one-shot through the configured Klerk gezel —
        * a writerly utility persona used for about.md drafts, rewrites,
        * session summaries, and memory consolidation. The Klerk's
@@ -8074,6 +8094,11 @@ export class ChatManager {
        */
       useKeurmeester?: boolean;
       /**
+       * Display owner for service work that is not attached to a persisted
+       * gezel. Carried into provider queue snapshots without affecting routing.
+       */
+      actorLabel?: string;
+      /**
        * Short label describing the job — surfaced in the QueueMeter so
        * the user can see what a busy gezel is actually doing. Examples:
        * "icon · Maya", "summary · session ae463fc7", "about · Reviewer",
@@ -8093,22 +8118,37 @@ export class ChatManager {
   ): Promise<string> {
     oneShotLog.info(`requesting completion (${prompt.length} chars, ${timeoutMs}ms timeout)`);
     let { gezelId } = opts;
+    let actorLabel = opts.actorLabel?.trim() || undefined;
     const config = await this.store.readConfig();
-    let klerkAbout: string | undefined;
-    if (opts.useKlerk && config.klerkGezelId) {
-      const klerk = await this.store.getGezel(config.klerkGezelId).catch(() => null);
-      if (klerk) {
-        gezelId = klerk.id;
-        klerkAbout = klerk.about?.trim() || undefined;
+    let personaAbout: string | undefined;
+    if (opts.useKlerk) {
+      actorLabel ??= 'Klerk';
+      if (config.klerkGezelId) {
+        const klerk = await this.store.getGezel(config.klerkGezelId).catch(() => null);
+        if (klerk) {
+          gezelId = klerk.id;
+          personaAbout = klerk.about?.trim() || undefined;
+        }
       }
     }
-    if (opts.useKeurmeester && config.keurmeesterGezelId) {
-      const keurmeester = await this.store.getGezel(config.keurmeesterGezelId).catch(() => null);
-      if (keurmeester) {
-        gezelId = keurmeester.id;
-        klerkAbout = keurmeester.about?.trim() || undefined;
+    if (opts.useKeurmeester) {
+      actorLabel ??= 'Keurmeester';
+      if (config.keurmeesterGezelId) {
+        const keurmeester = await this.store.getGezel(config.keurmeesterGezelId).catch(() => null);
+        if (keurmeester) {
+          gezelId = keurmeester.id;
+          personaAbout = keurmeester.about?.trim() || undefined;
+        }
       }
     }
+    if (opts.useGezelPersona && gezelId) {
+      const persona = await this.store.getGezel(gezelId).catch(() => null);
+      if (persona) {
+        personaAbout = persona.about?.trim() || undefined;
+        actorLabel ??= persona.name;
+      }
+    }
+    if (!actorLabel && !gezelId) actorLabel = 'System';
     const providerName = opts.providerName ?? (await this.resolveProviderName(gezelId));
     let model = opts.model ?? config.defaultModel?.[providerName];
     let reasoningEffort = config.defaultReasoningEffort?.[providerName];
@@ -8129,7 +8169,7 @@ export class ChatManager {
     // nor a persona model) and a smaller model is already resident on
     // the other local engine under a coexist GPU policy, run it there
     // so the big foreground model keeps streaming in parallel. The
-    // persona voice (klerkAbout, injected below) is preserved — only
+    // persona voice (personaAbout, injected below) is preserved — only
     // the compute engine changes. `selectEngineForTask` returns null
     // unless a strictly better resident target exists, so the default
     // path is unchanged. Routing is best-effort: any failure resolving
@@ -8163,7 +8203,7 @@ export class ChatManager {
 
     const baseSystem =
       'You respond to a single self-contained prompt. Follow the output format requested by the user exactly.';
-    const systemMessage = klerkAbout ? `${klerkAbout}\n\n---\n\n${baseSystem}` : baseSystem;
+    const systemMessage = personaAbout ? `${personaAbout}\n\n---\n\n${baseSystem}` : baseSystem;
     const session = await provider.createSession({
       systemMessage,
       model,
@@ -8184,6 +8224,7 @@ export class ChatManager {
           lane: 'background',
           ...(opts.ambient ? { ambient: true } : {}),
           ...(gezelId ? { gezelId } : {}),
+          ...(actorLabel ? { actorLabel } : {}),
           ...(opts.jobLabel ? { job: opts.jobLabel } : {}),
         },
       });
@@ -12250,7 +12291,11 @@ function clampAskTimeout(ms: number): number {
  * delegate-facing "call write_file NOW" remediation back to a caller who
  * merely delegated.
  */
-export function describeDelegateFailureForAsker(targetName: string, raw: string): string {
+export function describeDelegateFailureForAsker(
+  targetName: string,
+  raw: string,
+  targetGender?: GezelGender,
+): string {
   const text = (raw ?? '').trim();
   // Ramble / planning-budget abort family. Every local provider emits
   // "aborting — the gezel emitted N characters of prose this turn
@@ -12258,7 +12303,8 @@ export function describeDelegateFailureForAsker(targetName: string, raw: string)
   // ramble-detector.ts + the mlx / llama-cpp / ollama providers). Match
   // on the stable lead clause rather than the full second-person tail.
   if (/emitted\s+\d+\s+characters of prose this turn|\bStop planning\b/i.test(text)) {
-    return `${targetName} couldn't complete the request — they spent their whole turn planning without producing the deliverable. This is ${targetName}'s failure, not a problem with your call (it was delivered fine), so don't change your own tool arguments. Retry with a smaller, more concrete ask, reassign to a different gezel, or surface the blocker to the user.`;
+    const pronouns = pronounFormsForGender(targetGender);
+    return `${targetName} couldn't complete the request — ${pronouns.subject} spent ${pronouns.possessiveAdjective} whole turn planning without producing the deliverable. This is ${targetName}'s failure, not a problem with your call (it was delivered fine), so don't change your own tool arguments. Retry with a smaller, more concrete ask, reassign to a different gezel, or surface the blocker to the user.`;
   }
   // Generic downstream failure: preserve the underlying cause but make
   // ownership explicit so the asker doesn't read it as its own arg error.
@@ -14348,8 +14394,9 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
     }
     if (displayedVoormanName) {
       const voormanPronouns = voormanGender ? ` (${pronounsForGender(voormanGender)})` : '';
+      const voormanPronounForms = pronounFormsForGender(voormanGender);
       projectContext += isSolo
-        ? ` The ambachtsman of this job is **${displayedVoormanName}**${voormanPronouns} — they handle the entire project themselves; team-management tools are intentionally not available here.`
+        ? ` The ambachtsman of this job is **${displayedVoormanName}**${voormanPronouns} — ${voormanPronounForms.subject} will handle the entire project ${voormanPronounForms.reflexive}; team-management tools are intentionally not available here.`
         : ` The voorman of this project is **${displayedVoormanName}**${voormanPronouns}.`;
     }
     if (project.about && project.about.trim().length > 0) {

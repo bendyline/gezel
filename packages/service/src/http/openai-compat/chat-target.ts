@@ -40,6 +40,34 @@ export type ChatTargetInput =
   | { kind: 'model'; provider: ProviderName; model: string | undefined };
 
 /**
+ * Pick the gezel that guarantees a persona-backed fallback for public
+ * inference requests.
+ *
+ * The explicit Connected Apps choice wins. When it is unset or stale,
+ * the install's Meester is the natural front door; the first available
+ * gezel is the final recovery path for older or partially migrated
+ * homes. A healthy store always has at least a Meester, but returning
+ * `null` keeps callers honest if the home is temporarily empty.
+ */
+export async function resolveFallbackGezelId(
+  ctx: ServiceContext,
+  preferredGezelId?: string,
+): Promise<string | null> {
+  const config = await ctx.store.readConfig().catch(() => ({}) as { meesterGezelId?: string });
+  const candidates = [preferredGezelId, config.meesterGezelId].filter(
+    (id, index, ids): id is string => Boolean(id) && ids.indexOf(id) === index,
+  );
+
+  for (const id of candidates) {
+    const gezel = await ctx.store.getGezel(id).catch(() => null);
+    if (gezel) return gezel.id;
+  }
+
+  const gezels = await ctx.store.listGezels().catch(() => []);
+  return gezels[0]?.id ?? null;
+}
+
+/**
  * Resolve a {@link ChatTargetInput} into a concrete {@link ChatTarget}.
  *
  * Gezel routing:

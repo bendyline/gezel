@@ -1,4 +1,3 @@
-import { spawn } from 'node:child_process';
 import { mkdir, readFile, readdir, rm, stat } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import {
@@ -40,10 +39,11 @@ import {
   safeJoin,
 } from '../../fs/safe-paths.js';
 import { ProjectDeleteError } from '../../fs/store.js';
+import { resolveProjectBoekwachter } from '../../gezels/autonomous-roles.js';
 import { GitError, runGit } from '../../git/git.js';
 import { buildEnrichDeps } from '../../index-store/enrich.js';
 import { installPackage } from '../../packages/install.js';
-import { pnpmSpawnTarget, resolvePnpmCommand } from '../../packages/pnpm.js';
+import { resolvePnpmCommand, spawnPnpm } from '../../packages/pnpm.js';
 import { applyProjectType } from '../../project-type/apply.js';
 import { TypedProjectCreateError, createTypedProject } from '../../project-type/create.js';
 import { importGzlBundle, packProjectTypeBundle } from '../../project-type/gzl.js';
@@ -627,6 +627,17 @@ export function projectRoutes(ctx: ServiceContext): Hono {
   app.post('/:id/index/enrich', async (c) => {
     const id = c.req.param('id');
     const body = DriveIndexEnrichmentRequestSchema.parse(await c.req.json().catch(() => ({})));
+    const boekwachter = await resolveProjectBoekwachter(ctx.store, id);
+    if (!boekwachter) {
+      return c.json(
+        {
+          error: 'boekwachter-required',
+          message:
+            'Add a Boekwachter to this project crew to enable AI summaries, reviews, and semantic enrichment.',
+        },
+        409,
+      );
+    }
     if (await ctx.indexingJob.isPaused()) {
       const pending = await ctx.contentIndex.countNeedingEnrichment(id);
       return c.json({
@@ -642,7 +653,7 @@ export function projectRoutes(ctx: ServiceContext): Hono {
     }
     const maxFiles = body.maxFiles ?? 10;
     const deadline = Date.now() + (body.budgetMs ?? 45_000);
-    const deps = await buildEnrichDeps(ctx.store, ctx.chat);
+    const deps = await buildEnrichDeps(ctx.store, ctx.chat, { boekwachter });
     let files = 0;
     let summarized = 0;
     let embedded = 0;
@@ -1017,15 +1028,13 @@ export function projectRoutes(ctx: ServiceContext): Hono {
 
     const result = await new Promise<{ ok: boolean; code: number | null; log: string }>(
       (resolve) => {
-        const target = pnpmSpawnTarget(pnpm);
-        const child = spawn(target.command, target.args, {
+        const child = spawnPnpm(pnpm, {
           cwd: playwright.installPath,
           env: {
             ...process.env,
             PLAYWRIGHT_BROWSERS_PATH: playwrightBrowsersDir(ctx.home),
           },
           stdio: ['ignore', 'pipe', 'pipe'],
-          shell: pnpm.shell,
         });
         let log = '';
         const cap = (chunk: Buffer) => {

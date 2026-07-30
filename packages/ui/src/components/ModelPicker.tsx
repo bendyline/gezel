@@ -310,7 +310,7 @@ export function ModelPicker({
       {toolsUnknown && (
         <span
           className="model-picker-warn"
-          title="This model doesn't support structured tool calls, so gezels on it can't use MCP tools (read/write files, create tasks, etc.). Pick a tool-capable model (llama3.1+, qwen2.5+, mistral, gpt-oss, etc.) if you need tool use."
+          title="This model doesn't support structured tool calls, so gezellen on it can't use MCP tools (read/write files, create tasks, etc.). Pick a tool-capable model (llama3.1+, qwen2.5+, mistral, gpt-oss, etc.) if you need tool use."
         >
           no tools
         </span>

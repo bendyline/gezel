@@ -104,8 +104,17 @@ test('Electron release configuration pins the audited packaging contracts', asyn
   assert.ok(builder.includes(`synopsis: ${productTagline}`));
   assert.ok(builder.includes(`description: ${productDescription}`));
   assert.ok(metainfo.includes(`<summary>${productTagline}</summary>`));
-  assert.equal(JSON.parse(appPackage).description, productDescription);
   assert.equal(JSON.parse(rootPackage).description, productDescription);
+  // packages/app is the deliberate exception: electron-builder stamps its
+  // description into the NSIS installer's FileDescription, which Windows shows
+  // as the UAC "Program name". Marketing copy there titles the elevation prompt
+  // with a paragraph, so that field tracks productName instead — asserted by
+  // scripts/windows-branding-contract.test.mjs.
+  assert.notEqual(
+    JSON.parse(appPackage).description,
+    productDescription,
+    'packages/app description is the Windows UAC program name, not marketing copy',
+  );
   assert.match(
     readme,
     /Gezel helps you build a crew of named AI companions with distinct roles and tools/,
@@ -127,4 +136,27 @@ test('Electron release configuration pins the audited packaging contracts', asyn
   assert.match(workflow, /release asset basename collision/);
   assert.doesNotMatch(workflow, /artifacts\/flat/);
   assert.doesNotMatch(workflow, /find artifacts .* -exec ln/);
+});
+
+test('macOS release installs the finished PKG and exercises recovery', async () => {
+  const workflow = await readFile(
+    join(root, '.github', 'workflows', 'release-electron.yml'),
+    'utf8',
+  );
+  const macPkgSmokeStart = workflow.indexOf('- name: Smoke-test macOS PKG install and recovery');
+  const macPkgSmokeEnd = workflow.indexOf(
+    '- name: Verify macOS update metadata was generated',
+    macPkgSmokeStart,
+  );
+  assert.notEqual(macPkgSmokeStart, -1, 'macOS release must install the finished PKG');
+  const macPkgSmoke = workflow.slice(macPkgSmokeStart, macPkgSmokeEnd);
+  assert.equal(
+    macPkgSmoke.match(/sudo \/usr\/sbin\/installer -pkg "\$pkg" -target \//g)?.length,
+    3,
+    'macOS PKG smoke must cover clean install, reinstall, and disabled-state recovery',
+  );
+  assert.match(macPkgSmoke, /launchctl disable "system\/\$daemon_label"/);
+  assert.match(macPkgSmoke, /assert_installed_health/);
+  assert.match(macPkgSmoke, /--cacert "\$runtime_dir\/cert\.pem"/);
+  assert.match(macPkgSmoke, /trap cleanup EXIT/);
 });

@@ -229,7 +229,7 @@ export function buildOpenApiDoc(version: string): OpenApiDoc {
       },
       '/v1/models': {
         get: {
-          summary: 'List available models across every configured provider.',
+          summary: 'List selectable gezels and models across every configured provider.',
           security: [{ bearerAuth: ['openai'] }],
           responses: {
             '200': {
@@ -558,6 +558,10 @@ export function buildOpenApiDoc(version: string): OpenApiDoc {
                   object: { type: 'string', enum: ['model'] },
                   created: { type: 'integer' },
                   owned_by: { type: 'string' },
+                  gezel_id: { type: 'string' },
+                  name: { type: 'string' },
+                  role: { type: 'string' },
+                  is_fallback: { type: 'boolean' },
                 },
               },
             },

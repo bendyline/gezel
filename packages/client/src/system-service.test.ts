@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  SYSTEM_SERVICE_PORT,
   electronNativeBinCandidates,
   readSystemServiceEndpoint,
   readSystemServiceRuntime,
@@ -11,6 +12,10 @@ import {
 } from './system-service.js';
 
 const homes: string[] = [];
+
+it('uses the unprivileged MAAT port below the default OS ephemeral ranges', () => {
+  expect(SYSTEM_SERVICE_PORT).toBe(6228);
+});
 
 afterEach(async () => {
   await Promise.all(homes.splice(0).map((home) => rm(home, { recursive: true, force: true })));
@@ -56,12 +61,12 @@ describe('systemServiceHome', () => {
 describe('system service runtime discovery', () => {
   it('reads endpoint metadata without requiring the desktop credential', async () => {
     const home = await runtimeHome();
-    await writeFile(join(home, 'runtime', 'port'), '43935\n');
+    await writeFile(join(home, 'runtime', 'port'), '6228\n');
     await writeFile(join(home, 'runtime', 'cert.pem'), 'certificate');
 
     await expect(readSystemServiceEndpoint(home)).resolves.toEqual({
-      port: 43935,
-      baseUrl: 'https://127.0.0.1:43935',
+      port: 6228,
+      baseUrl: 'https://127.0.0.1:6228',
       cert: 'certificate',
       home,
     });
@@ -70,12 +75,12 @@ describe('system service runtime discovery', () => {
 
   it('adds the scoped desktop token only for the Electron runtime reader', async () => {
     const home = await runtimeHome();
-    await writeFile(join(home, 'runtime', 'port'), '43935\n');
+    await writeFile(join(home, 'runtime', 'port'), '6228\n');
     await writeFile(join(home, 'runtime', 'auth-token'), 'desktop-token\n');
 
     await expect(readSystemServiceRuntime(home)).resolves.toEqual({
-      port: 43935,
-      baseUrl: 'http://127.0.0.1:43935',
+      port: 6228,
+      baseUrl: 'http://127.0.0.1:6228',
       cert: null,
       home,
       token: 'desktop-token',

@@ -24,7 +24,7 @@ function harness(fetchImpl: typeof fetch) {
     },
   } as unknown as ChatViewProvider;
   const connection = {
-    baseUrl: 'https://127.0.0.1:43935',
+    baseUrl: 'https://127.0.0.1:6228',
     token: 'HOST-ONLY-TOKEN',
     firstPartyToken: 'FIRST-PARTY-HOST-ONLY-TOKEN',
     fetch: fetchImpl,
@@ -63,7 +63,7 @@ describe('WebviewRpc credential boundary', () => {
     await rpc.handleRequest(request('/api/projects'));
 
     expect(fetchMock).toHaveBeenCalledWith(
-      'https://127.0.0.1:43935/api/projects',
+      'https://127.0.0.1:6228/api/projects',
       expect.objectContaining({
         headers: { authorization: 'Bearer HOST-ONLY-TOKEN' },
         redirect: 'manual',

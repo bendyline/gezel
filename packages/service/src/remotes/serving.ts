@@ -46,7 +46,7 @@ export function createRemoteServingController(opts: {
         throw new Error('Remote serving requires HTTPS; insecure transport cannot be exposed');
       }
       const host = config.bindAddress ?? '0.0.0.0';
-      const port = config.port ?? 43936;
+      const port = config.port ?? 6229;
       if (server && current.listening && current.host === host && current.port === port) {
         return { ...current };
       }

@@ -36,6 +36,8 @@ export interface LiveTurnState {
    * Optional because the field is additive; the pill ignores it.
    */
   gezelId?: string;
+  /** Project scope from the chat event envelope. */
+  projectId?: string;
   /** When we first saw this turn start (used for elapsed-time). */
   startedAt: number;
   /** 0-1 progress, when the phase event carried one (prompt-processing batches). */
@@ -88,7 +90,7 @@ export function useOnDeviceLiveTurns(enabled: boolean): Map<string, LiveTurnStat
           signal: ctrl.signal,
           fetch: api.getFetch(),
         })) {
-          const { sessionId, gezelId, event } = env as ChatEventEnvelope;
+          const { sessionId, gezelId, projectId, event } = env as ChatEventEnvelope;
           if (event.type === 'engine_phase') {
             if (
               event.provider !== 'llama-cpp' &&
@@ -111,6 +113,7 @@ export function useOnDeviceLiveTurns(enabled: boolean): Map<string, LiveTurnStat
                 provider: event.provider,
                 label: detail ?? phaseBaseLabel(phase),
                 gezelId,
+                projectId,
                 startedAt: prior?.startedAt ?? Date.now(),
                 lastEventAt: Date.now(),
                 ...(typeof progress === 'number' ? { progress } : {}),
@@ -134,6 +137,7 @@ export function useOnDeviceLiveTurns(enabled: boolean): Map<string, LiveTurnStat
                 ...(prior?.provider ? { provider: prior.provider } : {}),
                 label: 'Preparing',
                 gezelId,
+                projectId,
                 startedAt: Date.now(),
                 lastEventAt: Date.now(),
               });

@@ -80,6 +80,17 @@ export interface EnqueueRequest {
   ambient?: boolean;
   sessionId?: string;
   gezelId?: string;
+  /**
+   * Project that owns this work. Display-only; it does not affect
+   * scheduling or prompt-cache affinity.
+   */
+  projectId?: string;
+  /**
+   * Human-readable owner for work that is not performed by a persisted
+   * gezel (for example the built-in Boekwachter indexing service).
+   * Display-only; unlike `gezelId`, this does not affect affinity.
+   */
+  actorLabel?: string;
   signal?: AbortSignal;
   /**
    * Opt this acquire out of affinity scoring. The `sessionId` /
@@ -114,6 +125,10 @@ interface PendingEntry {
   ambient?: boolean;
   sessionId?: string;
   gezelId?: string;
+  /** See {@link EnqueueRequest.projectId}. */
+  projectId?: string;
+  /** See {@link EnqueueRequest.actorLabel}. */
+  actorLabel?: string;
   enqueuedAt: number;
   resolve: (release: () => void) => void;
   reject: (err: Error) => void;
@@ -128,6 +143,10 @@ interface PendingEntry {
 interface RecentRun {
   sessionId?: string;
   gezelId?: string;
+  /** See {@link EnqueueRequest.projectId}. */
+  projectId?: string;
+  /** See {@link EnqueueRequest.actorLabel}. */
+  actorLabel?: string;
   endedAt: number;
   /** Populated for currently-running contexts; 0 for historical `recent` entries. */
   startedAt?: number;
@@ -318,6 +337,8 @@ export class ProviderQueue {
         ...(req.ambient ? { ambient: true } : {}),
         ...(req.sessionId !== undefined ? { sessionId: req.sessionId } : {}),
         ...(req.gezelId !== undefined ? { gezelId: req.gezelId } : {}),
+        ...(req.projectId !== undefined ? { projectId: req.projectId } : {}),
+        ...(req.actorLabel !== undefined ? { actorLabel: req.actorLabel } : {}),
         ...(req.signal !== undefined ? { signal: req.signal } : {}),
         ...(req.affinity === false ? { affinity: false } : {}),
         ...(req.job !== undefined ? { job: req.job } : {}),
@@ -356,13 +377,22 @@ export class ProviderQueue {
     concurrency: number;
     interactiveConcurrency: number;
     backgroundConcurrency: number;
-    active: Array<{ sessionId?: string; gezelId?: string; job?: string; runningForMs: number }>;
+    active: Array<{
+      sessionId?: string;
+      gezelId?: string;
+      projectId?: string;
+      actorLabel?: string;
+      job?: string;
+      runningForMs: number;
+    }>;
     pending: Array<{
       id: number;
       lane: Lane;
       ambient?: boolean;
       sessionId?: string;
       gezelId?: string;
+      projectId?: string;
+      actorLabel?: string;
       job?: string;
       waitedMs: number;
     }>;
@@ -372,6 +402,8 @@ export class ProviderQueue {
     const active = Array.from(this.runningContexts.values()).map((ctx) => ({
       ...(ctx.sessionId !== undefined ? { sessionId: ctx.sessionId } : {}),
       ...(ctx.gezelId !== undefined ? { gezelId: ctx.gezelId } : {}),
+      ...(ctx.projectId !== undefined ? { projectId: ctx.projectId } : {}),
+      ...(ctx.actorLabel !== undefined ? { actorLabel: ctx.actorLabel } : {}),
       ...(ctx.job !== undefined ? { job: ctx.job } : {}),
       runningForMs: Math.max(0, now - (ctx.startedAt ?? now)),
     }));
@@ -381,6 +413,8 @@ export class ProviderQueue {
       ...(p.ambient ? { ambient: true } : {}),
       ...(p.sessionId !== undefined ? { sessionId: p.sessionId } : {}),
       ...(p.gezelId !== undefined ? { gezelId: p.gezelId } : {}),
+      ...(p.projectId !== undefined ? { projectId: p.projectId } : {}),
+      ...(p.actorLabel !== undefined ? { actorLabel: p.actorLabel } : {}),
       ...(p.job !== undefined ? { job: p.job } : {}),
       waitedMs: Math.max(0, now - p.enqueuedAt),
     }));
@@ -482,6 +516,8 @@ export class ProviderQueue {
       if (next.ambient) ctx.ambient = true;
       if (next.sessionId !== undefined) ctx.sessionId = next.sessionId;
       if (next.gezelId !== undefined) ctx.gezelId = next.gezelId;
+      if (next.projectId !== undefined) ctx.projectId = next.projectId;
+      if (next.actorLabel !== undefined) ctx.actorLabel = next.actorLabel;
       if (next.job !== undefined) ctx.job = next.job;
       this.runningContexts.set(next.id, ctx);
       const released = { done: false };
@@ -651,6 +687,10 @@ export interface QueueWaitOpts {
   ambient?: boolean;
   sessionId?: string;
   gezelId?: string;
+  /** See {@link EnqueueRequest.projectId}. */
+  projectId?: string;
+  /** See {@link EnqueueRequest.actorLabel}. */
+  actorLabel?: string;
   signal?: AbortSignal;
   /** See {@link EnqueueRequest.affinity}. */
   affinity?: boolean;
@@ -703,6 +743,8 @@ export async function runInQueue<T>(
   if (opts.ambient) acquireOpts.ambient = true;
   if (opts.sessionId !== undefined) acquireOpts.sessionId = opts.sessionId;
   if (opts.gezelId !== undefined) acquireOpts.gezelId = opts.gezelId;
+  if (opts.projectId !== undefined) acquireOpts.projectId = opts.projectId;
+  if (opts.actorLabel !== undefined) acquireOpts.actorLabel = opts.actorLabel;
   if (opts.signal !== undefined) acquireOpts.signal = opts.signal;
   if (opts.affinity === false) acquireOpts.affinity = false;
   if (opts.job !== undefined) acquireOpts.job = opts.job;

@@ -136,12 +136,15 @@ const GALLERIES: Array<{
 export function TerminalComposer({
   projectId,
   workingDir,
+  contextRow,
   onSent,
   initialInput,
   onChatEscape,
 }: {
   projectId: string;
   workingDir: string;
+  /** Optional terminal context control rendered between the toolbar and input. */
+  contextRow?: ReactNode;
   /** Optional hook the parent can use to flip a UX state on submit. */
   onSent?: (input: string, result: RunTerminalCommandResponse) => void;
   /**
@@ -155,11 +158,11 @@ export function TerminalComposer({
   /**
    * Inverse of the chat composer's `onTerminalEscape`: when the user
    * starts a fresh terminal draft with `@` (the chat mention sigil),
-   * hand control back to the chat composer with the typed content
-   * carried over. Only fires on the FIRST transition out of an
-   * essentially-empty input — pastes that start with `@` won't hijack.
+   * hand control back to an empty chat composer. Only fires on the
+   * FIRST transition out of an essentially-empty input — pastes that
+   * start with `@` won't hijack.
    */
-  onChatEscape?: (initialInput: string) => void;
+  onChatEscape?: () => void;
 }) {
   // Initial value: a queued launcher command for this project wins (and
   // is consumed); otherwise the chat→terminal escape seed. Read once at
@@ -221,6 +224,16 @@ export function TerminalComposer({
     [projectId, workingDir, onSent],
   );
 
+  // The toolbar action is the pointer-friendly twin of Enter. Read directly
+  // from Monaco so it always submits the current buffer, then return focus to
+  // the editor for the next command.
+  const fire = useCallback(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    void submit(editor.getValue());
+    editor.focus();
+  }, [submit]);
+
   // Up at the first line: walk back through history.
   const historyPrev = useCallback(() => {
     if (historyRef.current.length === 0) return;
@@ -242,7 +255,7 @@ export function TerminalComposer({
       {/* Toolbar — mirrors the squisq editor's top toolbar so the terminal
        * reads as a symmetric sibling of the chat editor. Holds the three
        * galleries (commands / scripts / tasks); picking from any of them
-       * stages the line into the input for review. */}
+       * stages the line into the input for review, while Fire runs it. */}
       <div className="terminal-composer-toolbar">
         {GALLERIES.map((gallery) => (
           <Popover.Root
@@ -289,7 +302,16 @@ export function TerminalComposer({
             </Popover.Content>
           </Popover.Root>
         ))}
+        <button
+          type="button"
+          className="terminal-toolbar-btn terminal-toolbar-fire-btn"
+          title="Run command (Enter)"
+          onClick={fire}
+        >
+          Fire
+        </button>
       </div>
+      {contextRow}
       <div className="terminal-composer-input-wrap">
         <span className="terminal-prompt-sigil">&gt;</span>
         <Suspense fallback={<div className="terminal-composer-input" aria-busy="true" />}>

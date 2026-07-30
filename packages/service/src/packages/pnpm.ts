@@ -1,11 +1,11 @@
-import { type SpawnOptions, spawn } from 'node:child_process';
+import { type ChildProcess, type SpawnOptions, spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { type PnpmInvocation, resolvePnpmInvocation } from '@bendyline/gezel';
 import { winShellSafe } from './win-shell.js';
 
 /**
- * Single entry point for spawning pnpm from the service. Centralizes two
+ * Single entry point for spawning pnpm from the service. Centralizes three
  * concerns:
  *
  *  1. **Invocation resolution** — packaged Gezel points
@@ -16,6 +16,10 @@ import { winShellSafe } from './win-shell.js';
  *     exact supply-chain vector we're eliminating. Any legitimate
  *     post-install work (e.g. Playwright's chromium download) is invoked
  *     explicitly by the service in its own dedicated step.
+ *  3. **Headless Windows launches** — the machine-wide daemon runs in
+ *     non-interactive Session 0. Console-subsystem children must use
+ *     CREATE_NO_WINDOW (`windowsHide: true`) or they can die during DLL
+ *     initialization before pnpm itself starts.
  */
 
 /** Buffered result of a pnpm run. */
@@ -78,21 +82,42 @@ export function normalizeBundledPnpmPath(): string | undefined {
 }
 
 /**
- * Spawn-ready `{ command, args }` for a resolved pnpm invocation.
+ * Private spawn-ready `{ command, args }` for a resolved pnpm invocation.
  *
- * Every site that calls `spawn(pnpm.command, pnpm.args, { shell:
- * pnpm.shell })` must route through this instead. Node escapes nothing
- * under `shell: true`, so an unquoted command or argument containing a
- * space is split by cmd.exe — the failure mode being
- * `'C:\Program' is not recognized`. Callers keep their own env/stdio;
- * only the command and argv are rewritten, and only when a shell is
- * actually in play.
+ * Kept behind `spawnPnpm` so cmd.exe-safe quoting and the Session 0
+ * headless-launch invariant cannot drift apart. Node escapes nothing under
+ * `shell: true`, so an unquoted command or argument containing a space is
+ * split by cmd.exe — the failure mode being `'C:\Program' is not recognized`.
  */
-export function pnpmSpawnTarget(invocation: PnpmInvocation): {
+function pnpmSpawnTarget(invocation: PnpmInvocation): {
   command: string;
   args: string[];
 } {
   return winShellSafe(invocation.command, invocation.args, invocation.shell);
+}
+
+export type PnpmSpawnOptions = Omit<SpawnOptions, 'shell' | 'windowsHide'>;
+
+/**
+ * The only supported way to spawn a resolved pnpm invocation from the
+ * service. In addition to applying cmd.exe-safe quoting, this forces a
+ * headless Windows launch. `windowsHide` maps to CREATE_NO_WINDOW for
+ * console children and is ignored on other platforms.
+ *
+ * Keep `shell` and `windowsHide` out of the caller-owned options: both are
+ * invocation/runtime invariants, not per-call policy.
+ */
+export function spawnPnpm(
+  invocation: PnpmInvocation,
+  options: PnpmSpawnOptions,
+  spawnImpl: typeof spawn = spawn,
+): ChildProcess {
+  const target = pnpmSpawnTarget(invocation);
+  return spawnImpl(target.command, target.args, {
+    ...options,
+    shell: invocation.shell,
+    windowsHide: true,
+  });
 }
 
 /**
@@ -110,15 +135,13 @@ export function runPnpm(args: string[], opts: RunPnpmOptions): Promise<PnpmResul
     // Command AND args both go through the quoter — this used to quote
     // only the args, which leaves a `.cmd` shim under a spaced path
     // (C:\Program Files\...) to be split by cmd.exe.
-    const target = pnpmSpawnTarget(invocation);
-    const spawnOpts: SpawnOptions = {
+    const spawnOpts: PnpmSpawnOptions = {
       cwd: opts.cwd,
       env: { ...process.env, ...opts.env } as NodeJS.ProcessEnv,
       stdio: ['ignore', 'pipe', 'pipe'],
-      shell: invocation.shell,
     };
     if (opts.timeoutMs) spawnOpts.timeout = opts.timeoutMs;
-    const child = spawn(target.command, target.args, spawnOpts);
+    const child = spawnPnpm(invocation, spawnOpts);
 
     let stdout = '';
     let stderr = '';

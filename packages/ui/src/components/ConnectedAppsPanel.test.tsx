@@ -11,6 +11,7 @@ vi.mock('../api.js', () => ({
     authHeader: () => ({ Authorization: 'Bearer test-token' }),
     getConfig: async () => ({
       provider: 'copilot',
+      meesterGezelId: 'mira',
       openaiEndpoints: { servingGezelId: 'mira' },
     }),
     updateConfig: (body: Record<string, unknown>) => updateConfig(body),
@@ -100,7 +101,8 @@ describe('ConnectedAppsPanel', () => {
     expect(toggle).toBeChecked();
     expect(screen.getByText('http://127.0.0.1:3333/v1')).toBeInTheDocument();
     // getConfig scripts servingGezelId=mira — the explainer names her.
-    expect(await screen.findByText(/answered by Mira/)).toBeInTheDocument();
+    expect(await screen.findByText(/Mira answers/)).toBeInTheDocument();
+    expect(screen.queryByText(/None — apps must name a model/)).not.toBeInTheDocument();
   });
 
   it('shows the supporting-behaviors toggle on by default', async () => {
@@ -122,7 +124,7 @@ describe('ConnectedAppsPanel', () => {
     const { fireEvent } = await import('@testing-library/react');
     render(<ConnectedAppsPanel />);
     const toggle = await screen.findByRole('checkbox', { name: 'Allow apps to connect' });
-    await screen.findByText(/answered by Mira/);
+    await screen.findByText(/Mira answers/);
     fireEvent.click(toggle);
     expect(updateConfig).toHaveBeenCalledWith({
       openaiEndpoints: { enabled: false, servingGezelId: 'mira' },

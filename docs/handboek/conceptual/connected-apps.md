@@ -7,7 +7,7 @@ summary: Editors and other programs can talk to your crew through standard AI en
 
 # Connected apps
 
-Gezel isn't only a place you visit — it can also serve your models and gezels to *other* programs on your computer. A code editor, a writing tool, or a browser extension that knows how to talk to an AI service can talk to gezel instead, and get your local models with all of gezel's know-how applied.
+Gezel isn't only a place you visit — it can also serve your models and gezellen to *other* programs on your computer. A code editor, a writing tool, or a browser extension that knows how to talk to an AI service can talk to gezel instead, and get your local models with all of gezel's know-how applied.
 
 Everything described here lives in **Settings → Connected Apps**.
 
@@ -15,12 +15,14 @@ Everything described here lives in **Settings → Connected Apps**.
 
 Apps speak to gezel using the same "OpenAI-style" language most AI tools already know. Two things make it work:
 
-1. **An address.** Gezel listens at `https://127.0.0.1:43935/v1` on your machine. Apps that let you set a custom AI server go here.
+1. **An address.** Gezel listens at `https://127.0.0.1:6228/v1` on your machine. Apps that let you set a custom AI server go here.
 2. **Permission.** The first time an app asks for access, gezel shows you an approval request — who is asking, and for what. Nothing gets through until you approve, and you can revoke any app later from the same panel.
 
-## Who answers: the serving gezel
+## Who answers: gezel choices and the fallback
 
-Many apps ask for models by names gezel doesn't use, like `gpt-4o`. You can pick a **serving gezel** — one of your crew who answers those requests. Their character, their model, and their settings apply, so the app gets *your* configured experience, not an anonymous model. Leave it on "None" if you'd rather apps name an exact model and fail loudly otherwise.
+Gezel presents your crew to connected apps as model choices, including each gezel's name and role. When an app chooses one, that gezel answers with their character, model, and settings.
+
+Some apps cannot choose from that list and ask for a hardcoded model such as `gpt-4o`. The **fallback gezel** answers those requests. It defaults to your Meester, so there is always a useful front door; you can choose another gezel from **Settings → Connected Apps**.
 
 ## Supporting behaviors
 

@@ -14,41 +14,53 @@ test.describe('app shell', () => {
     await expect(page.getByTestId('app-sidebar')).toBeVisible();
     await expect(page.getByTestId('app-header')).toBeVisible();
 
-    for (const side of ['right', 'left'] as const) {
-      await page.evaluate((nextSide) => {
-        document.documentElement.dataset.sidebarSide = nextSide;
-      }, side);
-      const bridge = await page.getByTestId('sidebar-meester').evaluate((home, currentSide) => {
-        const sidebar = document.querySelector<HTMLElement>('[data-testid="app-sidebar"]');
-        if (!sidebar) throw new Error('Sidebar not found');
-        const homeRect = home.getBoundingClientRect();
-        const sidebarRect = sidebar.getBoundingClientRect();
-        const homeStyle = getComputedStyle(home);
-        const bridgeStyle = getComputedStyle(home, '::after');
-        const bridgeWidth = Number.parseFloat(bridgeStyle.width);
-        const bridgeTransform =
-          bridgeStyle.transform === 'none' ? new DOMMatrix() : new DOMMatrix(bridgeStyle.transform);
-        return {
-          seamOffset:
-            currentSide === 'right'
-              ? homeRect.left - bridgeWidth - sidebarRect.left
-              : homeRect.right + bridgeWidth - sidebarRect.right,
-          topOffset:
-            Number.parseFloat(homeStyle.borderTopWidth) +
-            Number.parseFloat(bridgeStyle.top) +
-            bridgeTransform.m42,
-          bottomOffset:
-            -Number.parseFloat(homeStyle.borderBottomWidth) -
-            Number.parseFloat(bridgeStyle.bottom) +
-            bridgeTransform.m42,
-        };
-      }, side);
-      /* The inset divider itself is 1px wide, so either edge may resolve to
-         that boundary depending on the mirrored sidebar direction. */
-      expect(Math.abs(bridge.seamOffset)).toBeLessThan(1.1);
-      expect(Math.abs(bridge.topOffset)).toBeLessThan(0.1);
-      expect(Math.abs(bridge.bottomOffset)).toBeLessThan(0.1);
+    const connectedTabs = [
+      {
+        trigger: null,
+        tab: page.getByTestId('sidebar-meester'),
+      },
+      {
+        trigger: page.getByTestId('sidebar-area-history'),
+        tab: page.getByTestId('sidebar-area-history'),
+      },
+      {
+        trigger: page.getByTestId('sidebar-group-documents'),
+        tab: page.locator('.app-sidebar-group[data-group="documents"] > .app-sidebar-group-header'),
+      },
+      {
+        trigger: page.getByTestId('sidebar-group-gezels'),
+        tab: page.locator('.app-sidebar-group[data-group="gezels"] > .app-sidebar-group-header'),
+      },
+    ];
+
+    for (const { trigger, tab } of connectedTabs) {
+      await trigger?.click();
+      await expect(tab).toHaveClass(/active/);
+      for (const side of ['right', 'left'] as const) {
+        await page.evaluate((nextSide) => {
+          document.documentElement.dataset.sidebarSide = nextSide;
+        }, side);
+        const connectedEdge = await tab.evaluate((element, currentSide) => {
+          const sidebar = document.querySelector<HTMLElement>('[data-testid="app-sidebar"]');
+          if (!sidebar) throw new Error('Sidebar not found');
+          const tabRect = element.getBoundingClientRect();
+          const sidebarRect = sidebar.getBoundingClientRect();
+          return {
+            seamOffset:
+              currentSide === 'right'
+                ? tabRect.left - sidebarRect.left
+                : tabRect.right - sidebarRect.right,
+            pseudoDisplay: getComputedStyle(element, '::after').display,
+          };
+        }, side);
+        /* The inset divider itself is 1px wide, so either edge may resolve to
+           that boundary depending on the mirrored sidebar direction. */
+        expect(Math.abs(connectedEdge.seamOffset)).toBeLessThan(1.1);
+        expect(connectedEdge.pseudoDisplay).toBe('none');
+      }
     }
+    await page.getByTestId('sidebar-meester').click();
+    await expect(page.getByTestId('home-workshop')).toBeVisible();
     await page.evaluate(() => {
       document.documentElement.dataset.sidebarSide = 'right';
     });
@@ -65,6 +77,27 @@ test.describe('app shell', () => {
     await shot(page, 'app-shell', { area: 'shell', description: 'Full app shell, light theme' });
 
     await setTheme(page, 'dark');
+    const home = page.getByTestId('sidebar-meester');
+    const unfocusedHome = await home.evaluate((element) => {
+      const style = getComputedStyle(element);
+      return { borderTopColor: style.borderTopColor, boxShadow: style.boxShadow };
+    });
+    await page.keyboard.press('Tab');
+    await home.focus();
+    await expect
+      .poll(() => home.evaluate((element) => element.matches(':focus-visible')))
+      .toBe(true);
+    const focusedHome = await home.evaluate((element) => {
+      const style = getComputedStyle(element);
+      return {
+        borderTopColor: style.borderTopColor,
+        borderLeftColor: style.borderLeftColor,
+        boxShadow: style.boxShadow,
+      };
+    });
+    expect(focusedHome.borderLeftColor).toBe('rgba(0, 0, 0, 0)');
+    expect(focusedHome.borderTopColor).not.toBe(unfocusedHome.borderTopColor);
+    expect(focusedHome.boxShadow).toBe(unfocusedHome.boxShadow);
     await expect
       .poll(() =>
         workshopPaper.evaluate((element) =>

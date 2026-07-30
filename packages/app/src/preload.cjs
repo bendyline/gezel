@@ -19,6 +19,7 @@ try {
 const token = conn?.token ?? '';
 const baseUrl = conn?.baseUrl ?? readArg('--gezel-url=') ?? '';
 const fallbackReason = conn?.fallbackReason ?? null;
+const fallbackCode = conn?.fallbackCode ?? null;
 const mode = conn?.mode ?? null;
 
 // Register at preload evaluation time so an OS open-file handoff sent as soon
@@ -35,6 +36,7 @@ contextBridge.exposeInMainWorld('__GEZEL__', {
   baseUrl,
   platform: process.platform,
   fallbackReason,
+  fallbackCode,
   mode,
   // Opens the native OS folder picker and resolves to the chosen absolute
   // path, or null if the user cancelled.
@@ -49,6 +51,17 @@ contextBridge.exposeInMainWorld('__GEZEL__', {
     status: () => ipcRenderer.invoke('gezel:autostart:status'),
     install: () => ipcRenderer.invoke('gezel:autostart:install'),
     uninstall: () => ipcRenderer.invoke('gezel:autostart:uninstall'),
+  },
+  // App updates. `state` is the pull for a freshly-mounted renderer;
+  // `onStateChanged` is the push for transitions while it is open. `install`
+  // opens the verified installer on macOS (Installer.app raises the admin
+  // prompt) and defers to electron-updater elsewhere.
+  update: {
+    state: () => ipcRenderer.invoke('gezel:update:state'),
+    install: () => ipcRenderer.invoke('gezel:update:install'),
+    onStateChanged: (callback) => {
+      ipcRenderer.on('gezel:update-state', (_event, state) => callback(state));
+    },
   },
   // Open the service's `~/.gezel/logs/` folder in the OS file manager.
   // Used by Settings → General. Returns an error string (empty on

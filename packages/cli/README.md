@@ -28,7 +28,7 @@ continues directly into the TUI without a restart.
 
 With no connection flags, the CLI follows this order:
 
-1. Use the Electron-installed machine service on port `43935` when it is
+1. Use the Electron-installed machine service on port `6228` when it is
    healthy. On first use, the terminal waits while the Gezel app asks you to
    approve **Gezel CLI**. The terminal shows a six-character code that you must
    enter in the app to confirm that you initiated the request. The resulting
@@ -58,14 +58,14 @@ It may reuse two deliberately public asset surfaces:
 The global overrides are:
 
 ```bash
-gezel --connect https://host:43935        # explicit service; approval on first use
-gezel --connect https://host:43935 --token "$TOKEN"
+gezel --connect https://host:6228        # explicit service; approval on first use
+gezel --connect https://host:6228 --token "$TOKEN"
 gezel --standalone                        # skip machine-service discovery
 gezel --home /path/to/another-home        # standalone with an alternate home
 ```
 
 `--home` (and an explicitly set `GEZEL_HOME`) implies standalone operation.
-An explicit `--port 43935` remains available when you intentionally want a
+An explicit `--port 6228` remains available when you intentionally want a
 CLI-owned daemon on the canonical port.
 
 ## What you get with no further setup

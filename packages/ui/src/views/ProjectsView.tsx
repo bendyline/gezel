@@ -16,10 +16,12 @@ import { queueComposerPrefill } from '../components/ChatComposer.js';
 import { ConfirmDialog } from '../components/ConfirmDialog.js';
 import { ExportToolbarControls } from '../components/DocumentExport/index.js';
 import { type FileEntry, FileTree } from '../components/FileTree.js';
+import { GezelPicker } from '../components/GezelPicker.js';
 import { HtmlPreviewFrame, type HtmlPreviewLogEntry } from '../components/HtmlPreviewFrame.js';
 import { ProjectActionsMenu, ProjectContextMenu } from '../components/ProjectActionsMenu.js';
 import { ProjectChat } from '../components/ProjectChat.js';
 import { ProjectConnectionsTab } from '../components/ProjectConnectionsTab.js';
+import { ProjectCrewRoster } from '../components/ProjectCrewRoster.js';
 import { ProjectGitStatusBar } from '../components/ProjectGitStatusBar.js';
 import { ProjectMailTab } from '../components/ProjectMailTab.js';
 import { ProjectOutputPane } from '../components/ProjectOutputPane.js';
@@ -359,6 +361,31 @@ function tabIconShapes(tab: ProjectTab) {
   }
 }
 
+interface AvailableCredential {
+  name: string;
+  label: string;
+  stored: boolean;
+  allowedOrigins: string[];
+  originSource: 'provider' | 'webhook' | 'project';
+}
+
+function credentialDestinationHint(credential: AvailableCredential): string | null {
+  if (!credential.stored) return null;
+  if (credential.allowedOrigins.length === 0) {
+    return credential.originSource === 'webhook'
+      ? 'Configure an HTTPS webhook URL in Settings → Channels first'
+      : 'No HTTPS destination configured';
+  }
+  const destinations = credential.allowedOrigins.map((origin) => {
+    try {
+      return new URL(origin).host;
+    } catch {
+      return origin;
+    }
+  });
+  return `Restricted to ${destinations.join(', ')}`;
+}
+
 interface ProjectsViewProps {
   /** When set, mounts in detail-only mode: hides the listing sidebar and
    *  auto-opens the given project. Used for the unified tab-bar surface
@@ -457,6 +484,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
     pageTools?: string[];
   } | null>(null);
   const [gezels, setGezels] = useState<GezelSummary[]>([]);
+  const [boekwachterGezelId, setBoekwachterGezelId] = useState<string | undefined>();
   const [workingDirDraft, setWorkingDirDraft] = useState('');
   const [showAllowWritesConfirm, setShowAllowWritesConfirm] = useState(false);
   const [writesJournal, setWritesJournal] = useState<
@@ -471,9 +499,8 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   >([]);
   const [githubUrlDraft, setGitHubUrlDraft] = useState('');
   const [gitStatus, setGitStatus] = useState<string>('');
-  const [availableCredentials, setAvailableCredentials] = useState<
-    Array<{ name: string; label: string; stored: boolean; defaultOrigins: string[] }>
-  >([]);
+  const [availableCredentials, setAvailableCredentials] = useState<AvailableCredential[]>([]);
+  const configuredCredentials = availableCredentials.filter((credential) => credential.stored);
 
   const refresh = useCallback(async () => {
     try {
@@ -519,7 +546,42 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
       .catch((err) => {
         console.error('[ProjectsView] listGezels failed', err);
       });
+    api
+      .getConfig()
+      .then((config) => setBoekwachterGezelId(config.boekwachterGezelId))
+      .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    const onConfigUpdated = (event: Event) => {
+      const detail = (event as CustomEvent<{ boekwachterGezelId?: string }>).detail;
+      setBoekwachterGezelId(detail?.boekwachterGezelId);
+    };
+    window.addEventListener('gezel:config-updated', onConfigUpdated);
+    return () => window.removeEventListener('gezel:config-updated', onConfigUpdated);
+  }, []);
+
+  const addProjectGezel = useCallback(
+    async (gezelId: string) => {
+      if (!selected) return;
+      const result = await api.addGezelToProject(selected.id, gezelId);
+      setSelected((current) =>
+        current?.id === selected.id ? { ...current, gezelIds: result.gezelIds } : current,
+      );
+    },
+    [selected],
+  );
+
+  const removeProjectGezel = useCallback(
+    async (gezelId: string) => {
+      if (!selected) return;
+      const result = await api.removeGezelFromProject(selected.id, gezelId);
+      setSelected((current) =>
+        current?.id === selected.id ? { ...current, gezelIds: result.gezelIds } : current,
+      );
+    },
+    [selected],
+  );
 
   const refreshFiles = useCallback(async (id: string) => {
     const [ws, art] = await Promise.all([
@@ -602,7 +664,25 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
       }
       try {
         const res = await api.listAvailableCredentials();
-        if (!cancelled) setAvailableCredentials(res.credentials);
+        if (!cancelled) {
+          setAvailableCredentials(
+            res.credentials.map((credential) => {
+              const wire = credential as typeof credential & {
+                allowedOrigins?: string[];
+                originSource?: AvailableCredential['originSource'];
+              };
+              return {
+                name: credential.name,
+                label: credential.label,
+                stored: credential.stored,
+                allowedOrigins: wire.allowedOrigins ?? credential.defaultOrigins,
+                originSource:
+                  wire.originSource ??
+                  (credential.name.startsWith('webhook.') ? 'webhook' : 'provider'),
+              };
+            }),
+          );
+        }
       } catch {
         /* non-fatal — grants UI hides */
       }
@@ -619,45 +699,14 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
       const next = grant
         ? Array.from(new Set([...current, credentialName]))
         : current.filter((n) => n !== credentialName);
-      const currentOrigins = selected.credentialAllowedOrigins ?? {};
-      const defaults =
-        availableCredentials.find((credential) => credential.name === credentialName)
-          ?.defaultOrigins ?? [];
-      const origins = currentOrigins[credentialName] ?? defaults;
-      if (grant && origins.length === 0) {
-        setError(`Add an allowed HTTPS origin for ${credentialName} before granting it.`);
+      const credential = availableCredentials.find((item) => item.name === credentialName);
+      if (grant && (credential?.allowedOrigins.length ?? 0) === 0) {
+        setError(`Configure an HTTPS destination for ${credentialName} before granting it.`);
         return;
       }
       try {
         const updated = await api.updateProject(selected.id, {
           grantedCredentials: next,
-          credentialAllowedOrigins: { ...currentOrigins, [credentialName]: origins },
-        });
-        setSelected(updated);
-      } catch (err) {
-        setError((err as Error).message);
-      }
-    },
-    [selected, availableCredentials],
-  );
-
-  const saveCredentialOrigins = useCallback(
-    async (credentialName: string, raw: string) => {
-      if (!selected) return;
-      const origins = Array.from(
-        new Set(
-          raw
-            .split(',')
-            .map((value) => value.trim())
-            .filter(Boolean),
-        ),
-      );
-      try {
-        const updated = await api.updateProject(selected.id, {
-          credentialAllowedOrigins: {
-            ...(selected.credentialAllowedOrigins ?? {}),
-            [credentialName]: origins,
-          },
         });
         setSelected(updated);
         setError(null);
@@ -665,7 +714,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
         setError((err as Error).message);
       }
     },
-    [selected],
+    [selected, availableCredentials],
   );
 
   /**
@@ -1484,6 +1533,14 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                 <div className="project-body-content">
                   {tab === 'about' && (
                     <div className="project-about-page">
+                      <ProjectCrewRoster
+                        project={selected}
+                        gezels={gezels}
+                        boekwachterGezelId={boekwachterGezelId}
+                        onAddGezel={addProjectGezel}
+                        onRemoveGezel={removeProjectGezel}
+                      />
+
                       <ProjectDocEditor
                         key={`${selected.id}:about`}
                         resourceKey={`project:${selected.id}:about`}
@@ -1593,7 +1650,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                           </label>
 
                           <label className="config-label" style={{ marginTop: '0.75rem' }}>
-                            Allow gezels to modify the workspace directory
+                            Allow gezellen to modify the workspace directory
                             <div className="new-row" style={{ alignItems: 'center' }}>
                               <input
                                 type="checkbox"
@@ -1613,8 +1670,8 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                               />
                               <span className="muted small">
                                 {selected.workingDir
-                                  ? 'Off by default for external dirs. Turn on only if you trust gezels to edit files at this path.'
-                                  : 'Internal workspace — on by default. Turn off to make this project read-only for gezels.'}
+                                  ? 'Off by default for external dirs. Turn on only if you trust gezellen to edit files at this path.'
+                                  : 'Internal workspace — on by default. Turn off to make this project read-only for gezellen.'}
                               </span>
                             </div>
                           </label>
@@ -1647,28 +1704,18 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                           <label className="config-label" style={{ marginTop: '0.75rem' }}>
                             {crewLeadLabel(selected)}
                             <div className="new-row">
-                              <Select.Root
-                                value={selected.voormanGezelId || '__NONE__'}
-                                onValueChange={async (v) => {
+                              <GezelPicker
+                                gezels={gezels}
+                                value={selected.voormanGezelId}
+                                noneLabel={`(no ${crewLeadLabelLower(selected)})`}
+                                ariaLabel={crewLeadLabel(selected)}
+                                onValueChange={async (gezelId) => {
                                   const updated = await api.updateProject(selected.id, {
-                                    voormanGezelId: v === '__NONE__' ? null : v,
+                                    voormanGezelId: gezelId,
                                   });
                                   setSelected(updated);
                                 }}
-                              >
-                                <Select.Trigger>
-                                  <Select.Value />
-                                </Select.Trigger>
-                                <Select.Content>
-                                  <Select.Item value="__NONE__">{`(no ${crewLeadLabelLower(selected)})`}</Select.Item>
-                                  {gezels.map((g) => (
-                                    <Select.Item key={g.id} value={g.id}>
-                                      {g.name}
-                                      {g.role ? ` — ${g.role}` : ''}
-                                    </Select.Item>
-                                  ))}
-                                </Select.Content>
-                              </Select.Root>
+                              />
                             </div>
                             <small className="muted">
                               {selected.mode === 'solo'
@@ -1760,32 +1807,30 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                             </small>
                           </fieldset>
 
-                          <div className="project-credentials">
-                            <h4>Granted credentials</h4>
-                            <p className="muted small">
-                              Credentials are stored once for your whole workspace and shared across
-                              projects you grant them to. Scripts and MCP tools running in this
-                              project can resolve only the names checked below. They never see the
-                              raw values.
-                            </p>
-                            {availableCredentials.length === 0 ? (
+                          {configuredCredentials.length > 0 && (
+                            <div className="project-credentials">
+                              <h4>Granted credentials</h4>
                               <p className="muted small">
-                                No credentials configured yet. Add a GitHub token or OpenAI key in{' '}
-                                <strong>Settings → Providers</strong> and it'll appear here.
+                                Credentials are stored once for your whole workspace and shared
+                                across projects you grant them to. Scripts and MCP tools running in
+                                this project can resolve only the names checked below. They never
+                                see the raw values.
                               </p>
-                            ) : (
                               <ul className="credentials-list">
-                                {availableCredentials.map((c) => {
+                                {configuredCredentials.map((c) => {
                                   const granted = (selected.grantedCredentials ?? []).includes(
                                     c.name,
                                   );
+                                  const destinationHint = credentialDestinationHint(c);
                                   return (
                                     <li key={c.name}>
                                       <label className="new-row" style={{ alignItems: 'center' }}>
                                         <input
                                           type="checkbox"
                                           checked={granted}
-                                          disabled={!c.stored}
+                                          disabled={
+                                            !granted && (!c.stored || c.allowedOrigins.length === 0)
+                                          }
                                           onChange={(e) =>
                                             void toggleGrant(c.name, e.target.checked)
                                           }
@@ -1793,35 +1838,20 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                                         <span>
                                           <code>{c.name}</code>
                                           <span className="muted small"> — {c.label}</span>
-                                          {!c.stored && (
-                                            <span className="muted small"> (not configured)</span>
+                                          {destinationHint && (
+                                            <span className="muted small">
+                                              {' '}
+                                              — {destinationHint}
+                                            </span>
                                           )}
                                         </span>
-                                      </label>
-                                      <label className="muted small">
-                                        Allowed HTTPS origins
-                                        <input
-                                          key={`${selected.id}:${c.name}:${(
-                                            selected.credentialAllowedOrigins?.[c.name] ??
-                                              c.defaultOrigins
-                                          ).join(',')}`}
-                                          type="text"
-                                          defaultValue={(
-                                            selected.credentialAllowedOrigins?.[c.name] ??
-                                            c.defaultOrigins
-                                          ).join(', ')}
-                                          placeholder="https://api.example.com"
-                                          onBlur={(event) =>
-                                            void saveCredentialOrigins(c.name, event.target.value)
-                                          }
-                                        />
                                       </label>
                                     </li>
                                   );
                                 })}
                               </ul>
-                            )}
-                          </div>
+                            </div>
+                          )}
 
                           <div className="project-writes-log">
                             <h4>Recent workspace changes</h4>
@@ -1866,6 +1896,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
 
                       <nav className="project-about-toc" aria-label="About sections">
                         <div className="project-about-toc-title">On this page</div>
+                        <a href="#project-about-crew">Assigned gezellen</a>
                         <a href="#project-about-overview">About this project</a>
                         <a href="#project-about-mission">Mission objectives</a>
                         <a href="#project-about-connections">Connections</a>
@@ -2063,7 +2094,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                                 ? selected.workingDir
                                   ? 'Workspace directory is empty.'
                                   : 'No external working directory set. Use the internal workspace or set an external path under the Settings tab.'
-                                : 'No artifacts yet. Your gezels will store reports and outputs here.'}
+                                : 'No artifacts yet. Your gezellen will store reports and outputs here.'}
                             </p>
                           )}
                           <FileTree
@@ -2200,7 +2231,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
             </div>
           </>
         ) : (
-          <p className="placeholder">Loading project…</p>
+          <p className="placeholder project-loading">Loading project…</p>
         )}
       </section>
     </div>

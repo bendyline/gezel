@@ -78,6 +78,18 @@ let isQuitting = false;
 let quitOnClose = false;
 // Held so the tray's "Check for updates" item can re-trigger a check.
 let autoUpdaterRef: import('electron-updater').AppUpdater | null = null;
+/**
+ * What the renderer shows about updates. Previously every update outcome —
+ * including outright failure — went only to the console, so a user whose
+ * update could not be applied had no way to find out.
+ */
+type UpdateState =
+  | { kind: 'downloading'; version: string }
+  | { kind: 'ready'; version: string }
+  | { kind: 'error'; version?: string; message: string };
+let updateState: UpdateState | null = null;
+/** Verified installer staged by the macOS update flow, awaiting the user. */
+let macUpdatePkgPath: string | null = null;
 const quitCoordinator = new QuitCoordinator({
   shutdown: async () => {
     if (connection) await connection.shutdown();
@@ -626,9 +638,27 @@ ipcMain.on('gezel:current-connection', (event) => {
         token: connection.token,
         baseUrl: connection.baseUrl,
         fallbackReason: connection.fallbackReason?.message ?? null,
+        // The code, not just the message: some reasons need their own banner
+        // copy rather than the generic "background work is paused" framing.
+        fallbackCode: connection.fallbackReason?.code ?? null,
         mode: connection.mode,
       }
     : null;
+});
+
+// Update IPC. `gezel:update-state` is pushed on every transition; this pull
+// covers a renderer that mounted (or reloaded after a supervisor restart)
+// while an update was already staged.
+ipcMain.handle('gezel:update:state', () => updateState);
+ipcMain.handle('gezel:update:install', async () => {
+  if (process.platform !== 'darwin') {
+    // Windows and Linux keep electron-updater's own installer handoff, which
+    // already elevates via elevate.exe / pkexec.
+    autoUpdaterRef?.quitAndInstall();
+    return { ok: true as const };
+  }
+  const result = await installStagedMacUpdate();
+  return result.ok ? { ok: true as const } : { ok: false as const, error: result.error };
 });
 
 // Autostart IPC — the UI's Service section toggles this on/off. Platform-
@@ -1313,22 +1343,105 @@ function ensureAutoUpdater(): import('electron-updater').AppUpdater | null {
   try {
     const { autoUpdater } = require('electron-updater') as typeof import('electron-updater');
     autoUpdater.logger = { info: console.log, warn: console.warn, error: console.error } as never;
-    autoUpdater.on('update-available', (info) => {
-      notify({ title: 'Gezel update available', body: `Downloading version ${info.version}…` });
-      tray?.setTooltip('Gezel — downloading update…');
-    });
-    autoUpdater.on('update-downloaded', (info) => {
-      notify({
-        title: 'Gezel update ready',
-        body: `Version ${info.version} installs when you quit Gezel.`,
+    if (process.platform === 'darwin') {
+      // Take the download away from MacUpdater. Its ZIP path cannot deliver a
+      // complete macOS update for a machine-service install and cannot elevate
+      // — see src/updater/mac-pkg.ts for the full reasoning. We keep
+      // electron-updater purely as the version-check, then stage and verify
+      // the signed PKG ourselves.
+      autoUpdater.autoDownload = false;
+      autoUpdater.on('update-available', (info) => {
+        void handleMacUpdateAvailable(info.version);
+      });
+    } else {
+      autoUpdater.on('update-available', (info) => {
+        notify({ title: 'Gezel update available', body: `Downloading version ${info.version}…` });
+        tray?.setTooltip('Gezel — downloading update…');
+      });
+      autoUpdater.on('update-downloaded', (info) => {
+        notify({
+          title: 'Gezel update ready',
+          body: `Version ${info.version} installs when you quit Gezel.`,
+        });
+      });
+    }
+    autoUpdater.on('error', (err) => {
+      // Was a bare console.warn, which made every update failure invisible.
+      console.warn('[updater] error:', err);
+      setUpdateState({
+        kind: 'error',
+        message: `Could not check for updates: ${err instanceof Error ? err.message : String(err)}`,
       });
     });
-    autoUpdater.on('error', (err) => console.warn('[updater] error:', err));
     autoUpdaterRef = autoUpdater;
     return autoUpdater;
   } catch (err) {
     console.warn('[updater] not available:', err);
     return null;
+  }
+}
+
+/**
+ * macOS update flow: fetch the release's signed PKG, verify it end to end,
+ * then let the user hand it to Installer.app, which raises macOS's own
+ * administrator prompt. We never elevate anything ourselves.
+ */
+async function handleMacUpdateAvailable(version: string): Promise<void> {
+  if (updateState?.kind === 'downloading' || updateState?.version === version) return;
+  setUpdateState({ kind: 'downloading', version });
+  notify({ title: 'Gezel update available', body: `Downloading version ${version}…` });
+  tray?.setTooltip('Gezel — downloading update…');
+  try {
+    const { stageVerifiedMacPkg } = await import('./updater/mac-pkg.js');
+    const run = promisify(execFile);
+    const staged = await stageVerifiedMacPkg(version, {
+      // Electron's per-user data dir, deliberately not GEZEL_HOME: on a
+      // machine-service install that is the root-owned system directory.
+      stagingDir: join(app.getPath('userData'), 'updates'),
+      fetch: globalThis.fetch,
+      execFile: async (file, args) => {
+        const { stdout } = await run(file, args, { maxBuffer: 8 * 1024 * 1024 });
+        return { stdout: String(stdout) };
+      },
+      logger: { info: console.log, warn: console.warn },
+    });
+    macUpdatePkgPath = staged.path;
+    setUpdateState({ kind: 'ready', version });
+    tray?.setTooltip('Gezel — update ready to install');
+    notify({
+      title: 'Gezel update ready',
+      body: `Version ${version} is verified. Open Gezel to install it.`,
+      view: 'home',
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn('[updater] macOS package staging failed:', message);
+    macUpdatePkgPath = null;
+    setUpdateState({ kind: 'error', version, message });
+    tray?.setTooltip('Gezel');
+  }
+}
+
+/**
+ * Launch the staged installer. Installer.app authenticates the user itself,
+ * replaces the root-owned bundle, and re-runs the postinstall that registers
+ * the LaunchDaemon and refreshes the daemon's service tree — the parts a ZIP
+ * swap silently skipped.
+ */
+async function installStagedMacUpdate(): Promise<{ ok: boolean; error?: string }> {
+  if (!macUpdatePkgPath) return { ok: false, error: 'No verified update is staged.' };
+  const failure = await shell.openPath(macUpdatePkgPath);
+  if (failure) {
+    console.warn('[updater] could not open staged package:', failure);
+    return { ok: false, error: failure };
+  }
+  return { ok: true };
+}
+
+function setUpdateState(next: UpdateState): void {
+  updateState = next;
+  for (const win of BrowserWindow.getAllWindows()) {
+    win.webContents.send('gezel:update-state', next);
   }
 }
 
@@ -1358,7 +1471,7 @@ function installMenu(): void {
 
   const viewTabs: Array<{ label: string; view: string; key: string }> = [
     { label: 'Home', view: 'home', key: '1' },
-    { label: 'Gezels', view: 'gezels', key: '2' },
+    { label: 'Gezellen', view: 'gezels', key: '2' },
     { label: 'Chat', view: 'chat', key: '3' },
     { label: 'Projects', view: 'projects', key: '4' },
     { label: 'Documents', view: 'documents', key: '5' },

@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises';
-import type { ProviderName } from '@bendyline/gezel';
+import type { GezelSummary, ProviderName } from '@bendyline/gezel';
 import type { ChatManager } from '../chat/manager.js';
 import { safeJoin } from '../fs/safe-paths.js';
 import type { Store } from '../fs/store.js';
@@ -40,6 +40,63 @@ export interface EnrichResult {
 // regardless of whether one of these is configured.
 export const ENRICH_LOCAL_PROVIDERS: ProviderName[] = ['llama-cpp', 'mlx', 'ollama'];
 
+export interface EnrichTargetOptions {
+  nightShift?: boolean;
+  boekwachter?: Pick<GezelSummary, 'id' | 'name' | 'provider' | 'model'>;
+}
+
+/**
+ * Resolve the local-first model used by autonomous indexing work. A cloud
+ * target is accepted only through the explicit Night Shift override.
+ */
+export async function resolveEnrichTarget(
+  store: Store,
+  opts: EnrichTargetOptions = {},
+): Promise<{ providerName: ProviderName; model: string } | null> {
+  const cfg = await store.readConfig().catch(() => null);
+  let providerName: ProviderName | undefined;
+  let model: string | undefined;
+  const nightShiftOverride = opts.nightShift ? cfg?.nightShift?.modelOverride : undefined;
+  if (nightShiftOverride?.enabled === true && nightShiftOverride.provider) {
+    const nightModel = nightShiftOverride.model ?? cfg?.defaultModel?.[nightShiftOverride.provider];
+    if (nightModel) {
+      providerName = nightShiftOverride.provider;
+      model = nightModel;
+    }
+  }
+  // A Boekwachter may pin their own small local model. Never silently send
+  // workspace indexing to a cloud provider: cloud use remains an explicit
+  // Night Shift override, while the gezel's about.md still supplies the
+  // personality on whichever local engine is selected.
+  if (
+    (!providerName || !model) &&
+    opts.boekwachter?.provider &&
+    ENRICH_LOCAL_PROVIDERS.includes(opts.boekwachter.provider) &&
+    opts.boekwachter.model
+  ) {
+    providerName = opts.boekwachter.provider;
+    model = opts.boekwachter.model;
+  }
+  if (!providerName || !model) {
+    for (const name of ENRICH_LOCAL_PROVIDERS) {
+      const configuredModel = cfg?.defaultModel?.[name];
+      if (configuredModel) {
+        providerName = name;
+        model = configuredModel;
+        break;
+      }
+    }
+  }
+
+  const envModel = process.env.GEZEL_ENRICH_MODEL?.trim();
+  if (envModel) {
+    model = envModel;
+    const envProvider = process.env.GEZEL_ENRICH_PROVIDER?.trim() as ProviderName | undefined;
+    if (envProvider && ENRICH_LOCAL_PROVIDERS.includes(envProvider)) providerName = envProvider;
+  }
+  return providerName && model ? { providerName, model } : null;
+}
+
 /**
  * Resolve a summarizer (if one is configured) + the local embedder — shared
  * by the background enrichment loop and the on-demand drive route. During
@@ -67,49 +124,31 @@ export async function buildEnrichDeps(
      * deadline the gate would blow) leaves it off.
      */
     ambient?: boolean;
+    /** The project-roster Boekwachter whose persona owns this pass. */
+    boekwachter?: Pick<GezelSummary, 'id' | 'name' | 'provider' | 'model'>;
   } = {},
 ): Promise<EnrichDeps> {
   const { embedBatch } = await import('../memory/embeddings.js');
   const embed = (texts: string[]) => embedBatch(texts);
 
-  const cfg = await store.readConfig().catch(() => null);
-  let providerName: ProviderName | undefined;
-  let model: string | undefined;
-  const nightShiftOverride = opts.nightShift ? cfg?.nightShift?.modelOverride : undefined;
-  if (nightShiftOverride?.enabled === true && nightShiftOverride.provider) {
-    const nightModel = nightShiftOverride.model ?? cfg?.defaultModel?.[nightShiftOverride.provider];
-    if (nightModel) {
-      providerName = nightShiftOverride.provider;
-      model = nightModel;
-    }
-  }
-  if (!providerName || !model) {
-    for (const name of ENRICH_LOCAL_PROVIDERS) {
-      const m = cfg?.defaultModel?.[name];
-      if (m) {
-        providerName = name;
-        model = m;
-        break;
-      }
-    }
-  }
-
-  const envModel = process.env.GEZEL_ENRICH_MODEL?.trim();
-  if (envModel) {
-    model = envModel;
-    const envProvider = process.env.GEZEL_ENRICH_PROVIDER?.trim() as ProviderName | undefined;
-    if (envProvider && ENRICH_LOCAL_PROVIDERS.includes(envProvider)) providerName = envProvider;
-  }
-
-  if (!providerName || !model) {
+  const target = await resolveEnrichTarget(store, opts);
+  if (!target) {
     // No local LLM configured — embeddings only (still makes code searchable).
     return { summarize: async () => '', embed };
   }
+  const { providerName, model } = target;
   const summarize = (prompt: string) =>
     chat
       .oneShotCompletion(prompt, 30_000, {
         providerName,
         model,
+        ...(opts.boekwachter
+          ? {
+              gezelId: opts.boekwachter.id,
+              useGezelPersona: true,
+              actorLabel: opts.boekwachter.name,
+            }
+          : { actorLabel: 'Boekwachter' }),
         jobLabel: 'index enrichment',
         ...(opts.ambient ? { ambient: true } : {}),
       })
@@ -119,6 +158,13 @@ export async function buildEnrichDeps(
       .oneShotCompletion(prompt, 60_000, {
         providerName,
         model,
+        ...(opts.boekwachter
+          ? {
+              gezelId: opts.boekwachter.id,
+              useGezelPersona: true,
+              actorLabel: opts.boekwachter.name,
+            }
+          : { actorLabel: 'Boekwachter' }),
         jobLabel: 'index review',
         ...(opts.ambient ? { ambient: true } : {}),
       })

@@ -35,6 +35,8 @@ const INTEGRATION_SUITES = [
   'src/providers/mcp-bridge.test.ts',
   'src/providers/llama-cpp/provider.test.ts',
   'src/providers/native/capacity-broker.test.ts',
+  // WebAssembly grammar compilation has a high native-memory peak.
+  'src/index-store/content-indexer.test.ts',
   // Script runner sandbox spawns + nested runs.
   'src/scripts/*.test.ts',
   'src/workspace/derive.test.ts',

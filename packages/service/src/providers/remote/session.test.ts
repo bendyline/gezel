@@ -80,7 +80,13 @@ describe('RemoteSession', () => {
     session.onDelta((d) => deltas.push(d));
 
     const text = await session.sendAndWait('read a.txt', {
-      queue: { lane: 'interactive', affinity: true, sessionId: 's1', gezelId: 'g1' },
+      queue: {
+        lane: 'interactive',
+        affinity: true,
+        sessionId: 's1',
+        gezelId: 'g1',
+        projectId: 'p1',
+      },
     });
 
     expect(text).toBe('Let me read it. The file says hello.');
@@ -104,6 +110,7 @@ describe('RemoteSession', () => {
     // A advertised its local bridge tools on the wire; B never executed them.
     const tools = calls[0]!.tools as Array<{ name: string }>;
     expect(tools.map((t) => t.name)).toContain('read_file');
+    expect(calls[0]!.queue).toMatchObject({ projectId: 'p1' });
   });
 
   it('throws when B sends an error frame', async () => {

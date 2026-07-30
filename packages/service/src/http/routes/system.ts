@@ -1,4 +1,3 @@
-import { spawn } from 'node:child_process';
 import { delimiter, dirname } from 'node:path';
 import {
   type GitHubIdentity,
@@ -29,7 +28,7 @@ import {
   InvalidGitHubUrlError,
   previewGitHubRepo,
 } from '../../github/repo-preview.js';
-import { pnpmSpawnTarget, resolvePnpmCommand } from '../../packages/pnpm.js';
+import { resolvePnpmCommand, spawnPnpm } from '../../packages/pnpm.js';
 import { resolveSystemLibraryPath } from '../../system-toolsets/resolve.js';
 import { sampleDarwinGezelProcessMemoryCached } from '../../system/gezel-process-memory.js';
 import {
@@ -169,12 +168,10 @@ export function systemRoutes(ctx: ServiceContext): Hono {
         ? `${nodeDir}${delimiter}${process.env.PATH ?? ''}`
         : (process.env.PATH ?? '');
       const pnpm = resolvePnpmCommand(['exec', 'copilot', 'login']);
-      const target = pnpmSpawnTarget(pnpm);
-      const child = spawn(target.command, target.args, {
+      const child = spawnPnpm(pnpm, {
         cwd: installDir,
         env: { ...process.env, PATH: extendedPath, FORCE_COLOR: '0' },
         stdio: ['ignore', 'pipe', 'pipe'],
-        shell: pnpm.shell,
       });
 
       let aborted = false;

@@ -113,7 +113,11 @@ describe('agents', () => {
     const created = await store.createGezel({ name: 'Maya' });
     await store.createProject({ name: 'Maya Project' });
     await store.updateProject('maya-project', { voormanGezelId: created.id });
-    await store.writeConfig({ klerkGezelId: created.id, keurmeesterGezelId: created.id });
+    await store.writeConfig({
+      klerkGezelId: created.id,
+      boekwachterGezelId: created.id,
+      keurmeesterGezelId: created.id,
+    });
 
     const removed = await store.deleteGezel(created.id);
     expect(removed).toEqual({ id: 'maya', name: 'Maya' });
@@ -125,6 +129,7 @@ describe('agents', () => {
     expect(project?.gezelIds).not.toContain(created.id);
     const config = await store.readConfig();
     expect(config.klerkGezelId).toBeUndefined();
+    expect(config.boekwachterGezelId).toBeUndefined();
     expect(config.keurmeesterGezelId).toBeUndefined();
   });
 
@@ -940,6 +945,17 @@ describe('project tasks storage', () => {
     expect(got?.title).toBe('First');
     const list = await store.listProjectTasks('alpha');
     expect(list).toHaveLength(1);
+  });
+
+  it.each([
+    ['male', 'who he is', 'work with him well'],
+    ['female', 'who she is', 'work with her well'],
+    ['non-binary', 'who they are', 'work with them well'],
+  ] as const)('writes %s pronouns into the default about prompt', async (gender, who, object) => {
+    const created = await store.createGezel({ name: `Default ${gender}`, gender });
+
+    expect(created.about).toContain(who);
+    expect(created.about).toContain(object);
   });
 
   it('readTask migrates a legacy phases/activePhaseId task to craftbook', async () => {

@@ -74,5 +74,5 @@ cmake --build .build && ctest --test-dir .build`.
   `ERROR_PATH_NOT_FOUND`.
 - The env contract in `env_overrides` is guarded by `--self-test`; the
   installer no longer carries it.
-- The machine service binds exactly to port `43935`. User-owned CLI fallback
+- The machine service binds exactly to port `6228`. User-owned CLI fallback
   daemons use discoverable ephemeral ports so they cannot block it.

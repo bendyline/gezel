@@ -138,13 +138,22 @@ export interface PooledQueueSummary {
   interactiveConcurrency: number;
   backgroundConcurrency: number;
   maxConcurrency: number;
-  active: Array<{ sessionId?: string; gezelId?: string; job?: string; runningForMs: number }>;
+  active: Array<{
+    sessionId?: string;
+    gezelId?: string;
+    projectId?: string;
+    actorLabel?: string;
+    job?: string;
+    runningForMs: number;
+  }>;
   pending: Array<{
     id: number;
     lane: 'interactive' | 'background';
     ambient?: boolean;
     sessionId?: string;
     gezelId?: string;
+    projectId?: string;
+    actorLabel?: string;
     job?: string;
     waitedMs: number;
   }>;

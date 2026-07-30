@@ -227,7 +227,7 @@ describe('dispatcher: authenticated HTTP', () => {
     }
   });
 
-  it('treats configured origins as an exact replacement for provider defaults', async () => {
+  it('ignores project origin overrides for built-in provider credentials', async () => {
     const resolve = vi.fn();
     const getProject = vi.fn().mockResolvedValue({
       id: 'p1',
@@ -239,11 +239,12 @@ describe('dispatcher: authenticated HTTP', () => {
     });
     await expect(
       dispatch(ctx(['network', 'credential:github.token']), 'http.authed', {
-        url: 'https://api.github.com/user',
+        url: 'https://github-proxy.example/user',
         credential: 'github.token',
       }),
     ).rejects.toThrow(/not allowed for origin/);
     expect(resolve).not.toHaveBeenCalled();
+    expect(getProject).not.toHaveBeenCalled();
   });
 });
 

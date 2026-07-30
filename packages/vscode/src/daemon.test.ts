@@ -36,7 +36,7 @@ describe('VS Code app authorization', () => {
     });
 
     const connection = {
-      baseUrl: 'https://127.0.0.1:43935',
+      baseUrl: 'https://127.0.0.1:6228',
       fetch: vi.fn(),
       token: 'FIRST-PARTY',
       firstPartyToken: 'FIRST-PARTY',
@@ -83,7 +83,7 @@ describe('VS Code app authorization', () => {
     });
 
     const connection = {
-      baseUrl: 'https://127.0.0.1:43935',
+      baseUrl: 'https://127.0.0.1:6228',
       fetch,
       token: 'FIRST-PARTY',
       firstPartyToken: 'FIRST-PARTY',
@@ -109,14 +109,14 @@ describe('VS Code app authorization', () => {
 
     expect(fetch).toHaveBeenNthCalledWith(
       1,
-      'https://127.0.0.1:43935/api/config',
+      'https://127.0.0.1:6228/api/config',
       expect.objectContaining({
         headers: { Authorization: 'Bearer OLD-OPENAI-TOKEN' },
       }),
     );
     expect(fetch).toHaveBeenNthCalledWith(
       2,
-      'https://127.0.0.1:43935/v1/apps/vscode/token',
+      'https://127.0.0.1:6228/v1/apps/vscode/token',
       expect.objectContaining({
         method: 'DELETE',
         headers: { Authorization: 'Bearer OLD-OPENAI-TOKEN' },

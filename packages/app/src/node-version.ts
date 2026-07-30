@@ -21,7 +21,7 @@
  * script downloads: the raw node.exe on Windows, the whole tarball on
  * unix.
  */
-export const NODE_VERSION = '24.18.0';
+export const NODE_VERSION = '24.18.1';
 
 /** sha256 of the version-tagged Node.js LICENSE file shipped beside the runtime. */
 export const NODE_LICENSE_SHA256 =
@@ -38,11 +38,11 @@ export const NODE_LICENSE_SHA256 =
  * `scripts/bump-node.mjs`.
  */
 export const NODE_SHA256: Record<string, string> = {
-  'macos-arm64': 'e1a97e14c99c803e96c7339403282ea05a499c32f8d83defe9ef5ec66f979ed1',
-  'macos-x64': 'dfd0dbd3e721503434df7b7205e719f61b3a3a31b2bcf9729b8b91fea240f080',
-  'linux-x64': '783130984963db7ba9cbd01089eaf2c2efb055c7c1693c943174b967b3050cb8',
-  'linux-arm64': '6b4484c2190274175df9aa8f28e2d758a819cb1c1fe6ab481e2f95b463ab8508',
-  'win-x64': '9a4eb5f1c29c6a2e93852ead46b999e284a6a5ca8bab4d4e241d587d025a52de',
+  'macos-arm64': 'eb02f7fab96d3d67de40c5ec8566096fcb4c2026728787683ae5a97eb612b941',
+  'macos-x64': '6fb20fceacbb157c2f95825b80df4a454a0f6d81cdcd7bb81eeae9147e0e76ec',
+  'linux-x64': '9f5eb6ac21845a66c493c91a253b1da32fd684e89e9b7202d4936982336be4ca',
+  'linux-arm64': 'df224555a083b918e46260cc969838501b9f9a87140c1195e5b9597b56d5dae2',
+  'win-x64': 'ac51903c4c111815d52280b1fdcc8da067cbb37e2fe1a765097b85c3292c8582',
 };
 
 /**

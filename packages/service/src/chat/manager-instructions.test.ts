@@ -1,3 +1,4 @@
+import type { ProjectDetail } from '@bendyline/gezel';
 import { describe, expect, it } from 'vitest';
 import { type BuildInstructionsOptions, buildInstructions } from './manager.js';
 
@@ -33,5 +34,30 @@ describe('buildInstructions coordinator routing', () => {
     expect(prompt).toContain('do not silently substitute markdown');
     expect(prompt).toContain('`convert_document`');
     expect(prompt).toContain('`save_artifact`');
+  });
+});
+
+describe('buildInstructions assigned pronouns', () => {
+  const soloProject = {
+    id: 'solo-job',
+    name: 'Solo job',
+    mode: 'solo',
+  } as unknown as ProjectDetail;
+
+  it.each([
+    ['male', 'he/him', 'he will handle the entire project himself'],
+    ['female', 'she/her', 'she will handle the entire project herself'],
+    ['non-binary', 'they/them', 'they will handle the entire project themselves'],
+  ] as const)('uses %s voorman pronouns in solo-project context', (gender, label, sentence) => {
+    const { full } = buildInstructions({
+      name: 'Worker',
+      about: 'A worker.',
+      project: soloProject,
+      voormanName: 'Lyudmyla',
+      voormanGender: gender,
+    });
+
+    expect(full).toContain(`Lyudmyla** (${label})`);
+    expect(full).toContain(sentence);
   });
 });

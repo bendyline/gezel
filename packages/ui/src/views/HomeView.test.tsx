@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockApi } from '../test-utils/mockApi.js';
 import { primitivesMock } from '../test-utils/primitivesMock.js';
 
@@ -46,7 +46,7 @@ vi.mock('../components/DeviceSummary.js', () => ({
   DeviceSummary: () => <div data-testid="device-summary">device</div>,
 }));
 vi.mock('../components/FirstRunInstallBanner.js', () => ({
-  FirstRunInstallBanner: () => null,
+  FirstRunInstallBanner: () => <div data-testid="first-run-install-banner" />,
 }));
 vi.mock('../components/GezelIcon.js', () => ({
   GezelIcon: ({ name, pulsing }: { name: string; pulsing?: boolean }) => (
@@ -126,6 +126,155 @@ describe('HomeView', () => {
     expect(screen.getByTestId('chat-composer')).toBeInTheDocument();
   });
 
+  // A skewed machine service is healthy and still holding the user's data —
+  // the generic "background work is paused" copy would be wrong about both,
+  // and its advice (reopen Gezel) does not fix a version mismatch.
+  describe('service banner', () => {
+    it('tells the user to reinstall when the app and service versions differ', async () => {
+      render(
+        <HomeView
+          fallbackReason="The Gezel background service is running version 1.26210.19, but this copy of Gezel expects version 1.26211.23."
+          fallbackCode="system-service-version-mismatch"
+          platform="darwin"
+        />,
+      );
+
+      // Wait for the *configured* branch specifically. The regression this
+      // pins: an onboarded user renders the workshop, which returned before
+      // the banner markup and swallowed every service notice. Asserting only
+      // on the banner would pass against the loading branch that precedes it.
+      await screen.findByTestId('home-workshop');
+
+      expect(
+        screen.getByText(/Gezel updated, but its background service did not/),
+      ).toBeInTheDocument();
+      expect(screen.getByText(/Run the Gezel PKG again/)).toBeInTheDocument();
+      expect(screen.queryByText(/Background work is temporarily paused/)).not.toBeInTheDocument();
+      // Both versions stay reachable in the details disclosure.
+      expect(screen.getByText(/1\.26210\.19/)).toBeInTheDocument();
+    });
+
+    it('names the right installer per platform', async () => {
+      const { unmount } = render(
+        <HomeView
+          fallbackReason="skew"
+          fallbackCode="system-service-version-mismatch"
+          platform="linux"
+        />,
+      );
+      await screen.findByText(/Reinstall the Gezel \.deb or \.rpm package/);
+      unmount();
+
+      render(
+        <HomeView
+          fallbackReason="skew"
+          fallbackCode="system-service-version-mismatch"
+          platform="win32"
+        />,
+      );
+      await screen.findByText(/Run the Gezel installer again/);
+    });
+
+    it('keeps the paused-background copy for an embedded fallback', async () => {
+      render(
+        <HomeView
+          fallbackReason="System service was unavailable: SCM stopped"
+          fallbackCode="system-service-unhealthy"
+          platform="darwin"
+        />,
+      );
+
+      await screen.findByText(/Background work is temporarily paused/);
+      expect(
+        screen.queryByText(/Gezel updated, but its background service did not/),
+      ).not.toBeInTheDocument();
+    });
+  });
+
+  describe('update banner', () => {
+    function stubUpdateBridge(state: unknown, install = vi.fn().mockResolvedValue({ ok: true })) {
+      const bridge = {
+        state: vi.fn().mockResolvedValue(state),
+        install,
+        onStateChanged: vi.fn(),
+      };
+      (window as unknown as { __GEZEL__: Record<string, unknown> }).__GEZEL__ = {
+        ...(window as unknown as { __GEZEL__: Record<string, unknown> }).__GEZEL__,
+        update: bridge,
+      };
+      return bridge;
+    }
+
+    afterEach(() => {
+      const g = window as unknown as { __GEZEL__: Record<string, unknown> };
+      g.__GEZEL__ = { ...g.__GEZEL__, update: undefined };
+    });
+
+    it('says nothing while there is no update', async () => {
+      stubUpdateBridge(null);
+      render(<HomeView />);
+      await screen.findByTestId('home-workshop');
+      expect(screen.queryByRole('button', { name: /install now/i })).not.toBeInTheDocument();
+    });
+
+    // A download in flight is not actionable, so it stays out of the way.
+    it('stays quiet while downloading', async () => {
+      stubUpdateBridge({ kind: 'downloading', version: '1.26212.4' });
+      render(<HomeView />);
+      await screen.findByTestId('home-workshop');
+      expect(screen.queryByRole('button', { name: /install now/i })).not.toBeInTheDocument();
+    });
+
+    // Assert on the banner's whole text rather than per-string queries: the
+    // headline interpolates the version, so React splits it across text nodes
+    // and getByText's element-level matching does not see it as one sentence.
+    it('warns that macOS will ask for an administrator password', async () => {
+      stubUpdateBridge({ kind: 'ready', version: '1.26212.4' });
+      render(<HomeView platform="darwin" />);
+
+      const banner = await screen.findByTestId('update-banner');
+      expect(banner).toHaveTextContent('Gezel 1.26212.4 is ready to install.');
+      expect(banner).toHaveTextContent('ask for an administrator password');
+    });
+
+    it('tells Windows and Linux users the app restarts instead', async () => {
+      stubUpdateBridge({ kind: 'ready', version: '1.26212.4' });
+      render(<HomeView platform="win32" />);
+
+      const banner = await screen.findByTestId('update-banner');
+      expect(banner).toHaveTextContent('Gezel will restart to finish installing.');
+      expect(banner).not.toHaveTextContent('administrator password');
+    });
+
+    it('hands the install to the shell when asked', async () => {
+      const install = vi.fn().mockResolvedValue({ ok: true });
+      stubUpdateBridge({ kind: 'ready', version: '1.26212.4' }, install);
+      render(<HomeView platform="darwin" />);
+
+      fireEvent.click(await screen.findByRole('button', { name: /install now/i }));
+      await waitFor(() => expect(install).toHaveBeenCalledTimes(1));
+    });
+
+    // The whole point of this banner: a failed update used to reach the user
+    // as nothing at all, just a console.warn in a window they never open.
+    it('offers a manual download when the update could not be installed', async () => {
+      stubUpdateBridge({
+        kind: 'error',
+        version: '1.26212.4',
+        message: 'Gatekeeper rejected the package',
+      });
+      render(<HomeView platform="darwin" />);
+
+      const banner = await screen.findByTestId('update-banner');
+      expect(banner).toHaveTextContent('Gezel could not install an update.');
+      expect(banner).toHaveTextContent('Gatekeeper rejected the package');
+      expect(screen.getByRole('link', { name: /get the latest release/i })).toHaveAttribute(
+        'href',
+        'https://github.com/bendyline/gezel/releases/latest',
+      );
+    });
+  });
+
   it('holds the loading splash while the probe is in flight — never flashes First run setup', async () => {
     // A probe that stays pending lets us inspect the intermediate state. The
     // regression this guards: a slow cold-boot probe used to drop the splash
@@ -154,6 +303,33 @@ describe('HomeView', () => {
     await waitFor(() => {
       expect(screen.getByTestId('home-workshop')).toBeInTheDocument();
     });
+    expect(screen.queryByText('First run setup')).not.toBeInTheDocument();
+  });
+
+  it.each(['mlx', 'llama-cpp'] as const)(
+    'keeps a healthy %s engine with no installed models in first run',
+    async (provider) => {
+      vi.mocked(api.getConfig).mockResolvedValue({
+        provider,
+        meesterGezelId: 'gz-meester',
+        defaultModel: { [provider]: 'recommended-model' },
+      } as never);
+      vi.mocked(api.testProvider).mockResolvedValue({ ok: true, modelCount: 0 } as never);
+
+      render(<HomeView />);
+
+      expect(await screen.findByText('First run setup')).toBeInTheDocument();
+      expect(screen.getByTestId('first-run-install-banner')).toBeInTheDocument();
+      expect(screen.queryByTestId('home-workshop')).not.toBeInTheDocument();
+    },
+  );
+
+  it('does not require a locally installed model when a cloud provider is connected', async () => {
+    vi.mocked(api.testProvider).mockResolvedValue({ ok: true, modelCount: 0 } as never);
+
+    render(<HomeView />);
+
+    expect(await screen.findByTestId('home-workshop')).toBeInTheDocument();
     expect(screen.queryByText('First run setup')).not.toBeInTheDocument();
   });
 

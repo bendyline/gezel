@@ -261,6 +261,12 @@ export interface ModelListEntry {
   owned_by: string;
   context_window?: number;
   supports_reasoning?: boolean;
+  /** Present when this model entry addresses one of the user's gezels. */
+  gezel_id?: string;
+  name?: string;
+  role?: string;
+  /** True for the gezel used when a caller requests an unknown model. */
+  is_fallback?: boolean;
 }
 
 export interface ModelListResponse {

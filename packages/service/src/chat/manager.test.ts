@@ -168,6 +168,23 @@ describe('ChatManager — session lifecycle', () => {
 });
 
 describe('ChatManager — send + persistence', () => {
+  it('threads the session project into interactive provider queue metadata', async () => {
+    const project = await store.createProject({ name: 'Spanish lessons' });
+    const session = await manager.createSession({ gezelId: 'ada', projectId: project.id });
+    mock.script('Ready');
+
+    await manager.send(session.id, 'Start the lesson');
+
+    const send = mock.calls.find(
+      (call) => call.kind === 'send' && call.sendOpts?.queue?.lane === 'interactive',
+    );
+    expect(send?.sendOpts?.queue).toMatchObject({
+      sessionId: session.id,
+      gezelId: 'ada',
+      projectId: project.id,
+    });
+  });
+
   it('threads the authoritative direct-file clamp into provider session options', async () => {
     const griet = await store.createGezel({ name: 'Griet', role: 'Boekwachter' });
     const grietId = griet.parsed.frontmatter.id;
@@ -2521,10 +2538,27 @@ describe('ChatManager — sendWithMentions (@-mention fan-out)', () => {
 });
 
 describe('ChatManager — per-session message queue', () => {
+  let previousMemoryExtractionSetting: string | undefined;
+
+  beforeEach(() => {
+    previousMemoryExtractionSetting = process.env.GEZEL_DISABLE_MEMORY_EXTRACTION;
+    // These tests exercise only the per-session chat queue. Letting the
+    // asynchronous memory extractor share MockProvider's response queue makes
+    // reply ownership timing-dependent under suite load.
+    process.env.GEZEL_DISABLE_MEMORY_EXTRACTION = '1';
+  });
+
+  afterEach(() => {
+    if (previousMemoryExtractionSetting === undefined) {
+      delete process.env.GEZEL_DISABLE_MEMORY_EXTRACTION;
+    } else {
+      process.env.GEZEL_DISABLE_MEMORY_EXTRACTION = previousMemoryExtractionSetting;
+    }
+  });
+
   it('back-to-back sends on one session run in FIFO order', async () => {
     const session = await manager.createSession({ gezelId: 'ada' });
-    // Script 4 replies: assistant-A, NONE (memory extract), assistant-B, NONE.
-    mock.script('reply-A', 'NONE', 'reply-B', 'NONE');
+    mock.script('reply-A', 'reply-B');
     // Hold A's turn for 100ms so B is guaranteed to arrive while A is
     // still running. That forces B into the queue rather than both
     // resolving synchronously on microtask-settle.
@@ -2557,7 +2591,7 @@ describe('ChatManager — per-session message queue', () => {
 
   it('three concurrent sends drain in FIFO order', async () => {
     const session = await manager.createSession({ gezelId: 'ada' });
-    mock.script('r1', 'NONE', 'r2', 'NONE', 'r3', 'NONE');
+    mock.script('r1', 'r2', 'r3');
     mock.scriptSendDelay(30);
     mock.scriptSendDelay(30);
     mock.scriptSendDelay(30);
@@ -2575,7 +2609,7 @@ describe('ChatManager — per-session message queue', () => {
 
   it('user_message event for B fires only after A completes', async () => {
     const session = await manager.createSession({ gezelId: 'ada' });
-    mock.script('reply-A', 'NONE', 'reply-B', 'NONE');
+    mock.script('reply-A', 'reply-B');
     mock.scriptSendDelay(80);
 
     const recorded: string[] = [];
@@ -2604,7 +2638,7 @@ describe('ChatManager — per-session message queue', () => {
 
   it('archiving a session rejects messages queued against it', async () => {
     const session = await manager.createSession({ gezelId: 'ada' });
-    mock.script('reply-A', 'NONE');
+    mock.script('reply-A');
     mock.scriptSendDelay(100);
 
     const pA = manager.send(session.id, 'userA');
@@ -2623,11 +2657,9 @@ describe('ChatManager — per-session message queue', () => {
 
   it('consecutive coalescable sends merge into one turn instead of queuing separately', async () => {
     const session = await manager.createSession({ gezelId: 'ada' });
-    // Scripts for: A's turn, A's memory extract, merged-BCD turn, its
-    // memory extract. Four total. If merging DIDN'T happen, we'd need
-    // 8 scripts (one turn per queued message + memory extract each) —
-    // the `userTurns.length === 2` assertion later catches the miss.
-    mock.script('reply-A', 'NONE', 'merged-reply', 'NONE');
+    // Scripts for A's turn and the merged BCD turn. If merging did not
+    // happen, the transcript assertion below would expose the extra turns.
+    mock.script('reply-A', 'merged-reply');
     mock.scriptSendDelay(100);
     // First send is a plain (non-coalescable) user message that
     // holds the inflight slot.
@@ -2671,7 +2703,7 @@ describe('ChatManager — per-session message queue', () => {
 
   it('does NOT coalesce across a user message (non-coalescable breaks the chain)', async () => {
     const session = await manager.createSession({ gezelId: 'ada' });
-    mock.script('reply-1', 'NONE', 'reply-2', 'NONE', 'reply-3', 'NONE');
+    mock.script('reply-1', 'reply-2', 'reply-3', 'reply-4');
     mock.scriptSendDelay(40);
     mock.scriptSendDelay(40);
     mock.scriptSendDelay(40);
@@ -2694,7 +2726,7 @@ describe('ChatManager — per-session message queue', () => {
 
   it('does NOT coalesce a gezel→gezel handoff into a user follow-up', async () => {
     const session = await manager.createSession({ gezelId: 'ada' });
-    mock.script('r1', 'NONE', 'r2', 'NONE', 'r3', 'NONE');
+    mock.script('r1', 'r2', 'r3');
     mock.scriptSendDelay(40);
     mock.scriptSendDelay(40);
     mock.scriptSendDelay(40);
@@ -2721,7 +2753,7 @@ describe('ChatManager — per-session message queue', () => {
     // exceeded `sendWithBusyRetry`'s old 20s backoff ceiling and
     // dropped B on the floor.
     const session = await manager.createSession({ gezelId: 'ada' });
-    mock.script('slow-reply-A', 'NONE', 'reply-B', 'NONE');
+    mock.script('slow-reply-A', 'reply-B');
     mock.scriptSendDelay(250);
 
     const pA = manager.send(session.id, 'userA');
@@ -2730,6 +2762,20 @@ describe('ChatManager — per-session message queue', () => {
     const [mA, mB] = await Promise.all([pA, pB]);
     expect(mA.content).toBe('slow-reply-A');
     expect(mB.content).toBe('reply-B');
+  });
+});
+
+describe('ChatManager — one-shot attribution', () => {
+  it('labels service-owned work as System when no gezel or subsystem actor is supplied', async () => {
+    mock.script('done');
+
+    await manager.oneShotCompletion('maintenance', 1_000, { jobLabel: 'maintenance' });
+
+    const send = mock.calls.find((call) => call.kind === 'send');
+    expect(send?.sendOpts?.queue).toMatchObject({
+      actorLabel: 'System',
+      job: 'maintenance',
+    });
   });
 });
 
@@ -4830,6 +4876,15 @@ describe('describeDelegateFailureForAsker', () => {
     expect(msg).toMatch(/couldn't complete the request/i);
     // The whole point: the asker is told NOT to touch its own args.
     expect(msg).toMatch(/don't change your own tool arguments/i);
+  });
+
+  it('uses the target gezel assigned pronouns in the asker-facing summary', () => {
+    const female = describeDelegateFailureForAsker('Lyudmyla', RAMBLE_ABORT, 'female');
+    expect(female).toContain('she spent her whole turn');
+    expect(female).not.toContain('they spent their whole turn');
+
+    const male = describeDelegateFailureForAsker('Adam', RAMBLE_ABORT, 'male');
+    expect(male).toContain('he spent his whole turn');
   });
 
   it('never forwards the delegate-facing second-person remediation to the asker', () => {

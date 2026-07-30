@@ -425,10 +425,16 @@ export function ToolsetsEditor({ scope, subject, hint }: ToolsetsEditorProps) {
     <div className="gezel-toolsets-panel">
       <div className="gezel-toolsets-header">
         <span className="muted small">
-          <i>Toolsets</i> for {subject}
+          {scope.kind === 'project' ? (
+            'Additional project toolsets'
+          ) : (
+            <>
+              <i>Toolsets</i> for {subject}
+            </>
+          )}
           {installed.length > 0 ? ` (${installed.length})` : ''}
         </span>
-        <button type="button" className="home-link" onClick={() => setShowPicker(true)}>
+        <button type="button" onClick={() => setShowPicker(true)}>
           + Add toolset
         </button>
       </div>

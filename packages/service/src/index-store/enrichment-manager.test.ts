@@ -1,3 +1,4 @@
+import type { GezelDetail } from '@bendyline/gezel';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ChatManager } from '../chat/manager.js';
 import type { Store } from '../fs/store.js';
@@ -5,6 +6,14 @@ import { SystemIdleState } from '../system/idle-state.js';
 import type { ContentIndex } from './content-index.js';
 import { buildEnrichDeps } from './enrich.js';
 import { IndexEnrichmentManager } from './enrichment-manager.js';
+
+const BOOK = {
+  id: 'noor',
+  name: 'Noor',
+  role: 'Boekwachter',
+  about: 'Keep summaries concise.',
+  parsed: { frontmatter: { name: 'Noor' } },
+} as unknown as GezelDetail;
 
 function make(opts: { active: boolean }) {
   const enrich = vi.fn().mockResolvedValue({ files: 1, summarized: 1, embedded: 1 });
@@ -18,7 +27,13 @@ function make(opts: { active: boolean }) {
   } as unknown as Store;
   const contentIndex = { enrich } as unknown as ContentIndex;
   const idle = new SystemIdleState();
-  const mgr = new IndexEnrichmentManager({ store, chat, contentIndex, idle });
+  const mgr = new IndexEnrichmentManager({
+    store,
+    chat,
+    contentIndex,
+    idle,
+    resolveBoekwachter: async () => BOOK,
+  });
   return { mgr, enrich, idle };
 }
 
@@ -33,6 +48,16 @@ describe('IndexEnrichmentManager idle gating', () => {
     const { mgr, enrich } = make({ active: false });
     await mgr.tick();
     expect(enrich).toHaveBeenCalledTimes(1);
+  });
+
+  it('skips AI indexing when the project crew has no Boekwachter', async () => {
+    const { mgr, enrich } = make({ active: false });
+    const withoutRole = mgr as unknown as {
+      resolveBoekwachter: (projectId: string) => Promise<GezelDetail | null>;
+    };
+    withoutRole.resolveBoekwachter = async () => null;
+    await mgr.tick();
+    expect(enrich).not.toHaveBeenCalled();
   });
 
   it('waits for OS idle to exceed the threshold', async () => {
@@ -80,6 +105,7 @@ describe('review tier scheduling', () => {
       idle,
       ...(opts.night ? { isNightShiftActive: () => true } : {}),
       ...(opts.paused ? { isPaused: () => true } : {}),
+      resolveBoekwachter: async () => BOOK,
     });
     return { mgr, enrich, enrichAreas, review };
   }
@@ -158,7 +184,28 @@ describe('buildEnrichDeps enricher override', () => {
     expect(oneShotCompletion).toHaveBeenCalledWith(
       'p',
       expect.any(Number),
-      expect.objectContaining({ providerName: 'mlx', model: 'big-executor' }),
+      expect.objectContaining({
+        providerName: 'mlx',
+        model: 'big-executor',
+        actorLabel: 'Boekwachter',
+      }),
+    );
+  });
+
+  it('runs one-shots as the project Boekwachter persona', async () => {
+    delete process.env.GEZEL_ENRICH_MODEL;
+    delete process.env.GEZEL_ENRICH_PROVIDER;
+    const { chat, store, oneShotCompletion } = makeDepsFixture();
+    const deps = await buildEnrichDeps(store, chat, { boekwachter: BOOK });
+    await deps.summarize('p');
+    expect(oneShotCompletion).toHaveBeenCalledWith(
+      'p',
+      expect.any(Number),
+      expect.objectContaining({
+        gezelId: 'noor',
+        useGezelPersona: true,
+        actorLabel: 'Noor',
+      }),
     );
   });
 
@@ -225,6 +272,7 @@ describe('buildEnrichDeps enricher override', () => {
       expect.objectContaining({
         providerName: 'mlx',
         model: 'big-executor',
+        actorLabel: 'Boekwachter',
         jobLabel: 'index review',
       }),
     );

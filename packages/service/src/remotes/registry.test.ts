@@ -16,7 +16,7 @@ afterEach(async () => {
 function sample(id: string): PairedRemote {
   return {
     remoteId: id,
-    baseUrl: `https://host-${id}:43936`,
+    baseUrl: `https://host-${id}:6229`,
     displayName: `Server ${id}`,
     token: `tok-${id}`,
     pinnedIdentityKey: `KEY-${id}`,
@@ -31,7 +31,7 @@ describe('RemotesRegistry', () => {
     const reg = await createRemotesRegistry({ home });
     await reg.add(sample('a'));
     await reg.add(sample('b'));
-    expect(reg.get('a')?.baseUrl).toBe('https://host-a:43936');
+    expect(reg.get('a')?.baseUrl).toBe('https://host-a:6229');
     expect(
       reg
         .list()

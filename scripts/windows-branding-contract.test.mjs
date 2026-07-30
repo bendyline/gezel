@@ -48,6 +48,26 @@ test('Windows publisher identity is consistent across every surface', async () =
   );
 });
 
+test('the Windows installer uses the product name in the UAC prompt', async () => {
+  const [builder, appPackage] = await Promise.all([
+    readFile(join(root, 'packages', 'app', 'electron-builder.yml'), 'utf8'),
+    readFile(join(root, 'packages', 'app', 'package.json'), 'utf8'),
+  ]);
+
+  const productName = builder.match(/^productName:\s*(.+)$/m)?.[1]?.trim();
+  const description = JSON.parse(appPackage).description;
+
+  // electron-builder stamps the NSIS installer's FileDescription from the
+  // application package description. Windows presents FileDescription as the
+  // UAC "Program name", so marketing copy here becomes a misleading title.
+  assert.equal(
+    description,
+    productName,
+    'packages/app description becomes the installer FileDescription and must ' +
+      'stay equal to productName so UAC identifies the installer as Gezel',
+  );
+});
+
 test('the installer records InstallLocation for Add/Remove Programs', async () => {
   const hook = await readFile(join(root, 'packages', 'app', 'installer', 'nsis-hooks.nsh'), 'utf8');
 

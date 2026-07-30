@@ -2043,6 +2043,59 @@ export function pronounsForGender(gender: GezelGender): string {
 }
 
 /**
+ * Grammatical forms for referring to a gezel in prose.
+ *
+ * `gender` is optional because legacy gezels predate the persisted field.
+ * Unknown assignments fall back to neutral they/them rather than guessing
+ * from the gezel's name.
+ */
+export interface GezelPronounForms {
+  subject: 'he' | 'she' | 'they';
+  object: 'him' | 'her' | 'them';
+  possessiveAdjective: 'his' | 'her' | 'their';
+  possessive: 'his' | 'hers' | 'theirs';
+  reflexive: 'himself' | 'herself' | 'themselves';
+  presentBe: 'is' | 'are';
+  presentHave: 'has' | 'have';
+}
+
+export function pronounFormsForGender(gender?: GezelGender): GezelPronounForms {
+  switch (gender) {
+    case 'male':
+      return {
+        subject: 'he',
+        object: 'him',
+        possessiveAdjective: 'his',
+        possessive: 'his',
+        reflexive: 'himself',
+        presentBe: 'is',
+        presentHave: 'has',
+      };
+    case 'female':
+      return {
+        subject: 'she',
+        object: 'her',
+        possessiveAdjective: 'her',
+        possessive: 'hers',
+        reflexive: 'herself',
+        presentBe: 'is',
+        presentHave: 'has',
+      };
+    case 'non-binary':
+    case undefined:
+      return {
+        subject: 'they',
+        object: 'them',
+        possessiveAdjective: 'their',
+        possessive: 'theirs',
+        reflexive: 'themselves',
+        presentBe: 'are',
+        presentHave: 'have',
+      };
+  }
+}
+
+/**
  * Pick a random first name AND the gender that goes with it. Names are
  * drawn 50/50 from the gendered pools; then a flat NON_BINARY_RATE share
  * of generated gezels has their gender flipped to non-binary (the name

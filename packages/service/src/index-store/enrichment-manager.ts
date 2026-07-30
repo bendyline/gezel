@@ -1,7 +1,8 @@
-import { createLogger } from '@bendyline/gezel';
+import { type GezelDetail, createLogger } from '@bendyline/gezel';
 import type { ChatEventBus } from '../chat/events.js';
 import type { ChatManager } from '../chat/manager.js';
 import type { Store } from '../fs/store.js';
+import { resolveProjectBoekwachter } from '../gezels/autonomous-roles.js';
 import type { SystemIdleState } from '../system/idle-state.js';
 import type { ContentIndex } from './content-index.js';
 import { type EnrichDeps, buildEnrichDeps } from './enrich.js';
@@ -54,6 +55,8 @@ export interface IndexEnrichmentManagerOptions {
   isPaused?: () => Promise<boolean> | boolean;
   /** Chat event bus for `index_progress` heartbeats (optional in tests). */
   events?: Pick<ChatEventBus, 'publishGlobalEvent'>;
+  /** Test seam; production resolves the role from each project's roster. */
+  resolveBoekwachter?: (projectId: string) => Promise<GezelDetail | null>;
 }
 
 export class IndexEnrichmentManager {
@@ -67,6 +70,7 @@ export class IndexEnrichmentManager {
   private readonly isNightShiftActive: () => boolean;
   private readonly isPaused: () => Promise<boolean> | boolean;
   private readonly events: Pick<ChatEventBus, 'publishGlobalEvent'> | undefined;
+  private readonly resolveBoekwachter: (projectId: string) => Promise<GezelDetail | null>;
 
   private startupTimer: ReturnType<typeof setTimeout> | null = null;
   private tickTimer: ReturnType<typeof setInterval> | null = null;
@@ -83,6 +87,9 @@ export class IndexEnrichmentManager {
     this.isNightShiftActive = opts.isNightShiftActive ?? (() => false);
     this.isPaused = opts.isPaused ?? (() => false);
     this.events = opts.events;
+    this.resolveBoekwachter =
+      opts.resolveBoekwachter ??
+      ((projectId) => resolveProjectBoekwachter(this.store, projectId).catch(() => null));
   }
 
   start(): void {
@@ -114,17 +121,18 @@ export class IndexEnrichmentManager {
       const night = this.isNightShiftActive();
       const batch = night ? NIGHT_BATCH : BATCH;
       const deadline = night ? Date.now() + NIGHT_TICK_BUDGET_MS : null;
-      const deps = await this.buildDeps(night);
-      // One rubric resolve per tick (config + ~/.gezel/rubrics reads), threaded
-      // into every project's review batch. Empty when reviews are disabled or
-      // no local model is configured — the review tier then no-ops.
-      const rubrics: Map<string, ResolvedRubric> = deps.model
-        ? await resolveRubrics(this.store).catch(() => new Map<string, ResolvedRubric>())
-        : new Map<string, ResolvedRubric>();
       const projects = await this.store.listProjects().catch(() => []);
       let didWork = false;
       for (const p of projects) {
+        // Roster presence is the explicit opt-in for AI indexing. The cheap
+        // WorkspaceIndexManager scan runs independently for every project.
+        const boekwachter = await this.resolveBoekwachter(p.id);
+        if (!boekwachter) continue;
         if (this.chat.isProjectActive(p.id)) continue;
+        const deps = await this.buildDeps(night, boekwachter);
+        const rubrics: Map<string, ResolvedRubric> = deps.model
+          ? await resolveRubrics(this.store).catch(() => new Map<string, ResolvedRubric>())
+          : new Map<string, ResolvedRubric>();
         let drained = false;
         for (;;) {
           if (this.chat.isAnyActive()) return; // yield to live work immediately
@@ -141,6 +149,8 @@ export class IndexEnrichmentManager {
               state: 'progress',
               projectId: p.id,
               detail: `${files} files enriched`,
+              gezelId: boekwachter.id,
+              gezelName: boekwachter.name,
             });
           }
           if (files === 0) {
@@ -165,6 +175,8 @@ export class IndexEnrichmentManager {
               state: 'ended',
               projectId: p.id,
               detail: `${areas.areasUpdated} folder summaries${areas.architectureUpdated ? ' + architecture note' : ''}`,
+              gezelId: boekwachter.id,
+              gezelName: boekwachter.name,
             });
           }
           // Review tier — strictly behind summaries + areas: the summary/
@@ -186,6 +198,8 @@ export class IndexEnrichmentManager {
                   state: 'progress',
                   projectId: p.id,
                   detail: `${files} files reviewed`,
+                  gezelId: boekwachter.id,
+                  gezelName: boekwachter.name,
                 });
               }
               if (files === 0) break;
@@ -214,8 +228,12 @@ export class IndexEnrichmentManager {
   }
 
   /** Resolve the configured summarizer (if any) + the always-local embedder. */
-  private async buildDeps(nightShift: boolean): Promise<EnrichDeps> {
-    return buildEnrichDeps(this.store, this.chat, { nightShift, ambient: true });
+  private async buildDeps(nightShift: boolean, boekwachter: GezelDetail): Promise<EnrichDeps> {
+    return buildEnrichDeps(this.store, this.chat, {
+      nightShift,
+      ambient: true,
+      boekwachter,
+    });
   }
 }
 

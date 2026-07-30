@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../api.js', () => ({
   api: {
-    getBaseUrl: () => 'http://127.0.0.1:43935',
+    getBaseUrl: () => 'http://127.0.0.1:6228',
     authHeader: () => ({ Authorization: 'Bearer desktop-token' }),
   },
 }));
@@ -40,7 +40,7 @@ describe('GrantConsentDialog', () => {
     render(<GrantConsentDialog />);
     expect(await screen.findByText('Visual Studio Code wants to connect')).toBeInTheDocument();
     expect(
-      screen.getByText(/Product access can read and change your gezels, projects, settings/),
+      screen.getByText(/Product access can read and change your gezellen, projects, settings/),
     ).toBeInTheDocument();
     expect(screen.getByText(/started this request from Visual Studio Code/)).toBeInTheDocument();
     expect(screen.getByLabelText('Connection code')).toBeInTheDocument();
@@ -71,7 +71,7 @@ describe('GrantConsentDialog', () => {
     render(<GrantConsentDialog />);
     expect(await screen.findByText('Gezel CLI wants to connect')).toBeInTheDocument();
     expect(
-      screen.getByText(/CLI access can read and change your gezels, projects, settings, models/),
+      screen.getByText(/CLI access can read and change your gezellen, projects, settings, models/),
     ).toBeInTheDocument();
     expect(screen.getByText(/Approve only if you started this request/)).toBeInTheDocument();
     const input = screen.getByLabelText('Connection code');

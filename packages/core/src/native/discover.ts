@@ -34,7 +34,7 @@
 
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { detectLlamaBackend } from './llama-backend.js';
+import { detectLlamaBackend, resolveAvailableLlamaBinary } from './llama-backend.js';
 import type { DetectInput, GpuVendorHint, LlamaBackend } from './llama-backend.js';
 import { LLAMA_ENGINE_VERSION } from './llama-engine-version.js';
 import { resolvePlatformKey } from './platform-key.js';
@@ -199,31 +199,41 @@ export function discoverNativeBinaries(input: DiscoverInput): DiscoverResult {
     if (!dir) {
       binaries.push({ name: 'llama-server', source: 'no-native-bin-dir', variant: probe.backend });
     } else {
-      const variantSubdir = `${platformKey}-${probe.backend}`;
-      const variantBin = resolveNativeBinaryUnder(
-        dir,
-        'llama-server',
-        variantSubdir,
-        platform,
-        fileExists,
+      const allowFallbacks =
+        input.llamaCppBackendOverride === undefined || input.llamaCppBackendOverride === 'auto';
+      const resolved = resolveAvailableLlamaBinary(
+        probe.backend,
+        (backend) =>
+          resolveNativeBinaryUnder(
+            dir,
+            'llama-server',
+            `${platformKey}-${backend}`,
+            platform,
+            fileExists,
+          ) ??
+          // Variant-less fallback covers Mac's single Metal build and
+          // native trees staged before multi-variant packaging.
+          resolveNativeBinaryUnder(dir, 'llama-server', platformKey, platform, fileExists),
+        allowFallbacks,
       );
-      // Variant-less fallback only on Mac (single Metal build) — the
-      // supervisor's native-bin.ts does the same fallthrough; mirror
-      // it here.
-      const fallbackBin =
-        variantBin ??
-        resolveNativeBinaryUnder(dir, 'llama-server', platformKey, platform, fileExists);
-      if (fallbackBin) {
-        process.env.GEZEL_LLAMA_SERVER_BIN = fallbackBin;
-        process.env.GEZEL_LLAMA_SERVER_BACKEND = probe.backend;
+      if (resolved) {
+        process.env.GEZEL_LLAMA_SERVER_BIN = resolved.path;
+        process.env.GEZEL_LLAMA_SERVER_BACKEND = resolved.backend;
+        if (resolved.fallbackFrom) {
+          result.llamaBackend.backend = resolved.backend;
+          result.llamaBackend.reason = `${probe.reason}; no bundled ${resolved.fallbackFrom} binary, using ${resolved.backend}`;
+          log?.info?.(
+            `[native] no bundled llama-server for ${resolved.fallbackFrom}; using ${resolved.backend} fallback: ${resolved.path}`,
+          );
+        }
         binaries.push({
           name: 'llama-server',
           source: 'discovered',
-          path: fallbackBin,
-          variant: probe.backend,
+          path: resolved.path,
+          variant: resolved.backend,
         });
         log?.info?.(
-          `[native] discovered llama-server (${probe.backend}${probe.cached ? ', cached' : ''}): ${fallbackBin}`,
+          `[native] discovered llama-server (${resolved.backend}${probe.cached ? ', cached' : ''}): ${resolved.path}`,
         );
       } else {
         binaries.push({ name: 'llama-server', source: 'not-found', variant: probe.backend });

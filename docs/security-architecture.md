@@ -293,7 +293,9 @@ per-run redaction set and never enters the script's address space).
 **Path & cross-tenant safety.** Workspace/artifact/document writes go through `resolveInside`
 (§10); reads now do too. Task refs (`splitRef`) validate the `projectId` segment so a crafted
 `../`-laden ref can't traverse the projects root. `http.authed` uses `redirect:'manual'` so a
-30x can't bounce a credential to another origin (per-credential host binding is **DEFERRED**).
+30x can't bounce a credential to another origin. Built-in credentials are pinned to their
+service-owned HTTPS origins, webhook credentials follow the configured webhook URL's exact
+origin, and toolset credentials retain explicit project-scoped origin bindings.
 
 ---
 

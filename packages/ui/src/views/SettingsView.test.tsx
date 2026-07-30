@@ -51,6 +51,7 @@ describe('SettingsView', () => {
     vi.mocked(api.getConfig).mockResolvedValue({
       provider: 'mock',
       meesterGezelId: 'gz-meester',
+      boekwachterGezelId: 'noor',
       hasGithubToken: true,
     } as never);
     vi.mocked(api.health).mockResolvedValue({
@@ -59,7 +60,10 @@ describe('SettingsView', () => {
       platform: 'linux',
     } as never);
     vi.mocked(api.listGezels).mockResolvedValue({
-      gezels: [{ id: 'gz-meester', name: 'Brigitte' }],
+      gezels: [
+        { id: 'gz-meester', name: 'Brigitte' },
+        { id: 'noor', name: 'Noor', role: 'Boekwachter' },
+      ],
     } as never);
     vi.mocked(api.getUsage).mockResolvedValue({ providers: {} } as never);
     vi.mocked(api.getQueueStatus).mockResolvedValue({ queues: [] } as never);
@@ -237,10 +241,20 @@ describe('SettingsView', () => {
     expect(screen.getByTestId('model-picker-openai')).toBeInTheDocument();
   });
 
-  it('lists gezels for the Meester picker', async () => {
+  it('lists gezellen for the Meester picker', async () => {
     render(<SettingsView />);
     await waitFor(() => {
       expect(api.listGezels).toHaveBeenCalled();
     });
+  });
+
+  it('shows the designated Boekwachter and explains project-level opt-in', async () => {
+    render(<SettingsView />);
+    fireEvent.click(await screen.findByTestId('settings-nav-team'));
+
+    expect(await screen.findByTestId('boekwachter-settings')).toHaveTextContent(
+      'A project with a Boekwachter on its assigned crew',
+    );
+    expect(screen.getByTestId('boekwachter-settings')).toHaveTextContent('Noor');
   });
 });

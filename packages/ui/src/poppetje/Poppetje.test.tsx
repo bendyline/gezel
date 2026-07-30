@@ -78,7 +78,7 @@ describe('Poppetje', () => {
     expect(seed1).not.toBe(seed2);
   });
 
-  it('varies wood-fiber width and waviness between gezels', () => {
+  it('varies wood-fiber width and waviness between gezellen', () => {
     const alpha = render(<Poppetje poppetje={poppetjeFromSeed(7, { key: 'alpha', name: 'A' })} />);
     const beta = render(<Poppetje poppetje={poppetjeFromSeed(7, { key: 'beta', name: 'B' })} />);
     const frequencies = (container: HTMLElement) =>
@@ -219,7 +219,7 @@ describe('Poppetje diversity rendering', () => {
     );
   });
 
-  it('gives two gezels with identical catalog slots different faces', () => {
+  it('gives two gezellen with identical catalog slots different faces', () => {
     // Same struct, different key: the key hash drives eye spacing, mouth
     // width, and blush, so visually the two are still individuals. Grain
     // is disabled to prove the difference is face geometry, not noise.

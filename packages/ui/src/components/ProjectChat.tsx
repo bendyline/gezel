@@ -1,13 +1,10 @@
-import type { GezelSummary, ProjectDetail, Task } from '@bendyline/gezel';
-import { displayName } from '@bendyline/gezel';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import type { GezelSummary, ProjectDetail } from '@bendyline/gezel';
+import { displayName, pronounFormsForGender } from '@bendyline/gezel';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
-import { crewLeadLabelLower } from '../labels.js';
-import { DropdownChevron, Popover } from '../primitives/index.js';
-import { ChatComposer, queueComposerPrefill } from './ChatComposer.js';
+import { ChatComposer } from './ChatComposer.js';
 import { ChatReferences } from './ChatReferences.js';
 import { FolderTreeSwitcher } from './FolderTreeSwitcher.js';
-import { GezelIcon } from './GezelIcon.js';
 import { ProjectTimeline } from './ProjectTimeline.js';
 import { SessionSwitcher } from './SessionSwitcher.js';
 import { TerminalComposer, queueTerminalCommand } from './TerminalComposer.js';
@@ -15,14 +12,10 @@ import { pickChatPlaceholder } from './chat-placeholder.js';
 import { useRoleBasedNameOnlyMode } from './useRoleBasedNameOnlyMode.js';
 
 /**
- * Per-project chat with the people doing the work. The roster is assembled
- * live: voorman first (⭐), then everyone on the project's explicit
- * `gezelIds` roster (auto-populated as gezels open sessions, are messaged,
- * or are assigned to tasks), then — for back-compat with projects on disk
- * before the explicit roster existed — task/step assignees. Everyone else
- * is reachable via the "More gezels…" dropdown so the user can still pull
- * an outsider in on an ad-hoc basis. The selected gezel scopes the
- * composer; the timeline shows ALL chats in the project interleaved.
+ * Per-project chat with the people doing the work. The selected gezel scopes
+ * the composer; the timeline shows ALL chats in the project interleaved.
+ * Project membership is summarized in Project Settings, while the To-line
+ * picker owns recipient changes and multi-gezel fan-out here.
  *
  * `compact` enables narrow-form-factor mode (VS Code chat sidebar, mobile).
  * Suppresses the right-rail commands / references panel — see
@@ -36,12 +29,8 @@ export function ProjectChat({
   project: ProjectDetail;
   compact?: boolean;
 }) {
-  const projectChatRef = useRef<HTMLDivElement>(null);
-  const rosterRef = useRef<HTMLDivElement>(null);
   const [gezels, setGezels] = useState<GezelSummary[]>([]);
-  const [tasks, setTasks] = useState<Task[]>([]);
   const [selectedId, setSelectedId] = useState<string>('');
-  const roleBasedNameOnlyMode = useRoleBasedNameOnlyMode();
 
   // Refetch the global gezel list whenever the project — or its
   // lead/roster — changes. `ProjectChat` stays MOUNTED across project
@@ -70,16 +59,9 @@ export function ProjectChat({
     setSelectedId('');
   }, [project.id]);
 
-  useEffect(() => {
-    api
-      .listProjectTasks(project.id)
-      .then((r) => setTasks(r.tasks))
-      .catch(() => setTasks([]));
-  }, [project.id]);
-
   // Whose conversation was live most recently in this project. The default
-  // chip lands there so every surface agrees on arrival: the timeline's most
-  // recent thread, the thread picker, the TO: line, and the composer
+  // recipient lands there so every surface agrees on arrival: the timeline's
+  // most recent thread, the thread picker, the To line, and the composer
   // placeholder all point at the same gezel. A project with no threads yet
   // falls back to the voorman — the natural first conversation.
   // `undefined` = probe in flight (hold the default), `null` = no threads.
@@ -102,222 +84,41 @@ export function ProjectChat({
     };
   }, [project.id]);
 
-  // Collect gezel IDs that appear as task-level or step-level assignees.
-  // Strictly redundant with `project.gezelIds` for new projects (the
-  // auto-add hooks fold task assignees into the roster), but kept as a
-  // fallback so projects written before the explicit roster existed
-  // still show their team without waiting for the next session/message
-  // to repopulate `gezelIds`.
-  const taskAssigneeIds = useMemo(() => {
-    const ids = new Set<string>();
-    for (const t of tasks) {
-      if (t.assignee.kind === 'gezel') ids.add(t.assignee.gezelId);
-      for (const s of t.craftbook?.steps ?? []) {
-        if (s.assignee?.kind === 'gezel') ids.add(s.assignee.gezelId);
-      }
-    }
-    return ids;
-  }, [tasks]);
-
-  // Primary roster = voorman + project.gezelIds + task/step assignees,
-  // in that order (deduped). Voorman keeps the ⭐ tag; everyone else
-  // renders as a plain chip — the explicit roster doesn't distinguish
-  // "joined via task" from "joined via session", and surfacing that
-  // detail in the chip is more noise than signal.
-  const primaryRoster = useMemo(() => {
-    const seen = new Set<string>();
-    const out: Array<{ gezel: GezelSummary; tag: 'voorman' | 'member' }> = [];
-    if (project.voormanGezelId) {
-      const voorman = gezels.find((g) => g.id === project.voormanGezelId);
-      if (voorman) {
-        out.push({ gezel: voorman, tag: 'voorman' });
-        seen.add(voorman.id);
-      }
-    }
-    for (const id of project.gezelIds ?? []) {
-      if (seen.has(id)) continue;
-      const g = gezels.find((gg) => gg.id === id);
-      if (g) {
-        out.push({ gezel: g, tag: 'member' });
-        seen.add(id);
-      }
-    }
-    for (const id of taskAssigneeIds) {
-      if (seen.has(id)) continue;
-      const g = gezels.find((gg) => gg.id === id);
-      if (g) {
-        out.push({ gezel: g, tag: 'member' });
-        seen.add(id);
-      }
-    }
-    return out;
-  }, [gezels, project.voormanGezelId, project.gezelIds, taskAssigneeIds]);
-
-  // Everyone else — shown in a secondary dropdown so the user can still
-  // pull in the Meester or any other gezel on an ad-hoc basis.
-  const otherGezels = useMemo(() => {
-    const primaryIds = new Set(primaryRoster.map((r) => r.gezel.id));
-    return gezels.filter((g) => !primaryIds.has(g.id));
-  }, [gezels, primaryRoster]);
-
-  // Solo projects (games, the chat room) run ONE gezel — the ambachtsman/
-  // lead does everything. Collapse the crew picker to that single lead:
-  // the voorman if set, else the first roster member, else the first
-  // available gezel. No chip row, no "More gezels…" dropdown.
-  const isSolo = project.mode === 'solo';
-  const soloLead = useMemo(() => {
-    if (!isSolo) return null;
-    return (
-      gezels.find((g) => g.id === project.voormanGezelId) ??
-      primaryRoster[0]?.gezel ??
-      gezels[0] ??
-      null
-    );
-  }, [isSolo, gezels, project.voormanGezelId, primaryRoster]);
-  const soloLeadName = soloLead
-    ? displayName(
-        { name: soloLead.name, roleBasedName: soloLead.roleBasedName },
-        roleBasedNameOnlyMode,
-      )
-    : '';
-
-  // Default selection: solo → the single lead; crew → the gezel holding the
-  // project's most recent thread → voorman → first assignee → first gezel
-  // overall. Crew mode waits for the recent-thread probe so the default
-  // doesn't flash the voorman and then contradict the timeline.
+  // Pick only the initial To-line target here. After that, the To-line picker
+  // owns every recipient change. Prefer the most recent live conversation,
+  // then the project lead, then the first explicitly assigned gezel, and
+  // finally the first available gezel.
   useEffect(() => {
     if (selectedId) return;
-    if (isSolo) {
-      if (soloLead?.id) setSelectedId(soloLead.id);
-      return;
-    }
     if (lastActiveGezelId === undefined) return;
     const lastActive =
       lastActiveGezelId && gezels.some((g) => g.id === lastActiveGezelId) ? lastActiveGezelId : '';
-    const next = lastActive || primaryRoster[0]?.gezel.id || otherGezels[0]?.id || '';
+    const lead = gezels.find((gezel) => gezel.id === project.voormanGezelId)?.id ?? '';
+    const assigned =
+      (project.gezelIds ?? [])
+        .map((id) => gezels.find((gezel) => gezel.id === id)?.id)
+        .find(Boolean) ?? '';
+    const next = lastActive || lead || assigned || gezels[0]?.id || '';
     if (next) setSelectedId(next);
-  }, [isSolo, soloLead, primaryRoster, otherGezels, selectedId, lastActiveGezelId, gezels]);
+  }, [selectedId, lastActiveGezelId, gezels, project.voormanGezelId, project.gezelIds]);
 
   const selected = gezels.find((g) => g.id === selectedId);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies(gezels.length): the roster refs do not exist during the empty loading render; a population-count change is the deliberate re-measure trigger.
-  useLayoutEffect(() => {
-    const projectChat = projectChatRef.current;
-    const roster = rosterRef.current;
-    if (!projectChat || !roster) return;
-
-    const syncGripOffset = () => {
-      const rowGap = Number.parseFloat(getComputedStyle(projectChat).rowGap) || 0;
-      const rosterBand = roster.getBoundingClientRect().height + rowGap;
-      projectChat.style.setProperty('--project-chat-grip-offset', `${rosterBand / 2}px`);
-    };
-
-    syncGripOffset();
-    if (typeof ResizeObserver === 'undefined') return;
-
-    const observer = new ResizeObserver(syncGripOffset);
-    observer.observe(projectChat);
-    observer.observe(roster);
-    return () => observer.disconnect();
-  }, [gezels.length]);
-
   if (gezels.length === 0) {
     return (
-      <p className="muted">No gezels available to chat with yet. Create one from the Gezels tab.</p>
+      <p className="muted">
+        No gezellen available to chat with yet. Create one from the Gezellen tab.
+      </p>
     );
   }
 
   return (
-    <div ref={projectChatRef} className="project-chat">
-      <div ref={rosterRef} className="project-chat-roster">
-        {isSolo ? (
-          soloLead ? (
-            <button
-              type="button"
-              className="project-chat-chip project-chat-chip-active"
-              onClick={() => setSelectedId(soloLead.id)}
-              title={`${soloLeadName} — the ${crewLeadLabelLower(project)}`}
-            >
-              <GezelIcon
-                svg={soloLead.icon ?? null}
-                poppetje={soloLead.poppetje}
-                iconOverride={soloLead.iconOverride}
-                name={soloLeadName}
-                size={26}
-              />
-              <span className="project-chat-chip-text">
-                <span className="project-chat-chip-name">{soloLeadName}</span>
-                <span className="project-chat-chip-tag">{`⭐ ${crewLeadLabelLower(project)}`}</span>
-              </span>
-            </button>
-          ) : (
-            <p className="muted small" style={{ margin: 0 }}>
-              {`No ${crewLeadLabelLower(project)} yet — create one from the Gezels tab.`}
-            </p>
-          )
-        ) : (
-          <>
-            {primaryRoster.length === 0 ? (
-              <p className="muted small" style={{ margin: 0 }}>
-                {`No ${crewLeadLabelLower(project)} set and no task assignees yet — pick anyone to start a conversation.`}
-              </p>
-            ) : (
-              primaryRoster.map(({ gezel, tag }) => {
-                const active = gezel.id === selectedId;
-                const leadLabel = crewLeadLabelLower(project);
-                const rendered = displayName(
-                  { name: gezel.name, roleBasedName: gezel.roleBasedName },
-                  roleBasedNameOnlyMode,
-                );
-                // Second line of the chip. The lead's standing in the project
-                // outranks their job title — a voorman who is also a Developer
-                // reads as the voorman here, and their role is one hover away
-                // in the title attribute.
-                const subtitle = tag === 'voorman' ? `⭐ ${leadLabel}` : gezel.role;
-                return (
-                  <button
-                    key={gezel.id}
-                    type="button"
-                    className={`project-chat-chip${active ? ' project-chat-chip-active' : ''}`}
-                    onClick={() => setSelectedId(gezel.id)}
-                    title={
-                      tag === 'voorman'
-                        ? `${rendered} — ${leadLabel} of this ${project.mode === 'solo' ? 'job' : 'project'}${gezel.role ? ` · ${gezel.role}` : ''}`
-                        : `${rendered} — on this ${project.mode === 'solo' ? 'job' : 'project'}'s team`
-                    }
-                  >
-                    <GezelIcon
-                      svg={gezel.icon ?? null}
-                      poppetje={gezel.poppetje}
-                      iconOverride={gezel.iconOverride}
-                      name={rendered}
-                      size={26}
-                    />
-                    <span className="project-chat-chip-text">
-                      <span className="project-chat-chip-name">{rendered}</span>
-                      {subtitle && <span className="project-chat-chip-tag">{subtitle}</span>}
-                    </span>
-                  </button>
-                );
-              })
-            )}
-
-            {otherGezels.length > 0 && (
-              <MoreGezels
-                gezels={otherGezels}
-                selectedId={selectedId}
-                roleBasedNameOnlyMode={roleBasedNameOnlyMode}
-                onSelect={setSelectedId}
-              />
-            )}
-          </>
-        )}
-      </div>
-
+    <div className="project-chat">
       {selectedId && selected && (
         <ProjectChatBody
           project={project}
           selectedGezel={selected}
+          recipientGezels={gezels}
           isVoorman={selected.id === project.voormanGezelId}
           onSelectGezel={setSelectedId}
           compact={compact}
@@ -327,149 +128,17 @@ export function ProjectChat({
   );
 }
 
-/**
- * The "More gezels…" key — everyone not on the project's roster, reachable
- * ad hoc. A popover of the same face-bearing chips the roster row uses, not
- * a text `Select`: the old dropdown had to carry its own trigger label as a
- * sentinel option ("More gezels…" listed alongside real people), which read
- * as a selectable gezel. A popover has a trigger that is not an option, so
- * the list is people and nothing else.
- */
-function MoreGezels({
-  gezels,
-  selectedId,
-  roleBasedNameOnlyMode,
-  onSelect,
-}: {
-  gezels: GezelSummary[];
-  selectedId: string;
-  roleBasedNameOnlyMode: boolean;
-  onSelect: (gezelId: string) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState('');
-
-  const named = useMemo(
-    () =>
-      gezels.map((g) => ({
-        gezel: g,
-        rendered: displayName(
-          { name: g.name, roleBasedName: g.roleBasedName },
-          roleBasedNameOnlyMode,
-        ),
-      })),
-    [gezels, roleBasedNameOnlyMode],
-  );
-
-  const active = named.find((n) => n.gezel.id === selectedId) ?? null;
-
-  // Search only earns its space once the list stops being scannable at a
-  // glance; below that it's a box between the user and four faces.
-  const searchable = named.length > 8;
-  const q = query.trim().toLowerCase();
-  const shown =
-    searchable && q
-      ? named.filter(
-          (n) =>
-            n.rendered.toLowerCase().includes(q) || (n.gezel.role ?? '').toLowerCase().includes(q),
-        )
-      : named;
-
-  return (
-    <Popover.Root
-      open={open}
-      onOpenChange={(next) => {
-        setOpen(next);
-        if (!next) setQuery('');
-      }}
-    >
-      <Popover.Trigger asChild>
-        <button
-          type="button"
-          className={
-            active
-              ? 'project-chat-chip project-chat-chip-active project-chat-more-active'
-              : 'project-chat-more'
-          }
-          title={
-            active
-              ? `${active.rendered} — pulled in from outside this project's team`
-              : 'Bring in a gezel from outside this team'
-          }
-        >
-          {active ? (
-            <>
-              <GezelIcon
-                svg={active.gezel.icon ?? null}
-                poppetje={active.gezel.poppetje}
-                iconOverride={active.gezel.iconOverride}
-                name={active.rendered}
-                size={26}
-              />
-              <span className="project-chat-chip-text">
-                <span className="project-chat-chip-name">{active.rendered}</span>
-                {active.gezel.role && (
-                  <span className="project-chat-chip-tag">{active.gezel.role}</span>
-                )}
-              </span>
-            </>
-          ) : (
-            <span>More gezels…</span>
-          )}
-          <DropdownChevron className="project-chat-more-caret" />
-        </button>
-      </Popover.Trigger>
-      <Popover.Content className="project-chat-more-popover" align="start">
-        <span className="project-chat-more-label">Bring someone else in</span>
-        {searchable && (
-          <input
-            className="project-chat-more-search"
-            type="search"
-            value={query}
-            placeholder="Search by name or role"
-            onChange={(e) => setQuery(e.target.value)}
-          />
-        )}
-        <div className="project-chat-more-list">
-          {shown.map(({ gezel, rendered }) => (
-            <button
-              key={gezel.id}
-              type="button"
-              className={`project-chat-chip${gezel.id === selectedId ? ' project-chat-chip-active' : ''}`}
-              onClick={() => {
-                onSelect(gezel.id);
-                setOpen(false);
-              }}
-            >
-              <GezelIcon
-                svg={gezel.icon ?? null}
-                poppetje={gezel.poppetje}
-                iconOverride={gezel.iconOverride}
-                name={rendered}
-                size={26}
-              />
-              <span className="project-chat-chip-text">
-                <span className="project-chat-chip-name">{rendered}</span>
-                {gezel.role && <span className="project-chat-chip-tag">{gezel.role}</span>}
-              </span>
-            </button>
-          ))}
-          {shown.length === 0 && <p className="muted small project-chat-more-empty">No matches.</p>}
-        </div>
-      </Popover.Content>
-    </Popover.Root>
-  );
-}
-
 function ProjectChatBody({
   project,
   selectedGezel,
+  recipientGezels,
   isVoorman,
   onSelectGezel,
   compact,
 }: {
   project: ProjectDetail;
   selectedGezel: GezelSummary;
+  recipientGezels: GezelSummary[];
   isVoorman: boolean;
   onSelectGezel: (gezelId: string) => void;
   compact: boolean;
@@ -499,6 +168,11 @@ function ProjectChatBody({
   // Per the design: this toggle ONLY lives on per-project chat —
   // Meester (HomeView) and per-gezel (GezelChatTab) do not get it.
   const [composeMode, setComposeMode] = useState<'chat' | 'terminal'>('chat');
+  const [chatFocusRequestKey, setChatFocusRequestKey] = useState(0);
+  const switchToChat = useCallback(() => {
+    setChatFocusRequestKey((key) => key + 1);
+    setComposeMode('chat');
+  }, []);
   // Two pieces of state for the terminal pane, separated on purpose:
   //
   //   - `terminalThreadDir` — the folder used for routing. Sent on
@@ -597,11 +271,20 @@ function ProjectChatBody({
       pickChatPlaceholder({
         role: isVoorman ? 'voorman' : 'other',
         gezelName: selectedGezel.name,
+        gezelGender: selectedGezel.gender,
         projectName: project.name,
         fixedFunctionTool: selectedGezel.fixedFunction?.tool,
       }),
-    [isVoorman, selectedGezel.name, project.name, selectedGezel.fixedFunction?.tool],
+    [
+      isVoorman,
+      selectedGezel.name,
+      selectedGezel.gender,
+      project.name,
+      selectedGezel.fixedFunction?.tool,
+    ],
   );
+
+  const selectedGezelPronouns = pronounFormsForGender(selectedGezel.gender);
 
   return (
     <ChatReferences
@@ -643,7 +326,7 @@ function ProjectChatBody({
             emptyPlaceholder={
               isVoorman
                 ? `Talk to ${selectedGezel.name} about running "${project.name}" — planning tasks, delegating, or checking progress.`
-                : `Chat with ${selectedGezel.name} about what they're working on in "${project.name}".`
+                : `Chat with ${selectedGezel.name} about what ${selectedGezelPronouns.subject} ${selectedGezelPronouns.presentBe} working on in "${project.name}".`
             }
           />
           <div className="project-chat-compose-shell">
@@ -659,6 +342,9 @@ function ProjectChatBody({
                   gezelIcon={selectedGezel.icon ?? null}
                   gezelPoppetje={selectedGezel.poppetje}
                   gezelIconOverride={selectedGezel.iconOverride}
+                  recipientGezels={recipientGezels}
+                  onPrimaryRecipientChange={onSelectGezel}
+                  focusRequestKey={chatFocusRequestKey}
                   projectId={project.id}
                   sessionId={sessionId || undefined}
                   onSessionCreated={(sid) => {
@@ -709,36 +395,28 @@ function ProjectChatBody({
                   }
                 />
               ) : (
-                <>
-                  <FolderTreeSwitcher
-                    projectId={project.id}
-                    workingDir={terminalPickerDisplay}
-                    onChangeWorkingDir={pickTerminalFolder}
-                  />
-                  <TerminalComposer
-                    key={`terminal:${project.id}:${terminalMountKey}`}
-                    projectId={project.id}
-                    workingDir={terminalThreadDir}
-                    initialInput={terminalInitialInput}
-                    onSent={(input, result) => {
-                      setTerminalSubmission({
-                        runId: result.runId,
-                        threadId: result.threadId,
-                        input,
-                      });
-                      setTerminalRefreshKey((key) => key + 1);
-                    }}
-                    onChatEscape={(seed) => {
-                      // Queue the seed for the ChatComposer that's
-                      // about to mount, then flip mode. The composer's
-                      // mount-time effect reads `pendingPrefills` for
-                      // this project, populates its editor, and clears
-                      // the entry.
-                      queueComposerPrefill(project.id, seed);
-                      setComposeMode('chat');
-                    }}
-                  />
-                </>
+                <TerminalComposer
+                  key={`terminal:${project.id}:${terminalMountKey}`}
+                  projectId={project.id}
+                  workingDir={terminalThreadDir}
+                  contextRow={
+                    <FolderTreeSwitcher
+                      projectId={project.id}
+                      workingDir={terminalPickerDisplay}
+                      onChangeWorkingDir={pickTerminalFolder}
+                    />
+                  }
+                  initialInput={terminalInitialInput}
+                  onSent={(input, result) => {
+                    setTerminalSubmission({
+                      runId: result.runId,
+                      threadId: result.threadId,
+                      input,
+                    });
+                    setTerminalRefreshKey((key) => key + 1);
+                  }}
+                  onChatEscape={switchToChat}
+                />
               )}
             </div>
             <div className="project-chat-compose-mode-bar">
@@ -749,7 +427,7 @@ function ProjectChatBody({
                   aria-selected={composeMode === 'chat'}
                   aria-label="AI chat"
                   className={composeMode === 'chat' ? 'active' : ''}
-                  onClick={() => setComposeMode('chat')}
+                  onClick={switchToChat}
                   title="AI chat (@-mention to talk to a gezel)"
                 >
                   @
