@@ -123,8 +123,8 @@ test('captures the workshop home at a tall window', async () => {
   console.log('GEZEL_MEASURE_END');
 
   // The chat surface must reach the window bottom (no dead gap under the
-  // composer) — assert chat-rail-main and the composer both land within
-  // ~2px of window.innerHeight.
+  // composer). The rail itself lands flush, while the composer keeps its
+  // deliberate 0.25rem (4px) inset so its rounded lower corners stay visible.
   const railMain = measurements.rects['.home-workshop-conversation .chat-rail-main'] as {
     bottom: number;
   };
@@ -132,7 +132,7 @@ test('captures the workshop home at a tall window', async () => {
     bottom: number;
   };
   expect(Math.abs(railMain.bottom - measurements.innerHeight)).toBeLessThanOrEqual(2);
-  expect(Math.abs(composer.bottom - measurements.innerHeight)).toBeLessThanOrEqual(2);
+  expect(Math.abs(composer.bottom - measurements.innerHeight)).toBeLessThanOrEqual(4);
 
   await page.screenshot({ path: '/tmp/gezel-home-workshop.png', fullPage: false });
 });
