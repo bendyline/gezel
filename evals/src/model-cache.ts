@@ -1,7 +1,8 @@
 import { existsSync, lstatSync, readdirSync, statSync } from 'node:fs';
 import { mkdir, readFile, readdir, rm, symlink } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
+import { chatModelInstallIdentity } from './model-sources.ts';
 import { shutdownTrialDaemon, spawnTrialDaemon } from './spawn.ts';
 
 /**
@@ -174,6 +175,90 @@ export async function isModelInstalled(
 }
 
 /**
+ * Why a present-and-complete install no longer matches the catalog, or
+ * `null` when it does (or when there's nothing to compare against).
+ *
+ * `isModelInstalled` deliberately answers only "is this a complete install"
+ * — the same contract the service-side loaders enforce. That made warm
+ * silently *sticky*: once a model was on disk it was never reconsidered, so
+ * a catalog bump that repointed at new upstream weights left every eval
+ * running the old ones. Wild-caught on 2026-07-29: all six warm llama-cpp
+ * models sat at catalogVersion 1.1.0/1.2.0 against a catalog on
+ * 1.1.2/1.1.4/1.2.1, two of them pointing at repos the catalog had moved off
+ * (`lmstudio-community/Qwen3.6-27B-GGUF` → `unsloth/Qwen3.6-27B-MTP-GGUF`),
+ * and three missing MTP draft weights added since. A whole model-vs-model
+ * sweep would have measured pre-update weights and reported "no regressions".
+ *
+ * Ordered most-precise-first so the logged reason names the real difference.
+ */
+export async function staleInstallReason(opts: {
+  cacheRoot: string;
+  engine: EngineKey;
+  /** Directory id to inspect on disk. */
+  modelId: string;
+  /**
+   * Catalog id whose identity the install must match. Defaults to `modelId`;
+   * pass the current id when inspecting a *historical* directory, whose own
+   * slug is no longer in the catalog index.
+   */
+  expectedId?: string;
+}): Promise<string | null> {
+  // sd-cpp image models aren't in the chat-model index; nothing to check.
+  if (opts.engine === 'sd-cpp') return null;
+  const expected = chatModelInstallIdentity(opts.expectedId ?? opts.modelId, opts.engine);
+  if (!expected) return null;
+
+  const dir = modelDirInHome(opts.cacheRoot, opts.engine, opts.modelId);
+  let installed: {
+    catalogVersion?: string;
+    sha256?: string;
+    huggingfaceRepo?: string;
+    weightsFilename?: string;
+  };
+  try {
+    installed = JSON.parse(await readFile(join(dir, 'manifest.json'), 'utf8'));
+  } catch {
+    // Unreadable manifest is "not installed", not "stale" — let
+    // isModelInstalled reject it and the normal install path rebuild.
+    return null;
+  }
+
+  if (expected.sha256 && installed.sha256 && expected.sha256 !== installed.sha256) {
+    return `weights sha256 ${installed.sha256.slice(0, 12)}… != catalog ${expected.sha256.slice(0, 12)}…`;
+  }
+  if (
+    expected.huggingfaceRepo &&
+    installed.huggingfaceRepo &&
+    expected.huggingfaceRepo !== installed.huggingfaceRepo
+  ) {
+    return `upstream repo moved: ${installed.huggingfaceRepo} -> ${expected.huggingfaceRepo}`;
+  }
+  if (
+    expected.weightsFilename &&
+    installed.weightsFilename &&
+    expected.weightsFilename !== installed.weightsFilename
+  ) {
+    return `weights file ${installed.weightsFilename} != catalog ${expected.weightsFilename}`;
+  }
+  // Compare the draft by BASENAME. The catalog names it by its upstream
+  // repo-relative path (`MTP/mtp-gemma-4-26B-A4B-it-Q4_0.gguf`) but the
+  // install pipeline flattens it into the model dir, so a full-path check
+  // never finds a correctly-installed draft — and would report a
+  // just-downloaded model stale, re-evicting and refetching it every run.
+  if (expected.draftFilename && !existsSync(join(dir, basename(expected.draftFilename)))) {
+    return `missing draft (MTP) weights ${basename(expected.draftFilename)} added by catalog`;
+  }
+  if (
+    expected.catalogVersion &&
+    installed.catalogVersion &&
+    expected.catalogVersion !== installed.catalogVersion
+  ) {
+    return `catalogVersion ${installed.catalogVersion} != catalog ${expected.catalogVersion}`;
+  }
+  return null;
+}
+
+/**
  * Reuse a complete historical-id install for its current catalog id. This
  * avoids downloading a second multi-GB copy solely because the directory
  * slug gained an explicit quantization suffix. A stale/incomplete target is
@@ -188,6 +273,21 @@ export async function adoptHistoricalLlamaCppAlias(opts: {
   const legacyId = HISTORICAL_LLAMA_CPP_ALIASES[opts.modelId];
   if (!legacyId) return false;
   if (!(await isModelInstalled(opts.cacheRoot, 'llama-cpp', legacyId))) return false;
+  // The legacy dir holds the same *variant*, not necessarily the same
+  // *revision*. Adopting a stale one would reintroduce the staleness the
+  // caller just evicted, one id removed and harder to spot.
+  const legacyStale = await staleInstallReason({
+    cacheRoot: opts.cacheRoot,
+    engine: 'llama-cpp',
+    modelId: legacyId,
+    expectedId: opts.modelId,
+  });
+  if (legacyStale) {
+    opts.log(
+      `[cache] not adopting llama-cpp/${legacyId} for ${opts.modelId}: legacy install is stale (${legacyStale})`,
+    );
+    return false;
+  }
 
   const source = modelDirInHome(opts.cacheRoot, 'llama-cpp', legacyId);
   const target = modelDirInHome(opts.cacheRoot, 'llama-cpp', opts.modelId);
@@ -244,10 +344,20 @@ export async function ensureWarmModel(opts: {
   }
   const { cacheRoot, engine, modelId, log } = opts;
   if (await isModelInstalled(cacheRoot, engine, modelId)) {
-    log(`[cache] ${engine}/${modelId} already warm`);
-    return;
-  }
-  if (engine === 'llama-cpp' && (await adoptHistoricalLlamaCppAlias({ cacheRoot, modelId, log }))) {
+    // Present and complete — but the catalog may have moved underneath it.
+    // Evict rather than reuse, so the install path below refetches; keeping
+    // stale weights would silently invalidate every downstream measurement.
+    const stale = await staleInstallReason({ cacheRoot, engine, modelId });
+    if (!stale) {
+      log(`[cache] ${engine}/${modelId} already warm`);
+      return;
+    }
+    log(`[cache] ${engine}/${modelId} is STALE vs catalog (${stale}) — evicting and refetching`);
+    await rm(modelDirInHome(cacheRoot, engine, modelId), { recursive: true, force: true });
+  } else if (
+    engine === 'llama-cpp' &&
+    (await adoptHistoricalLlamaCppAlias({ cacheRoot, modelId, log }))
+  ) {
     return;
   }
   await mkdir(cacheRoot, { recursive: true });

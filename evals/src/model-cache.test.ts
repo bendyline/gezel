@@ -1,18 +1,64 @@
-import { lstatSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import {
   adoptHistoricalLlamaCppAlias,
   assertMlxSourceComplete,
   isModelInstalled,
+  staleInstallReason,
 } from './model-cache.ts';
+import { _resetSourceIndexCache } from './model-sources.ts';
 
 function makeDir(files: string[]): string {
   const dir = mkdtempSync(join(tmpdir(), 'gezel-mlx-src-'));
   for (const f of files) writeFileSync(join(dir, f), 'x');
   return dir;
 }
+
+// Staleness is defined against the catalog index, so these tests pin a
+// synthetic one rather than the committed content — otherwise a routine
+// gilde bump would rewrite the expectations.
+const originalGildeDataDir = process.env.GEZEL_GILDE_DATA_DIR;
+let syntheticDataDir: string | undefined;
+
+function useSyntheticIndex(manifests: Array<Record<string, unknown>>): void {
+  syntheticDataDir = mkdtempSync(join(tmpdir(), 'gezel-model-cache-catalog-'));
+  const chatModelsDir = join(syntheticDataDir, 'chat-models');
+  mkdirSync(chatModelsDir, { recursive: true });
+  writeFileSync(
+    join(chatModelsDir, 'index.json'),
+    JSON.stringify({ entries: manifests.map((manifest) => ({ manifest })) }),
+  );
+  process.env.GEZEL_GILDE_DATA_DIR = syntheticDataDir;
+  _resetSourceIndexCache();
+}
+
+/** Install-side manifest as the install pipeline writes it. */
+function writeInstall(
+  root: string,
+  modelId: string,
+  manifest: Record<string, unknown>,
+  extraFiles: string[] = [],
+): string {
+  const dir = join(root, 'engines', 'llama-cpp', 'models', modelId);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, String(manifest.weightsFilename)), 'weights');
+  writeFileSync(join(dir, 'manifest.json'), JSON.stringify(manifest));
+  for (const f of extraFiles) {
+    mkdirSync(join(dir, f, '..'), { recursive: true });
+    writeFileSync(join(dir, f), 'draft');
+  }
+  return dir;
+}
+
+afterEach(() => {
+  if (originalGildeDataDir === undefined) delete process.env.GEZEL_GILDE_DATA_DIR;
+  else process.env.GEZEL_GILDE_DATA_DIR = originalGildeDataDir;
+  _resetSourceIndexCache();
+  if (syntheticDataDir) rmSync(syntheticDataDir, { recursive: true, force: true });
+  syntheticDataDir = undefined;
+});
 
 describe('assertMlxSourceComplete', () => {
   it('passes for a complete install (manifest + safetensors, no partials)', () => {
@@ -70,8 +116,184 @@ describe('isModelInstalled', () => {
   });
 });
 
+describe('staleInstallReason', () => {
+  const CATALOG = {
+    id: 'qwen3.6-27b-q4',
+    version: '1.1.4',
+    llamaCpp: {
+      huggingfaceRepo: 'unsloth/Qwen3.6-27B-MTP-GGUF',
+      filename: 'Qwen3.6-27B-Q4_K_M.gguf',
+      sha256: 'a'.repeat(64),
+    },
+  };
+  const install = {
+    weightsFilename: 'Qwen3.6-27B-Q4_K_M.gguf',
+    sha256: 'a'.repeat(64),
+    huggingfaceRepo: 'unsloth/Qwen3.6-27B-MTP-GGUF',
+    catalogVersion: '1.1.4',
+  };
+  const root = () => mkdtempSync(join(tmpdir(), 'gezel-stale-'));
+
+  it('accepts an install matching the catalog', async () => {
+    useSyntheticIndex([CATALOG]);
+    const r = root();
+    writeInstall(r, 'qwen3.6-27b-q4', install);
+    await expect(
+      staleInstallReason({ cacheRoot: r, engine: 'llama-cpp', modelId: 'qwen3.6-27b-q4' }),
+    ).resolves.toBeNull();
+  });
+
+  it('flags changed upstream weights by sha256', async () => {
+    useSyntheticIndex([CATALOG]);
+    const r = root();
+    writeInstall(r, 'qwen3.6-27b-q4', { ...install, sha256: 'b'.repeat(64) });
+    await expect(
+      staleInstallReason({ cacheRoot: r, engine: 'llama-cpp', modelId: 'qwen3.6-27b-q4' }),
+    ).resolves.toMatch(/sha256 bbbbbbbbbbbb… != catalog aaaaaaaaaaaa…/);
+  });
+
+  // The wild-caught case: catalog repointed lmstudio-community -> unsloth MTP.
+  it('flags a moved upstream repo', async () => {
+    useSyntheticIndex([CATALOG]);
+    const r = root();
+    writeInstall(r, 'qwen3.6-27b-q4', {
+      ...install,
+      huggingfaceRepo: 'lmstudio-community/Qwen3.6-27B-GGUF',
+    });
+    await expect(
+      staleInstallReason({ cacheRoot: r, engine: 'llama-cpp', modelId: 'qwen3.6-27b-q4' }),
+    ).resolves.toMatch(/repo moved: lmstudio-community.* -> unsloth/);
+  });
+
+  it('flags an install predating a newly-added MTP draft sidecar', async () => {
+    useSyntheticIndex([
+      { ...CATALOG, llamaCpp: { ...CATALOG.llamaCpp, draftModel: { filename: 'mtp-draft.gguf' } } },
+    ]);
+    const r = root();
+    writeInstall(r, 'qwen3.6-27b-q4', install);
+    await expect(
+      staleInstallReason({ cacheRoot: r, engine: 'llama-cpp', modelId: 'qwen3.6-27b-q4' }),
+    ).resolves.toMatch(/missing draft \(MTP\) weights mtp-draft\.gguf/);
+
+    writeInstall(r, 'qwen3.6-27b-q4', install, ['mtp-draft.gguf']);
+    await expect(
+      staleInstallReason({ cacheRoot: r, engine: 'llama-cpp', modelId: 'qwen3.6-27b-q4' }),
+    ).resolves.toBeNull();
+  });
+
+  // The catalog names a draft by its upstream repo-relative path; the
+  // installer flattens it into the model dir. Comparing full paths reported
+  // a just-downloaded gemma4-26b-q4 as stale, which would re-evict and
+  // refetch 14 GB on every sweep.
+  it('matches a flattened draft against a catalog path carrying a subdirectory', async () => {
+    useSyntheticIndex([
+      {
+        ...CATALOG,
+        llamaCpp: {
+          ...CATALOG.llamaCpp,
+          draftModel: { filename: 'MTP/mtp-gemma-4-26B-A4B-it-Q4_0.gguf' },
+        },
+      },
+    ]);
+    const r = root();
+    writeInstall(r, 'qwen3.6-27b-q4', install, ['mtp-gemma-4-26B-A4B-it-Q4_0.gguf']);
+    await expect(
+      staleInstallReason({ cacheRoot: r, engine: 'llama-cpp', modelId: 'qwen3.6-27b-q4' }),
+    ).resolves.toBeNull();
+  });
+
+  it('falls back to catalogVersion when the precise fields are absent', async () => {
+    useSyntheticIndex([{ id: 'm', version: '2.0.0', llamaCpp: { filename: 'w.gguf' } }]);
+    const r = root();
+    writeInstall(r, 'm', { weightsFilename: 'w.gguf', catalogVersion: '1.0.0' });
+    await expect(
+      staleInstallReason({ cacheRoot: r, engine: 'llama-cpp', modelId: 'm' }),
+    ).resolves.toMatch(/catalogVersion 1\.0\.0 != catalog 2\.0\.0/);
+  });
+
+  it('never reports stale for a model the catalog does not index', async () => {
+    useSyntheticIndex([]);
+    const r = root();
+    writeInstall(r, 'qwen3.6-27b-q4', install);
+    await expect(
+      staleInstallReason({ cacheRoot: r, engine: 'llama-cpp', modelId: 'qwen3.6-27b-q4' }),
+    ).resolves.toBeNull();
+  });
+
+  it('compares a historical directory against the current catalog id', async () => {
+    useSyntheticIndex([CATALOG]);
+    const r = root();
+    writeInstall(r, 'qwen3.6', { ...install, sha256: 'c'.repeat(64) });
+    // `qwen3.6` resolves via core's legacy-id alias table, so the implicit
+    // path finds the catalog entry today…
+    await expect(
+      staleInstallReason({ cacheRoot: r, engine: 'llama-cpp', modelId: 'qwen3.6' }),
+    ).resolves.toMatch(/sha256/);
+    // …and expectedId states the target outright, so the check survives the
+    // two alias tables (core's and this module's) drifting apart.
+    await expect(
+      staleInstallReason({
+        cacheRoot: r,
+        engine: 'llama-cpp',
+        modelId: 'qwen3.6',
+        expectedId: 'qwen3.6-27b-q4',
+      }),
+    ).resolves.toMatch(/sha256/);
+  });
+
+  it('uses expectedId when the directory slug has no alias entry', async () => {
+    useSyntheticIndex([CATALOG]);
+    const r = root();
+    writeInstall(r, 'some-unaliased-slug', { ...install, sha256: 'c'.repeat(64) });
+    await expect(
+      staleInstallReason({ cacheRoot: r, engine: 'llama-cpp', modelId: 'some-unaliased-slug' }),
+    ).resolves.toBeNull();
+    await expect(
+      staleInstallReason({
+        cacheRoot: r,
+        engine: 'llama-cpp',
+        modelId: 'some-unaliased-slug',
+        expectedId: 'qwen3.6-27b-q4',
+      }),
+    ).resolves.toMatch(/sha256/);
+  });
+});
+
 describe('adoptHistoricalLlamaCppAlias', () => {
+  it('refuses to adopt a historical install that is stale vs the current catalog', async () => {
+    useSyntheticIndex([
+      {
+        id: 'qwen3.6-27b-q4',
+        version: '1.1.4',
+        llamaCpp: {
+          huggingfaceRepo: 'unsloth/Qwen3.6-27B-MTP-GGUF',
+          filename: 'weights.gguf',
+          sha256: 'a'.repeat(64),
+        },
+      },
+    ]);
+    const root = mkdtempSync(join(tmpdir(), 'gezel-alias-stale-'));
+    writeInstall(root, 'qwen3.6', {
+      weightsFilename: 'weights.gguf',
+      sha256: 'b'.repeat(64),
+      huggingfaceRepo: 'lmstudio-community/Qwen3.6-27B-GGUF',
+    });
+    const logs: string[] = [];
+
+    await expect(
+      adoptHistoricalLlamaCppAlias({
+        cacheRoot: root,
+        modelId: 'qwen3.6-27b-q4',
+        log: (l) => logs.push(l),
+      }),
+    ).resolves.toBe(false);
+    expect(logs.join('\n')).toMatch(/not adopting llama-cpp\/qwen3\.6.*stale/);
+  });
+
   it('replaces an incomplete renamed-id download with the complete historical install', async () => {
+    // Empty index — no catalog identity to compare, so the alias path keeps
+    // its original "same variant, different slug" behavior.
+    useSyntheticIndex([]);
     const root = mkdtempSync(join(tmpdir(), 'gezel-model-alias-'));
     const models = join(root, 'engines', 'llama-cpp', 'models');
     const legacy = join(models, 'qwen3.5-2b');

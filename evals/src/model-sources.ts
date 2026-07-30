@@ -30,21 +30,57 @@ export interface ChatModelSources {
   ds4: boolean;
 }
 
-let indexCache: Map<string, ChatModelSources> | null = null;
+/**
+ * What the catalog says a *currently correct* install of this model looks
+ * like, per engine. Compared against the `manifest.json` an install writes
+ * so the warm cache can tell "already present" apart from "already present
+ * but built from weights the catalog has since moved off".
+ *
+ * `catalogVersion` is the coarse signal (always present); `sha256` /
+ * `huggingfaceRepo` are the precise ones and catch the case where a version
+ * bump repoints at different upstream weights (a repo move, a requant).
+ * `draftFilename` is separate because MTP/speculative-decoding sidecars were
+ * added to existing models — an install predating them is complete by the
+ * old contract yet misses the draft weights the engine now expects.
+ */
+export interface ChatModelInstallIdentity {
+  catalogVersion?: string;
+  sha256?: string;
+  huggingfaceRepo?: string;
+  weightsFilename?: string;
+  draftFilename?: string;
+}
 
-function loadIndex(): Map<string, ChatModelSources> {
+interface EngineBlock {
+  huggingfaceRepo?: string;
+  filename?: string;
+  sha256?: string;
+  disabledReason?: unknown;
+  draftModel?: { filename?: string };
+}
+
+interface IndexedModel {
+  sources: ChatModelSources;
+  version?: string;
+  blocks: Partial<Record<'llamaCpp' | 'mlx' | 'ds4', EngineBlock>>;
+}
+
+let indexCache: Map<string, IndexedModel> | null = null;
+
+function loadIndex(): Map<string, IndexedModel> {
   if (indexCache) return indexCache;
   const path = join(gildeDataDir(), 'chat-models', 'index.json');
-  const map = new Map<string, ChatModelSources>();
+  const map = new Map<string, IndexedModel>();
   try {
     const idx = JSON.parse(readFileSync(path, 'utf8')) as {
       entries?: Array<{
         manifest?: {
           id?: string;
+          version?: string;
           ollama?: unknown;
-          llamaCpp?: unknown;
-          mlx?: { disabledReason?: unknown } | unknown;
-          ds4?: unknown;
+          llamaCpp?: EngineBlock;
+          mlx?: EngineBlock;
+          ds4?: EngineBlock;
         };
       }>;
     };
@@ -55,12 +91,20 @@ function loadIndex(): Map<string, ChatModelSources> {
       // Treat it as NO mlx source so `assertLocalEngineSource('mlx', …)`
       // errors clearly with a "use --provider llama-cpp" hint instead of
       // the model appearing MLX-capable and crashing on load.
-      const mlxBlock = man.mlx as { disabledReason?: unknown } | undefined;
+      const mlxBlock = man.mlx;
       map.set(man.id, {
-        ollama: Boolean(man.ollama),
-        llamaCpp: Boolean(man.llamaCpp),
-        mlx: Boolean(man.mlx) && !mlxBlock?.disabledReason,
-        ds4: Boolean(man.ds4),
+        sources: {
+          ollama: Boolean(man.ollama),
+          llamaCpp: Boolean(man.llamaCpp),
+          mlx: Boolean(man.mlx) && !mlxBlock?.disabledReason,
+          ds4: Boolean(man.ds4),
+        },
+        ...(man.version ? { version: man.version } : {}),
+        blocks: {
+          ...(man.llamaCpp ? { llamaCpp: man.llamaCpp } : {}),
+          ...(man.mlx ? { mlx: man.mlx } : {}),
+          ...(man.ds4 ? { ds4: man.ds4 } : {}),
+        },
       });
     }
   } catch {
@@ -69,6 +113,32 @@ function loadIndex(): Map<string, ChatModelSources> {
   }
   indexCache = map;
   return map;
+}
+
+/**
+ * The catalog's expected install identity for a model on one engine, or
+ * `undefined` when the id / engine pair isn't in the index (cloud model,
+ * unbuilt index, or an engine this model ships no weights for). Callers
+ * treat `undefined` as "nothing to compare against" and leave the install
+ * alone — never as "stale".
+ */
+export function chatModelInstallIdentity(
+  modelId: string,
+  engine: 'llama-cpp' | 'mlx' | 'ds4',
+): ChatModelInstallIdentity | undefined {
+  const id = normalizeChatModelCatalogId(modelId) ?? modelId;
+  const model = loadIndex().get(id);
+  if (!model) return undefined;
+  const key = engine === 'llama-cpp' ? 'llamaCpp' : engine;
+  const block = model.blocks[key];
+  if (!block) return undefined;
+  return {
+    ...(model.version ? { catalogVersion: model.version } : {}),
+    ...(block.sha256 ? { sha256: block.sha256 } : {}),
+    ...(block.huggingfaceRepo ? { huggingfaceRepo: block.huggingfaceRepo } : {}),
+    ...(block.filename ? { weightsFilename: block.filename } : {}),
+    ...(block.draftModel?.filename ? { draftFilename: block.draftModel.filename } : {}),
+  };
 }
 
 /** Test-only: drop the cached index so a test can rebuild it on disk first. */
@@ -82,7 +152,7 @@ export function _resetSourceIndexCache(): void {
  */
 export function chatModelSources(modelId: string): ChatModelSources | undefined {
   const id = normalizeChatModelCatalogId(modelId) ?? modelId;
-  return loadIndex().get(id);
+  return loadIndex().get(id)?.sources;
 }
 
 function sourceKeyFor(p: ChatProvider): keyof ChatModelSources | null {
