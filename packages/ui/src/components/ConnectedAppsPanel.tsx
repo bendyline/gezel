@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
+import { Select } from '../primitives/index.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
 import {
   approvalErrorMessage,
@@ -58,12 +59,40 @@ function formatRelative(ms: number): string {
   return `${Math.floor(delta / 86_400_000)}d ago`;
 }
 
+interface GezelOption {
+  id: string;
+  name: string;
+  role?: string;
+  /** Frontmatter provider override; unset → the install default applies. */
+  provider?: string;
+}
+
+const NO_SERVING_GEZEL = '__NONE__';
+
+/**
+ * Backends that run their own tool loop (agent runtimes, not raw model
+ * APIs) can't advertise-and-halt caller-supplied tools — `/v1` returns
+ * `tools_not_supported_for_provider` for tool-bearing requests routed
+ * to them. The panel warns at pick time so an editor's first tool call
+ * isn't the moment the user finds out.
+ */
+const NO_APP_TOOLS_PROVIDERS = new Set(['copilot', 'anthropic-cli', 'codex-cli']);
+
 export function ConnectedAppsPanel() {
   const [state, setState] = useState<ConnectedAppsResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [revokeTarget, setRevokeTarget] = useState<ConnectedApp | null>(null);
   const [verificationCodes, setVerificationCodes] = useState<Record<string, string>>({});
+  const [endpoints, setEndpoints] = useState<{
+    enabled?: boolean;
+    servingGezelId?: string;
+    supportingBehaviors?: boolean;
+    emulateOllama?: boolean;
+  }>({});
+  const [gezels, setGezels] = useState<GezelOption[]>([]);
+  const [endpointsStatus, setEndpointsStatus] = useState<string | null>(null);
+  const [defaultProvider, setDefaultProvider] = useState<string>('copilot');
 
   const refresh = useCallback(async () => {
     try {
@@ -88,6 +117,62 @@ export function ConnectedAppsPanel() {
     const t = window.setInterval(() => void refresh(), 4000);
     return () => window.clearInterval(t);
   }, [refresh]);
+
+  useEffect(() => {
+    api
+      .getConfig()
+      .then((cfg) => {
+        setEndpoints(cfg.openaiEndpoints ?? {});
+        setDefaultProvider(cfg.provider ?? 'copilot');
+      })
+      .catch(() => {});
+    api
+      .listGezels()
+      .then((res) =>
+        setGezels(res.gezels.map(({ id, name, role, provider }) => ({ id, name, role, provider }))),
+      )
+      .catch(() => {});
+  }, []);
+
+  // The PUT replaces the whole `openaiEndpoints` object, so every save
+  // sends both fields — a toggle flip must not drop the chosen gezel.
+  const saveEndpoints = useCallback(
+    async (next: {
+      enabled?: boolean;
+      servingGezelId?: string;
+      supportingBehaviors?: boolean;
+      emulateOllama?: boolean;
+    }) => {
+      const previous = endpoints;
+      setEndpoints(next);
+      setEndpointsStatus('saving…');
+      try {
+        const res = await api.updateConfig({ openaiEndpoints: next });
+        setEndpoints(res.openaiEndpoints ?? {});
+        setEndpointsStatus(null);
+      } catch (err) {
+        setEndpoints(previous);
+        // GezelApiError carries the server's body under `details` — for
+        // the Ollama-emulation 409 that's the actionable text ("Ollama
+        // itself appears to be running there…"), so prefer it over the
+        // generic "Gezel API error 409" envelope message.
+        const detail =
+          err && typeof err === 'object' && 'details' in err
+            ? (err as { details?: { message?: string } }).details?.message
+            : undefined;
+        setEndpointsStatus(
+          `save failed: ${detail ?? (err instanceof Error ? err.message : String(err))}`,
+        );
+      }
+    },
+    [endpoints],
+  );
+
+  const endpointsEnabled = endpoints.enabled !== false;
+  const servingGezel = gezels.find((g) => g.id === endpoints.servingGezelId);
+  const resolveProvider = (g: GezelOption) => g.provider ?? defaultProvider;
+  const servingLacksAppTools =
+    servingGezel !== undefined && NO_APP_TOOLS_PROVIDERS.has(resolveProvider(servingGezel));
 
   const decide = useCallback(
     async (grantId: string, action: 'approve' | 'deny') => {
@@ -165,6 +250,114 @@ export function ConnectedAppsPanel() {
           {error}
         </p>
       )}
+
+      <div className="settings-subsection">
+        <h3>OpenAI-compatible endpoints</h3>
+        <p className="muted small">
+          Other apps (editors, browser tools) can use your gezels and models through standard
+          OpenAI-style endpoints. Each app still needs your approval below before it gets access.
+        </p>
+        <label className="debug-toggle">
+          <input
+            type="checkbox"
+            checked={endpointsEnabled}
+            onChange={(e) =>
+              void saveEndpoints({ ...endpoints, enabled: e.target.checked ? undefined : false })
+            }
+          />
+          <span>Allow apps to connect</span>
+        </label>
+        {endpointsEnabled ? (
+          <p className="muted small">
+            Point apps at <code>{api.getBaseUrl()}/v1</code>
+          </p>
+        ) : (
+          <p className="muted small">
+            Turned off — connected apps are refused and new apps cannot ask for access until this is
+            back on.
+          </p>
+        )}
+        <div className="connected-apps-serving">
+          <span id="serving-gezel-label">Serving gezel</span>
+          <Select.Root
+            value={endpoints.servingGezelId ?? NO_SERVING_GEZEL}
+            onValueChange={(v) =>
+              void saveEndpoints({
+                ...endpoints,
+                servingGezelId: v === NO_SERVING_GEZEL ? undefined : v,
+              })
+            }
+            disabled={!endpointsEnabled}
+          >
+            <Select.Trigger aria-labelledby="serving-gezel-label">
+              <Select.Value />
+            </Select.Trigger>
+            <Select.Content>
+              <Select.Item value={NO_SERVING_GEZEL}>None — apps must name a model</Select.Item>
+              {gezels.map((g) => (
+                <Select.Item key={g.id} value={g.id}>
+                  {g.name}
+                  {g.role ? ` — ${g.role}` : ''}
+                  {` (${resolveProvider(g)})`}
+                </Select.Item>
+              ))}
+            </Select.Content>
+          </Select.Root>
+        </div>
+        <p className="muted small">
+          {servingGezel
+            ? `Requests that don't name one of your models are answered by ${servingGezel.name} — their character and model settings apply.`
+            : 'When an app asks for a model gezel doesn’t know (like "gpt-4o"), the request is refused. Pick a gezel to answer those requests instead.'}
+        </p>
+        {servingGezel && servingLacksAppTools && (
+          <p className="small connected-apps-caution">
+            {servingGezel.name} runs on {resolveProvider(servingGezel)}, which can't accept tools
+            sent by apps — editors that use tools will get an error. For full compatibility, pick a
+            gezel on a local model or a direct API provider.
+          </p>
+        )}
+        <label className="debug-toggle">
+          <input
+            type="checkbox"
+            checked={endpoints.supportingBehaviors !== false}
+            onChange={(e) =>
+              void saveEndpoints({
+                ...endpoints,
+                supportingBehaviors: e.target.checked ? undefined : false,
+              })
+            }
+            disabled={!endpointsEnabled}
+          />
+          <span>Supporting behaviors</span>
+        </label>
+        <p className="muted small">
+          Gezel knows how to get the best out of each model — catching runaway rambling, folding
+          leaked reasoning, and applying model-specific fixes. Turn this off for plain serving: apps
+          still get the gezel's character and each model's tuned settings (sampling, thinking mode),
+          but no runtime interventions.
+        </p>
+        <label className="debug-toggle">
+          <input
+            type="checkbox"
+            checked={endpoints.emulateOllama === true}
+            onChange={(e) =>
+              void saveEndpoints({
+                ...endpoints,
+                emulateOllama: e.target.checked ? true : undefined,
+              })
+            }
+            disabled={!endpointsEnabled}
+          />
+          <span>Emulate Ollama (port 11434)</span>
+        </label>
+        <p className="muted small">
+          Apps that auto-discover Ollama will find gezel instead — no setup needed in each app.
+          Security note: Ollama's convention is no password, so while this is on, any program on
+          this computer can use your models without asking first. Gezel refuses to take the port if
+          Ollama itself is already running.
+        </p>
+        {endpointsStatus && <output className="muted small">{endpointsStatus}</output>}
+      </div>
 
       {pending.length > 0 && (
         <div className="settings-subsection">

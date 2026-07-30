@@ -183,16 +183,38 @@ win:
       arch:
         - x64
   icon: assets/icon.ico
+  # Also decides the install folder and the uninstaller filename, which is why
+  # they are lowercase: electron-builder sets AppInfo.productFilename from
+  # `executableName` when present (falling back to productName), and NSIS uses
+  # that one value for the exe, `$INSTDIR` (C:\Program Files\gezel), and
+  # "Uninstall gezel.exe". There is no separate install-directory option, so
+  # "Gezel\ containing gezel.exe" is not expressible — set this to `Gezel` and
+  # the binary becomes Gezel.exe too. Left lowercase deliberately; note that
+  # NTFS preserves an existing folder's case, so flipping it would only affect
+  # machines installing for the first time.
   executableName: gezel
   # Signing options moved under signtoolOptions in electron-builder 26.
+  #
+  # `publisherName` must match the CN on the Authenticode certificate exactly —
+  # electron-updater compares it against the downloaded installer's signature
+  # before running it, so a mismatch silently breaks auto-update.
+  #
+  # The publisher shown in Add/Remove Programs is a DIFFERENT value:
+  # electron-builder derives it from `author.name` in packages/app/package.json
+  # (AppInfo.companyName), not from this field. Both now read "Bendyline LLC";
+  # keep them in step, and note that author.name also becomes the Vendor and
+  # Maintainer on the Linux .deb/.rpm.
   signtoolOptions:
     publisherName: 'Bendyline LLC'
     sign: scripts/sign.cjs
     signingHashAlgorithms:
       - sha256
   # The first-party service host sits next to the Electron exe in
-  # $INSTDIR (C:\Program Files\Gezel\gezel-service-host.exe) so the NSIS
-  # hooks can register it as GezelService's ImagePath. It is built by
+  # $INSTDIR (C:\Program Files\gezel\gezel-service-host.exe) so the NSIS
+  # hooks can register it as GezelService's ImagePath. The install folder is
+  # lowercase because electron-builder derives it from `executableName` below
+  # (AppInfo.productFilename), not from productName — see `executableName`.
+  # It is built by
   # the native pipeline (native/helpers/service-host/), arrives in
   # native-bin/ born-signed from the native release, and the afterPack
   # sweep leaves validly-signed files untouched — installer bytes stay

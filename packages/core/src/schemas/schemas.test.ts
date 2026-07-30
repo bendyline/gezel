@@ -386,6 +386,26 @@ describe('UpdateTaskRequestSchema', () => {
   });
 });
 
+describe('openaiEndpoints config', () => {
+  it('parses the Connected Apps endpoint controls and tolerates absence', () => {
+    const cfg = GezelConfigSchema.parse({
+      openaiEndpoints: {
+        enabled: false,
+        servingGezelId: 'mira',
+        supportingBehaviors: false,
+        emulateOllama: true,
+      },
+    });
+    expect(cfg.openaiEndpoints?.enabled).toBe(false);
+    expect(cfg.openaiEndpoints?.servingGezelId).toBe('mira');
+    expect(cfg.openaiEndpoints?.supportingBehaviors).toBe(false);
+    expect(cfg.openaiEndpoints?.emulateOllama).toBe(true);
+    // Absent block parses — unset means the facade is on with no
+    // serving gezel, and the whole config must not fail over it.
+    expect(GezelConfigSchema.parse({}).openaiEndpoints).toBeUndefined();
+  });
+});
+
 describe('fileReviews config + reply contract', () => {
   it('parses the fileReviews config block and defaults enabled to true', () => {
     const cfg = GezelConfigSchema.parse({

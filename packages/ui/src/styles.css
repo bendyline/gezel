@@ -2816,16 +2816,29 @@ html.embedded-chat #root {
 .app-sidebar-tree .tree-row.tree-row-selected::after {
   content: "";
   position: absolute;
-  /* The pseudo-element is positioned from the tab's padding box. Its bottom
-     edge needs the extra border pixel to match the tab's border-box height. */
+  /* The pseudo-element is positioned from the tab's padding box. */
   top: 0;
-  bottom: -1px;
+  bottom: 0;
   right: calc(-1 * var(--sidebar-tab-bridge-size));
   width: var(--sidebar-tab-bridge-size);
   background: var(--sidebar-tab-surface);
   border-top: 1px solid var(--sidebar-tab-border);
   border-bottom: 1px solid var(--sidebar-tab-border);
   pointer-events: none;
+}
+
+/* Button rows paint the correctly sized bridge one pixel below their border
+   box. Lift the whole shape without changing its height. */
+.app-sidebar-item.active::after {
+  bottom: -1px;
+  transform: translateY(-1px);
+}
+
+/* Flex row wrappers resolve their bridge one pixel shorter than the bordered
+   row itself; extend only those wrappers at the bottom. */
+.app-sidebar-proj-row.active::after,
+.app-sidebar-gezel-row.active::after {
+  bottom: -1px;
 }
 
 /* Wrapper-owned selections suppress the old button-shaped selection inside
@@ -6559,6 +6572,23 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
   align-items: flex-end;
   justify-content: flex-end;
   gap: var(--space-sm);
+}
+
+.connected-apps-serving {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+  font-size: var(--text-sm);
+}
+
+.connected-apps-serving > span {
+  color: var(--text-muted);
+}
+
+.connected-apps-caution {
+  color: var(--warning);
+  max-width: 60ch;
 }
 
 .connected-apps-table-wrap {
@@ -12481,6 +12511,20 @@ body.chat-rail-resizing webview {
   border-radius: 6px;
   background: var(--bg, #141414);
   overflow: hidden;
+}
+
+/* Give the Meester composer the same quiet, self-contained compose surface as
+   project chat. The small inset keeps all four rounded corners legible inside
+   the larger conversation rail, while one shared paper wash carries behind
+   the recipient pill, thread picker, toolbar, and draft. */
+.home-workshop-conversation .chat-composer {
+  --compose-frame-bg: color-mix(in srgb, var(--panel) 88%, var(--surface));
+  --compose-frame-border: color-mix(in srgb, var(--accent) 62%, var(--border));
+  --compose-toolbar-bg: color-mix(in srgb, var(--panel) 97%, var(--chat-bubble-bg));
+  margin: 0 0.25rem 0.25rem;
+  border: 1px solid var(--compose-frame-border);
+  border-radius: var(--radius-md);
+  background: var(--compose-frame-bg);
 }
 
 /* ── Interleaved chat timeline (project + global Meester views) ── */

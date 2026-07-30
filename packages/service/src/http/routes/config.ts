@@ -307,6 +307,25 @@ export function configRoutes(ctx: ServiceContext): Hono {
         );
       }
     }
+    // Ollama emulation follows the remote-serving contract: the live
+    // listener must track config, and a bind failure (usually real
+    // Ollama already on 11434) reverts the toggle and surfaces an
+    // actionable 409 instead of persisting a switch that lies.
+    if (body.openaiEndpoints !== undefined) {
+      try {
+        await ctx.ollamaEmulation.reconfigure(updated.openaiEndpoints);
+      } catch (err) {
+        await ctx.store.writeConfig({ openaiEndpoints: previous.openaiEndpoints });
+        await ctx.ollamaEmulation.reconfigure(previous.openaiEndpoints).catch(() => undefined);
+        return c.json(
+          {
+            error: 'ollama-emulation-failed',
+            message: err instanceof Error ? err.message : String(err),
+          },
+          409,
+        );
+      }
+    }
     // Summaries carry the gezel's NAME — the id is a slug ("ada-lovelace")
     // that reads as plumbing in the History view; ids stay in `details`.
     const designationName = async (id: string): Promise<string> =>

@@ -575,11 +575,26 @@ export const GezelConfigSchema = z.object({
    *     hardcoded "gpt-4o"). Resolved like a `gezel:<id>` target: the
    *     gezel's persona + provider/model tuning apply. Unset → unknown
    *     models keep failing loudly with `404 model_not_found`.
+   *   - `supportingBehaviors` — whether `/v1` sessions get the resolved
+   *     per-model behavior PROFILE (ramble detection, preamble folding,
+   *     transcript shaping, family-specific fixes). Unset/`true` → on.
+   *     `false` → plain serving: persona + model + TUNING (sampling,
+   *     thinking/instruct folds) still apply — tuning is "what the
+   *     model is", not a behavior — but no runtime interventions.
+   *   - `emulateOllama` — host an UNAUTHENTICATED Ollama-compatible
+   *     listener on loopback port 11434 so apps that auto-discover
+   *     Ollama find gezel. Default OFF and deliberately opt-in: the
+   *     Ollama ecosystem's contract is no-auth plain HTTP, so any
+   *     local process can run inference through it without the
+   *     Connected Apps consent flow. The daemon refuses to bind when
+   *     something (usually real Ollama) already owns the port.
    */
   openaiEndpoints: z
     .object({
       enabled: z.boolean().optional(),
       servingGezelId: z.string().optional(),
+      supportingBehaviors: z.boolean().optional(),
+      emulateOllama: z.boolean().optional(),
     })
     .optional(),
   /**

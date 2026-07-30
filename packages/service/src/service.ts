@@ -52,6 +52,10 @@ import { createDaemonDeviceInfo } from './handboek/daemon-device.js';
 import { createHandboekEngine } from './handboek/engine.js';
 import { type LoopbackCert, generateLoopbackCert } from './http/cert.js';
 import type { ServiceContext } from './http/context.js';
+import {
+  buildOllamaEmulationApp,
+  createOllamaEmulationController,
+} from './http/ollama-emulation.js';
 import { PreviewCapabilityStore } from './http/preview-capability.js';
 import { buildRemoteApp } from './http/remote-server.js';
 import { type UnexpectedHttpErrorHandler, buildApp, buildPreviewApp } from './http/server.js';
@@ -181,6 +185,13 @@ export interface StartServiceOptions {
    * failing health signal instead of relying on log scraping.
    */
   onUnexpectedHttpError?: UnexpectedHttpErrorHandler;
+  /**
+   * Test seam: bind the opt-in Ollama emulation listener to this port
+   * instead of the well-known 11434 (`0` = ephemeral). Production
+   * launches leave it unset — emulating Ollama anywhere else defeats
+   * the point.
+   */
+  ollamaEmulationPort?: number;
 }
 
 export interface RunningService {
@@ -1529,6 +1540,20 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     },
   });
 
+  // Opt-in unauthenticated Ollama-compat listener (port 11434). Same
+  // deferred-fetch shape as remote serving: the controller is created
+  // before the context literal (config route needs it), the app after.
+  const ollamaEmulationFetchRef: { value?: Parameters<typeof serve>[0]['fetch'] } = {};
+  const ollamaEmulation = createOllamaEmulationController({
+    fetch: () => {
+      if (!ollamaEmulationFetchRef.value) {
+        throw new Error('ollama emulation cannot start before the HTTP app is ready');
+      }
+      return ollamaEmulationFetchRef.value;
+    },
+    ...(opts.ollamaEmulationPort !== undefined ? { port: opts.ollamaEmulationPort } : {}),
+  });
+
   // The meester's occasional status report — dynamic Home greeting +
   // dashboard + follow-up draft tasks. Constructed before the context
   // literal so the run-now HTTP route can reach it; started with the
@@ -1598,6 +1623,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     deviceIdentity,
     remotes,
     remoteServing,
+    ollamaEmulation,
     ...(cert ? { tlsCertSha256: cert.sha256Hex, tlsCertPem: cert.certPem } : {}),
     ensureModel,
     startedAt: nowIso(),
@@ -1630,6 +1656,8 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   });
   const remoteApp = buildRemoteApp(context);
   remoteFetchRef.value = remoteApp.fetch.bind(remoteApp);
+  const ollamaEmulationApp = buildOllamaEmulationApp(context);
+  ollamaEmulationFetchRef.value = ollamaEmulationApp.fetch.bind(ollamaEmulationApp);
 
   // Port selection, by caller intent:
   //   - explicit `opts.port` (from `--port` / `GEZEL_PORT`): bind exactly
@@ -1746,6 +1774,13 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     log.error(
       `[service] failed to start remote serving: ${err instanceof Error ? err.message : err}`,
     );
+  });
+  // Same contract for the Ollama emulation: non-fatal at boot (usually
+  // means real Ollama grabbed 11434 since the toggle was set) — the
+  // daemon still serves everything else; the toggle stays set and binds
+  // on the next launch/config change once the port frees up.
+  await ollamaEmulation.reconfigure(config.openaiEndpoints).catch((err) => {
+    log.warn(`[service] ollama emulation not started: ${err instanceof Error ? err.message : err}`);
   });
 
   scheduler.start();
@@ -1936,6 +1971,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
       clearInterval(idleSummarizerTimer);
       await channels.stop();
       await remoteServing.stop();
+      await ollamaEmulation.stop();
       await closePairedRemoteFetches(remotes);
       if (previewServer) {
         await new Promise<void>((resolve) => {

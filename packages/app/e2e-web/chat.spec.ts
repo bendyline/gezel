@@ -72,11 +72,43 @@ test.describe('chat surface', () => {
     expect(geometry.argsOverflow).toBe('ellipsis');
   });
 
-  test('composer keeps the toolbar while hiding document-formatting actions', async ({ page }) => {
+  test('composer uses the project-chat frame and keeps only host toolbar actions', async ({
+    page,
+  }) => {
     await gotoHome(page);
 
     const chat = page.getByTestId('meester-chat');
     const composer = chat.getByTestId('chat-composer');
+    const frame = await composer.evaluate((element) => {
+      const style = getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      const railRect = element.parentElement?.getBoundingClientRect();
+      const recipient = element.querySelector<HTMLElement>('.chat-composer-to');
+      const session = element.querySelector<HTMLElement>('.gezel-chat-session-header');
+      if (!railRect || !recipient || !session) {
+        throw new Error('Meester composer frame fixture did not render');
+      }
+      const recipientRect = recipient.getBoundingClientRect();
+      const sessionRect = session.getBoundingClientRect();
+      return {
+        background: style.backgroundColor,
+        borderWidth: style.borderTopWidth,
+        radius: Number.parseFloat(style.borderTopLeftRadius),
+        insetLeft: rect.left - railRect.left,
+        insetRight: railRect.right - rect.right,
+        recipientInside: recipientRect.left >= rect.left && recipientRect.right <= rect.right,
+        sessionInside: sessionRect.left >= rect.left && sessionRect.right <= rect.right,
+      };
+    });
+
+    expect(frame.background).not.toBe('rgba(0, 0, 0, 0)');
+    expect(frame.borderWidth).toBe('1px');
+    expect(frame.radius).toBeGreaterThan(0);
+    expect(frame.insetLeft).toBeGreaterThan(1);
+    expect(frame.insetRight).toBeGreaterThan(1);
+    expect(frame.recipientInside).toBe(true);
+    expect(frame.sessionInside).toBe(true);
+
     await expect(composer.getByRole('toolbar', { name: /toolbar/i })).toBeVisible();
     await expect(composer.getByRole('button', { name: /^Send$/ })).toBeVisible();
     await expect(composer.getByRole('button', { name: /^Bold/ })).toBeHidden();

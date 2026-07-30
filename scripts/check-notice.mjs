@@ -130,6 +130,11 @@ async function checkNativeInventory(notice) {
     markdownSection(notice, 'Native engines and bundled binaries'),
   );
   const referencedLicenseFiles = new Set();
+  // Collected for generate-sbom.mjs. This loop already reconciles the VERSION
+  // pin, the license manifest, and the NOTICE row, so it is the one place that
+  // has all three agreeing — re-parsing NOTICE.md in the SBOM generator would
+  // be a second parser to keep in step.
+  const components = [];
   for (const engineId of engineIds) {
     const versionPath = join(enginesRoot, engineId, 'VERSION');
     const pin = parseVersionFile(
@@ -170,6 +175,17 @@ async function checkNativeInventory(notice) {
         `NOTICE.md native pin is stale for ${noticeName}: expected "${expected}", found "${versionCell}"`,
       );
     }
+
+    components.push({
+      id: engineId,
+      name: noticeName,
+      // ds4 is pinned by commit; everything else by upstream tag.
+      version: engineId === 'ds4' ? pin.commit : pin.tag,
+      tag: pin.tag,
+      commit: pin.commit,
+      license: plainMarkdown(row[2] ?? ''),
+      source: (row[3] ?? '').match(/\]\((https?:[^)]+)\)/)?.[1] ?? null,
+    });
   }
 
   const presentLicenseFiles = (await readdir(licensesRoot)).filter((name) =>
@@ -184,7 +200,11 @@ async function checkNativeInventory(notice) {
       ].join('\n'),
     );
   }
-  return { engines: engineIds.length, licenseFiles: referencedLicenseFiles.size };
+  return {
+    engines: engineIds.length,
+    licenseFiles: referencedLicenseFiles.size,
+    components,
+  };
 }
 
 async function checkFontInventory(notice) {
@@ -270,6 +290,7 @@ async function checkBundledRuntimes(notice) {
     (cells) => cells[0] !== 'Component' && cells.length >= 4,
   );
   const noticeNames = new Set();
+  const components = [];
   for (const cells of rows) {
     const name = plainMarkdown(cells[0] ?? '');
     noticeNames.add(name);
@@ -280,6 +301,12 @@ async function checkBundledRuntimes(notice) {
         `NOTICE.md bundled runtime is stale for ${name}: expected ${versions[name]}, found ${foundVersion}`,
       );
     }
+    components.push({
+      name,
+      version: versions[name],
+      license: plainMarkdown(cells[2] ?? ''),
+      source: (cells[3] ?? '').match(/\]\((https?:[^)]+)\)/)?.[1] ?? null,
+    });
   }
   if (!sameMembers(Object.keys(versions), noticeNames)) {
     throw new Error(
@@ -290,7 +317,7 @@ async function checkBundledRuntimes(notice) {
       ].join('\n'),
     );
   }
-  return { count: Object.keys(versions).length, versions };
+  return { count: Object.keys(versions).length, versions, components };
 }
 
 export async function verifyNativeNoticeInventory() {

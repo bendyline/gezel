@@ -1116,6 +1116,21 @@ export interface ConfigResponse {
   };
   /** Per-model native-vision opt-in, keyed by catalog id. Absent → off. */
   nativeVision?: Record<string, boolean>;
+  /**
+   * OpenAI-compatible endpoint controls (Settings → Connected Apps).
+   * `enabled` unset means ON; `servingGezelId` designates the gezel who
+   * answers requests naming an unknown model; `supportingBehaviors`
+   * (unset = on) applies gezel's per-model behavior profile to app
+   * sessions — model tuning applies regardless. See
+   * `GezelConfig.openaiEndpoints` in core schemas.
+   */
+  openaiEndpoints?: {
+    enabled?: boolean;
+    servingGezelId?: string;
+    supportingBehaviors?: boolean;
+    /** Host an unauthenticated Ollama-compatible listener on port 11434. Default off. */
+    emulateOllama?: boolean;
+  };
   /** Remote model execution: serving this device's models to paired clients. */
   remoteServing?: {
     enabled?: boolean;

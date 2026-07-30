@@ -10,11 +10,15 @@
  * their vendor released them — byte-identical, hash-comparable against
  * the vendor's own manifest.
  *
- * Two consumers, one list:
+ * Three consumers, one list:
  *   - scripts/after-pack.cjs        skips these in the signing sweep
  *   - release-electron.yml          exempts these in "Verify Windows
  *                                   signatures", which otherwise requires
  *                                   every exe/dll in the payload to be Valid
+ *   - scripts/verify-pe-tree.mjs    exempts these when auditing the gezeld
+ *                                   service bundle before it is sealed into
+ *                                   service-bundle.tar.gz, which neither of
+ *                                   the above can see inside
  *
  * Keep it an explicit allowlist, never a blanket "skip unsigned". The
  * point of the release gate is that a first-party DLL which silently
@@ -53,6 +57,32 @@ const THIRD_PARTY_PATTERNS = [
     pattern: '^fastlist-[\\w.-]+\\.exe$',
     source: 'pnpm fastlist helper (ordinary pnpm package)',
   },
+
+  // Prebuilt native addons inside the gezeld service bundle. npm ships these
+  // as compiled artifacts; we never build them, so the same authorship rule
+  // that exempts cuBLAS exempts them. Listed explicitly because
+  // verify-pe-tree.mjs now inspects the bundle tree before it is archived —
+  // before that, they were exempt only because nothing looked inside the
+  // tarball. Their peers from the same packages (onnxruntime's DLLs,
+  // node-pty's ConPTY helpers) arrive Microsoft-signed and are preserved by
+  // the isValidlySigned check rather than by this list.
+  //
+  // Basename matching is safe here: Gezel compiles no .node addons at all, so
+  // there is no first-party binary these names could shadow.
+  {
+    pattern: '^resvgjs\\.win32-x64-msvc\\.node$',
+    source: '@resvg/resvg-js (prebuilt napi-rs addon)',
+  },
+  {
+    pattern: '^keyring\\.win32-x64-msvc\\.node$',
+    source: '@napi-rs/keyring (prebuilt napi-rs addon)',
+  },
+  { pattern: '^vec0\\.dll$', source: 'sqlite-vec (prebuilt extension)' },
+  { pattern: '^pty\\.node$', source: 'node-pty (prebuilt addon)' },
+  { pattern: '^conpty\\.node$', source: 'node-pty (prebuilt addon)' },
+  { pattern: '^conpty_console_list\\.node$', source: 'node-pty (prebuilt addon)' },
+  { pattern: '^winpty\\.dll$', source: 'node-pty (prebuilt winpty backend)' },
+  { pattern: '^winpty-agent\\.exe$', source: 'node-pty (prebuilt winpty backend)' },
 ];
 
 const COMPILED = THIRD_PARTY_PATTERNS.map((entry) => ({

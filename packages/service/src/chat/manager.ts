@@ -78,7 +78,11 @@ import {
 import { MINIMAL_CONTEXT_MAX_WINDOW } from '../model-profile/behaviors/prompt-minimal-context.js';
 import { resolveProfileForCatalogId } from '../model-profile/registry.js';
 import { applyBehaviorEnvOverrides, profileHasBehavior } from '../model-profile/runtime.js';
-import { resolveTuning } from '../model-profile/tuning.js';
+import {
+  type ResolveTuningInput,
+  type ResolvedTuning,
+  resolveTuning,
+} from '../model-profile/tuning.js';
 import type {
   ModelCtx,
   NudgeVerdict,
@@ -8991,6 +8995,90 @@ export class ChatManager {
       sessionId: `v1:${randomUUID()}`,
     });
     return provider;
+  }
+
+  /**
+   * Resolve the per-model session defaults — behavior `profile` and
+   * sampling `tuning` — for a (provider, model) pair OUTSIDE a chat
+   * session. Mirrors the resolution `ensureState` performs when
+   * building UI sessions (catalog-id normalization → tier
+   * classification → profile resolution with env overrides →
+   * {@link resolveTuning}) so stateless surfaces (`/v1/chat/completions`,
+   * the Ollama facade) can serve local models with the same tuned
+   * sampling and supporting behaviors instead of raw engine defaults.
+   *
+   * `overrides` carries a gezel's frontmatter knobs when the request
+   * routes through one (a `gezel:<ref>` target or the serving-gezel
+   * fallback) so per-gezel tuning picks apply exactly like a UI
+   * session on that gezel.
+   *
+   * Kept deliberately parallel to the inline block in `ensureState`
+   * rather than extracted from it — that block is entangled with the
+   * live session record (staleness notices, prompt-layer flags) and
+   * refactoring it risks UI-session behavior for no functional gain
+   * here. If the resolution *chain* changes (new layer, new
+   * precedence), update both sites.
+   *
+   * Best-effort by design: catalog or config misses degrade to the
+   * tier-default profile and base tuning — never a throw.
+   */
+  async resolveModelSessionDefaults(
+    providerName: ProviderName,
+    modelId: string | undefined,
+    overrides: {
+      tuning?: ResolveTuningInput['override'];
+      tuningProfileId?: string;
+      suggestedProfileId?: string;
+      reasoningEffort?: ResolveTuningInput['reasoningEffort'];
+    } = {},
+  ): Promise<{ profile: ResolvedModelProfile; tuning: ResolvedTuning }> {
+    const config = await this.store.readConfig();
+    const resolvedModelId = modelId ?? config.defaultModel?.[providerName];
+    const resolvedCatalogId =
+      (await resolveCatalogIdFromModelId(this.catalog, resolvedModelId)) ?? resolvedModelId;
+    const tier = classifyLocalModelTier({
+      providerName,
+      modelId: resolvedModelId,
+      parameterSize: await resolveCatalogParameterSize(this.catalog, resolvedCatalogId),
+    });
+    const profile = applyBehaviorEnvOverrides(
+      await resolveProfileForCatalogId({
+        catalog: this.catalog,
+        catalogId: resolvedCatalogId,
+        tier,
+        providerName,
+      }),
+    );
+    const catalogDetail = resolvedCatalogId
+      ? await this.catalog.get('chat-model', resolvedCatalogId).catch(() => null)
+      : null;
+    const catalogTuning =
+      catalogDetail && catalogDetail.manifest.kind === 'chat-model'
+        ? catalogDetail.manifest.tuning
+        : undefined;
+    const catalogStyle =
+      catalogDetail && catalogDetail.manifest.kind === 'chat-model'
+        ? catalogDetail.manifest.style
+        : undefined;
+    const installDefaultTuning = resolvedCatalogId
+      ? config.modelTuning?.[resolvedCatalogId]
+      : undefined;
+    const installDefaultProfileId = resolvedCatalogId
+      ? config.modelTuningProfile?.[resolvedCatalogId]
+      : undefined;
+    const tuning = resolveTuning({
+      ...(catalogTuning ? { catalog: catalogTuning } : {}),
+      ...(installDefaultTuning ? { installDefault: installDefaultTuning } : {}),
+      ...(overrides.tuning ? { override: overrides.tuning } : {}),
+      ...(overrides.tuningProfileId ? { tuningProfileId: overrides.tuningProfileId } : {}),
+      ...(installDefaultProfileId ? { installDefaultProfileId } : {}),
+      ...(overrides.suggestedProfileId ? { suggestedProfileId: overrides.suggestedProfileId } : {}),
+      ...(catalogStyle?.reasoningFormat
+        ? { styleReasoningFormat: catalogStyle.reasoningFormat }
+        : {}),
+      ...(overrides.reasoningEffort ? { reasoningEffort: overrides.reasoningEffort } : {}),
+    });
+    return { profile, tuning };
   }
 
   /**

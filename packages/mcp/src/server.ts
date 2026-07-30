@@ -3773,10 +3773,7 @@ server.tool(
       .string()
       .describe('Craftbook id from list_craftbooks (e.g. "pull-request-review", "ship").'),
     project: z.string().optional().describe('Project id or name. Defaults to the current project.'),
-    title: z
-      .string()
-      .optional()
-      .describe('Optional task title. Defaults to the craftbook name.'),
+    title: z.string().optional().describe('Optional task title. Defaults to the craftbook name.'),
     description: z
       .string()
       .optional()

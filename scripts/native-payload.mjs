@@ -65,9 +65,42 @@ export const NATIVE_PAYLOAD = Object.freeze({
   'linux-arm64-cuda': ['gezel-llama-server', 'gezel-ds4-server'],
 });
 
+/**
+ * Which upstream engine each staged binary comes from, keyed by the same
+ * names `NATIVE_PAYLOAD` uses. The values are the engine ids under
+ * `native/engines/<id>/`, which is what NOTICE.md and the native license
+ * manifest are keyed by.
+ *
+ * `null` marks a binary we write ourselves — it has no upstream pin, so it is
+ * not a third-party SBOM component. Everything in NATIVE_PAYLOAD must appear
+ * here; native-payload.test.mjs enforces that, so adding an engine to the
+ * payload without classifying it fails the build rather than silently
+ * dropping it from the SBOM.
+ */
+export const ENGINE_FOR_BINARY = Object.freeze({
+  'gezel-llama-server': 'llama-cpp',
+  'gezel-sd-server': 'sd-cpp',
+  'gezel-ds4-server': 'ds4',
+  'gezel-whisper-server': 'whisper-cpp',
+  uv: 'uv',
+  'gezel-device-health': null,
+  'gezel-service-host': null,
+});
+
 /** Every platform key a native release publishes an archive for. */
 export function allPlatformKeys() {
   return Object.keys(NATIVE_PAYLOAD);
+}
+
+/**
+ * Platform keys whose payload includes at least one binary from `engineId`.
+ * Used to annotate SBOM components, since one SBOM accompanies installers for
+ * several platforms and the CUDA-only engines ship on a subset of them.
+ */
+export function platformKeysForEngine(engineId) {
+  return allPlatformKeys().filter((key) =>
+    NATIVE_PAYLOAD[key].some((binary) => ENGINE_FOR_BINARY[binary] === engineId),
+  );
 }
 
 /**

@@ -96,9 +96,7 @@ describe('ChatReferences task picker', () => {
   it('replaces legacy generated ISO titles with the craftbook name', async () => {
     activeWidth = CHAT_RAIL_MIN_SPLIT_PX;
     const user = userEvent.setup();
-    apiMocks.getTaskByRef.mockResolvedValue(
-      task('project-1/1', 'craftbook-1 — 2026-07-28T13:19'),
-    );
+    apiMocks.getTaskByRef.mockResolvedValue(task('project-1/1', 'craftbook-1 — 2026-07-28T13:19'));
 
     render(
       <ChatReferences chatKey="project-1" projectId="project-1">

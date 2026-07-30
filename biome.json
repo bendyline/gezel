@@ -13,6 +13,7 @@
       "**/dist-e2e/**",
       "**/node_modules/**",
       "**/.cache/**",
+      "**/.gezel/**",
       "**/.turbo/**",
       "**/out/**",
       "**/coverage/**",

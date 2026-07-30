@@ -31,8 +31,8 @@ Gezel ships with open-source and third-party software that is licensed under its
 
   - the bundled FFmpeg WebAssembly runtime is GPL-2.0-or-later;
   - the resvg SVG renderer is MPL-2.0;
-  - the GitHub Copilot CLI is proprietary, and its license does not permit
-    redistributing it on its own or modifying it.
+  - the NVIDIA CUDA runtime libraries bundled with the CUDA engine builds are
+    proprietary, under the NVIDIA CUDA Toolkit EULA.
 
 Where a bundled component's license conflicts with the MIT License above, that component's own license governs that component.
 
@@ -46,11 +46,19 @@ You can also read it before installing, at:
 
   https://github.com/bendyline/gezel/blob/main/NOTICE.md
 
-4. Auto-update
+4. Software installed on demand
+
+Some optional features install additional software onto your computer when you turn them on. That software is not part of Gezel and is not redistributed by Bendyline LLC - Gezel downloads it from the public npm registry, at your direction, into your own Gezel home folder. Each such component is governed by its own license as published by its author, not by the MIT License above, and it is not covered by the bundled inventory described in section 3.
+
+The two current examples are the GitHub Copilot CLI (installed when you enable the Copilot provider; proprietary, under the free-of-charge GitHub Copilot CLI License) and the Playwright MCP server (installed when you enable browser automation; Apache-2.0). Enabling browser automation also downloads a Chromium build of about 281 MB from Playwright's own servers, under Chromium's BSD-3-Clause license.
+
+Model weights work the same way: anything you download through Gezel comes from its upstream source under its own license. See the "Catalog models" section of NOTICE.md before relying on any model commercially.
+
+5. Auto-update
 
 Gezel checks for updates on launch by querying public GitHub release metadata. No personal data is sent in this check. You can disable auto-update by editing your settings.
 
-5. No warranty
+6. No warranty
 
 Gezel is provided "as is" without warranty of any kind. See the MIT license below for the full disclaimer.
 

@@ -435,8 +435,8 @@
             53
           ],
           "p": ".github/workflows",
-          "h": "e3326f4e307e0ce64b619aaa8912ed054f359726153083c17e6c9fccd57765b9",
-          "w": 1030,
+          "h": "fc1980fb56a59982314b292e26d18945c5f48bee352b1d18d3d5abd015afe749",
+          "w": 1038,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -567,8 +567,8 @@
             42.2,
             35.1
           ],
-          "h": "bf0bdc1b324d779e8db2becd895ce8d0a690be6213ef2275fed936ae87d4bf62",
-          "w": 379,
+          "h": "dc1e30c8fe3b847ce81ca86b440dddd0d8902975da92d6369bef8913fd2587fc",
+          "w": 415,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -7018,8 +7018,8 @@
             23.5
           ],
           "p": "packages/app",
-          "h": "80fa85c5c6963432f3a406b0ceb4b5dc9f2dc416ae7680a010daa9e49389e7a6",
-          "w": 68,
+          "h": "8ded6fdb857c589993078ece0ab96d382d753917213a08a9ba6d1d5406623cb6",
+          "w": 76,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -7984,8 +7984,8 @@
             21.7
           ],
           "p": "packages/app/scripts",
-          "h": "4c0f5ebeedf916dd1039737f7eaa3a2acd21e1fb492722278d2346324559bb66",
-          "w": 84,
+          "h": "2669906a6d69c8637b6c6b0f60f79c33d59cd3a6dfba0dde873605af0b5dee26",
+          "w": 114,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -8362,8 +8362,8 @@
             27
           ],
           "p": "packages/app/ux-screenshots",
-          "h": "170ba0f448376873042d5d84bf6ba9d37508771ab1d7da27d79aad9ded581303",
-          "w": 16,
+          "h": "e205c0e83f27321e87a3e4eac80fa2ce2dd6eb7977e261f0054c18698e237017",
+          "w": 39,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -9468,8 +9468,8 @@
             68.1
           ],
           "p": "packages/client/src",
-          "h": "9cddf730d7d5cb99666a9d992f535d24033af8f0d363a9fba2df0ab2c4a68087",
-          "w": 6067,
+          "h": "ba6d5cbc5f7b866c09b34b78c6641ff799c09d3700a826e34c46187f967ee8ab",
+          "w": 6080,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -10742,8 +10742,8 @@
             64.2
           ],
           "p": "packages/core/src/schemas",
-          "h": "35bf48ed5c57bdf0cffcf8047fb3bfef675142a1ad62c4cc8f4602c9511c2af5",
-          "w": 5885,
+          "h": "b813e4a4b02768907409cd043dd355a23cb8825cbe3214a3a93e768f2aa040d2",
+          "w": 5913,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -14060,8 +14060,8 @@
             30
           ],
           "p": "packages/service/src/fs",
-          "h": "b9ba6fd7f51572ed4febb3cc4a8771774b45bdad85648a19f5c052d36f2ba978",
-          "w": 192,
+          "h": "b6ff09f03f583591cf2cdb072c4a858ec41d874d50b1c09ab1ac2fb76d7e6191",
+          "w": 189,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -14763,8 +14763,8 @@
             20
           ],
           "p": "packages/service/src/http/openai-compat",
-          "h": "f19432f7e680bf39981c14f9cb4d0e83faafdf1e43d3f271aa72f7bde82fcd2e",
-          "w": 85,
+          "h": "40fcc5c66d3d9206778bb4aa5e0bb43a81a5a286b5233fd443b3b054841366a8",
+          "w": 108,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -14808,6 +14808,20 @@
           "h": "72eb6ee8a481251619efb7f46dcb1261cb04bdedc9ed5784e66a5bd0234b791f",
           "w": 514,
           "a": "2026-07-29T12:45:34.302Z"
+        },
+        {
+          "k": "block",
+          "id": "packages/service/src/http/openai-endpoints-gate.ts",
+          "r": [
+            1075.8,
+            1778.7,
+            16.8,
+            24.1
+          ],
+          "p": "packages/service/src/http",
+          "h": "5eb39f828550ae2f5079527b8b1f185305317222d4c4039dc6f28f59d99d46f6",
+          "w": 45,
+          "a": "2026-07-30T01:07:34.767Z"
         },
         {
           "k": "block",
@@ -14959,8 +14973,8 @@
             55.5
           ],
           "p": "packages/service/src/http/routes",
-          "h": "1e712d0149b8ddc69c45d951648461ad54b76b21b12dfc372b127509924e8d86",
-          "w": 693,
+          "h": "19423ec108f3f7cf74d3d74b00c4a2a8fa0bde7739336e5a2e6cebc461547fff",
+          "w": 701,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -15015,8 +15029,8 @@
             23.4
           ],
           "p": "packages/service/src/http/routes",
-          "h": "3279a563c7ef516bfe824cd6da8163324f7c702ee63045045ecf8133bbb0e64e",
-          "w": 163,
+          "h": "500e4f6a4e1f199ef1901324713cd7a8af7297f710ca3ec066fc60f8f2faeb45",
+          "w": 160,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -15337,8 +15351,8 @@
             31.2
           ],
           "p": "packages/service/src/http/routes",
-          "h": "ce021105bc8c9d4cce8a87c9fbf618014d0d7a5d594110c29b24af07b7659543",
-          "w": 259,
+          "h": "b4cf6d1eb08bb0213cfe6fd4ce64be69264b3a89681656dc5729061a3335aa8a",
+          "w": 272,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -15743,8 +15757,8 @@
             32.5
           ],
           "p": "packages/service/src/http/routes",
-          "h": "e4d9a3c975f97a62482064ff717daca18bf40590478854b9a2b068613be27e39",
-          "w": 388,
+          "h": "fc0d0238861548ccb6599ae8ba033f38ad47984de8c16ad45854152f231312a1",
+          "w": 424,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -15813,8 +15827,8 @@
             22
           ],
           "p": "packages/service/src/http/routes",
-          "h": "49c80545bcff1b10ba62887485bc957668568f8061aeef8549b9e64c67780d9b",
-          "w": 70,
+          "h": "75b7026a47cb35a845e98ffa914cf51720e7b6acf9155165260f98ca7bd1d790",
+          "w": 91,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -15883,8 +15897,8 @@
             39.3
           ],
           "p": "packages/service/src/http",
-          "h": "5134da2133344f5caf7c1a0aa3c12ed0904d48f9bcdaf8aa494522aaaea5f603",
-          "w": 675,
+          "h": "f9d4037cf448104d64d4b5964e72ecfaf71eacb300b50d315637520441cb4102",
+          "w": 691,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -21399,7 +21413,7 @@
             46.6
           ],
           "p": "packages/ui/src",
-          "h": "27782166a18bb6769aa2073262fdff5de0fa3f5d9b3c0ffc76e576696bc6b3f7",
+          "h": "05e3684cd04ffb470a089ff61091be760d96f3454fa40826d131e8883a966aa4",
           "w": 1099,
           "a": "2026-07-29T12:45:34.302Z"
         },
@@ -21945,8 +21959,8 @@
             29.4
           ],
           "p": "packages/ui/src/components",
-          "h": "bc10ed3a294e2ff5afdc66b9c3d3c71faf22637d31c080138abc8d47ed40b750",
-          "w": 325,
+          "h": "770ea1d36f8ff0a12032ff9f0834639996f595eebd53d100810a9ed5a7d1caed",
+          "w": 486,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -22729,8 +22743,8 @@
             36.5
           ],
           "p": "packages/ui/src/components",
-          "h": "35fc8dd825762b0f4a5ff18c30225603bd4ec9e12932d3d73731f0fa1162c207",
-          "w": 283,
+          "h": "6487f5eee99296cb4eedc457c9ce8504a272019158d1668462631ab775d84771",
+          "w": 280,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -25810,7 +25824,7 @@
             22.7
           ],
           "p": "packages/ui/src/views/home",
-          "h": "6842c7414610b36b3a8e2376d021c37b2efd90b58a4ec90f91f72286ff210d44",
+          "h": "e1848c62993728833cea16c6bc9cf3022a4723d4e85802514ac4d40da197d1fd",
           "w": 88,
           "a": "2026-07-29T12:45:34.302Z"
         },
@@ -26383,8 +26397,8 @@
             31.9
           ],
           "p": "scripts",
-          "h": "a7441c762cc56662e1678e943b091cc9f9904fa9f3cd3695a7ede3e716a7043c",
-          "w": 386,
+          "h": "b68be2376283f125b3e355dafb9ed92ada15f8eba9c3a3b087f8d6e2ff40fabb",
+          "w": 391,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -27002,6 +27016,20 @@
           "h": "34a24e1d340047a0d136fa4eadac422e69c018f19588cf7b61667173b2aacda6",
           "w": 146,
           "a": "2026-07-29T12:45:34.302Z"
+        },
+        {
+          "k": "block",
+          "id": "scripts/verify-pe-tree.mjs",
+          "r": [
+            1254,
+            1382.8,
+            31.5,
+            29.5
+          ],
+          "p": "scripts",
+          "h": "594a1f7897bd92a3f5ca829283d14602a5108314d18490b9812aa91033d25c94",
+          "w": 205,
+          "a": "2026-07-30T01:38:10.851Z"
         },
         {
           "k": "block",

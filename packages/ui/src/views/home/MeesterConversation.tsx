@@ -10,8 +10,8 @@ import { pickChatPlaceholder } from '../../components/chat-placeholder.js';
  * The meester conversation in the workshop's main column. Reuses the
  * existing global timeline + composer verbatim (migrated from HomeView's
  * `MeesterChatBody`) so streaming, tool calls, mentions, and markdown all
- * keep working. Renders unframed so it fills the workshop's main column
- * edge-to-edge.
+ * keep working. The conversation rail fills the workshop's main column, while
+ * the composer receives its own quiet project-chat-style frame in CSS.
  */
 export function MeesterConversation({
   meesterGezelId,

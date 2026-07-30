@@ -171,6 +171,17 @@ export function v1ChatRoutes(ctx: ServiceContext): Hono {
     // through ITS configured provider/model; a regular `<provider>:<model>`
     // shape skips straight to the model. Either way the route below
     // only sees a uniform target.
+    // One config read serves both the serving-gezel fallback (below)
+    // and the supporting-behaviors switch at session build.
+    const endpointsConfig: {
+      enabled?: boolean;
+      servingGezelId?: string;
+      supportingBehaviors?: boolean;
+    } = await ctx.store
+      .readConfig()
+      .then((cfg) => cfg.openaiEndpoints ?? {})
+      .catch(() => ({}));
+
     let target: ChatTarget;
     try {
       const gezelRef = parseGezelModelRef(parsed.model);
@@ -184,10 +195,7 @@ export function v1ChatRoutes(ctx: ServiceContext): Hono {
           // Connected Apps), route through them — persona + tuning apply
           // exactly like a `gezel:<id>` target. Without one, unknown
           // models keep failing loudly so typos stay visible.
-          const config = await ctx.store
-            .readConfig()
-            .catch(() => ({}) as { openaiEndpoints?: { servingGezelId?: string } });
-          const servingGezelId = config.openaiEndpoints?.servingGezelId;
+          const servingGezelId = endpointsConfig.servingGezelId;
           if (!servingGezelId) {
             return c.json(
               {
@@ -255,11 +263,26 @@ export function v1ChatRoutes(ctx: ServiceContext): Hono {
       }
       const { systemMessage, prompt, priorMessages, attachments } = translated;
 
+      // Per-model session defaults, mirroring what a UI session on the
+      // same model would get. `tuning` (catalog sampling, thinking /
+      // instruct folds, per-gezel overrides for gezel: targets) applies
+      // unconditionally — it's "what the model is". The behavior
+      // `profile` (ramble detection, preamble folding, transcript
+      // shaping) is the supporting layer the Connected Apps switch
+      // gates. Best-effort: a resolver failure serves engine defaults
+      // rather than failing the request.
+      const defaults = await ctx.chat
+        .resolveModelSessionDefaults(target.provider, target.model, target.tuningOverrides ?? {})
+        .catch(() => null);
+      const supportingBehaviors = endpointsConfig.supportingBehaviors !== false;
+
       const sessionOpts: SessionOpts = {
         systemMessage,
         ...(target.model ? { model: target.model } : {}),
         ...(priorMessages.length > 0 ? { priorMessages } : {}),
         ...(externalTools && externalTools.length > 0 ? { externalTools } : {}),
+        ...(defaults ? { tuning: defaults.tuning } : {}),
+        ...(defaults && supportingBehaviors ? { profile: defaults.profile } : {}),
       };
       session = await provider.createSession(sessionOpts);
 

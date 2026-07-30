@@ -38,6 +38,7 @@ import { promisify } from 'node:util';
 import { pruneForeignBinariesWithReport } from './prune-foreign-binaries.mjs';
 import { stageSharpCompatibilityStub, verifySharpCompatibilityTree } from './sharp-compat.mjs';
 import { signMachOTree } from './sign-macho-tree.mjs';
+import { verifyPeTree } from './verify-pe-tree.mjs';
 
 const exec = promisify(execFile);
 
@@ -202,9 +203,13 @@ async function main() {
     return;
   }
 
-  // Must happen before the tarball exists: Apple's notary service inspects
-  // the archive contents, but nothing after this point can reach inside it.
+  // Both must happen before the tarball exists: Apple's notary service
+  // inspects the archive contents, and on Windows neither the afterPack sweep
+  // nor the release workflow's signature gate can reach inside it. macOS
+  // signs (notarization requires it); Windows only audits, because every
+  // unsigned binary in there is a prebuilt npm artifact we did not compile.
   await signMachOTree(target);
+  await verifyPeTree(target);
 
   await emitArchive(target, archivePath);
   await emitMeta(target, archivePath, metaPath);
