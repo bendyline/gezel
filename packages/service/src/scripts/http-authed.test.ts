@@ -49,11 +49,6 @@ beforeEach(async () => {
   await store.ensureLayout();
   await store.writeConfig({ securityPolicy: securityPolicyForLevel('free') });
   await store.createProject({ name: 'Alpha' });
-  await store.updateProject('alpha', {
-    credentialAllowedOrigins: {
-      'github.token': ['https://api.github.example', 'https://api.example.com'],
-    },
-  });
   secrets = new FileSecretStore(home);
   manager = new ChatManager({
     store,
@@ -89,9 +84,6 @@ describe.runIf(process.platform === 'darwin')('gezel.http.authed — end-to-end'
     await secrets.set({ kind: 'providerCredential', name: 'githubToken' }, 'ghp_test_token_alpha');
     await store.updateProject('alpha', {
       grantedCredentials: ['github.token'],
-      credentialAllowedOrigins: {
-        'github.token': ['https://api.github.example'],
-      },
     });
 
     await writeScript(
@@ -104,7 +96,7 @@ describe.runIf(process.platform === 'darwin')('gezel.http.authed — end-to-end'
           requires: ['network', 'credential:github.token'],
           outputs: { status: { type: 'number', description: 'HTTP status' } },
         });
-        const res = await gezel.http.authed('https://api.github.example/repos/x', {
+        const res = await gezel.http.authed('https://api.github.com/repos/x', {
           credential: 'github.token',
         });
         gezel.output({ status: res.status });
@@ -123,19 +115,13 @@ describe.runIf(process.platform === 'darwin')('gezel.http.authed — end-to-end'
     const init = fetchCalls[0]!.init!;
     const headers = init.headers as Record<string, string>;
     expect(headers.Authorization).toBe('Bearer ghp_test_token_alpha');
-    expect(fetchCalls[0]!.url).toBe('https://api.github.example/repos/x');
+    expect(fetchCalls[0]!.url).toBe('https://api.github.com/repos/x');
   });
 
   it('rejects when the project has not granted the credential', async () => {
     await secrets.set({ kind: 'providerCredential', name: 'githubToken' }, 'ghp_ungranted');
-    // Bind the destination but deliberately do not grant the credential,
-    // so this reaches the credential-registry denial instead of failing at
-    // the earlier origin-boundary check.
-    await store.updateProject('alpha', {
-      credentialAllowedOrigins: {
-        'github.token': ['https://api.example.com'],
-      },
-    });
+    // Use GitHub's fixed credential destination but deliberately do not grant
+    // the credential, so this reaches the credential-registry denial.
     await writeScript(
       'needs-grant',
       `
@@ -148,7 +134,7 @@ describe.runIf(process.platform === 'darwin')('gezel.http.authed — end-to-end'
         });
         let caught = false;
         try {
-          await gezel.http.authed('https://api.example.com/x', { credential: 'github.token' });
+          await gezel.http.authed('https://api.github.com/x', { credential: 'github.token' });
         } catch (e) {
           caught = true;
         }
@@ -177,9 +163,6 @@ describe.runIf(process.platform === 'darwin')('gezel.http.authed — end-to-end'
     );
     await store.updateProject('alpha', {
       grantedCredentials: ['github.token'],
-      credentialAllowedOrigins: {
-        'github.token': ['https://api.example.com'],
-      },
     });
 
     await writeScript(
@@ -194,7 +177,7 @@ describe.runIf(process.platform === 'darwin')('gezel.http.authed — end-to-end'
         });
         let caught = false;
         try {
-          await gezel.http.authed('https://api.example.com/x', { credential: 'github.token' });
+          await gezel.http.authed('https://api.github.com/x', { credential: 'github.token' });
         } catch (e) {
           caught = true;
         }
@@ -219,9 +202,6 @@ describe.runIf(process.platform === 'darwin')('gezel.http.authed — end-to-end'
     await secrets.set({ kind: 'providerCredential', name: 'githubToken' }, 'ghp_audit_e2e');
     await store.updateProject('alpha', {
       grantedCredentials: ['github.token'],
-      credentialAllowedOrigins: {
-        'github.token': ['https://api.example.com'],
-      },
     });
 
     await writeScript(
@@ -234,7 +214,7 @@ describe.runIf(process.platform === 'darwin')('gezel.http.authed — end-to-end'
           requires: ['network', 'credential:github.token'],
           outputs: { ok: { type: 'boolean', description: 'ok' } },
         });
-        await gezel.http.authed('https://api.example.com/x', { credential: 'github.token' });
+        await gezel.http.authed('https://api.github.com/x', { credential: 'github.token' });
         gezel.output({ ok: true });
       `,
     );
@@ -262,9 +242,6 @@ describe.runIf(process.platform === 'darwin')('gezel.http.authed — end-to-end'
     await secrets.set({ kind: 'providerCredential', name: 'githubToken' }, 'ghp_echoed_SECRET');
     await store.updateProject('alpha', {
       grantedCredentials: ['github.token'],
-      credentialAllowedOrigins: {
-        'github.token': ['https://api.example.com'],
-      },
     });
 
     await writeScript(
@@ -277,7 +254,7 @@ describe.runIf(process.platform === 'darwin')('gezel.http.authed — end-to-end'
           requires: ['network', 'credential:github.token'],
           outputs: { body: { type: 'string', description: 'response body' } },
         });
-        const res = await gezel.http.authed('https://api.example.com/echo', {
+        const res = await gezel.http.authed('https://api.github.com/echo', {
           credential: 'github.token',
         });
         gezel.output({ body: res.body });

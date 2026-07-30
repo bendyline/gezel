@@ -309,6 +309,28 @@ describe('discoverNativeBinaries — automatic backend cascade', () => {
       variant: 'vulkan',
     });
   });
+
+  it('falls through a missing Vulkan build to CPU when CUDA is also absent', () => {
+    const cpuBin = stageBinary(nativeBinDir, 'linux-x64-cpu', 'gezel-llama-server', 'linux');
+
+    const result = discoverNativeBinaries({
+      home,
+      nativeBinDirOverride: nativeBinDir,
+      platform: 'linux',
+      arch: 'x64',
+      llamaProbeOverride: {
+        fileExists: (p) => p === '/usr/lib/x86_64-linux-gnu/libcuda.so.1',
+      },
+    });
+
+    expect(process.env.GEZEL_LLAMA_SERVER_BIN).toBe(cpuBin);
+    expect(process.env.GEZEL_LLAMA_SERVER_BACKEND).toBe('cpu');
+    expect(process.env.GEZEL_LLAMA_DETECTED_BACKEND).toBe('cuda');
+    expect(result.llamaBackend).toMatchObject({
+      backend: 'cpu',
+      detectedBackend: 'cuda',
+    });
+  });
 });
 
 describe('discoverNativeBinaries — override', () => {
