@@ -5,6 +5,7 @@ import type { NativeEngineSupervisor } from '../native/supervisor.js';
 import { isSseComment, readSseEvents } from '../openai-compatible/sse.js';
 import {
   LlamaCppProvider,
+  NativeEngineCrashedError,
   ToolCallAccumulator,
   compactSuccessfulWriteToolCallForTranscript,
   constrainedToolNoSignalMsForModel,
@@ -7150,6 +7151,119 @@ describe('reasoning_content replay (ds4 live-KV alignment)', () => {
 });
 
 describe('LlamaCppProvider supervisor integration', () => {
+  const cudaExit = {
+    incidentId: 'native-55121-1234',
+    pid: 55121,
+    startedAt: 1000,
+    exitedAt: 1234,
+    uptimeMs: 234,
+    code: null,
+    signal: 'SIGABRT' as const,
+    expected: false,
+    panicKind: 'cuda-invalid-argument' as const,
+    panicLine: '[llama-server] CUDA error: invalid argument',
+    outputTail: '[llama-server] CUDA error: invalid argument\n',
+    diagnostics: { cudaArchitectures: '121a-real', computeCapability: '12.1' },
+  };
+
+  it('attributes a CUDA crash that happens while the engine is starting', async () => {
+    const supervisor = {
+      async ensureRunning() {
+        throw new Error('[llama-server] child exited before becoming ready');
+      },
+      lastExitSnapshot() {
+        return { ...cudaExit, exitedAt: Date.now() };
+      },
+      markUsed() {},
+      async stop() {},
+    } as unknown as NativeEngineSupervisor;
+
+    const provider = new LlamaCppProvider({ supervisor });
+    const session = await provider.createSession({ systemMessage: 'sys', model: 'llama' });
+    await expect(session.sendAndWait('ping')).rejects.toMatchObject({
+      code: 'native-engine-crash',
+      incidentId: 'native-55121-1234',
+      panicKind: 'cuda-invalid-argument',
+    });
+  });
+
+  it('does not blame a new startup failure on a stale native exit', async () => {
+    const supervisor = {
+      async ensureRunning() {
+        throw new Error('[llama-server] model file is missing');
+      },
+      lastExitSnapshot() {
+        return cudaExit;
+      },
+      markUsed() {},
+      async stop() {},
+    } as unknown as NativeEngineSupervisor;
+
+    const provider = new LlamaCppProvider({ supervisor });
+    const session = await provider.createSession({ systemMessage: 'sys', model: 'llama' });
+    const error = await session.sendAndWait('ping').catch((caught) => caught);
+    expect(error).toBeInstanceOf(Error);
+    expect(error).not.toBeInstanceOf(NativeEngineCrashedError);
+    expect((error as Error).message).toContain('model file is missing');
+  });
+
+  it('attributes a pre-response transport failure to the supervised CUDA crash', async () => {
+    const supervisor = {
+      async ensureRunning() {
+        return { command: 'fake', args: [], baseUrl: 'http://127.0.0.1:18099' };
+      },
+      markUsed() {},
+      async waitForUnexpectedExitSince() {
+        return cudaExit;
+      },
+      async stop() {},
+    } as unknown as NativeEngineSupervisor;
+    globalThis.fetch = (async () => {
+      throw new TypeError('fetch failed');
+    }) as typeof fetch;
+
+    const provider = new LlamaCppProvider({ supervisor });
+    const session = await provider.createSession({ systemMessage: 'sys', model: 'llama' });
+    const error = await session.sendAndWait('ping').catch((caught) => caught);
+    expect(error).toBeInstanceOf(NativeEngineCrashedError);
+    expect(error).toMatchObject({
+      code: 'native-engine-crash',
+      engine: 'llama-cpp',
+      incidentId: 'native-55121-1234',
+      panicKind: 'cuda-invalid-argument',
+    });
+    expect((error as Error).message).toContain('It will restart on the next request');
+  });
+
+  it('attributes an open SSE stream terminating to the supervised CUDA crash', async () => {
+    const supervisor = {
+      async ensureRunning() {
+        return { command: 'fake', args: [], baseUrl: 'http://127.0.0.1:18099' };
+      },
+      markUsed() {},
+      async waitForUnexpectedExitSince() {
+        return cudaExit;
+      },
+      async stop() {},
+    } as unknown as NativeEngineSupervisor;
+    globalThis.fetch = (async () =>
+      new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.error(new TypeError('terminated'));
+          },
+        }),
+        { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+      )) as typeof fetch;
+
+    const provider = new LlamaCppProvider({ supervisor });
+    const session = await provider.createSession({ systemMessage: 'sys', model: 'llama' });
+    await expect(session.sendAndWait('ping')).rejects.toMatchObject({
+      code: 'native-engine-crash',
+      incidentId: 'native-55121-1234',
+    });
+  });
+
   it('calls supervisor.ensureRunning() and markUsed() on each turn', async () => {
     const ensureCalls: number[] = [];
     let usedCalls = 0;

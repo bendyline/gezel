@@ -1,4 +1,4 @@
-import { mkdtemp, rm, utimes, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -11,6 +11,35 @@ afterEach(async () => {
 });
 
 describe('native engine logs', () => {
+  it('persists a redacted structured crash without the stdout tail', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'gezel-llama-log-'));
+    dirs.push(dir);
+    const log = new LlamaCppLogFile(dir);
+    log.writeIncident({
+      incidentId: 'native-55121-1234',
+      pid: 55121,
+      startedAt: 1000,
+      exitedAt: 1234,
+      uptimeMs: 234,
+      code: null,
+      signal: 'SIGABRT',
+      expected: false,
+      panicKind: 'cuda-invalid-argument',
+      panicLine: 'CUDA error: invalid argument token=sk-abcdefghijklmnopqrstuvwxyz123456',
+      outputTail: 'user prompt that must not be persisted',
+    });
+
+    const raw = await readFile(join(dir, 'native-incidents.jsonl'), 'utf8');
+    const incident = JSON.parse(raw) as Record<string, unknown>;
+    expect(incident).toMatchObject({
+      incidentId: 'native-55121-1234',
+      panicKind: 'cuda-invalid-argument',
+    });
+    expect(raw).not.toContain('user prompt');
+    expect(raw).not.toContain('sk-abcdefghijklmnopqrstuvwxyz123456');
+    await log.close();
+  });
+
   it('supports a DS4-specific basename', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'gezel-ds4-log-'));
     dirs.push(dir);

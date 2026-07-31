@@ -125,15 +125,12 @@ case "$backend" in
     cmake_flags+=(
       "-DCMAKE_CUDA_FLAGS=-Xcompiler=-ffile-prefix-map=$src=llama.cpp -Xcompiler=-fmacro-prefix-map=$src=llama.cpp -Xcompiler=-fdebug-prefix-map=$src=llama.cpp"
     )
-    # CUDA arch selection. The DEFAULT (LLAMA_CUDA_ARCH unset) omits
-    # CMAKE_CUDA_ARCHITECTURES and lets llama.cpp's own CMake pick its
-    # portable default list — which at CUDA 12.9+ already includes
-    # `121a-real` for GB10/DGX Spark (the arm64 CI leg pins cuda_pkg=12-9
-    # for exactly this). That default is CI-SAFE: a GPU-less runner cannot
-    # resolve `native`, and forcing it there fails the configure — or
-    # silently builds sm_52-only (the ds4 lesson). It is also what shipped
-    # green through native-v0.1.14. Overrides, all opt-in:
-    #   LLAMA_CUDA_ARCH="86;89;120"  explicit CMake arch list (release legs).
+    # CUDA arch selection. Release legs MUST set LLAMA_CUDA_ARCH explicitly:
+    # on a GPU-less runner CMake/nvcc can pre-populate the variable with its
+    # legacy sm_52 fallback before llama.cpp installs its portable defaults.
+    # Local builds may leave it empty, but the build log + emitted metadata
+    # make that choice visible. Overrides:
+    #   LLAMA_CUDA_ARCH="60-virtual;75-real;120" explicit CMake arch list.
     #   LLAMA_CUDA_ARCH=native       ONLY the GPU on THIS host — a lean, fast
     #                                local dev restore; REQUIRES a GPU present.
     #   LLAMA_CUDA_ARCH=spark        empty -arch, antirez cuda-spark style.
@@ -157,7 +154,7 @@ case "$backend" in
     exit 1
     ;;
 esac
-echo "[build] platform=$platform backend=$backend"
+echo "[build] platform=$platform backend=$backend cuda_architectures=${llama_cuda_arch:-unset}"
 
 # ── 4. Configure + build ───────────────────────────────────────────
 build_dir="$src/build-$platform-$backend"
@@ -239,6 +236,36 @@ mkdir -p "$out_dir"
 server_name="gezel-llama-server"
 cp "$found" "$out_dir/$server_name"
 chmod +x "$out_dir/$server_name"
+
+# Runtime diagnostics travel with the binary. The service reads this file at
+# launch and includes the exact upstream revision + CUDA target in structured
+# crash records, so an operator can distinguish a kernel bug from a malformed
+# release artifact without reverse-engineering the shared library.
+metadata_cuda_arch=""
+metadata_cuda_toolkit=""
+if [[ "$backend" == "cuda" ]]; then
+  metadata_cuda_arch="${llama_cuda_arch:-}"
+  if command -v nvcc >/dev/null 2>&1; then
+    metadata_cuda_toolkit="$(nvcc --version | sed -n 's/.*release \([^,]*\).*/\1/p' | tail -n1)"
+  fi
+fi
+node - "$out_dir/gezel-llama-build.json" "$pinned_commit" "$platform" "$backend" "$metadata_cuda_arch" "$metadata_cuda_toolkit" <<'NODE'
+const { writeFileSync } = require('node:fs');
+const [path, revision, platform, backend, cudaArchitectures, cudaToolkit] = process.argv.slice(2);
+writeFileSync(
+  path,
+  `${JSON.stringify({
+    schemaVersion: 1,
+    engine: 'llama-cpp',
+    revision,
+    platform,
+    backend,
+    ...(cudaArchitectures ? { cudaArchitectures: cudaArchitectures.split(';') } : {}),
+    ...(cudaToolkit ? { cudaToolkit } : {}),
+  }, null, 2)}\n`,
+  'utf8',
+);
+NODE
 
 # Copy llama.cpp's own runtime shared libraries that load lazily
 # when the server tries to load a model. Without these alongside

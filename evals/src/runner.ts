@@ -7,7 +7,11 @@ import { setTimeout as wait } from 'node:timers/promises';
 import type { GezelConfig } from '@bendyline/gezel';
 import type { GezelClient } from '@bendyline/gezel-client/node';
 import { startAutoAnswerer } from './auto-answer.ts';
-import { classifyTrial, readDaemonLogTailSync } from './failure-class.ts';
+import {
+  classifyTrial,
+  readDaemonLogTailSync,
+  summarizeNativeEngineIncidents,
+} from './failure-class.ts';
 import { summarizeKeurmeesterCases } from './keurmeester-metrics.ts';
 import { TrialLogger } from './logging.ts';
 import { startMockServices } from './mock/mock-server.ts';
@@ -2213,6 +2217,22 @@ export async function captureFinalState(args: {
     );
   }
 
+  // Structured native-engine exits are written separately from the rolling
+  // daemon log so a crash early in a long trial cannot fall out of the log
+  // tail used at finalize. They contain launch metadata and panic signatures,
+  // never prompts or tool arguments.
+  try {
+    const nativeIncidentsSrc = join(trialHome, 'logs', 'native-incidents.jsonl');
+    if (existsSync(nativeIncidentsSrc)) {
+      await cp(nativeIncidentsSrc, join(runDir, 'native-incidents.jsonl'));
+      log('[capture] snapshotted native engine incidents');
+    }
+  } catch (err) {
+    log(
+      `[capture] native incident snapshot failed: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+
   // Dump the high-level lists too — quick to read in a postmortem
   // without spinning the daemon back up.
   try {
@@ -2739,17 +2759,29 @@ async function finalize(args: {
   // can separate model failures from infra/operator noise. Log-signature
   // rules read the daemon log; classification must never block finalize.
   let classification = classifyTrial({ success: args.success, reason: args.reason });
+  let nativeIncidentLog: string | null = null;
   try {
     const daemonLog = readDaemonLogTailSync(join(args.runDir, 'daemon.log'));
+    const nativeIncidentPath = join(args.runDir, 'native-incidents.jsonl');
+    nativeIncidentLog = existsSync(nativeIncidentPath)
+      ? readFileSync(nativeIncidentPath, 'utf8')
+      : null;
     classification = classifyTrial({
       success: args.success,
       reason: args.reason,
       failureMode: args.failureMode ?? null,
       daemonLog,
+      nativeIncidentLog,
     });
   } catch {
     // Reason-only classification (already computed) stands.
   }
+  const nativeEngineIncidents = summarizeNativeEngineIncidents(nativeIncidentLog);
+  const effectiveFailureMode =
+    !args.success &&
+    (classification.rule === 'cuda-engine-crash' || classification.rule === 'native-engine-crash')
+      ? ('engine-crash' as const)
+      : args.failureMode;
   // Supervisor-arm trials: summarize the harvested intervention case
   // records (captureFinalState ran before finalize, so the dir exists
   // by now). Never blocks finalize; null = control arm.
@@ -2765,7 +2797,8 @@ async function finalize(args: {
     success: args.success,
     reason: args.reason,
     runDir: args.runDir,
-    ...(args.failureMode ? { failureMode: args.failureMode } : {}),
+    ...(effectiveFailureMode ? { failureMode: effectiveFailureMode } : {}),
+    ...(nativeEngineIncidents ? { nativeEngineIncidents } : {}),
     ...(args.finalSniff ? { finalSniff: args.finalSniff } : {}),
     ...(keurmeesterSummary ? { keurmeester: keurmeesterSummary } : {}),
     ...(classification.failureClass !== 'pass'

@@ -152,6 +152,22 @@ function performanceRows(facts: TrialFacts): string[] {
   ];
 }
 
+function nativeReliabilitySection(facts: TrialFacts): string[] {
+  const incidents = facts.nativeEngineIncidents;
+  if (!incidents) return [];
+  const kinds = Object.entries(incidents.kinds)
+    .map(([kind, count]) => `${kind} x${count}`)
+    .join(', ');
+  return [
+    '## Native-engine reliability',
+    '',
+    `- Unexpected exits: ${incidents.count} (${kinds || 'unclassified'}).`,
+    `- Incident IDs: ${incidents.incidentIds.map((id) => `\`${id}\``).join(', ')}.`,
+    ...incidents.evidence.map((item) => `- Evidence: ${item.replace(/`/g, "'")}`),
+    '',
+  ];
+}
+
 function evidenceSection(name: string, axis: AxisScore): string[] {
   const lines = [`### ${name} - ${axis.ruleId}`, '', axis.summary];
   if (axis.adjustments) {
@@ -199,6 +215,7 @@ export function renderDeterministicPostmortem(facts: TrialFacts, score: FixedRub
     '|---|---:|---|',
     ...performanceRows(facts),
     '',
+    ...nativeReliabilitySection(facts),
     '## Evidence map',
     '',
     ...evidenceSection('Task completion', score.axes.completion),

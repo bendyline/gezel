@@ -59,7 +59,7 @@ import {
 } from '@bendyline/gezel-catalog';
 import { gezelPaths } from '@bendyline/gezel/paths';
 import { autoAllowedToolsForToolsets, buildAutoAllowHook } from '../craftbook/auto-allow.js';
-import { isEnginePinned } from '../engines/native-manifest.js';
+import { effectiveEngineRelease, isEnginePinned } from '../engines/native-manifest.js';
 import { resolveInside } from '../fs/safe-paths.js';
 import type { Store } from '../fs/store.js';
 import { rankProjectsForGezel } from '../gezels/roster.js';
@@ -113,7 +113,14 @@ import {
   extractSingleFileSourceRepairTargetPath,
 } from '../providers/direct-file-work-prompt.js';
 import { Ds4Provider } from '../providers/ds4/index.js';
-import { maxGpuVramBytes, probeLlamaDevices } from '../providers/llama-cpp/devices.js';
+import { lastArgValue, readLlamaCppBuildMetadata } from '../providers/llama-cpp/build-metadata.js';
+import {
+  matchNvidiaRuntimeDevice,
+  maxGpuVramBytes,
+  pickBestGpuDevice,
+  probeLlamaDevices,
+  probeNvidiaRuntimeDevices,
+} from '../providers/llama-cpp/devices.js';
 import {
   type PlannerOffloadDecision,
   buildLlamaCppEngineArgs,
@@ -16101,6 +16108,21 @@ export async function buildLlamaCppProvider(opts: {
   // cross-check for an explicit draft-mtp request.
   let ggufHasMtp = false;
   let mtpLayerCount = 0;
+  const llamaBuildMetadata = binary ? await readLlamaCppBuildMetadata(binary) : null;
+  let llamaGpuDevice: import('../providers/llama-cpp/devices.js').LlamaDevice | null = null;
+  let nvidiaRuntimeDevice:
+    | import('../providers/llama-cpp/devices.js').NvidiaRuntimeDevice
+    | undefined;
+  let llamaDevices: import('../providers/llama-cpp/devices.js').LlamaDevice[] = [];
+  if (binary) {
+    const [probe, nvidiaDevices] = await Promise.all([
+      probeLlamaDevices({ binaryPath: binary, home }),
+      probeNvidiaRuntimeDevices(),
+    ]);
+    llamaDevices = probe.devices;
+    llamaGpuDevice = pickBestGpuDevice(probe.devices);
+    nvidiaRuntimeDevice = matchNvidiaRuntimeDevice(llamaGpuDevice, nvidiaDevices);
+  }
   if (binary && modelPath) {
     try {
       const summary = readGgufSummary(modelPath);
@@ -16114,8 +16136,7 @@ export async function buildLlamaCppProvider(opts: {
       }
       const approxBytes = modelCatalogInfo?.approxSizeBytes ?? summary.fileSizeBytes;
       const residentBytes = Math.round(approxBytes * 1.2);
-      const probe = await probeLlamaDevices({ binaryPath: binary, home });
-      const vramBytes = maxGpuVramBytes(probe.devices);
+      const vramBytes = maxGpuVramBytes(llamaDevices);
       offloadDecision = planMoeOffload({ isMoE, residentBytes, vramBytes });
       if (offloadDecision.reason) {
         log.info(
@@ -16195,6 +16216,10 @@ export async function buildLlamaCppProvider(opts: {
       log.info(line);
       logFile.write(line);
     },
+    onExit: (snapshot) => {
+      if (snapshot.expected) return;
+      logFile.writeIncident(snapshot);
+    },
     onRawLine: (line) => providerHolder.current?.onStdoutLine(line),
     resolveLaunch: async () => {
       const port = cachedPort ?? (await pickFreePort());
@@ -16210,6 +16235,19 @@ export async function buildLlamaCppProvider(opts: {
       // exe-dir-search-then-PATH-search resolve them all.
       const binDir = dirname(binary);
       const inheritedPath = process.env.PATH ?? '';
+      const resolvedAdvancedArgs = buildLlamaCppEngineArgs({
+        config,
+        perModel: resolvedManifestEngineConfig,
+        planner: offloadDecision,
+        kvCacheType,
+        slots,
+        ggufHasMtp,
+        installedDraftModelPath: modelCatalogInfo?.draftModelPath,
+        // Opt-in A/B lever: `GEZEL_LLAMA_REASONING_FORMAT=none`
+        // disables llama-server's chat-template output parsing so mangled
+        // model output reaches `delta.content` for provider-side salvage.
+        reasoningFormat: process.env.GEZEL_LLAMA_REASONING_FORMAT?.trim() || undefined,
+      });
       return {
         command: binary,
         args: [
@@ -16278,21 +16316,7 @@ export async function buildLlamaCppProvider(opts: {
           // global `config` ⊕ the model's manifest `tuning.engine.llamaCpp`.
           // Computed inside the closure so a settings change is picked up
           // on the next spawn.
-          ...buildLlamaCppEngineArgs({
-            config,
-            perModel: resolvedManifestEngineConfig,
-            planner: offloadDecision,
-            kvCacheType,
-            slots,
-            ggufHasMtp,
-            installedDraftModelPath: modelCatalogInfo?.draftModelPath,
-            // Opt-in A/B lever: `GEZEL_LLAMA_REASONING_FORMAT=none`
-            // disables llama-server's chat-template output parsing so
-            // mangled gemma tool-call turns (dropped pre-SSE by the
-            // peg-gemma4 parser) reach `delta.content` for salvage.
-            // Unset → flag omitted, default parsing unchanged.
-            reasoningFormat: process.env.GEZEL_LLAMA_REASONING_FORMAT?.trim() || undefined,
-          }),
+          ...resolvedAdvancedArgs,
           // Multimodal projector sidecar. Present only when the catalog
           // source declared `mmproj`, the installer fetched it, AND the user
           // opted this model into native vision.
@@ -16311,6 +16335,32 @@ export async function buildLlamaCppProvider(opts: {
           // (Int32.MAX) and some models think themselves into silence.
           ...(reasoningBudgetTokens ? ['--reasoning-budget', String(reasoningBudgetTokens)] : []),
         ],
+        diagnostics: {
+          nativeRelease: effectiveEngineRelease(),
+          model: modelCatalogInfo?.id ?? defaultModelId ?? 'manual-path',
+          backend:
+            llamaBuildMetadata?.backend ?? process.env.GEZEL_LLAMA_SERVER_BACKEND ?? 'unknown',
+          upstreamRevision: llamaBuildMetadata?.revision ?? 'unknown',
+          cudaArchitectures: llamaBuildMetadata?.cudaArchitectures?.join(';') ?? 'unknown',
+          ...(llamaBuildMetadata?.cudaToolkit
+            ? { cudaToolkit: llamaBuildMetadata.cudaToolkit }
+            : {}),
+          ...(llamaGpuDevice ? { gpu: llamaGpuDevice.name } : {}),
+          ...(nvidiaRuntimeDevice
+            ? {
+                computeCapability: nvidiaRuntimeDevice.computeCapability,
+                driverVersion: nvidiaRuntimeDevice.driverVersion,
+              }
+            : {}),
+          contextPerSlot: effectiveNumCtx,
+          contextTotal: effectiveNumCtx * slots,
+          slots,
+          kvCacheType,
+          batchSize: lastArgValue(resolvedAdvancedArgs, '--batch-size') ?? 'default',
+          ubatchSize: lastArgValue(resolvedAdvancedArgs, '--ubatch-size') ?? 'default',
+          flashAttention: lastArgValue(resolvedAdvancedArgs, '--flash-attn') ?? 'default',
+          cudaGraphs: process.env.GGML_CUDA_DISABLE_GRAPHS ? 'disabled-by-env' : 'default',
+        },
         env: {
           PATH: inheritedPath ? `${binDir}${delimiter}${inheritedPath}` : binDir,
         },

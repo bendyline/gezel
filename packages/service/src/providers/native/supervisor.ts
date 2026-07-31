@@ -43,6 +43,38 @@ export interface NativeEngineLaunch {
   cwd?: string;
   /** Base URL the provider will use to talk to the engine. */
   baseUrl: string;
+  /**
+   * Safe, request-independent launch facts copied into structured lifecycle
+   * logs and crash snapshots. Never place prompts, tool arguments, secrets,
+   * or other user content here.
+   */
+  diagnostics?: Record<string, string | number | boolean>;
+}
+
+export type NativeEnginePanicKind =
+  | 'cuda-invalid-argument'
+  | 'cuda-out-of-memory'
+  | 'cuda-illegal-memory-access'
+  | 'cuda-device-assert'
+  | 'cuda-error'
+  | 'assertion-failed';
+
+export interface NativeEngineExitSnapshot {
+  /** Stable correlation key included in the lifecycle log and provider error. */
+  incidentId: string;
+  pid?: number;
+  startedAt: number;
+  exitedAt: number;
+  uptimeMs: number;
+  code: number | null;
+  signal: NodeJS.Signals | null;
+  expected: boolean;
+  expectedReason?: string;
+  panicKind?: NativeEnginePanicKind;
+  panicLine?: string;
+  /** Bounded stdout/stderr tail retained in memory for diagnostics. */
+  outputTail: string;
+  diagnostics?: Record<string, string | number | boolean>;
 }
 
 /**
@@ -127,6 +159,8 @@ export interface NativeEngineSupervisorOptions {
   spawn?: typeof nodeSpawn;
   fetchImpl?: typeof fetch;
   onLog?: (line: string) => void;
+  /** Called for both expected and unexpected exits after a snapshot is sealed. */
+  onExit?: (snapshot: NativeEngineExitSnapshot) => void | Promise<void>;
   /**
    * Called on every raw stdout/stderr line BEFORE `onLog`. Optional —
    * when set, callers can parse the engine's log output and emit
@@ -191,6 +225,8 @@ type State =
 const RESTART_BUDGET = 3;
 const RESTART_WINDOW_MS = 60_000;
 const HEALTH_FAIL_THRESHOLD = 3;
+const RECENT_OUTPUT_MAX_BYTES = 64 * 1024;
+const EXIT_ATTRIBUTION_WAIT_MS = 250;
 /**
  * After SIGKILLing reaped orphans, how long to wait for them to actually leave
  * the process table before spawning the replacement. SIGKILL is asynchronous
@@ -245,6 +281,7 @@ export class NativeEngineSupervisor {
   private readonly spawn: typeof nodeSpawn;
   private readonly fetchImpl: typeof fetch;
   private readonly onLog: (line: string) => void;
+  private readonly onExit?: (snapshot: NativeEngineExitSnapshot) => void | Promise<void>;
   private readonly onRawLine?: (line: string) => void;
   private readonly logPrefix: string;
   private readonly readinessPath: string;
@@ -280,6 +317,17 @@ export class NativeEngineSupervisor {
   private startupAbort: AbortController | null = null;
   private idleTimer?: NodeJS.Timeout;
   private healthTimer?: NodeJS.Timeout;
+  private currentStartedAt = 0;
+  private currentPid?: number;
+  private currentDiagnostics?: Record<string, string | number | boolean>;
+  private currentOutput = '';
+  private currentPanic?: {
+    kind: NativeEnginePanicKind;
+    line: string;
+  };
+  private expectedExitReason?: string;
+  private lastExit?: NativeEngineExitSnapshot;
+  private readonly exitListeners = new Set<(snapshot: NativeEngineExitSnapshot) => void>();
 
   constructor(opts: NativeEngineSupervisorOptions) {
     this.resolveLaunch = opts.resolveLaunch;
@@ -306,6 +354,7 @@ export class NativeEngineSupervisor {
     this.spawn = opts.spawn ?? nodeSpawn;
     this.fetchImpl = opts.fetchImpl ?? fetch;
     this.onLog = opts.onLog ?? ((line) => log.info(line));
+    if (opts.onExit) this.onExit = opts.onExit;
     if (opts.onRawLine) this.onRawLine = opts.onRawLine;
     this.logPrefix = opts.logPrefix ?? '[native]';
     this.readinessPath = opts.readinessPath ?? '/health';
@@ -334,6 +383,47 @@ export class NativeEngineSupervisor {
       return this.state.child.pid ?? undefined;
     }
     return undefined;
+  }
+
+  /** Most recently sealed child exit, including expected idle/shutdown exits. */
+  lastExitSnapshot(): NativeEngineExitSnapshot | undefined {
+    return this.lastExit
+      ? {
+          ...this.lastExit,
+          ...(this.lastExit.diagnostics ? { diagnostics: { ...this.lastExit.diagnostics } } : {}),
+        }
+      : undefined;
+  }
+
+  /**
+   * Wait briefly for an unexpected exit attributable to a request that began
+   * at `sinceMs`. Fetch/stream teardown can race Node's child `exit` event by
+   * a few milliseconds; this bounded wait prevents CUDA SIGABRTs from being
+   * flattened into a generic undici "terminated" error.
+   */
+  async waitForUnexpectedExitSince(
+    sinceMs: number,
+    timeoutMs = EXIT_ATTRIBUTION_WAIT_MS,
+  ): Promise<NativeEngineExitSnapshot | undefined> {
+    const matches = (snapshot: NativeEngineExitSnapshot): boolean =>
+      !snapshot.expected && snapshot.exitedAt >= sinceMs;
+    if (this.lastExit && matches(this.lastExit)) return { ...this.lastExit };
+    if (timeoutMs <= 0) return undefined;
+
+    return await new Promise((resolve) => {
+      const listener = (snapshot: NativeEngineExitSnapshot) => {
+        if (!matches(snapshot)) return;
+        clearTimeout(timer);
+        this.exitListeners.delete(listener);
+        resolve({ ...snapshot });
+      };
+      this.exitListeners.add(listener);
+      const timer = setTimeout(() => {
+        this.exitListeners.delete(listener);
+        resolve(undefined);
+      }, timeoutMs);
+      timer.unref?.();
+    });
   }
 
   /**
@@ -399,6 +489,7 @@ export class NativeEngineSupervisor {
     this.clearHealthTimer();
     if (this.state.kind === 'stopped' || this.state.kind === 'restart-budget-exhausted') return;
     const { child } = this.state;
+    this.expectedExitReason = 'stop';
     this.state = { kind: 'stopped' };
     await killGracefully(child);
   }
@@ -452,53 +543,86 @@ export class NativeEngineSupervisor {
     this.ownedPid = typeof child.pid === 'number' ? child.pid : undefined;
     if (this.ownedPid !== undefined) liveEnginePids.add(this.ownedPid);
 
-    const onChunk = (buf: Buffer) => {
-      const text = buf.toString();
-      // Split on CR *and* LF so the optional line classifier sees one
-      // logical record at a time. Most engines emit line-buffered
-      // output (\n), but tqdm-style progress bars — notably mlx's
-      // chunked-prefill `Prefill: NN%|…` meter — repaint a single line
-      // in place with a bare `\r` and emit no `\n` until the bar hits
-      // 100%. Splitting on `\n` alone buffers the entire prefill arc
-      // into one unterminated record that only flushes at completion,
-      // so the classifier never sees per-step progress and the mlx
-      // idle watchdog kills the turn mid-prefill (it never gets the
-      // progress events that reset its per-chunk budget). Treating each
-      // `\r` repaint as its own line lets progress flow. A partial
-      // final line is rare and still fed through.
-      for (const rawLine of text.split(/\r\n?|\n/)) {
-        const line = rawLine;
-        if (!line) continue;
-        const prefixed = `${this.logPrefix} ${line}`;
-        this.onLog(prefixed);
-        if (this.onRawLine) {
-          try {
-            this.onRawLine(prefixed);
-          } catch (err) {
-            // Never let a bad classifier take down the supervisor.
-            log.warn(
-              `${this.logPrefix} onRawLine threw: ${err instanceof Error ? err.message : err}`,
-            );
-          }
+    this.currentStartedAt = Date.now();
+    this.currentPid = typeof child.pid === 'number' ? child.pid : undefined;
+    this.currentDiagnostics = launch.diagnostics ? { ...launch.diagnostics } : undefined;
+    this.currentOutput = '';
+    this.currentPanic = undefined;
+    this.expectedExitReason = undefined;
+    this.onLog(
+      `${this.logPrefix} launch ${JSON.stringify({
+        pid: this.currentPid ?? null,
+        command: basename(launch.command),
+        ...(this.currentDiagnostics ?? {}),
+      })}`,
+    );
+
+    const emitLine = (line: string) => {
+      if (!line) return;
+      const prefixed = `${this.logPrefix} ${line}`;
+      this.appendRecentOutput(prefixed);
+      this.onLog(prefixed);
+      if (this.onRawLine) {
+        try {
+          this.onRawLine(prefixed);
+        } catch (err) {
+          // Never let a bad classifier take down the supervisor.
+          log.warn(
+            `${this.logPrefix} onRawLine threw: ${err instanceof Error ? err.message : err}`,
+          );
         }
-        if (this.logListeners.size > 0) {
-          for (const listener of this.logListeners) {
-            try {
-              listener(prefixed);
-            } catch (err) {
-              log.warn(
-                `${this.logPrefix} log listener threw: ${err instanceof Error ? err.message : err}`,
-              );
-            }
+      }
+      if (this.logListeners.size > 0) {
+        for (const listener of this.logListeners) {
+          try {
+            listener(prefixed);
+          } catch (err) {
+            log.warn(
+              `${this.logPrefix} log listener threw: ${err instanceof Error ? err.message : err}`,
+            );
           }
         }
       }
     };
+    const chunkReader = () => {
+      let pending = '';
+      const onChunk = (buf: Buffer) => {
+        const text = pending + buf.toString();
+        // Split on CR *and* LF so the optional line classifier sees one
+        // logical record at a time. Most engines emit line-buffered
+        // output (\n), but tqdm-style progress bars — notably mlx's
+        // chunked-prefill `Prefill: NN%|…` meter — repaint a single line
+        // in place with a bare `\r` and emit no `\n` until the bar hits
+        // 100%. Splitting on `\n` alone buffers the entire prefill arc
+        // into one unterminated record that only flushes at completion,
+        // so the classifier never sees per-step progress and the mlx
+        // idle watchdog kills the turn mid-prefill (it never gets the
+        // progress events that reset its per-chunk budget). Treating each
+        // `\r` repaint as its own line lets progress flow. A partial
+        // final line is retained across chunks and flushed on process exit.
+        const lines = text.split(/\r\n?|\n/);
+        pending = lines.pop() ?? '';
+        for (const line of lines) emitLine(line);
+      };
+      return {
+        onChunk,
+        flush: () => {
+          if (pending) emitLine(pending);
+          pending = '';
+        },
+      };
+    };
+    const stdout = chunkReader();
+    const stderr = chunkReader();
     this.startupAbort = new AbortController();
     let spawnFailed = false;
-    child.stdout?.on('data', onChunk);
-    child.stderr?.on('data', onChunk);
-    child.on('exit', (code, signal) => this.handleExit(code, signal));
+    child.stdout?.on('data', stdout.onChunk);
+    child.stderr?.on('data', stderr.onChunk);
+    child.on('exit', (code, signal) => {
+      stdout.flush();
+      stderr.flush();
+      this.handleExit(code, signal);
+    });
     // `child_process.spawn` reports missing/non-traversable executables through
     // the child's `error` event on most Node/platform combinations. Without a
     // listener this can escape as an opaque process-level exception; abort the
@@ -521,6 +645,7 @@ export class NativeEngineSupervisor {
       // and may never emit `exit`; waiting for killGracefully would wedge the
       // chat turn while reporting the original spawn failure.
       if (!spawnFailed) {
+        this.expectedExitReason ??= 'startup-abort';
         await killGracefully(child);
       }
       this.state = { kind: 'stopped' };
@@ -755,7 +880,78 @@ export class NativeEngineSupervisor {
     );
   }
 
+  private appendRecentOutput(line: string): void {
+    this.currentOutput += `${line}\n`;
+    const bytes = Buffer.byteLength(this.currentOutput, 'utf8');
+    if (bytes > RECENT_OUTPUT_MAX_BYTES) {
+      const trimmed = Buffer.from(this.currentOutput, 'utf8')
+        .subarray(bytes - RECENT_OUTPUT_MAX_BYTES)
+        .toString('utf8');
+      const firstNewline = trimmed.indexOf('\n');
+      this.currentOutput = firstNewline >= 0 ? trimmed.slice(firstNewline + 1) : trimmed;
+    }
+    const panic = classifyNativeEnginePanic(line);
+    if (
+      panic &&
+      (!this.currentPanic || panicPriority(panic.kind) >= panicPriority(this.currentPanic.kind))
+    ) {
+      this.currentPanic = panic;
+    }
+  }
+
   private handleExit(code: number | null, signal: NodeJS.Signals | null): void {
+    const priorState = this.state;
+    const exitedAt = Date.now();
+    const expectedReason = this.expectedExitReason;
+    const expected = priorState.kind === 'stopped' || expectedReason !== undefined;
+    const pid = this.currentPid;
+    const snapshot: NativeEngineExitSnapshot = {
+      incidentId: `native-${pid ?? 'unknown'}-${exitedAt}`,
+      ...(pid !== undefined ? { pid } : {}),
+      startedAt: this.currentStartedAt || exitedAt,
+      exitedAt,
+      uptimeMs: Math.max(0, exitedAt - (this.currentStartedAt || exitedAt)),
+      code,
+      signal,
+      expected,
+      ...(expectedReason ? { expectedReason } : {}),
+      ...(this.currentPanic
+        ? { panicKind: this.currentPanic.kind, panicLine: this.currentPanic.line }
+        : {}),
+      outputTail: this.currentOutput,
+      ...(this.currentDiagnostics ? { diagnostics: { ...this.currentDiagnostics } } : {}),
+    };
+    this.lastExit = snapshot;
+    this.onLog(
+      `${this.logPrefix} exit ${JSON.stringify({
+        incidentId: snapshot.incidentId,
+        pid: snapshot.pid ?? null,
+        code,
+        signal: signal ?? null,
+        expected,
+        ...(expectedReason ? { expectedReason } : {}),
+        uptimeMs: snapshot.uptimeMs,
+        ...(snapshot.panicKind ? { panicKind: snapshot.panicKind } : {}),
+        ...(snapshot.panicLine ? { panicLine: snapshot.panicLine } : {}),
+        ...(snapshot.diagnostics ?? {}),
+      })}`,
+    );
+    try {
+      const callbackResult = this.onExit?.({ ...snapshot });
+      if (callbackResult) {
+        void Promise.resolve(callbackResult).catch((err) => {
+          log.warn(
+            `${this.logPrefix} onExit rejected: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        });
+      }
+    } catch (err) {
+      log.warn(
+        `${this.logPrefix} onExit threw: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    for (const listener of this.exitListeners) listener(snapshot);
+
     // Deregister before any early-return: this owned engine is gone, so
     // it's free for a future reaper to clean up if it somehow outlives us.
     if (this.ownedPid !== undefined) {
@@ -765,7 +961,13 @@ export class NativeEngineSupervisor {
     this.clearIdleTimer();
     this.clearFreezeTimer();
     this.clearHealthTimer();
-    if (this.state.kind === 'stopped') return;
+    this.currentPid = undefined;
+    this.currentStartedAt = 0;
+    this.currentDiagnostics = undefined;
+    this.currentOutput = '';
+    this.currentPanic = undefined;
+    this.expectedExitReason = undefined;
+    if (priorState.kind === 'stopped') return;
     this.onLog(`${this.logPrefix} exited (code=${code} signal=${signal ?? 'none'})`);
     // If the child died while we were still waiting for /health to come
     // up, abort the startup wait immediately. Otherwise `waitForReady`
@@ -776,7 +978,7 @@ export class NativeEngineSupervisor {
     // better-typed error a moment later via `abortStartup(err)`; that
     // call wins because it lands first (the classifier sees the leaf
     // exception line slightly before the kernel reports the exit).
-    if (this.startupAbort && this.state.kind === 'starting') {
+    if (this.startupAbort && priorState.kind === 'starting') {
       this.startupAbort.abort(
         new Error(
           `${this.logPrefix} child exited (code=${code} signal=${signal ?? 'none'}) before becoming ready`,
@@ -812,6 +1014,7 @@ export class NativeEngineSupervisor {
     if (this.state.healthFails >= HEALTH_FAIL_THRESHOLD) {
       this.onLog(`${this.logPrefix} ${HEALTH_FAIL_THRESHOLD} health failures — restarting`);
       const child = this.state.child;
+      this.expectedExitReason = 'health-restart';
       this.state = { kind: 'stopped' };
       await killGracefully(child);
       try {
@@ -902,6 +1105,36 @@ export class NativeEngineSupervisor {
       this.healthTimer = undefined;
     }
   }
+}
+
+/** High-precision fatal signatures; attribution happens only if the child exits. */
+export function classifyNativeEnginePanic(
+  line: string,
+): { kind: NativeEnginePanicKind; line: string } | undefined {
+  const clipped = line.trim().slice(0, 1_000);
+  if (/CUDA error:\s*invalid (?:configuration )?argument/i.test(line)) {
+    return { kind: 'cuda-invalid-argument', line: clipped };
+  }
+  if (/CUDA error:\s*(?:out of memory|memory allocation)/i.test(line)) {
+    return { kind: 'cuda-out-of-memory', line: clipped };
+  }
+  if (/CUDA error:\s*(?:an )?illegal memory access/i.test(line)) {
+    return { kind: 'cuda-illegal-memory-access', line: clipped };
+  }
+  if (/CUDA error:.*device-side assert/i.test(line)) {
+    return { kind: 'cuda-device-assert', line: clipped };
+  }
+  if (/CUDA error:/i.test(line)) return { kind: 'cuda-error', line: clipped };
+  if (/assert(?:ion)? failed|GGML_ASSERT/i.test(line)) {
+    return { kind: 'assertion-failed', line: clipped };
+  }
+  return undefined;
+}
+
+function panicPriority(kind: NativeEnginePanicKind): number {
+  if (kind === 'cuda-error') return 1;
+  if (kind === 'assertion-failed') return 2;
+  return 3;
 }
 
 /**

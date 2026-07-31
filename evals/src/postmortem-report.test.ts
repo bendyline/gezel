@@ -119,6 +119,29 @@ describe('postmortem report filesystem workflow', () => {
     expect(await readFile(join(dir, 'postmortem.md'), 'utf8')).toBe(initialPostmortem);
   });
 
+  it('surfaces recovered native-engine incidents without changing a successful outcome', async () => {
+    const dir = join(tempRoot, 'recovered-native-crash');
+    const facts = completeFacts('recovered-native-crash');
+    facts.nativeEngineIncidents = {
+      count: 1,
+      kinds: { 'cuda-invalid-argument': 1 },
+      incidentIds: ['native-55121-1234'],
+      evidence: ['CUDA error: invalid argument'],
+    };
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, 'facts.json'), JSON.stringify(facts));
+    await writeFile(
+      join(dir, 'result.json'),
+      JSON.stringify({ trialId: facts.trialId, success: true, failureClass: 'pass' }),
+    );
+
+    expect(await writeTrialReport(dir)).toMatchObject({ status: 'written' });
+    const report = await readFile(join(dir, 'postmortem.md'), 'utf8');
+    expect(report).toContain('## Native-engine reliability');
+    expect(report).toContain('cuda-invalid-argument x1');
+    expect(report).toContain('native-55121-1234');
+  });
+
   it('skips incomplete terminal candidates without writing either report', async () => {
     const dir = join(tempRoot, 'incomplete');
     await mkdir(dir);

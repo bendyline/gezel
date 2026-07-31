@@ -53,6 +53,7 @@ $platform = 'win32-x64'
 
 # -- 2. Resolve accelerator ----------------------------------------
 $backend = if ($env:LLAMA_BACKEND) { $env:LLAMA_BACKEND } else { 'auto' }
+$llamaCudaArch = if ($env:LLAMA_CUDA_ARCH) { $env:LLAMA_CUDA_ARCH } else { '' }
 if ($backend -eq 'auto') {
   if (Get-Command nvcc -ErrorAction SilentlyContinue) {
     $backend = 'cuda'
@@ -86,12 +87,17 @@ $cmakeFlags = @(
   '-DLLAMA_OPENSSL=OFF'
 )
 switch ($backend) {
-  'cuda'   { $cmakeFlags += '-DGGML_CUDA=ON' }
+  'cuda'   {
+    $cmakeFlags += '-DGGML_CUDA=ON'
+    if ($llamaCudaArch -and $llamaCudaArch -ne 'spark') {
+      $cmakeFlags += "-DCMAKE_CUDA_ARCHITECTURES=$llamaCudaArch"
+    }
+  }
   'vulkan' { $cmakeFlags += '-DGGML_VULKAN=ON' }
   'cpu'    { }
   default  { throw "unknown LLAMA_BACKEND=$backend (valid: cuda, vulkan, cpu)" }
 }
-Write-Host "[build] platform=$platform backend=$backend"
+Write-Host "[build] platform=$platform backend=$backend cuda_architectures=$(if ($llamaCudaArch) { $llamaCudaArch } else { 'unset' })"
 
 $buildDir = Join-Path $src "build-$platform-$backend"
 
@@ -129,6 +135,35 @@ New-Item -ItemType Directory -Force -Path $outDir | Out-Null
 # upstream name; only the installed file is prefixed.
 $serverName = 'gezel-llama-server.exe'
 Copy-Item $found.FullName (Join-Path $outDir $serverName) -Force
+
+# Runtime diagnostics sidecar, matching build.sh. Keep it beside the binary so
+# crash records can identify the exact upstream pin, backend, toolkit and CUDA
+# targets used to produce a release artifact.
+$versionContents = Get-Content (Join-Path $here 'VERSION')
+$pinnedCommit = ($versionContents | Where-Object { $_ -match '^commit=' }) -replace '^commit=',''
+$metadata = [ordered]@{
+  schemaVersion = 1
+  engine = 'llama-cpp'
+  revision = $pinnedCommit
+  platform = $platform
+  backend = $backend
+}
+if ($backend -eq 'cuda') {
+  if ($llamaCudaArch) {
+    $metadata.cudaArchitectures = @($llamaCudaArch -split ';')
+  }
+  $nvccVersionText = (& nvcc --version 2>$null) -join "`n"
+  if ($nvccVersionText -match 'release\s+([^,]+)') {
+    $metadata.cudaToolkit = $Matches[1]
+  }
+}
+$metadataPath = Join-Path $outDir 'gezel-llama-build.json'
+$metadataJson = ($metadata | ConvertTo-Json -Depth 4) + "`n"
+[System.IO.File]::WriteAllText(
+  $metadataPath,
+  $metadataJson,
+  [System.Text.UTF8Encoding]::new($false)
+)
 
 # Copy llama.cpp's own runtime DLLs sitting beside the exe in the
 # build output: ggml.dll, ggml-base.dll, ggml-cpu.dll, ggml-cuda.dll

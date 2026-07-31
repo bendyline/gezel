@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import {
   NativeEngineSupervisor,
   __resetLiveEnginePidsForTest,
+  classifyNativeEnginePanic,
   normalizeNativeEngineLaunch,
   parseNativeProcessSnapshot,
 } from './supervisor.js';
@@ -68,6 +69,14 @@ describe('NativeEngineSupervisor', () => {
   // The live-engine registry is a process-wide singleton; clear it so a
   // pid registered by one case can't suppress an orphan reap in the next.
   beforeEach(() => __resetLiveEnginePidsForTest());
+
+  it('classifies the CUDA invalid-argument panic precisely', () => {
+    expect(classifyNativeEnginePanic('CUDA error: invalid argument')).toEqual({
+      kind: 'cuda-invalid-argument',
+      line: 'CUDA error: invalid argument',
+    });
+    expect(classifyNativeEnginePanic('routine CUDA initialization')).toBeUndefined();
+  });
 
   it('rewrites every packaged ASAR launch path to its real unpacked location', () => {
     expect(
@@ -943,5 +952,69 @@ not a process row
     for (const l of prefillLines) expect(l).not.toContain('\r');
 
     await sup.stop();
+  });
+
+  it('retains a bounded crash tail and emits a structured unexpected-exit snapshot', async () => {
+    let stderrHandler: ((buf: Buffer) => void) | undefined;
+    const child = makeFakeChild(55121);
+    child.stderr = {
+      on: (ev: string, fn: (buf: Buffer) => void) => {
+        if (ev === 'data') stderrHandler = fn;
+      },
+    };
+    const fakeSpawn = (() =>
+      child as unknown as ReturnType<
+        typeof import('node:child_process').spawn
+      >) as unknown as typeof import('node:child_process').spawn;
+    const logs: string[] = [];
+    const exits: Array<import('./supervisor.js').NativeEngineExitSnapshot> = [];
+    const sup = new NativeEngineSupervisor({
+      resolveLaunch: async () => ({
+        command: '/opt/gezel/gezel-llama-server',
+        args: [],
+        baseUrl: 'http://127.0.0.1:9999',
+        diagnostics: {
+          model: 'qwen3.6-35b-a3b-q4',
+          cudaArchitectures: '121a-real',
+        },
+      }),
+      spawn: fakeSpawn,
+      fetchImpl: async () => new Response('ok', { status: 200 }),
+      startupTimeoutMs: 2_000,
+      healthIntervalMs: 10_000_000,
+      idleTimeoutMs: 0,
+      logPrefix: '[llama-server]',
+      onLog: (line) => logs.push(line),
+      onExit: (snapshot) => {
+        exits.push(snapshot);
+      },
+      psRunner: async () => [],
+    });
+
+    await sup.ensureRunning();
+    const requestStartedAt = Date.now();
+    // Split the fatal line across chunks. The line reader must join it before
+    // classification rather than inserting a log prefix in the middle.
+    stderrHandler!(Buffer.from('CUDA error: invalid '));
+    stderrHandler!(Buffer.from('argument\n  current device: 0\n'));
+    child.emitExit(null, 'SIGABRT');
+
+    const snapshot = await sup.waitForUnexpectedExitSince(requestStartedAt, 0);
+    expect(snapshot).toMatchObject({
+      pid: 55121,
+      code: null,
+      signal: 'SIGABRT',
+      expected: false,
+      panicKind: 'cuda-invalid-argument',
+      diagnostics: {
+        model: 'qwen3.6-35b-a3b-q4',
+        cudaArchitectures: '121a-real',
+      },
+    });
+    expect(snapshot?.outputTail).toContain('CUDA error: invalid argument');
+    expect(snapshot?.outputTail).toContain('current device: 0');
+    expect(exits).toHaveLength(1);
+    expect(logs.some((line) => line.includes('"panicKind":"cuda-invalid-argument"'))).toBe(true);
+    expect(sup.currentBaseUrl()).toBeUndefined();
   });
 });

@@ -1,6 +1,15 @@
 import '@testing-library/jest-dom/vitest';
-import { cleanup } from '@testing-library/react';
+import { cleanup, configure } from '@testing-library/react';
 import { afterEach } from 'vitest';
+
+// View tests routinely wait on a chain of effects (load projects -> pick a
+// default -> load that project's scripts), each of which needs its own render
+// pass. Testing-library's 1s default is enough in isolation but not when the
+// whole workspace suite runs in parallel and jsdom workers contend for the CPU
+// — that showed up as spurious "unable to find role=option" failures. waitFor
+// still resolves as soon as the condition holds, so a larger ceiling only
+// stretches the failing path.
+configure({ asyncUtilTimeout: 5000 });
 
 // Testing-library's auto-cleanup hook only registers itself when global
 // test functions are exposed (vitest globals=true). We keep globals=false

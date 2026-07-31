@@ -1,6 +1,7 @@
-import { type WriteStream, createWriteStream } from 'node:fs';
+import { type WriteStream, appendFileSync, createWriteStream, mkdirSync } from 'node:fs';
 import { mkdir, readFile, readdir, stat, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
+import type { NativeEngineExitSnapshot } from '../native/supervisor.js';
 import { redactLogLine } from './log-redact.js';
 
 /**
@@ -101,6 +102,25 @@ export class LlamaCppLogFile {
       this.bytesWritten += buf.length;
     };
     this.pendingWrites = this.pendingWrites.then(run, run);
+  }
+
+  /**
+   * Persist an unexpected native exit before the provider releases the
+   * correlated request error. This synchronous, single-line write closes the
+   * race where an eval snapshots its isolated home immediately after a crash.
+   * The potentially user-derived stdout/stderr tail deliberately stays only in
+   * memory; the panic classifier contributes at most one redacted error line.
+   */
+  writeIncident(snapshot: NativeEngineExitSnapshot): void {
+    const { outputTail: _outputTail, ...incident } = snapshot;
+    void _outputTail;
+    if (incident.panicLine) incident.panicLine = redactLogLine(incident.panicLine);
+    mkdirSync(this.dir, { recursive: true });
+    appendFileSync(
+      join(this.dir, 'native-incidents.jsonl'),
+      `${JSON.stringify(incident)}\n`,
+      'utf8',
+    );
   }
 
   /** Wait for all in-flight writes to flush, then return. */
