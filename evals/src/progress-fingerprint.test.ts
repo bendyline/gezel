@@ -1,6 +1,12 @@
 import type { SessionTelemetry } from '@bendyline/gezel';
 import { describe, expect, it } from 'vitest';
-import { parseDaemonActivityText, telemetryToActivityCounters } from './progress-fingerprint.ts';
+import {
+  type DaemonActivityCounters,
+  type ProgressFingerprint,
+  digestFingerprint,
+  parseDaemonActivityText,
+  telemetryToActivityCounters,
+} from './progress-fingerprint.ts';
 
 describe('parseDaemonActivityText', () => {
   it('marks native image generation active until the completion line appears', () => {
@@ -33,6 +39,55 @@ describe('parseDaemonActivityText', () => {
     // so a long MLX decode looked like a stall (T2-streaming).
     expect(fp.streamPulses).toBe(3);
     expect(fp.source).toBe('daemon-log');
+  });
+
+  // Real lines from gemma4-31b-q4 (2026-07-30), the two trials that
+  // false-failed `chat-stalled` on a live engine. Neither phase is visible to
+  // any other soft signal: this build emits no `slot update_slots:` at all,
+  // and `stream-active` logged NOTHING across the 301 s decode window.
+  it('tracks prefill batches so a slow prefill is not read as a dead engine', () => {
+    const early = parseDaemonActivityText(`
+2026-07-30T08:12:09.000Z INFO  [chat] [llama-server] 0.33.762.681 I slot print_timing: id  0 | task 1 | prompt processing, n_tokens =   6144, progress = 0.14, t =  29.76 s / 206.46 tokens per second
+2026-07-30T08:12:21.000Z INFO  [chat] [llama-server] 0.45.425.546 I slot print_timing: id  0 | task 1 | prompt processing, n_tokens =   8192, progress = 0.19, t =  41.42 s / 197.77 tokens per second
+`);
+    expect(early.slotUpdates).toBe(0);
+    expect(early.streamPulses).toBe(0);
+    expect(early.engineProgressMarker).toContain('n_tokens =   8192');
+
+    const later = parseDaemonActivityText(`
+2026-07-30T08:17:03.000Z INFO  [chat] [llama-server] 5.33.604.273 I slot print_timing: id  0 | task 1 | prompt processing, n_tokens =  42712, progress = 0.99, t = 329.60 s / 129.59 tokens per second
+`);
+    expect(later.engineProgressMarker).not.toBe(early.engineProgressMarker);
+  });
+
+  // The half the prefill-only marker missed: 10,783 tokens generated at
+  // 21 t/s across the whole soft window, with zero stream-active pulses.
+  it('tracks decode progress so reasoning-heavy generation is not read as a stall', () => {
+    const a = parseDaemonActivityText(
+      '2026-07-30T09:03:45.000Z INFO  [chat] [llama-server] 13.22.171.765 I slot print_timing: id  0 | task 424 | n_decoded =  10417, tg =  21.34 t/s, tg_3s =  17.38 t/s',
+    );
+    const b = parseDaemonActivityText(
+      '2026-07-30T09:08:43.000Z INFO  [chat] [llama-server] 13.43.311.705 I slot print_timing: id  0 | task 424 | n_decoded =  10783, tg =  21.17 t/s, tg_3s =  17.52 t/s',
+    );
+    expect(a.streamPulses).toBe(0);
+    expect(a.engineProgressMarker).toContain('n_decoded =  10417');
+    expect(b.engineProgressMarker).not.toBe(a.engineProgressMarker);
+  });
+
+  it('reports no engine marker when the tail has no timing line', () => {
+    expect(parseDaemonActivityText('nothing relevant here').engineProgressMarker).toBeNull();
+  });
+
+  // Counters restart per task, so the task id must be part of the marker or
+  // two tasks reporting identical numbers would look like a frozen engine.
+  it('distinguishes identical counters reported by different tasks', () => {
+    const a = parseDaemonActivityText(
+      'slot print_timing: id  0 | task 1 | n_decoded =  2048, tg =  20.00 t/s',
+    );
+    const b = parseDaemonActivityText(
+      'slot print_timing: id  0 | task 2 | n_decoded =  2048, tg =  20.00 t/s',
+    );
+    expect(a.engineProgressMarker).not.toBe(b.engineProgressMarker);
   });
 });
 
@@ -116,5 +171,53 @@ describe('telemetryToActivityCounters', () => {
       imageGenerationActive: false,
       source: 'service-telemetry',
     });
+  });
+});
+
+describe('digestFingerprint — engine heartbeat', () => {
+  const activity = (over: Partial<DaemonActivityCounters>): DaemonActivityCounters => ({
+    turnStarts: 1,
+    toolCalls: 0,
+    writeCalls: 0,
+    slotUpdates: 0,
+    streamPulses: 0,
+    imageLogLines: 0,
+    imageGenerationActive: false,
+    engineProgressMarker: null,
+    source: 'service-telemetry',
+    ...over,
+  });
+  const fp = (daemonActivity: DaemonActivityCounters): ProgressFingerprint => ({
+    workspace: {},
+    sessionCount: 1,
+    maxSessionActivityMs: 1000,
+    daemonActivity,
+    sniffState: null,
+  });
+
+  // The regression this guards: with every other counter flat mid-prefill,
+  // the soft digest froze and the watchdog killed a working engine.
+  it('moves the soft digest as the engine advances, leaving hard flat', () => {
+    const a = digestFingerprint(
+      fp(activity({ engineProgressMarker: '1|prompt processing, n_tokens = 6144' })),
+    );
+    const b = digestFingerprint(
+      fp(activity({ engineProgressMarker: '1|prompt processing, n_tokens = 42712' })),
+    );
+
+    expect(b.soft).not.toBe(a.soft);
+    // Prefill is engine-alive, NOT product progress — the hard watchdog must
+    // still be able to catch a model that prefills forever and delivers nothing.
+    expect(b.hard).toBe(a.hard);
+  });
+
+  it('leaves the soft digest frozen once the engine stops advancing', () => {
+    const a = digestFingerprint(
+      fp(activity({ engineProgressMarker: '1|prompt processing, n_tokens = 42712' })),
+    );
+    const b = digestFingerprint(
+      fp(activity({ engineProgressMarker: '1|prompt processing, n_tokens = 42712' })),
+    );
+    expect(b.soft).toBe(a.soft);
   });
 });

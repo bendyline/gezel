@@ -257,6 +257,36 @@ describe('staleInstallReason', () => {
       }),
     ).resolves.toMatch(/sha256/);
   });
+  // The MLX path cannot self-heal: those weights live in the user's dev home
+  // and the harness only symlinks them, so `runner.ts` fails the trial with a
+  // re-pull instruction instead of evicting. Wild-caught 2026-07-31 —
+  // correcting four gemma MLX sources left every installed copy stale, and the
+  // re-test meant to validate the fix would have re-run the old weights.
+  it('detects a moved MLX source, which the runner cannot refetch', async () => {
+    useSyntheticIndex([
+      {
+        id: 'gemma4-26b-q4',
+        version: '1.2.1',
+        mlx: {
+          huggingfaceRepo: 'mlx-community/gemma-4-26B-A4B-it-qat-4bit',
+          quantization: '4bit',
+        },
+      },
+    ]);
+    const r = mkdtempSync(join(tmpdir(), 'gezel-mlx-stale-'));
+    const dir = join(r, 'engines', 'mlx', 'models', 'gemma4-26b-q4');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, 'manifest.json'),
+      JSON.stringify({
+        huggingfaceRepo: 'mlx-community/gemma-4-26B-A4B-it-qat-nvfp4',
+        quantization: 'nvfp4',
+      }),
+    );
+    await expect(
+      staleInstallReason({ cacheRoot: r, engine: 'mlx', modelId: 'gemma4-26b-q4' }),
+    ).resolves.toMatch(/repo moved: .*nvfp4 -> .*qat-4bit/);
+  });
 });
 
 describe('adoptHistoricalLlamaCppAlias', () => {

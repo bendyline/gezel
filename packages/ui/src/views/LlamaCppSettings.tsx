@@ -247,6 +247,23 @@ export function LlamaCppSettings({ config, onConfigChanged, health }: Props) {
     [onConfigChanged],
   );
 
+  const saveSwaFull = useCallback(
+    async (value: boolean) => {
+      setSaving('saving');
+      try {
+        const next = await api.updateConfig({
+          llamaCppSwaFull: value ? true : undefined,
+        });
+        onConfigChanged(next);
+        setSaving('saved');
+        setTimeout(() => setSaving('idle'), 1200);
+      } catch {
+        setSaving('idle');
+      }
+    },
+    [onConfigChanged],
+  );
+
   const saveSpecType = useCallback(
     async (value: SpecType | 'none') => {
       setSaving('saving');
@@ -499,6 +516,30 @@ export function LlamaCppSettings({ config, onConfigChanged, health }: Props) {
           the sparse expert weights from system RAM — lets a model that wouldn't fit in VRAM run
           anyway. Leave off to let the engine size the offload automatically. Takes effect the next
           time the engine starts.
+        </p>
+        <div className="new-row" style={{ marginTop: '0.75rem', alignItems: 'center' }}>
+          <label className="muted" style={{ fontSize: '0.9rem', minWidth: '10rem' }}>
+            Full SWA cache
+          </label>
+          <label
+            className="muted"
+            style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.9rem' }}
+          >
+            <input
+              type="checkbox"
+              checked={Boolean(config?.llamaCppSwaFull)}
+              onChange={(e) => void saveSwaFull(e.target.checked)}
+            />
+            Allocate a full-size sliding-window KV cache (<code>--swa-full</code>)
+          </label>
+        </div>
+        <p className="muted small" style={{ marginTop: '0.25rem', marginLeft: '10rem' }}>
+          For sliding-window models (the Gemma family): swap the memory-efficient windowed KV cache
+          for a full-size one. Costs roughly 30% more memory at long context, and in exchange the
+          engine will accept prompt reuse — with the windowed cache it refuses, logging{' '}
+          <code>cache_reuse is not supported by this context</code>. Worth trying if you run long
+          multi-turn sessions and have headroom; it does nothing for Qwen models, which cannot reuse
+          this way at all. Takes effect the next time the engine starts.
         </p>
         <p className="muted small" style={{ marginTop: '0.5rem', marginLeft: '10rem' }}>
           More engine flags (an explicit GPU-layer count, partial expert split, prompt-reuse size,

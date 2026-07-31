@@ -2520,6 +2520,9 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
               ...(lastUsage.cached_tokens !== undefined
                 ? { cachedInputTokens: lastUsage.cached_tokens }
                 : {}),
+              ...(lastUsage.generation_tps !== undefined && lastUsage.generation_tps > 0
+                ? { outputTokensPerSec: lastUsage.generation_tps }
+                : {}),
               durationMs: Date.now() - start,
               at: new Date().toISOString(),
             });
@@ -2749,6 +2752,9 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
               outputTokens: lastUsage.completion_tokens,
               ...(lastUsage.cached_tokens !== undefined
                 ? { cachedInputTokens: lastUsage.cached_tokens }
+                : {}),
+              ...(lastUsage.generation_tps !== undefined && lastUsage.generation_tps > 0
+                ? { outputTokensPerSec: lastUsage.generation_tps }
                 : {}),
               durationMs,
               at: new Date().toISOString(),
@@ -3028,6 +3034,9 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
               ...(lastUsage.cached_tokens !== undefined
                 ? { cachedInputTokens: lastUsage.cached_tokens }
                 : {}),
+              ...(lastUsage.generation_tps !== undefined && lastUsage.generation_tps > 0
+                ? { outputTokensPerSec: lastUsage.generation_tps }
+                : {}),
               durationMs: Date.now() - start,
               at: new Date().toISOString(),
             });
@@ -3064,6 +3073,9 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
               ...(lastUsage.cached_tokens !== undefined
                 ? { cachedInputTokens: lastUsage.cached_tokens }
                 : {}),
+              ...(lastUsage.generation_tps !== undefined && lastUsage.generation_tps > 0
+                ? { outputTokensPerSec: lastUsage.generation_tps }
+                : {}),
               durationMs: Date.now() - start,
               at: new Date().toISOString(),
             });
@@ -3086,6 +3098,9 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
               outputTokens: lastUsage.completion_tokens,
               ...(lastUsage.cached_tokens !== undefined
                 ? { cachedInputTokens: lastUsage.cached_tokens }
+                : {}),
+              ...(lastUsage.generation_tps !== undefined && lastUsage.generation_tps > 0
+                ? { outputTokensPerSec: lastUsage.generation_tps }
                 : {}),
               durationMs: Date.now() - start,
               at: new Date().toISOString(),
@@ -3120,6 +3135,9 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
               outputTokens: lastUsage.completion_tokens,
               ...(lastUsage.cached_tokens !== undefined
                 ? { cachedInputTokens: lastUsage.cached_tokens }
+                : {}),
+              ...(lastUsage.generation_tps !== undefined && lastUsage.generation_tps > 0
+                ? { outputTokensPerSec: lastUsage.generation_tps }
                 : {}),
               durationMs,
               at: new Date().toISOString(),

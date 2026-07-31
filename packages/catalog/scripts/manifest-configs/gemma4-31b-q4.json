@@ -1,10 +1,13 @@
 {
   "id": "gemma4-31b-q4",
   "name": "Gemma 4 (31B)",
-  "description": "Google's flagship Gemma 4 at 30.7B parameters. Multimodal (text + image + video), 256K context, configurable thinking mode, native function-calling, 140+ languages. Frontier-tier instruction-following on device — needs 32GB+ of usable memory.",
+  "description": "Google's flagship Gemma 4 at 30.7B parameters. Multimodal (text + image + video), 256K context, configurable thinking mode, native function-calling, 140+ languages. Frontier-tier instruction-following on device \u2014 needs 32GB+ of usable memory.",
   "tags": ["google", "multimodal", "vision", "video", "tools", "reasoning", "large", "qat"],
   "category": "general",
-  "maintainer": { "name": "Google", "url": "https://huggingface.co/google/gemma-4-31B-it" },
+  "maintainer": {
+    "name": "Google",
+    "url": "https://huggingface.co/google/gemma-4-31B-it"
+  },
   "version": "1.2.1",
   "updatedAt": "2026-07-28T00:00:00Z",
   "license": "Apache-2.0",
@@ -41,7 +44,9 @@
       "repetitionContext": 20
     }
   },
-  "ollama": { "tag": "gemma4:31b-it-qat" },
+  "ollama": {
+    "tag": "gemma4:31b-it-qat"
+  },
   "llamaCpp": {
     "huggingfaceRepo": "unsloth/gemma-4-31B-it-qat-GGUF",
     "filename": "gemma-4-31B-it-qat-UD-Q4_K_XL.gguf",
@@ -62,8 +67,7 @@
     }
   },
   "mlx": {
-    "huggingfaceRepo": "mlx-community/gemma-4-31b-it-4bit",
-    "quantization": "4bit",
-    "residentBytes": 23977741909
+    "huggingfaceRepo": "mlx-community/gemma-4-31B-it-qat-4bit",
+    "quantization": "4bit"
   }
 }

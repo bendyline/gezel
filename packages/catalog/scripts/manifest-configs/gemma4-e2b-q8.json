@@ -4,7 +4,10 @@
   "description": "Google's edge-optimized Gemma 4 at ~2B effective parameters. Multimodal (text + image + audio), 256K context, native tool calling. Safe small-model default for any modern laptop.",
   "tags": ["google", "multimodal", "vision", "audio", "tools", "small"],
   "category": "general",
-  "maintainer": { "name": "Google", "url": "https://huggingface.co/google/gemma-4-E2B-it" },
+  "maintainer": {
+    "name": "Google",
+    "url": "https://huggingface.co/google/gemma-4-E2B-it"
+  },
   "version": "1.1.2",
   "updatedAt": "2026-07-28T00:00:00Z",
   "license": "Apache-2.0",
@@ -27,12 +30,19 @@
     "fabrication.detect-claim-without-tool",
     "mcp.relax-required-fields",
     "mcp.default-missing-fields",
-    { "id": "turn.continuation-budget", "config": { "count": 4 } },
+    {
+      "id": "turn.continuation-budget",
+      "config": {
+        "count": 4
+      }
+    },
     "turn.preamble-folding",
     "turn.ramble-detection",
     "parse.gemma-special-token"
   ],
-  "ollama": { "tag": "gemma4:e2b" },
+  "ollama": {
+    "tag": "gemma4:e2b"
+  },
   "llamaCpp": {
     "huggingfaceRepo": "ggml-org/gemma-4-E2B-it-GGUF",
     "filename": "gemma-4-E2B-it-Q8_0.gguf",
@@ -53,7 +63,7 @@
     }
   },
   "mlx": {
-    "huggingfaceRepo": "mlx-community/gemma-4-e2b-it-4bit",
-    "quantization": "4bit"
+    "huggingfaceRepo": "mlx-community/gemma-4-E2B-it-qat-8bit",
+    "quantization": "8bit"
   }
 }

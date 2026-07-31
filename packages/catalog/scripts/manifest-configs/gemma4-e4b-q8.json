@@ -4,7 +4,10 @@
   "description": "Google's edge-optimized Gemma 4 at ~4B effective parameters. Multimodal (text + image + audio), 256K context on the MLX/E4B-it variant, native tool calling. Strong compact default for laptops with 16GB+ memory.",
   "tags": ["google", "multimodal", "vision", "audio", "tools"],
   "category": "general",
-  "maintainer": { "name": "Google", "url": "https://huggingface.co/google/gemma-4-E4B-it" },
+  "maintainer": {
+    "name": "Google",
+    "url": "https://huggingface.co/google/gemma-4-E4B-it"
+  },
   "version": "1.1.2",
   "updatedAt": "2026-07-28T00:00:00Z",
   "license": "Apache-2.0",
@@ -31,7 +34,9 @@
     "turn.ramble-detection",
     "parse.gemma-special-token"
   ],
-  "ollama": { "tag": "gemma4:e4b" },
+  "ollama": {
+    "tag": "gemma4:e4b"
+  },
   "llamaCpp": {
     "huggingfaceRepo": "ggml-org/gemma-4-E4B-it-GGUF",
     "filename": "gemma-4-E4B-it-Q8_0.gguf",
@@ -54,7 +59,7 @@
     }
   },
   "mlx": {
-    "huggingfaceRepo": "mlx-community/gemma-4-e4b-it-4bit",
-    "quantization": "4bit"
+    "huggingfaceRepo": "mlx-community/gemma-4-E4B-it-qat-8bit",
+    "quantization": "8bit"
   }
 }

@@ -871,6 +871,14 @@ export const GezelConfigSchema = z.object({
    * (stable system prompt + history) with a cached one. Default when
    * unset: `256` (auto-on — near-zero risk, meaningful multi-turn
    * speedup). Set `0` to disable.
+   *
+   * The engine may still refuse it: `--cache-reuse` needs a context that
+   * can KV-shift, which rules out a windowed SWA cache (Gemma — see
+   * `llamaCppSwaFull`) and hybrid-attention models (Qwen 3.5/3.6) outright.
+   * Note this is only PARTIAL, position-shifted reuse; exact-prefix reuse
+   * via `cache_prompt` is always on and already does the heavy lifting
+   * (measured 2026-07-31: median prompt-eval 593 tokens against 38–52K
+   * token prompts on gemma4-26b-q4).
    */
   llamaCppCacheReuse: z.number().int().min(0).optional(),
   /**
@@ -878,6 +886,16 @@ export const GezelConfigSchema = z.object({
    * (`--swa-full`) for SWA models (Gemma family). Trades memory for
    * fewer recomputes at long context. Default unset (off — llama-server
    * uses the memory-efficient windowed cache).
+   *
+   * Also the PRECONDITION for `llamaCppCacheReuse` on these models:
+   * llama-server tests whether the loaded context can KV-shift and, for a
+   * windowed SWA cache, it cannot — so it logs `cache_reuse is not
+   * supported by this context, it will be disabled` and drops the flag no
+   * matter what `cacheReuse` is set to. Measured 2026-07-31 on
+   * gemma4-e4b-q8 at 64K context: windowed = 8,772 MB RSS + cache_reuse
+   * refused; `--swa-full` = 11,415 MB RSS (+30%) + cache_reuse accepted.
+   * Qwen 3.5/3.6 cannot KV-shift at all (hybrid attention) and this flag
+   * does not help them.
    */
   llamaCppSwaFull: z.boolean().optional(),
   /**

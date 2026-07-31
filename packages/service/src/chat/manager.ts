@@ -15781,6 +15781,13 @@ export async function buildLlamaCppProvider(opts: {
   const baseProviderOpts = {
     fetchImpl: createLlamaCppPatientFetch(),
     ...(defaultModelId ? { defaultModel: defaultModelId } : {}),
+    // llama-server only sends its final `usage` chunk (and the `timings`
+    // block that rides with it, carrying decode/prefill rate + cache_n) when
+    // the request opts in. Without this the usage tracker stayed empty for
+    // every llama-cpp turn, so the product could not show tokens or a decode
+    // rate for its own default engine — throughput was reachable only by
+    // scraping stdout from the eval harness.
+    includeUsageInStream: true,
     // External-baseUrl default; the supervised path overrides this with the
     // auto-sized `slots` computed below (after the model resolves).
     concurrency: configuredSlots ?? 2,

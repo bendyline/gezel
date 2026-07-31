@@ -15,6 +15,13 @@ export interface BuildTurnUsageOpts {
   durationMs: number;
   /** Total billed-input tokens served from the provider's prompt cache. */
   cachedInputTokens?: number;
+  /**
+   * Engine-reported decode throughput (generated tokens per second of decode
+   * time). Only set when the engine surfaces it — see
+   * `TurnUsage.outputTokensPerSec` for why this is never derived from
+   * `outputTokens / durationMs`.
+   */
+  outputTokensPerSec?: number;
   /** Provider-reported cost in USD. */
   cost?: number;
   /** Per-turn quota snapshots (Copilot). */
@@ -38,6 +45,7 @@ export function buildTurnUsage(opts: BuildTurnUsageOpts): TurnUsage {
     at: new Date().toISOString(),
   };
   if (opts.cachedInputTokens !== undefined) turn.cachedInputTokens = opts.cachedInputTokens;
+  if (opts.outputTokensPerSec !== undefined) turn.outputTokensPerSec = opts.outputTokensPerSec;
   if (opts.cost !== undefined) turn.cost = opts.cost;
   if (opts.quotaBuckets && opts.quotaBuckets.length > 0) turn.quotaBuckets = opts.quotaBuckets;
   if (opts.contextUtilization) turn.contextUtilization = opts.contextUtilization;

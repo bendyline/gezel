@@ -379,6 +379,15 @@ export interface ProviderUsage {
   totalTokensIn: number;
   totalTokensOut: number;
   totalCost: number;
+  /**
+   * Median engine-reported decode rate (tokens/sec) across turns that
+   * reported one; `null` when none did. Populated by local engines
+   * (llama.cpp, MLX); cloud providers don't report throughput, so `null`
+   * there is expected and should render as "n/a", never as zero.
+   *
+   * Optional so an older daemon that predates the field still typechecks.
+   */
+  medianOutputTokensPerSec?: number | null;
   lastUpdated: string | null;
 }
 
@@ -730,6 +739,16 @@ export interface ConfigResponse {
    * RAM (`--n-cpu-moe N`) — the partial-split form of `llamaCppCpuMoe`.
    */
   llamaCppNCpuMoe?: number;
+  /**
+   * llama-cpp: allocate a full-size sliding-window KV cache (`--swa-full`)
+   * instead of the memory-efficient windowed one, for SWA models (Gemma).
+   * ~30% more memory at long context, and the precondition for the engine
+   * accepting `--cache-reuse` at all on those models — with a windowed
+   * cache it refuses ("cache_reuse is not supported by this context").
+   * No effect on Qwen 3.5/3.6, which cannot KV-shift regardless.
+   * Undefined → off (windowed cache).
+   */
+  llamaCppSwaFull?: boolean;
   /**
    * llama-cpp: speculative-decoding mode (`--spec-type`). Lossless
    * decode speedup. `ngram-*` need no draft model; `draft-mtp` uses the

@@ -533,6 +533,17 @@ export interface TurnUsage {
    * cross-provider sums remain comparable; this field is the breakdown.
    */
   cachedInputTokens?: number;
+  /**
+   * Engine-reported DECODE throughput for this turn (generated tokens per
+   * second of decode time), when the engine surfaces it — MLX reports
+   * `generation_tps`, llama-server prints `tg`. Left undefined otherwise.
+   *
+   * Deliberately not derived from `outputTokens / durationMs`: that whole-turn
+   * average folds in prefill, tool round-trips, and idle waiting, so it reads
+   * far below the real decode rate and isn't comparable between engines. A
+   * missing value must stay missing rather than become a misleading estimate.
+   */
+  outputTokensPerSec?: number;
   cost?: number;
   durationMs: number;
   /**

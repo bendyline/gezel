@@ -3702,6 +3702,18 @@ function ProviderUsagePanel({ label, data }: { label: string; data: ProviderUsag
             </span>
           </div>
         </div>
+        {/* Decode speed. Only the on-device engines report throughput, so this
+            card is omitted entirely for cloud providers rather than showing a
+            zero that reads as a measurement. */}
+        {typeof data.medianOutputTokensPerSec === 'number' && (
+          <div className="usage-card">
+            <div className="usage-label">Decode speed</div>
+            <div className="usage-value">{data.medianOutputTokensPerSec} tok/s</div>
+            <div className="usage-detail">
+              <span>median across turns, generation only</span>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

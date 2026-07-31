@@ -21,6 +21,7 @@ import {
   ensureWarmModel,
   isModelInstalled,
   linkModelIntoTrial,
+  staleInstallReason,
 } from './model-cache.ts';
 import { loadModelEvalHints } from './model-eval-hints.ts';
 import { classifyEvalModelTier, modelBillionsForEval } from './model-tier.ts';
@@ -444,6 +445,27 @@ export async function runTrial(scenario: EvalScenario, opts: TrialOptions): Prom
       for (const modelId of [opts.modelId, ...(secondModelId ? [secondModelId] : [])]) {
         const sourceDir = join(mlxSourceHome, 'engines', 'mlx', 'models', modelId);
         assertMlxSourceComplete(sourceDir, modelId);
+        // Completeness is not currency. The llama-cpp path self-heals via
+        // `ensureWarmModel` (evict + refetch), but MLX weights live in the
+        // user's dev home and this harness only symlinks them — so a catalog
+        // change that repoints a model has no way to fix itself here and would
+        // otherwise be measured as if nothing changed. Wild-caught 2026-07-31:
+        // correcting four gemma MLX sources (4-bit -> QAT-8bit, nvfp4 ->
+        // 4bit) left every installed copy stale, and the re-test that was
+        // supposed to VALIDATE the correction would have silently re-run the
+        // old weights. Fail loudly with the pull command instead.
+        const stale = await staleInstallReason({
+          cacheRoot: mlxSourceHome,
+          engine: 'mlx',
+          modelId,
+        });
+        if (stale) {
+          throw new Error(
+            `MLX model "${modelId}" at ${sourceDir} is STALE vs the catalog (${stale}). ` +
+              'The harness cannot refetch MLX weights (it symlinks your dev home), so re-pull ' +
+              `first: gezel model pull --provider mlx ${modelId}`,
+          );
+        }
         log(`[trial] mlx source=${sourceDir}`);
       }
     } else {

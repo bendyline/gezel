@@ -31,6 +31,8 @@ export interface UsageTurn {
   outputTokens: number;
   cost: number;
   durationMs: number;
+  /** Engine-reported decode rate for this turn; absent when unreported. */
+  outputTokensPerSec?: number;
   at: string;
 }
 
@@ -45,6 +47,17 @@ export interface ProviderUsage {
   totalTokensIn: number;
   totalTokensOut: number;
   totalCost: number;
+  /**
+   * Median engine-reported DECODE rate (tokens/sec) across the turns that
+   * reported one, or null when none did. Median rather than mean so a single
+   * cold first turn doesn't drag the figure down.
+   *
+   * Only local engines populate this today (llama-server's
+   * `timings.predicted_per_second`, MLX's `generation_tps`) — cloud providers
+   * don't report throughput, so null there is expected and must render as
+   * "n/a" rather than zero.
+   */
+  medianOutputTokensPerSec: number | null;
   lastUpdated: string | null;
 }
 
@@ -81,6 +94,9 @@ export class UsageTracker {
       outputTokens: turn.outputTokens,
       cost: turn.cost ?? 0,
       durationMs: turn.durationMs,
+      ...(turn.outputTokensPerSec !== undefined
+        ? { outputTokensPerSec: turn.outputTokensPerSec }
+        : {}),
       at: turn.at,
     });
     if (turn.quotaBuckets && turn.quotaBuckets.length > 0) {
@@ -106,6 +122,11 @@ export class UsageTracker {
         totalTokensIn: state.turns.reduce((s, t) => s + t.inputTokens, 0),
         totalTokensOut: state.turns.reduce((s, t) => s + t.outputTokens, 0),
         totalCost: state.turns.reduce((s, t) => s + t.cost, 0),
+        medianOutputTokensPerSec: medianOf(
+          state.turns
+            .map((t) => t.outputTokensPerSec)
+            .filter((v): v is number => typeof v === 'number' && v > 0),
+        ),
         lastUpdated: last,
       };
     }
@@ -120,4 +141,13 @@ export class UsageTracker {
     }
     return state;
   }
+}
+
+/** Median of a numeric list, or null when empty. Exported for tests. */
+export function medianOf(values: number[]): number | null {
+  if (values.length === 0) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  const v = sorted.length % 2 === 1 ? sorted[mid]! : (sorted[mid - 1]! + sorted[mid]!) / 2;
+  return Math.round(v * 10) / 10;
 }

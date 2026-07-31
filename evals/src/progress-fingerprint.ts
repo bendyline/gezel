@@ -136,6 +136,34 @@ export interface DaemonActivityCounters {
    */
   imageLogLines: number;
   /**
+   * Latest llama-server `slot print_timing:` payload, or null when the tail
+   * has none. Used in the soft digest as a direct engine-alive heartbeat.
+   *
+   * This is the one signal that covers BOTH engine phases, which is why it
+   * takes the whole timing payload rather than parsing a specific phase:
+   * llama-server emits `prompt processing, n_tokens = N, progress = P, t = T`
+   * every ~12–22 s during prefill and `n_decoded = N, tg = X t/s` every ~3 s
+   * during decode. Every other soft signal misses at least one of them —
+   * `streamPulses` only fires once decode starts AND is chunk-derived (so it
+   * misses reasoning tokens the provider doesn't count as chunks), and this
+   * llama-server build emits no `slot update_slots:` lines at all.
+   *
+   * Wild-caught 2026-07-30, both halves on gemma4-31b-q4 / M4 Max:
+   *   - petshop prefilled 43,228 tokens in 339 s at 108 t/s; the 300 s soft
+   *     window expired mid-prefill, before a first token could physically
+   *     arrive.
+   *   - tictactoe was actively DECODING — 100 timing lines in the 301 s
+   *     window, 10,783 tokens generated, still running at 21 t/s — while
+   *     `stream-active` emitted nothing at all.
+   * Both false-failed `chat-stalled` on a demonstrably live engine.
+   *
+   * The payload's counters rise monotonically within a task, so the marker
+   * moves whenever the engine advances and freezes the moment it stops — a
+   * genuinely wedged engine still fails. This is the streaming-aware fix the
+   * per-engine defer constants were a stand-in for.
+   */
+  engineProgressMarker: string | null;
+  /**
    * True when the tail shows a native `generate_image` start without a
    * later `generate_image completed` line. The retry-loop guard uses this
    * to avoid false-failing partial HTML while the missing PNG is rendering.
@@ -279,6 +307,14 @@ export async function captureFingerprint(
   let daemonActivity: DaemonActivityCounters | null = await readServiceTelemetryActivity(client);
   if (!daemonActivity && daemonLogPath) {
     daemonActivity = await readDaemonActivity(daemonLogPath);
+  } else if (daemonActivity && daemonLogPath) {
+    // Telemetry has no engine-timing signal; graft it on from the engine log
+    // so a long prefill or reasoning-heavy decode still registers as engine
+    // activity (see `readEngineProgressMarker`).
+    daemonActivity = {
+      ...daemonActivity,
+      engineProgressMarker: await readEngineProgressMarker(daemonLogPath),
+    };
   }
 
   return { workspace, sessionCount, maxSessionActivityMs, daemonActivity, sniffState };
@@ -345,8 +381,42 @@ export function telemetryToActivityCounters(
     streamPulses,
     imageLogLines,
     imageGenerationActive,
+    // The telemetry endpoint exposes no engine-timing signal; the caller
+    // merges one in from the engine log so this path is not blind to an
+    // engine that is working without committing (see `engineProgressMarker`).
+    engineProgressMarker: null,
     source: 'service-telemetry',
   };
+}
+
+/**
+ * Read just the latest prefill marker from the end of a daemon log.
+ *
+ * Deliberately separate from {@link readDaemonActivity}: the telemetry
+ * endpoint supersedes that whole 16 MB scrape but carries no prefill signal,
+ * and re-adding the full read every poll to recover one field would undo the
+ * reason telemetry is preferred. A small tail is sufficient — llama-server
+ * emits a batch line every ~12–22 s, so the most recent one is always near
+ * the end.
+ */
+async function readEngineProgressMarker(path: string): Promise<string | null> {
+  const TAIL_BYTES = 256 * 1024;
+  try {
+    const s = await stat(path);
+    const startOffset = Math.max(0, s.size - TAIL_BYTES);
+    const length = s.size - startOffset;
+    if (length <= 0) return null;
+    const fh = await open(path, 'r');
+    try {
+      const buf = Buffer.alloc(length);
+      await fh.read({ buffer: buf, position: startOffset, length });
+      return lastEngineProgressMarker(buf.toString('utf8'));
+    } finally {
+      await fh.close();
+    }
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -405,6 +475,7 @@ export function parseDaemonActivityText(text: string): DaemonActivityCounters {
     /\[native\] \[sd-server\].*stable-diffusion\.cpp:\d+\s+- generate_image completed\b/g,
   );
   const imageGenerationActive = lastImageStart >= 0 && lastImageStart > lastImageComplete;
+  const engineProgressMarker = lastEngineProgressMarker(text);
 
   return {
     turnStarts,
@@ -412,6 +483,7 @@ export function parseDaemonActivityText(text: string): DaemonActivityCounters {
     writeCalls,
     slotUpdates,
     streamPulses,
+    engineProgressMarker,
     imageLogLines,
     imageGenerationActive,
     source: 'daemon-log',
@@ -424,6 +496,29 @@ function lastMatchIndex(text: string, re: RegExp): number {
     if (typeof match.index === 'number') last = match.index;
   }
   return last;
+}
+
+/**
+ * The most recent llama-server `slot print_timing:` payload, or null when the
+ * tail has none. See `DaemonActivityCounters.engineProgressMarker`.
+ *
+ * Takes the whole payload after the `| task N |` prefix rather than parsing a
+ * specific phase, deliberately: prefill and decode emit different fields, and
+ * a marker that only understood one of them missed the other (the tictactoe
+ * half of the 2026-07-30 wild-catch). Whatever counters a future llama.cpp
+ * build reports, the payload still changes while the engine works.
+ *
+ * The task id is captured too, so consecutive tasks that happen to report
+ * identical counters don't read as a frozen engine.
+ */
+export function lastEngineProgressMarker(text: string): string | null {
+  let marker: string | null = null;
+  for (const match of text.matchAll(
+    /slot print_timing:[^|]*\|\s*task\s*(\d+)\s*\|\s*(.+?)\s*$/gm,
+  )) {
+    marker = `${match[1]}|${match[2]}`;
+  }
+  return marker;
 }
 
 /**
@@ -492,6 +587,11 @@ export function digestFingerprint(fp: ProgressFingerprint): { hard: string; soft
           slotUpdates: fp.daemonActivity.slotUpdates,
           streamPulses: fp.daemonActivity.streamPulses,
           imageLogLines: fp.daemonActivity.imageLogLines,
+          // Direct engine heartbeat — the only soft signal that covers both
+          // prefill (before any token) and reasoning-heavy decode (which the
+          // chunk-derived streamPulses undercounts). Without it either one
+          // reads as a dead engine.
+          engineProgressMarker: fp.daemonActivity.engineProgressMarker,
         }
       : null,
   });

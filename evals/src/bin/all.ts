@@ -208,6 +208,11 @@ async function main() {
       ...(args.flags['cache-root'] ? { cacheRoot: String(args.flags['cache-root']) } : {}),
       ...(args.flags['llama-bin'] ? { llamaBin: String(args.flags['llama-bin']) } : {}),
       ...(args.flags['image-bin'] ? { sdBin: String(args.flags['image-bin']) } : {}),
+      // Preflight's own exclusion message tells the operator to "pass
+      // --skip-preflight to override", so the flag has to work on the command
+      // that printed it — it was only wired into `batch`, making that advice a
+      // silent no-op here.
+      ...(args.flags['skip-preflight'] ? { skipPreflight: true } : {}),
       ...(triageK !== undefined ? { triageK } : {}),
       signal: ac.signal,
     });
