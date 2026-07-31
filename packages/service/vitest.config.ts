@@ -65,11 +65,24 @@ const INTEGRATION_SUITES = [
  * file whose fork vanished. Compile one WASM function at a time in tests to
  * bound that native-memory spike.
  *
+ * Neither flag stopped it: the same file's fork vanished again on 2026-07-31,
+ * and "Fatal process out of memory: Zone" is what V8 reports when a zone
+ * segment `malloc` returns null — i.e. the whole runner is out of memory, and
+ * the wasm compiler is merely the process making the largest single request.
+ * Node sizes its default old-space from total RAM (GBs per fork on a 16 GB
+ * runner), so several forks holding uncollected garbage can starve everyone.
+ * Cap the JS heap instead: no service test needs a gigabyte, and a bounded
+ * ceiling per fork keeps headroom for the native allocations that die first.
+ *
  * Guarded by src/test-pool.test.ts. Vitest 4 removed `poolOptions` — these are
  * top-level `execArgv`, set per project because root-level values do not reach
  * the workers.
  */
-const WORKER_EXEC_ARGV = ['--no-wasm-tier-up', '--wasm-num-compilation-tasks=1'];
+const WORKER_EXEC_ARGV = [
+  '--no-wasm-tier-up',
+  '--wasm-num-compilation-tasks=1',
+  '--max-old-space-size=1024',
+];
 
 /**
  * Embedding defaults for tests:
