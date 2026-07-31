@@ -22,6 +22,25 @@ describe('serviceNotice', () => {
     expect(notice?.technical).toBe('System service was unavailable: SCM stopped');
   });
 
+  // The per-user daemon is a supported mode, so nothing is broken and the
+  // "Background work is off" copy would be wrong: work does run, just not
+  // once Gezel closes. Only the installer registers the machine service, so
+  // the advice has to be "rerun the installer", not "reopen Gezel".
+  it('distinguishes a per-user fallback from a dead service', () => {
+    const notice = serviceNotice({
+      reason: 'The Gezel installer could not register the machine-wide background service',
+      code: 'machine-service-not-installed',
+      platform: 'win32',
+    });
+
+    expect(notice?.id).toBe('machine-service-not-installed');
+    expect(notice?.title).not.toMatch(/off|unavailable|failed/i);
+    expect(notice?.body).not.toMatch(/will not start again by itself/);
+    expect(notice?.body).toMatch(/only runs while Gezel is open/);
+    expect(notice?.body).toMatch(/Run the Gezel installer again/);
+    expect(notice?.technical).toMatch(/could not register/);
+  });
+
   // A skewed machine service is healthy and still holding the user's data.
   // "Background work is off" would be wrong about both, and its advice
   // (reopen Gezel) does not fix a version mismatch.

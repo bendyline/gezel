@@ -23,6 +23,7 @@ import { defaultBundlePaths, extractBundleIfNeeded, readBundleMeta } from './ext
 import { defaultNodeBundleDir, installNodeIfNeeded } from './extract-node.js';
 import { defaultPnpmBundleDir, installPnpmIfNeeded } from './extract-pnpm.js';
 import { LogRotator } from './log-rotator.js';
+import { machineServiceInstallFailed } from './machine-service-state.js';
 import { type Mode, resolveMode } from './mode.js';
 import { nativeBinDir, resolveNativeBinaryPath } from './native-bin.js';
 import { readSystemServiceRuntime } from './system-service.js';
@@ -42,6 +43,7 @@ export interface ConnectOptions {
 export type ConnectionMode = Mode['kind'];
 
 export type ServiceFallbackCode =
+  | 'machine-service-not-installed'
   | 'system-service-unhealthy'
   | 'system-service-version-mismatch'
   | 'adopted-daemon-stale'
@@ -55,9 +57,11 @@ export type ServiceFallbackCode =
 /**
  * A degraded service situation worth telling the user about, surfaced as a
  * persistent banner. Most codes mean "we fell back to embedded"; the
- * exception is `system-service-version-mismatch`, where we stayed connected
+ * exceptions are `system-service-version-mismatch`, where we stayed connected
  * to the machine service on purpose and the banner is asking the user to
- * rerun the installer. Branch on `code`, not on the mode, when the copy
+ * rerun the installer, and `machine-service-not-installed`, where the daemon
+ * is healthy but running per-user because the installer never registered the
+ * machine service. Branch on `code`, not on the mode, when the copy
  * matters — see `FallbackBanner` in the UI.
  *
  * `code` and `message` both cross to the renderer via the preload bridge.
@@ -737,7 +741,9 @@ export async function connectOrStart(opts: ConnectOptions): Promise<SupervisedSe
           });
         }
       }
-      return new SupervisedService('local-adopt', mode.baseUrl, mode.token, mode.cert, opts);
+      return new SupervisedService('local-adopt', mode.baseUrl, mode.token, mode.cert, opts, {
+        fallbackReason: await machineServiceMissing(opts, 'local-adopt'),
+      });
     } catch (err) {
       if (isProcessAlive(mode.pid)) {
         opts.logger?.error?.(
@@ -768,6 +774,7 @@ export async function connectOrStart(opts: ConnectOptions): Promise<SupervisedSe
         result.token,
         result.cert,
         opts,
+        { fallbackReason: await machineServiceMissing(opts, 'local-spawn-packaged') },
       );
       svc.attachSpawned(result.child);
       return svc;
@@ -921,6 +928,38 @@ async function systemServiceVersionSkew(
     message:
       `The Gezel background service is running version ${daemonVersion}, but this copy of ` +
       `Gezel expects version ${shipped}. Its files at ${serviceHome} are only replaced by the installer.`,
+  };
+}
+
+/**
+ * The per-user daemon is healthy, but only because the installer failed to
+ * register the machine service and said so in the registry.
+ *
+ * Worth a notice even though nothing is broken right now: the user loses
+ * background work whenever the app is closed, keeps paying first-launch
+ * bundle extraction, and runs without the service's restricted SID and
+ * private home — none of which is visible anywhere else in the product.
+ * Only the installer can fix it, so the copy points at rerunning it.
+ *
+ * Packaged only, and only on a positive `MachineServiceInstalled = 0`. See
+ * machine-service-state.ts for why absence is never treated as failure.
+ */
+async function machineServiceMissing(
+  opts: ConnectOptions,
+  sourceMode: ConnectionMode,
+): Promise<ServiceFallbackReason | null> {
+  if (!opts.packaged) return null;
+  if (!(await machineServiceInstallFailed())) return null;
+  opts.logger?.warn?.(
+    '[supervisor] the installer recorded a failed GezelService registration; ' +
+      'running the per-user daemon and flagging it in the UI',
+  );
+  return {
+    code: 'machine-service-not-installed',
+    sourceMode,
+    message:
+      'The Gezel installer could not register the machine-wide background service, ' +
+      'so Gezel is running its per-user background service instead.',
   };
 }
 

@@ -14,6 +14,7 @@ import type { UpdateState } from './api.js';
  */
 
 export type SystemNoticeId =
+  | 'machine-service-not-installed'
   | 'service-version-mismatch'
   | 'service-unavailable'
   | 'update-install-failed'
@@ -62,6 +63,20 @@ export function serviceNotice(input: {
 }): SystemNotice | null {
   const { reason, code, platform } = input;
   if (!reason) return null;
+
+  if (code === 'machine-service-not-installed') {
+    return {
+      id: 'machine-service-not-installed',
+      railLabel: 'Background service is per-user',
+      title: 'Gezel is running its per-user background service.',
+      // Deliberately not the "Background work is off" copy below. That one is
+      // for the embedded fallback, where the service dies with the window.
+      // Here a real daemon is running and background work does happen — until
+      // Gezel is closed. Saying it is off would be its own inaccuracy.
+      body: `Everything works and all of your gezellen, projects, chats, and files are here. The difference is that background work — scheduled tasks and night shift — only runs while Gezel is open, and first launch after an update takes longer. The machine-wide service is installed by the installer, so this is the one thing Gezel cannot fix from inside. ${reinstallHint(platform)}`,
+      technical: reason,
+    };
+  }
 
   if (code === 'system-service-version-mismatch') {
     return {

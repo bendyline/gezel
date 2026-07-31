@@ -47,6 +47,63 @@
         pointer-events: none;
       }
 
+      /* First launch does real work before the UI can load — unpacking the
+         service bundle, provisioning the bundled runtimes — and on a cold
+         machine that runs into minutes. The main process writes the current
+         stage here (see setSplashStatus in main.ts) so the wait reads as
+         progress rather than a hang. Stays empty, and therefore invisible,
+         on the fast path. */
+      .status {
+        position: absolute;
+        z-index: 2;
+        bottom: 14%;
+        left: 50%;
+        transform: translateX(-50%);
+        margin: 0;
+        max-width: 80%;
+        text-align: center;
+        font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        font-size: 13px;
+        letter-spacing: 0.06em;
+        color: #f3ede0;
+        opacity: 0;
+        transition: opacity 240ms ease-out;
+      }
+
+      .status:not(:empty) {
+        opacity: 0.82;
+      }
+
+      /* Animated ellipsis. On a pseudo-element rather than in the text so the
+         main process can rewrite the stage with `textContent` without wiping
+         it, and so splash.html needs no script of its own. Reserved width
+         keeps the caption from shifting as the dots cycle. */
+      .status:not(:empty)::after {
+        content: "";
+        display: inline-block;
+        width: 1.2em;
+        text-align: left;
+        animation: ellipsis 1.6s steps(1, end) infinite;
+      }
+
+      @keyframes ellipsis {
+        0%   { content: ""; }
+        25%  { content: "."; }
+        50%  { content: ".."; }
+        75%  { content: "..."; }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .status {
+          transition-duration: 0.01ms;
+        }
+        /* Hold a steady ellipsis rather than pulsing one. */
+        .status:not(:empty)::after {
+          animation: none;
+          content: "...";
+        }
+      }
+
       @keyframes fade-in {
         to { opacity: 0.58; }
       }
@@ -61,6 +118,7 @@
   <body>
     <div class="splash">
       <img src="./gezel-mark.png" alt="Gezel" />
+      <p class="status" id="gezel-splash-status" role="status" aria-live="polite"></p>
     </div>
   </body>
 </html>
