@@ -101,6 +101,25 @@ test('the build matrix parses into a plausible set of legs', () => {
   }
 });
 
+test('x64 CUDA builds retain the Pascal PTX compatibility floor', () => {
+  const llamaCuda = parseMatrix().filter(
+    (entry) =>
+      entry.engine === 'llama-cpp' && entry.variant === 'cuda' && entry.platform.endsWith('-x64'),
+  );
+  assert.equal(llamaCuda.length, 2, 'expected Linux and Windows x64 llama CUDA legs');
+  for (const entry of llamaCuda) {
+    const architectures = entry.llama_cuda_arch.split(';');
+    assert.ok(
+      architectures.includes('60-virtual'),
+      `${entry.platform} lost the Pascal compute_60 PTX fallback`,
+    );
+    assert.ok(
+      architectures.some((architecture) => architecture.replace(/-(?:real|virtual)$/, '') === '90'),
+      `${entry.platform} lost Hopper coverage / the high PTX target`,
+    );
+  }
+});
+
 test('native-payload.mjs covers exactly the platform keys the matrix builds', () => {
   const fromMatrix = [...payloadFromMatrix().keys()].sort();
   assert.deepEqual(allPlatformKeys().sort(), fromMatrix);

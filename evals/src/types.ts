@@ -387,6 +387,7 @@ export type FailureMode =
   | 'success-check-false'
   | 'spawn-error'
   | 'crash'
+  | 'engine-crash'
   | 'interrupted'
   /**
    * A native engine (sd-server render, etc.) started a job and then
@@ -405,6 +406,14 @@ export type FailureMode =
  * grader bugs were all silently polluting the `model` column).
  */
 export type FailureClass = 'pass' | 'model' | 'infra' | 'grader' | 'operator';
+
+export interface NativeEngineIncidentSummary {
+  count: number;
+  kinds: Record<string, number>;
+  incidentIds: string[];
+  /** Short panic/exit excerpts; no prompt or tool content. */
+  evidence: string[];
+}
 
 export interface TrialResult {
   trialId: string;
@@ -430,6 +439,8 @@ export interface TrialResult {
   failureClassRule?: string;
   /** Short excerpt of the matched reason/log evidence. */
   failureClassEvidence?: string;
+  /** Reliability signal retained even when the trial recovered and passed. */
+  nativeEngineIncidents?: NativeEngineIncidentSummary;
   /**
    * Structured salvage: the last scenario sniff state at the moment a
    * FAILED trial terminated. Makes "killed at 6/7 signals" queryable

@@ -34,7 +34,7 @@
 
 import { closeSync, existsSync, fstatSync, openSync, readSync } from 'node:fs';
 import { parseDaemonActivityText } from './progress-fingerprint.ts';
-import type { FailureClass } from './types.ts';
+import type { FailureClass, NativeEngineIncidentSummary } from './types.ts';
 
 /**
  * Read the tail of a daemon.log for classification. Daemon logs commonly
@@ -76,6 +76,8 @@ export interface ClassifyTrialInput {
   failureMode?: string | null;
   /** daemon.log text (tail is fine). Log-signature rules skip when absent. */
   daemonLog?: string | null;
+  /** Structured JSONL copied from the trial home's native incident log. */
+  nativeIncidentLog?: string | null;
 }
 
 /** Failure modes where the trial died waiting/looping rather than on an
@@ -122,6 +124,11 @@ const CAPACITY_DENIAL = /capacity broker denied [^\n]*budget exhausted/;
 const CONTEXT_OVERFLOW =
   /On-device model ran out of working memory|context overflow: [\d,]+ tokens|exceeds the available context size/;
 const ENGINE_HUNG_REASON = /engine appears hung|no daemon activity for|image render wedged/;
+const NATIVE_ENGINE_CRASH_REASON = /native-engine-crash|on-device engine crashed/i;
+const CUDA_INVALID_ARGUMENT = /CUDA error:\s*invalid (?:configuration )?argument/i;
+const LLAMA_SIGABRT = /\[llama-server\][^\n]*(?:signal=SIGABRT|"signal":"SIGABRT")/i;
+const STRUCTURED_CUDA_CRASH =
+  /"expected":false[^\n]*"panicKind":"cuda-[^"]+"|"panicKind":"cuda-[^"]+"[^\n]*"expected":false/i;
 const JINJA_TEMPLATE_500 = /Jinja Exception: Conversation roles must alternate/;
 const VOORMAN_SCHEDULER_SKIP = /skip — voorman is the Meester/;
 
@@ -151,6 +158,29 @@ export function classifyTrial(input: ClassifyTrialInput): FailureClassification 
     return { failureClass: 'infra', rule: 'context-overflow', evidence: overflow };
   }
 
+  const incidentText = input.nativeIncidentLog ?? '';
+  const combinedCrashText = `${reason}\n${input.daemonLog ?? ''}\n${incidentText}`;
+  const typedNativeCrash = NATIVE_ENGINE_CRASH_REASON.test(combinedCrashText);
+  const structuredCudaCrash = STRUCTURED_CUDA_CRASH.test(combinedCrashText);
+  const rawCudaAbort =
+    CUDA_INVALID_ARGUMENT.test(combinedCrashText) && LLAMA_SIGABRT.test(combinedCrashText);
+  if (
+    input.failureMode === 'engine-crash' ||
+    ((isStallish(input) || input.failureMode === 'crash') &&
+      (typedNativeCrash || structuredCudaCrash || rawCudaAbort))
+  ) {
+    const match = combinedCrashText.match(
+      /[^\n]*(?:native-engine-crash|on-device engine crashed|"panicKind":"cuda-[^"]+"|CUDA error:\s*invalid (?:configuration )?argument)[^\n]*/i,
+    );
+    return {
+      failureClass: 'infra',
+      rule:
+        structuredCudaCrash || rawCudaAbort || CUDA_INVALID_ARGUMENT.test(combinedCrashText)
+          ? 'cuda-engine-crash'
+          : 'native-engine-crash',
+      evidence: (match?.[0] ?? reason).slice(0, 240),
+    };
+  }
   if (input.failureMode === 'crash') {
     return { failureClass: 'infra', rule: 'daemon-crash', evidence: reason.slice(0, 140) };
   }
@@ -192,4 +222,31 @@ export function classifyTrial(input: ClassifyTrialInput): FailureClassification 
   }
 
   return { failureClass: 'model', rule: 'model-default' };
+}
+
+/** Parse the dedicated JSONL reliability log. Malformed/expected rows are ignored. */
+export function summarizeNativeEngineIncidents(
+  jsonl: string | null | undefined,
+): NativeEngineIncidentSummary | undefined {
+  if (!jsonl) return undefined;
+  const kinds: Record<string, number> = {};
+  const incidentIds: string[] = [];
+  const evidence: string[] = [];
+  for (const line of jsonl.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    try {
+      const row = JSON.parse(line) as Record<string, unknown>;
+      if (row.expected !== false || typeof row.incidentId !== 'string') continue;
+      const kind = typeof row.panicKind === 'string' ? row.panicKind : 'unexpected-exit';
+      kinds[kind] = (kinds[kind] ?? 0) + 1;
+      incidentIds.push(row.incidentId);
+      const panicLine = typeof row.panicLine === 'string' ? row.panicLine : '';
+      const signal = typeof row.signal === 'string' ? row.signal : '';
+      evidence.push((panicLine || `${kind}${signal ? ` (${signal})` : ''}`).slice(0, 240));
+    } catch {
+      // One partial line must not hide later complete incidents.
+    }
+  }
+  if (incidentIds.length === 0) return undefined;
+  return { count: incidentIds.length, kinds, incidentIds, evidence };
 }

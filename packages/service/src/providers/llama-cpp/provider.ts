@@ -71,7 +71,11 @@ import {
 } from '../local-tool-call-salvage.js';
 import { McpBridgePool } from '../mcp-bridge-pool.js';
 import { capToolOutput, computeToolBudgetChars } from '../mcp-bridge.js';
-import type { NativeEngineSupervisor } from '../native/supervisor.js';
+import type {
+  NativeEngineExitSnapshot,
+  NativeEngineLaunch,
+  NativeEngineSupervisor,
+} from '../native/supervisor.js';
 import { isSseComment, readSseEvents } from '../openai-compatible/sse.js';
 import { ProviderQueue, defaultAmbientQuietMs, runInQueue } from '../queue.js';
 import { RambleDetector } from '../ramble-detector.js';
@@ -96,6 +100,39 @@ import type { LlamaCppLogFile } from './log.js';
 import { type StartupPhase, classifyStartupLine } from './stdout-parser.js';
 
 const log = createLogger('llama-cpp');
+
+export class NativeEngineCrashedError extends Error {
+  readonly code = 'native-engine-crash';
+  readonly engine = 'llama-cpp';
+  readonly incidentId: string;
+  readonly exitCode: number | null;
+  readonly signal: NodeJS.Signals | null;
+  readonly panicKind?: NativeEngineExitSnapshot['panicKind'];
+  readonly diagnostics?: NativeEngineExitSnapshot['diagnostics'];
+
+  constructor(
+    readonly snapshot: NativeEngineExitSnapshot,
+    cause?: unknown,
+  ) {
+    const causeMessage = cause instanceof Error ? cause.message : cause ? String(cause) : '';
+    const detail = snapshot.panicKind
+      ? ` (${snapshot.panicKind})`
+      : snapshot.signal
+        ? ` (${snapshot.signal})`
+        : '';
+    super(
+      `[llama-cpp] on-device engine crashed${detail}; incident=${snapshot.incidentId}. ` +
+        `It will restart on the next request.${causeMessage ? ` Transport reported: ${causeMessage}` : ''}`,
+      { cause },
+    );
+    this.name = 'NativeEngineCrashedError';
+    this.incidentId = snapshot.incidentId;
+    this.exitCode = snapshot.code;
+    this.signal = snapshot.signal;
+    if (snapshot.panicKind) this.panicKind = snapshot.panicKind;
+    if (snapshot.diagnostics) this.diagnostics = { ...snapshot.diagnostics };
+  }
+}
 
 /**
  * Parse an env-var override expressed as positive integer milliseconds.
@@ -1950,6 +1987,12 @@ export class LlamaCppProvider implements LLMProvider {
       resolveBaseUrl: () => this.resolveBaseUrl(),
       acquireGpuLease: () => this.acquireGpuLease(),
       markUsed: () => this.supervisor?.markUsed(),
+      ...(this.supervisor
+        ? {
+            waitForNativeEngineExit: async (sinceMs: number) =>
+              await this.supervisor?.waitForUnexpectedExitSince?.(sinceMs),
+          }
+        : {}),
       fetchImpl: this.fetchImpl,
       model: opts.model ?? this.defaultModel,
       numCtx: this.numCtx,
@@ -2145,7 +2188,17 @@ export class LlamaCppProvider implements LLMProvider {
     // `coexist` policy the call returns immediately. The arbiter is
     // only set on the supervised path (see constructor).
     if (this.arbiter) await this.arbiter.acquire('llm');
-    const launch = await this.supervisor.ensureRunning();
+    const ensureStartedAt = Date.now();
+    let launch: NativeEngineLaunch;
+    try {
+      launch = await this.supervisor.ensureRunning();
+    } catch (err) {
+      const nativeExit = this.supervisor.lastExitSnapshot?.();
+      if (nativeExit && !nativeExit.expected && nativeExit.exitedAt >= ensureStartedAt) {
+        throw new NativeEngineCrashedError(nativeExit, err);
+      }
+      throw err;
+    }
     return launch.baseUrl.replace(/\/+$/, '');
   }
 
@@ -2175,6 +2228,8 @@ interface LlamaCppSessionDeps {
   resolveBaseUrl: () => Promise<string>;
   acquireGpuLease?: () => Promise<(() => void) | undefined>;
   markUsed: () => void;
+  /** Correlate a transport teardown with a supervised child exit. */
+  waitForNativeEngineExit?: (sinceMs: number) => Promise<NativeEngineExitSnapshot | undefined>;
   fetchImpl: typeof fetch;
   model: string;
   /** Append `stream_options:{include_usage:true}` to chat requests (ds4 opt-in). */
@@ -3981,6 +4036,7 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
         };
 
         let res: Response;
+        const requestStartedAt = Date.now();
         try {
           res = await this.deps.fetchImpl(`${baseUrl}/v1/chat/completions`, {
             method: 'POST',
@@ -3991,6 +4047,10 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
         } catch (err) {
           cleanupTurn();
           this.deps.markUsed();
+          if ((err as Error).name !== 'AbortError') {
+            const nativeExit = await this.deps.waitForNativeEngineExit?.(requestStartedAt);
+            if (nativeExit) throw new NativeEngineCrashedError(nativeExit, err);
+          }
           if ((err as Error).name === 'AbortError') {
             if (abortKind === 'external' || externalSignal?.aborted) {
               throw new Error('[llama-cpp] turn cancelled by caller');
@@ -4492,6 +4552,10 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
         } catch (err) {
           cleanupTurn();
           this.deps.markUsed();
+          if ((err as Error).name !== 'AbortError') {
+            const nativeExit = await this.deps.waitForNativeEngineExit?.(requestStartedAt);
+            if (nativeExit) throw new NativeEngineCrashedError(nativeExit, err);
+          }
           // Recovery path: a `ramble` abort that has salvageable
           // tool-call markup falls through to the salvage block
           // below instead of throwing. See MlxSession for the

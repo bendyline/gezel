@@ -89,6 +89,36 @@ describe('score-trial project history fallback', () => {
     expect(facts.timing.timeToFirstArtifactMs).toBe(7_000);
     expect(facts.timing.timeToLastArtifactWriteMs).toBe(7_000);
   });
+
+  it('copies native-engine reliability facts from result.json', async () => {
+    await mkdir(join(tempRoot, 'sessions'), { recursive: true });
+    await writeFile(
+      join(tempRoot, 'result.json'),
+      JSON.stringify({
+        trialId: 'native-recovery',
+        scenarioId: 'bookstore-openapi',
+        modelId: 'qwen3.6-27b-q8',
+        startedAt: '2026-06-04T00:00:00.000Z',
+        finishedAt: '2026-06-04T00:00:10.000Z',
+        durationMs: 10_000,
+        success: true,
+        reason: 'ok after restart',
+        nativeEngineIncidents: {
+          count: 1,
+          kinds: { 'cuda-invalid-argument': 1 },
+          incidentIds: ['native-55121-1234'],
+          evidence: ['CUDA error: invalid argument'],
+        },
+      }),
+    );
+
+    expect(score(tempRoot).nativeEngineIncidents).toEqual({
+      count: 1,
+      kinds: { 'cuda-invalid-argument': 1 },
+      incidentIds: ['native-55121-1234'],
+      evidence: ['CUDA error: invalid argument'],
+    });
+  });
 });
 
 describe('score-trial F4.1 latency timing', () => {

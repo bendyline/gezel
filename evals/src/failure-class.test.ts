@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { classifyTrial } from './failure-class.ts';
+import { classifyTrial, summarizeNativeEngineIncidents } from './failure-class.ts';
 
 describe('classifyTrial — terminal classes', () => {
   it('success → pass', () => {
@@ -105,6 +105,62 @@ describe('classifyTrial — log-signature rules (stall-gated)', () => {
     expect(c).toMatchObject({ failureClass: 'infra', rule: 'chat-template-500' });
   });
 
+  it('CUDA invalid-argument + llama SIGABRT → infra cuda-engine-crash', () => {
+    const c = classifyTrial({
+      ...stall,
+      daemonLog: [
+        '[chat] [llama-server] CUDA error: invalid argument',
+        '[chat] [llama-server] current device: 0, in function ggml_cuda_kernel_launch',
+        '[chat] [llama-server] exited (code=null signal=SIGABRT)',
+      ].join('\n'),
+    });
+    expect(c).toMatchObject({ failureClass: 'infra', rule: 'cuda-engine-crash' });
+  });
+
+  it('structured native incident attributes a stall even if daemon tail rolled over', () => {
+    const nativeIncidentLog = JSON.stringify({
+      incidentId: 'native-55121-1234',
+      expected: false,
+      signal: 'SIGABRT',
+      panicKind: 'cuda-invalid-argument',
+      panicLine: '[llama-server] CUDA error: invalid argument',
+    });
+    const c = classifyTrial({ ...stall, daemonLog: 'later unrelated output', nativeIncidentLog });
+    expect(c).toMatchObject({ failureClass: 'infra', rule: 'cuda-engine-crash' });
+  });
+
+  it('structured CUDA incident takes precedence over a generic runner crash', () => {
+    const c = classifyTrial({
+      success: false,
+      failureMode: 'crash',
+      reason: 'runner crashed: fetch failed',
+      nativeIncidentLog: JSON.stringify({
+        incidentId: 'native-55121-1234',
+        expected: false,
+        signal: 'SIGABRT',
+        panicKind: 'cuda-invalid-argument',
+      }),
+    });
+    expect(c).toMatchObject({ failureClass: 'infra', rule: 'cuda-engine-crash' });
+  });
+
+  it('a generic runner crash without a native signature stays daemon-crash', () => {
+    const c = classifyTrial({
+      success: false,
+      failureMode: 'crash',
+      reason: 'runner crashed: service connection closed',
+    });
+    expect(c).toMatchObject({ failureClass: 'infra', rule: 'daemon-crash' });
+  });
+
+  it('an isolated CUDA error without a child abort is not enough to re-blame the trial', () => {
+    const c = classifyTrial({
+      ...stall,
+      daemonLog: '[chat] [llama-server] CUDA error: invalid argument\nengine recovered',
+    });
+    expect(c).toMatchObject({ failureClass: 'model', rule: 'model-default' });
+  });
+
   it('one Jinja 500 is recoverable — stays model', () => {
     const c = classifyTrial({
       ...stall,
@@ -129,5 +185,29 @@ describe('classifyTrial — log-signature rules (stall-gated)', () => {
       daemonLog: '[native] [sd-server] [INFO ] stable-diffusion.cpp:3395 - generate_image 512x512',
     });
     expect(c.failureClass).toBe('model');
+  });
+});
+
+describe('summarizeNativeEngineIncidents', () => {
+  it('retains recovered crash counts and ignores expected exits', () => {
+    const summary = summarizeNativeEngineIncidents(
+      [
+        JSON.stringify({
+          incidentId: 'native-1-100',
+          expected: false,
+          signal: 'SIGABRT',
+          panicKind: 'cuda-invalid-argument',
+          panicLine: 'CUDA error: invalid argument',
+        }),
+        JSON.stringify({ incidentId: 'native-2-200', expected: true, signal: 'SIGTERM' }),
+        'partial-json',
+      ].join('\n'),
+    );
+    expect(summary).toEqual({
+      count: 1,
+      kinds: { 'cuda-invalid-argument': 1 },
+      incidentIds: ['native-1-100'],
+      evidence: ['CUDA error: invalid argument'],
+    });
   });
 });

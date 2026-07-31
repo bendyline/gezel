@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   gpuVendorFromName,
+  matchNvidiaRuntimeDevice,
   maxGpuVramBytes,
   parseLlamaDevices,
+  parseNvidiaRuntimeDevices,
   pickBestGpuDevice,
 } from './devices.js';
 
@@ -57,6 +59,35 @@ describe('maxGpuVramBytes', () => {
 
   it('returns 0 when there is no device', () => {
     expect(maxGpuVramBytes([])).toBe(0);
+  });
+});
+
+describe('parseNvidiaRuntimeDevices', () => {
+  it('captures GPU name, compute capability, and driver version', () => {
+    expect(parseNvidiaRuntimeDevices('0, NVIDIA GB10, 12.1, 580.159.03\n')).toEqual([
+      {
+        index: 0,
+        name: 'NVIDIA GB10',
+        computeCapability: '12.1',
+        driverVersion: '580.159.03',
+      },
+    ]);
+  });
+
+  it('ignores malformed nvidia-smi rows', () => {
+    expect(parseNvidiaRuntimeDevices('not supported\n0, missing, fields\n')).toEqual([]);
+  });
+
+  it('matches the selected llama CUDA index on a multi-GPU host', () => {
+    const nvidiaDevices = parseNvidiaRuntimeDevices(
+      ['0, NVIDIA RTX 4090, 8.9, 580.65', '1, NVIDIA GB10, 12.1, 580.65'].join('\n'),
+    );
+    expect(
+      matchNvidiaRuntimeDevice(
+        { id: 'CUDA1', name: 'NVIDIA GB10', totalMiB: 119_000, freeMiB: 118_000 },
+        nvidiaDevices,
+      ),
+    ).toMatchObject({ index: 1, computeCapability: '12.1' });
   });
 });
 

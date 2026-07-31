@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { loadBuiltinToolContractsForLint } from './lint-contracts.js';
 
 describe('loadBuiltinToolContractsForLint', () => {
+  // Loads the full server module and completes an MCP handshake in-process.
+  // ~1.5s alone, but it runs alongside inventory.test.ts's subprocess fan-out,
+  // where contention pushes it past the 5s default.
   it('returns the production tools/list JSON Schemas, including conditional tools', async () => {
     const contracts = await loadBuiltinToolContractsForLint();
     const byName = new Map(contracts.map((tool) => [tool.name, tool]));
@@ -28,5 +31,5 @@ describe('loadBuiltinToolContractsForLint', () => {
       },
       additionalProperties: false,
     });
-  });
+  }, 30_000);
 });

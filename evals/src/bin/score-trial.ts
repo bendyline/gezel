@@ -27,7 +27,7 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { summarizeKeurmeesterCasesSync } from '../keurmeester-metrics.ts';
-import type { TrialFinalSniff } from '../types.ts';
+import type { NativeEngineIncidentSummary, TrialFinalSniff } from '../types.ts';
 
 export interface TrialFacts {
   trialId: string;
@@ -46,6 +46,9 @@ export interface TrialFacts {
   /** Optional: supervisor-arm trials — Keurmeester consult summary from
    *  the harvested case records under `<runDir>/keurmeester/`. */
   keurmeester?: import('../keurmeester-metrics.ts').KeurmeesterTrialSummary;
+  /** Unexpected native-engine exits observed during the trial, including
+   * crashes recovered by an automatic restart before the trial completed. */
+  nativeEngineIncidents?: NativeEngineIncidentSummary;
 
   outcome: {
     success: boolean;
@@ -667,6 +670,7 @@ export function score(runDir: string): TrialFacts {
     failureMode?: string;
     modelTier?: string;
     finalSniff?: TrialFinalSniff;
+    nativeEngineIncidents?: NativeEngineIncidentSummary;
   }>(join(runDir, 'result.json'));
   if (!result) throw new Error(`no result.json at ${runDir}`);
 
@@ -1027,6 +1031,9 @@ export function score(runDir: string): TrialFacts {
     ...(perf ? { perf } : {}),
     ...(judge ? { judge } : {}),
     ...(keurmeester ? { keurmeester } : {}),
+    ...(result.nativeEngineIncidents
+      ? { nativeEngineIncidents: result.nativeEngineIncidents }
+      : {}),
     outcome: {
       success: result.success,
       ...(result.failureMode ? { failureMode: result.failureMode } : {}),

@@ -243,14 +243,14 @@ jobs:
             artifact: gezel-llama-server
             needs_cuda: true
             needs_vulkan: false
-            # Modern consumer x86 NVIDIA: sm_75 (RTX 20 / GTX 16 / T4, Turing),
-            # sm_86 (RTX 30 / Ampere), sm_89 (RTX 40 / Ada), sm_120 (RTX 50 /
-            # Blackwell). Each plain entry compiles native SASS + PTX, so a
-            # newer-than-listed card still runs via JIT. sm_121 (GB10) is
-            # ARM-only + needs CUDA 12.9, so it lives on the arm64 leg (below),
-            # not here. This x64 leg stays on the workflow-default CUDA 12.8
-            # (supports sm_75 through sm_120).
-            llama_cuda_arch: '75;86;89;120'
+            # Pascal (2016) is the x64 CUDA compatibility floor. One compact
+            # compute_60 PTX payload lets Pascal and any later architecture JIT
+            # instead of being forced to Vulkan/CPU; native SASS covers the
+            # generations where llama.cpp is most likely to run, including
+            # data-center variants the old consumer-only list skipped. The
+            # final unsuffixed 120 adds both native SASS and forward-compatible
+            # PTX. sm_121 (GB10) is ARM-only and lives on the leg below.
+            llama_cuda_arch: '60-virtual;70-real;75-real;80-real;86-real;89-real;90-real;100-real;120'
           # linux-arm64 (Jetson, DGX Spark / Grace Hopper, Ampere
           # Altra). CPU + CUDA only — Vulkan deferred (LunarG SDK has
           # no aarch64 tarball; revisit when upstream ships one or
@@ -274,12 +274,13 @@ jobs:
             # GB10 / DGX Spark is sm_121. llama.cpp adds 121a-real only
             # with CUDA 12.9+, so the ARM64 CUDA server needs the newer
             # toolkit even though other llama-cpp CUDA legs can use 12.8.
-            # NOTE: this leg deliberately sets NO `llama_cuda_arch` — it relies
-            # on llama.cpp's own CMake default, which at 12.9 emits the exact
-            # `121a-real` form (the arch-specific `a` suffix Blackwell needs).
-            # Hand-writing "121" here risks the wrong form; the default is the
-            # proven path. Add an explicit list only if you also need to cover
-            # other arm64 CUDA GPUs (e.g. GH200 sm_90).
+            # Pin the architecture explicitly. GPU-less CMake runners can
+            # initialize CMAKE_CUDA_ARCHITECTURES to nvcc's legacy sm_52
+            # fallback before llama.cpp gets a chance to install its portable
+            # defaults. native-v0.1.26 shipped exactly that malformed payload.
+            # `121a-real` is the architecture-specific GB10 target supported by
+            # CUDA 12.9; the post-build cuobjdump audit below proves it landed.
+            llama_cuda_arch: '121a-real'
             cuda_pkg: '12-9'
           - engine: llama-cpp
             platform: win32-x64
@@ -313,6 +314,11 @@ jobs:
             artifact: gezel-llama-server.exe
             needs_cuda: true
             needs_vulkan: false
+            # Same Pascal-era floor as Linux x64. Native SASS covers Volta
+            # through Hopper; compute_60 and compute_90 PTX keep other Pascal+
+            # devices on CUDA. Native RTX 50 / Blackwell support still requires
+            # moving this Windows toolchain from CUDA 12.4 to CUDA 12.8+.
+            llama_cuda_arch: '60-virtual;70-real;75-real;80-real;86-real;89-real;90'
 
           # ── ds4 (DwarfStar / DeepSeek-V4) — Metal on darwin-arm64,
           #    CUDA on Linux. GPU-only (no CPU / Vulkan / ROCm / Windows /
@@ -466,12 +472,12 @@ jobs:
       # a single CUDA_ARCH; 'spark' = empty -arch for GB10). Empty for every
       # non-ds4-linux job (ignored there).
       DS4_CUDA_ARCH: ${{ matrix.ds4_cuda_arch || '' }}
-      # llama-cpp CUDA build reads this for -DCMAKE_CUDA_ARCHITECTURES. Set on
-      # the linux-x64-cuda leg to the modern-consumer set (RTX 30/40/50).
-      # Empty everywhere else → build.sh omits the flag and llama.cpp's own
-      # CMake picks its portable default (which at CUDA 12.9+ includes
-      # 121a-real for the arm64 DGX-Spark leg). Empty is CI-safe; `native`
-      # is NOT (GPU-less runners can't resolve it).
+      # llama-cpp CUDA build reads this for -DCMAKE_CUDA_ARCHITECTURES. x64
+      # legs keep a Pascal PTX floor plus native targets for newer generations;
+      # Linux ARM64 deliberately targets GB10 only.
+      # CUDA release legs always carry an explicit architecture list. `native`
+      # is intentionally unsupported in CI because GPU-less runners cannot
+      # resolve it and nvcc otherwise falls back to a legacy target.
       LLAMA_CUDA_ARCH: ${{ matrix.llama_cuda_arch || '' }}
       # workflow_dispatch can target a comma-separated engine subset. Push
       # builds always resolve this to `all`.
@@ -808,6 +814,34 @@ jobs:
           if [[ "${{ matrix.variant }}" == cuda && "${{ matrix.engine }}" == llama-cpp ]]; then
             ls "$out" | grep -Ei 'cudart|cublas' || { echo "CUDA runtime libraries missing alongside exe"; exit 1; }
           fi
+
+      - name: Verify llama.cpp CUDA architecture payload
+        if: steps.preflight.outputs.pinned == 'true' && matrix.engine == 'llama-cpp' && matrix.variant == 'cuda' && startsWith(matrix.platform, 'linux-')
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="${{ steps.outdir.outputs.dir }}"
+          lib="$(find "$out" -maxdepth 1 -type f -name 'libggml-cuda.so.*' | sort -V | tail -n1)"
+          if [[ -z "$lib" ]]; then
+            echo "::error::no real versioned libggml-cuda.so found under $out"
+            exit 1
+          fi
+          node scripts/verify-cuda-architecture.mjs \
+            --library "$lib" \
+            --expected '${{ matrix.llama_cuda_arch }}'
+
+      - name: Verify llama.cpp CUDA architecture payload (Windows)
+        if: steps.preflight.outputs.pinned == 'true' && matrix.engine == 'llama-cpp' && matrix.variant == 'cuda' && matrix.platform == 'win32-x64'
+        shell: pwsh
+        run: |
+          $out = '${{ steps.outdir.outputs.dir }}'
+          $lib = Join-Path $out 'ggml-cuda.dll'
+          if (-not (Test-Path $lib)) {
+            throw "no ggml-cuda.dll found under $out"
+          }
+          node scripts/verify-cuda-architecture.mjs `
+            --library $lib `
+            --expected '${{ matrix.llama_cuda_arch }}'
 
       # ── Unbundled-runtime guard ───────────────────────────────────
       # The engines are built with -DGGML_OPENMP=OFF so nothing depends

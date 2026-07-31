@@ -5,7 +5,12 @@
  * `models.ts`, …) is internal.
  */
 
-export { LlamaCppProvider, ToolCallAccumulator, createLlamaCppPatientFetch } from './provider.js';
+export {
+  LlamaCppProvider,
+  NativeEngineCrashedError,
+  ToolCallAccumulator,
+  createLlamaCppPatientFetch,
+} from './provider.js';
 // Re-exported for backwards compatibility — actual implementation lives
 // in providers/openai-compatible/sse.ts, shared with MLX and any future
 // OpenAI-compatible provider.

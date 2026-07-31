@@ -43,6 +43,13 @@ export interface LlamaDeviceProbe {
   cached: boolean;
 }
 
+export interface NvidiaRuntimeDevice {
+  index: number;
+  name: string;
+  computeCapability: string;
+  driverVersion: string;
+}
+
 const LINE_RE = /^\s*(\S+?):\s*(.+?)\s*\((\d+)\s*MiB,\s*(\d+)\s*MiB\s+free\)\s*$/;
 
 /**
@@ -65,6 +72,54 @@ export function parseLlamaDevices(stdout: string): LlamaDevice[] {
     });
   }
   return devices;
+}
+
+/** Parse the stable CSV shape requested from nvidia-smi for crash diagnostics. */
+export function parseNvidiaRuntimeDevices(stdout: string): NvidiaRuntimeDevice[] {
+  const devices: NvidiaRuntimeDevice[] = [];
+  for (const rawLine of stdout.split(/\r?\n/)) {
+    const fields = rawLine.split(',').map((field) => field.trim());
+    if (fields.length !== 4) continue;
+    const index = Number.parseInt(fields[0] ?? '', 10);
+    const name = fields[1] ?? '';
+    const computeCapability = fields[2] ?? '';
+    const driverVersion = fields[3] ?? '';
+    if (!Number.isFinite(index) || !name || !computeCapability || !driverVersion) continue;
+    devices.push({ index, name, computeCapability, driverVersion });
+  }
+  return devices;
+}
+
+/**
+ * Best-effort NVIDIA driver/device facts. This is diagnostic only: failure or
+ * absence never changes backend selection and returns an empty list.
+ */
+export async function probeNvidiaRuntimeDevices(): Promise<NvidiaRuntimeDevice[]> {
+  try {
+    const { stdout } = await execFileAsync(
+      'nvidia-smi',
+      ['--query-gpu=index,name,compute_cap,driver_version', '--format=csv,noheader,nounits'],
+      { timeout: 5_000 },
+    );
+    return parseNvidiaRuntimeDevices(stdout);
+  } catch {
+    return [];
+  }
+}
+
+/** Match llama-server's selected CUDA device to nvidia-smi diagnostics. */
+export function matchNvidiaRuntimeDevice(
+  llamaDevice: LlamaDevice | null,
+  nvidiaDevices: NvidiaRuntimeDevice[],
+): NvidiaRuntimeDevice | undefined {
+  const cudaIndex = llamaDevice?.id.match(/^CUDA(\d+)$/i)?.[1];
+  return (
+    (cudaIndex !== undefined
+      ? nvidiaDevices.find((device) => device.index === Number(cudaIndex))
+      : undefined) ??
+    (llamaDevice ? nvidiaDevices.find((device) => device.name === llamaDevice.name) : undefined) ??
+    nvidiaDevices[0]
+  );
 }
 
 /**
