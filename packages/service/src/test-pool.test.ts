@@ -12,4 +12,8 @@ describe('vitest fork flags', () => {
     expect(process.execArgv).toContain('--no-wasm-tier-up');
     expect(process.execArgv).toContain('--wasm-num-compilation-tasks=1');
   });
+
+  it('bounds the JS heap so forks leave room for native allocations', () => {
+    expect(process.execArgv).toContain('--max-old-space-size=1024');
+  });
 });
