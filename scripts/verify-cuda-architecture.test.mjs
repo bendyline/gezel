@@ -51,6 +51,29 @@ test('prefers the toolkit cuobjdump over a bare PATH lookup', () => {
   assert.equal(resolveCuobjdump({ CUDA_PATH: join(root, 'missing') }), `cuobjdump${suffix}`);
 });
 
+test('accepts the family-specific variant ggml substitutes for a plain target', () => {
+  // `-- Replacing 120 in CMAKE_CUDA_ARCHITECTURES with 120a` on the linux-x64 leg.
+  assert.deepEqual(
+    assertCudaArchitectures({
+      expected: '60-virtual;90-real;120',
+      elfOutput: 'ELF file 1: lib.1.sm_90.cubin\nELF file 2: lib.2.sm_120a.cubin',
+      ptxOutput: 'PTX file 1: lib.1.sm_60.ptx',
+    }).expected,
+    ['60', '90', '120'],
+  );
+});
+
+test('still fails when an arch-specific target degraded to the plain one', () => {
+  assert.throws(
+    () =>
+      assertCudaArchitectures({
+        expected: '121a-real',
+        elfOutput: 'ELF file 1: lib.1.sm_121.cubin',
+      }),
+    /missing expected architecture\(s\): 121a/,
+  );
+});
+
 test('rejects the sm_52-only fallback that escaped native-v0.1.26', () => {
   assert.throws(
     () =>

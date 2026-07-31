@@ -248,8 +248,12 @@ jobs:
             # instead of being forced to Vulkan/CPU; native SASS covers the
             # generations where llama.cpp is most likely to run, including
             # data-center variants the old consumer-only list skipped. The
-            # final unsuffixed 120 adds both native SASS and forward-compatible
-            # PTX. sm_121 (GB10) is ARM-only and lives on the leg below.
+            # final unsuffixed 120 asks for native SASS plus PTX; ggml's CMake
+            # rewrites it to 120a on CUDA 12.8+ ("Replacing 120 in
+            # CMAKE_CUDA_ARCHITECTURES with 120a"), so the shipped Blackwell
+            # payload is family-specific and the forward-compat JIT path for
+            # anything newer comes from the compute_60 PTX above, not from 120.
+            # sm_121 (GB10) is ARM-only and lives on the leg below.
             llama_cuda_arch: '60-virtual;70-real;75-real;80-real;86-real;89-real;90-real;100-real;120'
           # linux-arm64 (Jetson, DGX Spark / Grace Hopper, Ampere
           # Altra). CPU + CUDA only — Vulkan deferred (LunarG SDK has

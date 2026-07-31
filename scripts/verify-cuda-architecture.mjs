@@ -34,6 +34,23 @@ export function parseCuobjdumpArchitectures(output) {
     .sort();
 }
 
+/**
+ * Does the built payload cover this requested architecture?
+ *
+ * ggml's CMake upgrades some plain targets to the family-specific variant on a
+ * new enough toolkit — `-- Replacing 120 in CMAKE_CUDA_ARCHITECTURES with 120a`
+ * — so a leg that asks for `120` legitimately ships `sm_120a`. That code still
+ * runs on sm_120 hardware, so accept it. The tolerance is one-directional: a
+ * leg that asked for `121a` and got plain `121` lost the arch-accelerated
+ * instructions it asked for, and must still fail.
+ */
+function isArchCovered(wanted, available) {
+  const arch = wanted.toLowerCase();
+  if (available.has(arch)) return true;
+  if (/[a-z]$/.test(arch)) return false;
+  return [...available].some((found) => found.replace(/[a-z]$/, '') === arch);
+}
+
 export function assertCudaArchitectures({ expected, elfOutput, ptxOutput = '' }) {
   const wanted = normalizeExpectedCudaArchitectures(expected);
   if (wanted.length === 0) throw new Error('expected CUDA architecture list is empty');
@@ -41,7 +58,7 @@ export function assertCudaArchitectures({ expected, elfOutput, ptxOutput = '' })
   const real = parseCuobjdumpArchitectures(elfOutput);
   const virtual = parseCuobjdumpArchitectures(ptxOutput);
   const available = new Set([...real, ...virtual]);
-  const missing = wanted.filter((arch) => !available.has(arch.toLowerCase()));
+  const missing = wanted.filter((arch) => !isArchCovered(arch, available));
   if (missing.length > 0) {
     throw new Error(
       `CUDA payload missing expected architecture(s): ${missing.join(', ')}; ` +
