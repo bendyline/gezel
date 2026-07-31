@@ -65,6 +65,7 @@ import {
   buildKickoffTaskDescription,
   inferSourceDeliverablePath,
   shouldPromoteStartJobToProject,
+  shouldRouteStartProjectToJob,
 } from './kickoff-text.js';
 import { normalizeMarkdown } from './normalize.js';
 import { unavailableToolsForPlatform } from './platform-tool-availability.js';
@@ -5935,6 +5936,19 @@ server.tool(
   },
   async ({ name, about, missionObjectives, taskDescription, taskTitle, kickoffMessage }) => {
     const brief = resolveMacroBrief({ name, about, missionObjectives, taskDescription });
+    if (shouldRouteStartProjectToJob(brief)) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text:
+              `[runtime routing guard] "${brief.name}" is a clearly single-deliverable job, not a crew project. ` +
+              'No project was created. Retry now with `start_job` using the same name/about/mission/task fields and `specialistRole: "developer"` (or `"image-generator"` for a raster-only deliverable).',
+          },
+        ],
+        isError: true,
+      };
+    }
     const repoRedirect = repoFetchRedirectForMacro({
       tool: 'start_project',
       ...brief,
@@ -7408,12 +7422,16 @@ server.tool(
         : gate.paused
           ? ' The rejection budget is exhausted — the task is now PAUSED for the user; summarize where you got stuck and what you tried.'
           : ' Address these specifically, then call `advance_task_step` again.';
+      const failedRun = gate.scriptRuns?.find((run) => run.error || run.runId);
+      const diagnosticNote = failedRun
+        ? `\nScript diagnostic: ${failedRun.scriptName}${failedRun.runId ? ` (run ${failedRun.runId})` : ''}${failedRun.error ? ` — ${failedRun.error}` : ''}. Full redacted logs are in the task note.`
+        : '';
       return {
         content: [
           {
             type: 'text' as const,
             text: gate.infrastructureError
-              ? `Step "${stepId}" on ${ref} was NOT completed because its gate could not run:\n\n${gate.message}\n${pausedNote}`
+              ? `Step "${stepId}" on ${ref} was NOT completed because its gate could not run:\n\n${gate.message}\n${pausedNote}${diagnosticNote}`
               : `Step "${stepId}" on ${ref} was NOT completed — its gate rejected the work (attempt ${gate.attempt}/${gate.maxAttempts}):\n\n${gate.message}\n${pausedNote}`,
           },
         ],

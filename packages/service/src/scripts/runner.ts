@@ -10,6 +10,7 @@ import {
   type ScriptRunStatus,
   type ScriptRunTrigger,
   type ScriptScope,
+  createLogger,
   getEngagementMode,
   isEngagementAllowed,
   resolveSecurityPolicy,
@@ -25,7 +26,7 @@ import type { ChatManager } from '../chat/manager.js';
 import type { Store } from '../fs/store.js';
 import type { MemoryManager } from '../memory/manager.js';
 import { redactObject, redactString } from '../providers/mcp-bridge.js';
-import { runInSandbox } from '../sandbox/runner.js';
+import { type SandboxRunResult, runInSandbox } from '../sandbox/runner.js';
 import { type CredentialRegistry, DefaultCredentialRegistry } from '../secrets/registry.js';
 import type { SecretStore } from '../secrets/types.js';
 import type { TaskManager } from '../tasks/manager.js';
@@ -40,6 +41,8 @@ import { validateScriptInput } from './input-validator.js';
 import { parseScriptMeta } from './meta.js';
 import { SDK_PACKAGE_NAME, resolveSdkDir } from './sdk.js';
 import { stdlibScriptFile } from './stdlib-source.js';
+
+const log = createLogger('scripts');
 
 export interface ScriptRunnerOptions {
   store: Store;
@@ -328,6 +331,10 @@ export class ScriptRunner {
       opts.scriptName,
       opts.inlineSource !== undefined,
     );
+    const trustedReadOnlyStandard =
+      scope === 'standard' &&
+      provenanceTrusted &&
+      [...allowedCapabilities].every((capability) => capability.endsWith('.read'));
 
     const scratch = await this.prepareScratch(source, opts.scriptName);
     try {
@@ -335,6 +342,7 @@ export class ScriptRunner {
         scratch,
         scriptName: opts.scriptName,
         provenanceTrusted,
+        trustedReadOnlyStandard,
         init: {
           input: validatedInput,
           runId,
@@ -367,6 +375,10 @@ export class ScriptRunner {
         },
       });
 
+      if (result.sandboxFallback) {
+        run.logs +=
+          '[sandbox] macOS Seatbelt failed to start; retried byte-verified read-only standard script under the Node permission and network-neutralizer layers.\n';
+      }
       run.finishedAt = new Date().toISOString();
       if (result.timedOut) {
         run.status = 'error';
@@ -380,7 +392,7 @@ export class ScriptRunner {
         run.error =
           run.error ??
           extractScriptFailureFromStderr(result.stderr) ??
-          `script exited with code ${result.exitCode}`;
+          formatScriptExitFailure(result);
       } else {
         run.status = 'ok';
         if (outputSeen) {
@@ -402,6 +414,13 @@ export class ScriptRunner {
 
     redactRunInPlace(run, knownSecretValues);
     await this.persistRun(run);
+    if (run.status === 'error') {
+      log.error(
+        `[script-run] runId=${run.id} project=${run.projectId} script=${run.scriptName} ` +
+          `trigger=${run.trigger.kind} error=${run.error ?? 'unknown error'} ` +
+          `logsTail=${JSON.stringify(tailText(run.logs, 1_500))}`,
+      );
+    }
     return run;
   }
 
@@ -540,6 +559,7 @@ export class ScriptRunner {
     scratch: string;
     scriptName: string;
     provenanceTrusted: boolean;
+    trustedReadOnlyStandard: boolean;
     init: Record<string, unknown>;
     timeoutMs: number;
     onRequest: (method: string, params: unknown) => Promise<unknown>;
@@ -547,7 +567,7 @@ export class ScriptRunner {
     recordCall: (call: ScriptRunCall) => void;
     onStdout: (line: string) => void;
     onStderr: (line: string) => void;
-  }): Promise<{ exitCode: number; stdout: string; stderr: string; timedOut: boolean }> {
+  }): Promise<SandboxRunResult> {
     let sendFrame: ((line: string) => void) | null = null;
 
     return runInSandbox({
@@ -567,6 +587,7 @@ export class ScriptRunner {
       // boundary exists (see isProvenanceTrusted); everything else still
       // fails closed there.
       allowMissingNetBoundary: opts.provenanceTrusted,
+      allowMacSandboxStartupFallback: opts.trustedReadOnlyStandard,
       // Cap heap so a runaway allocation can't OOM the whole host. The
       // child gets a generous ceiling — enough for normal data-wrangling,
       // far below total system memory.
@@ -662,6 +683,20 @@ export function extractScriptFailureFromStderr(stderr: string): string | undefin
   );
   if (refusal) return refusal;
   return lines.find((line) => /^(?:Error|[A-Za-z][A-Za-z0-9]*Error):\s+\S/.test(line));
+}
+
+function formatScriptExitFailure(result: SandboxRunResult): string {
+  const exit = result.signal
+    ? `script closed by signal ${result.signal}`
+    : `script exited with code ${result.exitCode}`;
+  const stderrTail = tailText(result.stderr, 600);
+  return stderrTail.length > 0 ? `${exit}: ${stderrTail}` : `${exit} without stderr output`;
+}
+
+function tailText(value: string, maxChars: number): string {
+  const trimmed = value.trim();
+  if (trimmed.length <= maxChars) return trimmed;
+  return `…${trimmed.slice(trimmed.length - maxChars)}`;
 }
 
 function summarize(value: unknown): string {

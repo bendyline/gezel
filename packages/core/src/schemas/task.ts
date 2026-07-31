@@ -590,6 +590,16 @@ export const CompleteStepGateInfoSchema = z.object({
   maxAttempts: z.number().int().positive(),
   paused: z.boolean(),
   infrastructureError: z.boolean().optional(),
+  scriptRuns: z
+    .array(
+      z.object({
+        scriptName: z.string(),
+        runId: z.string().optional(),
+        error: z.string().optional(),
+        logsTail: z.string().optional(),
+      }),
+    )
+    .optional(),
 });
 export type CompleteStepGateInfo = z.infer<typeof CompleteStepGateInfoSchema>;
 

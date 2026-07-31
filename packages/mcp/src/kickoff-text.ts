@@ -195,3 +195,44 @@ export function shouldPromoteStartJobToProject(input: {
     macroNeedsImageAsset(input.name, input.about, input.missionObjectives, input.taskDescription)
   );
 }
+
+/**
+ * Runtime guard for a small model that selected the crew macro despite a
+ * clearly solo brief. Ambiguous apps remain crew-shaped; redirect only
+ * when the text explicitly says small/single/prototype/browser-game, or
+ * names exactly one deliverable file, and contains no multi-discipline
+ * signal.
+ */
+export function shouldRouteStartProjectToJob(input: {
+  name: string;
+  about: string;
+  missionObjectives: string;
+  taskDescription?: string;
+}): boolean {
+  if (shouldPromoteStartJobToProject(input)) return false;
+  const text =
+    `${input.name}\n${input.about}\n${input.missionObjectives}\n${input.taskDescription ?? ''}`.toLowerCase();
+  if (
+    /\b(crew|team of|multiple specialists|multi[- ]discipline|multimodal|frontend and backend|code and tests|tests and docs|research and build)\b/.test(
+      text,
+    )
+  ) {
+    return false;
+  }
+
+  const explicitPaths = new Set(
+    [
+      ...text.matchAll(
+        new RegExp(`\\b(?:workspace\\/)?[\\w./-]+\\.(?:${DELIVERABLE_EXT})\\b`, 'gi'),
+      ),
+    ]
+      .map((match) => match[0]?.replace(/^workspace\//i, ''))
+      .filter((path): path is string => Boolean(path)),
+  );
+  if (explicitPaths.size > 1) return false;
+  if (explicitPaths.size === 1) return true;
+
+  return /\b(single[- ]file|one[- ]file|one file|small browser|simple browser|browser game|quick prototype|small prototype|one[- ]shot prototype|tiny (?:game|site|app))\b/.test(
+    text,
+  );
+}

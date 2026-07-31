@@ -27,9 +27,7 @@ import {
   type ToolsetManifest,
   createLogger,
   decodeProjectGezelId,
-  deliverableKindForStep,
   displayName,
-  firstActionForKind,
   isEngagementAllowed,
   isLocalProvider,
   isProactiveAllowed,
@@ -454,6 +452,13 @@ async function resolveCatalogLlamaCppEngineConfig(
   }
 }
 
+export interface GateScriptDiagnostic {
+  scriptName: string;
+  runId?: string;
+  error?: string;
+  logsTail?: string;
+}
+
 /** Result the injected task advancer reports back to the chat loop. */
 export type TaskAdvancerOutcome =
   | { status: 'advanced' }
@@ -466,6 +471,8 @@ export type TaskAdvancerOutcome =
       paused?: boolean;
       /** The gate runtime/configuration failed before judging the deliverable. */
       infrastructureError?: boolean;
+      /** Gate script diagnostics for durable/user-visible failure reporting. */
+      scriptRuns?: GateScriptDiagnostic[];
       /** Escalation rung of `message` (≥1 = deliver raw, it IS the directive). */
       escalationStage?: number;
     };
@@ -1408,6 +1415,7 @@ export class ChatManager {
       paused?: boolean;
       escalationStage?: number;
       infrastructureError?: boolean;
+      scriptRuns?: GateScriptDiagnostic[];
     };
   }> {
     if (!this.taskAdvancer) return {};
@@ -1482,6 +1490,7 @@ export class ChatManager {
             ...(outcome.infrastructureError !== undefined
               ? { infrastructureError: outcome.infrastructureError }
               : {}),
+            ...(outcome.scriptRuns !== undefined ? { scriptRuns: outcome.scriptRuns } : {}),
             ...(outcome.escalationStage !== undefined
               ? { escalationStage: outcome.escalationStage }
               : {}),
@@ -5395,6 +5404,13 @@ export class ChatManager {
       }
       let continuations = 0;
       const maxContinuations = resolveContinuationBudget(state);
+      // Keep a send-wide view for detectors. Individual assistant
+      // iterations still own their own `toolCalls` arrays, but a
+      // continuation must not forget that an earlier iteration in this
+      // same user-visible send successfully used a tool. Forgetting that
+      // history makes the follow-up look fabricated ("I read the file")
+      // even though the read is attached to the preceding bubble.
+      const toolsAcrossContinuations: ChatMessageToolCall[] = [];
       // Self-chat guard: count compactions triggered by this single
       // user-initiated send. A healthy turn should compact at most once;
       // if we hit MAX_COMPACTIONS_PER_SEND the model is in a
@@ -5765,6 +5781,7 @@ export class ChatManager {
         // A continuation turn (set below) re-initializes the bucket.
         const drained = this.currentTurnTools.get(sessionId) ?? [];
         if (drained.length > 0) assistantMessage.toolCalls = drained;
+        toolsAcrossContinuations.push(...drained);
         this.currentTurnTools.set(sessionId, []);
         // Same pattern for intents. Clamp `afterChars` to the final
         // content length — the delta-stream proxy may overshoot if the
@@ -5883,7 +5900,7 @@ export class ChatManager {
           sessionId,
           isMeester: cfgForDetector?.meesterGezelId === state.record.gezelId,
           userText,
-          drained,
+          drained: toolsAcrossContinuations,
           assistantContent: assistantMessage.content,
           continuationCount: continuations,
         });
@@ -6080,6 +6097,30 @@ export class ChatManager {
         }
         const noopConfirmationAccepted =
           continuations === 0 && isNoopConfirmationResponse(promptForTurn, finalContent);
+        // A gate pause is terminal for this task turn and must remain
+        // visible regardless of the continuation budget or engagement
+        // mode. Persist the warning before retry/inspector gating.
+        if (advanceOutcome.gateRejected?.paused) {
+          const ref = advanceOutcome.gateRejected.taskRef;
+          const failedRun = advanceOutcome.gateRejected.scriptRuns?.find(
+            (run) => run.error || run.runId,
+          );
+          log.warn(
+            `session ${sessionId}: ${ref} step "${advanceOutcome.gateRejected.stepId}" gate paused the task — stopping the repair loop`,
+          );
+          const gateWarning = advanceOutcome.gateRejected.infrastructureError
+            ? `The step gate for ${ref} could not run, so the task was paused without counting a deliverable attempt.${
+                failedRun?.runId ? ` Script run: ${failedRun.runId}.` : ''
+              }${failedRun?.error ? ` ${failedRun.error}` : ''} See the task notes for diagnostics.`
+            : `The step gate paused ${ref} after repeated failures — see the task notes for the attempt history.`;
+          assistantMessage.warnings = [...(assistantMessage.warnings ?? []), gateWarning];
+          await this.store.writeSession(state.record);
+          this.events.publish(scope, {
+            type: 'warning',
+            message: gateWarning,
+          });
+          break;
+        }
         if (
           continuations >= maxContinuations &&
           looksStalled(finalContent) &&
@@ -6197,21 +6238,6 @@ export class ChatManager {
             );
             promptForTurn = detectorReprompt;
             continue;
-          }
-          // The gate PAUSED the task (budget spent or plateau stage 3):
-          // no re-prompt — the model already ignored the ladder. Surface
-          // a user-visible warning instead so the pause isn't silent.
-          if (advanceOutcome.gateRejected?.paused) {
-            const ref = advanceOutcome.gateRejected.taskRef;
-            log.warn(
-              `session ${sessionId}: ${ref} step "${advanceOutcome.gateRejected.stepId}" gate paused the task — stopping the repair loop`,
-            );
-            this.events.publish(scope, {
-              type: 'warning',
-              message: advanceOutcome.gateRejected.infrastructureError
-                ? `The step gate for ${ref} could not run, so the task was paused without counting a deliverable attempt. See the task notes for the runtime/configuration error.`
-                : `The step gate paused ${ref} after repeated failures — see the task notes for the attempt history.`,
-            });
           }
           // The step's completion GATE rejected the deliverable: it
           // exists (advanceWhen fired) but was judged not good enough.
@@ -6383,7 +6409,13 @@ export class ChatManager {
             continue;
           }
           const unresolvedToolFailures = unresolvedFailedToolCalls(drained);
-          let stallReason: 'text' | 'tool-failed' | 'tool-only' | 'voorman-idle' | null = null;
+          let stallReason:
+            | 'text'
+            | 'tool-failed'
+            | 'tool-read-only'
+            | 'tool-only'
+            | 'voorman-idle'
+            | null = null;
           let voormanIdleVerdict: 'idle' | 'nothing-built' | null = null;
           const completedAsyncHandoff = drained.some(isSuccessfulAsyncHandoffToolCall);
           if (looksStalled(finalContent)) {
@@ -6422,6 +6454,15 @@ export class ChatManager {
                 log.info(
                   `session ${sessionId}: file mutation completed — skipping tool-only closing nudge so validation can run`,
                 );
+              } else if (
+                state.record.taskRef &&
+                drained.every((call) => call.success && isReadOnlyToolName(call.name))
+              ) {
+                // A read is context acquisition, not completion, for a
+                // task-driving session. The old generic "No more tools"
+                // nudge made small models summarize the read and abandon
+                // the actual build/edit action.
+                stallReason = 'tool-read-only';
               } else {
                 stallReason = 'tool-only';
               }
@@ -6485,9 +6526,11 @@ export class ChatManager {
                   )
                 : stallReason === 'tool-only'
                   ? CLOSING_SUMMARY_NUDGE
-                  : stallReason === 'tool-failed'
-                    ? buildFailedToolRecoveryNudge(unresolvedToolFailures)
-                    : buildContinuationNudge(finalContent, state.record.messages);
+                  : stallReason === 'tool-read-only'
+                    ? READ_ONLY_PROGRESS_NUDGE
+                    : stallReason === 'tool-failed'
+                      ? buildFailedToolRecoveryNudge(unresolvedToolFailures)
+                      : buildContinuationNudge(finalContent, state.record.messages);
             continue;
           }
         }
@@ -13249,6 +13292,16 @@ const CLOSING_SUMMARY_NUDGE =
   'In one sentence, tell the user what happened. No more tools — just words.';
 
 /**
+ * A task-scoped read-only call is an intermediate observation, not the
+ * deliverable. Keep the model moving toward the first mutating/action tool
+ * instead of applying the terminal closing-summary nudge.
+ */
+const READ_ONLY_PROGRESS_NUDGE =
+  'The read-only tool returned the context you needed, but the current task step is not finished. ' +
+  'Continue now with the next concrete action in the Step procedure, using the required tool. ' +
+  'Do not stop merely to say that you read, inspected, or retrieved something.';
+
+/**
  * Nudge specific to the voorman-idle case: the project's voorman just
  * replied, fired zero mutating tools, and no one else in the project is
  * working. Either advance the work this turn, or surface the blocker to
@@ -14219,6 +14272,26 @@ const MINIMAL_CONTEXT_ABOUT_MAX_CHARS = 900;
 const MINIMAL_CONTEXT_CONDUCT =
   '\n\n---\n\nThis is a lightweight chat. You have no tools and no workspace this turn — reply directly to the user in plain prose. Do not narrate a process, list steps, or claim to run tools or save files; just converse and write.';
 
+/**
+ * Return the first tool the craftbook procedure actually names.
+ *
+ * Deliverable-shape inference is deliberately not used here. A step may
+ * produce `index.html` but require an acceptance note or a script check
+ * before the write; steering from the file extension contradicted that
+ * authored order and caused small models to skip the procedure.
+ */
+function firstAvailableProcedureTool(
+  procedure: string,
+  availableToolNames: ReadonlySet<string>,
+): string | undefined {
+  const namedTool = /`([a-z][a-z0-9_-]+)(?:\([^`]*\))?`/g;
+  for (const match of procedure.matchAll(namedTool)) {
+    const name = match[1];
+    if (name && availableToolNames.has(name)) return name;
+  }
+  return undefined;
+}
+
 /** Sentence-aware cap of the about body for minimal-context mode. */
 function capAboutForMinimalContext(about: string, maxChars: number): string {
   if (about.length <= maxChars) return about;
@@ -14776,42 +14849,30 @@ ${artifactsLine}
       const gateReminder = activeStepIsGate
         ? ` This step is a **gate** — do not \`advance_task_step\` forward until its exit criteria are genuinely met; if they are not, loop back and fix the named gap${activeStepAttempt > 1 ? ` (attempt ${activeStepAttempt})` : ''}.`
         : '';
-      // Single-action collapse for small / verbose-family models. A
-      // multi-step procedure ("write the acceptance note, THEN build") is
-      // read by a small or reasoning-leaking model as "plan the whole
-      // sequence first" — which is exactly the planning loop that burns
-      // the turn without a tool call. Bigger models sequence procedures
-      // fine, so this is scoped to where the failure actually lands. The
-      // build-style steps already auto-advance on the deliverable, so
-      // "one action this turn" never strands the workflow — the next turn
-      // continues. Wild-caught (gemma4-e4b-q8 build step: 9
-      // generation passes, 0 committed tool calls, all planning prose).
+      // Small / reasoning-leaking models benefit from an explicit starting
+      // point, but must be allowed to continue after an observational tool
+      // call. The former "exactly ONE tool then end" wording stranded
+      // read-before-write procedures: the model obeyed it literally,
+      // returned a read_file result, and never reached the edit.
       const smallOrLeaky =
         localModelTier === 'tiny' || localModelTier === 'small' || leaksUntaggedReasoning(modelId);
-      const singleActionHint = smallOrLeaky
-        ? ' Do exactly ONE tool call this turn — the first action the procedure names — then end your turn. You do NOT need to complete the whole procedure in one turn; the next turn picks up where this one ends. Do not plan the remaining steps in prose.'
+      const procedureMomentumHint = smallOrLeaky
+        ? ' Start with the first tool action the procedure names, then chain the minimum tool calls needed to complete the current procedure stage. A read-only call gives you context; it is not completion when the procedure still requires a write, edit, script, or other action. Do not plan the remaining steps in prose.'
         : '';
-      // D3 Half B: at tiny/small tier, name the concrete first action
-      // derived from the step's deliverable class — covers ≤3-step books
-      // the collapse pass never touches. Kit-guaranteed: the named tool is
-      // always on the step's tool surface. Small tier is included because
-      // the general "don't call read_task_notes to find the procedure"
-      // anchor alone doesn't stop a small model from reflex-looping
-      // read_task_notes on the entry turn — it needs the concrete tool
-      // named. Wild-caught (gemma4-e4b, tier `small`, on a fanout
-      // craftbook: 40+ consecutive read_task_notes, never wrote the step's
-      // deliverable). `smallOrLeaky`'s singleActionHint already extends the
-      // sibling "do exactly ONE tool call" guidance to small tier; this
-      // completes it by naming which call.
+      // Name the authored first action, not one inferred from the
+      // deliverable extension. For example, an HTML step may explicitly
+      // require `write_task_note` before `write_file`.
       let firstActionAnchor = '';
-      if ((localModelTier === 'tiny' || localModelTier === 'small') && task.step) {
-        const kind = deliverableKindForStep(task.step);
-        const deliverablePath = stepDeliverablePath(task.step);
-        if (kind && deliverablePath) {
-          firstActionAnchor = ` First action: \`${firstActionForKind(kind, deliverablePath)}\`.`;
+      if (smallOrLeaky && task.step) {
+        const firstProcedureTool = firstAvailableProcedureTool(
+          task.step.prompt ?? '',
+          availableToolNameSet,
+        );
+        if (firstProcedureTool) {
+          firstActionAnchor = ` First action: call \`${firstProcedureTool}\` exactly as the procedure specifies.`;
         }
       }
-      activeTaskAnchor = `\n\n---\n\n**You are mid-craftbook step: \`${task.task.ref}\` — "${task.task.title}"${stepLabel}.** The **Step procedure** block above contains your exact instructions for this turn — those instructions take precedence over your default \`about.md\` persona. Read the procedure, identify the FIRST tool it tells you to call, and call it. Do NOT call \`read_task_notes\` to find the procedure; it's in the prompt above. Do NOT default to \`write_file\` if the procedure says otherwise.${onExitHint}${gateReminder}${singleActionHint}${firstActionAnchor}`;
+      activeTaskAnchor = `\n\n---\n\n**You are mid-craftbook step: \`${task.task.ref}\` — "${task.task.title}"${stepLabel}.** The **Step procedure** block above contains your exact instructions for this turn — those instructions take precedence over your default \`about.md\` persona. Read the procedure, identify the FIRST tool it tells you to call, and call it. Do NOT call \`read_task_notes\` to find the procedure; it's in the prompt above. Do NOT default to \`write_file\` if the procedure says otherwise.${onExitHint}${gateReminder}${procedureMomentumHint}${firstActionAnchor}`;
     } else {
       const resumeAction = availableToolNameSet.has('read_task_notes')
         ? `call \`read_task_notes({ ref: "${task.task.ref}" })\` for the latest, then take the next concrete step with the tools wired this turn`

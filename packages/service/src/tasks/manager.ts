@@ -375,6 +375,8 @@ export interface GateHoldInfo {
   cached: boolean;
   /** The gate runtime/configuration failed; no deliverable attempt was charged. */
   infrastructureError?: true;
+  /** Script-run identifiers and redacted log tails for gate infrastructure failures. */
+  scriptRuns?: StepGateOutcome['runs'];
   /** Per-check structured outcomes from the gate's declarative floor. */
   checkResults?: GateCheckOutcome[];
   /**
@@ -388,6 +390,19 @@ export interface GateHoldInfo {
 export type CompleteStepOutcome =
   | { status: 'advanced'; task: Task }
   | { status: 'held'; task: Task; gate: GateHoldInfo };
+
+function formatGateScriptDiagnostics(runs: StepGateOutcome['runs']): string {
+  return runs
+    .filter((run) => run.error || run.logsTail)
+    .map((run) => {
+      const lines = [`- Script: \`${run.scriptName}\``];
+      if (run.runId) lines.push(`  - Run ID: \`${run.runId}\``);
+      if (run.error) lines.push(`  - Error: ${run.error}`);
+      if (run.logsTail) lines.push(`  - Log tail:\n\n    \`\`\`\n${run.logsTail}\n    \`\`\``);
+      return lines.join('\n');
+    })
+    .join('\n');
+}
 
 /** Thrown by the legacy `completeStep` wrapper when a gate holds the step. */
 export class GateRejectionError extends Error {
@@ -2051,6 +2066,10 @@ export class TaskManager {
             ? { firstFailKind: failedKinds[0], failedKinds }
             : {}),
           ...(outcome && outcome.skipped.length > 0 ? { skippedScripts: outcome.skipped } : {}),
+          ...(outcome?.infrastructureError ? { infrastructureError: true } : {}),
+          ...(rejectingScript?.runId ? { scriptRunId: rejectingScript.runId } : {}),
+          ...(rejectingScript?.error ? { scriptError: rejectingScript.error } : {}),
+          ...(rejectingScript?.logsTail ? { scriptLogsTail: rejectingScript.logsTail } : {}),
           ...(extra?.escalationStage ? { escalationStage: extra.escalationStage } : {}),
           ...(extra?.frozen ? { frozen: true } : {}),
           ...(workingModel ? workingModel : {}),
@@ -2337,18 +2356,25 @@ export class TaskManager {
 
     if (outcome.infrastructureError) {
       const message = outcome.message ?? 'The completion gate could not run.';
+      const scriptRuns = outcome.runs.filter((run) => run.error || run.logsTail);
+      const diagnostics = formatGateScriptDiagnostics(scriptRuns);
       const paused = await this.setStatus(projectId, task.num, 'paused').catch(() => ({
         ...task,
         status: 'paused' as const,
       }));
       await this.appendNote(projectId, task.num, {
-        text: `# Gate unavailable — task paused\n\n${message}\n\nThis is a gate/runtime problem, not a failed deliverable check. No completion attempt was consumed. Fix the gate or runtime, then set the task active and retry.`,
+        text:
+          `# Gate unavailable — task paused\n\n${message}` +
+          (diagnostics ? `\n\n## Script diagnostics\n\n${diagnostics}` : '') +
+          '\n\nThis is a gate/runtime problem, not a failed deliverable check. No completion attempt was consumed. Fix the gate or runtime, then set the task active and retry.',
         author: { kind: 'user' },
         stepId: step.id,
       }).catch(() => {});
       log.error(
-        `[gate] ${task.ref} step "${step.id}" could not be evaluated — pausing without consuming an attempt: ${message}`,
+        `[gate] ${task.ref} step "${step.id}" could not be evaluated — pausing without consuming an attempt: ${message}` +
+          (diagnostics ? ` diagnostics=${JSON.stringify(diagnostics)}` : ''),
       );
+      await logGated('reject', priorAttempts, true, outcome);
       return {
         kind: 'held',
         task: paused,
@@ -2360,6 +2386,7 @@ export class TaskManager {
           paused: true,
           cached: false,
           infrastructureError: true,
+          ...(scriptRuns.length > 0 ? { scriptRuns } : {}),
           ...(outcome.checkResults ? { checkResults: outcome.checkResults } : {}),
         },
       };

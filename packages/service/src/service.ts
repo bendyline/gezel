@@ -847,6 +847,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
         attempt: outcome.gate.attempt,
         ...(outcome.gate.paused ? { paused: true } : {}),
         ...(outcome.gate.infrastructureError ? { infrastructureError: true } : {}),
+        ...(outcome.gate.scriptRuns ? { scriptRuns: outcome.gate.scriptRuns } : {}),
         ...(outcome.gate.escalationStage !== undefined
           ? { escalationStage: outcome.gate.escalationStage }
           : {}),

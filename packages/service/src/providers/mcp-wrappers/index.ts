@@ -13,6 +13,7 @@ import { PlaywrightAutoScreenshot } from './playwright-auto-screenshot.js';
 import { PlaywrightSnapshotInliner } from './playwright-snapshot.js';
 import { PlaywrightToolDescriptions } from './playwright-tool-descriptions.js';
 import { SourceWriteGuard } from './source-write-guard.js';
+import { TaskStepArgNormalizer } from './task-step-arg-normalizer.js';
 import type { McpToolWrapper } from './types.js';
 import { WorkspacePathNormalizer } from './workspace-path-normalizer.js';
 import { ZodErrorTranslator } from './zod-error-translator.js';
@@ -41,6 +42,7 @@ import { ZodErrorTranslator } from './zod-error-translator.js';
  */
 export const ALL_WRAPPERS: readonly McpToolWrapper[] = [
   WorkspacePathNormalizer,
+  TaskStepArgNormalizer,
   SourceWriteGuard,
   ZodErrorTranslator,
   PlaywrightToolDescriptions,

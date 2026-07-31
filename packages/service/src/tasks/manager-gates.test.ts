@@ -338,6 +338,12 @@ describe('completion gates — script verdicts', () => {
     expect(held.status).toBe('held');
     if (held.status !== 'held') return;
     expect(held.gate.infrastructureError).toBe(true);
+    expect(held.gate.scriptRuns?.[0]).toMatchObject({
+      scriptName: 'broken-gate',
+      runId: 'broken-run',
+      error: 'script exited with code 9',
+      logsTail: '[stderr] node: bad option: --permission',
+    });
     expect(held.gate.attempt).toBe(0);
     expect(held.gate.paused).toBe(true);
     const after = await tasks.get('default', task.num);
@@ -347,6 +353,8 @@ describe('completion gates — script verdicts', () => {
     const notes = await tasks.listNotes('default', task.num, stepId);
     expect(notes.some((n) => n.text.includes('Gate unavailable — task paused'))).toBe(true);
     expect(notes.some((n) => n.text.includes('No completion attempt was consumed'))).toBe(true);
+    expect(notes.some((n) => n.text.includes('broken-run'))).toBe(true);
+    expect(notes.some((n) => n.text.includes('node: bad option: --permission'))).toBe(true);
   });
 
   it.runIf(process.platform === 'darwin')(
