@@ -2197,6 +2197,8 @@ export class Store {
       workingDir?: string;
       /** `crew` (default) or `solo`. Persisted to `project.json`. */
       mode?: 'crew' | 'solo';
+      /** Missing/true indexes the workspace; false opts the project out. */
+      indexingEnabled?: boolean;
       /** Optional GitHub link. Just `{ url }` at creation; `branch` /
        *  `checkoutDir` / `lastSyncedAt` are populated later by the
        *  GitHub manager once a clone runs. */
@@ -2244,6 +2246,7 @@ export class Store {
         description: input.description,
         ...(input.workingDir ? { workingDir: input.workingDir } : {}),
         ...(input.mode && input.mode !== 'crew' ? { mode: input.mode } : {}),
+        ...(input.indexingEnabled !== undefined ? { indexingEnabled: input.indexingEnabled } : {}),
         ...(input.github?.url ? { github: { url: input.github.url } } : {}),
         createdAt: nowIso(),
         updatedAt: nowIso(),
@@ -2270,6 +2273,9 @@ export class Store {
           name: project.name,
           description: project.description,
           workingDir: project.workingDir,
+          ...(project.indexingEnabled !== undefined
+            ? { indexingEnabled: project.indexingEnabled }
+            : {}),
           ...(project.github?.url ? { githubUrl: project.github.url } : {}),
         },
       });
@@ -2311,6 +2317,16 @@ export class Store {
       ...(about !== null ? { about } : {}),
       ...(missionObjectives !== null ? { missionObjectives } : {}),
     };
+  }
+
+  /**
+   * Cheap metadata-only read for workspace-index admission gates. Avoids the
+   * package/about/mission reads performed by `getProject` on hot status and
+   * background-refresh paths.
+   */
+  async projectIndexingEnabled(id: string): Promise<boolean> {
+    const meta = await this.tryGetProjectMeta(id);
+    return meta?.indexingEnabled !== false;
   }
 
   /** Read durable lifecycle state for indexed findings in one project. */
@@ -2500,6 +2516,8 @@ export class Store {
       leadLabel?: string | null;
       /** Lean-agent profile — minimal tools + prompt for focused single-purpose gezels. */
       leanProfile?: boolean;
+      /** Missing/true indexes the workspace; false opts the project out. */
+      indexingEnabled?: boolean;
       workspaceScriptTimeoutMs?: number;
       status?: 'active' | 'readonly' | 'inactive' | 'stable';
       grantedCredentials?: string[];
@@ -2509,6 +2527,12 @@ export class Store {
       detectedProjectType?: { id: string; score: number; scannedAt: string };
       /** Custom project-type provenance stamped on adoption; `null` clears it. */
       projectType?: import('@bendyline/gezel').ProjectTypeProvenance | null;
+      /**
+       * Merge into the project's shared configuration bag (see core
+       * `project-properties.ts`). Empty-string values delete the key;
+       * unmentioned keys are untouched.
+       */
+      properties?: Record<string, string>;
     },
   ): Promise<ProjectDetail> {
     const meta = await this.tryGetProjectMeta(id);
@@ -2566,6 +2590,7 @@ export class Store {
           ? { leadLabel: patch.leadLabel }
           : {}),
       ...(patch.leanProfile !== undefined ? { leanProfile: patch.leanProfile } : {}),
+      ...(patch.indexingEnabled !== undefined ? { indexingEnabled: patch.indexingEnabled } : {}),
       ...(patch.workspaceScriptTimeoutMs !== undefined
         ? { workspaceScriptTimeoutMs: patch.workspaceScriptTimeoutMs }
         : {}),
@@ -2589,8 +2614,22 @@ export class Store {
         : patch.projectType !== undefined
           ? { projectType: patch.projectType }
           : {}),
+      ...(patch.properties !== undefined
+        ? { properties: mergeProjectProperties(meta.properties, patch.properties) }
+        : {}),
     };
+    if (updated.properties && Object.keys(updated.properties).length === 0) {
+      delete (updated as Partial<Project>).properties;
+    }
     await writeFileAtomic(projectMetaFile(this.home, id), `${JSON.stringify(updated, null, 2)}\n`);
+    if (patch.properties !== undefined) {
+      await this.history?.log({
+        kind: 'project.properties.updated',
+        projectId: id,
+        summary: `Project properties updated on "${meta.name}" (${Object.keys(patch.properties).join(', ')})`,
+        details: { values: patch.properties },
+      });
+    }
     if (patch.about !== undefined) {
       await this.writeProjectDoc(id, 'about.md', patch.about);
     }
@@ -2616,6 +2655,12 @@ export class Store {
       !isDeepStrictEqual(patch.tabVisibility, meta.tabVisibility)
     ) {
       metaChanged.push('tabVisibility');
+    }
+    if (
+      patch.indexingEnabled !== undefined &&
+      patch.indexingEnabled !== (meta.indexingEnabled !== false)
+    ) {
+      metaChanged.push('indexingEnabled');
     }
     if (metaChanged.length > 0) {
       await this.history?.log({
@@ -2875,6 +2920,34 @@ export class Store {
   }
 
   /**
+   * Add or remove a suggested-work key on the project's dismissal list
+   * ("don't offer this again here"). Advisory UI state, same spirit as
+   * the roster: idempotent, missing project → no-op, does NOT touch
+   * `updatedAt`.
+   */
+  async setSuggestedWorkDismissed(
+    projectId: string,
+    key: string,
+    dismissed: boolean,
+  ): Promise<{ changed: boolean }> {
+    const meta = await this.tryGetProjectMeta(projectId);
+    if (!meta) return { changed: false };
+    const current = meta.suggestedWorkDismissed ?? [];
+    if (dismissed === current.includes(key)) return { changed: false };
+    const next = dismissed ? [...current, key] : current.filter((k) => k !== key);
+    const updated: Project = {
+      ...meta,
+      ...(next.length > 0 ? { suggestedWorkDismissed: next } : {}),
+    };
+    if (next.length === 0) delete (updated as Partial<Project>).suggestedWorkDismissed;
+    await writeFileAtomic(
+      projectMetaFile(this.home, projectId),
+      `${JSON.stringify(updated, null, 2)}\n`,
+    );
+    return { changed: true };
+  }
+
+  /**
    * Patch the project's `nudgeState` without touching `updatedAt`. The
    * ambient-nudge scheduler uses this after every nudge decision —
    * bumping `updatedAt` here would be a false positive for "project had
@@ -3048,8 +3121,11 @@ export class Store {
     return this.artifacts.listProjectArtifacts(id, subpath);
   }
 
-  async listProjectArtifactsRecursive(id: string): Promise<ProjectFileEntry[]> {
-    return this.artifacts.listProjectArtifactsRecursive(id);
+  async listProjectArtifactsRecursive(
+    id: string,
+    opts?: { withStats?: boolean },
+  ): Promise<ProjectFileEntry[]> {
+    return this.artifacts.listProjectArtifactsRecursive(id, opts);
   }
 
   async readProjectArtifact(id: string, filePath: string): Promise<string | null> {
@@ -3696,6 +3772,102 @@ export class Store {
     await this.logWorkspaceEditHistory(id, 'apply_patch', result, ctx);
     await this.touchProject(id);
     return result;
+  }
+
+  /**
+   * Apply a PACK of single-file unified diffs with validate-all-first
+   * semantics: phase A dry-runs every patch in memory (`applyPatch`
+   * returns `false` on rejection — no new machinery) and, on ANY failure,
+   * returns per-file errors having written NOTHING. Phase B then writes
+   * each file atomically with the same journaling/history as
+   * `applyPatchToProjectWorkspaceFile`.
+   *
+   * Identity no-op diffs pass as `{ ok: true, error: 'no-op' }` rather
+   * than failing the pack — a recommendation already applied by hand
+   * shouldn't block its siblings.
+   *
+   * v1 limitation, deliberate: phase B is not transactional across a
+   * crash mid-pack. Each write is individually journaled and
+   * recoverable; validate-first keeps the window small. No rollback.
+   */
+  async applyEditPackToProjectWorkspace(
+    id: string,
+    edits: Array<{ path: string; diff: string }>,
+    ctx?: JournalContext,
+  ): Promise<{ ok: boolean; results: Array<{ path: string; ok: boolean; error?: string }> }> {
+    const gate = await this.assertWorkspaceWritable(id, { initiatedByGezel: !!ctx?.gezelId });
+    if (!gate.ok) throw new WorkspaceWriteDeniedError(gate);
+
+    interface PlannedWrite {
+      path: string;
+      full: string;
+      oldContent: string;
+      newContent: string | null;
+    }
+    const planned: PlannedWrite[] = [];
+    const results: Array<{ path: string; ok: boolean; error?: string }> = [];
+    let failed = false;
+
+    for (const edit of edits) {
+      try {
+        const full = await resolveInside(gate.workspaceDir, edit.path);
+        const oldContent = await readFileForEditOrThrow(full, edit.path);
+        let parsed: ReturnType<typeof parsePatch>;
+        try {
+          parsed = parsePatch(edit.diff);
+        } catch (err) {
+          throw new WorkspaceEditError(
+            `unified diff did not parse: ${err instanceof Error ? err.message : String(err)}`,
+            'patch-parse-failed',
+          );
+        }
+        if (parsed.length === 0) {
+          throw new WorkspaceEditError('unified diff contained no hunks', 'patch-parse-failed');
+        }
+        if (parsed.length > 1) {
+          throw new WorkspaceEditError(
+            `diff describes ${parsed.length} files; each pack entry must be a single-file diff`,
+            'patch-multi-file',
+          );
+        }
+        const applied = applyPatch(oldContent, parsed[0]!, { fuzzFactor: 1 });
+        if (applied === false) {
+          throw new WorkspaceEditError(
+            `hunk(s) did not apply cleanly to ${edit.path} — the file may have changed since the diff was written`,
+            'patch-rejected',
+          );
+        }
+        if (applied === oldContent) {
+          planned.push({ path: edit.path, full, oldContent, newContent: null });
+          results.push({ path: edit.path, ok: true, error: 'no-op' });
+          continue;
+        }
+        planned.push({ path: edit.path, full, oldContent, newContent: applied });
+        results.push({ path: edit.path, ok: true });
+      } catch (err) {
+        failed = true;
+        results.push({
+          path: edit.path,
+          ok: false,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
+    if (failed) return { ok: false, results };
+
+    for (const write of planned) {
+      if (write.newContent === null) continue;
+      await writeFileAtomic(write.full, write.newContent);
+      await appendJournalEntry(this.home, id, 'write', write.path, {
+        content: write.newContent,
+        ctx,
+      });
+      const result = buildWorkspaceEditResult(write.path, write.oldContent, write.newContent);
+      await this.logWorkspaceEditHistory(id, 'apply_patch', result, ctx);
+    }
+    await this.touchProject(id);
+    return { ok: true, results };
   }
 
   /**
@@ -5741,6 +5913,19 @@ async function autoDetectGitHubLink(
     checkoutDir: workingDir,
     lastSyncedAt: new Date().toISOString(),
   };
+}
+
+/** Merge a properties patch onto the stored bag; empty string deletes. */
+function mergeProjectProperties(
+  existing: Record<string, string> | undefined,
+  patch: Record<string, string>,
+): Record<string, string> {
+  const next: Record<string, string> = { ...(existing ?? {}) };
+  for (const [id, value] of Object.entries(patch)) {
+    if (value === '') delete next[id];
+    else next[id] = value;
+  }
+  return next;
 }
 
 function mergeGitHubPatch(

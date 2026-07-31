@@ -147,6 +147,7 @@ async function seedCatalog(): Promise<void> {
       version: '1.0.0',
       releasedAt: '2026-07-06T00:00:00Z',
       extends: 'content-writing',
+      indexingEnabled: false,
       tabVisibility: { overview: false, approvals: false },
       params: { type: 'object', properties: { language: { type: 'string' } } },
       aboutTemplate: 'about.md',
@@ -192,6 +193,7 @@ async function seedCatalog(): Promise<void> {
       mode: 'solo',
       leadLabel: 'Opponent',
       leanProfile: true,
+      indexingEnabled: false,
       gezels: [{ templateId: 'trainer', voorman: true }],
     },
   );
@@ -241,6 +243,7 @@ describe('applyProjectType', () => {
     expect(detail?.mode).toBe('solo');
     expect(detail?.leadLabel).toBe('Opponent');
     expect(detail?.leanProfile).toBe(true);
+    expect(detail?.indexingEnabled).toBe(false);
   });
 
   it('reuses one gezel across lean-profile projects instead of minting a new one each time', async () => {
@@ -354,6 +357,7 @@ describe('applyProjectType', () => {
     expect(detail?.projectType?.appliedAt).toBeTruthy();
     expect(detail?.projectTypeId).toBe('content-writing');
     expect(detail?.voormanGezelId).toBe(applied.gezelsCreated[0]?.id);
+    expect(detail?.indexingEnabled).toBe(false);
     expect(detail?.tabVisibility).toEqual({ overview: false, approvals: false });
 
     // Seed file rendered with the param (no leftover placeholder).

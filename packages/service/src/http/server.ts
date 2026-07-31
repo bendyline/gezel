@@ -65,6 +65,7 @@ import { projectGezelRoutes } from './routes/project-gezels.js';
 import { globalTaskRoutes, projectTaskRoutes } from './routes/project-tasks.js';
 import { projectRoutes } from './routes/projects.js';
 import { questionRoutes } from './routes/questions.js';
+import { reportActionRoutes } from './routes/report-actions.js';
 import { queueRoutes } from './routes/queues.js';
 import { recognitionRoutes } from './routes/recognition.js';
 import { remotesRoutes } from './routes/remotes.js';
@@ -74,6 +75,7 @@ import { scriptRoutes } from './routes/scripts.js';
 import { sdkTypesRoutes } from './routes/sdk-types.js';
 import { searchRoutes } from './routes/search.js';
 import { sessionRoutes } from './routes/sessions.js';
+import { suggestedWorkRoutes } from './routes/suggested-work.js';
 import { systemToolsetRoutes } from './routes/system-toolsets.js';
 import { systemRoutes } from './routes/system.js';
 import { terminalRoutes } from './routes/terminals.js';
@@ -100,6 +102,7 @@ import {
   sessionRouteGuard,
   teamRouteGuard,
 } from './scope-guard.js';
+import { shouldServeUiShell, staticUiCacheControl } from './static-ui.js';
 
 export interface UnexpectedHttpErrorEvent {
   kind: 'unhandled_exception' | 'unsanitized_response';
@@ -435,6 +438,10 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   app.route('/api/projects', projectRoutes(ctx));
   // Per-project gezels + import review queue at /api/projects/:id/gezels|imports/*
   app.route('/api/projects', projectGezelRoutes(ctx));
+  // Suggested night work toggles at /api/projects/:id/suggested-work/*
+  app.route('/api/projects', suggestedWorkRoutes(ctx));
+  // Report-embedded action requests at /api/projects/:id/report-actions/*
+  app.route('/api/projects', reportActionRoutes(ctx));
   // Per-project GitHub operations live at /api/projects/:id/github/*
   app.route('/api/projects', gitRoutes(ctx, 'git'));
   // Legacy alias: the same local-git routes under the old /github segment,
@@ -603,18 +610,27 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
       try {
         const s = await stat(file);
         if (!s.isFile()) {
+          if (!shouldServeUiShell(rel)) return c.notFound();
           // Fall through to index.html for client-side routing.
           const html = await readFile(join(ctx.uiDir!, 'index.html'));
-          return c.body(html, 200, { 'content-type': 'text/html; charset=utf-8' });
+          return c.body(html, 200, {
+            'content-type': 'text/html; charset=utf-8',
+            'cache-control': staticUiCacheControl('index.html'),
+          });
         }
         const content = await readFile(file);
         return c.body(content, 200, {
           'content-type': contentType(extname(file)),
+          'cache-control': staticUiCacheControl(rel),
         });
       } catch {
+        if (!shouldServeUiShell(rel)) return c.notFound();
         try {
           const html = await readFile(join(ctx.uiDir!, 'index.html'));
-          return c.body(html, 200, { 'content-type': 'text/html; charset=utf-8' });
+          return c.body(html, 200, {
+            'content-type': 'text/html; charset=utf-8',
+            'cache-control': staticUiCacheControl('index.html'),
+          });
         } catch {
           return c.notFound();
         }

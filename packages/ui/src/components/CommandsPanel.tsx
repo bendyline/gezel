@@ -6,6 +6,7 @@ import type {
   DiscoveredSkill,
   PendingImportItem,
   WorkspaceCommandIndex,
+  WorkspaceIndexStatus,
 } from '@bendyline/gezel';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
@@ -119,7 +120,7 @@ export function CommandsPanel({ projectId, section = 'all', onStageCommand }: Pr
   // The craftbook whose toolset-setup popover is open (null = none).
   const [setupTarget, setSetupTarget] = useState<CraftbookTemplateManifest | null>(null);
   const [scannedAt, setScannedAt] = useState<string | undefined>();
-  const [state, setState] = useState<'fresh' | 'stale' | 'indexing' | 'never'>('never');
+  const [state, setState] = useState<WorkspaceIndexStatus['state']>('never');
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   // Drives which shell the primer is written for. Undefined until resolved —
@@ -565,15 +566,17 @@ export function CommandsPanel({ projectId, section = 'all', onStageCommand }: Pr
           aria-label="Filter commands"
         />
         <span className="commands-panel-state muted small" title={scannedAt ?? ''}>
-          {indexBusy
-            ? // "never" resolves within moments of the panel opening — both
-              // states read as one human activity, not an index status code.
-              'looking…'
-            : needsIndex && state === 'stale'
-              ? 'refreshing…'
-              : countLabel > 0
-                ? `${countLabel} ${countNoun}${countLabel === 1 ? '' : 's'}`
-                : ''}
+          {needsIndex && state === 'disabled'
+            ? 'indexing off'
+            : indexBusy
+              ? // "never" resolves within moments of the panel opening — both
+                // states read as one human activity, not an index status code.
+                'looking…'
+              : needsIndex && state === 'stale'
+                ? 'refreshing…'
+                : countLabel > 0
+                  ? `${countLabel} ${countNoun}${countLabel === 1 ? '' : 's'}`
+                  : ''}
         </span>
       </div>
       {error && <p className="commands-panel-error small">{error}</p>}
@@ -583,6 +586,10 @@ export function CommandsPanel({ projectId, section = 'all', onStageCommand }: Pr
       {showEmpty &&
         (isSearching ? (
           <p className="commands-panel-empty muted small">Nothing matches “{filter.trim()}”.</p>
+        ) : needsIndex && state === 'disabled' ? (
+          <p className="commands-panel-empty muted small">
+            Workspace indexing is off for this project.
+          </p>
         ) : section === 'tasks' ? (
           <p className="commands-panel-empty muted small">
             No tasks are available for this project yet. Craftbooks show up here once one applies to

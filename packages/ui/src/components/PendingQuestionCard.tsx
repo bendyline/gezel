@@ -89,7 +89,90 @@ export function PendingQuestionCard({
       />
     );
   }
+  if (question.intent?.kind === 'night-shift-review') {
+    return <NightShiftReviewCard question={question} onAnswered={onAnswered} />;
+  }
   return <PendingForm question={question} onAnswered={onAnswered} onOpenInChat={onOpenInChat} />;
+}
+
+// ── Night-shift review (the morning summary) ───────────────────────
+//
+// Synthesized once per settled night window: what the shift finished
+// and which reports carry suggested actions. Report rows open the
+// owning project; Dismiss collapses the card (the answer route
+// early-returns — nothing to arm or seed).
+
+function NightShiftReviewCard({
+  question,
+  onAnswered,
+}: {
+  question: Question;
+  onAnswered?: (q: Question) => void;
+}) {
+  const intent = question.intent as {
+    kind: 'night-shift-review';
+    windowKey: string;
+    tasksCompleted: number;
+    reports: Array<{ projectId: string; path: string; title?: string; actionCount: number }>;
+  };
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const dismiss = useCallback(async () => {
+    if (submitting) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      const updated = await api.answerQuestion(question.id, { selectedChoices: [0] });
+      onAnswered?.(updated);
+    } catch (err) {
+      setError((err as Error).message ?? 'Failed to dismiss.');
+      setSubmitting(false);
+    }
+  }, [question.id, submitting, onAnswered]);
+
+  return (
+    <div className="pending-question pending-question-pending pending-question-night-review">
+      <ContextStrip question={question} />
+      <div className="pending-question-prompt">{question.prompt}</div>
+      {intent.reports.length > 0 && (
+        <div className="pending-question-night-reports">
+          {intent.reports.map((r) => (
+            <button
+              key={`${r.projectId}:${r.path}`}
+              type="button"
+              className="pending-question-night-report"
+              onClick={() =>
+                window.dispatchEvent(
+                  new CustomEvent('gezel:open-tab', {
+                    detail: { kind: 'project', id: r.projectId, activate: true },
+                  }),
+                )
+              }
+            >
+              <span>{r.title ?? r.path}</span>
+              {r.actionCount > 0 && (
+                <span className="muted small">
+                  {r.actionCount} action{r.actionCount === 1 ? '' : 's'}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
+      {error && <p className="pending-question-error">{error}</p>}
+      <div className="pending-question-actions">
+        <button
+          type="button"
+          className="pending-question-skip subtle"
+          onClick={() => void dismiss()}
+          disabled={submitting}
+        >
+          {submitting ? 'Saving…' : 'Dismiss'}
+        </button>
+      </div>
+    </div>
+  );
 }
 
 // ── Image generation approval (cloud provider cost gate) ───────────
@@ -224,9 +307,11 @@ function ScheduleApprovalForm({
     kind: 'schedule-approval';
     typeId: string;
     craftbookId: string;
+    runMode?: 'scheduled' | 'night-shift';
     cron: string;
     overlap?: string;
   };
+  const nightShift = intent.runMode === 'night-shift';
   const [submitting, setSubmitting] = useState<'enable' | 'keep' | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -253,10 +338,20 @@ function ScheduleApprovalForm({
     <div className="pending-question pending-question-pending pending-question-schedule-approval">
       <ContextStrip question={question} />
       <div className="pending-question-prompt">
-        The <strong>{intent.typeId}</strong> project type set up a recurring{' '}
-        <strong>{intent.craftbookId}</strong> run (<code>{intent.cron}</code> UTC
-        {intent.overlap ? `, overlap: ${intent.overlap}` : ''}). It stays paused until you enable
-        it.
+        {nightShift ? (
+          <>
+            The <strong>{intent.typeId}</strong> project type set up a recurring{' '}
+            <strong>{intent.craftbookId}</strong> run for the Night Shift (at most once per night,
+            inside your configured window). It stays paused until you enable it.
+          </>
+        ) : (
+          <>
+            The <strong>{intent.typeId}</strong> project type set up a recurring{' '}
+            <strong>{intent.craftbookId}</strong> run (<code>{intent.cron}</code> UTC
+            {intent.overlap ? `, overlap: ${intent.overlap}` : ''}). It stays paused until you
+            enable it.
+          </>
+        )}
       </div>
       {error && <p className="pending-question-error">{error}</p>}
       <div className="pending-question-actions">

@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { chmod, rm, writeFile } from 'node:fs/promises';
 import { createSecureServer as createSecureHttp2Server } from 'node:http2';
@@ -46,6 +46,8 @@ import { Store } from './fs/store.js';
 import { ensureDefaultBoekwachter } from './gezels/autonomous-roles.js';
 import { GitManager } from './git/manager.js';
 import { CodeReviewManager } from './git/reviews.js';
+import { ReportActionManager } from './reports/report-action-manager.js';
+import { buildNightShiftReview } from './tasks/night-review.js';
 import { GitHubPrs } from './github/prs.js';
 import { createGrantManager, parseAutoApproveAppIds } from './grants/manager.js';
 import { GrowthEngine } from './growth/engine.js';
@@ -748,6 +750,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     store,
     debug,
     isNightShiftWindowOpen: () => nightShift.isWindowOpen(),
+    currentNightShiftDayKey: () => nightShift.currentDayKey(),
     activity: activityTracker,
   });
 
@@ -1407,6 +1410,64 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     contentIndex,
     workspaceIndex,
   });
+  // Report actions: the ```gezel-action blocks night reports embed —
+  // durable fired/dismissed lifecycle in per-project report-actions.json.
+  const reportActions = new ReportActionManager({
+    home,
+    store,
+    tasks,
+    taskRunner,
+    history,
+    catalog,
+    chat,
+  });
+  // Morning review question: once per settled night window (deduped on
+  // the window key against the question store, so restarts and
+  // slept-through-window-end catch-ups never double-ask), summarize what
+  // the shift accomplished as a needs-input card with report links.
+  nightShift.setOnWindowSettled(async (windowKey) => {
+    const existing = await store.listProjectQuestions('default').catch(() => []);
+    if (
+      existing.some(
+        (q) => q.intent?.kind === 'night-shift-review' && q.intent.windowKey === windowKey,
+      )
+    ) {
+      return;
+    }
+    const review = await buildNightShiftReview(
+      { store, tasks, reportActions },
+      nightShift.currentWindow(),
+      new Date(),
+    );
+    if (review.windowKey !== windowKey) return;
+    if (review.tasksCompleted.length === 0 && review.reports.length === 0) return;
+    const config = await store.readConfig().catch(() => ({}) as GezelConfig);
+    const actionTotal = review.reports.reduce((n, r) => n + r.actionCounts.total, 0);
+    await store.writeQuestion({
+      id: randomUUID(),
+      projectId: 'default',
+      gezelId: config.meesterGezelId ?? '',
+      // No live session — the answer route early-returns for this intent.
+      sessionId: '',
+      prompt: `The night shift finished: ${review.tasksCompleted.length} task(s) completed, ${review.reports.length} report(s) written${actionTotal > 0 ? `, ${actionTotal} suggested action(s) to review` : ''}.`,
+      choices: ['Dismiss'],
+      allowWriteIn: false,
+      multiSelect: false,
+      ...(review.reports[0] ? { documentPath: review.reports[0].path } : {}),
+      intent: {
+        kind: 'night-shift-review',
+        windowKey: review.windowKey,
+        tasksCompleted: review.tasksCompleted.length,
+        reports: review.reports.map((r) => ({
+          projectId: r.projectId,
+          path: r.path,
+          title: r.title,
+          actionCount: r.actionCounts.total,
+        })),
+      },
+      createdAt: new Date().toISOString(),
+    });
+  });
   // Terminal-task fan-out, one callee per feature, each isolated so a
   // failing settle never starves the others: finding delegation closes
   // the linked finding (cancel reopens it); code reviews flip their
@@ -1418,6 +1479,14 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     await codeReviews
       .settleForTask(projectId, task.ref, outcome)
       .catch((err) => log.warn(`[service] review settle failed for ${task.ref}: ${String(err)}`));
+    // Report actions can live in a different project than their fired
+    // task (the oversight report delegates cross-project), so this settle
+    // scans records by taskRef rather than trusting projectId.
+    await reportActions
+      .settleForTask(task.ref, outcome)
+      .catch((err) =>
+        log.warn(`[service] report-action settle failed for ${task.ref}: ${String(err)}`),
+      );
   });
   // Global search index (session transcripts + history mirror + documents):
   // change hooks enqueue into the single-writer manager; the read facade is
@@ -1623,6 +1692,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     git,
     gitHubPrs,
     codeReviews,
+    reportActions,
     mail,
     connectors,
     connectorActions,

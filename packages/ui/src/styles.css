@@ -3724,7 +3724,19 @@ button.danger {
 }
 
 .project-crew-settings-title {
-  margin: 0 0 0.2rem;
+  margin: 0;
+}
+
+.project-crew-settings-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.2rem;
+}
+
+.project-crew-add {
+  flex: 0 0 auto;
 }
 
 .project-crew-settings-hint {
@@ -3823,6 +3835,451 @@ button.danger {
 
 .project-autonomous-role-error {
   margin: 0.4rem 0 0;
+}
+
+/* Suggested night work — opt-in recurring-craftbook rows sharing the
+   autonomous-role card grammar (the Boekwachter card sets the pattern). */
+.suggested-work {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.suggested-work-row {
+  margin-top: 0;
+}
+
+.suggested-work-glyph {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  color: var(--text-muted);
+}
+
+.project-autonomous-role-active .suggested-work-glyph {
+  color: var(--accent);
+}
+
+.suggested-work-actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.25rem;
+}
+
+.suggested-work-dismiss {
+  font-size: var(--text-2xs);
+}
+
+.suggested-work-hidden {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  align-items: flex-start;
+}
+
+.suggested-work-param-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+  padding: 0.55rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+}
+
+.suggested-work-param-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.4rem;
+}
+
+.suggested-work-error {
+  margin: 0.2rem 0 0;
+}
+
+.project-properties {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.35rem;
+}
+
+.project-properties-row {
+  margin: 0;
+}
+
+/* Report-action cards — gezel-action fence widgets in rendered reports. */
+.report-action-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0.6rem 0;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: var(--text-md);
+  text-align: left;
+}
+
+.report-action-card-fired,
+.report-action-card-applied {
+  border-color: color-mix(in srgb, var(--success) 45%, var(--border));
+}
+
+.report-action-card-failed {
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
+}
+
+.report-action-card-dismissed {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.6rem;
+  opacity: 0.7;
+}
+
+.report-action-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: var(--text-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.report-action-target {
+  color: var(--accent);
+}
+
+.report-action-changed {
+  padding: 0.05rem 0.35rem;
+  border: 1px solid color-mix(in srgb, var(--warning) 55%, var(--border));
+  border-radius: var(--radius-sm);
+  color: var(--warning);
+  text-transform: none;
+}
+
+.report-action-title {
+  font-weight: 650;
+}
+
+.report-action-reason {
+  margin: 0;
+}
+
+.report-action-raw {
+  overflow-x: auto;
+  margin: 0;
+  padding: 0.45rem 0.55rem;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  font-size: var(--text-xs);
+}
+
+.report-action-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.2rem;
+}
+
+.report-action-task-chip {
+  align-self: flex-start;
+  padding: 0.25rem 0.6rem;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.report-action-applied {
+  margin: 0;
+  color: var(--success);
+}
+
+.report-action-edits {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.report-action-edit-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--text);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  text-align: left;
+}
+
+.report-action-edit-stats {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.report-action-edit-ok {
+  color: var(--success);
+  font-size: var(--text-xs);
+}
+
+.report-action-edit-err {
+  color: var(--danger);
+  font-size: var(--text-xs);
+}
+
+.report-action-edit-diff {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+/* Night-shift morning review surfaces. */
+.app-nightshift-report {
+  width: 100%;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.app-nightshift-report:hover .app-nightshift-task-title {
+  color: var(--accent);
+}
+
+.home-workshop-night-summary {
+  margin: 0 0 0.5rem;
+  font-size: var(--text-md);
+}
+
+.home-workshop-night-reports {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin-top: 0.5rem;
+}
+
+.home-workshop-night-report-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--text);
+  font-size: var(--text-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.home-workshop-night-report-title {
+  font-weight: 600;
+}
+
+.pending-question-night-reports {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin: 0.4rem 0;
+}
+
+.pending-question-night-report {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--text);
+  font-size: var(--text-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.gz-dialog.project-add-gezel-dialog {
+  width: min(42rem, calc(100vw - 2rem));
+  min-width: 0;
+}
+
+.project-add-gezel-dialog > .muted {
+  margin: 0;
+}
+
+.project-add-gezel-error {
+  margin: 0;
+}
+
+.project-add-gezel-search input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.project-add-gezel-options {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 0.8rem;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.project-add-gezel-options > section {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--panel) 72%, var(--surface));
+}
+
+.project-add-gezel-options h4 {
+  margin-bottom: 0.55rem;
+}
+
+.project-add-gezel-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  min-height: 0;
+  max-height: 21rem;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.project-add-gezel-option {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.5rem;
+  color: var(--text);
+  text-align: left;
+  background: var(--key-bg);
+  border: 1px solid var(--key-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--key-shadow);
+  cursor: pointer;
+}
+
+.project-add-gezel-option:hover:not([disabled]) {
+  background: var(--key-bg-hover);
+}
+
+.project-add-gezel-option:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.project-add-gezel-option[disabled] {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.project-add-gezel-option-copy {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 0.08rem;
+  min-width: 0;
+}
+
+.project-add-gezel-option-name {
+  font-size: var(--text-sm);
+  font-weight: 650;
+}
+
+.project-add-gezel-option-copy .muted {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-height: 1.25;
+}
+
+.project-add-gezel-option .gz-badge {
+  flex: 0 0 auto;
+}
+
+.project-add-gezel-empty {
+  margin: 0;
+}
+
+.project-add-gezel-customize {
+  display: grid;
+  grid-template-columns: 11rem minmax(0, 1fr);
+  gap: 1rem;
+  align-items: center;
+}
+
+.project-add-gezel-preview {
+  display: flex;
+  min-height: 12rem;
+  align-items: flex-end;
+  justify-content: center;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--panel) 78%, var(--surface));
+}
+
+.project-add-gezel-customize-fields {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.65rem;
+  min-width: 0;
+}
+
+.project-add-gezel-customize-fields label,
+.project-add-gezel-customize-fields input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.project-add-gezel-customize-fields .muted {
+  margin: 0;
+}
+
+.project-add-gezel-customize .gz-dialog-actions {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 640px) {
+  .project-add-gezel-options {
+    grid-template-columns: minmax(0, 1fr);
+    overflow-y: auto;
+  }
+
+  .project-add-gezel-list {
+    max-height: 13rem;
+  }
+
+  .project-add-gezel-customize {
+    grid-template-columns: 1fr;
+  }
+
+  .project-add-gezel-preview {
+    min-height: 9rem;
+  }
 }
 
 /* History carries a master/detail split that wants a bounded height —
@@ -7905,6 +8362,15 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
   animation: project-index-pulse 1.2s ease-in-out infinite;
 }
 
+.project-index-chip-disabled {
+  cursor: default;
+  color: var(--text-muted);
+}
+
+.project-index-chip-disabled:hover {
+  border-color: var(--border);
+}
+
 .project-index-tooltip {
   width: 16.5rem;
   display: flex;
@@ -7942,6 +8408,10 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
 .project-index-tooltip-dot-indexing {
   background: var(--accent);
   animation: project-index-pulse 1.2s ease-in-out infinite;
+}
+
+.project-index-tooltip-dot-disabled {
+  background: var(--text-muted);
 }
 
 .project-index-tooltip-progress {
@@ -9083,7 +9553,7 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
 
 /* ── Step tracker · bench-rail variant (task mode) ──────────────────
    The workshop "bench": numbered stations whose pegs — or, for the step
-   in hand, a carved poppetje — stand on a continuous wooden rail, with
+   that's active, a carved poppetje — stand on a continuous wooden rail, with
    the assignee captioned above and the lifecycle word below. The rail is
    one absolutely-positioned beam; stations are flex columns sized off a
    shared set of height vars so every peg's base lands on the rail. */
@@ -9319,7 +9789,7 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
   display: block;
 }
 
-/* CSS pegs (every station but the one in hand, which gets a figure). */
+/* CSS pegs (every station but the active one, which gets a figure). */
 .bench-peg {
   display: inline-flex;
   align-items: center;
@@ -9346,7 +9816,7 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
   box-shadow: 0 2px 3px rgba(0, 0, 0, 0.18);
 }
 
-/* Fallback peg for the in-hand step when poppetjes are off or the
+/* Fallback peg for the active step when poppetjes are off or the
    assignee has no figure — a taller, terracotta peg. */
 .bench-step.status-active .bench-peg {
   width: 22px;
@@ -9435,8 +9905,7 @@ button.bench-step-foot:disabled {
   color: var(--text-muted, var(--muted));
 }
 
-/* The step in hand: terracotta status word with a leading dot, and the
-   foot lifts into a parchment card to mark "this is where work is". */
+/* The active step: terracotta status word with a pulsing tracker dot. */
 .bench-step.status-active .bench-step-status {
   color: var(--accent);
   display: inline-flex;
@@ -9450,14 +9919,29 @@ button.bench-step-foot:disabled {
   height: 0.4em;
   border-radius: 50%;
   background: currentColor;
+  animation: bench-active-pulse 1.6s ease-in-out infinite;
 }
 
-/* The in-hand step is marked by its poppetje, the terracotta "In hand" word,
+@keyframes bench-active-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+    box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 28%, transparent);
+  }
+  50% {
+    opacity: 0.72;
+    transform: scale(1.16);
+    box-shadow: 0 0 0 0.32em transparent;
+  }
+}
+
+/* The active step is marked by its poppetje, the terracotta "Active" word,
    and the peg glyph — deliberately NOT a card fill/border, so it doesn't read
    like the selected tab. It sits on the rail like any other pending step. */
 
 /* Viewing a station that isn't the live one: a quiet underline so selection
-   reads without competing with the in-hand highlight. (The card itself is
+   reads without competing with the active highlight. (The card itself is
    the shared selected-foot rule below.) */
 .bench-step.selected:not(.status-active) .bench-step-name {
   text-decoration: underline;
@@ -9514,6 +9998,10 @@ button.bench-step-foot:disabled {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .bench-step.status-active .bench-step-status::before {
+    animation: none;
+  }
+
   .bench-step-marker {
     transition: none;
   }

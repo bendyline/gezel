@@ -31,7 +31,11 @@ describe('buildInstructions coordinator routing', () => {
     ]);
     expect(prompt).toContain('first call `suggest_craftbook`');
     expect(prompt).toContain('PowerPoint/PPTX');
+    expect(prompt).toContain('Word/DOCX');
+    expect(prompt).toContain('MP4, GIF');
     expect(prompt).toContain('do not silently substitute markdown');
+    expect(prompt).toContain('author Markdown');
+    expect(prompt).toContain('Do not recruit a developer');
     expect(prompt).toContain('`convert_document`');
     expect(prompt).toContain('`save_artifact`');
   });

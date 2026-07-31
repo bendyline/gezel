@@ -11,6 +11,7 @@ import type { JobManager } from '../folders/job-manager.js';
 import type { Store } from '../fs/store.js';
 import type { GitManager } from '../git/manager.js';
 import type { CodeReviewManager } from '../git/reviews.js';
+import type { ReportActionManager } from '../reports/report-action-manager.js';
 import type { GitHubPrs } from '../github/prs.js';
 import type { GrantManager } from '../grants/manager.js';
 import type { GrowthEngine } from '../growth/engine.js';
@@ -86,6 +87,8 @@ export interface ServiceContext {
   gitHubPrs: GitHubPrs;
   /** Snapshot-driven code reviews (the GitHub tab's Review panel). */
   codeReviews: CodeReviewManager;
+  /** Lifecycle of report-embedded action requests (```gezel-action blocks). */
+  reportActions: ReportActionManager;
   mail: MailManager;
   connectors: ConnectorManager;
   connectorActions: ConnectorActionManager;

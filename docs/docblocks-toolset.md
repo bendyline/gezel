@@ -1,9 +1,10 @@
-# DocBlocks toolset — real documents (DOCX / PPTX / PDF) from markdown
+# DocBlocks toolset — real documents and media from Markdown
 
 Gezel ships the [DocBlocks](https://github.com/bendyline/docblocks) MCP server as a
 **bundled catalog toolset** (`docblocks`), so gezels can turn markdown into real
-Office documents — an editable `.pptx`, a `.docx`, a `.pdf` (plus XLSX, CSV, HTML,
-EPUB, DBK, MP4, GIF) — instead of hand-assembling HTML decks or raw OOXML.
+Office documents and rendered media — editable `.pptx` and `.docx`, `.pdf`, XLSX,
+CSV, HTML, EPUB, DBK, MP4, and animated GIF — instead of hand-assembling HTML,
+raw OOXML, or base64.
 
 Three pieces make it native rather than "just another MCP server":
 
@@ -18,6 +19,13 @@ pre-authorized tool set from `tools[].name`
 (see [docs/craftbook-toolsets.md](craftbook-toolsets.md)), so keep it in sync with
 the server when bumping versions (`docblocks mcp` publishes exactly 19 tools, no
 aliases; verify with a `tools/list` against the new tarball).
+
+The current bundled release is **`@bendyline/docblocks-cli@2.3.2`**, pinned to
+tarball SHA-256
+`642f3f054b2ac76487ab869a5cf3dd1c7bec55853b3093f4e09e4b98232229ca`.
+Compared with the old 2.0.0 inventory, `validate_document` is gone and
+`get_authoring_context` is present. Plain Markdown needs no validation preflight;
+conversion reports and previews carry the useful diagnostics.
 
 To bump: add a new `versions/<ver>/manifest.json` with the new tarball's SHA-256
 (`Get-FileHash` the `.tgz` from the npm registry) and re-run
@@ -49,22 +57,27 @@ spawn them at all. Coverage:
 
 ## 3. The craftbooks
 
-Two bundled craftbooks exercise the artifact-first workflow (inspect → convert →
-preview → `save_artifact`) end to end, declaring the toolset with
-`autoAllow: true` so unattended runs never stall on a permission prompt:
+Four bundled craftbooks exercise the Markdown → convert → preview →
+`save_artifact` workflow end to end, declaring the toolset with `autoAllow: true`
+so unattended runs never stall on a permission prompt:
 
 - **`powerpoint-deck`** — PowerPoint from Content: outline → slide-structured
-  `deck.md` (one `##` per slide) → `convert_document` to PPTX
-  (`slideBreak: h2`, theme, `autoTemplates`) → `preview_document` visual QA →
-  `save_artifact` as `deck.pptx`. Gated on the saved artifact
-  (`minBytes` with `artifact: true`).
-- **`research-to-document`** — Research to Word Document: scope → source log →
-  cited `report.md` → `validate_document` → convert to `.docx` (+ `.pdf` on
-  request) → preview → save as `report.docx`.
+  `deck.md` (one `#` per slide) → `convert_document` to editable PPTX
+  (`slideBreak: h1`, theme, `autoTemplates`) → preview → save `deck.pptx`.
+- **`research-to-document`** — Word Document from Content or Research: scope →
+  supplied/researched source log → `report.md` → one conversion to `.docx`
+  (+ `.pdf` on request) → preview → save. There is no obsolete
+  `validate_document` call.
+- **`report-pdf`** — Formatted PDF Report: outline → complete `report.md` →
+  direct PDF conversion → page preview → save `report.pdf`. The legacy
+  `report.html`/print-CSS phase and generic Developer are gone.
+- **`narrated-slideshow`** (displayed as Animated Content Slideshow) — outline →
+  `slideshow.md` (one `#` per scene) → one atomic MP4+GIF conversion → frame
+  previews → save both rendered files. The legacy HTML player is gone.
 
-Both differ from the older HTML-deck craftbooks (`content-deck`, `pitch-deck`,
-`board-deck`): the deliverable is a real file the user opens in PowerPoint/Word,
-not a page.
+All four gate on the real saved artifact (`minBytes` with `artifact: true`).
+Their production roles are content/design specialists, not Developers hired solely
+to make an intermediary page.
 
 ## Workflow notes for prompt authors
 
@@ -73,12 +86,20 @@ not a page.
   no-replace by default — replacing an existing file needs `ifExists: "replace"`
   plus the `expectedSha256` of the current file (available from the earlier
   save/convert result).
+- Call `list_roots` first for durable output. Prefer a file source such as
+  `{ "kind": "file", "rootId": "<workspace>", "path": "report.md" }` so
+  DocBlocks reads the Markdown directly from its granted project root.
+- Plain Markdown converts directly. Call `get_authoring_context` only when exact
+  target, template, theme, transform, or annotation guidance would materially
+  help; do not turn it into a mandatory preflight.
 - `preview_document` returns page/slide images (max 20 per call) — use it for
   visual QA before saving, and check `previewBasis` before treating pixels as
   native-app rendering.
-- Default fidelity is `editable-native` for DOCX/PPTX and `semantic` for most
-  other formats. MP4/GIF (and `rendered-fidelity`/`hybrid` PPTX/PDF) need
-  Chromium — not granted by default; prefer the native/editable targets.
+- Default fidelity is `editable-native` for DOCX/PPTX, `rendered-fidelity` for
+  MP4/GIF, and `semantic` for most other formats. MP4/GIF (and
+  `rendered-fidelity`/`hybrid` PPTX/PDF) need Chromium; MP4/GIF also need
+  FFmpeg. Surface a missing media runtime as a blocker instead of substituting
+  HTML.
 - Discover vocabulary live (`list_themes`, `list_templates`,
   `list_transform_styles`, `list_formats`) instead of hard-coding IDs in
   prompts.

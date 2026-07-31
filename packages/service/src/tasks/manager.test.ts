@@ -249,6 +249,51 @@ describe('TaskManager', () => {
     expect(activated).toHaveLength(1);
   });
 
+  it('treats a duplicate completion of the prior step as an idempotent no-op', async () => {
+    const activations: string[] = [];
+    tasks.setStepActivatedHook(async ({ newStep }) => {
+      activations.push(newStep.id);
+    });
+    const t = await tasks.create('website', {
+      title: 'Duplicate model advance',
+      assignee: { kind: 'user' },
+      steps: [{ name: 'Design' }, { name: 'Build' }, { name: 'Review' }],
+    });
+    const designId = t.craftbook.steps[0]!.id;
+    const buildId = t.craftbook.steps[1]!.id;
+
+    const advanced = await tasks.completeStep('website', t.num, designId);
+    const buildBeforeReplay = advanced.craftbook.steps[1]!;
+    expect(advanced.activeStepId).toBe(buildId);
+    expect(buildBeforeReplay.attemptCount).toBe(1);
+    expect(buildBeforeReplay.lastActivatedAt).toBeTruthy();
+
+    const replayed = await tasks.completeStep('website', t.num, designId);
+    const buildAfterReplay = replayed.craftbook.steps[1]!;
+    expect(replayed.activeStepId).toBe(buildId);
+    expect(buildAfterReplay.attemptCount).toBe(1);
+    expect(buildAfterReplay.lastActivatedAt).toBe(buildBeforeReplay.lastActivatedAt);
+    expect(activations).toEqual([buildId]);
+
+    const completed = await history.listEvents({ kinds: ['task.step.completed'] });
+    const activated = await history.listEvents({ kinds: ['task.step.activated'] });
+    expect(completed).toHaveLength(1);
+    expect(activated).toHaveLength(1);
+  });
+
+  it('rejects completion of a different unfinished step', async () => {
+    const t = await tasks.create('website', {
+      title: 'Wrong step',
+      assignee: { kind: 'user' },
+      steps: [{ name: 'Design' }, { name: 'Build' }],
+    });
+    const buildId = t.craftbook.steps[1]!.id;
+
+    await expect(tasks.completeStep('website', t.num, buildId)).rejects.toThrow(
+      /step "build" is not active.*active step: "design"/,
+    );
+  });
+
   it('preserves advanceWhen on inline-steps tasks (regression: inlineStepsToCraftbook dropped it)', async () => {
     const t = await tasks.create('website', {
       title: 'Has advanceWhen',

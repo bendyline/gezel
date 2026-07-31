@@ -1,14 +1,19 @@
-import type { MeesterStatusReport, Poppetje as PoppetjeStruct } from '@bendyline/gezel';
+import type {
+  MeesterStatusReport,
+  NightShiftReviewResponse,
+  Poppetje as PoppetjeStruct,
+} from '@bendyline/gezel';
 import { GezelIcon } from '../../components/GezelIcon.js';
 import { useShowPoppetjes } from '../../components/useShowPoppetjes.js';
 import { Poppetje } from '../../poppetje/index.js';
 import { IntroHandboekArticle } from './IntroHandboekArticle.js';
+import { NightReviewPanel } from './NightReviewPanel.js';
 import { StatusReportPanel } from './StatusReportPanel.js';
 import { TipOfDay } from './TipOfDay.js';
 import { type HomeChip, type HomeNavView, greetingForHour } from './utils.js';
 
 /** Which panel the greeting band's tab strip is showing. */
-export type HomeGreetingTab = 'greeting' | 'status' | 'tour';
+export type HomeGreetingTab = 'greeting' | 'status' | 'night' | 'tour';
 
 /** Symmetric SVG chevron for the greeting's collapse / expand toggle.
  *  The Unicode arrowhead glyphs (⌃ ⌄) render asymmetrically and off-center
@@ -98,6 +103,7 @@ export function GreetingBand({
   statusReport,
   statusRunning,
   onRunStatusReport,
+  nightReview,
   onNavigate,
 }: {
   chips: HomeChip[];
@@ -112,6 +118,8 @@ export function GreetingBand({
   statusReport?: MeesterStatusReport | null;
   statusRunning?: boolean;
   onRunStatusReport?: () => void;
+  /** Last night's review, when fresh and non-empty (parent applies decay). */
+  nightReview?: NightShiftReviewResponse | null;
   onNavigate?: (view: HomeNavView) => void;
 }) {
   const showPoppetjes = useShowPoppetjes();
@@ -195,6 +203,17 @@ export function GreetingBand({
               Status report
             </button>
           )}
+          {nightReview && (
+            <button
+              type="button"
+              role="tab"
+              aria-selected={tab === 'night'}
+              className={`home-workshop-tab${tab === 'night' ? ' is-active' : ''}`}
+              onClick={() => onTabChange('night')}
+            >
+              Last night
+            </button>
+          )}
           <button
             type="button"
             role="tab"
@@ -224,6 +243,8 @@ export function GreetingBand({
               running={statusRunning ?? false}
               {...(onRunStatusReport ? { onRefresh: onRunStatusReport } : {})}
             />
+          ) : tab === 'night' && nightReview ? (
+            <NightReviewPanel review={nightReview} />
           ) : tab === 'tour' ? (
             <div className="home-workshop-tour-inline" role="tabpanel">
               <IntroHandboekArticle />

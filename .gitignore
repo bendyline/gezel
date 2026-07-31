@@ -207,3 +207,4 @@ packages/catalog/scripts/harvested-auth/
 /native/helpers/service-host/.build
 /.tmp-game-peers
 /ship-audit
+/.tmp-docblocks-2.3.2

@@ -1354,11 +1354,43 @@ describe('ChatManager — messageGezel (cross-gezel messaging)', () => {
 
     const mayaDisk = await store.getSession('maya', res.sessionId);
     const seed = String(mayaDisk!.messages[0]?.content ?? '');
-    expect(seed).toContain('REAL BINARY DOCUMENT at `d-day.pptx`');
+    expect(seed).toContain('REAL BINARY DOCUMENT OR MEDIA FILE at `d-day.pptx`');
+    expect(seed).toContain('author the source as Markdown');
     expect(seed).toContain('`convert_document`');
     expect(seed).toContain('`preview_document`');
     expect(seed).toContain('`save_artifact`');
     expect(seed).toContain('blocked instead of silently substituting another format');
+    expect(seed).not.toContain('first assistant action should be the tool call `write_file');
+  });
+
+  it.each([
+    ['animated GIF', 'launch-loop.gif'],
+    ['video', 'launch-video.mp4'],
+  ])('preserves an %s handoff as DocBlocks media instead of write_file text', async (_, path) => {
+    await store.createGezel({ name: 'Maya', role: 'Copywriter' });
+    const adaSession = await manager.createSession({ gezelId: 'ada' });
+    mock.script('The exact-format production surface is unavailable.');
+
+    const res = await manager.messageGezel({
+      fromGezelId: 'ada',
+      fromSessionId: adaSession.id,
+      toGezelIdOrName: 'maya',
+      text: `Turn this content into ${path}.`,
+      expectedDeliverable: { kind: 'file', filePath: path },
+    });
+
+    await waitForCondition(async () => {
+      const disk = await store.getSession('maya', res.sessionId);
+      return (disk?.messages.length ?? 0) >= 2;
+    });
+
+    const mayaDisk = await store.getSession('maya', res.sessionId);
+    const seed = String(mayaDisk!.messages[0]?.content ?? '');
+    expect(seed).toContain(`REAL BINARY DOCUMENT OR MEDIA FILE at \`${path}\``);
+    expect(seed).toContain('DocBlocks production tools/craftbook');
+    expect(seed).toContain('author the source as Markdown');
+    expect(seed).toContain('`convert_document`');
+    expect(seed).toContain('`save_artifact`');
     expect(seed).not.toContain('first assistant action should be the tool call `write_file');
   });
 

@@ -97,6 +97,19 @@ describe('ProjectGitStatusBar', () => {
     expect(tooltip).toHaveTextContent('7 of 20 · 11 waiting · 2 to refresh');
   });
 
+  it('shows an intentional opt-out without offering a rescan', async () => {
+    vi.mocked(api.getProjectIndexStatus).mockResolvedValue({ state: 'disabled' } as never);
+
+    render(<ProjectGitStatusBar projectId="pj-1" />);
+    const trigger = await screen.findByRole('button', {
+      name: /Workspace indexing is off/,
+    });
+    expect(trigger).toHaveAttribute('aria-disabled', 'true');
+
+    await userEvent.click(trigger);
+    expect(api.refreshProjectIndex).not.toHaveBeenCalled();
+  });
+
   it('flags a waiting merge and clicks through to the GitHub tab', async () => {
     vi.mocked(api.getProjectGitStatus).mockResolvedValue({
       ...BASE_STATUS,

@@ -264,6 +264,11 @@ export function projectCodeReviewsFile(root: string, projectId: string): string 
   return join(projectLocalDir(root, projectId), 'code-reviews.json');
 }
 
+/** Durable per-project report-action lifecycle records (fired/dismissed report recommendations). Always local. */
+export function projectReportActionsFile(root: string, projectId: string): string {
+  return join(projectLocalDir(root, projectId), 'report-actions.json');
+}
+
 /** Per-project documents folder — holds about.md, missionObjectives.md, etc. */
 export function projectDocsDir(
   root: string,

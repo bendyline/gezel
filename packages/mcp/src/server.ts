@@ -6215,7 +6215,7 @@ server.tool(
 
 server.tool(
   'update_project',
-  'Update a project — rename, change description, set / clear its external working directory, assign a voorman gezel, set its lifecycle status, or rewrite its about.md / missionObjectives.md. Pass `workingDir: ""` to clear the external path. Pass `voormanGezelId: ""` to clear the voorman.',
+  'Update a project — rename, change description, set / clear its external working directory, assign a voorman gezel, set its lifecycle status, rewrite its about.md / missionObjectives.md, or set shared project properties (e.g. `content.language`, the designated language). Pass `workingDir: ""` to clear the external path. Pass `voormanGezelId: ""` to clear the voorman.',
   {
     id: z.string().describe('Project id (from list_projects)'),
     name: z.string().optional(),
@@ -6245,6 +6245,12 @@ server.tool(
       .describe(
         "Replace the project's documents/missionObjectives.md. Also flows into system prompts.",
       ),
+    properties: z
+      .record(z.string(), z.string())
+      .optional()
+      .describe(
+        'Merge shared project configuration values (e.g. {"content.language": "Nederlands"}). Empty-string value deletes a key; unmentioned keys are untouched.',
+      ),
   },
   async ({
     id,
@@ -6255,6 +6261,7 @@ server.tool(
     voormanGezelId,
     about,
     missionObjectives,
+    properties,
   }) => {
     const body: Parameters<typeof api.updateProject>[1] = {};
     if (name !== undefined) body.name = name;
@@ -6267,6 +6274,7 @@ server.tool(
     if (about !== undefined) body.about = normalizeMarkdown(about);
     if (missionObjectives !== undefined)
       body.missionObjectives = normalizeMarkdown(missionObjectives);
+    if (properties !== undefined) body.properties = properties;
     await api.updateProject(id, body);
     return {
       content: [{ type: 'text' as const, text: `Updated project ${id}` }],
@@ -6346,13 +6354,143 @@ server.tool(
     const resolvedProject = project ? await resolveProjectId(project) : projectId;
     const resolvedGezel = await resolveGezelId(gezel);
     const res = await api.addGezelToProject(resolvedProject, resolvedGezel);
+    const base = res.added
+      ? `Added gezel ${resolvedGezel} to project ${resolvedProject}.`
+      : `Gezel ${resolvedGezel} is already on the roster for project ${resolvedProject}.`;
+    const offers = await describeSuggestedWorkOffers(resolvedProject, resolvedGezel);
+    return {
+      content: [{ type: 'text' as const, text: offers ? `${base}\n\n${offers}` : base }],
+    };
+  },
+);
+
+/**
+ * The new roster member's still-virtual suggested work, rendered as an
+ * offer the calling gezel (usually the Meester) can relay to the user.
+ * Best-effort: any failure returns null and the caller's message stands.
+ */
+async function describeSuggestedWorkOffers(
+  resolvedProject: string,
+  gezelId: string,
+): Promise<string | null> {
+  try {
+    const { items } = await api.listSuggestedWork(resolvedProject);
+    const offers = items.filter(
+      (i) =>
+        i.state === 'suggested' &&
+        i.source.kind === 'gezel-template' &&
+        i.source.gezelId === gezelId,
+    );
+    if (offers.length === 0) return null;
+    const lines = offers.map(
+      (i) =>
+        `• ${i.craftbookName ?? i.craftbookId} (${i.runMode === 'night-shift' ? 'night shift' : `cron ${i.cron}`}) — key: ${i.key}${i.reason ? ` — ${i.reason}` : ''}`,
+    );
+    return [
+      `This gezel's role suggests recurring background work for this project (not yet enabled):`,
+      ...lines,
+      `Offer these to the user; enable with \`enable_suggested_work\` only after they agree.`,
+    ].join('\n');
+  } catch {
+    return null;
+  }
+}
+
+server.tool(
+  'list_suggested_work',
+  "List a project's suggested recurring work — night-shift or scheduled craftbook runs recommended by the roles on its roster (e.g. a Chief Security Officer suggests a nightly security review) and by its project type. Each item carries a stable `key`, its state (suggested / enabled / paused / dismissed), and the host task ref when one exists. Use this to answer 'what could this crew be doing overnight?'.",
+  {
+    project: z
+      .string()
+      .optional()
+      .describe('Project id or name — defaults to your current project'),
+  },
+  async ({ project }) => {
+    const resolvedProject = project ? await resolveProjectId(project) : projectId;
+    const { items } = await api.listSuggestedWork(resolvedProject);
+    if (items.length === 0) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `Project ${resolvedProject} has no suggested recurring work — none of its roster roles or its project type recommend any.`,
+          },
+        ],
+      };
+    }
+    const lines = items.map((i) => {
+      const sponsor =
+        i.source.kind === 'gezel-template'
+          ? i.source.gezelName
+            ? `suggested by ${i.source.gezelName}${i.source.role ? ` (${i.source.role})` : ''}`
+            : `from the "${i.source.templateId}" role`
+          : `from the "${i.source.typeId}" project type`;
+      const cadence = i.runMode === 'night-shift' ? 'night shift' : `cron ${i.cron} (UTC)`;
+      const state = i.pendingQuestionId ? `${i.state}, approval pending` : i.state;
+      return `• ${i.craftbookName ?? i.craftbookId} — ${cadence} — ${sponsor} — state: ${state}${i.taskRef ? ` — task: ${i.taskRef}` : ''}\n  key: ${i.key}${i.reason ? `\n  ${i.reason}` : ''}`;
+    });
     return {
       content: [
         {
           type: 'text' as const,
-          text: res.added
-            ? `Added gezel ${resolvedGezel} to project ${resolvedProject}.`
-            : `Gezel ${resolvedGezel} is already on the roster for project ${resolvedProject}.`,
+          text: [`Suggested recurring work for project ${resolvedProject}:`, ...lines].join('\n'),
+        },
+      ],
+    };
+  },
+);
+
+server.tool(
+  'enable_suggested_work',
+  "Enable a suggested-work item by key (from `list_suggested_work`): materializes — or resurrects — its recurring host task. Night-shift items run inside the user's Night Shift window at most once per night; scheduled items fire on their cron. Only call after the user has agreed — the suggestion surface exists so the user decides.",
+  {
+    key: z.string().describe('Suggested-work key from list_suggested_work'),
+    project: z
+      .string()
+      .optional()
+      .describe('Project id or name — defaults to your current project'),
+    params: z
+      .record(z.string(), z.string())
+      .optional()
+      .describe(
+        "Craftbook param values for the spawned runs (see the item's paramSchema), e.g. {\"language\": \"Nederlands\"}",
+      ),
+  },
+  async ({ key, project, params }) => {
+    const resolvedProject = project ? await resolveProjectId(project) : projectId;
+    const res = await api.enableSuggestedWork(resolvedProject, {
+      key,
+      ...(params ? { params } : {}),
+    });
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: `Enabled "${res.item.craftbookName ?? res.item.craftbookId}" (${res.item.runMode}) — host task ${res.task.ref}.`,
+        },
+      ],
+    };
+  },
+);
+
+server.tool(
+  'disable_suggested_work',
+  'Disable a suggested-work item by key: pauses its recurring host task (state and history are preserved; enabling again resumes it).',
+  {
+    key: z.string().describe('Suggested-work key from list_suggested_work'),
+    project: z
+      .string()
+      .optional()
+      .describe('Project id or name — defaults to your current project'),
+  },
+  async ({ key, project }) => {
+    const resolvedProject = project ? await resolveProjectId(project) : projectId;
+    const res = await api.disableSuggestedWork(resolvedProject, key);
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: `Disabled "${res.item.craftbookName ?? res.item.craftbookId}"${res.item.taskRef ? ` — host task ${res.item.taskRef} paused` : ''}.`,
         },
       ],
     };

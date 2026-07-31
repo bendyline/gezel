@@ -92,6 +92,7 @@ Do not bake "the service is in-process" assumptions into new code — go through
 │   └── {id}/
 │       ├── project.json     name, description, workingDir?, packages
 │       ├── finding-lifecycle.json  durable open/in-progress/resolved scanner findings
+│       ├── report-actions.json  fired/dismissed lifecycle of report-embedded action requests
 │       ├── artifacts/       read-write user/agent outputs
 │       ├── workspace/       internal fallback when no external dir
 │       └── memories/        same structure as gezel memories
@@ -266,7 +267,7 @@ Tool categories (`packages/mcp/src/server.ts`):
 - **Artifacts** (read-write, project-scoped): `list_artifacts`, `read_artifact`, `write_artifact`
 - **Documents** (shared library): `list_documents`, `read_document`, `write_document`, `delete_document`
 - **Execution**: `run_nodejs_script`, `run_playwright_script`, `npm_install`, `list_packages`
-- **Team / projects** (Meester surface): `list_gezels`, `create_gezel`, `update_gezel`, `list_gilde`, `create_gezel_from_gilde`, `ensure_gezel`, `message_gezel`, `list_projects`, `create_project`, `update_project`
+- **Team / projects** (Meester surface): `list_gezels`, `create_gezel`, `update_gezel`, `list_gilde`, `create_gezel_from_gilde`, `ensure_gezel`, `message_gezel`, `list_projects`, `create_project`, `update_project`, plus the suggested-work toggles (`list_suggested_work`, `enable_suggested_work`, `disable_suggested_work`) that surface role- and project-type-recommended recurring craftbooks ([suggested-work/](packages/service/src/suggested-work/))
 - **Tasks**: `list_tasks`, `get_task`, `create_task`, `update_task`, `set_task_status`, `assign_task`, `add_task_step`, `advance_task_step`, `read_task_notes`, `write_task_note`
 - **Other**: `ask_user_question`, `search_history`, `render_image`
 

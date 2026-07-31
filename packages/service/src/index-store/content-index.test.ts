@@ -12,7 +12,10 @@ let ci: ContentIndex;
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'gezel-cidx-'));
   home = await mkdtemp(join(tmpdir(), 'gezel-cidx-home-'));
-  const fakeStore = { projectWorkspaceDir: async () => dir } as unknown as Store;
+  const fakeStore = {
+    projectIndexingEnabled: async () => true,
+    projectWorkspaceDir: async () => dir,
+  } as unknown as Store;
   ci = new ContentIndex(fakeStore, home);
 });
 afterEach(async () => {
@@ -21,6 +24,23 @@ afterEach(async () => {
 });
 
 describe('ContentIndex (code-intel façade)', () => {
+  it('does not open or update an index for an opted-out project', async () => {
+    let workspaceResolved = false;
+    const disabled = new ContentIndex(
+      {
+        projectIndexingEnabled: async () => false,
+        projectWorkspaceDir: async () => {
+          workspaceResolved = true;
+          return dir;
+        },
+      } as unknown as Store,
+      home,
+    );
+
+    await expect(disabled.refresh('p1')).resolves.toBeNull();
+    expect(workspaceResolved).toBe(false);
+  });
+
   it('refreshes then answers outline/find/read/map', async () => {
     await mkdir(join(dir, 'src'), { recursive: true });
     await writeFile(

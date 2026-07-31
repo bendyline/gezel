@@ -19,7 +19,7 @@ export const SECURITY_LEVEL_PRESETS: ReadonlyArray<SecurityLevelPreset> = [
     id: 'super-lockdown',
     label: 'Super Lockdown',
     description:
-      'Nothing leaves your machine. Local models only — no external services, no script execution, no background app network, no model git. You can still do a lot in Super Lockdown mode, though: review, scan, index, chat, and build reports, prototypes, PowerPoints, images as well as do code reviews, and more. Gezels can edit files in internal project workspaces; folders you open stay read-only unless you opt them in per project. Safest to get started, and you can move to more permissive modes later.',
+      'Nothing leaves your machine. Local models only — no external services, no script execution, no model git. You can still do a lot in Super Lockdown mode, though: review, scan, index, chat, and build reports, prototypes, PowerPoints, images as well as do code reviews, and more. Gezels can edit files in internal project workspaces; folders you open stay read-only unless you opt them in per project. Safest to get started, and you can move to more permissive modes later.',
   },
   {
     id: 'lockdown',

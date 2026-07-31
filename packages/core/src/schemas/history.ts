@@ -40,6 +40,22 @@ export const HistoryEventKindSchema = z.enum([
    * or task assignments, just drops them from the membership list.
    */
   'project.gezel.left',
+  /**
+   * A suggested-work item (role- or project-type-recommended recurring
+   * craftbook) was enabled/disabled via the toggle surface. `details`
+   * carries `{ key, craftbookId, runMode, taskRef }`.
+   */
+  'project.suggested-work.enabled',
+  'project.suggested-work.disabled',
+  /** A project property changed. `details` carries `{ id, value }` per entry. */
+  'project.properties.updated',
+  /**
+   * A report's embedded action request was fired (task created / edit
+   * pack applied) or dismissed by the user. `details` carries
+   * `{ reportPath, actionId, kind, state?, taskRef?, targetProjectId? }`.
+   */
+  'report.action.fired',
+  'report.action.dismissed',
   'project.status.changed',
   'project.nudge.sent',
   'project.github.linked',

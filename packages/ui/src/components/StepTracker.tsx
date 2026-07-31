@@ -11,7 +11,7 @@ export interface StepTrackerStep {
 /**
  * Per-step decoration for the `bench` variant — the workshop "bench
  * rail" look where each step is a peg (or a carved poppetje figure for the
- * one in hand) standing on a wooden rail, captioned with who's holding it.
+ * active one) standing on a wooden rail, captioned with who's holding it.
  * Supplied by the task wrapper via {@link StepTrackerProps.stepOf};
  * design mode leaves it undefined and the bench falls back to plain pegs.
  */
@@ -28,7 +28,7 @@ export interface StepMeta {
    * When present it wins over {@link assigneeName}/{@link assigneeRole}.
    */
   assigneeControl?: ReactNode;
-  /** Lifecycle word under the step name (e.g. "Signed off", "In hand"). */
+  /** Lifecycle word under the step name (e.g. "Signed off", "Active"). */
   statusWord?: string;
 }
 

@@ -466,6 +466,33 @@ export const GezelTemplateIdentitySchema = IdentityCommonSchema.extend({
 });
 export type GezelTemplateIdentity = z.infer<typeof GezelTemplateIdentitySchema>;
 
+/**
+ * A recurring craftbook run a gezel template recommends for any project
+ * its gezel joins ("suggested night work"). Never auto-armed: the
+ * suggested-work layer surfaces these as toggles and only a user action
+ * (UI toggle or an MCP enable on the user's behalf) materializes the
+ * host task. `night-shift` items run inside the configured Night Shift
+ * window at most once per window; `scheduled` items are plain cron
+ * (UTC) spawn hosts and therefore require `cron`.
+ */
+export const SuggestedCraftbookSchema = z
+  .object({
+    craftbookId: z.string(),
+    runMode: z.enum(['night-shift', 'scheduled']),
+    /** 5-field cron (UTC). Required for 'scheduled'; ignored for 'night-shift'. */
+    cron: z.string().optional(),
+    /** Overlap policy for the materialized host. */
+    overlap: z.enum(['skip', 'queue', 'concurrent']).optional(),
+    /** Default craftbook params seeding the enable form / spawned children. */
+    params: z.record(z.string(), z.string()).optional(),
+    /** One-liner shown next to the toggle ("keeps an eye on new code overnight"). */
+    reason: z.string().optional(),
+  })
+  .refine((v) => v.runMode !== 'scheduled' || !!v.cron, {
+    message: 'scheduled suggestions require cron',
+  });
+export type SuggestedCraftbook = z.infer<typeof SuggestedCraftbookSchema>;
+
 export const GezelTemplateVersionManifestSchema = z.object({
   schemaVersion: z.literal(1),
   version: z.string().regex(SemverRegex),
@@ -505,6 +532,11 @@ export const GezelTemplateVersionManifestSchema = z.object({
    * back to the shared random-name pool.
    */
   nameSuggestions: z.array(z.string()).optional(),
+  /**
+   * Recurring craftbook runs this role recommends for projects its gezel
+   * joins — surfaced by the suggested-work layer as opt-in toggles.
+   */
+  suggestedCraftbooks: z.array(SuggestedCraftbookSchema).optional(),
 });
 export type GezelTemplateVersionManifest = z.infer<typeof GezelTemplateVersionManifestSchema>;
 
@@ -541,6 +573,8 @@ export const GezelTemplateManifestSchema = z.object({
   frontmatter: z.record(z.string(), z.unknown()).optional(),
   /** Suggested instance names for the install dialog's quick-pick chips. */
   nameSuggestions: z.array(z.string()).optional(),
+  /** Mirrored from the version manifest — see GezelTemplateVersionManifestSchema. */
+  suggestedCraftbooks: z.array(SuggestedCraftbookSchema).optional(),
 });
 export type GezelTemplateManifest = z.infer<typeof GezelTemplateManifestSchema>;
 
@@ -787,16 +821,27 @@ export type ProjectTypeTool = z.infer<typeof ProjectTypeToolSchema>;
  * materializes as a cron task spawning the named craftbook (see
  * `TaskCronSchema`).
  */
-export const ProjectTypeScheduleSchema = z.object({
-  /** Standard 5-field cron expression (UTC). */
-  cron: z.string(),
-  /** Craftbook id (from this manifest's `craftbooks`) to run each fire. */
-  craftbook: z.string(),
-  /** Whether the schedule is armed on adoption. Default asks the user. */
-  consent: z.enum(['ask', 'auto', 'disabled']).default('ask'),
-  /** Overlap policy when a prior run is still going. */
-  overlap: z.enum(['skip', 'queue', 'concurrent']).optional(),
-});
+export const ProjectTypeScheduleSchema = z
+  .object({
+    /**
+     * How the run recurs. `scheduled` (the default, preserving every
+     * manifest authored before this field existed) fires on `cron`;
+     * `night-shift` runs inside the configured Night Shift window at
+     * most once per window and needs no cron.
+     */
+    runMode: z.enum(['scheduled', 'night-shift']).default('scheduled'),
+    /** Standard 5-field cron expression (UTC). Required for 'scheduled'. */
+    cron: z.string().optional(),
+    /** Craftbook id (from this manifest's `craftbooks`) to run each fire. */
+    craftbook: z.string(),
+    /** Whether the schedule is armed on adoption. Default asks the user. */
+    consent: z.enum(['ask', 'auto', 'disabled']).default('ask'),
+    /** Overlap policy when a prior run is still going. */
+    overlap: z.enum(['skip', 'queue', 'concurrent']).optional(),
+  })
+  .refine((v) => v.runMode !== 'scheduled' || !!v.cron, {
+    message: 'scheduled project-type schedules require cron',
+  });
 export type ProjectTypeSchedule = z.infer<typeof ProjectTypeScheduleSchema>;
 
 /** Output page tree pinned into the project's Output pane (served read-only). */
@@ -880,6 +925,14 @@ const ProjectTypeCompositionShape = {
    * Omit for the default full-agent profile.
    */
   leanProfile: z.boolean().optional(),
+  /**
+   * Whether projects instantiated from this type should participate in
+   * workspace indexing. `false` is appropriate for lightweight stateful
+   * experiences (board games, language practice, chat rooms) whose seeded
+   * workspace files do not benefit from structural/code intelligence.
+   * Omit to preserve the project's existing setting (enabled by default).
+   */
+  indexingEnabled: z.boolean().optional(),
   /**
    * Squisq/JSON-Schema object whose top-level `properties` are the params
    * collected at adoption (rendered as a form) and substituted into the

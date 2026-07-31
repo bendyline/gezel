@@ -87,6 +87,7 @@ export function ProjectOverviewView({
   const typeName = typeId ? (getProjectType(typeId)?.label ?? typeId) : null;
   const areasWithPurpose = (map?.areas ?? []).filter((a) => a.purpose);
   const scanning = indexStatus?.state === 'indexing';
+  const indexingDisabled = indexStatus?.state === 'disabled';
   const aiPending = indexStatus?.aiScanPending === true;
   const reviewPending = indexStatus?.enrichment?.reviews?.pending ?? 0;
 
@@ -107,7 +108,13 @@ export function ProjectOverviewView({
         </div>
       </div>
 
-      {!map?.indexed && (
+      {!map?.indexed && indexingDisabled && (
+        <p className="muted">
+          Workspace indexing is off for this project. You can turn it on in Project Settings.
+        </p>
+      )}
+
+      {!map?.indexed && !indexingDisabled && (
         <p className="muted">
           The boekwachter hasn't scanned this workspace yet. The map, folder notes, and architecture
           summary appear here once indexing runs.

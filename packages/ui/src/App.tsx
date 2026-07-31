@@ -1,5 +1,6 @@
 import type {
   ChatEventEnvelope,
+  NightShiftReviewResponse,
   NightShiftTasksResponse,
   ProviderName,
   RecentTab,
@@ -851,11 +852,30 @@ function NightShiftMenu({
 
   const [open, setOpen] = useState(false);
   const [tasks, setTasks] = useState<NightShiftTasksResponse | null>(null);
+  const [review, setReview] = useState<NightShiftReviewResponse | null>(null);
 
   const handleOpenChange = (next: boolean) => {
     setOpen(next);
     if (next) window.dispatchEvent(new CustomEvent('gezel:close-header-popovers'));
   };
+
+  // "Done last night" — fetched on open regardless of active state, so the
+  // menu answers the morning-after question, not just the live one.
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    api
+      .getNightShiftReview()
+      .then((r) => {
+        if (!cancelled) setReview(r);
+      })
+      .catch(() => {
+        /* the menu still shows status + actions */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
 
   // While the menu is open during a running shift, surface what it's working
   // on. Poll lightly so the active/upcoming split tracks progress as tasks
@@ -934,6 +954,58 @@ function NightShiftMenu({
                   ))}
                 </div>
               )}
+            </div>
+          )}
+          {review && (review.tasksCompleted.length > 0 || review.reports.length > 0) && (
+            <div className="app-nightshift-tasks">
+              <div className="app-nightshift-task-group">
+                <div className="app-nightshift-task-heading">Done last night</div>
+                {review.reports.map((r) => (
+                  <button
+                    key={`${r.projectId}:${r.path}`}
+                    type="button"
+                    className="app-nightshift-task app-nightshift-report"
+                    onClick={() =>
+                      window.dispatchEvent(
+                        new CustomEvent('gezel:open-tab', {
+                          detail: { kind: 'project', id: r.projectId },
+                        }),
+                      )
+                    }
+                  >
+                    <span className="app-nightshift-task-dot" aria-hidden="true" />
+                    <span className="app-nightshift-task-text">
+                      <span className="app-nightshift-task-title">{r.title}</span>
+                      <span className="app-nightshift-task-meta">
+                        {r.projectName}
+                        {r.actionCounts.total > 0
+                          ? ` · ${r.actionCounts.suggested > 0 ? `${r.actionCounts.suggested} action${r.actionCounts.suggested === 1 ? '' : 's'} to review` : `${r.actionCounts.total} action${r.actionCounts.total === 1 ? '' : 's'}`}`
+                          : ''}
+                      </span>
+                    </span>
+                  </button>
+                ))}
+                {review.tasksCompleted.slice(0, 5).map((t) => (
+                  <button
+                    key={t.ref}
+                    type="button"
+                    className="app-nightshift-task app-nightshift-report"
+                    onClick={() =>
+                      window.dispatchEvent(
+                        new CustomEvent('gezel:open-tab', {
+                          detail: { kind: 'task', ref: t.ref },
+                        }),
+                      )
+                    }
+                  >
+                    <span className="app-nightshift-task-dot" aria-hidden="true" />
+                    <span className="app-nightshift-task-text">
+                      <span className="app-nightshift-task-title">{t.title}</span>
+                      <span className="app-nightshift-task-meta">{t.projectName}</span>
+                    </span>
+                  </button>
+                ))}
+              </div>
             </div>
           )}
           {state.active ? (

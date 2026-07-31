@@ -22,6 +22,12 @@ import type { Store } from '../fs/store.js';
 import { installProjectTypeScripts } from '../scripts/install.js';
 import { parseCron } from '../tasks/cron.js';
 import { TaskManager } from '../tasks/manager.js';
+import {
+  SCHEDULE_HOST_STEP,
+  describeHostCadence,
+  hostCronExpression,
+  hostRecurrenceFields,
+} from '../tasks/schedule-host.js';
 import { installProjectTypeCraftbooks, resolveTypeCraftbook } from './craftbooks.js';
 
 const log = createLogger('project-type');
@@ -184,14 +190,18 @@ export async function preflightProjectType(
   }
 
   for (const schedule of manifest.schedules) {
-    try {
-      parseCron(schedule.cron);
-    } catch (err) {
-      throw new Error(
-        `project type ${input.typeId}: schedule cron "${schedule.cron}" is invalid: ${
-          err instanceof Error ? err.message : String(err)
-        }`,
-      );
+    // Night-shift schedules carry no user cron — the host runs on an
+    // internal heartbeat confined to the Night Shift window.
+    if (schedule.runMode !== 'night-shift') {
+      try {
+        parseCron(schedule.cron ?? '');
+      } catch (err) {
+        throw new Error(
+          `project type ${input.typeId}: schedule cron "${schedule.cron}" is invalid: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
     }
     if (!manifest.craftbooks.includes(schedule.craftbook)) {
       throw new Error(
@@ -415,8 +425,9 @@ export async function applyProjectType(
 
   // 6. Stamp provenance + inherited taxonomy id + rendered docs + voorman.
   //    Project types may also set defaults for ambient Meester progress
-  //    check-ins and optional tab visibility. Only write settings the
-  //    manifest declares, preserving existing cadence/tab overrides otherwise.
+  //    check-ins, optional tab visibility, and workspace indexing. Only write
+  //    settings the manifest declares, preserving existing project overrides
+  //    otherwise.
   const provenance: ProjectTypeProvenance = {
     id: typeId,
     version: manifest.version,
@@ -439,6 +450,9 @@ export async function applyProjectType(
     ...(manifest.mode ? { mode: manifest.mode } : {}),
     ...(manifest.leadLabel ? { leadLabel: manifest.leadLabel } : {}),
     ...(manifest.leanProfile !== undefined ? { leanProfile: manifest.leanProfile } : {}),
+    ...(manifest.indexingEnabled !== undefined
+      ? { indexingEnabled: manifest.indexingEnabled }
+      : {}),
     ...(manifest.meesterManaged !== undefined
       ? {
           nudgeConfig: {
@@ -526,6 +540,7 @@ export async function materializeProjectTypeSchedules(
     keyCounts.set(schedule.craftbook, n);
     const scheduleKey = n === 1 ? schedule.craftbook : `${schedule.craftbook}#${n}`;
 
+    const hostCron = hostCronExpression(schedule);
     try {
       const prior = existing.find(
         (t) =>
@@ -536,11 +551,11 @@ export async function materializeProjectTypeSchedules(
       if (prior) {
         if (
           (prior.status === 'active' || prior.status === 'paused') &&
-          (prior.cron?.expression !== schedule.cron || prior.cron?.overlap !== schedule.overlap)
+          (prior.cron?.expression !== hostCron || prior.cron?.overlap !== schedule.overlap)
         ) {
           await tasks.update(projectId, prior.num, {
             cron: {
-              expression: schedule.cron,
+              expression: hostCron,
               ...(schedule.overlap ? { overlap: schedule.overlap } : {}),
             },
           });
@@ -560,7 +575,7 @@ export async function materializeProjectTypeSchedules(
         out.push({
           ref: prior.ref,
           craftbook: schedule.craftbook,
-          cron: schedule.cron,
+          cron: hostCron,
           consent: schedule.consent,
           status: prior.status === 'active' ? 'active' : 'paused',
           created: false,
@@ -576,22 +591,13 @@ export async function materializeProjectTypeSchedules(
         projectId,
         {
           title: `Schedule: ${schedule.craftbook}`,
-          description: `Recurring craftbook run installed by the "${typeId}" project type. Cron (UTC): ${schedule.cron}. Each fire spawns a "${schedule.craftbook}" child task; this host never runs steps itself.`,
+          description: `Recurring craftbook run installed by the "${typeId}" project type. ${describeHostCadence(schedule)} Each fire spawns a "${schedule.craftbook}" child task; this host never runs steps itself.`,
           assignee: args.voormanGezelId
             ? { kind: 'gezel', gezelId: args.voormanGezelId }
             : { kind: 'user' },
-          steps: [
-            {
-              name: 'Wait for schedule',
-              prompt:
-                'This host task holds a recurring schedule. It never runs its own steps — each cron fire spawns a child task from the attached craftbook.',
-            },
-          ],
+          steps: [{ ...SCHEDULE_HOST_STEP }],
           spawnsCraftbookId: schedule.craftbook,
-          cron: {
-            expression: schedule.cron,
-            ...(schedule.overlap ? { overlap: schedule.overlap } : {}),
-          },
+          ...hostRecurrenceFields(schedule),
           createdBy: { kind: 'user' },
         },
         { origin: { kind: 'project-type-schedule', typeId, scheduleKey } },
@@ -614,7 +620,7 @@ export async function materializeProjectTypeSchedules(
       out.push({
         ref: host.ref,
         craftbook: schedule.craftbook,
-        cron: schedule.cron,
+        cron: hostCron,
         consent: schedule.consent,
         status,
         created: true,
@@ -647,6 +653,7 @@ async function writeScheduleApprovalQuestion(
   if (all.some((q) => q.intent?.kind === 'schedule-approval' && q.taskRef === args.taskRef)) {
     return;
   }
+  const night = args.schedule.runMode === 'night-shift';
   const question: Question = {
     id: randomUUID(),
     projectId: args.projectId,
@@ -654,7 +661,9 @@ async function writeScheduleApprovalQuestion(
     // Adoption has no live chat session; the answer route early-returns
     // for this intent, so nothing tries to seed a turn from it.
     sessionId: '',
-    prompt: `The "${args.typeId}" project type set up a recurring "${args.schedule.craftbook}" run (cron \`${args.schedule.cron}\`, UTC). It was created paused and will not run until you enable it.`,
+    prompt: night
+      ? `The "${args.typeId}" project type set up a recurring "${args.schedule.craftbook}" run for the Night Shift (at most once per night, inside your configured window). It was created paused and will not run until you enable it.`
+      : `The "${args.typeId}" project type set up a recurring "${args.schedule.craftbook}" run (cron \`${args.schedule.cron}\`, UTC). It was created paused and will not run until you enable it.`,
     choices: ['Enable schedule', 'Keep paused'],
     allowWriteIn: false,
     multiSelect: false,
@@ -663,7 +672,8 @@ async function writeScheduleApprovalQuestion(
       kind: 'schedule-approval',
       typeId: args.typeId,
       craftbookId: args.schedule.craftbook,
-      cron: args.schedule.cron,
+      ...(night ? { runMode: 'night-shift' as const } : {}),
+      cron: hostCronExpression(args.schedule),
       ...(args.schedule.overlap ? { overlap: args.schedule.overlap } : {}),
     },
     createdAt: new Date().toISOString(),

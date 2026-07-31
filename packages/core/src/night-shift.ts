@@ -64,6 +64,56 @@ export function nightShiftDayKey(now: Date, window: NightShiftWindow): string {
 }
 
 /**
+ * The night window the morning review talks about: the current window
+ * when `now` is inside one, else the most recently COMPLETED window.
+ * `key` matches `nightShiftWindowKey` for instants inside that window
+ * (and therefore `Task.nightShift.lastRunDay` stamps from it). For an
+ * always-on window (equal bounds) the "window" is the last 24h and the
+ * key is the local date.
+ */
+export function lastNightShiftWindow(
+  now: Date,
+  window: NightShiftWindow,
+): { key: string; start: Date; end: Date } {
+  const { startHour, endHour } = window;
+  if (startHour === endHour) {
+    const end = new Date(now);
+    const start = new Date(now);
+    start.setDate(start.getDate() - 1);
+    return { key: localDateKey(now), start, end };
+  }
+  // The window's start day: today when we're inside it or past its end;
+  // otherwise the window that ended earlier today started yesterday (for
+  // wrapping windows) or hasn't happened today yet (non-wrapping, before
+  // start → yesterday's window).
+  const wraps = startHour > endHour;
+  const start = new Date(now);
+  start.setHours(startHour, 0, 0, 0);
+  if (wraps) {
+    // Window runs startHour → next-day endHour.
+    if (now.getHours() >= startHour) {
+      // Inside tonight's window (before midnight).
+      start.setTime(start.getTime()); // today startHour
+    } else {
+      // Early morning (inside the tail) or daytime (after the tail
+      // closed): either way the relevant window started yesterday.
+      start.setDate(start.getDate() - 1);
+    }
+    const end = new Date(start);
+    end.setDate(end.getDate() + 1);
+    end.setHours(endHour, 0, 0, 0);
+    return { key: localDateKey(start), start, end };
+  }
+  // Non-wrapping same-day window.
+  if (now.getHours() < startHour) {
+    start.setDate(start.getDate() - 1);
+  }
+  const end = new Date(start);
+  end.setHours(endHour, 0, 0, 0);
+  return { key: localDateKey(start), start, end };
+}
+
+/**
  * The next local datetime the window opens, strictly after `now`. Used to
  * pre-schedule an OS wake (`wakeOnStart`) so a sleeping machine comes up
  * for the upcoming shift — the service can't detect the window if it's

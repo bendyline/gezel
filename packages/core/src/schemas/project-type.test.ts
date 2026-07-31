@@ -26,6 +26,7 @@ describe('ProjectType manifest schema', () => {
     expect(parsed.scripts).toBeUndefined();
     expect(parsed.pages).toBeUndefined();
     expect(parsed.meesterManaged).toBeUndefined();
+    expect(parsed.indexingEnabled).toBeUndefined();
     expect(parsed.tabVisibility).toBeUndefined();
   });
 
@@ -36,6 +37,7 @@ describe('ProjectType manifest schema', () => {
       releasedAt: '2026-07-06T00:00:00Z',
       extends: 'content-writing',
       meesterManaged: false,
+      indexingEnabled: false,
       tabVisibility: { overview: false, tasks: false, artifacts: true },
       params: { type: 'object', properties: { language: { type: 'string' } } },
       nameTemplate: '{{language}} Language Trainer',
@@ -65,6 +67,7 @@ describe('ProjectType manifest schema', () => {
     expect(parsed.pages?.entry).toBe('dashboard/index.html');
     expect(parsed.nameTemplate).toBe('{{language}} Language Trainer');
     expect(parsed.meesterManaged).toBe(false);
+    expect(parsed.indexingEnabled).toBe(false);
     expect(parsed.tabVisibility).toEqual({ overview: false, tasks: false, artifacts: true });
   });
 

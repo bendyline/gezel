@@ -963,6 +963,14 @@ export class TaskManager {
       }
       changed.push('fanout');
     }
+    if (patch.spawnsCraftbookParams !== undefined) {
+      if (patch.spawnsCraftbookParams === null) {
+        delete next.spawnsCraftbookParams;
+      } else {
+        next.spawnsCraftbookParams = patch.spawnsCraftbookParams;
+      }
+      changed.push('spawnsCraftbookParams');
+    }
     if (changed.length === 0) return task;
     await this.store.writeTask(next);
     // Editing a task (retitle, re-plan, reassign, cron/fanout) is live
@@ -1677,6 +1685,29 @@ export class TaskManager {
     const idx = task.craftbook.steps.findIndex((s) => s.id === stepId);
     if (idx < 0) throw new Error(`task ${task.ref}: no step "${stepId}"`);
     const completedStep = task.craftbook.steps[idx]!;
+
+    // Step completion is an idempotent transition. Local models can emit the
+    // same `advance_task_step` call twice while consuming the first call's
+    // tool result. Once the first call has moved the task forward, replaying
+    // the stale call must not re-run the old gate/onExit hooks or bump the
+    // successor's activation timestamp: TaskRunner keys the live successor
+    // handoff by that timestamp and would otherwise cancel it as superseded.
+    //
+    // A real loop-back remains valid. `bumpStepActivation` clears the old
+    // `completedAt` and makes the step active again, so it passes this guard.
+    if (task.activeStepId !== stepId) {
+      if (completedStep.completedAt) {
+        log.info(
+          `[tasks] duplicate completion ignored for ${task.ref} step "${stepId}" ` +
+            `(active step: "${task.activeStepId ?? '(none)'}")`,
+        );
+        return { status: 'advanced', task };
+      }
+      throw new Error(
+        `task ${task.ref}: step "${stepId}" is not active ` +
+          `(active step: "${task.activeStepId ?? '(none)'}")`,
+      );
+    }
 
     // ── Completion gate guard ─────────────────────────────────────────
     // Skipped when: no gate / activation-moment gate (the service hook
@@ -3073,6 +3104,7 @@ export class TaskManager {
         expression: task.cron.expression,
         lastTickAt: now.toISOString(),
         nextTickAt: nextCronFire(schedule, now).toISOString(),
+        ...(task.cron.overlap ? { overlap: task.cron.overlap } : {}),
       },
       updatedAt: now.toISOString(),
     };
@@ -3090,6 +3122,23 @@ export class TaskManager {
       },
     });
     return updated;
+  }
+
+  /**
+   * Stamp a night-shift spawn host's `lastRunDay` with the current night
+   * window's day key. Called by the scheduler at child-spawn time — the
+   * host's placeholder step never completes, so the step-completion
+   * stamping path can't reach it. Together with the scheduler's guard
+   * this gives `onceADay` hosts "at most one spawn per night window".
+   */
+  async recordNightShiftSpawn(ref: string, dayKey: string): Promise<void> {
+    const task = await this.getByRef(ref);
+    if (!task?.nightShift) return;
+    await this.store.writeTask({
+      ...task,
+      nightShift: { ...task.nightShift, lastRunDay: dayKey },
+      updatedAt: new Date().toISOString(),
+    });
   }
 
   describeAssignee = describeAssignee;

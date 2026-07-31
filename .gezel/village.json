@@ -449,8 +449,8 @@
             53
           ],
           "p": ".github/workflows",
-          "h": "39b960d90f4fcb4e3881b5899cfe4af64fb2aaa013fd8b8a14e95e60f44330e8",
-          "w": 1025,
+          "h": "607b59fb5d1ef546c27261eef21c126c6259d198ec3a7c881561a1d5c1202f89",
+          "w": 1178,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -462,8 +462,8 @@
             26.8,
             37.5
           ],
-          "h": "3a9db5980d6b812eda7a7ac10de7898b034b933c600ee64b9f6f0d3703b03292",
-          "w": 210,
+          "h": "0f034e924e18fb30fac79078e9a7db37e9b046fb21956eb055d95e5ae2f5e9f1",
+          "w": 211,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -491,8 +491,7 @@
           "p": ".pnpm-store/v11",
           "h": "eefee28e3e88102c227c857dcec20b0b42049e0a8e2fbe3cd57dd4320dc24c66",
           "w": 1,
-          "a": "2026-07-29T12:45:34.302Z",
-          "d": "2026-07-30T16:08:30.670Z"
+          "a": "2026-07-29T12:45:34.302Z"
         },
         {
           "k": "block",
@@ -506,8 +505,37 @@
           "p": ".pnpm-store/v11",
           "h": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
           "w": 1,
-          "a": "2026-07-29T12:45:34.302Z",
-          "d": "2026-07-30T16:08:30.670Z"
+          "a": "2026-07-29T12:45:34.302Z"
+        },
+        {
+          "k": "block",
+          "id": ".tmp-docblocks-2.3.2/package/LICENSE",
+          "r": [
+            423.2,
+            260.1,
+            17.9,
+            17.6
+          ],
+          "p": ".tmp-docblocks-2.3.2/package",
+          "h": "acbb45b16259bd20bb1af957ee4b2a77a1f918f5c2ef18bb28f25ee2ef5611db",
+          "w": 22,
+          "a": "2026-07-30T22:19:22.145Z",
+          "d": "2026-07-30T22:50:21.111Z"
+        },
+        {
+          "k": "block",
+          "id": ".tmp-docblocks-2.3.2/package/README.md",
+          "r": [
+            423.2,
+            281.6,
+            21.8,
+            28.1
+          ],
+          "p": ".tmp-docblocks-2.3.2/package",
+          "h": "a69cd3f0cd5e7e0367bac0cca41a17d88ddb61702a7d846a38cff23491c78952",
+          "w": 96,
+          "a": "2026-07-30T22:19:22.145Z",
+          "d": "2026-07-30T22:50:21.111Z"
         },
         {
           "k": "block",
@@ -531,7 +559,7 @@
             40.7,
             38.6
           ],
-          "h": "d3d310a31273d659a66f99c4398e639f859ebd69a63e7226acbdf9f9b0c78936",
+          "h": "1a25293345cb4fbe3ef7278323cd19ce19967f3f341306147dec9aed803a0276",
           "w": 435,
           "a": "2026-07-29T12:45:34.302Z"
         },
@@ -583,7 +611,7 @@
             42.2,
             35.1
           ],
-          "h": "38db5bacc6d03faa5c220a9fb3bdfa180d65e0edcf22b9a984070c471c7a3ec6",
+          "h": "1d69a44db3b6a6bb5a6879c94d812973ae27bcee20cf2732ca73bae7af74267a",
           "w": 414,
           "a": "2026-07-29T12:45:34.302Z"
         },
@@ -596,7 +624,7 @@
             21.5,
             28.6
           ],
-          "h": "9c5bdb24a79716b65053858d92ac8cc9f6053619c319edded925488a214412e0",
+          "h": "7a3995d7fb65e4ed380d8c548e23611ccddbf2e5d9920e5df1ad87df2896f16d",
           "w": 86,
           "a": "2026-07-29T12:45:34.302Z"
         },
@@ -746,8 +774,8 @@
             21.1
           ],
           "p": "docs",
-          "h": "afab7a7cda6b1224404d898097d0eafbeb65f968fc82545c22d466498f454016",
-          "w": 85,
+          "h": "1e4fa9b162cf992b9dc95f076eb67bfe89fb408a1f5458034b13a47fe8933cd1",
+          "w": 106,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -816,7 +844,7 @@
             15
           ],
           "p": "docs/handboek/conceptual",
-          "h": "6653ceab58dd57b5c55b30a1e540d54237078bbad560567a45e49ae1df8f2147",
+          "h": "768fe50ce8b5e6ad5bda248ff8d65c4fe6361ecb4777b40a4dece50e54d118ba",
           "w": 40,
           "a": "2026-07-30T13:03:54.427Z"
         },
@@ -861,6 +889,20 @@
           "h": "ec3d49a11cb1e928e36337d1858d3c3499ff4766408b5c186b79e8bd310a3650",
           "w": 32,
           "a": "2026-07-29T12:45:34.302Z"
+        },
+        {
+          "k": "block",
+          "id": "docs/handboek/conceptual/night-shift.md",
+          "r": [
+            4990.1,
+            4292.6,
+            18.4,
+            21.4
+          ],
+          "p": "docs/handboek/conceptual",
+          "h": "c592cdd1c85d58b25dedf86077d179e2466efeb0fc702a411dac2df5f1a53056",
+          "w": 52,
+          "a": "2026-07-30T22:19:22.145Z"
         },
         {
           "k": "block",
@@ -1278,8 +1320,8 @@
             35.4
           ],
           "p": "docs",
-          "h": "3df745b766d7603a80a61531ffac8008c0f20d25d30aafd36f4708db821fd728",
-          "w": 373,
+          "h": "7885f9ee5f7ccf4943d35d506c30925bc303a2274cc22f90262be8adcd2b3bf7",
+          "w": 389,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -4708,8 +4750,8 @@
             57.3
           ],
           "p": "evals/src/craftbooks",
-          "h": "3e4a7961a891e5fd8822211583672b09bc00876d69752cfc549ac7dfcbc21dc1",
-          "w": 2169,
+          "h": "2429340bf0c8ab2d650fe2c906a522c5b40170087a7c077cb8f94aa1c6ccb1fd",
+          "w": 2175,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -7217,8 +7259,8 @@
             31.2
           ],
           "p": "packages/app/e2e-web/helpers",
-          "h": "e3bb701f3e3fa4612cc42f44f8de5e687cba9691f7be5b17cbb291a5f16debc3",
-          "w": 203,
+          "h": "b647057df84d7c7f078b1eff45f4b53eed757afac7c79002b707775d99bec197",
+          "w": 215,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -7259,8 +7301,8 @@
             31
           ],
           "p": "packages/app",
-          "h": "44b5d813875714a06ef790fc0ac3580d069ba69e1df4931621c4330506d542b0",
-          "w": 404,
+          "h": "6747da3d51dd3a38f2067c74fb756cb3285d65ce0f5792c8ee4daf90870680df",
+          "w": 442,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -7343,8 +7385,8 @@
             34.7
           ],
           "p": "packages/app/installer/macos-pkg-scripts",
-          "h": "76a9b8f17e7b72943a6d0116d0e52f57a5c738fbce6ec960bf64fb07ed583065",
-          "w": 245,
+          "h": "78948b5c25b77dde78b67185f527bb8246ad273ca098f733d2f5a45c58f2def3",
+          "w": 317,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -7371,8 +7413,8 @@
             23.7
           ],
           "p": "packages/app/installer",
-          "h": "4d1db2d53135e164010a2595be90c1dea465663458bab97a97988e1b43ad7fb3",
-          "w": 59,
+          "h": "bc4c29778258e2f5888cf913c4ecdab44958fb1cf56d2d369234bb815437bbfa",
+          "w": 65,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -8155,8 +8197,8 @@
             66.3
           ],
           "p": "packages/app/src",
-          "h": "1779435de69f88538edad5f6954ab301c9de50784a58f6030b2f59c67908944b",
-          "w": 1775,
+          "h": "9103e5b61f7b555d58e5352fce79099cf19a58a65030915e5ffbf61bc9950b7d",
+          "w": 1888,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -8183,7 +8225,7 @@
             19
           ],
           "p": "packages/app/src",
-          "h": "6688b2f8aa2dbc3cab0219a3ad63370db46e2b87b8ca62b796bc347938bdf5f7",
+          "h": "c1eda265c781886b01c81a3e036131e5a60a2e926dea699a027ffcbca3a4a781",
           "w": 60,
           "a": "2026-07-29T12:45:34.302Z"
         },
@@ -8211,8 +8253,8 @@
             27.1
           ],
           "p": "packages/app/src",
-          "h": "eb1aaa13bb94d1e02f371e4caa6fce01bb2b26dca08f3873d279f86da6a73b1a",
-          "w": 98,
+          "h": "2aa380541ddfaba1b6dbd2a9c4d5fc50b5d7810d58e2fd05f4ad31047cc57402",
+          "w": 111,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -8295,8 +8337,8 @@
             66.6
           ],
           "p": "packages/app/src/supervisor",
-          "h": "6d8b0fe0c835de6e3fb69796f6885fe020405a4684bdbb829a55901871ee5670",
-          "w": 1245,
+          "h": "62b67e9334039664ad32634a68ba89d23db36a54be8f1ce0180001eb47574e04",
+          "w": 1328,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -8413,6 +8455,20 @@
         },
         {
           "k": "block",
+          "id": "packages/app/src/updater/mac-pkg.ts",
+          "r": [
+            523,
+            396.9,
+            31.1,
+            32.1
+          ],
+          "p": "packages/app/src/updater",
+          "h": "1b4c03060c054b12d8bd95eff467f50c458946b30f68e40d5b3101f2c699d004",
+          "w": 218,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
           "id": "packages/app/tsup.config.ts",
           "r": [
             181.3,
@@ -8435,8 +8491,8 @@
             27
           ],
           "p": "packages/app/ux-screenshots",
-          "h": "1141d3b1473470328761f0df1af727d4b3950a43c3b46568b65aed3135b4e397",
-          "w": 5,
+          "h": "df1cbe4f63dd682315eae41170ec03064c06d3d452c7a3c2f6d820fb69134467",
+          "w": 64,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -8533,8 +8589,8 @@
             26
           ],
           "p": "packages/catalog/scripts",
-          "h": "2ee2aed94edc729df7cca90d07ca339998749af6480ac15a1060a5feb5e6c589",
-          "w": 141,
+          "h": "8618a3e1b7888561ee74e4d1e37e1c7544bcf7e6097b28387aaa2bc84e256deb",
+          "w": 146,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -9037,8 +9093,8 @@
             34.5
           ],
           "p": "packages/catalog/src",
-          "h": "607bc3a7f664824140283d3ae922e7ca6949dff3cc12ebea7b8ca7390ca67fe9",
-          "w": 495,
+          "h": "b0b8468cbf62772512dcce2982b35393a8287065ee72154528687d7df79ee107",
+          "w": 498,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -9219,8 +9275,8 @@
             51.2
           ],
           "p": "packages/catalog/src",
-          "h": "f4b82901da35f3fce37979e74ef9f560e58521eefa7adf58f702e7064ab1c907",
-          "w": 1091,
+          "h": "40d05e25502722fb95ca5611ebe997e5edfe0237e5ef7a37bd7e7355ada433e9",
+          "w": 1095,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -9541,8 +9597,8 @@
             68.1
           ],
           "p": "packages/client/src",
-          "h": "8b883ba06ca748e9ad6cc1b3a0ba05acfba1234b5d68b376e0a277ec21c8390d",
-          "w": 6129,
+          "h": "3a7c2f09f86b427f4e1c874d9e9c6684e02ef09bb696b5cc411664a2a6e238e2",
+          "w": 6186,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -10353,8 +10409,8 @@
             21.8
           ],
           "p": "packages/core/src",
-          "h": "4f971401f6c1c79d05a6a64b715906e21974aa0f7d06c76be49a002a9c73d2b6",
-          "w": 47,
+          "h": "4b1f322240210f36d6e4a0aa7ef9da3a588509950319c01f509c195fa7b7ce5b",
+          "w": 48,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -10521,8 +10577,8 @@
             31.9
           ],
           "p": "packages/core/src/native",
-          "h": "16b1a992a5a0fdf3232015e8a29e8fb6bc2d26b0c522a5a195dc6f4dc89180a3",
-          "w": 287,
+          "h": "6146aa722b3d1a09920067664e44007fd0cc826b6677aaf9b7c596088a497315",
+          "w": 297,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -10549,8 +10605,8 @@
             19.8
           ],
           "p": "packages/core/src/native",
-          "h": "0c977551a1743844ca9070ea669f8169ec45d032bbb786342b4515571e6761f8",
-          "w": 68,
+          "h": "c64ec3eb03d6fe5d06c38bc6c7949038e19e46a5768b2e507a3d40ba9c98a3ee",
+          "w": 69,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -10563,8 +10619,8 @@
             36.4
           ],
           "p": "packages/core/src/native",
-          "h": "0b3a414b52fec673f065bebc0b75ac1e20274b111d919251aab898732d681e06",
-          "w": 476,
+          "h": "1b0348c21e8f2a7b60e443ede561049a70ba017b1a996a03a6478df70dfa4848",
+          "w": 530,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -10737,6 +10793,20 @@
         },
         {
           "k": "block",
+          "id": "packages/core/src/project-properties.ts",
+          "r": [
+            2428.4,
+            1426.5,
+            26.5,
+            19.1
+          ],
+          "p": "packages/core/src",
+          "h": "48669c0e841d56d573b9bafe69857a5e14fe891bd9be48bbc0bd644d2a64e2bf",
+          "w": 65,
+          "a": "2026-07-30T21:48:21.401Z"
+        },
+        {
+          "k": "block",
           "id": "packages/core/src/project-types/taxonomy.ts",
           "r": [
             2291.9,
@@ -10815,8 +10885,8 @@
             64.2
           ],
           "p": "packages/core/src/schemas",
-          "h": "022ad729e15a3f1131c3c6f3a4ab19f00e80614cc3fe7137b583839bb96ac84b",
-          "w": 5973,
+          "h": "227d6091e24e53f917a77ac037e5d3297aa5360204216fdb728b4e0b9c6c41d7",
+          "w": 5998,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -10857,8 +10927,8 @@
             62
           ],
           "p": "packages/core/src/schemas",
-          "h": "2c2fa34ea994f944354dc10351fe1e69ade9f934a87aa117dba753c61acff1bb",
-          "w": 2134,
+          "h": "5944dedf118cfea79ae41cc1f5917021d799bfe262d39d78d3a87372eb7f18fe",
+          "w": 2187,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -10955,8 +11025,8 @@
             48.2
           ],
           "p": "packages/core/src/schemas",
-          "h": "18a421bca7ff4ca74f5d1de3351d657314696534a0d26e282da1d25590c00754",
-          "w": 1164,
+          "h": "6d6c664ddb52ee137ec11957b405338b82d78bbab8b52492c516e2ed5900062e",
+          "w": 1168,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -10997,8 +11067,8 @@
             32.8
           ],
           "p": "packages/core/src/schemas",
-          "h": "0d37b84d60fda192230181556c396dcf114fb1c1984a58e50547b42389ca2bcb",
-          "w": 286,
+          "h": "71c1634fbf7febb49ba8f35592986a6f11932379f2a2cf6e6f202ce662da1fa7",
+          "w": 296,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -11039,8 +11109,8 @@
             17.8
           ],
           "p": "packages/core/src/schemas",
-          "h": "cfff69c6a1acea6a7d58c948895fb88bbc18fcb526c432e1a3928d38ada8fa45",
-          "w": 38,
+          "h": "d9157221dedd361a68953ff357955bba5b12cb32a84dba51dd49373c641e6eea",
+          "w": 39,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -11165,8 +11235,8 @@
             43.2
           ],
           "p": "packages/core/src/schemas",
-          "h": "15576bdc1dc4a7aa63ada9de0983438dfbfd1ad42fdc17da389492b424fed4e4",
-          "w": 438,
+          "h": "c0e6077b0d6f5bb3d11486f689673cfb28ff3923ac08e038ad3459f1045708c4",
+          "w": 470,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -11179,8 +11249,8 @@
             30.7
           ],
           "p": "packages/core/src/schemas",
-          "h": "fa6660ae694dffd8c1e6b971031cbaaff95b5276304b4393a36216dfd5809347",
-          "w": 264,
+          "h": "e4a0f46c0d06b28fc89ca2a28a8951cd0eb44f79bc25ad640a23fd70941b95de",
+          "w": 275,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -11269,6 +11339,20 @@
         },
         {
           "k": "block",
+          "id": "packages/core/src/schemas/suggested-work.ts",
+          "r": [
+            1808.1,
+            1924.3,
+            25.2,
+            24.8
+          ],
+          "p": "packages/core/src/schemas",
+          "h": "d7e07bb05e2c589f032445923f972443cf439180934d166239e77974762e7b2b",
+          "w": 109,
+          "a": "2026-07-30T21:48:21.401Z"
+        },
+        {
+          "k": "block",
           "id": "packages/core/src/schemas/task.ts",
           "r": [
             1866.5,
@@ -11277,8 +11361,8 @@
             56
           ],
           "p": "packages/core/src/schemas",
-          "h": "fdf53a2421e19e64609df55cdd8adeacef46df92017ae86351b7f0519a2003cd",
-          "w": 755,
+          "h": "b7545497714bc755f63764acb3eb4d55e2befa255bd604a387f66a768a6ed862",
+          "w": 790,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -12061,8 +12145,8 @@
             54.6
           ],
           "p": "packages/mcp/src",
-          "h": "876b6c9f216e1c8d70699af0e7bee2077dbc937c4fada24b1a46c23c0c1f9d1d",
-          "w": 9719,
+          "h": "e969e540f50d602511fd6994ed473e96c96ed5e83e01a0efd57cd543ca1ea37d",
+          "w": 9857,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -12117,8 +12201,8 @@
             39.2
           ],
           "p": "packages/mcp/src",
-          "h": "fd2cec796574e00949f775094129211bcd6ff00ca870440100019e11e8044e0b",
-          "w": 351,
+          "h": "bc8b30e712ca0992d071ffede99e772146f43b4e99d8e247ba85a67df73204e1",
+          "w": 354,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -13685,8 +13769,8 @@
             40.8
           ],
           "p": "packages/service/src/digest",
-          "h": "55ed6f207146312a8430c7ea2c6faee29064f3f83d31b9aaa99ab6e6205cca49",
-          "w": 371,
+          "h": "41e3053d3257ee0df37febbd754e369ed6ed4e8bcab47940266cb7473d38c199",
+          "w": 398,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -14217,8 +14301,8 @@
             63.7
           ],
           "p": "packages/service/src/fs",
-          "h": "46dc32e72f1b741f16d292075a41cf5cab091a4541b50800e13b98348f48532d",
-          "w": 5912,
+          "h": "b1bd00bd78ef0608c520b192b78f3d23c3a4d12a9beb58992f8974476633805c",
+          "w": 5999,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -14234,6 +14318,20 @@
           "h": "69a102c1f386fe9f7456382baadeae9acf7cc53238db52e1e5d181519391d069",
           "w": 152,
           "a": "2026-07-29T12:45:34.302Z"
+        },
+        {
+          "k": "block",
+          "id": "packages/service/src/gezels/autonomous-roles.ts",
+          "r": [
+            1177.6,
+            1942,
+            28.6,
+            32.8
+          ],
+          "p": "packages/service/src/gezels",
+          "h": "788cfc54db535d39965a325b5ac678eccf54d3fba0ff00484a685f33ba8fca24",
+          "w": 190,
+          "a": "2026-07-30T21:01:22.327Z"
         },
         {
           "k": "block",
@@ -14696,8 +14794,8 @@
             36.2
           ],
           "p": "packages/service/src/handboek",
-          "h": "0fd9fc54f2c79430a97082cdcfcf7fede290d1f36671c9afad9e617acb4c07a6",
-          "w": 519,
+          "h": "13be8d0e5b6f74c16b87621cd684529b0a571896e2ccbfec9c1aba7a9e50cb43",
+          "w": 549,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -15088,8 +15186,8 @@
             55.5
           ],
           "p": "packages/service/src/http/routes",
-          "h": "9aae55569baf016b375283fe68a8af9bf07b4286333af07e622ecae96b29d782",
-          "w": 720,
+          "h": "afafdec62ee8738852fbcec4ea7c9c100e892e955652ff747cdd6bfd2e516fdf",
+          "w": 797,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -15228,8 +15326,8 @@
             36.9
           ],
           "p": "packages/service/src/http/routes",
-          "h": "eface34bc3c6fbf79c4eb8d0412c8bb8eddebf39630a6d55b7572c6132c42941",
-          "w": 355,
+          "h": "bce9bbd656879ddfce84ce693741b2f33910eb42d58868dea970aeedd53d9ca5",
+          "w": 370,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -15298,8 +15396,8 @@
             23.9
           ],
           "p": "packages/service/src/http/routes",
-          "h": "65b86abedf18360018e7e67af961326ebe232734d6ac7cb208e3df39ba7c7aff",
-          "w": 128,
+          "h": "3975074c45cdcecbb72506f2f40fd2097a27b3cb99176870186e31df8c7bbfd3",
+          "w": 131,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -15620,8 +15718,8 @@
             57.3
           ],
           "p": "packages/service/src/http/routes",
-          "h": "e935c598cf9dc4e63783be269622d971a61caac2ca9ab002201cc63c7d81cc58",
-          "w": 2048,
+          "h": "ac2ced80aa08e3a03c12554570e11035d225b7f3c13c77963cc489eabb754751",
+          "w": 2069,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -15766,6 +15864,20 @@
         },
         {
           "k": "block",
+          "id": "packages/service/src/http/routes/suggested-work.ts",
+          "r": [
+            875.9,
+            2046.4,
+            27.9,
+            21.1
+          ],
+          "p": "packages/service/src/http/routes",
+          "h": "29d92422fa2c1631823f1ae7a3ca840ef7ac5d0313204a888d0b4e89b05506cc",
+          "w": 92,
+          "a": "2026-07-30T21:48:21.401Z"
+        },
+        {
+          "k": "block",
           "id": "packages/service/src/http/routes/system-toolsets.ts",
           "r": [
             857,
@@ -15788,8 +15900,8 @@
             37.9
           ],
           "p": "packages/service/src/http/routes",
-          "h": "19a06c32982cb192b666e66f4e5d40516d81b4a938c8029f5e4b02a5d6e524bc",
-          "w": 457,
+          "h": "e2461713cb46c81b3215379b615ad80a63422a75878258e44cc41b6290049731",
+          "w": 454,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -16026,9 +16138,23 @@
             39.3
           ],
           "p": "packages/service/src/http",
-          "h": "bcd1fff56f8a5b5b96525f2c1c81c5b3b0f98c958ba4536f0189cc612e4a290a",
-          "w": 695,
+          "h": "5062612990739d9ca7565969e06358e85643aa2c2dde1a1c3cfc90ace9c83d40",
+          "w": 708,
           "a": "2026-07-29T12:45:34.302Z"
+        },
+        {
+          "k": "block",
+          "id": "packages/service/src/http/static-ui.ts",
+          "r": [
+            1055.9,
+            1788.4,
+            14.9,
+            21.6
+          ],
+          "p": "packages/service/src/http",
+          "h": "7eb1563796786909ead308e8bc152ce41145bd0df5653ee99194c101a33c6887",
+          "w": 26,
+          "a": "2026-07-30T23:21:21.365Z"
         },
         {
           "k": "block",
@@ -16110,8 +16236,8 @@
             66
           ],
           "p": "packages/service/src/index-store",
-          "h": "7b20397d1b07b8afe6dd38855d805d78aed67466614624ccdfc7a10bcc45965f",
-          "w": 1725,
+          "h": "b0e5a9a219aaae81984f6796d6ac7cf5a5f38ae651ff97e050f3e4ecce4efd52",
+          "w": 1726,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -16166,8 +16292,8 @@
             32.4
           ],
           "p": "packages/service/src/index-store",
-          "h": "fb3d7348e5189f31f9abd316a39fe32494911e7798cf7711977dd4c595a7ceb6",
-          "w": 390,
+          "h": "b0a3cb2b54439d2dd62c94afb7a93546be17777fce63d536aa1e029c9ef6af83",
+          "w": 434,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -16180,8 +16306,8 @@
             33.1
           ],
           "p": "packages/service/src/index-store",
-          "h": "e06e5e215daaf1cad71f4736e0226f467abcdb502f355079f1d5fd290fc9f9ec",
-          "w": 231,
+          "h": "6fc369d5f962351ee9aabed1eee0fe5d66354a044f863247b29015d8c94cdbe7",
+          "w": 253,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -16334,8 +16460,8 @@
             24.8
           ],
           "p": "packages/service/src/index-store",
-          "h": "1e6bc684dcccaab578c0f02caf62145aa20681fa53694dfc59011025c05cf9be",
-          "w": 96,
+          "h": "bfe2acbc9174f504c7ab95f657f898e0c0c2b6a08c12df63d9a24da24b7b02a1",
+          "w": 137,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -17664,8 +17790,8 @@
             31.9
           ],
           "p": "packages/service/src/packages",
-          "h": "d5a0267168cd313e2b62ab5a056f2cdbb7aa8f43e5bc658a89b8525aa45e95e5",
-          "w": 147,
+          "h": "cd2a05be2e566098c2de198466895605fb85f0858d0d5c047f6d087310cae8ee",
+          "w": 170,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -17692,8 +17818,8 @@
             31.3
           ],
           "p": "packages/service/src/page-check",
-          "h": "0c7050f2c93093bcf999df94ed8d66f48a9517dde857f953c650e2c08c56d0c1",
-          "w": 241,
+          "h": "d5016e29f91f763b60ed96903eca6aaf5f538f4d01dd18cefb37ea9fabacea41",
+          "w": 243,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -17734,8 +17860,8 @@
             40.2
           ],
           "p": "packages/service/src/project-type",
-          "h": "86137a66187d490d89de654e500b1be28754893d16f23db492ae3e2a8a7f2e0f",
-          "w": 673,
+          "h": "c49859c966d9ab127d7a91cb4baec9412470dd484efba424f14963f9c15053ae",
+          "w": 683,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -20226,8 +20352,8 @@
             45.2
           ],
           "p": "packages/service/src/sandbox",
-          "h": "1707f6d9a16f6d0ef52e5a710b01fded616a2caae636683c41897e31f0bac8fd",
-          "w": 737,
+          "h": "c9746ec3e56531467b4b7d34191336b023d5afc7124319a75d4f94e4f852c76d",
+          "w": 745,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -20408,8 +20534,8 @@
             46
           ],
           "p": "packages/service/src/search",
-          "h": "9a4af3b1029767db778994077c58143e3af6f4ec0b48edb4c48dbbdb3dd9e239",
-          "w": 538,
+          "h": "0b71010b69721eebb5febf982ecee48abb8ebd2aaa4af2db2815a866f3eee578",
+          "w": 545,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -20576,8 +20702,8 @@
             66.9
           ],
           "p": "packages/service/src",
-          "h": "e068650c971308d8fa67e40033cc0cea86af3cb46dbeec701d3c072e3d5e600c",
-          "w": 2150,
+          "h": "d836c5f2e2a39b268fb8f7ab8ab53ff2bf69ff256749819984d26084f84fa5e4",
+          "w": 2156,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -20624,6 +20750,34 @@
         },
         {
           "k": "block",
+          "id": "packages/service/src/suggested-work/enable.ts",
+          "r": [
+            918.9,
+            2122.8,
+            40.3,
+            28.4
+          ],
+          "p": "packages/service/src/suggested-work",
+          "h": "9ed5d71ed5b00782cc92b39e1bd692a88ebc4631bba34077d8a5929036d6c311",
+          "w": 251,
+          "a": "2026-07-30T21:48:21.401Z"
+        },
+        {
+          "k": "block",
+          "id": "packages/service/src/suggested-work/resolve.ts",
+          "r": [
+            918.9,
+            2155.2,
+            32.9,
+            38.5
+          ],
+          "p": "packages/service/src/suggested-work",
+          "h": "65eb08b7e300a7f0186f4276b8e1eddc27706edc24f70ab471de8e5cea61b6f7",
+          "w": 313,
+          "a": "2026-07-30T21:48:21.401Z"
+        },
+        {
+          "k": "block",
           "id": "packages/service/src/system-toolsets/bootstrap.ts",
           "r": [
             673.7,
@@ -20632,8 +20786,8 @@
             36.1
           ],
           "p": "packages/service/src/system-toolsets",
-          "h": "d51f8818bb9e29bd3f9cb39a7b8ff8135b1599b6159baf259d1720f69eaf3ce6",
-          "w": 558,
+          "h": "8ec5988029c22c976c753ed5aa5aa0e75898ac898cda3427c00a0b83f75ee75a",
+          "w": 550,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -20674,8 +20828,8 @@
             27.8
           ],
           "p": "packages/service/src/system-toolsets",
-          "h": "60d3d0683a7b3577e2b15bf9cdeb553e74cf014be000101215e95a1687ed6a8d",
-          "w": 122,
+          "h": "02a15a6f33dd802350214d57bb009d0c6c6d9f5cdd564b7fc81fb2a35cf0983f",
+          "w": 119,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -20856,8 +21010,8 @@
             65
           ],
           "p": "packages/service/src/tasks",
-          "h": "b084d2feb87e2983821df941f0b0c298f0f742c3afd9da23572b9e75f5d19443",
-          "w": 3232,
+          "h": "f80c7eebf7c870a8dcccc4353795fd75bd494ad0e14484ee58423d1fe8aaa7f6",
+          "w": 3295,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -20870,8 +21024,8 @@
             36
           ],
           "p": "packages/service/src/tasks",
-          "h": "f0aef73d551f5724f0a85acc9e1282ec26bcd0f815abad7b9c6d3fb67d038f0f",
-          "w": 271,
+          "h": "95d3c0fd83957277e70b92b3152bfa3830ec38aec1fd9a7ccf298c1bdf304c55",
+          "w": 281,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -20904,6 +21058,20 @@
         },
         {
           "k": "block",
+          "id": "packages/service/src/tasks/schedule-host.ts",
+          "r": [
+            799.6,
+            3065.3,
+            22.9,
+            21.3
+          ],
+          "p": "packages/service/src/tasks",
+          "h": "02839be8839776ca11ad805f610e41be83781fa950d3b180614bd3ee5de3f3d3",
+          "w": 66,
+          "a": "2026-07-30T21:48:21.401Z"
+        },
+        {
+          "k": "block",
           "id": "packages/service/src/tasks/scheduler.ts",
           "r": [
             720.5,
@@ -20912,8 +21080,8 @@
             66
           ],
           "p": "packages/service/src/tasks",
-          "h": "8c42354d7a1d1ffcaaf4a3ec23eeffd054b0241219a768a4ddf058d17cd16be9",
-          "w": 1021,
+          "h": "3194b79f38853e8062c0875e7f0ca236d08d620e2c0d0a1e4ac28f2b14853ee0",
+          "w": 1044,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -21178,8 +21346,8 @@
             36.5
           ],
           "p": "packages/service/src/workspace",
-          "h": "33892fdc64090ecb22e903119cc10e4e617b8fcf8c2c308207f50e04f3318715",
-          "w": 225,
+          "h": "81fcb599fa6e4e1fcd84e91a7b69c6da1dbbbf65e4b382112e4c950b553560fe",
+          "w": 229,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -21248,8 +21416,8 @@
             40.7
           ],
           "p": "packages/service/src/workspace",
-          "h": "b595be8d428846a0ec44aacd6f21db5b479915c6e9676c317d35cf508c175f01",
-          "w": 635,
+          "h": "61b416651540de04a8d16ef168282d2668a184f88d445a780c91382a832145b4",
+          "w": 663,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -21430,8 +21598,8 @@
             21.2
           ],
           "p": "packages/service",
-          "h": "84300efdf72f6b4a120389aaf0981beebfde20498151b7b2b64b5178e83d24a2",
-          "w": 129,
+          "h": "bcca630a81ae8f13bfb57b2c27b28a30d4aa394216b53cde0da27bf6e7b29c2e",
+          "w": 131,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -21598,8 +21766,8 @@
             46.6
           ],
           "p": "packages/ui/src",
-          "h": "05e3684cd04ffb470a089ff61091be760d96f3454fa40826d131e8883a966aa4",
-          "w": 1099,
+          "h": "3707c371cdbc276e0b6d90de7e964cb2f50eb6ad5fe70c8c8986cc86ef0855ab",
+          "w": 1101,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -21612,8 +21780,8 @@
             26.6
           ],
           "p": "packages/ui/src",
-          "h": "c2978753c5caf09b04b023e68199d7261f1db1c5c132a3b809006f950214ce80",
-          "w": 206,
+          "h": "85d84feb49ab4c0e3ba7c637b8ce4e9ac74892a6e53fdf6173c38a93548ebc4e",
+          "w": 235,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -21990,8 +22158,8 @@
             26.4
           ],
           "p": "packages/ui/src/components",
-          "h": "340a30fd6d1ac877a8700cd82c0280203c7b8022a8fa400396fa0be6c493b5d3",
-          "w": 73,
+          "h": "650ee0f89959b1a1a56f0283bcf3638a23dce523273ad7a76c8f13ec5fd04ebf",
+          "w": 124,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -22130,8 +22298,8 @@
             45
           ],
           "p": "packages/ui/src/components",
-          "h": "0bc6653c8e0ace523333219f1d4e1c3bb4de4c98bd2f5206e993b1e53a6ba22d",
-          "w": 738,
+          "h": "331b2c44a4e279734530558a964efe591b8c7810dcf12e7e4b14ea681e7a9536",
+          "w": 745,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -22158,7 +22326,7 @@
             29.4
           ],
           "p": "packages/ui/src/components",
-          "h": "85ebd09c757460b03c0ac3499d1d5ca39ca81cb6d92fa822bda3ba745d3e3297",
+          "h": "3759723627d80d5fa917b0f681ce84cf1a7dfc45f8c9077b479110c8a8baa800",
           "w": 525,
           "a": "2026-07-29T12:45:34.302Z"
         },
@@ -22958,7 +23126,7 @@
             39.1
           ],
           "p": "packages/ui/src/components",
-          "h": "d98e232e82df286201fee61d4ca6c3b5f85682384ba8f67981b47836a21242ad",
+          "h": "542073cd5246d6aafc451260a3a46a2dffce3ce1cd7c3440a68adb311fba9417",
           "w": 642,
           "a": "2026-07-29T12:45:34.302Z"
         },
@@ -23168,7 +23336,7 @@
             26.1
           ],
           "p": "packages/ui/src/components",
-          "h": "587dc80057d862cd03ceb8123a3e2a974dd5647931c04c26428d0a096ed68e3a",
+          "h": "33859b87421759f0eea7faef9a3fa1764ba812c1138f26b8a8f5829e5dfbb139",
           "w": 234,
           "a": "2026-07-29T12:45:34.302Z"
         },
@@ -23266,7 +23434,7 @@
             26.8
           ],
           "p": "packages/ui/src/components",
-          "h": "ebb9fce1ab36f4660c0df8bd76d8ac6e8a3ed8b723fcb1961402987fc998d53e",
+          "h": "632154c9b1718711ff9d137c8d616cbf4eb36815fcfaba8661cf483b30c3fb96",
           "w": 254,
           "a": "2026-07-29T12:45:34.302Z"
         },
@@ -23406,7 +23574,7 @@
             34.4
           ],
           "p": "packages/ui/src/components",
-          "h": "a45fcd300c1636df10fd51d08f3bf47814ec732dfd38858823638c87ad684c58",
+          "h": "f888937cbea91f419aedd32f082548579a3e53306fd372682c8322aa3b575e18",
           "w": 376,
           "a": "2026-07-29T12:45:34.302Z"
         },
@@ -23476,8 +23644,8 @@
             48.1
           ],
           "p": "packages/ui/src/components",
-          "h": "a2f634dd1c9d2310ce0f65a312ed3ef8cb1c47077c9558c847bac60364c768dd",
-          "w": 983,
+          "h": "b611ac31f8dd26807c23a1fc8f8df645ea008881cb0bccce76c48d44d6e79a48",
+          "w": 995,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -23496,6 +23664,20 @@
         },
         {
           "k": "block",
+          "id": "packages/ui/src/components/ProjectAddGezelDialog.tsx",
+          "r": [
+            1856.1,
+            3087.8,
+            45.6,
+            33.8
+          ],
+          "p": "packages/ui/src/components",
+          "h": "08698577085fe6dd734403761c4b75007b263cab53049599f47d7f81535e792d",
+          "w": 423,
+          "a": "2026-07-30T21:48:21.401Z"
+        },
+        {
+          "k": "block",
           "id": "packages/ui/src/components/ProjectChat.tsx",
           "r": [
             1797.8,
@@ -23504,8 +23686,8 @@
             41.3
           ],
           "p": "packages/ui/src/components",
-          "h": "246999020ecb9c3063d48468ea680869c44dc10a5768c1bcb05749c6385dd4e1",
-          "w": 452,
+          "h": "698938c753e1964586ba7ff4006b55878575d6c480ee094f9e03626b735d75ed",
+          "w": 454,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -23532,8 +23714,8 @@
             21.7
           ],
           "p": "packages/ui/src/components",
-          "h": "fed1634c719879219279626d55c2e252d4da50008b6631014f7decc3292fa8d0",
-          "w": 92,
+          "h": "5dffe26099b5cbcc6d06085a72b03a7437c33c3bd850015c3e19413257c75080",
+          "w": 210,
           "a": "2026-07-30T15:38:31.974Z"
         },
         {
@@ -23546,8 +23728,8 @@
             56.9
           ],
           "p": "packages/ui/src/components",
-          "h": "2361f4b530209f7f7a7a297bb311255bd44e0cd537ece4b1bf88103c3c4a3703",
-          "w": 792,
+          "h": "3ce0123827b43886c157ed5e626c7088d143a6560b1634033ef35ff783960eed",
+          "w": 805,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -23577,6 +23759,20 @@
           "h": "9f88bd46cdd92d0c529c629d189123c24702e62c64ec9c01c1bc6e5e41574ca4",
           "w": 853,
           "a": "2026-07-29T12:45:34.302Z"
+        },
+        {
+          "k": "block",
+          "id": "packages/ui/src/components/ProjectPropertiesEditor.tsx",
+          "r": [
+            1903.8,
+            3095.9,
+            21.1,
+            25.8
+          ],
+          "p": "packages/ui/src/components",
+          "h": "ad3f8c9f4d8674b33e4c4f1ec46093e4e17b2b98fa31c3662dee95a4f61b2d13",
+          "w": 86,
+          "a": "2026-07-30T21:48:21.401Z"
         },
         {
           "k": "block",
@@ -23840,9 +24036,23 @@
             47.5
           ],
           "p": "packages/ui/src/components",
-          "h": "e4ed9041aa65a643113782f73c4a264b5a473594cc78476459fa7c94e86cf40a",
+          "h": "ae2a4f7a937a74c2ac8f821d390fe10f768635f587865ff7a0f24d8a2118b64a",
           "w": 406,
           "a": "2026-07-29T12:45:34.302Z"
+        },
+        {
+          "k": "block",
+          "id": "packages/ui/src/components/SuggestedNightWork.tsx",
+          "r": [
+            2317.9,
+            2533,
+            36.1,
+            39
+          ],
+          "p": "packages/ui/src/components",
+          "h": "402557027a47d963c0f599094c9ff31ed1c630d35d8659ce8e6e732b8bbf7e72",
+          "w": 360,
+          "a": "2026-07-30T21:48:21.401Z"
         },
         {
           "k": "block",
@@ -23910,7 +24120,7 @@
             25.9
           ],
           "p": "packages/ui/src/components",
-          "h": "9ba08a93cb6ec7c867c794573b42b84df86b1f151cbc1eaa20c131549b7d03be",
+          "h": "30dfe7a2e7c0db0c515095957e8e267640a145f0a6efe4e37a529333bc9228dc",
           "w": 199,
           "a": "2026-07-29T12:45:34.302Z"
         },
@@ -23938,8 +24148,8 @@
             36.8
           ],
           "p": "packages/ui/src/components",
-          "h": "f7693b6e532485819acbbd871b46005abce9422d27e211e36a2caa3097a009b4",
-          "w": 316,
+          "h": "2f042c19f101fafe6cc712f5a3d8993540869e3a49c42235ea5cddfbcfb39f6c",
+          "w": 334,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -24120,8 +24330,8 @@
             23.2
           ],
           "p": "packages/ui/src/components",
-          "h": "7d31d9c8955b98307d0511bc63e601abc1e8323a8de99bee99d647e4b5acf301",
-          "w": 151,
+          "h": "e18d8d8f64d65b696fb67b297346373f804e05d2c517d383703d209e2682ebeb",
+          "w": 161,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -24736,7 +24946,7 @@
             21.3
           ],
           "p": "packages/ui/src/components",
-          "h": "54b4a60366d23cef29645f80c3b92d40b3555e1ec143fbad8732189b7c27a1a3",
+          "h": "576633e41b10a38cb3138eabf97ffd3df21147519c8e8e0ecce41a32a98f0147",
           "w": 106,
           "a": "2026-07-29T12:45:34.302Z"
         },
@@ -24876,7 +25086,7 @@
             24.6
           ],
           "p": "packages/ui/src/components",
-          "h": "1e9dcf99ffeedd352e81cf3443a26d15d6e5a3516cd8d9ff5bf0b25b0d3a3fee",
+          "h": "321e520b186a93c766a5ea376b86edfce9c0252fc1dbcae35992d2f6bc07d94b",
           "w": 86,
           "a": "2026-07-29T12:45:34.302Z"
         },
@@ -25170,8 +25380,8 @@
             14.7
           ],
           "p": "packages/ui/src",
-          "h": "dbc5c0ec385423003b9b21210c5e207f32f7310403a25ae06a19427b0e20a8bf",
-          "w": 15,
+          "h": "f6dfe1a6c09d18c852eb942dfb3085202182f166d43d236fdca57696b4309ec1",
+          "w": 17,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -25422,7 +25632,7 @@
             20.1
           ],
           "p": "packages/ui/src",
-          "h": "bbf9c95fd4c925495218d50a81cff73310263ce60eb3827f6c6245bb3d8bd49e",
+          "h": "b6ad4af3e7751694b66bdab3ba77ddf44d88cdfa0ca21d01e3938a4e95abdf4a",
           "w": 38,
           "a": "2026-07-29T12:45:34.302Z"
         },
@@ -25481,6 +25691,20 @@
           "h": "055d5d157de81cd3e0ee6e369e8354f5b85d458b7205e2cf62286692b56600d0",
           "w": 24,
           "a": "2026-07-29T12:45:34.302Z"
+        },
+        {
+          "k": "block",
+          "id": "packages/ui/src/stale-bundle-recovery.ts",
+          "r": [
+            2611.6,
+            2533.5,
+            23.7,
+            20.9
+          ],
+          "p": "packages/ui/src",
+          "h": "99e88a03cedd39f5fe8aa307b5563938b53ac286fc302186e648cabe571e34cb",
+          "w": 62,
+          "a": "2026-07-30T23:21:21.365Z"
         },
         {
           "k": "block",
@@ -25675,7 +25899,7 @@
             40.7
           ],
           "p": "packages/ui/src/views",
-          "h": "84a630e49878add979832d6c6c82b56552475f452c38239ffc81e45ec837def9",
+          "h": "15937a33ca688d314da83bf158c016d7afc4ddba8c9bbd2707501261ddea8c41",
           "w": 435,
           "a": "2026-07-29T12:45:34.302Z"
         },
@@ -25731,8 +25955,8 @@
             37.6
           ],
           "p": "packages/ui/src/views",
-          "h": "19a430a6dba86b4a5a3f9b74c3248b845cb11015aa2198a382054424748f7032",
-          "w": 374,
+          "h": "1cc4b46a27b900d1bc58d36cc6e9f5fb13c3398f5784086b4098d913abf1038d",
+          "w": 379,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -25745,8 +25969,8 @@
             53.4
           ],
           "p": "packages/ui/src/views",
-          "h": "082ac581803ebe389ccadaf491af44dd18498785752586b5d74d30eedb379218",
-          "w": 729,
+          "h": "aa1ad62d5fdcba0867de495426c5475eb3c42dcba922013a5ec1e064974af7c5",
+          "w": 900,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -25843,8 +26067,8 @@
             28
           ],
           "p": "packages/ui/src/views",
-          "h": "888cfe9457a87647614bbc0595f07730b1cd643a529f572358aac85e65b8db13",
-          "w": 256,
+          "h": "f83db4cde9c5cd6ed6cc27f8b62314b54863444ba6f8235f4011cee825ad09fb",
+          "w": 263,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -25857,8 +26081,8 @@
             58.8
           ],
           "p": "packages/ui/src/views",
-          "h": "0d9f49a9112c18f1b87d4a8243cf35841d982cdc43fd83983367477f4342b9ea",
-          "w": 2770,
+          "h": "fd48b7b8945491432e3087668cfca3b942af189f7175240310a55a6a64b71901",
+          "w": 2889,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -25899,7 +26123,7 @@
             26
           ],
           "p": "packages/ui/src/views",
-          "h": "2654dfe24dbb19a177f1443dd9c58a01093af3fd528f9d0ac509eb36aeaab8da",
+          "h": "f8a35ecd6a5aa17ffe0978944df86018bd9c6611f7c90ac91e2d08793da8761a",
           "w": 190,
           "a": "2026-07-29T12:45:34.302Z"
         },
@@ -25913,8 +26137,8 @@
             67.2
           ],
           "p": "packages/ui/src/views",
-          "h": "c9e8862283d3afa526d88759a831e8d9b0b63d2023d920e02f5dc5a608d42928",
-          "w": 3771,
+          "h": "3c2dea6fbed34a33a26a767fe76d15a3aabba59b87db80fdeacaeaafb4604b37",
+          "w": 3917,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -25927,8 +26151,8 @@
             42.7
           ],
           "p": "packages/ui/src/views",
-          "h": "dcb095c5f1ee547915b1fa3fd55be27d7da1aa7384b891801daa8f8afc633cca",
-          "w": 907,
+          "h": "9b983551dc0c5cf05adcda56d96e06f0eaeab151c6f0373085cc5e6ddc6e8c64",
+          "w": 937,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -25955,8 +26179,8 @@
             33.3
           ],
           "p": "packages/ui/src/views",
-          "h": "09f0a89fefea04477c4a643f72f6647e7b53a33657329b86b97822399cf99f17",
-          "w": 490,
+          "h": "1e581c5394167a0c02c4346d80422c3817b8b9f12cfe0ac34cbda258fb4b9455",
+          "w": 499,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -26025,8 +26249,8 @@
             35
           ],
           "p": "packages/ui/src/views/home",
-          "h": "c1a745cacf255f5ff9378e1fbe63820e551db83565cda67d6d914f7519830225",
-          "w": 230,
+          "h": "e11898e2e6a2a2de249f3c1c4a7b8d0d3ada61eb3a43a837e548c72be9274c96",
+          "w": 240,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -26151,7 +26375,7 @@
             52
           ],
           "p": "packages/ui/src/views/projects",
-          "h": "117499d6f8b04ce172b750d5319e8a838804b15f6051c510ab269dc1992529e5",
+          "h": "98a969ce1521f5fcc8432a121faa849b47d8454aa1eec18204511936abb465ef",
           "w": 1233,
           "a": "2026-07-29T12:45:34.302Z"
         },
@@ -26528,8 +26752,8 @@
             21.8,
             21.7
           ],
-          "h": "d3a9abee3682ddc910f99cc01704780888b91642316e060fe2f2d26d73bf189c",
-          "w": 81,
+          "h": "71cf1b0cfd24b54437b84b11914bc4918688ae900a44ad51384c2e38839f72c6",
+          "w": 82,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -26587,6 +26811,20 @@
           "h": "40b8a2a6be2c1e587ec2b0488d2687f633a53a167bf516aba9ca20cf059b6b43",
           "w": 149,
           "a": "2026-07-30T16:39:30.883Z"
+        },
+        {
+          "k": "block",
+          "id": "reports/ux-review-report-20260730-1011.md",
+          "r": [
+            5152.1,
+            4845.7,
+            23.9,
+            31.9
+          ],
+          "p": "reports",
+          "h": "ced8a06f03bbdeb16550d537b5f7bc80dbc97c28f04695fa782dcd6469f4903c",
+          "w": 129,
+          "a": "2026-07-30T21:01:22.327Z"
         },
         {
           "k": "block",
@@ -26654,7 +26892,7 @@
             26.5
           ],
           "p": "scripts",
-          "h": "e8cd8868bb55d64cbe1c09f0ccbcb93bcdf6b1d642354ec8d5baf5a504a0557c",
+          "h": "e722d39bbf56c7f3256053cbdbcc2557ba07a248d3021681ccc5484f0d1b762f",
           "w": 97,
           "a": "2026-07-29T12:45:34.302Z"
         },
@@ -26696,7 +26934,7 @@
             21.8
           ],
           "p": "scripts",
-          "h": "6a0d803b9ff89dbb5f9b22bae5ea24781f3a4fc9edcfbbb261d29d5d87967e01",
+          "h": "678335880315200ec2ee4cea27d7fc646daa20f2887203ef563989bec2e58b59",
           "w": 71,
           "a": "2026-07-29T12:45:34.302Z"
         },
@@ -27287,6 +27525,20 @@
           "h": "b62b0e49b41ef38794f90d3654fcc4ce82080c1911d392c9b54854c3287ae414",
           "w": 86,
           "a": "2026-07-29T18:50:41.070Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/SHIP-REPORT-v1.26211.23.md",
+          "r": [
+            3803.2,
+            -9.1,
+            47.1,
+            42.8
+          ],
+          "p": "ship-audit",
+          "h": "e4d871744a6deb64bdaa7591de965e22fed698b78004a6d15df9696f52747418",
+          "w": 599,
+          "a": "2026-07-30T21:01:22.327Z"
         },
         {
           "k": "block",
@@ -27959,6 +28211,62 @@
           "h": "4ed720044a49dc4190ccfde1ceb786cc2bc38a799ebd1b32c8cea2778fc5a3be",
           "w": 4,
           "a": "2026-07-30T16:39:30.883Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/logs/windows-installed-fallback-retry.stderr.log",
+          "r": [
+            3898,
+            127.4,
+            23.4,
+            26.2
+          ],
+          "p": "ship-audit/logs",
+          "h": "4a429584b1b59f1462b5865c15a264dcba4baced57c633289a3719683da60c37",
+          "w": 98,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/logs/windows-installed-fallback-retry.stdout.log",
+          "r": [
+            84.6,
+            483.9,
+            14.1,
+            19.3
+          ],
+          "p": "ship-audit/logs",
+          "h": "795f4240ca2fd16c53890413e18d8a592b5b766d4f99596ed8c3506763649ccf",
+          "w": 17,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/logs/windows-installed-fallback.stderr.log",
+          "r": [
+            100.8,
+            487.4,
+            11.8,
+            15.7
+          ],
+          "p": "ship-audit/logs",
+          "h": "4903ff2a4cd3ae3f6cba9e4f1cfcbab6885b4c4740443df4b03869bef69c63fe",
+          "w": 4,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/logs/windows-installed-fallback.stdout.log",
+          "r": [
+            114.5,
+            490.1,
+            17.3,
+            13
+          ],
+          "p": "ship-audit/logs",
+          "h": "7bee8399802c243645f7907971d608893049c5f5f63f47eac1149f3efdbb6a4f",
+          "w": 10,
+          "a": "2026-07-30T21:01:22.327Z"
         },
         {
           "k": "block",
@@ -37927,6 +38235,20 @@
           "h": "76a9b8f17e7b72943a6d0116d0e52f57a5c738fbce6ec960bf64fb07ed583065",
           "w": 245,
           "a": "2026-07-30T16:39:30.883Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/node-v24.18.1-LICENSE",
+          "r": [
+            3980.5,
+            15,
+            55.9,
+            67.8
+          ],
+          "p": "ship-audit",
+          "h": "148eacf7863ef4329224a29398623077200a27194aa075569faf4a0a85566ca5",
+          "w": 2947,
+          "a": "2026-07-30T21:01:22.327Z"
         },
         {
           "k": "block",
@@ -61807,6 +62129,20 @@
         },
         {
           "k": "block",
+          "id": "ship-audit/test-installed-windows-fallback.mjs",
+          "r": [
+            4011.1,
+            87.1,
+            25.3,
+            22.9
+          ],
+          "p": "ship-audit",
+          "h": "6e9cb9ab9c61ce1d0b3b04af89fd5c64e464f4c44864af949a2d8b2957af7cb4",
+          "w": 84,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
           "id": "ship-audit/windows-app-extracted/LICENSE.electron.txt",
           "r": [
             -5923.4,
@@ -69143,6 +69479,1224 @@
         },
         {
           "k": "block",
+          "id": "ship-audit/windows-installed-fallback-home/bin/node.version",
+          "r": [
+            -5945.2,
+            -4567.9,
+            12.6,
+            13.1
+          ],
+          "p": "ship-audit/windows-installed-fallback-home/bin",
+          "h": "55075b5ec4e8b31936cbbc282b8829116d1fd48f2f2f1856dee592a6650700ce",
+          "w": 2,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-home/bin/pnpm-runtime/CHANGELOG.md",
+          "r": [
+            -5941.2,
+            -4535.8,
+            65.9,
+            49.5
+          ],
+          "p": "ship-audit/windows-installed-fallback-home/bin/pnpm-runtime",
+          "h": "33852b08dff749c6fe40bcca333e239a1e5cb16f4ee48c5159f864cf1a9c490d",
+          "w": 1257,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-home/bin/pnpm-runtime/LICENSE",
+          "r": [
+            -5873.3,
+            -4503.4,
+            17.5,
+            17.1
+          ],
+          "p": "ship-audit/windows-installed-fallback-home/bin/pnpm-runtime",
+          "h": "e0a867ff513ea7be2a0ddc339ac6a031e459a38668e077b8f0e649544062f9f2",
+          "w": 23,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-home/bin/pnpm-runtime/LICENSE.txt",
+          "r": [
+            -5941.2,
+            -4464,
+            18,
+            17.8
+          ],
+          "p": "ship-audit/windows-installed-fallback-home/bin/pnpm-runtime",
+          "h": "e0a867ff513ea7be2a0ddc339ac6a031e459a38668e077b8f0e649544062f9f2",
+          "w": 23,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-home/bin/pnpm-runtime/README.md",
+          "r": [
+            -5921.2,
+            -4482.2,
+            31.5,
+            36
+          ],
+          "p": "ship-audit/windows-installed-fallback-home/bin/pnpm-runtime",
+          "h": "c238fbf53b51aa9ccd10bb68f8501f5f72e0f1a433165b939645523a9b0128b0",
+          "w": 273,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-home/bin/pnpm-runtime/bin/pnpm.cjs",
+          "r": [
+            -5847.8,
+            -4510.4,
+            15.1,
+            11.9
+          ],
+          "p": "ship-audit/windows-installed-fallback-home/bin/pnpm-runtime/bin",
+          "h": "67b035e322203961795e8e34ca63a08c37a4386eda94107fb3d28f3246d882ad",
+          "w": 4,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-home/bin/pnpm-runtime/bin/pnpm.mjs",
+          "r": [
+            -5830.7,
+            -4520.8,
+            17.4,
+            22.2
+          ],
+          "p": "ship-audit/windows-installed-fallback-home/bin/pnpm-runtime/bin",
+          "h": "ff3224d46b47fbb24a7e9fe15fededef7e00892d07d4e376b6762d4899906bfd",
+          "w": 37,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-home/bin/pnpm-runtime/bin/pnpx.cjs",
+          "r": [
+            -5847.8,
+            -4494.5,
+            15,
+            13.4
+          ],
+          "p": "ship-audit/windows-installed-fallback-home/bin/pnpm-runtime/bin",
+          "h": "3cbdc69ac2a2bc3d88e38840b73c80d40c553ab9d8c8ab832639b69f1a1baf5d",
+          "w": 4,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-home/bin/pnpm-runtime/bin/pnpx.mjs",
+          "r": [
+            -5830.8,
+            -4493.3,
+            17,
+            12.3
+          ],
+          "p": "ship-audit/windows-installed-fallback-home/bin/pnpm-runtime/bin",
+          "h": "7e2a61f1636e6d85fbd894b7062b1837e175c673c3dc9ba9bc7538fe1ce66502",
+          "w": 6,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-home/bin/pnpm-runtime/package.sha256",
+          "r": [
+            -5887.8,
+            -4457.6,
+            13.3,
+            11.4
+          ],
+          "p": "ship-audit/windows-installed-fallback-home/bin/pnpm-runtime",
+          "h": "864c2dfe89093329a5a077c8bdfbc72fbe6522c3b1c1f90f3792d5c7789c25c2",
+          "w": 2,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-home/bin/pnpm-runtime/sha256.txt",
+          "r": [
+            -5872.4,
+            -4457.5,
+            14.4,
+            11.3
+          ],
+          "p": "ship-audit/windows-installed-fallback-home/bin/pnpm-runtime",
+          "h": "5857246644eaad9055871d14ff4f2f8b08191b07044c0eca1308bbcbc40ba66c",
+          "w": 3,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-home/bin/pnpm-runtime/version.txt",
+          "r": [
+            -5941.2,
+            -4442.2,
+            10.9,
+            13.8
+          ],
+          "p": "ship-audit/windows-installed-fallback-home/bin/pnpm-runtime",
+          "h": "9489fc454e716b6ac53dfe17432d495e9143a744509eadeb49380765597fc94b",
+          "w": 2,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-home/bin/pnpm.version",
+          "r": [
+            -5930.6,
+            -4569.9,
+            11.1,
+            15.2
+          ],
+          "p": "ship-audit/windows-installed-fallback-home/bin",
+          "h": "9489fc454e716b6ac53dfe17432d495e9143a744509eadeb49380765597fc94b",
+          "w": 2,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-home/device-identity.json.bak",
+          "r": [
+            -5949.2,
+            -4604.8,
+            14.2,
+            13.8
+          ],
+          "p": "ship-audit/windows-installed-fallback-home",
+          "h": "5d7ea51e3525566131e896e77a1bb19a52aebb33642f16aaa9d9c4fedd4572ba",
+          "w": 7,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-home/gezels/alma/about.md",
+          "r": [
+            -5787.3,
+            -4575.7,
+            17.9,
+            17.2
+          ],
+          "p": "ship-audit/windows-installed-fallback-home/gezels/alma",
+          "h": "12a9b813d60a7e5fb7bfa3564751f6a32a56c1a86a3b2579b3f494da621aaa36",
+          "w": 23,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-home/gezels/alma/gezel.md",
+          "r": [
+            -5787.3,
+            -4554.5,
+            18.3,
+            15.6
+          ],
+          "p": "ship-audit/windows-installed-fallback-home/gezels/alma",
+          "h": "dcd82bc5680f786534bf1358d9cb36133fafe6e395b2dd41bb435cacc68f6cd0",
+          "w": 22,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-home/gezels/bastien/about.md",
+          "r": [
+            -5756.9,
+            -4575.7,
+            19.8,
+            16.5
+          ],
+          "p": "ship-audit/windows-installed-fallback-home/gezels/bastien",
+          "h": "ce28e9cff8b984283bd6f06123562ad3112c461d379be985b9a88c83e537c7b5",
+          "w": 27,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-home/gezels/bastien/gezel.md",
+          "r": [
+            -5756.9,
+            -4555.3,
+            20.4,
+            13.8
+          ],
+          "p": "ship-audit/windows-installed-fallback-home/gezels/bastien",
+          "h": "447590b6f40067f9b6ba55cec6a431321d64b6c54e5d5bfeca301a9299b9baba",
+          "w": 22,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-home/history.jsonl",
+          "r": [
+            -5933,
+            -4605.7,
+            13.8,
+            14.8
+          ],
+          "p": "ship-audit/windows-installed-fallback-home",
+          "h": "32e044bd56d33a1ed9183d9182007c0d0e585ca4d1cacc7652ac43f0e3081984",
+          "w": 5,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-home/logs/service-2026-07-30.log",
+          "r": [
+            -5791.3,
+            -4509.9,
+            27.6,
+            21.8
+          ],
+          "p": "ship-audit/windows-installed-fallback-home/logs",
+          "h": "d88cf47891274a0c0b1836182abd951c610b8a30c1a601c67683516fb21fec70",
+          "w": 96,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-home/projects/default/history.jsonl",
+          "r": [
+            -5730.8,
+            -4463.1,
+            16.1,
+            11.3
+          ],
+          "p": "ship-audit/windows-installed-fallback-home/projects/default",
+          "h": "53840a9b19e6eafae6f0e989bce9a3d61957673f52cd6d2c3a6a03213d51b09b",
+          "w": 5,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-home/projects/default/tasks/.next-id",
+          "r": [
+            -5761.5,
+            -4448.1,
+            14.7,
+            12.6
+          ],
+          "p": "ship-audit/windows-installed-fallback-home/projects/default/tasks",
+          "h": "53c234e5e8472b6ac51c1ae1cab3fe06fad053beb8ebfd8977b010655bfdd3c3",
+          "w": 2,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-home/projects/default/tasks/1/about.md",
+          "r": [
+            -5783.3,
+            -4433.1,
+            13.8,
+            12.5
+          ],
+          "p": "ship-audit/windows-installed-fallback-home/projects/default/tasks/1",
+          "h": "d802b065ba17e2a835a83d014bf41c1a541abb27306fcd7b25f91debafd9ccd1",
+          "w": 1,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-home/projects/default/tasks/2/about.md",
+          "r": [
+            -5757.5,
+            -4416.5,
+            14.7,
+            12
+          ],
+          "p": "ship-audit/windows-installed-fallback-home/projects/default/tasks/2",
+          "h": "67507dc7cd7a5e8265e16f4ae909b80d5c9366da5f8b2fc70e316d05831cb7e1",
+          "w": 1,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-home/projects/default/workspace/.gitignore",
+          "r": [
+            -5726.8,
+            -4432.8,
+            15.2,
+            14.4
+          ],
+          "p": "ship-audit/windows-installed-fallback-home/projects/default/workspace",
+          "h": "1eeb397af0f0360da802e8f7097ee5d84a00cba2b7637c2206ffd17f8b1192fc",
+          "w": 8,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-home/runtime/auth-token",
+          "r": [
+            -5791.3,
+            -4371.5,
+            13,
+            11.7
+          ],
+          "p": "ship-audit/windows-installed-fallback-home/runtime",
+          "h": "7d4cd38f594c5479690bbbf75389066f4438059d56332fe902f9403f5df28f79",
+          "w": 1,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-home/runtime/cert-fingerprint",
+          "r": [
+            -5776.3,
+            -4370.2,
+            14.2,
+            10.4
+          ],
+          "p": "ship-audit/windows-installed-fallback-home/runtime",
+          "h": "a41ff04d81cfe6d506dc23fd94af744afa08b7c3348c0aa1f861eac9fd6a8274",
+          "w": 2,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-home/runtime/cert.pem",
+          "r": [
+            -5791.3,
+            -4355.8,
+            13.9,
+            20.6
+          ],
+          "p": "ship-audit/windows-installed-fallback-home/runtime",
+          "h": "db0c7bc9cda8d2ce43c6aa38c266541f63a03750e0f0c64c0592c247ec0f34e2",
+          "w": 19,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-home/runtime/pid",
+          "r": [
+            -5775.3,
+            -4350,
+            10.7,
+            14.8
+          ],
+          "p": "ship-audit/windows-installed-fallback-home/runtime",
+          "h": "c41c28aff73dd52c5f54021bc8dfc355972371ae49042490afdc35692f5f348c",
+          "w": 2,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-home/runtime/port",
+          "r": [
+            -5791.3,
+            -4331.2,
+            13.7,
+            11.9
+          ],
+          "p": "ship-audit/windows-installed-fallback-home/runtime",
+          "h": "4ce0a4b7ba4dd0e130f09ac501f2eb61f884d3805c10ddd891b48f05c855d5c3",
+          "w": 2,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-home/secrets.backend",
+          "r": [
+            -5917.2,
+            -4605.5,
+            12.3,
+            14.6
+          ],
+          "p": "ship-audit/windows-installed-fallback-home",
+          "h": "8b911a8716b94442f9ca3dff20584048536e4c2f47b8b5bb9096cbd43c3432d5",
+          "w": 2,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-home/secrets.enc",
+          "r": [
+            -5902.9,
+            -4603.3,
+            15.2,
+            12.4
+          ],
+          "p": "ship-audit/windows-installed-fallback-home",
+          "h": "20487d90c36fc9e46ddbfa3323036883bb298844218d308c5d5b4f3c1fa49818",
+          "w": 7,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-home/secrets.key",
+          "r": [
+            -5885.8,
+            -4603.1,
+            15.5,
+            12.2
+          ],
+          "p": "ship-audit/windows-installed-fallback-home",
+          "h": "ee68096cff441e4cf3982bf3c2b8713f4e513c8cc4251f507d3d5deaded31861",
+          "w": 1,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-home/service/.gezel-bundle.sha256",
+          "r": [
+            -5945.2,
+            -4399.4,
+            13.6,
+            12.8
+          ],
+          "p": "ship-audit/windows-installed-fallback-home/service",
+          "h": "4a79a01fb3d85ac7485a9d4059f4e8a2e406a8d57c0f9065d7c0a81a6d7ae3f0",
+          "w": 2,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-home/service/README.md",
+          "r": [
+            -5945.2,
+            -4382.7,
+            22.7,
+            20.8
+          ],
+          "p": "ship-audit/windows-installed-fallback-home/service",
+          "h": "3d9c8c661ad9946b71e9788143a302fc30487846df9e8560a527f6e53e03ba2f",
+          "w": 68,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-user-data/.updaterId",
+          "r": [
+            -5775.8,
+            -3964.6,
+            13.7,
+            13.4
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data",
+          "h": "91357e0d0f963474acd47797fd0abddc4a4dffb15368730c08249d9738fecb68",
+          "w": 1,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-user-data/Cache/Cache_Data/data_0",
+          "r": [
+            -6002.7,
+            -3927.6,
+            13.5,
+            14.3
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/Cache/Cache_Data",
+          "h": "daee20fe27914fc95735b8387536e2b785b152a0a383ebe5e15c955d9aa8127a",
+          "w": 5,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-user-data/Cache/Cache_Data/f_000002",
+          "r": [
+            -5987.2,
+            -3926.3,
+            13.2,
+            13
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/Cache/Cache_Data",
+          "h": "5eda2a868574a8112d4414b90375af338fb413ae00ccc5a30a90251ecc4b25f8",
+          "w": 3,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-user-data/Cache/Cache_Data/f_000006",
+          "r": [
+            -5972.1,
+            -3936.2,
+            32,
+            22.9
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/Cache/Cache_Data",
+          "h": "cba558d21e9a9fe54662934fe7934d27f639dcf90c0fd1b22ca0aeda5e82b4e7",
+          "w": 140,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-user-data/Cache/Cache_Data/f_000008",
+          "r": [
+            -6002.7,
+            -3909.3,
+            30,
+            24.4
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/Cache/Cache_Data",
+          "h": "c2f0063dae9c41dcded9cf747563e5753b35da6ccd057a28c5b344c209ebb775",
+          "w": 133,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-user-data/Cache/Cache_Data/f_000009",
+          "r": [
+            -6002.7,
+            -3880.9,
+            51,
+            33.5
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/Cache/Cache_Data",
+          "h": "332c3ec95ca392a4cf4471b8cb03a1a2f96122dcc0ca6d83f5a7b09007b5b650",
+          "w": 498,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-user-data/Cache/No_Vary_Search/journal.baj",
+          "r": [
+            -5928.1,
+            -3936.2,
+            14.7,
+            11.3
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/Cache/No_Vary_Search",
+          "h": "9c169428d852e25bd59b27652ed533d2a1f09f96e4c329fa5e06f47e16731543",
+          "w": 1,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-user-data/Cache/No_Vary_Search/snapshot.baf",
+          "r": [
+            -5928.1,
+            -3920.9,
+            15,
+            11.9
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/Cache/No_Vary_Search",
+          "h": "fc5ba7c5dfbc5d16e6cdfd676ce6d99cc90350561aec6ce8c114c1ba3390e2a3",
+          "w": 1,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-user-data/Code Cache/electron-preload/90CF2F4D90D447171F9C159BD6F86B1BAB404205F8F89BE93ABD35F511DF401E.cache",
+          "r": [
+            -5829.3,
+            -3936.2,
+            17.2,
+            18.2
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/Code Cache/electron-preload",
+          "h": "7c1da6bfc00f801fe1e7abfe921b4109caf386faa7c3ee4dacf03bd61164f4e3",
+          "w": 27,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-user-data/Code Cache/js/175ed3507e9180ca_0",
+          "r": [
+            -5891.1,
+            -3931.8,
+            13.3,
+            10.8
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/Code Cache/js",
+          "h": "121fc838d0f7d3241d4d3cd5453b7e6cb35a4e09ccdf2d4e9bc83c7cf1c025a6",
+          "w": 2,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-user-data/Code Cache/js/3ef398ad1a0d8251_0",
+          "r": [
+            -5875.8,
+            -3936.2,
+            10.7,
+            15.2
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/Code Cache/js",
+          "h": "c97e59d6b1fde4fb521acd3f50784e505fe0c2d723393df80dac40ffdedf7cb6",
+          "w": 3,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-user-data/Code Cache/js/7e8e03d515e05342_0",
+          "r": [
+            -5891.1,
+            -3917,
+            10.6,
+            14.6
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/Code Cache/js",
+          "h": "31cd4514670caa5dedd9e233ada68c7e2649eb11a1e83fdb6aa7ed3bb2ce7d82",
+          "w": 2,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-user-data/Code Cache/js/83229e5b44387783_0",
+          "r": [
+            -5878.5,
+            -3914.6,
+            12.4,
+            12.2
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/Code Cache/js",
+          "h": "3c4b43e7f947b34e8c5e8ba861490653af2378e14bedecedbd336b776eb5f406",
+          "w": 2,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-user-data/Code Cache/js/ffe012b926580ef6_0",
+          "r": [
+            -5891.1,
+            -3898.4,
+            12,
+            13.8
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/Code Cache/js",
+          "h": "f842584d8ddb20b4aaa51240a613863e756473fad3f700d30baa3fc3b957620c",
+          "w": 2,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-user-data/Code Cache/js/index",
+          "r": [
+            -5877,
+            -3897.3,
+            12.1,
+            12.8
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/Code Cache/js",
+          "h": "61f7c8e7f7e870f40417b68536382efc588d4fdc21bcfa905306a0baab6f861d",
+          "w": 1,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-user-data/Code Cache/js/index-dir/the-real-index",
+          "r": [
+            -5856.9,
+            -3921.2,
+            11.6,
+            17.7
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/Code Cache/js/index-dir",
+          "h": "74afbd6e508fb6b079aa4a9390f9b0d532c4b6c518ba111d99265ef0ca7eb9a8",
+          "w": 6,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-user-data/Code Cache/wasm/index",
+          "r": [
+            -5801.6,
+            -3895,
+            11.8,
+            14.7
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/Code Cache/wasm",
+          "h": "61f7c8e7f7e870f40417b68536382efc588d4fdc21bcfa905306a0baab6f861d",
+          "w": 1,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-user-data/Code Cache/wasm/index-dir/the-real-index",
+          "r": [
+            -5825.3,
+            -3880,
+            15.7,
+            11.8
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/Code Cache/wasm/index-dir",
+          "h": "a01dc7c3a2f7bfa49e9f7f8d243e21ef456c0586a480649a45e524f7988323cb",
+          "w": 1,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-user-data/DIPS",
+          "r": [
+            -5760.1,
+            -3965.2,
+            13.4,
+            13.9
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data",
+          "h": "b07012f2a35896bfeba53d47be356cf5b7b5d0a98a228aef1b6763110c2a1ac2",
+          "w": 5,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-user-data/DawnGraphiteCache/data_0",
+          "r": [
+            -5771.8,
+            -3914.1,
+            14.1,
+            12.5
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/DawnGraphiteCache",
+          "h": "94f1b1918d56694a544c6d57bbbe2653bd6588c12404298d2113a9a98f4ba189",
+          "w": 1,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-user-data/DawnGraphiteCache/data_2",
+          "r": [
+            -5771.8,
+            -3897.6,
+            13.5,
+            12.8
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/DawnGraphiteCache",
+          "h": "d11ab18a7a7352712f3044aa92940d36499f17b684e0bc771339edae2f630349",
+          "w": 1,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-user-data/DawnGraphiteCache/data_3",
+          "r": [
+            -5771.8,
+            -3880.8,
+            14.5,
+            11.9
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/DawnGraphiteCache",
+          "h": "d1e6989be2b6c426b4b3921280b8bce3c49d2c1b6562dd1215c318b5cb05b2aa",
+          "w": 1,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-user-data/DawnWebGPUCache/data_0",
+          "r": [
+            -5895.1,
+            -3835.2,
+            14.4,
+            10.6
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/DawnWebGPUCache",
+          "h": "94f1b1918d56694a544c6d57bbbe2653bd6588c12404298d2113a9a98f4ba189",
+          "w": 1,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-user-data/DawnWebGPUCache/data_2",
+          "r": [
+            -5895.1,
+            -3820.7,
+            13.8,
+            13.8
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/DawnWebGPUCache",
+          "h": "d11ab18a7a7352712f3044aa92940d36499f17b684e0bc771339edae2f630349",
+          "w": 1,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-user-data/DawnWebGPUCache/data_3",
+          "r": [
+            -5895.1,
+            -3802.9,
+            14.8,
+            11.4
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/DawnWebGPUCache",
+          "h": "d1e6989be2b6c426b4b3921280b8bce3c49d2c1b6562dd1215c318b5cb05b2aa",
+          "w": 1,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-user-data/DevToolsActivePort",
+          "r": [
+            -5744.7,
+            -3966.2,
+            11.2,
+            14.9
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data",
+          "h": "f48d05d4df9d84c7449fa144aaadb401a0d4c681cfcbcb179bb22cc003a275eb",
+          "w": 2,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-user-data/GPUCache/data_0",
+          "r": [
+            -6006.7,
+            -3818.4,
+            14,
+            13.4
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/GPUCache",
+          "h": "b59df1107a3d68daf31624854dd38011d87527134d6b36fb32fa59dafbaeca09",
+          "w": 1,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-user-data/GPUCache/data_3",
+          "r": [
+            -6006.7,
+            -3801,
+            12.4,
+            13.5
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/GPUCache",
+          "h": "d1e6989be2b6c426b4b3921280b8bce3c49d2c1b6562dd1215c318b5cb05b2aa",
+          "w": 1,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-user-data/Local State",
+          "r": [
+            -5731.5,
+            -3963.3,
+            13.5,
+            12
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data",
+          "h": "579c839ee198fdaa65ada45dfed46f19fa032b6a6a264c891257118829f14e9a",
+          "w": 1,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-user-data/Local Storage/leveldb/000003.log",
+          "r": [
+            -5895.1,
+            -3766.5,
+            12.5,
+            13.6
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/Local Storage/leveldb",
+          "h": "34ec100ec03f8e4ebff3652f612ca70ae0523806addf3994d2d03eabd23ed9f3",
+          "w": 1,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-user-data/Local Storage/leveldb/CURRENT",
+          "r": [
+            -5880.5,
+            -3766.1,
+            11.4,
+            13.2
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/Local Storage/leveldb",
+          "h": "0f1bad70c7bd1e0a69562853ec529355462fcd0423263a3d39d6d0d70b780443",
+          "w": 2,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-user-data/Local Storage/leveldb/LOCK",
+          "r": [
+            -5895.1,
+            -3748.1,
+            12.9,
+            10.5
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/Local Storage/leveldb",
+          "h": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "w": 1,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-user-data/Local Storage/leveldb/LOG",
+          "r": [
+            -5880.1,
+            -3748.9,
+            16.4,
+            11.3
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/Local Storage/leveldb",
+          "h": "1b3fcbb574d51cb9c545e2847a588b88a28166b4eb314fb8b9316d871aa85453",
+          "w": 4,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-user-data/Local Storage/leveldb/LOG.old",
+          "r": [
+            -5895.1,
+            -3733.6,
+            12.7,
+            14.8
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/Local Storage/leveldb",
+          "h": "c5dc837208356e32438fd2d18fb4c26c3a5a09152c2db6a3f5d2ce3b0dafa9b0",
+          "w": 3,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-user-data/Local Storage/leveldb/MANIFEST-000001",
+          "r": [
+            -5880.4,
+            -3729.7,
+            16.1,
+            10.9
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/Local Storage/leveldb",
+          "h": "a2b3187dd89f52840bc814bab1ef334ce12b01eb36f5e62c35d3b8b95fa97fa0",
+          "w": 1,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-user-data/Network/Cookies",
+          "r": [
+            -5771.8,
+            -3843.9,
+            13.2,
+            13.6
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/Network",
+          "h": "a8c1f48f50c4106f81da61904bd13ff3afe995b0edf2bf77f2de6383fe1522e9",
+          "w": 3,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-user-data/Network/Cookies-journal",
+          "r": [
+            -5756.6,
+            -3842.2,
+            13.5,
+            11.8
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/Network",
+          "h": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "w": 1,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-user-data/Network/Network Persistent State",
+          "r": [
+            -5771.8,
+            -3826.4,
+            12,
+            13.6
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/Network",
+          "h": "3dae3becb3c32ef76784a020073782f600ed5dff41cc1c2a591bfc44a14928f6",
+          "w": 1,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-user-data/Network/NetworkDataMigrated",
+          "r": [
+            -5757.8,
+            -3823.9,
+            14.8,
+            11.1
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/Network",
+          "h": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "w": 1,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-user-data/Network/Trust Tokens",
+          "r": [
+            -5771.8,
+            -3808.8,
+            13,
+            16.3
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/Network",
+          "h": "a2fc91a42fab87653effbe6fdd7ea7eb4e598c43daa55a129a6653d0a4569c14",
+          "w": 5,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-user-data/Network/Trust Tokens-journal",
+          "r": [
+            -5756.9,
+            -3803.3,
+            15.7,
+            10.8
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/Network",
+          "h": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "w": 1,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-user-data/Preferences",
+          "r": [
+            -5716,
+            -3964.1,
+            11.8,
+            12.8
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data",
+          "h": "be4b8924ab38e8acf350e6e3b9f1f63a1a94952d8002759acd6946c4d5d0b5de",
+          "w": 1,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-user-data/Session Storage/000003.log",
+          "r": [
+            -6006.7,
+            -3762.5,
+            14.1,
+            10.9
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/Session Storage",
+          "h": "63f543649fc0adda4e6e10369cd2d33c4c59ca006823e6699c9e4b9b04480593",
+          "w": 1,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-user-data/Session Storage/CURRENT",
+          "r": [
+            -5990.6,
+            -3762.5,
+            15,
+            10.9
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/Session Storage",
+          "h": "0f1bad70c7bd1e0a69562853ec529355462fcd0423263a3d39d6d0d70b780443",
+          "w": 2,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-user-data/Session Storage/LOCK",
+          "r": [
+            -6006.7,
+            -3747.6,
+            12.1,
+            14.4
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/Session Storage",
+          "h": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "w": 1,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-user-data/Session Storage/LOG",
+          "r": [
+            -5992.7,
+            -3745.2,
+            14.9,
+            12.1
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/Session Storage",
+          "h": "89c0415f5e279c0d0a3a090eefe8475c3206c260ff1fdf26de471d68420cd100",
+          "w": 3,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-user-data/Session Storage/MANIFEST-000001",
+          "r": [
+            -6006.7,
+            -3729.2,
+            13.6,
+            12.3
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/Session Storage",
+          "h": "a2b3187dd89f52840bc814bab1ef334ce12b01eb36f5e62c35d3b8b95fa97fa0",
+          "w": 1,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-user-data/Shared Dictionary/cache/index",
+          "r": [
+            -5745.8,
+            -3752.5,
+            12,
+            12.5
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/Shared Dictionary/cache",
+          "h": "61f7c8e7f7e870f40417b68536382efc588d4fdc21bcfa905306a0baab6f861d",
+          "w": 1,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-user-data/Shared Dictionary/cache/index-dir/the-real-index",
+          "r": [
+            -5763.8,
+            -3737.5,
+            10,
+            13.4
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/Shared Dictionary/cache/index-dir",
+          "h": "a696e704db89ffe3ca46a9c588c3cbf32a0272bdcc18ea61a63e6abe7e01e2cd",
+          "w": 1,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-user-data/Shared Dictionary/db",
+          "r": [
+            -5725.8,
+            -3767.5,
+            19,
+            14.5
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/Shared Dictionary",
+          "h": "771e917526ca3e8dea82d245bba3439e69893f804a23fcb614015c43b81fb4c0",
+          "w": 14,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-user-data/Shared Dictionary/db-journal",
+          "r": [
+            -5725.8,
+            -3749,
+            13,
+            12.1
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/Shared Dictionary",
+          "h": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "w": 1,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/windows-installed-fallback-user-data/SharedStorage",
+          "r": [
+            -5775.8,
+            -3947.3,
+            14.1,
+            12.1
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data",
+          "h": "059223de65229e5a5d94fe7a5d4da1a66fe07c9162368395a331de7a99c42fb7",
+          "w": 1,
+          "a": "2026-07-30T21:01:22.327Z"
+        },
+        {
+          "k": "block",
           "id": "ship-audit/windows-service-bundle-extracted/README.md",
           "r": [
             -3914.4,
@@ -70860,6 +72414,17 @@
             11
           ],
           "p": ".pnpm-store"
+        },
+        {
+          "k": "plate",
+          "id": ".tmp-docblocks-2.3.2/package",
+          "r": [
+            423.2,
+            249.1,
+            21.8,
+            11
+          ],
+          "p": ".tmp-docblocks-2.3.2"
         },
         {
           "k": "plate",
@@ -72597,6 +74162,17 @@
         },
         {
           "k": "plate",
+          "id": "packages/app/src/updater",
+          "r": [
+            523,
+            385.9,
+            31.1,
+            11
+          ],
+          "p": "packages/app/src"
+        },
+        {
+          "k": "plate",
           "id": "packages/app/ux-screenshots",
           "r": [
             12,
@@ -74131,6 +75707,17 @@
             1145.5,
             2951.3,
             37.4,
+            11
+          ],
+          "p": "packages/service/src"
+        },
+        {
+          "k": "plate",
+          "id": "packages/service/src/suggested-work",
+          "r": [
+            918.9,
+            2111.8,
+            40.3,
             11
           ],
           "p": "packages/service/src"
@@ -80084,6 +81671,380 @@
         },
         {
           "k": "plate",
+          "id": "ship-audit/windows-installed-fallback-home",
+          "r": [
+            -5949.2,
+            -4616.7,
+            184.4,
+            11
+          ],
+          "p": "ship-audit"
+        },
+        {
+          "k": "plate",
+          "id": "ship-audit/windows-installed-fallback-home/bin",
+          "r": [
+            -5945.2,
+            -4580.9,
+            20.6,
+            11
+          ],
+          "p": "ship-audit/windows-installed-fallback-home"
+        },
+        {
+          "k": "plate",
+          "id": "ship-audit/windows-installed-fallback-home/bin/pnpm-runtime",
+          "r": [
+            -5941.2,
+            -4546.8,
+            58.4,
+            11
+          ],
+          "p": "ship-audit/windows-installed-fallback-home/bin"
+        },
+        {
+          "k": "plate",
+          "id": "ship-audit/windows-installed-fallback-home/bin/pnpm-runtime/bin",
+          "r": [
+            -5847.8,
+            -4531.8,
+            20.6,
+            11
+          ],
+          "p": "ship-audit/windows-installed-fallback-home/bin/pnpm-runtime"
+        },
+        {
+          "k": "plate",
+          "id": "ship-audit/windows-installed-fallback-home/gezels",
+          "r": [
+            -5791.3,
+            -4601.7,
+            33.2,
+            11
+          ],
+          "p": "ship-audit/windows-installed-fallback-home"
+        },
+        {
+          "k": "plate",
+          "id": "ship-audit/windows-installed-fallback-home/gezels/alma",
+          "r": [
+            -5787.3,
+            -4586.7,
+            18.3,
+            11
+          ],
+          "p": "ship-audit/windows-installed-fallback-home/gezels"
+        },
+        {
+          "k": "plate",
+          "id": "ship-audit/windows-installed-fallback-home/gezels/bastien",
+          "r": [
+            -5756.9,
+            -4586.7,
+            20.4,
+            11
+          ],
+          "p": "ship-audit/windows-installed-fallback-home/gezels"
+        },
+        {
+          "k": "plate",
+          "id": "ship-audit/windows-installed-fallback-home/logs",
+          "r": [
+            -5791.3,
+            -4520.9,
+            24.8,
+            11
+          ],
+          "p": "ship-audit/windows-installed-fallback-home"
+        },
+        {
+          "k": "plate",
+          "id": "ship-audit/windows-installed-fallback-home/projects/default",
+          "r": [
+            -5791.3,
+            -4474.1,
+            75.2,
+            11
+          ],
+          "p": "ship-audit/windows-installed-fallback-home/projects"
+        },
+        {
+          "k": "plate",
+          "id": "ship-audit/windows-installed-fallback-home/projects/default/tasks",
+          "r": [
+            -5787.3,
+            -4459.1,
+            29,
+            11
+          ],
+          "p": "ship-audit/windows-installed-fallback-home/projects/default"
+        },
+        {
+          "k": "plate",
+          "id": "ship-audit/windows-installed-fallback-home/projects/default/tasks/1",
+          "r": [
+            -5783.3,
+            -4444.1,
+            12.2,
+            11
+          ],
+          "p": "ship-audit/windows-installed-fallback-home/projects/default/tasks"
+        },
+        {
+          "k": "plate",
+          "id": "ship-audit/windows-installed-fallback-home/projects/default/tasks/2",
+          "r": [
+            -5757.5,
+            -4427.5,
+            12.2,
+            11
+          ],
+          "p": "ship-audit/windows-installed-fallback-home/projects/default/tasks"
+        },
+        {
+          "k": "plate",
+          "id": "ship-audit/windows-installed-fallback-home/projects/default/workspace",
+          "r": [
+            -5726.8,
+            -4443.8,
+            15.2,
+            11
+          ],
+          "p": "ship-audit/windows-installed-fallback-home/projects/default"
+        },
+        {
+          "k": "plate",
+          "id": "ship-audit/windows-installed-fallback-home/runtime",
+          "r": [
+            -5791.3,
+            -4382.5,
+            29.2,
+            11
+          ],
+          "p": "ship-audit/windows-installed-fallback-home"
+        },
+        {
+          "k": "plate",
+          "id": "ship-audit/windows-installed-fallback-home/service",
+          "r": [
+            -5945.2,
+            -4410.4,
+            22.7,
+            11
+          ],
+          "p": "ship-audit/windows-installed-fallback-home"
+        },
+        {
+          "k": "plate",
+          "id": "ship-audit/windows-installed-fallback-user-data",
+          "r": [
+            -6010.7,
+            -3977.2,
+            205.4,
+            11
+          ],
+          "p": "ship-audit"
+        },
+        {
+          "k": "plate",
+          "id": "ship-audit/windows-installed-fallback-user-data/Cache",
+          "r": [
+            -6006.7,
+            -3962.2,
+            29,
+            11
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data"
+        },
+        {
+          "k": "plate",
+          "id": "ship-audit/windows-installed-fallback-user-data/Cache/Cache_Data",
+          "r": [
+            -6002.7,
+            -3947.2,
+            50,
+            11
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/Cache"
+        },
+        {
+          "k": "plate",
+          "id": "ship-audit/windows-installed-fallback-user-data/Cache/No_Vary_Search",
+          "r": [
+            -5928.1,
+            -3947.2,
+            15,
+            11
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/Cache"
+        },
+        {
+          "k": "plate",
+          "id": "ship-audit/windows-installed-fallback-user-data/Code Cache",
+          "r": [
+            -5895.1,
+            -3962.2,
+            50,
+            11
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data"
+        },
+        {
+          "k": "plate",
+          "id": "ship-audit/windows-installed-fallback-user-data/Code Cache/electron-preload",
+          "r": [
+            -5829.3,
+            -3947.2,
+            17.2,
+            11
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/Code Cache"
+        },
+        {
+          "k": "plate",
+          "id": "ship-audit/windows-installed-fallback-user-data/Code Cache/js",
+          "r": [
+            -5891.1,
+            -3947.2,
+            16.4,
+            11
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/Code Cache"
+        },
+        {
+          "k": "plate",
+          "id": "ship-audit/windows-installed-fallback-user-data/Code Cache/js/index-dir",
+          "r": [
+            -5856.9,
+            -3932.2,
+            11.6,
+            11
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/Code Cache/js"
+        },
+        {
+          "k": "plate",
+          "id": "ship-audit/windows-installed-fallback-user-data/Code Cache/wasm",
+          "r": [
+            -5829.3,
+            -3906,
+            24.8,
+            11
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/Code Cache"
+        },
+        {
+          "k": "plate",
+          "id": "ship-audit/windows-installed-fallback-user-data/Code Cache/wasm/index-dir",
+          "r": [
+            -5825.3,
+            -3891,
+            15.7,
+            11
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/Code Cache/wasm"
+        },
+        {
+          "k": "plate",
+          "id": "ship-audit/windows-installed-fallback-user-data/DawnGraphiteCache",
+          "r": [
+            -5771.8,
+            -3925.1,
+            14.5,
+            11
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data"
+        },
+        {
+          "k": "plate",
+          "id": "ship-audit/windows-installed-fallback-user-data/DawnWebGPUCache",
+          "r": [
+            -5895.1,
+            -3846.2,
+            14.8,
+            11
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data"
+        },
+        {
+          "k": "plate",
+          "id": "ship-audit/windows-installed-fallback-user-data/GPUCache",
+          "r": [
+            -6006.7,
+            -3829.4,
+            14,
+            11
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data"
+        },
+        {
+          "k": "plate",
+          "id": "ship-audit/windows-installed-fallback-user-data/Local Storage/leveldb",
+          "r": [
+            -5895.1,
+            -3777.5,
+            31.3,
+            11
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/Local Storage"
+        },
+        {
+          "k": "plate",
+          "id": "ship-audit/windows-installed-fallback-user-data/Network",
+          "r": [
+            -5771.8,
+            -3854.9,
+            30.7,
+            11
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data"
+        },
+        {
+          "k": "plate",
+          "id": "ship-audit/windows-installed-fallback-user-data/Session Storage",
+          "r": [
+            -6006.7,
+            -3773.5,
+            31.2,
+            11
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data"
+        },
+        {
+          "k": "plate",
+          "id": "ship-audit/windows-installed-fallback-user-data/Shared Dictionary",
+          "r": [
+            -5771.8,
+            -3778.5,
+            65,
+            11
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data"
+        },
+        {
+          "k": "plate",
+          "id": "ship-audit/windows-installed-fallback-user-data/Shared Dictionary/cache",
+          "r": [
+            -5767.8,
+            -3763.5,
+            29,
+            11
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/Shared Dictionary"
+        },
+        {
+          "k": "plate",
+          "id": "ship-audit/windows-installed-fallback-user-data/Shared Dictionary/cache/index-dir",
+          "r": [
+            -5763.8,
+            -3748.5,
+            10,
+            11
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/Shared Dictionary/cache"
+        },
+        {
+          "k": "plate",
           "id": "ship-audit/windows-service-bundle-extracted",
           "r": [
             -3914.4,
@@ -82547,6 +84508,116 @@
         },
         {
           "k": "plaza",
+          "id": "green:ship-audit/windows-installed-fallback-home/bin/pnpm-runtime:1",
+          "r": [
+            -5851.8,
+            -4475.1,
+            42.6,
+            46.6
+          ],
+          "p": "ship-audit/windows-installed-fallback-home/bin/pnpm-runtime"
+        },
+        {
+          "k": "plaza",
+          "id": "green:ship-audit/windows-installed-fallback-home/projects/default/tasks:0",
+          "r": [
+            -5787.3,
+            -4414.6,
+            21.8,
+            14.1
+          ],
+          "p": "ship-audit/windows-installed-fallback-home/projects/default/tasks"
+        },
+        {
+          "k": "plaza",
+          "id": "green:ship-audit/windows-installed-fallback-home/projects/default:1",
+          "r": [
+            -5730.8,
+            -4412.4,
+            23.2,
+            15.9
+          ],
+          "p": "ship-audit/windows-installed-fallback-home/projects/default"
+        },
+        {
+          "k": "plaza",
+          "id": "green:ship-audit/windows-installed-fallback-home:0",
+          "r": [
+            -5949.2,
+            -4354.8,
+            148,
+            39.5
+          ],
+          "p": "ship-audit/windows-installed-fallback-home"
+        },
+        {
+          "k": "plaza",
+          "id": "green:ship-audit/windows-installed-fallback-user-data/Cache:1",
+          "r": [
+            -5932.1,
+            -3903,
+            23,
+            59.6
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/Cache"
+        },
+        {
+          "k": "plaza",
+          "id": "green:ship-audit/windows-installed-fallback-user-data/Code Cache/js:1",
+          "r": [
+            -5860.9,
+            -3897.4,
+            19.6,
+            12.9
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/Code Cache/js"
+        },
+        {
+          "k": "plaza",
+          "id": "green:ship-audit/windows-installed-fallback-user-data/Code Cache/wasm:1",
+          "r": [
+            -5801.6,
+            -3878.3,
+            11.8,
+            14
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/Code Cache/wasm"
+        },
+        {
+          "k": "plaza",
+          "id": "green:ship-audit/windows-installed-fallback-user-data/Code Cache:0",
+          "r": [
+            -5895.1,
+            -3878.6,
+            57.8,
+            18.3
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/Code Cache"
+        },
+        {
+          "k": "plaza",
+          "id": "green:ship-audit/windows-installed-fallback-user-data/Shared Dictionary/cache:1",
+          "r": [
+            -5745.8,
+            -3738,
+            12,
+            17.9
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/Shared Dictionary/cache"
+        },
+        {
+          "k": "plaza",
+          "id": "green:ship-audit/windows-installed-fallback-user-data/Shared Dictionary:1",
+          "r": [
+            -5725.8,
+            -3734.9,
+            19,
+            18.8
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/Shared Dictionary"
+        },
+        {
+          "k": "plaza",
           "id": "green:ship-audit/windows-smoke-home/.electron-userdata/Cache:1",
           "r": [
             -4373.7,
@@ -83104,6 +85175,18 @@
             4
           ],
           "p": ".pnpm-store/v11",
+          "w": 3
+        },
+        {
+          "k": "street",
+          "id": "st:.tmp-docblocks-2.3.2/package:423.2,277.6,21.8,4",
+          "r": [
+            423.2,
+            277.6,
+            21.8,
+            4
+          ],
+          "p": ".tmp-docblocks-2.3.2/package",
           "w": 3
         },
         {
@@ -89513,6 +91596,18 @@
             4
           ],
           "p": "packages/service/src/sources",
+          "w": 3
+        },
+        {
+          "k": "street",
+          "id": "st:packages/service/src/suggested-work:918.9,2151.2,40.3,4",
+          "r": [
+            918.9,
+            2151.2,
+            40.3,
+            4
+          ],
+          "p": "packages/service/src/suggested-work",
           "w": 3
         },
         {
@@ -102257,6 +104352,666 @@
             268.8
           ],
           "p": "ship-audit/windows-asar-extracted",
+          "w": 2
+        },
+        {
+          "k": "street",
+          "id": "st:ship-audit/windows-installed-fallback-home/bin/pnpm-runtime/bin:-5847.8,-4498.5,34.6,4",
+          "r": [
+            -5847.8,
+            -4498.5,
+            34.6,
+            4
+          ],
+          "p": "ship-audit/windows-installed-fallback-home/bin/pnpm-runtime/bin",
+          "w": 3
+        },
+        {
+          "k": "street",
+          "id": "st:ship-audit/windows-installed-fallback-home/bin/pnpm-runtime:-5855.8,-4535.8,4,107.3",
+          "r": [
+            -5855.8,
+            -4535.8,
+            4,
+            107.3
+          ],
+          "p": "ship-audit/windows-installed-fallback-home/bin/pnpm-runtime",
+          "w": 3
+        },
+        {
+          "k": "street",
+          "id": "st:ship-audit/windows-installed-fallback-home/bin/pnpm-runtime:-5941.2,-4446.2,85.4,4",
+          "r": [
+            -5941.2,
+            -4446.2,
+            85.4,
+            4
+          ],
+          "p": "ship-audit/windows-installed-fallback-home/bin/pnpm-runtime",
+          "w": 3
+        },
+        {
+          "k": "street",
+          "id": "st:ship-audit/windows-installed-fallback-home/bin/pnpm-runtime:-5941.2,-4486.2,85.4,4",
+          "r": [
+            -5941.2,
+            -4486.2,
+            85.4,
+            4
+          ],
+          "p": "ship-audit/windows-installed-fallback-home/bin/pnpm-runtime",
+          "w": 3
+        },
+        {
+          "k": "street",
+          "id": "st:ship-audit/windows-installed-fallback-home/bin:-5945.2,-4554.8,140,4",
+          "r": [
+            -5945.2,
+            -4554.8,
+            140,
+            4
+          ],
+          "p": "ship-audit/windows-installed-fallback-home/bin",
+          "w": 3
+        },
+        {
+          "k": "street",
+          "id": "st:ship-audit/windows-installed-fallback-home/gezels/alma:-5787.3,-4558.5,18.3,4",
+          "r": [
+            -5787.3,
+            -4558.5,
+            18.3,
+            4
+          ],
+          "p": "ship-audit/windows-installed-fallback-home/gezels/alma",
+          "w": 3
+        },
+        {
+          "k": "street",
+          "id": "st:ship-audit/windows-installed-fallback-home/gezels/bastien:-5756.9,-4559.3,20.4,4",
+          "r": [
+            -5756.9,
+            -4559.3,
+            20.4,
+            4
+          ],
+          "p": "ship-audit/windows-installed-fallback-home/gezels/bastien",
+          "w": 3
+        },
+        {
+          "k": "street",
+          "id": "st:ship-audit/windows-installed-fallback-home/gezels:-5764.9,-4590.7,4,55.9",
+          "r": [
+            -5764.9,
+            -4590.7,
+            4,
+            55.9
+          ],
+          "p": "ship-audit/windows-installed-fallback-home/gezels",
+          "w": 3
+        },
+        {
+          "k": "street",
+          "id": "st:ship-audit/windows-installed-fallback-home/projects/default/tasks:-5765.5,-4435.5,26.7,4",
+          "r": [
+            -5765.5,
+            -4435.5,
+            26.7,
+            4
+          ],
+          "p": "ship-audit/windows-installed-fallback-home/projects/default/tasks",
+          "w": 3
+        },
+        {
+          "k": "street",
+          "id": "st:ship-audit/windows-installed-fallback-home/projects/default/tasks:-5765.5,-4448.1,4,47.6",
+          "r": [
+            -5765.5,
+            -4448.1,
+            4,
+            47.6
+          ],
+          "p": "ship-audit/windows-installed-fallback-home/projects/default/tasks",
+          "w": 3
+        },
+        {
+          "k": "street",
+          "id": "st:ship-audit/windows-installed-fallback-home/projects/default:-5734.8,-4451.8,27.2,4",
+          "r": [
+            -5734.8,
+            -4451.8,
+            27.2,
+            4
+          ],
+          "p": "ship-audit/windows-installed-fallback-home/projects/default",
+          "w": 3
+        },
+        {
+          "k": "street",
+          "id": "st:ship-audit/windows-installed-fallback-home/projects/default:-5734.8,-4463.1,4,66.6",
+          "r": [
+            -5734.8,
+            -4463.1,
+            4,
+            66.6
+          ],
+          "p": "ship-audit/windows-installed-fallback-home/projects/default",
+          "w": 3
+        },
+        {
+          "k": "street",
+          "id": "st:ship-audit/windows-installed-fallback-home/runtime:-5791.3,-4335.2,29.2,4",
+          "r": [
+            -5791.3,
+            -4335.2,
+            29.2,
+            4
+          ],
+          "p": "ship-audit/windows-installed-fallback-home/runtime",
+          "w": 3
+        },
+        {
+          "k": "street",
+          "id": "st:ship-audit/windows-installed-fallback-home/runtime:-5791.3,-4359.8,29.2,4",
+          "r": [
+            -5791.3,
+            -4359.8,
+            29.2,
+            4
+          ],
+          "p": "ship-audit/windows-installed-fallback-home/runtime",
+          "w": 3
+        },
+        {
+          "k": "street",
+          "id": "st:ship-audit/windows-installed-fallback-home/service:-5945.2,-4386.7,22.7,4",
+          "r": [
+            -5945.2,
+            -4386.7,
+            22.7,
+            4
+          ],
+          "p": "ship-audit/windows-installed-fallback-home/service",
+          "w": 3
+        },
+        {
+          "k": "street",
+          "id": "st:ship-audit/windows-installed-fallback-home:-5801.3,-4392.5,97.6,6",
+          "r": [
+            -5801.3,
+            -4392.5,
+            97.6,
+            6
+          ],
+          "p": "ship-audit/windows-installed-fallback-home",
+          "w": 2
+        },
+        {
+          "k": "street",
+          "id": "st:ship-audit/windows-installed-fallback-home:-5801.3,-4484.1,97.6,6",
+          "r": [
+            -5801.3,
+            -4484.1,
+            97.6,
+            6
+          ],
+          "p": "ship-audit/windows-installed-fallback-home",
+          "w": 2
+        },
+        {
+          "k": "street",
+          "id": "st:ship-audit/windows-installed-fallback-home:-5801.3,-4530.9,97.6,6",
+          "r": [
+            -5801.3,
+            -4530.9,
+            97.6,
+            6
+          ],
+          "p": "ship-audit/windows-installed-fallback-home",
+          "w": 2
+        },
+        {
+          "k": "street",
+          "id": "st:ship-audit/windows-installed-fallback-home:-5801.3,-4605.7,6,290.4",
+          "r": [
+            -5801.3,
+            -4605.7,
+            6,
+            290.4
+          ],
+          "p": "ship-audit/windows-installed-fallback-home",
+          "w": 2
+        },
+        {
+          "k": "street",
+          "id": "st:ship-audit/windows-installed-fallback-home:-5949.2,-4420.4,154,6",
+          "r": [
+            -5949.2,
+            -4420.4,
+            154,
+            6
+          ],
+          "p": "ship-audit/windows-installed-fallback-home",
+          "w": 2
+        },
+        {
+          "k": "street",
+          "id": "st:ship-audit/windows-installed-fallback-home:-5949.2,-4590.9,154,6",
+          "r": [
+            -5949.2,
+            -4590.9,
+            154,
+            6
+          ],
+          "p": "ship-audit/windows-installed-fallback-home",
+          "w": 2
+        },
+        {
+          "k": "street",
+          "id": "st:ship-audit/windows-installed-fallback-user-data/Cache/Cache_Data:-6002.7,-3884.9,62.7,4",
+          "r": [
+            -6002.7,
+            -3884.9,
+            62.7,
+            4
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/Cache/Cache_Data",
+          "w": 3
+        },
+        {
+          "k": "street",
+          "id": "st:ship-audit/windows-installed-fallback-user-data/Cache/Cache_Data:-6002.7,-3913.3,62.7,4",
+          "r": [
+            -6002.7,
+            -3913.3,
+            62.7,
+            4
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/Cache/Cache_Data",
+          "w": 3
+        },
+        {
+          "k": "street",
+          "id": "st:ship-audit/windows-installed-fallback-user-data/Cache/No_Vary_Search:-5928.1,-3924.9,15,4",
+          "r": [
+            -5928.1,
+            -3924.9,
+            15,
+            4
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/Cache/No_Vary_Search",
+          "w": 3
+        },
+        {
+          "k": "street",
+          "id": "st:ship-audit/windows-installed-fallback-user-data/Cache:-5936.1,-3951.2,4,107.8",
+          "r": [
+            -5936.1,
+            -3951.2,
+            4,
+            107.8
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/Cache",
+          "w": 3
+        },
+        {
+          "k": "street",
+          "id": "st:ship-audit/windows-installed-fallback-user-data/Code Cache/js:-5864.9,-3936.2,4,51.6",
+          "r": [
+            -5864.9,
+            -3936.2,
+            4,
+            51.6
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/Code Cache/js",
+          "w": 3
+        },
+        {
+          "k": "street",
+          "id": "st:ship-audit/windows-installed-fallback-user-data/Code Cache/js:-5891.1,-3902.4,26.2,4",
+          "r": [
+            -5891.1,
+            -3902.4,
+            26.2,
+            4
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/Code Cache/js",
+          "w": 3
+        },
+        {
+          "k": "street",
+          "id": "st:ship-audit/windows-installed-fallback-user-data/Code Cache/js:-5891.1,-3921,26.2,4",
+          "r": [
+            -5891.1,
+            -3921,
+            26.2,
+            4
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/Code Cache/js",
+          "w": 3
+        },
+        {
+          "k": "street",
+          "id": "st:ship-audit/windows-installed-fallback-user-data/Code Cache/wasm:-5805.6,-3895,4,30.8",
+          "r": [
+            -5805.6,
+            -3895,
+            4,
+            30.8
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/Code Cache/wasm",
+          "w": 3
+        },
+        {
+          "k": "street",
+          "id": "st:ship-audit/windows-installed-fallback-user-data/Code Cache:-5837.3,-3914,51.4,4",
+          "r": [
+            -5837.3,
+            -3914,
+            51.4,
+            4
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/Code Cache",
+          "w": 3
+        },
+        {
+          "k": "street",
+          "id": "st:ship-audit/windows-installed-fallback-user-data/Code Cache:-5837.3,-3951.2,4,90.9",
+          "r": [
+            -5837.3,
+            -3951.2,
+            4,
+            90.9
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/Code Cache",
+          "w": 3
+        },
+        {
+          "k": "street",
+          "id": "st:ship-audit/windows-installed-fallback-user-data/DawnGraphiteCache:-5771.8,-3884.8,14.5,4",
+          "r": [
+            -5771.8,
+            -3884.8,
+            14.5,
+            4
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/DawnGraphiteCache",
+          "w": 3
+        },
+        {
+          "k": "street",
+          "id": "st:ship-audit/windows-installed-fallback-user-data/DawnGraphiteCache:-5771.8,-3901.6,14.5,4",
+          "r": [
+            -5771.8,
+            -3901.6,
+            14.5,
+            4
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/DawnGraphiteCache",
+          "w": 3
+        },
+        {
+          "k": "street",
+          "id": "st:ship-audit/windows-installed-fallback-user-data/DawnWebGPUCache:-5895.1,-3806.9,14.8,4",
+          "r": [
+            -5895.1,
+            -3806.9,
+            14.8,
+            4
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/DawnWebGPUCache",
+          "w": 3
+        },
+        {
+          "k": "street",
+          "id": "st:ship-audit/windows-installed-fallback-user-data/DawnWebGPUCache:-5895.1,-3824.7,14.8,4",
+          "r": [
+            -5895.1,
+            -3824.7,
+            14.8,
+            4
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/DawnWebGPUCache",
+          "w": 3
+        },
+        {
+          "k": "street",
+          "id": "st:ship-audit/windows-installed-fallback-user-data/GPUCache:-6006.7,-3805,14,4",
+          "r": [
+            -6006.7,
+            -3805,
+            14,
+            4
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/GPUCache",
+          "w": 3
+        },
+        {
+          "k": "street",
+          "id": "st:ship-audit/windows-installed-fallback-user-data/Local Storage/leveldb:-5895.1,-3737.6,31.3,4",
+          "r": [
+            -5895.1,
+            -3737.6,
+            31.3,
+            4
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/Local Storage/leveldb",
+          "w": 3
+        },
+        {
+          "k": "street",
+          "id": "st:ship-audit/windows-installed-fallback-user-data/Local Storage/leveldb:-5895.1,-3752.9,31.3,4",
+          "r": [
+            -5895.1,
+            -3752.9,
+            31.3,
+            4
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/Local Storage/leveldb",
+          "w": 3
+        },
+        {
+          "k": "street",
+          "id": "st:ship-audit/windows-installed-fallback-user-data/Network:-5771.8,-3812.8,30.7,4",
+          "r": [
+            -5771.8,
+            -3812.8,
+            30.7,
+            4
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/Network",
+          "w": 3
+        },
+        {
+          "k": "street",
+          "id": "st:ship-audit/windows-installed-fallback-user-data/Network:-5771.8,-3830.4,30.7,4",
+          "r": [
+            -5771.8,
+            -3830.4,
+            30.7,
+            4
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/Network",
+          "w": 3
+        },
+        {
+          "k": "street",
+          "id": "st:ship-audit/windows-installed-fallback-user-data/Session Storage:-6006.7,-3733.2,31.2,4",
+          "r": [
+            -6006.7,
+            -3733.2,
+            31.2,
+            4
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/Session Storage",
+          "w": 3
+        },
+        {
+          "k": "street",
+          "id": "st:ship-audit/windows-installed-fallback-user-data/Session Storage:-6006.7,-3751.6,31.2,4",
+          "r": [
+            -6006.7,
+            -3751.6,
+            31.2,
+            4
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/Session Storage",
+          "w": 3
+        },
+        {
+          "k": "street",
+          "id": "st:ship-audit/windows-installed-fallback-user-data/Shared Dictionary/cache:-5749.8,-3752.5,4,32.4",
+          "r": [
+            -5749.8,
+            -3752.5,
+            4,
+            32.4
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/Shared Dictionary/cache",
+          "w": 3
+        },
+        {
+          "k": "street",
+          "id": "st:ship-audit/windows-installed-fallback-user-data/Shared Dictionary:-5725.8,-3753,19,4",
+          "r": [
+            -5725.8,
+            -3753,
+            19,
+            4
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/Shared Dictionary",
+          "w": 3
+        },
+        {
+          "k": "street",
+          "id": "st:ship-audit/windows-installed-fallback-user-data/Shared Dictionary:-5729.8,-3767.5,4,51.4",
+          "r": [
+            -5729.8,
+            -3767.5,
+            4,
+            51.4
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data/Shared Dictionary",
+          "w": 3
+        },
+        {
+          "k": "street",
+          "id": "st:ship-audit/windows-installed-fallback-user-data:-5775.8,-3951.3,71.7,4",
+          "r": [
+            -5775.8,
+            -3951.3,
+            71.7,
+            4
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data",
+          "w": 3
+        },
+        {
+          "k": "street",
+          "id": "st:ship-audit/windows-installed-fallback-user-data:-5781.8,-3788.5,79,6",
+          "r": [
+            -5781.8,
+            -3788.5,
+            79,
+            6
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data",
+          "w": 2
+        },
+        {
+          "k": "street",
+          "id": "st:ship-audit/windows-installed-fallback-user-data:-5781.8,-3864.9,79,6",
+          "r": [
+            -5781.8,
+            -3864.9,
+            79,
+            6
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data",
+          "w": 2
+        },
+        {
+          "k": "street",
+          "id": "st:ship-audit/windows-installed-fallback-user-data:-5781.8,-3935.1,79,6",
+          "r": [
+            -5781.8,
+            -3935.1,
+            79,
+            6
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data",
+          "w": 2
+        },
+        {
+          "k": "street",
+          "id": "st:ship-audit/windows-installed-fallback-user-data:-5781.8,-3966.2,6,254.1",
+          "r": [
+            -5781.8,
+            -3966.2,
+            6,
+            254.1
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data",
+          "w": 2
+        },
+        {
+          "k": "street",
+          "id": "st:ship-audit/windows-installed-fallback-user-data:-5905.1,-3787.5,129.2,6",
+          "r": [
+            -5905.1,
+            -3787.5,
+            129.2,
+            6
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data",
+          "w": 2
+        },
+        {
+          "k": "street",
+          "id": "st:ship-audit/windows-installed-fallback-user-data:-5905.1,-3856.2,129.2,6",
+          "r": [
+            -5905.1,
+            -3856.2,
+            129.2,
+            6
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data",
+          "w": 2
+        },
+        {
+          "k": "street",
+          "id": "st:ship-audit/windows-installed-fallback-user-data:-5905.1,-3966.2,6,254.1",
+          "r": [
+            -5905.1,
+            -3966.2,
+            6,
+            254.1
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data",
+          "w": 2
+        },
+        {
+          "k": "street",
+          "id": "st:ship-audit/windows-installed-fallback-user-data:-6010.7,-3783.5,111.7,6",
+          "r": [
+            -6010.7,
+            -3783.5,
+            111.7,
+            6
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data",
+          "w": 2
+        },
+        {
+          "k": "street",
+          "id": "st:ship-audit/windows-installed-fallback-user-data:-6010.7,-3839.4,111.7,6",
+          "r": [
+            -6010.7,
+            -3839.4,
+            111.7,
+            6
+          ],
+          "p": "ship-audit/windows-installed-fallback-user-data",
           "w": 2
         },
         {

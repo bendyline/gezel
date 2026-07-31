@@ -1,5 +1,5 @@
 import type { Dirent } from 'node:fs';
-import { readFile, readdir } from 'node:fs/promises';
+import { lstat, readFile, readdir } from 'node:fs/promises';
 import { join, normalize } from 'node:path';
 import type { ProjectFileEntry } from '@bendyline/gezel';
 import { realpathContained, safeJoin } from './safe-paths.js';
@@ -33,7 +33,7 @@ export async function listDirEntries(base: string, subpath: string): Promise<Pro
  */
 export async function walkDir(
   base: string,
-  opts: { maxEntries?: number; maxDepth?: number } = {},
+  opts: { maxEntries?: number; maxDepth?: number; withStats?: boolean } = {},
 ): Promise<ProjectFileEntry[]> {
   const maxEntries = opts.maxEntries ?? 500;
   const maxDepth = opts.maxDepth ?? 6;
@@ -54,7 +54,19 @@ export async function walkDir(
       if (e.name.startsWith('.')) continue;
       if (skipDirs.has(e.name)) continue;
       const rel = prefix ? `${prefix}/${e.name}` : e.name;
-      results.push({ name: e.name, path: rel, isDirectory: e.isDirectory() });
+      const entry: ProjectFileEntry = { name: e.name, path: rel, isDirectory: e.isDirectory() };
+      // Opt-in per-file stat — the "what got written last night" reads
+      // need mtimes; bounded by maxEntries so the extra lstat cost stays
+      // capped.
+      if (opts.withStats && !entry.isDirectory) {
+        try {
+          const stat = await lstat(join(dir, e.name));
+          entry.mtimeMs = stat.mtimeMs;
+        } catch {
+          /* stat is best-effort */
+        }
+      }
+      results.push(entry);
       if (results.length >= maxEntries) {
         truncated = true;
         return;

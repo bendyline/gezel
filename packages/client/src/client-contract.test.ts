@@ -48,6 +48,62 @@ const cases: ContractCase[] = [
     path: '/api/projects/p1/git/status',
     invoke: (c) => c.getProjectGithubStatus('p1'),
   },
+  {
+    name: 'suggested work list',
+    method: 'GET',
+    path: '/api/projects/p1/suggested-work',
+    invoke: (c) => c.listSuggestedWork('p1'),
+  },
+  {
+    name: 'suggested work enable',
+    method: 'POST',
+    path: '/api/projects/p1/suggested-work/enable',
+    body: { key: 'gezel-template:veiligheidsmeester:security-code-review' },
+    invoke: (c) =>
+      c.enableSuggestedWork('p1', { key: 'gezel-template:veiligheidsmeester:security-code-review' }),
+  },
+  {
+    name: 'suggested work disable',
+    method: 'POST',
+    path: '/api/projects/p1/suggested-work/disable',
+    body: { key: 'project-type:job-hunt:weekly-pipeline-review' },
+    invoke: (c) => c.disableSuggestedWork('p1', 'project-type:job-hunt:weekly-pipeline-review'),
+  },
+  {
+    name: 'suggested work dismiss',
+    method: 'POST',
+    path: '/api/projects/p1/suggested-work/dismiss',
+    body: { key: 'gezel-template:vertaler:translate-content', dismissed: true },
+    invoke: (c) => c.dismissSuggestedWork('p1', 'gezel-template:vertaler:translate-content', true),
+  },
+  {
+    name: 'report actions list with escaping',
+    method: 'GET',
+    path: '/api/projects/p1/report-actions?path=night-shift-report.md',
+    invoke: (c) => c.getReportActions('p1', 'night-shift-report.md'),
+  },
+  {
+    name: 'report action fire',
+    method: 'POST',
+    path: '/api/projects/p1/report-actions/fire',
+    body: { path: 'night-shift-report.md', actionId: 'fix-null-parse' },
+    invoke: (c) =>
+      c.fireReportAction('p1', { path: 'night-shift-report.md', actionId: 'fix-null-parse' }),
+  },
+  {
+    name: 'report action dismiss',
+    method: 'POST',
+    path: '/api/projects/p1/report-actions/dismiss',
+    body: { path: 'night-shift-report.md', actionId: 'fix-null-parse' },
+    invoke: (c) =>
+      c.dismissReportAction('p1', { path: 'night-shift-report.md', actionId: 'fix-null-parse' }),
+  },
+  {
+    name: 'night shift review',
+    method: 'GET',
+    path: '/api/night-shift/review',
+    invoke: (c) => c.getNightShiftReview(),
+  },
   { name: 'usage', method: 'GET', path: '/api/usage', invoke: (c) => c.getUsage() },
   { name: 'queue status', method: 'GET', path: '/api/queues', invoke: (c) => c.getQueueStatus() },
   {

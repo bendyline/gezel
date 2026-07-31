@@ -175,4 +175,33 @@ describe('NightShiftManager', () => {
     await m.tick();
     expect(m.getPowerIntent().keepAwake).toBe(true);
   });
+
+  it('fires onWindowSettled once per settled window, including a startup catch-up', async () => {
+    const settled: string[] = [];
+    const m = makeManager();
+    m.setOnWindowSettled(async (key) => {
+      settled.push(key);
+    });
+
+    // Startup catch-up: first tick lands mid-morning, well after the
+    // window's end (machine slept through 06:00).
+    clock = localMs(2026, 6, 21, 10, 0);
+    await m.tick();
+    expect(settled).toEqual(['2026-06-20']);
+
+    // Same day again — deduped in-process.
+    clock = localMs(2026, 6, 21, 11, 0);
+    await m.tick();
+    expect(settled).toEqual(['2026-06-20']);
+
+    // Inside the next window: nothing (the window isn't settled yet)…
+    clock = localMs(2026, 6, 21, 23, 0);
+    await m.tick();
+    expect(settled).toEqual(['2026-06-20']);
+
+    // …then the live open→closed transition at 06:00 fires the new key.
+    clock = localMs(2026, 6, 22, 6, 30);
+    await m.tick();
+    expect(settled).toEqual(['2026-06-20', '2026-06-21']);
+  });
 });

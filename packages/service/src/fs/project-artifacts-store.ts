@@ -78,8 +78,11 @@ export class ProjectArtifactsStore {
     return listDirEntries(this.projectArtifactsDir(id), subpath);
   }
 
-  async listProjectArtifactsRecursive(id: string): Promise<ProjectFileEntry[]> {
-    return walkDir(this.projectArtifactsDir(id));
+  async listProjectArtifactsRecursive(
+    id: string,
+    opts?: { withStats?: boolean },
+  ): Promise<ProjectFileEntry[]> {
+    return walkDir(this.projectArtifactsDir(id), opts?.withStats ? { withStats: true } : {});
   }
 
   async readProjectArtifact(id: string, filePath: string): Promise<string | null> {

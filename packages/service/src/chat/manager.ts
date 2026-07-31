@@ -1240,6 +1240,8 @@ export class ChatManager {
   private async buildWorkspaceGestalt(projectId: string): Promise<string> {
     const index = this.contentIndexRef;
     if (!index) return '';
+    const project = await this.store.getProject(projectId).catch(() => null);
+    if (project?.indexingEnabled === false) return '';
     const cached = this.gestaltCache.get(projectId);
     if (cached && Date.now() - cached.at < 60_000) return cached.block;
     let block = '';
@@ -12348,7 +12350,7 @@ function formatExpectedDeliverableAnnotation(
     return `\n\n[Deliverable expected as an IMAGE FILE at \`${path}\`. Your first assistant action should be the tool call \`generate_image({ prompt, saveAs: "${path}" })\`; the image tool writes the PNG/JPG/WebP bytes to disk. Reply in chat with the path + a 2-sentence precis — do NOT call \`write_file({ path, content })\` for binary image bytes and do NOT paste base64 or prose as the deliverable.]`;
   }
   if (path && isExpectedBinaryDocumentDeliverablePath(path)) {
-    return `\n\n[Deliverable expected as a REAL BINARY DOCUMENT at \`${path}\`. Preserve that exact format — a markdown outline or similarly named text file is not the deliverable. Use the installed document-production tools/craftbook (for PowerPoint: \`convert_document\`, visually inspect with \`preview_document\`, then persist with \`save_artifact\`). Do NOT call \`write_file\` with prose or base64 for this binary file. If those production tools are not on your roster, reply that the exact-format deliverable is blocked instead of silently substituting another format.]`;
+    return `\n\n[Deliverable expected as a REAL BINARY DOCUMENT OR MEDIA FILE at \`${path}\`. Preserve that exact format — a markdown outline, HTML page, or similarly named text file is not the deliverable. Use the installed DocBlocks production tools/craftbook: author the source as Markdown, call \`convert_document\` for the requested target, visually inspect with \`preview_document\` when layout or frames matter, then persist with \`save_artifact\`. Do NOT hand-build HTML/OOXML or call \`write_file\` with prose or base64 for this binary file. If those production tools are not on your roster, reply that the exact-format deliverable is blocked instead of silently substituting another format.]`;
   }
   const explicitEditTools = extractExplicitFileEditTools(requestText);
   if (explicitEditTools.length > 0) {
@@ -12390,7 +12392,7 @@ function normalizeExpectedDeliverablePath(path: string): string {
 }
 
 function isExpectedBinaryDocumentDeliverablePath(path: string): boolean {
-  return /\.(?:pptx|docx|xlsx|pdf)$/i.test(path.trim());
+  return /\.(?:pptx|docx|xlsx|pdf|epub|dbk|mp4|gif)$/i.test(path.trim());
 }
 
 function isExplicitAppendOnlyRequest(requestText: string | undefined): boolean {
@@ -14376,7 +14378,7 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
     (availableToolNameSet.has('suggest_craftbook') ||
       availableToolNameSet.has('invoke_craftbook') ||
       availableToolNameSet.has('convert_document'))
-      ? `\n\n---\n\n## Preserve requested output formats\n\nA named format is an acceptance criterion, not a suggestion. If the user asks for PowerPoint/PPTX, DOCX, XLSX, PDF, or another binary document, do not silently substitute markdown, HTML, or chat prose. For PowerPoint, prefer the matching craftbook via ${availableToolNameSet.has('suggest_craftbook') ? '`suggest_craftbook`' : 'the available craftbook surface'}${availableToolNameSet.has('invoke_craftbook') ? ' + `invoke_craftbook`' : ''}. A real PPTX production step uses \`convert_document\`, visual QA with \`preview_document\`, and \`save_artifact\` when those tools are present. If the required production surface is unavailable, explain the blocker instead of claiming completion.`
+      ? `\n\n---\n\n## Preserve requested output formats\n\nA named format is an acceptance criterion, not a suggestion. If the user asks for PowerPoint/PPTX, Word/DOCX, XLSX, PDF, EPUB, MP4, GIF, or another binary document or rendered-media file, do not silently substitute markdown, HTML, or chat prose. Prefer the matching craftbook via ${availableToolNameSet.has('suggest_craftbook') ? '`suggest_craftbook`' : 'the available craftbook surface'}${availableToolNameSet.has('invoke_craftbook') ? ' + `invoke_craftbook`' : ''}. Content-first production should author Markdown, then use DocBlocks \`convert_document\` for the requested target, \`preview_document\` when visual QA matters, and \`save_artifact\` for the durable file. Do not recruit a developer merely to hand-build an HTML or OOXML intermediary. If the required production surface is unavailable, explain the blocker instead of claiming completion.`
       : '';
 
   let projectContext = '';

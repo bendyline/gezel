@@ -1,4 +1,5 @@
 import type { Task } from '@bendyline/gezel';
+import { hasReportActionFence } from '@bendyline/gezel';
 import { GezelApiError } from '@bendyline/gezel-client';
 import { EditorShell } from '@bendyline/squisq-editor-react';
 import '@bendyline/squisq-editor-react/styles';
@@ -22,6 +23,7 @@ import { CommandsPanel } from './CommandsPanel.js';
 import { HtmlPreviewFrame } from './HtmlPreviewFrame.js';
 import type { ToolActivity } from './chat-bubbles.js';
 import { gezelChatTheme } from './chat-theme.js';
+import { makeReportActionFenceRenderers } from './report-actions/ReportActionFence.js';
 import { useCompactLayout } from './useCompactLayout.js';
 
 /**
@@ -962,7 +964,11 @@ function ReferenceViewer({
           !loading &&
           !error &&
           (isMarkdown(reference.path) ? (
-            <RenderedMarkdownPreview markdown={content} />
+            <RenderedMarkdownPreview
+              markdown={content}
+              projectId={projectId}
+              reportPath={resolvedKind === 'artifact' ? reference.path : undefined}
+            />
           ) : isHtml(reference.path) &&
             (resolvedKind === 'artifact' || resolvedKind === 'workspace') ? (
             // Artifact or workspace HTML both go through the shared
@@ -1079,7 +1085,16 @@ const GEZEL_LIGHT_SURFACE = {
   textMuted: '#666666',
 } as const;
 
-function RenderedMarkdownPreview({ markdown }: { markdown: string }) {
+function RenderedMarkdownPreview({
+  markdown,
+  projectId,
+  reportPath,
+}: {
+  markdown: string;
+  projectId: string;
+  /** Artifacts-relative path when this preview shows an artifact — enables gezel-action cards. */
+  reportPath?: string;
+}) {
   const doc = useMemo(() => {
     try {
       const mdDoc = parseMarkdown(markdown);
@@ -1089,6 +1104,15 @@ function RenderedMarkdownPreview({ markdown }: { markdown: string }) {
     }
   }, [markdown]);
   const effective = useEffectiveTheme();
+  // Report artifacts may embed gezel-action blocks — register the fence
+  // renderer so recommendations render as fireable cards in the rail.
+  const fenceRenderers = useMemo(
+    () =>
+      reportPath && hasReportActionFence(markdown)
+        ? makeReportActionFenceRenderers({ projectId, reportPath })
+        : undefined,
+    [markdown, projectId, reportPath],
+  );
   // Same theme the chat bubbles render with — defined in
   // [chat-theme.ts](./chat-theme.ts). Gezel-tinted surface (warm/sage,
   // not Squisq's stock cool slate-blue) so the previewer reads as part
@@ -1097,7 +1121,12 @@ function RenderedMarkdownPreview({ markdown }: { markdown: string }) {
   if (!doc) return <pre className="chat-rail-viewer-raw">{markdown}</pre>;
   return (
     <div className="chat-rail-viewer-markdown">
-      <LinearDocView doc={doc} theme={gezelChatTheme} surface={surface} />
+      <LinearDocView
+        doc={doc}
+        theme={gezelChatTheme}
+        surface={surface}
+        fenceRenderers={fenceRenderers}
+      />
     </div>
   );
 }

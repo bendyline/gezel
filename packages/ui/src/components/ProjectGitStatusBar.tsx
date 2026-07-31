@@ -239,6 +239,7 @@ export function ProjectGitStatusBar({
   }, [projectId, refresh]);
 
   const onClickIndexDot = useCallback(async () => {
+    if (indexStatus?.state === 'disabled') return;
     try {
       await api.refreshProjectIndex(projectId);
       // Optimistic: flip the chip to "indexing" until the next poll
@@ -252,7 +253,7 @@ export function ProjectGitStatusBar({
     } catch {
       /* swallow */
     }
-  }, [projectId, refreshIndex]);
+  }, [indexStatus?.state, projectId, refreshIndex]);
 
   // Outside-click dismisses the branch dropdown.
   useEffect(() => {
@@ -349,38 +350,45 @@ export function ProjectGitStatusBar({
   //   fresh + scan todo → amber ('scan')    — index fresh, AI scan still pending
   //   stale / never     → red   ('stale')   — index out of date
   //   indexing          → blue pulse ('indexing', transient)
+  //   disabled          → neutral ('disabled')
   const indexDotState =
-    indexState === 'indexing'
-      ? 'indexing'
-      : indexState === 'fresh'
-        ? aiScanPending
-          ? 'scan'
-          : 'fresh'
-        : 'stale';
+    indexState === 'disabled'
+      ? 'disabled'
+      : indexState === 'indexing'
+        ? 'indexing'
+        : indexState === 'fresh'
+          ? aiScanPending
+            ? 'scan'
+            : 'fresh'
+          : 'stale';
   const enrichment = indexStatus?.enrichment;
   const aiCoverage = enrichment ? coveragePercent(enrichment.embedded, enrichment.eligible) : null;
   const indexHeadline =
     indexStatus === null
       ? 'Checking workspace index'
-      : indexState === 'indexing'
-        ? 'Scanning workspace'
-        : indexState === 'never'
-          ? 'Workspace not indexed'
-          : indexState === 'stale'
-            ? 'Workspace scan is out of date'
-            : aiScanPending
-              ? aiCoverage === null
-                ? 'AI indexing is pending'
-                : `AI indexing ${aiCoverage}% complete`
-              : 'Workspace index is ready';
+      : indexState === 'disabled'
+        ? 'Workspace indexing is off'
+        : indexState === 'indexing'
+          ? 'Scanning workspace'
+          : indexState === 'never'
+            ? 'Workspace not indexed'
+            : indexState === 'stale'
+              ? 'Workspace scan is out of date'
+              : aiScanPending
+                ? aiCoverage === null
+                  ? 'AI indexing is pending'
+                  : `AI indexing ${aiCoverage}% complete`
+                : 'Workspace index is ready';
   const indexTooltip = `${indexHeadline}. ${
-    indexState === 'indexing'
-      ? 'Scan in progress.'
-      : indexState === 'never' || indexState === 'stale'
-        ? 'Click to scan now.'
-        : aiScanPending
-          ? 'AI indexing continues while the app is idle.'
-          : 'Click to rescan.'
+    indexState === 'disabled'
+      ? 'Turn it on in Project Settings.'
+      : indexState === 'indexing'
+        ? 'Scan in progress.'
+        : indexState === 'never' || indexState === 'stale'
+          ? 'Click to scan now.'
+          : aiScanPending
+            ? 'AI indexing continues while the app is idle.'
+            : 'Click to rescan.'
   }`;
 
   const chipPhrase = status
@@ -508,6 +516,7 @@ export function ProjectGitStatusBar({
                 type="button"
                 className={`project-index-chip project-index-chip-${indexDotState}`}
                 onClick={() => void onClickIndexDot()}
+                aria-disabled={indexState === 'disabled'}
                 aria-label={indexTooltip}
               >
                 {/* Notebook glyph — stands in for "workspace index"; the dot to its
@@ -646,11 +655,13 @@ export function ProjectGitStatusBar({
                 </dl>
 
                 <div className="project-index-tooltip-footer">
-                  {indexState === 'indexing'
-                    ? 'The status updates automatically.'
-                    : aiScanPending
-                      ? 'AI indexing continues while the app is idle. Click to rescan files.'
-                      : 'Click to rescan the workspace.'}
+                  {indexState === 'disabled'
+                    ? 'Workspace files are not scanned or summarized for this project.'
+                    : indexState === 'indexing'
+                      ? 'The status updates automatically.'
+                      : aiScanPending
+                        ? 'AI indexing continues while the app is idle. Click to rescan files.'
+                        : 'Click to rescan the workspace.'}
                 </div>
               </div>
             </Tooltip.Content>
@@ -779,6 +790,8 @@ function indexStateLabel(state: WorkspaceIndexStatus['state']): string {
       return 'Scanning now';
     case 'never':
       return 'Not scanned yet';
+    case 'disabled':
+      return 'Off for this project';
   }
 }
 

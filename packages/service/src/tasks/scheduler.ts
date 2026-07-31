@@ -9,6 +9,7 @@ import {
   getWorkshopTempo,
   isProactiveAllowed,
   isSchedulingAllowed,
+  localDateKey,
   projectAllowsAmbientWork,
   projectWorkspaceWritable,
   workshopTempoDefaults,
@@ -48,6 +49,14 @@ export interface SchedulerOptions {
    * always-open (no confinement).
    */
   isNightShiftWindowOpen?: () => boolean;
+  /**
+   * Synchronous read of the current night-window day key (see
+   * `nightShiftDayKey` in core). Drives the once-per-window guard on
+   * night-shift spawn hosts flagged `onceADay`: skip spawning when the
+   * host's `lastRunDay` already equals this key, stamp it on spawn.
+   * Defaults to the plain local date.
+   */
+  currentNightShiftDayKey?: () => string;
   /**
    * Stored per-project activity stamps. When wired, the nudge sweep
    * seeds its "last activity" with the tracker's value, so non-chat
@@ -118,6 +127,7 @@ export class TaskScheduler {
   private readonly now: () => Date;
   private readonly debug?: { isEnabled(): boolean };
   private readonly isNightShiftWindowOpen: () => boolean;
+  private readonly currentNightShiftDayKey: () => string;
   private readonly activity?: ActivityTracker;
   private timer: ReturnType<typeof setInterval> | null = null;
   private running = false;
@@ -130,6 +140,7 @@ export class TaskScheduler {
     this.now = opts.now ?? (() => new Date());
     if (opts.debug) this.debug = opts.debug;
     this.isNightShiftWindowOpen = opts.isNightShiftWindowOpen ?? (() => true);
+    this.currentNightShiftDayKey = opts.currentNightShiftDayKey ?? (() => localDateKey(this.now()));
     this.activity = opts.activity;
   }
 
@@ -503,6 +514,15 @@ export class TaskScheduler {
         // inherits the night-shift flag (so the runner gates its dispatch to
         // an active shift).
         if (task.nightShift?.enabled === true && !this.isNightShiftWindowOpen()) continue;
+        // Once-per-window guard: a night-shift host with `onceADay` spawns
+        // at most one child per night window. `lastRunDay` is stamped below
+        // at spawn time — the host's placeholder step never completes, so
+        // the step-completion stamping path can't reach it.
+        const nightOnceKey =
+          task.nightShift?.enabled === true && task.nightShift.onceADay
+            ? this.currentNightShiftDayKey()
+            : null;
+        if (nightOnceKey !== null && task.nightShift?.lastRunDay === nightOnceKey) continue;
         if (task.spawnsCraftbook && task.spawnsCraftbook.steps.length > 0) {
           const overlap = task.cron.overlap ?? 'skip';
           if (overlap === 'skip') {
@@ -512,6 +532,9 @@ export class TaskScheduler {
             if (activeChildren.length > 0) continue;
           }
           await this.manager.spawnChild(task.ref);
+          if (nightOnceKey !== null) {
+            await this.manager.recordNightShiftSpawn(task.ref, nightOnceKey);
+          }
         }
       } catch (err) {
         log.warn(

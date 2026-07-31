@@ -167,6 +167,9 @@ export class WorkspaceIndexManager {
    * we haven't seen the project yet this process. Never throws.
    */
   async status(projectId: string): Promise<WorkspaceIndexStatus> {
+    if (!(await this.isIndexingEnabled(projectId))) {
+      return { state: 'disabled' };
+    }
     const inMem = this.state.get(projectId);
     if (inMem?.indexing) {
       return {
@@ -213,6 +216,7 @@ export class WorkspaceIndexManager {
    * a 404 on null.
    */
   async readCommandIndex(projectId: string): Promise<WorkspaceCommandIndex | null> {
+    if (!(await this.isIndexingEnabled(projectId))) return null;
     const dir = projectIndexDir(this.home, projectId);
     try {
       const [metaRaw, commandsRaw] = await Promise.all([
@@ -247,6 +251,7 @@ export class WorkspaceIndexManager {
    * file paths without re-walking the tree.
    */
   async readFiles(projectId: string): Promise<WorkspaceFile[]> {
+    if (!(await this.isIndexingEnabled(projectId))) return [];
     const dir = projectIndexDir(this.home, projectId);
     try {
       const raw = await readFile(join(dir, FILES_FILE), 'utf8');
@@ -290,6 +295,8 @@ export class WorkspaceIndexManager {
    *   - on-mount of the Commands panel when status is `never`
    */
   async refresh(projectId: string): Promise<WorkspaceIndexStatus> {
+    const current = await this.status(projectId);
+    if (current.state === 'disabled') return current;
     void this.indexOne(projectId).catch((err) => {
       log.warn(`[index] forced refresh failed for ${projectId}: ${describe(err)}`);
     });
@@ -325,6 +332,8 @@ export class WorkspaceIndexManager {
 
     for (let i = 0; i < ordered.length; i++) {
       const projectId = ordered[i]!;
+      const project = projects.find((candidate) => candidate.id === projectId);
+      if (project?.indexingEnabled === false) continue;
       if (this.chat.isProjectActive(projectId)) continue;
       const status = await this.status(projectId);
       if (status.state === 'fresh' || status.state === 'indexing') continue;
@@ -347,6 +356,7 @@ export class WorkspaceIndexManager {
    */
   private indexOne(projectId: string): Promise<void> {
     return this.withLock(projectId, async () => {
+      if (!(await this.isIndexingEnabled(projectId))) return;
       const state = this.getState(projectId);
       if (state.indexing) {
         // Another in-flight; wait for it instead of double-scanning.
@@ -368,6 +378,9 @@ export class WorkspaceIndexManager {
   }
 
   private async runScan(projectId: string): Promise<void> {
+    // Re-check at the work boundary so a project disabled while waiting on
+    // the per-project lock does not begin a scan.
+    if (!(await this.isIndexingEnabled(projectId))) return;
     const workspaceDir = await this.store.projectWorkspaceDir(projectId);
     if (!(await workspaceLooksReal(workspaceDir))) return;
     const boekwachter = await resolveProjectBoekwachter(this.store, projectId).catch(() => null);
@@ -503,6 +516,7 @@ export class WorkspaceIndexManager {
    * list when no skills were found or the index file is missing.
    */
   async readSkills(projectId: string): Promise<WorkspaceSkillIndex> {
+    if (!(await this.isIndexingEnabled(projectId))) return { skills: [] };
     const dir = projectIndexDir(this.home, projectId);
     try {
       const raw = await readFile(join(dir, SKILLS_FILE), 'utf8');
@@ -518,6 +532,7 @@ export class WorkspaceIndexManager {
    * Returns an empty list when none were found or the index is missing.
    */
   async readInstructions(projectId: string): Promise<WorkspaceInstructionIndex> {
+    if (!(await this.isIndexingEnabled(projectId))) return { instructions: [] };
     const dir = projectIndexDir(this.home, projectId);
     try {
       const raw = await readFile(join(dir, INSTRUCTIONS_FILE), 'utf8');
@@ -588,6 +603,15 @@ export class WorkspaceIndexManager {
     const projectTabs = cfg.recentTabs.filter((t) => t.kind === 'project');
     const i = projectTabs.findIndex((t) => t.id === projectId);
     return i < 0 ? Number.POSITIVE_INFINITY : i;
+  }
+
+  /**
+   * Missing preserves the historical indexed-by-default behavior. Reads the
+   * live project each time so toggling the setting takes effect without a
+   * service restart and hides any stale derived index immediately.
+   */
+  private async isIndexingEnabled(projectId: string): Promise<boolean> {
+    return this.store.projectIndexingEnabled(projectId).catch(() => true);
   }
 
   private getState(projectId: string): ProjectIndexState {

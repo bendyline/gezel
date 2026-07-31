@@ -2811,6 +2811,11 @@ export const CreateProjectRequestSchema = z.object({
    */
   mode: z.enum(['crew', 'solo']).optional(),
   /**
+   * Opt out of structural and content indexing for this project's workspace.
+   * Missing/true keeps the historical indexing behavior.
+   */
+  indexingEnabled: z.boolean().optional(),
+  /**
    * Optional GitHub repo to associate with the project at creation. When
    * present, the URL is persisted into `project.github.url` and a
    * background clone is kicked off; the project lands ready-to-use on
@@ -2860,6 +2865,11 @@ export const UpdateProjectRequestSchema = z.object({
   /** Replace the project's optional-tab visibility overrides. */
   tabVisibility: ProjectTabVisibilitySchema.optional(),
   /**
+   * Enable or disable structural and content indexing for this workspace.
+   * Chat history, memories, and shared-document indexing are unaffected.
+   */
+  indexingEnabled: z.boolean().optional(),
+  /**
    * Project-level operational status. `active` (default) lets ambient
    * gezel work flow; `readonly` and `inactive` pause meester nudges,
    * auto-phase-advance handoffs, cron-tick recording, and boot-time
@@ -2895,6 +2905,12 @@ export const UpdateProjectRequestSchema = z.object({
    * override and falls back to auto-detection.
    */
   projectTypeId: z.string().nullable().optional(),
+  /**
+   * Merge values into the project's shared configuration bag (see core
+   * `project-properties.ts`). Empty-string values delete the key; keys
+   * not mentioned are untouched.
+   */
+  properties: z.record(z.string(), z.string()).optional(),
 });
 export type UpdateProjectRequest = z.infer<typeof UpdateProjectRequestSchema>;
 
@@ -5144,8 +5160,9 @@ export const WorkspaceIndexStatusSchema = z.object({
    *   - `stale`    — index exists but older than threshold; re-scan pending
    *   - `indexing` — a scan is in flight right now
    *   - `never`    — no index on disk yet
+   *   - `disabled` — this project explicitly opted out of workspace indexing
    */
-  state: z.enum(['fresh', 'stale', 'indexing', 'never']),
+  state: z.enum(['fresh', 'stale', 'indexing', 'never', 'disabled']),
   meta: WorkspaceIndexMetaSchema.optional(),
   /**
    * True when the structural index is fresh but the background AI scan
@@ -5244,6 +5261,50 @@ export const NightShiftTasksResponseSchema = z.object({
   upcoming: z.array(NightShiftTaskBriefSchema),
 });
 export type NightShiftTasksResponse = z.infer<typeof NightShiftTasksResponseSchema>;
+
+/** One task last night's shift completed. */
+export const NightShiftCompletedTaskSchema = z.object({
+  ref: z.string(),
+  title: z.string(),
+  projectId: z.string(),
+  projectName: z.string(),
+  completedAt: z.string().optional(),
+});
+export type NightShiftCompletedTask = z.infer<typeof NightShiftCompletedTaskSchema>;
+
+/** One report the shift produced, with its embedded-action tally. */
+export const NightShiftReportSchema = z.object({
+  projectId: z.string(),
+  projectName: z.string(),
+  /** Artifacts-relative path. */
+  path: z.string(),
+  /** First H1, else the filename. */
+  title: z.string(),
+  writtenAt: z.string().optional(),
+  actionCounts: z.object({
+    total: z.number(),
+    suggested: z.number(),
+    fired: z.number(),
+    applied: z.number(),
+    dismissed: z.number(),
+  }),
+});
+export type NightShiftReport = z.infer<typeof NightShiftReportSchema>;
+
+/**
+ * The morning review: what the most recent night window accomplished —
+ * completed tasks and the reports they left, with per-report action
+ * tallies. Powers the moon menu's "Done last night", the Home "Last
+ * night" tab, and the synthesized morning question.
+ */
+export const NightShiftReviewResponseSchema = z.object({
+  windowKey: z.string(),
+  windowStart: z.string(),
+  windowEnd: z.string(),
+  tasksCompleted: z.array(NightShiftCompletedTaskSchema),
+  reports: z.array(NightShiftReportSchema),
+});
+export type NightShiftReviewResponse = z.infer<typeof NightShiftReviewResponseSchema>;
 
 export const WorkspaceCommandIndexSchema = z.object({
   meta: WorkspaceIndexMetaSchema,

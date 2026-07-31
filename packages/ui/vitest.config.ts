@@ -21,6 +21,18 @@ export default defineConfig({
     dedupe: ['react', 'react-dom'],
   },
   test: {
+    // Dedupe only applies to modules vite PROCESSES. Vitest externalizes
+    // node_modules by default, and under `pnpm link:squisq` the linked
+    // dist chunks then node-resolve `react` from the sibling checkout's
+    // own node_modules — a second React that breaks hooks ("Cannot read
+    // properties of null (reading 'useRef')" in tiptap's useEditor).
+    // Inlining the squisq + tiptap packages routes their imports through
+    // vite, where the dedupe above pins every React to this package's.
+    server: {
+      deps: {
+        inline: [/@bendyline[\\/]squisq/, /@tiptap[\\/]/],
+      },
+    },
     environment: 'jsdom',
     setupFiles: ['./src/test-utils/setup.ts'],
     globals: false,

@@ -118,6 +118,16 @@ describe('CommandsPanel sections', () => {
     expect(screen.queryByText('Getting around')).toBeNull();
   });
 
+  it('does not retry a workspace scan when indexing is disabled', async () => {
+    apiMocks.getProjectIndexStatus.mockResolvedValue({ state: 'disabled' });
+
+    render(<CommandsPanel projectId="p1" section="scripts" onStageCommand={() => {}} />);
+
+    expect(await screen.findByText('Workspace indexing is off for this project.')).toBeTruthy();
+    expect(apiMocks.refreshProjectIndex).not.toHaveBeenCalled();
+    expect(apiMocks.getProjectIndex).not.toHaveBeenCalled();
+  });
+
   it('stages a primer line rather than running it', async () => {
     const onStage = vi.fn();
     render(<CommandsPanel projectId="p1" section="commands" onStageCommand={onStage} />);

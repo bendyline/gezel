@@ -19,12 +19,15 @@ import { type FileEntry, FileTree } from '../components/FileTree.js';
 import { GezelPicker } from '../components/GezelPicker.js';
 import { HtmlPreviewFrame, type HtmlPreviewLogEntry } from '../components/HtmlPreviewFrame.js';
 import { ProjectActionsMenu, ProjectContextMenu } from '../components/ProjectActionsMenu.js';
+import type { ProjectTemplateGezelOptions } from '../components/ProjectAddGezelDialog.js';
 import { ProjectChat } from '../components/ProjectChat.js';
 import { ProjectConnectionsTab } from '../components/ProjectConnectionsTab.js';
 import { ProjectCrewRoster } from '../components/ProjectCrewRoster.js';
 import { ProjectGitStatusBar } from '../components/ProjectGitStatusBar.js';
 import { ProjectMailTab } from '../components/ProjectMailTab.js';
 import { ProjectOutputPane } from '../components/ProjectOutputPane.js';
+import { ProjectPropertiesEditor } from '../components/ProjectPropertiesEditor.js';
+import { makeReportActionFenceRenderers } from '../components/report-actions/ReportActionFence.js';
 import { PromoteToTabButton } from '../components/PromoteToTabButton.js';
 import {
   createArtifactsContentContainer,
@@ -427,6 +430,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   const editorTheme = useEffectiveTheme();
   const [projects, setProjects] = useState<Project[]>([]);
   const [selected, setSelected] = useState<ProjectDetail | null>(null);
+  const [recentlyAddedGezelId, setRecentlyAddedGezelId] = useState<string | undefined>(undefined);
   // Consume a pending "+" intent from the sidebar synchronously on first
   // render (the event below covers the already-mounted case). Never in
   // detail-only mode — a single project tab has no create UI.
@@ -565,6 +569,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
     async (gezelId: string) => {
       if (!selected) return;
       const result = await api.addGezelToProject(selected.id, gezelId);
+      setRecentlyAddedGezelId(gezelId);
       setSelected((current) =>
         current?.id === selected.id ? { ...current, gezelIds: result.gezelIds } : current,
       );
@@ -579,6 +584,31 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
       setSelected((current) =>
         current?.id === selected.id ? { ...current, gezelIds: result.gezelIds } : current,
       );
+    },
+    [selected],
+  );
+
+  const createProjectTemplateGezel = useCallback(
+    async (templateId: string, options: ProjectTemplateGezelOptions) => {
+      if (!selected) return;
+      const projectId = selected.id;
+      let created = await api.createGezelFromTemplate(templateId, {
+        name: options.name,
+        ...(options.gender ? { gender: options.gender } : {}),
+      });
+      if (options.appearanceSeed !== undefined) {
+        const { poppetje } = await api.rerollGezelPoppetje(created.id, {
+          seed: options.appearanceSeed,
+        });
+        created = { ...created, poppetje };
+      }
+      const membership = await api.addGezelToProject(projectId, created.id);
+      setRecentlyAddedGezelId(created.id);
+      setGezels((current) => [...current.filter((gezel) => gezel.id !== created.id), created]);
+      setSelected((current) =>
+        current?.id === projectId ? { ...current, gezelIds: membership.gezelIds } : current,
+      );
+      window.dispatchEvent(new CustomEvent('gezel:gezel-updated', { detail: created }));
     },
     [selected],
   );
@@ -931,6 +961,24 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
         setSelected(updated);
       } catch (err) {
         console.error('updateProject(allowGezelWrites) failed:', err);
+      }
+    },
+    [selected],
+  );
+
+  const saveIndexingEnabled = useCallback(
+    async (next: boolean) => {
+      if (!selected) return;
+      try {
+        const updated = await api.updateProject(selected.id, { indexingEnabled: next });
+        setSelected(updated);
+        if (next) {
+          // This was an explicit user action; start the first scan now instead
+          // of waiting for the background MRU cadence.
+          void api.refreshProjectIndex(selected.id).catch(() => {});
+        }
+      } catch (err) {
+        console.error('updateProject(indexingEnabled) failed:', err);
       }
     },
     [selected],
@@ -1537,7 +1585,9 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                         project={selected}
                         gezels={gezels}
                         boekwachterGezelId={boekwachterGezelId}
+                        recentlyAddedGezelId={recentlyAddedGezelId}
                         onAddGezel={addProjectGezel}
+                        onCreateTemplateGezel={createProjectTemplateGezel}
                         onRemoveGezel={removeProjectGezel}
                       />
 
@@ -1675,6 +1725,34 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                               </span>
                             </div>
                           </label>
+
+                          <label className="config-label" style={{ marginTop: '0.75rem' }}>
+                            Index this project's workspace
+                            <div className="new-row" style={{ alignItems: 'center' }}>
+                              <input
+                                type="checkbox"
+                                checked={selected.indexingEnabled !== false}
+                                onChange={(event) => void saveIndexingEnabled(event.target.checked)}
+                              />
+                              <span className="muted small">
+                                Builds file search, commands, the Village map, and AI summaries.
+                                Turn it off for lightweight projects such as games or language
+                                practice.
+                              </span>
+                            </div>
+                          </label>
+
+                          <div className="config-label" style={{ marginTop: '0.75rem' }}>
+                            Project properties
+                            <ProjectPropertiesEditor
+                              project={selected}
+                              onProjectChange={setSelected}
+                            />
+                            <small className="muted">
+                              Shared values gezellen and recurring craftbooks draw from — set the
+                              designated language once and every translation run uses it.
+                            </small>
+                          </div>
 
                           <label className="config-label" style={{ marginTop: '0.75rem' }}>
                             GitHub repository
@@ -2301,6 +2379,13 @@ function ProjectMarkdownArtifactEditor({
       }),
     [projectId, path],
   );
+  // Reports may embed gezel-action recommendation blocks — register the
+  // fence renderer so they mount as live, fireable cards INSIDE the
+  // editor (instead of Monaco code insets).
+  const fenceRenderers = useMemo(
+    () => makeReportActionFenceRenderers({ projectId, reportPath: path }),
+    [projectId, path],
+  );
   return (
     <div className="editor-wrap" style={{ height: '100%' }}>
       <EditorShell
@@ -2312,6 +2397,7 @@ function ProjectMarkdownArtifactEditor({
         fullWidth
         workspaceContainer={container}
         documentLinkProvider={documentLinkProvider}
+        fenceRenderers={fenceRenderers}
         allowVersioning={!isReadOnly}
         versionBasename={primaryDocumentFilename}
         outline
