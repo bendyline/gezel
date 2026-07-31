@@ -1,23 +1,17 @@
 /**
- * The macOS hardened-runtime entitlement set is pinned, and the assumption
- * that lets it stay small is pinned with it.
+ * Pin both the intended and effective macOS hardened-runtime entitlement set.
  *
- * Every entitlement hands back a protection hardened runtime gives for free,
- * so the set should only ever grow deliberately. The v1.26211.26 release audit
- * dropped two:
+ * Every hardened-runtime exception gives back a protection, so additions are
+ * deliberate and reviewed. The v1.26211.26 audit removed unsigned executable
+ * memory and DYLD environment variables. This follow-up also removed two
+ * App Sandbox-only network keys that had no effect because Gezel is not App
+ * Sandbox-enabled.
  *
- *   - allow-unsigned-executable-memory, which disabled W^X process-wide. It
- *     was the Intel-era V8 workaround; the arm64 build JITs through MAP_JIT
- *     and needs only allow-jit.
- *   - allow-dyld-environment-variables, which opened a DYLD_INSERT_LIBRARIES
- *     path into a signed process for no benefit — nothing sets a DYLD_ var.
- *
- * The first removal is only sound while macOS ships arm64 exclusively. Restore
- * an x86_64 mac target and V8 goes back to mapping RWX pages directly, at
- * which point the app fails to launch on Intel with a codesign violation
- * rather than anything that looks like a missing entitlement. That is the trap
- * this test exists to spring: adding an Intel target fails here, with the
- * reason, instead of shipping a Mac build that dies on first run.
+ * Electron's maintained notarization guidance makes the compatibility boundary
+ * version-based, not architecture-based: Electron 11 and older needed unsigned
+ * executable memory, while Electron 12+ should use the narrower allow-jit
+ * entitlement. Pin that floor so adding an x64 target never becomes a reason to
+ * weaken the current build.
  */
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
@@ -25,106 +19,125 @@ import { dirname, join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
+import {
+  REVIEWED_ENTITLEMENTS,
+  assertExactReviewedEntitlements,
+  parseBooleanEntitlementsPlist,
+} from './verify-macos-entitlements.mjs';
+
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, '..');
-const plistPath = join(root, 'packages/app/entitlements.mac.plist');
-const builderPath = join(root, 'packages/app/electron-builder.yml');
+const appDir = join(root, 'packages', 'app');
+const plistPath = join(appDir, 'entitlements.mac.plist');
+const builderPath = join(appDir, 'electron-builder.yml');
+const appPackagePath = join(appDir, 'package.json');
+const releaseWorkflowPath = join(root, '.github', 'workflows', 'release-electron.yml');
 
-/**
- * The complete set, each with the payload fact that justifies it. Kept as
- * prose so a reviewer removing an entitlement has to confront the claim.
- */
-const ALLOWED = new Map([
-  ['com.apple.security.cs.allow-jit', 'V8/Chromium JIT via MAP_JIT on Apple Silicon'],
-  ['com.apple.security.network.client', 'outbound provider, model-download and update traffic'],
-  ['com.apple.security.network.server', 'gezeld loopback HTTPS listener'],
-  [
-    'com.apple.security.cs.disable-library-validation',
-    'vendor-signed Mach-Os preserved by sign-macho-tree.mjs, plus native addons installed at runtime by pnpm/uv',
-  ],
-]);
-
-/**
- * Removed deliberately. Listed separately from "not in ALLOWED" so the
- * failure message can carry the reason rather than a bare set difference.
- */
 const REMOVED = new Map([
   [
     'com.apple.security.cs.allow-unsigned-executable-memory',
-    'disables W^X process-wide; the arm64 build needs only allow-jit',
+    'Electron 12+ uses allow-jit; this broader exception increases attack surface',
   ],
   [
     'com.apple.security.cs.allow-dyld-environment-variables',
-    'permits DYLD_INSERT_LIBRARIES injection; nothing in the tree sets a DYLD_ variable',
+    'permits dynamic-linker environment injection; Gezel does not use DYLD_* variables',
+  ],
+  [
+    'com.apple.security.network.client',
+    'an App Sandbox capability with no effect when com.apple.security.app-sandbox is absent',
+  ],
+  [
+    'com.apple.security.network.server',
+    'an App Sandbox capability with no effect when com.apple.security.app-sandbox is absent',
   ],
 ]);
 
-/** Never valid in a distribution build — it makes the app debuggable by any process. */
 const FORBIDDEN = new Map([
   [
     'com.apple.security.get-task-allow',
-    'development-only; breaks notarization and lets any process attach',
+    'development-only; breaks notarization and lets other processes attach',
+  ],
+  [
+    'com.apple.security.app-sandbox',
+    'incompatible with Gezel local workspaces, local tools and child-process model',
   ],
 ]);
 
-/**
- * Entitlement keys actually granted. The file documents the removed keys in a
- * comment block, so comments have to come out before parsing or the
- * documentation would read as configuration.
- */
-async function grantedKeys() {
-  const raw = await readFile(plistPath, 'utf8');
-  const withoutComments = raw.replace(/<!--[\s\S]*?-->/g, '');
-  return new Set(Array.from(withoutComments.matchAll(/<key>([^<]+)<\/key>/g), (m) => m[1].trim()));
+async function sourceEntitlements() {
+  return parseBooleanEntitlementsPlist(
+    await readFile(plistPath, 'utf8'),
+    'packages/app/entitlements.mac.plist',
+  );
 }
 
-test('grants exactly the reviewed entitlement set', async () => {
-  const granted = await grantedKeys();
-  for (const [key, why] of ALLOWED) {
-    assert.ok(granted.has(key), `missing entitlement ${key} — required for: ${why}`);
-  }
-  for (const key of granted) {
-    assert.ok(
-      ALLOWED.has(key),
-      `${key} is granted but not in the reviewed set. Adding an entitlement gives back a hardened-runtime protection: document why the payload needs it in entitlements.mac.plist and add it to ALLOWED here.`,
-    );
-  }
-});
-
-test('does not reinstate the entitlements removed in the v1.26211.26 audit', async () => {
-  const granted = await grantedKeys();
-  for (const [key, why] of REMOVED) {
-    assert.ok(
-      !granted.has(key),
-      `${key} was removed deliberately (${why}). Restoring it needs a written reason in the plist header.`,
-    );
-  }
-});
-
-test('never ships a development-only entitlement', async () => {
-  const granted = await grantedKeys();
-  for (const [key, why] of FORBIDDEN) {
-    assert.ok(!granted.has(key), `${key} must never ship: ${why}`);
-  }
-});
-
-test('macOS stays arm64-only, which is what makes allow-jit sufficient', async () => {
-  const builder = await readFile(builderPath, 'utf8');
-  // `mac:` is not the last top-level key and not always followed by the same
-  // one, so bound the block by the next key at column 0 rather than by name.
+function macBlock(builder) {
   const block = builder.match(/^mac:$[\s\S]*?(?=^\S)/m);
   assert.ok(block, 'could not locate the mac: block in electron-builder.yml');
-  const mac = block[0];
+  return block[0];
+}
 
-  const arches = new Set(
-    Array.from(mac.matchAll(/^\s+-\s+(x64|arm64|universal)\s*$/gm), (m) => m[1]),
+function macScalar(block, key) {
+  const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return block.match(new RegExp(`^ {2}${escaped}:\\s*([^#\\n]+)`, 'm'))?.[1].trim();
+}
+
+test('source plist grants exactly the reviewed true entitlement set', async () => {
+  const entitlements = await sourceEntitlements();
+  assertExactReviewedEntitlements(entitlements, 'packages/app/entitlements.mac.plist');
+  assert.deepEqual(new Set(entitlements.keys()), new Set(REVIEWED_ENTITLEMENTS.keys()));
+});
+
+test('strict plist parser rejects false values and malformed content', () => {
+  const falseValue = parseBooleanEntitlementsPlist(
+    '<?xml version="1.0"?><plist><dict><key>com.apple.security.cs.allow-jit</key><false/><key>com.apple.security.cs.disable-library-validation</key><true/></dict></plist>',
+    'false-value fixture',
   );
-  assert.ok(arches.has('arm64'), 'expected an arm64 macOS target');
-  for (const arch of arches) {
-    assert.equal(
-      arch,
-      'arm64',
-      `macOS target "${arch}" is not arm64. On x86_64 (and inside a universal slice) V8 maps RWX pages without MAP_JIT, so allow-jit alone is not enough and the app dies at launch with a codesign violation. Re-add com.apple.security.cs.allow-unsigned-executable-memory — and its rationale — before shipping this target.`,
-    );
+  assert.throws(
+    () => assertExactReviewedEntitlements(falseValue, 'false-value fixture'),
+    /missing true entitlement com\.apple\.security\.cs\.allow-jit/,
+  );
+  assert.throws(
+    () =>
+      parseBooleanEntitlementsPlist(
+        '<?xml version="1.0"?><plist><dict><key>broken</key><string>yes</string></dict></plist>',
+        'malformed fixture',
+      ),
+    /unsupported or malformed XML/,
+  );
+});
+
+test('does not reinstate removed or development-only entitlements', async () => {
+  const entitlements = await sourceEntitlements();
+  for (const [key, why] of [...REMOVED, ...FORBIDDEN]) {
+    assert.ok(!entitlements.has(key), `${key} must not ship: ${why}`);
   }
+});
+
+test('electron-builder applies this plist to hardened app and helper signatures', async () => {
+  const builder = await readFile(builderPath, 'utf8');
+  const mac = macBlock(builder);
+  assert.equal(macScalar(mac, 'hardenedRuntime'), 'true');
+  assert.equal(macScalar(mac, 'entitlements'), 'entitlements.mac.plist');
+  assert.equal(macScalar(mac, 'entitlementsInherit'), 'entitlements.mac.plist');
+});
+
+test('Electron stays new enough to omit unsigned executable memory on every architecture', async () => {
+  const manifest = JSON.parse(await readFile(appPackagePath, 'utf8'));
+  const electronRange = manifest.devDependencies?.electron;
+  assert.equal(typeof electronRange, 'string', 'packages/app must declare its Electron version');
+  const major = Number(electronRange.match(/\d+/)?.[0]);
+  assert.ok(Number.isInteger(major), `could not read Electron major from ${electronRange}`);
+  assert.ok(
+    major >= 12,
+    `Electron ${electronRange} predates the MAP_JIT-only guidance. Restore com.apple.security.cs.allow-unsigned-executable-memory before using Electron 11 or older.`,
+  );
+});
+
+test('macOS release verifies entitlements from the signed app payload', async () => {
+  const workflow = await readFile(releaseWorkflowPath, 'utf8');
+  assert.match(
+    workflow,
+    /node scripts\/verify-macos-entitlements\.mjs "\$app"/,
+    'release must inspect effective entitlements after signing the packaged app',
+  );
 });
