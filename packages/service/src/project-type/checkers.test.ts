@@ -69,7 +69,7 @@ describe('Checkers bundled project type', () => {
     // The reaction lives on the page tool and targets the opponent template.
     const userMove = detail.manifest.tools.find((t) => t.name === 'user_move');
     expect(userMove?.reaction?.gezel).toBe('checkers-player');
-    expect(userMove?.reaction?.prompt).toContain('{{output.board}}');
+    expect(userMove?.reaction?.prompt).toContain('{{output.modelState}}');
     expect(userMove?.reaction?.prompt).toContain('Style: {{playStyle}}');
     expect(userMove?.reaction?.prompt).toContain('do not volunteer advice');
     // Hard rule: every reaction-bearing tool is page-listed (reactions only
@@ -98,7 +98,7 @@ describe('Checkers bundled project type', () => {
 
     expect(applied.scriptsInstalled).toEqual(['game-store']);
     const scriptBody = await readFile(projectScriptFile(home, project.id, 'game-store'), 'utf8');
-    expect(scriptBody.startsWith('// @gezel-project-type: checkers@1.1.0\n')).toBe(true);
+    expect(scriptBody.startsWith('// @gezel-project-type: checkers@1.1.1\n')).toBe(true);
 
     const workspaceDir = await store.projectWorkspaceDir(project.id);
     const seed = JSON.parse(await readFile(join(workspaceDir, 'game.json'), 'utf8'));

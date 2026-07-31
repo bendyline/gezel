@@ -461,9 +461,7 @@ export async function runTrial(scenario: EvalScenario, opts: TrialOptions): Prom
         });
         if (stale) {
           throw new Error(
-            `MLX model "${modelId}" at ${sourceDir} is STALE vs the catalog (${stale}). ` +
-              'The harness cannot refetch MLX weights (it symlinks your dev home), so re-pull ' +
-              `first: gezel model pull --provider mlx ${modelId}`,
+            `MLX model "${modelId}" at ${sourceDir} is STALE vs the catalog (${stale}). The harness cannot refetch MLX weights (it symlinks your dev home), so re-pull first: gezel model pull --provider mlx ${modelId}`,
           );
         }
         log(`[trial] mlx source=${sourceDir}`);

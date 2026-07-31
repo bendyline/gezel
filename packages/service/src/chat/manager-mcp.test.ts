@@ -422,7 +422,11 @@ describe('ChatManager + MCP — tool calls fire through the bridge', () => {
     const reply = disk?.messages.find((message) => message.content === 'Built the page.');
     expect(reply?.warnings).toEqual([expect.stringContaining('run-diagnostic-123')]);
     expect(reply?.warnings?.[0]).toContain('script exited with code 1 without stderr output');
-    expect(mock.calls.filter((call) => call.kind === 'send')).toHaveLength(1);
+    expect(
+      mock.calls.filter(
+        (call) => call.kind === 'send' && call.sendOpts?.queue?.lane === 'interactive',
+      ),
+    ).toHaveLength(1);
   }, 30_000);
 
   it('skips CLOSING_SUMMARY after validation repair writes so checks can rerun', async () => {

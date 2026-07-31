@@ -459,9 +459,9 @@ describe('McpBridge', () => {
       about:
         'Custom Kickoff Guard is a browser game project used to verify custom kickoff text cannot bypass the standard workspace-file guidance.',
       missionObjectives:
-        '- Build a playable browser game\n- Ship the actual game as workspace/index.html',
+        '- Build a playable browser game\n- Ship the actual game as workspace/index.html\n- Deliver code and tests for the game logic',
       taskDescription:
-        'Build the playable browser game as one self-contained HTML file at workspace/index.html.',
+        'Build the playable browser game as one self-contained HTML file at workspace/index.html and add automated tests.',
       kickoffMessage:
         'Start the project by delivering a single index.html file that contains the entire game logic.',
     });
@@ -667,12 +667,13 @@ describe('McpBridge', () => {
     });
 
     it('rejects status=complete when verification claims an app but no workspace deliverable exists', async () => {
-      const create = await bridge.callTool('start_project', {
+      const create = await bridge.callTool('start_job', {
         name: 'GatedCloseNoFile',
         about:
           'GatedCloseNoFile is a test project for app-like mission objectives without a real workspace deliverable.',
         missionObjectives: '- Ship a playable browser game\n- Write workspace/index.html',
         taskDescription: 'Build the playable browser game for the no-file close gate test.',
+        specialistRole: 'developer',
       });
       const projectId = create.match(/\(([a-z0-9-]+)\)/)![1]!;
       const tasks = await bridge.callTool('list_tasks', { project: projectId });
@@ -695,11 +696,12 @@ describe('McpBridge', () => {
     });
 
     it('accepts status=complete when verification is provided + writes it to task notes', async () => {
-      const create = await bridge.callTool('start_project', {
+      const create = await bridge.callTool('start_job', {
         name: 'GatedCloseOk',
         about: 'GatedCloseOk is the happy-path project for the set_task_status verification gate.',
         missionObjectives: '- Index.html exists\n- Has clickable grid',
         taskDescription: 'Build the page for the verification-passes test.',
+        specialistRole: 'developer',
       });
       const projectId = create.match(/\(([a-z0-9-]+)\)/)![1]!;
       const tasks = await bridge.callTool('list_tasks', { project: projectId });
