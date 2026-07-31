@@ -1,9 +1,13 @@
 import assert from 'node:assert/strict';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 import {
   assertCudaArchitectures,
   normalizeExpectedCudaArchitectures,
   parseCuobjdumpArchitectures,
+  resolveCuobjdump,
 } from './verify-cuda-architecture.mjs';
 
 test('normalizes CMake real/virtual CUDA architecture suffixes', () => {
@@ -32,6 +36,19 @@ test('accepts expected targets split across cubin and PTX payloads', () => {
     }).expected,
     ['90', '121a'],
   );
+});
+
+test('prefers the toolkit cuobjdump over a bare PATH lookup', () => {
+  const suffix = process.platform === 'win32' ? '.exe' : '';
+  const root = mkdtempSync(join(tmpdir(), 'cuda-arch-'));
+  mkdirSync(join(root, 'bin'));
+  writeFileSync(join(root, 'bin', `cuobjdump${suffix}`), '');
+
+  assert.equal(resolveCuobjdump({ CUDA_PATH: root }), join(root, 'bin', `cuobjdump${suffix}`));
+  assert.equal(resolveCuobjdump({ CUDA_HOME: root }), join(root, 'bin', `cuobjdump${suffix}`));
+  // No toolkit root, or one without the binary: fall back to PATH.
+  assert.equal(resolveCuobjdump({}), `cuobjdump${suffix}`);
+  assert.equal(resolveCuobjdump({ CUDA_PATH: join(root, 'missing') }), `cuobjdump${suffix}`);
 });
 
 test('rejects the sm_52-only fallback that escaped native-v0.1.26', () => {

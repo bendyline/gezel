@@ -2,7 +2,23 @@
 
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+
+/**
+ * Locate `cuobjdump`. A partial toolkit install (the CI legs pull only nvcc +
+ * cudart + cublas) leaves it off PATH entirely, so prefer the toolkit root the
+ * workflow exports before falling back to a bare PATH lookup.
+ */
+export function resolveCuobjdump(env = process.env) {
+  const suffix = process.platform === 'win32' ? '.exe' : '';
+  for (const root of [env.CUDA_PATH, env.CUDA_HOME]) {
+    if (!root) continue;
+    const candidate = join(root, 'bin', `cuobjdump${suffix}`);
+    if (existsSync(candidate)) return candidate;
+  }
+  return `cuobjdump${suffix}`;
+}
 
 export function normalizeExpectedCudaArchitectures(value) {
   return String(value ?? '')
@@ -40,10 +56,21 @@ function valueAfter(flag) {
   return index >= 0 ? process.argv[index + 1] : undefined;
 }
 
-export function verifyCudaArchitectureFile({ library, expected, cuobjdump = 'cuobjdump' }) {
+export function verifyCudaArchitectureFile({ library, expected, cuobjdump = resolveCuobjdump() }) {
   if (!library || !existsSync(library)) throw new Error(`CUDA library not found: ${library ?? ''}`);
-  const elfOutput = execFileSync(cuobjdump, ['--list-elf', library], { encoding: 'utf8' });
-  const ptxOutput = execFileSync(cuobjdump, ['--list-ptx', library], { encoding: 'utf8' });
+  let elfOutput;
+  let ptxOutput;
+  try {
+    elfOutput = execFileSync(cuobjdump, ['--list-elf', library], { encoding: 'utf8' });
+    ptxOutput = execFileSync(cuobjdump, ['--list-ptx', library], { encoding: 'utf8' });
+  } catch (error) {
+    if (error?.code === 'ENOENT') {
+      throw new Error(
+        `cuobjdump not found (tried "${cuobjdump}"). Install the cuda-cuobjdump package for the toolkit version in use, or pass --cuobjdump <path>.`,
+      );
+    }
+    throw error;
+  }
   return assertCudaArchitectures({ expected, elfOutput, ptxOutput });
 }
 
@@ -52,7 +79,7 @@ if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) 
     const result = verifyCudaArchitectureFile({
       library: valueAfter('--library'),
       expected: valueAfter('--expected'),
-      cuobjdump: valueAfter('--cuobjdump') ?? 'cuobjdump',
+      cuobjdump: valueAfter('--cuobjdump') ?? resolveCuobjdump(),
     });
     console.log(
       `[cuda-arch] verified expected=[${result.expected.join(', ')}] ` +

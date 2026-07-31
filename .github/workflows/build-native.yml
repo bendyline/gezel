@@ -595,8 +595,12 @@ jobs:
           wget -q "https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/${cuda_arch}/cuda-keyring_1.1-1_all.deb"
           sudo dpkg -i cuda-keyring_1.1-1_all.deb
           sudo apt-get update
+          # cuobjdump is its own package — `cuda-nvcc-*` ships the compiler
+          # driver (nvcc, ptxas, fatbinary) but not the object inspector the
+          # architecture-payload audit below shells out to.
           sudo apt-get install -y --no-install-recommends \
-            "cuda-nvcc-${cuda_pkg}" "cuda-cudart-dev-${cuda_pkg}" "libcublas-dev-${cuda_pkg}"
+            "cuda-nvcc-${cuda_pkg}" "cuda-cudart-dev-${cuda_pkg}" "libcublas-dev-${cuda_pkg}" \
+            "cuda-cuobjdump-${cuda_pkg}"
           echo "CUDA_PATH=/usr/local/cuda-${cuda_ver}" >> "$GITHUB_ENV"
           # ds4's Makefile invokes `$(CUDA_HOME)/bin/nvcc` directly (not PATH
           # nvcc), and there's no guaranteed /usr/local/cuda symlink, so pin
@@ -616,7 +620,10 @@ jobs:
         with:
           cuda: '12.4.1'
           method: 'network'
-          sub-packages: '["nvcc","cudart","cublas","cublas_dev","visual_studio_integration"]'
+          # `cuobjdump` is listed for the same reason as the Linux apt line
+          # above: the architecture-payload audit needs it and "nvcc" alone
+          # does not pull it in.
+          sub-packages: '["nvcc","cuobjdump","cudart","cublas","cublas_dev","visual_studio_integration"]'
 
       # ── Linux CPU baseline build deps ─────────────────────────
       # Fires for every linux-* CPU-only build (x86_64 and arm64
