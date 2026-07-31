@@ -1,6 +1,7 @@
 import { pathToFileURL } from 'node:url';
 import { createLogger, resolveSandboxCopilot } from '@bendyline/gezel';
 import type { QuotaBucket } from '../chat/usage.js';
+import { resolveCopilotCliPath } from './copilot-cli.js';
 import { ProviderQueue, runInQueue } from './queue.js';
 import { StreamingSessionBase } from './streaming-session.js';
 import {
@@ -114,15 +115,23 @@ export class CopilotProvider implements LLMProvider {
    * devDependency copy of the SDK.
    */
   private readonly sdkEntryPath?: string;
+  /**
+   * Root of that same system-toolsets install. The CLI binary the SDK
+   * drives ships as an optional dep beneath it, and the SDK cannot find
+   * it on its own — see `resolveCopilotCliPath`.
+   */
+  private readonly sdkInstallRoot?: string;
 
   constructor(opts: {
     githubToken?: string;
     sdkEntryPath?: string;
+    sdkInstallRoot?: string;
     concurrency?: number;
     affinity?: boolean;
   }) {
     this.githubToken = opts.githubToken;
     this.sdkEntryPath = opts.sdkEntryPath;
+    this.sdkInstallRoot = opts.sdkInstallRoot;
     this.queue = new ProviderQueue({
       concurrency: opts.concurrency ?? 10,
       ...(opts.affinity !== undefined ? { affinity: opts.affinity } : {}),
@@ -137,6 +146,16 @@ export class CopilotProvider implements LLMProvider {
     ) => CopilotClientHandle;
     const clientOpts: Record<string, unknown> = {};
     if (this.githubToken) clientOpts.githubToken = this.githubToken;
+    // `COPILOT_CLI_PATH` rather than a `RuntimeConnection.forStdio({ path })`
+    // override: it feeds both the spawned-child and in-process FFI code
+    // paths, and leaves the caller's choice of connection kind alone.
+    const cli = resolveCopilotCliPath({ installRoot: this.sdkInstallRoot ?? null });
+    if (cli) {
+      log.info(`[copilot] CLI resolved (${cli.source}): ${cli.path}`);
+      clientOpts.env = { ...definedEnv(), COPILOT_CLI_PATH: cli.path };
+    } else {
+      log.warn('[copilot] no Copilot CLI found; falling back to the SDK lookup');
+    }
     const client = new CopilotClient(clientOpts);
     log.info('[copilot] starting CopilotClient...');
     try {
@@ -223,7 +242,7 @@ export class CopilotProvider implements LLMProvider {
       systemMessage: { mode: 'replace' as const, content: systemMessage },
       onPermissionRequest: sandboxCopilot
         ? buildSandboxPermissionHandler(opts.onSandboxDenial)
-        : (approveAllFn ?? (() => ({ kind: 'approved' }))),
+        : (approveAllFn ?? (() => ({ kind: PERMISSION_APPROVE }))),
     };
     // `excludedTools` at the session level only accepts Copilot built-in
     // tool names — the SDK logs "Unknown tool name in the tool excludedlist"
@@ -661,6 +680,18 @@ function parseUsage(d: Record<string, unknown>): TurnUsage {
 }
 
 /**
+ * `process.env` with the `undefined` values dropped — the SDK passes the
+ * env we hand it straight to `child_process.spawn`.
+ */
+function definedEnv(): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value !== undefined) out[key] = value;
+  }
+  return out;
+}
+
+/**
  * The Copilot CLI subprocess writes `(node:NNNN) ExperimentalWarning: ...`
  * lines to stderr even on a healthy run. On an unauthenticated machine, the
  * process also exits with code 0 before printing `listening on port ...`,
@@ -675,12 +706,24 @@ function parseUsage(d: Record<string, unknown>): TurnUsage {
 function translateCopilotStartError(err: unknown, hasToken: boolean): Error {
   const raw = err instanceof Error ? err.message : String(err);
   const stripped = stripExperimentalWarnings(raw);
-  const cleanedExit = /CLI server exited with code 0\b/.test(stripped);
+  // The SDK words this two ways: "exited with code 0" when the CLI died
+  // during startup, "exited unexpectedly with code 0" when it died after
+  // reporting ready with nothing on stderr. Both mean the same thing to
+  // a user.
+  const cleanedExit = /CLI server exited (?:unexpectedly )?with code 0\b/.test(stripped);
   if (cleanedExit) {
     const guidance = hasToken
       ? 'The saved GitHub token was rejected by Copilot. Confirm the token has Copilot access, or run `npx @github/copilot login` to re-authenticate.'
       : 'Copilot CLI is not authenticated. Run `npx @github/copilot login` to sign in, or paste a GitHub token with Copilot access in Settings.';
     const wrapped = new Error(guidance) as Error & { isActionable?: boolean };
+    wrapped.isActionable = true;
+    return wrapped;
+  }
+  if (/@github\/copilot platform package/.test(stripped)) {
+    const wrapped = new Error(
+      'The Copilot CLI binary is missing from this install. Install the CLI yourself ' +
+        '(`npm i -g @github/copilot`), or set COPILOT_CLI_PATH to an existing one.',
+    ) as Error & { isActionable?: boolean };
     wrapped.isActionable = true;
     return wrapped;
   }
@@ -724,6 +767,26 @@ export const NON_SANDBOX_EXCLUDED_MCP_TOOLS = [
 ];
 
 /**
+ * The two permission decisions a client is allowed to send back.
+ *
+ * The SDK's `PermissionDecision` union mixes two directions of travel:
+ * *request* variants a handler may return (`approve-once`,
+ * `approve-for-session`, `reject`, `user-not-available`, …) and *outcome*
+ * variants the CLI emits to describe what happened (`approved`,
+ * `denied-by-rules`, `cancelled`, …). Returning an outcome kind is
+ * rejected by the CLI with `unexpected user permission response: <kind>`,
+ * which fails the tool call rather than allowing or denying it — every
+ * MCP call in the session errors out and the model retries forever.
+ * `approveAll()` from the SDK returns `approve-once` for the same reason.
+ */
+const PERMISSION_APPROVE = 'approve-once';
+const PERMISSION_REJECT = 'reject';
+
+/** Told to the model on denial so it stops retrying the built-in. */
+const SANDBOX_DENIAL_FEEDBACK =
+  'Sandbox mode: Copilot built-in tools are disabled. Use the gezel MCP tools instead.';
+
+/**
  * Permission handler used when sandbox mode is on. Denies every
  * Copilot-SDK permission kind except `mcp` (our MCP tools) and
  * `custom-tool` (host-registered custom tools — we don't use them
@@ -739,11 +802,11 @@ export function buildSandboxPermissionHandler(
     fileName?: string;
     fullCommandText?: string;
   }) => void | Promise<void>,
-): (request: Record<string, unknown>) => { kind: string } {
+): (request: Record<string, unknown>) => { kind: string; feedback?: string } {
   return (request) => {
     const kind = typeof request?.kind === 'string' ? (request.kind as string) : 'unknown';
     if (kind === 'mcp' || kind === 'custom-tool') {
-      return { kind: 'approved' };
+      return { kind: PERMISSION_APPROVE };
     }
     try {
       const toolName =
@@ -763,7 +826,7 @@ export function buildSandboxPermissionHandler(
     } catch (err) {
       log.warn('[copilot] sandbox denial callback threw:', err);
     }
-    return { kind: 'denied-by-rules' };
+    return { kind: PERMISSION_REJECT, feedback: SANDBOX_DENIAL_FEEDBACK };
   };
 }
 

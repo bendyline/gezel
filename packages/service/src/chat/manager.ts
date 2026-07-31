@@ -9513,12 +9513,14 @@ export class ChatManager {
       // keeps dev-mode happy and lets fresh packaged installs still
       // produce a clear "not installed yet" error from the SDK probe
       // rather than a module-resolution crash.
-      const sdkEntryPath =
-        (await resolveSystemLibraryPath(this.home, '@github/copilot-sdk', { withEntry: true })) ??
-        undefined;
+      const [sdkInstallRoot, sdkEntryPath] = await Promise.all([
+        resolveSystemLibraryPath(this.home, '@github/copilot-sdk'),
+        resolveSystemLibraryPath(this.home, '@github/copilot-sdk', { withEntry: true }),
+      ]);
       provider = new CopilotProvider({
         githubToken: githubToken ?? undefined,
-        sdkEntryPath,
+        sdkEntryPath: sdkEntryPath ?? undefined,
+        sdkInstallRoot: sdkInstallRoot ?? undefined,
         ...(config.providerConcurrency?.copilot
           ? { concurrency: config.providerConcurrency.copilot }
           : {}),

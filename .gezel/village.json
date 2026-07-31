@@ -379,8 +379,8 @@
             60.6
           ],
           "p": ".github/workflows",
-          "h": "4b19be497dff896d5fd2b6b2dde601e4dcd836dfc106760a76a7714ae0e4779f",
-          "w": 1680,
+          "h": "6637758cd41799c67db3dce60ebedc77f64925fe7e8a32f2bde88884f2a5acfa",
+          "w": 1684,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -491,8 +491,7 @@
           "p": ".pnpm-store/v11",
           "h": "eefee28e3e88102c227c857dcec20b0b42049e0a8e2fbe3cd57dd4320dc24c66",
           "w": 1,
-          "a": "2026-07-29T12:45:34.302Z",
-          "d": "2026-07-31T18:09:42.904Z"
+          "a": "2026-07-29T12:45:34.302Z"
         },
         {
           "k": "block",
@@ -506,8 +505,7 @@
           "p": ".pnpm-store/v11",
           "h": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
           "w": 1,
-          "a": "2026-07-29T12:45:34.302Z",
-          "d": "2026-07-31T18:09:42.904Z"
+          "a": "2026-07-29T12:45:34.302Z"
         },
         {
           "k": "block",
@@ -678,8 +676,8 @@
             16.2,
             13.1
           ],
-          "h": "1f73d78f6ab82a01b3032910e5869fb1425be99f492dde791b4cc48729d7e487",
-          "w": 7,
+          "h": "8c559f1edc9cd3fa59e02dd6a6c6ad3ac652e4527b3a007050cd984ea8878841",
+          "w": 21,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -8535,8 +8533,8 @@
             27
           ],
           "p": "packages/app/ux-screenshots",
-          "h": "627697d857ff80c780c41f05febbf117e1f010c39d125f9f60aee87701855e98",
-          "w": 108,
+          "h": "ce59d582f4d59868288c9f5d7426dc42946ebac19a8c5f3c589aff987b8af34b",
+          "w": 471,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -10943,8 +10941,8 @@
             64.2
           ],
           "p": "packages/core/src/schemas",
-          "h": "2f7577f225018fe6ce50012c9427c13ad2a16da267f887a7482961fab6ed5545",
-          "w": 6066,
+          "h": "35837823e0a15be42d1a1dd241406e7a5eeedad6444a3b136454306a3ae1c242",
+          "w": 6068,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -12217,8 +12215,8 @@
             54.6
           ],
           "p": "packages/mcp/src",
-          "h": "1c0a00dc60e9907f6bfed33b0d4d2db368a43a64ed6d1cabf4947e0449b5c377",
-          "w": 9873,
+          "h": "1af52396a99eaa433743f27918a72d951ccab4f1323e6ad8708f16c6db972547",
+          "w": 9880,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -13435,8 +13433,8 @@
             57.4
           ],
           "p": "packages/service/src/chat",
-          "h": "ad861296e93873c8640d970a1bfe4e7cf4ff81486d3e681b067365bc0b614574",
-          "w": 1016,
+          "h": "b0adabbea7e3198dce4e680d2bc38f1b7650fd289f629ca1a6872b66f88a096c",
+          "w": 1049,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -15398,8 +15396,8 @@
             36.9
           ],
           "p": "packages/service/src/http/routes",
-          "h": "bce9bbd656879ddfce84ce693741b2f33910eb42d58868dea970aeedd53d9ca5",
-          "w": 370,
+          "h": "915158de652489be404851b6768566dfa6d5451b7b2643265042d793edf65766",
+          "w": 371,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -17302,8 +17300,8 @@
             22.7
           ],
           "p": "packages/service/src/model-profile/behaviors",
-          "h": "e89a5fb402436c555d4d5699842d1b0d9aefbcc410338aa0bf86900e33c6c8b9",
-          "w": 112,
+          "h": "8ab9571d1b1271fed0947f3505727dbf8ee8ed4536a50706c906ddd4ae59fd39",
+          "w": 117,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -18484,6 +18482,20 @@
         },
         {
           "k": "block",
+          "id": "packages/service/src/providers/copilot-cli.ts",
+          "r": [
+            157.3,
+            2141.6,
+            25,
+            37.8
+          ],
+          "p": "packages/service/src/providers",
+          "h": "ab542a759dcac1d10ec50eb7d2577b710bb9d6ff2db67f88e0fa364814272c44",
+          "w": 214,
+          "a": "2026-07-31T21:40:34.966Z"
+        },
+        {
+          "k": "block",
           "id": "packages/service/src/providers/copilot.ts",
           "r": [
             149.8,
@@ -18492,8 +18504,8 @@
             61.9
           ],
           "p": "packages/service/src/providers",
-          "h": "1e5f8913d7e3d1865569eee838d3a361c6e90c97f1483895dc86b12d1b852dfc",
-          "w": 796,
+          "h": "8f7ca05d97b8eeb44cd41a7cc7515d440aebd52fb7398d42b7d2c4a862501598",
+          "w": 839,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -21152,8 +21164,8 @@
             65
           ],
           "p": "packages/service/src/tasks",
-          "h": "35d8ea2e37c48ff52753316442b54ec55f3d2388f6a6ac386acd086f0567d640",
-          "w": 3318,
+          "h": "cba219d33c62d42ce4074034f3f58db2b595ab1c8aefcc69d8209fc1f9140cc2",
+          "w": 3362,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -22384,8 +22396,8 @@
             46
           ],
           "p": "packages/ui/src/components",
-          "h": "e58cd02945512014b24f27e62b5412ffbc516ddd7ecec1d5c11befbe19237f20",
-          "w": 1037,
+          "h": "f9804da524a0a313780f4a3ad20b73167fc76bc317d94e84da1df81984841bae",
+          "w": 1044,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -23534,8 +23546,8 @@
             31.4
           ],
           "p": "packages/ui/src/components",
-          "h": "1b3735bf755041fb381e8478ec18bf090efa2ca5a709119916fc67427458ef2a",
-          "w": 322,
+          "h": "fe74b9fd969aeeeea3536edd867a49d40e4a6ef074803c347f91ea57881d99ea",
+          "w": 331,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -27678,8 +27690,8 @@
             25.3
           ],
           "p": "scripts",
-          "h": "2681859b1a76b30987a45904ad984bafc3fe6f78a9dbd3252434be19d1c1ee3f",
-          "w": 93,
+          "h": "5223fd111da660c1a049907fbbb740da950aedb9ab0a3999d864397e94daafce",
+          "w": 110,
           "a": "2026-07-31T17:30:53.594Z"
         },
         {
@@ -38570,6 +38582,20 @@
           "w": 2947,
           "a": "2026-07-30T21:01:22.327Z",
           "d": "2026-07-31T17:30:53.594Z"
+        },
+        {
+          "k": "block",
+          "id": "ship-audit/rc-1.26212.27/release-assets/SHA256SUMS",
+          "r": [
+            -7065.1,
+            -4270.1,
+            15.6,
+            17.6
+          ],
+          "p": "ship-audit/rc-1.26212.27/release-assets",
+          "h": "fad708ec5aaab4f620ce086c0838b3081f40d74c12eefa5407493763a2596010",
+          "w": 15,
+          "a": "2026-07-31T21:40:34.966Z"
         },
         {
           "k": "block",
@@ -80887,6 +80913,17 @@
             11
           ],
           "p": "ship-audit"
+        },
+        {
+          "k": "plate",
+          "id": "ship-audit/rc-1.26212.27/release-assets",
+          "r": [
+            -7065.1,
+            -4281.1,
+            15.6,
+            11
+          ],
+          "p": "ship-audit/rc-1.26212.27"
         },
         {
           "k": "plate",
