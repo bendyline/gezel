@@ -681,6 +681,7 @@ jobs:
           app=$(find packages/app/dist/installers -maxdepth 2 -name '*.app' -print -quit)
           test -n "$app"
           codesign --verify --strict --deep --verbose=2 "$app"
+          node scripts/verify-macos-entitlements.mjs "$app"
           node scripts/verify-macos-version-floor.mjs "$app" 13.5
 
           # The official Node runtime arrives signed/notarized by the Node.js

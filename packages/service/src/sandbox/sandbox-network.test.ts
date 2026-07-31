@@ -8,6 +8,7 @@ import {
   NET_BLOCK_PRELOAD,
   type SandboxRunResult,
   canApplyLinuxSystemdSandbox,
+  isSilentMacSandboxStartupFailure,
   runInSandbox,
   selectDenyNetBoundary,
 } from './runner.js';
@@ -163,6 +164,24 @@ await writeFile(${JSON.stringify(marker)}, fetchError);
     expect(childEnv.GEZEL_TEST_VISIBLE).toBe('yes');
     expect(childEnv.GEZEL_TEST_SHOULD_NOT_LEAK).toBeUndefined();
     expect(childEnv.WINDOWPATH).toBeUndefined();
+  });
+});
+
+describe('trusted macOS Seatbelt startup fallback classifier', () => {
+  it('recognizes only the silent pre-execution exit shape on macOS', () => {
+    const silent: SandboxRunResult = {
+      exitCode: 1,
+      signal: null,
+      stdout: '',
+      stderr: '',
+      timedOut: false,
+    };
+    expect(isSilentMacSandboxStartupFailure(silent, 'darwin')).toBe(true);
+    expect(isSilentMacSandboxStartupFailure(silent, 'linux')).toBe(false);
+    expect(
+      isSilentMacSandboxStartupFailure({ ...silent, stderr: 'script failed\n' }, 'darwin'),
+    ).toBe(false);
+    expect(isSilentMacSandboxStartupFailure({ ...silent, timedOut: true }, 'darwin')).toBe(false);
   });
 });
 

@@ -312,6 +312,123 @@ describe('ChatManager + MCP — tool calls fire through the bridge', () => {
     expect(wrapUpMsg).toBeDefined();
   }, 30_000);
 
+  it('continues a task after a read-only tool instead of summarizing and stopping', async () => {
+    await store.writeProjectWorkspaceFile('default', 'src/game.js', 'export const speed = 1;\n');
+    const task = await svc.context.tasks.create('default', {
+      title: 'Tune the game',
+      assignee: { kind: 'gezel', gezelId: 'ada' },
+      steps: [
+        {
+          name: 'Edit',
+          prompt:
+            'First call `read_file` on `src/game.js`, then call `replace_in_file` to change the speed from 1 to 2.',
+        },
+        { name: 'Evaluate', assignee: { kind: 'user' } },
+      ],
+    });
+    const session = await manager.createSession({
+      gezelId: 'ada',
+      projectId: 'default',
+      taskRef: task.ref,
+      stepId: task.activeStepId,
+    });
+
+    mock.scriptToolCalls([{ name: 'read_file', arguments: { path: 'src/game.js' } }]);
+    mock.scriptToolCalls([
+      {
+        name: 'replace_in_file',
+        arguments: {
+          path: 'src/game.js',
+          find: 'speed = 1',
+          replace: 'speed = 2',
+        },
+      },
+    ]);
+    mock.script('', 'Updated src/game.js.');
+
+    await manager.send(session.id, 'Continue the current step.');
+
+    const sends = mock.calls.filter((call) => call.kind === 'send');
+    expect(
+      sends.some((call) =>
+        /read-only tool returned the context you needed/i.test(call.prompt ?? ''),
+      ),
+    ).toBe(true);
+    expect(sends.some((call) => /No more tools — just words/i.test(call.prompt ?? ''))).toBe(false);
+    await expect(store.readProjectWorkspaceFile('default', 'src/game.js')).resolves.toBe(
+      'export const speed = 2;\n',
+    );
+    expect(mock.toolCallOutputs.map((output) => output.name)).toEqual([
+      'read_file',
+      'replace_in_file',
+    ]);
+  }, 30_000);
+
+  it('persists gate infrastructure diagnostics on the assistant message', async () => {
+    const project = await store.createProject({ name: 'Gate diagnostics' });
+    const task = await svc.context.tasks.create(project.id, {
+      title: 'Build the page',
+      assignee: { kind: 'gezel', gezelId: 'ada' },
+      steps: [
+        {
+          name: 'Build',
+          prompt: 'Create `index.html` with `write_file`.',
+          advanceWhen: { file: 'index.html', minBytes: 20 },
+        },
+        { name: 'Evaluate', assignee: { kind: 'user' } },
+      ],
+    });
+    manager.setTaskAdvancer(async () => ({
+      status: 'held',
+      message: 'Gate script "checkHtmlComplete" failed.',
+      messageFingerprint: 'gate-infra',
+      attempt: 0,
+      paused: true,
+      infrastructureError: true,
+      scriptRuns: [
+        {
+          scriptName: 'checkHtmlComplete',
+          runId: 'run-diagnostic-123',
+          error: 'script exited with code 1 without stderr output',
+        },
+      ],
+    }));
+    const session = await manager.createSession({
+      gezelId: 'ada',
+      projectId: project.id,
+      taskRef: task.ref,
+      stepId: task.activeStepId,
+    });
+    mock.scriptToolCalls([
+      {
+        name: 'write_file',
+        arguments: {
+          path: 'index.html',
+          content: '<!doctype html><html><head><title>Game</title></head><body>Ready</body></html>',
+        },
+      },
+    ]);
+    mock.script('Built the page.');
+
+    await manager.send(session.id, 'Build it.');
+
+    expect(mock.toolCallOutputs.find((output) => output.name === 'write_file')?.output).toMatch(
+      /Wrote index\.html/,
+    );
+    await expect(store.readProjectWorkspaceFile(project.id, 'index.html')).resolves.toContain(
+      '<title>Game</title>',
+    );
+    const disk = await store.getSession('ada', session.id);
+    const reply = disk?.messages.find((message) => message.content === 'Built the page.');
+    expect(reply?.warnings).toEqual([expect.stringContaining('run-diagnostic-123')]);
+    expect(reply?.warnings?.[0]).toContain('script exited with code 1 without stderr output');
+    expect(
+      mock.calls.filter(
+        (call) => call.kind === 'send' && call.sendOpts?.queue?.lane === 'interactive',
+      ),
+    ).toHaveLength(1);
+  }, 30_000);
+
   it('skips CLOSING_SUMMARY after validation repair writes so checks can rerun', async () => {
     const session = await manager.createSession({ gezelId: 'ada' });
 

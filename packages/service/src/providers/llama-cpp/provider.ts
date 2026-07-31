@@ -2845,7 +2845,14 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
     // start_project in one response and producing N duplicate projects.
     let startedProjectOrJobThisTurn: { tool: string; firstResult: string } | null = null;
     let fullText = '';
-    let lastUsage: { prompt_tokens: number; completion_tokens: number } | null = null;
+    let lastUsage: {
+      prompt_tokens: number;
+      completion_tokens: number;
+      /** From llama-server's `timings.predicted_per_second` — decode rate. */
+      predicted_per_second?: number;
+      /** From llama-server's `timings.cache_n` — prompt tokens reused. */
+      cache_n?: number;
+    } | null = null;
     // TTFT stopwatch — null until the first content delta arrives for
     // this whole turn (across every tool-loop iteration). Non-null on
     // subsequent iterations means we've already seen the first token
@@ -2935,6 +2942,14 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
           // ds4-server emits per-turn usage only when asked; llama-server
           // surfaces its own custom timings the session already parses.
           ...(this.deps.includeUsageInStream ? { stream_options: { include_usage: true } } : {}),
+          // Ask llama-server for its per-request `timings` block, which carries
+          // `predicted_per_second` (decode rate), `prompt_per_second` (prefill
+          // rate) and `cache_n` (prompt tokens served from cache). Without it
+          // the stream's `usage` has token COUNTS only, so throughput was
+          // reachable solely by scraping stdout — which meant the product had
+          // no decode rate to show at all. Unknown request fields are ignored
+          // by servers that predate the option, so this is safe to always send.
+          timings_per_token: true,
         };
         // Per-model tuning. Writes temperature/top_p/top_k/min_p plus
         // DRY/XTC, grammar / json_schema, tool_choice, and
@@ -4504,9 +4519,17 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
               }
             }
             if (chunk.usage) {
+              // `timings` rides alongside `usage` when `timings_per_token` is
+              // set; it is the only HTTP source of decode/prefill rate.
+              const t = (chunk as { timings?: Record<string, unknown> }).timings;
+              const perSec =
+                typeof t?.predicted_per_second === 'number' ? t.predicted_per_second : undefined;
+              const cacheN = typeof t?.cache_n === 'number' ? t.cache_n : undefined;
               iterationUsage = {
                 prompt_tokens: chunk.usage.prompt_tokens,
                 completion_tokens: chunk.usage.completion_tokens,
+                ...(perSec !== undefined && perSec > 0 ? { predicted_per_second: perSec } : {}),
+                ...(cacheN !== undefined && cacheN > 0 ? { cache_n: cacheN } : {}),
               };
               lastUsage = iterationUsage;
             }
@@ -5331,6 +5354,12 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
                 model: this.deps.model,
                 inputTokens: lastUsage.prompt_tokens,
                 outputTokens: lastUsage.completion_tokens,
+                ...(lastUsage.predicted_per_second !== undefined
+                  ? { outputTokensPerSec: lastUsage.predicted_per_second }
+                  : {}),
+                ...(lastUsage.cache_n !== undefined
+                  ? { cachedInputTokens: lastUsage.cache_n }
+                  : {}),
                 durationMs: Date.now() - start,
               }),
             );
@@ -5354,6 +5383,12 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
                 model: this.deps.model,
                 inputTokens: lastUsage.prompt_tokens,
                 outputTokens: lastUsage.completion_tokens,
+                ...(lastUsage.predicted_per_second !== undefined
+                  ? { outputTokensPerSec: lastUsage.predicted_per_second }
+                  : {}),
+                ...(lastUsage.cache_n !== undefined
+                  ? { cachedInputTokens: lastUsage.cache_n }
+                  : {}),
                 durationMs,
               }),
             );
@@ -5879,6 +5914,12 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
                 model: this.deps.model,
                 inputTokens: lastUsage.prompt_tokens,
                 outputTokens: lastUsage.completion_tokens,
+                ...(lastUsage.predicted_per_second !== undefined
+                  ? { outputTokensPerSec: lastUsage.predicted_per_second }
+                  : {}),
+                ...(lastUsage.cache_n !== undefined
+                  ? { cachedInputTokens: lastUsage.cache_n }
+                  : {}),
                 durationMs,
               }),
             );
@@ -5894,6 +5935,12 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
                 model: this.deps.model,
                 inputTokens: lastUsage.prompt_tokens,
                 outputTokens: lastUsage.completion_tokens,
+                ...(lastUsage.predicted_per_second !== undefined
+                  ? { outputTokensPerSec: lastUsage.predicted_per_second }
+                  : {}),
+                ...(lastUsage.cache_n !== undefined
+                  ? { cachedInputTokens: lastUsage.cache_n }
+                  : {}),
                 durationMs: Date.now() - start,
               }),
             );
@@ -5945,6 +5992,12 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
                 model: this.deps.model,
                 inputTokens: lastUsage.prompt_tokens,
                 outputTokens: lastUsage.completion_tokens,
+                ...(lastUsage.predicted_per_second !== undefined
+                  ? { outputTokensPerSec: lastUsage.predicted_per_second }
+                  : {}),
+                ...(lastUsage.cache_n !== undefined
+                  ? { cachedInputTokens: lastUsage.cache_n }
+                  : {}),
                 durationMs,
               }),
             );
@@ -5962,6 +6015,12 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
                 model: this.deps.model,
                 inputTokens: lastUsage.prompt_tokens,
                 outputTokens: lastUsage.completion_tokens,
+                ...(lastUsage.predicted_per_second !== undefined
+                  ? { outputTokensPerSec: lastUsage.predicted_per_second }
+                  : {}),
+                ...(lastUsage.cache_n !== undefined
+                  ? { cachedInputTokens: lastUsage.cache_n }
+                  : {}),
                 durationMs,
               }),
             );
@@ -5979,6 +6038,12 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
                 model: this.deps.model,
                 inputTokens: lastUsage.prompt_tokens,
                 outputTokens: lastUsage.completion_tokens,
+                ...(lastUsage.predicted_per_second !== undefined
+                  ? { outputTokensPerSec: lastUsage.predicted_per_second }
+                  : {}),
+                ...(lastUsage.cache_n !== undefined
+                  ? { cachedInputTokens: lastUsage.cache_n }
+                  : {}),
                 durationMs,
               }),
             );
@@ -5996,6 +6061,12 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
                 model: this.deps.model,
                 inputTokens: lastUsage.prompt_tokens,
                 outputTokens: lastUsage.completion_tokens,
+                ...(lastUsage.predicted_per_second !== undefined
+                  ? { outputTokensPerSec: lastUsage.predicted_per_second }
+                  : {}),
+                ...(lastUsage.cache_n !== undefined
+                  ? { cachedInputTokens: lastUsage.cache_n }
+                  : {}),
                 durationMs,
               }),
             );

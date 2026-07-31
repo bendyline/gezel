@@ -97,6 +97,12 @@ export const MachineMemoryUsageSchema = z.object({
   gezelBytesEstimated: z.number().nonnegative(),
   /** Observed same-home process footprint when the platform exposes it. */
   gezelBytesObserved: z.number().nonnegative().nullable(),
+  /** Gezel daemon + local-engine runtime overhead within the attributed total. */
+  gezelInfraBytes: z.number().nonnegative(),
+  /** Loaded model parameters, estimated from the installed model payloads. */
+  gezelModelWeightsBytes: z.number().nonnegative(),
+  /** KV cache, inference buffers, and other model working-set overhead. */
+  gezelModelCacheBytes: z.number().nonnegative(),
   /** Capacity-broker reservation for local chat-model replicas. */
   engineReservedBytes: z.number().nonnegative(),
   gezelEngineProcessCount: z.number().int().nonnegative(),
@@ -871,6 +877,14 @@ export const GezelConfigSchema = z.object({
    * (stable system prompt + history) with a cached one. Default when
    * unset: `256` (auto-on — near-zero risk, meaningful multi-turn
    * speedup). Set `0` to disable.
+   *
+   * The engine may still refuse it: `--cache-reuse` needs a context that
+   * can KV-shift, which rules out a windowed SWA cache (Gemma — see
+   * `llamaCppSwaFull`) and hybrid-attention models (Qwen 3.5/3.6) outright.
+   * Note this is only PARTIAL, position-shifted reuse; exact-prefix reuse
+   * via `cache_prompt` is always on and already does the heavy lifting
+   * (measured 2026-07-31: median prompt-eval 593 tokens against 38–52K
+   * token prompts on gemma4-26b-q4).
    */
   llamaCppCacheReuse: z.number().int().min(0).optional(),
   /**
@@ -878,6 +892,16 @@ export const GezelConfigSchema = z.object({
    * (`--swa-full`) for SWA models (Gemma family). Trades memory for
    * fewer recomputes at long context. Default unset (off — llama-server
    * uses the memory-efficient windowed cache).
+   *
+   * Also the PRECONDITION for `llamaCppCacheReuse` on these models:
+   * llama-server tests whether the loaded context can KV-shift and, for a
+   * windowed SWA cache, it cannot — so it logs `cache_reuse is not
+   * supported by this context, it will be disabled` and drops the flag no
+   * matter what `cacheReuse` is set to. Measured 2026-07-31 on
+   * gemma4-e4b-q8 at 64K context: windowed = 8,772 MB RSS + cache_reuse
+   * refused; `--swa-full` = 11,415 MB RSS (+30%) + cache_reuse accepted.
+   * Qwen 3.5/3.6 cannot KV-shift at all (hybrid attention) and this flag
+   * does not help them.
    */
   llamaCppSwaFull: z.boolean().optional(),
   /**
@@ -2328,6 +2352,8 @@ export const MessageGezelResponseSchema = z.object({
   sessionId: z.string(),
   toGezelId: z.string(),
   toGezelName: z.string(),
+  /** True when an identical file handoff was already pending and was joined. */
+  deduplicated: z.boolean().optional(),
 });
 export type MessageGezelResponse = z.infer<typeof MessageGezelResponseSchema>;
 
@@ -2811,6 +2837,11 @@ export const CreateProjectRequestSchema = z.object({
    */
   mode: z.enum(['crew', 'solo']).optional(),
   /**
+   * Opt out of structural and content indexing for this project's workspace.
+   * Missing/true keeps the historical indexing behavior.
+   */
+  indexingEnabled: z.boolean().optional(),
+  /**
    * Optional GitHub repo to associate with the project at creation. When
    * present, the URL is persisted into `project.github.url` and a
    * background clone is kicked off; the project lands ready-to-use on
@@ -2860,6 +2891,11 @@ export const UpdateProjectRequestSchema = z.object({
   /** Replace the project's optional-tab visibility overrides. */
   tabVisibility: ProjectTabVisibilitySchema.optional(),
   /**
+   * Enable or disable structural and content indexing for this workspace.
+   * Chat history, memories, and shared-document indexing are unaffected.
+   */
+  indexingEnabled: z.boolean().optional(),
+  /**
    * Project-level operational status. `active` (default) lets ambient
    * gezel work flow; `readonly` and `inactive` pause meester nudges,
    * auto-phase-advance handoffs, cron-tick recording, and boot-time
@@ -2895,6 +2931,12 @@ export const UpdateProjectRequestSchema = z.object({
    * override and falls back to auto-detection.
    */
   projectTypeId: z.string().nullable().optional(),
+  /**
+   * Merge values into the project's shared configuration bag (see core
+   * `project-properties.ts`). Empty-string values delete the key; keys
+   * not mentioned are untouched.
+   */
+  properties: z.record(z.string(), z.string()).optional(),
 });
 export type UpdateProjectRequest = z.infer<typeof UpdateProjectRequestSchema>;
 
@@ -5144,8 +5186,9 @@ export const WorkspaceIndexStatusSchema = z.object({
    *   - `stale`    — index exists but older than threshold; re-scan pending
    *   - `indexing` — a scan is in flight right now
    *   - `never`    — no index on disk yet
+   *   - `disabled` — this project explicitly opted out of workspace indexing
    */
-  state: z.enum(['fresh', 'stale', 'indexing', 'never']),
+  state: z.enum(['fresh', 'stale', 'indexing', 'never', 'disabled']),
   meta: WorkspaceIndexMetaSchema.optional(),
   /**
    * True when the structural index is fresh but the background AI scan
@@ -5244,6 +5287,50 @@ export const NightShiftTasksResponseSchema = z.object({
   upcoming: z.array(NightShiftTaskBriefSchema),
 });
 export type NightShiftTasksResponse = z.infer<typeof NightShiftTasksResponseSchema>;
+
+/** One task last night's shift completed. */
+export const NightShiftCompletedTaskSchema = z.object({
+  ref: z.string(),
+  title: z.string(),
+  projectId: z.string(),
+  projectName: z.string(),
+  completedAt: z.string().optional(),
+});
+export type NightShiftCompletedTask = z.infer<typeof NightShiftCompletedTaskSchema>;
+
+/** One report the shift produced, with its embedded-action tally. */
+export const NightShiftReportSchema = z.object({
+  projectId: z.string(),
+  projectName: z.string(),
+  /** Artifacts-relative path. */
+  path: z.string(),
+  /** First H1, else the filename. */
+  title: z.string(),
+  writtenAt: z.string().optional(),
+  actionCounts: z.object({
+    total: z.number(),
+    suggested: z.number(),
+    fired: z.number(),
+    applied: z.number(),
+    dismissed: z.number(),
+  }),
+});
+export type NightShiftReport = z.infer<typeof NightShiftReportSchema>;
+
+/**
+ * The morning review: what the most recent night window accomplished —
+ * completed tasks and the reports they left, with per-report action
+ * tallies. Powers the moon menu's "Done last night", the Home "Last
+ * night" tab, and the synthesized morning question.
+ */
+export const NightShiftReviewResponseSchema = z.object({
+  windowKey: z.string(),
+  windowStart: z.string(),
+  windowEnd: z.string(),
+  tasksCompleted: z.array(NightShiftCompletedTaskSchema),
+  reports: z.array(NightShiftReportSchema),
+});
+export type NightShiftReviewResponse = z.infer<typeof NightShiftReviewResponseSchema>;
 
 export const WorkspaceCommandIndexSchema = z.object({
   meta: WorkspaceIndexMetaSchema,

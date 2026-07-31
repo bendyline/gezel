@@ -58,7 +58,23 @@ beforeAll(async () => {
   );
   coachGezelId = applied.gezelsCreated[0]!.id;
 
-  runStub = vi.fn(async () => okRun({ lastMove: 'c3-d4', board: 'ascii', status: 'playing' }));
+  runStub = vi.fn(async (opts?: { inputs?: Record<string, unknown> }) => {
+    // Match the failure to the invocation itself. A one-shot mock is racy
+    // here because this replaces the service-wide runner and background
+    // service work can otherwise consume the next implementation first.
+    if (
+      opts?.inputs?.action === 'user_move' &&
+      opts.inputs.from === 'c3' &&
+      opts.inputs.to === 'c4'
+    ) {
+      return {
+        ...okRun({}),
+        status: 'error' as const,
+        error: 'Illegal move c3-c4. Legal moves: c3-d4',
+      };
+    }
+    return okRun({ lastMove: 'c3-d4', board: 'ascii', status: 'playing' });
+  });
   svc.context.scriptRunner.run = runStub as unknown as typeof svc.context.scriptRunner.run;
 }, 60_000);
 
@@ -163,11 +179,6 @@ describe('POST /api/projects/:id/page-invoke', () => {
     // A 5xx here would route through the opaque-error sanitizer and destroy
     // the instructive error the page (and, via the same contract on
     // /scripts/run, the model) depends on.
-    runStub.mockImplementationOnce(async () => ({
-      ...okRun({}),
-      status: 'error',
-      error: 'Illegal move c3-c4. Legal moves: c3-d4',
-    }));
     const res = await invoke({ tool: 'user_move', input: { from: 'c3', to: 'c4' } });
     expect(res.status).toBe(200);
     const body = (await res.json()) as { status: string; error?: string; reaction?: unknown };

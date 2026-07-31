@@ -60,7 +60,7 @@ The Electron shell runs a **supervisor** ([packages/app/src/supervisor/](package
 
 5. **Local spawn (dev)** — `GEZEL_SPAWN=1` is set in dev mode. Spawn from `packages/service/dist/bin/gezeld.js` via `require.resolve`. No extraction. Watch-mode rebuilds of the service package aren't picked up until the child is restarted — if you're iterating on service code, set `GEZEL_EMBEDDED=1` instead.
 
-6. **Embedded** (fallback or forced) — `GEZEL_EMBEDDED=1` env var is set, OR we're in dev mode and `GEZEL_SPAWN=1` is *not* set, OR any of the spawn branches above fail inside the health-wait budget. Boot the service in-process via `@bendyline/gezel-service`'s `startService()`. Fast iteration, no child process. When this branch is reached because of a spawn failure (not by force), the UI shows a persistent red banner (`.app-fallback-banner`) noting that background features (autostart, scheduled jobs) are unavailable.
+6. **Embedded** (fallback or forced) — `GEZEL_EMBEDDED=1` env var is set, OR we're in dev mode and `GEZEL_SPAWN=1` is *not* set, OR any of the spawn branches above fail inside the health-wait budget. Boot the service in-process via `@bendyline/gezel-service`'s `startService()`. Fast iteration, no child process. When this branch is reached because of a spawn failure (not by force), the UI reports it as an **install-health notice** ([packages/ui/src/system-notices.ts](packages/ui/src/system-notices.ts)): one muted line in the navigation rail under Settings, with the full explanation in Settings → About. It is deliberately not a banner on Home — the state is neither urgent nor fixable without the installer — and the copy must never imply background work resumes on its own, because in this branch it does not.
 
 The supervisor also runs a health-watch on spawned children (15s interval, 3 consecutive failures trigger a restart). Restart budget: 3 attempts in 60s, then fall back to embedded. On each restart, the BrowserWindow reloads so the UI picks up the rotated auth token via the preload's synchronous `ipcMain.on('gezel:current-connection')` bridge.
 
@@ -92,6 +92,7 @@ Do not bake "the service is in-process" assumptions into new code — go through
 │   └── {id}/
 │       ├── project.json     name, description, workingDir?, packages
 │       ├── finding-lifecycle.json  durable open/in-progress/resolved scanner findings
+│       ├── report-actions.json  fired/dismissed lifecycle of report-embedded action requests
 │       ├── artifacts/       read-write user/agent outputs
 │       ├── workspace/       internal fallback when no external dir
 │       └── memories/        same structure as gezel memories
@@ -266,7 +267,7 @@ Tool categories (`packages/mcp/src/server.ts`):
 - **Artifacts** (read-write, project-scoped): `list_artifacts`, `read_artifact`, `write_artifact`
 - **Documents** (shared library): `list_documents`, `read_document`, `write_document`, `delete_document`
 - **Execution**: `run_nodejs_script`, `run_playwright_script`, `npm_install`, `list_packages`
-- **Team / projects** (Meester surface): `list_gezels`, `create_gezel`, `update_gezel`, `list_gilde`, `create_gezel_from_gilde`, `ensure_gezel`, `message_gezel`, `list_projects`, `create_project`, `update_project`
+- **Team / projects** (Meester surface): `list_gezels`, `create_gezel`, `update_gezel`, `list_gilde`, `create_gezel_from_gilde`, `ensure_gezel`, `message_gezel`, `list_projects`, `create_project`, `update_project`, plus the suggested-work toggles (`list_suggested_work`, `enable_suggested_work`, `disable_suggested_work`) that surface role- and project-type-recommended recurring craftbooks ([suggested-work/](packages/service/src/suggested-work/))
 - **Tasks**: `list_tasks`, `get_task`, `create_task`, `update_task`, `set_task_status`, `assign_task`, `add_task_step`, `advance_task_step`, `read_task_notes`, `write_task_note`
 - **Other**: `ask_user_question`, `search_history`, `render_image`
 

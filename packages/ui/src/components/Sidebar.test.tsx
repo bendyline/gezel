@@ -17,6 +17,7 @@ vi.mock('./FileTree.js', () => ({
 
 const { Sidebar } = await import('./Sidebar.js');
 const { api } = await import('../api.js');
+const { resetUpdateStateForTests } = await import('../update-state.js');
 const { consumeFocusSessionError } = await import('./pending-focus-session-error.js');
 
 const PROJECTS: Project[] = [
@@ -501,5 +502,52 @@ describe('Sidebar', () => {
     expect(label.closest('button')?.getAttribute('title')).toBe(
       'Maya — Voorman · Manages projects',
     );
+  });
+
+  // Install-health notices moved off the Home screen into the rail. They are
+  // the quietest thing here: one muted line under Settings that opens the
+  // page explaining it.
+  describe('install-health notices', () => {
+    function setShell(fields: Record<string, unknown>) {
+      const g = window as unknown as { __GEZEL__: Record<string, unknown> };
+      g.__GEZEL__ = { ...g.__GEZEL__, ...fields };
+    }
+
+    beforeEach(() => {
+      setShell({ fallbackReason: null, fallbackCode: null, update: undefined });
+      resetUpdateStateForTests();
+    });
+
+    it('stays out of the rail on a healthy launch', () => {
+      render(<Sidebar selection={null} onSelect={vi.fn()} onOpenArea={vi.fn()} />);
+      expect(screen.queryByTestId('sidebar-notice-service-unavailable')).not.toBeInTheDocument();
+    });
+
+    it('shows one quiet line when the background service did not start', () => {
+      setShell({
+        fallbackReason: 'System service was unavailable: SCM stopped',
+        fallbackCode: 'system-service-unhealthy',
+      });
+      render(<Sidebar selection={null} onSelect={vi.fn()} onOpenArea={vi.fn()} />);
+
+      const notice = screen.getByTestId('sidebar-notice-service-unavailable');
+      expect(notice).toHaveTextContent('Background work is off');
+      expect(notice.getAttribute('title')).toMatch(/will not start again by itself/);
+    });
+
+    it('opens Settings → About when clicked', () => {
+      setShell({ fallbackReason: 'down', fallbackCode: 'system-service-unhealthy' });
+      const onOpenArea = vi.fn();
+      const navigated: unknown[] = [];
+      const onNav = (e: Event) => navigated.push((e as CustomEvent).detail);
+      window.addEventListener('gezel:navigate', onNav);
+
+      render(<Sidebar selection={null} onSelect={vi.fn()} onOpenArea={onOpenArea} />);
+      fireEvent.click(screen.getByTestId('sidebar-notice-service-unavailable'));
+      window.removeEventListener('gezel:navigate', onNav);
+
+      expect(onOpenArea).toHaveBeenCalledWith('settings');
+      expect(navigated).toContainEqual({ view: 'settings', section: 'about' });
+    });
   });
 });

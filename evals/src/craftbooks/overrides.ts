@@ -1308,12 +1308,13 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
   },
   'narrated-slideshow': {
     coverage: {
-      status: 'validated',
-      localModels: ['gemma4-e4b-q8'],
+      status: 'implemented',
       notes:
-        'Validated locally with gemma4-e4b-q8; generated media smoke spec passed 5 deterministic checks.',
+        'The latest sidecar checks the one-H1-per-scene Markdown source that feeds DocBlocks. Catalog contract tests cover the auto-allowed DocBlocks toolset and dual MP4/GIF artifact gates; the revised workflow has not yet been run on a local model.',
     },
-    gaps: ['Add active binary/media fixture assertions for deeper media-pipeline coverage.'],
+    gaps: [
+      'Add a fake DocBlocks MCP/media runtime that returns deterministic MP4/GIF artifacts and previews, then assert both saved binaries.',
+    ],
   },
   'newsletter-issue': {
     coverage: {
@@ -1493,9 +1494,11 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'implemented',
       notes:
-        'Generated generic html-page smoke spec. Needs local-model validation and, where listed, richer simulator/runtime gates before full confidence.',
+        'The latest sidecar checks the one-H1-per-slide Markdown source that feeds DocBlocks. Catalog contract tests cover the auto-allowed DocBlocks toolset and real PPTX artifact gate; the revised workflow has not yet been run on a local model.',
     },
-    gaps: ['Add Playwright behavior checks for the class-specific controls.'],
+    gaps: [
+      'Add a fake DocBlocks MCP that returns a deterministic PPTX artifact and slide previews, then assert the saved binary and tool-call sequence.',
+    ],
   },
   'pr-security-review': {
     coverage: {
@@ -1681,12 +1684,13 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
   },
   'report-pdf': {
     coverage: {
-      status: 'validated',
-      localModels: ['gemma4-e4b-q8'],
+      status: 'implemented',
       notes:
-        'Validated locally with gemma4-e4b-q8; generated HTML smoke spec passed 6 deterministic checks as the local stand-in for formatted PDF output.',
+        'The latest sidecar checks the source-grounded report.md that feeds DocBlocks. Catalog contract tests cover the auto-allowed DocBlocks toolset, real PDF artifact gate, and absence of the legacy HTML path; the revised workflow has not yet been run on a local model.',
     },
-    gaps: ['Add Playwright behavior checks for the class-specific controls.'],
+    gaps: [
+      'Add a fake DocBlocks MCP that returns a deterministic PDF artifact and page previews, then assert the saved binary and tool-call sequence.',
+    ],
   },
   'research-report': {
     coverage: {
@@ -1701,9 +1705,11 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'implemented',
       notes:
-        'Generated generic html-page smoke spec. Needs local-model validation and, where listed, richer simulator/runtime gates before full confidence.',
+        'The latest sidecar checks the complete Markdown source that feeds DocBlocks. Catalog contract tests cover the auto-allowed DocBlocks toolset, real DOCX artifact gate, and removal of the obsolete validate_document call; the revised workflow has not yet been run on a local model.',
     },
-    gaps: ['Add Playwright behavior checks for the class-specific controls.'],
+    gaps: [
+      'Add a fake DocBlocks MCP that returns deterministic DOCX/PDF artifacts and page previews, then assert saved binaries and tool-call sequence.',
+    ],
   },
   'rest-api': {
     coverage: {

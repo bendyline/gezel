@@ -382,6 +382,8 @@ export interface ChatTimelineViewProps {
    * timeline so the artifact is looked up in the right project.
    */
   onArtifactReference?: (path: string, projectId?: string) => void;
+  /** Opens a verified terminal workspace-file reference in the right rail. */
+  onWorkspaceReference?: (path: string, projectId?: string) => void;
   /**
    * Forwarded from {@link ChatReferences} so the right rail's "Task" tab
    * can surface the work context. The timeline feeds it two ways: every
@@ -497,6 +499,7 @@ export function ChatTimelineView({
   onFocusSession,
   onToolActivity,
   onArtifactReference,
+  onWorkspaceReference,
   onTaskReference,
   emptyPlaceholder,
   loadTimeline,
@@ -1196,6 +1199,11 @@ export function ChatTimelineView({
               backoffMs = 250;
               continue;
             }
+            if (env.kind === 'openFile') {
+              onWorkspaceReference?.(env.path, env.projectId);
+              backoffMs = 250;
+              continue;
+            }
             if (env.kind === 'runStarted') {
               terminalLiveRef.current.set(env.runId, {
                 projectId: env.projectId,
@@ -1260,6 +1268,9 @@ export function ChatTimelineView({
                   : {}),
                 ...(env.message.truncated ? { truncated: true } : {}),
                 ...(env.message.errorMessage ? { errorMessage: env.message.errorMessage } : {}),
+                ...(env.message.fileReferences
+                  ? { fileReferences: env.message.fileReferences }
+                  : {}),
                 ...(env.message.cwd !== undefined ? { cwd: env.message.cwd } : {}),
               };
               const next = [...prev, entry];
@@ -1285,7 +1296,7 @@ export function ChatTimelineView({
       stopped = true;
       ctrl.abort();
     };
-  }, [scopeKey, terminalStreamUrl]);
+  }, [scopeKey, terminalStreamUrl, onWorkspaceReference]);
 
   // Reconcile after an acknowledged terminal submission. The service
   // persists the command before returning 202, so this snapshot is the
@@ -3072,7 +3083,15 @@ export function ChatTimelineView({
         );
       }
       els.push(
-        <TerminalBubble key={`terminal:${entry.threadId}:${entry.messageId}`} entry={entry} />,
+        <TerminalBubble
+          key={`terminal:${entry.threadId}:${entry.messageId}`}
+          entry={entry}
+          {...(onWorkspaceReference
+            ? {
+                onOpenWorkspaceFile: (path: string) => onWorkspaceReference(path, entry.projectId),
+              }
+            : {})}
+        />,
       );
       prevTerminalByThread.set(entry.threadId, entry);
       continue;

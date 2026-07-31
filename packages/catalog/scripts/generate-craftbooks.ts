@@ -82,6 +82,11 @@ async function main(): Promise<void> {
     'office-hours',
     'pull-request-review',
     'plan',
+    // These began as gallery archetypes, but their released successors are
+    // curated DocBlocks workflows. Keep the legacy specs for taxonomy
+    // history without letting regeneration overwrite immutable releases.
+    'report-pdf',
+    'narrated-slideshow',
   ];
 
   // Seeds + curated books are authoritative. Gallery specs add NEW ids; any

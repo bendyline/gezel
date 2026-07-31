@@ -56,6 +56,35 @@ vi.mock('@bendyline/squisq-editor-react', async () => {
   };
 });
 
+describe('ChatComposer keyboard hints', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(api.getChatSessionInflight).mockResolvedValue({ inflight: null });
+  });
+
+  it('uses the native modifier name for Windows and macOS', () => {
+    window.__GEZEL__ = { ...window.__GEZEL__!, platform: 'win32' };
+    const { rerender } = render(
+      <ChatComposer gezelId="tomas" gezelName="Tomas" projectId="default" sessionId="session-1" />,
+    );
+
+    expect(screen.getByRole('button', { name: /^send$/i })).toHaveAttribute(
+      'title',
+      'Enter to send, Ctrl+Enter for newline',
+    );
+
+    window.__GEZEL__ = { ...window.__GEZEL__!, platform: 'darwin' };
+    rerender(
+      <ChatComposer gezelId="tomas" gezelName="Tomas" projectId="default" sessionId="session-1" />,
+    );
+
+    expect(screen.getByRole('button', { name: /^send$/i })).toHaveAttribute(
+      'title',
+      'Enter to send, ⌘⏎ for newline',
+    );
+  });
+});
+
 describe('ChatComposer server-authoritative cancellation', () => {
   beforeEach(() => {
     vi.clearAllMocks();

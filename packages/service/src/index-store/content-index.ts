@@ -116,6 +116,7 @@ export class ContentIndex {
 
   /** Bring the project's content index up to date. Called by the indexer tick. */
   async refresh(projectId: string): Promise<ContentIndexStats | null> {
+    if (!(await this.store.projectIndexingEnabled(projectId).catch(() => true))) return null;
     const opened = await this.open(projectId);
     if (!opened) return null;
     try {

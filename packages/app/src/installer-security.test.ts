@@ -28,8 +28,8 @@ function commandLine(containing: string): string {
 describe('Windows machine-service installer security', () => {
   it('keeps private state closed while exposing runtime and read-only assets', () => {
     expect(hook).toContain('/setowner "*S-1-5-32-544"');
-    expect(hook).toContain('"${GEZEL_DATA_DIR}" /setowner "*S-1-5-32-544" /T /L');
-    expect(hook).toContain('"${GEZEL_DATA_DIR}" /reset /T /L');
+    expect(hook).toContain('!insertmacro TakeTrustedOwnership "${GEZEL_DATA_DIR}"');
+    expect(hook).toContain('!insertmacro SanitizeDescendants "${GEZEL_DATA_DIR}"');
 
     const rootAcl = commandLine('"${GEZEL_DATA_DIR}" /inheritance:r');
     const [rootGrant = '', rootRemove = ''] = rootAcl.split('/remove:g');
@@ -71,6 +71,68 @@ describe('Windows machine-service installer security', () => {
     // The protected runtime directory does not inherit the service SID from
     // the parent; the asset boundary also has an explicit DACL.
     expect(hook.match(/NT SERVICE\\\${GEZEL_SERVICE_NAME}:\(OI\)\(CI\)\(M\)/g)).toHaveLength(3);
+  });
+
+  it('applies every load-bearing ACL to the container itself, not by recursion', () => {
+    // A recursive icacls pass fails as a unit — one MAX_PATH entry inside a
+    // preserved GEZEL_HOME (uv venvs, cloned repos, sandbox node_modules) is
+    // enough. No control that gates the install may depend on /T; each one
+    // names the container, whose (OI)(CI) ACEs then propagate.
+    for (const gate of [
+      '"${GEZEL_DATA_DIR}" /inheritance:r',
+      '"${GEZEL_DATA_DIR}" /grant:r "*S-1-5-32-545:(X)"',
+      '"${GEZEL_DATA_DIR}\\runtime" /inheritance:r',
+      '"${GEZEL_DATA_DIR}\\assets" /inheritance:r',
+      '"${GEZEL_DATA_DIR}" /grant:r "NT SERVICE',
+      '"${GEZEL_DATA_DIR}\\runtime" /grant:r "NT SERVICE',
+      '"${GEZEL_DATA_DIR}\\assets" /grant:r "NT SERVICE',
+    ]) {
+      expect(commandLine(gate), `${gate} must not recurse`).not.toContain('/T');
+    }
+
+    // Ownership is the other gate. icacls alone cannot take ownership of a
+    // directory whose DACL withholds WRITE_OWNER (it never enables
+    // SeTakeOwnershipPrivilege), so the fallback is load-bearing.
+    const ownership = hook.slice(
+      position('!macro TakeTrustedOwnership'),
+      hook.indexOf('!macroend', position('!macro TakeTrustedOwnership')),
+    );
+    expect(ownership).toContain('/setowner "*S-1-5-32-544"');
+    expect(ownership).toContain('takeown.exe" /F "${PATH}" /A');
+    expect(ownership).toContain('Goto ${FAILURE_LABEL}');
+    for (const container of [
+      '"${GEZEL_DATA_DIR}"',
+      '"${GEZEL_DATA_DIR}\\runtime"',
+      '"${GEZEL_DATA_DIR}\\assets"',
+    ]) {
+      expect(hook).toContain(`!insertmacro TakeTrustedOwnership ${container}`);
+    }
+  });
+
+  it('cleans up pre-existing descendants without letting one file abort the install', () => {
+    const sweep = hook.slice(
+      position('!macro SanitizeDescendants'),
+      hook.indexOf('!macroend', position('!macro SanitizeDescendants')),
+    );
+    // /C so icacls does not stop at the first entry it cannot open, and no
+    // Goto: the fallback for a partial sweep is the per-user daemon, which
+    // has no service isolation at all — strictly worse than this service
+    // with a stale child ACE.
+    expect(sweep).toContain('/setowner "*S-1-5-32-544" /T /C /L /Q');
+    expect(sweep).toContain('/reset /T /C /L /Q');
+    expect(sweep).not.toContain('Goto');
+    expect(sweep).not.toContain('MessageBox');
+
+    // /reset resets the named object too, so the sweep has to precede the
+    // container DACL or it would undo it.
+    for (const container of ['"${GEZEL_DATA_DIR}"', '"${GEZEL_DATA_DIR}\\assets"']) {
+      expect(hook.indexOf(`!insertmacro SanitizeDescendants ${container}`)).toBeLessThan(
+        position(`${container} /inheritance:r`),
+      );
+      expect(hook.indexOf(`!insertmacro TakeTrustedOwnership ${container}`)).toBeLessThan(
+        hook.indexOf(`!insertmacro SanitizeDescendants ${container}`),
+      );
+    }
   });
 
   it('registers born-disabled LocalService and restricts the SID before startup', () => {

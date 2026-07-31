@@ -95,13 +95,16 @@ export interface TrialMetrics {
     /** Raw per-provider snapshot — kept for cross-framework analysis. */
     rawProviders?: unknown;
     /**
-     * Where the token counts came from. `http` = the daemon's
-     * `/api/usage` tracker (cloud / CLI providers populate it).
-     * `llama-server-log` = parsed from llama.cpp's per-request timing
-     * lines in `daemon.log` — the local llama-cpp path doesn't feed the
-     * usage tracker, so this is the only on-device token source.
+     * Where the token counts came from. `http` = the daemon's `/api/usage`
+     * tracker, summed across providers. `engine-log` = reconstructed from the
+     * engine's own lines in `daemon.log` — llama-server and ds4-server print
+     * per-request timing blocks; MLX has none, so its figures come from
+     * heartbeat + cache lines instead.
+     *
+     * Named `engine-log` rather than `llama-server-log` since three different
+     * engines now feed it.
      */
-    source?: 'http' | 'llama-server-log';
+    source?: 'http' | 'engine-log';
   };
   /**
    * Coarse derived axes the score-trial layer formats for the postmortem.
@@ -369,15 +372,18 @@ export class PerfCollector {
       // analysis.
       // biome-ignore lint/suspicious/noExplicitAny: usage shape is intentionally provider-shaped + open
       const u = got as any;
+      // Sum across `providers` — `UsageSummary` has NO top-level `total`
+      // block. Reading `u.total.*` here was dead code: it silently yielded
+      // no token totals for EVERY provider, which is why MLX (and every
+      // cloud/CLI provider) reported `outputTokens: 0` while the same
+      // numbers sat visibly in `rawProviders`. llama-cpp/ds4 were masked
+      // because their log parsers below overwrite these fields anyway.
+      const summed = sumProviderTokens(u?.providers);
       usage = {
         available: true,
-        ...(typeof u?.total?.inputTokens === 'number'
-          ? { totalInputTokens: u.total.inputTokens }
-          : {}),
-        ...(typeof u?.total?.outputTokens === 'number'
-          ? { totalOutputTokens: u.total.outputTokens }
-          : {}),
-        ...(typeof u?.total?.costUsd === 'number' ? { totalCostUsd: u.total.costUsd } : {}),
+        ...(summed.inputTokens !== null ? { totalInputTokens: summed.inputTokens } : {}),
+        ...(summed.outputTokens !== null ? { totalOutputTokens: summed.outputTokens } : {}),
+        ...(summed.costUsd !== null ? { totalCostUsd: summed.costUsd } : {}),
         rawProviders: u?.providers ?? null,
       };
     } catch (err) {
@@ -404,7 +410,8 @@ export class PerfCollector {
         const logText = await readFile(this.daemonLogPath, 'utf8');
         // llama-server and ds4-server print different per-request timing
         // formats; a trial is single-engine, so at most one parser matches.
-        engineTimings = parseLlamaCppTimings(logText) ?? parseDs4Timings(logText);
+        engineTimings =
+          parseLlamaCppTimings(logText) ?? parseDs4Timings(logText) ?? parseMlxTimings(logText);
       } catch {
         /* no log / unreadable — leave usage untouched */
       }
@@ -412,15 +419,26 @@ export class PerfCollector {
         usage = {
           ...usage,
           available: true,
-          source: 'llama-server-log',
-          totalInputTokens: engineTimings.promptTokens,
-          totalOutputTokens: engineTimings.genTokens,
+          source: 'engine-log',
+          // MLX reconstructs token counts from heartbeats rather than a
+          // per-request block, so prefer the daemon's usage tracker when it
+          // has real totals and only fall back to the parsed figures.
+          totalInputTokens: usage.totalInputTokens ?? engineTimings.promptTokens,
+          totalOutputTokens: usage.totalOutputTokens ?? engineTimings.genTokens,
         };
+        const cached = engineTimings.cachedPromptTokens;
         this.log(
-          `[perf] tokens from engine log: ${engineTimings.promptTokens} in / ${engineTimings.genTokens} out · decode ${engineTimings.genTokensPerSec ?? 'n/a'} t/s · prefill ${engineTimings.promptTokensPerSec ?? 'n/a'} t/s · ${engineTimings.requestCount} requests`,
+          `[perf] tokens from engine log: ${usage.totalInputTokens} in / ${usage.totalOutputTokens} out · decode ${engineTimings.genTokensPerSec ?? 'n/a'} t/s · prefill ${engineTimings.promptTokensPerSec ?? 'n/a'} t/s · ${engineTimings.requestCount} requests${cached ? ` · ${cached} prompt tokens served from cache` : ''}`,
         );
       }
-    } else if (usage.totalInputTokens !== undefined || usage.totalOutputTokens !== undefined) {
+    }
+    // Not an `else if`: a local engine whose log yields no parseable timings
+    // still has usable HTTP totals, and gating the fallback behind the
+    // local-sampling branch is what left MLX with no token data at all.
+    if (
+      usage.source === undefined &&
+      (usage.totalInputTokens !== undefined || usage.totalOutputTokens !== undefined)
+    ) {
       usage = { ...usage, source: 'http' };
     }
 
@@ -485,6 +503,39 @@ export class PerfCollector {
  * any non-zero activity. Eval trials are one chat-provider each, so
  * picking the first match is sound.
  */
+/**
+ * Sum token/cost totals across every provider in a `/api/usage` snapshot.
+ *
+ * `UsageSummary` is `{ providers: { <name>: { totalTokensIn, totalTokensOut,
+ * totalCost, … } } }` with no aggregate block, so a reader wanting totals has
+ * to fold the providers itself. Returns `null` per field when nothing reported
+ * it, so "didn't measure" stays distinguishable from a measured zero.
+ */
+export function sumProviderTokens(rawProviders: unknown): {
+  inputTokens: number | null;
+  outputTokens: number | null;
+  costUsd: number | null;
+} {
+  if (!rawProviders || typeof rawProviders !== 'object') {
+    return { inputTokens: null, outputTokens: null, costUsd: null };
+  }
+  // biome-ignore lint/suspicious/noExplicitAny: provider shapes are intentionally open
+  const map = rawProviders as Record<string, any>;
+  let inputTokens: number | null = null;
+  let outputTokens: number | null = null;
+  let costUsd: number | null = null;
+  for (const data of Object.values(map)) {
+    if (!data || typeof data !== 'object') continue;
+    if (typeof data.totalTokensIn === 'number')
+      inputTokens = (inputTokens ?? 0) + data.totalTokensIn;
+    if (typeof data.totalTokensOut === 'number') {
+      outputTokens = (outputTokens ?? 0) + data.totalTokensOut;
+    }
+    if (typeof data.totalCost === 'number') costUsd = (costUsd ?? 0) + data.totalCost;
+  }
+  return { inputTokens, outputTokens, costUsd };
+}
+
 export function extractBilling(rawProviders: unknown): TrialBilling | null {
   if (!rawProviders || typeof rawProviders !== 'object') return null;
   // biome-ignore lint/suspicious/noExplicitAny: provider shapes are intentionally open
@@ -688,6 +739,13 @@ export interface LlamaCppTimings {
   promptTokensPerSec: number | null;
   /** Number of per-request timing blocks aggregated. */
   requestCount: number;
+  /**
+   * Prompt tokens served from a warm prefix cache instead of prefilled, when
+   * the engine reports the split (MLX does; llama-server does not surface it
+   * per-request). Useful for reading prefill cost: a high ratio here against
+   * `promptTokens` means reuse is working and prefill is not the bottleneck.
+   */
+  cachedPromptTokens?: number;
 }
 
 // llama.cpp server prints, per request:
@@ -750,6 +808,92 @@ export function parseLlamaCppTimings(logText: string): LlamaCppTimings | null {
 // prefill line (P==M) carries the full prompt count + total prefill wall-clock.
 const DS4_PREFILL_RE = /\bprefill chunk (\d+)\/\d+\s*\([\d.]+%\).*?\bavg=[\d.]+ t\/s\s+([\d.]+)s\b/;
 const DS4_DECODE_RE = /\bgen=(\d+)\b.*?\bdecoding\b.*?\bavg=[\d.]+ t\/s\s+([\d.]+)s\b/;
+
+// The MLX server reports no per-request timing block, so its throughput has to
+// be reconstructed from two other lines the provider already logs:
+//   [mlx] stream-active tokens=872 · 85 tok/s
+//   [mlx] [cache] reuse cache_id=… cached_tokens=6976 prefilled_tokens=44
+// `tokens=` is cumulative WITHIN a turn and resets per turn, so summing every
+// pulse would multiply-count; the decode rate is the reliable field.
+const MLX_STREAM_RE = /\[mlx\] stream-active tokens=(\d+)(?:\s*·\s*([\d.]+) tok\/s)?/;
+const MLX_CACHE_RE = /\[mlx\] \[cache\].*?\bcached_tokens=(\d+)\s+prefilled_tokens=(\d+)/;
+
+/**
+ * Reconstruct MLX throughput from the provider's own log lines, in the same
+ * {@link LlamaCppTimings} shape as the llama.cpp / ds4 parsers (null when the
+ * log carries no MLX signal).
+ *
+ * Why this exists: MLX was the one local engine with no timing parser, and the
+ * HTTP usage path it should have fallen back to was reading a `total` block
+ * that `UsageSummary` doesn't have — so every MLX trial reported
+ * `decode t/s: n/a` and `outputTokens: 0`, making an engine-vs-engine
+ * throughput comparison impossible (2026-07-31 sweep).
+ *
+ * Two deliberate differences from the other parsers:
+ *  - `genTokensPerSec` is the MEDIAN of the per-pulse rates, not
+ *    tokens/elapsed. The pulses are a 5 s heartbeat sampled during active
+ *    decode only, so they already exclude idle and tool-call time; a median
+ *    resists the low first-pulse reading on each turn.
+ *  - `promptTokensPerSec` stays null — MLX logs prefill token COUNTS but no
+ *    prefill duration, and inventing a rate from turn wall-clock would be
+ *    worse than an honest "n/a".
+ */
+export function parseMlxTimings(logText: string): LlamaCppTimings | null {
+  const rates: number[] = [];
+  let genTokens = 0;
+  let promptTokens = 0;
+  let cachedTokens = 0;
+  let requestCount = 0;
+  let turnPeakTokens = 0;
+  let lastTokens = -1;
+  for (const line of logText.split('\n')) {
+    const s = MLX_STREAM_RE.exec(line);
+    if (s) {
+      const tokens = Number(s[1]);
+      if (s[2]) {
+        const r = Number(s[2]);
+        if (Number.isFinite(r) && r > 0) rates.push(r);
+      }
+      // A non-increasing count means a new turn started: bank the previous
+      // turn's peak before tracking the new one.
+      if (tokens <= lastTokens) {
+        genTokens += turnPeakTokens;
+        requestCount += 1;
+        turnPeakTokens = tokens;
+      } else {
+        turnPeakTokens = Math.max(turnPeakTokens, tokens);
+      }
+      lastTokens = tokens;
+      continue;
+    }
+    const c = MLX_CACHE_RE.exec(line);
+    if (c) {
+      cachedTokens += Number(c[1]);
+      promptTokens += Number(c[2]);
+    }
+  }
+  if (rates.length === 0 && genTokens === 0 && turnPeakTokens === 0 && promptTokens === 0) {
+    return null;
+  }
+  // Bank the final in-flight turn.
+  if (turnPeakTokens > 0) {
+    genTokens += turnPeakTokens;
+    requestCount += 1;
+  }
+  const sorted = [...rates].sort((a, b) => a - b);
+  const median = sorted.length > 0 ? sorted[Math.floor(sorted.length / 2)]! : null;
+  return {
+    promptTokens,
+    genTokens,
+    // No per-phase durations available from MLX — see the doc comment.
+    promptMs: 0,
+    genMs: 0,
+    genTokensPerSec: median === null ? null : Math.round(median * 100) / 100,
+    promptTokensPerSec: null,
+    requestCount,
+    ...(cachedTokens > 0 ? { cachedPromptTokens: cachedTokens } : {}),
+  };
+}
 
 /**
  * Aggregate ds4-server's per-chunk timing lines out of a daemon log, returning

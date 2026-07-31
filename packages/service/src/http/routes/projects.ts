@@ -98,6 +98,7 @@ export function projectRoutes(ctx: ServiceContext): Hono {
     if (c.req.query('rollup') !== '1') return c.json({ projects });
     const enriched = await Promise.all(
       projects.map(async (p) => {
+        if (p.indexingEnabled === false) return p;
         const architecture = await ctx.contentIndex.architectureNote(p.id).catch(() => null);
         return architecture ? { ...p, architecture: architecture.slice(0, 400) } : p;
       }),
@@ -627,6 +628,17 @@ export function projectRoutes(ctx: ServiceContext): Hono {
   app.post('/:id/index/enrich', async (c) => {
     const id = c.req.param('id');
     const body = DriveIndexEnrichmentRequestSchema.parse(await c.req.json().catch(() => ({})));
+    const project = await ctx.store.getProject(id);
+    if (!project) return c.json({ error: 'not found' }, 404);
+    if (project.indexingEnabled === false) {
+      return c.json(
+        {
+          error: 'indexing-disabled',
+          message: 'Workspace indexing is disabled for this project.',
+        },
+        409,
+      );
+    }
     const boekwachter = await resolveProjectBoekwachter(ctx.store, id);
     if (!boekwachter) {
       return c.json(

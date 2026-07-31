@@ -64,7 +64,13 @@ describe('Job Hunt bundled project type', () => {
     }
     expect(detail.manifest.craftbooks).toEqual(CRAFTBOOKS);
     expect(detail.manifest.schedules).toEqual([
-      { cron: '0 17 * * 5', craftbook: 'weekly-pipeline-review', consent: 'ask', overlap: 'skip' },
+      {
+        runMode: 'scheduled',
+        cron: '0 17 * * 5',
+        craftbook: 'weekly-pipeline-review',
+        consent: 'ask',
+        overlap: 'skip',
+      },
     ]);
     expect(detail.manifest.pages?.entry).toBe('dashboard/index.html');
     expect(detail.manifest.pages?.reads?.map((r) => r.path)).toEqual([

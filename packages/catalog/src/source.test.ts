@@ -539,6 +539,7 @@ describe('BundledSource — project types', () => {
       version: '1.0.0',
       releasedAt: '2026-07-06T00:00:00Z',
       meesterManaged: false,
+      indexingEnabled: false,
       nameTemplate: '{{topic}} pp-type',
       gezels: [{ templateId: 'language-trainer', voorman: true }],
       toolsets: [{ id: 'web-search', need: 'suggested', autoAllow: ['search'] }],
@@ -555,6 +556,7 @@ describe('BundledSource — project types', () => {
     if (!m || m.kind !== 'project-type') throw new Error('expected project-type manifest');
     expect(m.gezels[0]?.templateId).toBe('language-trainer');
     expect(m.meesterManaged).toBe(false);
+    expect(m.indexingEnabled).toBe(false);
     expect(m.nameTemplate).toBe('{{topic}} pp-type');
     expect(m.tools[0]?.name).toBe('advance_level');
     expect(m.pages?.entry).toBe('dashboard/index.html');

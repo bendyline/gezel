@@ -40,6 +40,7 @@ import type { DeviceIdentity } from '../remotes/identity.js';
 import type { RemotesRegistry } from '../remotes/registry.js';
 import type { RemoteServingController } from '../remotes/serving.js';
 import type { ImageRenderer } from '../rendering/image-renderer.js';
+import type { ReportActionManager } from '../report-actions/report-action-manager.js';
 import type { ScriptRunner } from '../scripts/runner.js';
 import type { SearchService } from '../search/search-service.js';
 import type { SecretStore } from '../secrets/types.js';
@@ -86,6 +87,8 @@ export interface ServiceContext {
   gitHubPrs: GitHubPrs;
   /** Snapshot-driven code reviews (the GitHub tab's Review panel). */
   codeReviews: CodeReviewManager;
+  /** Lifecycle of report-embedded action requests (```gezel-action blocks). */
+  reportActions: ReportActionManager;
   mail: MailManager;
   connectors: ConnectorManager;
   connectorActions: ConnectorActionManager;

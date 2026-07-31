@@ -15,14 +15,19 @@ const BOOK = {
   parsed: { frontmatter: { name: 'Noor' } },
 } as unknown as GezelDetail;
 
-function make(opts: { active: boolean }) {
+function make(opts: { active: boolean; indexingEnabled?: boolean }) {
   const enrich = vi.fn().mockResolvedValue({ files: 1, summarized: 1, embedded: 1 });
   const chat = {
     isAnyActive: () => opts.active,
     isProjectActive: () => false,
   } as unknown as ChatManager;
   const store = {
-    listProjects: async () => [{ id: 'p1' }],
+    listProjects: async () => [
+      {
+        id: 'p1',
+        ...(opts.indexingEnabled !== undefined ? { indexingEnabled: opts.indexingEnabled } : {}),
+      },
+    ],
     readConfig: async () => ({}),
   } as unknown as Store;
   const contentIndex = { enrich } as unknown as ContentIndex;
@@ -56,6 +61,12 @@ describe('IndexEnrichmentManager idle gating', () => {
       resolveBoekwachter: (projectId: string) => Promise<GezelDetail | null>;
     };
     withoutRole.resolveBoekwachter = async () => null;
+    await mgr.tick();
+    expect(enrich).not.toHaveBeenCalled();
+  });
+
+  it('skips AI indexing when workspace indexing is disabled', async () => {
+    const { mgr, enrich } = make({ active: false, indexingEnabled: false });
     await mgr.tick();
     expect(enrich).not.toHaveBeenCalled();
   });

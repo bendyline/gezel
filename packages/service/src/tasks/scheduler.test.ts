@@ -152,6 +152,79 @@ describe('TaskScheduler', () => {
     expect(children).toHaveLength(2);
   });
 
+  it('night-shift host outside the window advances cron but never spawns', async () => {
+    const parent = await tasks.create('cron', {
+      title: 'Night review',
+      assignee: { kind: 'user' },
+      steps: [{ name: 'Wait' }],
+      spawnsSteps: [{ name: 'Review' }],
+      cron: { expression: '* * * * *', overlap: 'skip' },
+      nightShift: { enabled: true, onceADay: true },
+    });
+    const stored = await store.readTask('cron', parent.num);
+    await store.writeTask({
+      ...stored!,
+      cron: { expression: '* * * * *', nextTickAt: '2020-01-01T00:00:00Z', overlap: 'skip' },
+    });
+
+    const scheduler = new TaskScheduler({
+      manager: tasks,
+      isNightShiftWindowOpen: () => false,
+      currentNightShiftDayKey: () => '2026-07-30',
+    });
+    await scheduler.tick();
+
+    expect(await tasks.listChildren(parent.ref)).toHaveLength(0);
+    const after = await store.readTask('cron', parent.num);
+    expect(Date.parse(after!.cron!.nextTickAt!)).toBeGreaterThan(Date.now());
+  });
+
+  it('once-per-window: a night-shift onceADay host spawns once per window key, stamped at spawn time', async () => {
+    const parent = await tasks.create('cron', {
+      title: 'Nightly security review',
+      assignee: { kind: 'user' },
+      steps: [{ name: 'Wait' }],
+      spawnsSteps: [{ name: 'Review' }],
+      cron: { expression: '* * * * *', overlap: 'skip' },
+      nightShift: { enabled: true, onceADay: true },
+    });
+    const forceOverdue = async () => {
+      const stored = await store.readTask('cron', parent.num);
+      await store.writeTask({
+        ...stored!,
+        cron: { ...stored!.cron!, nextTickAt: '2020-01-01T00:00:00Z' },
+      });
+    };
+    let dayKey = '2026-07-30';
+    const scheduler = new TaskScheduler({
+      manager: tasks,
+      isNightShiftWindowOpen: () => true,
+      currentNightShiftDayKey: () => dayKey,
+    });
+
+    await forceOverdue();
+    await scheduler.tick();
+    let children = await tasks.listChildren(parent.ref);
+    expect(children).toHaveLength(1);
+    expect((await store.readTask('cron', parent.num))?.nightShift?.lastRunDay).toBe('2026-07-30');
+
+    // The child finishes, the heartbeat fires again inside the SAME
+    // window — the guard (not the overlap policy) must hold the line.
+    await tasks.setStatus('cron', children[0]!.num, 'canceled');
+    await forceOverdue();
+    await scheduler.tick();
+    children = await tasks.listChildren(parent.ref);
+    expect(children).toHaveLength(1);
+
+    // Next night's window key → one fresh spawn.
+    dayKey = '2026-07-31';
+    await forceOverdue();
+    await scheduler.tick();
+    children = await tasks.listChildren(parent.ref);
+    expect(children).toHaveLength(2);
+    expect((await store.readTask('cron', parent.num))?.nightShift?.lastRunDay).toBe('2026-07-31');
+  });
+
   it('cron without template stays metadata-only (back-compat)', async () => {
     const parent = await tasks.create('cron', {
       title: 'Old cron task',

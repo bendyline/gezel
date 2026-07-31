@@ -47,9 +47,17 @@ test.describe('projects IDE', () => {
     });
     const unfocusedProject = await activeProjectRow.evaluate((row) => {
       const style = getComputedStyle(row);
-      return { borderTopColor: style.borderTopColor, boxShadow: style.boxShadow };
+      const button = row.querySelector<HTMLElement>(':scope > .app-sidebar-item.active');
+      return {
+        borderTopColor: style.borderTopColor,
+        boxShadow: style.boxShadow,
+        filter: style.filter,
+        buttonFilter: button ? getComputedStyle(button).filter : null,
+      };
     });
     expect(unfocusedProject.boxShadow).toBe('none');
+    expect(unfocusedProject.filter).toBe('none');
+    expect(unfocusedProject.buttonFilter).toBe('none');
 
     const activeProjectButton = activeProjectRow.locator(':scope > .app-sidebar-item.active');
     await page.keyboard.press('Tab');
@@ -69,11 +77,15 @@ test.describe('projects IDE', () => {
         openEdgeColor,
         borderTopColor: rowStyle.borderTopColor,
         rowShadow: rowStyle.boxShadow,
+        rowFilter: rowStyle.filter,
         buttonShadow: button ? getComputedStyle(button).boxShadow : null,
+        buttonFilter: button ? getComputedStyle(button).filter : null,
       };
     });
     expect(activeProjectFocus.rowShadow).toBe('none');
+    expect(activeProjectFocus.rowFilter).toBe('none');
     expect(activeProjectFocus.buttonShadow).toBe('none');
+    expect(activeProjectFocus.buttonFilter).toBe('none');
     expect(activeProjectFocus.openEdgeColor).toBe('rgba(0, 0, 0, 0)');
     expect(activeProjectFocus.borderTopColor).not.toBe(unfocusedProject.borderTopColor);
 

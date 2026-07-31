@@ -6,6 +6,7 @@ import {
   type TaskCraftbookStep,
   isLocalProvider,
   normalizeScriptRefs,
+  resolveRoleId,
 } from '@bendyline/gezel';
 import { BUILTIN_TOOLSETS } from '@bendyline/gezel-catalog';
 import type { LocalModelTier } from './local-model-tier.js';
@@ -227,6 +228,38 @@ export async function resolveSessionToolSurface(
     !stepToolKitDisabled()
       ? stepToolKit(opts.activeStep)
       : null;
+  // Planner is a pure-delegation role in ordinary chat, but many authored
+  // craftbooks deliberately assign it a planning document (`notes/*.md`,
+  // an outline, a brief). In a real step-scoped session that assignment is
+  // the authority to produce the Markdown deliverable. Grant only the
+  // active Markdown kit, and only where the mode=`never` surface says each
+  // tool survives the install's security + workspace-write ceilings.
+  if (
+    rawAllowlist &&
+    kit &&
+    resolveRoleId(opts.role) === 'planner' &&
+    (kit.kind === 'markdown-doc' || kit.kind === 'markdown-report' || kit.kind === 'markdown-notes')
+  ) {
+    const hardCeiling = computeToolAllowlist({
+      role: opts.role,
+      mode: 'never',
+      provider: opts.provider,
+      ...(opts.modelId !== undefined ? { modelId: opts.modelId } : {}),
+      ...(opts.parameterSize !== undefined ? { parameterSize: opts.parameterSize } : {}),
+      ...(opts.webSearchProvider ? { webSearchProvider: opts.webSearchProvider } : {}),
+      githubLinked: opts.githubLinked,
+      isGitRepo: opts.isGitRepo,
+      ...(opts.securityPolicy ? { securityPolicy: opts.securityPolicy } : {}),
+      ...(opts.workspaceWritable !== undefined
+        ? { workspaceWritable: opts.workspaceWritable }
+        : {}),
+    });
+    const withPlannerDeliverable = new Set(rawAllowlist);
+    for (const name of kit.tools) {
+      if (hardCeiling === null || hardCeiling.has(name)) withPlannerDeliverable.add(name);
+    }
+    rawAllowlist = withPlannerDeliverable;
+  }
   if (rawAllowlist && kit) {
     const keep = new Set<string>([
       ...kit.tools,
@@ -470,9 +503,9 @@ const LOAD_BEARING_TOOL_CAP_ALWAYS_KEEP: ReadonlySet<string> = new Set([
 // of an office-hours craftbook, but the meester role kit is `tasks-readonly`
 // (no `write_task_note` / `advance_task_step`). The nudge told her to write
 // the deliverable and advance; neither tool was on her surface, so she
-// stalled. `write_file` is deliberately absent: a step whose deliverable is a
-// source file belongs to a developer — mis-assignment is fixed by
-// reassignment, not by handing a coordinator workspace-write.
+// stalled. `write_file` is deliberately absent from this generic grant. The
+// narrow Planner + Markdown exception is derived from the active step kit
+// above; source-file misassignment still requires reassignment.
 const STEP_COMPLETION_TOOLS: readonly string[] = [
   'read_task_notes',
   'write_task_note',

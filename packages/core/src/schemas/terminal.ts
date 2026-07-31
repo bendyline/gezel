@@ -1,5 +1,14 @@
 import { z } from 'zod';
 
+/** A verified workspace file mentioned by terminal output. */
+export const TerminalFileReferenceSchema = z.object({
+  /** Text to turn into a link in the terminal transcript. */
+  label: z.string().min(1),
+  /** Canonical project-workspace-relative path opened by the link. */
+  path: z.string().min(1),
+});
+export type TerminalFileReference = z.infer<typeof TerminalFileReferenceSchema>;
+
 /**
  * One row in a terminal thread — either the user's typed command or the
  * captured output of the run. Threads append both: a `command` row first,
@@ -37,6 +46,12 @@ export const TerminalMessageSchema = z.object({
   truncated: z.boolean().optional(),
   /** Set when execution failed before producing exitCode (timeout, spawn error, etc.). */
   errorMessage: z.string().optional(),
+  /**
+   * Workspace files the service verified while producing this output.
+   * The UI only hyperlinks these known paths; filename-looking error text
+   * and arbitrary command output remain inert.
+   */
+  fileReferences: z.array(TerminalFileReferenceSchema).optional(),
   /**
    * Display path for the folder pill on this row. Set per-message so
    * the bubble shows the cwd the command actually ran from, not the
@@ -225,12 +240,27 @@ export const TerminalInputRequestedEventSchema = z.object({
 });
 export type TerminalInputRequestedEvent = z.infer<typeof TerminalInputRequestedEventSchema>;
 
+/**
+ * One-shot UI intent emitted by the native `open <path>` terminal command.
+ * Unlike persisted message events this is not replayed on SSE reconnect, so
+ * reopening a project cannot unexpectedly steal the user's reference pane.
+ */
+export const TerminalOpenFileEventSchema = z.object({
+  kind: z.literal('openFile'),
+  projectId: z.string(),
+  threadId: z.string(),
+  path: z.string(),
+  source: z.literal('workspace'),
+});
+export type TerminalOpenFileEvent = z.infer<typeof TerminalOpenFileEventSchema>;
+
 export const TerminalEventEnvelopeSchema = z.discriminatedUnion('kind', [
   TerminalMessageEventSchema,
   TerminalWorkingDirChangedEventSchema,
   TerminalRunStartedEventSchema,
   TerminalOutputChunkEventSchema,
   TerminalInputRequestedEventSchema,
+  TerminalOpenFileEventSchema,
 ]);
 export type TerminalEventEnvelope = z.infer<typeof TerminalEventEnvelopeSchema>;
 
@@ -252,6 +282,7 @@ export const TerminalTimelineEntrySchema = z.object({
   durationMs: z.number().int().nonnegative().optional(),
   truncated: z.boolean().optional(),
   errorMessage: z.string().optional(),
+  fileReferences: z.array(TerminalFileReferenceSchema).optional(),
   /** See `TerminalMessage.cwd` — per-row folder-pill display path. */
   cwd: z.string().optional(),
 });

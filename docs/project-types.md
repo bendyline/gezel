@@ -75,6 +75,7 @@ Version manifest (composition payload):
 {
   "extends": "content-writing",            // optional taxonomy base: detection + craftbookTags
   "meesterManaged": false,                  // optional: false exempts progress check-ins
+  "indexingEnabled": false,                 // optional: false skips workspace/code indexing
   "tabVisibility": {                        // optional UI defaults; omitted keys preserve project/default
     "overview": false,
     "tasks": false,
@@ -100,6 +101,10 @@ Version manifest (composition payload):
              "reads": [ { "source": "workspace", "path": "…" } ],
              "tools": ["user_move"] },                 // page-ONLY invokable subset of tools[]
   "schedules": [{ "cron": "0 18 * * *", "craftbook": "daily-lesson", "consent": "ask" }],
+  //  … or window-driven night work instead of cron: a `runMode: "night-shift"`
+  //  schedule needs no cron — the host runs inside the user's Night Shift
+  //  window, at most once per night, and surfaces in the same suggested-work
+  //  toggles as role-suggested craftbooks.
   "workspaceSeed": ["progress.json"]                  // initial data files, param-templated
 }
 ```
@@ -119,6 +124,15 @@ When explicitly set, adoption maps it to the project's `nudgeConfig.enabled` set
 `false` is appropriate for long-running ambient projects that should not receive periodic
 status checks simply because they remain active. When omitted, adoption preserves the
 project's existing setting and its normal inheritance from the global default.
+
+`indexingEnabled` is an optional project default for the workspace index. `false` skips
+structural discovery, code/document intelligence, search enrichment, maps, summaries,
+and reviews for that project. It is intended for lightweight stateful experiences such
+as checkers, chess, Go, language practice, or a chat room, where the workspace is a few
+small data files rather than a body of work that benefits from code intelligence.
+Omission preserves the project's existing choice and defaults to enabled. This switch
+does not affect chat/session history, memories, or the shared document index, and the
+user can override it later in Project Settings.
 
 `tabVisibility` is an optional set of defaults for the supporting project tabs. Omitted
 keys preserve the existing project choice or historical UI default (including Map's
@@ -142,9 +156,11 @@ creation from the gallery, or applying a type to an existing project):
 5. Seed workspace data files (param-templated).
 6. Apply an explicitly declared `meesterManaged` value to the project's Meester
    progress-check setting, preserving its other nudge cadence overrides.
-7. Apply explicitly declared `tabVisibility` defaults over the project's existing tab
+7. Apply an explicitly declared `indexingEnabled` value to the project's workspace
+   indexing switch.
+8. Apply explicitly declared `tabVisibility` defaults over the project's existing tab
    choices.
-8. Register toolsets and schedules **through the existing consent gates — never
+9. Register toolsets and schedules **through the existing consent gates — never
    silently**. Schedules are created disabled or consent-prompted per their `consent`
    field.
 

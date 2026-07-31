@@ -11,6 +11,7 @@ import { RecommendedMediaDownloads } from '../components/RecommendedMediaDownloa
 import { useRoleBasedNameOnlyMode } from '../components/useRoleBasedNameOnlyMode.js';
 import { SECURITY_LEVEL_PRESETS } from '../security-levels.js';
 import { requestSettingsSection } from '../settings-nav.js';
+import { useUpdateState } from '../update-state.js';
 import { HomeWorkshop } from './home/HomeWorkshop.js';
 import { IntroHandboekArticle } from './home/IntroHandboekArticle.js';
 
@@ -56,13 +57,9 @@ const OLLAMA_MAX_RETRIES = 720;
  *      the user is onboarded.
  */
 export function HomeView({
-  fallbackReason,
-  fallbackCode,
   platform,
   onNavigate,
 }: {
-  fallbackReason?: string | null;
-  fallbackCode?: string | null;
   platform?: string;
   onNavigate?: (
     view:
@@ -323,18 +320,10 @@ export function HomeView({
 
   const updateState = useUpdateState();
 
-  // Built once and rendered by whichever branch below wins. It used to live
-  // only in the un-configured setup markup, which meant no configured user
-  // ever saw a degraded-service notice — the workshop branch returns before
-  // that JSX is reached.
-  const banner = (
-    <>
-      {fallbackReason ? (
-        <FallbackBanner reason={fallbackReason} code={fallbackCode} platform={platform} />
-      ) : null}
-      <UpdateBanner state={updateState} platform={platform} />
-    </>
-  );
+  // Built once and rendered by whichever branch below wins — first-run setup
+  // and the workshop are separate returns, and an installable update is worth
+  // showing on both.
+  const banner = <UpdateBanner state={updateState} platform={platform} />;
 
   // Hold the loading splash until the verdict has actually settled — never
   // guess first-run-vs-workshop while config is still loading or the probe is
@@ -506,40 +495,11 @@ export function HomeView({
 
 // ─────────────────────────────────────────────────────────────────
 /**
- * Subscribe to the Electron shell's update status.
- *
- * Lives in HomeView rather than inside the banner because the banner is
- * rendered from a `banner` element that HomeView hands to a *different*
- * parent depending on which branch wins (loading splash, workshop, or first-
- * run setup). Moving between parents unmounts and remounts it, so state held
- * inside the banner was lost — and refetched — every time the app settled
- * from loading into the workshop, which made the banner flicker on startup.
- * HomeView itself never unmounts across those transitions.
- */
-function useUpdateState(): UpdateState | null {
-  const [state, setState] = useState<UpdateState | null>(null);
-  useEffect(() => {
-    const bridge = window.__GEZEL__?.update;
-    if (!bridge) return;
-    let live = true;
-    void bridge.state().then((s) => {
-      if (live) setState(s);
-    });
-    bridge.onStateChanged((s) => {
-      if (live) setState(s);
-    });
-    return () => {
-      live = false;
-    };
-  }, []);
-  return state;
-}
-
-/**
- * App-update status. Exists because every update outcome used to go only to
- * the Electron console: a user whose update could not be applied — the normal
- * case for a standard macOS account, where the app bundle is root-owned and
- * nothing in the update path can elevate — had no way to learn that.
+ * The "an update is waiting for you" prompt — the one update outcome that is
+ * both actionable and worth interrupting for. Every *failure* (a check that
+ * could not reach GitHub, an install that could not be applied) is an
+ * install-health notice instead: quiet in the navigation rail under Settings,
+ * explained in Settings → About. See system-notices.ts for why.
  *
  * On macOS "Install" opens a verified PKG so Installer.app can authenticate;
  * elsewhere it defers to electron-updater's own elevating handoff.
@@ -548,26 +508,7 @@ function UpdateBanner({ state, platform }: { state: UpdateState | null; platform
   const [installing, setInstalling] = useState(false);
   const [installError, setInstallError] = useState<string | null>(null);
 
-  if (!state || state.kind === 'downloading') return null;
-
-  if (state.kind === 'error') {
-    return (
-      <output className="app-fallback-banner" data-testid="update-banner">
-        <strong>Gezel could not install an update.</strong>
-        <span>
-          You can keep working. Download the latest version and run the installer to update
-          manually.{' '}
-          <a href="https://github.com/bendyline/gezel/releases/latest" rel="noreferrer">
-            Get the latest release
-          </a>
-        </span>
-        <details>
-          <summary>Technical details</summary>
-          <p>{state.message}</p>
-        </details>
-      </output>
-    );
-  }
+  if (!state || state.kind !== 'ready') return null;
 
   return (
     <output className="app-fallback-banner" data-testid="update-banner">
@@ -602,70 +543,6 @@ function UpdateBanner({ state, platform }: { state: UpdateState | null; platform
           <p>{installError}</p>
         </details>
       )}
-    </output>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────
-// How to reinstall, per platform. The version-mismatch banner is the one
-// place we ask the user to rerun the installer, and "rerun the installer"
-// means a different artifact on each OS.
-const REINSTALL_HINT: Record<string, string> = {
-  darwin: 'Run the Gezel PKG again and approve Installer’s administrator prompt.',
-  win32: 'Run the Gezel installer again and approve the Windows administrator prompt.',
-  linux: 'Reinstall the Gezel .deb or .rpm package.',
-};
-
-function FallbackBanner({
-  reason,
-  code,
-  platform,
-}: {
-  reason: string;
-  code?: string | null;
-  platform?: string;
-}) {
-  // The machine service is healthy and holding the user's data — it is just
-  // running a different release than this app. Saying "background work is
-  // paused" here would be wrong on both counts, and the fix (rerun the
-  // installer) is nothing like "reopen Gezel". See the supervisor's
-  // `systemServiceVersionSkew` for why the app cannot repair this itself.
-  if (code === 'system-service-version-mismatch') {
-    return (
-      <output className="app-fallback-banner">
-        <strong>Gezel updated, but its background service did not.</strong>
-        <span>
-          Everything still works and none of your gezellen, projects, or chats are affected — but
-          the app and the service are on different versions, so newer features may misbehave until
-          they match. The service is installed for the whole machine, so only the installer can
-          replace it.
-          {platform && REINSTALL_HINT[platform] ? ` ${REINSTALL_HINT[platform]}` : ''}
-        </span>
-        <details>
-          <summary>Technical details</summary>
-          <p>{reason}</p>
-        </details>
-      </output>
-    );
-  }
-
-  return (
-    <output className="app-fallback-banner">
-      <strong>Background work is temporarily paused.</strong>
-      <span>
-        Gezel is still ready to use. Autostart and scheduled work will resume when the background
-        service is available again. Try closing and reopening Gezel first.
-        {platform === 'darwin'
-          ? ' If this message returns, rerun the Gezel PKG and approve Installer’s administrator prompt.'
-          : null}
-      </span>
-      <details>
-        <summary>Technical details</summary>
-        <p>{reason}</p>
-        <p>
-          Per-user service logs are under <code>~/.gezel/logs/</code>.
-        </p>
-      </details>
     </output>
   );
 }

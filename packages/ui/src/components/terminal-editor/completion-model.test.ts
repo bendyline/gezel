@@ -67,6 +67,7 @@ describe('first-token completions', () => {
     });
     const items = computeTerminalCompletions(parseTerminalContext(''), d);
     const byLabel = new Map(items.map((i) => [i.label, i]));
+    expect(byLabel.get('open')).toMatchObject({ kind: 'command', badge: 'gezel' });
     // craftbook "build" wins over the same-named npm script (only one "build")
     expect(items.filter((i) => i.label === 'build')).toHaveLength(1);
     expect(byLabel.get('build')?.kind).toBe('craftbook');

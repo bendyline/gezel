@@ -50,7 +50,14 @@ export interface StepGateOutcome {
   /** Names of scripts skipped by security/engagement policy (fail-open). */
   skipped: string[];
   /** Per-script trail for history/log lines. */
-  runs: Array<{ scriptName: string; runId?: string; decision?: string; error?: string }>;
+  runs: Array<{
+    scriptName: string;
+    runId?: string;
+    decision?: string;
+    error?: string;
+    /** Redacted tail of the persisted script run log. */
+    logsTail?: string;
+  }>;
   /**
    * The gate itself could not execute or returned an invalid protocol shape.
    * This is not evidence that the deliverable failed and must not feed the
@@ -127,7 +134,12 @@ export async function evaluateStepGate(opts: {
       continue;
     }
     if (run.status !== 'ok') {
-      runs.push({ scriptName: ref.name, runId: run.id, error: run.error ?? 'failed' });
+      runs.push({
+        scriptName: ref.name,
+        runId: run.id,
+        error: run.error ?? 'failed',
+        ...(tailGateLogs(run.logs) ? { logsTail: tailGateLogs(run.logs) } : {}),
+      });
       return {
         decision: 'reject',
         message: `Gate script "${ref.name}" failed: ${run.error ?? 'unknown error'}.`,
@@ -139,7 +151,12 @@ export async function evaluateStepGate(opts: {
     }
     const parsed = GateScriptResultSchema.safeParse(run.output);
     if (!parsed.success) {
-      runs.push({ scriptName: ref.name, runId: run.id, error: 'invalid gate result' });
+      runs.push({
+        scriptName: ref.name,
+        runId: run.id,
+        error: 'invalid gate result',
+        ...(tailGateLogs(run.logs) ? { logsTail: tailGateLogs(run.logs) } : {}),
+      });
       return {
         decision: 'reject',
         message: `Gate script "${ref.name}" returned an invalid result (${parsed.error.issues[0]?.message ?? 'shape mismatch'}). A gate script must output { decision: 'approve' | 'reject', message, ... }.`,
@@ -187,4 +204,10 @@ export function gateMessageFingerprint(message: string): string {
     h = ((h << 5) + h + message.charCodeAt(i)) | 0;
   }
   return (h >>> 0).toString(36);
+}
+
+function tailGateLogs(logs: string, maxChars = 2_000): string {
+  const trimmed = logs.trim();
+  if (trimmed.length <= maxChars) return trimmed;
+  return `…${trimmed.slice(trimmed.length - maxChars)}`;
 }

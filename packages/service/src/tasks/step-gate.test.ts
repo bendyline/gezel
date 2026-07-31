@@ -89,12 +89,23 @@ describe('evaluateStepGate', () => {
     const errored = await evaluateStepGate({
       gate: gate({ scripts: [{ name: 'boom' }] }),
       ws: ws(),
-      runScript: async () => ({ ...okRun(undefined), status: 'error', error: 'exploded' }),
+      runScript: async () => ({
+        ...okRun(undefined),
+        status: 'error',
+        error: 'exploded',
+        logs: '[stderr] detailed failure',
+      }),
     });
     expect(errored.decision).toBe('reject');
     expect(errored.message).toContain('boom');
     expect(errored.message).toContain('exploded');
     expect(errored.infrastructureError).toBe(true);
+    expect(errored.runs[0]).toMatchObject({
+      scriptName: 'boom',
+      runId: 'run-1',
+      error: 'exploded',
+      logsTail: '[stderr] detailed failure',
+    });
 
     const invalid = await evaluateStepGate({
       gate: gate({ scripts: [{ name: 'weird' }] }),

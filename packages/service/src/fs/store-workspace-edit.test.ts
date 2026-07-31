@@ -364,6 +364,51 @@ describe('Store.applyPatchToProjectWorkspaceFile', () => {
   });
 });
 
+describe('Store.applyEditPackToProjectWorkspace', () => {
+  const patchFor = (file: string, from: string, to: string) =>
+    [`--- a/${file}`, `+++ b/${file}`, '@@ -1 +1 @@', `-${from}`, `+${to}`, ''].join('\n');
+
+  it('applies every file when all patches validate, treating identity edits as no-ops', async () => {
+    await seedFile('a.txt', 'a\n');
+    await seedFile('b.txt', 'b\n');
+    const result = await store.applyEditPackToProjectWorkspace(projectId, [
+      { path: 'a.txt', diff: patchFor('a.txt', 'a', 'A') },
+      // Already-applied change: old and new content are identical.
+      { path: 'b.txt', diff: patchFor('b.txt', 'missing', 'b') },
+    ]);
+    // The b.txt patch actually rejects (context mismatch) — use a real no-op:
+    expect(result.ok).toBe(false);
+
+    await seedFile('c.txt', 'C\n');
+    const ok = await store.applyEditPackToProjectWorkspace(projectId, [
+      { path: 'a.txt', diff: patchFor('a.txt', 'a', 'A') },
+      { path: 'c.txt', diff: patchFor('c.txt', 'C', 'C') },
+    ]);
+    expect(ok.ok).toBe(true);
+    expect(ok.results).toEqual([
+      { path: 'a.txt', ok: true },
+      { path: 'c.txt', ok: true, error: 'no-op' },
+    ]);
+    expect(await readBack('a.txt')).toBe('A\n');
+    expect(await readBack('c.txt')).toBe('C\n');
+  });
+
+  it('writes NOTHING when any patch in the pack fails validation', async () => {
+    await seedFile('good.txt', 'good\n');
+    await seedFile('stale.txt', 'unexpected content\n');
+    const result = await store.applyEditPackToProjectWorkspace(projectId, [
+      { path: 'good.txt', diff: patchFor('good.txt', 'good', 'GOOD') },
+      { path: 'stale.txt', diff: patchFor('stale.txt', 'stale', 'STALE') },
+    ]);
+    expect(result.ok).toBe(false);
+    expect(result.results.find((r) => r.path === 'good.txt')?.ok).toBe(true);
+    expect(result.results.find((r) => r.path === 'stale.txt')?.ok).toBe(false);
+    // Validate-all-first: the good file was NOT written.
+    expect(await readBack('good.txt')).toBe('good\n');
+    expect(await readBack('stale.txt')).toBe('unexpected content\n');
+  });
+});
+
 describe('Store.insertAtMarkerInProjectWorkspaceFile', () => {
   it('inserts after the marker by default', async () => {
     await seedFile('src/index.ts', "// EXPORTS\nexport * from './a.js';\n");

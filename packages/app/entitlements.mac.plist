@@ -1,26 +1,68 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Hardened-runtime entitlements for Gezel.app and, via `entitlementsInherit`,
+  every Electron helper inside it.
+
+  Each entry here gives back a protection hardened runtime otherwise grants for
+  free, so the set is deliberately minimal: an entitlement stays only while a
+  concrete thing in the payload needs it. scripts/macos-entitlements.test.mjs
+  pins the list — adding one is a deliberate, reviewed act, not a drive-by.
+
+  Four unnecessary entitlements were removed in the v1.26211.26 release
+  audit:
+
+    com.apple.security.cs.allow-unsigned-executable-memory
+      An Electron 11-and-older compatibility exception. Electron 12+ uses the
+      narrower MAP_JIT path authorized by allow-jit on supported Darwin
+      architectures; @electron/notarize explicitly says not to grant unsigned
+      executable memory on newer releases because it increases attack surface.
+      scripts/macos-entitlements.test.mjs pins that Electron-version floor.
+
+    com.apple.security.cs.allow-dyld-environment-variables
+      Previously justified as needed to spawn gezeld from the extracted
+      service bundle. That reasoning was wrong: this entitlement controls
+      whether *this* process honours DYLD_* variables handed to it, and has no
+      bearing on execing a child. Nothing in the tree sets a DYLD_ variable,
+      and native engines locate their sibling dylibs through @loader_path /
+      @rpath load commands rather than the environment. All it bought was a
+      DYLD_INSERT_LIBRARIES injection path into a signed process.
+
+    com.apple.security.network.client / .network.server
+      App Sandbox capability keys. Gezel is deliberately not App Sandbox-
+      enabled: its local-first model requires user-selected workspaces, local
+      tools and child processes. Without com.apple.security.app-sandbox these
+      keys do not gate ordinary loopback or outbound sockets, so they granted
+      nothing and incorrectly made the hardened-runtime set look larger.
+
+  If a future change needs any of them back, the reason belongs here in writing —
+  and scripts/verify-macos-entitlements.mjs must continue to confirm the
+  effective signed payload, not just this source file.
+-->
 <plist version="1.0">
 <dict>
-    <!-- Required for Electron apps to pass notarization with hardened runtime. -->
+    <!-- V8 and the Chromium renderers JIT-compile. Supported Electron 12+
+         releases use the narrower MAP_JIT path authorized by this entitlement;
+         Electron cannot start without it. -->
     <key>com.apple.security.cs.allow-jit</key>
     <true/>
-    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
-    <true/>
 
-    <!-- gezeld binds a loopback HTTP server on a random port; the UI + any
-         remote/supervisor probes connect to it. Both client and server
-         entitlements are needed because we do both. -->
-    <key>com.apple.security.network.client</key>
-    <true/>
-    <key>com.apple.security.network.server</key>
-    <true/>
+    <!-- Library validation would require every Mach-O loaded into the process
+         to carry Bendyline's team ID. Two things in the payload legitimately
+         do not:
 
-    <!-- The supervisor spawns `gezeld` as a child Node process from the
-         extracted service bundle at ~/.gezel/service/. Notarized apps with
-         hardened runtime need this to allow executing bundled interpreters. -->
-    <key>com.apple.security.cs.allow-dyld-environment-variables</key>
-    <true/>
+           1. scripts/sign-macho-tree.mjs preserves a third-party binary that
+              already ships a valid distribution Developer ID signature
+              byte-for-byte, rather than re-signing vendor code as ours. Those
+              carry their vendor's team ID by design.
+           2. Toolsets and Python packages installed at runtime (pnpm into
+              ~/.gezel/system-toolsets, uv into ~/.gezel/python) bring prebuilt
+              native addons that no one signed for us and that cannot be signed
+              at build time, because they are fetched after the build.
+
+         This is the one entitlement here that genuinely widens what may enter
+         the process, and it is load-bearing: without it those loads fail at
+         dlopen. Narrowing it means changing what gets loaded, not the plist. -->
     <key>com.apple.security.cs.disable-library-validation</key>
     <true/>
 </dict>

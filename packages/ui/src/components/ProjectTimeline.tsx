@@ -27,6 +27,7 @@ export function ProjectTimeline({
   onFocusSession,
   onToolActivity,
   onArtifactReference,
+  onWorkspaceReference,
   onTaskReference,
   emptyPlaceholder,
   onTerminalWorkingDirChanged,
@@ -40,6 +41,7 @@ export function ProjectTimeline({
   onFocusSession?: (sessionId: string, gezelId: string, projectId: string) => void;
   onToolActivity?: (tool: ToolActivity) => void;
   onArtifactReference?: (path: string, projectId?: string) => void;
+  onWorkspaceReference?: (path: string, projectId?: string) => void;
   onTaskReference?: (ref: string, opts?: { scoped?: boolean }) => void;
   emptyPlaceholder?: string;
   onTerminalWorkingDirChanged?: (threadId: string, newWorkingDir: string) => void;
@@ -166,6 +168,7 @@ export function ProjectTimeline({
       onFocusSession={onFocusSession}
       onToolActivity={onToolActivity}
       onArtifactReference={onArtifactReference}
+      onWorkspaceReference={onWorkspaceReference}
       {...(onTaskReference ? { onTaskReference } : {})}
       emptyPlaceholder={emptyPlaceholder}
       loadTimeline={loadTimeline}

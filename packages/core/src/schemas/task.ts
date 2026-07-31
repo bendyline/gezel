@@ -82,11 +82,14 @@ export type NewTaskFanout = z.infer<typeof NewTaskFanoutSchema>;
  * window or a manual shift) — see `NightShiftManager`. Interactive and
  * scheduled work always preempts it.
  *
- * `onceADay` adds a run-once-per-calendar-day guard that composes with
+ * `onceADay` adds a run-once-per-night guard that composes with
  * `enabled` (the bundled meester oversight task is `{enabled, onceADay}`
- * with no cron). `lastRunDay` is the local 'YYYY-MM-DD' of the last run,
- * stamped on terminal completion; the task is no longer "pending" today
- * once it equals today's date.
+ * with no cron). `lastRunDay` is the 'YYYY-MM-DD' night-window day key
+ * of the last run. It is stamped from two disjoint sites that can never
+ * collide: workable tasks stamp on step completion (they never spawn),
+ * and night-shift spawn hosts stamp at child-spawn time in the scheduler
+ * (their placeholder step never completes) — giving hosts "at most one
+ * spawn per night window" semantics.
  */
 export const TaskNightShiftSchema = z.object({
   enabled: z.boolean(),
@@ -357,6 +360,19 @@ export const TaskSchema = z.object({
         jobId: z.string(),
         managedByGezelId: z.string().optional(),
       }),
+      z.object({
+        /**
+         * A host materialized from a gezel template's `suggestedCraftbooks`
+         * entry via the suggested-work layer. `suggestionKey` is the
+         * entry's key within the template (`<craftbookId>` or
+         * `<craftbookId>#N` on repeats) — together with `templateId` it is
+         * the toggle identity: enable resurrects a matching paused host
+         * instead of creating a second one.
+         */
+        kind: z.literal('gezel-suggested-craftbook'),
+        templateId: z.string(),
+        suggestionKey: z.string(),
+      }),
     ])
     .optional(),
   cron: TaskCronSchema.optional(),
@@ -533,6 +549,12 @@ export const UpdateTaskRequestSchema = z.object({
     .nullable()
     .optional(),
   fanout: NewTaskFanoutSchema.nullable().optional(),
+  /**
+   * Replace a host's child-invocation params (copied to each spawned
+   * child's `craftbookParams`). Only meaningful on spawn hosts; `null`
+   * clears them.
+   */
+  spawnsCraftbookParams: z.record(z.string(), z.string()).nullable().optional(),
 });
 export type UpdateTaskRequest = z.infer<typeof UpdateTaskRequestSchema>;
 
@@ -568,6 +590,16 @@ export const CompleteStepGateInfoSchema = z.object({
   maxAttempts: z.number().int().positive(),
   paused: z.boolean(),
   infrastructureError: z.boolean().optional(),
+  scriptRuns: z
+    .array(
+      z.object({
+        scriptName: z.string(),
+        runId: z.string().optional(),
+        error: z.string().optional(),
+        logsTail: z.string().optional(),
+      }),
+    )
+    .optional(),
 });
 export type CompleteStepGateInfo = z.infer<typeof CompleteStepGateInfoSchema>;
 

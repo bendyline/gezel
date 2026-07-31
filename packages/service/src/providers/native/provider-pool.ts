@@ -56,6 +56,8 @@ export interface ProviderBuilderArgs {
 export type ProviderBuilder = (args: ProviderBuilderArgs) => Promise<{
   provider: LLMProvider;
   residentBytes: number;
+  /** Installed parameter payload resident for this replica, when known. */
+  modelWeightsBytes?: number;
 }>;
 
 export interface ProviderPoolOptions {
@@ -108,6 +110,8 @@ export interface PoolEntrySnapshot {
   modelId: string;
   replicaIdx: number;
   residentBytes: number;
+  /** Installed parameter payload resident for this replica, when known. */
+  modelWeightsBytes?: number;
   lastUsedAt: number;
   createdAt: number;
   /** True while a non-forced eviction is waiting for in-flight turns to finish. */
@@ -178,6 +182,7 @@ interface PoolEntry {
   parsed: ParsedEngineKey;
   provider: LLMProvider;
   residentBytes: number;
+  modelWeightsBytes?: number;
   lastUsedAt: number;
   createdAt: number;
   /** See {@link PoolEntrySnapshot.draining}. */
@@ -390,10 +395,19 @@ export class ProviderPool {
         replicaIdx,
         rebuilt.provider,
         rebuilt.residentBytes,
+        rebuilt.modelWeightsBytes,
       );
       return rebuilt.provider;
     }
-    this.installEntry(key, provider, modelId, replicaIdx, built.provider, finalBytes);
+    this.installEntry(
+      key,
+      provider,
+      modelId,
+      replicaIdx,
+      built.provider,
+      finalBytes,
+      built.modelWeightsBytes,
+    );
     return built.provider;
   }
 
@@ -404,12 +418,16 @@ export class ProviderPool {
     replicaIdx: number,
     instance: LLMProvider,
     residentBytes: number,
+    modelWeightsBytes?: number,
   ): void {
     const at = this.now();
     this.entries.set(key, {
       parsed: { provider, modelId, replicaIdx },
       provider: instance,
       residentBytes,
+      ...(typeof modelWeightsBytes === 'number' && Number.isFinite(modelWeightsBytes)
+        ? { modelWeightsBytes: Math.max(0, modelWeightsBytes) }
+        : {}),
       lastUsedAt: at,
       createdAt: at,
       draining: false,
@@ -742,6 +760,7 @@ export class ProviderPool {
         modelId: e.parsed.modelId,
         replicaIdx: e.parsed.replicaIdx,
         residentBytes: e.residentBytes,
+        ...(e.modelWeightsBytes !== undefined ? { modelWeightsBytes: e.modelWeightsBytes } : {}),
         lastUsedAt: e.lastUsedAt,
         createdAt: e.createdAt,
         draining: e.draining,

@@ -70,11 +70,13 @@ import type {
   DeviceSafetyPolicyConfig,
   DiffFilesRequest,
   DiffFilesResponse,
+  DismissReportActionRequest,
   DocumentMediaExportRequest,
   DraftScriptRequest,
   DraftScriptResponse,
   DriveIndexEnrichmentRequest,
   DriveIndexEnrichmentResponse,
+  EnableSuggestedWorkRequest,
   EnsureGezelRequest,
   EnsureGezelResponse,
   FetchDiffRequest,
@@ -99,6 +101,8 @@ import type {
   FindSimilarImagesResponse,
   FindSymbolRequest,
   FindSymbolResponse,
+  FireReportActionRequest,
+  FireReportActionResponse,
   GenerateGezelAboutRequest,
   GenerateGezelIconRequest,
   GetScriptSourceResponse,
@@ -193,6 +197,7 @@ import type {
   NativeEngineResolveEvent,
   NativeEngineStatusResponse,
   NewCraftbookStep,
+  NightShiftReviewResponse,
   NightShiftTasksResponse,
   OutlineFileRequest,
   OutlineFileResponse,
@@ -221,6 +226,8 @@ import type {
   RenderImageResponse,
   ReplaceInProjectWorkspaceFileRequest,
   ReplaceLinesInProjectWorkspaceFileRequest,
+  ReportActionRecord,
+  ReportActionsResponse,
   ReportPreviewLogRequest,
   RequestAskRequest,
   RequestAskResponse,
@@ -269,6 +276,8 @@ import type {
   StartCodeReviewResponse,
   StepPosition,
   SuggestCraftbooksResponse,
+  SuggestedWorkItem,
+  SuggestedWorkResponse,
   SystemBootstrapStatus,
   Task,
   TaskAssignee,
@@ -370,6 +379,15 @@ export interface ProviderUsage {
   totalTokensIn: number;
   totalTokensOut: number;
   totalCost: number;
+  /**
+   * Median engine-reported decode rate (tokens/sec) across turns that
+   * reported one; `null` when none did. Populated by local engines
+   * (llama.cpp, MLX); cloud providers don't report throughput, so `null`
+   * there is expected and should render as "n/a", never as zero.
+   *
+   * Optional so an older daemon that predates the field still typechecks.
+   */
+  medianOutputTokensPerSec?: number | null;
   lastUpdated: string | null;
 }
 
@@ -721,6 +739,16 @@ export interface ConfigResponse {
    * RAM (`--n-cpu-moe N`) — the partial-split form of `llamaCppCpuMoe`.
    */
   llamaCppNCpuMoe?: number;
+  /**
+   * llama-cpp: allocate a full-size sliding-window KV cache (`--swa-full`)
+   * instead of the memory-efficient windowed one, for SWA models (Gemma).
+   * ~30% more memory at long context, and the precondition for the engine
+   * accepting `--cache-reuse` at all on those models — with a windowed
+   * cache it refuses ("cache_reuse is not supported by this context").
+   * No effect on Qwen 3.5/3.6, which cannot KV-shift regardless.
+   * Undefined → off (windowed cache).
+   */
+  llamaCppSwaFull?: boolean;
   /**
    * llama-cpp: speculative-decoding mode (`--spec-type`). Lossless
    * decode speedup. `ngram-*` need no draft model; `draft-mtp` uses the
@@ -1739,6 +1767,86 @@ export class GezelClient {
    *  Both lists are empty when no shift is running. */
   getNightShiftTasks(): Promise<NightShiftTasksResponse> {
     return this.request('GET', '/api/night-shift/tasks');
+  }
+
+  /** The morning review: what the most recent night window accomplished. */
+  getNightShiftReview(): Promise<NightShiftReviewResponse> {
+    return this.request('GET', '/api/night-shift/review');
+  }
+
+  // ---------- suggested night work ----------
+
+  /** The project's suggested-work toggle list (role + project-type sources). */
+  listSuggestedWork(projectId: string): Promise<SuggestedWorkResponse> {
+    return this.request('GET', `/api/projects/${encodeURIComponent(projectId)}/suggested-work`);
+  }
+
+  /** Enable a suggestion — materializes (or resurrects) its host task. */
+  enableSuggestedWork(
+    projectId: string,
+    body: EnableSuggestedWorkRequest,
+  ): Promise<{ item: SuggestedWorkItem; task: Task }> {
+    return this.request(
+      'POST',
+      `/api/projects/${encodeURIComponent(projectId)}/suggested-work/enable`,
+      body,
+    );
+  }
+
+  /** Disable a suggestion — pauses its host task (re-enable resurrects it). */
+  disableSuggestedWork(projectId: string, key: string): Promise<{ item: SuggestedWorkItem }> {
+    return this.request(
+      'POST',
+      `/api/projects/${encodeURIComponent(projectId)}/suggested-work/disable`,
+      { key },
+    );
+  }
+
+  /** Hide (or un-hide) a suggestion from the project's toggle list. */
+  dismissSuggestedWork(
+    projectId: string,
+    key: string,
+    dismissed: boolean,
+  ): Promise<{ ok: boolean }> {
+    return this.request(
+      'POST',
+      `/api/projects/${encodeURIComponent(projectId)}/suggested-work/dismiss`,
+      { key, dismissed },
+    );
+  }
+
+  // ---------- report actions ----------
+
+  /** Parse a report artifact's ```gezel-action blocks + lifecycle overlay. */
+  getReportActions(projectId: string, path: string): Promise<ReportActionsResponse> {
+    return this.request(
+      'GET',
+      `/api/projects/${encodeURIComponent(projectId)}/report-actions?path=${encodeURIComponent(path)}`,
+    );
+  }
+
+  /** Fire one report action (create+dispatch a task, or apply an edit pack). */
+  fireReportAction(
+    projectId: string,
+    body: FireReportActionRequest,
+  ): Promise<FireReportActionResponse> {
+    return this.request(
+      'POST',
+      `/api/projects/${encodeURIComponent(projectId)}/report-actions/fire`,
+      body,
+    );
+  }
+
+  /** Dismiss a report action ("don't offer this recommendation again"). */
+  dismissReportAction(
+    projectId: string,
+    body: DismissReportActionRequest,
+  ): Promise<{ record: ReportActionRecord }> {
+    return this.request(
+      'POST',
+      `/api/projects/${encodeURIComponent(projectId)}/report-actions/dismiss`,
+      body,
+    );
   }
 
   // ---------- meester status report ----------

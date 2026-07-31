@@ -66,6 +66,65 @@ afterEach(async () => {
 });
 
 describe('TerminalManager', () => {
+  it('opens a verified workspace file through a one-shot UI event', async () => {
+    const projectId = (await store.listProjects())[0]!.id;
+    await store.writeProjectWorkspaceFile(projectId, 'notes/battle-research.md', '# Battle');
+    const collected: TerminalEventEnvelope[] = [];
+    events.subscribeProject(projectId, (env) => collected.push(env));
+    const mgr = makeManager({ workspaceIndex: stubIndex(null) });
+
+    const outcome = await mgr.enqueueRun(projectId, 'notes', 'open battle-research.md');
+    expect(outcome.resolution).toMatchObject({
+      kind: 'intercept',
+      intercept: 'open',
+      arg: 'battle-research.md',
+    });
+
+    const opened = collected.find((event) => event.kind === 'openFile');
+    expect(opened).toMatchObject({
+      kind: 'openFile',
+      projectId,
+      path: 'notes/battle-research.md',
+      source: 'workspace',
+    });
+    const thread = await store.getTerminalThread(projectId, outcome.threadId);
+    expect(thread?.messages.at(-1)).toMatchObject({
+      kind: 'output',
+      exitCode: 0,
+      fileReferences: [{ label: 'notes/battle-research.md', path: 'notes/battle-research.md' }],
+    });
+  });
+
+  it('refuses to preview paths outside the project workspace', async () => {
+    const projectId = (await store.listProjects())[0]!.id;
+    const collected: TerminalEventEnvelope[] = [];
+    events.subscribeProject(projectId, (env) => collected.push(env));
+    const mgr = makeManager({ workspaceIndex: stubIndex(null) });
+
+    const outcome = await mgr.enqueueRun(projectId, '', 'open ../private.md');
+    expect(collected.some((event) => event.kind === 'openFile')).toBe(false);
+    const thread = await store.getTerminalThread(projectId, outcome.threadId);
+    expect(thread?.messages.at(-1)).toMatchObject({
+      kind: 'output',
+      exitCode: 1,
+      errorMessage: 'open-outside-workspace',
+    });
+  });
+
+  itPosix('marks verified files in directory-listing output', async () => {
+    const projectId = (await store.listProjects())[0]!.id;
+    await store.writeProjectWorkspaceFile(projectId, 'battle-research.md', '# Battle');
+    const mgr = makeManager({ workspaceIndex: stubIndex(null) });
+
+    const outcome = await mgr.enqueueRun(projectId, '', 'ls');
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    const thread = await store.getTerminalThread(projectId, outcome.threadId);
+    expect(thread?.messages.at(-1)?.fileReferences).toContainEqual({
+      label: 'battle-research.md',
+      path: 'battle-research.md',
+    });
+  });
+
   itPosix('round-trips a command through the persistent shell and persists output', async () => {
     const projectId = (await store.listProjects())[0]!.id;
     const collected: TerminalEventEnvelope[] = [];

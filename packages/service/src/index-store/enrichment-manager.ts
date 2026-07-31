@@ -124,6 +124,10 @@ export class IndexEnrichmentManager {
       const projects = await this.store.listProjects().catch(() => []);
       let didWork = false;
       for (const p of projects) {
+        // `indexingEnabled: false` is a full workspace-index opt-out, not
+        // merely a request to skip the cheap structural pass. Do not consume
+        // an older on-disk index if the project was disabled after a scan.
+        if (p.indexingEnabled === false) continue;
         // Roster presence is the explicit opt-in for AI indexing. The cheap
         // WorkspaceIndexManager scan runs independently for every project.
         const boekwachter = await this.resolveBoekwachter(p.id);

@@ -22,6 +22,7 @@ test('Electron release configuration pins the audited packaging contracts', asyn
     appPackage,
     rootPackage,
     readme,
+    nativeWorkflow,
   ] = await Promise.all([
     readFile(join(root, 'packages', 'app', 'electron-builder.yml'), 'utf8'),
     readFile(join(root, '.github', 'workflows', 'release-electron.yml'), 'utf8'),
@@ -36,6 +37,7 @@ test('Electron release configuration pins the audited packaging contracts', asyn
     readFile(join(root, 'packages', 'app', 'package.json'), 'utf8'),
     readFile(join(root, 'package.json'), 'utf8'),
     readFile(join(root, 'README.md'), 'utf8'),
+    readFile(join(root, '.github', 'workflows', 'build-native.yml'), 'utf8'),
   ]);
 
   assert.match(tsup, /noExternal:/);
@@ -154,6 +156,15 @@ test('Electron release configuration pins the audited packaging contracts', asyn
   assert.match(workflow, /release asset basename collision/);
   assert.doesNotMatch(workflow, /artifacts\/flat/);
   assert.doesNotMatch(workflow, /find artifacts .* -exec ln/);
+
+  const nativeReleaseStart = nativeWorkflow.indexOf('- name: Create draft Release');
+  assert.notEqual(nativeReleaseStart, -1, 'native workflow must create a distinct release');
+  const nativeRelease = nativeWorkflow.slice(nativeReleaseStart);
+  assert.match(
+    nativeRelease,
+    /^\s+prerelease: true$/m,
+    'native-v* releases must not replace the Electron app at /releases/latest',
+  );
 });
 
 test('macOS release installs the finished PKG and exercises recovery', async () => {

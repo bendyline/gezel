@@ -1,6 +1,12 @@
 import { randomUUID } from 'node:crypto';
-import { normalize, relative } from 'node:path';
-import { type TerminalMessage, type TerminalThread, createLogger, nowIso } from '@bendyline/gezel';
+import { isAbsolute, normalize, relative, resolve } from 'node:path';
+import {
+  type TerminalFileReference,
+  type TerminalMessage,
+  type TerminalThread,
+  createLogger,
+  nowIso,
+} from '@bendyline/gezel';
 import { safeJoin } from '../fs/safe-paths.js';
 import type { Store } from '../fs/store.js';
 import type { HistoryManager } from '../history/manager.js';
@@ -187,10 +193,8 @@ export class TerminalManager {
    * id + run id; the output bubble arrives later via SSE +
    * `appendTerminalMessage`.
    *
-   * Intercepts (`cd`, `pwd`, `clear`) bypass spawning. `cd` resolves
-   * client-side (the UI swallows it before submission); if it still
-   * reaches the server we just emit an output bubble that echoes the
-   * resolved folder so the user has feedback.
+   * Intercepts (`pwd`, `clear`, `open`) bypass spawning. `open` resolves a
+   * workspace file and emits a one-shot preview intent to the UI.
    */
   async enqueueRun(projectId: string, workingDir: string, input: string): Promise<RunOutcome> {
     const runId = randomUUID();
@@ -256,7 +260,18 @@ export class TerminalManager {
 
     // Intercepts handled server-side as a courtesy output bubble.
     if (resolution.kind === 'intercept') {
-      const outputMessage: TerminalMessage = {
+      const openResult =
+        resolution.intercept === 'open'
+          ? await this.buildOpenInterceptOutput({
+              projectId,
+              threadId,
+              workingDir,
+              cwdDisplay,
+              wsRoot,
+              path: resolution.arg!,
+            })
+          : null;
+      const outputMessage: TerminalMessage = openResult?.message ?? {
         ...this.buildInterceptOutput(resolution, workingDir),
         cwd: cwdDisplay,
       };
@@ -268,6 +283,15 @@ export class TerminalManager {
         workingDir,
         message: outputMessage,
       });
+      if (openResult?.path) {
+        this.events.publish({
+          kind: 'openFile',
+          projectId,
+          threadId,
+          path: openResult.path,
+          source: 'workspace',
+        });
+      }
       return { threadId, runId, resolution };
     }
 
@@ -363,6 +387,80 @@ export class TerminalManager {
       exitCode: 0,
       durationMs: 0,
       stdout: body,
+    };
+  }
+
+  private async buildOpenInterceptOutput(args: {
+    projectId: string;
+    threadId: string;
+    workingDir: string;
+    cwdDisplay: string;
+    wsRoot: string | null;
+    path: string;
+  }): Promise<{ message: TerminalMessage; path?: string }> {
+    const { projectId, threadId, workingDir, cwdDisplay, wsRoot, path } = args;
+    const baseMessage = {
+      id: randomUUID(),
+      kind: 'output' as const,
+      at: nowIso(),
+      durationMs: 0,
+      cwd: cwdDisplay,
+    };
+    if (!wsRoot) {
+      const body = `Couldn't open ${path}: the project workspace is unavailable.`;
+      return {
+        message: {
+          ...baseMessage,
+          content: body,
+          stdout: body,
+          exitCode: 1,
+          errorMessage: 'open-workspace-unavailable',
+        },
+      };
+    }
+
+    const shellCwd = this.shellPool.currentCwd(threadId) ?? resolveWorkingCwd(wsRoot, workingDir);
+    const target = resolve(shellCwd, path);
+    const relativePath = projectRelativeOrAbsolute(wsRoot, target);
+    if (isAbsolute(relativePath)) {
+      const body = `Couldn't open ${path}: previews are limited to files in this project workspace.`;
+      return {
+        message: {
+          ...baseMessage,
+          content: body,
+          stdout: body,
+          exitCode: 1,
+          errorMessage: 'open-outside-workspace',
+        },
+      };
+    }
+
+    const canonicalPath = relativePath.replace(/\\/g, '/');
+    const stat = await this.store.statProjectWorkspacePath(projectId, canonicalPath);
+    if (stat.kind !== 'file') {
+      const reason = stat.kind === 'dir' ? 'is a folder' : 'was not found';
+      const body = `Couldn't open ${path}: ${reason}.`;
+      return {
+        message: {
+          ...baseMessage,
+          content: body,
+          stdout: body,
+          exitCode: 1,
+          errorMessage: stat.kind === 'dir' ? 'open-is-directory' : 'open-not-found',
+        },
+      };
+    }
+
+    const body = `Opened ${canonicalPath} in References.`;
+    return {
+      path: canonicalPath,
+      message: {
+        ...baseMessage,
+        content: body,
+        stdout: body,
+        exitCode: 0,
+        fileReferences: [{ label: canonicalPath, path: canonicalPath }],
+      },
     };
   }
 
@@ -672,6 +770,12 @@ export class TerminalManager {
       // unset rather than fake-splitting.
       ...(result.output ? { stdout: result.output } : {}),
       ...(result.truncated ? { truncated: true } : {}),
+      ...(await this.collectListingFileReferences(
+        projectId,
+        preRunCwdDisplay,
+        resolution,
+        result.output,
+      )),
     };
     await this.store.appendTerminalMessage(projectId, threadId, workingDir, outputMessage);
     this.events.publish({
@@ -716,6 +820,32 @@ export class TerminalManager {
       },
     });
   }
+
+  private async collectListingFileReferences(
+    projectId: string,
+    cwdDisplay: string,
+    resolution: Extract<ResolvedTerminalInput, { kind: 'argv' }>,
+    output: string,
+  ): Promise<{ fileReferences?: TerminalFileReference[] }> {
+    if (!isDirectoryListingCommand(resolution.bin) || !output || isAbsolute(cwdDisplay)) return {};
+    try {
+      const entries = await this.store.listProjectWorkspace(projectId, cwdDisplay);
+      const references = entries
+        .filter((entry) => !entry.isDirectory && output.includes(entry.name))
+        .slice(0, 200)
+        .map((entry) => ({ label: entry.name, path: entry.path }));
+      return references.length > 0 ? { fileReferences: references } : {};
+    } catch {
+      // Linking is a transcript enhancement; never turn a successful shell
+      // command into a failure because the workspace changed mid-listing.
+      return {};
+    }
+  }
+}
+
+function isDirectoryListingCommand(bin: string): boolean {
+  const leaf = bin.replace(/\\/g, '/').split('/').at(-1)?.toLowerCase();
+  return leaf === 'ls' || leaf === 'dir' || leaf === 'gci' || leaf === 'get-childitem';
 }
 
 /**
@@ -759,7 +889,9 @@ function projectRelativeOrAbsolute(wsRoot: string, absoluteCwd: string): string 
   // `relative` returns `..` / `../foo` when the cwd is outside; in
   // that case fall back to the absolute path. Also guard against
   // empty relpaths (same dir) and explicit upward traversal.
-  if (rel === '' || rel.startsWith('..')) return absoluteCwd;
+  if (rel === '' || rel === '..' || rel.startsWith('../') || rel.startsWith('..\\')) {
+    return absoluteCwd;
+  }
   // Force forward-slash separators for project-relative paths even
   // when running on Windows, where `node:path.relative` returns
   // backslash-separated paths. The schema's `workingDir` /

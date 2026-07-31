@@ -6,6 +6,7 @@ import {
   createLogger,
   isInNightShiftWindow,
   isPendingNightShiftTask,
+  lastNightShiftWindow,
   localDateKey,
   nextNightShiftStart,
   nightShiftDayKey,
@@ -125,6 +126,36 @@ export class NightShiftManager {
   }
 
   /**
+   * The current night-window day key (window-start local date inside a
+   * window, plain local date outside). Drives the scheduler's
+   * once-per-window guard on night-shift spawn hosts. Uses the window
+   * cached from the last tick.
+   */
+  currentDayKey(): string {
+    return nightShiftDayKey(this.now(), this.window);
+  }
+
+  /** The window config cached from the last tick. */
+  currentWindow(): NightShiftWindow {
+    return this.window;
+  }
+
+  /**
+   * Register the window-settled callback — invoked (fire-and-forget)
+   * whenever a night window is behind us: on the open→closed transition
+   * AND on the first tick after startup when the machine slept through
+   * the window's end. In-process dedup by window key; the callee dedups
+   * durably (the morning question's `windowKey` intent), so a restart
+   * re-invoking it is harmless. Wired late by service.ts (the review
+   * builder depends on managers constructed after this one).
+   */
+  setOnWindowSettled(fn: (windowKey: string) => Promise<void>): void {
+    this.onWindowSettled = fn;
+  }
+  private onWindowSettled?: (windowKey: string) => Promise<void>;
+  private settledNotifiedKey: string | null = null;
+
+  /**
    * Whether `task` still has night-shift work to do today — false for a
    * `onceADay` task whose `lastRunDay` is today's window-start date. Used
    * by the runner to hold a daily task after its single run. Uses the
@@ -221,6 +252,20 @@ export class NightShiftManager {
 
     this.keepAwake = active && ns.keepAwakeWhileRunning === true;
     this.setActive(active, src);
+
+    // Morning-review trigger: whenever we're OUTSIDE the window, the most
+    // recently completed window is "settled". Notify once per key —
+    // covers both the live open→closed transition and waking up after
+    // having slept through the window's end.
+    if (enabled && !this.windowOpen && this.onWindowSettled) {
+      const settledKey = lastNightShiftWindow(now, window).key;
+      if (settledKey !== this.settledNotifiedKey) {
+        this.settledNotifiedKey = settledKey;
+        this.onWindowSettled(settledKey).catch((err) => {
+          log.warn(`[night-shift] window-settled callback failed: ${String(err)}`);
+        });
+      }
+    }
   }
 
   /**

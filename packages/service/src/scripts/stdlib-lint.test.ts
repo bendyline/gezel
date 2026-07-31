@@ -121,8 +121,17 @@ describe('bundled craftbook gallery gate refs', () => {
             const meta = stdlib.get(ref.name);
             expect(meta, `${book}/${step.id}: unknown standard script "${ref.name}"`).toBeDefined();
             if (!meta) continue;
+            // Step-triggered runs inject taskRef/stepId when the script
+            // declares them, so validate the same effective input shape
+            // the runtime sees rather than requiring every gallery book to
+            // hard-code invocation-specific task context.
+            const inputs = {
+              ...(meta.inputs?.taskRef ? { taskRef: 'gallery-lint/1' } : {}),
+              ...(meta.inputs?.stepId ? { stepId: step.id } : {}),
+              ...(ref.inputs ?? {}),
+            };
             expect(
-              () => validateScriptInput(meta, ref.inputs),
+              () => validateScriptInput(meta, inputs),
               `${book}/${step.id}: inputs for "${ref.name}" do not validate`,
             ).not.toThrow();
           }

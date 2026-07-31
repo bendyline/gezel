@@ -182,6 +182,233 @@ describe('ProjectsView', () => {
     expect(within(roster).getByText('Developer')).toBeInTheDocument();
   });
 
+  it('adds an existing workshop gezel from Project Settings', async () => {
+    vi.mocked(api.listGezels).mockResolvedValue({
+      gezels: [
+        {
+          id: 'tomas',
+          name: 'Tomas',
+          role: 'Meester',
+          updatedAt: '2026-07-30T00:00:00.000Z',
+        },
+        {
+          id: 'amira',
+          name: 'Amira',
+          role: 'Researcher',
+          updatedAt: '2026-07-30T00:00:00.000Z',
+        },
+      ],
+    } as never);
+    vi.mocked(api.getProject).mockResolvedValue({
+      id: 'pj-alpha',
+      name: 'Alpha',
+      packages: [],
+      allowGezelWrites: false,
+      gezelIds: ['tomas'],
+    } as never);
+    vi.mocked(api.addGezelToProject).mockResolvedValue({
+      gezelIds: ['tomas', 'amira'],
+    } as never);
+
+    render(<ProjectsView forceProjectId="pj-alpha" />);
+    await screen.findByTestId('project-chat');
+    fireEvent.click(screen.getByRole('tab', { name: 'Settings' }));
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Add Gezel' }));
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).queryByText('Tomas')).not.toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole('button', { name: /Amira/ }));
+
+    await waitFor(() => {
+      expect(api.addGezelToProject).toHaveBeenCalledWith('pj-alpha', 'amira');
+    });
+    const roster = screen.getByRole('region', { name: 'Assigned gezellen' });
+    expect(await within(roster).findByText('Amira')).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('offers name and appearance customization for a new role', async () => {
+    vi.mocked(api.listGezels).mockResolvedValue({
+      gezels: [
+        {
+          id: 'tomas',
+          name: 'Tomas',
+          role: 'Meester',
+          updatedAt: '2026-07-30T00:00:00.000Z',
+        },
+      ],
+    } as never);
+    vi.mocked(api.getProject).mockResolvedValue({
+      id: 'pj-alpha',
+      name: 'Alpha',
+      packages: [],
+      allowGezelWrites: false,
+      gezelIds: ['tomas'],
+    } as never);
+    vi.mocked(api.listCatalogItems).mockResolvedValue({
+      items: [
+        {
+          sourceId: 'gilde',
+          manifest: {
+            schemaVersion: 1,
+            kind: 'gezel-template',
+            id: 'meester',
+            name: 'Meester',
+            description: 'Guides the workshop.',
+            tags: [],
+            maintainer: { name: 'Gezel' },
+            version: '1.0.0',
+            releasedAt: '2026-07-30',
+            role: 'Meester',
+            about: 'about.md',
+            suggestedTools: [],
+            meesterCandidate: true,
+            availableVersions: [],
+          },
+        },
+        {
+          sourceId: 'gilde',
+          manifest: {
+            schemaVersion: 1,
+            kind: 'gezel-template',
+            id: 'visual-designer',
+            name: 'Visual Designer',
+            description: 'Shapes clear and welcoming interfaces.',
+            tags: ['design'],
+            maintainer: { name: 'Gezel' },
+            version: '1.0.0',
+            releasedAt: '2026-07-30',
+            role: 'Visual Designer',
+            about: 'about.md',
+            suggestedTools: [],
+            meesterCandidate: false,
+            availableVersions: [],
+            nameSuggestions: ['Nia'],
+          },
+        },
+      ],
+    } as never);
+    vi.mocked(api.createGezelFromTemplate).mockResolvedValue({
+      id: 'nia',
+      name: 'Nia',
+      role: 'Visual Designer',
+      templateId: 'visual-designer',
+      updatedAt: '2026-07-30T00:00:00.000Z',
+    } as never);
+    vi.mocked(api.rerollGezelPoppetje).mockResolvedValue({ poppetje: undefined } as never);
+    vi.mocked(api.addGezelToProject).mockResolvedValue({
+      gezelIds: ['tomas', 'nia'],
+    } as never);
+
+    render(<ProjectsView forceProjectId="pj-alpha" />);
+    await screen.findByTestId('project-chat');
+    fireEvent.click(screen.getByRole('tab', { name: 'Settings' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Add Gezel' }));
+
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).queryByRole('button', { name: /Meester/ })).not.toBeInTheDocument();
+    fireEvent.click(
+      await within(dialog).findByRole('button', {
+        name: /Visual Designer.*Shapes clear and welcoming interfaces/,
+      }),
+    );
+
+    const name = screen.getByRole('textbox', { name: 'Name' });
+    expect(name).toHaveValue('Nia');
+    fireEvent.change(name, { target: { value: 'Anika' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Reroll appearance' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add to project' }));
+
+    await waitFor(() => {
+      expect(api.createGezelFromTemplate).toHaveBeenCalledWith(
+        'visual-designer',
+        expect.objectContaining({ name: 'Anika' }),
+      );
+      expect(api.rerollGezelPoppetje).toHaveBeenCalledWith('nia', {
+        seed: expect.any(Number),
+      });
+      expect(api.addGezelToProject).toHaveBeenCalledWith('pj-alpha', 'nia');
+    });
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('creates a selected role immediately without customization in boring mode', async () => {
+    vi.mocked(api.getConfig).mockResolvedValue({
+      provider: 'mock',
+      roleBasedNameOnlyMode: true,
+    } as never);
+    vi.mocked(api.listGezels).mockResolvedValue({
+      gezels: [
+        {
+          id: 'tomas',
+          name: 'Tomas',
+          role: 'Developer',
+          roleBasedName: 'developer',
+          updatedAt: '2026-07-30T00:00:00.000Z',
+        },
+      ],
+    } as never);
+    vi.mocked(api.getProject).mockResolvedValue({
+      id: 'pj-alpha',
+      name: 'Alpha',
+      packages: [],
+      allowGezelWrites: false,
+      gezelIds: ['tomas'],
+    } as never);
+    vi.mocked(api.listCatalogItems).mockResolvedValue({
+      items: [
+        {
+          sourceId: 'gilde',
+          manifest: {
+            schemaVersion: 1,
+            kind: 'gezel-template',
+            id: 'researcher',
+            name: 'Researcher',
+            description: 'Finds and checks evidence.',
+            tags: [],
+            maintainer: { name: 'Gezel' },
+            version: '1.0.0',
+            releasedAt: '2026-07-30',
+            role: 'Researcher',
+            about: 'about.md',
+            suggestedTools: [],
+            meesterCandidate: false,
+            availableVersions: [],
+          },
+        },
+      ],
+    } as never);
+    vi.mocked(api.createGezelFromTemplate).mockResolvedValue({
+      id: 'researcher',
+      name: 'Researcher',
+      role: 'Researcher',
+      roleBasedName: 'researcher',
+      templateId: 'researcher',
+      updatedAt: '2026-07-30T00:00:00.000Z',
+    } as never);
+    vi.mocked(api.addGezelToProject).mockResolvedValue({
+      gezelIds: ['tomas', 'researcher'],
+    } as never);
+
+    render(<ProjectsView forceProjectId="pj-alpha" />);
+    await screen.findByTestId('project-chat');
+    fireEvent.click(screen.getByRole('tab', { name: 'Settings' }));
+    await screen.findByText('developer');
+    fireEvent.click(screen.getByRole('button', { name: 'Add Gezel' }));
+    fireEvent.click(
+      await screen.findByRole('button', { name: /Researcher.*Finds and checks evidence/ }),
+    );
+
+    expect(screen.queryByRole('textbox', { name: 'Name' })).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(api.createGezelFromTemplate).toHaveBeenCalledWith('researcher', {
+        name: 'Researcher',
+      });
+      expect(api.addGezelToProject).toHaveBeenCalledWith('pj-alpha', 'researcher');
+    });
+    expect(api.rerollGezelPoppetje).not.toHaveBeenCalled();
+  });
+
   it('shows credential destinations without editable origin fields', async () => {
     vi.mocked(api.listAvailableCredentials).mockResolvedValue({
       credentials: [
@@ -469,6 +696,36 @@ describe('ProjectsView', () => {
       expect(
         screen.getByRole('checkbox', { name: 'Exclude from Meester progress check-ins' }),
       ).not.toBeChecked();
+    });
+  });
+
+  it('lets Project Settings override workspace indexing', async () => {
+    const project = {
+      id: 'pj-alpha',
+      name: 'Checkers',
+      packages: [],
+      allowGezelWrites: false,
+      indexingEnabled: false,
+    };
+    vi.mocked(api.getProject).mockResolvedValue(project as never);
+    vi.mocked(api.updateProject).mockResolvedValue({
+      ...project,
+      indexingEnabled: true,
+    } as never);
+
+    render(<ProjectsView forceProjectId="pj-alpha" />);
+    await screen.findByTestId('project-chat');
+    fireEvent.click(screen.getByRole('tab', { name: 'Settings' }));
+
+    const checkbox = await screen.findByRole('checkbox', {
+      name: /Index this project's workspace/,
+    });
+    expect(checkbox).not.toBeChecked();
+    fireEvent.click(checkbox);
+
+    await waitFor(() => {
+      expect(api.updateProject).toHaveBeenCalledWith('pj-alpha', { indexingEnabled: true });
+      expect(api.refreshProjectIndex).toHaveBeenCalledWith('pj-alpha');
     });
   });
 

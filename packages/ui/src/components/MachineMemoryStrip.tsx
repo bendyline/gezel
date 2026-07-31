@@ -1,6 +1,7 @@
 import type { MachineMemoryUsage } from '@bendyline/gezel';
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
+import { Tooltip } from '../primitives/index.js';
 import { formatBytes } from './engine-pill-stats.js';
 
 interface Props {
@@ -75,13 +76,33 @@ export function MachineMemoryStrip({ pollMs = 1_000 }: Props) {
       : `${formatBytes(usage.usedBytes)} of ${formatBytes(usage.totalBytes)} used`;
   const observed = typeof usage.gezelBytesObserved === 'number';
   const gezelBytes = usage.gezelBytesObserved ?? usage.gezelBytesEstimated;
-  const gezelPercent = percent(gezelBytes, usage.totalBytes);
   const otherPercent = usage.otherBytes === null ? 0 : percent(usage.otherBytes, usage.totalBytes);
+  const gezelSegments = [
+    {
+      key: 'infra',
+      label: 'Core Gezel infra',
+      detail: 'daemon and local-engine runtime',
+      bytes: usage.gezelInfraBytes,
+    },
+    {
+      key: 'weights',
+      label: 'Model weights',
+      detail: 'resident model parameters',
+      bytes: usage.gezelModelWeightsBytes,
+    },
+    {
+      key: 'cache',
+      label: 'Model cache',
+      detail: 'KV cache and inference buffers',
+      bytes: usage.gezelModelCacheBytes,
+    },
+  ] as const;
   const ariaSummary = [
     `${label}: ${usedSummary}`,
     observed
       ? `Gezel observed footprint ${formatBytes(gezelBytes)}`
       : `Gezel estimated ${formatBytes(gezelBytes)}`,
+    ...gezelSegments.map((segment) => `${segment.label} about ${formatBytes(segment.bytes)}`),
     observed && usage.engineReservedBytes > 0
       ? `models reserve about ${formatBytes(usage.engineReservedBytes)}`
       : null,
@@ -105,20 +126,34 @@ export function MachineMemoryStrip({ pollMs = 1_000 }: Props) {
         </span>
         <span>{usedSummary}</span>
       </div>
-      <div
-        className={`machine-memory-bar${usage.usedBytes === null ? ' machine-memory-bar-unknown' : ''}`}
-        role="img"
-        aria-label={ariaSummary}
-      >
-        <span
-          className="machine-memory-segment machine-memory-segment-gezel"
-          style={{ width: `${gezelPercent}%` }}
-        />
-        <span
-          className="machine-memory-segment machine-memory-segment-other"
-          style={{ width: `${otherPercent}%` }}
-        />
-      </div>
+      <Tooltip.Provider delayDuration={150}>
+        <div
+          className={`machine-memory-bar${usage.usedBytes === null ? ' machine-memory-bar-unknown' : ''}`}
+          role="img"
+          aria-label={ariaSummary}
+        >
+          {gezelSegments.map((segment) =>
+            segment.bytes > 0 ? (
+              <Tooltip.Root key={segment.key}>
+                <Tooltip.Trigger asChild>
+                  <span
+                    className={`machine-memory-segment machine-memory-segment-gezel machine-memory-segment-gezel-${segment.key}`}
+                    style={{ width: `${percent(segment.bytes, usage.totalBytes)}%` }}
+                    aria-label={`${segment.label}, about ${formatBytes(segment.bytes)}`}
+                  />
+                </Tooltip.Trigger>
+                <Tooltip.Content>
+                  {segment.label} · ~{formatBytes(segment.bytes)} ({segment.detail})
+                </Tooltip.Content>
+              </Tooltip.Root>
+            ) : null,
+          )}
+          <span
+            className="machine-memory-segment machine-memory-segment-other"
+            style={{ width: `${otherPercent}%` }}
+          />
+        </div>
+      </Tooltip.Provider>
       <div className="machine-memory-legend">
         <span>
           <i className="machine-memory-swatch machine-memory-swatch-gezel" aria-hidden />

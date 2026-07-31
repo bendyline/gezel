@@ -1,4 +1,5 @@
-import type { TerminalTimelineEntry } from '@bendyline/gezel';
+import type { TerminalFileReference, TerminalTimelineEntry } from '@bendyline/gezel';
+import type { ReactNode } from 'react';
 import { AnsiOutput } from './AnsiOutput.js';
 import { formatFolderLabel } from './terminal-folder-label.js';
 
@@ -22,7 +23,13 @@ const KEYBOARD_SCROLL_PROPS = { tabIndex: 0 } as const;
  * directory the row belonged to — necessary because a single project
  * timeline can interleave commands from multiple folders.
  */
-export function TerminalBubble({ entry }: { entry: TerminalTimelineEntry }) {
+export function TerminalBubble({
+  entry,
+  onOpenWorkspaceFile,
+}: {
+  entry: TerminalTimelineEntry;
+  onOpenWorkspaceFile?: (path: string) => void;
+}) {
   // Prefer the per-message `cwd` (set by the server from the
   // persistent shell's actual cwd at the time the command ran) over
   // the thread's anchor `workingDir`. The anchor is where the user
@@ -63,6 +70,8 @@ export function TerminalBubble({ entry }: { entry: TerminalTimelineEntry }) {
       : entry.exitCode === 0
         ? 'exit 0'
         : `exit ${entry.exitCode}`;
+  const renderLinkedText = (text: string) =>
+    renderTerminalFileLinks(text, entry.fileReferences ?? [], onOpenWorkspaceFile);
   return (
     <div
       className="msg msg-assistant terminal-group terminal-group-output"
@@ -98,10 +107,68 @@ export function TerminalBubble({ entry }: { entry: TerminalTimelineEntry }) {
         {...KEYBOARD_SCROLL_PROPS}
       >
         <pre className="terminal-output-body">
-          {entry.content ? <AnsiOutput text={entry.content} /> : isFailed ? '(no output)' : ''}
+          {entry.content ? (
+            <AnsiOutput text={entry.content} renderText={renderLinkedText} />
+          ) : isFailed ? (
+            '(no output)'
+          ) : (
+            ''
+          )}
         </pre>
       </section>
     </div>
+  );
+}
+
+function renderTerminalFileLinks(
+  text: string,
+  references: TerminalFileReference[],
+  onOpenWorkspaceFile: ((path: string) => void) | undefined,
+): ReactNode {
+  if (!onOpenWorkspaceFile || references.length === 0 || !text) return text;
+  const ordered = [...references].sort((a, b) => b.label.length - a.label.length);
+  const lower = text.toLowerCase();
+  const nodes: ReactNode[] = [];
+  let cursor = 0;
+  let key = 0;
+
+  while (cursor < text.length) {
+    let next: { at: number; reference: TerminalFileReference } | null = null;
+    for (const reference of ordered) {
+      const needle = reference.label.toLowerCase();
+      let at = lower.indexOf(needle, cursor);
+      while (at >= 0 && !hasFileNameBoundaries(text, at, reference.label.length)) {
+        at = lower.indexOf(needle, at + Math.max(1, needle.length));
+      }
+      if (at >= 0 && (!next || at < next.at)) next = { at, reference };
+    }
+    if (!next) break;
+    if (next.at > cursor) nodes.push(text.slice(cursor, next.at));
+    const label = text.slice(next.at, next.at + next.reference.label.length);
+    nodes.push(
+      <button
+        key={`${next.reference.path}:${key++}`}
+        type="button"
+        className="terminal-file-link"
+        title={`Preview ${next.reference.path}`}
+        onClick={() => onOpenWorkspaceFile(next!.reference.path)}
+      >
+        {label}
+      </button>,
+    );
+    cursor = next.at + next.reference.label.length;
+  }
+  if (cursor === 0) return text;
+  if (cursor < text.length) nodes.push(text.slice(cursor));
+  return nodes;
+}
+
+function hasFileNameBoundaries(text: string, at: number, length: number): boolean {
+  const before = at === 0 ? '' : text[at - 1]!;
+  const afterAt = at + length;
+  const after = afterAt >= text.length ? '' : text[afterAt]!;
+  return (
+    (before === '' || /[\s"'([{<]/.test(before)) && (after === '' || /[\s"')\]}>:,;]/.test(after))
   );
 }
 

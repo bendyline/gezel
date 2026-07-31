@@ -264,15 +264,22 @@ export class SearchService {
     // One pool unit per project: code + docs + symbols + project memory.
     const perProject = projects.map((p) => async () => {
       const out: UnifiedSearchResult[] = [];
+      const workspaceIndexing = p.indexingEnabled !== false;
       const codeOpts = vector
         ? { queryVector: vector, maxResults: PER_SOURCE_RESULTS }
         : { mode: 'keyword' as const, maxResults: PER_SOURCE_RESULTS };
       const [code, docs, symbols, mem] = await Promise.all([
-        this.contentIndex.searchCode(p.id, query, codeOpts).catch(() => null),
-        this.contentIndex.searchDocs(p.id, query, PER_SOURCE_RESULTS).catch(() => null),
-        this.contentIndex
-          .findSymbol(p.id, query, { maxResults: PER_SOURCE_RESULTS })
-          .catch(() => null),
+        workspaceIndexing
+          ? this.contentIndex.searchCode(p.id, query, codeOpts).catch(() => null)
+          : Promise.resolve(null),
+        workspaceIndexing
+          ? this.contentIndex.searchDocs(p.id, query, PER_SOURCE_RESULTS).catch(() => null)
+          : Promise.resolve(null),
+        workspaceIndexing
+          ? this.contentIndex
+              .findSymbol(p.id, query, { maxResults: PER_SOURCE_RESULTS })
+              .catch(() => null)
+          : Promise.resolve(null),
         vector
           ? this.memory.searchVector('project', p.id, vector, PER_MEMORY_RESULTS).catch(() => [])
           : Promise.resolve([]),

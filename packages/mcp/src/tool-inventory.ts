@@ -117,6 +117,9 @@ export const ALWAYS_REGISTERED_TOOLS = [
   'list_project_gezels',
   'add_gezel_to_project',
   'remove_gezel_from_project',
+  'list_suggested_work',
+  'enable_suggested_work',
+  'disable_suggested_work',
 
   // Tasks
   'list_tasks',

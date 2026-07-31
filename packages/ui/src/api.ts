@@ -8,7 +8,14 @@ import { GezelClient } from '@bendyline/gezel-client';
 export type UpdateState =
   | { kind: 'downloading'; version: string }
   | { kind: 'ready'; version: string }
-  | { kind: 'error'; version?: string; message: string };
+  /**
+   * `stage` tells a failed version *check* (offline, or no release published
+   * yet — nothing is wrong with the install) apart from a failed *install* (a
+   * verified update could not be applied). Optional because an older Electron
+   * shell may still be driving this renderer; absent is read as 'check', the
+   * quieter of the two.
+   */
+  | { kind: 'error'; stage?: 'check' | 'install'; version?: string; message: string };
 
 /**
  * Build a client against the daemon that served this HTML. When the Electron

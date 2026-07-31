@@ -237,6 +237,25 @@ export const ProjectSchema = z.object({
    */
   gezelIds: z.array(z.string()).optional(),
   /**
+   * Suggested-work keys the user has dismissed ("don't offer this again
+   * here"). Advisory UI state, same spirit as `gezelIds`: enabling a
+   * dismissed key un-dismisses it, and a materialized host always
+   * outranks a dismissal. Keys are the stable suggested-work identities
+   * (`gezel-template:<templateId>:<craftbookId>[#N]` /
+   * `project-type:<typeId>:<scheduleKey>`). Deliberately not exposed
+   * through the model-facing `update_project` MCP tool.
+   */
+  suggestedWorkDismissed: z.array(z.string()).optional(),
+  /**
+   * Shared per-project configuration values ("project properties") that
+   * craftbook params and features draw from — e.g. `content.language`,
+   * the designated language a translator gezel targets. Keys are ids
+   * from the well-known registry in `project-properties.ts`, but unknown
+   * ids are allowed (the registry improves display, it doesn't gate).
+   * Values are plain strings; empty string is treated as unset.
+   */
+  properties: z.record(z.string(), z.string()).optional(),
+  /**
    * Project shape. `crew` (the default) is the original behavior — the
    * voorman recruits and coordinates a team of specialists. `solo` is a
    * "job" — a single specialist (the ambachtsman, stored in
@@ -263,6 +282,19 @@ export const ProjectSchema = z.object({
    * focused single-purpose task. Absent → the full agent profile.
    */
   leanProfile: z.boolean().optional(),
+  /**
+   * Per-project workspace-indexing switch. Missing/true preserves the
+   * historical behavior: structural discovery plus the content-index refresh
+   * run in the background. `false` opts this project out entirely — useful for
+   * lightweight stateful project types such as board games or language
+   * practice, whose small JSON workspace does not benefit from code search,
+   * maps, summaries, or reviews.
+   *
+   * This does not disable chat/session history, memories, or the global
+   * document index. Project-type manifests may seed the value at adoption and
+   * the user can override it later in Project Settings.
+   */
+  indexingEnabled: z.boolean().optional(),
   github: ProjectGitHubSchema.optional(),
   /** Optional email association — see {@link ProjectMailSchema}. */
   mail: ProjectMailSchema.optional(),
@@ -427,6 +459,8 @@ export const ProjectFileEntrySchema = z.object({
   name: z.string(),
   path: z.string(),
   isDirectory: z.boolean(),
+  /** File mtime (ms epoch). Populated only when the caller opts into stats. */
+  mtimeMs: z.number().optional(),
 });
 export type ProjectFileEntry = z.infer<typeof ProjectFileEntrySchema>;
 

@@ -113,6 +113,17 @@ describe('ProjectSchema', () => {
     });
     expect(result.tabVisibility).toEqual({ tasks: false, workspace: true });
   });
+
+  it('accepts an explicit workspace-indexing opt-out', () => {
+    const result = ProjectSchema.parse({
+      id: 'checkers',
+      name: 'Checkers',
+      indexingEnabled: false,
+      createdAt: '2026-01-01',
+      updatedAt: '2026-01-01',
+    });
+    expect(result.indexingEnabled).toBe(false);
+  });
 });
 
 describe('Task schemas', () => {
@@ -238,6 +249,12 @@ describe('CreateProjectRequestSchema', () => {
     expect(() => CreateProjectRequestSchema.parse(base)).not.toThrow();
   });
 
+  it('accepts a workspace-indexing preference at creation', () => {
+    expect(
+      CreateProjectRequestSchema.parse({ ...base, indexingEnabled: false }).indexingEnabled,
+    ).toBe(false);
+  });
+
   // about/missionObjectives are encouraged, not required, at the wire level:
   // the "from folder" flow creates projects without them (context comes from
   // the folder's files). The New Project dialog still enforces richness
@@ -302,6 +319,12 @@ describe('CreateTypedProjectRequestSchema', () => {
 });
 
 describe('UpdateProjectRequestSchema', () => {
+  it('accepts a per-project workspace-indexing switch', () => {
+    expect(UpdateProjectRequestSchema.parse({ indexingEnabled: false }).indexingEnabled).toBe(
+      false,
+    );
+  });
+
   it('accepts a per-project Meester progress-check override', () => {
     const nudgeConfig = { enabled: false, slowIntervalMs: 12 * 60 * 60_000 };
     const parsed = UpdateProjectRequestSchema.parse({ nudgeConfig });

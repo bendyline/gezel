@@ -8,6 +8,7 @@ export * from './markdown/index.js';
 export * from './fonts.js';
 export * from './engagement.js';
 export * from './night-shift.js';
+export * from './project-properties.js';
 export * from './growth-cosmetics.js';
 export * from './security/policy.js';
 export * from './gezel-display.js';

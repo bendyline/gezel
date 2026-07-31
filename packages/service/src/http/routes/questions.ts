@@ -243,6 +243,13 @@ export function questionRoutes(ctx: ServiceContext): Hono {
       return c.json(question);
     }
 
+    // Night-shift-review questions are a synthesized morning summary —
+    // no live session (sessionId is '') and nothing to arm. Answering
+    // (Dismiss) just collapses the card everywhere.
+    if (question.intent?.kind === 'night-shift-review') {
+      return c.json(question);
+    }
+
     // Schedule-approval questions come from project-type adoption —
     // there is no live session to seed (sessionId is ''). Approving
     // arms the paused host: the cron update re-derives `nextTickAt`

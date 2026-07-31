@@ -64,6 +64,7 @@ export function parseSha256Sums(text: string): Map<string, string> {
 
 export interface ExecFileResult {
   stdout: string;
+  stderr?: string;
 }
 export type ExecFileFn = (file: string, args: string[]) => Promise<ExecFileResult>;
 
@@ -128,16 +129,28 @@ export async function verifyMacPkg(
     );
   }
 
-  const assessment = await deps
-    .execFile('/usr/sbin/spctl', ['--assess', '--type', 'install', '--verbose=4', pkgPath])
-    // spctl writes its verdict to stderr and exits non-zero on rejection.
-    .catch((err: Error & { stdout?: string; stderr?: string }) => ({
-      stdout: `${err.stdout ?? ''}${err.stderr ?? ''}${err.message}`,
-      rejected: true as const,
-    }));
-  if ('rejected' in assessment || !/accepted/i.test(assessment.stdout)) {
+  try {
+    // `spctl` writes diagnostics to stderr even when it accepts a package.
+    // Promisified execFile resolves only for exit status 0, which is the
+    // stable, non-localized acceptance contract; never parse its prose.
+    await deps.execFile('/usr/sbin/spctl', [
+      '--assess',
+      '--type',
+      'install',
+      '--verbose=4',
+      pkgPath,
+    ]);
+  } catch (err) {
+    const failure = err as Error & {
+      stdout?: string | Buffer;
+      stderr?: string | Buffer;
+    };
+    const details = [failure.stderr, failure.stdout, failure.message]
+      .map((part) => String(part ?? '').trim())
+      .filter(Boolean)
+      .join('\n');
     throw new PkgVerificationError(
-      `Gatekeeper rejected the package:\n${assessment.stdout.trim()}`,
+      `Gatekeeper rejected the package${details ? `:\n${details}` : ''}`,
       'gatekeeper',
     );
   }

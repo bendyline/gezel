@@ -254,4 +254,40 @@ describe('LlamaCppSettings', () => {
       expect(screen.getByText(/using external engine/)).toBeInTheDocument();
     });
   });
+  // `--swa-full` is the precondition for llama-server accepting
+  // `--cache-reuse` on SWA models; without it the engine logs
+  // "cache_reuse is not supported by this context" and drops the flag.
+  it('toggling the full SWA cache saves llamaCppSwaFull', async () => {
+    render(
+      <LlamaCppSettings config={BASE_CONFIG} onConfigChanged={vi.fn()} health={BASE_HEALTH} />,
+    );
+    await waitFor(() => {
+      expect(screen.getByText(/Full SWA cache/)).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByLabelText(/full-size sliding-window KV cache/i));
+
+    await waitFor(() => {
+      expect(api.updateConfig).toHaveBeenCalledWith({ llamaCppSwaFull: true });
+    });
+  });
+
+  it('clearing the full SWA cache sends undefined, not false', async () => {
+    render(
+      <LlamaCppSettings
+        config={{ ...BASE_CONFIG, llamaCppSwaFull: true } as ConfigResponse}
+        onConfigChanged={vi.fn()}
+        health={BASE_HEALTH}
+      />,
+    );
+    await waitFor(() => {
+      expect(screen.getByText(/Full SWA cache/)).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByLabelText(/full-size sliding-window KV cache/i));
+
+    await waitFor(() => {
+      expect(api.updateConfig).toHaveBeenCalledWith({ llamaCppSwaFull: undefined });
+    });
+  });
 });

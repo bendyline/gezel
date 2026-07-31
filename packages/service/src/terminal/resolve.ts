@@ -17,7 +17,7 @@ import { shellSplit } from './shell-split.js';
 export type ResolvedTerminalInput =
   | {
       kind: 'intercept';
-      intercept: 'pwd' | 'clear';
+      intercept: 'pwd' | 'clear' | 'open';
       arg?: string;
     }
   | {
@@ -75,10 +75,10 @@ export interface CraftbookCommandSpec {
 
 // `cd` is intentionally NOT in this set anymore — with persistent
 // shells, the shell handles it natively (and emits a workingDirChanged
-// event when its cwd drifts). `pwd` stays as an intercept so we can
-// answer it without paying the shell round-trip, and `clear` is a UI
-// signal the shell can't satisfy.
-const INTERCEPTS = new Set(['pwd', 'clear']);
+// event when its cwd drifts). `pwd` and `clear` are lightweight UI-facing
+// helpers; `open` validates a workspace path and asks the References pane
+// to preview it without launching an OS application.
+const INTERCEPTS = new Set(['pwd', 'clear', 'open']);
 
 /**
  * Resolve raw user input into either an intercept, executable argv, or
@@ -109,8 +109,11 @@ export function resolveTerminalInput(
   const first = tokens[0]!;
 
   if (INTERCEPTS.has(first)) {
-    const intercept = first as 'pwd' | 'clear';
+    const intercept = first as 'pwd' | 'clear' | 'open';
     const rest = tokens.slice(1).join(' ');
+    if (intercept === 'open' && !rest) {
+      return { kind: 'parseError', message: 'open requires a workspace file path' };
+    }
     return rest ? { kind: 'intercept', intercept, arg: rest } : { kind: 'intercept', intercept };
   }
 

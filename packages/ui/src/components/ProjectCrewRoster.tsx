@@ -3,29 +3,44 @@ import { displayName } from '@bendyline/gezel';
 import { useMemo, useState } from 'react';
 import { crewLeadLabelLower } from '../labels.js';
 import { GezelIcon } from './GezelIcon.js';
+import {
+  ProjectAddGezelDialog,
+  type ProjectTemplateGezelOptions,
+} from './ProjectAddGezelDialog.js';
+import { SuggestedNightWork } from './SuggestedNightWork.js';
 import { useRoleBasedNameOnlyMode } from './useRoleBasedNameOnlyMode.js';
 
 /**
- * Read-only project membership summary for the top of Project Settings.
+ * Project membership summary and add-crew entry point at the top of Project
+ * Settings.
  *
  * Chat recipient selection lives in ChatComposer's To-line picker; this
- * surface is intentionally informational and keeps project membership in the
- * place where the lead and other project-wide settings are managed.
+ * surface manages durable project membership while task and conversation
+ * assignments continue to happen in their own contexts.
  */
 export function ProjectCrewRoster({
   project,
   gezels,
   boekwachterGezelId,
+  recentlyAddedGezelId,
   onAddGezel,
+  onCreateTemplateGezel,
   onRemoveGezel,
 }: {
   project: ProjectDetail;
   gezels: GezelSummary[];
   boekwachterGezelId?: string;
+  /** The last gezel added via this surface — flashes their fresh suggestions. */
+  recentlyAddedGezelId?: string;
   onAddGezel?: (gezelId: string) => Promise<void>;
+  onCreateTemplateGezel?: (
+    templateId: string,
+    options: ProjectTemplateGezelOptions,
+  ) => Promise<void>;
   onRemoveGezel?: (gezelId: string) => Promise<void>;
 }) {
   const roleBasedNameOnlyMode = useRoleBasedNameOnlyMode();
+  const [showAddGezel, setShowAddGezel] = useState(false);
   const [boekwachterBusy, setBoekwachterBusy] = useState(false);
   const [boekwachterError, setBoekwachterError] = useState<string | null>(null);
   const assigned = useMemo(() => {
@@ -79,9 +94,20 @@ export function ProjectCrewRoster({
       className="project-crew-settings project-about-anchor"
       aria-labelledby="project-crew-settings-title"
     >
-      <h3 id="project-crew-settings-title" className="project-crew-settings-title">
-        Assigned gezellen
-      </h3>
+      <div className="project-crew-settings-heading">
+        <h3 id="project-crew-settings-title" className="project-crew-settings-title">
+          Assigned gezellen
+        </h3>
+        {onAddGezel && onCreateTemplateGezel && (
+          <button
+            type="button"
+            className="primary project-crew-add"
+            onClick={() => setShowAddGezel(true)}
+          >
+            Add Gezel
+          </button>
+        )}
+      </div>
       <p className="muted small project-crew-settings-hint">
         The crew attached to this project. Change the lead below; task and conversation assignments
         are added automatically.
@@ -160,6 +186,23 @@ export function ProjectCrewRoster({
       </div>
       {boekwachterError && (
         <p className="error small project-autonomous-role-error">{boekwachterError}</p>
+      )}
+      <SuggestedNightWork
+        projectId={project.id}
+        projectProperties={project.properties}
+        refreshKey={[project.voormanGezelId ?? '', ...(project.gezelIds ?? [])].join('|')}
+        recentlyAddedGezelId={recentlyAddedGezelId}
+      />
+      {onAddGezel && onCreateTemplateGezel && (
+        <ProjectAddGezelDialog
+          open={showAddGezel}
+          project={project}
+          gezels={gezels}
+          roleBasedNameOnlyMode={roleBasedNameOnlyMode}
+          onClose={() => setShowAddGezel(false)}
+          onAddExisting={onAddGezel}
+          onCreateTemplate={onCreateTemplateGezel}
+        />
       )}
     </section>
   );

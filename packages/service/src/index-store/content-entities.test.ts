@@ -17,7 +17,13 @@ let ci: ContentIndex;
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'gezel-ent-'));
   home = await mkdtemp(join(tmpdir(), 'gezel-ent-home-'));
-  ci = new ContentIndex({ projectWorkspaceDir: async () => dir } as unknown as Store, home);
+  ci = new ContentIndex(
+    {
+      projectIndexingEnabled: async () => true,
+      projectWorkspaceDir: async () => dir,
+    } as unknown as Store,
+    home,
+  );
 });
 afterEach(async () => {
   await rm(dir, { recursive: true, force: true });

@@ -97,11 +97,25 @@ export function computeTerminalCompletions(
 
 function firstTokenItems(data: TerminalCompletionData): TerminalCompletionItem[] {
   const items: TerminalCompletionItem[] = [];
+  const nativeCommands: TerminalCompletionItem[] = [
+    {
+      label: 'open',
+      insertText: 'open',
+      kind: 'command',
+      badge: 'gezel',
+      detail: 'Preview a workspace file in References',
+      documentation: 'Usage: `open <workspace-file>`',
+      sortText: '0open',
+    },
+  ];
+  items.push(...nativeCommands);
+  const nativeNames = new Set(nativeCommands.map((command) => command.label));
   const craftbookNames = new Set(data.craftbooks.map((c) => c.command));
 
   // Craftbooks rank first (they win over a same-named npm script, matching the
   // server resolver) — sortText group '0'.
   for (const cb of data.craftbooks) {
+    if (nativeNames.has(cb.command)) continue;
     items.push({
       label: cb.command,
       insertText: cb.command,
@@ -109,12 +123,12 @@ function firstTokenItems(data: TerminalCompletionData): TerminalCompletionItem[]
       badge: 'craftbook',
       detail: cb.name,
       documentation: cb.description,
-      sortText: `0${cb.command}`,
+      sortText: `1${cb.command}`,
     });
   }
   // Indexed commands/scripts — group '1'.
   for (const c of data.index?.commands ?? []) {
-    if (craftbookNames.has(c.name)) continue;
+    if (nativeNames.has(c.name) || craftbookNames.has(c.name)) continue;
     items.push({
       label: c.name,
       insertText: c.name,
@@ -122,18 +136,19 @@ function firstTokenItems(data: TerminalCompletionData): TerminalCompletionItem[]
       badge: badgeForKind(c.kind),
       detail: c.run,
       documentation: commandDoc(c, data.index?.shapes?.[c.name]),
-      sortText: `1${c.name}`,
+      sortText: `2${c.name}`,
     });
   }
   // MCP tools — group '2'.
   for (const t of data.mcpTools) {
+    if (nativeNames.has(t.name)) continue;
     items.push({
       label: t.name,
       insertText: t.name,
       kind: 'mcp-tool',
       badge: 'mcp',
       documentation: t.description,
-      sortText: `2${t.name}`,
+      sortText: `3${t.name}`,
     });
   }
   return items;

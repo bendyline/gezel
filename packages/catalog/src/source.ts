@@ -884,6 +884,9 @@ function mergeIdentityAndVersion(
       ...(version.mode !== undefined ? { mode: version.mode } : {}),
       ...(version.leadLabel !== undefined ? { leadLabel: version.leadLabel } : {}),
       ...(version.leanProfile !== undefined ? { leanProfile: version.leanProfile } : {}),
+      ...(version.indexingEnabled !== undefined
+        ? { indexingEnabled: version.indexingEnabled }
+        : {}),
       ...(version.params !== undefined ? { params: version.params } : {}),
       ...(version.nameTemplate !== undefined ? { nameTemplate: version.nameTemplate } : {}),
       ...(version.aboutTemplate !== undefined ? { aboutTemplate: version.aboutTemplate } : {}),
@@ -957,6 +960,7 @@ function mergeIdentityAndVersion(
       ...(version.notes !== undefined ? { notes: version.notes } : {}),
       ...(version.frontmatter ? { frontmatter: version.frontmatter } : {}),
       ...(version.nameSuggestions ? { nameSuggestions: version.nameSuggestions } : {}),
+      ...(version.suggestedCraftbooks ? { suggestedCraftbooks: version.suggestedCraftbooks } : {}),
       availableVersions,
     };
   }

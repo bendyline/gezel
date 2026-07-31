@@ -12,9 +12,10 @@ interface RecentMessage {
 
 /**
  * Per-project pub/sub for terminal events. The envelope is a
- * discriminated union (`kind: 'message' | 'workingDirChanged'`)
- * defined in core's schemas — both variants flow through the same
- * project listener; consumers narrow by `kind`.
+ * discriminated union defined in core's schemas — persisted messages,
+ * streaming-run updates, cwd changes, prompt requests, and one-shot file-open
+ * intents all flow through the same project listener; consumers narrow by
+ * `kind`.
  *
  * Lifetime: bus is created in `service.ts` alongside `chatEvents` and
  * lives for the life of the process. Subscriptions return an

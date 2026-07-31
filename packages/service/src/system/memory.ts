@@ -141,6 +141,8 @@ export interface SampleMachineMemoryUsageOptions {
   deviceHealth?: DeviceHealthStatusSnapshot;
   /** Capacity broker reservation across resident Gezel local-engine replicas. */
   engineCommittedBytes?: number;
+  /** Installed parameter payloads for the resident replicas, when known. */
+  engineModelWeightsBytes?: number;
   /** macOS physical footprint for gezeld + same-home engine processes. */
   gezelProcessMemory?: GezelProcessMemorySnapshot | null;
   /**
@@ -176,6 +178,7 @@ export function sampleMachineMemoryUsage(
   const mainMemory =
     opts.forceMainMemory === true || profile.source === 'system-ram-fallback' || unified;
   const engineBytes = finiteNonNegative(opts.engineCommittedBytes);
+  const engineModelWeightsBytes = finiteNonNegative(opts.engineModelWeightsBytes);
   const sampledAt = opts.sampledAt ?? new Date().toISOString();
 
   if (mainMemory) {
@@ -190,12 +193,19 @@ export function sampleMachineMemoryUsage(
         : null;
     const gezelBytesEstimated = clamp(engineBytes + serviceRssBytes, 0, usedBytes);
     const gezelBytesAttributed = observedBytes ?? gezelBytesEstimated;
+    const breakdown = splitGezelMemory({
+      attributedBytes: gezelBytesAttributed,
+      engineReservedBytes: engineBytes,
+      modelWeightsBytes: engineModelWeightsBytes,
+      coreFloorBytes: serviceRssBytes,
+    });
     return {
       kind: opts.forceMainMemory === true && !unified ? 'ram' : 'unified',
       totalBytes: totalRamBytes,
       usedBytes,
       gezelBytesEstimated,
       gezelBytesObserved: observedBytes,
+      ...breakdown,
       engineReservedBytes: engineBytes,
       gezelEngineProcessCount: opts.gezelProcessMemory?.engineProcessCount ?? 0,
       orphanedGezelEngineProcessCount: opts.gezelProcessMemory?.orphanedEngineProcessCount ?? 0,
@@ -234,6 +244,12 @@ export function sampleMachineMemoryUsage(
       )
     : null;
   const gezelBytesEstimated = clamp(engineBytes, 0, usedBytes ?? totalBytes);
+  const breakdown = splitGezelMemory({
+    attributedBytes: gezelBytesEstimated,
+    engineReservedBytes: engineBytes,
+    modelWeightsBytes: engineModelWeightsBytes,
+    coreFloorBytes: 0,
+  });
   const deviceNames = [
     ...new Set(
       memoryReadings
@@ -248,6 +264,7 @@ export function sampleMachineMemoryUsage(
     usedBytes,
     gezelBytesEstimated,
     gezelBytesObserved: null,
+    ...breakdown,
     engineReservedBytes: engineBytes,
     gezelEngineProcessCount: 0,
     orphanedGezelEngineProcessCount: 0,
@@ -257,6 +274,41 @@ export function sampleMachineMemoryUsage(
     source: memoryReadings.length > 0 ? 'device-health' : 'capacity-only',
     deviceNames,
   };
+}
+
+/**
+ * Split the Gezel-attributed total without claiming unavailable precision.
+ * Installed payload size is our weights estimate; the capacity reservation's
+ * remainder covers KV + compute buffers. On UMA/RAM, daemon RSS is protected
+ * first and any observed footprint beyond the reservation remains core/runtime
+ * overhead. Every output is clamped so the three pieces always sum to the
+ * attributed total, even when an observed sample is below the reservation.
+ */
+function splitGezelMemory(opts: {
+  attributedBytes: number;
+  engineReservedBytes: number;
+  modelWeightsBytes: number;
+  coreFloorBytes: number;
+}): {
+  gezelInfraBytes: number;
+  gezelModelWeightsBytes: number;
+  gezelModelCacheBytes: number;
+} {
+  const attributedBytes = finiteNonNegative(opts.attributedBytes);
+  const coreFloorBytes = clamp(finiteNonNegative(opts.coreFloorBytes), 0, attributedBytes);
+  const modelBudget = Math.max(0, attributedBytes - coreFloorBytes);
+  const engineBytes = clamp(finiteNonNegative(opts.engineReservedBytes), 0, modelBudget);
+  // If installed metadata is unavailable, count the reservation as weights.
+  // This avoids inventing a cache split and still keeps the total truthful.
+  const weightEstimate =
+    opts.modelWeightsBytes > 0 ? finiteNonNegative(opts.modelWeightsBytes) : engineBytes;
+  const gezelModelWeightsBytes = clamp(weightEstimate, 0, engineBytes);
+  const gezelModelCacheBytes = Math.max(0, engineBytes - gezelModelWeightsBytes);
+  const gezelInfraBytes = Math.max(
+    0,
+    attributedBytes - gezelModelWeightsBytes - gezelModelCacheBytes,
+  );
+  return { gezelInfraBytes, gezelModelWeightsBytes, gezelModelCacheBytes };
 }
 
 function finiteNonNegative(value: number | undefined): number {

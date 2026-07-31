@@ -76,6 +76,20 @@ describe('PromptMeesterCraftbookPrelude', () => {
     expect(fire('Can we create a new Space Invaders game?')).toBeNull();
     expect(fire('Fix the typo in the About page.')).toBeNull();
     expect(fire('I trust the process, just ship it.')).toBeNull();
+    expect(fire('Add an Acceptance Criteria Checklist to notes/outline.md.')).toBeNull();
+  });
+
+  it('stays silent for cross-gezel file handoffs even when their criteria mention a workflow', () => {
+    expect(
+      fire(
+        '[Message from Daehyun]: Add a workflow checklist to the outline.\n\n' +
+          '[Deliverable expected as a FILE at `notes/outline.md`. Your first assistant action should be the tool call `write_file({ path, content })`.]',
+      ),
+    ).toBeNull();
+  });
+
+  it('still treats an explicitly reusable checklist as a repeatable procedure', () => {
+    expect(fire('Create a reusable checklist for every launch.')).toContain('craftbook_write');
   });
 
   it("does not claim the build prelude's generic build turns (non-overlap contract)", () => {
@@ -107,6 +121,7 @@ describe('procedure/library regexes', () => {
       'my workflow is blocked today',
       'build me a website',
       'what did we ship each quarter?',
+      'add an acceptance criteria checklist to the outline',
     ]) {
       expect(looksLikeProcedureRequest(text), text).toBe(false);
     }

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   type NightShiftWindow,
   isInNightShiftWindow,
+  lastNightShiftWindow,
   nextNightShiftStart,
   nightShiftDayKey,
   nightShiftWindowKey,
@@ -27,6 +28,39 @@ describe('night-shift window math', () => {
     expect(isInNightShiftWindow(at(2026, 6, 20, 12, 0), DAYTIME)).toBe(true);
     expect(isInNightShiftWindow(at(2026, 6, 20, 8, 0), DAYTIME)).toBe(false);
     expect(isInNightShiftWindow(at(2026, 6, 20, 17, 0), DAYTIME)).toBe(false);
+  });
+
+  it('lastNightShiftWindow resolves the current or most recent window', () => {
+    // Morning after (10:00): last night's window, keyed to its start day.
+    const morning = lastNightShiftWindow(at(2026, 6, 21, 10, 0), OVERNIGHT);
+    expect(morning.key).toBe('2026-06-20');
+    expect(morning.start.getHours()).toBe(22);
+    expect(morning.start.getDate()).toBe(20);
+    expect(morning.end.getHours()).toBe(6);
+    expect(morning.end.getDate()).toBe(21);
+
+    // Inside the window before midnight: tonight's window.
+    const late = lastNightShiftWindow(at(2026, 6, 20, 23, 0), OVERNIGHT);
+    expect(late.key).toBe('2026-06-20');
+
+    // Inside the early-morning tail: still the prior day's window.
+    const tail = lastNightShiftWindow(at(2026, 6, 21, 3, 0), OVERNIGHT);
+    expect(tail.key).toBe('2026-06-20');
+
+    // The key matches what a run inside the window stamped as lastRunDay.
+    expect(tail.key).toBe(nightShiftDayKey(at(2026, 6, 21, 3, 0), OVERNIGHT));
+
+    // Non-wrapping window, queried before it opens: yesterday's window.
+    const beforeDaytime = lastNightShiftWindow(at(2026, 6, 21, 8, 0), DAYTIME);
+    expect(beforeDaytime.key).toBe('2026-06-20');
+    // After it closed today: today's window.
+    const afterDaytime = lastNightShiftWindow(at(2026, 6, 21, 19, 0), DAYTIME);
+    expect(afterDaytime.key).toBe('2026-06-21');
+
+    // Always-on window: trailing 24h keyed to today.
+    const always = lastNightShiftWindow(at(2026, 6, 21, 12, 0), { startHour: 0, endHour: 0 });
+    expect(always.key).toBe('2026-06-21');
+    expect(always.end.getTime() - always.start.getTime()).toBe(24 * 60 * 60 * 1000);
   });
 
   it('maps an overnight window to one stable key across midnight', () => {

@@ -48,6 +48,13 @@ const pendingPrefills = new Map<string, string>();
  */
 const PREFILL_EVENT = 'gezel:composer-prefill';
 
+function newlineShortcutLabel(): string {
+  const platform =
+    window.__GEZEL__?.platform ??
+    (typeof navigator === 'undefined' ? '' : navigator.platform || navigator.userAgent);
+  return platform === 'darwin' || /Mac/i.test(platform) ? '⌘⏎' : 'Ctrl+Enter';
+}
+
 export function queueComposerPrefill(projectId: string, markdown: string): void {
   pendingPrefills.set(projectId, markdown);
   // Harmless when no composer is mounted yet — the mount-time drain in
@@ -977,7 +984,7 @@ export function ChatComposer({
                 title={
                   engagementOff
                     ? 'AI is disabled in Settings → General'
-                    : 'Enter to send, ⌘⏎ for newline'
+                    : `Enter to send, ${newlineShortcutLabel()} for newline`
                 }
               >
                 Send

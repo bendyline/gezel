@@ -127,6 +127,35 @@ describe('completion gates — checks floor', () => {
     expect(outcome.task.craftbook.steps[0]!.completedAt).toBeTruthy();
   });
 
+  it('does not re-run an old completion gate when its successful advance is replayed', async () => {
+    const task = await tasks.create('default', {
+      title: 'Replayed gated advance',
+      description: 'A duplicate model tool call must be idempotent.',
+      assignee: { kind: 'user' },
+      steps: gatedSteps({
+        at: 'completion',
+        checks: [{ kind: 'minBytes', file: 'index.html', bytes: 10 }],
+      }),
+    });
+    const buildId = task.craftbook.steps[0]!.id;
+    const doneId = task.craftbook.steps[1]!.id;
+    await writeWorkspaceFile('index.html', '<!doctype html><html><body>hello</body></html>');
+
+    const advanced = await tasks.completeStepChecked('default', task.num, buildId);
+    expect(advanced.status).toBe('advanced');
+    if (advanced.status !== 'advanced') return;
+    const doneActivation = advanced.task.craftbook.steps[1]!.lastActivatedAt;
+
+    // If the stale call reached the gate again this missing file would reject
+    // it. The replay must instead return the already-advanced task unchanged.
+    await rm(join(home, 'projects', 'default', 'workspace', 'index.html'));
+    const replayed = await tasks.completeStepChecked('default', task.num, buildId);
+    expect(replayed.status).toBe('advanced');
+    if (replayed.status !== 'advanced') return;
+    expect(replayed.task.activeStepId).toBe(doneId);
+    expect(replayed.task.craftbook.steps[1]!.lastActivatedAt).toBe(doneActivation);
+  });
+
   it('pauses the task when maxAttempts is exhausted', async () => {
     const task = await tasks.create('default', {
       title: 'Gated build',
@@ -309,6 +338,12 @@ describe('completion gates — script verdicts', () => {
     expect(held.status).toBe('held');
     if (held.status !== 'held') return;
     expect(held.gate.infrastructureError).toBe(true);
+    expect(held.gate.scriptRuns?.[0]).toMatchObject({
+      scriptName: 'broken-gate',
+      runId: 'broken-run',
+      error: 'script exited with code 9',
+      logsTail: '[stderr] node: bad option: --permission',
+    });
     expect(held.gate.attempt).toBe(0);
     expect(held.gate.paused).toBe(true);
     const after = await tasks.get('default', task.num);
@@ -318,6 +353,8 @@ describe('completion gates — script verdicts', () => {
     const notes = await tasks.listNotes('default', task.num, stepId);
     expect(notes.some((n) => n.text.includes('Gate unavailable — task paused'))).toBe(true);
     expect(notes.some((n) => n.text.includes('No completion attempt was consumed'))).toBe(true);
+    expect(notes.some((n) => n.text.includes('broken-run'))).toBe(true);
+    expect(notes.some((n) => n.text.includes('node: bad option: --permission'))).toBe(true);
   });
 
   it.runIf(process.platform === 'darwin')(

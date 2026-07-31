@@ -51,6 +51,14 @@ export interface SandboxRunOptions {
    */
   allowMissingNetBoundary?: boolean;
   /**
+   * macOS machine-service compatibility lane. When Seatbelt itself fails
+   * to start a byte-verified, read-only first-party script, allow one
+   * retry under the remaining Node permission + JS network-denial layers.
+   * The ScriptRunner sets this only for standard-scope scripts whose
+   * declared capabilities are all read-only.
+   */
+  allowMacSandboxStartupFallback?: boolean;
+  /**
    * Cap the V8 old-space heap (in MB) via `--max-old-space-size`. Bounds
    * a runaway allocation so a sandboxed script can't OOM the whole host.
    * Omit for no cap (Node's default, sized to system memory).
@@ -84,6 +92,8 @@ export interface SandboxRunResult {
   stdout: string;
   stderr: string;
   timedOut: boolean;
+  /** Present when a trusted macOS job retried after Seatbelt failed to start. */
+  sandboxFallback?: 'trusted-readonly-macos-seatbelt-startup';
 }
 
 /**
@@ -195,16 +205,30 @@ export async function runInSandbox(opts: SandboxRunOptions): Promise<SandboxRunR
 
     const childOpts = cwd === opts.cwd ? opts : { ...opts, cwd };
     const first = await runSandboxChild(command, args, childOpts);
-    if (command === 'sandbox-exec' && shouldRetryWithoutMacSandbox(first)) {
+    const allowTrustedMacFallback =
+      opts.allowMacSandboxStartupFallback === true && opts.allowMissingNetBoundary === true;
+    const macSandboxStartupFailed =
+      shouldRetryWithoutMacSandbox(first) ||
+      (allowTrustedMacFallback && isSilentMacSandboxStartupFailure(first, process.platform));
+    if (command === 'sandbox-exec' && macSandboxStartupFailed) {
       // A denyNet job cannot retry without Seatbelt: doing so would
-      // silently turn a sandbox startup failure into network access.
-      if (opts.denyNet) {
+      // silently turn a sandbox startup failure into network access,
+      // except for the explicit byte-verified, read-only standard-script
+      // lane. That lane keeps the Node permission model and the JS network
+      // neutralizer armed and records the degraded boundary in its result.
+      if (opts.denyNet && !allowTrustedMacFallback) {
         return {
           ...first,
           stderr: `${first.stderr}${NETWORK_SANDBOX_RETRY_REFUSED}\n`,
         };
       }
-      return await runSandboxChild(nodeBin, nodeArgs, childOpts);
+      const retried = await runSandboxChild(nodeBin, nodeArgs, childOpts);
+      return allowTrustedMacFallback
+        ? {
+            ...retried,
+            sandboxFallback: 'trusted-readonly-macos-seatbelt-startup',
+          }
+        : retried;
     }
     return first;
   } finally {
@@ -407,6 +431,26 @@ function shouldRetryWithoutMacSandbox(result: SandboxRunResult): boolean {
     !result.timedOut &&
     result.stdout.length === 0 &&
     result.stderr === '[process closed by signal SIGABRT]\n'
+  );
+}
+
+/**
+ * The macOS machine-service identity can make sandbox-exec exit 1 before
+ * Node starts, with no stdout/stderr at all. Limit recognition of that
+ * otherwise-ambiguous shape to callers that explicitly selected the
+ * trusted read-only fallback lane.
+ */
+export function isSilentMacSandboxStartupFailure(
+  result: SandboxRunResult,
+  platform: NodeJS.Platform = process.platform,
+): boolean {
+  return (
+    platform === 'darwin' &&
+    result.exitCode === 1 &&
+    !result.signal &&
+    !result.timedOut &&
+    result.stdout.trim().length === 0 &&
+    result.stderr.trim().length === 0
   );
 }
 

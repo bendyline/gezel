@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, execSync } from 'node:child_process';
 import { basename } from 'node:path';
 
 function runPnpm(args) {
@@ -20,10 +20,36 @@ function runPnpm(args) {
       },
     );
   }
-  return execFileSync(process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm', effectiveArgs, {
+  // PATH fallback, reached only when the caller is not itself a pnpm script —
+  // `node scripts/stage-third-party-licenses.mjs` rather than
+  // `pnpm build:packaged`. Through pnpm, npm_execpath above resolves the JS
+  // CLI and this branch never runs, which is why CI never saw it.
+  //
+  // Node 24 refuses to execFile a `.cmd` without a shell (the CVE-2024-27980
+  // mitigation) and fails with EINVAL, so on Windows the shim needs one. Under
+  // `shell: true` Node concatenates argv without escaping, so anything that
+  // can carry a space — GEZEL_PNPM_STORE_DIR is the only one here — has to be
+  // quoted or cmd.exe splits it.
+  if (process.platform === 'win32') {
+    // execSync, not execFileSync+shell: passing an args array alongside
+    // `shell: true` earns Node's DEP0190 warning precisely because Node would
+    // concatenate without escaping. We do the escaping, so hand the shell one
+    // finished command string and skip the warning.
+    return execSync(['pnpm.cmd', ...effectiveArgs.map(cmdQuote)].join(' '), {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'inherit'],
+    });
+  }
+  return execFileSync('pnpm', effectiveArgs, {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'inherit'],
   });
+}
+
+/** Quote an argument for cmd.exe, which is what `shell: true` invokes on Windows. */
+function cmdQuote(arg) {
+  const value = String(arg);
+  return /[\s"^&|<>()]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
 }
 
 /**

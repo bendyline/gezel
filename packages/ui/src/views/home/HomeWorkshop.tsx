@@ -1,6 +1,7 @@
 import type {
   ChatEventEnvelope,
   MeesterStatusResponse,
+  NightShiftReviewResponse,
   Poppetje as PoppetjeStruct,
   Project,
   Question,
@@ -140,6 +141,26 @@ export function HomeWorkshop({
   // greeting rather than greeting the user with last week's news.
   const statusReport = useMemo(() => freshStatusReport(status?.report), [status]);
 
+  // Last night's review — the "Last night" tab appears only while the
+  // window's end is recent (~12h) and the shift actually did something.
+  const [nightReview, setNightReview] = useState<NightShiftReviewResponse | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .getNightShiftReview()
+      .then((review) => {
+        if (cancelled) return;
+        const endedMs = Date.parse(review.windowEnd);
+        const fresh = Number.isFinite(endedMs) && Date.now() - endedMs < 12 * 60 * 60 * 1000;
+        const hasContent = review.tasksCompleted.length > 0 || review.reports.length > 0;
+        setNightReview(fresh && hasContent ? review : null);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const runStatusReport = useCallback(() => {
     setStatusRunning(true);
     api.runMeesterStatus().catch(() => setStatusRunning(false));
@@ -202,6 +223,7 @@ export function HomeWorkshop({
         statusReport={statusReport}
         statusRunning={statusRunning}
         onRunStatusReport={runStatusReport}
+        nightReview={nightReview}
         onNavigate={onNavigate}
       />
       <div className="home-workshop-body">

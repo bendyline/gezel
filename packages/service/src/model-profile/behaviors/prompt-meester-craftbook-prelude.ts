@@ -32,7 +32,11 @@ import type { Behavior } from '../types.js';
  * incidental uses ("trust the process") from firing.
  */
 const PROCEDURE_NOUN_RE =
-  /\b(?:recipe|craftbook|playbook|runbook|checklist|routine|standard\s+procedure|procedure\s+(?:for|to)|process\s+(?:for|to)|workflow\s+(?:for|to))\b/i;
+  /\b(?:recipe|craftbook|playbook|runbook|routine|standard\s+procedure|procedure\s+(?:for|to)|process\s+(?:for|to)|workflow\s+(?:for|to))\b/i;
+
+/** Cross-gezel file handoffs are implementation messages, not authoring asks. */
+const INTER_GEZEL_FILE_HANDOFF_RE =
+  /^\[Message from [^\]]+\]:[\s\S]*\[Deliverable expected as (?:an IMAGE |a REAL BINARY DOCUMENT OR MEDIA |a DERIVED DATA )?FILE\b/i;
 
 /** Recurrence phrasing: the "I'll need this again" signal. */
 const RECURRENCE_RE =
@@ -97,6 +101,7 @@ export const PromptMeesterCraftbookPrelude: Behavior = {
 
   userPromptPrelude(ctx) {
     if (!ctx.isMeester) return null;
+    if (INTER_GEZEL_FILE_HANDOFF_RE.test(ctx.userText)) return null;
     if (looksLikeLibraryLookupRequest(ctx.userText)) {
       return MEESTER_CRAFTBOOK_SELECT_PRELUDE;
     }

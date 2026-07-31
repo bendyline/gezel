@@ -1,5 +1,6 @@
 import { type NightShiftTaskBrief, createLogger } from '@bendyline/gezel';
 import { Hono } from 'hono';
+import { buildNightShiftReview } from '../../tasks/night-review.js';
 import type { ServiceContext } from '../context.js';
 
 const log = createLogger('http');
@@ -67,6 +68,18 @@ export function nightShiftRoutes(ctx: ServiceContext): Hono {
   });
 
   app.get('/power-intent', (c) => c.json(ctx.nightShift.getPowerIntent()));
+
+  // The morning review: what the most recent night window accomplished —
+  // completed tasks + the reports they left, with embedded-action tallies.
+  // Powers the moon menu's "Done last night" and the Home "Last night" tab.
+  app.get('/review', async (c) => {
+    const review = await buildNightShiftReview(
+      { store: ctx.store, tasks: ctx.tasks, reportActions: ctx.reportActions },
+      ctx.nightShift.currentWindow(),
+      new Date(),
+    );
+    return c.json(review);
+  });
 
   return app;
 }

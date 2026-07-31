@@ -3,7 +3,9 @@ import {
   extractBilling,
   parseDs4Timings,
   parseLlamaCppTimings,
+  parseMlxTimings,
   sumProcessTree,
+  sumProviderTokens,
   winCpuPercent,
 } from './perf-collector.ts';
 
@@ -307,5 +309,82 @@ describe('winCpuPercent', () => {
     expect(winCpuPercent({ atMs: 5000, cpuTime100ns: 0 }, { atMs: 5000, cpuTime100ns: 999 })).toBe(
       0,
     );
+  });
+});
+
+// Real MLX log lines. MLX prints no per-request timing block, so throughput is
+// reconstructed from the heartbeat + cache lines the provider already logs.
+const MLX_LOG = [
+  '2026-07-30T18:32:01.000Z INFO  [chat] [mlx] stream-active tokens=120 · 84 tok/s',
+  '2026-07-30T18:32:06.000Z INFO  [chat] [mlx] stream-active tokens=444 · 85 tok/s',
+  '2026-07-30T18:32:11.000Z INFO  [chat] [mlx] stream-active tokens=872 · 79 tok/s',
+  '2026-07-30T18:40:12.922Z INFO  [chat] [mlx] [cache] reuse cache_id=1d8f6a91 cached_tokens=6976 prefilled_tokens=44',
+  '2026-07-30T18:40:20.000Z INFO  [chat] [mlx] stream-active tokens=6 · 101 tok/s',
+  '2026-07-30T18:40:25.000Z INFO  [chat] [mlx] stream-active tokens=310 · 98 tok/s',
+].join('\n');
+
+describe('parseMlxTimings', () => {
+  it('returns null for a log with no MLX signal', () => {
+    expect(parseMlxTimings('nothing here')).toBeNull();
+  });
+
+  it('does not collide with the llama.cpp parser (each engine matches only its own)', () => {
+    expect(parseLlamaCppTimings(MLX_LOG)).toBeNull();
+    expect(parseMlxTimings(MLX_LOG)).not.toBeNull();
+  });
+
+  it('takes the MEDIAN per-pulse decode rate, not tokens/elapsed', () => {
+    // Pulses fire only during active decode, so they already exclude idle and
+    // tool-call time; a median resists the low first-pulse reading per turn.
+    const t = parseMlxTimings(MLX_LOG);
+    expect(t?.genTokensPerSec).toBe(85);
+  });
+
+  it('banks each turn peak instead of summing cumulative pulses', () => {
+    // `tokens=` is cumulative WITHIN a turn and resets per turn: summing every
+    // pulse (120+444+872+6+310) would multiply-count to 1752.
+    const t = parseMlxTimings(MLX_LOG);
+    expect(t?.genTokens).toBe(872 + 310);
+    expect(t?.requestCount).toBe(2);
+  });
+
+  it('captures the prefill/cache split MLX reports', () => {
+    const t = parseMlxTimings(MLX_LOG);
+    expect(t?.promptTokens).toBe(44);
+    expect(t?.cachedPromptTokens).toBe(6976);
+  });
+
+  it('leaves promptTokensPerSec null — MLX logs no prefill duration', () => {
+    expect(parseMlxTimings(MLX_LOG)?.promptTokensPerSec).toBeNull();
+  });
+});
+
+describe('sumProviderTokens', () => {
+  // Regression: the collector read `usage.total.inputTokens`, but UsageSummary
+  // has no `total` block — only `providers`. That silently yielded zero tokens
+  // for MLX and every cloud/CLI provider.
+  it('folds token totals across the providers map', () => {
+    const r = sumProviderTokens({
+      mlx: { totalTokensIn: 50_500, totalTokensOut: 158, totalCost: 0 },
+      openai: { totalTokensIn: 1_000, totalTokensOut: 200, totalCost: 0.42 },
+    });
+    expect(r).toEqual({ inputTokens: 51_500, outputTokens: 358, costUsd: 0.42 });
+  });
+
+  it('distinguishes "nothing reported" (null) from a measured zero', () => {
+    expect(sumProviderTokens({})).toEqual({
+      inputTokens: null,
+      outputTokens: null,
+      costUsd: null,
+    });
+    expect(sumProviderTokens({ mlx: { totalTokensIn: 0, totalTokensOut: 0 } })).toMatchObject({
+      inputTokens: 0,
+      outputTokens: 0,
+    });
+  });
+
+  it('tolerates a missing or malformed snapshot', () => {
+    expect(sumProviderTokens(null).inputTokens).toBeNull();
+    expect(sumProviderTokens({ mlx: 'nope' }).inputTokens).toBeNull();
   });
 });

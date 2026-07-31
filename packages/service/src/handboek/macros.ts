@@ -59,6 +59,7 @@ export const MACROS: Record<string, MacroFn> = {
   'device-hardware': deviceHardware,
   'installed-models': installedModels,
   'project-type-composition': projectTypeComposition,
+  'suggested-work': suggestedWork,
 };
 
 const DIRECTIVE_RE = /^::handboek-([a-z0-9-]+)(?:\{([^}]*)\})?\s*$/;
@@ -507,12 +508,41 @@ async function projectTypeComposition(
     );
   }
   if (manifest.schedules.length) {
-    const rows = manifest.schedules.map((s) => `| \`${s.cron}\` | ${s.craftbook} |`);
+    const rows = manifest.schedules.map(
+      (s) =>
+        `| ${s.runMode === 'night-shift' ? 'Night Shift (once per night)' : `\`${s.cron}\``} | ${s.craftbook} |`,
+    );
     parts.push(
-      ['**Scheduled work**', '', '| When (cron) | Craftbook |', '| --- | --- |', ...rows].join(
-        '\n',
-      ),
+      ['**Scheduled work**', '', '| When | Craftbook |', '| --- | --- |', ...rows].join('\n'),
     );
   }
   return parts.join('\n\n');
+}
+
+/**
+ * The roles that bring their own suggested recurring work — rendered
+ * live from the catalog's gezel-template `suggestedCraftbooks` so this
+ * listing can never drift from content (the same anti-drift rule as the
+ * runtime tool inventory, ADR 0001). Optional `template=<id>` narrows to
+ * one template; default renders every template that suggests anything.
+ */
+async function suggestedWork(attrs: Record<string, string>, ctx: MacroContext): Promise<string> {
+  const items = await ctx.catalog.list('gezel-template');
+  const rows: string[] = [];
+  for (const item of items) {
+    const manifest = item.manifest as GezelTemplateManifest;
+    if (manifest.kind !== 'gezel-template') continue;
+    if (attrs.template && manifest.id !== attrs.template) continue;
+    for (const suggestion of manifest.suggestedCraftbooks ?? []) {
+      const cadence =
+        suggestion.runMode === 'night-shift'
+          ? 'Night Shift, once per night'
+          : `on schedule (\`${suggestion.cron}\`)`;
+      rows.push(
+        `| ${manifest.name} (${manifest.role}) | \`${suggestion.craftbookId}\` | ${cadence} |`,
+      );
+    }
+  }
+  if (rows.length === 0) return '';
+  return ['| Role | Suggested craftbook | When |', '| --- | --- | --- |', ...rows].join('\n');
 }

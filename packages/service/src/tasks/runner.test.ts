@@ -429,6 +429,51 @@ describe('TaskRunner — cancellation via task status', () => {
     expect(dispatcher.cancelledSessionIds).toEqual([]);
   });
 
+  it('keeps the successor handoff alive when the prior step completion is replayed', async () => {
+    await store.createProject({ name: 'p1' });
+    await store.createGezel({ name: 'Bea' });
+    const dispatcher = new FakeDispatcher(new Map([['bea', 'copilot']]));
+    dispatcher.setProvider('copilot', new ProviderQueue({ concurrency: 10 }));
+    const runner = new TaskRunner({ store, dispatcher });
+    const tasks = new TaskManager(store);
+    const task = await tasks.create('p1', {
+      title: 'Duplicate advance race',
+      assignee: { kind: 'gezel', gezelId: 'bea' },
+      steps: [
+        { id: 'design', name: 'Design', assignee: { kind: 'gezel', gezelId: 'bea' } },
+        { id: 'build', name: 'Build', assignee: { kind: 'gezel', gezelId: 'bea' } },
+      ] as never,
+    });
+
+    const advanced = await tasks.completeStep('p1', task.num, 'design');
+    const originalActivation = advanced.craftbook.steps.find(
+      (step) => step.id === 'build',
+    )?.lastActivatedAt;
+    expect(originalActivation).toBeTruthy();
+
+    runner.enqueueHandoff({
+      taskRef: task.ref,
+      stepId: 'build',
+      gezelId: 'bea',
+      projectId: 'p1',
+      activationAt: originalActivation!,
+    });
+    await runner.tick();
+    expect(dispatcher.dispatches).toHaveLength(1);
+    expect(dispatcher.isHandoffSessionActive('session-1')).toBe(true);
+
+    // This is the exact debug-bundle race: the previous worker emits its
+    // successful advance call again after the successor has already started.
+    const replayed = await tasks.completeStep('p1', task.num, 'design');
+    expect(replayed.craftbook.steps.find((step) => step.id === 'build')?.lastActivatedAt).toBe(
+      originalActivation,
+    );
+
+    await runner.tick();
+    expect(dispatcher.cancelledSessionIds).toEqual([]);
+    expect(dispatcher.isHandoffSessionActive('session-1')).toBe(true);
+  });
+
   it('does not cancel a model-owned same-step gate recovery after reactivation', async () => {
     await store.createProject({ name: 'p1' });
     await store.createGezel({ name: 'Bea' });

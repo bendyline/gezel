@@ -375,6 +375,8 @@ export interface GateHoldInfo {
   cached: boolean;
   /** The gate runtime/configuration failed; no deliverable attempt was charged. */
   infrastructureError?: true;
+  /** Script-run identifiers and redacted log tails for gate infrastructure failures. */
+  scriptRuns?: StepGateOutcome['runs'];
   /** Per-check structured outcomes from the gate's declarative floor. */
   checkResults?: GateCheckOutcome[];
   /**
@@ -388,6 +390,19 @@ export interface GateHoldInfo {
 export type CompleteStepOutcome =
   | { status: 'advanced'; task: Task }
   | { status: 'held'; task: Task; gate: GateHoldInfo };
+
+function formatGateScriptDiagnostics(runs: StepGateOutcome['runs']): string {
+  return runs
+    .filter((run) => run.error || run.logsTail)
+    .map((run) => {
+      const lines = [`- Script: \`${run.scriptName}\``];
+      if (run.runId) lines.push(`  - Run ID: \`${run.runId}\``);
+      if (run.error) lines.push(`  - Error: ${run.error}`);
+      if (run.logsTail) lines.push(`  - Log tail:\n\n    \`\`\`\n${run.logsTail}\n    \`\`\``);
+      return lines.join('\n');
+    })
+    .join('\n');
+}
 
 /** Thrown by the legacy `completeStep` wrapper when a gate holds the step. */
 export class GateRejectionError extends Error {
@@ -745,6 +760,24 @@ export class TaskManager {
     // resolved paths. Unknown placeholders survive untouched; books
     // without `{{}}` are unaffected.
     if (input.craftbookParams) interpolateStepsContext(craftbook.steps, input.craftbookParams);
+    // A previous run may have left the same deliverable path behind. An
+    // existence-only observable gate would then advance this brand-new task
+    // before its assignee changed anything. Preserve explicit author intent
+    // (`requireChange: true` or `false`), but make the safe behavior the
+    // default whenever the snapshotted path already exists at create time.
+    await Promise.all(
+      craftbook.steps.map(async (step) => {
+        const advanceWhen = step.advanceWhen;
+        if (!advanceWhen || advanceWhen.requireChange !== undefined) return;
+        const existing = await (advanceWhen.artifact
+          ? this.store.readProjectArtifact(projectId, advanceWhen.file)
+          : this.store.readProjectWorkspaceFile(projectId, advanceWhen.file)
+        ).catch(() => null);
+        if (existing !== null) {
+          step.advanceWhen = { ...advanceWhen, requireChange: true };
+        }
+      }),
+    );
     const spawnsCraftbook = spawnBook ? snapshotCraftbookForTask(spawnBook, now) : undefined;
     const activeStepId = craftbook.entryStepId;
     if (!isDraft) {
@@ -963,6 +996,14 @@ export class TaskManager {
       }
       changed.push('fanout');
     }
+    if (patch.spawnsCraftbookParams !== undefined) {
+      if (patch.spawnsCraftbookParams === null) {
+        delete next.spawnsCraftbookParams;
+      } else {
+        next.spawnsCraftbookParams = patch.spawnsCraftbookParams;
+      }
+      changed.push('spawnsCraftbookParams');
+    }
     if (changed.length === 0) return task;
     await this.store.writeTask(next);
     // Editing a task (retitle, re-plan, reassign, cron/fanout) is live
@@ -1037,7 +1078,33 @@ export class TaskManager {
       }
       return task;
     }
-    const next: Task = { ...task, status, updatedAt: nowIso() };
+    const now = nowIso();
+    let craftbook = task.craftbook;
+    // Legacy task snapshots predate the create-time stale-deliverable guard.
+    // On resume, protect the active step if its existence-only deliverable is
+    // already present; otherwise the first post-resume turn can advance on
+    // yesterday's unchanged file. Explicit `requireChange: false` remains an
+    // author-controlled opt-out.
+    if (task.status === 'paused' && status === 'active' && task.activeStepId) {
+      const activeIndex = task.craftbook.steps.findIndex((step) => step.id === task.activeStepId);
+      const activeStep = activeIndex >= 0 ? task.craftbook.steps[activeIndex] : undefined;
+      const advanceWhen = activeStep?.advanceWhen;
+      if (advanceWhen && advanceWhen.requireChange === undefined) {
+        const existing = await (advanceWhen.artifact
+          ? this.store.readProjectArtifact(projectId, advanceWhen.file)
+          : this.store.readProjectWorkspaceFile(projectId, advanceWhen.file)
+        ).catch(() => null);
+        if (existing !== null) {
+          const steps = [...task.craftbook.steps];
+          steps[activeIndex] = {
+            ...activeStep,
+            advanceWhen: { ...advanceWhen, requireChange: true },
+          };
+          craftbook = { ...task.craftbook, steps, updatedAt: now };
+        }
+      }
+    }
+    const next: Task = { ...task, status, craftbook, updatedAt: now };
     await this.store.writeTask(next);
     // Drive the project lifecycle: closing/completing may bring the
     // project to rest; reopening/pausing is live work that wakes it.
@@ -1678,6 +1745,29 @@ export class TaskManager {
     if (idx < 0) throw new Error(`task ${task.ref}: no step "${stepId}"`);
     const completedStep = task.craftbook.steps[idx]!;
 
+    // Step completion is an idempotent transition. Local models can emit the
+    // same `advance_task_step` call twice while consuming the first call's
+    // tool result. Once the first call has moved the task forward, replaying
+    // the stale call must not re-run the old gate/onExit hooks or bump the
+    // successor's activation timestamp: TaskRunner keys the live successor
+    // handoff by that timestamp and would otherwise cancel it as superseded.
+    //
+    // A real loop-back remains valid. `bumpStepActivation` clears the old
+    // `completedAt` and makes the step active again, so it passes this guard.
+    if (task.activeStepId !== stepId) {
+      if (completedStep.completedAt) {
+        log.info(
+          `[tasks] duplicate completion ignored for ${task.ref} step "${stepId}" ` +
+            `(active step: "${task.activeStepId ?? '(none)'}")`,
+        );
+        return { status: 'advanced', task };
+      }
+      throw new Error(
+        `task ${task.ref}: step "${stepId}" is not active ` +
+          `(active step: "${task.activeStepId ?? '(none)'}")`,
+      );
+    }
+
     // ── Completion gate guard ─────────────────────────────────────────
     // Skipped when: no gate / activation-moment gate (the service hook
     // owns that), the user forced completion, or the runtime itself is
@@ -2020,6 +2110,10 @@ export class TaskManager {
             ? { firstFailKind: failedKinds[0], failedKinds }
             : {}),
           ...(outcome && outcome.skipped.length > 0 ? { skippedScripts: outcome.skipped } : {}),
+          ...(outcome?.infrastructureError ? { infrastructureError: true } : {}),
+          ...(rejectingScript?.runId ? { scriptRunId: rejectingScript.runId } : {}),
+          ...(rejectingScript?.error ? { scriptError: rejectingScript.error } : {}),
+          ...(rejectingScript?.logsTail ? { scriptLogsTail: rejectingScript.logsTail } : {}),
           ...(extra?.escalationStage ? { escalationStage: extra.escalationStage } : {}),
           ...(extra?.frozen ? { frozen: true } : {}),
           ...(workingModel ? workingModel : {}),
@@ -2306,18 +2400,21 @@ export class TaskManager {
 
     if (outcome.infrastructureError) {
       const message = outcome.message ?? 'The completion gate could not run.';
+      const scriptRuns = outcome.runs.filter((run) => run.error || run.logsTail);
+      const diagnostics = formatGateScriptDiagnostics(scriptRuns);
       const paused = await this.setStatus(projectId, task.num, 'paused').catch(() => ({
         ...task,
         status: 'paused' as const,
       }));
       await this.appendNote(projectId, task.num, {
-        text: `# Gate unavailable — task paused\n\n${message}\n\nThis is a gate/runtime problem, not a failed deliverable check. No completion attempt was consumed. Fix the gate or runtime, then set the task active and retry.`,
+        text: `# Gate unavailable — task paused\n\n${message}${diagnostics ? `\n\n## Script diagnostics\n\n${diagnostics}` : ''}\n\nThis is a gate/runtime problem, not a failed deliverable check. No completion attempt was consumed. Fix the gate or runtime, then set the task active and retry.`,
         author: { kind: 'user' },
         stepId: step.id,
       }).catch(() => {});
       log.error(
-        `[gate] ${task.ref} step "${step.id}" could not be evaluated — pausing without consuming an attempt: ${message}`,
+        `[gate] ${task.ref} step "${step.id}" could not be evaluated — pausing without consuming an attempt: ${message}${diagnostics ? ` diagnostics=${JSON.stringify(diagnostics)}` : ''}`,
       );
+      await logGated('reject', priorAttempts, true, outcome);
       return {
         kind: 'held',
         task: paused,
@@ -2329,6 +2426,7 @@ export class TaskManager {
           paused: true,
           cached: false,
           infrastructureError: true,
+          ...(scriptRuns.length > 0 ? { scriptRuns } : {}),
           ...(outcome.checkResults ? { checkResults: outcome.checkResults } : {}),
         },
       };
@@ -3073,6 +3171,7 @@ export class TaskManager {
         expression: task.cron.expression,
         lastTickAt: now.toISOString(),
         nextTickAt: nextCronFire(schedule, now).toISOString(),
+        ...(task.cron.overlap ? { overlap: task.cron.overlap } : {}),
       },
       updatedAt: now.toISOString(),
     };
@@ -3090,6 +3189,23 @@ export class TaskManager {
       },
     });
     return updated;
+  }
+
+  /**
+   * Stamp a night-shift spawn host's `lastRunDay` with the current night
+   * window's day key. Called by the scheduler at child-spawn time — the
+   * host's placeholder step never completes, so the step-completion
+   * stamping path can't reach it. Together with the scheduler's guard
+   * this gives `onceADay` hosts "at most one spawn per night window".
+   */
+  async recordNightShiftSpawn(ref: string, dayKey: string): Promise<void> {
+    const task = await this.getByRef(ref);
+    if (!task?.nightShift) return;
+    await this.store.writeTask({
+      ...task,
+      nightShift: { ...task.nightShift, lastRunDay: dayKey },
+      updatedAt: new Date().toISOString(),
+    });
   }
 
   describeAssignee = describeAssignee;

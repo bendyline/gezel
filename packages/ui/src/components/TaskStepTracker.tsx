@@ -28,7 +28,7 @@ interface TaskStepTrackerProps {
 }
 
 /**
- * Once the task itself is complete or canceled, no step is "in hand" — the
+ * Once the task itself is complete or canceled, no step is active — the
  * task's end state lives on the terminal dot, not on a gezel.
  */
 function stepStatus(
@@ -43,7 +43,7 @@ function stepStatus(
 
 const STATUS_WORD: Record<StepStatus, string> = {
   done: 'Signed off',
-  active: 'In hand',
+  active: 'Active',
   pending: 'Waiting its turn',
 };
 
@@ -52,7 +52,7 @@ const STATUS_WORD: Record<StepStatus, string> = {
  * {@link StepTracker}. Supplies lifecycle status (done/active/pending) plus
  * per-step decoration: who's holding each step (its assignee, inherited
  * from the task when the step sets none), a status word, and — for the
- * step in hand — the assignee's carved poppetje standing on the rail.
+ * active step — the assignee's carved poppetje standing on the rail.
  *
  * The craftbook editor uses the same bench in design mode (plain pegs, no
  * lifecycle status, with drag-reorder). Activating/completing a task step is
@@ -108,7 +108,7 @@ export function TaskStepTracker({
       role = gezel?.role;
     }
 
-    // The step in hand reads as "<role> · with the task"; others just show role.
+    // The active step reads as "<role> · with the task"; others just show role.
     const assigneeRole =
       status === 'active' ? (role ? `${role} · with the task` : 'with the task') : role;
 

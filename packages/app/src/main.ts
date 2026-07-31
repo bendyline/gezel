@@ -29,11 +29,17 @@ import { autostart } from './autostart/index.js';
 import { isAllowedTopLevelNavigation, isExactApprovedPath } from './electron-boundaries.js';
 import { findGezmodelArguments, portableGezmodelFilename } from './model-bundle-files.js';
 import { QuitCoordinator } from './quit-coordinator.js';
+import { splashStage } from './splash-stage.js';
 import { redirectAsarToUnpacked } from './supervisor/extract-bundle.js';
 import { type Connection, connectOrStart } from './supervisor/index.js';
 import { updateActiveTraySessions } from './tray-activity.js';
 import { type EngagementMode, TrayController } from './tray.js';
 import { type UpdaterPermission, resolveUpdaterPermission } from './updater-policy.js';
+import {
+  type PublishedAppRelease,
+  appReleaseFeedConfiguration,
+  discoverLatestAppRelease,
+} from './updater/app-release.js';
 
 const execFileP = promisify(execFile);
 
@@ -52,6 +58,8 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 let connection: Connection | null = null;
 let mainWindow: Electron.BrowserWindow | null = null;
+/** True while the window is showing splash.html rather than the daemon UI. */
+let splashShowing = false;
 // The system tray (locus for notifications, status, and the engagement-mode
 // toggle). Created/destroyed in response to the `showSystemTray` preference;
 // null when disabled. See ./tray.ts.
@@ -78,15 +86,23 @@ let isQuitting = false;
 let quitOnClose = false;
 // Held so the tray's "Check for updates" item can re-trigger a check.
 let autoUpdaterRef: import('electron-updater').AppUpdater | null = null;
+/** The exact app-tagged release selected for the current update check. */
+let appUpdateRelease: PublishedAppRelease | null = null;
 /**
  * What the renderer shows about updates. Previously every update outcome —
  * including outright failure — went only to the console, so a user whose
  * update could not be applied had no way to find out.
+ *
+ * `stage` separates the two failures the renderer used to conflate. A failed
+ * *check* is the ordinary offline/no-release-published case and says nothing
+ * about the install; the renderer showed it as "Gezel could not install an
+ * update", which was both alarming and untrue. Only a failed *install* means
+ * a verified update is sitting there unable to land.
  */
 type UpdateState =
   | { kind: 'downloading'; version: string }
   | { kind: 'ready'; version: string }
-  | { kind: 'error'; version?: string; message: string };
+  | { kind: 'error'; stage: 'check' | 'install'; version?: string; message: string };
 let updateState: UpdateState | null = null;
 /** Verified installer staged by the macOS update flow, awaiting the user. */
 let macUpdatePkgPath: string | null = null;
@@ -358,8 +374,19 @@ const GEZEL_CSP = [
   "form-action 'self'",
 ].join('; ');
 
+/**
+ * Create the main window, paint the splash, and — when the daemon is already
+ * up — load the UI.
+ *
+ * Safe to call before `connection` exists, and on first launch that is the
+ * point: `connectOrStart` has to unpack the service bundle and provision the
+ * bundled Node/pnpm runtimes before it resolves, which on a cold machine took
+ * ~135s in the v1.26211.26 audit. Blocking window creation on that meant the
+ * app showed *nothing at all* for over two minutes after the user launched it.
+ * The window now comes up immediately with the splash, and
+ * {@link navigateToApp} swaps in the real UI once the daemon answers.
+ */
 async function createWindow(): Promise<void> {
-  if (!connection) return;
   const icon = iconPath();
   // E2E headless-ish mode: when `GEZEL_E2E=1`, the window is parked far off
   // every physical display and shown *inactive* (see `showInactive()` below),
@@ -407,7 +434,13 @@ async function createWindow(): Promise<void> {
       // and timers throttled by Chromium, which slows and flakes E2E. Prod keeps
       // the default (throttle in the background) to save power.
       ...(e2e ? { backgroundThrottling: false } : {}),
-      additionalArguments: [`--gezel-url=${connection.baseUrl}`],
+      // Startup hint only, and absent when the window is created ahead of the
+      // daemon. preload.cjs prefers the synchronous `gezel:current-connection`
+      // IPC bridge and falls back to this, so a window built before the
+      // connection exists still resolves the right base URL once it loads the
+      // UI — and picks up a rotated port on restart, which a baked-in argv
+      // value could not.
+      ...(connection ? { additionalArguments: [`--gezel-url=${connection.baseUrl}`] } : {}),
     },
   });
 
@@ -429,10 +462,17 @@ async function createWindow(): Promise<void> {
   // the bearer token. Same-origin navigations pass; the splash file://
   // handoff passes; everything else is cancelled and, if it's a safe
   // external scheme, opened in the user's browser instead.
-  const allowedOrigin = safeOrigin(connection.baseUrl);
   const allowedSplashPath = splashPath();
   const allowedSplashUrl = allowedSplashPath ? pathToFileURL(allowedSplashPath).href : null;
   mainWindow.webContents.on('will-navigate', (event, url) => {
+    // Resolved per navigation, not captured at construction. The window can
+    // now outlive the connection it was born with — it is created before the
+    // daemon exists, and an embedded restart can come back on a different
+    // port. A captured origin would pin the guard to a stale (or null) value
+    // and start refusing the daemon's own URL. Null denies every http(s)
+    // navigation and permits only the splash file, so the pre-connection
+    // window is locked down rather than open.
+    const allowedOrigin = connection ? safeOrigin(connection.baseUrl) : null;
     if (isAllowedTopLevelNavigation(url, allowedOrigin, allowedSplashUrl)) return;
     event.preventDefault();
     if (isSafeExternalUrl(url)) void shell.openExternal(url);
@@ -520,15 +560,52 @@ async function createWindow(): Promise<void> {
   // acceptable fallback.
   const splash = splashPath();
   if (splash) {
+    splashShowing = true;
     try {
       await mainWindow.loadFile(splash);
     } catch {
+      splashShowing = false;
       /* swallow — fall through to the real load */
     }
+    // Say something before the supervisor's first log line: on a cold install
+    // the gap ahead of "extracting service bundle" is itself several seconds.
+    if (!connection) setSplashStatus('Starting Gezel');
   }
 
+  // Already connected — the `activate` and post-boot call sites. On the cold
+  // path `connection` is still null here and whenReady calls navigateToApp
+  // once the daemon answers.
+  if (connection) await navigateToApp();
+}
+
+/**
+ * Swap the splash for the daemon-served UI. Separate from {@link createWindow}
+ * so the window can be painted before the service exists.
+ */
+async function navigateToApp(): Promise<void> {
+  if (!connection || !mainWindow || mainWindow.isDestroyed()) return;
   await loadAppUrl(mainWindow, `${connection.baseUrl}/`);
+  splashShowing = false;
   flushOpenedModelBundles();
+}
+
+/**
+ * Write a stage line onto the splash while the daemon starts.
+ *
+ * Injected rather than shipped as an inline `<script>` in splash.html: the
+ * renderer CSP forbids inline script, and keeping the asset script-free means
+ * the splash cannot execute anything of its own. No-ops once the real UI has
+ * loaded, so a late supervisor log can't scribble on the app.
+ */
+function setSplashStatus(message: string): void {
+  if (!splashShowing || !mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.webContents
+    .executeJavaScript(
+      `(() => { const el = document.getElementById('gezel-splash-status'); if (el) el.textContent = ${JSON.stringify(message)}; })()`,
+    )
+    .catch(() => {
+      /* window closed or navigated mid-write */
+    });
 }
 
 /**
@@ -564,6 +641,43 @@ async function loadAppUrl(win: Electron.BrowserWindow, url: string): Promise<voi
       );
       if (!win.isDestroyed()) await showConnectionError(win, url, err as Error);
     }
+  }
+}
+
+/**
+ * The service never came up at all, so there is nothing to reconnect to.
+ *
+ * Distinct from {@link showConnectionError}: that one recovers a window whose
+ * daemon went away mid-session, and its Reconnect button bounces a supervisor
+ * that exists. Here `connectOrStart` rejected, there is no connection to
+ * restart, and offering a button that cannot work would be worse than
+ * offering none. Relaunching is the only real remedy, so the copy says that.
+ */
+async function showStartupError(win: Electron.BrowserWindow, err: Error): Promise<void> {
+  const escapeHtml = (s: string) => s.replace(/[<>&]/g, (c) => `&#${c.charCodeAt(0)};`);
+  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">
+<title>Gezel — could not start</title>
+<style>
+  :root { color-scheme: dark; }
+  html, body { height: 100%; margin: 0; }
+  body { background: #667f62; color: #f3ede0; display: flex; align-items: center;
+    justify-content: center; font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    -webkit-user-select: none; -webkit-app-region: drag; }
+  main { max-width: 460px; padding: 32px; text-align: center; }
+  h1 { font-size: 19px; font-weight: 650; margin: 0 0 10px; }
+  p { margin: 0 0 14px; opacity: 0.92; }
+  .detail { font-size: 12px; opacity: 0.7; word-break: break-word; }
+</style></head><body><main>
+  <h1>Gezel couldn't start its background service</h1>
+  <p>Nothing has been lost — your gezellen, projects, and chats are still on disk.
+     Quit Gezel and open it again. If it keeps happening, reinstall Gezel.</p>
+  <div class="detail">${escapeHtml(err.message)}</div>
+</main></body></html>`;
+  try {
+    await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+  } catch {
+    /* nothing more we can do — the sage background remains */
   }
 }
 
@@ -1312,9 +1426,7 @@ async function setupAutoUpdater(): Promise<void> {
     return;
   }
   const updater = ensureAutoUpdater();
-  updater?.checkForUpdates().catch((err: unknown) => {
-    console.warn('[updater] check failed:', err);
-  });
+  if (updater) await checkAppReleaseForUpdates(updater);
 }
 
 function triggerUpdateCheck(): void {
@@ -1333,9 +1445,32 @@ async function triggerAuthorizedUpdateCheck(): Promise<void> {
   // check can recover by wiring the updater only after authorization succeeds.
   const updater = ensureAutoUpdater();
   if (!updater) return;
-  await updater.checkForUpdates().catch((err: unknown) => {
+  await checkAppReleaseForUpdates(updater);
+}
+
+/**
+ * GitHub's repository-wide "latest" release may be a `native-v*` engine
+ * release. Resolve the newest exact `v<semver>` application release first,
+ * then give electron-updater a generic feed rooted at that immutable tag.
+ */
+async function checkAppReleaseForUpdates(
+  updater: import('electron-updater').AppUpdater,
+): Promise<void> {
+  try {
+    const release = await discoverLatestAppRelease({
+      fetch: globalThis.fetch,
+    });
+    if (!release) {
+      console.info('[updater] no published application release exists yet');
+      return;
+    }
+    appUpdateRelease = release;
+    updater.setFeedURL(appReleaseFeedConfiguration(release));
+    console.info(`[updater] checking application release ${release.tagName}`);
+    await updater.checkForUpdates();
+  } catch (err) {
     console.warn('[updater] check failed:', err);
-  });
+  }
 }
 
 function ensureAutoUpdater(): import('electron-updater').AppUpdater | null {
@@ -1370,7 +1505,9 @@ function ensureAutoUpdater(): import('electron-updater').AppUpdater | null {
       console.warn('[updater] error:', err);
       setUpdateState({
         kind: 'error',
-        message: `Could not check for updates: ${err instanceof Error ? err.message : String(err)}`,
+        stage: 'check',
+        version: appUpdateRelease?.version,
+        message: err instanceof Error ? err.message : String(err),
       });
     });
     autoUpdaterRef = autoUpdater;
@@ -1387,7 +1524,12 @@ function ensureAutoUpdater(): import('electron-updater').AppUpdater | null {
  * administrator prompt. We never elevate anything ourselves.
  */
 async function handleMacUpdateAvailable(version: string): Promise<void> {
-  if (updateState?.kind === 'downloading' || updateState?.version === version) return;
+  if (
+    updateState?.kind === 'downloading' ||
+    (updateState?.kind === 'ready' && updateState.version === version)
+  ) {
+    return;
+  }
   setUpdateState({ kind: 'downloading', version });
   notify({ title: 'Gezel update available', body: `Downloading version ${version}…` });
   tray?.setTooltip('Gezel — downloading update…');
@@ -1400,8 +1542,8 @@ async function handleMacUpdateAvailable(version: string): Promise<void> {
       stagingDir: join(app.getPath('userData'), 'updates'),
       fetch: globalThis.fetch,
       execFile: async (file, args) => {
-        const { stdout } = await run(file, args, { maxBuffer: 8 * 1024 * 1024 });
-        return { stdout: String(stdout) };
+        const { stdout, stderr } = await run(file, args, { maxBuffer: 8 * 1024 * 1024 });
+        return { stdout: String(stdout), stderr: String(stderr) };
       },
       logger: { info: console.log, warn: console.warn },
     });
@@ -1417,7 +1559,7 @@ async function handleMacUpdateAvailable(version: string): Promise<void> {
     const message = err instanceof Error ? err.message : String(err);
     console.warn('[updater] macOS package staging failed:', message);
     macUpdatePkgPath = null;
-    setUpdateState({ kind: 'error', version, message });
+    setUpdateState({ kind: 'error', stage: 'install', version, message });
     tray?.setTooltip('Gezel');
   }
 }
@@ -1732,6 +1874,12 @@ app.whenReady().then(async () => {
     }
   }
 
+  // Paint the window before the daemon is asked for. connectOrStart unpacks
+  // the service bundle and provisions the bundled runtimes on first launch,
+  // which is minutes of work on a cold machine; doing this afterwards is what
+  // made a fresh install look like it had failed to launch.
+  await createWindow();
+
   try {
     connection = await connectOrStart({
       home: launch.home,
@@ -1746,7 +1894,11 @@ app.whenReady().then(async () => {
         (!app.isPackaged && process.env.GEZEL_SPAWN !== '1'),
       uiDir: resolveBundledUi(),
       logger: {
-        info: (m) => console.log(m),
+        info: (m) => {
+          console.log(m);
+          const stage = splashStage(m);
+          if (stage) setSplashStatus(stage);
+        },
         warn: (m) => console.warn(m),
         error: (m) => console.error(m),
       },
@@ -1755,6 +1907,16 @@ app.whenReady().then(async () => {
     console.error('Gezel service failed to start:', err);
     if (packagedSmoke) {
       app.exit(1);
+      return;
+    }
+    // Explain, don't evaporate. Quitting here was survivable when the window
+    // was created *after* connectOrStart — the user saw nothing appear and
+    // read it as a launch that failed. Now the splash is already on screen,
+    // so a bare app.quit() looks exactly like a crash a few seconds in. Paint
+    // the failure instead and let the user close it themselves.
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      splashShowing = false;
+      await showStartupError(mainWindow, err as Error);
       return;
     }
     app.quit();
@@ -1789,7 +1951,7 @@ app.whenReady().then(async () => {
     void loadAppUrl(mainWindow, `${connection?.baseUrl ?? ''}/`);
   });
 
-  await createWindow();
+  await navigateToApp();
 
   if (packagedSmoke) {
     try {
@@ -1855,10 +2017,10 @@ app.whenReady().then(async () => {
   // its window-close specs keep quitting. Non-fatal if it fails.
   await initTray();
 
-  // electron-updater pulls release metadata from the GitHub repo configured
-  // under `publish:` in electron-builder.yml. Packaged builds only — dev
-  // launches have no signed installer to update from. Surfaces
-  // update-available / -downloaded as notifications via the tray.
+  // Resolve the latest exact `v<semver>` app release, then point
+  // electron-updater at that immutable release's metadata. This deliberately
+  // excludes the repository's `native-v*` releases. Packaged builds only —
+  // dev launches have no signed installer to update from.
   await setupAutoUpdater();
 
   app.on('activate', () => {

@@ -199,11 +199,46 @@ export const ScheduleApprovalIntentSchema = z.object({
   kind: z.literal('schedule-approval'),
   typeId: z.string(),
   craftbookId: z.string(),
-  /** 5-field cron expression (UTC). Surfaced verbatim on the card. */
+  /**
+   * Recurrence flavor. Absent → 'scheduled' (every question written
+   * before this field existed is a cron schedule). 'night-shift' hosts
+   * run inside the Night Shift window instead of on a user-visible cron;
+   * the card copy switches accordingly.
+   */
+  runMode: z.enum(['scheduled', 'night-shift']).optional(),
+  /**
+   * 5-field cron expression (UTC). Surfaced verbatim on the card for
+   * 'scheduled' hosts; for 'night-shift' hosts it is the internal
+   * heartbeat and the card shows the window instead.
+   */
   cron: z.string(),
   overlap: z.enum(['skip', 'queue', 'concurrent']).optional(),
 });
 export type ScheduleApprovalIntent = z.infer<typeof ScheduleApprovalIntentSchema>;
+
+/**
+ * The morning-review question, synthesized once per completed night
+ * window (deduped on `windowKey` — the question store IS the "already
+ * asked for window K" state). Created by the NightShiftManager's
+ * window-settled callback with `sessionId: ''`; the answer route
+ * early-returns (nothing to seed — the card is a summary with report
+ * links, and Dismiss just collapses it).
+ */
+export const NightShiftReviewIntentSchema = z.object({
+  kind: z.literal('night-shift-review'),
+  /** The window's day key (see `nightShiftWindowKey`). */
+  windowKey: z.string(),
+  tasksCompleted: z.number(),
+  reports: z.array(
+    z.object({
+      projectId: z.string(),
+      path: z.string(),
+      title: z.string().optional(),
+      actionCount: z.number(),
+    }),
+  ),
+});
+export type NightShiftReviewIntent = z.infer<typeof NightShiftReviewIntentSchema>;
 
 export const QuestionIntentSchema = z.discriminatedUnion('kind', [
   z.object({
@@ -220,6 +255,7 @@ export const QuestionIntentSchema = z.discriminatedUnion('kind', [
   ImageGenerationApprovalIntentSchema,
   VideoGenerationApprovalIntentSchema,
   ScheduleApprovalIntentSchema,
+  NightShiftReviewIntentSchema,
 ]);
 export type QuestionIntent = z.infer<typeof QuestionIntentSchema>;
 
