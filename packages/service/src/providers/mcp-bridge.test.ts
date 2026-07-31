@@ -42,6 +42,7 @@ async function waitForProjectSessionText(projectId: string, pattern: RegExp): Pr
   // A timed poll passed here for months and then failed on CI, where the
   // 5s ticker and a per-session MCP child spawn on a loaded 4-vCPU runner
   // outran the window — a slow machine must not change the outcome.
+  let seen = 0;
   for (let pass = 0; pass < 10; pass++) {
     // Drain first so slots and writes from earlier tests' unawaited
     // kickoffs settle before this pass measures anything.
@@ -54,13 +55,27 @@ async function waitForProjectSessionText(projectId: string, pattern: RegExp): Pr
       const text = session?.messages.map((m) => m.content).join('\n') ?? '';
       if (pattern.test(text)) return text;
     }
+    seen = sessions.length;
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
-  return '';
+  // Returning '' here produced the useless "expected '' to contain …" on the
+  // caller's assertion. Fail where the information is.
+  throw new Error(
+    `no session under project ${projectId} matched ${pattern} after 10 runner passes (${seen} session(s) present)`,
+  );
 }
 
 beforeAll(async () => {
   process.env.GEZEL_MOCK_PROVIDER = '1';
+  // This file asserts on the MCP tool surface, never on recall quality — the
+  // only memory reference is that `search_memory` is registered. But
+  // `start_project` writes project memories, and the first `embed()` in the
+  // process pays a one-shot sentence-transformer init that measured ~26 s
+  // here, landing inside the first `start_project` test and eating almost all
+  // of its 30 s budget: any CPU contention then tipped it into a timeout or
+  // starved the kickoff poll below. Skip the embedder; the same 53 assertions
+  // hold and the file drops from ~50 s to ~14 s.
+  process.env.GEZEL_DISABLE_EMBEDDINGS = '1';
   const home = await mkdtemp(join(tmpdir(), 'gezel-mcp-bridge-'));
   svc = await startService({ home });
 
