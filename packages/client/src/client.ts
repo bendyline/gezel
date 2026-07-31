@@ -567,6 +567,12 @@ export interface EngineStatusResponse {
   budgetBytes: number;
   committedBytes: number;
   entries: EngineStatusEntry[];
+  /** Physical RAM — the memory slider's ceiling. Absent pre-boot. */
+  systemRamBytes?: number;
+  /** Host-derived budget; the slider's "Auto" mark. Absent pre-boot. */
+  autoBudgetBytes?: number;
+  /** True when `localEngineMemoryGb` overrides the auto value. */
+  overridden?: boolean;
 }
 
 export interface ReconcileEnginePoolRequest {
@@ -837,10 +843,12 @@ export interface ConfigResponse {
   mlxKvBits?: number;
   /**
    * Multi-engine pool: combined RAM budget (GB) across all resident
-   * local engines. Unset → auto-derive as
-   * `min(systemRamGB * 0.6, 96)`. Authoritative when present.
+   * local engines. Unset → auto-derive from the host (unified-memory
+   * machines get a larger share than discrete-GPU ones — see
+   * `autoDetectBudgetBytes`). Authoritative when present; `null` clears
+   * the override and returns to auto.
    */
-  localEngineMemoryGb?: number;
+  localEngineMemoryGb?: number | null;
   /**
    * Multi-engine pool: per-model clone count keyed by catalog `modelId`.
    * Missing keys default to 1 resident replica.

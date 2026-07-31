@@ -1924,6 +1924,31 @@ export class ChatManager {
   }
 
   /**
+   * Live-update the capacity broker's total budget for resident local
+   * engines. Called from the config PUT handler when the operator moves the
+   * memory slider (`localEngineMemoryGb`); `null` reverts to the host's
+   * auto-derived value.
+   *
+   * No-op when no router exists yet — {@link buildEngineRouter} reads the
+   * config itself, so a router built later already picks the new value up.
+   * The in-flight case is the one that needs care: a build that read the
+   * config *before* this write would otherwise install the stale budget and
+   * keep it until shutdown, so chain onto the pending promise rather than
+   * only checking the resolved cache.
+   */
+  async setLocalEngineMemoryBudget(bytes: number | null): Promise<void> {
+    const live = this.engineRouter ?? this.engineRouterCache;
+    if (live) {
+      live.broker.setBudgetBytes(bytes);
+      return;
+    }
+    const pending = this.engineRouterInitPromise;
+    if (!pending) return;
+    const router = await pending.catch(() => null);
+    router?.broker.setBudgetBytes(bytes);
+  }
+
+  /**
    * Pre-warm a session's prompt cache on the engine that owns it.
    * Phase 4 hook — called by the UI when the user opens a chat so the
    * first message returns near-instantly instead of paying the full

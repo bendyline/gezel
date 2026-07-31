@@ -153,29 +153,90 @@ if ! dscl . -read "/Users/${DAEMON_USER}" >/dev/null 2>&1; then
   dscl . -create "/Users/${DAEMON_USER}" IsHidden 1
 else
   echo "[gezel postinstall] ${DAEMON_USER} already exists; skipping create"
+  # Repair a half-provisioned identity. The group is only ever created in the
+  # branch above, so a machine that kept the user but lost the group could
+  # never get it back: every reinstall takes this branch, skips the only code
+  # that creates a group, and then fails validation. That state is reachable
+  # (an interrupted uninstall, or an install predating the paired create) and
+  # left users with no recovery short of manual dscl surgery, because
+  # uninstall.sh ships inside an app bundle the failed install never wrote.
+  #
+  # Recreate it from the user's own PrimaryGroupID, and only when that id is
+  # actually free. If it is out of range or already owned by another group,
+  # minting a group over it would manufacture exactly the shared-GID collision
+  # the checks below exist to reject — leave it missing and let them say so.
+  if ! dscl . -read "/Groups/${DAEMON_USER}" >/dev/null 2>&1; then
+    echo "[gezel postinstall] ${DAEMON_USER} group is missing; attempting repair"
+    repair_gid=$(
+      dscl . -read "/Users/${DAEMON_USER}" PrimaryGroupID 2>/dev/null |
+        awk '$1 ~ /(^|:)PrimaryGroupID:$/ { print $2 }' || true
+    )
+    repair_gid_owners=$(
+      dscl . -list /Groups PrimaryGroupID 2>/dev/null |
+        awk -v id="$repair_gid" '$2 == id { count++ } END { print count + 0 }' || true
+    )
+    if [[ "$repair_gid" =~ ^[0-9]+$ ]] &&
+      [ "$repair_gid" -ge 200 ] &&
+      [ "$repair_gid" -lt 400 ] &&
+      [ "$repair_gid_owners" = "0" ]; then
+      dscl . -create "/Groups/${DAEMON_USER}"
+      dscl . -create "/Groups/${DAEMON_USER}" PrimaryGroupID "$repair_gid"
+      dscl . -create "/Groups/${DAEMON_USER}" RealName "Gezel Service"
+      echo "[gezel postinstall] recreated ${DAEMON_USER} group with GID ${repair_gid}"
+    else
+      echo "[gezel postinstall] cannot safely recreate ${DAEMON_USER} group" \
+        "(PrimaryGroupID='${repair_gid}', conflicting groups=${repair_gid_owners:-unknown})" >&2
+    fi
+  fi
 fi
 
 # Validate both new and pre-existing identities. Numeric UID/GID reuse would
 # make another local principal indistinguishable from the daemon to POSIX
 # ownership checks, so collision or reserved-range drift is installation-fatal.
-daemon_uid=$(dscl . -read "/Users/${DAEMON_USER}" UniqueID | awk '$1 == "UniqueID:" { print $2 }')
-daemon_user_gid=$(dscl . -read "/Users/${DAEMON_USER}" PrimaryGroupID | awk '$1 == "PrimaryGroupID:" { print $2 }')
-daemon_group_gid=$(dscl . -read "/Groups/${DAEMON_USER}" PrimaryGroupID | awk '$1 == "PrimaryGroupID:" { print $2 }')
-daemon_shell=$(dscl . -read "/Users/${DAEMON_USER}" UserShell | awk '$1 == "UserShell:" { print $2 }')
-daemon_home=$(dscl . -read "/Users/${DAEMON_USER}" NFSHomeDirectory | awk '$1 == "NFSHomeDirectory:" { print $2 }')
-# macOS 26 renders native attributes as `dsAttrTypeNative:IsHidden: 1`;
-# older releases use `IsHidden: 1`. Accept either label without weakening
-# the requirement that the stored value itself is exactly 1.
-daemon_hidden=$(dscl . -read "/Users/${DAEMON_USER}" IsHidden | awk '$1 ~ /(^|:)IsHidden:$/ { print $2 }')
+#
+# Every read goes through this helper because dscl exits non-zero for a missing
+# record *and* for a missing key on a record that exists. Under
+# `set -Eeuo pipefail` a bare `x=$(dscl ... | awk ...)` therefore aborts the
+# whole install at the ERR trap, reporting a line number instead of which part
+# of the identity is wrong — and PackageKit shows the user only "installation
+# failed". Absent values must survive to the named checks below.
+#
+# macOS 26 renders native attributes as `dsAttrTypeNative:IsHidden: 1` while
+# older releases use `IsHidden: 1`, so the key match accepts either label
+# without weakening the requirement on the stored value itself.
+read_daemon_attribute() {
+  dscl . -read "$1" "$2" 2>/dev/null |
+    awk -v key="$2" '$1 ~ "(^|:)" key ":$" { print $2 }' || true
+}
+daemon_uid=$(read_daemon_attribute "/Users/${DAEMON_USER}" UniqueID)
+daemon_user_gid=$(read_daemon_attribute "/Users/${DAEMON_USER}" PrimaryGroupID)
+daemon_group_gid=$(read_daemon_attribute "/Groups/${DAEMON_USER}" PrimaryGroupID)
+daemon_shell=$(read_daemon_attribute "/Users/${DAEMON_USER}" UserShell)
+daemon_home=$(read_daemon_attribute "/Users/${DAEMON_USER}" NFSHomeDirectory)
+daemon_hidden=$(read_daemon_attribute "/Users/${DAEMON_USER}" IsHidden)
+if [ -z "$daemon_uid" ] || [ -z "$daemon_user_gid" ]; then
+  abort_bad_service_identity "the dedicated user record is missing or incomplete"
+fi
+if [ -z "$daemon_group_gid" ]; then
+  abort_bad_service_identity "the matching ${DAEMON_USER} group is missing and could not be repaired"
+fi
 if ! [[ "$daemon_uid" =~ ^[0-9]+$ && "$daemon_user_gid" =~ ^[0-9]+$ && "$daemon_group_gid" =~ ^[0-9]+$ ]]; then
   abort_bad_service_identity "UID/GID identity is incomplete or non-numeric"
 fi
-user_id_count=$(dscl . -list /Users UniqueID | awk -v id="$daemon_uid" '$2 == id { count++ } END { print count + 0 }')
-group_id_count=$(dscl . -list /Groups PrimaryGroupID | awk -v id="$daemon_group_gid" '$2 == id { count++ } END { print count + 0 }')
+# Guarded for the same reason as the reads above: a directory-service failure
+# here must reach the collision check as a count, not abort at the ERR trap.
+user_id_count=$(
+  dscl . -list /Users UniqueID 2>/dev/null |
+    awk -v id="$daemon_uid" '$2 == id { count++ } END { print count + 0 }' || true
+)
+group_id_count=$(
+  dscl . -list /Groups PrimaryGroupID 2>/dev/null |
+    awk -v id="$daemon_group_gid" '$2 == id { count++ } END { print count + 0 }' || true
+)
 if [ "$daemon_uid" -lt 200 ] || [ "$daemon_uid" -ge 400 ] || \
    [ "$daemon_uid" -ne "$daemon_user_gid" ] || \
    [ "$daemon_uid" -ne "$daemon_group_gid" ] || \
-   [ "$user_id_count" -ne 1 ] || [ "$group_id_count" -ne 1 ]; then
+   [ "${user_id_count:-0}" -ne 1 ] || [ "${group_id_count:-0}" -ne 1 ]; then
   abort_bad_service_identity "UID/GID is shared, mismatched, or outside 200-399"
 fi
 if [ "$daemon_shell" != "/usr/bin/false" ] || \

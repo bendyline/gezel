@@ -22340,40 +22340,49 @@ button.linklike {
   font: inherit;
 }
 
-/* Memory-budget slider in the engine cache controls (CacheControlsPanel).
- * The track maps a floor → physical-RAM ceiling; a tick under the thumb
- * marks the RAM-aware "Auto" suggestion so operators can see how far
- * their override drifts from what gezel recommends for this machine. */
-.cache-budget-slider {
+/* Budget slider — one recipe for every "how much memory may gezel take"
+ * control. The track maps a floor → physical-RAM ceiling; a tick under the
+ * thumb marks the auto-derived value so operators can see how far their
+ * override drifts from what gezel recommends for this machine.
+ *
+ * Two users today: the per-engine prompt-cache budget (CacheControlsPanel)
+ * and the total resident-engine budget (EngineMemoryBudgetPanel). Keep the
+ * shape shared — they sit on the same settings pages, one above the other,
+ * and any divergence reads as a bug. */
+.gz-budget-slider {
   margin-top: 0.75rem;
   max-width: 26rem;
 }
-.cache-budget-slider-head {
+.gz-budget-slider-head {
   display: flex;
   align-items: baseline;
   gap: 0.5rem;
 }
-.cache-budget-slider-head strong {
-  font-size: 1.05rem;
+.gz-budget-slider-head strong {
+  font-size: var(--text-lg);
 }
-.cache-budget-tag {
-  font-size: 0.72rem;
+.gz-budget-tag {
+  font-size: var(--text-2xs);
   font-weight: 600;
   letter-spacing: 0.02em;
   padding: 0.08rem 0.4rem;
-  border-radius: 0.6rem;
+  border-radius: var(--radius-sm);
   background: color-mix(in srgb, var(--accent) 18%, transparent);
   color: var(--accent);
 }
-.cache-budget-tag-custom {
+.gz-budget-tag-custom {
   background: var(--border);
   color: var(--text-muted);
 }
-.cache-budget-track {
+.gz-budget-tag-risky {
+  background: color-mix(in srgb, var(--warning) 22%, transparent);
+  color: var(--warning);
+}
+.gz-budget-track {
   position: relative;
   margin-top: 0.4rem;
 }
-.cache-budget-track input[type="range"] {
+.gz-budget-track input[type="range"] {
   width: 100%;
   margin: 0;
   accent-color: var(--accent);
@@ -22382,7 +22391,7 @@ button.linklike {
 /* Suggestion tick — an upward arrow sitting just under the track,
  * centered on the auto-derived budget. translateX(-50%) keeps it
  * anchored to its `left:` percentage as the label widens. */
-.cache-budget-marker {
+.gz-budget-marker {
   position: absolute;
   top: 1.15rem;
   transform: translateX(-50%);
@@ -22392,20 +22401,40 @@ button.linklike {
   pointer-events: none;
   white-space: nowrap;
 }
-.cache-budget-marker-arrow {
+.gz-budget-marker-arrow {
   color: var(--accent);
   font-size: 0.6rem;
   line-height: 1;
 }
-.cache-budget-marker-label {
-  font-size: 0.68rem;
+.gz-budget-marker-label {
+  font-size: var(--text-2xs);
   color: var(--text-muted);
   margin-top: 0.05rem;
 }
-.cache-budget-scale {
+.gz-budget-scale {
   display: flex;
   justify-content: space-between;
   margin-top: 1.9rem;
+}
+
+/* Total on-device model memory dial, inside the engine budget strip. */
+.engine-memory-budget {
+  margin-top: 0.9rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--gz-color-border, var(--border));
+}
+.engine-memory-budget h4 {
+  margin: 0 0 0.25rem;
+  font-size: var(--text-md);
+}
+.engine-memory-budget-warning {
+  max-width: 26rem;
+  color: var(--warning);
+}
+.engine-memory-budget-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
 }
 
 /* ── Project Overview tab (index-derived gestalt) ─────────────────────── */

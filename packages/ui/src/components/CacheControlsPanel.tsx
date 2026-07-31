@@ -168,16 +168,16 @@ export function CacheControlsPanel({
         <p className="muted small">No warm sessions yet — cache populates after the first turn.</p>
       )}
 
-      <div className="cache-budget-slider">
-        <div className="cache-budget-slider-head">
+      <div className="gz-budget-slider">
+        <div className="gz-budget-slider-head">
           <strong>{fmtMemory(valueMb)}</strong>
           {onAuto ? (
-            <span className="cache-budget-tag">Auto (RAM-aware)</span>
+            <span className="gz-budget-tag">Auto (RAM-aware)</span>
           ) : (
-            <span className="cache-budget-tag cache-budget-tag-custom">Custom</span>
+            <span className="gz-budget-tag gz-budget-tag-custom">Custom</span>
           )}
         </div>
-        <div className="cache-budget-track">
+        <div className="gz-budget-track">
           <input
             type="range"
             min={minMb}
@@ -189,16 +189,16 @@ export function CacheControlsPanel({
           />
           {/* Tick + arrow marking the RAM-aware suggestion on the track. */}
           <div
-            className="cache-budget-marker"
+            className="gz-budget-marker"
             style={{ left: `${markerPct}%` }}
             title={`Suggested for this Mac: ${fmtMemory(suggestedMb)}`}
             aria-hidden="true"
           >
-            <span className="cache-budget-marker-arrow">▲</span>
-            <span className="cache-budget-marker-label">Auto · {fmtMemory(suggestedMb)}</span>
+            <span className="gz-budget-marker-arrow">▲</span>
+            <span className="gz-budget-marker-label">Auto · {fmtMemory(suggestedMb)}</span>
           </div>
         </div>
-        <div className="cache-budget-scale muted small">
+        <div className="gz-budget-scale muted small">
           <span>{fmtMemory(minMb)}</span>
           <span>{fmtMemory(maxMb)}</span>
         </div>

@@ -47,6 +47,14 @@ export interface CapacityCommitted {
   enforced: boolean;
   /** Total physical RAM the budget was derived from (for messaging). */
   systemRamBytes: number;
+  /**
+   * What {@link autoDetectBudgetBytes} would pick for this host, whether or
+   * not an explicit budget is in force. The Settings slider marks it on the
+   * track so "Auto" stays a visible position rather than a hidden default.
+   */
+  autoBudgetBytes: number;
+  /** True when an explicit budget is overriding {@link autoBudgetBytes}. */
+  overridden: boolean;
   byKey: Array<{ key: EngineKey; bytes: number }>;
 }
 
@@ -96,23 +104,33 @@ export function formatCapacityDenial(opts: {
     );
   }
   parts.push(
-    'Try a smaller or more-quantized model. To raise the limit at your own ' +
-      'risk (may cause the app to run out of memory), set the ' +
-      'GEZEL_CAPACITY_BUDGET_GB environment variable.',
+    'Try a smaller or more-quantized model, or raise the memory budget in ' +
+      'Settings under the engine that runs it — at your own risk, since a ' +
+      'budget the machine cannot back may make the app run out of memory.',
   );
   return parts.join('');
 }
 
 export class CapacityBroker {
-  private readonly budgetBytes: number;
-  private readonly enforced: boolean;
+  private budgetBytes: number;
+  private enforced: boolean;
+  private explicitBudgetBytes: number | null;
   private readonly systemRamBytes: number;
   private readonly reservations = new Map<EngineKey, number>();
 
   constructor(opts: CapacityBrokerOptions = {}) {
     this.systemRamBytes = (opts.systemRamBytes ?? totalmem)();
-    const explicit = opts.budgetBytes;
-    if (explicit === undefined) {
+    this.explicitBudgetBytes = opts.budgetBytes ?? null;
+    // Assigned by applyBudget; the definite-assignment dance TS wants for
+    // fields a constructor sets through a helper.
+    this.budgetBytes = 0;
+    this.enforced = false;
+    this.applyBudget();
+  }
+
+  private applyBudget(): void {
+    const explicit = this.explicitBudgetBytes;
+    if (explicit === null) {
       this.budgetBytes = autoDetectBudgetBytes(this.systemRamBytes);
       this.enforced = true;
     } else if (explicit < 1024 ** 3) {
@@ -122,6 +140,27 @@ export class CapacityBroker {
       this.budgetBytes = explicit;
       this.enforced = true;
     }
+  }
+
+  /**
+   * Re-point the budget without rebuilding the broker. `null` reverts to
+   * {@link autoDetectBudgetBytes}. Existing reservations are untouched: a
+   * shrink below current commitments doesn't evict anything, it just makes
+   * the next `reserve` fail until the pool's LRU path frees room. That is
+   * the same shape as the cache controller's live budget, and it keeps the
+   * Settings slider from severing a mid-turn engine.
+   *
+   * Without this the budget was read once when the engine router was built
+   * and cached until shutdown, so changing the setting did nothing until
+   * the daemon restarted.
+   */
+  setBudgetBytes(bytes: number | null): void {
+    this.explicitBudgetBytes = bytes;
+    this.applyBudget();
+    log.info(
+      `budget set to ${this.budgetBytes} (${bytes === null ? 'auto' : 'explicit'}), ` +
+        `committed ${this.committedBytes()}`,
+    );
   }
 
   /** True iff a fresh reservation of `bytes` would fit under the budget. */
@@ -198,6 +237,8 @@ export class CapacityBroker {
       committedBytes: this.committedBytes(),
       enforced: this.enforced,
       systemRamBytes: this.systemRamBytes,
+      autoBudgetBytes: autoDetectBudgetBytes(this.systemRamBytes),
+      overridden: this.explicitBudgetBytes !== null,
       byKey: [...this.reservations.entries()]
         .map(([key, bytes]) => ({ key, bytes }))
         .sort((a, b) => b.bytes - a.bytes),

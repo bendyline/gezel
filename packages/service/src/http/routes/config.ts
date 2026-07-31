@@ -499,6 +499,15 @@ export function configRoutes(ctx: ServiceContext): Hono {
         ctx.chat.setCacheBudget('llama-cpp', mb['llama-cpp'] * 1024 * 1024);
       }
     }
+    // Same contract for the local-engine memory budget: push it into the
+    // live broker so the slider takes effect on the next model spawn
+    // instead of the next daemon restart. `null` reverts to auto. A shrink
+    // never evicts — it just makes the next reserve fail until the pool's
+    // LRU frees room, so moving the slider can't sever a running turn.
+    if (body.localEngineMemoryGb !== undefined) {
+      const gb = body.localEngineMemoryGb;
+      await ctx.chat.setLocalEngineMemoryBudget(gb === null ? null : Math.round(gb * 1024 ** 3));
+    }
     // GPU memory policy: hot-swap on the live arbiter so the next
     // chat turn / image gen sees the new behavior without a restart.
     // `'auto'` is resolved to a concrete policy via the same helper

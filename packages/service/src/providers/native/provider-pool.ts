@@ -123,6 +123,12 @@ export interface PoolSnapshot {
   committedBytes: number;
   budgetBytes: number;
   enforced: boolean;
+  /** Physical RAM — the Settings slider's ceiling. */
+  systemRamBytes: number;
+  /** What the host would auto-derive; the slider's "Auto" mark. */
+  autoBudgetBytes: number;
+  /** True when `localEngineMemoryGb` is overriding the auto value. */
+  overridden: boolean;
 }
 
 /**
@@ -771,6 +777,9 @@ export class ProviderPool {
       committedBytes: committed.committedBytes,
       budgetBytes: committed.budgetBytes,
       enforced: committed.enforced,
+      systemRamBytes: committed.systemRamBytes,
+      autoBudgetBytes: committed.autoBudgetBytes,
+      overridden: committed.overridden,
     };
   }
 

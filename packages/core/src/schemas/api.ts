@@ -1034,9 +1034,10 @@ export const GezelConfigSchema = z.object({
    * `min(systemRamGB * 0.6, 96)`. Hard-set to a low number on
    * tight-RAM hosts to keep gezel from monopolizing memory; raise
    * on Mac Studio / 128 GB machines that want the pool to keep
-   * multiple models warm.
+   * multiple models warm. Explicit `null` clears the override and
+   * returns the broker to the auto-derived value.
    */
-  localEngineMemoryGb: z.number().positive().optional(),
+  localEngineMemoryGb: z.number().positive().nullable().optional(),
   /**
    * Per-model clone count, keyed by catalog `modelId`. Missing keys
    * default to 1 (one resident replica). Drives the warm-pool

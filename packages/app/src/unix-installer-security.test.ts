@@ -73,10 +73,10 @@ describe('macOS machine-service filesystem security', () => {
     expect(macPostinstall).toContain('dscl . -list /Groups PrimaryGroupID');
     expect(macPostinstall).toContain('for candidate in $(seq 200 399)');
     expect(macPostinstall).toContain('if [ -z "$new_uid" ]');
-    expect(macPostinstall).toContain('user_id_count=$(dscl . -list /Users UniqueID');
-    expect(macPostinstall).toContain('group_id_count=$(dscl . -list /Groups PrimaryGroupID');
-    expect(macPostinstall).toContain('[ "$user_id_count" -ne 1 ]');
-    expect(macPostinstall).toContain('[ "$group_id_count" -ne 1 ]');
+    expect(macPostinstall).toContain('dscl . -list /Users UniqueID');
+    expect(macPostinstall).toContain('dscl . -list /Groups PrimaryGroupID');
+    expect(macPostinstall).toContain('[ "${user_id_count:-0}" -ne 1 ]');
+    expect(macPostinstall).toContain('[ "${group_id_count:-0}" -ne 1 ]');
     expect(macPostinstall).toContain('abort_bad_service_identity()');
     expect(macPostinstall).toContain('launchctl disable "system/${DAEMON_LABEL}"');
     expect(macPostinstall).toContain('daemon_shell=$(dscl . -read');
@@ -110,6 +110,81 @@ describe('macOS machine-service filesystem security', () => {
     expect(macPostinstall).toContain('grep -Eq \'"ok"[[:space:]]*:[[:space:]]*true\'');
     expect(macPostinstall).toContain('dump_service_diagnostics');
     expect(macUninstall).toContain('launchctl enable "system/${DAEMON_LABEL}"');
+  });
+
+  it('repairs a daemon account that kept its user but lost its group', () => {
+    // Group creation lives inside the `user does not exist` branch, so a
+    // machine holding the user without the group takes the *other* branch on
+    // every reinstall and never reaches the only code that makes a group.
+    // Without a repair here that state is permanent: validation rejects the
+    // install forever, and uninstall.sh ships inside an app bundle the failed
+    // install never wrote. Reproduced on a real Mac carrying uid 206 with no
+    // matching group.
+    const alreadyExists = position(macPostinstall, 'already exists; skipping create');
+    const repair = position(macPostinstall, 'group is missing; attempting repair');
+    const validation = position(macPostinstall, 'read_daemon_attribute() {');
+    expect(alreadyExists).toBeLessThan(repair);
+    expect(repair).toBeLessThan(validation);
+
+    // Repaired from the user's own PrimaryGroupID, not a freshly-picked id:
+    // the account already owns files under that gid.
+    expect(macPostinstall).toContain('dscl . -create "/Groups/${DAEMON_USER}" PrimaryGroupID "$repair_gid"');
+    // …and only when that id is genuinely free. Minting a group over a gid
+    // another group already holds would manufacture the shared-GID collision
+    // the checks below exist to reject.
+    expect(macPostinstall).toContain('[ "$repair_gid" -ge 200 ]');
+    expect(macPostinstall).toContain('[ "$repair_gid" -lt 400 ]');
+    expect(macPostinstall).toContain('[ "$repair_gid_owners" = "0" ]');
+    expect(macPostinstall).toContain('cannot safely recreate ${DAEMON_USER} group');
+  });
+
+  it('reads every identity attribute through a guard so a gap is named, not trapped', () => {
+    // dscl exits non-zero for a missing record AND for a missing key on a
+    // record that exists. Under `set -Eeuo pipefail` a bare
+    // `x=$(dscl ... | awk ...)` aborts at the ERR trap, so PackageKit showed
+    // only "installation failed" plus a line number. Absent values have to
+    // survive to the named checks instead.
+    expect(macPostinstall).toContain('read_daemon_attribute() {');
+    expect(macPostinstall).toMatch(/dscl \. -read "\$1" "\$2" 2>\/dev\/null \|\n\s*awk .* \|\| true/);
+    expect(macPostinstall).toContain('the dedicated user record is missing or incomplete');
+    expect(macPostinstall).toContain(
+      'the matching ${DAEMON_USER} group is missing and could not be repaired',
+    );
+
+    // The regression itself: no identity value may be assigned from an
+    // unguarded dscl pipeline.
+    const unguarded = macPostinstall
+      .split('\n')
+      .filter((line) => /^\s*(daemon_|user_id_count|group_id_count|repair_)\w*=\$\(\s*dscl/.test(line))
+      .filter((line) => !line.includes('2>/dev/null'));
+    expect(unguarded, `unguarded dscl assignment: ${unguarded.join(' | ')}`).toEqual([]);
+  });
+
+  it('still refuses to commandeer a pre-existing interactive or shared account', () => {
+    // The repair above must not soften any of these: it only ever creates a
+    // group, never rewrites the user record's shell, home, or visibility.
+    expect(macPostinstall).toContain('abort_bad_service_identity');
+    expect(macPostinstall).toContain('[ "$daemon_uid" -lt 200 ]');
+    expect(macPostinstall).toContain('[ "$daemon_uid" -ge 400 ]');
+    expect(macPostinstall).toContain('[ "$daemon_uid" -ne "$daemon_user_gid" ]');
+    expect(macPostinstall).toContain('[ "${user_id_count:-0}" -ne 1 ]');
+    expect(macPostinstall).toContain('[ "${group_id_count:-0}" -ne 1 ]');
+    expect(macPostinstall).toContain('[ "$daemon_shell" != "/usr/bin/false" ]');
+    expect(macPostinstall).toContain('[ "$daemon_home" != "/var/empty" ]');
+    expect(macPostinstall).toContain('[ "$daemon_hidden" != "1" ]');
+
+    // The repair writes to /Groups only. Re-asserting the user record's shell,
+    // home, or visibility would turn a pre-existing human account named
+    // _gezeld into a daemon account — exactly what the checks above refuse.
+    const repairBlock = macPostinstall.slice(
+      position(macPostinstall, 'group is missing; attempting repair'),
+      position(macPostinstall, 'read_daemon_attribute() {'),
+    );
+    const repairWrites = repairBlock.match(/dscl \. -create "[^"]+"/g) ?? [];
+    expect(repairWrites.length).toBeGreaterThan(0);
+    for (const write of repairWrites) {
+      expect(write, 'account repair must never rewrite the user record').toContain('/Groups/');
+    }
   });
 });
 

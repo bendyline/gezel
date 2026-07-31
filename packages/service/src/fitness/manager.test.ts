@@ -126,6 +126,9 @@ describe('ModelFitnessManager', () => {
       enforced: true,
       committedBytes: 92 * GB,
       budgetBytes: 96 * GB,
+      systemRamBytes: 128 * GB,
+      autoBudgetBytes: 96 * GB,
+      overridden: false,
       entries: [
         {
           key: 'llama-cpp:qwen3.6-27b-q4:0',
