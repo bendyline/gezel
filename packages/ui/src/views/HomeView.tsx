@@ -557,7 +557,14 @@ function UpdateBanner({ state, platform }: { state: UpdateState | null; platform
         <span>
           You can keep working. Download the latest version and run the installer to update
           manually.{' '}
-          <a href="https://github.com/bendyline/gezel/releases/latest" rel="noreferrer">
+          <a
+            href={
+              state.version
+                ? `https://github.com/bendyline/gezel/releases/tag/v${encodeURIComponent(state.version)}`
+                : 'https://github.com/bendyline/gezel/releases'
+            }
+            rel="noreferrer"
+          >
             Get the latest release
           </a>
         </span>

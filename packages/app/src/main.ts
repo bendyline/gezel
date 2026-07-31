@@ -34,6 +34,11 @@ import { type Connection, connectOrStart } from './supervisor/index.js';
 import { updateActiveTraySessions } from './tray-activity.js';
 import { type EngagementMode, TrayController } from './tray.js';
 import { type UpdaterPermission, resolveUpdaterPermission } from './updater-policy.js';
+import {
+  type PublishedAppRelease,
+  appReleaseFeedConfiguration,
+  discoverLatestAppRelease,
+} from './updater/app-release.js';
 
 const execFileP = promisify(execFile);
 
@@ -78,6 +83,8 @@ let isQuitting = false;
 let quitOnClose = false;
 // Held so the tray's "Check for updates" item can re-trigger a check.
 let autoUpdaterRef: import('electron-updater').AppUpdater | null = null;
+/** The exact app-tagged release selected for the current update check. */
+let appUpdateRelease: PublishedAppRelease | null = null;
 /**
  * What the renderer shows about updates. Previously every update outcome —
  * including outright failure — went only to the console, so a user whose
@@ -1312,9 +1319,7 @@ async function setupAutoUpdater(): Promise<void> {
     return;
   }
   const updater = ensureAutoUpdater();
-  updater?.checkForUpdates().catch((err: unknown) => {
-    console.warn('[updater] check failed:', err);
-  });
+  if (updater) await checkAppReleaseForUpdates(updater);
 }
 
 function triggerUpdateCheck(): void {
@@ -1333,9 +1338,32 @@ async function triggerAuthorizedUpdateCheck(): Promise<void> {
   // check can recover by wiring the updater only after authorization succeeds.
   const updater = ensureAutoUpdater();
   if (!updater) return;
-  await updater.checkForUpdates().catch((err: unknown) => {
+  await checkAppReleaseForUpdates(updater);
+}
+
+/**
+ * GitHub's repository-wide "latest" release may be a `native-v*` engine
+ * release. Resolve the newest exact `v<semver>` application release first,
+ * then give electron-updater a generic feed rooted at that immutable tag.
+ */
+async function checkAppReleaseForUpdates(
+  updater: import('electron-updater').AppUpdater,
+): Promise<void> {
+  try {
+    const release = await discoverLatestAppRelease({
+      fetch: globalThis.fetch,
+    });
+    if (!release) {
+      console.info('[updater] no published application release exists yet');
+      return;
+    }
+    appUpdateRelease = release;
+    updater.setFeedURL(appReleaseFeedConfiguration(release));
+    console.info(`[updater] checking application release ${release.tagName}`);
+    await updater.checkForUpdates();
+  } catch (err) {
     console.warn('[updater] check failed:', err);
-  });
+  }
 }
 
 function ensureAutoUpdater(): import('electron-updater').AppUpdater | null {
@@ -1370,6 +1398,7 @@ function ensureAutoUpdater(): import('electron-updater').AppUpdater | null {
       console.warn('[updater] error:', err);
       setUpdateState({
         kind: 'error',
+        version: appUpdateRelease?.version,
         message: `Could not check for updates: ${err instanceof Error ? err.message : String(err)}`,
       });
     });
@@ -1855,10 +1884,10 @@ app.whenReady().then(async () => {
   // its window-close specs keep quitting. Non-fatal if it fails.
   await initTray();
 
-  // electron-updater pulls release metadata from the GitHub repo configured
-  // under `publish:` in electron-builder.yml. Packaged builds only — dev
-  // launches have no signed installer to update from. Surfaces
-  // update-available / -downloaded as notifications via the tray.
+  // Resolve the latest exact `v<semver>` app release, then point
+  // electron-updater at that immutable release's metadata. This deliberately
+  // excludes the repository's `native-v*` releases. Packaged builds only —
+  // dev launches have no signed installer to update from.
   await setupAutoUpdater();
 
   app.on('activate', () => {

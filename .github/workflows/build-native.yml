@@ -1602,6 +1602,11 @@ jobs:
           tag_name: ${{ github.ref_name }}
           name: Native binaries v${{ steps.pack.outputs.version }}
           draft: true
+          # Native archives are implementation inputs, not end-user app
+          # releases. Keeping them in GitHub's prerelease channel prevents a
+          # published native-v* tag from replacing the Electron app at
+          # /releases/latest.
+          prerelease: true
           generate_release_notes: true
           body: |
             Prebuilt Gezel native engine binaries, signed at birth:
@@ -1619,6 +1624,8 @@ jobs:
             signatures before packaging). This workflow has already
             verified the complete platform archive set and every checksum.
             After validation, publish this draft from the GitHub Releases UI.
+            It remains a prerelease by design so GitHub's stable/latest
+            release namespace belongs only to the Electron application.
 
             Each archive contains the engine binaries for one platform plus
             `THIRD_PARTY_LICENSES/` with the pin-bound native redistribution

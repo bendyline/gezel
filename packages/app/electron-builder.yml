@@ -162,11 +162,12 @@ afterPack: scripts/after-pack.cjs
 # afterSign hook only sees the .app and would leave the installer package
 # itself unnotarized.
 
-# `electron-updater` consults this at runtime to find releases. The
-# release workflow runs with `--publish never` and uploads artifacts via
-# softprops/action-gh-release instead, so this block only feeds the
-# autoUpdater check on the client. Repo must be public so unauthenticated
-# clients can read the releases API.
+# electron-builder needs a publish target to generate each platform's update
+# metadata. The release workflow still runs with `--publish never` and uploads
+# artifacts via softprops/action-gh-release. At runtime main.ts deliberately
+# overrides this GitHub provider with a generic provider rooted at the newest
+# exact `v<semver>` app release, because this repository's `native-v*` releases
+# must never participate in Electron update discovery.
 publish:
   provider: github
   owner: bendyline

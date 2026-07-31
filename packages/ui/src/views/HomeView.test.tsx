@@ -270,7 +270,20 @@ describe('HomeView', () => {
       expect(banner).toHaveTextContent('Gatekeeper rejected the package');
       expect(screen.getByRole('link', { name: /get the latest release/i })).toHaveAttribute(
         'href',
-        'https://github.com/bendyline/gezel/releases/latest',
+        'https://github.com/bendyline/gezel/releases/tag/v1.26212.4',
+      );
+    });
+
+    it('falls back to the releases list, never repository latest, when no app version is known', async () => {
+      stubUpdateBridge({
+        kind: 'error',
+        message: 'Could not contact the update service',
+      });
+      render(<HomeView platform="darwin" />);
+
+      expect(await screen.findByRole('link', { name: /get the latest release/i })).toHaveAttribute(
+        'href',
+        'https://github.com/bendyline/gezel/releases',
       );
     });
   });
