@@ -4633,6 +4633,7 @@ export class Store {
           ...(m.durationMs !== undefined ? { durationMs: m.durationMs } : {}),
           ...(m.truncated ? { truncated: true } : {}),
           ...(m.errorMessage ? { errorMessage: m.errorMessage } : {}),
+          ...(m.fileReferences ? { fileReferences: m.fileReferences } : {}),
           ...(m.cwd !== undefined ? { cwd: m.cwd } : {}),
         });
       }

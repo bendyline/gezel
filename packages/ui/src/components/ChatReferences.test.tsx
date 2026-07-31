@@ -6,6 +6,9 @@ import { CHAT_RAIL_MIN_SPLIT_PX, ChatReferences } from './ChatReferences.js';
 
 const apiMocks = vi.hoisted(() => ({
   getTaskByRef: vi.fn(),
+  readProjectArtifact: vi.fn(),
+  readDocument: vi.fn(),
+  readProjectWorkspaceFile: vi.fn(),
 }));
 
 vi.mock('../api.js', () => ({ api: apiMocks }));
@@ -17,6 +20,9 @@ vi.mock('./CommandsPanel.js', () => ({
 let activeWidth = 0;
 
 beforeEach(() => {
+  apiMocks.readProjectArtifact.mockImplementation(async (_projectId, path) => ({
+    content: `# ${path}`,
+  }));
   Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
     configurable: true,
     get: () => activeWidth,
@@ -151,5 +157,82 @@ describe('ChatReferences task picker', () => {
 
     expect(await screen.findByText('Second task')).toBeInTheDocument();
     expect(apiMocks.getTaskByRef).toHaveBeenLastCalledWith('project-1/2');
+  });
+});
+
+describe('ChatReferences reference picker', () => {
+  it('promotes a terminal workspace reference into the previewer', async () => {
+    activeWidth = CHAT_RAIL_MIN_SPLIT_PX;
+    const user = userEvent.setup();
+    apiMocks.readProjectWorkspaceFile.mockRejectedValue(
+      new Error('Preview unavailable in workspace-reference test'),
+    );
+
+    render(
+      <ChatReferences chatKey="project-1" projectId="project-1">
+        {({ onWorkspaceReference }) => (
+          <button type="button" onClick={() => onWorkspaceReference('battle-research.md')}>
+            Open workspace reference
+          </button>
+        )}
+      </ChatReferences>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Open workspace reference' }));
+
+    await waitFor(() => {
+      expect(apiMocks.readProjectWorkspaceFile).toHaveBeenCalledWith(
+        'project-1',
+        'battle-research.md',
+      );
+    });
+  });
+
+  it('selects files from a dropdown under the References tab', async () => {
+    activeWidth = CHAT_RAIL_MIN_SPLIT_PX;
+    const user = userEvent.setup();
+    // Keep the viewer on its lightweight error path. This test exercises the
+    // picker; rendering markdown would pull canvas/media behavior into jsdom
+    // that belongs to the previewer's own coverage.
+    apiMocks.readProjectArtifact.mockRejectedValue(new Error('Preview unavailable in picker test'));
+
+    const { container } = render(
+      <ChatReferences chatKey="project-1" projectId="project-1" commandsProjectId="project-1">
+        {({ onToolActivity }) => (
+          <button
+            type="button"
+            onClick={() => {
+              onToolActivity({
+                name: 'read_artifact',
+                path: 'outline.md',
+                success: true,
+                durationMs: 1,
+              });
+              onToolActivity({
+                name: 'read_artifact',
+                path: 'design.md',
+                success: true,
+                durationMs: 1,
+              });
+            }}
+          >
+            Add references
+          </button>
+        )}
+      </ChatReferences>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Add references' }));
+
+    const referencesTab = await screen.findByRole('tab', { name: 'References' });
+    expect(referencesTab).toHaveAttribute('aria-haspopup', 'menu');
+    expect(container.querySelector('nav[aria-label="References"]')).toBeNull();
+
+    await user.click(referencesTab);
+    await user.click(await screen.findByRole('menuitem', { name: 'design.md' }));
+
+    await waitFor(() => {
+      expect(apiMocks.readProjectArtifact).toHaveBeenLastCalledWith('project-1', 'design.md');
+    });
   });
 });

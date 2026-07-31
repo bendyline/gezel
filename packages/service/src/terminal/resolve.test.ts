@@ -22,9 +22,18 @@ describe('resolveTerminalInput', () => {
     expect(resolveTerminalInput('   \t  ', null)).toEqual({ kind: 'empty' });
   });
 
-  it('intercepts pwd / clear without spawning', () => {
+  it('intercepts pwd / clear / open without spawning', () => {
     expect(resolveTerminalInput('pwd', null)).toEqual({ kind: 'intercept', intercept: 'pwd' });
     expect(resolveTerminalInput('clear', null)).toEqual({ kind: 'intercept', intercept: 'clear' });
+    expect(resolveTerminalInput('open "battle research.md"', null)).toEqual({
+      kind: 'intercept',
+      intercept: 'open',
+      arg: 'battle research.md',
+    });
+    expect(resolveTerminalInput('open', null)).toEqual({
+      kind: 'parseError',
+      message: 'open requires a workspace file path',
+    });
   });
 
   it('passes cd through to the shell as argv (no longer intercepted)', () => {

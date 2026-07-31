@@ -1338,6 +1338,18 @@ html.embedded-chat #root {
 .machine-memory-segment-gezel {
   background: var(--accent);
 }
+.machine-memory-segment-gezel-infra {
+  background: color-mix(in srgb, var(--accent) 42%, var(--surface));
+}
+.machine-memory-segment-gezel-weights {
+  background: var(--accent);
+}
+.machine-memory-segment-gezel-cache {
+  background: color-mix(in srgb, var(--accent) 78%, var(--text));
+}
+.machine-memory-segment-gezel + .machine-memory-segment-gezel {
+  box-shadow: inset 1px 0 color-mix(in srgb, var(--surface) 45%, transparent);
+}
 .machine-memory-segment-other {
   background: color-mix(in srgb, var(--warning) 62%, var(--surface));
 }
@@ -1503,7 +1515,15 @@ html.embedded-chat #root {
 .queue-meter-chip-label-short {
   display: none;
 }
+/* Size and line box pinned to match `.queue-meter-chip-gezel-name`. The
+   chip centers its flex items by box, not by baseline, so a count that
+   inherited the button's 0.72rem/`normal` landed ~0.6px below the name's
+   baseline — Chromium rounds a font's used ascent/descent to whole pixels
+   per size, and the two spans rounded differently. Identical metrics make
+   the centering exact. */
 .queue-meter-chip-counts {
+  font-size: 0.76rem;
+  line-height: 1;
   font-variant-numeric: tabular-nums;
   font-weight: 500;
 }
@@ -3254,12 +3274,22 @@ html.embedded-chat #root {
     drop-shadow(3px 5px 9px var(--sidebar-seam-shadow));
 }
 
-/* The shared inset highlight reads as a stray gray arc against dark project
-   tabs. Their filter shadow already supplies elevation, so keep the surface
-   clean and let the actual perimeter be the only top edge. */
+/* Project tabs sit in a dense list where the shared inset highlight and
+   drop-shadow can rasterize as a second gray contour just inside the orange
+   perimeter. Keep these rows flat: the connected border alone distinguishes
+   the active project from its neighbours. */
 .app-sidebar-proj-row.active,
 :root[data-sidebar-side="right"] .app-sidebar-proj-row.active {
   box-shadow: none;
+  filter: none;
+}
+
+/* The nested name button also matched the shared active-tab filter rule.
+   Clear it explicitly after the mirrored rule so it cannot paint a second
+   rounded silhouette inside the wrapper on either sidebar side. */
+.app-sidebar-proj-row.active > .app-sidebar-item.active,
+:root[data-sidebar-side="right"] .app-sidebar-proj-row.active > .app-sidebar-item.active {
+  filter: none;
 }
 
 :root[data-sidebar-side="right"] .app-sidebar-item.active::after,
@@ -6561,7 +6591,7 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
 }
 
 .chat-send-btn {
-  margin: 2px 2px 2px 0.5rem;
+  margin: 1px 2px 1px calc(0.5rem + 2px);
   border: 1px solid color-mix(in srgb, var(--accent) 82%, var(--text));
   border-radius: var(--radius-md);
   background: linear-gradient(
@@ -14183,23 +14213,17 @@ button.timeline-session-divider-continuing::before {
   gap: 0.4rem;
 }
 
-/* References section keeps the original row layout (viewer + tab
-   column on the right); Commands section just fills the available
-   space. */
+/* Every rail section fills the available space. Reference selection lives
+   in the References tab's dropdown rather than taking width from the viewer. */
 .chat-rail-section-body {
   display: flex;
   flex: 1;
   min-height: 0;
 }
 
-.chat-rail-section-body-row {
-  flex-direction: row;
-  gap: 0.4rem;
-}
-
-/* Tab strip that switches between References and Commands. Only
-   rendered when both are available; if there's only one, the rail
-   shows that one directly without chrome. */
+/* Tab strip that switches among rail sections and hosts dropdown triggers
+   when a section has multiple items. A lone section with one item renders
+   directly without this chrome. */
 .chat-rail-section-tabs {
   display: flex;
   gap: 0.25rem;
@@ -14251,11 +14275,27 @@ button.timeline-session-divider-continuing::before {
   max-width: min(24rem, calc(100vw - 2rem));
 }
 
+.chat-rail-reference-menu {
+  min-width: 10rem;
+  max-width: min(24rem, calc(100vw - 2rem));
+}
+
+.chat-rail-reference-menu-item {
+  min-width: 0;
+}
+
+.chat-rail-reference-menu-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .chat-rail-task-menu-item {
   min-width: 0;
 }
 
-.chat-rail-task-menu-check {
+.chat-rail-menu-check {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -14541,47 +14581,6 @@ button.timeline-session-divider-continuing::before {
   display: flex;
   justify-content: flex-end;
   gap: 0.4rem;
-}
-
-.chat-rail-tabs {
-  display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
-  padding-left: 0.35rem;
-  border-left: 1px solid var(--border);
-  width: 6rem;
-  flex: 0 0 auto;
-  overflow-y: auto;
-}
-
-.chat-rail-tab {
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 4px;
-  padding: 0.3rem 0.4rem;
-  font-size: 0.75rem;
-  color: var(--muted);
-  cursor: pointer;
-  text-align: left;
-  font-family: inherit;
-}
-
-.chat-rail-tab-label {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.chat-rail-tab:hover {
-  background: rgba(176, 114, 76, 0.08);
-  color: var(--fg);
-}
-
-.chat-rail-tab-active {
-  background: rgba(176, 114, 76, 0.14);
-  color: var(--fg);
-  border-color: rgba(176, 114, 76, 0.28);
 }
 
 .chat-rail-side-header {
@@ -18702,6 +18701,31 @@ a.license-button:hover {
   min-width: 100%;
 }
 
+.terminal-file-link {
+  appearance: none;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: inherit;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 0.16em;
+  cursor: pointer;
+}
+
+.terminal-file-link:hover,
+.terminal-file-link:focus-visible {
+  color: var(--accent);
+  text-decoration-style: solid;
+}
+
+.terminal-file-link:focus-visible {
+  outline: 1px solid currentColor;
+  outline-offset: 2px;
+}
+
 /* Light-mode terminal surfaces — `--color-*` tokens above are undefined
  * so dark fallbacks ship in both themes. Goal in light mode is "monospace
  * content block on paper", NOT "dark terminal slab" — re-skin the output
@@ -19384,6 +19408,7 @@ a.license-button:hover {
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
   font-size: 0.85rem;
   line-height: 21px;
+  transform: translateY(1px);
   white-space: nowrap;
   pointer-events: none;
   opacity: 0.85;

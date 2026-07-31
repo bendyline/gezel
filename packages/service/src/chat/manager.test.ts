@@ -669,6 +669,44 @@ describe('ChatManager — task context', () => {
     expect(sys).toContain('Design');
   });
 
+  it('anchors a paused task as blocked instead of telling the gezel to continue its step', async () => {
+    const { TaskManager } = await import('../tasks/manager.js');
+    const taskMgr = new TaskManager(store);
+    const task = await taskMgr.create('default', {
+      title: 'Historical battle report',
+      assignee: { kind: 'gezel', gezelId: 'ada' },
+      steps: [
+        {
+          name: 'Outline',
+          prompt: 'Write `notes/outline.md`, then advance the task.',
+          advanceWhen: { file: 'notes/outline.md', minBytes: 100 },
+        },
+      ],
+    });
+    await taskMgr.appendNote('default', task.num, {
+      text: 'Paused because the outline gate did not observe a changed file.',
+      author: { kind: 'user' },
+    });
+    await taskMgr.setStatus('default', task.num, 'paused');
+
+    const session = await manager.createSession({
+      gezelId: 'ada',
+      projectId: 'default',
+      taskRef: task.ref,
+      stepId: task.activeStepId,
+    });
+    mock.script('blocked');
+    await manager.send(session.id, 'keep going');
+
+    const create = mock.calls.find((call) => call.kind === 'create');
+    const system = create!.opts!.systemMessage!;
+    expect(system).toContain(`Task \`${task.ref}\` — "Historical battle report" is paused`);
+    expect(system).toContain('Do not continue the step');
+    expect(system).toContain('Paused because the outline gate did not observe a changed file.');
+    expect(system).not.toContain('You are mid-craftbook step');
+    expect(system).not.toContain('identify the FIRST tool it tells you to call');
+  });
+
   it('keeps an urgent build-step prompt consistent with its live write-only tool surface', async () => {
     const localHome = await mkdtemp(join(tmpdir(), 'gezel-task-write-surface-'));
     const localStore = new Store({ home: localHome });
@@ -1279,6 +1317,22 @@ async function waitForCondition(
 }
 
 describe('ChatManager — messageGezel (cross-gezel messaging)', () => {
+  it('rejects a text-file handoff to a pure-delegation role before queueing it', async () => {
+    await store.createGezel({ name: 'Maya', role: 'Planner' });
+    const adaSession = await manager.createSession({ gezelId: 'ada' });
+
+    await expect(
+      manager.messageGezel({
+        fromGezelId: 'ada',
+        fromSessionId: adaSession.id,
+        toGezelIdOrName: 'maya',
+        text: 'Write the outline.',
+        expectedDeliverable: { kind: 'file', filePath: 'notes/outline.md' },
+      }),
+    ).rejects.toThrow(/cannot write workspace file "notes\/outline\.md"/);
+    expect(await store.listSessions({ gezelId: 'maya' })).toHaveLength(0);
+  });
+
   it("reuses the target gezel's active session and injects a prefixed user message", async () => {
     await store.createGezel({ name: 'Maya', role: 'Voorman' });
     const adaSession = await manager.createSession({ gezelId: 'ada' });
@@ -1515,6 +1569,50 @@ describe('ChatManager — messageGezel (cross-gezel messaging)', () => {
     const mayaDisk = await store.getSession('maya', res.sessionId);
     expect(mayaDisk!.messages[0]?.content).toBe('[Message from Ada]: please handle the page');
     expect(mayaDisk!.messages[1]?.content).toBe('I will take it from here.');
+  });
+
+  it('joins a duplicate pending file handoff instead of parking it twice', async () => {
+    await store.createGezel({ name: 'Maya', role: 'Developer' });
+    const adaSession = await manager.createSession({ gezelId: 'ada' });
+    mock.script('I wrote the outline.');
+
+    const internals = manager as unknown as {
+      inflight: Map<string, { userText: string; startedAt: number }>;
+      afterSessionIdle: Map<string, Array<() => void>>;
+      flushAfterSessionIdle(sessionId: string): void;
+    };
+    internals.inflight.set(adaSession.id, { userText: 'delegate', startedAt: Date.now() });
+
+    const first = await manager.messageGezel({
+      fromGezelId: 'ada',
+      fromSessionId: adaSession.id,
+      toGezelIdOrName: 'maya',
+      text: 'Write the outline.',
+      expectedDeliverable: { kind: 'file', filePath: 'notes/outline.md' },
+    });
+    const duplicate = await manager.messageGezel({
+      fromGezelId: 'ada',
+      fromSessionId: adaSession.id,
+      toGezelIdOrName: 'maya',
+      text: 'Please write the outline now.',
+      expectedDeliverable: { kind: 'file', filePath: 'notes/outline.md' },
+    });
+
+    expect(duplicate).toMatchObject({
+      sessionId: first.sessionId,
+      toGezelId: first.toGezelId,
+      deduplicated: true,
+    });
+    expect(internals.afterSessionIdle.get(adaSession.id)).toHaveLength(1);
+
+    internals.inflight.delete(adaSession.id);
+    internals.flushAfterSessionIdle(adaSession.id);
+    await waitForCondition(async () => {
+      const disk = await store.getSession('maya', first.sessionId);
+      return (disk?.messages.length ?? 0) >= 2;
+    });
+    const mayaDisk = await store.getSession('maya', first.sessionId);
+    expect(mayaDisk!.messages.filter((message) => message.role === 'user')).toHaveLength(1);
   });
 
   it('flushes deferred target sends before draining queued sender messages', async () => {

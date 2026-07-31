@@ -46,9 +46,12 @@ test.afterAll(async () => {
 });
 
 test('01 - app window opens with correct title', async () => {
-  const title = await page.title();
+  // The BrowserWindow is created before the embedded service is ready and
+  // navigates from the splash to the daemon URL. During that handoff Electron
+  // briefly exposes a generated "Loading https://…" title, so wait for the
+  // served UI's document title instead of snapshotting the transient value.
+  await expect(page).toHaveTitle('Gezel');
   await page.screenshot({ path: join(screenshotDir, '01-initial-load.png'), fullPage: true });
-  expect(title).toBe('Gezel');
 });
 
 test('02 - header shows the brand and the left sidebar lists every area', async () => {

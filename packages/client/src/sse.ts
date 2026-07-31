@@ -276,8 +276,8 @@ export function streamAllChatEvents(opts: SseStreamOptions): AsyncGenerator<Chat
 
 /**
  * Per-project terminal events stream. Lives forever; aborts via `signal`.
- * Each envelope is `{ projectId, threadId, workingDir, message }` —
- * the UI splices `message` into the matching thread's timeline rows.
+ * Envelopes include persisted messages, live output, cwd changes, prompt
+ * requests, and one-shot file-open intents. The UI narrows by `kind`.
  * Same keepalive defaults as the chat envelope streams.
  */
 export function streamTerminalEvents(

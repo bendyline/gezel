@@ -1,6 +1,6 @@
 import type { TerminalTimelineEntry } from '@bendyline/gezel';
 import { fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { TerminalBubble } from './TerminalBubble.js';
 import { TerminalStreamingBubble } from './TerminalStreamingBubble.js';
 
@@ -25,6 +25,23 @@ describe('TerminalBubble', () => {
     expect(output).toHaveClass('terminal-output-viewport');
     expect(output).toHaveAttribute('tabindex', '0');
     expect(output.querySelector('.terminal-output-body')?.textContent).toBe(OUTPUT_ENTRY.content);
+  });
+
+  it('links only service-verified filenames and opens their workspace path', () => {
+    const onOpenWorkspaceFile = vi.fn();
+    const entry: TerminalTimelineEntry = {
+      ...OUTPUT_ENTRY,
+      content: 'battle-research.md  battle-research.md.bak  guessed.md',
+      fileReferences: [{ label: 'battle-research.md', path: 'notes/battle-research.md' }],
+    };
+    render(<TerminalBubble entry={entry} onOpenWorkspaceFile={onOpenWorkspaceFile} />);
+
+    const link = screen.getByRole('button', { name: 'battle-research.md' });
+    expect(screen.queryByRole('button', { name: 'guessed.md' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'battle-research.md.bak' })).toBeNull();
+    fireEvent.click(link);
+    expect(onOpenWorkspaceFile).toHaveBeenCalledWith('notes/battle-research.md');
+    expect(screen.getByRole('region', { name: 'Terminal output' }).textContent).toBe(entry.content);
   });
 });
 

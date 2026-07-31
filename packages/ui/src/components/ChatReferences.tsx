@@ -44,11 +44,11 @@ import { useCompactLayout } from './useCompactLayout.js';
  *       )}
  *     </ChatReferences>
  *
- * The render prop receives an `onToolActivity` callback that the caller
- * threads into the timeline + composer. Switching `chatKey` clears the
- * reference list — callers should key it to a stable scope (project id
- * for project chat, "global" for the Meester) so the list persists
- * across gezel + session switches within that scope.
+ * The render prop receives callbacks that the caller threads into the
+ * timeline + composer. Switching `chatKey` clears the reference list — callers
+ * should key it to a stable scope (project id for project chat, "global" for
+ * the Meester) so the list persists across gezel + session switches within
+ * that scope.
  */
 
 type RefKind = 'artifact' | 'document' | 'workspace';
@@ -161,6 +161,8 @@ export interface ChatReferencesApi {
    * back to this ChatReferences' own `projectId` prop).
    */
   onArtifactReference: (path: string, projectId?: string) => void;
+  /** Promote a workspace file into the References viewer. */
+  onWorkspaceReference: (path: string, projectId?: string) => void;
   /**
    * Fed by the timeline as it loads/streams messages. Surfaces a task in
    * the right rail's "Task" tab so the gezel's current work context is
@@ -339,13 +341,35 @@ export function ChatReferences({
     if (ref) setActiveRef(ref);
   }, []);
 
+  const handleWorkspaceReference = useCallback((path: string, messageProjectId?: string) => {
+    const key = referenceKey('workspace', messageProjectId, path);
+    let ref: Reference | null = null;
+    setReferences((prev) => {
+      const hit = prev.find((r) => r.key === key);
+      if (hit) {
+        ref = hit;
+        return prev;
+      }
+      ref = {
+        key,
+        kind: 'workspace',
+        path,
+        firstSeenAt: Date.now(),
+        ...(messageProjectId ? { projectId: messageProjectId } : {}),
+      };
+      return [...prev, ref];
+    });
+    if (ref) setActiveRef(ref);
+  }, []);
+
   const api = useMemo<ChatReferencesApi>(
     () => ({
       onToolActivity: handleToolActivity,
       onArtifactReference: handleArtifactReference,
+      onWorkspaceReference: handleWorkspaceReference,
       onTaskReference: handleTaskReference,
     }),
-    [handleToolActivity, handleArtifactReference, handleTaskReference],
+    [handleToolActivity, handleArtifactReference, handleWorkspaceReference, handleTaskReference],
   );
 
   const handleResolved = useCallback((refKey: string, resolvedKind: RefKind) => {
@@ -519,7 +543,8 @@ export function ChatReferences({
         {hasSide && (
           <div className="chat-rail-side-inner">
             {([hasTasks, hasReferences, hasCommands].filter(Boolean).length > 1 ||
-              orderedTasks.length > 1) && (
+              orderedTasks.length > 1 ||
+              references.length > 1) && (
               <div className="chat-rail-section-tabs" role="tablist">
                 {hasTasks &&
                   (orderedTasks.length > 1 ? (
@@ -555,19 +580,31 @@ export function ChatReferences({
                     Commands
                   </button>
                 )}
-                {hasReferences && (
-                  <button
-                    type="button"
-                    role="tab"
-                    className={`chat-rail-section-tab${
-                      activeTab === 'references' ? ' is-active' : ''
-                    }`}
-                    aria-selected={activeTab === 'references'}
-                    onClick={() => setActiveTab('references')}
-                  >
-                    References
-                  </button>
-                )}
+                {hasReferences &&
+                  (references.length > 1 ? (
+                    <ReferenceTabMenu
+                      refs={references}
+                      activeKey={effectiveActive.key}
+                      selected={activeTab === 'references'}
+                      onOpen={() => setActiveTab('references')}
+                      onSelect={(reference) => {
+                        setActiveRef(reference);
+                        setActiveTab('references');
+                      }}
+                    />
+                  ) : (
+                    <button
+                      type="button"
+                      role="tab"
+                      className={`chat-rail-section-tab${
+                        activeTab === 'references' ? ' is-active' : ''
+                      }`}
+                      aria-selected={activeTab === 'references'}
+                      onClick={() => setActiveTab('references')}
+                    >
+                      References
+                    </button>
+                  ))}
               </div>
             )}
             {activeTab === 'tasks' && hasTasks && effectiveTaskRef && (
@@ -586,7 +623,7 @@ export function ChatReferences({
               </div>
             )}
             {activeTab === 'references' && effectiveActive && (
-              <div className="chat-rail-section-body chat-rail-section-body-row">
+              <div className="chat-rail-section-body">
                 <div className="chat-rail-viewer-wrap">
                   <ReferenceViewer
                     key={effectiveActive.key}
@@ -595,13 +632,6 @@ export function ChatReferences({
                     onResolved={handleResolved}
                   />
                 </div>
-                {references.length > 1 && (
-                  <ReferenceTabs
-                    refs={references}
-                    activeKey={effectiveActive.key}
-                    onSelect={setActiveRef}
-                  />
-                )}
               </div>
             )}
             {activeTab === 'commands' && commandsProjectId && (
@@ -751,7 +781,7 @@ function TaskTabMenu({
                 onSelect={() => onSelect(task.ref)}
                 title={task.scoped ? `${task.ref} (this session's task)` : task.ref}
               >
-                <span className="chat-rail-task-menu-check" aria-hidden="true">
+                <span className="chat-rail-menu-check" aria-hidden="true">
                   {active && (
                     <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
                       <path
@@ -775,32 +805,78 @@ function TaskTabMenu({
   );
 }
 
-function ReferenceTabs({
+function ReferenceTabMenu({
   refs,
   activeKey,
+  selected,
+  onOpen,
   onSelect,
 }: {
   refs: Reference[];
   activeKey: string | null;
+  selected: boolean;
+  onOpen: () => void;
   onSelect: (r: Reference) => void;
 }) {
   return (
-    <nav className="chat-rail-tabs" aria-label="References">
-      {refs.map((r) => {
-        const name = r.path.split('/').pop() || r.path;
-        return (
-          <button
-            key={r.key}
-            type="button"
-            className={`chat-rail-tab${r.key === activeKey ? ' chat-rail-tab-active' : ''}`}
-            onClick={() => onSelect(r)}
-            title={r.path}
-          >
-            <span className="chat-rail-tab-label">{name}</span>
-          </button>
-        );
-      })}
-    </nav>
+    <DropdownMenu.Root
+      onOpenChange={(open) => {
+        if (open) onOpen();
+      }}
+    >
+      <DropdownMenu.Trigger asChild>
+        <button
+          type="button"
+          role="tab"
+          className={`chat-rail-section-tab chat-rail-section-tab-menu${
+            selected ? ' is-active' : ''
+          }`}
+          aria-selected={selected}
+        >
+          <span>References</span>
+          <DropdownChevron className="chat-rail-section-tab-chevron" />
+        </button>
+      </DropdownMenu.Trigger>
+      <DropdownMenu.Portal>
+        <DropdownMenu.Content
+          className="app-nav-menu chat-rail-reference-menu"
+          sideOffset={4}
+          align="start"
+          aria-label="Choose reference"
+        >
+          {refs.map((reference) => {
+            const active = reference.key === activeKey;
+            const name = reference.path.split('/').pop() || reference.path;
+            return (
+              <DropdownMenu.Item
+                key={reference.key}
+                className={`app-nav-menu-item chat-rail-reference-menu-item${
+                  active ? ' active' : ''
+                }`}
+                aria-current={active ? 'true' : undefined}
+                onSelect={() => onSelect(reference)}
+                title={reference.path}
+              >
+                <span className="chat-rail-menu-check" aria-hidden="true">
+                  {active && (
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                      <path
+                        d="m2.25 6.25 2.25 2.25 5.25-5.25"
+                        stroke="currentColor"
+                        strokeWidth="1.6"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  )}
+                </span>
+                <span className="chat-rail-reference-menu-name">{name}</span>
+              </DropdownMenu.Item>
+            );
+          })}
+        </DropdownMenu.Content>
+      </DropdownMenu.Portal>
+    </DropdownMenu.Root>
   );
 }
 

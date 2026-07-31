@@ -84,10 +84,17 @@ export function systemRoutes(ctx: ServiceContext): Hono {
       profile.platform === 'darwin' && (forceMainMemory || unifiedMemory)
         ? await sampleDarwinGezelProcessMemoryCached({ home: ctx.home })
         : null;
+    const engineSnapshot = ctx.chat.peekEngineStatus();
+    const engineModelWeightsBytes = (engineSnapshot?.entries ?? []).reduce(
+      (sum, entry) =>
+        sum + Math.min(entry.modelWeightsBytes ?? entry.residentBytes, entry.residentBytes),
+      0,
+    );
     const snapshot = sampleMachineMemoryUsage({
       profile,
       ...(deviceHealth ? { deviceHealth } : {}),
-      engineCommittedBytes: ctx.chat.peekEngineStatus()?.committedBytes ?? 0,
+      engineCommittedBytes: engineSnapshot?.committedBytes ?? 0,
+      engineModelWeightsBytes,
       gezelProcessMemory,
       forceMainMemory,
     });

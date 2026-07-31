@@ -358,6 +358,7 @@ export function gezelRoutes(ctx: ServiceContext): Hono {
         sessionId: res.sessionId,
         toGezelId: res.toGezelId,
         toGezelName: res.toGezelName,
+        ...(res.deduplicated ? { deduplicated: true } : {}),
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

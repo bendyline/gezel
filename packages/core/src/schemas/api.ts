@@ -97,6 +97,12 @@ export const MachineMemoryUsageSchema = z.object({
   gezelBytesEstimated: z.number().nonnegative(),
   /** Observed same-home process footprint when the platform exposes it. */
   gezelBytesObserved: z.number().nonnegative().nullable(),
+  /** Gezel daemon + local-engine runtime overhead within the attributed total. */
+  gezelInfraBytes: z.number().nonnegative(),
+  /** Loaded model parameters, estimated from the installed model payloads. */
+  gezelModelWeightsBytes: z.number().nonnegative(),
+  /** KV cache, inference buffers, and other model working-set overhead. */
+  gezelModelCacheBytes: z.number().nonnegative(),
   /** Capacity-broker reservation for local chat-model replicas. */
   engineReservedBytes: z.number().nonnegative(),
   gezelEngineProcessCount: z.number().int().nonnegative(),
@@ -2346,6 +2352,8 @@ export const MessageGezelResponseSchema = z.object({
   sessionId: z.string(),
   toGezelId: z.string(),
   toGezelName: z.string(),
+  /** True when an identical file handoff was already pending and was joined. */
+  deduplicated: z.boolean().optional(),
 });
 export type MessageGezelResponse = z.infer<typeof MessageGezelResponseSchema>;
 

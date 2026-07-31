@@ -215,7 +215,7 @@ export interface AnsiRenderer {
   feed(text: string): ReactNode[];
 }
 
-export function createAnsiRenderer(): AnsiRenderer {
+export function createAnsiRenderer(renderText?: (text: string) => ReactNode): AnsiRenderer {
   let state = initialState();
   let partial = '';
   let key = 0;
@@ -232,13 +232,14 @@ export function createAnsiRenderer(): AnsiRenderer {
         if (end <= plainStart) return;
         const slice = input.slice(plainStart, end);
         if (slice === '') return;
+        const content = renderText ? renderText(slice) : slice;
         const className = stateClasses(state);
         if (className === '') {
-          out.push(slice);
+          out.push(content);
         } else {
           out.push(
             <span key={key++} className={className}>
-              {slice}
+              {content}
             </span>,
           );
         }
@@ -276,7 +277,14 @@ export function createAnsiRenderer(): AnsiRenderer {
  * `createAnsiRenderer()` directly so its partial-sequence buffer
  * survives chunk boundaries.
  */
-export function AnsiOutput({ text }: { text: string }) {
-  const nodes = useMemo(() => createAnsiRenderer().feed(text), [text]);
+export function AnsiOutput({
+  text,
+  renderText,
+}: {
+  text: string;
+  /** Optional renderer for plain-text runs after ANSI escapes are removed. */
+  renderText?: (text: string) => ReactNode;
+}) {
+  const nodes = useMemo(() => createAnsiRenderer(renderText).feed(text), [text, renderText]);
   return <>{nodes}</>;
 }

@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { access, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -24,7 +24,33 @@ let page: Page;
 let gezelHome: string;
 let runtimePidPath: string;
 
+/**
+ * How long the spawned daemon gets to come up. The supervisor provisions the
+ * bundled Node/pnpm runtimes and boots gezeld before `connectOrStart`
+ * resolves; on a cold CI home that is minutes, not seconds.
+ */
+const DAEMON_BOOT_TIMEOUT_MS = 180_000;
+/** Slack past the daemon boot for the splash-to-UI handoff and Electron launch. */
+const HOOK_TIMEOUT_MS = DAEMON_BOOT_TIMEOUT_MS + 60_000;
+const UI_LOAD_TIMEOUT_MS = 60_000;
+
+async function waitForRuntimePid(path: string, timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    try {
+      await access(path);
+      return;
+    } catch {
+      if (Date.now() >= deadline) {
+        throw new Error(`runtime/pid was never written within ${timeoutMs}ms: ${path}`);
+      }
+      await new Promise((r) => setTimeout(r, 250));
+    }
+  }
+}
+
 test.beforeAll(async () => {
+  test.setTimeout(HOOK_TIMEOUT_MS);
   gezelHome = await mkdtemp(join(tmpdir(), 'gezel-spawn-e2e-'));
   runtimePidPath = join(gezelHome, 'runtime', 'pid');
 
@@ -35,11 +61,21 @@ test.beforeAll(async () => {
       GEZEL_MOCK_PROVIDER: '1',
       GEZEL_SPAWN: '1',
       // Crucially NOT setting GEZEL_EMBEDDED — we want the real spawn path.
+      // Same reason as app.spec.ts: skip the on-device model download and the
+      // system-toolset bootstrap. This spec is about supervisor spawn, and
+      // paying for first-run provisioning only widens the boot window.
+      GEZEL_SKIP_SYSTEM_BOOTSTRAP: '1',
     }),
   });
   page = await app.firstWindow();
   await page.waitForLoadState('domcontentloaded');
-  await page.waitForTimeout(3000);
+  // The window is painted *before* `connectOrStart` resolves so a cold install
+  // shows the splash instead of nothing (see createWindow in src/main.ts), so
+  // reaching here proves nothing about the daemon — a fixed sleep just races
+  // the bundle unpack. Wait on the daemon's own artifacts instead: the pid file
+  // the supervisor writes, then the UI the splash hands off to.
+  await waitForRuntimePid(runtimePidPath, DAEMON_BOOT_TIMEOUT_MS);
+  await expect(page.locator('.app-header')).toBeVisible({ timeout: UI_LOAD_TIMEOUT_MS });
 });
 
 test.afterAll(async () => {

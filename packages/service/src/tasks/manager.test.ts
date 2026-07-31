@@ -315,6 +315,48 @@ describe('TaskManager', () => {
     });
   });
 
+  it('requires a change when a new task reuses an existing observable deliverable', async () => {
+    await store.writeProjectWorkspaceFile('website', 'notes/outline.md', '# Old outline\n');
+
+    const guarded = await tasks.create('website', {
+      title: 'Rewrite the outline',
+      assignee: { kind: 'user' },
+      steps: [{ name: 'Outline', advanceWhen: { file: 'notes/outline.md', minBytes: 5 } }],
+    });
+    const explicitLegacy = await tasks.create('website', {
+      title: 'Accept the existing outline',
+      assignee: { kind: 'user' },
+      steps: [
+        {
+          name: 'Outline',
+          advanceWhen: { file: 'notes/outline.md', minBytes: 5, requireChange: false },
+        },
+      ],
+    });
+
+    expect(guarded.craftbook.steps[0]!.advanceWhen?.requireChange).toBe(true);
+    expect(explicitLegacy.craftbook.steps[0]!.advanceWhen?.requireChange).toBe(false);
+  });
+
+  it('guards an existing legacy deliverable when a paused task resumes', async () => {
+    const task = await tasks.create('website', {
+      title: 'Resume the outline',
+      assignee: { kind: 'user' },
+      steps: [{ name: 'Outline', advanceWhen: { file: 'notes/resume-outline.md' } }],
+    });
+    expect(task.craftbook.steps[0]!.advanceWhen?.requireChange).toBeUndefined();
+
+    await tasks.setStatus('website', task.num, 'paused');
+    await store.writeProjectWorkspaceFile(
+      'website',
+      'notes/resume-outline.md',
+      '# Stale pre-resume outline\n',
+    );
+    const resumed = await tasks.setStatus('website', task.num, 'active');
+
+    expect(resumed.craftbook.steps[0]!.advanceWhen?.requireChange).toBe(true);
+  });
+
   it('tracks attemptCount + lastActivatedAt across activations and loop-backs', async () => {
     const t = await tasks.create('website', {
       title: 'Build loop',

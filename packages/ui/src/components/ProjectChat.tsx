@@ -300,7 +300,7 @@ function ProjectChatBody({
       chatKey={`${project.id}:timeline`}
       onStageTerminalCommand={stageTerminalCommand}
     >
-      {({ onToolActivity, onArtifactReference, onTaskReference }) => (
+      {({ onToolActivity, onArtifactReference, onWorkspaceReference, onTaskReference }) => (
         <>
           <ProjectTimeline
             projectId={project.id}
@@ -314,6 +314,7 @@ function ProjectChatBody({
             }}
             onToolActivity={onToolActivity}
             onArtifactReference={onArtifactReference}
+            onWorkspaceReference={onWorkspaceReference}
             onTaskReference={onTaskReference}
             onTerminalWorkingDirChanged={(_threadId, next) => {
               // Display-only: keep the routing anchor stable so the

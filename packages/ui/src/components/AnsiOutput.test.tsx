@@ -94,6 +94,17 @@ describe('AnsiOutput', () => {
     expect(renderToText('\x1b[999msurvived\x1b[0m')).toBe('survived');
   });
 
+  it('can transform plain runs without losing their ANSI styling', () => {
+    const { container } = render(
+      <AnsiOutput
+        text={'plain \x1b[32mfile.md\x1b[0m'}
+        renderText={(text) => (text === 'file.md' ? <button type="button">{text}</button> : text)}
+      />,
+    );
+    expect(container.textContent).toBe('plain file.md');
+    expect(container.querySelector('.ansi-fg-green button')?.textContent).toBe('file.md');
+  });
+
   it('handles `\\x1b[39m` (default foreground) by clearing the fg color', () => {
     const classes = renderToClasses('\x1b[31mred\x1b[39mplain');
     const reds = classes.filter((c) => c.includes('ansi-fg-red'));

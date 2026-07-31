@@ -8,6 +8,17 @@ import type { LiveTurnState } from './useOnDeviceLiveTurns.js';
 
 vi.mock('../api.js', () => ({ api: createMockApi() }));
 
+// Radix Popper measures tooltip content with ResizeObserver. jsdom does not
+// provide it, so give the focused segment-hover test the inert browser shape.
+vi.stubGlobal(
+  'ResizeObserver',
+  class ResizeObserverMock {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  },
+);
+
 let mockLiveTurns = new Map<string, LiveTurnState>();
 vi.mock('./useOnDeviceLiveTurns.js', () => ({
   useOnDeviceLiveTurns: () => mockLiveTurns,
@@ -161,6 +172,9 @@ describe('EngineStatusPill — simultaneous local engines', () => {
       usedBytes: 9 * GiB,
       gezelBytesEstimated: 5 * GiB,
       gezelBytesObserved: null,
+      gezelInfraBytes: 0,
+      gezelModelWeightsBytes: 4 * GiB,
+      gezelModelCacheBytes: 1 * GiB,
       engineReservedBytes: 5 * GiB,
       gezelEngineProcessCount: 0,
       orphanedGezelEngineProcessCount: 0,
@@ -178,14 +192,23 @@ describe('EngineStatusPill — simultaneous local engines', () => {
       }),
     );
 
-    expect(
-      await screen.findByRole('img', {
-        name: /VRAM: 9\.0 GiB of 24\.0 GiB used, Gezel estimated 5\.0 GiB/i,
-      }),
-    ).toBeInTheDocument();
+    const strip = await screen.findByRole('img', {
+      name: /VRAM: 9\.0 GiB of 24\.0 GiB used, Gezel estimated 5\.0 GiB/i,
+    });
+    expect(strip).toBeInTheDocument();
     expect(screen.getByText('Gezel ~5.0 GiB')).toBeInTheDocument();
+    expect(strip).toHaveAccessibleName(/Core Gezel infra about 0 B/i);
+    expect(strip).toHaveAccessibleName(/Model weights about 4\.0 GiB/i);
+    expect(strip).toHaveAccessibleName(/Model cache about 1\.0 GiB/i);
     expect(screen.getByText('Other 4.0 GiB')).toBeInTheDocument();
     expect(screen.getByText(/Test GPU/)).toBeInTheDocument();
+
+    const weightsSegment = strip.querySelector('.machine-memory-segment-gezel-weights');
+    expect(weightsSegment).toBeInstanceOf(HTMLElement);
+    await user.hover(weightsSegment as HTMLElement);
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(
+      'Model weights · ~4.0 GiB (resident model parameters)',
+    );
   });
 
   it('omits other use when the GPU driver cannot report it', async () => {
@@ -197,6 +220,9 @@ describe('EngineStatusPill — simultaneous local engines', () => {
       usedBytes: null,
       gezelBytesEstimated: 19.1 * GiB,
       gezelBytesObserved: null,
+      gezelInfraBytes: 0.7 * GiB,
+      gezelModelWeightsBytes: 17 * GiB,
+      gezelModelCacheBytes: 1.4 * GiB,
       engineReservedBytes: 19.1 * GiB,
       gezelEngineProcessCount: 0,
       orphanedGezelEngineProcessCount: 0,
@@ -230,6 +256,9 @@ describe('EngineStatusPill — simultaneous local engines', () => {
       usedBytes: 100 * GiB,
       gezelBytesEstimated: 36 * GiB,
       gezelBytesObserved: 76 * GiB,
+      gezelInfraBytes: 40 * GiB,
+      gezelModelWeightsBytes: 30 * GiB,
+      gezelModelCacheBytes: 6 * GiB,
       engineReservedBytes: 36 * GiB,
       gezelEngineProcessCount: 2,
       orphanedGezelEngineProcessCount: 2,
@@ -247,11 +276,14 @@ describe('EngineStatusPill — simultaneous local engines', () => {
       }),
     );
 
-    expect(
-      await screen.findByRole('img', {
-        name: /Gezel observed footprint 76\.0 GiB, models reserve about 36\.0 GiB, 2 leftover Gezel engine processes/i,
-      }),
-    ).toBeInTheDocument();
+    const strip = await screen.findByRole('img', {
+      name: /Gezel observed footprint 76\.0 GiB/i,
+    });
+    expect(strip).toHaveAccessibleName(/Core Gezel infra about 40\.0 GiB/i);
+    expect(strip).toHaveAccessibleName(/Model weights about 30\.0 GiB/i);
+    expect(strip).toHaveAccessibleName(/Model cache about 6\.0 GiB/i);
+    expect(strip).toHaveAccessibleName(/models reserve about 36\.0 GiB/i);
+    expect(strip).toHaveAccessibleName(/2 leftover Gezel engine processes/i);
     expect(screen.getByText('Gezel 76.0 GiB')).toBeInTheDocument();
     expect(screen.getByText('Models reserve ~36.0 GiB for capacity planning')).toBeInTheDocument();
     expect(

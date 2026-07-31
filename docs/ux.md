@@ -309,6 +309,10 @@ up pauses that follow behavior until they return to the tail. The timeline's
 lightweight ANSI rendering is the durable transcript view. Full-screen TUIs that
 depend on cursor movement or the alternate screen belong in a dedicated live
 terminal surface backed by a terminal emulator, not in every historical bubble.
+When directory-listing output names a workspace file the service has verified,
+render that filename as a subtle inline link into the References previewer;
+filename-looking arbitrary output stays plain text. The native `open <path>`
+command provides the keyboard-first version of the same action.
 
 **Errors.** Inline, close to the thing that failed, `.error` class. Don't
 use toasts for errors. If the operation is dismissable, show the error

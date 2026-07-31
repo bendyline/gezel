@@ -18,6 +18,25 @@ function commandEvent(projectId: string, id: string): TerminalMessageEvent {
 }
 
 describe('TerminalEventBus', () => {
+  it('delivers open-file intents live but does not replay them', () => {
+    const bus = new TerminalEventBus();
+    const live: string[] = [];
+    const unsubscribe = bus.subscribeProject('alpha', (event) => live.push(event.kind));
+    bus.publish({
+      kind: 'openFile',
+      projectId: 'alpha',
+      threadId: '_root',
+      path: 'battle-research.md',
+      source: 'workspace',
+    });
+    unsubscribe();
+
+    const replayed: string[] = [];
+    bus.subscribeProject('alpha', (event) => replayed.push(event.kind));
+    expect(live).toEqual(['openFile']);
+    expect(replayed).toEqual([]);
+  });
+
   it('replays recent persisted messages to a late project subscriber', () => {
     const bus = new TerminalEventBus();
     bus.publish(commandEvent('alpha', 'list_memories'));

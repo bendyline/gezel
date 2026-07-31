@@ -173,6 +173,48 @@ describe('resolveSessionToolSurface — step-scoped sessions', () => {
     expect(allowlist!.has('read_task_notes')).toBe(true);
   });
 
+  it('grants a task-scoped Planner the Markdown kit for its authored planning file', async () => {
+    const { allowlist } = await resolveSessionToolSurface({
+      ...baseOpts,
+      role: 'Planner',
+      session: baseSession({ taskRef: 'p1/8', stepId: 'outline' }),
+      tier: 'medium',
+      activeStep: {
+        advanceWhen: { file: 'notes/outline.md', minBytes: 400 },
+      },
+    });
+
+    expect(allowlist).not.toBeNull();
+    expect(allowlist!.has('read_file')).toBe(true);
+    expect(allowlist!.has('write_file')).toBe(true);
+    expect(allowlist!.has('replace_in_file')).toBe(true);
+    expect(allowlist!.has('advance_task_step')).toBe(true);
+  });
+
+  it('keeps ordinary Planner chat read-only and honors a non-writable project ceiling', async () => {
+    const ordinary = await resolveSessionToolSurface({
+      ...baseOpts,
+      role: 'Planner',
+      session: baseSession({}),
+      tier: 'medium',
+    });
+    const lockedStep = await resolveSessionToolSurface({
+      ...baseOpts,
+      role: 'Planner',
+      session: baseSession({ taskRef: 'p1/8', stepId: 'outline' }),
+      tier: 'medium',
+      workspaceWritable: false,
+      activeStep: {
+        advanceWhen: { file: 'notes/outline.md', minBytes: 400 },
+      },
+    });
+
+    expect(ordinary.allowlist?.has('write_file')).toBe(false);
+    expect(lockedStep.allowlist?.has('read_file')).toBe(true);
+    expect(lockedStep.allowlist?.has('write_file')).toBe(false);
+    expect(lockedStep.allowlist?.has('replace_in_file')).toBe(false);
+  });
+
   it('does NOT grant step tools to a session with no active step', async () => {
     const { allowlist } = await resolveSessionToolSurface({
       ...baseOpts,

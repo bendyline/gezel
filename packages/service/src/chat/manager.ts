@@ -896,6 +896,16 @@ export class ChatManager {
    * land before the sender starts consuming follow-up nudges.
    */
   private readonly afterSessionIdle = new Map<string, Array<() => void>>();
+  /**
+   * One live async file handoff per sender/target/project/path. Models can
+   * emit the same `message_gezel` call several times while the sender turn
+   * is still active; joining that work prevents a parked-send burst from
+   * replaying the same assignment into the recipient session.
+   */
+  private readonly inflightFileHandoffs = new Map<
+    string,
+    { sessionId: string; toGezelName: string; toGezelId: string }
+  >();
   /** Set once {@link shutdown} starts so deferred watchdogs don't fire into a tearing-down manager. */
   private shuttingDown = false;
   /**
@@ -2843,7 +2853,12 @@ export class ChatManager {
      * annotation is the per-message reinforcement.
      */
     expectedDeliverable?: ExpectedDeliverable;
-  }): Promise<{ sessionId: string; toGezelName: string; toGezelId: string }> {
+  }): Promise<{
+    sessionId: string;
+    toGezelName: string;
+    toGezelId: string;
+    deduplicated?: boolean;
+  }> {
     let projectId = args.projectId;
     if (!projectId && args.fromSessionId) {
       const fromRec = await this.getSessionRecord(args.fromSessionId);
@@ -2892,6 +2907,35 @@ export class ChatManager {
       }
     }
 
+    const requestedFilePath =
+      args.expectedDeliverable?.kind === 'file'
+        ? args.expectedDeliverable.filePath?.trim()
+        : undefined;
+    if (
+      requestedFilePath &&
+      isPureDelegationRole(target.role) &&
+      !isExpectedImageDeliverablePath(requestedFilePath) &&
+      !isExpectedBinaryDocumentDeliverablePath(requestedFilePath) &&
+      (target.parsed.frontmatter.tools?.length ?? 0) === 0
+    ) {
+      throw new Error(
+        `gezel "${target.name}" has role "${target.role ?? 'coordinator'}", which cannot write workspace file "${requestedFilePath}"; send this file handoff to an implementation-role gezel instead`,
+      );
+    }
+
+    const fileHandoffKey = requestedFilePath
+      ? [
+          args.fromSessionId ?? args.fromGezelId,
+          target.id,
+          projectId,
+          normalizeExpectedDeliverablePath(requestedFilePath),
+        ].join('\u0000')
+      : null;
+    const pendingHandoff = fileHandoffKey
+      ? this.inflightFileHandoffs.get(fileHandoffKey)
+      : undefined;
+    if (pendingHandoff) return { ...pendingHandoff, deduplicated: true };
+
     const session = await this.ensureOrCreateSession({
       gezelId: target.id,
       projectId,
@@ -2905,6 +2949,19 @@ export class ChatManager {
           fromConfigPre.roleBasedNameOnlyMode ?? false,
         )
       : 'another gezel';
+    const result = {
+      sessionId: session.id,
+      toGezelName: displayName(
+        { name: target.name, roleBasedName: target.roleBasedName },
+        fromConfigPre.roleBasedNameOnlyMode ?? false,
+      ),
+      toGezelId: target.id,
+    };
+    // Re-check after the async session/config reads so simultaneous calls
+    // converge on whichever one registered first.
+    const racedHandoff = fileHandoffKey ? this.inflightFileHandoffs.get(fileHandoffKey) : undefined;
+    if (racedHandoff) return { ...racedHandoff, deduplicated: true };
+    if (fileHandoffKey) this.inflightFileHandoffs.set(fileHandoffKey, result);
     const deliverableAnnotation = formatExpectedDeliverableAnnotation(
       args.expectedDeliverable,
       args.expectedDeliverable
@@ -3003,12 +3060,12 @@ export class ChatManager {
       if (dispatched) return; // once-guard: park-flush AND watchdog can both call this
       dispatched = true;
       log.info(`[chat] ${htag}: dispatching — recipient turn entering the provider queue`);
-      this.trackBackground(
-        this.sendWithBusyRetry(session.id, seed, {
-          from: { gezelId: args.fromGezelId, gezelName: fromName },
-          ...(args.lane ? { lane: args.lane } : {}),
-          ...(args.ambient ? { ambient: true } : {}),
-        }).then(
+      const targetSend = this.sendWithBusyRetry(session.id, seed, {
+        from: { gezelId: args.fromGezelId, gezelName: fromName },
+        ...(args.lane ? { lane: args.lane } : {}),
+        ...(args.ambient ? { ambient: true } : {}),
+      })
+        .then(
           async () => {
             log.info(`[chat] ${htag}: delivered — recipient turn ran to completion`);
             if (this.historyManager) {
@@ -3061,8 +3118,13 @@ export class ChatManager {
               });
             }
           },
-        ),
-      );
+        )
+        .finally(() => {
+          if (fileHandoffKey && this.inflightFileHandoffs.get(fileHandoffKey) === result) {
+            this.inflightFileHandoffs.delete(fileHandoffKey);
+          }
+        });
+      this.trackBackground(targetSend);
     };
 
     if (args.fromSessionId && this.inflight.has(args.fromSessionId)) {
@@ -3103,14 +3165,7 @@ export class ChatManager {
       dispatchTargetSend();
     }
 
-    return {
-      sessionId: session.id,
-      toGezelName: displayName(
-        { name: target.name, roleBasedName: target.roleBasedName },
-        fromConfigPre.roleBasedNameOnlyMode ?? false,
-      ),
-      toGezelId: target.id,
-    };
+    return result;
   }
 
   /**
@@ -8005,6 +8060,7 @@ export class ChatManager {
     this.shuttingDown = true;
     // Parked handoffs must not dispatch as their sender unwinds.
     this.afterSessionIdle.clear();
+    this.inflightFileHandoffs.clear();
     for (const sessionId of Array.from(this.pendingSends.keys())) {
       this.rejectQueuedForSession(sessionId, 'service shutting down');
     }
@@ -8720,7 +8776,12 @@ export class ChatManager {
       });
       await this.initLocalProvider('llama-cpp', provider, cfg);
       const bytes = await this.resolveResidentBytes('llama-cpp', modelId);
-      return { provider, residentBytes: bytes };
+      const installed = await this.llamaCppModels?.resolveModel(modelId).catch(() => null);
+      return {
+        provider,
+        residentBytes: bytes,
+        ...(installed?.approxSizeBytes ? { modelWeightsBytes: installed.approxSizeBytes } : {}),
+      };
     };
 
     const mlxBuilder: import('../providers/native/provider-pool.js').ProviderBuilder = async ({
@@ -8741,7 +8802,12 @@ export class ChatManager {
       });
       await this.initLocalProvider('mlx', provider, cfg);
       const bytes = await this.resolveResidentBytes('mlx', modelId);
-      return { provider, residentBytes: bytes };
+      const installed = await this.mlxModels?.resolveModel(modelId).catch(() => null);
+      return {
+        provider,
+        residentBytes: bytes,
+        ...(installed?.approxSizeBytes ? { modelWeightsBytes: installed.approxSizeBytes } : {}),
+      };
     };
 
     const ds4Builder: import('../providers/native/provider-pool.js').ProviderBuilder = async ({
@@ -8762,7 +8828,12 @@ export class ChatManager {
       });
       await this.initLocalProvider('ds4', provider, cfg);
       const bytes = await this.resolveResidentBytes('ds4', modelId);
-      return { provider, residentBytes: bytes };
+      const installed = await this.ds4Models?.resolveModel(modelId).catch(() => null);
+      return {
+        provider,
+        residentBytes: bytes,
+        ...(installed?.approxSizeBytes ? { modelWeightsBytes: installed.approxSizeBytes } : {}),
+      };
     };
 
     const builders: Partial<
@@ -14846,7 +14917,12 @@ ${artifactsLine}
   if (task) {
     const stepLabel = task.step ? ` · active step **${task.step.name}**` : '';
     const stepHasProcedure = task.step?.prompt && task.step.prompt.trim().length > 0;
-    if (stepHasProcedure) {
+    if (task.task.status === 'paused') {
+      const resumeHint = availableToolNameSet.has('set_task_status')
+        ? ` If the user explicitly asks to resume, first call \`set_task_status({ ref: "${task.task.ref}", status: "active" })\`.`
+        : ' If the user explicitly asks to resume, explain that the task must be set active before work continues.';
+      activeTaskAnchor = `\n\n---\n\n**Task \`${task.task.ref}\` — "${task.task.title}" is paused${stepLabel}.** Do not continue the step, call \`advance_task_step\`, or dispatch more work while it remains paused. Use the task notes above to explain the blocker.${resumeHint}`;
+    } else if (stepHasProcedure) {
       const exitRefs = normalizeScriptRefs(task.step?.onExit);
       const lastExitName = exitRefs[exitRefs.length - 1]?.name;
       const onExitHint =

@@ -4617,11 +4617,18 @@ server.tool(
       expectedDeliverable?.kind === 'file'
         ? ` They have been asked to write ${expectedDeliverable.filePath ? `\`${expectedDeliverable.filePath}\`` : 'the file'} before replying.`
         : '';
+    // The client package may be consumed from a previously built declaration
+    // during workspace-local typechecks; the wire field is optional so this
+    // remains compatible with both response revisions.
+    const responseWasDeduplicated = (res as typeof res & { deduplicated?: boolean }).deduplicated;
+    const responseText = responseWasDeduplicated
+      ? `An identical file handoff is already pending with ${res.toGezelName}; joined it instead of queueing another message.`
+      : `Pinged ${res.toGezelName}.${deliverableText} Their reply will land in your next turn.`;
     return {
       content: [
         {
           type: 'text' as const,
-          text: `Pinged ${res.toGezelName}.${deliverableText} Their reply will land in your next turn.`,
+          text: responseText,
         },
       ],
     };

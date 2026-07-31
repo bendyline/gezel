@@ -22,10 +22,11 @@ class FakeProvider implements LLMProvider {
   }
 }
 
-function mkBuilder(bytes: number): ProviderBuilder {
+function mkBuilder(bytes: number, modelWeightsBytes?: number): ProviderBuilder {
   return async ({ modelId, replicaIdx }) => ({
     provider: new FakeProvider(`${modelId}:${replicaIdx}`),
     residentBytes: bytes,
+    ...(modelWeightsBytes !== undefined ? { modelWeightsBytes } : {}),
   });
 }
 
@@ -101,7 +102,7 @@ function mkQueueBuilder(bytes: number, made: QueueFakeProvider[]): ProviderBuild
 
 describe('ProviderPool', () => {
   it('ensure() builds on miss and hits cache on second call', async () => {
-    const builder = vi.fn(mkBuilder(10 * GB));
+    const builder = vi.fn(mkBuilder(10 * GB, 8 * GB));
     const broker = new CapacityBroker({ budgetBytes: 32 * GB });
     const pool = new ProviderPool({ broker, builders: { mlx: builder } });
 
@@ -109,7 +110,12 @@ describe('ProviderPool', () => {
     const b = await pool.ensure('mlx', 'gemma4-26b', 0, 10 * GB);
     expect(a).toBe(b);
     expect(builder).toHaveBeenCalledTimes(1);
-    expect(pool.snapshot().committedBytes).toBe(10 * GB);
+    const snapshot = pool.snapshot();
+    expect(snapshot.committedBytes).toBe(10 * GB);
+    expect(snapshot.entries[0]).toMatchObject({
+      residentBytes: 10 * GB,
+      modelWeightsBytes: 8 * GB,
+    });
   });
 
   it('LRU-evicts the oldest entry when budget is exhausted', async () => {

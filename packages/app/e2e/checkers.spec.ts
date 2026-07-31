@@ -207,7 +207,12 @@ test('checkers: create from gallery, move on the board, the reaction summons the
   const gameFile = join(workspace, 'game.json');
   await writeFile(gameFile, `${JSON.stringify(multiJump, null, 2)}\n`, 'utf8');
   // This is test-only state seeding, outside the page-invoke bridge. Reload
-  // the preview explicitly instead of racing its next background poll.
+  // the preview explicitly instead of racing its next background poll. The
+  // old frame can observe the file write before React finishes minting the
+  // replacement capability, so wait for the iframe URL itself to change.
+  const previewFrame = page.locator('iframe.project-output-iframe');
+  const previewSrcBeforeReload = await previewFrame.getAttribute('src');
+  expect(previewSrcBeforeReload).toBeTruthy();
   const reloadPreview = page.getByRole('button', { name: 'Reload the preview' });
   if (await reloadPreview.isVisible()) {
     await reloadPreview.click();
@@ -215,8 +220,22 @@ test('checkers: create from gallery, move on the board, the reaction summons the
     await page.getByRole('button', { name: 'More output actions' }).click();
     await page.getByRole('menuitem', { name: 'Reload' }).click();
   }
-  await expect(board.locator('[data-square="c3"] .piece.red')).toBeVisible({ timeout: 10_000 });
-  await board.locator('[data-square="c3"]').click();
+  await expect
+    .poll(
+      async () => {
+        const currentSrc = await previewFrame.getAttribute('src');
+        return Boolean(currentSrc && currentSrc !== previewSrcBeforeReload);
+      },
+      { timeout: 10_000 },
+    )
+    .toBe(true);
+  const seededOrigin = board.locator('[data-square="c3"]');
+  await expect(seededOrigin.locator('.piece.red')).toBeVisible({ timeout: 10_000 });
+  await seededOrigin.click();
+  // Crossing back into the iframe immediately after Playwright dispatches
+  // the click can beat the page's synchronous board rebuild. Observe the
+  // selection state first so the landing assertion targets the rebuilt DOM.
+  await expect(seededOrigin).toHaveClass(/selected/);
   await expect(board.locator('[data-square="e5"].hint')).toBeVisible();
   await expect(board.locator('[data-square="g7"].hint')).toHaveCount(0);
 

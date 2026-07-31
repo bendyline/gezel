@@ -760,6 +760,24 @@ export class TaskManager {
     // resolved paths. Unknown placeholders survive untouched; books
     // without `{{}}` are unaffected.
     if (input.craftbookParams) interpolateStepsContext(craftbook.steps, input.craftbookParams);
+    // A previous run may have left the same deliverable path behind. An
+    // existence-only observable gate would then advance this brand-new task
+    // before its assignee changed anything. Preserve explicit author intent
+    // (`requireChange: true` or `false`), but make the safe behavior the
+    // default whenever the snapshotted path already exists at create time.
+    await Promise.all(
+      craftbook.steps.map(async (step) => {
+        const advanceWhen = step.advanceWhen;
+        if (!advanceWhen || advanceWhen.requireChange !== undefined) return;
+        const existing = await (advanceWhen.artifact
+          ? this.store.readProjectArtifact(projectId, advanceWhen.file)
+          : this.store.readProjectWorkspaceFile(projectId, advanceWhen.file)
+        ).catch(() => null);
+        if (existing !== null) {
+          step.advanceWhen = { ...advanceWhen, requireChange: true };
+        }
+      }),
+    );
     const spawnsCraftbook = spawnBook ? snapshotCraftbookForTask(spawnBook, now) : undefined;
     const activeStepId = craftbook.entryStepId;
     if (!isDraft) {
@@ -1060,7 +1078,33 @@ export class TaskManager {
       }
       return task;
     }
-    const next: Task = { ...task, status, updatedAt: nowIso() };
+    const now = nowIso();
+    let craftbook = task.craftbook;
+    // Legacy task snapshots predate the create-time stale-deliverable guard.
+    // On resume, protect the active step if its existence-only deliverable is
+    // already present; otherwise the first post-resume turn can advance on
+    // yesterday's unchanged file. Explicit `requireChange: false` remains an
+    // author-controlled opt-out.
+    if (task.status === 'paused' && status === 'active' && task.activeStepId) {
+      const activeIndex = task.craftbook.steps.findIndex((step) => step.id === task.activeStepId);
+      const activeStep = activeIndex >= 0 ? task.craftbook.steps[activeIndex] : undefined;
+      const advanceWhen = activeStep?.advanceWhen;
+      if (advanceWhen && advanceWhen.requireChange === undefined) {
+        const existing = await (advanceWhen.artifact
+          ? this.store.readProjectArtifact(projectId, advanceWhen.file)
+          : this.store.readProjectWorkspaceFile(projectId, advanceWhen.file)
+        ).catch(() => null);
+        if (existing !== null) {
+          const steps = [...task.craftbook.steps];
+          steps[activeIndex] = {
+            ...activeStep,
+            advanceWhen: { ...advanceWhen, requireChange: true },
+          };
+          craftbook = { ...task.craftbook, steps, updatedAt: now };
+        }
+      }
+    }
+    const next: Task = { ...task, status, craftbook, updatedAt: now };
     await this.store.writeTask(next);
     // Drive the project lifecycle: closing/completing may bring the
     // project to rest; reopening/pausing is live work that wakes it.

@@ -95,6 +95,10 @@ interface HtmlPreviewFrameProps {
 /** Bound on concurrently in-flight page invokes per frame. */
 const MAX_INFLIGHT_INVOKES = 4;
 
+type PreviewLoadState =
+  | { requestKey: string; status: 'ready'; url: string }
+  | { requestKey: string; status: 'error'; error: string };
+
 /**
  * Sandboxed HTML preview. Loads content from the service's unified
  * `/preview/:capability/:source/:projectId/*` mount so relative `<link>` /
@@ -129,16 +133,17 @@ export function HtmlPreviewFrame({
 }: HtmlPreviewFrameProps) {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const inflightInvokes = useRef<Set<string>>(new Set());
-  const [src, setSrc] = useState<string | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const requestKey = JSON.stringify([projectId, path, source, refreshKey ?? null]);
+  const [loadState, setLoadState] = useState<PreviewLoadState | null>(null);
+  // Effects run after React commits. Keying the resolved lease to the props
+  // that requested it prevents that commit from briefly remounting the old,
+  // still-interactive page while a refresh or target change is being minted.
+  const activeLoadState = loadState?.requestKey === requestKey ? loadState : null;
+  const src = activeLoadState?.status === 'ready' ? activeLoadState.url : null;
+  const loadError = activeLoadState?.status === 'error' ? activeLoadState.error : null;
 
   useEffect(() => {
-    // Reading the key is intentional: changing it remints a capability for an
-    // explicit preview reload even though it is not part of the request body.
-    void refreshKey;
     let cancelled = false;
-    setSrc(null);
-    setLoadError(null);
     onUrlReady?.(null);
     const request =
       source === 'workspace'
@@ -153,17 +158,21 @@ export function HtmlPreviewFrame({
         // src would be blocked as mixed content. `onUrlReady` (external-browser
         // "open in browser") prefers the plain-HTTP URL when the daemon offers
         // one, so the system browser doesn't hit the self-signed-cert warning.
-        setSrc(lease.url);
+        setLoadState({ requestKey, status: 'ready', url: lease.url });
         onUrlReady?.(lease.browserUrl ?? lease.url);
       })
       .catch((err) => {
         if (cancelled) return;
-        setLoadError(err instanceof Error ? err.message : String(err));
+        setLoadState({
+          requestKey,
+          status: 'error',
+          error: err instanceof Error ? err.message : String(err),
+        });
       });
     return () => {
       cancelled = true;
     };
-  }, [projectId, path, source, refreshKey, onUrlReady]);
+  }, [projectId, path, source, requestKey, onUrlReady]);
 
   useEffect(() => {
     // Loopback batcher: every captured entry is also reported to the
@@ -310,7 +319,7 @@ export function HtmlPreviewFrame({
   return (
     <iframe
       ref={iframeRef}
-      key={`${src ?? 'loading'}:${refreshKey ?? ''}`}
+      key={`${requestKey}:${src ?? 'loading'}`}
       title={title}
       {...(src ? { src } : {})}
       sandbox="allow-scripts"
