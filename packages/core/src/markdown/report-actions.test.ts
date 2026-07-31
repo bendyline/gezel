@@ -18,7 +18,7 @@ function doc(...fences: string[]): string {
     '# Night report',
     '',
     'Findings prose.',
-    ...fences.map((body) => '```gezel-action\n' + body + '\n```'),
+    ...fences.map((body) => `\`\`\`gezel-action\n${body}\n\`\`\``),
     '',
   ].join('\n\n');
 }

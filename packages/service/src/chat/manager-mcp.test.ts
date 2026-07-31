@@ -404,8 +404,7 @@ describe('ChatManager + MCP — tool calls fire through the bridge', () => {
         name: 'write_file',
         arguments: {
           path: 'index.html',
-          content:
-            '<!doctype html><html><head><title>Game</title></head><body>Ready</body></html>',
+          content: '<!doctype html><html><head><title>Game</title></head><body>Ready</body></html>',
         },
       },
     ]);

@@ -40,6 +40,7 @@ vi.mock('../components/ProviderModelSelect.js', () => ({ ProviderModelSelect: ()
 
 const { SettingsView } = await import('./SettingsView.js');
 const { api } = await import('../api.js');
+const { resetUpdateStateForTests } = await import('../update-state.js');
 
 describe('SettingsView', () => {
   beforeEach(() => {
@@ -116,6 +117,74 @@ describe('SettingsView', () => {
     fireEvent.click(checkbox);
 
     await waitFor(() => expect(api.updateConfig).toHaveBeenCalledWith({ autoUpdateChecks: false }));
+  });
+
+  // About is the only full home for install-health notices — the rail just
+  // points here. See system-notices.ts.
+  describe('install-health notices in About', () => {
+    beforeEach(() => {
+      resetUpdateStateForTests();
+      window.__GEZEL__ = {
+        ...window.__GEZEL__,
+        token: 'test-token',
+        platform: 'darwin',
+        fallbackReason: null,
+        fallbackCode: null,
+        update: undefined,
+      };
+    });
+
+    it('reports a healthy service plainly', async () => {
+      render(<SettingsView />);
+      fireEvent.click(await screen.findByTestId('settings-nav-about'));
+      expect(
+        await screen.findByText('The background service is running normally.'),
+      ).toBeInTheDocument();
+    });
+
+    it('explains a service that did not start, without promising it returns', async () => {
+      window.__GEZEL__ = {
+        ...window.__GEZEL__,
+        token: window.__GEZEL__?.token ?? 'test-token',
+        fallbackReason: 'System service was unavailable: SCM stopped',
+        fallbackCode: 'system-service-unhealthy',
+      };
+
+      render(<SettingsView />);
+      fireEvent.click(await screen.findByTestId('settings-nav-about'));
+
+      const notice = await screen.findByTestId('settings-notice-service-unavailable');
+      expect(notice).toHaveTextContent('Background work is off.');
+      expect(notice).toHaveTextContent('will not start again by itself');
+      expect(notice).toHaveTextContent('Run the Gezel PKG again');
+      expect(notice).toHaveTextContent('System service was unavailable: SCM stopped');
+      expect(notice).not.toHaveTextContent('temporarily');
+    });
+
+    // The reported bug: a failed *check* was shown on Home as "Gezel could
+    // not install an update", which is a different (and alarming) claim.
+    it('calls a failed update check what it is, here and nowhere else', async () => {
+      window.__GEZEL__ = {
+        ...window.__GEZEL__,
+        update: {
+          state: vi.fn().mockResolvedValue({
+            kind: 'error',
+            stage: 'check',
+            message: 'net::ERR_INTERNET_DISCONNECTED',
+          }),
+          install: vi.fn(),
+          onStateChanged: vi.fn(),
+        },
+      } as never;
+
+      render(<SettingsView />);
+      fireEvent.click(await screen.findByTestId('settings-nav-about'));
+
+      const notice = await screen.findByTestId('settings-notice-update-check-failed');
+      expect(notice).toHaveTextContent('Gezel could not check for updates.');
+      expect(notice).not.toHaveTextContent('could not install');
+      expect(notice).toHaveTextContent('net::ERR_INTERNET_DISCONNECTED');
+    });
   });
 
   it('uses llama as the user-facing engine name on Mac', async () => {

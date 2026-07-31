@@ -40,7 +40,10 @@ export async function resolveSuggestedWork(
 
   // ── Source 1: gezel templates via the roster ─────────────────────────
   const rosterIds = [
-    ...new Set([...(project.voormanGezelId ? [project.voormanGezelId] : []), ...(project.gezelIds ?? [])]),
+    ...new Set([
+      ...(project.voormanGezelId ? [project.voormanGezelId] : []),
+      ...(project.gezelIds ?? []),
+    ]),
   ];
   const templateSponsors = await resolveRosterTemplates(deps, rosterIds);
   for (const { template, sponsor } of templateSponsors) {
@@ -50,8 +53,7 @@ export async function resolveSuggestedWork(
     for (const suggestion of suggestions) {
       const n = (keyCounts.get(suggestion.craftbookId) ?? 0) + 1;
       keyCounts.set(suggestion.craftbookId, n);
-      const suggestionKey =
-        n === 1 ? suggestion.craftbookId : `${suggestion.craftbookId}#${n}`;
+      const suggestionKey = n === 1 ? suggestion.craftbookId : `${suggestion.craftbookId}#${n}`;
       const craftbook = await resolveCraftbook(suggestion.craftbookId);
       if (!craftbook) {
         log.warn(
@@ -182,8 +184,13 @@ async function resolveRosterTemplates(
     string,
     { template: GezelTemplateManifest; sponsor: { id: string; name: string; role?: string } | null }
   >();
-  let listCandidates: Array<{ id: string; role?: string; name?: string; tags?: string[]; description?: string }> | null =
-    null;
+  let listCandidates: Array<{
+    id: string;
+    role?: string;
+    name?: string;
+    tags?: string[];
+    description?: string;
+  }> | null = null;
 
   const getTemplate = async (templateId: string): Promise<GezelTemplateManifest | null> => {
     const detail = await catalog.get('gezel-template', templateId).catch(() => null);
@@ -204,7 +211,13 @@ async function resolveRosterTemplates(
           .filter((g) => g.manifest.kind === 'gezel-template')
           .map((g) => {
             const m = g.manifest as Extract<typeof g.manifest, { kind: 'gezel-template' }>;
-            return { id: m.id, role: m.role, name: m.name, tags: m.tags, description: m.description };
+            return {
+              id: m.id,
+              role: m.role,
+              name: m.name,
+              tags: m.tags,
+              description: m.description,
+            };
           });
       }
       const ranked = rankCandidates(query, listCandidates);
@@ -217,7 +230,7 @@ async function resolveRosterTemplates(
     const template = await getTemplate(templateId);
     if (!template) continue;
     // Fuzzy fallback only attributes to templates that declare suggestions.
-    if (!gezel.templateId && !(template.suggestedCraftbooks?.length)) continue;
+    if (!gezel.templateId && !template.suggestedCraftbooks?.length) continue;
     out.set(templateId, {
       template,
       sponsor: { id: gezel.id, name: gezel.name, ...(gezel.role ? { role: gezel.role } : {}) },
@@ -229,7 +242,10 @@ async function resolveRosterTemplates(
 function buildItem(args: {
   key: string;
   source: SuggestedWorkSource;
-  suggestion: Pick<SuggestedCraftbook, 'craftbookId' | 'runMode' | 'cron' | 'overlap' | 'params' | 'reason'>;
+  suggestion: Pick<
+    SuggestedCraftbook,
+    'craftbookId' | 'runMode' | 'cron' | 'overlap' | 'params' | 'reason'
+  >;
   craftbook: Craftbook;
 }): SuggestedWorkItem {
   const { key, source, suggestion, craftbook } = args;
@@ -241,9 +257,7 @@ function buildItem(args: {
     ...(craftbook.description ? { description: craftbook.description } : {}),
     ...(suggestion.reason ? { reason: suggestion.reason } : {}),
     runMode: suggestion.runMode,
-    ...(suggestion.runMode === 'scheduled'
-      ? { cron: hostCronExpression(suggestion) }
-      : {}),
+    ...(suggestion.runMode === 'scheduled' ? { cron: hostCronExpression(suggestion) } : {}),
     ...(suggestion.overlap ? { overlap: suggestion.overlap } : {}),
     ...(craftbook.paramSchema ? { paramSchema: craftbook.paramSchema } : {}),
     ...(suggestion.params ? { params: suggestion.params } : {}),
@@ -254,16 +268,13 @@ function buildItem(args: {
 function dedupeAcrossSources(items: SuggestedWorkItem[]): SuggestedWorkItem[] {
   const out: SuggestedWorkItem[] = [];
   for (const item of items) {
-    const dup = out.find(
-      (o) => o.craftbookId === item.craftbookId && o.runMode === item.runMode,
-    );
+    const dup = out.find((o) => o.craftbookId === item.craftbookId && o.runMode === item.runMode);
     if (!dup) {
       out.push(item);
       continue;
     }
     // Project-type wins; fold the gezel sponsor into the survivor's reason.
-    const [typeItem, gezelItem] =
-      dup.source.kind === 'project-type' ? [dup, item] : [item, dup];
+    const [typeItem, gezelItem] = dup.source.kind === 'project-type' ? [dup, item] : [item, dup];
     if (typeItem.source.kind !== 'project-type') {
       // Same-source duplicate (two templates suggesting the same book):
       // first one stands.

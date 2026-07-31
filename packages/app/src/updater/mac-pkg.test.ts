@@ -31,7 +31,17 @@ function goodSignature(team = APPLE_TEAM_ID): string {
   ].join('\n');
 }
 
-function execStub(overrides: Record<string, string | Error> = {}) {
+interface ExecResult {
+  stdout: string;
+  stderr?: string;
+}
+
+function execStub(
+  overrides: {
+    pkgutil?: string | Error;
+    spctl?: ExecResult | Error;
+  } = {},
+) {
   return vi.fn(async (file: string) => {
     if (file.endsWith('pkgutil')) {
       const v = overrides.pkgutil ?? goodSignature();
@@ -39,9 +49,12 @@ function execStub(overrides: Record<string, string | Error> = {}) {
       return { stdout: v };
     }
     if (file.endsWith('spctl')) {
-      const v = overrides.spctl ?? 'Gezel.pkg: accepted\nsource=Notarized Developer ID';
+      const v = overrides.spctl ?? {
+        stdout: '',
+        stderr: 'Gezel.pkg: accepted\nsource=Notarized Developer ID',
+      };
       if (v instanceof Error) throw v;
-      return { stdout: v };
+      return v;
     }
     throw new Error(`unexpected exec: ${file}`);
   });
@@ -77,8 +90,18 @@ describe('parseSha256Sums', () => {
 describe('verifyMacPkg', () => {
   const deps = () => ({ execFile: execStub(), logger: { info: vi.fn(), warn: vi.fn() } });
 
-  it('accepts a signed, notarized, first-party, Gatekeeper-approved package', async () => {
+  it('accepts the real spctl shape: exit 0 with the verdict on stderr', async () => {
     await expect(verifyMacPkg('/tmp/x.pkg', 'abc', 'abc', deps())).resolves.toBeUndefined();
+  });
+
+  it('uses Gatekeeper exit status instead of parsing localized output', async () => {
+    const d = {
+      execFile: execStub({
+        spctl: { stdout: '', stderr: 'Paket akzeptiert\nQuelle=Notarisierte Entwickler-ID' },
+      }),
+      logger: {},
+    };
+    await expect(verifyMacPkg('/tmp/x.pkg', 'a', 'a', d)).resolves.toBeUndefined();
   });
 
   it('rejects a digest mismatch before running any Apple check', async () => {
@@ -122,9 +145,11 @@ describe('verifyMacPkg', () => {
       stderr: 'x.pkg: rejected\nsource=no usable signature',
     });
     const d = { execFile: execStub({ spctl: rejection }), logger: {} };
-    await expect(verifyMacPkg('/tmp/x.pkg', 'a', 'a', d)).rejects.toMatchObject({
+    const verification = verifyMacPkg('/tmp/x.pkg', 'a', 'a', d);
+    await expect(verification).rejects.toMatchObject({
       step: 'gatekeeper',
     });
+    await expect(verification).rejects.toThrow(/rejected[\s\S]*no usable signature/i);
   });
 });
 

@@ -2363,16 +2363,12 @@ export class TaskManager {
         status: 'paused' as const,
       }));
       await this.appendNote(projectId, task.num, {
-        text:
-          `# Gate unavailable — task paused\n\n${message}` +
-          (diagnostics ? `\n\n## Script diagnostics\n\n${diagnostics}` : '') +
-          '\n\nThis is a gate/runtime problem, not a failed deliverable check. No completion attempt was consumed. Fix the gate or runtime, then set the task active and retry.',
+        text: `# Gate unavailable — task paused\n\n${message}${diagnostics ? `\n\n## Script diagnostics\n\n${diagnostics}` : ''}\n\nThis is a gate/runtime problem, not a failed deliverable check. No completion attempt was consumed. Fix the gate or runtime, then set the task active and retry.`,
         author: { kind: 'user' },
         stepId: step.id,
       }).catch(() => {});
       log.error(
-        `[gate] ${task.ref} step "${step.id}" could not be evaluated — pausing without consuming an attempt: ${message}` +
-          (diagnostics ? ` diagnostics=${JSON.stringify(diagnostics)}` : ''),
+        `[gate] ${task.ref} step "${step.id}" could not be evaluated — pausing without consuming an attempt: ${message}${diagnostics ? ` diagnostics=${JSON.stringify(diagnostics)}` : ''}`,
       );
       await logGated('reject', priorAttempts, true, outcome);
       return {

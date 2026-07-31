@@ -11,7 +11,10 @@ import {
 } from 'react';
 import { api } from '../api.js';
 import { Tooltip } from '../primitives/index.js';
+import { requestSettingsSection } from '../settings-nav.js';
 import { getSidebarSide } from '../sidebar-side.js';
+import { railSystemNotices } from '../system-notices.js';
+import { useUpdateState } from '../update-state.js';
 import { AreaIcon } from './AreaIcon.js';
 import { type FileEntry, FileTree } from './FileTree.js';
 import { GezelActionsMenu } from './GezelActionsMenu.js';
@@ -217,6 +220,16 @@ export function Sidebar({
     () => AREA_LINKS.filter((area) => area !== 'scripts' || showAdvancedFeatures),
     [showAdvancedFeatures],
   );
+  // Install-health notices (background service, updater). They live here
+  // rather than across the top of Home: neither is urgent, and neither is
+  // fixable without the installer. See system-notices.ts.
+  const updateState = useUpdateState();
+  const systemNotices = railSystemNotices({
+    reason: window.__GEZEL__?.fallbackReason ?? null,
+    code: window.__GEZEL__?.fallbackCode ?? null,
+    ...(window.__GEZEL__?.platform ? { platform: window.__GEZEL__.platform } : {}),
+    update: updateState,
+  });
 
   // ── Live entity lists ───────────────────────────────────────────
   const refreshProjects = useCallback(() => {
@@ -745,6 +758,31 @@ export function Sidebar({
               </button>
             );
           })}
+          {/* Settings is last in AREA_LINKS, so install-health notices land
+              directly beneath it — the screen that explains them. */}
+          {systemNotices.map((notice) => (
+            <button
+              key={notice.id}
+              type="button"
+              className="app-sidebar-notice"
+              data-testid={`sidebar-notice-${notice.id}`}
+              onClick={() => {
+                // Stash for the not-yet-mounted case, open the area, then fire
+                // the event for the already-open-on-another-section case.
+                requestSettingsSection('about');
+                onOpenArea('settings');
+                window.dispatchEvent(
+                  new CustomEvent('gezel:navigate', {
+                    detail: { view: 'settings', section: 'about' },
+                  }),
+                );
+              }}
+              title={`${notice.title} ${notice.body}`}
+            >
+              <span className="app-sidebar-notice-dot" aria-hidden="true" />
+              <span className="app-sidebar-notice-label">{notice.railLabel}</span>
+            </button>
+          ))}
         </div>
       </nav>
 

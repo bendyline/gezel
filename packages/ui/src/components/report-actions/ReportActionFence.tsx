@@ -3,8 +3,8 @@ import { parseReportActionBlock } from '@bendyline/gezel';
 import type { FenceRenderContext, FenceRendererMap } from '@bendyline/squisq/fence';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../../api.js';
-import { parseUnifiedDiff } from '../github/diffModel.js';
 import { GitDiffView } from '../github/GitDiffView.js';
+import { parseUnifiedDiff } from '../github/diffModel.js';
 import {
   readReportActions,
   refreshReportActions,
@@ -109,7 +109,9 @@ function ReportActionCard({
           className="subtle small"
           disabled={busy}
           onClick={() =>
-            void run(() => api.fireReportAction(projectId, { path: reportPath, actionId: action.id }))
+            void run(() =>
+              api.fireReportAction(projectId, { path: reportPath, actionId: action.id }),
+            )
           }
         >
           {fireLabel} anyway
@@ -171,7 +173,9 @@ function ReportActionCard({
       )}
 
       {actionError && <p className="error small">{actionError}</p>}
-      {overlay.error && !view && <p className="muted small">Actions unavailable: {overlay.error}</p>}
+      {overlay.error && !view && (
+        <p className="muted small">Actions unavailable: {overlay.error}</p>
+      )}
 
       {(state === 'suggested' || state === 'failed' || view?.contentChanged) && (
         <div className="report-action-actions">
@@ -237,7 +241,11 @@ function EditDiffRow({
 
   return (
     <div className="report-action-edit">
-      <button type="button" className="report-action-edit-toggle" onClick={() => setOpen((v) => !v)}>
+      <button
+        type="button"
+        className="report-action-edit-toggle"
+        onClick={() => setOpen((v) => !v)}
+      >
         <code>{edit.path}</code>
         {stats && (
           <span className="report-action-edit-stats">
@@ -246,7 +254,11 @@ function EditDiffRow({
         )}
         {result && (
           <span className={result.ok ? 'report-action-edit-ok' : 'report-action-edit-err'}>
-            {result.ok ? (result.error === 'no-op' ? 'no-op' : 'applied') : (result.error ?? 'failed')}
+            {result.ok
+              ? result.error === 'no-op'
+                ? 'no-op'
+                : 'applied'
+              : (result.error ?? 'failed')}
           </span>
         )}
         <span aria-hidden="true">{open ? '▾' : '▸'}</span>

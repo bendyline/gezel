@@ -178,9 +178,12 @@ temp/
 
 .DS_Store
 
-# Architecture/quality review reports — local artifacts
-reports/
-/reports
+# Architecture/quality review reports — local artifacts.
+# Root-anchored on purpose: a bare `reports/` matches at ANY depth, and once
+# swallowed a whole service source directory — never committed, then lost.
+# biome.json's `reports/**` ignore has the same depth reach and no way to
+# anchor it (Biome 1.x), so source directories must not be named `reports`.
+/reports/
 /artifacts/
 
 # Catalog importer cache and per-run diagnostics (never team-shared).

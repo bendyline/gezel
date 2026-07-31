@@ -9,7 +9,7 @@ import {
   parseReportActions,
 } from '@bendyline/gezel';
 import type { Store } from '../fs/store.js';
-import type { ReportActionManager } from '../reports/report-action-manager.js';
+import type { ReportActionManager } from '../report-actions/report-action-manager.js';
 import type { TaskManager } from '../tasks/manager.js';
 
 /**
@@ -62,9 +62,7 @@ export async function buildNightShiftReview(
       const completedAt =
         task.craftbook.steps.reduce<string | undefined>(
           (latest, step) =>
-            step.completedAt && (!latest || step.completedAt > latest)
-              ? step.completedAt
-              : latest,
+            step.completedAt && (!latest || step.completedAt > latest) ? step.completedAt : latest,
           undefined,
         ) ?? (task.status === 'complete' ? task.updatedAt : undefined);
       const ranThisWindow = task.nightShift?.lastRunDay === key;

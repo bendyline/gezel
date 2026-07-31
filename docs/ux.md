@@ -331,6 +331,22 @@ row-level status/actions on the same raised surface. Reserve this treatment
 for the one destination currently shown; hover and expand/collapse states
 remain flat in the rail.
 
+**Install-health notices.** Conditions about the *installation* rather than
+the user's work — the background service did not start, an update could not
+be checked or applied — never take a banner on the home screen. They are not
+urgent, and none of them is fixable from where the user is standing. They get
+one muted line in the navigation rail beneath Settings (`.app-sidebar-notice`:
+a small `--warning` dot, muted text, no pulse) which lands on Settings → About,
+where the full explanation lives as a `.settings-notice` block with the raw
+diagnostic behind a "Technical details" disclosure. A condition that is purely
+informational — a failed update *check*, which is what being offline looks like
+— skips the rail entirely and appears only in Settings. Copy rule: never say a
+capability is "temporarily paused" unless it genuinely returns on its own; say
+what is off, and what the user would have to do. Derivation lives in
+[system-notices.ts](../packages/ui/src/system-notices.ts), so the rail and
+Settings can never drift apart. The one update outcome that *is* worth
+interrupting for — a verified update waiting to install — stays a banner.
+
 **Landing cues.** When navigation scrolls a surface to a specific row
 rather than the top or bottom of it, flash the row so the jump doesn't read
 as the view moving on its own: add `.timeline-focus-flash` (a ~2s ring that

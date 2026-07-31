@@ -4,8 +4,8 @@ import {
   createLogger,
 } from '@bendyline/gezel';
 import { Hono } from 'hono';
+import { ReportNotFoundError } from '../../report-actions/report-action-manager.js';
 import { CraftbookSetupRequiredError } from '../../tasks/manager.js';
-import { ReportNotFoundError } from '../../reports/report-action-manager.js';
 import type { ServiceContext } from '../context.js';
 
 const log = createLogger('http');

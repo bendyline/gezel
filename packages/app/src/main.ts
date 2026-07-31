@@ -89,11 +89,17 @@ let appUpdateRelease: PublishedAppRelease | null = null;
  * What the renderer shows about updates. Previously every update outcome —
  * including outright failure — went only to the console, so a user whose
  * update could not be applied had no way to find out.
+ *
+ * `stage` separates the two failures the renderer used to conflate. A failed
+ * *check* is the ordinary offline/no-release-published case and says nothing
+ * about the install; the renderer showed it as "Gezel could not install an
+ * update", which was both alarming and untrue. Only a failed *install* means
+ * a verified update is sitting there unable to land.
  */
 type UpdateState =
   | { kind: 'downloading'; version: string }
   | { kind: 'ready'; version: string }
-  | { kind: 'error'; version?: string; message: string };
+  | { kind: 'error'; stage: 'check' | 'install'; version?: string; message: string };
 let updateState: UpdateState | null = null;
 /** Verified installer staged by the macOS update flow, awaiting the user. */
 let macUpdatePkgPath: string | null = null;
@@ -1398,8 +1404,9 @@ function ensureAutoUpdater(): import('electron-updater').AppUpdater | null {
       console.warn('[updater] error:', err);
       setUpdateState({
         kind: 'error',
+        stage: 'check',
         version: appUpdateRelease?.version,
-        message: `Could not check for updates: ${err instanceof Error ? err.message : String(err)}`,
+        message: err instanceof Error ? err.message : String(err),
       });
     });
     autoUpdaterRef = autoUpdater;
@@ -1416,7 +1423,12 @@ function ensureAutoUpdater(): import('electron-updater').AppUpdater | null {
  * administrator prompt. We never elevate anything ourselves.
  */
 async function handleMacUpdateAvailable(version: string): Promise<void> {
-  if (updateState?.kind === 'downloading' || updateState?.version === version) return;
+  if (
+    updateState?.kind === 'downloading' ||
+    (updateState?.kind === 'ready' && updateState.version === version)
+  ) {
+    return;
+  }
   setUpdateState({ kind: 'downloading', version });
   notify({ title: 'Gezel update available', body: `Downloading version ${version}…` });
   tray?.setTooltip('Gezel — downloading update…');
@@ -1429,8 +1441,8 @@ async function handleMacUpdateAvailable(version: string): Promise<void> {
       stagingDir: join(app.getPath('userData'), 'updates'),
       fetch: globalThis.fetch,
       execFile: async (file, args) => {
-        const { stdout } = await run(file, args, { maxBuffer: 8 * 1024 * 1024 });
-        return { stdout: String(stdout) };
+        const { stdout, stderr } = await run(file, args, { maxBuffer: 8 * 1024 * 1024 });
+        return { stdout: String(stdout), stderr: String(stderr) };
       },
       logger: { info: console.log, warn: console.warn },
     });
@@ -1446,7 +1458,7 @@ async function handleMacUpdateAvailable(version: string): Promise<void> {
     const message = err instanceof Error ? err.message : String(err);
     console.warn('[updater] macOS package staging failed:', message);
     macUpdatePkgPath = null;
-    setUpdateState({ kind: 'error', version, message });
+    setUpdateState({ kind: 'error', stage: 'install', version, message });
     tray?.setTooltip('Gezel');
   }
 }

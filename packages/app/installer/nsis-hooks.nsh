@@ -106,6 +106,65 @@
   ${EndIf}
 !macroend
 
+; Take Administrators ownership of one container.  Fails closed: an owner we
+; do not trust can rewrite whatever DACL we set next.
+;
+; Two commands because icacls alone is not sufficient.  icacls never enables
+; SeTakeOwnershipPrivilege, so /setowner only works where the object's
+; existing DACL already grants the installer WRITE_OWNER — it returns access
+; denied on a directory whose previous owner locked us out, which is exactly
+; the pre-created-directory case this hardening exists for.  takeown.exe does
+; enable the privilege, and /A assigns the Administrators group.  Try the
+; cheap path first, then the privileged one.
+!macro TakeTrustedOwnership PATH SUBJECT FAILURE_LABEL
+  nsExec::ExecToLog '"$SYSDIR\icacls.exe" "${PATH}" /setowner "*S-1-5-32-544" /L /Q'
+  Pop $0
+  ${If} $0 != 0
+    DetailPrint "icacls could not take ownership of ${PATH} (exit $0); retrying with takeown."
+    nsExec::ExecToLog '"$SYSDIR\takeown.exe" /F "${PATH}" /A'
+    Pop $0
+  ${EndIf}
+  ${If} $0 != 0
+    DetailPrint "ERROR: failed to set a trusted owner on ${PATH} (exit $0)."
+    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not take secure ownership of ${SUBJECT} (Windows error $0). The service will not be installed; the desktop app will use its per-user fallback."
+    Goto ${FAILURE_LABEL}
+  ${EndIf}
+!macroend
+
+; Strip ownership and explicit ACEs from whatever a pre-created data
+; directory already contained, so a planted child cannot keep granting its
+; author access once the container is closed.
+;
+; Deliberately best-effort, and deliberately run before the container DACL is
+; applied (/reset resets the named object too, so it would undo it).
+; Recursive icacls fails as a whole for reasons that are ordinary inside a
+; preserved GEZEL_HOME: without /C it stops at the first object it cannot
+; open, and it cannot open a path over MAX_PATH at all — uv virtualenvs,
+; cloned repos and sandbox node_modules all produce those, and a model file
+; mapped by a leftover engine process produces the first.
+;
+; Aborting the machine-service install over one such file is not the safe
+; outcome.  It drops the user onto the per-user daemon, which has no service
+; isolation, no restricted SID and no private home — strictly weaker than
+; this service with one stale child ACE.  The controls that actually bound
+; the blast radius are the container's owner and DACL, and both of those
+; still fail closed.
+!macro SanitizeDescendants PATH SUBJECT
+  ; /Q keeps a per-file success line out of the log, but a big preserved home
+  ; still takes a while with real-time scanning on, so say what is happening.
+  DetailPrint "Reviewing existing permissions under ${PATH}..."
+  nsExec::ExecToLog '"$SYSDIR\icacls.exe" "${PATH}" /setowner "*S-1-5-32-544" /T /C /L /Q'
+  Pop $0
+  ${If} $0 != 0
+    DetailPrint "WARNING: some ${SUBJECT} entries kept a previous owner (icacls exit $0)."
+  ${EndIf}
+  nsExec::ExecToLog '"$SYSDIR\icacls.exe" "${PATH}" /reset /T /C /L /Q'
+  Pop $0
+  ${If} $0 != 0
+    DetailPrint "WARNING: some ${SUBJECT} entries kept explicit permissions (icacls exit $0)."
+  ${EndIf}
+!macroend
+
 ; `dir /A:L` selects reparse-point entries. A zero exit code means at least
 ; one descendant exists. The tree itself is checked separately above; this
 ; closes the upgrade case where an old broadly-writable service directory
@@ -187,6 +246,12 @@
 
   !insertmacro InstallVCRedist
 
+  ; No elevation check here on purpose: `perMachine: true` makes
+  ; electron-builder emit `RequestExecutionLevel admin`, so Windows either
+  ; elevated this process or never started it.  Everything below — SCM
+  ; registration, ProgramData ownership, service-SID ACLs — can assume an
+  ; administrator token, which is also why an access-denied result from any
+  ; of them means something other than "the user is not an admin".
   DetailPrint "Installing least-privileged GezelService..."
 
   !insertmacro RemoveGezelService
@@ -212,22 +277,11 @@
   ; attacker owner who can rewrite its DACL after installation.
   CreateDirectory "${GEZEL_DATA_DIR}"
   !insertmacro RejectReparsePoint "${GEZEL_DATA_DIR}" "Gezel data directory" SkipNssm
-  ; Recursively replace legacy/attacker ownership and explicit child ACLs.
-  ; /L operates on links themselves rather than traversing their targets.
-  nsExec::ExecToLog '"$SYSDIR\icacls.exe" "${GEZEL_DATA_DIR}" /setowner "*S-1-5-32-544" /T /L'
-  Pop $0
-  ${If} $0 != 0
-    DetailPrint "ERROR: failed to set a trusted owner on ${GEZEL_DATA_DIR} (icacls exit $0)."
-    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not take secure ownership of its machine-service data directory. The service will not be installed; the desktop app will use its per-user fallback."
-    Goto SkipNssm
-  ${EndIf}
-  nsExec::ExecToLog '"$SYSDIR\icacls.exe" "${GEZEL_DATA_DIR}" /reset /T /L'
-  Pop $0
-  ${If} $0 != 0
-    DetailPrint "ERROR: failed to reset legacy ACLs under ${GEZEL_DATA_DIR} (icacls exit $0)."
-    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not remove legacy permissions from its machine-service data. The service will not be installed; the desktop app will use its per-user fallback."
-    Goto SkipNssm
-  ${EndIf}
+  ; The container is the boundary, so its owner is the one ownership step
+  ; that fails closed.  /L operates on links themselves rather than
+  ; traversing their targets.
+  !insertmacro TakeTrustedOwnership "${GEZEL_DATA_DIR}" "its machine-service data directory" SkipNssm
+  !insertmacro SanitizeDescendants "${GEZEL_DATA_DIR}" "existing machine-service data"
 
   ; Private root: SYSTEM + Administrators only until the per-service SID exists.
   ; Remove inherited/broad Users, Authenticated Users, Everyone, and generic
@@ -236,7 +290,7 @@
   Pop $0
   ${If} $0 != 0
     DetailPrint "ERROR: failed to harden ${GEZEL_DATA_DIR} ACL (icacls exit $0)."
-    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not secure its machine-service data directory. The service will not be installed; the desktop app will use its per-user fallback."
+    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not secure its machine-service data directory (Windows error $0). The service will not be installed; the desktop app will use its per-user fallback."
     Goto SkipNssm
   ${EndIf}
   ; POSIX-0711 equivalent: let desktop users traverse this exact directory to
@@ -246,7 +300,7 @@
   Pop $0
   ${If} $0 != 0
     DetailPrint "ERROR: failed to grant traverse-only client access (icacls exit $0)."
-    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not configure safe client traversal to runtime discovery. The service will not be installed; the desktop app will use its per-user fallback."
+    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not configure safe client traversal to runtime discovery (Windows error $0). The service will not be installed; the desktop app will use its per-user fallback."
     Goto SkipNssm
   ${EndIf}
   ; The root may have been attacker-owned when the first check ran. Re-check
@@ -273,31 +327,23 @@
   ; elevated would otherwise turn upgrade cleanup into an arbitrary-file
   ; deletion primitive.
   !insertmacro ClearGezelRuntime
-  nsExec::ExecToLog '"$SYSDIR\icacls.exe" "${GEZEL_DATA_DIR}\runtime" /setowner "*S-1-5-32-544"'
-  Pop $0
-  ${If} $0 != 0
-    DetailPrint "ERROR: failed to set a trusted runtime owner (icacls exit $0)."
-    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not secure its machine-service runtime directory. The service will not be installed; the desktop app will use its per-user fallback."
-    Goto SkipNssm
-  ${EndIf}
+  !insertmacro TakeTrustedOwnership "${GEZEL_DATA_DIR}\runtime" "its machine-service runtime directory" SkipNssm
 
   ; Public immutable asset boundary. Users may traverse and read/execute
   ; published models, but cannot create, replace, or delete them. The service
   ; SID receives write access only after it exists below.
-  nsExec::ExecToLog '"$SYSDIR\icacls.exe" "${GEZEL_DATA_DIR}\assets" /setowner "*S-1-5-32-544" /T /L'
-  Pop $0
-  ${If} $0 != 0
-    DetailPrint "ERROR: failed to set a trusted asset-store owner (icacls exit $0)."
-    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not secure its shared model store. The service will not be installed; the desktop app will use its per-user fallback."
-    Goto SkipNssm
-  ${EndIf}
-  nsExec::ExecToLog '"$SYSDIR\icacls.exe" "${GEZEL_DATA_DIR}\assets" /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)(F)" "*S-1-5-32-544:(OI)(CI)(F)" "*S-1-5-32-545:(OI)(CI)(RX)" /remove:g "*S-1-5-11" "*S-1-1-0" "*S-1-5-19" /T /L'
+  !insertmacro TakeTrustedOwnership "${GEZEL_DATA_DIR}\assets" "its shared model store" SkipNssm
+  !insertmacro SanitizeDescendants "${GEZEL_DATA_DIR}\assets" "published model"
+  nsExec::ExecToLog '"$SYSDIR\icacls.exe" "${GEZEL_DATA_DIR}\assets" /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)(F)" "*S-1-5-32-544:(OI)(CI)(F)" "*S-1-5-32-545:(OI)(CI)(RX)" /remove:g "*S-1-5-11" "*S-1-1-0" "*S-1-5-19" /L'
   Pop $0
   ${If} $0 != 0
     DetailPrint "ERROR: failed to apply the read-only asset-store ACL (icacls exit $0)."
-    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not secure its shared model store. The service will not be installed; the desktop app will use its per-user fallback."
+    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not secure its shared model store (Windows error $0). The service will not be installed; the desktop app will use its per-user fallback."
     Goto SkipNssm
   ${EndIf}
+  ; No recursive pass here: SanitizeDescendants above already reset every
+  ; reachable model back to pure inheritance, so the container ACEs — which
+  ; are (OI)(CI) — propagate to them.
 
   ; Client discovery boundary.  BUILTIN\Users receives read/execute only on
   ; runtime and its files.  It receives no access to config, secrets, gezels,
@@ -306,7 +352,7 @@
   Pop $0
   ${If} $0 != 0
     DetailPrint "ERROR: failed to apply the runtime discovery ACL (icacls exit $0)."
-    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not secure its machine-service runtime discovery directory. The service will not be installed; the desktop app will use its per-user fallback."
+    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not secure its machine-service runtime discovery directory (Windows error $0). The service will not be installed; the desktop app will use its per-user fallback."
     Goto SkipNssm
   ${EndIf}
 
@@ -319,7 +365,7 @@
   System::Call 'Kernel32::SetEnvironmentVariable(t "ELECTRON_RUN_AS_NODE", i 0)i'
   ${If} $0 != 0
     DetailPrint "ERROR: service bundle extraction failed (exit $0)."
-    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not extract its machine-service bundle. The service will not be installed; the desktop app will use its per-user fallback."
+    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not extract its machine-service bundle (exit code $0). The service will not be installed; the desktop app will use its per-user fallback."
     Goto SkipNssm
   ${EndIf}
 
@@ -334,7 +380,7 @@
   Pop $0
   ${If} $0 != 0
     DetailPrint "ERROR: service registration failed (sc create exit $0)."
-    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not register its machine service. The desktop app will use its per-user fallback."
+    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not register its machine service (Windows error $0). The desktop app will use its per-user fallback."
     Goto SkipNssm
   ${EndIf}
 
@@ -346,7 +392,7 @@
   ${If} $0 != 0
     DetailPrint "ERROR: failed to set restricted service SID (exit $0)."
     !insertmacro RemoveGezelService
-    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not restrict its machine-service identity. The registration was removed; the desktop app will use its per-user fallback."
+    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not restrict its machine-service identity (Windows error $0). The registration was removed; the desktop app will use its per-user fallback."
     Goto SkipNssm
   ${EndIf}
 
@@ -361,7 +407,7 @@
   ${If} $0 != 0
     DetailPrint "ERROR: failed to restrict service privileges (exit $0)."
     !insertmacro RemoveGezelService
-    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not remove unnecessary privileges from its machine service. The registration was removed; the desktop app will use its per-user fallback."
+    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not remove unnecessary privileges from its machine service (Windows error $0). The registration was removed; the desktop app will use its per-user fallback."
     Goto SkipNssm
   ${EndIf}
 
@@ -372,7 +418,7 @@
   ${If} $0 != 0
     DetailPrint "ERROR: failed to grant the service SID access to private state (exit $0)."
     !insertmacro RemoveGezelService
-    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not grant its restricted service access to private state. The registration was removed; the desktop app will use its per-user fallback."
+    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not grant its restricted service access to private state (Windows error $0). The registration was removed; the desktop app will use its per-user fallback."
     Goto SkipNssm
   ${EndIf}
   nsExec::ExecToLog '"$SYSDIR\icacls.exe" "${GEZEL_DATA_DIR}\runtime" /grant:r "NT SERVICE\${GEZEL_SERVICE_NAME}:(OI)(CI)(M)"'
@@ -380,15 +426,15 @@
   ${If} $0 != 0
     DetailPrint "ERROR: failed to grant the service SID access to runtime state (exit $0)."
     !insertmacro RemoveGezelService
-    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not grant its restricted service access to runtime state. The registration was removed; the desktop app will use its per-user fallback."
+    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not grant its restricted service access to runtime state (Windows error $0). The registration was removed; the desktop app will use its per-user fallback."
     Goto SkipNssm
   ${EndIf}
-  nsExec::ExecToLog '"$SYSDIR\icacls.exe" "${GEZEL_DATA_DIR}\assets" /grant:r "NT SERVICE\${GEZEL_SERVICE_NAME}:(OI)(CI)(M)" /T /L'
+  nsExec::ExecToLog '"$SYSDIR\icacls.exe" "${GEZEL_DATA_DIR}\assets" /grant:r "NT SERVICE\${GEZEL_SERVICE_NAME}:(OI)(CI)(M)" /L'
   Pop $0
   ${If} $0 != 0
     DetailPrint "ERROR: failed to grant the service SID access to shared assets (exit $0)."
     !insertmacro RemoveGezelService
-    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not grant its restricted service access to shared model assets. The registration was removed; the desktop app will use its per-user fallback."
+    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not grant its restricted service access to shared model assets (Windows error $0). The registration was removed; the desktop app will use its per-user fallback."
     Goto SkipNssm
   ${EndIf}
 
@@ -408,7 +454,7 @@
   ${If} $0 != 0
     DetailPrint "ERROR: failed to enable GezelService autostart (exit $0)."
     !insertmacro RemoveGezelService
-    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not enable its machine service. The registration was removed; the desktop app will use its per-user fallback."
+    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not enable its machine service (Windows error $0). The registration was removed; the desktop app will use its per-user fallback."
     Goto SkipNssm
   ${EndIf}
 

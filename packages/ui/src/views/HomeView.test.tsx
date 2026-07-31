@@ -82,6 +82,7 @@ vi.mock('./home/IntroHandboekArticle.js', () => ({
 
 const { HomeView } = await import('./HomeView.js');
 const { api } = await import('../api.js');
+const { resetUpdateStateForTests } = await import('../update-state.js');
 
 /** Configure a "warm + onboarded" state so HomeView renders the workshop. */
 function onboard() {
@@ -126,69 +127,27 @@ describe('HomeView', () => {
     expect(screen.getByTestId('chat-composer')).toBeInTheDocument();
   });
 
-  // A skewed machine service is healthy and still holding the user's data —
-  // the generic "background work is paused" copy would be wrong about both,
-  // and its advice (reopen Gezel) does not fix a version mismatch.
-  describe('service banner', () => {
-    it('tells the user to reinstall when the app and service versions differ', async () => {
-      render(
-        <HomeView
-          fallbackReason="The Gezel background service is running version 1.26210.19, but this copy of Gezel expects version 1.26211.23."
-          fallbackCode="system-service-version-mismatch"
-          platform="darwin"
-        />,
-      );
-
-      // Wait for the *configured* branch specifically. The regression this
-      // pins: an onboarded user renders the workshop, which returned before
-      // the banner markup and swallowed every service notice. Asserting only
-      // on the banner would pass against the loading branch that precedes it.
+  // Service health is an install-health notice now — a quiet line in the
+  // navigation rail under Settings, explained in Settings → About. Home was
+  // the wrong home for it: not urgent, not fixable from here, and it pushed
+  // the meester conversation down the screen on every launch.
+  it('never puts a degraded-service banner on the home screen', async () => {
+    const g = window as unknown as { __GEZEL__: Record<string, unknown> };
+    const before = { ...g.__GEZEL__ };
+    g.__GEZEL__ = {
+      ...before,
+      fallbackReason: 'System service was unavailable: SCM stopped',
+      fallbackCode: 'system-service-unhealthy',
+    };
+    try {
+      render(<HomeView platform="darwin" />);
       await screen.findByTestId('home-workshop');
 
-      expect(
-        screen.getByText(/Gezel updated, but its background service did not/),
-      ).toBeInTheDocument();
-      expect(screen.getByText(/Run the Gezel PKG again/)).toBeInTheDocument();
-      expect(screen.queryByText(/Background work is temporarily paused/)).not.toBeInTheDocument();
-      // Both versions stay reachable in the details disclosure.
-      expect(screen.getByText(/1\.26210\.19/)).toBeInTheDocument();
-    });
-
-    it('names the right installer per platform', async () => {
-      const { unmount } = render(
-        <HomeView
-          fallbackReason="skew"
-          fallbackCode="system-service-version-mismatch"
-          platform="linux"
-        />,
-      );
-      await screen.findByText(/Reinstall the Gezel \.deb or \.rpm package/);
-      unmount();
-
-      render(
-        <HomeView
-          fallbackReason="skew"
-          fallbackCode="system-service-version-mismatch"
-          platform="win32"
-        />,
-      );
-      await screen.findByText(/Run the Gezel installer again/);
-    });
-
-    it('keeps the paused-background copy for an embedded fallback', async () => {
-      render(
-        <HomeView
-          fallbackReason="System service was unavailable: SCM stopped"
-          fallbackCode="system-service-unhealthy"
-          platform="darwin"
-        />,
-      );
-
-      await screen.findByText(/Background work is temporarily paused/);
-      expect(
-        screen.queryByText(/Gezel updated, but its background service did not/),
-      ).not.toBeInTheDocument();
-    });
+      expect(screen.queryByText(/Background work/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/SCM stopped/)).not.toBeInTheDocument();
+    } finally {
+      g.__GEZEL__ = before;
+    }
   });
 
   describe('update banner', () => {
@@ -205,9 +164,16 @@ describe('HomeView', () => {
       return bridge;
     }
 
+    beforeEach(() => {
+      // The update state is a module-level store shared by the rail, Settings,
+      // and this banner — drop what a previous test cached before restubbing.
+      resetUpdateStateForTests();
+    });
+
     afterEach(() => {
       const g = window as unknown as { __GEZEL__: Record<string, unknown> };
       g.__GEZEL__ = { ...g.__GEZEL__, update: undefined };
+      resetUpdateStateForTests();
     });
 
     it('says nothing while there is no update', async () => {
@@ -255,36 +221,21 @@ describe('HomeView', () => {
       await waitFor(() => expect(install).toHaveBeenCalledTimes(1));
     });
 
-    // The whole point of this banner: a failed update used to reach the user
-    // as nothing at all, just a console.warn in a window they never open.
-    it('offers a manual download when the update could not be installed', async () => {
+    // Failures are install-health notices, not banners. A failed check is the
+    // ordinary offline case and must never interrupt the home screen; a failed
+    // install is real but still belongs in Settings → About.
+    it('keeps update failures off the home screen', async () => {
       stubUpdateBridge({
         kind: 'error',
+        stage: 'install',
         version: '1.26212.4',
         message: 'Gatekeeper rejected the package',
       });
       render(<HomeView platform="darwin" />);
+      await screen.findByTestId('home-workshop');
 
-      const banner = await screen.findByTestId('update-banner');
-      expect(banner).toHaveTextContent('Gezel could not install an update.');
-      expect(banner).toHaveTextContent('Gatekeeper rejected the package');
-      expect(screen.getByRole('link', { name: /get the latest release/i })).toHaveAttribute(
-        'href',
-        'https://github.com/bendyline/gezel/releases/tag/v1.26212.4',
-      );
-    });
-
-    it('falls back to the releases list, never repository latest, when no app version is known', async () => {
-      stubUpdateBridge({
-        kind: 'error',
-        message: 'Could not contact the update service',
-      });
-      render(<HomeView platform="darwin" />);
-
-      expect(await screen.findByRole('link', { name: /get the latest release/i })).toHaveAttribute(
-        'href',
-        'https://github.com/bendyline/gezel/releases',
-      );
+      expect(screen.queryByTestId('update-banner')).not.toBeInTheDocument();
+      expect(screen.queryByText(/Gatekeeper rejected the package/)).not.toBeInTheDocument();
     });
   });
 

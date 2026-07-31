@@ -41,6 +41,7 @@ export function SuggestedNightWork({
     }
   }, [projectId]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refreshKey is the refetch trigger — the effect body doesn't read it.
   useEffect(() => {
     void reload();
   }, [reload, refreshKey]);
@@ -214,7 +215,9 @@ function SuggestedWorkRow({
             type="button"
             className="subtle"
             disabled={busy || paramFormOpen}
-            onClick={() => (hasParams && item.state === 'suggested' ? onOpenParamForm() : onEnable())}
+            onClick={() =>
+              hasParams && item.state === 'suggested' ? onOpenParamForm() : onEnable()
+            }
           >
             {busy ? 'Updating…' : item.state === 'paused' ? 'Resume' : 'Enable'}
           </button>

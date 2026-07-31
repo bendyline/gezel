@@ -24,7 +24,9 @@ import { Poppetje } from '../poppetje/index.js';
 import { Select } from '../primitives/index.js';
 import { takePendingSettingsSection } from '../settings-nav.js';
 import { type SidebarSide, getSidebarSide, setSidebarSide } from '../sidebar-side.js';
+import { type SystemNotice, serviceNotice, updateNotice } from '../system-notices.js';
 import { type ThemePref, getThemePref, setThemePref } from '../theme.js';
+import { useUpdateState } from '../update-state.js';
 import { AudioEngineSettings } from './AudioEngineSettings.js';
 import { BenchmarksView } from './BenchmarksView.js';
 import { ChannelsSettings } from './ChannelsSettings.js';
@@ -3233,6 +3235,7 @@ export function SettingsView() {
                 </dl>
               )}
               <AutostartToggle />
+              <BackgroundServiceStatus />
             </section>
             <section style={{ marginBottom: '2rem' }}>
               <h3>Updates</h3>
@@ -3249,6 +3252,7 @@ export function SettingsView() {
                 />
                 <span>Check for updates automatically when Gezel starts</span>
               </label>
+              <UpdateStatus />
             </section>
             <section style={{ marginBottom: '2rem' }}>
               <h3>Advanced</h3>
@@ -3513,6 +3517,119 @@ function autostartLabel(): string {
   if (platform === 'linux') return 'systemd --user unit';
   if (platform === 'win32') return 'Task Scheduler task';
   return 'startup item';
+}
+
+/**
+ * The quiet form every install-health notice takes here: a headline, the
+ * plain-language explanation, and the raw diagnostic behind a disclosure.
+ * This page is the notice's only full home — the navigation rail carries at
+ * most a one-line label pointing back here.
+ */
+function SystemNoticeNote({ notice }: { notice: SystemNotice }) {
+  return (
+    <div className="settings-notice" data-testid={`settings-notice-${notice.id}`}>
+      <strong>{notice.title}</strong>
+      <span>
+        {notice.body}
+        {notice.link ? (
+          <>
+            {' '}
+            <a href={notice.link.href} rel="noreferrer">
+              {notice.link.label}
+            </a>
+          </>
+        ) : null}
+      </span>
+      {notice.technical && (
+        <details>
+          <summary>Technical details</summary>
+          <p>{notice.technical}</p>
+        </details>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Whether gezeld is running as a real background service this launch. The
+ * degraded answer used to be a banner across Home; it is neither urgent nor
+ * fixable without the installer, so it lives here and only leaves a one-line
+ * pointer in the rail.
+ */
+function BackgroundServiceStatus() {
+  const [logsError, setLogsError] = useState<string | null>(null);
+  const notice = serviceNotice({
+    reason: window.__GEZEL__?.fallbackReason ?? null,
+    code: window.__GEZEL__?.fallbackCode ?? null,
+    ...(window.__GEZEL__?.platform ? { platform: window.__GEZEL__.platform } : {}),
+  });
+
+  if (!notice) {
+    return (
+      <p className="muted small" style={{ marginTop: '0.75rem' }}>
+        The background service is running normally.
+      </p>
+    );
+  }
+
+  return (
+    <div style={{ marginTop: '0.75rem' }}>
+      <SystemNoticeNote notice={notice} />
+      <p className="muted small" style={{ marginTop: '0.5rem' }}>
+        Service logs are under <code>~/.gezel/logs/</code>.{' '}
+        <button
+          type="button"
+          className="subtle"
+          onClick={() => {
+            const open = window.__GEZEL__?.openLogsFolder;
+            if (!open) {
+              setLogsError('Opening the folder needs the Gezel desktop app.');
+              return;
+            }
+            void open()
+              .then((err) => setLogsError(err || null))
+              .catch((err: unknown) => setLogsError(String(err)));
+          }}
+        >
+          Open logs folder
+        </button>
+      </p>
+      {logsError && <p className="error small">{logsError}</p>}
+    </div>
+  );
+}
+
+/** Where the last update attempt got to. Silent unless there is news. */
+function UpdateStatus() {
+  const state = useUpdateState();
+  const notice = updateNotice(state);
+
+  if (notice) {
+    return (
+      <div style={{ marginTop: '0.75rem' }}>
+        <SystemNoticeNote notice={notice} />
+      </div>
+    );
+  }
+
+  if (state?.kind === 'downloading') {
+    return (
+      <p className="muted small" style={{ marginTop: '0.75rem' }}>
+        Downloading version {state.version}…
+      </p>
+    );
+  }
+
+  if (state?.kind === 'ready') {
+    return (
+      <p className="muted small" style={{ marginTop: '0.75rem' }}>
+        Version {state.version} is downloaded and ready to install — the prompt is on the Home
+        screen.
+      </p>
+    );
+  }
+
+  return null;
 }
 
 /**

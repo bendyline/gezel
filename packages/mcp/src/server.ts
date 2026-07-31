@@ -5941,9 +5941,7 @@ server.tool(
         content: [
           {
             type: 'text' as const,
-            text:
-              `[runtime routing guard] "${brief.name}" is a clearly single-deliverable job, not a crew project. ` +
-              'No project was created. Retry now with `start_job` using the same name/about/mission/task fields and `specialistRole: "developer"` (or `"image-generator"` for a raster-only deliverable).',
+            text: `[runtime routing guard] "${brief.name}" is a clearly single-deliverable job, not a crew project. No project was created. Retry now with \`start_job\` using the same name/about/mission/task fields and \`specialistRole: "developer"\` (or \`"image-generator"\` for a raster-only deliverable).`,
           },
         ],
         isError: true,
@@ -6403,7 +6401,7 @@ async function describeSuggestedWorkOffers(
     return [
       `This gezel's role suggests recurring background work for this project (not yet enabled):`,
       ...lines,
-      `Offer these to the user; enable with \`enable_suggested_work\` only after they agree.`,
+      'Offer these to the user; enable with `enable_suggested_work` only after they agree.',
     ].join('\n');
   } catch {
     return null;
@@ -6467,7 +6465,7 @@ server.tool(
       .record(z.string(), z.string())
       .optional()
       .describe(
-        "Craftbook param values for the spawned runs (see the item's paramSchema), e.g. {\"language\": \"Nederlands\"}",
+        'Craftbook param values for the spawned runs (see the item\'s paramSchema), e.g. {"language": "Nederlands"}',
       ),
   },
   async ({ key, project, params }) => {

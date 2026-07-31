@@ -63,9 +63,7 @@ export function ProjectPropertiesEditor({
               value={drafts[row.id] ?? stored[row.id] ?? ''}
               placeholder="Not set"
               list={row.options ? `project-property-options-${row.id}` : undefined}
-              onChange={(e) =>
-                setDrafts((current) => ({ ...current, [row.id]: e.target.value }))
-              }
+              onChange={(e) => setDrafts((current) => ({ ...current, [row.id]: e.target.value }))}
               onBlur={() => void save(row.id)}
             />
             {row.options && (

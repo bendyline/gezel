@@ -160,7 +160,12 @@ async function seedCatalog(): Promise<void> {
       version: '1.0.0',
       releasedAt: '2026-07-06T00:00:00Z',
       schedules: [
-        { cron: '0 17 * * 5', craftbook: 'weekly-pipeline-review', consent: 'ask', overlap: 'skip' },
+        {
+          cron: '0 17 * * 5',
+          craftbook: 'weekly-pipeline-review',
+          consent: 'ask',
+          overlap: 'skip',
+        },
       ],
       craftbooks: ['weekly-pipeline-review'],
     },

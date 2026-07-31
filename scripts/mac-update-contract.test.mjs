@@ -26,10 +26,11 @@ const root = join(here, '..');
 const appDir = join(root, 'packages', 'app');
 
 test('the macOS updater derives the real release asset name and URL', async () => {
-  const [builder, workflow, macPkg] = await Promise.all([
+  const [builder, workflow, macPkg, main] = await Promise.all([
     readFile(join(appDir, 'electron-builder.yml'), 'utf8'),
     readFile(join(root, '.github', 'workflows', 'release-electron.yml'), 'utf8'),
     readFile(join(appDir, 'src', 'updater', 'mac-pkg.ts'), 'utf8'),
+    readFile(join(appDir, 'src', 'main.ts'), 'utf8'),
   ]);
 
   // `mac:` block wins over the top-level fallback artifactName.
@@ -82,5 +83,16 @@ test('the macOS updater derives the real release asset name and URL', async () =
     workflow,
     /xargs sha256sum > SHA256SUMS/,
     'release job no longer produces SHA256SUMS — the updater verifies against it',
+  );
+
+  assert.match(
+    main,
+    /const \{ stdout, stderr \} = await run/,
+    'the production execFile adapter must preserve spctl stderr for diagnostics',
+  );
+  assert.match(
+    main,
+    /updateState\?\.kind === 'ready' && updateState\.version === version/,
+    'a failed macOS update must remain retryable for the same version',
   );
 });

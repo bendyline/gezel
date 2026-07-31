@@ -151,8 +151,7 @@ export function HomeWorkshop({
       .then((review) => {
         if (cancelled) return;
         const endedMs = Date.parse(review.windowEnd);
-        const fresh =
-          Number.isFinite(endedMs) && Date.now() - endedMs < 12 * 60 * 60 * 1000;
+        const fresh = Number.isFinite(endedMs) && Date.now() - endedMs < 12 * 60 * 60 * 1000;
         const hasContent = review.tasksCompleted.length > 0 || review.reports.length > 0;
         setNightReview(fresh && hasContent ? review : null);
       })

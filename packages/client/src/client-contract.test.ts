@@ -60,7 +60,9 @@ const cases: ContractCase[] = [
     path: '/api/projects/p1/suggested-work/enable',
     body: { key: 'gezel-template:veiligheidsmeester:security-code-review' },
     invoke: (c) =>
-      c.enableSuggestedWork('p1', { key: 'gezel-template:veiligheidsmeester:security-code-review' }),
+      c.enableSuggestedWork('p1', {
+        key: 'gezel-template:veiligheidsmeester:security-code-review',
+      }),
   },
   {
     name: 'suggested work disable',

@@ -515,6 +515,44 @@ html.embedded-chat #root {
   color: var(--text-muted, var(--text));
 }
 
+/* Install-health notice, the Settings form. The rail carries a one-line
+   pointer (.app-sidebar-notice); the full explanation lives here. */
+.settings-notice {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  max-width: 640px;
+  padding: 0.6rem 0.75rem;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--warning);
+  border-radius: var(--radius-md);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.settings-notice > span,
+.settings-notice details {
+  color: var(--text-muted);
+}
+
+.settings-notice details {
+  margin-top: 0.15rem;
+  font-size: 0.78rem;
+}
+
+.settings-notice summary {
+  width: fit-content;
+  color: var(--accent-hover);
+  cursor: pointer;
+}
+
+.settings-notice p {
+  margin: 0.35rem 0 0;
+}
+
 .app-fallback-banner {
   box-sizing: border-box;
   display: flex;
@@ -2928,6 +2966,62 @@ html.embedded-chat #root {
   display: flex;
   flex-direction: column;
   gap: 0.1rem;
+}
+
+/* Install-health pointer, directly beneath Settings. Deliberately the
+   quietest thing in the rail: muted, unweighted, no pulse — it reports a
+   state the user cannot fix from here, and the fix (the installer) is not
+   urgent. Clicking lands on Settings → About, where it explains itself. */
+.app-sidebar-notice {
+  display: flex;
+  align-items: center;
+  /* Same padding + gap as the area links above, so the dot centers in their
+     24px icon column and the label starts on their text baseline x. */
+  gap: 0.5rem;
+  padding: 0.2rem 0.45rem;
+  margin-top: 0.1rem;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 0.75rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.app-sidebar-notice:hover {
+  background: rgba(176, 114, 76, 0.08);
+  color: var(--text);
+}
+
+.app-sidebar-notice-dot {
+  flex: 0 0 auto;
+  width: 0.45rem;
+  height: 0.45rem;
+  /* A true circle — the one shape the keys-in-trays rule exempts. */
+  border-radius: 50%;
+  background: var(--warning);
+  /* Centers the dot in the 24px icon column the links above use. */
+  margin: 0 calc((24px - 0.45rem) / 2);
+}
+
+.app-sidebar-notice-label {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.app-sidebar.collapsed .app-sidebar-notice-label {
+  display: none;
+}
+
+.app-sidebar.collapsed .app-sidebar-notice {
+  justify-content: center;
+  padding-left: 0.35rem;
+  padding-right: 0.35rem;
+  gap: 0;
 }
 
 /* The current destination is a raised paper tab joined to the open canvas,

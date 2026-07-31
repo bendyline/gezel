@@ -6,7 +6,7 @@ import { BundledSource, CatalogService } from '@bendyline/gezel-catalog';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { ChatManager } from '../chat/manager.js';
 import { Store } from '../fs/store.js';
-import { ReportActionManager } from '../reports/report-action-manager.js';
+import { ReportActionManager } from '../report-actions/report-action-manager.js';
 import { TaskManager } from './manager.js';
 import { buildNightShiftReview } from './night-review.js';
 import type { TaskRunner } from './runner.js';

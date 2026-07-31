@@ -171,8 +171,7 @@ async function createHost(
 ): Promise<Task> {
   const { store, tasks } = deps;
   const project = await store.getProject(projectId);
-  const sponsorGezelId =
-    item.source.kind === 'gezel-template' ? item.source.gezelId : undefined;
+  const sponsorGezelId = item.source.kind === 'gezel-template' ? item.source.gezelId : undefined;
   const assigneeGezelId = sponsorGezelId ?? project?.voormanGezelId;
   const sponsorLabel =
     item.source.kind === 'gezel-template'
@@ -212,7 +211,9 @@ async function createHost(
   );
   if (originKey(host) !== item.key) {
     // Origin/key derivations drifted apart — surface loudly in dev.
-    log.warn(`[suggested-work] created host ${host.ref} origin does not round-trip key ${item.key}`);
+    log.warn(
+      `[suggested-work] created host ${host.ref} origin does not round-trip key ${item.key}`,
+    );
   }
   return host;
 }

@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import type { ReactElement } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockApi } from '../../test-utils/mockApi.js';
 
@@ -24,7 +25,7 @@ function renderFence(body: string) {
     value: body,
     mode: 'read',
   });
-  return render(<>{node}</>);
+  return render(node as ReactElement);
 }
 
 beforeEach(async () => {
