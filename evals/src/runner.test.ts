@@ -26,6 +26,7 @@ import {
   recoveryFilePathForSniff,
   repeatedPoisonedSessionFailure,
   retryLoopSniffKey,
+  shouldDeferRetryLoopForInflight,
   shouldDeferSoftWatchdog,
   slugifyForDirName,
   sniffArtifactHasScored,
@@ -398,6 +399,98 @@ describe('soft watchdog inflight handling', () => {
     expect(inflightDeferMsForEngine('mlx')).toBe(20 * 60 * 1000);
     expect(inflightDeferMsForEngine('llama-cpp')).toBe(4 * 60 * 1000);
     expect(inflightDeferMsForEngine(undefined)).toBe(4 * 60 * 1000);
+  });
+
+  it('the STALL retry-loop path defers while a slow turn is still streaming', () => {
+    // incident-postmortem / qwen3.6-27b-q8, 2026-08-01: failed as "stalled 18m
+    // ... 0 re-writes" at 04:23:17 while the engine was 2,275 tokens into a
+    // turn at 4.62 t/s that released 1.6s later. One repair turn on a 27B at
+    // ~5 t/s legitimately runs 8-11 min, past the 4-min llama-cpp cap.
+    const midTurn = [
+      {
+        sessionId: 'dddddddd-4444',
+        gezelId: 'jordan',
+        projectId: 'checkout',
+        elapsedMs: 8 * 60_000,
+      },
+    ];
+    const base = {
+      fastPathTripped: false,
+      longPathTripped: false,
+      chatterPathTripped: false,
+      inflightTurns: midTurn,
+      inflightDeferMs: inflightDeferMsForEngine('llama-cpp'),
+    };
+    expect(shouldDeferRetryLoopForInflight({ ...base, stallPathTripped: true })).toBe(true);
+    // The same 8-min turn under the LONG path keeps the old 4-min budget.
+    expect(
+      shouldDeferRetryLoopForInflight({
+        ...base,
+        stallPathTripped: false,
+        longPathTripped: true,
+      }),
+    ).toBe(false);
+  });
+
+  it('count-based retry-loop paths never defer for an in-flight turn', () => {
+    // FAST and CHATTER carry a count component, so they are throughput-
+    // invariant: a model that re-wrote N times without moving the sniff is
+    // looping at any decode speed. Deferring them would let a real loop ride.
+    const freshTurn = [
+      { sessionId: 'eeeeeeee-5555', gezelId: 'priya', projectId: 'orders', elapsedMs: 10_000 },
+    ];
+    const base = {
+      longPathTripped: false,
+      stallPathTripped: false,
+      inflightTurns: freshTurn,
+      inflightDeferMs: inflightDeferMsForEngine('llama-cpp'),
+    };
+    expect(
+      shouldDeferRetryLoopForInflight({
+        ...base,
+        fastPathTripped: true,
+        chatterPathTripped: false,
+      }),
+    ).toBe(false);
+    expect(
+      shouldDeferRetryLoopForInflight({
+        ...base,
+        fastPathTripped: false,
+        chatterPathTripped: true,
+      }),
+    ).toBe(false);
+    // A stall that co-trips with a count-based path still fails fast.
+    expect(
+      shouldDeferRetryLoopForInflight({
+        ...base,
+        stallPathTripped: true,
+        fastPathTripped: true,
+        chatterPathTripped: false,
+      }),
+    ).toBe(false);
+  });
+
+  it('a genuinely wedged turn past the stall budget still fails the trial', () => {
+    // The deferral is not unbounded — a turn stuck 20 min is past the 15-min
+    // stall budget and the HARD progress watchdog stays the real backstop.
+    const wedged = [
+      {
+        sessionId: 'ffffffff-6666',
+        gezelId: 'jordan',
+        projectId: 'checkout',
+        elapsedMs: 20 * 60_000,
+      },
+    ];
+    expect(
+      shouldDeferRetryLoopForInflight({
+        fastPathTripped: false,
+        longPathTripped: false,
+        stallPathTripped: true,
+        chatterPathTripped: false,
+        inflightTurns: wedged,
+        inflightDeferMs: inflightDeferMsForEngine('llama-cpp'),
+      }),
+    ).toBe(false);
   });
 
   it('a 10-min MLX prefill still defers under the MLX cap but not the default', () => {

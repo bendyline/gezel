@@ -770,7 +770,14 @@ export const conflictSynthesisScenario: EvalScenario = {
     { signal: 'citations', pattern: /six claims/ },
   ],
   evidenceTexts: [SYNTHESIS_MISSION_OBJECTIVES, SYNTHESIS_KICKOFF_MESSAGE],
-  timeoutMs: 30 * 60_000,
+  // 30m was a ceiling, not a backstop. gemma4-e4b-q8 finishes this in 1.8 min
+  // at ~22 t/s; qwen3.6-27b-q8 at ~5 t/s needs 36.8 min and died here on
+  // 2026-08-01 with the poller still reporting forward progress — a false
+  // negative created purely by decode speed. Capability is invariant to
+  // throughput, so the wall clock must not decide the verdict: leave the
+  // progress watchdog below to terminate genuinely stuck runs and give the
+  // ceiling enough headroom for slow local models.
+  timeoutMs: 90 * 60_000,
   progressTimeoutMs: 15 * 60_000,
   setup,
   skipInitialPrompt: true,
