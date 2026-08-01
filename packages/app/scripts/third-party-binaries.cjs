@@ -33,14 +33,6 @@
  * with no team identifier). There, re-signing is the price of
  * notarization, not a choice. See the macOS note in build-native.yml.
  */
-const PNPM_RUNTIME_INVENTORY = require('../src/pnpm-runtime-inventory.json');
-const REFLINK_WINDOWS_X64 = PNPM_RUNTIME_INVENTORY.packages.find(
-  (pkg) => pkg.name === '@reflink/reflink-win32-x64-msvc',
-);
-if (!REFLINK_WINDOWS_X64) {
-  throw new Error('pnpm runtime inventory has no @reflink/reflink-win32-x64-msvc identity');
-}
-
 /**
  * Matched against the file's basename, case-insensitively. Anchored so a
  * first-party binary cannot be exempted by having a vendor name inside it.
@@ -66,15 +58,6 @@ const THIRD_PARTY_PATTERNS = [
     pattern: '^fastlist-[\\w.-]+\\.exe$',
     source: 'pnpm fastlist helper (ordinary pnpm package)',
   },
-  {
-    pattern: '^reflink\\.win32-x64-msvc\\.node$',
-    source: `${REFLINK_WINDOWS_X64.name}@${REFLINK_WINDOWS_X64.version} (pnpm vendored prebuilt addon)`,
-    package: REFLINK_WINDOWS_X64.name,
-    version: REFLINK_WINDOWS_X64.version,
-    license: REFLINK_WINDOWS_X64.license,
-    packageSha256: PNPM_RUNTIME_INVENTORY.packageSha256,
-  },
-
   // Prebuilt native addons inside the gezeld service bundle. npm ships these
   // as compiled artifacts; we never build them, so the same authorship rule
   // that exempts cuBLAS exempts them. Listed explicitly because

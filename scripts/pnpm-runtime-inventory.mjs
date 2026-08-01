@@ -4,9 +4,10 @@
  *
  * This graph is separate from Gezel's workspace lockfile: pnpm publishes its
  * CLI with a private `dist/node_modules/` tree, including platform-qualified
- * native addons. Packaging prunes foreign platform packages, so the release
- * SBOM and legal notices must start from the unpruned, checked-in inventory
- * rather than whichever platform happened to generate the SBOM.
+ * native addons. Packaging prunes foreign platform packages and removes the
+ * optional @reflink scope, so the release SBOM and legal notices must start
+ * from the unpruned, checked-in inventory rather than whichever platform
+ * happened to generate the SBOM.
  */
 import { readFile, readdir } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
@@ -117,10 +118,26 @@ export function pnpmPackagePlatformKeys(pkg) {
   );
 }
 
+/**
+ * @reflink is present in pnpm's upstream npm tarball, but Gezel removes the
+ * whole optional native package scope and patches pnpm to Node's built-in
+ * COPYFILE_FICLONE_FORCE before packaging.
+ */
+export function isRemovedPnpmRuntimePackage(pkg) {
+  return pkg.name === '@reflink/reflink' || pkg.name.startsWith('@reflink/reflink-');
+}
+
+/** Exact package graph staged into one installer target. */
+export function packagedPnpmRuntimePackages(inventory, target) {
+  return inventory.packages.filter(
+    (pkg) => pnpmPackageMatchesTarget(pkg, target) && !isRemovedPnpmRuntimePackage(pkg),
+  );
+}
+
 /** Union of package identities present in at least one released installer. */
 export function shippedPnpmRuntimePackages(inventory) {
   return inventory.packages
-    .filter((pkg) => pnpmPackageTargets(pkg).length > 0)
+    .filter((pkg) => !isRemovedPnpmRuntimePackage(pkg) && pnpmPackageTargets(pkg).length > 0)
     .map((pkg) => ({
       ...pkg,
       targets: pnpmPackageTargets(pkg),
@@ -182,9 +199,9 @@ export async function verifyPnpmRuntimeTree(root, { target } = {}) {
       `pnpm runtime root is ${rootMetadata.name}@${rootMetadata.version}; expected pnpm@${inventory.pnpmVersion}`,
     );
   }
-  const expected = inventory.packages
-    .filter((pkg) => !target || pnpmPackageMatchesTarget(pkg, target))
-    .sort((a, b) => a.name.localeCompare(b.name) || a.version.localeCompare(b.version));
+  const expected = (
+    target ? packagedPnpmRuntimePackages(inventory, target) : inventory.packages
+  ).sort((a, b) => a.name.localeCompare(b.name) || a.version.localeCompare(b.version));
   const actual = await readTreePackages(root);
   if (
     actual.length !== expected.length ||

@@ -150,7 +150,6 @@ describe('third-party allowlist covers prebuilt Windows payloads', () => {
     'conpty_console_list.node',
     'winpty.dll',
     'winpty-agent.exe',
-    'reflink.win32-x64-msvc.node',
   ];
 
   for (const name of bundled) {
@@ -177,14 +176,6 @@ describe('third-party allowlist covers prebuilt Windows payloads', () => {
     }
     assert.equal(isWindowsLoadableBinary('addon.node.map'), false);
     assert.equal(isWindowsLoadableBinary('README.md'), false);
-  });
-
-  it('binds the reflink exception to a package identity, license, and tarball checksum', () => {
-    const policy = thirdPartyMetadata('reflink.win32-x64-msvc.node');
-    assert.equal(policy.package, '@reflink/reflink-win32-x64-msvc');
-    assert.equal(policy.version, '0.1.19');
-    assert.equal(policy.license, 'MIT');
-    assert.match(policy.packageSha256, /^[0-9a-f]{64}$/);
   });
 });
 

@@ -7,7 +7,7 @@ import { join, relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
   loadPnpmRuntimeInventory,
-  pnpmPackageMatchesTarget,
+  packagedPnpmRuntimePackages,
   pnpmReleaseTargets,
 } from './pnpm-runtime-inventory.mjs';
 
@@ -45,9 +45,7 @@ export async function verifyPnpmComponentInventory(pnpmComponents, expectedCount
   ) {
     throw new Error('pnpm component inventory is not bound to the packaged pnpm pin');
   }
-  const expectedPnpmPackages = pinnedPnpm.packages.filter((pkg) =>
-    pnpmPackageMatchesTarget(pkg, pnpmComponents.target),
-  );
+  const expectedPnpmPackages = packagedPnpmRuntimePackages(pinnedPnpm, pnpmComponents.target);
   if (JSON.stringify(pnpmComponents.packages) !== JSON.stringify(expectedPnpmPackages)) {
     throw new Error(`pnpm component inventory is stale for ${pnpmComponents.target}`);
   }

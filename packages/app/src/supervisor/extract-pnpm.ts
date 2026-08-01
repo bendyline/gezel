@@ -49,8 +49,17 @@ export async function installPnpmIfNeeded(opts: PnpmInstallOptions): Promise<Pnp
   const versionFilePath = join(bundleDir, 'version.txt');
   const bundleEntry = join(bundleDir, 'bin', 'pnpm.mjs');
   const bundleRuntime = join(bundleDir, 'dist', 'pnpm.mjs');
+  const bundleWorker = join(bundleDir, 'dist', 'worker.js');
+  const bundleReflinkCompat = join(bundleDir, 'dist', 'gezel-reflink-compat.cjs');
+  const bundleManifest = join(bundleDir, 'sha256.txt');
 
-  if (!existsSync(bundleEntry) || !existsSync(bundleRuntime) || !existsSync(versionFilePath)) {
+  if (
+    !existsSync(bundleEntry) ||
+    !existsSync(bundleRuntime) ||
+    !existsSync(bundleWorker) ||
+    !existsSync(bundleReflinkCompat) ||
+    !existsSync(versionFilePath)
+  ) {
     logger?.info?.(
       '[supervisor] pnpm bundle dir exists but is incomplete; falling back to system pnpm',
     );
@@ -62,6 +71,7 @@ export async function installPnpmIfNeeded(opts: PnpmInstallOptions): Promise<Pnp
   const installedRuntimeDir = join(installDir, 'pnpm-runtime');
   const installedEntry = join(installedRuntimeDir, 'bin', 'pnpm.mjs');
   const installedVersionFile = join(installDir, 'pnpm.version');
+  const installedManifestFile = join(installDir, 'pnpm.sha256');
 
   let installedVersion: string | null = null;
   try {
@@ -69,11 +79,23 @@ export async function installPnpmIfNeeded(opts: PnpmInstallOptions): Promise<Pnp
   } catch {
     /* fresh install */
   }
+  const shippedManifest = existsSync(bundleManifest)
+    ? (await readFile(bundleManifest, 'utf8')).trim()
+    : null;
+  let installedManifest: string | null = null;
+  try {
+    installedManifest = (await readFile(installedManifestFile, 'utf8')).trim();
+  } catch {
+    /* older or development install */
+  }
 
   if (
     installedVersion === shippedVersion &&
     existsSync(installedEntry) &&
-    existsSync(join(installedRuntimeDir, 'dist', 'pnpm.mjs'))
+    existsSync(join(installedRuntimeDir, 'dist', 'pnpm.mjs')) &&
+    existsSync(join(installedRuntimeDir, 'dist', 'worker.js')) &&
+    existsSync(join(installedRuntimeDir, 'dist', 'gezel-reflink-compat.cjs')) &&
+    (shippedManifest === null || installedManifest === shippedManifest)
   ) {
     return {
       entryPath: installedEntry,
@@ -82,11 +104,16 @@ export async function installPnpmIfNeeded(opts: PnpmInstallOptions): Promise<Pnp
     };
   }
 
-  // Re-hash the load-bearing bundle files against the bundle's
-  // sha256.txt (written by fetch-pnpm.mjs) before installing. A
+  // Re-hash the load-bearing bundle files against the bundle's sha256.txt
+  // (written by fetch-pnpm.mjs) before installing. A
   // corrupted or tampered bundle must not land in <home>/bin — fall
   // back to system pnpm.
-  const integrity = await verifyBundleManifest(bundleDir, ['bin/pnpm.mjs', 'dist/pnpm.mjs']);
+  const integrity = await verifyBundleManifest(bundleDir, [
+    'bin/pnpm.mjs',
+    'dist/pnpm.mjs',
+    'dist/worker.js',
+    'dist/gezel-reflink-compat.cjs',
+  ]);
   if (!integrity.ok) {
     logger?.warn?.(
       `[supervisor] pnpm bundle failed integrity check (${integrity.reason}); refusing to install — falling back to system pnpm`,
@@ -96,9 +123,11 @@ export async function installPnpmIfNeeded(opts: PnpmInstallOptions): Promise<Pnp
 
   await mkdir(installDir, { recursive: true });
   logger?.info?.(
-    installedVersion
-      ? `[supervisor] upgrading bundled pnpm ${installedVersion} → ${shippedVersion}`
-      : `[supervisor] installing bundled pnpm v${shippedVersion}`,
+    installedVersion === shippedVersion
+      ? `[supervisor] refreshing bundled pnpm v${shippedVersion} (bundle revision changed)`
+      : installedVersion
+        ? `[supervisor] upgrading bundled pnpm ${installedVersion} → ${shippedVersion}`
+        : `[supervisor] installing bundled pnpm v${shippedVersion}`,
   );
   const stagingDir = `${installedRuntimeDir}.staging-${process.pid}-${Date.now()}`;
   await rm(stagingDir, { recursive: true, force: true });
@@ -106,6 +135,11 @@ export async function installPnpmIfNeeded(opts: PnpmInstallOptions): Promise<Pnp
   await rm(installedRuntimeDir, { recursive: true, force: true });
   await rename(stagingDir, installedRuntimeDir);
   await writeFile(installedVersionFile, `${shippedVersion}\n`, 'utf8');
+  if (shippedManifest !== null) {
+    await writeFile(installedManifestFile, `${shippedManifest}\n`, 'utf8');
+  } else {
+    await rm(installedManifestFile, { force: true });
+  }
 
   // Sanity: verify the copy actually exists.
   const st = await stat(installedEntry);

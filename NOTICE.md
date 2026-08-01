@@ -60,16 +60,16 @@ attribution file is taken from the exact Electron distribution being packaged.
 The ordinary pnpm package carries its own private `dist/node_modules/` graph;
 those packages are executable runtime content, not dependencies from Gezel's
 workspace lockfile. The table below is derived from the exact pnpm tarball
-bound by `PNPM_PACKAGE_SHA256`. Packaging verifies the graph before and after
-foreign-platform pruning. Platform-qualified packages that cannot occur in a
-currently published installer are intentionally omitted.
+bound by `PNPM_PACKAGE_SHA256`. Packaging verifies the original graph, removes
+foreign-platform packages, and removes pnpm's optional `@reflink` package scope
+after routing its three clone call sites to Node's built-in
+`COPYFILE_FICLONE_FORCE` with pnpm's existing ordinary-copy fallback. The
+staged graph is then verified again. Packages that cannot occur in a currently
+published installer are intentionally omitted.
 
 | Package | Version | License | Installer targets |
 |---|---|---|---|
 | `@isaacs/fs-minipass` | `4.0.1` | ISC | all released targets |
-| `@reflink/reflink` | `0.1.19` | MIT | all released targets |
-| `@reflink/reflink-darwin-arm64` | `0.1.19` | MIT | darwin-arm64 |
-| `@reflink/reflink-win32-x64-msvc` | `0.1.19` | MIT | win32-x64 |
 | `abbrev` | `4.0.0` | ISC | all released targets |
 | `chownr` | `3.0.0` | BlueOak-1.0.0 | all released targets |
 | `env-paths` | `2.2.1` | MIT | all released targets |

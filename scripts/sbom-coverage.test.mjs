@@ -22,8 +22,10 @@ import { fileURLToPath } from 'node:url';
 import { verifyNoticeInventory } from './check-notice.mjs';
 import { ENGINE_FOR_BINARY, allPlatformKeys } from './native-payload.mjs';
 import {
+  isRemovedPnpmRuntimePackage,
   loadPnpmRuntimeInventory,
   mergePnpmRuntimeSbomComponents,
+  packagedPnpmRuntimePackages,
   pnpmPackageMatchesTarget,
   shippedPnpmRuntimePackages,
 } from './pnpm-runtime-inventory.mjs';
@@ -51,7 +53,7 @@ test('the generator sources every non-npm component kind', async () => {
   assert.match(generator, /dependencies: pnpmDependencies/);
 });
 
-test('the pin-bound pnpm graph covers every released target without foreign addons', async () => {
+test('the pin-bound pnpm graph covers every released target without @reflink or foreign addons', async () => {
   const inventory = await loadPnpmRuntimeInventory();
   const shipped = shippedPnpmRuntimePackages(inventory);
   assert.ok(
@@ -71,8 +73,9 @@ test('the pin-bound pnpm graph covers every released target without foreign addo
   assert.equal(pnpmPackageMatchesTarget(windowsAddon, 'linux-x64'), false);
 
   const shippedNames = new Set(shipped.map((pkg) => pkg.name));
-  assert.equal(shippedNames.has('@reflink/reflink-darwin-x64'), false);
-  assert.equal(shippedNames.has('@reflink/reflink-win32-arm64-msvc'), false);
+  for (const pkg of inventory.packages.filter(isRemovedPnpmRuntimePackage)) {
+    assert.equal(shippedNames.has(pkg.name), false, `${pkg.name} must be removed before packaging`);
+  }
 });
 
 test('the SBOM merge emits every shipped pnpm identity, scope, and dependency edge', async () => {
@@ -105,20 +108,10 @@ test('the SBOM merge emits every shipped pnpm identity, scope, and dependency ed
     1,
     'an identity shared with the workspace graph must be upserted, not duplicated',
   );
-  const windowsAddon = sbomComponents.find(
-    (component) => component.version === '0.1.19' && component.name === 'reflink-win32-x64-msvc',
-  );
-  assert.ok(windowsAddon);
-  assert.ok(
-    windowsAddon.properties.some(
-      (property) =>
-        property.name === 'gezel:component-kind' && property.value === 'bundled-pnpm-dependency',
-    ),
-  );
-  assert.ok(
-    windowsAddon.properties.some(
-      (property) => property.name === 'gezel:platforms' && property.value.includes('win32-x64'),
-    ),
+  assert.equal(
+    sbomComponents.some((component) => component.group === '@reflink'),
+    false,
+    'the SBOM must describe the staged graph, not pnpm tarball packages removed before shipping',
   );
   const pnpmEdge = dependencies.find((entry) => entry.ref === pnpmRef);
   assert.equal(pnpmEdge.dependsOn.length, components.length);
@@ -128,7 +121,7 @@ test('the SBOM merge emits every shipped pnpm identity, scope, and dependency ed
 test('the packaged legal bundle rejects a stale or incomplete pnpm graph', async () => {
   const inventory = await loadPnpmRuntimeInventory();
   const target = 'win32-x64';
-  const packages = inventory.packages.filter((pkg) => pnpmPackageMatchesTarget(pkg, target));
+  const packages = packagedPnpmRuntimePackages(inventory, target);
   const manifest = {
     schemaVersion: 1,
     pnpmVersion: inventory.pnpmVersion,
