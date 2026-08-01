@@ -39,7 +39,7 @@ afterEach(async () => {
 });
 
 function fakeModelManager(
-  scriptedEvents: InstallEvent[] = [{ type: 'done', id: 'gemma4-e2b-q8' }],
+  scriptedEvents: InstallEvent[] = [{ type: 'done', id: 'gemma4-e2b-q4' }],
   installed: Array<{ id: string }> = [],
 ): {
   manager: LlamaCppModelManager;
@@ -123,7 +123,7 @@ describe('bootstrapOnDeviceFirstRun', () => {
     // limbo recovery handles that).
     await store.writeConfig({
       provider: 'llama-cpp',
-      defaultModel: { 'llama-cpp': 'gemma4-e2b-q8' },
+      defaultModel: { 'llama-cpp': 'gemma4-e2b-q4' },
       firstRunCompleted: true,
     });
     // Fake a host with 24 GB GPU so the resolver picks 26B-A4B; nothing
@@ -168,10 +168,10 @@ describe('bootstrapOnDeviceFirstRun', () => {
     // re-eval branch is gated on the pinned model being absent.
     await store.writeConfig({
       provider: 'llama-cpp',
-      defaultModel: { 'llama-cpp': 'gemma4-e2b-q8' },
+      defaultModel: { 'llama-cpp': 'gemma4-e2b-q4' },
       firstRunCompleted: true,
     });
-    const { manager: llama, calls: llamaCalls } = fakeModelManager([], [{ id: 'gemma4-e2b-q8' }]);
+    const { manager: llama, calls: llamaCalls } = fakeModelManager([], [{ id: 'gemma4-e2b-q4' }]);
     const { manager: mlx } = fakeMlxManager();
     await bootstrapOnDeviceFirstRun({
       store,
@@ -182,7 +182,7 @@ describe('bootstrapOnDeviceFirstRun', () => {
       archOverride: 'x64',
     });
     const config = await store.readConfig();
-    expect(config.defaultModel?.['llama-cpp']).toBe('gemma4-e2b-q8');
+    expect(config.defaultModel?.['llama-cpp']).toBe('gemma4-e2b-q4');
     expect(llamaCalls).toEqual([]);
   });
 
@@ -266,13 +266,13 @@ describe('resolveFirstRunTarget', () => {
     // older `gemma4-*-mlx` suffix referenced catalog entries that
     // never existed; dropping it fixes a latent first-run failure on
     // Apple Silicon.
-    expect(resolveFirstRunTarget('gemma4-e2b-q8', 'darwin', 'arm64')).toEqual({
+    expect(resolveFirstRunTarget('gemma4-e2b-q4', 'darwin', 'arm64')).toEqual({
       provider: 'mlx',
-      modelId: 'gemma4-e2b-q8',
+      modelId: 'gemma4-e2b-q4',
     });
-    expect(resolveFirstRunTarget('gemma4-e4b-q8', 'darwin', 'arm64')).toEqual({
+    expect(resolveFirstRunTarget('gemma4-e4b-q4', 'darwin', 'arm64')).toEqual({
       provider: 'mlx',
-      modelId: 'gemma4-e4b-q8',
+      modelId: 'gemma4-e4b-q4',
     });
     expect(resolveFirstRunTarget('gemma4-26b-q4', 'darwin', 'arm64')).toEqual({
       provider: 'mlx',
@@ -281,17 +281,17 @@ describe('resolveFirstRunTarget', () => {
   });
 
   it('keeps Intel Mac / Linux / Windows on llama-cpp', () => {
-    expect(resolveFirstRunTarget('gemma4-e4b-q8', 'darwin', 'x64')).toEqual({
+    expect(resolveFirstRunTarget('gemma4-e4b-q4', 'darwin', 'x64')).toEqual({
       provider: 'llama-cpp',
-      modelId: 'gemma4-e4b-q8',
+      modelId: 'gemma4-e4b-q4',
     });
-    expect(resolveFirstRunTarget('gemma4-e2b-q8', 'linux', 'x64')).toEqual({
+    expect(resolveFirstRunTarget('gemma4-e2b-q4', 'linux', 'x64')).toEqual({
       provider: 'llama-cpp',
-      modelId: 'gemma4-e2b-q8',
+      modelId: 'gemma4-e2b-q4',
     });
-    expect(resolveFirstRunTarget('gemma4-e4b-q8', 'win32', 'x64')).toEqual({
+    expect(resolveFirstRunTarget('gemma4-e4b-q4', 'win32', 'x64')).toEqual({
       provider: 'llama-cpp',
-      modelId: 'gemma4-e4b-q8',
+      modelId: 'gemma4-e4b-q4',
     });
     expect(resolveFirstRunTarget('gemma4-26b-q4', 'win32', 'x64')).toEqual({
       provider: 'llama-cpp',

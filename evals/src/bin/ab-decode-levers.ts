@@ -2,7 +2,7 @@
  * A/B micro-harness for the Theme F decode-throughput levers on the local
  * llama-cpp engine. Isolates each engine knob — single-slot (+ auto
  * cache-reuse), flash-attn, ubatch, and speculative decoding — on
- * `gemma4-e4b-q8` and reports decode t/s, prefill t/s, generated tokens,
+ * `gemma4-e4b-q4` and reports decode t/s, prefill t/s, generated tokens,
  * and (for spec-decode) draft acceptance + output identity vs the greedy
  * baseline.
  *
@@ -44,7 +44,7 @@ import { defaultCacheRoot, ensureWarmModel, linkModelIntoTrial } from '../model-
 import { resolveLlamaBinary } from '../native-bin.ts';
 import { shutdownTrialDaemon, spawnTrialDaemon } from '../spawn.ts';
 
-const MODEL = process.env.GEZEL_EVAL_DECODE_MODEL?.trim() || 'gemma4-e4b-q8';
+const MODEL = process.env.GEZEL_EVAL_DECODE_MODEL?.trim() || 'gemma4-e4b-q4';
 const MODEL_REF = `llama-cpp:${MODEL}`;
 // The draft partner for draft-simple: same Gemma-4 family / tokenizer, ~2B
 // effective params. Warm-cached at this absolute path; passed verbatim to

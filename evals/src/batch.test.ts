@@ -41,7 +41,7 @@ const scenario = (id: string): EvalScenario => ({
 const trialResult = (scenarioId: string, overrides: Partial<TrialResult> = {}): TrialResult => ({
   trialId: `${scenarioId}-trial`,
   scenarioId,
-  modelId: 'gemma4-e4b-q8',
+  modelId: 'gemma4-e4b-q4',
   startedAt: '2026-06-03T00:00:00.000Z',
   finishedAt: '2026-06-03T00:00:01.000Z',
   durationMs: 1000,
@@ -99,7 +99,7 @@ describe('batch abort handling', () => {
     ac.abort();
 
     const summary = await runBatch(scenario('tictactoe'), {
-      modelId: 'gemma4-e4b-q8',
+      modelId: 'gemma4-e4b-q4',
       count: 1,
       runsDir: tempRoot,
       signal: ac.signal,
@@ -122,7 +122,7 @@ describe('batch abort handling', () => {
     });
 
     const summary = await runBatch(scenario('tictactoe'), {
-      modelId: 'gemma4-e4b-q8',
+      modelId: 'gemma4-e4b-q4',
       count: 3,
       runsDir: tempRoot,
       signal: ac.signal,
@@ -143,7 +143,7 @@ describe('batch abort handling', () => {
     });
 
     const summary = await runBatch(scenario('tictactoe'), {
-      modelId: 'gemma4-e4b-q8',
+      modelId: 'gemma4-e4b-q4',
       count: 2,
       runsDir: tempRoot,
       signal: ac.signal,
@@ -164,7 +164,7 @@ describe('batch abort handling', () => {
       .mockRejectedValueOnce(new Error('unexpected runner rejection'));
 
     const summary = await runBatch(scenario('tictactoe'), {
-      modelId: 'gemma4-e4b-q8',
+      modelId: 'gemma4-e4b-q4',
       count: 2,
       runsDir: tempRoot,
       skipPreflight: true,
@@ -182,7 +182,7 @@ describe('batch abort handling', () => {
     );
 
     const summary = await runBatch(scenario('tictactoe'), {
-      modelId: 'gemma4-e4b-q8',
+      modelId: 'gemma4-e4b-q4',
       count: 2,
       runsDir: tempRoot,
       skipPreflight: true,
@@ -202,7 +202,7 @@ describe('batch abort handling', () => {
     });
 
     const summary = await runMatrix([scenario('tictactoe'), scenario('petshop')], {
-      modelId: 'gemma4-e4b-q8',
+      modelId: 'gemma4-e4b-q4',
       count: 1,
       runsDir: tempRoot,
       signal: ac.signal,
@@ -232,7 +232,7 @@ describe('batch abort handling', () => {
     ac.abort();
 
     const summary = await runMatrix([scenario('tictactoe'), scenario('petshop')], {
-      modelId: 'gemma4-e4b-q8',
+      modelId: 'gemma4-e4b-q4',
       count: 1,
       runsDir: tempRoot,
       signal: ac.signal,
@@ -259,7 +259,7 @@ describe('batch abort handling', () => {
       .mockRejectedValueOnce(new Error('unexpected runner rejection'));
 
     const summary = await runMatrix([scenario('tictactoe')], {
-      modelId: 'gemma4-e4b-q8',
+      modelId: 'gemma4-e4b-q4',
       count: 2,
       runsDir: tempRoot,
       skipPreflight: true,
@@ -304,7 +304,7 @@ describe('daemon-spawn timeout retry', () => {
       .mockResolvedValueOnce(trialResult('petshop', { success: true, failureMode: undefined }));
 
     const summary = await runBatch(scenario('petshop'), {
-      modelId: 'gemma4-e4b-q8',
+      modelId: 'gemma4-e4b-q4',
       count: 1,
       runsDir: tempRoot,
       skipPreflight: true,
@@ -320,7 +320,7 @@ describe('daemon-spawn timeout retry', () => {
     runTrialMock.mockResolvedValue(spawnTimeout('tankcombat'));
 
     const summary = await runBatch(scenario('tankcombat'), {
-      modelId: 'gemma4-e4b-q8',
+      modelId: 'gemma4-e4b-q4',
       count: 1,
       runsDir: tempRoot,
       skipPreflight: true,
@@ -338,7 +338,7 @@ describe('daemon-spawn timeout retry', () => {
     );
 
     const summary = await runBatch(scenario('tictactoe'), {
-      modelId: 'gemma4-e4b-q8',
+      modelId: 'gemma4-e4b-q4',
       count: 1,
       runsDir: tempRoot,
       skipPreflight: true,
@@ -357,7 +357,7 @@ describe('daemon-spawn timeout retry', () => {
     );
 
     await runBatch(scenario('tictactoe'), {
-      modelId: 'gemma4-e4b-q8',
+      modelId: 'gemma4-e4b-q4',
       count: 1,
       runsDir: tempRoot,
       skipPreflight: true,
@@ -374,7 +374,7 @@ describe('daemon-spawn timeout retry', () => {
     });
 
     const summary = await runBatch(scenario('petshop'), {
-      modelId: 'gemma4-e4b-q8',
+      modelId: 'gemma4-e4b-q4',
       count: 1,
       runsDir: tempRoot,
       signal: ac.signal,
@@ -387,7 +387,7 @@ describe('daemon-spawn timeout retry', () => {
 });
 
 describe('batch auto-triage (E2)', () => {
-  const base = { modelId: 'gemma4-e4b-q8', skipPreflight: true as const };
+  const base = { modelId: 'gemma4-e4b-q4', skipPreflight: true as const };
 
   it('stops a cell after exactly k identical failures and surfaces the cluster', async () => {
     runTrialMock.mockImplementation(async (s) => modelFail(s.id, { trialId: `${s.id}-x` }));
@@ -603,7 +603,7 @@ describe('preflight provenance (E4)', () => {
       trialResult(s.id, { success: true, failureMode: undefined }),
     );
     const summary = await runBatch(scenario('tictactoe'), {
-      modelId: 'gemma4-e4b-q8',
+      modelId: 'gemma4-e4b-q4',
       count: 1,
       runsDir: tempRoot,
       skipPreflight: true,
@@ -667,7 +667,7 @@ describe('matrix GPU settle', () => {
     runTrialMock.mockImplementation(async (s) => trialResult(s.id));
 
     await runMatrix([scenario('tictactoe'), scenario('petshop')], {
-      modelId: 'gemma4-e4b-q8',
+      modelId: 'gemma4-e4b-q4',
       count: 1,
       runsDir: tempRoot,
       skipPreflight: true,

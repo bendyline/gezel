@@ -25,7 +25,7 @@ pins these 11 scenarios in run order:
 ```bash
 pnpm eval:run tictactoe
 # or with options
-pnpm eval:run tictactoe --model gemma4-e4b-q8 --timeout 20m
+pnpm eval:run tictactoe --model gemma4-e4b-q4 --timeout 20m
 
 # Image-gen scenario; provider-specific chat default + SDXL Lightning. Override either:
 pnpm eval:run petshop --image-model sdxl-lightning-4step --timeout 25m
@@ -68,7 +68,7 @@ answer to "evaluate this model"; `smoke` is a fast pulse check;
 per-axis deep dives; `headroom` holds the deliberately hard probes:
 
 ```bash
-pnpm eval:all --suite core --count 3 --model gemma4-e4b-q8
+pnpm eval:all --suite core --count 3 --model gemma4-e4b-q4
 ```
 
 `--count <N>` is required for every `eval:all` run (except `--list`); there is no implicit
@@ -129,7 +129,7 @@ analysis:
 
 ```json
 {
-  "modelId": "gemma4-e4b-q8",
+  "modelId": "gemma4-e4b-q4",
   "status": "complete",
   "count": 5,
   "requestedScenarios": [
@@ -198,9 +198,9 @@ real model work.
   `llama-server` also resolves) at `native/build/<platform>-<backend>/` or
   `packages/app/native-bin/<platform>-<backend>/` (CUDA preferred, then Vulkan,
   Metal, and CPU). The harness also checks an installed `Gezel.app` on macOS.
-- **For llama.cpp trials only** — one-time `gemma4-e4b-q8` download (~8 GB).
+- **For llama.cpp trials only** — one-time `gemma4-e4b-q4` download (~8 GB).
   The first trial primes
-  `~/.gezel-eval-cache/engines/llama-cpp/models/gemma4-e4b-q8/`; subsequent
+  `~/.gezel-eval-cache/engines/llama-cpp/models/gemma4-e4b-q4/`; subsequent
   trials reuse it via filesystem links.
 - **For Apple Silicon MLX trials** — the platform-aware default provider is
   MLX, and its complete `qwen3.5-4b-q4` source must already exist under

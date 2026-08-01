@@ -779,7 +779,7 @@ describe('computeToolAllowlist', () => {
       role: 'Researcher',
       mode: 'always',
       provider: 'llama-cpp',
-      modelId: 'gemma4-e4b-q8',
+      modelId: 'gemma4-e4b-q4',
       webSearchProvider: 'brave',
     });
     const constrained = constrainAllowlistForImmediateFileWrite(allow, {

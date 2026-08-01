@@ -4562,7 +4562,7 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
               // reasoning-chunks (~130 chars) into the think phase, long
               // before the model could emit its tool call — the turn then
               // failed "no-tool-signal" 2/2 and the handoff died.
-              // Wild-caught core sweep (gemma4-e4b-q8:
+              // Wild-caught core sweep (gemma4-e4b-q4:
               // schema-migration + symptom-debug, deterministic).
               if (constrainedToolSignalMode && !sawStructuredToolSignal) {
                 constrainedToolNoSignalChunks += 1;

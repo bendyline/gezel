@@ -627,11 +627,11 @@ function modelDisplay(id: string): string {
   // in `config.defaultModel` — keep the alias so labels stay correct until
   // the next install rewrites the pin. Unknown ids fall back to the raw id.
   switch (id) {
-    case 'gemma4-e2b-q8':
+    case 'gemma4-e2b-q4':
     case 'gemma4-e2b':
     case 'gemma4-e2b-mlx':
       return 'Gemma 4 (E2B)';
-    case 'gemma4-e4b-q8':
+    case 'gemma4-e4b-q4':
     case 'gemma4-e4b':
     case 'gemma4-e4b-mlx':
       return 'Gemma 4 (E4B)';

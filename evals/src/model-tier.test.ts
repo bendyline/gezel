@@ -12,8 +12,8 @@ describe('modelBillionsForEval', () => {
 describe('classifyEvalModelTier', () => {
   it('classifies real local models by their catalog parameterSize', () => {
     // Manifests carry parameterSize: 2.3B / 8B / 27B / 120B respectively.
-    expect(classifyEvalModelTier({ engine: 'llama-cpp', modelId: 'gemma4-e2b-q8' })).toBe('tiny');
-    expect(classifyEvalModelTier({ engine: 'llama-cpp', modelId: 'gemma4-e4b-q8' })).toBe('small');
+    expect(classifyEvalModelTier({ engine: 'llama-cpp', modelId: 'gemma4-e2b-q4' })).toBe('tiny');
+    expect(classifyEvalModelTier({ engine: 'llama-cpp', modelId: 'gemma4-e4b-q4' })).toBe('small');
     expect(classifyEvalModelTier({ engine: 'llama-cpp', modelId: 'qwen3.6-27b-q4' })).toBe(
       'medium',
     );

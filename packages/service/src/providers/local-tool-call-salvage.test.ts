@@ -945,8 +945,8 @@ describe('extractReasoning', () => {
     expect(out.reasoning).toBe('step 1, step 2');
   });
 
-  it('strips leaked chat-template framing tokens (gemma4-e4b-q8 `<eos><|tool_response><eos>`)', () => {
-    // Wild-caught from gemma4-e4b-q8 (debug bundle): after firing its
+  it('strips leaked chat-template framing tokens (gemma4-e4b-q4 `<eos><|tool_response><eos>`)', () => {
+    // Wild-caught from gemma4-e4b-q4 (debug bundle): after firing its
     // tool calls the model streamed the chat-template tool-response
     // framing as literal special-token text. None of it is reasoning or
     // reply — it should vanish entirely.
@@ -2336,7 +2336,7 @@ describe('formatToolMenu', () => {
 describe('findBareInvokeToolCallSpans', () => {
   const tools = new Set(['write_file', 'list_projects', 'create_project']);
 
-  it('salvages the exact gemma4-e2b-q8/MLX shape', () => {
+  it('salvages the exact gemma4-e2b-q4/MLX shape', () => {
     const text = 'invoke write_file {\n  "path": "preflight.txt",\n  "content": "FLIGHT OK"\n}';
     const spans = findBareInvokeToolCallSpans(text, tools);
     expect(spans).toHaveLength(1);

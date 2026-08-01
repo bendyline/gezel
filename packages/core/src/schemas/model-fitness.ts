@@ -35,7 +35,7 @@ export const ModelFitnessRecordSchema = z.object({
   schemaVersion: z.literal(1),
   /** Local engine family the probe ran against ('llama-cpp', 'ds4', …). */
   provider: z.string(),
-  /** Catalog model id (e.g. `gemma4-e4b-q8`). */
+  /** Catalog model id (e.g. `gemma4-e4b-q4`). */
   modelId: z.string(),
   /**
    * `probed` — the trial ran to completion (checks may still fail);

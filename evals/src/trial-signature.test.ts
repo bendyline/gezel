@@ -5,7 +5,7 @@ import type { TrialResult } from './types.ts';
 const result = (overrides: Partial<TrialResult> = {}): TrialResult => ({
   trialId: 'trial-0',
   scenarioId: 'bookstore-openapi',
-  modelId: 'gemma4-e4b-q8',
+  modelId: 'gemma4-e4b-q4',
   startedAt: '2026-07-08T00:00:00.000Z',
   finishedAt: '2026-07-08T00:01:00.000Z',
   durationMs: 60_000,

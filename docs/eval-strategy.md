@@ -57,9 +57,9 @@ Suite membership changes are deliberate: adding to `core` taxes every future sco
 
 ## What a matrix run looks like
 
-The primary cadence is `pnpm eval:all --suite core --count <N> --model gemma4-e4b-q8` — the standardized scorecard × N trials × one model. `--count` is required; use 1 for a diagnostic pass and at least 3 for a comparative scorecard. Omitting `--suite` runs every registered scenario and is reserved for an explicitly exhaustive sweep. For a real strategy signal:
+The primary cadence is `pnpm eval:all --suite core --count <N> --model gemma4-e4b-q4` — the standardized scorecard × N trials × one model. `--count` is required; use 1 for a diagnostic pass and at least 3 for a comparative scorecard. Omitting `--suite` runs every registered scenario and is reserved for an explicitly exhaustive sweep. For a real strategy signal:
 
-- Run the matrix across **multiple model tiers per family** — e.g. `gemma4-e2b-q8` × `gemma4-e4b-q8` × `gemma4-26b-q4`.
+- Run the matrix across **multiple model tiers per family** — e.g. `gemma4-e2b-q4` × `gemma4-e4b-q4` × `gemma4-26b-q4`.
 - Run it across **at least two families** — gemma + qwen, or gemma + a llama variant.
 - Include **at least one cloud baseline** (Claude / GPT) so the on-device numbers always have a reference point. Without that the "is e4b good enough?" question has no anchor.
 

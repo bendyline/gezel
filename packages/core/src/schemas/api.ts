@@ -1005,7 +1005,7 @@ export const GezelConfigSchema = z.object({
    * windowed SWA cache, it cannot — so it logs `cache_reuse is not
    * supported by this context, it will be disabled` and drops the flag no
    * matter what `cacheReuse` is set to. Measured 2026-07-31 on
-   * gemma4-e4b-q8 at 64K context: windowed = 8,772 MB RSS + cache_reuse
+   * gemma4-e4b-q4 at 64K context: windowed = 8,772 MB RSS + cache_reuse
    * refused; `--swa-full` = 11,415 MB RSS (+30%) + cache_reuse accepted.
    * Qwen 3.5/3.6 cannot KV-shift at all (hybrid attention) and this flag
    * does not help them.

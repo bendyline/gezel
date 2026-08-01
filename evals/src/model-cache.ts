@@ -131,11 +131,14 @@ function modelDirInHome(home: string, engine: EngineKey, modelId: string): strin
  * already held the exact same weights under shorter ids. Keep this bridge
  * deliberately narrow: these are historical renames of the same shipped
  * variant, not fuzzy family matches (a q4 install must never satisfy q8).
+ *
+ * `gemma4-e2b`/`gemma4-e4b` are deliberately absent. Those short ids name
+ * the Q8_0 weights the catalog shipped before the QAT-Q4 swap, so aliasing
+ * them onto `gemma4-e{2,4}b-q4` would hand a cached Q8 tree to a Q4 id —
+ * the same variant confusion this list exists to prevent.
  */
 const HISTORICAL_LLAMA_CPP_ALIASES: Readonly<Record<string, string>> = {
   'deepseek-r1-8b-q4': 'deepseek-r1',
-  'gemma4-e2b-q8': 'gemma4-e2b',
-  'gemma4-e4b-q8': 'gemma4-e4b',
   'gemma4-26b-q4': 'gemma4-26b',
   'gemma4-31b-q4': 'gemma4-31b',
   'gpt-oss-20b-q4': 'gpt-oss',

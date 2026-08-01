@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { type ResidentModel, selectBackgroundEngine } from './background-routing.js';
 
 const mlx26b: ResidentModel = { provider: 'mlx', modelId: 'gemma4-26b-q4' };
-const llamaTiny: ResidentModel = { provider: 'llama-cpp', modelId: 'gemma4-e2b-q8' };
+const llamaTiny: ResidentModel = { provider: 'llama-cpp', modelId: 'gemma4-e2b-q4' };
 const llamaSmall: ResidentModel = { provider: 'llama-cpp', modelId: 'qwen3.5-9b' };
 const llama70b: ResidentModel = { provider: 'llama-cpp', modelId: 'llama-3-70b' };
 
@@ -40,7 +40,7 @@ describe('selectBackgroundEngine', () => {
     // no parallelism win, so we decline and leave existing behavior.
     const target = selectBackgroundEngine({
       foregroundProvider: 'llama-cpp',
-      resident: [{ provider: 'llama-cpp', modelId: 'gemma4-e2b-q8' }, mlx26b],
+      resident: [{ provider: 'llama-cpp', modelId: 'gemma4-e2b-q4' }, mlx26b],
       gpuPolicy: 'coexist',
     });
     expect(target).toBeNull();

@@ -30,7 +30,7 @@ import { join } from 'node:path';
 import { acquireEvalDeviceLock } from '../eval-device-lock.ts';
 import { shutdownTrialDaemon, spawnTrialDaemon } from '../spawn.ts';
 
-const MODEL = 'gemma4-e4b-q8';
+const MODEL = 'gemma4-e4b-q4';
 const PROMPT = 'Reply with exactly the single word: ready.';
 const HOME = join(homedir(), '.gezel-mlx-validate');
 const FIRST_TURN_TIMEOUT_MS = 1_200_000; // venv build + model load + turn

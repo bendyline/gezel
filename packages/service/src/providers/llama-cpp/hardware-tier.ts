@@ -25,7 +25,7 @@ import { detectMemoryProfile } from '../../system/memory.js';
 const MEMORY_OVERHEAD_FACTOR = 1.2;
 
 /** Safe universal default if the catalog somehow ships no recommended model. */
-const FALLBACK_TIER = 'gemma4-e2b-q8';
+const FALLBACK_TIER = 'gemma4-e2b-q4';
 
 /** A catalog chat-model id (the pinned first-run model). */
 export type ModelTier = string;

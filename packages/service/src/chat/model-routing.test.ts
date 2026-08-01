@@ -19,7 +19,7 @@ function candidate(overrides: Partial<RoutingCandidate> & { modelId: string }): 
 
 /** The dev-host fleet shape: e4b (small) + 20b/27b (medium), 27b default. */
 const FLEET: RoutingCandidate[] = [
-  candidate({ modelId: 'gemma4-e4b-q8', tier: 'small', parameterSizeB: 8 }),
+  candidate({ modelId: 'gemma4-e4b-q4', tier: 'small', parameterSizeB: 8 }),
   candidate({ modelId: 'gpt-oss-20b-q4', tier: 'medium', parameterSizeB: 20 }),
   candidate({ modelId: 'gemma4-26b-q4', tier: 'medium', parameterSizeB: 26 }),
   candidate({
@@ -34,7 +34,7 @@ const FLEET: RoutingCandidate[] = [
 describe('rankModelForFloor', () => {
   it('floor=small downgrades to the cheapest clearing tier (e4b, not the 27b default)', () => {
     const pick = rankModelForFloor({ floor: 'small', candidates: FLEET });
-    expect(pick?.model).toBe('gemma4-e4b-q8');
+    expect(pick?.model).toBe('gemma4-e4b-q4');
     expect(pick?.tier).toBe('small');
     expect(pick?.reason).toContain('floor=small');
   });
@@ -43,11 +43,11 @@ describe('rankModelForFloor', () => {
     const pick = rankModelForFloor({
       floor: 'small',
       candidates: [
-        candidate({ modelId: 'gemma4-e2b-q8', tier: 'tiny', parameterSizeB: 2.3 }),
-        candidate({ modelId: 'gemma4-e4b-q8', tier: 'small', parameterSizeB: 8 }),
+        candidate({ modelId: 'gemma4-e2b-q4', tier: 'tiny', parameterSizeB: 2.3 }),
+        candidate({ modelId: 'gemma4-e4b-q4', tier: 'small', parameterSizeB: 8 }),
       ],
     });
-    expect(pick?.model).toBe('gemma4-e4b-q8');
+    expect(pick?.model).toBe('gemma4-e4b-q4');
   });
 
   it('floor=medium prefers the config default within the qualifying tier (27b over 20b)', () => {
@@ -104,7 +104,7 @@ describe('rankModelForFloor', () => {
         floor: 'small',
         candidates: FLEET,
         fitness: fitness({
-          'llama-cpp:gemma4-e4b-q8': { status: 'probed', admitted: false, stale: false },
+          'llama-cpp:gemma4-e4b-q4': { status: 'probed', admitted: false, stale: false },
         }),
       });
       expect(pick?.model).toBe('qwen3.6-27b-q4');
@@ -115,7 +115,7 @@ describe('rankModelForFloor', () => {
         floor: 'small',
         candidates: FLEET,
         fitness: fitness({
-          'llama-cpp:gemma4-e4b-q8': {
+          'llama-cpp:gemma4-e4b-q4': {
             status: 'probed',
             admitted: true,
             genTokensPerSec: 1.2,
@@ -138,7 +138,7 @@ describe('rankModelForFloor', () => {
           candidates: FLEET,
           fitness: () => evidence,
         });
-        expect(pick?.model).toBe('gemma4-e4b-q8');
+        expect(pick?.model).toBe('gemma4-e4b-q4');
       }
     });
   });
@@ -225,7 +225,7 @@ describe('fitnessLookupFromRecords', () => {
       record: {
         schemaVersion: 1,
         provider: 'llama-cpp',
-        modelId: 'gemma4-e4b-q8',
+        modelId: 'gemma4-e4b-q4',
         status: 'probed',
         admitted: true,
         genTokensPerSec: 24,
@@ -245,7 +245,7 @@ describe('fitnessLookupFromRecords', () => {
       hardwareChanged: false,
     };
     const lookup = fitnessLookupFromRecords([record]);
-    expect(lookup('llama-cpp', 'gemma4-e4b-q8')).toEqual({
+    expect(lookup('llama-cpp', 'gemma4-e4b-q4')).toEqual({
       status: 'probed',
       admitted: true,
       genTokensPerSec: 24,

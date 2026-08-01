@@ -251,7 +251,7 @@ export interface EvalScenario {
 }
 
 export interface TrialOptions {
-  /** Catalog id of the chat model to use (e.g. `gemma4-e4b-q8`). */
+  /** Catalog id of the chat model to use (e.g. `gemma4-e4b-q4`). */
   modelId: string;
   /**
    * Chat provider that drives the trial. Defaults to `llama-cpp`. The

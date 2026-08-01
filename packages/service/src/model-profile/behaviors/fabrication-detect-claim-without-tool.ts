@@ -226,7 +226,7 @@ const CLAIM_RULES: ReadonlyArray<ClaimRule> = [
   {
     // Draft-plan gate fabrication — the model says it attached the
     // deliverable gates but never calls the structural tool that adds
-    // them. Wild-caught (gemma4-e4b-q8, craftbook-plan eval): after
+    // them. Wild-caught (gemma4-e4b-q4, craftbook-plan eval): after
     // `set_task_status` rejected a draft with
     // explicit `set_step_deliverable(...)` repair calls, the model
     // replied "I have attached the required `index.html` deliverable

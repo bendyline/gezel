@@ -238,7 +238,7 @@ export function lintChatModelManifest(manifest: LooseManifest): ManifestLintRepo
   }
 
   // Cross-engine quant parity. One model id must mean one quality level: a
-  // user picking `gemma4-e4b-q8` should not silently get 8-bit weights on
+  // user picking `gemma4-e4b-q4` should not silently get 8-bit weights on
   // llama.cpp and 4-bit on MLX. Wild-caught 2026-07-31 — the whole gemma
   // MLX deficit in that sweep traced here, not to the engine:
   //   e4b-q8/e2b-q8  Q8_0 vs 4bit  → neither could complete a tool

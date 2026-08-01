@@ -3,7 +3,7 @@ import type { PerModelLlamaCppEngineConfig } from './engine-flags.js';
 import { resolveSpecDraft } from './spec-draft.js';
 
 const draftManifest: PerModelLlamaCppEngineConfig = {
-  spec: { type: 'draft-simple', draftModelId: 'gemma4-e2b-q8', nMax: 4 },
+  spec: { type: 'draft-simple', draftModelId: 'gemma4-e2b-q4', nMax: 4 },
 };
 
 describe('resolveSpecDraft', () => {
@@ -11,9 +11,9 @@ describe('resolveSpecDraft', () => {
     const res = await resolveSpecDraft({
       perModel: draftManifest,
       resolveDraftPath: async (id) =>
-        id === 'gemma4-e2b-q8' ? '/models/gemma4-e2b-q8/weights.gguf' : null,
+        id === 'gemma4-e2b-q4' ? '/models/gemma4-e2b-q4/weights.gguf' : null,
     });
-    expect(res.perModel?.spec?.draftModelId).toBe('/models/gemma4-e2b-q8/weights.gguf');
+    expect(res.perModel?.spec?.draftModelId).toBe('/models/gemma4-e2b-q4/weights.gguf');
     expect(res.perModel?.spec?.type).toBe('draft-simple');
     expect(res.perModel?.spec?.nMax).toBe(4);
     expect(res.log?.level).toBe('info');
@@ -56,7 +56,7 @@ describe('resolveSpecDraft', () => {
 
   it('resolves a manifest draft even when the spec type comes from global config', async () => {
     const res = await resolveSpecDraft({
-      perModel: { spec: { draftModelId: 'gemma4-e2b-q8' } },
+      perModel: { spec: { draftModelId: 'gemma4-e2b-q4' } },
       configSpecType: 'draft-simple',
       resolveDraftPath: async () => '/models/e2b/weights.gguf',
     });
@@ -65,11 +65,11 @@ describe('resolveSpecDraft', () => {
 
   it('warns (does not strip) when the operator forced the spec type but no draft resolves', async () => {
     const res = await resolveSpecDraft({
-      perModel: { spec: { draftModelId: 'gemma4-e2b-q8' } },
+      perModel: { spec: { draftModelId: 'gemma4-e2b-q4' } },
       configSpecType: 'draft-simple',
       resolveDraftPath: async () => null,
     });
-    expect(res.perModel?.spec?.draftModelId).toBe('gemma4-e2b-q8');
+    expect(res.perModel?.spec?.draftModelId).toBe('gemma4-e2b-q4');
     expect(res.log?.level).toBe('warn');
   });
 

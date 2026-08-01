@@ -4007,7 +4007,7 @@ export class ChatManager {
    * event — visible in the UI but invisible to the SENDER'S MODEL — so an
    * unattended team went permanently idle: the sender kept waiting for a
    * reply that could never come. Wild-caught (core sweep,
-   * gemma4-e4b-q8): schema-migration and symptom-debug both died as "chat
+   * gemma4-e4b-q4): schema-migration and symptom-debug both died as "chat
    * stalled — no model turns; re-engage nudge ignored" after a handoff
    * send threw. Delivering the failure as a real handoff message gives
    * the sender a turn to retry, reassign, or do the work itself.
@@ -9464,7 +9464,7 @@ export class ChatManager {
    * `model` rather than spawning a second, unbudgeted engine for the
    * same model.
    *
-   * Wild-caught: an interactive `gemma4-e4b-q8` session and a
+   * Wild-caught: an interactive `gemma4-e4b-q4` session and a
    * background memory-summarize one-shot each held a copy of the model
    * (the one-shot fell through to the singleton {@link ensureProvider}
    * path, which spawns a parallel supervisor outside the

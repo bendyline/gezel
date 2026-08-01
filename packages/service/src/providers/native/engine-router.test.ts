@@ -89,12 +89,12 @@ describe('EngineRouter', () => {
     const router = makeRouter(10 * GB, 12 * GB);
 
     // Interactive session loads the model.
-    const interactive = await router.bindForSession('mlx', 'gemma4-e4b-q8', {
+    const interactive = await router.bindForSession('mlx', 'gemma4-e4b-q4', {
       sessionId: 'interactive',
     });
     // Background one-shot for the SAME model: distinct synthetic session
     // id, no prior key — exactly the shape of a summarizer/about chore.
-    const oneShot = await router.bindForSession('mlx', 'gemma4-e4b-q8', {
+    const oneShot = await router.bindForSession('mlx', 'gemma4-e4b-q4', {
       sessionId: 'singleton:summary',
     });
 

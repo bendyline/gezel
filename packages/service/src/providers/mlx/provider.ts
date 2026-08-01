@@ -2366,7 +2366,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
           }
         }
         // Bare `invoke NAME {json}` — a weak-model prose shape (wild-caught
-        // on gemma4-e2b-q8/MLX) that no earlier layer recognizes: the model
+        // on gemma4-e2b-q4/MLX) that no earlier layer recognizes: the model
         // never emits Gemma's `<|tool_call>` trigger so the grammar can't
         // engage, and it narrates the call as `invoke write_file {…}` instead.
         // Last-resort salvage, gated on nothing else having fired.

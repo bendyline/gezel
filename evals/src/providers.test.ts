@@ -98,12 +98,12 @@ describe('defaultModelFor', () => {
   });
 
   it('keeps the historical llama-cpp baseline and a smaller MLX default', () => {
-    expect(defaultModelFor('llama-cpp')).toBe('gemma4-e4b-q8');
+    expect(defaultModelFor('llama-cpp')).toBe('gemma4-e4b-q4');
     expect(defaultModelFor('mlx')).toBe('qwen3.5-4b-q4');
     // Both the fast default and the historical E4B baseline must be runnable
     // on MLX so explicit cross-engine comparisons do not fail during warm.
     expect(chatModelSources('qwen3.5-4b-q4')?.mlx).toBe(true);
-    expect(chatModelSources('gemma4-e4b-q8')?.mlx).toBe(true);
+    expect(chatModelSources('gemma4-e4b-q4')?.mlx).toBe(true);
   });
 });
 
@@ -138,9 +138,9 @@ describe('buildProviderConfig', () => {
     // Regression: the old hard-coded if/else used exactly this shape;
     // dropping any field would silently change how the trial daemon
     // gets configured.
-    expect(buildProviderConfig('llama-cpp', 'gemma4-e4b-q8')).toEqual({
+    expect(buildProviderConfig('llama-cpp', 'gemma4-e4b-q4')).toEqual({
       provider: 'llama-cpp',
-      defaultModel: { 'llama-cpp': 'gemma4-e4b-q8' },
+      defaultModel: { 'llama-cpp': 'gemma4-e4b-q4' },
     });
   });
 
@@ -149,7 +149,7 @@ describe('buildProviderConfig', () => {
     // `imageProvider` + `firstRunCompleted`. The fields here must
     // never overlap with those, otherwise the spread would clobber
     // them.
-    const cfg = buildProviderConfig('mlx', 'gemma4-e4b-q8');
+    const cfg = buildProviderConfig('mlx', 'gemma4-e4b-q4');
     expect('imageProvider' in cfg).toBe(false);
     expect('firstRunCompleted' in cfg).toBe(false);
   });

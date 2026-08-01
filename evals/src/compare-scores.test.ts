@@ -200,7 +200,7 @@ describe('compareScores', () => {
     ];
     const comparison = compareScores(
       [
-        ...mk('gemma4-e4b-q8', 8, 10), // primary
+        ...mk('gemma4-e4b-q4', 8, 10), // primary
         ...mk('mistral-7b-q4', 0, 0), // reference (weak base)
         ...mk('nemotron3-super-120b-q4', 0, 0), // reference (slow host)
       ],

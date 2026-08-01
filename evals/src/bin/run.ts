@@ -3,7 +3,7 @@
  *
  * Runs a single trial. Positional argument is the scenario id (`tictactoe`).
  * Flags:
- *   --model <id>         chat model catalog id, default `gemma4-e4b-q8`
+ *   --model <id>         chat model catalog id, default `gemma4-e4b-q4`
  *   --image-model <id>   image model catalog id (e.g. `sdxl-base-1.0`).
  *                        Default comes from scenario.defaultImageModelId.
  *   --timeout <duration> override scenario.timeoutMs, e.g. `5m`, `30s`, `300000`

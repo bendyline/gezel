@@ -2,8 +2,6 @@ const LEGACY_CHAT_MODEL_CATALOG_IDS: Record<string, string> = {
   'deepseek-r1': 'deepseek-r1-8b-q4',
   'gemma4-26b': 'gemma4-26b-q4',
   'gemma4-31b': 'gemma4-31b-q4',
-  'gemma4-e2b': 'gemma4-e2b-q8',
-  'gemma4-e4b': 'gemma4-e4b-q8',
   'gpt-oss': 'gpt-oss-20b-q4',
   'llama3.2': 'llama3.2-3b-q4',
   mistral: 'mistral-7b-q4',

@@ -14,7 +14,7 @@ function record(overrides: Partial<ModelFitnessRecord> = {}): ModelFitnessRecord
   return {
     schemaVersion: 1,
     provider: 'llama-cpp',
-    modelId: 'gemma4-e4b-q8',
+    modelId: 'gemma4-e4b-q4',
     status: 'probed',
     admitted: true,
     genTokensPerSec: 20,
@@ -99,9 +99,9 @@ describe('ModelFitnessManager', () => {
         return record();
       },
     });
-    mgr.scheduleProbe('llama-cpp', 'gemma4-e4b-q8', { trigger: 'manual' });
-    mgr.scheduleProbe('llama-cpp', 'gemma4-e4b-q8', { trigger: 'manual' });
-    expect(mgr.probingKeys()).toEqual(['llama-cpp:gemma4-e4b-q8']);
+    mgr.scheduleProbe('llama-cpp', 'gemma4-e4b-q4', { trigger: 'manual' });
+    mgr.scheduleProbe('llama-cpp', 'gemma4-e4b-q4', { trigger: 'manual' });
+    expect(mgr.probingKeys()).toEqual(['llama-cpp:gemma4-e4b-q4']);
     release();
     await drained(mgr);
     expect(runs).toBe(1);
@@ -109,11 +109,11 @@ describe('ModelFitnessManager', () => {
 
   it('persists the record and round-trips it through a real Store', async () => {
     const mgr = makeManager();
-    mgr.scheduleProbe('llama-cpp', 'gemma4-e4b-q8', { trigger: 'manual' });
+    mgr.scheduleProbe('llama-cpp', 'gemma4-e4b-q4', { trigger: 'manual' });
     await drained(mgr);
     const config = await store.readConfig();
-    expect(config.modelFitness?.['llama-cpp:gemma4-e4b-q8']).toBeDefined();
-    const resolved = await mgr.get('llama-cpp', 'gemma4-e4b-q8');
+    expect(config.modelFitness?.['llama-cpp:gemma4-e4b-q4']).toBeDefined();
+    const resolved = await mgr.get('llama-cpp', 'gemma4-e4b-q4');
     expect(resolved?.record.admitted).toBe(true);
     expect(resolved?.stale).toBe(false);
     expect(resolved?.hardwareChanged).toBe(false);
@@ -153,10 +153,10 @@ describe('ModelFitnessManager', () => {
         deferRetryMs: 1,
         deferBudgetMs: 3,
       });
-      mgr.scheduleProbe('llama-cpp', 'gemma4-e4b-q8', { trigger: 'install' });
+      mgr.scheduleProbe('llama-cpp', 'gemma4-e4b-q4', { trigger: 'install' });
       await drained(mgr);
       expect(runs).toBe(0);
-      const resolved = await mgr.get('llama-cpp', 'gemma4-e4b-q8');
+      const resolved = await mgr.get('llama-cpp', 'gemma4-e4b-q4');
       expect(resolved?.record.status).toBe('deferred');
     });
 
@@ -169,7 +169,7 @@ describe('ModelFitnessManager', () => {
           return record();
         },
       });
-      mgr.scheduleProbe('llama-cpp', 'gemma4-e4b-q8', { trigger: 'manual' });
+      mgr.scheduleProbe('llama-cpp', 'gemma4-e4b-q4', { trigger: 'manual' });
       await drained(mgr);
       expect(runs).toBe(1);
     });
@@ -181,7 +181,7 @@ describe('ModelFitnessManager', () => {
         entries: [
           {
             ...fullPool.entries[0]!,
-            modelId: 'gemma4-e4b-q8',
+            modelId: 'gemma4-e4b-q4',
           } as PoolSnapshot['entries'][number],
         ],
       };
@@ -192,7 +192,7 @@ describe('ModelFitnessManager', () => {
           return record();
         },
       });
-      mgr.scheduleProbe('llama-cpp', 'gemma4-e4b-q8', { trigger: 'install' });
+      mgr.scheduleProbe('llama-cpp', 'gemma4-e4b-q4', { trigger: 'install' });
       await drained(mgr);
       expect(runs).toBe(1);
     });
@@ -206,19 +206,19 @@ describe('ModelFitnessManager', () => {
         approxSizeBytes: 5 * GB,
       }),
     });
-    mgr.scheduleProbe('llama-cpp', 'gemma4-e4b-q8', { trigger: 'manual' });
+    mgr.scheduleProbe('llama-cpp', 'gemma4-e4b-q4', { trigger: 'manual' });
     await drained(mgr);
     // The probe stub records sha 'aaa' (from `record()`); installed says 'bbb'.
-    const resolved = await mgr.get('llama-cpp', 'gemma4-e4b-q8');
+    const resolved = await mgr.get('llama-cpp', 'gemma4-e4b-q4');
     expect(resolved?.stale).toBe(true);
   });
 
   it('a model no longer installed reads as stale', async () => {
     const mgr = makeManager();
-    mgr.scheduleProbe('llama-cpp', 'gemma4-e4b-q8', { trigger: 'manual' });
+    mgr.scheduleProbe('llama-cpp', 'gemma4-e4b-q4', { trigger: 'manual' });
     await drained(mgr);
     const gone = makeManager({ resolveInstalled: async () => null });
-    const resolved = await gone.get('llama-cpp', 'gemma4-e4b-q8');
+    const resolved = await gone.get('llama-cpp', 'gemma4-e4b-q4');
     expect(resolved?.stale).toBe(true);
   });
 
@@ -226,10 +226,10 @@ describe('ModelFitnessManager', () => {
     const mgr = makeManager({
       currentMemory: async () => ({ totalRamBytes: 96 * GB, gpuVramBytes: null }),
     });
-    mgr.scheduleProbe('llama-cpp', 'gemma4-e4b-q8', { trigger: 'manual' });
+    mgr.scheduleProbe('llama-cpp', 'gemma4-e4b-q4', { trigger: 'manual' });
     await drained(mgr);
     // Record host says 128 GB (from `record()`), current says 96 GB — 25% drift.
-    const resolved = await mgr.get('llama-cpp', 'gemma4-e4b-q8');
+    const resolved = await mgr.get('llama-cpp', 'gemma4-e4b-q4');
     expect(resolved?.hardwareChanged).toBe(true);
     expect(resolved?.stale).toBe(false);
   });

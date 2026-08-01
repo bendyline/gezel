@@ -20,13 +20,13 @@ const GB = 1024 ** 3;
  */
 const CANDIDATES: RecoModelInput[] = [
   {
-    id: 'gemma4-e2b-q8',
+    id: 'gemma4-e2b-q4',
     recoScore: 15,
     licenseClass: 'open',
     tags: ['small'],
     residentBytes: 5.96 * GB,
   },
-  { id: 'gemma4-e4b-q8', recoScore: 15, licenseClass: 'open', tags: [], residentBytes: 9.64 * GB },
+  { id: 'gemma4-e4b-q4', recoScore: 15, licenseClass: 'open', tags: [], residentBytes: 9.64 * GB },
   {
     id: 'gemma4-12b-q4',
     recoScore: 15,
@@ -130,7 +130,7 @@ describe('pickRecommendedModel', () => {
     });
     // No GPU to offload onto → big MoEs don't comfortably fit; E2B is the
     // only thing under the 8 GB CPU budget.
-    expect(pick?.id).toBe('gemma4-e2b-q8');
+    expect(pick?.id).toBe('gemma4-e2b-q4');
   });
 
   it('never recommends a non-open model, even with a huge stray score', () => {
@@ -160,7 +160,7 @@ describe('pickRecommendedModel', () => {
     });
     // Nothing fits 2 GB comfortably → the smallest candidate is offered so
     // first-run always has something.
-    expect(pick?.id).toBe('gemma4-e2b-q8');
+    expect(pick?.id).toBe('gemma4-e2b-q4');
     expect(pick?.reason).toMatch(/best-effort/);
   });
 });

@@ -114,7 +114,7 @@ describe('CapacityBroker', () => {
     const uma = { unifiedMemory: true };
     // The case this exists for: a 16 GB Mac. The old shared 60% fraction
     // capped it at 9.6 GiB, below an 8B-class model at 8-bit — the machine
-    // could hold the model, the budget said otherwise. gemma4-e4b-q8 on
+    // could hold the model, the budget said otherwise. gemma4-e4b-q4 on
     // MLX reserves ~10.8 GiB, so the new value has to clear that.
     expect(autoDetectBudgetBytes(16 * GB, uma)).toBe(Math.floor(16 * GB * 0.7));
     expect(autoDetectBudgetBytes(16 * GB, uma)).toBeGreaterThan(11 * GB);

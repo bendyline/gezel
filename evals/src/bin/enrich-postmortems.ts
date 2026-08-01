@@ -59,8 +59,8 @@ const MODEL_TUNING: Readonly<Record<string, ModelTuningTarget>> = {
     efficiency: { field: 'tuning.reasoning.thinkingBudget', current: 2048, proposed: 1024 },
     cleanRun: { field: 'tuning.sampling.maxTokens', current: 16384, proposed: 12288 },
   },
-  'gemma4-e4b-q8': {
-    manifest: '../gilde/data/chat-models/ge/gemma4-e4b-q8/manifest.json',
+  'gemma4-e4b-q4': {
+    manifest: '../gilde/data/chat-models/ge/gemma4-e4b-q4/manifest.json',
     compactToolSchemas: true,
     buildPrelude: true,
     codingTemperature: { current: 0.3, proposed: 0.2 },

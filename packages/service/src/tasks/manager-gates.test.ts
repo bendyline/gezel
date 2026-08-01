@@ -877,7 +877,7 @@ describe('completion gates — task.step.gated telemetry events', () => {
     await store.writeSession({
       ...base,
       id: 'newer-session',
-      model: 'gemma4-e4b-q8',
+      model: 'gemma4-e4b-q4',
       createdAt: '2026-07-07T01:00:00.000Z',
       lastActivityAt: '2026-07-07T01:00:00.000Z',
     });
@@ -890,7 +890,7 @@ describe('completion gates — task.step.gated telemetry events', () => {
     const gated = events.filter((e) => e.kind === 'task.step.gated');
     expect(gated).toHaveLength(1);
     expect(gated[0]?.details).toMatchObject({
-      model: 'gemma4-e4b-q8',
+      model: 'gemma4-e4b-q4',
       provider: 'llama-cpp',
     });
 

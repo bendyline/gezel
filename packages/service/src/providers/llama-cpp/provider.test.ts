@@ -40,8 +40,8 @@ describe('constrained tool guards', () => {
     expect(constrainedToolNoSignalMsForModel('deepseek-r1-8b-q4')).toBe(90_000);
     expect(constrainedToolReasoningCharLimitForModel('gpt-oss-20b-q4')).toBe(3_072);
     expect(constrainedToolNoSignalMsForModel('gpt-oss-20b-q4')).toBe(90_000);
-    expect(constrainedToolReasoningCharLimitForModel('gemma4-e4b-q8')).toBe(1_024);
-    expect(constrainedToolNoSignalMsForModel('gemma4-e4b-q8')).toBe(45_000);
+    expect(constrainedToolReasoningCharLimitForModel('gemma4-e4b-q4')).toBe(1_024);
+    expect(constrainedToolNoSignalMsForModel('gemma4-e4b-q4')).toBe(45_000);
   });
 });
 
@@ -1620,9 +1620,9 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     const provider = new LlamaCppProvider({ baseUrl: 'http://llama.test' });
     const session = await provider.createSession({
       systemMessage: 'sys',
-      model: 'gemma4-e4b-q8',
+      model: 'gemma4-e4b-q4',
       profile: {
-        catalogId: 'gemma4-e4b-q8',
+        catalogId: 'gemma4-e4b-q4',
         tier: 'small',
         style: { family: 'gemma', reasoningFormat: 'channel', toolCallFormat: 'function-call' },
         behaviors: [],
@@ -1791,9 +1791,9 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     const provider = new LlamaCppProvider({ baseUrl: 'http://llama.test' });
     const session = await provider.createSession({
       systemMessage: 'sys',
-      model: 'gemma4-e4b-q8',
+      model: 'gemma4-e4b-q4',
       profile: {
-        catalogId: 'gemma4-e4b-q8',
+        catalogId: 'gemma4-e4b-q4',
         tier: 'small',
         style: { family: 'gemma', reasoningFormat: 'channel', toolCallFormat: 'function-call' },
         behaviors: [],

@@ -49,7 +49,7 @@ ls ~/.gezel-eval-cache/engines/llama-cpp/models/   # ids present == runnable now
 **The cross-tier reference is essential** (see Phase 3) — you cannot cleanly separate "model capability" from "craftbook/eval bug" with a single tier. Before running, look at what's present:
 
 - **≥2 tiers present** (e.g. a `small` and a `medium`) → good; run the matrix across all of them.
-- **only one tier present** (common — often just `gemma4-e4b-q8`, tier `small`) → you have no local reference for the differential. Resolve it before Phase 3, and pick with `AskUserQuestion` if unclear:
+- **only one tier present** (common — often just `gemma4-e4b-q4`, tier `small`) → you have no local reference for the differential. Resolve it before Phase 3, and pick with `AskUserQuestion` if unclear:
   1. **Warm a larger local model** — e.g. `gemma4-26b-q4` (medium). The runner's `ensureWarmModel` downloads it on first use (~15 GB, 10–20 min). Best signal; the reference stays on-device and hermetic.
   2. **Use a cloud baseline** for the differential only — `--provider anthropic|openai|copilot` (needs the matching key/login in env). Cheap and fast, but a hosted model is a coarse reference (it's `cloud` tier, not a real medium-local).
   3. **Proceed single-tier** — acceptable for a first triage pass, but every "model capability" verdict in the report MUST carry the caveat "unconfirmed — no stronger reference was run."

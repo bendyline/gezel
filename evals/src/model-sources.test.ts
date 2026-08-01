@@ -12,7 +12,7 @@ import { defaultProvider } from './providers.ts';
 // These assert against the real committed catalog index.json, using stable
 // fixtures: `qwen3.5-4b-q4` ships all three engine sources; the GGUF-only
 // `nemotron3-super-120b-q4` ships llamaCpp only (no MLX quant upstream); and
-// `gemma4-e4b-q8` ships both llama.cpp and MLX weights.
+// `gemma4-e4b-q4` ships both llama.cpp and MLX weights.
 
 const originalGildeDataDir = process.env.GEZEL_GILDE_DATA_DIR;
 let syntheticDataDir: string | undefined;
@@ -52,7 +52,7 @@ describe('chatModelSources', () => {
   });
 
   it('reports MLX for Gemma-4 E4B now that the catalog ships a supported build', () => {
-    expect(chatModelSources('gemma4-e4b-q8')).toMatchObject({
+    expect(chatModelSources('gemma4-e4b-q4')).toMatchObject({
       llamaCpp: true,
       mlx: true,
     });
@@ -110,8 +110,8 @@ describe('assertLocalEngineSource', () => {
   it('passes when the model ships weights for the chosen engine', () => {
     expect(() => assertLocalEngineSource('llama-cpp', 'nemotron3-super-120b-q4')).not.toThrow();
     expect(() => assertLocalEngineSource('mlx', 'qwen3.5-4b-q4')).not.toThrow();
-    expect(() => assertLocalEngineSource('mlx', 'gemma4-e4b-q8')).not.toThrow();
-    expect(() => assertLocalEngineSource('llama-cpp', 'gemma4-e4b-q8')).not.toThrow();
+    expect(() => assertLocalEngineSource('mlx', 'gemma4-e4b-q4')).not.toThrow();
+    expect(() => assertLocalEngineSource('llama-cpp', 'gemma4-e4b-q4')).not.toThrow();
   });
 
   it('is a no-op for cloud/CLI providers (no catalog source to check)', () => {

@@ -73,10 +73,10 @@ import tool_grammar  # noqa: E402
 # ───────── Leaked special-token scrub ─────────
 
 # Chat-template framing tokens — turn / sequence / tool-response
-# delimiters that tight quants (e.g. gemma4-e4b-q8) sometimes emit as
+# delimiters that tight quants (e.g. gemma4-e4b-q4) sometimes emit as
 # literal special-token text. `tokenizer.decode()` keeps special tokens,
 # so these render into the SSE content stream verbatim; wild-caught case
-# was gemma4-e4b-q8 streaming `<eos><|tool_response><eos>` after firing
+# was gemma4-e4b-q4 streaming `<eos><|tool_response><eos>` after firing
 # its tool calls. We scrub them at every detokenization site so they
 # never reach the client.
 #
@@ -104,7 +104,7 @@ def _generation_config_eos_ids(model_dir: str) -> "List[int]":
     """Read the stop-token set a model declares in generation_config.json.
 
     mlx's tokenizer wrapper doesn't always surface the full eos set the
-    model author declared. gemma4-e4b-q8 is the wild-caught case: it
+    model author declared. gemma4-e4b-q4 is the wild-caught case: it
     declares `eos_token_id: [1, 106, 50]` (`<eos>`, `<turn|>`,
     `<|tool_response>`), but the wrapper resolved a narrower set, so the
     batch engine never stopped on `<eos>` / `<|tool_response>` and
@@ -410,7 +410,7 @@ def _augment_serial_stop_set(processor, model_dir: str) -> None:
     The serial (non-batch) stream path stops on
     `tokenizer.stopping_criteria.eos_token_ids`, seeded at load from the
     tokenizer's own (sometimes narrower) eos set — the same gap that let
-    gemma4-e4b-q8 stream `<eos>` / `<|tool_response>` as text. We append
+    gemma4-e4b-q4 stream `<eos>` / `<|tool_response>` as text. We append
     the declared ids directly (not via `add_eos_token_ids`, which expects
     token *strings*). Defensive: mlx internals vary by version, so any
     structural mismatch is logged and skipped rather than crashing
