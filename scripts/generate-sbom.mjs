@@ -2,9 +2,10 @@
 /**
  * Generate a CycloneDX inventory of everything a Gezel installer redistributes.
  *
- * Three sources, because no single one sees the whole payload:
+ * Four sources, because no single one sees the whole payload:
  *
  *   - pnpm's production license graph — the npm dependency tree;
+ *   - the pin-bound inventory of pnpm's own vendored `dist/node_modules`;
  *   - NOTICE.md's native-engine and bundled-runtime tables, read through
  *     check-notice.mjs so the pins are the ones it has already reconciled
  *     against `native/engines/<id>/VERSION` and the native license manifest;
@@ -18,9 +19,11 @@
  *
  * PLATFORM SCOPE: one SBOM accompanies installers for four platforms, so it is
  * a superset. Native components carry a `gezel:platforms` property naming the
- * payload keys they ship on; consumers filter on it. The npm half cannot be
- * scoped that way — pnpm reports only the optional dependencies installed on
- * the generating host — so `gezel:npm-platform` records which host that was.
+ * payload keys they ship on; consumers filter on it. The workspace npm half
+ * cannot be scoped that way — pnpm reports only the optional dependencies
+ * installed on the generating host — so `gezel:npm-platform` records which
+ * host that was. The vendored pnpm graph is pin-bound and platform-scoped
+ * separately, so it is complete even when generated on Linux.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -28,6 +31,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { verifyNoticeInventory } from './check-notice.mjs';
 import { allPlatformKeys, platformKeysForEngine } from './native-payload.mjs';
+import { mergePnpmRuntimeSbomComponents } from './pnpm-runtime-inventory.mjs';
 import { readProductionLicenseInventory } from './production-dependency-inventory.mjs';
 
 const output = resolve(process.argv[2] ?? 'artifacts/gezel.cdx.json');
@@ -99,6 +103,21 @@ for (const runtime of notice.runtimes.components) {
   });
 }
 
+const pnpmRuntimeComponent = components.find(
+  (component) =>
+    component.name === 'pnpm' &&
+    component.properties?.some(
+      (property) =>
+        property.name === 'gezel:component-kind' && property.value === 'bundled-runtime',
+    ),
+);
+if (!pnpmRuntimeComponent) throw new Error('bundled pnpm runtime component was not generated');
+const pnpmDependencies = mergePnpmRuntimeSbomComponents(
+  components,
+  notice.pnpmRuntime,
+  pnpmRuntimeComponent['bom-ref'],
+);
+
 // NVIDIA's CUDA redistributables, bundled beside the CUDA engine variants so
 // they run without a local CUDA Toolkit. Deliberately version-less: nothing in
 // this repo pins one — native/engines/*/build.{sh,ps1} copy whatever the build
@@ -145,7 +164,7 @@ const bom = {
           type: 'application',
           author: 'Bendyline',
           name: 'gezel-sbom-generator',
-          version: '2',
+          version: '3',
         },
       ],
     },
@@ -168,6 +187,7 @@ const bom = {
     ],
   },
   components,
+  dependencies: pnpmDependencies,
 };
 
 await mkdir(dirname(output), { recursive: true });

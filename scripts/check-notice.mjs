@@ -15,6 +15,11 @@ import { readFile, readdir } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import {
+  loadPnpmRuntimeInventory,
+  pnpmReleaseTargets,
+  shippedPnpmRuntimePackages,
+} from './pnpm-runtime-inventory.mjs';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 export const repoRoot = resolve(scriptDir, '..');
@@ -49,6 +54,15 @@ function markdownSection(markdown, heading) {
   if (start < 0) throw new Error(`missing Markdown section: ${marker}`);
   const rest = markdown.slice(start + marker.length);
   const next = rest.search(/\n## /);
+  return next < 0 ? rest : rest.slice(0, next);
+}
+
+function markdownSubsection(markdown, heading) {
+  const marker = `### ${heading}`;
+  const start = markdown.indexOf(marker);
+  if (start < 0) throw new Error(`missing Markdown subsection: ${marker}`);
+  const rest = markdown.slice(start + marker.length);
+  const next = rest.search(/\n#{2,3} /);
   return next < 0 ? rest : rest.slice(0, next);
 }
 
@@ -286,7 +300,8 @@ async function checkBundledRuntimes(notice) {
     'Node.js': await parsePinnedConstant(join(appRoot, 'src', 'node-version.ts'), 'NODE_VERSION'),
     pnpm: await parsePinnedConstant(join(appRoot, 'src', 'pnpm-version.ts'), 'PNPM_VERSION'),
   };
-  const rows = parseMarkdownTable(markdownSection(notice, 'Bundled application runtimes')).filter(
+  const runtimeSection = markdownSection(notice, 'Bundled application runtimes').split('\n### ')[0];
+  const rows = parseMarkdownTable(runtimeSection).filter(
     (cells) => cells[0] !== 'Component' && cells.length >= 4,
   );
   const noticeNames = new Set();
@@ -320,6 +335,65 @@ async function checkBundledRuntimes(notice) {
   return { count: Object.keys(versions).length, versions, components };
 }
 
+function pnpmTargetDisplay(targets) {
+  return targets.length === pnpmReleaseTargets().length
+    ? 'all released targets'
+    : targets.join(', ');
+}
+
+async function checkPnpmRuntimeInventory(notice) {
+  const inventory = await loadPnpmRuntimeInventory();
+  const expected = shippedPnpmRuntimePackages(inventory);
+  const rows = parseMarkdownTable(
+    markdownSubsection(notice, 'pnpm embedded dependency graph'),
+  ).filter((cells) => cells[0] !== 'Package' && cells.length >= 4);
+  const byIdentity = new Map();
+  for (const cells of rows) {
+    const name = plainMarkdown(cells[0] ?? '');
+    const version = plainMarkdown(cells[1] ?? '');
+    const identity = `${name}@${version}`;
+    if (byIdentity.has(identity)) throw new Error(`duplicate NOTICE pnpm runtime row: ${identity}`);
+    byIdentity.set(identity, {
+      name,
+      version,
+      license: plainMarkdown(cells[2] ?? ''),
+      targets: plainMarkdown(cells[3] ?? ''),
+    });
+  }
+  const expectedIds = expected.map((pkg) => `${pkg.name}@${pkg.version}`);
+  if (!sameMembers(expectedIds, byIdentity.keys())) {
+    throw new Error(
+      [
+        'NOTICE pnpm embedded dependency graph differs from the pin-bound inventory',
+        `  inventory: ${formatSet(expectedIds)}`,
+        `  NOTICE: ${formatSet(byIdentity.keys())}`,
+      ].join('\n'),
+    );
+  }
+  for (const pkg of expected) {
+    const row = byIdentity.get(`${pkg.name}@${pkg.version}`);
+    if (row.license !== pkg.license) {
+      throw new Error(
+        `NOTICE pnpm runtime license is stale for ${pkg.name}@${pkg.version}: ` +
+          `expected ${pkg.license}, found ${row.license}`,
+      );
+    }
+    const expectedTargets = pnpmTargetDisplay(pkg.targets);
+    if (row.targets !== expectedTargets) {
+      throw new Error(
+        `NOTICE pnpm runtime targets are stale for ${pkg.name}@${pkg.version}: ` +
+          `expected ${expectedTargets}, found ${row.targets}`,
+      );
+    }
+  }
+  return {
+    pnpmVersion: inventory.pnpmVersion,
+    packageSha256: inventory.packageSha256,
+    count: expected.length,
+    components: expected,
+  };
+}
+
 export async function verifyNativeNoticeInventory() {
   const notice = await readFile(join(repoRoot, 'NOTICE.md'), 'utf8');
   return checkNativeInventory(notice);
@@ -330,7 +404,8 @@ export async function verifyNoticeInventory() {
   const native = await checkNativeInventory(notice);
   const fonts = await checkFontInventory(notice);
   const runtimes = await checkBundledRuntimes(notice);
-  return { native, fonts, runtimes };
+  const pnpmRuntime = await checkPnpmRuntimeInventory(notice);
+  return { native, fonts, runtimes, pnpmRuntime };
 }
 
 async function main() {
@@ -339,7 +414,8 @@ async function main() {
     `\u2713 NOTICE inventory matches ${result.native.engines} native pins, ` +
       `${result.native.licenseFiles} native license texts, ` +
       `${result.fonts.families} font families, ${result.fonts.files} WOFF2 files, and ` +
-      `${result.runtimes.count} bundled application runtimes.`,
+      `${result.runtimes.count} bundled application runtimes with ` +
+      `${result.pnpmRuntime.count} embedded pnpm dependency identities.`,
   );
 }
 

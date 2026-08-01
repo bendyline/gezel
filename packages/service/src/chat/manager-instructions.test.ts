@@ -41,6 +41,54 @@ describe('buildInstructions coordinator routing', () => {
   });
 });
 
+describe('buildInstructions never advertises a tool the role lacks', () => {
+  // Both of these fired as `directive-missing-tool` warnings against a
+  // real Chief Security Officer session: the prompt told them to use
+  // `run_playwright_script` and `search_code`, neither of which was on
+  // their post-allowlist roster. Prose that names a tool the model
+  // cannot call is the drift ADR 0001 exists to prevent.
+  function prompt(names: string[], extra: Record<string, unknown> = {}): string {
+    return buildInstructions({
+      name: 'Kiran',
+      role: 'Chief Security Officer',
+      about: 'Audit the stack.',
+      executionDensity: 'flat',
+      availableTools: names.map((name) => ({ name, description: `${name} tool` })),
+      ...extra,
+    } as unknown as BuildInstructionsOptions).full;
+  }
+
+  it('drops the scripted-browsing directive when the role cannot run scripts', () => {
+    const installed = { installedToolsetIds: new Set(['@playwright/mcp']) };
+    const withScript = prompt(['run_playwright_script', 'write_artifact'], installed);
+    expect(withScript).toContain('`run_playwright_script`');
+
+    // Toolset installed, but the tool is not on this role's roster.
+    const withoutScript = prompt(['read_file'], installed);
+    expect(withoutScript).not.toContain('run_playwright_script');
+    expect(withoutScript).toContain('browser_*');
+  });
+
+  it('names only the GitHub tools the role actually holds', () => {
+    const project = {
+      id: 'p1',
+      name: 'gezel',
+      github: { url: 'https://github.com/bendyline/gezel' },
+    } as unknown as ProjectDetail;
+    const partial = prompt(['get_pull_request', 'get_issue'], { project });
+    expect(partial).toContain('`get_pull_request`');
+    expect(partial).not.toContain('search_code');
+
+    // These names come from an installed third-party toolset, so an
+    // empty intersection means "can't confirm", not "absent" — the
+    // directive stands, it just stops naming specific tools.
+    const none = prompt(['read_file'], { project });
+    expect(none).toContain('Use the GitHub toolset');
+    expect(none).not.toContain('search_code');
+    expect(none).not.toContain('get_pull_request');
+  });
+});
+
 describe('buildInstructions assigned pronouns', () => {
   const soloProject = {
     id: 'solo-job',

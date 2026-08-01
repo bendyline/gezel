@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   CopilotProvider,
   NON_SANDBOX_EXCLUDED_MCP_TOOLS,
-  SANDBOX_EXCLUDED_TOOLS,
+  SANDBOX_ALLOWED_TOOL_PATTERNS,
   buildSandboxPermissionHandler,
   buildSandboxSystemMessage,
 } from './copilot.js';
@@ -110,10 +110,20 @@ describe('sandbox system message hint', () => {
   });
 });
 
-describe('sandbox excluded-tools list', () => {
-  it('covers the Copilot built-ins we explicitly deny', () => {
-    for (const name of ['bash', 'web_fetch', 'view', 'edit_file', 'str_replace_editor']) {
-      expect(SANDBOX_EXCLUDED_TOOLS).toContain(name);
+describe('sandbox tool surface', () => {
+  // A deny-list of built-in NAMES rotted silently when the CLI renamed
+  // them: five of the eight we excluded no longer existed, so shell and
+  // file-write tools stayed advertised. Patterns can't rot that way.
+  it('allows only the MCP + custom surface the permission handler approves', () => {
+    expect(SANDBOX_ALLOWED_TOOL_PATTERNS).toEqual(['mcp:*', 'custom:*']);
+    for (const pattern of SANDBOX_ALLOWED_TOOL_PATTERNS) {
+      expect(pattern.endsWith(':*')).toBe(true);
+    }
+  });
+
+  it('names no built-in tool, so an upstream rename cannot silently widen it', () => {
+    for (const stale of ['bash', 'write_file', 'edit_file', 'powershell', 'create', 'edit']) {
+      expect(SANDBOX_ALLOWED_TOOL_PATTERNS).not.toContain(stale);
     }
   });
 });
@@ -129,7 +139,8 @@ describe('Copilot provider sandbox default', () => {
 
     await provider.createSession({ systemMessage: 'default' });
     const defaultConfig = configs[0]!;
-    expect(defaultConfig.excludedTools).toEqual(SANDBOX_EXCLUDED_TOOLS);
+    expect(defaultConfig.availableTools).toEqual(SANDBOX_ALLOWED_TOOL_PATTERNS);
+    expect(defaultConfig.excludedTools).toBeUndefined();
     expect(defaultConfig.systemMessage).toEqual({
       mode: 'replace',
       content: expect.stringContaining('Sandbox mode is active'),
@@ -142,7 +153,7 @@ describe('Copilot provider sandbox default', () => {
 
     await provider.createSession({ systemMessage: 'opt out', sandboxCopilot: false });
     const optedOutConfig = configs[1]!;
-    expect(optedOutConfig.excludedTools).toBeUndefined();
+    expect(optedOutConfig.availableTools).toBeUndefined();
     expect(optedOutConfig.systemMessage).toEqual({ mode: 'replace', content: 'opt out' });
     expect(
       (optedOutConfig.onPermissionRequest as (request: object) => object)({ kind: 'shell' }),

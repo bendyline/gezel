@@ -20,6 +20,10 @@ describe('quoteWinShellToken', () => {
     expect(quoteWinShellToken('foo & calc.exe')).toBe('"foo & calc.exe"');
     expect(quoteWinShellToken('a|b')).toBe('"a|b"');
     expect(quoteWinShellToken('a>b')).toBe('"a>b"');
+    expect(quoteWinShellToken('a<b')).toBe('"a<b"');
+    expect(quoteWinShellToken('a^b')).toBe('"a^b"');
+    expect(quoteWinShellToken('(a)')).toBe('"(a)"');
+    expect(quoteWinShellToken('a!b')).toBe('"a!b"');
   });
 
   it('keeps a semver caret intact', () => {
@@ -56,22 +60,33 @@ describe('winShellSafe', () => {
     });
   });
 
-  it('quotes BOTH the command and every argument when a shell is used', () => {
-    // Quoting args but not the command was the actual bug: several call
-    // sites did exactly that and still broke on spaced install paths.
+  it('folds the safely quoted command and arguments into one atomic shell command', () => {
+    // A single command string + empty argv avoids both Node's unescaped
+    // token concatenation and the corresponding DEP0190 warning.
     const out = winShellSafe('C:\\Program Files\\nodejs\\pnpm.cmd', ['install', '--prod'], true);
     expect(out).toEqual({
-      command: '"C:\\Program Files\\nodejs\\pnpm.cmd"',
-      args: ['"install"', '"--prod"'],
+      command: '"C:\\Program Files\\nodejs\\pnpm.cmd" "install" "--prod"',
+      args: [],
     });
   });
 
   it('produces a command line cmd.exe parses as one token', () => {
     const out = winShellSafe('C:\\Program Files\\nodejs\\claude.cmd', ['--version'], true);
-    // This is what Node concatenates and hands to `cmd /d /s /c`.
-    expect(`${out.command} ${out.args.join(' ')}`).toBe(
-      '"C:\\Program Files\\nodejs\\claude.cmd" "--version"',
+    expect(out.command).toBe('"C:\\Program Files\\nodejs\\claude.cmd" "--version"');
+    expect(out.args).toEqual([]);
+  });
+
+  it('keeps whitespace, quotes, Unicode, and shell metacharacters inside quoted tokens', () => {
+    const out = winShellSafe(
+      'C:\\Program Files\\tool.cmd',
+      ['a b', '&', '|', '<', '>', '^', '(', ')', '!', 'Zażółć', 'say "hi"'],
+      true,
     );
+    expect(out).toEqual({
+      command:
+        '"C:\\Program Files\\tool.cmd" "a b" "&" "|" "<" ">" "^" "(" ")" "!" "Zażółć" "say ""hi"""',
+      args: [],
+    });
   });
 
   it('does not alias the caller\u2019s array', () => {

@@ -21,6 +21,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { x as extractTar } from 'tar';
 
+import { pnpmTargetFor, verifyPnpmRuntimeTree } from '../../../scripts/pnpm-runtime-inventory.mjs';
 import { pruneForeignBinariesWithReport } from '../../../scripts/prune-foreign-binaries.mjs';
 
 // See fetch-node.mjs: Node's default 250ms per-address connect timeout
@@ -91,8 +92,10 @@ async function main() {
       (await readFile(cacheVersion, 'utf8')).trim() === version &&
       (await readFile(cachePackageSha, 'utf8')).trim() === packageSha &&
       (await sha256File(cacheLicense)) === licenseSha;
+    if (cacheValid) await verifyPnpmRuntimeTree(cacheDir);
   } catch {
     /* no valid existing cache */
+    cacheValid = false;
   }
 
   if (cacheValid) {
@@ -143,6 +146,7 @@ async function main() {
     await cp(embeddedLicense, cacheLicense);
     await writeFile(cacheVersion, `${version}\n`, 'utf8');
     await writeFile(cachePackageSha, `${packageSha}\n`, 'utf8');
+    await verifyPnpmRuntimeTree(cacheDir);
     console.log(`[fetch-pnpm] cached pnpm v${version} (package + license sha256 verified)`);
   }
 
@@ -150,6 +154,11 @@ async function main() {
   await rm(distDir, { recursive: true, force: true });
   await cp(cacheDir, distDir, { recursive: true });
   await pruneForeignBinariesWithReport(distDir);
+  const target = pnpmTargetFor(
+    process.env.GEZEL_BUNDLE_PLATFORM ?? process.platform,
+    process.env.GEZEL_BUNDLE_ARCH ?? process.arch,
+  );
+  await verifyPnpmRuntimeTree(distDir, { target });
   await writeFile(join(distDir, 'version.txt'), `${version}\n`, 'utf8');
 
   // The supervisor re-hashes both load-bearing JavaScript entrypoints

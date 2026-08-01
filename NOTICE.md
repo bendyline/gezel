@@ -55,6 +55,42 @@ attribution file is taken from the exact Electron distribution being packaged.
 | **Node.js** | `24.18.1` | MIT, with bundled third-party notices | [nodejs/node](https://github.com/nodejs/node) |
 | **pnpm** | `11.15.1` | MIT | [pnpm/pnpm](https://github.com/pnpm/pnpm) |
 
+### pnpm embedded dependency graph
+
+The ordinary pnpm package carries its own private `dist/node_modules/` graph;
+those packages are executable runtime content, not dependencies from Gezel's
+workspace lockfile. The table below is derived from the exact pnpm tarball
+bound by `PNPM_PACKAGE_SHA256`. Packaging verifies the graph before and after
+foreign-platform pruning. Platform-qualified packages that cannot occur in a
+currently published installer are intentionally omitted.
+
+| Package | Version | License | Installer targets |
+|---|---|---|---|
+| `@isaacs/fs-minipass` | `4.0.1` | ISC | all released targets |
+| `@reflink/reflink` | `0.1.19` | MIT | all released targets |
+| `@reflink/reflink-darwin-arm64` | `0.1.19` | MIT | darwin-arm64 |
+| `@reflink/reflink-win32-x64-msvc` | `0.1.19` | MIT | win32-x64 |
+| `abbrev` | `4.0.0` | ISC | all released targets |
+| `chownr` | `3.0.0` | BlueOak-1.0.0 | all released targets |
+| `env-paths` | `2.2.1` | MIT | all released targets |
+| `exponential-backoff` | `3.1.3` | Apache-2.0 | all released targets |
+| `fdir` | `6.5.0` | MIT | all released targets |
+| `graceful-fs` | `4.2.11` | ISC | all released targets |
+| `isexe` | `4.0.0` | BlueOak-1.0.0 | all released targets |
+| `minipass` | `7.1.3` | BlueOak-1.0.0 | all released targets |
+| `minizlib` | `3.1.0` | MIT | all released targets |
+| `node-gyp` | `12.4.0` | MIT | all released targets |
+| `nopt` | `9.0.0` | ISC | all released targets |
+| `picomatch` | `4.0.5` | MIT | all released targets |
+| `proc-log` | `6.1.0` | ISC | all released targets |
+| `semver` | `7.8.5` | ISC | all released targets |
+| `tar` | `7.5.20` | BlueOak-1.0.0 | all released targets |
+| `tinyglobby` | `0.2.17` | MIT | all released targets |
+| `undici` | `6.27.0` | MIT | all released targets |
+| `v8-compile-cache` | `2.4.0` | MIT | all released targets |
+| `which` | `6.0.1` | ISC | all released targets |
+| `yallist` | `5.0.0` | BlueOak-1.0.0 | all released targets |
+
 ### Sibling packages (same author)
 
 These are developed in the neighbouring [Squisq](https://github.com/bendyline/squisq)

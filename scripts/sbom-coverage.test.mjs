@@ -21,6 +21,13 @@ import { fileURLToPath } from 'node:url';
 
 import { verifyNoticeInventory } from './check-notice.mjs';
 import { ENGINE_FOR_BINARY, allPlatformKeys } from './native-payload.mjs';
+import {
+  loadPnpmRuntimeInventory,
+  mergePnpmRuntimeSbomComponents,
+  pnpmPackageMatchesTarget,
+  shippedPnpmRuntimePackages,
+} from './pnpm-runtime-inventory.mjs';
+import { verifyPnpmComponentInventory } from './verify-packaged-licenses.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, '..');
@@ -34,11 +41,111 @@ test('the generator sources every non-npm component kind', async () => {
       `generate-sbom.mjs no longer emits ${kind} components`,
     );
   }
+  assert.match(generator, /mergePnpmRuntimeSbomComponents/);
   // The platform caveat is the honest part of shipping one SBOM for four
   // platforms; losing it would make the superset look authoritative.
   assert.match(generator, /gezel:npm-platform/);
   assert.match(generator, /gezel:native-platforms/);
   assert.match(generator, /superset-across-platforms/);
+  assert.match(generator, /notice\.pnpmRuntime/);
+  assert.match(generator, /dependencies: pnpmDependencies/);
+});
+
+test('the pin-bound pnpm graph covers every released target without foreign addons', async () => {
+  const inventory = await loadPnpmRuntimeInventory();
+  const shipped = shippedPnpmRuntimePackages(inventory);
+  assert.ok(
+    inventory.packages.length > shipped.length,
+    'the source tarball should include pruned targets',
+  );
+  assert.ok(shipped.length > 0, 'pnpm runtime inventory is empty');
+
+  const byName = new Map(inventory.packages.map((pkg) => [pkg.name, pkg]));
+  const darwinAddon = byName.get('@reflink/reflink-darwin-arm64');
+  const windowsAddon = byName.get('@reflink/reflink-win32-x64-msvc');
+  assert.ok(darwinAddon);
+  assert.ok(windowsAddon);
+  assert.equal(pnpmPackageMatchesTarget(darwinAddon, 'darwin-arm64'), true);
+  assert.equal(pnpmPackageMatchesTarget(darwinAddon, 'win32-x64'), false);
+  assert.equal(pnpmPackageMatchesTarget(windowsAddon, 'win32-x64'), true);
+  assert.equal(pnpmPackageMatchesTarget(windowsAddon, 'linux-x64'), false);
+
+  const shippedNames = new Set(shipped.map((pkg) => pkg.name));
+  assert.equal(shippedNames.has('@reflink/reflink-darwin-x64'), false);
+  assert.equal(shippedNames.has('@reflink/reflink-win32-arm64-msvc'), false);
+});
+
+test('the SBOM merge emits every shipped pnpm identity, scope, and dependency edge', async () => {
+  const inventory = await loadPnpmRuntimeInventory();
+  const components = shippedPnpmRuntimePackages(inventory);
+  const runtime = { ...inventory, components };
+  const existingRef = 'pkg:npm/tar@7.5.20';
+  const sbomComponents = [
+    {
+      type: 'library',
+      'bom-ref': existingRef,
+      name: 'tar',
+      version: '7.5.20',
+      purl: existingRef,
+    },
+  ];
+  const pnpmRef = 'pkg:github/pnpm/pnpm@11.15.1';
+  const dependencies = mergePnpmRuntimeSbomComponents(sbomComponents, runtime, pnpmRef);
+
+  const refs = new Set(sbomComponents.map((component) => component['bom-ref']));
+  for (const pkg of components) {
+    const suffix = `${encodeURIComponent(pkg.name.split('/').pop())}@${encodeURIComponent(pkg.version)}`;
+    assert.ok(
+      [...refs].some((ref) => ref.endsWith(suffix)),
+      `${pkg.name}@${pkg.version} is absent`,
+    );
+  }
+  assert.equal(
+    sbomComponents.filter((component) => component['bom-ref'] === existingRef).length,
+    1,
+    'an identity shared with the workspace graph must be upserted, not duplicated',
+  );
+  const windowsAddon = sbomComponents.find(
+    (component) => component.version === '0.1.19' && component.name === 'reflink-win32-x64-msvc',
+  );
+  assert.ok(windowsAddon);
+  assert.ok(
+    windowsAddon.properties.some(
+      (property) =>
+        property.name === 'gezel:component-kind' && property.value === 'bundled-pnpm-dependency',
+    ),
+  );
+  assert.ok(
+    windowsAddon.properties.some(
+      (property) => property.name === 'gezel:platforms' && property.value.includes('win32-x64'),
+    ),
+  );
+  const pnpmEdge = dependencies.find((entry) => entry.ref === pnpmRef);
+  assert.equal(pnpmEdge.dependsOn.length, components.length);
+  assert.ok(dependencies.some((entry) => entry.ref === existingRef && entry.dependsOn.length > 0));
+});
+
+test('the packaged legal bundle rejects a stale or incomplete pnpm graph', async () => {
+  const inventory = await loadPnpmRuntimeInventory();
+  const target = 'win32-x64';
+  const packages = inventory.packages.filter((pkg) => pnpmPackageMatchesTarget(pkg, target));
+  const manifest = {
+    schemaVersion: 1,
+    pnpmVersion: inventory.pnpmVersion,
+    packageSha256: inventory.packageSha256,
+    target,
+    packageCount: packages.length,
+    packages,
+  };
+  await verifyPnpmComponentInventory(manifest, packages.length);
+  await assert.rejects(
+    () =>
+      verifyPnpmComponentInventory(
+        { ...manifest, packageCount: packages.length - 1, packages: packages.slice(0, -1) },
+        packages.length - 1,
+      ),
+    /stale for win32-x64/,
+  );
 });
 
 test('every native engine and bundled runtime reaches the SBOM with a pin', async () => {

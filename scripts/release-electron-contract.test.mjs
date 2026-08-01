@@ -99,6 +99,14 @@ test('Electron release configuration pins the audited packaging contracts', asyn
   );
   assert.match(workflow, /latest-mac\.yml/);
   assert.match(workflow, /packages\/app\/dist\/installers\/\*\.zip\.blockmap/);
+  assert.equal(
+    workflow.match(
+      /\$extensions = node packages\/app\/scripts\/third-party-binaries\.cjs --extensions \| ConvertFrom-Json/g,
+    )?.length,
+    2,
+    'both Windows signature gates must consume the shared loadable-extension policy',
+  );
+  assert.match(workflow, /\$extensions -contains \$_.Extension\.ToLowerInvariant\(\)/);
 
   assert.equal(
     builder.match(

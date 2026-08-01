@@ -106,8 +106,8 @@ describe('spawnPnpm', () => {
       spawnImpl,
     );
 
-    expect(captured?.command).toBe('"C:\\Program Files\\nodejs\\pnpm.cmd"');
-    expect(captured?.args).toEqual(['"install"', '"--prod"']);
+    expect(captured?.command).toBe('"C:\\Program Files\\nodejs\\pnpm.cmd" "install" "--prod"');
+    expect(captured?.args).toEqual([]);
     expect(captured?.options).toMatchObject({ shell: true, windowsHide: true });
   });
 });

@@ -618,6 +618,25 @@ interface InflightTurn {
   abort?: AbortController;
   /** Set by `cancelInflight`; remains attached to this exact turn object. */
   cancelled?: boolean;
+  /**
+   * Per-turn buffers copied off the session-keyed maps by
+   * `cancelInflight`, before it releases the session slot.
+   *
+   * A cancelled turn's provider call can outlive the cancel — by 16s in
+   * the observed Copilot case, where the SDK ran the response to
+   * completion. By then the next turn has started and reset those maps,
+   * so the late `catch` would salvage its successor's half-written reply
+   * and file it as this turn's `turn-aborted` record: one stream, split
+   * across two bubbles, the second turn's text attributed to the first.
+   * Snapshotting at cancel time keeps this turn's own trace.
+   */
+  salvage?: {
+    tools: ChatMessageToolCall[];
+    warnings: string[];
+    contentText: string;
+    reasoning?: string;
+    reasoningTiming?: { firstDeltaAt: number; lastDeltaAt: number };
+  };
 }
 
 /**
@@ -996,6 +1015,19 @@ export class ChatManager {
    * the conversation. Cleared at the start of every turn.
    */
   private readonly currentTurnWarnings = new Map<string, string[]>();
+  /**
+   * Which turn currently owns the per-turn maps above for a session.
+   *
+   * Every one of those maps is keyed by sessionId, not by turn, so they
+   * hold exactly one turn's state at a time. That is fine while turns
+   * are strictly sequential — but `cancelInflight` frees the session
+   * slot synchronously while the cancelled turn's provider call is still
+   * running, so a successor can start and take the maps over before the
+   * cancelled turn unwinds. This pointer lets a late-unwinding turn tell
+   * "these buffers are still mine" from "my successor owns these now",
+   * and skip both the salvage read and the teardown when they aren't.
+   */
+  private readonly turnBufferOwner = new Map<string, InflightTurn>();
   /**
    * Directed graph of in-flight sync `ask_gezel` calls — each entry
    * records "asker session ID is currently blocked waiting on target
@@ -2038,6 +2070,28 @@ export class ChatManager {
     // abort propagates) is what previously produced an empty aborted
     // bubble with the committed tool calls dropped. `send()`'s `finally`
     // clears them once the catch has salvaged what it needs.
+    //
+    // Do snapshot them onto this turn object, though. Freeing the slot on
+    // the line above lets the next turn start and reset those maps while
+    // this turn's provider call is still running, so by the time the
+    // catch reads them they may belong to a successor. Copy now, while
+    // this turn demonstrably still owns them, and read the copy there.
+    // Reasoning has to come from the live session before the
+    // `disconnect()` below nulls it out.
+    const cancelledState = this.states.get(sessionId);
+    entry.salvage = {
+      tools: [...(this.currentTurnTools.get(sessionId) ?? [])],
+      warnings: [...(this.currentTurnWarnings.get(sessionId) ?? [])],
+      contentText: this.currentTurnContentText.get(sessionId) ?? '',
+      ...(() => {
+        const reasoning = cancelledState?.session?.getLastTurnReasoning?.();
+        return reasoning && reasoning.length > 0 ? { reasoning } : {};
+      })(),
+      ...(() => {
+        const timing = this.currentTurnReasoningTiming.get(sessionId);
+        return timing ? { reasoningTiming: { ...timing } } : {};
+      })(),
+    };
     // Abort the in-flight provider call so it unwinds now, rather
     // than running to completion against an already-started stream
     // while the user waits for their cancel to actually take
@@ -5077,6 +5131,9 @@ export class ChatManager {
     // bridge handler (built in buildSessionOpts) pushes here; we drain
     // into the final assistant message below.
     this.currentTurnTools.set(sessionId, []);
+    // Claim the session-keyed buffers for this turn. A predecessor whose
+    // provider call is still unwinding checks this before touching them.
+    this.turnBufferOwner.set(sessionId, inflightTurn);
     // Same pattern for intents + the running content char counter that
     // pins each intent's offset into the final reply.
     this.currentTurnIntents.set(sessionId, []);
@@ -6801,8 +6858,19 @@ export class ChatManager {
       // Best-effort: if writing fails, the in-memory bus already
       // published the error.
       try {
-        const drainedTools = this.currentTurnTools.get(sessionId) ?? [];
-        const drainedWarnings = this.currentTurnWarnings.get(sessionId) ?? [];
+        // Read this turn's own state, never a successor's. `salvage` is
+        // the snapshot `cancelInflight` took while this turn still owned
+        // the buffers; absent that, only read the live maps when this
+        // turn is still their owner. A cancelled turn that unwound after
+        // its successor claimed them has neither, and records an empty
+        // trace rather than one attributed to the wrong turn.
+        const snapshot = inflightTurn.salvage;
+        const ownsBuffers = this.turnBufferOwner.get(sessionId) === inflightTurn;
+        const drainedTools =
+          snapshot?.tools ?? (ownsBuffers ? (this.currentTurnTools.get(sessionId) ?? []) : []);
+        const drainedWarnings =
+          snapshot?.warnings ??
+          (ownsBuffers ? (this.currentTurnWarnings.get(sessionId) ?? []) : []);
         // Salvage the partial reply the model streamed before the abort so
         // the record reflects what the user actually saw, not an empty
         // bubble. Content comes from the per-turn stream buffer; reasoning
@@ -6811,9 +6879,19 @@ export class ChatManager {
         // and we simply omit the field). Together with the tool calls +
         // warnings already carried here, a turn cut short after committing
         // real work leaves a faithful trace instead of a blank message.
-        const salvagedContent = this.currentTurnContentText.get(sessionId) ?? '';
-        const salvagedReasoning = this.states.get(sessionId)?.session?.getLastTurnReasoning?.();
-        const reasoningTiming = this.currentTurnReasoningTiming.get(sessionId);
+        const salvagedContent =
+          snapshot?.contentText ??
+          (ownsBuffers ? (this.currentTurnContentText.get(sessionId) ?? '') : '');
+        const salvagedReasoning = snapshot
+          ? snapshot.reasoning
+          : ownsBuffers
+            ? this.states.get(sessionId)?.session?.getLastTurnReasoning?.()
+            : undefined;
+        const reasoningTiming = snapshot
+          ? snapshot.reasoningTiming
+          : ownsBuffers
+            ? this.currentTurnReasoningTiming.get(sessionId)
+            : undefined;
         if (!intentionallyCancelled) {
           state.record.lastTurnError = userMessage.slice(0, 500);
         }
@@ -6885,7 +6963,11 @@ export class ChatManager {
         this.keurmeester &&
         (isSilentStallAbort(message) || consecutiveGuardAbort)
       ) {
-        const abortedTurnTools = this.currentTurnTools.get(sessionId) ?? [];
+        const abortedTurnTools =
+          inflightTurn.salvage?.tools ??
+          (this.turnBufferOwner.get(sessionId) === inflightTurn
+            ? (this.currentTurnTools.get(sessionId) ?? [])
+            : []);
         const abortCtx = {
           trigger: 'turn_aborted' as const,
           triggerSummary: consecutiveGuardAbort
@@ -6929,13 +7011,20 @@ export class ChatManager {
       throw err;
     } finally {
       liveUnsub();
-      this.currentTurnTools.delete(sessionId);
-      this.currentTurnIntents.delete(sessionId);
-      this.currentTurnWarnings.delete(sessionId);
-      this.currentTurnContentChars.delete(sessionId);
-      this.currentTurnContentText.delete(sessionId);
-      this.currentTurnReasoningTiming.delete(sessionId);
-      this.telemetry.noteTurnEnd(sessionId);
+      // Only tear down the buffers this turn still owns. A cancelled turn
+      // whose provider call outlived the cancel gets here after its
+      // successor has claimed them — clearing them then would wipe the
+      // running turn's accumulators mid-stream and end its telemetry.
+      if (this.turnBufferOwner.get(sessionId) === inflightTurn) {
+        this.turnBufferOwner.delete(sessionId);
+        this.currentTurnTools.delete(sessionId);
+        this.currentTurnIntents.delete(sessionId);
+        this.currentTurnWarnings.delete(sessionId);
+        this.currentTurnContentChars.delete(sessionId);
+        this.currentTurnContentText.delete(sessionId);
+        this.currentTurnReasoningTiming.delete(sessionId);
+        this.telemetry.noteTurnEnd(sessionId);
+      }
     }
   }
 
@@ -14650,9 +14739,28 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
       // is actionable, but the PR/issue toolset prose names tools an
       // executor usually can't call. Keep the header + checkout, drop the
       // toolset sentence for executors.
+      // Name only the GitHub tools this role actually holds. The literal
+      // list used to be unconditional, so a Chief Security Officer whose
+      // roster has no `search_code` was still told to use it — one of the
+      // `directive-missing-tool` warnings this build logs, and the drift
+      // ADR 0001 exists to prevent. The *sentence* still stands either
+      // way: these names come from an installed third-party GitHub
+      // toolset, whose tool names never appear in the predicted roster,
+      // so an empty intersection means "can't confirm", not "absent".
+      const githubTools = toolsFrom([
+        'get_pull_request',
+        'list_pull_requests',
+        'get_issue',
+        'search_code',
+        'add_issue_comment',
+      ]);
       if (!trimExecutor) {
+        const named =
+          githubTools.length > 0
+            ? `${formatToolList(githubTools)}, …`
+            : 'the `github_*` / PR + issue tools on your function schema';
         lines.push(
-          'Use the GitHub toolset (`get_pull_request`, `list_pull_requests`, `get_issue`, `search_code`, `add_issue_comment`, …) for repo and PR actions; treat the owner/repo above as the default.',
+          `Use the GitHub toolset (${named}) for repo and PR actions; treat the owner/repo above as the default.`,
         );
       }
       projectContext += lines.join('\n');
@@ -14822,11 +14930,18 @@ ${artifactsLine}
   // setup step. Only a genuinely missing install gets the bootstrap
   // line. All three keep the McKinley-Park guard: never emit fake
   // `browser_*` markup for tools that aren't on the schema.
-  const browsingGuidance = hasPlaywright
+  // `hasPlaywright` means the toolset is INSTALLED, not that this role can
+  // run scripts with it. A Chief Security Officer with Playwright
+  // installed but no `run_playwright_script` on their post-allowlist
+  // roster was still told to write and run one.
+  const scriptedBrowsing = hasPlaywright && availableToolNameSet.has('run_playwright_script');
+  const browsingGuidance = scriptedBrowsing
     ? `**Web work.** For anything re-runnable (multi-step flows, data extraction, repeated lookups), write a Playwright script to \`scripts/<name>.ts\` via \`write_artifact\` and run it with \`run_playwright_script\`. For one-shot reads, use the \`browser_*\` tools on your function schema. Playwright + Chromium are pre-installed; \`import { chromium } from 'playwright'\` just works — don't \`npm_install\` any \`playwright*\` package.`
-    : browserAutomationRoleExcluded
-      ? "**Browser tools are not part of this role's kit** (they are installed on this machine). Workspace HTML you write is still runtime-checked automatically after each write. If the user needs live browsing or scraping, suggest a web-focused teammate (Web Developer, Researcher, Designer) or ask them to retag your role. Don't emit fake `<browser_*>` markup."
-      : "**Browser automation is not installed.** If the user asks you to browse or scrape, tell them the Playwright toolset hasn't been bootstrapped (Settings → Daemon). Don't emit fake `<browser_*>` markup.";
+    : hasPlaywright
+      ? "**Web work.** Use the `browser_*` tools on your function schema for reads. Scripted browsing is not part of your kit this turn — if the job needs a re-runnable script, hand it to a teammate who can run one. Don't emit fake `<browser_*>` markup."
+      : browserAutomationRoleExcluded
+        ? "**Browser tools are not part of this role's kit** (they are installed on this machine). Workspace HTML you write is still runtime-checked automatically after each write. If the user needs live browsing or scraping, suggest a web-focused teammate (Web Developer, Researcher, Designer) or ask them to retag your role. Don't emit fake `<browser_*>` markup."
+        : "**Browser automation is not installed.** If the user asks you to browse or scrape, tell them the Playwright toolset hasn't been bootstrapped (Settings → Daemon). Don't emit fake `<browser_*>` markup.";
 
   // Is the active step a "gate" — a phase the model must hold at until its
   // exit criteria are met, rather than advance past on its first attempt?

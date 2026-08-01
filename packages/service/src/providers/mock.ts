@@ -89,6 +89,8 @@ export class MockProvider implements LLMProvider {
    * shape a real provider unwinds with on `cancelInflight`.
    */
   private readonly streamThenHangQueue: string[] = [];
+  /** See {@link scriptStreamThenStall}. */
+  private readonly streamThenStallQueue: Array<{ content: string; gate: Promise<void> }> = [];
   /**
    * Scripted external tool-call payloads. Each entry is the array a
    * single `sendAndWait` should emit (and halt on) when the session's
@@ -190,6 +192,30 @@ export class MockProvider implements LLMProvider {
   /** @internal */
   nextStreamThenHang(): string | undefined {
     return this.streamThenHangQueue.shift();
+  }
+
+  /**
+   * Make the next `sendAndWait` stream `content` and then **ignore its
+   * abort signal**, settling only when the returned `release` fires.
+   *
+   * Models a provider whose in-flight call outlives a cancel — which is
+   * what the Copilot SDK did before `session.abort()` was wired: a
+   * cancelled turn kept generating for seconds while the manager had
+   * already freed the session slot and started the next turn. Tests use
+   * it to drive two overlapping turns deterministically.
+   */
+  scriptStreamThenStall(content: string): { release: () => void } {
+    let release = (): void => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    this.streamThenStallQueue.push({ content, gate });
+    return { release };
+  }
+
+  /** @internal */
+  nextStreamThenStall(): { content: string; gate: Promise<void> } | undefined {
+    return this.streamThenStallQueue.shift();
   }
 
   /**
@@ -379,6 +405,15 @@ class MockSession extends StreamingSessionBase implements LLMSession {
         }
         signal?.addEventListener('abort', fail, { once: true });
       });
+    }
+
+    const stall = this.provider.nextStreamThenStall();
+    if (stall) {
+      if (stall.content.length > 0) this.emitDelta(stall.content);
+      // Deliberately not linked to `sendOpts.queue.signal` — the point is
+      // to outlive the cancel.
+      await stall.gate;
+      return stall.content;
     }
 
     const delay = this.provider.nextScriptedSendDelay();

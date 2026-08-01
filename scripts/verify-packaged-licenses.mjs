@@ -5,6 +5,11 @@ import { existsSync } from 'node:fs';
 import { readFile, readdir } from 'node:fs/promises';
 import { join, relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import {
+  loadPnpmRuntimeInventory,
+  pnpmPackageMatchesTarget,
+  pnpmReleaseTargets,
+} from './pnpm-runtime-inventory.mjs';
 
 function sha256(content) {
   return createHash('sha256').update(content).digest('hex');
@@ -23,6 +28,32 @@ async function listFiles(root) {
   return files;
 }
 
+export async function verifyPnpmComponentInventory(pnpmComponents, expectedCount) {
+  if (
+    pnpmComponents.schemaVersion !== 1 ||
+    !pnpmReleaseTargets().includes(pnpmComponents.target) ||
+    !Array.isArray(pnpmComponents.packages) ||
+    pnpmComponents.packageCount !== expectedCount ||
+    pnpmComponents.packages.length !== expectedCount
+  ) {
+    throw new Error('pnpm component inventory does not match the legal bundle summary');
+  }
+  const pinnedPnpm = await loadPnpmRuntimeInventory();
+  if (
+    pnpmComponents.pnpmVersion !== pinnedPnpm.pnpmVersion ||
+    pnpmComponents.packageSha256 !== pinnedPnpm.packageSha256
+  ) {
+    throw new Error('pnpm component inventory is not bound to the packaged pnpm pin');
+  }
+  const expectedPnpmPackages = pinnedPnpm.packages.filter((pkg) =>
+    pnpmPackageMatchesTarget(pkg, pnpmComponents.target),
+  );
+  if (JSON.stringify(pnpmComponents.packages) !== JSON.stringify(expectedPnpmPackages)) {
+    throw new Error(`pnpm component inventory is stale for ${pnpmComponents.target}`);
+  }
+  return expectedPnpmPackages;
+}
+
 export async function verifyLicenseBundle(rootInput) {
   const root = resolve(rootInput);
   const manifestPath = join(root, 'manifest.json');
@@ -31,7 +62,13 @@ export async function verifyLicenseBundle(rootInput) {
   if (manifest.schemaVersion !== 1 || !Array.isArray(manifest.files)) {
     throw new Error(`${manifestPath} is not a schemaVersion 1 legal bundle manifest`);
   }
-  for (const field of ['productionPackages', 'nativeEngines', 'fontFamilies', 'bundledRuntimes']) {
+  for (const field of [
+    'productionPackages',
+    'nativeEngines',
+    'fontFamilies',
+    'bundledRuntimes',
+    'bundledPnpmPackages',
+  ]) {
     if (!Number.isInteger(manifest[field]) || manifest[field] <= 0) {
       throw new Error(`${manifestPath} has invalid ${field}`);
     }
@@ -43,6 +80,7 @@ export async function verifyLicenseBundle(rootInput) {
     'npm/manifest.json',
     'native/manifest.json',
     'runtimes/manifest.json',
+    'runtimes/pnpm-components.json',
   ];
   for (const path of required) {
     if (!existsSync(join(root, path))) throw new Error(`legal bundle is missing ${path}`);
@@ -116,6 +154,11 @@ export async function verifyLicenseBundle(rootInput) {
     }
   }
 
+  const pnpmComponents = JSON.parse(
+    await readFile(join(root, 'runtimes', 'pnpm-components.json'), 'utf8'),
+  );
+  await verifyPnpmComponentInventory(pnpmComponents, manifest.bundledPnpmPackages);
+
   return {
     root,
     files: manifest.files.length,
@@ -123,6 +166,7 @@ export async function verifyLicenseBundle(rootInput) {
     nativeEngines: manifest.nativeEngines,
     fontFamilies: manifest.fontFamilies,
     bundledRuntimes: manifest.bundledRuntimes,
+    bundledPnpmPackages: manifest.bundledPnpmPackages,
   };
 }
 
@@ -133,7 +177,8 @@ async function main() {
   console.log(
     `\u2713 verified ${result.files} legal files in ${result.root} ` +
       `(${result.packages} packages, ${result.nativeEngines} native engines, ` +
-      `${result.fontFamilies} font families, ${result.bundledRuntimes} bundled runtimes).`,
+      `${result.fontFamilies} font families, ${result.bundledRuntimes} bundled runtimes, ` +
+      `${result.bundledPnpmPackages} pnpm runtime packages).`,
   );
 }
 

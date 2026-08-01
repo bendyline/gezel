@@ -8,7 +8,11 @@ import { after, before, describe, it } from 'node:test';
 import { auditPeTree, findPeBinaries, isPeImage, verifyPeTree } from './verify-pe-tree.mjs';
 
 const require = createRequire(import.meta.url);
-const { isThirdPartyBinary } = require('../packages/app/scripts/third-party-binaries.cjs');
+const {
+  isThirdPartyBinary,
+  isWindowsLoadableBinary,
+  thirdPartyMetadata,
+} = require('../packages/app/scripts/third-party-binaries.cjs');
 
 /**
  * Minimal well-formed PE header: `MZ`, an e_lfanew at 0x3c pointing at a
@@ -133,7 +137,7 @@ describe('auditPeTree', () => {
   });
 });
 
-describe('third-party allowlist covers the service bundle', () => {
+describe('third-party allowlist covers prebuilt Windows payloads', () => {
   // The eight prebuilt binaries observed unsigned inside
   // service-bundle.tar.gz for win32-x64. If a bundled package renames one,
   // verify-pe-tree fails the release; this fails first, and says why.
@@ -146,6 +150,7 @@ describe('third-party allowlist covers the service bundle', () => {
     'conpty_console_list.node',
     'winpty.dll',
     'winpty-agent.exe',
+    'reflink.win32-x64-msvc.node',
   ];
 
   for (const name of bundled) {
@@ -164,6 +169,22 @@ describe('third-party allowlist covers the service bundle', () => {
     // exemption by embedding a vendor name.
     assert.equal(isThirdPartyBinary('C:\\bundle\\not-vec0.dll'), false);
     assert.equal(isThirdPartyBinary('C:\\bundle\\pty.node.exe'), false);
+  });
+
+  it('classifies native Node addons as loadable binaries that must be audited', () => {
+    for (const name of ['tool.exe', 'library.dll', 'addon.node']) {
+      assert.equal(isWindowsLoadableBinary(name), true);
+    }
+    assert.equal(isWindowsLoadableBinary('addon.node.map'), false);
+    assert.equal(isWindowsLoadableBinary('README.md'), false);
+  });
+
+  it('binds the reflink exception to a package identity, license, and tarball checksum', () => {
+    const policy = thirdPartyMetadata('reflink.win32-x64-msvc.node');
+    assert.equal(policy.package, '@reflink/reflink-win32-x64-msvc');
+    assert.equal(policy.version, '0.1.19');
+    assert.equal(policy.license, 'MIT');
+    assert.match(policy.packageSha256, /^[0-9a-f]{64}$/);
   });
 });
 

@@ -12,9 +12,10 @@ import { existsSync } from 'node:fs';
 import { cp, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { basename, dirname, extname, join, relative, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import { verifyNoticeInventory } from './check-notice.mjs';
+import { pnpmTargetFor, verifyPnpmRuntimeTree } from './pnpm-runtime-inventory.mjs';
 import { readProductionLicenseInventory } from './production-dependency-inventory.mjs';
 
 const execFileP = promisify(execFile);
@@ -325,9 +326,9 @@ async function ensureElectronDistribution(electronRoot, version) {
   }
 }
 
-async function stageBundledRuntimeLicenses(expected) {
+export async function stageBundledRuntimeLicenses(expected, { outputRoot = destination } = {}) {
   const appRoot = join(repoRoot, 'packages', 'app');
-  const targetRoot = join(destination, 'runtimes');
+  const targetRoot = join(outputRoot, 'runtimes');
   const requireFromApp = createRequire(join(appRoot, 'package.json'));
   const electronPackagePath = requireFromApp.resolve('electron/package.json');
   const electronRoot = dirname(electronPackagePath);
@@ -336,6 +337,11 @@ async function stageBundledRuntimeLicenses(expected) {
   const pnpmRoot = join(appRoot, 'dist', 'pnpm-bundle');
   const nodeVersion = (await readFile(join(nodeRoot, 'version.txt'), 'utf8')).trim();
   const pnpmVersion = (await readFile(join(pnpmRoot, 'version.txt'), 'utf8')).trim();
+  const pnpmTarget = pnpmTargetFor(
+    process.env.GEZEL_BUNDLE_PLATFORM ?? process.platform,
+    process.env.GEZEL_BUNDLE_ARCH ?? process.arch,
+  );
+  const pnpmPackages = await verifyPnpmRuntimeTree(pnpmRoot, { target: pnpmTarget });
   const versions = {
     Electron: electronPackage.version,
     'Node.js': nodeVersion,
@@ -372,11 +378,35 @@ async function stageBundledRuntimeLicenses(expected) {
     {
       name: 'pnpm',
       version: versions.pnpm,
-      files: [{ source: join(pnpmRoot, 'LICENSE.txt'), target: 'pnpm-LICENSE.txt' }],
+      files: [
+        { source: join(pnpmRoot, 'LICENSE.txt'), target: 'pnpm-LICENSE.txt' },
+        {
+          target: 'pnpm-components.json',
+          content: Buffer.from(
+            `${JSON.stringify(
+              {
+                schemaVersion: 1,
+                pnpmVersion: versions.pnpm,
+                packageSha256: expected.pnpmRuntime.packageSha256,
+                target: pnpmTarget,
+                packageCount: pnpmPackages.length,
+                packages: pnpmPackages,
+              },
+              null,
+              2,
+            )}\n`,
+          ),
+        },
+      ],
     },
   ];
   for (const entry of entries) {
     for (const file of entry.files) {
+      if (file.content) {
+        await mkdir(targetRoot, { recursive: true });
+        await writeFile(join(targetRoot, file.target), file.content);
+        continue;
+      }
       if (!existsSync(file.source) || (await stat(file.source)).size === 0) {
         throw new Error(`missing ${entry.name} redistribution text: ${file.source}`);
       }
@@ -399,7 +429,7 @@ async function stageBundledRuntimeLicenses(expected) {
       2,
     )}\n`,
   );
-  return entries.length;
+  return { runtimes: entries.length, pnpmPackages: pnpmPackages.length };
 }
 
 async function stageNativeLicenses() {
@@ -452,24 +482,31 @@ async function main() {
   await stagePolicyLicenses();
   await stageFontLicenses();
   const cudaPayloads = await stageNativeLicenses();
-  const bundledRuntimes = await stageBundledRuntimeLicenses(notice.runtimes);
+  const runtimeSummary = await stageBundledRuntimeLicenses({
+    ...notice.runtimes,
+    pnpmRuntime: notice.pnpmRuntime,
+  });
   const productionPackages = await stageDependencyLicenses();
   await writeBundleManifest({
     productionPackages,
     nativeEngines: notice.native.engines,
     fontFamilies: notice.fonts.families,
-    bundledRuntimes,
+    bundledRuntimes: runtimeSummary.runtimes,
+    bundledPnpmPackages: runtimeSummary.pnpmPackages,
     cudaPayloads,
   });
   console.log(
     `\u2713 staged legal bundle at ${relative(repoRoot, destination)} ` +
       `(${productionPackages} production packages, ${notice.native.engines} native engines, ` +
-      `${notice.fonts.families} font families, ${bundledRuntimes} bundled runtimes, ` +
+      `${notice.fonts.families} font families, ${runtimeSummary.runtimes} bundled runtimes, ` +
+      `${runtimeSummary.pnpmPackages} pnpm runtime packages, ` +
       `${cudaPayloads} CUDA payloads).`,
   );
 }
 
-main().catch((error) => {
-  console.error(`\u2717 failed to stage third-party licenses: ${error.message}`);
-  process.exitCode = 1;
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+  main().catch((error) => {
+    console.error(`\u2717 failed to stage third-party licenses: ${error.message}`);
+    process.exitCode = 1;
+  });
+}

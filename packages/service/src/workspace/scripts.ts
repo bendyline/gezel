@@ -9,7 +9,7 @@ import type { HistoryManager } from '../history/manager.js';
 import { resolvePnpmCommand } from '../packages/pnpm.js';
 import {
   type CommandApprovalsFile,
-  hashCommandBody,
+  hashCommandInvocation,
   lookupApproval,
   readCommandApprovals,
 } from './command-approvals.js';
@@ -167,7 +167,7 @@ async function checkApprovalGate(input: ApprovalGateInput): Promise<RunCommandOu
     input.approvals,
     input.scope,
     input.name,
-    hashCommandBody(input.body),
+    hashCommandInvocation(input.body, input.args),
   );
   if (decision === 'approved') return undefined;
   if (decision === 'declined') {
@@ -254,6 +254,8 @@ async function findPendingApproval(input: ApprovalGateInput): Promise<Question |
     if (q.intent?.kind !== 'command-approval') continue;
     if (q.intent.scope !== input.scope) continue;
     if (q.intent.name !== input.name) continue;
+    if (q.intent.body !== input.body) continue;
+    if (JSON.stringify(q.intent.args ?? []) !== JSON.stringify(input.args)) continue;
     return q;
   }
   return undefined;
@@ -263,7 +265,7 @@ function buildApprovalPrompt(input: ApprovalGateInput): string {
   const verb = input.scope === 'script' ? `\`npm run ${input.name}\`` : `\`npx ${input.name}\``;
   const bodyBlock = input.body ? `\n\nCommand body:\n\n\`\`\`\n${input.body}\n\`\`\`` : '';
   const argsLine = input.args.length > 0 ? `\n\nExtra args: \`${input.args.join(' ')}\`` : '';
-  return `A gezel wants to run ${verb} in this project.${bodyBlock}${argsLine}\n\nSecurity warning: package commands are not isolated from your OS account. They can spawn other programs, access the network, and read or modify files outside this project. Approve only if you trust this command and the project's dependencies.\n\nApproving stores this decision so future runs of this command body don't ask again.`;
+  return `A gezel wants to run ${verb} in this project.${bodyBlock}${argsLine}\n\nSecurity warning: package commands are not isolated from your OS account. They can spawn other programs, access the network, and read or modify files outside this project. Approve only if you trust this command, these exact arguments, and the project's dependencies.\n\nApproving stores this decision for this exact command body and argument list. Different arguments will ask again.`;
 }
 
 // ── npx allowlist ──────────────────────────────────────────────────────────

@@ -415,6 +415,60 @@ describe('ChatManager — send + persistence', () => {
     expect(aborted.content).toBe('Partial answer the user already saw');
   }, 20_000);
 
+  it('does not let a late-unwinding cancelled turn steal or wipe its successor', async () => {
+    // Wild-caught on Copilot: `cancelInflight` frees the session slot
+    // synchronously, but the SDK ran the cancelled response to completion
+    // ~16s later. By then the next turn owned the session-keyed per-turn
+    // buffers, so the cancelled turn's catch salvaged ITS SUCCESSOR's
+    // half-streamed text and filed it as its own `turn-aborted` record —
+    // one continuous stream split across two bubbles, the second turn's
+    // words attributed to the first — and then its `finally` wiped the
+    // running turn's accumulators.
+    const session = await manager.createSession({ gezelId: 'ada' });
+    const stalled = mock.scriptStreamThenStall('FIRST turn text');
+
+    const first = manager.send(session.id, 'first').catch(() => {
+      /* cancel surfaces as events, not a rejection here */
+    });
+    await vi.waitFor(() => expect(mock.calls.filter((c) => c.kind === 'send')).toHaveLength(1), {
+      timeout: 5000,
+      interval: 10,
+    });
+
+    // Cancel frees the slot; the provider call is still running.
+    await manager.cancelInflight(session.id);
+
+    // Successor starts and takes over the per-turn buffers. Left in
+    // flight on purpose: its half-streamed text is sitting in exactly the
+    // buffers the cancelled turn is about to read.
+    const stalledSuccessor = mock.scriptStreamThenStall('SECOND turn text');
+    const second = manager.send(session.id, 'second');
+    await vi.waitFor(() => expect(mock.calls.filter((c) => c.kind === 'send')).toHaveLength(2), {
+      timeout: 5000,
+      interval: 10,
+    });
+
+    // Only now does the cancelled turn's provider call settle.
+    stalled.release();
+    await first;
+
+    stalledSuccessor.release();
+    await second;
+
+    const disk = await store.getSession('ada', session.id);
+    const aborted = disk!.messages.find((m) => m.synthetic === 'turn-aborted');
+    expect(aborted).toBeDefined();
+    // Its own streamed text — never the successor's.
+    expect(aborted!.content).toBe('FIRST turn text');
+    expect(aborted!.content).not.toContain('SECOND');
+
+    // The successor committed a real reply, and the late teardown did not
+    // eat it.
+    const replies = disk!.messages.filter((m) => m.role === 'assistant' && !m.synthetic);
+    expect(replies).toHaveLength(1);
+    expect(replies[0]!.content).toBe('SECOND turn text');
+  }, 20_000);
+
   it('honors a stop pressed during setup, before the turn wires its abort signal', async () => {
     // A user who hits stop while the prompt is still being built — the
     // ensureState / auto-recall prologue that runs before the per-turn
