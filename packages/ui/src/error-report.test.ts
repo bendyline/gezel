@@ -6,6 +6,7 @@ import {
   deriveIssueTitle,
   fitIssueUrl,
   formatErrorReport,
+  isUserCancelledTurnError,
   reportCursorOffset,
 } from './error-report.js';
 
@@ -84,12 +85,19 @@ describe('formatErrorReport', () => {
 
   it('carries the error and the structured detail', () => {
     const body = formatErrorReport(crash());
-    expect(body).toContain('### Error');
+    expect(body).toContain(`### Error\n${SIGILL}\n\n### Details`);
+    expect(body).not.toContain(`### Error\n\n\`\`\`text`);
     expect(body).toContain('on-device engine crashed');
     expect(body).toContain('code: native-engine-crash');
     expect(body).toContain('engine: llama-cpp');
     expect(body).toContain('incident: native-51832-1785547847453');
     expect(body).toContain('panic: SIGILL');
+  });
+
+  it('keeps a multiline error compact and unfenced', () => {
+    const body = formatErrorReport(crash({ message: 'first line\nsecond line' }));
+    expect(body).toContain('### Error\nfirst line second line\n\n### Details');
+    expect(body).not.toContain('```text');
   });
 
   it('flattens the crash-time launch diagnostics into the details block', () => {
@@ -150,6 +158,17 @@ describe('reportCursorOffset', () => {
   it('points at the blank line under the first heading', () => {
     const body = formatErrorReport(crash());
     expect(body.slice(reportCursorOffset(body))).toMatch(/^<!-- One or two lines/);
+  });
+});
+
+describe('isUserCancelledTurnError', () => {
+  it('recognizes the local-provider cancellation wording', () => {
+    expect(isUserCancelledTurnError('[Mac AI] turn cancelled by caller')).toBe(true);
+    expect(isUserCancelledTurnError('[llama-cpp] turn canceled by caller')).toBe(true);
+  });
+
+  it('does not classify a genuine provider failure as user cancellation', () => {
+    expect(isUserCancelledTurnError(SIGILL)).toBe(false);
   });
 });
 

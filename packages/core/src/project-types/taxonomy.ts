@@ -17,6 +17,11 @@ import { z } from 'zod';
  *                 to tags that actually exist in the catalog (the near-
  *                 universal `gallery` tag is intentionally never used here —
  *                 it would match every book).
+ *   - `gezelRoles` — gezel-template affinity in two tiers. `default` is the
+ *                 core crew this kind of project normally starts with;
+ *                 `suggested` is the useful specialist bench beyond that.
+ *                 Detection only surfaces these choices and never creates a
+ *                 gezel as a side effect.
  *
  * This is shared core data: the service imports it for detection + craftbook
  * partitioning, and the UI imports it for the settings override dropdown, so
@@ -38,6 +43,22 @@ export const ProjectTypeDetectSchema = z.object({
 });
 export type ProjectTypeDetect = z.infer<typeof ProjectTypeDetectSchema>;
 
+export const ProjectTypeGezelRoleSchema = z.object({
+  /** Gezel-template id from the catalog. */
+  templateId: z.string(),
+  /** Project-type-specific explanation shown with the recommendation. */
+  reason: z.string(),
+});
+export type ProjectTypeGezelRole = z.infer<typeof ProjectTypeGezelRoleSchema>;
+
+export const ProjectTypeGezelAffinitySchema = z.object({
+  /** Core roles expected in the standard crew for this type. */
+  default: z.array(ProjectTypeGezelRoleSchema),
+  /** Additional specialists that often improve this kind of project. */
+  suggested: z.array(ProjectTypeGezelRoleSchema),
+});
+export type ProjectTypeGezelAffinity = z.infer<typeof ProjectTypeGezelAffinitySchema>;
+
 export const ProjectTypeSchema = z.object({
   id: z.string(),
   label: z.string(),
@@ -45,6 +66,8 @@ export const ProjectTypeSchema = z.object({
   detect: ProjectTypeDetectSchema,
   /** Craftbook tags that mark a book "suggested" for this project type. */
   craftbookTags: z.array(z.string()),
+  /** Core and extended gezel-template recommendations for this project type. */
+  gezelRoles: ProjectTypeGezelAffinitySchema,
 });
 export type ProjectType = z.infer<typeof ProjectTypeSchema>;
 
@@ -92,6 +115,18 @@ export const PROJECT_TYPES: ProjectType[] = [
       'game-art',
       'atlas',
     ],
+    gezelRoles: {
+      default: [
+        {
+          templateId: 'builder',
+          reason: 'Owns the game from mechanics and code through a playable release.',
+        },
+      ],
+      suggested: [
+        { templateId: 'designer', reason: 'Shapes the game board, feedback, and visual language.' },
+        { templateId: 'reviewer', reason: 'Tests gameplay, edge cases, and release quality.' },
+      ],
+    },
   },
   {
     id: 'web-app',
@@ -128,6 +163,25 @@ export const PROJECT_TYPES: ProjectType[] = [
       'seo',
       'performance',
     ],
+    gezelRoles: {
+      default: [
+        {
+          templateId: 'builder',
+          reason: 'Owns the product flow from interface through implementation and release.',
+        },
+      ],
+      suggested: [
+        { templateId: 'designer', reason: 'Improves layout, hierarchy, and interaction quality.' },
+        {
+          templateId: 'reviewer',
+          reason: 'Provides an independent quality and accessibility pass.',
+        },
+        {
+          templateId: 'veiligheidsmeester',
+          reason: 'Reviews authentication, data handling, dependencies, and attack surface.',
+        },
+      ],
+    },
   },
   {
     id: 'static-site',
@@ -151,6 +205,19 @@ export const PROJECT_TYPES: ProjectType[] = [
       'content',
       'marketing',
     ],
+    gezelRoles: {
+      default: [
+        { templateId: 'builder', reason: 'Builds and ships the site as a coherent whole.' },
+      ],
+      suggested: [
+        { templateId: 'designer', reason: 'Strengthens the visual system and responsive layout.' },
+        { templateId: 'copywriter', reason: 'Sharpens the message for the intended reader.' },
+        {
+          templateId: 'reviewer',
+          reason: 'Checks polish, accessibility, links, and release quality.',
+        },
+      ],
+    },
   },
   {
     id: 'data-analysis',
@@ -186,6 +253,21 @@ export const PROJECT_TYPES: ProjectType[] = [
       'time-series',
       'finance',
     ],
+    gezelRoles: {
+      default: [
+        {
+          templateId: 'researcher',
+          reason: 'Investigates the data and turns evidence into a substantive analysis.',
+        },
+      ],
+      suggested: [
+        { templateId: 'builder', reason: 'Builds repeatable analysis pipelines and deliverables.' },
+        {
+          templateId: 'reviewer',
+          reason: 'Challenges assumptions, calculations, and conclusions.',
+        },
+      ],
+    },
   },
   {
     id: 'api-service',
@@ -219,6 +301,18 @@ export const PROJECT_TYPES: ProjectType[] = [
       'tests',
       'tdd',
     ],
+    gezelRoles: {
+      default: [
+        { templateId: 'builder', reason: 'Owns the service from API shape through deployment.' },
+      ],
+      suggested: [
+        { templateId: 'reviewer', reason: 'Checks contracts, failure modes, and test coverage.' },
+        {
+          templateId: 'veiligheidsmeester',
+          reason: 'Reviews trust boundaries, secrets, dependencies, and exposed endpoints.',
+        },
+      ],
+    },
   },
   {
     id: 'cli-tool',
@@ -229,6 +323,21 @@ export const PROJECT_TYPES: ProjectType[] = [
       keywords: ['cli', 'command', 'terminal', 'tool', 'script', 'automation', 'utility'],
     },
     craftbookTags: ['tooling', 'automation', 'script', 'testing', 'tests', 'quality', 'refactor'],
+    gezelRoles: {
+      default: [
+        {
+          templateId: 'builder',
+          reason: 'Takes the tool from command design through distribution.',
+        },
+      ],
+      suggested: [
+        { templateId: 'reviewer', reason: 'Checks ergonomics, errors, portability, and tests.' },
+        {
+          templateId: 'veiligheidsmeester',
+          reason: 'Reviews shell boundaries, filesystem access, inputs, and dependencies.',
+        },
+      ],
+    },
   },
   {
     id: 'library',
@@ -255,6 +364,18 @@ export const PROJECT_TYPES: ProjectType[] = [
       'refactor',
       'quality',
     ],
+    gezelRoles: {
+      default: [
+        { templateId: 'builder', reason: 'Owns the public API, implementation, and release path.' },
+      ],
+      suggested: [
+        { templateId: 'reviewer', reason: 'Checks API clarity, compatibility, tests, and docs.' },
+        {
+          templateId: 'veiligheidsmeester',
+          reason: 'Audits dependency risk and unsafe public behavior before release.',
+        },
+      ],
+    },
   },
   {
     id: 'content-writing',
@@ -287,6 +408,25 @@ export const PROJECT_TYPES: ProjectType[] = [
       'brief',
       'summary',
     ],
+    gezelRoles: {
+      default: [
+        {
+          templateId: 'copywriter',
+          reason: 'Turns the brief into clear writing for real readers.',
+        },
+      ],
+      suggested: [
+        { templateId: 'researcher', reason: 'Finds and organizes the evidence behind the piece.' },
+        {
+          templateId: 'reviewer',
+          reason: 'Provides a rigorous editorial and factual second pass.',
+        },
+        {
+          templateId: 'schrijfmaat',
+          reason: 'Supports sustained long-form and creative drafting.',
+        },
+      ],
+    },
   },
   {
     id: 'media-production',
@@ -312,6 +452,22 @@ export const PROJECT_TYPES: ProjectType[] = [
       'vision',
       'ocr',
     ],
+    gezelRoles: {
+      default: [
+        {
+          templateId: 'designer',
+          reason: 'Sets the visual direction and keeps the assets coherent.',
+        },
+      ],
+      suggested: [
+        { templateId: 'image-generator', reason: 'Produces image assets from a focused brief.' },
+        { templateId: 'video-generator', reason: 'Produces video assets from a focused brief.' },
+        {
+          templateId: 'copywriter',
+          reason: 'Develops scripts, captions, titles, and supporting copy.',
+        },
+      ],
+    },
   },
   {
     id: 'design-prototype',
@@ -334,6 +490,15 @@ export const PROJECT_TYPES: ProjectType[] = [
       'html',
       'canvas',
     ],
+    gezelRoles: {
+      default: [
+        { templateId: 'designer', reason: 'Owns the concept, hierarchy, and visual direction.' },
+      ],
+      suggested: [
+        { templateId: 'builder', reason: 'Turns the design into a working, testable prototype.' },
+        { templateId: 'reviewer', reason: 'Checks usability, accessibility, and consistency.' },
+      ],
+    },
   },
   {
     // Email specifically — thread/subject-centric, document-like correspondence.
@@ -350,6 +515,21 @@ export const PROJECT_TYPES: ProjectType[] = [
       keywords: ['inbox', 'email', 'reply', 'thread', 'correspondence', 'triage', 'newsletter'],
     },
     craftbookTags: ['email', 'inbox-triage', 'triage', 'summary', 'brief', 'writing'],
+    gezelRoles: {
+      default: [
+        {
+          templateId: 'copywriter',
+          reason: 'Drafts clear replies in the right voice and context.',
+        },
+      ],
+      suggested: [
+        { templateId: 'kantoormeester', reason: 'Keeps operational follow-ups from slipping.' },
+        {
+          templateId: 'researcher',
+          reason: 'Investigates background before consequential replies.',
+        },
+      ],
+    },
   },
   {
     // Tag audit note: 'pipeline'/'research'/'brief'/'weekly' are deliberately
@@ -376,6 +556,21 @@ export const PROJECT_TYPES: ProjectType[] = [
       ],
     },
     craftbookTags: ['career', 'job', 'resume', 'cv', 'interview', 'offer', 'application'],
+    gezelRoles: {
+      default: [
+        {
+          templateId: 'career-coach',
+          reason: 'Runs the search as a campaign and keeps the application pipeline moving.',
+        },
+      ],
+      suggested: [
+        {
+          templateId: 'mock-interviewer',
+          reason: 'Provides realistic interview practice and feedback.',
+        },
+        { templateId: 'copywriter', reason: 'Tailors resumes, cover letters, and outreach.' },
+      ],
+    },
   },
 ];
 

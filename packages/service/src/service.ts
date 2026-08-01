@@ -775,6 +775,10 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
       ? { tickIntervalMs: config.taskRunner.tickIntervalMs }
       : {}),
   });
+  nightShift.setOnActivated(async () => {
+    await taskRunner.rehydrateFromStore({ nightShiftOnly: true });
+    await taskRunner.wake();
+  });
   // A model-owned completion-gate loop keeps repairing inside its existing
   // turn; TaskManager therefore does not enqueue a replacement handoff. Move
   // TaskRunner's live dispatch to the new activation timestamp immediately so
@@ -1685,6 +1689,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     tasks,
     taskRunner,
     nightShift,
+    indexEnrichment,
     meesterStatus,
     scriptRunner,
     catalog,
@@ -1883,20 +1888,18 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
 
   scheduler.start();
   nightShift.start();
+  // Install the always-bundled daily meester oversight task before runner
+  // rehydration so a first-run install queues it in the same boot.
+  await ensureNightShiftOversightTask(store, tasks).catch((err) => {
+    log.warn('[night-shift] oversight ensure failed:', err instanceof Error ? err.message : err);
+  });
   // Rehydrate pending handoffs from disk (any active task whose
-  // current phase has an assignee but no open session) before starting
-  // the runner's tick loop. Ensures work dropped by a prior process
-  // gets picked up on restart.
+  // current phase has an effective assignee) before starting the runner's
+  // tick loop. Ensures work dropped by a prior process gets picked up.
   await taskRunner.rehydrateFromStore().catch((err) => {
     log.warn('[task-runner] rehydrate failed:', err instanceof Error ? err.message : err);
   });
   taskRunner.start();
-  // Install the always-bundled daily meester oversight task (idempotent).
-  // After the runner is wired so its entry-step handoff enqueues and is
-  // then held by night-shift gating until the next window.
-  await ensureNightShiftOversightTask(store, tasks).catch((err) => {
-    log.warn('[night-shift] oversight ensure failed:', err instanceof Error ? err.message : err);
-  });
   // Install the boekwachter indexing job task (idempotent) — the visible,
   // pausable control surface for the background indexing loops.
   await ensureIndexingJobTask(store, tasks).catch((err) => {

@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockApi } from './test-utils/mockApi.js';
@@ -40,6 +41,93 @@ vi.mock('./views/HomeView.js', () => ({ HomeView: () => <div>Home view</div> }))
 
 const { App } = await import('./App.js');
 const { api } = await import('./api.js');
+
+describe('Night Shift header status', () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    vi.mocked(api.getNightShiftStatus).mockResolvedValue({ active: false, source: null });
+    vi.mocked(api.getNightShiftTasks).mockResolvedValue({
+      background: [],
+      active: [],
+      upcoming: [],
+    });
+  });
+
+  it('adds passing clouds only while a shift is running', async () => {
+    vi.mocked(api.getNightShiftStatus).mockResolvedValue({ active: true, source: 'manual' });
+    render(<App />);
+
+    const trigger = await screen.findByRole('button', { name: 'Night Shift: on (manual)' });
+    expect(trigger.querySelectorAll('.app-nightshift-cloud')).toHaveLength(2);
+    expect(trigger.querySelector('.app-nightshift-moon')).toHaveClass('is-active');
+  });
+
+  it('keeps the resting moon still when Night Shift is off', async () => {
+    render(<App />);
+
+    const trigger = await screen.findByRole('button', { name: 'Night Shift: off' });
+    expect(trigger.querySelector('.app-nightshift-cloud')).not.toBeInTheDocument();
+    expect(trigger.querySelector('.app-nightshift-moon')).not.toHaveClass('is-active');
+  });
+
+  it('sets the start command into a raised key tray', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole('button', { name: 'Night Shift: off' }));
+
+    const action = await screen.findByRole('menuitem', { name: /Start night shift now/ });
+    expect(action).toHaveClass('app-nightshift-action', 'gz-key', 'gz-key--stacked');
+    expect(action.parentElement).toHaveClass('app-nightshift-action-tray', 'gz-tray');
+  });
+
+  it('sets the stop command into the same raised key tray', async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.getNightShiftStatus).mockResolvedValue({ active: true, source: 'manual' });
+    render(<App />);
+
+    await user.click(await screen.findByRole('button', { name: 'Night Shift: on (manual)' }));
+
+    const action = await screen.findByRole('menuitem', { name: /Stop night shift/ });
+    expect(action).toHaveClass('app-nightshift-action', 'gz-key', 'gz-key--stacked');
+    expect(action.parentElement).toHaveClass('app-nightshift-action-tray', 'gz-tray');
+  });
+
+  it('lists live indexing as work instead of leaving it implicit', async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.getNightShiftStatus).mockResolvedValue({ active: true, source: 'manual' });
+    vi.mocked(api.getNightShiftTasks).mockResolvedValue({
+      background: [
+        {
+          id: 'index-enrichment',
+          title: 'Workspace indexing',
+          projectName: 'molen-internal',
+          detail: 'Studying workspace files',
+        },
+      ],
+      active: [],
+      upcoming: [],
+    });
+    render(<App />);
+
+    await user.click(await screen.findByRole('button', { name: 'Night Shift: on (manual)' }));
+
+    expect(await screen.findByText('Workspace indexing')).toBeInTheDocument();
+    expect(screen.getByText('molen-internal · Studying workspace files')).toBeInTheDocument();
+    expect(screen.getByText('Working on')).toBeInTheDocument();
+  });
+
+  it('says plainly when an active shift has no real work in flight or queued', async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.getNightShiftStatus).mockResolvedValue({ active: true, source: 'manual' });
+    render(<App />);
+
+    await user.click(await screen.findByRole('button', { name: 'Night Shift: on (manual)' }));
+
+    expect(await screen.findByText('No work is running or queued.')).toBeInTheDocument();
+    expect(screen.queryByText('Up next')).not.toBeInTheDocument();
+  });
+});
 
 describe('App project deletion navigation', () => {
   beforeEach(() => {

@@ -5385,12 +5385,22 @@ export const NightShiftTaskBriefSchema = z.object({
 });
 export type NightShiftTaskBrief = z.infer<typeof NightShiftTaskBriefSchema>;
 
+/** Live service-owned work performed during Night Shift, outside TaskRunner. */
+export const NightShiftBackgroundWorkBriefSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  detail: z.string(),
+  projectName: z.string().optional(),
+});
+export type NightShiftBackgroundWorkBrief = z.infer<typeof NightShiftBackgroundWorkBriefSchema>;
+
 /**
- * What the night shift is doing right now: tasks with a turn in flight
- * (`active`) and the pending night-shift tasks queued behind them
- * (`upcoming`). Both empty when no shift is running.
+ * What the night shift is doing right now: service-owned background work,
+ * tasks with a turn in flight (`active`), and tasks genuinely present in the
+ * runner queue (`upcoming`). All three are empty when no shift is running.
  */
 export const NightShiftTasksResponseSchema = z.object({
+  background: z.array(NightShiftBackgroundWorkBriefSchema),
   active: z.array(NightShiftTaskBriefSchema),
   upcoming: z.array(NightShiftTaskBriefSchema),
 });

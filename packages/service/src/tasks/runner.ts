@@ -48,7 +48,7 @@ import {
 } from '@bendyline/gezel';
 import type { Store } from '../fs/store.js';
 import type { LLMProvider, ProviderName } from '../providers/types.js';
-import { mainBookSource } from './manager.js';
+import { mainBookSource, stepOwnerGezelId } from './manager.js';
 
 const log = createLogger('tasks');
 
@@ -187,10 +187,7 @@ export class TaskRunner {
   start(): void {
     if (this.ticker) return;
     this.ticker = setInterval(() => {
-      if (this.tickInFlight) return;
-      this.tickInFlight = this.tick().finally(() => {
-        this.tickInFlight = null;
-      });
+      void this.wake();
     }, this.tickIntervalMs);
     // Node's `setInterval` keeps the event loop alive — unref so this
     // doesn't block process shutdown in CLI contexts.
@@ -285,17 +282,34 @@ export class TaskRunner {
     };
   }
 
+  /** Task refs represented by the runner right now. */
+  workSnapshot(): { queuedTaskRefs: string[]; dispatchedTaskRefs: string[] } {
+    return {
+      queuedTaskRefs: [...new Set(this.pending.map((handoff) => handoff.taskRef))],
+      dispatchedTaskRefs: [...new Set([...this.activeDispatches.values()].map((d) => d.taskRef))],
+    };
+  }
+
+  /** Run one serialized dispatch pass now, sharing the interval's overlap guard. */
+  async wake(): Promise<void> {
+    if (this.tickInFlight) return this.tickInFlight;
+    this.tickInFlight = this.tick().finally(() => {
+      this.tickInFlight = null;
+    });
+    return this.tickInFlight;
+  }
+
   /**
    * Scan every `active` task and enqueue a handoff for any whose
-   * current step is assigned (to a gezel, not user) but has no
-   * open session yet. Call once on service boot to backfill work
-   * lost across a restart.
+   * current step has an effective gezel owner. Call on service boot and
+   * whenever Night Shift opens to backfill work lost across a restart or an
+   * earlier failed send.
    *
    * Safe to call more than once — duplicates are filtered via the
    * (taskRef, stepId, gezelId) triple before dispatch inside
    * `tick`, so a double-enqueue won't produce two handoff sessions.
    */
-  async rehydrateFromStore(): Promise<void> {
+  async rehydrateFromStore(opts: { nightShiftOnly?: boolean } = {}): Promise<void> {
     const projects = await this.store.listProjects();
     for (const proj of projects) {
       // Skip projects whose status gates ambient work. Prevents stale
@@ -305,21 +319,16 @@ export class TaskRunner {
       const tasks = await this.store.listProjectTasks(proj.id).catch(() => []);
       for (const task of tasks) {
         if (task.status !== 'active') continue;
+        if (opts.nightShiftOnly && task.nightShift?.enabled !== true) continue;
         if (!task.activeStepId) continue;
         const step = task.craftbook.steps.find((s) => s.id === task.activeStepId);
         if (!step) continue;
-        const assigneeId =
-          step.assignee?.kind === 'gezel' ? step.assignee.gezelId : step.suggestedGezelId;
+        const assigneeId = stepOwnerGezelId(task, step);
         if (!assigneeId) continue;
-        // Skip if this gezel already has a live session for this
-        // task — the previous process (or a concurrent boot path)
-        // got to it first. Best-effort; worst case is a redundant
-        // enqueue that startHandoffSession ignores anyway.
-        const sessions = await this.store.listSessions({ gezelId: assigneeId }).catch(() => []);
-        const hasLive = sessions.some(
-          (s) => !s.archived && s.taskRef === task.ref && s.stepId === task.activeStepId,
-        );
-        if (hasLive) continue;
+        // Persisted sessions are history, not evidence of live process work.
+        // A failed handoff remains non-archived, and treating it as "live"
+        // strands the active task forever after restart. enqueueHandoff plus
+        // tick's activeDispatches check provide the in-process dedupe.
         this.enqueueHandoff({
           taskRef: task.ref,
           stepId: step.id,

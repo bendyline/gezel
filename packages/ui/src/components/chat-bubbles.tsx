@@ -30,6 +30,7 @@ import {
   useState,
 } from 'react';
 import { api } from '../api.js';
+import { isUserCancelledTurnError } from '../error-report.js';
 import { Tooltip } from '../primitives/index.js';
 import { requestSettingsSection } from '../settings-nav.js';
 import { useEffectiveTheme } from '../theme.js';
@@ -1990,9 +1991,11 @@ export function StreamingBubble({
         {failed && (
           <div className="msg-failed-banner">
             ✗ Turn stopped before finishing. {error}{' '}
-            <ReportErrorLink
-              report={{ surface: 'chat-turn', message: error ?? '', detail: errorDetail }}
-            />
+            {!isUserCancelledTurnError(error) && (
+              <ReportErrorLink
+                report={{ surface: 'chat-turn', message: error ?? '', detail: errorDetail }}
+              />
+            )}
           </div>
         )}
       </div>

@@ -17,6 +17,7 @@ import type { GrowthEngine } from '../growth/engine.js';
 import type { HandboekEngine } from '../handboek/engine.js';
 import type { HistoryManager } from '../history/manager.js';
 import type { ContentIndex } from '../index-store/content-index.js';
+import type { IndexEnrichmentManager } from '../index-store/enrichment-manager.js';
 import type { GlobalIndex } from '../index-store/global-index.js';
 import type { IndexingJobControl } from '../index-store/indexing-job.js';
 import type { MailManager } from '../mail/manager.js';
@@ -69,6 +70,7 @@ export interface ServiceContext {
   tasks: TaskManager;
   taskRunner: TaskRunner;
   nightShift: NightShiftManager;
+  indexEnrichment: IndexEnrichmentManager;
   /**
    * The meester's occasional status report (Home greeting headline +
    * dashboard). In context so `POST /api/meester-status/run` can kick a

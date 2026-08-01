@@ -154,6 +154,26 @@ describe('NightShiftManager', () => {
     expect(seen[0]?.source).toBe('scheduled');
   });
 
+  it('reconciles work exactly once when a shift transitions on', async () => {
+    await addNightTask();
+    clock = localMs(2026, 6, 20, 12, 0);
+    const m = makeManager();
+    let activations = 0;
+    m.setOnActivated(async () => {
+      activations++;
+    });
+
+    await m.startManual();
+    expect(activations).toBe(1);
+
+    await m.tick();
+    expect(activations).toBe(1);
+
+    await m.stopManual();
+    await m.startManual();
+    expect(activations).toBe(2);
+  });
+
   it('listPendingTasks surfaces the active night-shift tasks pending now', async () => {
     await addNightTask();
     clock = localMs(2026, 6, 20, 23, 0); // inside the window

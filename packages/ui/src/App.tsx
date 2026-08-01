@@ -835,10 +835,10 @@ function EngagementMenu({ mode }: { mode: EngagementMode }) {
 type NightShiftState = { active: boolean; source: 'scheduled' | 'manual' | null };
 
 /**
- * Header control for Night Shift. The moon glows when a shift is active;
- * the dropdown lets the user start a shift on demand (e.g. stepping out)
- * and end a manual one. Scheduled shifts can't be force-ended here — they
- * latch off on their own once their work drains.
+ * Header control for Night Shift. Passing clouds + a quiet moon glow show
+ * when a shift is active; the dropdown lets the user start a shift on demand
+ * (e.g. stepping out) and end a manual one. Scheduled shifts can't be
+ * force-ended here — they latch off on their own once their work drains.
  */
 function NightShiftMenu({
   state,
@@ -912,7 +912,10 @@ function NightShiftMenu({
       });
   };
 
-  const hasTasks = tasks !== null && (tasks.active.length > 0 || tasks.upcoming.length > 0);
+  const backgroundWork = tasks?.background ?? [];
+  const hasWork =
+    tasks !== null &&
+    (backgroundWork.length > 0 || tasks.active.length > 0 || tasks.upcoming.length > 0);
 
   return (
     <DropdownMenu.Root open={open} onOpenChange={handleOpenChange}>
@@ -923,8 +926,31 @@ function NightShiftMenu({
           aria-label={title}
           title={title}
         >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-            <path d="M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.39 5.39 0 0 1-8.54-6.5A8.97 8.97 0 0 0 12 3z" />
+          <svg
+            className="app-nightshift-glyph"
+            width="24"
+            height="18"
+            viewBox="0 0 32 24"
+            fill="currentColor"
+            aria-hidden="true"
+          >
+            {state.active && (
+              <g className="app-nightshift-cloud app-nightshift-cloud-far">
+                <g transform="translate(0 -4) scale(.74)">
+                  <path d="M1 17h10.4a2 2 0 0 0 .1-4 3.2 3.2 0 0 0-6.15-1.1A2.5 2.5 0 0 0 1 13.4 1.8 1.8 0 0 0 1 17Z" />
+                </g>
+              </g>
+            )}
+            <path
+              className={`app-nightshift-moon${state.active ? ' is-active' : ''}`}
+              transform="translate(4 0)"
+              d="M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.39 5.39 0 0 1-8.54-6.5A8.97 8.97 0 0 0 12 3z"
+            />
+            {state.active && (
+              <g className="app-nightshift-cloud app-nightshift-cloud-near">
+                <path d="M1 17h10.4a2 2 0 0 0 .1-4 3.2 3.2 0 0 0-6.15-1.1A2.5 2.5 0 0 0 1 13.4 1.8 1.8 0 0 0 1 17Z" />
+              </g>
+            )}
           </svg>
         </button>
       </DropdownMenu.Trigger>
@@ -935,11 +961,19 @@ function NightShiftMenu({
               ? `Running — ${state.source === 'manual' ? 'manual shift' : 'scheduled window'}`
               : 'Not running'}
           </div>
-          {state.active && hasTasks && tasks && (
+          {state.active && hasWork && tasks && (
             <div className="app-nightshift-tasks">
-              {tasks.active.length > 0 && (
+              {(backgroundWork.length > 0 || tasks.active.length > 0) && (
                 <div className="app-nightshift-task-group">
                   <div className="app-nightshift-task-heading">Working on</div>
+                  {backgroundWork.map((work) => (
+                    <NightShiftWorkRow
+                      key={work.id}
+                      title={work.title}
+                      meta={[work.projectName, work.detail].filter(Boolean).join(' · ')}
+                      active
+                    />
+                  ))}
                   {tasks.active.map((t) => (
                     <NightShiftTaskRow key={t.ref} task={t} active />
                   ))}
@@ -954,6 +988,9 @@ function NightShiftMenu({
                 </div>
               )}
             </div>
+          )}
+          {state.active && tasks !== null && !hasWork && (
+            <div className="app-nightshift-empty">No work is running or queued.</div>
           )}
           {review && (review.tasksCompleted.length > 0 || review.reports.length > 0) && (
             <div className="app-nightshift-tasks">
@@ -1007,23 +1044,31 @@ function NightShiftMenu({
               </div>
             </div>
           )}
-          {state.active ? (
-            <DropdownMenu.Item className="app-nav-menu-item" onSelect={() => run('stop')}>
-              <span className="app-engagement-menu-label">Stop night shift</span>
-              <span className="app-engagement-menu-hint">
-                {state.source === 'manual'
-                  ? 'Stop now and revert to the schedule.'
-                  : "Stop for tonight — it won't auto-restart until the next window."}
-              </span>
-            </DropdownMenu.Item>
-          ) : (
-            <DropdownMenu.Item className="app-nav-menu-item" onSelect={() => run('start')}>
-              <span className="app-engagement-menu-label">Start night shift now</span>
-              <span className="app-engagement-menu-hint">
-                Run deferred indexing + the meester review while you're away.
-              </span>
-            </DropdownMenu.Item>
-          )}
+          <div className="app-nightshift-action-tray gz-tray" role="presentation">
+            {state.active ? (
+              <DropdownMenu.Item
+                className="app-nav-menu-item app-nightshift-action gz-key gz-key--stacked"
+                onSelect={() => run('stop')}
+              >
+                <span className="app-engagement-menu-label">Stop night shift</span>
+                <span className="app-engagement-menu-hint">
+                  {state.source === 'manual'
+                    ? 'Stop now and revert to the schedule.'
+                    : "Stop for tonight — it won't auto-restart until the next window."}
+                </span>
+              </DropdownMenu.Item>
+            ) : (
+              <DropdownMenu.Item
+                className="app-nav-menu-item app-nightshift-action gz-key gz-key--stacked"
+                onSelect={() => run('start')}
+              >
+                <span className="app-engagement-menu-label">Start night shift now</span>
+                <span className="app-engagement-menu-hint">
+                  Run deferred indexing + the meester review while you're away.
+                </span>
+              </DropdownMenu.Item>
+            )}
+          </div>
         </DropdownMenu.Content>
       </DropdownMenu.Portal>
     </DropdownMenu.Root>
@@ -1039,11 +1084,23 @@ function NightShiftTaskRow({
   active?: boolean;
 }) {
   const meta = task.stepName ? `${task.projectName} · ${task.stepName}` : task.projectName;
+  return <NightShiftWorkRow title={task.title} meta={meta} active={active} />;
+}
+
+function NightShiftWorkRow({
+  title,
+  meta,
+  active = false,
+}: {
+  title: string;
+  meta: string;
+  active?: boolean;
+}) {
   return (
     <div className="app-nightshift-task">
       <span className={`app-nightshift-task-dot${active ? ' is-active' : ''}`} aria-hidden="true" />
       <span className="app-nightshift-task-text">
-        <span className="app-nightshift-task-title">{task.title}</span>
+        <span className="app-nightshift-task-title">{title}</span>
         <span className="app-nightshift-task-meta">{meta}</span>
       </span>
     </div>

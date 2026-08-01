@@ -14,6 +14,7 @@ import { displayName, resolveGezelFontFamily, resolveGezelFontScale } from '@ben
 import type { SseStreamOptions } from '@bendyline/gezel-client';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
+import { isUserCancelledTurnError } from '../error-report.js';
 import { streamSharedProjectChatEvents } from '../shared-chat-events.js';
 import { GezelIcon } from './GezelIcon.js';
 import { getReadonlyGezelMediaProvider } from './GezelMediaProvider.js';
@@ -2808,7 +2809,9 @@ export function ChatTimelineView({
             </button>
           </>
         )}{' '}
-        <ReportErrorLink report={{ surface: 'session-error', message: error }} />
+        {!isUserCancelledTurnError(error) && (
+          <ReportErrorLink report={{ surface: 'session-error', message: error }} />
+        )}
       </div>,
     );
   };

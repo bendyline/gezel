@@ -4363,8 +4363,22 @@ button.danger {
   background: color-mix(in srgb, var(--panel) 72%, var(--surface));
 }
 
+.project-add-gezel-suggestions {
+  grid-column: 1 / -1;
+}
+
+.project-add-gezel-suggestions .project-add-gezel-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  max-height: 10rem;
+}
+
 .project-add-gezel-options h4 {
   margin-bottom: 0.55rem;
+}
+
+.project-add-gezel-section-hint {
+  margin: -0.25rem 0 0.55rem;
 }
 
 .project-add-gezel-list {
@@ -4484,6 +4498,11 @@ button.danger {
   }
 
   .project-add-gezel-list {
+    max-height: 13rem;
+  }
+
+  .project-add-gezel-suggestions .project-add-gezel-list {
+    grid-template-columns: minmax(0, 1fr);
     max-height: 13rem;
   }
 
@@ -8324,18 +8343,20 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
   border: 1px solid var(--border);
 }
 
-/* ── Per-project git status bar ── */
+/* ── Per-project git status bar ──
+   Sits along the bottom edge of the project column, below the tab body. The
+   separator is a single hairline on top — the controls inside stay button-y
+   on their own, so the bar itself takes no fill or shadow of its own. */
 
 .project-git-status-bar {
   position: relative;
   display: flex;
+  flex: 0 0 auto;
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
-  /* No left padding: the left group (index pill / branch chip) lines up with
-     the output toggle in the tab row below, which sits flush at the column's
-     left edge. */
-  padding: 0.4rem 0.75rem 0.4rem 0;
+  padding: 0.35rem 0.75rem;
+  border-top: 1px solid var(--border);
   font-size: 0.85rem;
   container-name: project-status-bar;
   container-type: inline-size;
@@ -8387,9 +8408,10 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
   color: var(--muted);
 }
 
+/* Opens upward — the bar it hangs off is the bottom edge of the column. */
 .project-git-branch-menu {
   position: absolute;
-  top: calc(100% + 4px);
+  bottom: calc(100% + 4px);
   left: 0;
   z-index: 50;
   min-width: 220px;
@@ -8896,9 +8918,9 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
 
 .project-git-toast {
   position: absolute;
-  top: 100%;
+  bottom: 100%;
   right: 0.75rem;
-  margin-top: 0.5rem;
+  margin-bottom: 0.5rem;
   padding: 0.35rem 0.65rem;
   border-radius: 4px;
   font-size: 0.8rem;
@@ -11230,6 +11252,10 @@ button.bench-step-foot:disabled {
   }
 }
 
+/* Held invisible for the first moments of the boot verdict. A configured
+   install settles in well under half a second, and a spinner that appears
+   and vanishes in that window reads as a glitch — worse than an empty
+   surface. Only a genuinely slow probe ever reveals it. */
 .home-loading-placeholder {
   display: flex;
   align-items: center;
@@ -11238,6 +11264,16 @@ button.bench-step-foot:disabled {
   padding: 3rem 1.25rem;
   color: var(--text-muted, rgba(0, 0, 0, 0.55));
   font-size: 0.95rem;
+  animation: home-loading-appear 0.25s ease 0.6s both;
+}
+
+@keyframes home-loading-appear {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 .home-loading-spinner {
@@ -17209,8 +17245,8 @@ a.license-button:hover {
 }
 
 /* Night Shift trigger — same cream-on-sage chrome as the other titlebar
-   controls. A running shift is indicated by full opacity, without giving
-   this one control a separate blue accent or hover halo. */
+   controls. A running shift gets quiet sky motion without giving this one
+   control a separate blue accent or hover halo. */
 .app-nightshift-trigger {
   align-self: center;
   display: inline-flex;
@@ -17218,6 +17254,7 @@ a.license-button:hover {
   justify-content: center;
   width: 34px;
   height: 34px;
+  margin: 4px 2px;
   padding: 0;
   background: transparent;
   border: 1px solid transparent;
@@ -17235,6 +17272,62 @@ a.license-button:hover {
 .app-nightshift-trigger-active {
   opacity: 1;
   color: var(--titlebar-ink);
+}
+.app-nightshift-glyph {
+  display: block;
+  overflow: hidden;
+}
+.app-nightshift-moon {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.app-nightshift-moon.is-active {
+  animation: app-nightshift-moon-glow 4.8s ease-in-out infinite;
+}
+.app-nightshift-cloud {
+  opacity: 0;
+  will-change: transform, opacity;
+  animation-name: app-nightshift-cloud-cross;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+.app-nightshift-cloud-far {
+  opacity: 0.28;
+  animation-duration: 10.8s;
+  animation-delay: -7.1s;
+}
+.app-nightshift-cloud-near {
+  opacity: 0.52;
+  animation-duration: 8.2s;
+  animation-delay: -2.4s;
+}
+@keyframes app-nightshift-cloud-cross {
+  from {
+    transform: translate3d(34px, 0, 0);
+  }
+  to {
+    transform: translate3d(-16px, 0, 0);
+  }
+}
+@keyframes app-nightshift-moon-glow {
+  0%,
+  100% {
+    opacity: 0.88;
+    scale: 0.98;
+  }
+  50% {
+    opacity: 1;
+    scale: 1.02;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .app-nightshift-cloud {
+    display: none;
+  }
+
+  .app-nightshift-moon.is-active {
+    animation: none;
+  }
 }
 .app-nightshift-status {
   padding: 0.35rem 0.6rem 0.45rem;
@@ -17296,6 +17389,34 @@ a.license-button:hover {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.app-nightshift-empty {
+  max-width: 18rem;
+  padding: 0.25rem 0.7rem 0.55rem;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+/* The start/stop command is the menu's one primary action. Set it into the
+   same shallow tray as the engine pill's health controls so it reads as a
+   raised key instead of another line of menu copy. */
+.app-nightshift-action-tray.gz-tray {
+  display: flex;
+  margin: 0.2rem;
+  padding: 0.25rem;
+}
+.app-nightshift-action.gz-key {
+  width: 100%;
+  min-width: 0;
+  padding-inline: 0.65rem;
+  font-size: var(--text-md);
+}
+.app-nightshift-action[data-highlighted],
+.app-nightshift-action:hover {
+  background: var(--key-bg-hover);
+}
+.app-nightshift-action .app-engagement-menu-hint {
+  margin-left: 0;
 }
 
 /* Two-line menu items: label on top, secondary hint below. The base

@@ -261,6 +261,10 @@ describe('HomeView', () => {
     await screen.findByText(/Loading/);
     expect(screen.queryByText('First run setup')).not.toBeInTheDocument();
     expect(screen.queryByTestId('home-workshop')).not.toBeInTheDocument();
+    // …and nothing first-run-flavoured either. The splash used to render the
+    // full intro plus the "What is gezel?" article, which flashed past on
+    // every boot of a configured install before the workshop took over.
+    expect(screen.queryByTestId('home-intro-article')).not.toBeInTheDocument();
 
     // Probe lands ok → straight to the workshop, with no first-run in between.
     resolveProbe({ ok: true, modelCount: 3 });

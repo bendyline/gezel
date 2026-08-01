@@ -301,6 +301,17 @@ link that lands on the same article.
 `.gezel-icon--pulse`) is the canonical "this thing is working in the
 background" signal.
 
+**Status bars.** Ambient state that describes a whole surface — what branch
+it's on, whether the index is fresh, whether gezels may edit — belongs along
+the *bottom* edge of that surface, not in a row of chrome above the content.
+Separate it with a single hairline `border-top` and no fill: the bar has no
+weight of its own, and the controls inside stay ordinary keys so they still
+read as pressable. Everything that overlays out of a bottom bar opens upward
+— hand-positioned menus anchor with `bottom: calc(100% + …)`, Radix surfaces
+take `side="top"` (selects flip on their own). The project status bar
+([ProjectGitStatusBar](../packages/ui/src/components/ProjectGitStatusBar.tsx))
+is the reference.
+
 **Terminal output.** Terminal text is spatial, not prose: preserve whitespace
 and columns exactly, and contain overflow in a keyboard-focusable viewport with
 horizontal and vertical scrolling. Never reflow output to fit a chat bubble.

@@ -46,6 +46,11 @@ const SURFACE_LABEL: Record<ErrorReportSurface, string> = {
 const PROMPT_HEADING = '### What I was doing';
 const STACK_MAX = 2000;
 
+/** Provider wording for a turn stopped through the user's cancel action. */
+export function isUserCancelledTurnError(message: string | null | undefined): boolean {
+  return Boolean(message && /\bturn cancel(?:l)?ed by caller\b/i.test(message));
+}
+
 function gb(bytes: number | null | undefined): string | null {
   if (bytes == null || bytes <= 0) return null;
   return `${Math.round(bytes / 1_000_000_000)} GB`;
@@ -127,7 +132,7 @@ export function formatErrorReport(input: ErrorReportInput): string {
     }`,
   );
 
-  if (input.message) blocks.push(`### Error\n\n${fence(input.message.trim(), 'text')}`);
+  if (input.message) blocks.push(`### Error\n${input.message.trim().replace(/\s+/g, ' ')}`);
 
   blocks.push(`### Details\n\n${fence(detailLines(input).join('\n'))}`);
 

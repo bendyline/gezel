@@ -1787,8 +1787,8 @@ export class GezelClient {
     return this.request('POST', '/api/night-shift/manual', { action });
   }
 
-  /** What the night shift is working on now (active) and queued (upcoming).
-   *  Both lists are empty when no shift is running. */
+  /** What the shift is working on now (background + active tasks), plus tasks
+   *  genuinely present in the runner queue (upcoming). */
   getNightShiftTasks(): Promise<NightShiftTasksResponse> {
     return this.request('GET', '/api/night-shift/tasks');
   }

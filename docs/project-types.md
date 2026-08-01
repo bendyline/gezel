@@ -26,7 +26,7 @@ format. Implementation lands in phases (see the end of this doc).
 
 - The **taxonomy** ([packages/core/src/project-types/taxonomy.ts](../packages/core/src/project-types/taxonomy.ts))
   stays as the *detection layer*. A custom type may `extends` a taxonomy id to inherit
-  its detection profile and `craftbookTags`.
+  its detection profile, `craftbookTags`, and gezel-role affinity.
 - `project.json` today carries `projectTypeId` (user override) and `detectedProjectType`
   (auto-detected). This grows into full provenance: `projectType: {id, version, source,
   params}`. `resolveProjectTypeId` keeps working for existing consumers.
@@ -140,6 +140,23 @@ project-type-aware default). Adoption merges declared keys over any existing pro
 choices; the user can change them later in Project Settings. Chat and Settings are
 permanent entry points, while Output remains capability-driven by the presence of a
 previewable page.
+
+## Crew affinity
+
+There are two complementary sources of crew intent:
+
+- A catalog project type's `gezels[]` is its concrete default crew. Those gezels are
+  created or attached when the user explicitly adopts the type.
+- A taxonomy project's `gezelRoles` describes broader affinity. Its `default` tier is
+  the core crew normally expected for that kind of work; `suggested` is the extended
+  specialist bench. Each entry references a gezel-template id and carries a short,
+  project-specific reason.
+
+The Add a Gezel dialog combines both role tiers with the global workshop: when a
+matching gezel already exists it recommends that person, otherwise it recommends
+creating the corresponding role. Auto-detection never adds a gezel by itself. That
+would turn a deterministic classifier into a surprising mutation; detected affinity
+remains advice until the user chooses it.
 
 ## Instantiation
 

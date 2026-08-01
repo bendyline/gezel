@@ -67,4 +67,19 @@ describe('the failed-turn banner', () => {
     render(<StreamingBubble authorLabel="Ada" authorIcon={null} segments={[]} startedAt={null} />);
     expect(screen.queryByRole('button', { name: /report error on github/i })).toBeNull();
   });
+
+  it('offers no report link when the user cancelled the turn', () => {
+    render(
+      <StreamingBubble
+        authorLabel="Ada"
+        authorIcon={null}
+        segments={[]}
+        startedAt={null}
+        error="[Mac AI] turn cancelled by caller"
+      />,
+    );
+
+    expect(screen.getByText(/Turn stopped before finishing/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /report error on github/i })).toBeNull();
+  });
 });

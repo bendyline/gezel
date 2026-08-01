@@ -330,27 +330,20 @@ export function HomeView({
   // mid-flight. This is what keeps "First run setup" from flashing past on a
   // slow cold boot before the probe confirms a model is already installed.
   if (!config || configured === null) {
-    // Deliberately no banner here. This branch lives for a few hundred
-    // milliseconds at boot, and rendering the banner in it only to hand the
-    // same element to a different parent a moment later tears the node down
-    // and rebuilds it — the banner visibly flickers, and a click landing in
-    // that window hits a detached button and is swallowed. Nothing is lost:
-    // the settled branches below render it as soon as there is a screen worth
-    // putting it on.
+    // Nothing first-run-flavoured renders here — not the intro, not the
+    // "What is gezel?" Handboek article, not the banner. On a configured
+    // install this branch lives for a few hundred milliseconds before
+    // HomeWorkshop takes over, and anything with visual weight in it reads
+    // as a flash of the wrong screen. The banner has a second reason:
+    // handing the same element to a different parent a moment later tears
+    // the node down and rebuilds it, so it visibly flickers and a click
+    // landing in that window hits a detached button. Both are rendered by
+    // the settled branches below as soon as there is a screen worth putting
+    // them on. The placeholder itself fades in only after a delay (see
+    // .home-loading-placeholder) so a fast boot shows an empty surface
+    // rather than a spinner blink.
     return (
-      <div className="home-view home-view-loading">
-        <IntroSection
-          collapsed={false}
-          onToggle={() => {}}
-          version={health?.version}
-          meesterName={meesterDisplayName}
-          isConfigured={false}
-          loading
-          provider={provider}
-          defaultModel={effectiveDefaultModel}
-          llamaCppBackend={health?.llamaCppBackend}
-          llamaCppDetectedVendor={health?.llamaCppDetectedVendor}
-        />
+      <div className="home-view home-view-loading" aria-busy="true">
         <div className="home-loading-placeholder" aria-live="polite">
           <span className="home-loading-spinner" aria-hidden />
           <span>Loading…</span>
@@ -503,6 +496,7 @@ export function HomeView({
         provider={provider}
         defaultModel={effectiveDefaultModel}
         llamaCppBackend={health?.llamaCppBackend}
+        llamaCppDetectedVendor={health?.llamaCppDetectedVendor}
       />
     </div>
   );
@@ -626,7 +620,6 @@ function IntroSection({
   version,
   meesterName,
   isConfigured,
-  loading = false,
   provider,
   defaultModel,
   llamaCppBackend,
@@ -637,11 +630,6 @@ function IntroSection({
   version?: string;
   meesterName?: string;
   isConfigured: boolean;
-  // While the verdict is still settling we don't yet know whether this is
-  // first-run or a returning user — omit the closing call-to-action entirely
-  // so the loading splash doesn't assert "download a model" over a user who
-  // already has one.
-  loading?: boolean;
   provider: Provider;
   defaultModel?: string;
   llamaCppBackend?: 'cuda' | 'vulkan' | 'metal' | 'cpu';
@@ -688,7 +676,7 @@ function IntroSection({
             (docs/handboek/conceptual/welcome.md) — embedded here as a live
             page so the first-run pitch and the documentation never drift. */}
         <IntroHandboekArticle />
-        {loading ? null : isConfigured ? (
+        {isConfigured ? (
           <p>
             Get started with <strong>{meesterName ?? 'your Meester'}</strong>, your meester, who
             acts as your concierge. You can work with{' '}
