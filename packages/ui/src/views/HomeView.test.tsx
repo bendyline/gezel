@@ -333,6 +333,28 @@ describe('HomeView', () => {
     expect(events.at(-1)?.detail).toEqual({ view: 'settings', section: 'llamaCpp' });
   });
 
+  it('first run puts setup above the intro article', async () => {
+    // The download affordance has to own the top of the screen; the "what is
+    // gezel?" pitch is reading material for after.
+    vi.mocked(api.getConfig).mockResolvedValue({
+      provider: 'copilot',
+      hasGithubToken: false,
+      meesterGezelId: 'gz-meester',
+    } as never);
+    vi.mocked(api.testProvider).mockResolvedValue({ ok: false, error: 'not signed in' } as never);
+    vi.mocked(api.health).mockResolvedValue({
+      ok: true,
+      version: '0.1.0',
+      platform: 'win32',
+    } as never);
+
+    render(<HomeView />);
+
+    const heading = await screen.findByText('First run setup');
+    const intro = screen.getByTestId('home-intro-article');
+    expect(heading.compareDocumentPosition(intro) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it('first run offers "Boring mode" — one toggle over names + avatars', async () => {
     vi.mocked(api.getConfig).mockResolvedValue({
       provider: 'copilot',

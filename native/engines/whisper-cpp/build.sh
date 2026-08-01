@@ -60,6 +60,18 @@ cmake_flags=(
   # ggml's default OPENMP=ON bakes into libggml-base + libggml-cpu. See
   # the longer note in native/engines/llama-cpp/build.sh.
   -DGGML_OPENMP=OFF
+  # Do not pin the CPU backend to the build host. ggml defaults
+  # GGML_NATIVE=ON, i.e. `-march=native`, so the shipped binary would
+  # require whatever ISA the CI runner happened to have and SIGILL on
+  # anything less. With NATIVE=OFF ggml falls back to its declared
+  # baseline (AVX/AVX2/F16C/FMA on x86) — a floor we choose rather than
+  # one the runner pool chooses for us. llama-cpp goes further and gets
+  # per-ISA runtime dispatch via GGML_BACKEND_DL + GGML_CPU_ALL_VARIANTS;
+  # whisper stays on the fixed baseline because that would also change
+  # the bundled file set and the macOS signing pass, and transcription
+  # is not where the CPU floor hurts. whisper-server does call
+  # ggml_backend_load_all(), so the upgrade is available later.
+  -DGGML_NATIVE=OFF
   -DWHISPER_BUILD_SERVER=ON
   -DWHISPER_BUILD_TESTS=OFF
   -DWHISPER_BUILD_EXAMPLES=ON

@@ -87,7 +87,9 @@ function xetFetch(opts: {
 function segmentedXetFetch(opts: {
   parts: Buffer[];
   requested: number[];
-  failOnceAt?: number;
+  /** Xorb index that answers 503 for its first `failTimes` requests. */
+  failAt?: number;
+  failTimes?: number;
 }): typeof fetch {
   const segments = opts.parts.map((part) => noneChunk(part));
   const recon = {
@@ -110,7 +112,8 @@ function segmentedXetFetch(opts: {
       ]),
     ),
   };
-  let failed = false;
+  const budget = opts.failTimes ?? 1;
+  let failures = 0;
 
   return (async (input: string | URL) => {
     const url = String(input);
@@ -133,8 +136,8 @@ function segmentedXetFetch(opts: {
     if (url.startsWith(`${XORB}/`)) {
       const index = Number.parseInt(url.slice(`${XORB}/`.length), 10);
       opts.requested.push(index);
-      if (index === opts.failOnceAt && !failed) {
-        failed = true;
+      if (index === opts.failAt && failures < budget) {
+        failures++;
         return new Response(null, { status: 503 });
       }
       const segment = segments[index];
@@ -230,18 +233,48 @@ describe('downloadWithRetry — Xet path', () => {
     expect(progress.every((event) => event.bytesWritten > resumeFrom.length)).toBe(true);
   });
 
-  it('skips completed Xet terms when an automatic retry resumes the same pull', async () => {
+  it('absorbs a single xorb failure in place, without spending a whole-file attempt', async () => {
+    // Regression: a segment blip used to unwind to the outer loop, re-mint the
+    // CAS token, re-fetch the reconstruction manifest, and — the part that
+    // actually broke first-run installs — burn one of only five whole-file
+    // attempts. A multi-GB file is hundreds of segments, so an occasional
+    // blip exhausted the budget long before the file finished.
     const parts = [Buffer.from('AAAA'), Buffer.from('BBBB'), Buffer.from('CCCC')];
     const full = Buffer.concat(parts);
     const requested: number[] = [];
-    const destPath = join(dir, 'retried.bin');
+    const destPath = join(dir, 'inner-retry.bin');
 
     const { events, result } = await run(
       downloadWithRetry({
         url: RESOLVE,
         destPath,
         approxSizeBytes: full.length,
-        fetchImpl: segmentedXetFetch({ parts, requested, failOnceAt: 1 }),
+        fetchImpl: segmentedXetFetch({ parts, requested, failAt: 1, failTimes: 1 }),
+      }),
+    );
+
+    expect(result.kind).toBe('ok');
+    expect(readFileSync(`${destPath}.partial`)).toEqual(full);
+    // Only the failed segment is re-requested; the walk continues from there.
+    expect(requested).toEqual([0, 1, 1, 2]);
+    // No outer retry — the whole-file attempt was never restarted.
+    expect(events.some((event) => event.type === 'retrying')).toBe(false);
+  });
+
+  it('skips completed Xet terms when an automatic retry resumes the same pull', async () => {
+    const parts = [Buffer.from('AAAA'), Buffer.from('BBBB'), Buffer.from('CCCC')];
+    const full = Buffer.concat(parts);
+    const requested: number[] = [];
+    const destPath = join(dir, 'retried.bin');
+
+    // Fail term 1 past the in-place segment budget so the failure escalates to
+    // the whole-file retry loop.
+    const { events, result } = await run(
+      downloadWithRetry({
+        url: RESOLVE,
+        destPath,
+        approxSizeBytes: full.length,
+        fetchImpl: segmentedXetFetch({ parts, requested, failAt: 1, failTimes: 3 }),
       }),
     );
 
@@ -250,7 +283,7 @@ describe('downloadWithRetry — Xet path', () => {
     expect(events.some((event) => event.type === 'retrying')).toBe(true);
     // The first term completed before term 1 transiently failed. The retry
     // starts at term 1 rather than silently re-downloading term 0.
-    expect(requested).toEqual([0, 1, 1, 2]);
+    expect(requested).toEqual([0, 1, 1, 1, 1, 2]);
   });
 
   it('treats a 403 from the token endpoint as fatal (gated repo — no endless retry)', async () => {

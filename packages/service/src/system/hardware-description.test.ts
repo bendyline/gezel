@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { classifyHardwareTier, describeCurrentHardware } from './daemon-device.js';
+import { classifyHardwareTier, describeCurrentHardware } from './hardware-description.js';
 
 describe('handboek hardware summary', () => {
   it('classifies the usable local-model budget at the onboarding boundaries', () => {

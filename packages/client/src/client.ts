@@ -279,6 +279,7 @@ import type {
   SuggestedWorkItem,
   SuggestedWorkResponse,
   SystemBootstrapStatus,
+  SystemDiagnostics,
   Task,
   TaskAssignee,
   TaskStatus,
@@ -2482,6 +2483,14 @@ export class GezelClient {
 
   getMachineMemoryUsage(): Promise<MachineMemoryUsage> {
     return this.request('GET', '/api/system/memory/usage');
+  }
+
+  /**
+   * Shareable machine profile for a bug report. Contains no paths, usernames,
+   * hostnames, or user content — see `SystemDiagnosticsSchema`.
+   */
+  getSystemDiagnostics(signal?: AbortSignal): Promise<SystemDiagnostics> {
+    return this.request('GET', '/api/system/diagnostics', undefined, undefined, signal);
   }
 
   deleteOllamaModel(name: string): Promise<{ ok: true }> {

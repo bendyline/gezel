@@ -100,6 +100,21 @@ describe('resolveMlxEffectiveNumCtx', () => {
   });
 });
 
+/**
+ * The properties `NativeEngineCrashedError` carries. Assigned onto a
+ * scripted mock failure so the structured-detail path is exercised without
+ * dragging the llama-cpp provider into these tests.
+ */
+const NATIVE_CRASH_FIELDS = {
+  code: 'native-engine-crash',
+  engine: 'llama-cpp',
+  incidentId: 'native-51832-1785547847453',
+  panicKind: 'cuda-out-of-memory',
+  exitCode: null,
+  signal: 'SIGILL',
+  diagnostics: { model: 'gemma4-26b-q4', backend: 'vulkan' },
+};
+
 let home: string;
 let store: Store;
 let events: ChatEventBus;
@@ -373,6 +388,69 @@ describe('ChatManager — send + persistence', () => {
     expect(disk!.lastTurnError).toMatch(/list_tasks.*5 times/);
   });
 
+  it('publishes the structured detail alongside the error event', async () => {
+    const session = await manager.createSession({ gezelId: 'ada' });
+    const received: Array<{ type: string; errorDetail?: { code?: string } }> = [];
+    events.subscribe(session.id, (event) => received.push(event));
+    mock.scriptSendFailure('[llama-cpp] on-device engine crashed (SIGILL)', NATIVE_CRASH_FIELDS);
+
+    await expect(manager.send(session.id, 'go')).rejects.toThrow();
+
+    expect(received).toContainEqual(
+      expect.objectContaining({
+        type: 'error',
+        errorDetail: expect.objectContaining({
+          code: 'native-engine-crash',
+          engine: 'llama-cpp',
+          incidentId: 'native-51832-1785547847453',
+        }),
+      }),
+    );
+  });
+
+  it('clears the structured detail on the next successful turn', async () => {
+    // Regression guard: a stale detail outliving the error it describes
+    // would have the UI offering to report an already-fixed problem.
+    const session = await manager.createSession({ gezelId: 'ada' });
+    mock.scriptSendFailure('[llama-cpp] on-device engine crashed (SIGILL)', NATIVE_CRASH_FIELDS);
+    await expect(manager.send(session.id, 'go')).rejects.toThrow();
+    expect((await store.getSession('ada', session.id))!.lastTurnErrorDetail).toBeDefined();
+
+    mock.script('recovered');
+    await manager.send(session.id, 'try again');
+
+    const disk = await store.getSession('ada', session.id);
+    expect(disk!.lastTurnError).toBeUndefined();
+    expect(disk!.lastTurnErrorDetail).toBeUndefined();
+  });
+
+  it('clears the structured detail through clearLastTurnError', async () => {
+    // Guards the early-return in `clearLastTurnError`, which used to bail
+    // on `lastTurnError === undefined` alone.
+    const session = await manager.createSession({ gezelId: 'ada' });
+    mock.scriptSendFailure('[llama-cpp] on-device engine crashed (SIGILL)', NATIVE_CRASH_FIELDS);
+    await expect(manager.send(session.id, 'go')).rejects.toThrow();
+
+    await manager.clearLastTurnError(session.id);
+
+    const disk = await store.getSession('ada', session.id);
+    expect(disk!.lastTurnError).toBeUndefined();
+    expect(disk!.lastTurnErrorDetail).toBeUndefined();
+  });
+
+  it('scrubs credentials out of the persisted lastTurnError', async () => {
+    // A token that leaked into an error message would otherwise sit in
+    // session JSON forever — and session JSON is what gets copied into
+    // debug bundles and pasted into support threads.
+    const session = await manager.createSession({ gezelId: 'ada' });
+    mock.scriptSendFailure('auth failed: ghp_ABCdefGHIjklMNOpqrSTUvwxYZ0123456789');
+    await expect(manager.send(session.id, 'go')).rejects.toThrow();
+
+    const disk = await store.getSession('ada', session.id);
+    expect(disk!.lastTurnError).toContain('[REDACTED]');
+    expect(disk!.lastTurnError).not.toContain('ghp_');
+  });
+
   it('salvages the streamed reply onto the turn-aborted message when cancelled mid-stream', async () => {
     // A turn cancelled mid-flight (user stop, or a superseding task
     // handoff) used to persist an EMPTY assistant bubble: cancelInflight
@@ -407,6 +485,7 @@ describe('ChatManager — send + persistence', () => {
     const disk = await store.getSession('ada', session.id);
     expect(disk).not.toBeNull();
     expect(disk!.lastTurnError).toBeUndefined();
+    expect(disk!.lastTurnErrorDetail).toBeUndefined();
     expect(received).toContain('cancelled');
     expect(received).not.toContain('error');
     const aborted = disk!.messages.at(-1)!;

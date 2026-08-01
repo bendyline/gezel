@@ -1,4 +1,10 @@
-import type { GezelSummary, Project, RecentTab, RecentTabArea } from '@bendyline/gezel';
+import type {
+  GezelSummary,
+  HealthResponse,
+  Project,
+  RecentTab,
+  RecentTabArea,
+} from '@bendyline/gezel';
 import { displayName } from '@bendyline/gezel';
 import {
   type KeyboardEvent as ReactKeyboardEvent,
@@ -224,11 +230,26 @@ export function Sidebar({
   // rather than across the top of Home: neither is urgent, and neither is
   // fixable without the installer. See system-notices.ts.
   const updateState = useUpdateState();
+  // Engine-backend health rides along here because a quarantined GPU
+  // backend is otherwise completely invisible: the app works, just
+  // slower. One fetch, same pattern as HealthStrip — the rail is the
+  // only surface that shows it without the user going looking.
+  const [engineHealth, setEngineHealth] = useState<HealthResponse | null>(null);
+  useEffect(() => {
+    api
+      .health()
+      .then(setEngineHealth)
+      .catch(() => {});
+  }, []);
   const systemNotices = railSystemNotices({
     reason: window.__GEZEL__?.fallbackReason ?? null,
     code: window.__GEZEL__?.fallbackCode ?? null,
     ...(window.__GEZEL__?.platform ? { platform: window.__GEZEL__.platform } : {}),
     update: updateState,
+    ...(engineHealth?.llamaCppQuarantinedBackends
+      ? { quarantinedBackends: engineHealth.llamaCppQuarantinedBackends }
+      : {}),
+    ...(engineHealth?.llamaCppBackend ? { runningBackend: engineHealth.llamaCppBackend } : {}),
   });
 
   // ── Live entity lists ───────────────────────────────────────────

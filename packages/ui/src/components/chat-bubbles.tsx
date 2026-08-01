@@ -1,6 +1,7 @@
 import type {
   ChatEvent,
   ChatMessageToolCall,
+  ChatTurnErrorDetail,
   Question,
   SessionGpuTask,
   ToolCallAudio,
@@ -37,6 +38,7 @@ import { DraftPlanCard } from './DraftPlanCard.js';
 import { GezelIcon } from './GezelIcon.js';
 import { ImagePreview } from './ImagePreview.js';
 import { PendingQuestionCard } from './PendingQuestionCard.js';
+import { ReportErrorLink } from './ReportErrorLink.js';
 import { ToolDiffBlock } from './ToolDiffBlock.js';
 import { artifactPathFromHref, linkifyArtifactRefs } from './artifact-linkify.js';
 import { GEZEL_LIGHT_SURFACE, gezelChatTheme } from './chat-theme.js';
@@ -1027,6 +1029,13 @@ export interface StreamingBubbleProps {
    */
   error?: string;
   /**
+   * Machine-readable classification of {@link error}, when the daemon knew
+   * one — the incident id, engine, and crash class the bug report needs.
+   * Absent for older daemons and for failures with nothing structured to
+   * say, so every consumer has to tolerate it being undefined.
+   */
+  errorDetail?: ChatTurnErrorDetail;
+  /**
    * When set, the turn is sitting in the provider queue — waiting for
    * other turns to finish before it can start. The "thinking" label
    * is replaced with "queued — N ahead" so the user knows the delay
@@ -1456,6 +1465,7 @@ export function StreamingBubble({
   fontFamily,
   fontScale,
   error,
+  errorDetail,
   queueAhead,
   lastActivityAt,
   hasProgress,
@@ -1978,7 +1988,12 @@ export function StreamingBubble({
             </div>
           )}
         {failed && (
-          <div className="msg-failed-banner">✗ Turn stopped before finishing. {error}</div>
+          <div className="msg-failed-banner">
+            ✗ Turn stopped before finishing. {error}{' '}
+            <ReportErrorLink
+              report={{ surface: 'chat-turn', message: error ?? '', detail: errorDetail }}
+            />
+          </div>
         )}
       </div>
       {question && <PendingQuestionCard question={question} onAnswered={onQuestionAnswered} />}

@@ -43,6 +43,7 @@ import {
   projectWorkspaceWritable,
   pronounFormsForGender,
   pronounsForGender,
+  redactCredentials,
   resolveExecutionDensity,
   resolveSandboxCopilot,
   resolveSecurityPolicy,
@@ -57,6 +58,8 @@ import {
   BUILTIN_TOOL_TO_GROUP,
   type CatalogService,
 } from '@bendyline/gezel-catalog';
+import type { LlamaBackend } from '@bendyline/gezel/native';
+import { recordLlamaQuarantine } from '@bendyline/gezel/native';
 import { gezelPaths } from '@bendyline/gezel/paths';
 import { autoAllowedToolsForToolsets, buildAutoAllowHook } from '../craftbook/auto-allow.js';
 import { effectiveEngineRelease, isEnginePinned } from '../engines/native-manifest.js';
@@ -252,6 +255,7 @@ import {
 } from './task-budget.js';
 import { extractReferencedTasks } from './task-references.js';
 import { type AvailableToolInfo, renderAvailableToolsBlock } from './tools-block.js';
+import { describeTurnError } from './turn-error.js';
 import { UsageTracker } from './usage.js';
 import type { RecognitionMode } from './vision-capability.js';
 import { renderWorkspaceGestalt } from './workspace-gestalt.js';
@@ -4335,7 +4339,12 @@ export class ChatManager {
     const fail = (err: unknown): never => {
       const message = err instanceof Error ? err.message : String(err);
       log.error('notifyUserMessage error:', message);
-      this.events.publishSessionOnly(sessionId, { type: 'error', error: message });
+      const detail = describeTurnError(err);
+      this.events.publishSessionOnly(sessionId, {
+        type: 'error',
+        error: redactCredentials(message),
+        ...(detail ? { errorDetail: detail } : {}),
+      });
       this.events.publishSessionOnly(sessionId, { type: 'done' });
       throw err;
     };
@@ -4419,8 +4428,14 @@ export class ChatManager {
   async clearLastTurnError(sessionId: string): Promise<ChatSession | null> {
     const record = await this.getSessionRecord(sessionId);
     if (!record) return null;
-    if (record.lastTurnError === undefined) return record;
+    // Both fields, and the early-return guards on both: a structured detail
+    // that outlived the error it describes would have the UI offering to
+    // report a problem the user already cleared.
+    if (record.lastTurnError === undefined && record.lastTurnErrorDetail === undefined) {
+      return record;
+    }
     record.lastTurnError = undefined;
+    record.lastTurnErrorDetail = undefined;
     await this.store.writeSession(record);
     const live = this.states.get(sessionId);
     if (live) live.record = record;
@@ -5019,7 +5034,12 @@ export class ChatManager {
       if (inflightTurn.cancelled) {
         this.events.publishSessionOnly(sessionId, { type: 'cancelled' });
       } else {
-        this.events.publishSessionOnly(sessionId, { type: 'error', error: message });
+        const detail = describeTurnError(err);
+        this.events.publishSessionOnly(sessionId, {
+          type: 'error',
+          error: redactCredentials(message),
+          ...(detail ? { errorDetail: detail } : {}),
+        });
       }
       this.events.publishSessionOnly(sessionId, { type: 'done' });
       throw err;
@@ -6194,6 +6214,7 @@ export class ChatManager {
         // Same for the last-turn-error banner: a fresh successful turn
         // clears it. Otherwise the banner would linger across successes.
         state.record.lastTurnError = undefined;
+        state.record.lastTurnErrorDetail = undefined;
         await this.store.writeSession(state.record);
 
         // Publish each turn so the timeline renders incremental progress —
@@ -6837,10 +6858,21 @@ export class ChatManager {
       // `userMessage`; `message` stays the technical record (logs +
       // turn-aborted warnings). Every other error has no split — `message`
       // already reads for a human — so `userMessage` falls back to it.
-      const userMessage = err instanceof TurnAbortError ? err.userMessage : message;
+      // Credential-scrub before the string is published AND before it is
+      // persisted: a token that leaks into an error message would otherwise
+      // sit in session JSON forever, which is exactly what gets copied into
+      // debug bundles and pasted into support threads.
+      const userMessage = redactCredentials(
+        err instanceof TurnAbortError ? err.userMessage : message,
+      );
+      const errorDetail = describeTurnError(err);
       log.error('error:', message);
       if (!intentionallyCancelled) {
-        this.events.publish(scope, { type: 'error', error: userMessage });
+        this.events.publish(scope, {
+          type: 'error',
+          error: userMessage,
+          ...(errorDetail ? { errorDetail } : {}),
+        });
         this.events.publish(scope, { type: 'done' });
       }
       // Persist the error on the session record so a user who was away
@@ -6894,6 +6926,7 @@ export class ChatManager {
             : undefined;
         if (!intentionallyCancelled) {
           state.record.lastTurnError = userMessage.slice(0, 500);
+          state.record.lastTurnErrorDetail = errorDetail;
         }
         const abortMessage: ChatMessage = {
           role: 'assistant',
@@ -7057,7 +7090,12 @@ export class ChatManager {
       const message = err instanceof Error ? err.message : String(err);
       log.error(`fixed-function#${tag} error: ${message}`);
       this.telemetry.noteTurnEnd(sessionId);
-      this.events.publishSessionOnly(sessionId, { type: 'error', error: message });
+      const detail = describeTurnError(err);
+      this.events.publishSessionOnly(sessionId, {
+        type: 'error',
+        error: redactCredentials(message),
+        ...(detail ? { errorDetail: detail } : {}),
+      });
       this.events.publishSessionOnly(sessionId, { type: 'done' });
       throw err;
     };
@@ -16444,6 +16482,33 @@ export async function buildLlamaCppProvider(opts: {
     onExit: (snapshot) => {
       if (snapshot.expected) return;
       logFile.writeIncident(snapshot);
+      // A build that dies by SIGILL before it ever answers /health has
+      // not failed at a task — it cannot run on this CPU at all, and
+      // relaunching it on every request just reproduces the crash while
+      // a working lower-tier build sits in the same directory. Write it
+      // down so the next launch routes around it.
+      //
+      // Deliberately narrow: only SIGILL, and only before readiness.
+      // A SIGSEGV during startup can be a corrupt model file, and any
+      // crash after readiness is attributable to the work rather than
+      // the binary — quarantining a backend over either would demote
+      // users to slow engines for transient reasons.
+      if (snapshot.signal !== 'SIGILL' || snapshot.reachedReady) return;
+      const backend = process.env.GEZEL_LLAMA_SERVER_BACKEND as LlamaBackend | undefined;
+      if (!backend) return;
+      const entry = recordLlamaQuarantine(home, {
+        backend,
+        binaryPath: binary,
+        signal: 'SIGILL',
+        reason:
+          'crashed with SIGILL before the engine became ready — this build uses CPU instructions ' +
+          'this machine does not support, or faulted inside GPU library startup',
+      });
+      if (entry) {
+        log.warn(
+          `[llama-server] quarantined the ${backend} build after SIGILL (incident=${snapshot.incidentId}); the next launch will fall back to another backend`,
+        );
+      }
     },
     onRawLine: (line) => providerHolder.current?.onStdoutLine(line),
     resolveLaunch: async () => {

@@ -1017,4 +1017,98 @@ not a process row
     expect(logs.some((line) => line.includes('"panicKind":"cuda-invalid-argument"'))).toBe(true);
     expect(sup.currentBaseUrl()).toBeUndefined();
   });
+
+  it('classifies a silent SIGILL during startup as an unrunnable build', async () => {
+    // The field case: a CUDA build that could not execute on the host CPU
+    // died before binding its port and printed nothing at all, so the
+    // crash surfaced as a bare signal name with no attribution.
+    const child = makeFakeChild(51832);
+    child.stderr = { on: () => {} };
+    // The exit listeners only exist once the supervisor has spawned, so
+    // the crash has to be emitted after that — not synchronously after
+    // ensureRunning(), which never resolves on this path.
+    let markSpawned: () => void;
+    const spawned = new Promise<void>((resolve) => {
+      markSpawned = resolve;
+    });
+    const fakeSpawn = ((): unknown => {
+      queueMicrotask(() => markSpawned());
+      return child;
+    }) as unknown as typeof import('node:child_process').spawn;
+    const exits: Array<import('./supervisor.js').NativeEngineExitSnapshot> = [];
+    const sup = new NativeEngineSupervisor({
+      resolveLaunch: async () => ({
+        command: '/opt/Gezel/native-bin/linux-x64-cuda/gezel-llama-server',
+        args: [],
+        baseUrl: 'http://127.0.0.1:9999',
+      }),
+      spawn: fakeSpawn,
+      // Never becomes ready — the child dies mid-startup.
+      fetchImpl: async () => {
+        throw new Error('ECONNREFUSED');
+      },
+      startupTimeoutMs: 2_000,
+      healthIntervalMs: 10_000_000,
+      idleTimeoutMs: 0,
+      onLog: () => {},
+      onExit: (snapshot) => void exits.push(snapshot),
+      psRunner: async () => [],
+    });
+
+    const started = sup.ensureRunning().catch(() => {});
+    await spawned;
+    child.emitExit(null, 'SIGILL');
+    await started;
+
+    expect(exits).toHaveLength(1);
+    expect(exits[0]).toMatchObject({
+      signal: 'SIGILL',
+      expected: false,
+      reachedReady: false,
+      panicKind: 'illegal-instruction',
+    });
+  });
+
+  it('does not relabel a diagnosed CUDA fault that happens to exit via SIGILL', async () => {
+    // SIGILL is also how a `ud2` trap on a C++ abort path surfaces. When
+    // the engine already said what went wrong, that explanation wins —
+    // otherwise a recoverable CUDA fault would quarantine the backend.
+    let stderrHandler: ((buf: Buffer) => void) | undefined;
+    const child = makeFakeChild(51833);
+    child.stderr = {
+      on: (ev: string, fn: (buf: Buffer) => void) => {
+        if (ev === 'data') stderrHandler = fn;
+      },
+    };
+    const fakeSpawn = (() =>
+      child as unknown as ReturnType<
+        typeof import('node:child_process').spawn
+      >) as unknown as typeof import('node:child_process').spawn;
+    const exits: Array<import('./supervisor.js').NativeEngineExitSnapshot> = [];
+    const sup = new NativeEngineSupervisor({
+      resolveLaunch: async () => ({
+        command: '/opt/gezel/gezel-llama-server',
+        args: [],
+        baseUrl: 'http://127.0.0.1:9999',
+      }),
+      spawn: fakeSpawn,
+      fetchImpl: async () => new Response('ok', { status: 200 }),
+      startupTimeoutMs: 2_000,
+      healthIntervalMs: 10_000_000,
+      idleTimeoutMs: 0,
+      onLog: () => {},
+      onExit: (snapshot) => void exits.push(snapshot),
+      psRunner: async () => [],
+    });
+
+    await sup.ensureRunning();
+    stderrHandler!(Buffer.from('CUDA error: out of memory\n'));
+    child.emitExit(null, 'SIGILL');
+
+    expect(exits[0]).toMatchObject({
+      signal: 'SIGILL',
+      reachedReady: true,
+      panicKind: 'cuda-out-of-memory',
+    });
+  });
 });

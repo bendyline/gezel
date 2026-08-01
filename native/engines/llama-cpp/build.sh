@@ -95,6 +95,31 @@ cmake_flags=(
   # finds no OpenMP — so OFF is a configuration we already ship and test,
   # just not yet everywhere. Keep every platform on it.
   -DGGML_OPENMP=OFF
+  # Portable CPU code. ggml defaults GGML_NATIVE=ON, which compiles the
+  # CPU backend with `-march=native` (GCC/Clang) or the host's detected
+  # SIMD level (MSVC, via FindSIMD.cmake). That pins the shipped binary
+  # to whatever CPU the CI runner happened to be scheduled on, and the
+  # GitHub-hosted pool is heterogeneous — native-v0.1.29 shipped a
+  # linux-x64-vulkan `libggml-cpu.so` full of AVX-512 + AVX512-VNNI
+  # while the cpu and cuda legs of the SAME release got AVX2-only code.
+  # A user whose CPU lacks the runner's ISA gets SIGILL before
+  # llama-server ever binds its port, which the supervisor reports as
+  # "on-device engine crashed (SIGILL) ... before becoming ready".
+  #
+  # CI can never catch this: the runner that built the binary is by
+  # definition a machine that can execute it.
+  #
+  # NATIVE=OFF + BACKEND_DL + CPU_ALL_VARIANTS is upstream's own release
+  # recipe. ggml builds one dlopen-able `libggml-cpu-<variant>` module
+  # per ISA level (x64, sse42, sandybridge, haswell, skylakex, icelake,
+  # zen4, alderlake, … on x86; armv8.0 … armv9.2 on Linux ARM; apple_m1
+  # / m2_m3 / m4 on macOS) and `ggml_backend_load_all()` picks the best
+  # one the running CPU actually supports. Portable AND faster than a
+  # fixed baseline. The modules sit beside the server binary in $out_dir,
+  # which is one of the directories ggml-backend-reg.cpp searches.
+  -DGGML_NATIVE=OFF
+  -DGGML_BACKEND_DL=ON
+  -DGGML_CPU_ALL_VARIANTS=ON
   # No OpenSSL. This gates cpp-httplib's CPPHTTPLIB_OPENSSL_SUPPORT —
   # llama-server terminating TLS itself — which gezel never uses: the
   # engine is spawned on loopback and spoken to over plain HTTP. Leaving
@@ -164,17 +189,27 @@ build_dir="$src/build-$platform-$backend"
 # bump leaves the PREVIOUS pin's versioned .so files in the tree, and
 # step 6's `find … *.so.*` then bundles BOTH generations — the
 # mixed-libggml `undefined symbol` crash that broke the CUDA engine on
-# the b8892→b9843 bump. Stamp the pinned commit into the build dir and
-# wipe when it differs (or when a pre-stamp tree is found). Same-pin
-# iteration stays incremental. Override with LLAMA_FORCE_CLEAN=1.
+# the b8892→b9843 bump. Stamp the build dir and wipe when it differs (or
+# when a pre-stamp tree is found). Same-pin iteration stays incremental.
+# Override with LLAMA_FORCE_CLEAN=1.
+#
+# The stamp covers the cmake FLAGS as well as the pin, because a
+# configuration change produces differently-named outputs from the same
+# sources and cmake does not remove the old ones. Turning GGML_BACKEND_DL
+# on is exactly that case: the CPU/Metal backends switch from versioned
+# SHARED libs (libggml-cpu.0.17.0.dylib) to dlopen-able MODULEs
+# (libggml-cpu-apple_m1.so), and an incremental tree keeps both — so the
+# bundle ships a stale, host-tuned libggml-cpu alongside the dispatching
+# modules. CI always starts clean; this is for local iteration.
 pinned_commit="$(sed -n 's/^commit=//p' "$here/VERSION" | head -1)"
 build_stamp="$build_dir/.gezel-built-commit"
+build_identity="$pinned_commit ${cmake_flags[*]}"
 if [[ -d "$build_dir" ]]; then
   if [[ "${LLAMA_FORCE_CLEAN:-0}" == "1" ]]; then
     echo "[build] LLAMA_FORCE_CLEAN=1 — wiping $build_dir"
     rm -rf "$build_dir"
-  elif [[ ! -f "$build_stamp" || "$(cat "$build_stamp" 2>/dev/null)" != "$pinned_commit" ]]; then
-    echo "[build] pin changed or unstamped tree — wiping $build_dir to avoid stale versioned .so mixing"
+  elif [[ ! -f "$build_stamp" || "$(cat "$build_stamp" 2>/dev/null)" != "$build_identity" ]]; then
+    echo "[build] pin/flags changed or unstamped tree — wiping $build_dir to avoid stale output mixing"
     rm -rf "$build_dir"
   fi
 fi
@@ -196,9 +231,9 @@ fi
 echo "[build] parallelism: $jobs_flag"
 cmake --build "$build_dir" --config Release --target llama-server $jobs_flag
 
-# Stamp the pin this tree was built at, so the next run can detect a bump
-# and wipe (see the wipe guard above).
-echo "$pinned_commit" > "$build_stamp"
+# Stamp the pin + flags this tree was built with, so the next run can
+# detect a bump or a reconfigure and wipe (see the wipe guard above).
+echo "$build_identity" > "$build_stamp"
 
 # ── 5. Locate the produced binary ──────────────────────────────────
 found=""
@@ -290,8 +325,16 @@ NODE
 # treats that as unbound — same hazard that tripped whisper.cpp's
 # earlier glob-only path).
 echo "[build] discovering bundled shared libs under $build_dir"
+#
+# macOS matches `*.so` as well as `*.dylib`. CMake gives MODULE libraries
+# a `.so` suffix on Apple, and ggml's loader agrees —
+# `backend_filename_extension()` in ggml-backend-reg.cpp returns `.so` on
+# every non-Windows platform. So under GGML_BACKEND_DL the dlopen-able
+# `libggml-cpu-apple_m1.so` etc. are Mach-O files with an ELF-looking
+# extension. A dylib-only sweep here would silently ship a macOS bundle
+# with no CPU backend at all.
 case "$os" in
-  Darwin) lib_pattern=( -name '*.dylib' -o -name '*.dylib.*' ) ;;
+  Darwin) lib_pattern=( -name '*.dylib' -o -name '*.dylib.*' -o -name '*.so' ) ;;
   *)      lib_pattern=( -name '*.so' -o -name '*.so.*' ) ;;
 esac
 #
@@ -400,6 +443,31 @@ if [[ -n "$dup" ]]; then
   exit 1
 fi
 echo "[build] version-consistency guard passed"
+
+# ── 6b2. CPU-dispatch guard ────────────────────────────────────────
+# The whole point of GGML_CPU_ALL_VARIANTS is that the bundle carries
+# several `libggml-cpu-<variant>` modules and ggml picks one at load
+# time. If a future pin bump drops the option, renames the modules, or
+# stops building them under `--target llama-server`, cmake does NOT
+# fail: it quietly falls back to a single host-tuned `libggml-cpu`, and
+# the only symptom is a SIGILL on somebody else's machine weeks later.
+# The build runner can never reproduce that. So assert the shape here.
+variant_count=0
+shopt -s nullglob
+for so in "$out_dir"/libggml-cpu-*.so "$out_dir"/libggml-cpu-*.dylib; do
+  [[ -L "$so" ]] && continue
+  variant_count=$((variant_count + 1))
+done
+shopt -u nullglob
+if [[ "$variant_count" -lt 2 ]]; then
+  echo "[build] error: expected multiple libggml-cpu-<variant> modules, found $variant_count" >&2
+  echo "[build]        GGML_CPU_ALL_VARIANTS did not take effect, so the CPU backend is" >&2
+  echo "[build]        compiled for THIS build host's instruction set and will SIGILL on" >&2
+  echo "[build]        any user CPU that lacks it. Check the ggml pin's support for" >&2
+  echo "[build]        GGML_CPU_ALL_VARIANTS on $platform before shipping." >&2
+  exit 1
+fi
+echo "[build] cpu-dispatch guard passed ($variant_count variant modules)"
 
 # ── 6c. Strip our own bundled libraries (Linux) ────────────────────
 # Step 5 stripped the server binary but not the peers it loads, so the
@@ -533,7 +601,11 @@ elif [[ "$os" == "Darwin" ]]; then
   }
   rewrite_macho "$out_dir/$server_name"
   shopt -s nullglob
-  for dylib in "$out_dir"/*.dylib; do
+  # `*.so` is included on purpose — see the note on lib_pattern above.
+  # The GGML_BACKEND_DL modules are Mach-O with a `.so` suffix, and they
+  # need the same rpath rewrite and ad-hoc re-signature as the dylibs or
+  # dlopen fails at runtime.
+  for dylib in "$out_dir"/*.dylib "$out_dir"/*.so; do
     rewrite_macho "$dylib"
   done
   # Apple Silicon linkers add an ad-hoc signature automatically.
@@ -541,7 +613,7 @@ elif [[ "$os" == "Darwin" ]]; then
   # before main() with exit 137. Re-sign concrete Mach-O files after
   # all load-command edits; release CI may replace these ad-hoc
   # signatures with Developer ID signatures later.
-  for dylib in "$out_dir"/*.dylib; do
+  for dylib in "$out_dir"/*.dylib "$out_dir"/*.so; do
     [[ -L "$dylib" ]] && continue
     codesign --force --sign - "$dylib"
   done

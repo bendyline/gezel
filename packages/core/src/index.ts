@@ -13,6 +13,7 @@ export * from './growth-cosmetics.js';
 export * from './security/policy.js';
 export * from './gezel-display.js';
 export * from './log.js';
+export * from './redact.js';
 export * from './ollama-models.js';
 export * from './model-fit.js';
 export * from './fitness-badge.js';
@@ -32,6 +33,7 @@ export * from './execution-density.js';
 export * from './plan/plan-document.js';
 export * from './mentions.js';
 export * from './pnpm-invocation.js';
+export * from './net-retry.js';
 
 /**
  * The package version is embedded into health responses and logs so clients

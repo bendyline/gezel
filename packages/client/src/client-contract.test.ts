@@ -12,6 +12,12 @@ interface ContractCase {
 const cases: ContractCase[] = [
   { name: 'health', method: 'GET', path: '/api/health', invoke: (c) => c.health() },
   {
+    name: 'system diagnostics',
+    method: 'GET',
+    path: '/api/system/diagnostics',
+    invoke: (c) => c.getSystemDiagnostics(),
+  },
+  {
     name: 'code review start',
     method: 'POST',
     path: '/api/projects/p1/git/reviews',

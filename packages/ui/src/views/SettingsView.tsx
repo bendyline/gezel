@@ -19,6 +19,7 @@ import { HealthStrip } from '../components/HealthStrip.js';
 import { InstallModelTuningEditor } from '../components/InstallModelTuningEditor.js';
 import { EffortPicker, ModelPicker } from '../components/ModelPicker.js';
 import { RemoteServersPanel } from '../components/RemoteServersPanel.js';
+import { ReportErrorLink } from '../components/ReportErrorLink.js';
 import { ToolsetsEditor } from '../components/ToolsetsEditor.js';
 import { Poppetje } from '../poppetje/index.js';
 import { Select } from '../primitives/index.js';
@@ -3236,6 +3237,14 @@ export function SettingsView() {
               )}
               <AutostartToggle />
               <BackgroundServiceStatus />
+              <p className="muted small" style={{ marginTop: '0.75rem' }}>
+                Something not working right?{' '}
+                <ReportErrorLink
+                  className="home-link"
+                  label="Report a problem on GitHub…"
+                  report={{ surface: 'settings-about', message: '' }}
+                />
+              </p>
             </section>
             <section style={{ marginBottom: '2rem' }}>
               <h3>Updates</h3>
@@ -3545,6 +3554,19 @@ function SystemNoticeNote({ notice }: { notice: SystemNotice }) {
           <summary>Technical details</summary>
           <p>{notice.technical}</p>
         </details>
+      )}
+      {notice.reportable && (
+        <ReportErrorLink
+          className="home-link"
+          report={{
+            surface: 'install-health',
+            message: notice.title,
+            // Already on screen behind the disclosure above, so this adds no
+            // new exposure — and it is the single most useful line to a
+            // maintainer reading the issue.
+            stack: notice.technical,
+          }}
+        />
       )}
     </div>
   );

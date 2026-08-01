@@ -10,6 +10,7 @@ import {
   type GitHubRepoSummary,
   type GitHubReposResponse,
   MachineMemoryUsageSchema,
+  SystemDiagnosticsSchema,
   createLogger,
 } from '@bendyline/gezel';
 import { Octokit } from '@octokit/rest';
@@ -30,6 +31,7 @@ import {
 } from '../../github/repo-preview.js';
 import { resolvePnpmCommand, spawnPnpm } from '../../packages/pnpm.js';
 import { resolveSystemLibraryPath } from '../../system-toolsets/resolve.js';
+import { collectSystemDiagnosticsCached } from '../../system/diagnostics.js';
 import { sampleDarwinGezelProcessMemoryCached } from '../../system/gezel-process-memory.js';
 import {
   detectMemoryProfile,
@@ -110,6 +112,23 @@ export function systemRoutes(ctx: ServiceContext): Hono {
   app.get('/memory', async (c) => {
     const profile = await detectMemoryProfile();
     return c.json(profile);
+  });
+
+  /**
+   * Shareable machine profile for the "Report error on GitHub" dialog.
+   *
+   * Parsing through `SystemDiagnosticsSchema` on the way out is the privacy
+   * boundary, not a formality: anything the collector assembles that the
+   * schema does not declare is stripped instead of shipped to a public
+   * issue tracker.
+   */
+  app.get('/diagnostics', async (c) => {
+    const diagnostics = await collectSystemDiagnosticsCached({
+      home: ctx.home,
+      store: ctx.store,
+      chat: ctx.chat,
+    });
+    return c.json(SystemDiagnosticsSchema.parse(diagnostics));
   });
 
   /**

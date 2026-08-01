@@ -57,7 +57,22 @@ export type NativeEnginePanicKind =
   | 'cuda-illegal-memory-access'
   | 'cuda-device-assert'
   | 'cuda-error'
-  | 'assertion-failed';
+  | 'assertion-failed'
+  /**
+   * SIGILL. Every other kind is recognized from a line the engine
+   * printed; this one is inferred from the signal, because a binary
+   * whose instructions the CPU cannot decode usually dies without
+   * printing anything at all. That silence is exactly what made it hard
+   * to diagnose in the field — the crash reported a bare signal name and
+   * no attribution, so it read as a generic engine fault rather than
+   * "this build cannot run on this machine."
+   *
+   * Two distinct causes land here and both mean the same thing for the
+   * user: an instruction above the CPU's feature level (a build tuned to
+   * the CI runner rather than to the target), or a `ud2` trap on an
+   * unreachable/abort path inside GPU library init.
+   */
+  | 'illegal-instruction';
 
 export interface NativeEngineExitSnapshot {
   /** Stable correlation key included in the lifecycle log and provider error. */
@@ -72,6 +87,14 @@ export interface NativeEngineExitSnapshot {
   expectedReason?: string;
   panicKind?: NativeEnginePanicKind;
   panicLine?: string;
+  /**
+   * False when the engine died during startup, before it ever answered
+   * on its readiness endpoint. The distinction decides whether a crash
+   * is attributable to the BUILD (never worked here) or to the WORK (a
+   * model, a request, an allocation) — only the former is safe to
+   * quarantine a backend over.
+   */
+  reachedReady: boolean;
   /** Bounded stdout/stderr tail retained in memory for diagnostics. */
   outputTail: string;
   diagnostics?: Record<string, string | number | boolean>;
@@ -905,6 +928,18 @@ export class NativeEngineSupervisor {
     const expectedReason = this.expectedExitReason;
     const expected = priorState.kind === 'stopped' || expectedReason !== undefined;
     const pid = this.currentPid;
+    // A SIGILL is a classification in its own right. Only claim it when
+    // the output didn't already explain the death more precisely: an
+    // engine that printed `CUDA error: …` and then took SIGILL on the
+    // way down is a CUDA fault, not an unrunnable build.
+    const panic =
+      this.currentPanic ??
+      (signal === 'SIGILL'
+        ? {
+            kind: 'illegal-instruction' as const,
+            line: 'engine terminated by SIGILL (illegal instruction) with no diagnostic output',
+          }
+        : undefined);
     const snapshot: NativeEngineExitSnapshot = {
       incidentId: `native-${pid ?? 'unknown'}-${exitedAt}`,
       ...(pid !== undefined ? { pid } : {}),
@@ -914,10 +949,9 @@ export class NativeEngineSupervisor {
       code,
       signal,
       expected,
+      reachedReady: priorState.kind === 'running',
       ...(expectedReason ? { expectedReason } : {}),
-      ...(this.currentPanic
-        ? { panicKind: this.currentPanic.kind, panicLine: this.currentPanic.line }
-        : {}),
+      ...(panic ? { panicKind: panic.kind, panicLine: panic.line } : {}),
       outputTail: this.currentOutput,
       ...(this.currentDiagnostics ? { diagnostics: { ...this.currentDiagnostics } } : {}),
     };
@@ -931,6 +965,7 @@ export class NativeEngineSupervisor {
         expected,
         ...(expectedReason ? { expectedReason } : {}),
         uptimeMs: snapshot.uptimeMs,
+        reachedReady: snapshot.reachedReady,
         ...(snapshot.panicKind ? { panicKind: snapshot.panicKind } : {}),
         ...(snapshot.panicLine ? { panicLine: snapshot.panicLine } : {}),
         ...(snapshot.diagnostics ?? {}),

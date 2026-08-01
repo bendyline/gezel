@@ -27,6 +27,7 @@
 import type { ConfigResponse, LocalActiveInstall } from '@bendyline/gezel-client';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
+import { ReportErrorLink } from './ReportErrorLink.js';
 
 interface Props {
   config: ConfigResponse;
@@ -493,6 +494,20 @@ export function FirstRunInstallBanner({ config, onConfigChanged, onModelInstalle
         >
           Use GitHub Copilot instead
         </button>
+        {/* Not offered on a checksum mismatch: that is Hugging Face
+            republishing a file, which the copy above already explains as
+            expected — not something wrong with Gezel. Last in the row,
+            because a report is what you do after the fixes fail. */}
+        {!isMismatch && (
+          <ReportErrorLink
+            className="first-run-banner-btn"
+            report={{
+              surface: 'model-download',
+              message: state.error,
+              detail: { code: 'first-run-install-failed', engine: state.provider },
+            }}
+          />
+        )}
       </div>
     </output>
   );

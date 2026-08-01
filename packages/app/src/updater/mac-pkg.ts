@@ -32,6 +32,16 @@
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { HttpStatusError, retryTransient } from '@bendyline/gezel';
+
+/**
+ * A 450 MB installer over a home connection drops sometimes. Both requests
+ * here are safely repeatable — the SHA256SUMS read is a GET, and the PKG is
+ * re-fetched into a path we unlink first, then digest-verified — so retrying a
+ * transient fault is strictly better than surfacing "fetch failed" to someone
+ * who just clicked Update.
+ */
+const DOWNLOAD_ATTEMPTS = 3;
 
 /** Team ID on the Developer ID certificates the release workflow signs with. */
 export const APPLE_TEAM_ID = 'JXA5M4VK3V';
@@ -184,11 +194,19 @@ export async function stageVerifiedMacPkg(version: string, deps: StageDeps): Pro
   const sumsUrl = releaseAssetUrl(version, 'SHA256SUMS');
   const pkgUrl = releaseAssetUrl(version, assetName);
 
-  const sumsResponse = await deps.fetch(sumsUrl);
-  if (!sumsResponse.ok) {
-    throw new Error(`Could not fetch SHA256SUMS for v${version} (HTTP ${sumsResponse.status})`);
-  }
-  const sums = parseSha256Sums(await sumsResponse.text());
+  const sums = await retryTransient(
+    async () => {
+      const sumsResponse = await deps.fetch(sumsUrl);
+      if (!sumsResponse.ok) {
+        throw new HttpStatusError(
+          sumsResponse.status,
+          `Could not fetch SHA256SUMS for v${version} (HTTP ${sumsResponse.status})`,
+        );
+      }
+      return parseSha256Sums(await sumsResponse.text());
+    },
+    { attempts: DOWNLOAD_ATTEMPTS, onRetry: (info) => deps.logger?.info?.(retryLine(info)) },
+  );
   const expected = sums.get(assetName);
   if (!expected) {
     throw new Error(`Release v${version} publishes no digest for ${assetName}`);
@@ -202,11 +220,19 @@ export async function stageVerifiedMacPkg(version: string, deps: StageDeps): Pro
   await rm(pkgPath, { force: true });
 
   deps.logger?.info?.(`[updater] downloading ${assetName}`);
-  const pkgResponse = await deps.fetch(pkgUrl);
-  if (!pkgResponse.ok) {
-    throw new Error(`Could not download ${assetName} (HTTP ${pkgResponse.status})`);
-  }
-  const bytes = Buffer.from(await pkgResponse.arrayBuffer());
+  const bytes = await retryTransient(
+    async () => {
+      const pkgResponse = await deps.fetch(pkgUrl);
+      if (!pkgResponse.ok) {
+        throw new HttpStatusError(
+          pkgResponse.status,
+          `Could not download ${assetName} (HTTP ${pkgResponse.status})`,
+        );
+      }
+      return Buffer.from(await pkgResponse.arrayBuffer());
+    },
+    { attempts: DOWNLOAD_ATTEMPTS, onRetry: (info) => deps.logger?.info?.(retryLine(info)) },
+  );
   await writeFile(pkgPath, bytes);
   const actual = createHash('sha256').update(bytes).digest('hex');
 
@@ -220,6 +246,15 @@ export async function stageVerifiedMacPkg(version: string, deps: StageDeps): Pro
   }
 
   return { path: pkgPath, version, sha256: actual };
+}
+
+function retryLine(info: {
+  attempt: number;
+  maxAttempts: number;
+  delayMs: number;
+  reason: string;
+}): string {
+  return `[updater] download failed (${info.reason}); retrying in ${info.delayMs}ms (attempt ${info.attempt}/${info.maxAttempts})`;
 }
 
 /** Digest of a file already on disk. Split out so tests can reuse it. */

@@ -381,22 +381,25 @@ export function HomeView({
   return (
     <div className="home-view">
       {banner}
-      {/* ── 1. Intro ─────────────────────────────────────────────── */}
-      <IntroSection
-        collapsed={collapseIntro ?? false}
-        onToggle={() => setCollapseIntro((c) => !(c ?? false))}
-        version={health?.version}
-        meesterName={meesterDisplayName}
-        isConfigured={false}
-        provider={provider}
-        defaultModel={effectiveDefaultModel}
-        llamaCppBackend={health?.llamaCppBackend}
-      />
-
       {/* ── First run setup ──────────────────────────────────────── */}
+      {/* Setup leads, the intro follows. A first-run user's one job is to get a
+          model onto the machine, so the download affordance owns the top of the
+          screen; the "what is gezel?" pitch is reading material for after. */}
       {/* Everything below the intro is grouped + slightly indented so the
           steps read as one "First run setup" block. */}
       <h1 className="home-firstrun-heading">First run setup</h1>
+      <p className="home-firstrun-lede muted">
+        Use the buttons below to download local models from{' '}
+        <a
+          href="https://huggingface.co"
+          target="_blank"
+          rel="noreferrer"
+          style={{ color: 'inherit' }}
+        >
+          Hugging Face
+        </a>{' '}
+        that will get you started.
+      </p>
       <div className="home-firstrun-body">
         {/* First-run on-device install banner. Visible only while
           the bootstrapped default model is still downloading (or
@@ -489,6 +492,18 @@ export function HomeView({
           }}
         />
       </div>
+
+      {/* ── Intro ────────────────────────────────────────────────── */}
+      <IntroSection
+        collapsed={collapseIntro ?? false}
+        onToggle={() => setCollapseIntro((c) => !(c ?? false))}
+        version={health?.version}
+        meesterName={meesterDisplayName}
+        isConfigured={false}
+        provider={provider}
+        defaultModel={effectiveDefaultModel}
+        llamaCppBackend={health?.llamaCppBackend}
+      />
     </div>
   );
 }
@@ -683,7 +698,7 @@ function IntroSection({
         ) : (
           <>
             <p>
-              To get started, download the recommended <strong>on-device</strong> model below — it
+              To get started, download the recommended <strong>on-device</strong> model above — it
               runs privately on your machine, with no account or network required.
             </p>
             <p className="muted small">

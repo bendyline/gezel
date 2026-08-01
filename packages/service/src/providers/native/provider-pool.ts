@@ -19,7 +19,11 @@
 
 import { createLogger } from '@bendyline/gezel';
 import type { LLMProvider } from '../types.js';
-import { type CapacityBroker, formatCapacityDenial } from './capacity-broker.js';
+import {
+  type CapacityBroker,
+  CapacityDeniedError,
+  formatCapacityDenial,
+} from './capacity-broker.js';
 import {
   type LocalProviderName,
   type ParsedEngineKey,
@@ -355,7 +359,7 @@ export class ProviderPool {
     if (!this.broker.canReserve(residentBytes)) {
       const c = this.broker.committed();
       log.error(capacityDenialLogLine(key, this.broker.denialReason(residentBytes)));
-      throw new Error(
+      throw new CapacityDeniedError(
         formatCapacityDenial({
           modelLabel: modelId,
           requestedBytes: residentBytes,
@@ -382,7 +386,7 @@ export class ProviderPool {
       if (!r2.granted) {
         const c = this.broker.committed();
         log.error(capacityDenialLogLine(key, r2.reason ?? this.broker.denialReason(finalBytes)));
-        throw new Error(
+        throw new CapacityDeniedError(
           formatCapacityDenial({
             modelLabel: modelId,
             requestedBytes: finalBytes,

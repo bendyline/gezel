@@ -1,7 +1,12 @@
 import { z } from 'zod';
 import { ProjectTypeToolSchema } from './catalog.js';
 import { GateCheckSchema, GateScriptRefSchema } from './gate.js';
-import { ChatMessageSchema, ChatMessageToolCallSchema, ProviderNameSchema } from './gezel.js';
+import {
+  ChatMessageSchema,
+  ChatMessageToolCallSchema,
+  ChatTurnErrorDetailSchema,
+  ProviderNameSchema,
+} from './gezel.js';
 import { TerminalTimelineEntrySchema } from './terminal.js';
 
 /**
@@ -138,6 +143,12 @@ export const ChatSessionSchema = z.object({
    * Cleared automatically on the next successful turn.
    */
   lastTurnError: z.string().optional(),
+  /**
+   * Structured classification of {@link lastTurnError}. Written and cleared
+   * together with it — a detail that outlives the error it describes would
+   * have the UI offering to report a problem that is already fixed.
+   */
+  lastTurnErrorDetail: ChatTurnErrorDetailSchema.optional(),
   /** Optional task this session is scoped to, in `projectId/num` form. */
   taskRef: z.string().optional(),
   /** Optional specific step within the task. */

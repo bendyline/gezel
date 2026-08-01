@@ -106,6 +106,13 @@ function needsRestart(
     config?.llamaCppBackendOverride && config.llamaCppBackendOverride !== 'auto'
       ? config.llamaCppBackendOverride
       : (health.llamaCppDetectedBackend ?? currentlyRunning);
+  // A quarantined backend is detected but unusable, so it is NOT what
+  // would run — resolution routes around it every launch. Without this,
+  // a machine whose CUDA build crashes reads as permanently
+  // "needs restart": detected=cuda, running=vulkan, restart changes
+  // nothing, and the prompt never goes away. The quarantine gets its own
+  // notice (system-notices.ts) that explains the real situation.
+  if (health.llamaCppQuarantinedBackends?.includes(wouldRun)) return false;
   return wouldRun !== currentlyRunning;
 }
 

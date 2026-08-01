@@ -14,11 +14,13 @@
  */
 
 import { type WriteStream, createWriteStream } from 'node:fs';
+import { backoffDelayMs } from '@bendyline/gezel';
 import {
   DEFAULT_CHUNK_TIMEOUT_MS,
   DEFAULT_MAX_RETRIES,
   type DownloadEvent,
   type DownloadResult,
+  DownloadRetryBudget,
   GEZEL_DOWNLOAD_UA,
   downloadLog,
   existingPartialSize,
@@ -26,7 +28,6 @@ import {
   friendlyStatusError,
   friendlyStreamError,
   rawErrorString,
-  retryDelayMs,
   sleepRespectingAbort,
 } from './download-common.js';
 import { type XetReconstruction, decodeSegmentChunks } from './xet.js';
@@ -59,11 +60,11 @@ export async function* downloadXet(
 ): AsyncGenerator<DownloadEvent, DownloadResult, void> {
   const partialPath = `${opts.destPath}.partial`;
   const maxAttempts = opts.maxRetries ?? DEFAULT_MAX_RETRIES;
-  let attempt = 0;
+  const budget = new DownloadRetryBudget(maxAttempts, existingPartialSize(partialPath));
   let lastFriendly = 'Xet download failed';
 
-  while (attempt < maxAttempts) {
-    attempt++;
+  while (budget.canAttempt()) {
+    budget.beginAttempt();
     if (opts.signal?.aborted) return aborted(partialPath);
 
     const resumeFrom = existingPartialSize(partialPath);
@@ -75,21 +76,22 @@ export async function* downloadXet(
       return {
         kind: 'error',
         error: result.friendlyError,
-        attemptsMade: attempt,
+        attemptsMade: budget.attemptsMade,
         bytesWritten: result.bytesWritten,
       };
     }
 
     lastFriendly = result.friendlyError;
+    budget.recordFailure(result.bytesWritten);
     downloadLog.warn(
-      `[xet] attempt ${attempt}/${maxAttempts} failed: ${result.friendlyError} (rawError=${result.rawError})`,
+      `[xet] attempt ${budget.attemptsMade} failed at ${result.bytesWritten} bytes: ${result.friendlyError} (rawError=${result.rawError})`,
     );
-    if (attempt >= maxAttempts) break;
-    const delay = retryDelayMs(attempt - 1);
+    if (!budget.canAttempt()) break;
+    const delay = budget.nextDelayMs();
     yield {
       type: 'retrying',
-      attempt: attempt + 1,
-      maxAttempts,
+      attempt: budget.nextAttemptLabel,
+      maxAttempts: budget.maxAttempts,
       delayMs: delay,
       reason: result.friendlyError,
       resumeFromBytes: result.bytesWritten,
@@ -97,10 +99,11 @@ export async function* downloadXet(
     if (await sleepRespectingAbort(delay, opts.signal)) return aborted(partialPath);
   }
 
+  const attemptsMade = budget.attemptsMade;
   return {
     kind: 'error',
-    error: `${lastFriendly} (gave up after ${maxAttempts} attempt${maxAttempts === 1 ? '' : 's'})`,
-    attemptsMade: attempt,
+    error: `${lastFriendly} (gave up after ${attemptsMade} attempt${attemptsMade === 1 ? '' : 's'})`,
+    attemptsMade,
     bytesWritten: existingPartialSize(partialPath),
   };
 }
@@ -258,23 +261,27 @@ async function* runXetAttempt(
   } catch (err) {
     await closeStream(stream);
     if (signal?.aborted || (err instanceof XetError && err.wasAborted)) {
-      return { kind: 'aborted', bytesWritten: written };
+      return { kind: 'aborted', bytesWritten: Math.max(written, resumeFrom) };
     }
+    // The `.partial` genuinely holds `resumeFrom` bytes even when the failure
+    // landed inside the term that straddles the resume boundary, so report the
+    // larger of the two — the retry budget reads this as forward progress.
+    const onDisk = Math.max(written, resumeFrom);
     if (err instanceof XetError) {
       return err.transient
         ? {
             kind: 'transient',
             friendlyError: err.friendly,
             rawError: err.raw,
-            bytesWritten: written,
+            bytesWritten: onDisk,
           }
-        : { kind: 'fatal', friendlyError: err.friendly, bytesWritten: written };
+        : { kind: 'fatal', friendlyError: err.friendly, bytesWritten: onDisk };
     }
     return {
       kind: 'transient',
       friendlyError: friendlyStreamError(err),
       rawError: rawErrorString(err),
-      bytesWritten: written,
+      bytesWritten: onDisk,
     };
   }
 
@@ -332,8 +339,57 @@ async function termData(
   return Buffer.concat(parts);
 }
 
-/** Fetch one xorb byte range, with a per-read stall timeout. */
+/** In-place retries for one xorb segment before the failure escalates. */
+const SEGMENT_ATTEMPTS = 3;
+
+/** Tighter than the whole-file schedule: a segment is small and independently
+ * re-fetchable, so the useful move is to try again quickly rather than to sit
+ * out a multi-second backoff hundreds of times over one file. */
+const SEGMENT_BACKOFF_MS: readonly number[] = [400, 1_200, 2_500];
+
+/**
+ * Fetch one xorb byte range, retrying transient failures in place.
+ *
+ * This is the difference between "one dropped packet costs a few seconds" and
+ * "one dropped packet costs a whole file attempt". A multi-GB Xet file is
+ * reconstructed from hundreds of these segment fetches; before the inner
+ * retry, a single blip unwound all the way to the outer loop, which re-minted
+ * the CAS token, re-fetched the reconstruction manifest, and re-walked the
+ * terms — and, worse, spent one of only five whole-file attempts. On a link
+ * that drops even occasionally, the outer budget was guaranteed to run out
+ * before the file finished. Segments are small and individually re-fetchable,
+ * so retrying at this granularity is nearly free.
+ */
 async function fetchXorbSegment(
+  seg: XetReconstruction['fetch_info'][string][number],
+  fetchImpl: typeof fetch,
+  chunkTimeoutMs: number,
+  signal: AbortSignal | undefined,
+): Promise<Buffer> {
+  let lastError: XetError | undefined;
+  for (let attempt = 1; attempt <= SEGMENT_ATTEMPTS; attempt++) {
+    try {
+      return await fetchXorbSegmentOnce(seg, fetchImpl, chunkTimeoutMs, signal);
+    } catch (err) {
+      if (!(err instanceof XetError) || !err.transient || err.wasAborted || signal?.aborted) {
+        throw err;
+      }
+      lastError = err;
+      if (attempt >= SEGMENT_ATTEMPTS) break;
+      const delay = backoffDelayMs(attempt - 1, SEGMENT_BACKOFF_MS);
+      downloadLog.debug(
+        `[xet] segment fetch attempt ${attempt}/${SEGMENT_ATTEMPTS} failed (${err.raw}); retrying in ${delay}ms`,
+      );
+      if (await sleepRespectingAbort(delay, signal)) {
+        throw new XetError(err.friendly, true, err.raw, true);
+      }
+    }
+  }
+  throw lastError ?? new XetError('xorb fetch failed', true, 'segment-exhausted');
+}
+
+/** One attempt at a xorb byte range, with a per-read stall timeout. */
+async function fetchXorbSegmentOnce(
   seg: XetReconstruction['fetch_info'][string][number],
   fetchImpl: typeof fetch,
   chunkTimeoutMs: number,

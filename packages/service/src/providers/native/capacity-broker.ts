@@ -39,6 +39,13 @@ export interface CapacityBrokerOptions {
   budgetBytes?: number;
   /** Test seam — defaults to {@link totalmem}. */
   systemRamBytes?: () => number;
+  /**
+   * Whether this host shares one memory pool between CPU and GPU, which
+   * changes the auto-derived budget. Defaults to detecting the running
+   * host; pass it explicitly in tests so the expected budget doesn't
+   * depend on which machine the suite runs on.
+   */
+  unifiedMemory?: boolean;
 }
 
 export interface CapacityCommitted {
@@ -111,15 +118,33 @@ export function formatCapacityDenial(opts: {
   return parts.join('');
 }
 
+/**
+ * A model that could not be admitted for lack of memory. The message is
+ * unchanged from what `formatCapacityDenial` always produced — the class
+ * exists purely so `describeTurnError` can tell an out-of-memory refusal
+ * apart from an engine crash, since the two need very different advice in
+ * a bug report.
+ */
+export class CapacityDeniedError extends Error {
+  readonly code = 'capacity-denied';
+
+  constructor(message: string) {
+    super(message);
+    this.name = 'CapacityDeniedError';
+  }
+}
+
 export class CapacityBroker {
   private budgetBytes: number;
   private enforced: boolean;
   private explicitBudgetBytes: number | null;
   private readonly systemRamBytes: number;
+  private readonly unifiedMemory: boolean | undefined;
   private readonly reservations = new Map<EngineKey, number>();
 
   constructor(opts: CapacityBrokerOptions = {}) {
     this.systemRamBytes = (opts.systemRamBytes ?? totalmem)();
+    this.unifiedMemory = opts.unifiedMemory;
     this.explicitBudgetBytes = opts.budgetBytes ?? null;
     // Assigned by applyBudget; the definite-assignment dance TS wants for
     // fields a constructor sets through a helper.
@@ -128,10 +153,17 @@ export class CapacityBroker {
     this.applyBudget();
   }
 
+  private autoBudget(): number {
+    return autoDetectBudgetBytes(
+      this.systemRamBytes,
+      this.unifiedMemory === undefined ? {} : { unifiedMemory: this.unifiedMemory },
+    );
+  }
+
   private applyBudget(): void {
     const explicit = this.explicitBudgetBytes;
     if (explicit === null) {
-      this.budgetBytes = autoDetectBudgetBytes(this.systemRamBytes);
+      this.budgetBytes = this.autoBudget();
       this.enforced = true;
     } else if (explicit < 1024 ** 3) {
       this.budgetBytes = explicit;
@@ -237,7 +269,7 @@ export class CapacityBroker {
       committedBytes: this.committedBytes(),
       enforced: this.enforced,
       systemRamBytes: this.systemRamBytes,
-      autoBudgetBytes: autoDetectBudgetBytes(this.systemRamBytes),
+      autoBudgetBytes: this.autoBudget(),
       overridden: this.explicitBudgetBytes !== null,
       byKey: [...this.reservations.entries()]
         .map(([key, bytes]) => ({ key, bytes }))

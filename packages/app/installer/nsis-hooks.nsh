@@ -93,10 +93,19 @@
 ; GetFileAttributes returns -1 both when a path is absent and when inspection
 ; fails. Only FILE_NOT_FOUND/PATH_NOT_FOUND are safe for a not-yet-created
 ; child; access-denied and I/O failures must stop the elevated operation.
+;
+; The last-error code MUST come from the System plugin's `?e` suffix, which
+; reads it inside the same call. A separate `GetLastError()` System::Call is
+; not atomic: the plugin's own marshalling between the two calls overwrites
+; the thread's last error, so the check reads an unrelated leftover code.
+; That shipped once and broke every *fresh* Windows install — the service
+; tree is the one guarded path that legitimately does not exist yet, so it
+; was the only one to take the -1 branch, where a stale ERROR_FILE_EXISTS (80)
+; failed the != 2 / != 3 test and aborted the machine-service install.
 !macro RejectReparsePoint PATH DESCRIPTION FAILURE_LABEL
-  System::Call 'kernel32::GetFileAttributesW(w "${PATH}") i .r0'
+  System::Call 'kernel32::GetFileAttributesW(w "${PATH}") i .r0 ?e'
+  Pop $1
   ${If} $0 == -1
-    System::Call 'kernel32::GetLastError() i .r1'
     ${If} $1 != 2
     ${AndIf} $1 != 3
       DetailPrint "ERROR: ${DESCRIPTION} could not be inspected safely (Win32 error $1)."

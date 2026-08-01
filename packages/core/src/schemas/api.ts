@@ -12,6 +12,7 @@ import {
 } from './gezel.js';
 import { GezelGrowthStateSchema } from './growth.js';
 import { ChatModelTuningSchema } from './model-tuning.js';
+import { NativeEngineNameSchema } from './native-engines.js';
 import {
   HttpsOriginSchema,
   ProjectDetailSchema,
@@ -66,6 +67,22 @@ export const HealthResponseSchema = z.object({
    * (macOS, headless containers, exotic GPU drivers).
    */
   llamaCppDetectedVendor: z.enum(['amd', 'nvidia', 'intel']).optional(),
+  /**
+   * Backends whose bundled build crashed on this machine before the
+   * engine ever became ready, and which backend resolution therefore
+   * routed around this launch.
+   *
+   * Distinct from a user pin, and the distinction matters: with a pin,
+   * `llamaCppBackend` differs from `llamaCppDetectedBackend` because the
+   * user asked for that. Here it differs because a build we shipped does
+   * not run on their hardware — which they did not ask for, cannot infer
+   * from the two backend fields alone, and would otherwise only notice as
+   * an unexplained drop in speed.
+   *
+   * Empty/undefined in the normal case. Entries clear themselves when the
+   * offending binary is replaced (see `llama-quarantine.ts`).
+   */
+  llamaCppQuarantinedBackends: z.array(z.enum(['cuda', 'vulkan', 'metal', 'cpu'])).optional(),
 });
 export type HealthResponse = z.infer<typeof HealthResponseSchema>;
 
@@ -114,6 +131,88 @@ export const MachineMemoryUsageSchema = z.object({
   deviceNames: z.array(z.string()),
 });
 export type MachineMemoryUsage = z.infer<typeof MachineMemoryUsageSchema>;
+
+/**
+ * Shareable machine profile for a user-authored bug report.
+ *
+ * The contract of this shape is that every field is safe to paste into a
+ * PUBLIC GitHub issue: no absolute paths, no hostname, no username, no
+ * session/gezel/project identifiers, no prompts, no transcripts, no log
+ * tails, no credentials.
+ *
+ * GPU card model names ARE included. "NVIDIA GeForce RTX 4070" is a hardware
+ * SKU, not an identifier — no serial, no UUID, no bus address — and it is the
+ * single most triage-relevant fact for the native-engine crash class this
+ * report exists to capture.
+ *
+ * The route parses its response through this schema on the way out, so a
+ * field the handler assembles but does not declare here is stripped rather
+ * than shipped. That strip is the privacy boundary, not a formality: adding
+ * a field here is the deliberate act that the route's guard test watches.
+ */
+export const SystemDiagnosticsSchema = z.object({
+  version: z.string(),
+  sampledAt: z.string(),
+  runtime: z.object({
+    nodeVersion: z.string(),
+    platform: z.string(),
+    arch: z.string(),
+    /** `os.release()` — kernel/build string, e.g. `24.5.0`, `10.0.26100`. */
+    osRelease: z.string(),
+    /** Native-binary subtree key, e.g. `darwin-arm64`. Null off shipped targets. */
+    platformKey: z.string().nullable(),
+  }),
+  hardware: z.object({
+    totalRamBytes: z.number().nonnegative(),
+    gpuVramBytes: z.number().nonnegative().nullable(),
+    usableBytes: z.number().nonnegative(),
+    source: z.enum(['darwin-unified', 'gpu-nvidia', 'gpu-vulkan', 'system-ram-fallback']),
+    gpuVendor: z.enum(['amd', 'nvidia', 'intel']).optional(),
+    /** Prose sentence — the same copy local-model onboarding shows. */
+    description: z.string(),
+    tier: z.enum(['tiny', 'small', 'medium', 'large']),
+    /** Card model names as the engine reports them. No bus ids, no serials. */
+    gpuDevices: z.array(
+      z.object({
+        name: z.string(),
+        totalMiB: z.number().nonnegative(),
+        computeCapability: z.string().optional(),
+        driverVersion: z.string().optional(),
+      }),
+    ),
+  }),
+  engine: z.object({
+    nativeRelease: z.string(),
+    nativePinned: z.boolean(),
+    /** Engine names resolvable by this daemon. Names only — never paths. */
+    installedEngines: z.array(NativeEngineNameSchema),
+    llamaCppBackend: z.enum(['cuda', 'vulkan', 'metal', 'cpu']).optional(),
+    llamaCppDetectedBackend: z.enum(['cuda', 'vulkan', 'metal', 'cpu']).optional(),
+    llamaCppBackendOverride: z.enum(['auto', 'cuda', 'vulkan', 'metal', 'cpu']).optional(),
+    /** From `gezel-llama-build.json` beside the binary. */
+    llamaCppRevision: z.string().optional(),
+    llamaCppBuildBackend: z.string().optional(),
+    cudaArchitectures: z.array(z.string()).optional(),
+    cudaToolkit: z.string().optional(),
+  }),
+  models: z.object({
+    defaultProvider: ProviderNameSchema,
+    defaultModel: z.string().optional(),
+    /**
+     * Local chat models installed on this daemon. Catalog ids only, and
+     * deliberately excluding Ollama: Ollama tags are user-authored
+     * (`acme-corp/internal-7b:latest`) and can name an employer.
+     */
+    installed: z.array(
+      z.object({
+        id: z.string(),
+        provider: z.enum(['llama-cpp', 'mlx', 'ds4']),
+        parameterSize: z.string().optional(),
+      }),
+    ),
+  }),
+});
+export type SystemDiagnostics = z.infer<typeof SystemDiagnosticsSchema>;
 
 /**
  * Non-secret metadata about the user's GitHub auth state. The token itself

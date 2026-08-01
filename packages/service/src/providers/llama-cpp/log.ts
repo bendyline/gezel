@@ -1,8 +1,8 @@
 import { type WriteStream, appendFileSync, createWriteStream, mkdirSync } from 'node:fs';
 import { mkdir, readFile, readdir, stat, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
+import { redactCredentials } from '@bendyline/gezel';
 import type { NativeEngineExitSnapshot } from '../native/supervisor.js';
-import { redactLogLine } from './log-redact.js';
 
 /**
  * Rolling append-only log for llama-server stdout/stderr. Mirrors the
@@ -85,12 +85,12 @@ export class LlamaCppLogFile {
    * subsequent `tail()` / `close()` awaits the drain.
    */
   write(line: string): void {
-    // Credential-shape scrub before hitting disk. See `log-redact.ts`
-    // for the patterns + rationale. Defense in depth — llama-server
+    // Credential-shape scrub before hitting disk. See core's
+    // `redact.ts` for the patterns + rationale. Defense in depth — llama-server
     // doesn't emit secrets by design, but a log file is the kind of
     // thing users share on bug reports, and being wrong-by-omission
     // here costs more than over-redacting.
-    const safe = redactLogLine(line);
+    const safe = redactCredentials(line);
     const run = async () => {
       await this.readyPromise;
       await this.rollIfNeeded();
@@ -114,7 +114,7 @@ export class LlamaCppLogFile {
   writeIncident(snapshot: NativeEngineExitSnapshot): void {
     const { outputTail: _outputTail, ...incident } = snapshot;
     void _outputTail;
-    if (incident.panicLine) incident.panicLine = redactLogLine(incident.panicLine);
+    if (incident.panicLine) incident.panicLine = redactCredentials(incident.panicLine);
     mkdirSync(this.dir, { recursive: true });
     appendFileSync(
       join(this.dir, 'native-incidents.jsonl'),

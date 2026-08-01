@@ -108,7 +108,9 @@ export function EngineMemoryBudgetPanel({ status, onSaved }: EngineMemoryBudgetP
           {onAuto ? (
             <span className="gz-budget-tag">Automatic</span>
           ) : (
-            <span className={`gz-budget-tag ${overAuto ? 'gz-budget-tag-risky' : 'gz-budget-tag-custom'}`}>
+            <span
+              className={`gz-budget-tag ${overAuto ? 'gz-budget-tag-risky' : 'gz-budget-tag-custom'}`}
+            >
               {overAuto ? 'Above recommended' : 'Custom'}
             </span>
           )}
@@ -140,10 +142,10 @@ export function EngineMemoryBudgetPanel({ status, onSaved }: EngineMemoryBudgetP
       </div>
 
       {overAuto && (
-        <p className="muted small engine-memory-budget-warning" role="status">
+        <output className="muted small engine-memory-budget-warning">
           Above what we'd pick for this machine. Models will still load, but the rest of the system
           has less to work with — expect things to feel slower before anything fails outright.
-        </p>
+        </output>
       )}
 
       <div className="engine-memory-budget-actions">

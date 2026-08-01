@@ -1,5 +1,6 @@
 import type {
   ChatEventEnvelope,
+  ChatTurnErrorDetail,
   GezelSummary,
   ListTimelineResponse,
   Project,
@@ -16,6 +17,7 @@ import { api } from '../api.js';
 import { streamSharedProjectChatEvents } from '../shared-chat-events.js';
 import { GezelIcon } from './GezelIcon.js';
 import { getReadonlyGezelMediaProvider } from './GezelMediaProvider.js';
+import { ReportErrorLink } from './ReportErrorLink.js';
 import { TerminalBubble } from './TerminalBubble.js';
 import { TerminalStreamingBubble } from './TerminalStreamingBubble.js';
 import {
@@ -251,6 +253,8 @@ interface LiveSlot {
    * user_message for this session replaces the slot.
    */
   error?: string;
+  /** Machine-readable classification of {@link error}, when the daemon knew one. */
+  errorDetail?: ChatTurnErrorDetail;
   /**
    * When set, this turn is waiting in the provider queue — not yet
    * streaming. Number is how many turns are ahead of it. Populated
@@ -1933,6 +1937,7 @@ export function ChatTimelineView({
         const slot = liveRef.current.get(sessionId);
         if (slot) {
           slot.error = event.error;
+          slot.errorDetail = event.errorDetail;
           liveRef.current.set(sessionId, slot);
           setLiveBump((n) => n + 1);
         }
@@ -2802,7 +2807,8 @@ export function ChatTimelineView({
               Continue
             </button>
           </>
-        )}
+        )}{' '}
+        <ReportErrorLink report={{ surface: 'session-error', message: error }} />
       </div>,
     );
   };
@@ -2988,6 +2994,7 @@ export function ChatTimelineView({
         {...(fontFamily ? { fontFamily } : {})}
         {...(fontScale !== 1 ? { fontScale } : {})}
         {...(slot.error ? { error: slot.error } : {})}
+        {...(slot.errorDetail ? { errorDetail: slot.errorDetail } : {})}
         {...(slot.queueAhead !== undefined ? { queueAhead: slot.queueAhead } : {})}
         {...(slot.wirePulseCount && slot.wirePulseCount > 0
           ? { wirePulseCount: slot.wirePulseCount }

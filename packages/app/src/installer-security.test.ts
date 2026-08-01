@@ -267,7 +267,6 @@ describe('Windows machine-service installer security', () => {
 
   it('rejects reparse-point redirection before elevated extraction', () => {
     expect(hook).toContain('GetFileAttributesW');
-    expect(hook).toContain('GetLastError()');
     expect(hook).toContain('${If} $1 != 2');
     expect(hook).toContain('${AndIf} $1 != 3');
     expect(hook).toContain('IntOp $1 $0 & 0x400');
@@ -286,5 +285,16 @@ describe('Windows machine-service installer security', () => {
     expect(position('RejectReparsePoint "${GEZEL_SERVICE_TREE}"')).toBeLessThan(
       position('--dest="${GEZEL_SERVICE_TREE}" --force'),
     );
+  });
+
+  it('captures the reparse-check last error atomically with the call', () => {
+    // A standalone GetLastError() System::Call reads a leftover code, because
+    // the plugin's marshalling clobbers the thread's last error in between.
+    // That aborted the machine-service install on every fresh Windows device:
+    // the not-yet-created service tree took the -1 branch and saw a stale
+    // ERROR_FILE_EXISTS (80) instead of ERROR_PATH_NOT_FOUND.
+    expect(hook).toContain('System::Call \'kernel32::GetFileAttributesW(w "${PATH}") i .r0 ?e\'');
+    expect(hook).not.toMatch(/System::Call\s+'kernel32::GetLastError/);
+    expect(position('Pop $1')).toBeLessThan(position('${If} $0 == -1'));
   });
 });

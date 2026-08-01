@@ -11,9 +11,10 @@ each production package to the exact text shipped for it.
 
 ## Runtime dependencies
 
-These ship in the Electron app or the `gezeld` daemon. Two optional toolsets
+These ship in the Electron app or the `gezeld` daemon. Two further components
 — the GitHub Copilot CLI and the Playwright MCP server — are deliberately
-*not* among them; see **Installed on demand** below.
+*not* among them; Gezel downloads them on first run instead. See
+**Downloaded on first run** below.
 
 | Package | License | Homepage |
 |---|---|---|
@@ -214,26 +215,26 @@ weights are third-party and carry their own licenses.
 
 ---
 
-## Installed on demand
+## Downloaded on first run
 
-Some optional toolsets are **not** bundled into any installer. When a user
-enables the feature that needs one, Gezel installs it from the public npm
-registry into that user's own Gezel home (`system-toolsets/`), using the
-bundled pnpm and a version+integrity set pinned in
+These third-party components are **not** bundled into any installer. Gezel
+downloads them on first run, from the public npm registry into the user's own
+Gezel home (`system-toolsets/`), using the bundled pnpm and a
+version+integrity set pinned in
 [`packages/service/src/system-toolsets/locks.ts`](packages/service/src/system-toolsets/locks.ts).
 
-Gezel does **not** redistribute these packages — they are fetched from npm at
-the user's direction, and each is governed by its own license as published by
-its author. The install is pinned rather than floating so every machine
+Gezel does **not** redistribute these packages — they are fetched from npm on
+the user's own machine, and each is governed by its own license as published
+by its author. The install is pinned rather than floating so every machine
 resolves the exact versions reviewed at release time.
 
-| Package | Installed for | License |
+| Package | Used for | License |
 |---|---|---|
 | [@github/copilot-sdk](https://github.com/github/copilot-sdk) | GitHub Copilot chat provider | MIT |
 | [@github/copilot](https://github.com/github/copilot-cli) and its `@github/copilot-{darwin,linux,linuxmusl,win32}-{arm64,x64}` binary siblings, pulled in transitively by the SDK | GitHub Copilot chat provider | **Proprietary** — GitHub Copilot CLI License |
 | [@playwright/mcp](https://github.com/microsoft/playwright-mcp) | browser-automation MCP toolset | Apache-2.0 |
 
-Enabling the Playwright toolset additionally downloads a **Chromium** build
+The Playwright component additionally downloads a **Chromium** build
 (~281 MB) from Playwright's own CDN into `~/.gezel/playwright-browsers/`, via
 `playwright install chromium`. That browser is not bundled either, and carries
 Chromium's own BSD-3-Clause license plus the third-party notices shipped inside
@@ -356,9 +357,9 @@ component is redistributed:
 Separately, the **GitHub Copilot CLI** (`@github/copilot` and its
 platform-specific binary siblings, pulled in transitively by
 `@github/copilot-sdk`) is proprietary, under the free-of-charge **GitHub
-Copilot CLI License**. Gezel does not redistribute it: it is installed from
-npm into the user's own Gezel home only when they enable the Copilot
-provider — see **Installed on demand** above.
+Copilot CLI License**. Gezel does not redistribute it: it is downloaded from
+npm into the user's own Gezel home on first run — see **Downloaded on first
+run** above.
 
 Some **catalog models** likewise ship under non-OSI licenses with
 acceptable-use or commercial restrictions (Llama Community License,

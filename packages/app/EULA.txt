@@ -45,11 +45,11 @@ You can also read it before installing, at:
 
   https://github.com/bendyline/gezel/blob/main/NOTICE.md
 
-4. Software installed on demand
+4. Third-party components Gezel downloads
 
-Some optional features install additional software onto your computer when you turn them on. That software is not part of Gezel and is not redistributed by Bendyline LLC - Gezel downloads it from the public npm registry, at your direction, into your own Gezel home folder. Each such component is governed by its own license as published by its author, not by the MIT License above, and it is not covered by the bundled inventory described in section 3.
+On first run, Gezel downloads additional third-party software onto your computer so that its features work without further setup. That software is not part of Gezel and is not redistributed by Bendyline LLC - Gezel downloads it and other system components from the public npm registry into your own Gezel home folder. Each such component is governed by its own license as published by its author, not by the MIT License above, and it is not covered by the bundled inventory described in section 3.
 
-The two current examples are the GitHub Copilot CLI (installed when you enable the Copilot provider; proprietary, under the free-of-charge GitHub Copilot CLI License) and the Playwright MCP server (installed when you enable browser automation; Apache-2.0). Enabling browser automation also downloads a Chromium build of about 281 MB from Playwright's own servers, under Chromium's BSD-3-Clause license.
+The two current examples are the GitHub Copilot CLI (proprietary, under the free-of-charge GitHub Copilot CLI License) and the Playwright MCP server (Apache-2.0). Gezel also downloads a Chromium build of about 281 MB from Playwright's own servers, under Chromium's BSD-3-Clause license.
 
 Model weights work the same way: anything you download through Gezel comes from its upstream source under its own license. See the "Catalog models" section of NOTICE.md before relying on any model commercially.
 

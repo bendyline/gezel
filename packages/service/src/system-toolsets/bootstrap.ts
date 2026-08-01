@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdir, open, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { createLogger } from '@bendyline/gezel';
+import { HttpStatusError, createLogger, retryTransient } from '@bendyline/gezel';
 import {
   extractNpmPackageTarball,
   publishStagedNpmInstall,
@@ -28,6 +28,10 @@ const MAX_PACKUMENT_BYTES = 5 * 1024 * 1024;
 const MAX_TARBALL_BYTES = 100 * 1024 * 1024;
 const REGISTRY_TIMEOUT_MS = 30_000;
 const DOWNLOAD_TIMEOUT_MS = 2 * 60_000;
+/** Transient-fault retries for the registry read and the tarball fetch. The
+ * tarball opens its destination with 'wx' and unlinks on failure, so a repeat
+ * attempt starts from a clean slate. */
+const NETWORK_ATTEMPTS = 3;
 
 export interface SystemBootstrapOptions {
   home: string;
@@ -324,71 +328,57 @@ async function installOne(
   await mkdir(staging, { recursive: true });
 
   try {
-    const packumentUrl = `https://registry.npmjs.org/${encodePath(entry.pkg)}`;
-    const packument = await fetchBounded(packumentUrl, REGISTRY_TIMEOUT_MS);
-    try {
-      if (!packument.response.ok) {
-        throw new Error(`registry HTTP ${packument.response.status} for ${entry.pkg}`);
-      }
-      if (new URL(packument.response.url).origin !== 'https://registry.npmjs.org') {
-        throw new Error('registry metadata redirected to an untrusted origin');
-      }
-      const body = (await readBoundedJson(packument.response, MAX_PACKUMENT_BYTES)) as {
-        versions?: Record<string, { dist?: { tarball?: string; integrity?: string } }>;
-      };
-      const dist = body.versions?.[entry.version]?.dist;
-      if (!dist?.tarball) {
-        throw new Error(`version ${entry.version} of ${entry.pkg} missing from packument`);
-      }
-      if (dist.integrity && dist.integrity !== entry.integrity) {
-        throw new Error(
-          `integrity mismatch for ${entry.pkg}@${entry.version}: manifest=${entry.integrity} registry=${dist.integrity}`,
-        );
-      }
+    const dist = await retryTransient(() => resolvePinnedDist(entry), {
+      attempts: NETWORK_ATTEMPTS,
+      label: `${entry.pkg}@${entry.version} packument`,
+      onRetry: (info) =>
+        logger?.info?.(
+          `[system-toolsets] registry read for ${entry.pkg} failed (${info.reason}); retrying in ${info.delayMs}ms`,
+        ),
+    });
 
-      const tarball = join(staging, 'package.tgz');
-      await downloadWithIntegrity(dist.tarball, tarball, entry.integrity);
-      const pkgDir = await extractNpmPackageTarball({
-        tarballPath: tarball,
-        destination: staging,
-        expectedName: entry.pkg,
-        expectedVersion: entry.version,
-      });
-      await rm(tarball, { force: true });
+    const tarball = join(staging, 'package.tgz');
+    await retryTransient(() => downloadWithIntegrity(dist.tarball, tarball, entry.integrity), {
+      attempts: NETWORK_ATTEMPTS,
+      label: `${entry.pkg}@${entry.version} tarball`,
+      onRetry: (info) =>
+        logger?.info?.(
+          `[system-toolsets] tarball download for ${entry.pkg} failed (${info.reason}); retrying in ${info.delayMs}ms`,
+        ),
+    });
+    const pkgDir = await extractNpmPackageTarball({
+      tarballPath: tarball,
+      destination: staging,
+      expectedName: entry.pkg,
+      expectedVersion: entry.version,
+    });
+    await rm(tarball, { force: true });
 
-      // System packages use the reviewed lockfile and never auto-run package
-      // install hooks. This does not affect user-approved npm/package commands.
-      const pkgJsonPath = join(pkgDir, 'package.json');
-      const installedPkg = JSON.parse(await readFile(pkgJsonPath, 'utf8')) as {
-        devDependencies?: Record<string, string>;
-        scripts?: Record<string, string>;
-        [key: string]: unknown;
-      };
-      const lockfile = SYSTEM_LOCKFILES[entry.toolsetId];
-      if (!lockfile) {
-        throw new Error(
-          `system-toolset ${entry.toolsetId} has no committed lockfile in SYSTEM_LOCKFILES`,
-        );
-      }
-      if (installedPkg.devDependencies) delete installedPkg.devDependencies;
-      if (installedPkg.scripts) delete installedPkg.scripts;
-      await writeFile(pkgJsonPath, `${JSON.stringify(installedPkg, null, 2)}\n`);
-      await writeFile(join(pkgDir, 'pnpm-lock.yaml'), lockfile);
-
-      logger?.info?.(`[system-toolsets] running pnpm install --prod for ${entry.toolsetId}`);
-      const pnpm = resolvePnpmCommand([
-        'install',
-        '--prod',
-        '--frozen-lockfile',
-        '--ignore-scripts',
-      ]);
-      await run(pnpm, pkgDir);
-
-      await publishStagedNpmInstall(staging, target, backup);
-      return { installPath: join(target, 'package') };
-    } finally {
-      packument.dispose();
+    // System packages use the reviewed lockfile and never auto-run package
+    // install hooks. This does not affect user-approved npm/package commands.
+    const pkgJsonPath = join(pkgDir, 'package.json');
+    const installedPkg = JSON.parse(await readFile(pkgJsonPath, 'utf8')) as {
+      devDependencies?: Record<string, string>;
+      scripts?: Record<string, string>;
+      [key: string]: unknown;
+    };
+    const lockfile = SYSTEM_LOCKFILES[entry.toolsetId];
+    if (!lockfile) {
+      throw new Error(
+        `system-toolset ${entry.toolsetId} has no committed lockfile in SYSTEM_LOCKFILES`,
+      );
     }
+    if (installedPkg.devDependencies) delete installedPkg.devDependencies;
+    if (installedPkg.scripts) delete installedPkg.scripts;
+    await writeFile(pkgJsonPath, `${JSON.stringify(installedPkg, null, 2)}\n`);
+    await writeFile(join(pkgDir, 'pnpm-lock.yaml'), lockfile);
+
+    logger?.info?.(`[system-toolsets] running pnpm install --prod for ${entry.toolsetId}`);
+    const pnpm = resolvePnpmCommand(['install', '--prod', '--frozen-lockfile', '--ignore-scripts']);
+    await run(pnpm, pkgDir);
+
+    await publishStagedNpmInstall(staging, target, backup);
+    return { installPath: join(target, 'package') };
   } catch (err) {
     await rm(staging, { recursive: true, force: true }).catch(() => {});
     throw err;
@@ -397,6 +387,44 @@ async function installOne(
 
 function encodePath(pkg: string): string {
   return pkg.replace('/', '%2f');
+}
+
+/**
+ * Read the registry packument and return the pinned version's `dist` block.
+ * Split out of `installOne` so the whole read — fetch, origin check, bounded
+ * parse — can be retried as one unit on a transient fault.
+ */
+async function resolvePinnedDist(
+  entry: PinnedSystemToolset,
+): Promise<{ tarball: string; integrity?: string }> {
+  const packumentUrl = `https://registry.npmjs.org/${encodePath(entry.pkg)}`;
+  const packument = await fetchBounded(packumentUrl, REGISTRY_TIMEOUT_MS);
+  try {
+    if (!packument.response.ok) {
+      throw new HttpStatusError(
+        packument.response.status,
+        `registry HTTP ${packument.response.status} for ${entry.pkg}`,
+      );
+    }
+    if (new URL(packument.response.url).origin !== 'https://registry.npmjs.org') {
+      throw new Error('registry metadata redirected to an untrusted origin');
+    }
+    const body = (await readBoundedJson(packument.response, MAX_PACKUMENT_BYTES)) as {
+      versions?: Record<string, { dist?: { tarball?: string; integrity?: string } }>;
+    };
+    const dist = body.versions?.[entry.version]?.dist;
+    if (!dist?.tarball) {
+      throw new Error(`version ${entry.version} of ${entry.pkg} missing from packument`);
+    }
+    if (dist.integrity && dist.integrity !== entry.integrity) {
+      throw new Error(
+        `integrity mismatch for ${entry.pkg}@${entry.version}: manifest=${entry.integrity} registry=${dist.integrity}`,
+      );
+    }
+    return { tarball: dist.tarball, ...(dist.integrity ? { integrity: dist.integrity } : {}) };
+  } finally {
+    packument.dispose();
+  }
 }
 
 async function downloadWithIntegrity(url: string, dest: string, integrity: string): Promise<void> {
@@ -414,7 +442,10 @@ async function downloadWithIntegrity(url: string, dest: string, integrity: strin
       throw new Error('tarball download redirected to an insecure origin');
     }
     if (!request.response.ok || !request.response.body) {
-      throw new Error(`tarball HTTP ${request.response.status} from ${url}`);
+      throw new HttpStatusError(
+        request.response.status,
+        `tarball HTTP ${request.response.status} from ${url}`,
+      );
     }
     const declared = Number(request.response.headers.get('content-length'));
     if (Number.isFinite(declared) && declared > MAX_TARBALL_BYTES) {
