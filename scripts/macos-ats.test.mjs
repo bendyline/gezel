@@ -54,54 +54,63 @@ test('the release job verifies the shipped plist, not just the source config', (
   );
 });
 
-test('the gate accepts a narrowed plist and rejects a blanket one', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'gezel-ats-'));
-  try {
-    const write = (ats) => {
-      const path = join(dir, 'Info.plist');
-      writeFileSync(path, JSON.stringify({ CFBundleIdentifier: 'com.example', ...ats }));
-      execFileSync('/usr/bin/plutil', ['-convert', 'xml1', path]);
-      return path;
-    };
-    const loopback = {
-      '127.0.0.1': { NSTemporaryExceptionAllowsInsecureHTTPLoads: true },
-      localhost: { NSTemporaryExceptionAllowsInsecureHTTPLoads: true },
-    };
+// Both the fixture writer and the gate itself shell out to `plutil`, which
+// only exists on macOS. The gate runs on the macOS release runner; the three
+// tests above are plain file reads and stay platform-independent.
+test(
+  'the gate accepts a narrowed plist and rejects a blanket one',
+  {
+    skip: process.platform !== 'darwin',
+  },
+  () => {
+    const dir = mkdtempSync(join(tmpdir(), 'gezel-ats-'));
+    try {
+      const write = (ats) => {
+        const path = join(dir, 'Info.plist');
+        writeFileSync(path, JSON.stringify({ CFBundleIdentifier: 'com.example', ...ats }));
+        execFileSync('/usr/bin/plutil', ['-convert', 'xml1', path]);
+        return path;
+      };
+      const loopback = {
+        '127.0.0.1': { NSTemporaryExceptionAllowsInsecureHTTPLoads: true },
+        localhost: { NSTemporaryExceptionAllowsInsecureHTTPLoads: true },
+      };
 
-    const good = write({
-      NSAppTransportSecurity: {
-        NSAllowsArbitraryLoads: false,
-        NSAllowsLocalNetworking: true,
-        NSExceptionDomains: loopback,
-      },
-    });
-    assert.deepEqual(verifyAts(good).problems, []);
+      const good = write({
+        NSAppTransportSecurity: {
+          NSAllowsArbitraryLoads: false,
+          NSAllowsLocalNetworking: true,
+          NSExceptionDomains: loopback,
+        },
+      });
+      assert.deepEqual(verifyAts(good).problems, []);
 
-    const blanket = write({
-      NSAppTransportSecurity: {
-        NSAllowsArbitraryLoads: true,
-        NSExceptionDomains: loopback,
-      },
-    });
-    assert.match(verifyAts(blanket).problems.join('\n'), /NSAllowsArbitraryLoads is true/);
+      const blanket = write({
+        NSAppTransportSecurity: {
+          NSAllowsArbitraryLoads: true,
+          NSExceptionDomains: loopback,
+        },
+      });
+      assert.match(verifyAts(blanket).problems.join('\n'), /NSAllowsArbitraryLoads is true/);
 
-    // A dotted domain key must survive plutil's keypath parsing — `127.0.0.1`
-    // reads as four nested keys unless the dots are escaped, which produced a
-    // false "missing" report before the gate escaped them.
-    const missingLoopback = write({
-      NSAppTransportSecurity: {
-        NSAllowsArbitraryLoads: false,
-        NSExceptionDomains: { localhost: {} },
-      },
-    });
-    const problems = verifyAts(missingLoopback).problems.join('\n');
-    assert.match(problems, /missing 127\.0\.0\.1/);
-    assert.doesNotMatch(problems, /missing localhost/);
+      // A dotted domain key must survive plutil's keypath parsing — `127.0.0.1`
+      // reads as four nested keys unless the dots are escaped, which produced a
+      // false "missing" report before the gate escaped them.
+      const missingLoopback = write({
+        NSAppTransportSecurity: {
+          NSAllowsArbitraryLoads: false,
+          NSExceptionDomains: { localhost: {} },
+        },
+      });
+      const problems = verifyAts(missingLoopback).problems.join('\n');
+      assert.match(problems, /missing 127\.0\.0\.1/);
+      assert.doesNotMatch(problems, /missing localhost/);
 
-    // No ATS block at all is the strict default; nothing to complain about.
-    const none = write({});
-    assert.deepEqual(verifyAts(none).problems, []);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
+      // No ATS block at all is the strict default; nothing to complain about.
+      const none = write({});
+      assert.deepEqual(verifyAts(none).problems, []);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  },
+);

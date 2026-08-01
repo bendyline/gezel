@@ -12,6 +12,7 @@ import type { ChatManager } from '../chat/manager.js';
 import { effectiveEngineRelease, isEnginePinned } from '../engines/native-manifest.js';
 import { KNOWN_ENGINES } from '../engines/registry.js';
 import type { Store } from '../fs/store.js';
+import { resolveDefaultProviderName } from '../providers/default-provider.js';
 import { readLlamaCppBuildMetadata } from '../providers/llama-cpp/build-metadata.js';
 import {
   type LlamaDevice,
@@ -142,7 +143,7 @@ export async function collectSystemDiagnostics(
     collectLlamaBuild(),
   ]);
 
-  const defaultProvider = config?.provider ?? 'copilot';
+  const defaultProvider = resolveDefaultProviderName(config);
   const defaultModel = config?.defaultModel?.[defaultProvider];
 
   return {

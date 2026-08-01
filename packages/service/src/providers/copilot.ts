@@ -158,7 +158,12 @@ export class CopilotProvider implements LLMProvider {
 
   async initialize(): Promise<void> {
     if (this.client) return;
-    const mod = await this.loadSdk();
+    let mod: unknown;
+    try {
+      mod = await this.loadSdk();
+    } catch (err) {
+      throw translateCopilotSdkMissingError(err);
+    }
     const CopilotClient = (mod as Record<string, unknown>).CopilotClient as new (
       opts?: Record<string, unknown>,
     ) => CopilotClientHandle;
@@ -821,6 +826,34 @@ function translateCopilotStartError(err: unknown, hasToken: boolean): Error {
     return wrapped;
   }
   const wrapped = new Error(stripped) as Error & { isActionable?: boolean };
+  return wrapped;
+}
+
+/**
+ * The Copilot SDK is an on-demand system toolset, so an install where the
+ * user has never enabled Copilot has nothing at `sdkEntryPath` *and* nothing
+ * under the bare specifier — it's a devDependency, stripped from the shipped
+ * bundle by `pnpm deploy --prod`. Node's raw `ERR_MODULE_NOT_FOUND` names a
+ * path inside `~/.gezel/system-toolsets/` and tells the user nothing about
+ * what to do.
+ *
+ * `.isActionable = true` is load-bearing: without it `ChatManager.ensureProvider`
+ * rewrites this into "copilot provider failed to start: … check your
+ * credentials", which points at entirely the wrong problem.
+ */
+function translateCopilotSdkMissingError(err: unknown): Error {
+  const raw = err instanceof Error ? err.message : String(err);
+  const code = (err as NodeJS.ErrnoException | undefined)?.code;
+  const looksMissing =
+    code === 'ERR_MODULE_NOT_FOUND' ||
+    code === 'MODULE_NOT_FOUND' ||
+    /Cannot find (module|package)/i.test(raw);
+  if (!looksMissing) return err instanceof Error ? err : new Error(raw);
+  const wrapped = new Error(
+    "GitHub Copilot isn't installed on this device yet. Open Settings → GitHub Copilot " +
+      'and choose Install, then try again.',
+  ) as Error & { isActionable?: boolean };
+  wrapped.isActionable = true;
   return wrapped;
 }
 

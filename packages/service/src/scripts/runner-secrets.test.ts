@@ -34,6 +34,10 @@ beforeEach(async () => {
   home = await mkdtemp(join(tmpdir(), 'gezel-runner-secrets-'));
   store = new Store({ home });
   await store.ensureLayout();
+  // This suite injects a mock under the 'copilot' key. Pin it as the default
+  // too — otherwise routing falls through to the platform default (an
+  // on-device engine) and the injected mock is never reached.
+  await store.writeConfig({ provider: 'copilot' });
   await store.writeConfig({ securityPolicy: securityPolicyForLevel('free') });
   await store.createProject({ name: 'Default' });
   manager = new ChatManager({

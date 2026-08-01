@@ -30,7 +30,8 @@ import {
   previewGitHubRepo,
 } from '../../github/repo-preview.js';
 import { resolvePnpmCommand, spawnPnpm } from '../../packages/pnpm.js';
-import { resolveSystemLibraryPath } from '../../system-toolsets/resolve.js';
+import { resolveCopilotAvailability } from '../../providers/copilot-availability.js';
+import { resolveInstalledSystemLibrary } from '../../system-toolsets/resolve.js';
 import { collectSystemDiagnosticsCached } from '../../system/diagnostics.js';
 import { sampleDarwinGezelProcessMemoryCached } from '../../system/gezel-process-memory.js';
 import {
@@ -139,6 +140,21 @@ export function systemRoutes(ctx: ServiceContext): Hono {
    * via `{ ok: false, error }` so the caller doesn't have to distinguish
    * HTTP errors from "not signed in".
    */
+  /**
+   * Whether GitHub Copilot can be used on this device, and via which rung of
+   * the resolution ladder. The single source of truth for every "should we
+   * offer Copilot?" gate in the UI.
+   *
+   * Deliberately its own endpoint rather than a field on `GET /api/config`:
+   * the config GET and PUT response whitelists have diverged, and the UI
+   * reassigns its `config` from PUT responses all over Settings. A field
+   * that only the GET emits would vanish the moment the user toggled an
+   * unrelated setting, making the Copilot option blink out mid-session.
+   */
+  app.get('/copilot-status', async (c) => {
+    return c.json(await resolveCopilotAvailability(ctx.home));
+  });
+
   app.get('/copilot-user', async (c) => {
     try {
       const status = await ctx.chat.getCopilotAuthStatus();
@@ -164,16 +180,19 @@ export function systemRoutes(ctx: ServiceContext): Hono {
    * new auth state.
    */
   app.post('/copilot-login', async (c) => {
-    const installDir = await resolveSystemLibraryPath(ctx.home, '@github/copilot-sdk');
-    if (!installDir) {
+    const installed = await resolveInstalledSystemLibrary(ctx.home, '@github/copilot-sdk');
+    if (!installed) {
+      // Nothing is going to install this in the background — the SDK is an
+      // on-demand toolset, so the only path forward is the Settings card.
       return c.json(
         {
           error:
-            "The Copilot CLI hasn't finished installing yet. Wait for the system toolsets bootstrap to complete and try again.",
+            "GitHub Copilot isn't installed on this device. Open Settings → GitHub Copilot and choose Install, then sign in.",
         },
         503,
       );
     }
+    const installDir = installed.path;
     const pnpmPath = process.env.GEZEL_PNPM_PATH;
     if (!pnpmPath) {
       return c.json(

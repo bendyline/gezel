@@ -1,5 +1,6 @@
 import { SystemDiagnosticsSchema } from '@bendyline/gezel';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { resolveDefaultProviderName } from '../providers/default-provider.js';
 import type { ModelInfo } from '../providers/types.js';
 import {
   collectSystemDiagnostics,
@@ -100,7 +101,9 @@ describe('collectSystemDiagnostics', () => {
     );
     expect(() => SystemDiagnosticsSchema.parse(result)).not.toThrow();
     expect(result.models.installed).toEqual([]);
-    expect(result.models.defaultProvider).toBe('copilot');
+    // An unreadable config still reports *a* default — the platform one,
+    // which is what a chat with no configured provider would actually use.
+    expect(result.models.defaultProvider).toBe(resolveDefaultProviderName(null));
   });
 
   it('reports the configured default provider and model', async () => {

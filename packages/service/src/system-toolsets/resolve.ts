@@ -51,3 +51,55 @@ export async function resolveSystemLibraryPath(
   }
   return root;
 }
+
+export interface InstalledSystemLibrary {
+  /** Package root (or entry path, with `withEntry`) of the version on disk. */
+  path: string;
+  /** Version per the tracking record — not necessarily the pinned one. */
+  version: string;
+  /** False when this build pins a version other than the one installed. */
+  matchesPin: boolean;
+}
+
+/**
+ * Version-tolerant sibling of {@link resolveSystemLibraryPath}: returns the
+ * install that is actually *on disk*, even when this build pins a newer one.
+ *
+ * The strict resolver's null-on-mismatch is right for eagerly-installed
+ * entries, where the boot bootstrap upgrades before anything asks. For an
+ * on-demand entry it would strand every existing user the moment the pin
+ * moves: `installDirName` embeds the version, so a bumped pin points at a
+ * directory nobody has, and Copilot would report "not installed" until each
+ * user reinstalled by hand.
+ *
+ * An SDK one release behind is strictly better than no SDK — the shapes we
+ * consume are hand-declared structural interfaces (see the top of
+ * `providers/copilot.ts`), so they don't move with the pin. Callers surface
+ * `matchesPin: false` as "update available", never as "not installed".
+ */
+export async function resolveInstalledSystemLibrary(
+  home: string,
+  toolsetId: string,
+  opts: { withEntry?: boolean } = {},
+): Promise<InstalledSystemLibrary | null> {
+  const entry = SYSTEM_TOOLSETS.find((e) => e.toolsetId === toolsetId);
+  if (!entry || entry.kind !== 'library') return null;
+
+  const tracking = await readSystemTracking(home);
+  const installed = tracking.toolsets[toolsetId];
+  if (!installed) return null;
+
+  const root = join(
+    systemToolsetsInstallDir(home),
+    installDirName({ pkg: entry.pkg, version: installed.version }),
+    'package',
+  );
+  if (!existsSync(root)) return null;
+
+  const path = opts.withEntry && entry.entry ? join(root, entry.entry) : root;
+  return {
+    path,
+    version: installed.version,
+    matchesPin: installed.version === entry.version && installed.integrity === entry.integrity,
+  };
+}

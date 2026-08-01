@@ -45,6 +45,7 @@ import type { ReportActionManager } from '../report-actions/report-action-manage
 import type { ScriptRunner } from '../scripts/runner.js';
 import type { SearchService } from '../search/search-service.js';
 import type { SecretStore } from '../secrets/types.js';
+import type { SystemToolsetInstallRegistry } from '../system-toolsets/install-registry.js';
 import type { SystemStatusBus } from '../system-toolsets/status-bus.js';
 import type { SystemIdleState } from '../system/idle-state.js';
 import type { TaskManager } from '../tasks/manager.js';
@@ -126,6 +127,14 @@ export interface ServiceContext {
    * {@link imagePulls}. See [engines/registry.ts](../engines/registry.ts).
    */
   engineBinaries: EngineBinaryRegistry;
+  /**
+   * Installs `onDemand` system toolsets (today only the GitHub Copilot SDK)
+   * when the user asks, with the same background-job + SSE lifecycle as
+   * {@link engineBinaries}. Distinct from {@link systemStatus}, which tracks
+   * the eager boot install and must not move for a user-triggered one. See
+   * [system-toolsets/install-registry.ts](../system-toolsets/install-registry.ts).
+   */
+  systemToolsetInstalls: SystemToolsetInstallRegistry;
   /**
    * Speech-to-text provider manager. Holds a lazily-built underlying
    * provider (whisper.cpp / mock). Same lifecycle pattern as

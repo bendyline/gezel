@@ -25,6 +25,7 @@ import { TabErrorBoundary } from './components/TabErrorBoundary.js';
 import { TitlebarSearch } from './components/TitlebarSearch.js';
 import { type RecentTabInput, tabKey, toRecentTab } from './components/recent-tabs.js';
 import { EmbeddedChat } from './embedded/EmbeddedChat.js';
+import { UI_FALLBACK_PROVIDER } from './provider-default.js';
 import { requestSettingsSection } from './settings-nav.js';
 import { streamSharedAllChatEvents } from './shared-chat-events.js';
 import { syncSidebarSideFromConfig } from './sidebar-side.js';
@@ -211,7 +212,7 @@ function FullApp() {
       .getConfig()
       .then((cfg) => {
         setEngagementMode((cfg.aiEngagementMode ?? 'proactive') as EngagementMode);
-        setProvider(cfg.provider ?? 'copilot');
+        setProvider(cfg.provider ?? UI_FALLBACK_PROVIDER);
       })
       .catch(() => {});
     api
@@ -378,7 +379,7 @@ function FullApp() {
     // EngineStatusPill — picks it up by polling.
     api
       .getConfig()
-      .then((cfg) => setProvider(cfg.provider ?? 'copilot'))
+      .then((cfg) => setProvider(cfg.provider ?? UI_FALLBACK_PROVIDER))
       .catch(() => {});
   }, []);
 

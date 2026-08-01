@@ -2897,6 +2897,104 @@ export const CopilotLoginEventSchema = z.union([
 ]);
 export type CopilotLoginEvent = z.infer<typeof CopilotLoginEventSchema>;
 
+/**
+ * Progress from a user-triggered on-demand system-toolset install
+ * (`POST /api/system-toolsets/:toolsetId/install`).
+ *
+ * Deliberately separate from {@link SystemBootstrapStatusSchema}: that one
+ * is boot health, a single global phase with no job identity. This one
+ * belongs to one install the user asked for, and an in-flight copy of it
+ * must never move the Home health pill.
+ *
+ * `log` carries raw pnpm output for the details pane — chunk-sized, not
+ * necessarily one line each.
+ */
+export const SystemToolsetInstallEventSchema = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('phase'),
+    phase: z.enum(['resolving', 'downloading', 'extracting', 'installing-deps', 'publishing']),
+  }),
+  z.object({
+    type: z.literal('progress'),
+    bytesWritten: z.number().nonnegative(),
+    /** 0 when the registry sent no `content-length`. */
+    totalBytes: z.number().nonnegative(),
+  }),
+  z.object({
+    type: z.literal('retrying'),
+    attempt: z.number().int().positive(),
+    maxAttempts: z.number().int().positive(),
+    delayMs: z.number().nonnegative(),
+    reason: z.string(),
+  }),
+  z.object({ type: z.literal('log'), line: z.string() }),
+  z.object({ type: z.literal('done'), installPath: z.string(), version: z.string() }),
+  z.object({ type: z.literal('error'), error: z.string() }),
+]);
+export type SystemToolsetInstallEvent = z.infer<typeof SystemToolsetInstallEventSchema>;
+
+/** Phases an on-demand system-toolset install moves through, in order. */
+export type SystemToolsetInstallPhase = Extract<
+  SystemToolsetInstallEvent,
+  { type: 'phase' }
+>['phase'];
+
+/**
+ * Server-owned snapshot of one on-demand install, replayed to every new
+ * subscriber so a late SSE connection doesn't render a blank progress bar.
+ */
+export const SystemToolsetInstallSnapshotSchema = z.object({
+  toolsetId: z.string(),
+  version: z.string(),
+  startedAt: z.string(),
+  phase: z.enum(['resolving', 'downloading', 'extracting', 'installing-deps', 'publishing']),
+  bytesWritten: z.number().nonnegative(),
+  totalBytes: z.number().nonnegative(),
+  retrying: z
+    .object({
+      attempt: z.number().int().positive(),
+      maxAttempts: z.number().int().positive(),
+      delayMs: z.number().nonnegative(),
+      reason: z.string(),
+    })
+    .optional(),
+  /** Tail of the pnpm output, capped so replay stays cheap. */
+  log: z.array(z.string()),
+  finished: z.boolean(),
+  error: z.string().optional(),
+  installPath: z.string().optional(),
+});
+export type SystemToolsetInstallSnapshot = z.infer<typeof SystemToolsetInstallSnapshotSchema>;
+
+/**
+ * Whether GitHub Copilot can be used on this device, and how we got there.
+ *
+ * The Copilot SDK is an on-demand system toolset, so "is it available?" is a
+ * ladder, not a boolean on disk: an explicit `COPILOT_CLI_PATH`, then our own
+ * managed install, then a Copilot CLI the user installed themselves. The last
+ * rung is why this exists — someone who ran `npm i -g @github/copilot` must
+ * never be offered a second copy.
+ */
+export const CopilotAvailabilitySchema = z.object({
+  /** The single boolean every "should we offer Copilot?" gate reads. */
+  available: z.boolean(),
+  /** Which rung answered, or null when none did. */
+  source: z.enum(['env', 'managed', 'path']).nullable(),
+  /** Our managed install specifically, independent of the other rungs. */
+  managed: z.enum(['current', 'outdated', 'absent']),
+  /** Version on disk, when `managed !== 'absent'`. */
+  installedVersion: z.string().optional(),
+  /** Version this build pins. */
+  pinnedVersion: z.string(),
+  /** Package root of the managed install, for the `copilot login` hint. */
+  installDir: z.string().optional(),
+  /** Path of a CLI found via `COPILOT_CLI_PATH` or PATH, for display. */
+  cliPath: z.string().optional(),
+  /** True when a managed install exists but this build pins a different version. */
+  updateAvailable: z.boolean(),
+});
+export type CopilotAvailability = z.infer<typeof CopilotAvailabilitySchema>;
+
 export const ListProjectsResponseSchema = z.object({
   projects: z.array(
     ProjectSchema.extend({

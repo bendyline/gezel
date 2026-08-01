@@ -47,6 +47,7 @@ import type {
   CodeReviewResponse,
   CompleteStepRequest,
   CompleteStepResponse,
+  CopilotAvailability,
   CopyArtifactToWorkspaceRequest,
   CopyArtifactToWorkspaceResponse,
   Craftbook,
@@ -280,6 +281,8 @@ import type {
   SuggestedWorkResponse,
   SystemBootstrapStatus,
   SystemDiagnostics,
+  SystemToolsetInstallEvent,
+  SystemToolsetInstallSnapshot,
   Task,
   TaskAssignee,
   TaskStatus,
@@ -326,6 +329,7 @@ import {
   type RecognitionPullEvent,
   RecognitionPullEventSchema,
   type RecognitionRequest,
+  SystemToolsetInstallEventSchema,
   VideoModelPullEventSchema,
 } from '@bendyline/gezel/schemas';
 import { z } from 'zod';
@@ -4299,6 +4303,59 @@ export class GezelClient {
 
   systemToolsetStatusStreamUrl(): string {
     return `${this.baseUrl}/api/system-toolsets/status/stream`;
+  }
+
+  /** In-flight (and recently-finished) on-demand system-toolset installs. */
+  listSystemToolsetInstalls(): Promise<{ installs: SystemToolsetInstallSnapshot[] }> {
+    return this.request('GET', '/api/system-toolsets/installs');
+  }
+
+  /**
+   * Install — or attach to a running install of — an on-demand system
+   * toolset. Only entries flagged `onDemand` in the pinned manifest are
+   * installable this way; today that is the GitHub Copilot SDK.
+   *
+   * The job is server-owned and survives a listener disconnect, so aborting
+   * `signal` stops watching without stopping the install. Use
+   * {@link cancelSystemToolsetInstall} to actually stop it. Resolves on the
+   * terminal `done` or `error` event.
+   */
+  async installSystemToolset(
+    toolsetId: string,
+    onEvent: (event: SystemToolsetInstallEvent) => void,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    await consumeApiSseJson({
+      ...MODEL_DOWNLOAD_SSE_POLICY,
+      url: `${this.baseUrl}/api/system-toolsets/${encodeURIComponent(toolsetId)}/install`,
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${this.token}`,
+      },
+      signal,
+      fetch: this.fetchImpl,
+      schema: SystemToolsetInstallEventSchema,
+      onEvent,
+      isTerminal: (event) => event.type === 'done' || event.type === 'error',
+      label: `System toolset install stream for "${toolsetId}"`,
+    });
+  }
+
+  cancelSystemToolsetInstall(toolsetId: string): Promise<{ aborted: boolean }> {
+    return this.request('DELETE', `/api/system-toolsets/${encodeURIComponent(toolsetId)}/install`);
+  }
+
+  /**
+   * Whether GitHub Copilot is usable on this device, and via which rung of
+   * the resolution ladder (explicit `COPILOT_CLI_PATH`, our managed install,
+   * or a CLI the user installed themselves).
+   *
+   * The gate every "should we offer Copilot?" decision in the UI reads. Note
+   * `available: true` with `managed: 'absent'` is a normal state — it means
+   * the user brought their own CLI and must not be offered a download.
+   */
+  getCopilotStatus(): Promise<CopilotAvailability> {
+    return this.request('GET', '/api/system/copilot-status');
   }
 
   getMlxRuntimeStatus(): Promise<MlxRuntimeStatus> {

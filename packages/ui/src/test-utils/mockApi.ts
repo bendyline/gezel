@@ -122,6 +122,17 @@ const DEFAULT_RESPONSES: Record<string, unknown> = {
     },
   },
   getConfig: { provider: 'mock' },
+  // Copilot is an on-demand install, so most gates read this rather than a
+  // stored token. Default to installed so tests that predate the gating keep
+  // seeing the provider offered.
+  getCopilotStatus: {
+    available: true,
+    source: 'managed',
+    managed: 'current',
+    installedVersion: '1.0.7',
+    pinnedVersion: '1.0.7',
+    updateAvailable: false,
+  },
   getChatSessionInflight: { inflight: null },
   getMemoryProfile: {
     platform: 'darwin',

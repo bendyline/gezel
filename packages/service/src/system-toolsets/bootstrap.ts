@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdir, open, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import type { SystemToolsetInstallEvent } from '@bendyline/gezel';
 import { HttpStatusError, createLogger, retryTransient } from '@bendyline/gezel';
 import {
   extractNpmPackageTarball,
@@ -10,7 +11,7 @@ import {
 } from '@bendyline/gezel-catalog';
 import { systemToolsetsInstallDir } from '@bendyline/gezel/paths';
 import type { Store } from '../fs/store.js';
-import { resolvePnpmCommand, spawnPnpm } from '../packages/pnpm.js';
+import { type PnpmResult, runPnpm } from '../packages/pnpm.js';
 import { SYSTEM_LOCKFILES } from './locks.js';
 import {
   CHROMIUM_REVISION,
@@ -32,6 +33,9 @@ const DOWNLOAD_TIMEOUT_MS = 2 * 60_000;
  * tarball opens its destination with 'wx' and unlinks on failure, so a repeat
  * attempt starts from a clean slate. */
 const NETWORK_ATTEMPTS = 3;
+/** Progress-emit throttle for the tarball download. */
+const PROGRESS_INTERVAL_BYTES = 256 * 1024;
+const PROGRESS_INTERVAL_MS = 200;
 
 export interface SystemBootstrapOptions {
   home: string;
@@ -55,7 +59,11 @@ export interface SystemBootstrapOptions {
  * Bring the `~/.gezel/system-toolsets/` tree in line with the shipped
  * `SYSTEM_TOOLSETS` manifest. Idempotent — safe to call on every boot.
  *
- * For each entry in the manifest:
+ * Only *eager* entries are handled here. Entries flagged `onDemand` are
+ * skipped entirely and installed by `SystemToolsetInstallRegistry` when the
+ * user asks for them.
+ *
+ * For each eager entry in the manifest:
  *   1. Check `system-toolsets.json` — does the tracking record already
  *      match this version + integrity?
  *   2. If not, fetch the tarball, verify integrity, extract, install
@@ -92,10 +100,17 @@ export async function runSystemBootstrap(opts: SystemBootstrapOptions): Promise<
     return;
   }
 
+  // On-demand entries are installed by `SystemToolsetInstallRegistry` when
+  // the user asks, never here. Derived AFTER the placeholder check above so
+  // a manifest whose only real entry is on-demand still reports "pinned"
+  // rather than `setup-incomplete` — that check answers "is this build
+  // pinned?", which on-demand doesn't change.
+  const eager = real.filter((e) => e.onDemand !== true);
+
   const tracking = await readSystemTracking(home);
 
-  // Install / refresh each manifest entry.
-  for (const entry of real) {
+  // Install / refresh each eager manifest entry.
+  for (const entry of eager) {
     const existing = tracking.toolsets[entry.toolsetId];
     const satisfied =
       existing && existing.version === entry.version && existing.integrity === entry.integrity;
@@ -158,7 +173,7 @@ export async function runSystemBootstrap(opts: SystemBootstrapOptions): Promise<
 
     statusBus.publish({ phase: 'installing-toolsets', currentToolset: entry.toolsetId });
     try {
-      const { installPath } = await installOne(home, entry, logger);
+      const { installPath } = await installOne(home, entry, logger, existing?.version);
       const trackingEntry: SystemTrackingEntry = {
         toolsetId: entry.toolsetId,
         version: entry.version,
@@ -210,7 +225,7 @@ export async function runSystemBootstrap(opts: SystemBootstrapOptions): Promise<
   }
 
   // Post-install hooks. Only `playwright-chromium` today.
-  for (const entry of real) {
+  for (const entry of eager) {
     if (entry.postInstall !== 'playwright-chromium') continue;
     const installed = await store.listInstalledToolsets({ kind: 'system' });
     const rec = installed.find((t) => t.toolsetId === entry.toolsetId);
@@ -314,11 +329,91 @@ interface InstallOneResult {
   installPath: string;
 }
 
-async function installOne(
+export interface InstallSystemToolsetOptions {
+  signal?: AbortSignal;
+  logger?: SystemBootstrapOptions['logger'];
+  /**
+   * The version currently recorded in the tracking file, when this install
+   * is an upgrade. Install directories are version-named, so a new version
+   * publishes *beside* its predecessor rather than over it — pass this and
+   * the old tree gets reaped.
+   */
+  previousVersion?: string;
+}
+
+/**
+ * Turn a callback-driven async operation into a generator of its callback
+ * payloads.
+ *
+ * `start` gets an `emit` it may call any number of times; the generator
+ * yields each payload as it arrives and finally returns (or rethrows) what
+ * the operation settled with. Without this, awaiting a long operation like
+ * the tarball download would buffer every progress event until it finished
+ * — which is precisely when nobody needs them any more.
+ */
+async function* pump<E, R>(
+  start: (emit: (e: E) => void) => Promise<R>,
+): AsyncGenerator<E, R, void> {
+  const queue: E[] = [];
+  let wake: (() => void) | null = null;
+  const nudge = () => {
+    const w = wake;
+    wake = null;
+    w?.();
+  };
+
+  let settled = false;
+  let failed = false;
+  let result!: R;
+  let failure: unknown;
+  // Never rejects — a rejection here would become an unhandled rejection on
+  // the `Promise.race` below, since the race is re-entered each loop.
+  const tracked = start((e) => {
+    queue.push(e);
+    nudge();
+  }).then(
+    (r) => {
+      result = r;
+      settled = true;
+      nudge();
+    },
+    (err) => {
+      failure = err;
+      failed = true;
+      settled = true;
+      nudge();
+    },
+  );
+
+  while (true) {
+    while (queue.length) yield queue.shift() as E;
+    if (settled) {
+      if (failed) throw failure;
+      return result;
+    }
+    await Promise.race([
+      tracked,
+      new Promise<void>((resolve) => {
+        wake = resolve;
+      }),
+    ]);
+  }
+}
+
+/**
+ * Install one pinned system-toolset, yielding progress as it goes.
+ *
+ * The eager boot path drains this through {@link installOne} and ignores
+ * every event; the on-demand path (`SystemToolsetInstallRegistry`) forwards
+ * them to the UI. One implementation, so an on-demand install is provably
+ * the same install the bootstrap would have run.
+ */
+export async function* installSystemToolsetStreaming(
   home: string,
   entry: PinnedSystemToolset,
-  logger?: SystemBootstrapOptions['logger'],
-): Promise<InstallOneResult> {
+  opts: InstallSystemToolsetOptions = {},
+): AsyncGenerator<SystemToolsetInstallEvent, InstallOneResult, void> {
+  const { signal, logger } = opts;
   const root = systemToolsetsInstallDir(home);
   const target = join(root, installDirName(entry));
   const staging = `${target}.staging-${process.pid}-${randomUUID()}`;
@@ -328,24 +423,46 @@ async function installOne(
   await mkdir(staging, { recursive: true });
 
   try {
-    const dist = await retryTransient(() => resolvePinnedDist(entry), {
-      attempts: NETWORK_ATTEMPTS,
-      label: `${entry.pkg}@${entry.version} packument`,
-      onRetry: (info) =>
-        logger?.info?.(
-          `[system-toolsets] registry read for ${entry.pkg} failed (${info.reason}); retrying in ${info.delayMs}ms`,
-        ),
-    });
+    yield { type: 'phase', phase: 'resolving' };
+    const dist = yield* pump<SystemToolsetInstallEvent, { tarball: string }>((emit) =>
+      retryTransient(() => resolvePinnedDist(entry), {
+        attempts: NETWORK_ATTEMPTS,
+        label: `${entry.pkg}@${entry.version} packument`,
+        ...(signal ? { signal } : {}),
+        onRetry: (info) => {
+          logger?.info?.(
+            `[system-toolsets] registry read for ${entry.pkg} failed (${info.reason}); retrying in ${info.delayMs}ms`,
+          );
+          emit({ type: 'retrying', ...info });
+        },
+      }),
+    );
 
+    yield { type: 'phase', phase: 'downloading' };
     const tarball = join(staging, 'package.tgz');
-    await retryTransient(() => downloadWithIntegrity(dist.tarball, tarball, entry.integrity), {
-      attempts: NETWORK_ATTEMPTS,
-      label: `${entry.pkg}@${entry.version} tarball`,
-      onRetry: (info) =>
-        logger?.info?.(
-          `[system-toolsets] tarball download for ${entry.pkg} failed (${info.reason}); retrying in ${info.delayMs}ms`,
-        ),
-    });
+    yield* pump<SystemToolsetInstallEvent, void>((emit) =>
+      retryTransient(
+        () =>
+          downloadWithIntegrity(dist.tarball, tarball, entry.integrity, {
+            ...(signal ? { signal } : {}),
+            onProgress: (bytesWritten, totalBytes) =>
+              emit({ type: 'progress', bytesWritten, totalBytes }),
+          }),
+        {
+          attempts: NETWORK_ATTEMPTS,
+          label: `${entry.pkg}@${entry.version} tarball`,
+          ...(signal ? { signal } : {}),
+          onRetry: (info) => {
+            logger?.info?.(
+              `[system-toolsets] tarball download for ${entry.pkg} failed (${info.reason}); retrying in ${info.delayMs}ms`,
+            );
+            emit({ type: 'retrying', ...info });
+          },
+        },
+      ),
+    );
+
+    yield { type: 'phase', phase: 'extracting' };
     const pkgDir = await extractNpmPackageTarball({
       tarballPath: tarball,
       destination: staging,
@@ -373,15 +490,69 @@ async function installOne(
     await writeFile(pkgJsonPath, `${JSON.stringify(installedPkg, null, 2)}\n`);
     await writeFile(join(pkgDir, 'pnpm-lock.yaml'), lockfile);
 
+    yield { type: 'phase', phase: 'installing-deps' };
     logger?.info?.(`[system-toolsets] running pnpm install --prod for ${entry.toolsetId}`);
-    const pnpm = resolvePnpmCommand(['install', '--prod', '--frozen-lockfile', '--ignore-scripts']);
-    await run(pnpm, pkgDir);
+    // `runPnpm` prepends `--ignore-scripts` itself — passing it here would
+    // duplicate the flag.
+    const pnpmResult = yield* pump<SystemToolsetInstallEvent, PnpmResult>((emit) =>
+      runPnpm(['install', '--prod', '--frozen-lockfile'], {
+        cwd: pkgDir,
+        ...(signal ? { signal } : {}),
+        onLine: (chunk) => emit({ type: 'log', line: chunk }),
+      }),
+    );
+    if (!pnpmResult.ok) {
+      if (signal?.aborted) throw new Error('install was cancelled');
+      const tail = pnpmResult.log.trim() ? `\n${tailLines(pnpmResult.log, 40)}` : '';
+      throw new Error(
+        `pnpm install for ${entry.toolsetId} exited with code ${pnpmResult.code}.${pnpmLaunchHint(pnpmResult)}${tail}`,
+      );
+    }
 
+    yield { type: 'phase', phase: 'publishing' };
     await publishStagedNpmInstall(staging, target, backup);
+
+    // Install dirs are version-named, so an upgrade lands beside the old
+    // tree instead of over it. Best-effort: a Windows file lock must not
+    // fail an otherwise-successful install.
+    if (opts.previousVersion && opts.previousVersion !== entry.version) {
+      const stale = join(root, installDirName({ pkg: entry.pkg, version: opts.previousVersion }));
+      await rm(stale, { recursive: true, force: true }).catch((err) => {
+        logger?.warn?.(
+          `[system-toolsets] could not remove superseded ${entry.pkg}@${opts.previousVersion}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      });
+    }
+
     return { installPath: join(target, 'package') };
   } catch (err) {
     await rm(staging, { recursive: true, force: true }).catch(() => {});
     throw err;
+  }
+}
+
+/** Last `n` non-empty lines of a log blob, for error messages. */
+function tailLines(log: string, n: number): string {
+  const lines = log.split('\n').filter((l) => l.trim().length > 0);
+  return lines.slice(-n).join('\n');
+}
+
+/** Drain {@link installSystemToolsetStreaming}, discarding progress. */
+async function installOne(
+  home: string,
+  entry: PinnedSystemToolset,
+  logger?: SystemBootstrapOptions['logger'],
+  previousVersion?: string,
+): Promise<InstallOneResult> {
+  const gen = installSystemToolsetStreaming(home, entry, {
+    ...(logger ? { logger } : {}),
+    ...(previousVersion ? { previousVersion } : {}),
+  });
+  while (true) {
+    const step = await gen.next();
+    if (step.done) return step.value;
   }
 }
 
@@ -427,14 +598,25 @@ async function resolvePinnedDist(
   }
 }
 
-async function downloadWithIntegrity(url: string, dest: string, integrity: string): Promise<void> {
+interface DownloadOptions {
+  signal?: AbortSignal;
+  /** Throttled to {@link PROGRESS_INTERVAL_MS} / {@link PROGRESS_INTERVAL_BYTES}. */
+  onProgress?: (bytesWritten: number, totalBytes: number) => void;
+}
+
+async function downloadWithIntegrity(
+  url: string,
+  dest: string,
+  integrity: string,
+  opts: DownloadOptions = {},
+): Promise<void> {
   const [algo, b64] = integrity.split('-');
   if (!algo || !b64) throw new Error(`bad integrity string: ${integrity}`);
   if (!['sha256', 'sha384', 'sha512'].includes(algo)) {
     throw new Error(`unsupported integrity algorithm: ${algo}`);
   }
   const hash = createHash(algo);
-  const request = await fetchBounded(url, DOWNLOAD_TIMEOUT_MS);
+  const request = await fetchBounded(url, DOWNLOAD_TIMEOUT_MS, opts.signal);
   const handle = await open(dest, 'wx', 0o600);
   try {
     const finalUrl = new URL(request.response.url);
@@ -451,7 +633,10 @@ async function downloadWithIntegrity(url: string, dest: string, integrity: strin
     if (Number.isFinite(declared) && declared > MAX_TARBALL_BYTES) {
       throw new Error('system toolset tarball exceeds the 100 MiB limit');
     }
+    const totalBytes = Number.isFinite(declared) && declared > 0 ? declared : 0;
     let total = 0;
+    let lastEmitAt = 0;
+    let lastEmitBytes = 0;
     const reader = request.response.body.getReader();
     try {
       while (true) {
@@ -467,7 +652,20 @@ async function downloadWithIntegrity(url: string, dest: string, integrity: strin
           const result = await handle.write(value, offset, value.byteLength - offset);
           offset += result.bytesWritten;
         }
+        // Throttled — an unthrottled emit turns a 40 MB tarball into
+        // thousands of SSE frames, each of which is a JSON encode and a
+        // socket write per subscriber.
+        const now = Date.now();
+        if (
+          total - lastEmitBytes >= PROGRESS_INTERVAL_BYTES ||
+          now - lastEmitAt >= PROGRESS_INTERVAL_MS
+        ) {
+          lastEmitBytes = total;
+          lastEmitAt = now;
+          opts.onProgress?.(total, totalBytes);
+        }
       }
+      opts.onProgress?.(total, totalBytes || total);
     } finally {
       await reader.cancel().catch(() => {});
     }
@@ -490,6 +688,7 @@ async function downloadWithIntegrity(url: string, dest: string, integrity: strin
 async function fetchBounded(
   url: string,
   timeoutMs: number,
+  signal?: AbortSignal,
 ): Promise<{ response: Response; dispose: () => void }> {
   const parsed = new URL(url);
   if (parsed.protocol !== 'https:' || parsed.username || parsed.password) {
@@ -501,11 +700,20 @@ async function fetchBounded(
     timeoutMs,
   );
   timer.unref?.();
+  const onCallerAbort = () => controller.abort(new Error('install was cancelled'));
+  if (signal) {
+    if (signal.aborted) onCallerAbort();
+    else signal.addEventListener('abort', onCallerAbort, { once: true });
+  }
+  const dispose = () => {
+    clearTimeout(timer);
+    signal?.removeEventListener('abort', onCallerAbort);
+  };
   try {
     const response = await fetch(parsed, { redirect: 'follow', signal: controller.signal });
-    return { response, dispose: () => clearTimeout(timer) };
+    return { response, dispose };
   } catch (err) {
-    clearTimeout(timer);
+    dispose();
     throw err;
   }
 }
@@ -543,38 +751,16 @@ async function readBoundedJson(response: Response, maxBytes: number): Promise<un
   }
 }
 
-function run(
-  invocation: ReturnType<typeof resolvePnpmCommand>,
-  cwd: string | undefined,
-): Promise<void> {
-  return new Promise((resolve, reject) => {
-    // `spawnPnpm` owns both Windows quoting and CREATE_NO_WINDOW. The latter
-    // is load-bearing for the machine service: an ordinary Node console
-    // process launched in non-interactive Session 0 can terminate with
-    // STATUS_DLL_INIT_FAILED (0xC0000142) before pnpm starts.
-    const child = spawnPnpm(invocation, {
-      cwd,
-      stdio: 'inherit',
-    });
-    child.on('error', (err) => {
-      // Translate the Node-level `ENOENT` into something a user (or a
-      // log reader) can actually act on.
-      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-        const pnpmEnv = process.env.GEZEL_PNPM_PATH;
-        const hint = pnpmEnv
-          ? `GEZEL_PNPM_PATH=${pnpmEnv} could not be launched; check that it exists and that GEZEL_NODE_PATH names a working Node runtime when it is a JavaScript entrypoint.`
-          : `GEZEL_PNPM_PATH is unset; the daemon's launcher did not provide a path to the bundled pnpm.`;
-        reject(new Error(`Could not run '${invocation.command}' (${err.message}). ${hint}`));
-        return;
-      }
-      reject(err);
-    });
-    child.on('exit', (code) => {
-      if (code === 0) resolve();
-      else
-        reject(
-          new Error(`${invocation.command} ${invocation.args.join(' ')} exited with code ${code}`),
-        );
-    });
-  });
+/**
+ * Explain a pnpm that could not be launched at all. `ENOENT` here means the
+ * bundled runtime the supervisor was supposed to lay down isn't where we
+ * were told it is — a deployment problem, not an install problem, and the
+ * bare Node error names neither.
+ */
+function pnpmLaunchHint(result: PnpmResult): string {
+  if (result.code !== null || !/ENOENT/.test(result.stderr)) return '';
+  const pnpmEnv = process.env.GEZEL_PNPM_PATH;
+  return pnpmEnv
+    ? ` GEZEL_PNPM_PATH=${pnpmEnv} could not be launched; check that it exists and that GEZEL_NODE_PATH names a working Node runtime when it is a JavaScript entrypoint.`
+    : " GEZEL_PNPM_PATH is unset; the daemon's launcher did not provide a path to the bundled pnpm.";
 }

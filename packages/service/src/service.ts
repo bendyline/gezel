@@ -105,6 +105,7 @@ import { CATALOG_RELEVANT_HISTORY_KINDS, SearchService } from './search/search-s
 import { openSecretStore } from './secrets/index.js';
 import { seedSecretsFromEnvFile } from './secrets/seed.js';
 import { runSystemBootstrap } from './system-toolsets/bootstrap.js';
+import { SystemToolsetInstallRegistry } from './system-toolsets/install-registry.js';
 import { SystemStatusBus } from './system-toolsets/status-bus.js';
 import { reapOrphanedGezelEngineProcesses } from './system/gezel-process-cleanup.js';
 import { SystemIdleState } from './system/idle-state.js';
@@ -524,6 +525,13 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     const { MockProvider } = await import('./providers/mock.js');
     mockProviders.push(['copilot', new MockProvider({ name: 'copilot' })]);
     mockProviders.push(['openai', new MockProvider({ name: 'openai' })]);
+    // Mock mode also skips the on-device first-run bootstrap, so nothing
+    // would otherwise write `config.provider` — and an unset provider now
+    // resolves to the platform's on-device engine, which a mock-mode home
+    // has no model for. Pin the mock so routing reaches it.
+    if (!bootConfig.provider) {
+      await store.writeConfig({ provider: 'copilot' });
+    }
     log.info('[service] GEZEL_MOCK_PROVIDER=1 — LLM calls routed to MockProvider');
   }
 
@@ -663,6 +671,10 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
       ? { signaturePolicy: bootConfig.engineSignaturePolicy }
       : {}),
   });
+
+  // User-triggered installs of `onDemand` system toolsets (the Copilot SDK).
+  // Separate from the boot bootstrap below, which only handles eager entries.
+  const systemToolsetInstalls = new SystemToolsetInstallRegistry({ home });
 
   // Preview-shim runtime errors → next-turn chat prelude. Shared between
   // the HTTP intake route and ChatManager's drain-on-send.
@@ -1708,6 +1720,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     videoProvider,
     videoPulls,
     engineBinaries,
+    systemToolsetInstalls,
     stt,
     recognition,
     tts,
@@ -2065,6 +2078,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
       imagePulls.clear();
       videoPulls.clear();
       engineBinaries.clear();
+      systemToolsetInstalls.clear();
       await imageProvider.shutdown();
       await videoProvider.shutdown();
       await stt.shutdown();

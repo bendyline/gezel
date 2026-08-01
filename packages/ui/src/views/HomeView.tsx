@@ -9,6 +9,7 @@ import gezelLogotypeUrl from '../assets/gezellogotype.png';
 import { FirstRunInstallBanner } from '../components/FirstRunInstallBanner.js';
 import { RecommendedMediaDownloads } from '../components/RecommendedMediaDownloads.js';
 import { useRoleBasedNameOnlyMode } from '../components/useRoleBasedNameOnlyMode.js';
+import { UI_FALLBACK_PROVIDER } from '../provider-default.js';
 import { SECURITY_LEVEL_PRESETS } from '../security-levels.js';
 import { requestSettingsSection } from '../settings-nav.js';
 import { useUpdateState } from '../update-state.js';
@@ -157,7 +158,7 @@ export function HomeView({
       .catch(() => {});
   }, [config?.meesterGezelId]);
 
-  const provider: Provider = config?.provider ?? 'copilot';
+  const provider: Provider = config?.provider ?? UI_FALLBACK_PROVIDER;
   // Resolve the effective default model name for the banner. For
   // llama-cpp, when the user hasn't pinned a default, the supervisor
   // falls through to the first installed model (see

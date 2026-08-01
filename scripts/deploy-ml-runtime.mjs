@@ -1,11 +1,50 @@
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { cp, mkdtemp, readFile, readdir, rm, unlink, writeFile } from 'node:fs/promises';
+import { cp, lstat, mkdtemp, readFile, readdir, rm, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 
 const exec = promisify(execFile);
+
+/**
+ * True when two paths are the very same inode. Both trees are materialized by
+ * pnpm out of one content-addressable store, so a dependency that lands in the
+ * staging deploy AND in the bundle is one hardlinked file with two names on
+ * any filesystem pnpm hardlinks into (Linux ext4). macOS clones instead, which
+ * is why this only ever fired on CI.
+ *
+ * Windows reports `ino` as 0 for every entry, so treat 0 as "unknown" rather
+ * than letting it collapse every comparison to true.
+ */
+async function isSameInode(src, dest) {
+  try {
+    const [a, b] = await Promise.all([lstat(src), lstat(dest)]);
+    return a.ino !== 0 && a.ino === b.ino && a.dev === b.dev;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Merge every top-level entry of `sourceModules` into `targetModules`.
+ *
+ * `fs.cp` rejects a same-inode pair with EINVAL ("src and dest cannot be the
+ * same"), which is exactly what the shared pnpm store produces for deps both
+ * deploys resolve. Those files are byte-identical by construction, so skipping
+ * them is the copy. Filtering per entry (rather than clearing the destination)
+ * keeps the already-deployed service tree intact — scope directories like
+ * `@types/` hold packages from both graphs.
+ */
+export async function mergeNodeModules(sourceModules, targetModules) {
+  for (const entry of await readdir(sourceModules)) {
+    await cp(join(sourceModules, entry), join(targetModules, entry), {
+      recursive: true,
+      force: true,
+      filter: async (src, dest) => !(await isSameInode(src, dest)),
+    });
+  }
+}
 
 /**
  * Merge the deployment-only Transformers/Kokoro graph into a full runtime
@@ -40,14 +79,8 @@ export async function deployMlRuntime(repoRoot, target, label) {
     if (stdout.trim()) process.stdout.write(stdout);
     if (stderr.trim()) process.stderr.write(stderr);
 
-    const sourceModules = join(staging, 'node_modules');
     const targetModules = join(target, 'node_modules');
-    for (const entry of await readdir(sourceModules)) {
-      await cp(join(sourceModules, entry), join(targetModules, entry), {
-        recursive: true,
-        force: true,
-      });
-    }
+    await mergeNodeModules(join(staging, 'node_modules'), targetModules);
 
     for (const relative of [
       ['@huggingface', 'transformers', 'package.json'],

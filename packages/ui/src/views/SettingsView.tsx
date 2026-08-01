@@ -13,6 +13,7 @@ import type {
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
 import { ConnectedAppsPanel } from '../components/ConnectedAppsPanel.js';
+import { CopilotInstallCard } from '../components/CopilotInstallCard.js';
 import { CopilotLoginCommand } from '../components/CopilotLoginCommand.js';
 import { GezelIcon } from '../components/GezelIcon.js';
 import { HealthStrip } from '../components/HealthStrip.js';
@@ -21,8 +22,10 @@ import { EffortPicker, ModelPicker } from '../components/ModelPicker.js';
 import { RemoteServersPanel } from '../components/RemoteServersPanel.js';
 import { ReportErrorLink } from '../components/ReportErrorLink.js';
 import { ToolsetsEditor } from '../components/ToolsetsEditor.js';
+import { useCopilotAvailability } from '../components/useCopilotAvailability.js';
 import { Poppetje } from '../poppetje/index.js';
 import { Select } from '../primitives/index.js';
+import { UI_FALLBACK_PROVIDER } from '../provider-default.js';
 import { takePendingSettingsSection } from '../settings-nav.js';
 import { type SidebarSide, getSidebarSide, setSidebarSide } from '../sidebar-side.js';
 import { type SystemNotice, serviceNotice, updateNotice } from '../system-notices.js';
@@ -608,7 +611,7 @@ export function SettingsView() {
       await saveNightShift({
         modelOverride: {
           ...current,
-          provider: current.provider ?? config?.provider ?? 'copilot',
+          provider: current.provider ?? config?.provider ?? UI_FALLBACK_PROVIDER,
           ...patch,
         },
       });
@@ -1020,13 +1023,14 @@ export function SettingsView() {
     [config],
   );
 
-  const provider: ProviderName = config?.provider ?? 'copilot';
+  const provider: ProviderName = config?.provider ?? UI_FALLBACK_PROVIDER;
   const nightShiftModelOverride = config?.nightShift?.modelOverride;
   const nightShiftProvider: ProviderName = nightShiftModelOverride?.provider ?? provider;
   const hasGithubToken = config?.hasGithubToken ?? false;
   const hasOpenaiKey = config?.hasOpenaiApiKey ?? false;
   const hasAnthropicKey = config?.hasAnthropicApiKey ?? false;
   const copilotUsage = usage?.providers.copilot;
+  const copilotAvailability = useCopilotAvailability();
   const openaiUsage = usage?.providers.openai;
   // The Electron bridge is authoritative when present; health keeps the
   // platform-aware navigation correct in the standalone web UI too.
@@ -1076,6 +1080,17 @@ export function SettingsView() {
     nightShiftProvider === 'ds4' ||
     detectDs4Availability({ externalBaseUrl: config?.ds4BaseUrl }).status !== 'unavailable';
 
+  // GitHub Copilot needs GitHub's proprietary CLI, which we don't ship — it's
+  // an opt-in download from the Copilot tab. Don't offer it as a provider
+  // until it can actually run. `!== false` rather than `=== true`: the hook
+  // returns null while loading, and treating that as unavailable would make
+  // the option blink out on every mount. As with ds4 above, an already-chosen
+  // Copilot stays on offer so a configured user is never stranded.
+  const showCopilotProvider =
+    provider === 'copilot' ||
+    nightShiftProvider === 'copilot' ||
+    copilotAvailability?.available !== false;
+
   const nightShiftProviderChoices: Array<{
     id: ProviderName;
     label: string;
@@ -1104,7 +1119,7 @@ export function SettingsView() {
           },
         ]
       : []),
-    { id: 'copilot', label: 'GitHub Copilot' },
+    ...(showCopilotProvider ? [{ id: 'copilot' as const, label: 'GitHub Copilot' }] : []),
     { id: 'openai', label: 'OpenAI' },
     { id: 'codex-cli', label: 'OpenAI Codex CLI' },
     { id: 'anthropic', label: 'Anthropic Claude' },
@@ -1837,9 +1852,15 @@ export function SettingsView() {
                             <Select.Value placeholder="Pick a cloud provider…" />
                           </Select.Trigger>
                           <Select.Content>
-                            <Select.Item value="copilot">
-                              Copilot{hasGithubToken ? ' ✓' : ''}
-                            </Select.Item>
+                            {/* An already-selected Copilot must keep its item
+                                even when unavailable, or Radix falls back to
+                                the placeholder and the set value looks unset. */}
+                            {(showCopilotProvider ||
+                              config?.keurmeester?.providerName === 'copilot') && (
+                              <Select.Item value="copilot">
+                                Copilot{hasGithubToken ? ' ✓' : ''}
+                              </Select.Item>
+                            )}
                             <Select.Item value="anthropic">
                               Anthropic{hasAnthropicKey ? ' ✓' : ''}
                             </Select.Item>
@@ -2005,7 +2026,7 @@ export function SettingsView() {
                 Which AI chat provider handles chat and one-shot generations. Individual gezellen
                 can override this in their detail pane.
               </p>
-              <div className="provider-switch">
+              <div className="provider-switch" data-testid="default-provider-switch">
                 <button
                   type="button"
                   className={`provider-pill${provider === onDeviceProvider ? ' provider-pill-active' : ''}`}
@@ -2034,13 +2055,15 @@ export function SettingsView() {
                     DwarfStar
                   </button>
                 )}
-                <button
-                  type="button"
-                  className={`provider-pill${provider === 'copilot' ? ' provider-pill-active' : ''}`}
-                  onClick={() => void setProvider('copilot')}
-                >
-                  GitHub Copilot
-                </button>
+                {showCopilotProvider && (
+                  <button
+                    type="button"
+                    className={`provider-pill${provider === 'copilot' ? ' provider-pill-active' : ''}`}
+                    onClick={() => void setProvider('copilot')}
+                  >
+                    GitHub Copilot
+                  </button>
+                )}
                 <button
                   type="button"
                   className={`provider-pill${provider === 'openai' ? ' provider-pill-active' : ''}`}
@@ -2323,6 +2346,14 @@ export function SettingsView() {
 
         {section === 'copilot' && (
           <>
+            {/* Installing precedes signing in, so this card comes first.
+                The tab itself is never gated on availability — it's where
+                you come to make Copilot available. */}
+            <CopilotInstallCard
+              availability={copilotAvailability}
+              onInstalled={() => void runCopilotProbe()}
+            />
+
             <section className="provider-card">
               <h3>GitHub Copilot</h3>
               <p className="muted" style={{ marginTop: 0 }}>

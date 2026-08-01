@@ -68,7 +68,9 @@ beforeEach(async () => {
   // Disable the role filter so a Developer gezel can drive tools from the
   // documents / team-management / images groups (write_document,
   // create_gezel, generate_image) that the Developer role trims by default.
-  await store.writeConfig({ toolFilterMode: 'never' });
+  // 'provider' pins the injected mock: without it, routing falls through to
+  // the platform default (an on-device engine) and the mock is never reached.
+  await store.writeConfig({ provider: 'copilot', toolFilterMode: 'never' });
 }, 20_000);
 
 afterEach(async () => {

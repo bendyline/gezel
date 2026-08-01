@@ -125,6 +125,10 @@ beforeEach(async () => {
   home = await mkdtemp(join(tmpdir(), 'gezel-mgr-test-'));
   store = new Store({ home });
   await store.ensureLayout();
+  // This suite injects a mock under the 'copilot' key. Pin it as the default
+  // too — otherwise routing falls through to the platform default (an
+  // on-device engine) and the injected mock is never reached.
+  await store.writeConfig({ provider: 'copilot' });
   await store.createGezel({ name: 'Ada', role: 'Developer' });
   await store.createProject({ name: 'Default' });
   events = new ChatEventBus();
@@ -492,6 +496,36 @@ describe('ChatManager — send + persistence', () => {
     expect(aborted.role).toBe('assistant');
     expect(aborted.synthetic).toBe('turn-aborted');
     expect(aborted.content).toBe('Partial answer the user already saw');
+  }, 20_000);
+
+  it('scrubs reasoning markup off the turn-aborted message instead of baking it into content', async () => {
+    // The salvaged buffer is RAW — the turn died before the provider's
+    // end-of-turn reasoning extraction ran. Persisting it verbatim put
+    // `<|channel>thought` framing into `content`, and this message gets
+    // replayed to the model like any other, so Gemma 4 read back its own
+    // markup and copied the pattern. Measured on MLX: 305 stray markers
+    // across 19 aborted messages, 0 across the 222 normal ones — the
+    // abort path was the only one skipping the scrub.
+    const session = await manager.createSession({ gezelId: 'ada' });
+    mock.scriptStreamThenHang('<|channel>thought\nWeighing the options.<channel|>Visible answer');
+
+    const pending = manager.send(session.id, 'go').catch(() => {
+      /* cancel surfaces as cancelled/done events */
+    });
+    await vi.waitFor(() => expect(mock.calls.some((c) => c.kind === 'send')).toBe(true), {
+      timeout: 5000,
+      interval: 10,
+    });
+    await manager.cancelInflight(session.id);
+    await pending;
+
+    const disk = await store.getSession('ada', session.id);
+    const aborted = disk!.messages.at(-1)!;
+    expect(aborted.synthetic).toBe('turn-aborted');
+    expect(aborted.content).not.toMatch(/<\|?\/?channel\|?>/);
+    expect(aborted.content).toContain('Visible answer');
+    // Scrubbed, not discarded — the prose still reaches the reasoning channel.
+    expect(aborted.reasoning ?? '').toContain('Weighing the options.');
   }, 20_000);
 
   it('does not let a late-unwinding cancelled turn steal or wipe its successor', async () => {
@@ -3103,6 +3137,10 @@ describe('ChatManager — memory extraction isolation', () => {
       const home = await mkdtemp(join(tmpdir(), `gezel-extract-${providerName}-`));
       const store = new Store({ home });
       await store.ensureLayout();
+      // This suite injects a mock under the 'copilot' key. Pin it as the default
+      // too — otherwise routing falls through to the platform default (an
+      // on-device engine) and the injected mock is never reached.
+      await store.writeConfig({ provider: 'copilot' });
       await store.createGezel({ name: 'Ada', role: 'Developer' });
       await store.createProject({ name: 'Default' });
       await store.writeConfig({ provider: providerName });
@@ -3208,6 +3246,10 @@ describe('ChatManager — context-window pressure (Ollama)', () => {
     const home = await mkdtemp(join(tmpdir(), 'gezel-ctx-test-'));
     const store = new Store({ home });
     await store.ensureLayout();
+    // This suite injects a mock under the 'copilot' key. Pin it as the default
+    // too — otherwise routing falls through to the platform default (an
+    // on-device engine) and the injected mock is never reached.
+    await store.writeConfig({ provider: 'copilot' });
     await store.createGezel({ name: 'Ada', role: 'Developer' });
     await store.createProject({ name: 'Default' });
     await store.writeConfig({ provider: 'ollama' });
@@ -3416,6 +3458,10 @@ describe('ChatManager — context-window pressure (Ollama)', () => {
     const home = await mkdtemp(join(tmpdir(), 'gezel-ctx-llama-test-'));
     const store = new Store({ home });
     await store.ensureLayout();
+    // This suite injects a mock under the 'copilot' key. Pin it as the default
+    // too — otherwise routing falls through to the platform default (an
+    // on-device engine) and the injected mock is never reached.
+    await store.writeConfig({ provider: 'copilot' });
     await store.createGezel({ name: 'Ada', role: 'Developer' });
     await store.createProject({ name: 'Default' });
     await store.writeConfig({ provider: 'llama-cpp' });
@@ -3532,6 +3578,10 @@ describe('ChatManager — context-window pressure (Ollama)', () => {
     const home = await mkdtemp(join(tmpdir(), 'gezel-loop-test-'));
     const store = new Store({ home });
     await store.ensureLayout();
+    // This suite injects a mock under the 'copilot' key. Pin it as the default
+    // too — otherwise routing falls through to the platform default (an
+    // on-device engine) and the injected mock is never reached.
+    await store.writeConfig({ provider: 'copilot' });
     await store.createGezel({ name: 'Ada', role: 'Developer' });
     await store.createProject({ name: 'Default' });
     await store.writeConfig({ provider: 'ollama' });

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { Select } from '../primitives/index.js';
+import { UI_FALLBACK_PROVIDER } from '../provider-default.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
 import {
   approvalErrorMessage,
@@ -124,7 +125,7 @@ export function ConnectedAppsPanel() {
       .getConfig()
       .then((cfg) => {
         setEndpoints(cfg.openaiEndpoints ?? {});
-        setDefaultProvider(cfg.provider ?? 'copilot');
+        setDefaultProvider(cfg.provider ?? UI_FALLBACK_PROVIDER);
         setMeesterGezelId(cfg.meesterGezelId);
       })
       .catch(() => {});

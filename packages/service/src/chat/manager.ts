@@ -110,6 +110,7 @@ import {
   CopilotProvider,
   NON_SANDBOX_EXCLUDED_MCP_TOOLS,
 } from '../providers/copilot.js';
+import { resolveDefaultProviderName } from '../providers/default-provider.js';
 import {
   extractDirectFileWorkTargetPath,
   extractExplicitFileEditTools,
@@ -133,7 +134,7 @@ import { LlamaCppProvider, createLlamaCppPatientFetch } from '../providers/llama
 import { resolveLlamaCppKvCacheType } from '../providers/llama-cpp/kv-cache-type.js';
 import { planMoeOffload } from '../providers/llama-cpp/offload-planner.js';
 import { resolveSpecDraft } from '../providers/llama-cpp/spec-draft.js';
-import { stripReasoningTags } from '../providers/local-tool-call-salvage.js';
+import { extractReasoning, stripReasoningTags } from '../providers/local-tool-call-salvage.js';
 import { McpBridgePool } from '../providers/mcp-bridge-pool.js';
 import type { OpenAIFunctionTool } from '../providers/mcp-bridge.js';
 import {
@@ -171,7 +172,7 @@ import { getPairedRemoteFetch } from '../remotes/pinned-fetch.js';
 import type { RemotesRegistry } from '../remotes/registry.js';
 import { listStdlibScripts } from '../scripts/stdlib-source.js';
 import type { SecretStore } from '../secrets/types.js';
-import { resolveSystemLibraryPath } from '../system-toolsets/resolve.js';
+import { resolveInstalledSystemLibrary } from '../system-toolsets/resolve.js';
 import {
   buildStageOneNudge,
   buildStageTwoNudge,
@@ -1947,6 +1948,40 @@ export class ChatManager {
    */
   invalidateProviderCache(providerName: string): void {
     this.cacheController?.invalidateProvider(providerName);
+  }
+
+  /**
+   * Drop one cached provider so the next {@link ensureProvider} rebuilds it
+   * against current on-disk state.
+   *
+   * The narrow counterpart to {@link resetClient}: used when a background
+   * install changes what a *single* provider would resolve to — the
+   * on-demand Copilot SDK landing in `~/.gezel/system-toolsets/` is the
+   * motivating case. `resetClient` would be disproportionate there; in its
+   * default mode it disconnects every live session on every provider and
+   * tears down the engine router, so a finished Copilot install would sever
+   * an unrelated in-flight local-model turn.
+   *
+   * Seeded providers are never evicted — they are the test/mock factory
+   * override, not a disposable cache entry.
+   *
+   * Caveat: any live session still holding this provider's client is severed
+   * by the `shutdown()` below and rebuilds on its next turn. For the
+   * install case that set is empty by construction (nothing could have been
+   * chatting on a provider that wasn't installed); for an upgrade it may not
+   * be, and that is the same tradeoff a config provider-change already makes.
+   */
+  async evictProvider(name: ProviderName): Promise<void> {
+    if (this.seededProviders.has(name)) return;
+    const provider = this.providers.get(name);
+    if (!provider) return;
+    this.providers.delete(name);
+    this.cacheController?.invalidateProvider(name);
+    try {
+      await provider.shutdown();
+    } catch {
+      /* a provider that can't shut down cleanly is still evicted */
+    }
   }
 
   /**
@@ -6911,14 +6946,33 @@ export class ChatManager {
         // and we simply omit the field). Together with the tool calls +
         // warnings already carried here, a turn cut short after committing
         // real work leaves a faithful trace instead of a blank message.
-        const salvagedContent =
+        // The stream buffer is RAW — it never went through the provider's
+        // end-of-turn `extractReasoningWithProfile` pass, because the turn
+        // never reached one. Persisting it verbatim bakes reasoning markup
+        // into `content`, and this message is replayed to the model like
+        // any other: Gemma 4 then reads back its own `<|channel>thought`
+        // framing and copies the pattern (see stripReasoningTags' docstring
+        // on self-feedback). Wild-caught on MLX — 305 stray `<|channel>`
+        // markers across 19 aborted messages, and zero across the 222
+        // normal ones, because only this path skips the scrub.
+        const rawSalvagedContent =
           snapshot?.contentText ??
           (ownsBuffers ? (this.currentTurnContentText.get(sessionId) ?? '') : '');
-        const salvagedReasoning = snapshot
+        const salvagedSplit = extractReasoning(rawSalvagedContent);
+        const salvagedContent = salvagedSplit.visible;
+        const providerReasoning = snapshot
           ? snapshot.reasoning
           : ownsBuffers
             ? this.states.get(sessionId)?.session?.getLastTurnReasoning?.()
             : undefined;
+        // Keep the trace: whatever the scrub pulled out of `content` is
+        // real reasoning prose, so it goes to the reasoning channel rather
+        // than being dropped. The provider's own capture wins when both
+        // exist — it saw the structured deltas, this only sees leftovers.
+        const salvagedReasoning =
+          providerReasoning && providerReasoning.length > 0
+            ? providerReasoning
+            : salvagedSplit.reasoning || undefined;
         const reasoningTiming = snapshot
           ? snapshot.reasoningTiming
           : ownsBuffers
@@ -8812,7 +8866,7 @@ export class ChatManager {
     ) {
       return config.nightShift.modelOverride.provider;
     }
-    return config.provider ?? 'copilot';
+    return resolveDefaultProviderName(config);
   }
 
   /**
@@ -9678,17 +9732,20 @@ export class ChatManager {
       // Prefer the `~/.gezel/system-toolsets/` install (the prod path —
       // the SDK doesn't ship inside the Electron bundle). Falls back to
       // the workspace's own devDependency when not installed yet, which
-      // keeps dev-mode happy and lets fresh packaged installs still
-      // produce a clear "not installed yet" error from the SDK probe
-      // rather than a module-resolution crash.
-      const [sdkInstallRoot, sdkEntryPath] = await Promise.all([
-        resolveSystemLibraryPath(this.home, '@github/copilot-sdk'),
-        resolveSystemLibraryPath(this.home, '@github/copilot-sdk', { withEntry: true }),
+      // keeps dev-mode happy; in a packaged build that bare import fails
+      // and `CopilotProvider.initialize` turns it into an actionable
+      // "install it in Settings" error.
+      //
+      // Version-tolerant on purpose: the SDK is an on-demand toolset, so a
+      // bumped pin must not un-install everyone who is one release behind.
+      const [sdkInstallRoot, sdkEntry] = await Promise.all([
+        resolveInstalledSystemLibrary(this.home, '@github/copilot-sdk'),
+        resolveInstalledSystemLibrary(this.home, '@github/copilot-sdk', { withEntry: true }),
       ]);
       provider = new CopilotProvider({
         githubToken: githubToken ?? undefined,
-        sdkEntryPath: sdkEntryPath ?? undefined,
-        sdkInstallRoot: sdkInstallRoot ?? undefined,
+        sdkEntryPath: sdkEntry?.path,
+        sdkInstallRoot: sdkInstallRoot?.path,
         ...(config.providerConcurrency?.copilot
           ? { concurrency: config.providerConcurrency.copilot }
           : {}),

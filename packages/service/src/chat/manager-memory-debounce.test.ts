@@ -44,6 +44,10 @@ beforeEach(async () => {
   home = await mkdtemp(join(tmpdir(), 'gezel-mem-debounce-'));
   store = new Store({ home });
   await store.ensureLayout();
+  // This suite injects a mock under the 'copilot' key. Pin it as the default
+  // too — otherwise routing falls through to the platform default (an
+  // on-device engine) and the injected mock is never reached.
+  await store.writeConfig({ provider: 'copilot' });
   await store.createGezel({ name: 'Ada', role: 'Developer' });
   await store.createProject({ name: 'Default' });
   // Heavy provider — debounce + cap apply.
@@ -306,6 +310,9 @@ describe('ChatManager — cloud-provider memory extraction is NOT debounced', ()
     cloudHome = await mkdtemp(join(tmpdir(), 'gezel-mem-cloud-'));
     cloudStore = new Store({ home: cloudHome });
     await cloudStore.ensureLayout();
+    // Pin the injected mock as the default; otherwise routing falls through
+    // to the platform default (an on-device engine) and never reaches it.
+    await cloudStore.writeConfig({ provider: 'copilot' });
     await cloudStore.createGezel({ name: 'Ada', role: 'Developer' });
     await cloudStore.createProject({ name: 'Default' });
     cloudMock = new MockProvider({ name: 'copilot' });
