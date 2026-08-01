@@ -648,7 +648,11 @@ function FullApp() {
           <ClaudeCliPoolPill />
           <NightShiftMenu state={nightShift} onChange={setNightShift} />
           <EngagementMenu mode={engagementMode} />
-          <QuotaMeter usage={usage} provider={provider} onClick={() => openArea('settings')} />
+          <QuotaMeter
+            usage={usage}
+            provider={provider}
+            onOpenSettings={() => openArea('settings')}
+          />
         </div>
       </header>
       {questionsOpen && (
@@ -1049,12 +1053,52 @@ function NightShiftTaskRow({
 function QuotaMeter({
   usage,
   provider,
-  onClick,
+  onOpenSettings,
 }: {
   usage: UsageResponse | null;
   provider: ProviderName;
-  onClick: () => void;
+  onOpenSettings: () => void;
 }) {
+  // Clicking the pill opens the same numbers the tooltip carries, so they
+  // survive a pointer leaving the pill (and exist at all for keyboard and
+  // touch, which never see a `title`). Settings moves into the popover
+  // rather than being the click target. Open/close mirrors
+  // EngineStatusPill — the sibling pill in this header.
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (ev: MouseEvent) => {
+      if (rootRef.current && !rootRef.current.contains(ev.target as Node)) {
+        setOpen(false);
+      }
+    };
+    window.addEventListener('mousedown', handler);
+    return () => window.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  // Cooperative dismissal with the other header popovers — a Radix trigger
+  // can swallow the mousedown before it reaches the handler above.
+  useEffect(() => {
+    const close = (event: Event) => {
+      if ((event as CustomEvent<{ source?: string }>).detail?.source === 'quota') return;
+      setOpen(false);
+    };
+    window.addEventListener('gezel:close-header-popovers', close);
+    return () => window.removeEventListener('gezel:close-header-popovers', close);
+  }, []);
+
+  const toggle = useCallback(() => {
+    setOpen((current) => {
+      if (!current) {
+        window.dispatchEvent(
+          new CustomEvent('gezel:close-header-popovers', { detail: { source: 'quota' } }),
+        );
+      }
+      return !current;
+    });
+  }, []);
   // Local-compute engines (on-device MLX/llama.cpp, paired remote, Ollama)
   // don't bill against a cloud quota. When one of them is the active
   // provider, any quota number we'd show is a leftover from an earlier
@@ -1082,18 +1126,40 @@ function QuotaMeter({
   const totalTurnsToday =
     (usage.providers.copilot?.todayTurns ?? 0) + (usage.providers.openai?.todayTurns ?? 0);
 
-  // No limited quota surfaced (e.g. OpenAI-only or Copilot hasn't reported yet).
+  // No limited quota surfaced (e.g. OpenAI-only or Copilot hasn't reported
+  // yet). Thin, but it still gets the popover so a click means the same
+  // thing on both variants of this pill.
   if (!mostConstrained) {
     if (totalTurnsToday === 0) return null;
     return (
-      <button
-        type="button"
-        className="quota-meter"
-        onClick={onClick}
-        title={`${totalTurnsToday} turns today`}
-      >
-        <span className="quota-label">{totalTurnsToday} today</span>
-      </button>
+      <div className="quota-meter-root" ref={rootRef}>
+        <button
+          type="button"
+          className="quota-meter"
+          onClick={toggle}
+          aria-expanded={open}
+          title={`${totalTurnsToday} turns today`}
+        >
+          <span className="quota-label">{totalTurnsToday} today</span>
+        </button>
+        {open && (
+          <div className="quota-popover">
+            <div className="quota-popover-header">Usage</div>
+            <dl className="quota-popover-stats">
+              <dt>Today</dt>
+              <dd>
+                {totalTurnsToday} {totalTurnsToday === 1 ? 'turn' : 'turns'}
+              </dd>
+            </dl>
+            <p className="quota-popover-note">
+              No quota limit reported yet — it appears after the provider returns one.
+            </p>
+            <button type="button" className="quota-popover-action" onClick={onOpenSettings}>
+              Provider settings
+            </button>
+          </div>
+        )}
+      </div>
     );
   }
 
@@ -1109,28 +1175,75 @@ function QuotaMeter({
   const tooltip = `${humanizeBucketName(q.name)}: ${q.used.toLocaleString()} / ${q.limit.toLocaleString()} (${usedPercent}%)\n${q.remaining.toLocaleString()} remaining${q.resetDate ? `\nResets ${formatResetDate(q.resetDate)}` : ''}${q.overage > 0 ? `\n${q.overage} overage` : ''}\n${totalTurnsToday} turns today`;
 
   return (
-    <button type="button" className="quota-meter" onClick={onClick} title={tooltip}>
-      <div className="quota-ring-wrap">
-        <svg className="quota-ring" viewBox="0 0 36 36" aria-hidden="true">
-          <circle className="quota-ring-bg" cx="18" cy="18" r="15.5" fill="none" strokeWidth="4" />
-          <circle
-            className={`quota-ring-fill${isCritical ? ' critical' : isWarn ? ' warn' : ''}`}
-            cx="18"
-            cy="18"
-            r="15.5"
-            fill="none"
-            strokeWidth="4"
-            pathLength={100}
-            strokeDasharray={`${clampedUsedPercent} ${100 - clampedUsedPercent}`}
-            strokeDashoffset="25"
-            strokeLinecap="round"
-          />
-        </svg>
-      </div>
-      <span className="quota-label">
-        {q.used}/{q.limit}
-      </span>
-    </button>
+    <div className="quota-meter-root" ref={rootRef}>
+      <button
+        type="button"
+        className="quota-meter"
+        onClick={toggle}
+        aria-expanded={open}
+        title={tooltip}
+      >
+        <div className="quota-ring-wrap">
+          <svg className="quota-ring" viewBox="0 0 36 36" aria-hidden="true">
+            <circle
+              className="quota-ring-bg"
+              cx="18"
+              cy="18"
+              r="15.5"
+              fill="none"
+              strokeWidth="4"
+            />
+            <circle
+              className={`quota-ring-fill${isCritical ? ' critical' : isWarn ? ' warn' : ''}`}
+              cx="18"
+              cy="18"
+              r="15.5"
+              fill="none"
+              strokeWidth="4"
+              pathLength={100}
+              strokeDasharray={`${clampedUsedPercent} ${100 - clampedUsedPercent}`}
+              strokeDashoffset="25"
+              strokeLinecap="round"
+            />
+          </svg>
+        </div>
+        <span className="quota-label">
+          {q.used}/{q.limit}
+        </span>
+      </button>
+      {open && (
+        <div className="quota-popover">
+          <div className="quota-popover-header">{humanizeBucketName(q.name)}</div>
+          <dl className="quota-popover-stats">
+            <dt>Used</dt>
+            <dd>
+              {q.used.toLocaleString()} / {q.limit.toLocaleString()} ({usedPercent}%)
+            </dd>
+            <dt>Remaining</dt>
+            <dd>{q.remaining.toLocaleString()}</dd>
+            {q.overage > 0 && (
+              <>
+                <dt>Overage</dt>
+                <dd>{q.overage.toLocaleString()}</dd>
+              </>
+            )}
+            {q.resetDate && (
+              <>
+                <dt>Resets</dt>
+                <dd>{formatResetDate(q.resetDate)}</dd>
+              </>
+            )}
+            <dt>Today</dt>
+            <dd>
+              {totalTurnsToday} {totalTurnsToday === 1 ? 'turn' : 'turns'}
+            </dd>
+          </dl>
+          <button type="button" className="quota-popover-action" onClick={onOpenSettings}>
+            Provider settings
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 

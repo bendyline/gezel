@@ -1001,6 +1001,15 @@ html.embedded-chat #root {
   align-self: center;
 }
 
+/* Anchor for the quota popover. Mirrors `.engine-pill-root` — the pill
+   next door in this header — so both dropdowns hang the same way. */
+.quota-meter-root {
+  position: relative;
+  display: flex;
+  align-items: center;
+  align-self: center;
+}
+
 .quota-meter {
   display: flex;
   align-items: center;
@@ -1051,6 +1060,38 @@ html.embedded-chat #root {
 
 .quota-label {
   font-variant-numeric: tabular-nums;
+}
+
+/* Quota popover extras. The slab, header, and stats grid come from the
+   shared header-popover recipe above (`.engine-pill-popover` et al.);
+   only these two pieces are quota-specific. */
+.quota-popover {
+  min-width: 15rem;
+}
+
+.quota-popover-note {
+  margin: 0.6rem 0 0;
+  font-size: var(--text-xs);
+  opacity: 0.7;
+  line-height: 1.35;
+}
+
+.quota-popover-action {
+  margin-top: 0.7rem;
+  width: 100%;
+  padding: 0.3rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+
+.quota-popover-action:hover {
+  border-color: var(--accent);
 }
 
 /* Engine status pills — one resting pill for the configured local default,
@@ -1200,7 +1241,8 @@ html.embedded-chat #root {
 /* Popover — anchored to the pill, opens on click. Mirrors the
    layout of QueueMeter's popover so the header reads consistently
    across the two status indicators. */
-.engine-pill-popover {
+.engine-pill-popover,
+.quota-popover {
   position: absolute;
   top: calc(100% + 0.4rem);
   right: 0;
@@ -1221,19 +1263,22 @@ html.embedded-chat #root {
    <select> pattern above: a base light rule for explicit-light +
    implicit-light, re-darkened inside the dark media query for the
    implicit-dark and explicit-dark cases. */
-:root:not([data-theme="dark"]) .engine-pill-popover {
+:root:not([data-theme="dark"]) .engine-pill-popover,
+:root:not([data-theme="dark"]) .quota-popover {
   background: var(--panel);
   color: var(--text);
   border-color: var(--border);
 }
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) .engine-pill-popover {
+  :root:not([data-theme="light"]) .engine-pill-popover,
+  :root:not([data-theme="light"]) .quota-popover {
     background: #1a1a1a;
     color: var(--titlebar-ink);
     border-color: rgba(243, 237, 224, 0.25);
   }
 }
-.engine-pill-popover-header {
+.engine-pill-popover-header,
+.quota-popover-header {
   font-size: 0.7rem;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -1272,7 +1317,8 @@ html.embedded-chat #root {
   font-size: 0.72rem;
   font-variant-numeric: tabular-nums;
 }
-.engine-pill-stats {
+.engine-pill-stats,
+.quota-popover-stats {
   display: grid;
   grid-template-columns: auto 1fr;
   align-items: baseline;
@@ -1280,13 +1326,15 @@ html.embedded-chat #root {
   row-gap: 0.35rem;
   margin: 0;
 }
-.engine-pill-stats dt {
+.engine-pill-stats dt,
+.quota-popover-stats dt {
   font-size: 0.7rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   opacity: 0.6;
 }
-.engine-pill-stats dd {
+.engine-pill-stats dd,
+.quota-popover-stats dd {
   margin: 0;
   font-variant-numeric: tabular-nums;
   word-break: break-word;

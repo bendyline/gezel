@@ -40,6 +40,10 @@ import { readFile, readdir, readlink, unlink, writeFile } from 'node:fs/promises
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
+import {
+  pruneRuntimeFilesWithReport,
+  verifyRuntimeDeclarationAssets,
+} from './prune-runtime-files.mjs';
 
 const exec = promisify(execFile);
 
@@ -122,6 +126,12 @@ async function main() {
   // the workspace; prune any that escape the bundle so `tar` doesn't follow
   // them out of the tree.
   await pruneEscapingSymlinks(target);
+
+  // Keep the standalone runtime consistent with the Electron service bundle:
+  // package-consumer maps/types are not needed after deployment, except for
+  // the declaration files the in-app script editor reads as content.
+  await pruneRuntimeFilesWithReport(target);
+  await verifyRuntimeDeclarationAssets(target);
 
   // Convenience launchers at the bundle root so an extracted bundle runs as
   // `./gezel start --web` (POSIX) / `gezel start --web` (Windows) instead of

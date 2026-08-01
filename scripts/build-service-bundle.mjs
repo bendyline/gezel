@@ -36,6 +36,10 @@ import { basename, dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import { pruneForeignBinariesWithReport } from './prune-foreign-binaries.mjs';
+import {
+  pruneRuntimeFilesWithReport,
+  verifyRuntimeDeclarationAssets,
+} from './prune-runtime-files.mjs';
 import { stageSharpCompatibilityStub, verifySharpCompatibilityTree } from './sharp-compat.mjs';
 import { signMachOTree } from './sign-macho-tree.mjs';
 import { verifyPeTree } from './verify-pe-tree.mjs';
@@ -179,6 +183,18 @@ async function main() {
     `[sharp-compat] verified ${sharpCompatibility.stubs} no-image stub(s); no native Sharp/libvips payload`,
   );
 
+  // `pnpm deploy` includes published source maps and declaration files. They
+  // are useful to package consumers, but this tree is an application runtime:
+  // every extra file costs a tar extraction + Defender scan on first launch.
+  // Run after staging the Sharp compatibility package so its declaration is
+  // covered too. The pruner preserves the declarations read by the script
+  // editor at runtime.
+  await pruneRuntimeFilesWithReport(target);
+  const declarationAssets = await verifyRuntimeDeclarationAssets(target);
+  console.log(
+    `[prune-runtime] verified ${declarationAssets.total} runtime declaration assets for script-editor IntelliSense`,
+  );
+
   console.log('[build-service-bundle] verifying the bundle imports cleanly');
   // Importing the service module resolves the whole dep graph, including
   // native modules. We spawn a throwaway node process, let it import
@@ -195,6 +211,23 @@ async function main() {
   await exec(
     process.execPath,
     ['--input-type=module', '-e', `await import(${JSON.stringify(indexUrl)});`],
+    { cwd: target, maxBuffer: 16 * 1024 * 1024 },
+  );
+
+  // TypeScript is deliberately external in the service bundle and is used at
+  // runtime for parsing/transpiling user scripts. Exercise that lazy path
+  // after declarations have been pruned; importing the service alone does not
+  // call it and would miss an over-aggressive prune.
+  const typescriptUrl = pathToFileURL(
+    join(target, 'node_modules', 'typescript', 'lib', 'typescript.js'),
+  ).href;
+  await exec(
+    process.execPath,
+    [
+      '--input-type=module',
+      '-e',
+      `const ts=(await import(${JSON.stringify(typescriptUrl)})).default; const out=ts.transpileModule('const value: number = 1;', { compilerOptions: { module: ts.ModuleKind.ESNext } }); if (!out.outputText.includes('const value = 1')) throw new Error('bundled TypeScript transpile smoke failed');`,
+    ],
     { cwd: target, maxBuffer: 16 * 1024 * 1024 },
   );
 
