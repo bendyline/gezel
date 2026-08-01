@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -30,7 +30,10 @@ async function writePackage(
 }
 
 beforeEach(async () => {
-  dir = await mkdtemp(join(tmpdir(), 'gezel-copilot-cli-'));
+  // Resolved, because the pnpm-isolated case below re-anchors its walk on
+  // `realpathSync` of the store symlink — and macOS hands out `/var/...`
+  // tmpdirs that resolve to `/private/var/...`.
+  dir = await realpath(await mkdtemp(join(tmpdir(), 'gezel-copilot-cli-')));
 });
 
 afterEach(async () => {

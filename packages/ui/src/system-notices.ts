@@ -1,4 +1,7 @@
 import type { UpdateState } from './api.js';
+import { RELEASES_URL, releaseUrl } from './github-urls.js';
+
+export { releaseUrl };
 
 /**
  * Install-health notices: the background service, and the app updater.
@@ -18,7 +21,8 @@ export type SystemNoticeId =
   | 'service-version-mismatch'
   | 'service-unavailable'
   | 'update-install-failed'
-  | 'update-check-failed';
+  | 'update-check-failed'
+  | 'engine-backend-quarantined';
 
 export interface SystemNotice {
   id: SystemNoticeId;
@@ -29,9 +33,17 @@ export interface SystemNotice {
   /** Raw diagnostic text, kept behind a disclosure. */
   technical?: string;
   link?: { href: string; label: string };
+  /**
+   * Whether this condition is worth a bug report. A failed update *check* is
+   * what being offline looks like — nothing is wrong with the install — so
+   * soliciting an issue for it is pure maintainer noise.
+   *
+   * Deliberately decided here rather than at the render site, so the "which
+   * conditions are reportable" policy sits with the rest of the notice
+   * policy and the two can never drift.
+   */
+  reportable?: boolean;
 }
-
-const RELEASES_URL = 'https://github.com/bendyline/gezel/releases';
 
 /**
  * How to reinstall, per platform. "Rerun the installer" means a different
@@ -45,10 +57,6 @@ const REINSTALL_HINT: Record<string, string> = {
 
 function reinstallHint(platform?: string): string {
   return (platform && REINSTALL_HINT[platform]) ?? 'Run the Gezel installer again.';
-}
-
-export function releaseUrl(version?: string): string {
-  return version ? `${RELEASES_URL}/tag/v${encodeURIComponent(version)}` : RELEASES_URL;
 }
 
 /**
@@ -75,6 +83,7 @@ export function serviceNotice(input: {
       // Gezel is closed. Saying it is off would be its own inaccuracy.
       body: `Everything works and all of your gezellen, projects, chats, and files are here. The difference is that background work — scheduled tasks and night shift — only runs while Gezel is open, and first launch after an update takes longer. The machine-wide service is installed by the installer, so this is the one thing Gezel cannot fix from inside. ${reinstallHint(platform)}`,
       technical: reason,
+      reportable: true,
     };
   }
 
@@ -85,6 +94,7 @@ export function serviceNotice(input: {
       title: 'Gezel updated, but its background service did not.',
       body: `Everything still works and none of your gezellen, projects, or chats are affected — but the app and the service are on different versions, so newer features may misbehave until they match. The service is installed for the whole machine, so only the installer can replace it. ${reinstallHint(platform)}`,
       technical: reason,
+      reportable: true,
     };
   }
 
@@ -97,6 +107,7 @@ export function serviceNotice(input: {
     title: 'Background work is off.',
     body: `Gezel itself works normally and all of your gezellen, projects, chats, and files are here. Autostart, scheduled work, and night shift stay off until the background service runs again, and it will not start again by itself. Reopening Gezel retries it once; if it stays off, reinstall Gezel. ${reinstallHint(platform)}`,
     technical: reason,
+    reportable: true,
   };
 }
 
@@ -115,6 +126,7 @@ export function updateNotice(state: UpdateState | null): SystemNotice | null {
       title: 'Gezel could not install the update.',
       body: 'You can keep working. Download the latest version and run the installer to update manually.',
       technical: state.message,
+      reportable: true,
       link: { href: releaseUrl(state.version), label: 'Get the latest release' },
     };
   }
@@ -132,14 +144,69 @@ export function updateNotice(state: UpdateState | null): SystemNotice | null {
   };
 }
 
+const BACKEND_LABEL: Record<string, string> = {
+  cuda: 'NVIDIA GPU (CUDA)',
+  vulkan: 'GPU (Vulkan)',
+  metal: 'GPU (Metal)',
+  cpu: 'CPU',
+};
+
+function backendLabel(backend?: string): string {
+  return (backend && BACKEND_LABEL[backend]) ?? backend ?? 'another backend';
+}
+
+/**
+ * A GPU backend that crashed on this machine and was routed around.
+ *
+ * This one earns a rail label where the other install-health notices are
+ * borderline, because it is silent by construction: the app keeps working,
+ * just on a slower engine, and nothing else on screen says why. A user can
+ * spend a long time assuming their GPU is being used.
+ *
+ * Unlike the service notices, this IS actionable — the fallback is a real
+ * downgrade and the cause is usually a driver or a build that a later
+ * release fixes — so the copy names the demoted backend rather than
+ * speaking generally.
+ */
+export function engineBackendNotice(input: {
+  quarantined?: readonly string[];
+  running?: string;
+}): SystemNotice | null {
+  const demoted = input.quarantined?.[0];
+  if (!demoted) return null;
+  return {
+    id: 'engine-backend-quarantined',
+    railLabel: `Running on ${backendLabel(input.running)}`,
+    title: `Gezel switched off ${backendLabel(demoted)} on this machine.`,
+    body: [
+      `The ${backendLabel(demoted)} engine crashed every time it started here, so Gezel is using`,
+      `${backendLabel(input.running)} instead. Everything still works — local models are just`,
+      'slower than this machine is capable of. Gezel retries automatically once a Gezel update',
+      'ships a new engine build, and updating your GPU driver is worth trying in the meantime.',
+    ].join(' '),
+    technical: `quarantined backends: ${input.quarantined?.join(', ')}`,
+    // The most report-worthy of the lot: a backend that crashes on every
+    // start is a build or driver bug, and the machine profile in the report
+    // is exactly what triaging it needs.
+    reportable: true,
+  };
+}
+
 /** Every notice that belongs in the navigation rail, most severe first. */
 export function railSystemNotices(input: {
   reason?: string | null;
   code?: string | null;
   platform?: string;
   update: UpdateState | null;
+  quarantinedBackends?: readonly string[];
+  runningBackend?: string;
 }): SystemNotice[] {
-  return [serviceNotice(input), updateNotice(input.update)].filter(
-    (n): n is SystemNotice => n !== null && n.railLabel !== null,
-  );
+  return [
+    serviceNotice(input),
+    engineBackendNotice({
+      ...(input.quarantinedBackends ? { quarantined: input.quarantinedBackends } : {}),
+      ...(input.runningBackend ? { running: input.runningBackend } : {}),
+    }),
+    updateNotice(input.update),
+  ].filter((n): n is SystemNotice => n !== null && n.railLabel !== null);
 }

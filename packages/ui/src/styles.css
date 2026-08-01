@@ -586,6 +586,48 @@ html.embedded-chat #root {
   color: var(--text-muted);
 }
 
+/* The tab crash screen. These three classes have been referenced from
+   TabErrorBoundary since it was written but never had rules, so the crash
+   screen rendered at browser defaults inside the workshop's flex column.
+   Same shape as .app-fallback-banner above with --danger in place of
+   --warning, since this one really is a failure. */
+.tab-error-boundary {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.6rem;
+  width: min(720px, calc(100% - 2rem));
+  margin: 2rem auto;
+  padding: 1rem 1.25rem;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, var(--border));
+  border-left: 3px solid var(--danger);
+  border-radius: var(--radius-md);
+  box-shadow: var(--surface-shadow);
+}
+
+.tab-error-boundary-detail {
+  align-self: stretch;
+  max-height: 12rem;
+  margin: 0;
+  padding: 0.5rem 0.65rem;
+  overflow: auto;
+  color: var(--danger);
+  background: var(--danger-bg);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: var(--text-xs);
+  white-space: pre-wrap;
+}
+
+.tab-error-boundary-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
 .app-fallback-banner-actions {
   display: flex;
   gap: 0.4rem;
@@ -11810,6 +11852,17 @@ button.bench-step-foot:disabled {
   font-size: 1.6rem;
   margin: 1.25rem 0 0.5rem;
 }
+/* Setup now leads the first-run page, so the heading usually sits directly
+   under the view's own padding — drop the leading margin there. It keeps the
+   1.25rem only when something (the update banner) is stacked above it. */
+.home-view > .home-firstrun-heading:first-child {
+  margin-top: 0;
+}
+.home-firstrun-lede {
+  margin: 0 0 0.9rem;
+  padding-left: 1.25rem;
+  font-size: 0.9rem;
+}
 .home-firstrun-body {
   padding-left: 1.25rem;
 }
@@ -15972,6 +16025,16 @@ a.license-button:hover {
   color: var(--danger, #d06a6a);
   font-size: 0.85rem;
   margin: 0;
+}
+
+/* `.gz-dialog label textarea` already supplies width, padding, border, and
+   resize; only the height and reading register are missing. Left in
+   --font-ui rather than monospace: the body is prose with a few fenced
+   blocks, and monospace would need a typography exception for no gain. */
+.gz-dialog-report .gz-dialog-report-field textarea {
+  min-height: 20rem;
+  font-size: var(--text-sm);
+  line-height: 1.5;
 }
 
 .gezel-template-list {
@@ -22475,7 +22538,11 @@ button.linklike {
   margin: 0 0 0.25rem;
   font-size: var(--text-md);
 }
+/* An <output> so the live-region role is native rather than role="status";
+ * it is inline by default, hence the explicit block. */
 .engine-memory-budget-warning {
+  display: block;
+  margin-top: 0.5rem;
   max-width: 26rem;
   color: var(--warning);
 }

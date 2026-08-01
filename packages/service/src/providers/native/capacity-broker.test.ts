@@ -97,25 +97,88 @@ describe('CapacityBroker', () => {
   });
 
   it('auto-detect: 60% on ordinary machines, 80% on workstation machines, capped at 96GB', () => {
-    expect(autoDetectBudgetBytes(16 * GB)).toBe(Math.floor(16 * GB * 0.6));
-    expect(autoDetectBudgetBytes(64 * GB)).toBe(Math.floor(64 * GB * 0.6));
-    expect(autoDetectBudgetBytes(96 * GB)).toBe(Math.floor(96 * GB * 0.8));
+    const discrete = { unifiedMemory: false };
+    expect(autoDetectBudgetBytes(16 * GB, discrete)).toBe(Math.floor(16 * GB * 0.6));
+    expect(autoDetectBudgetBytes(64 * GB, discrete)).toBe(Math.floor(64 * GB * 0.6));
+    expect(autoDetectBudgetBytes(96 * GB, discrete)).toBe(Math.floor(96 * GB * 0.8));
     // 128 GB × 0.8 = 102.4 GB → cap of 96 GB applies.
-    expect(autoDetectBudgetBytes(128 * GB)).toBe(96 * GB);
+    expect(autoDetectBudgetBytes(128 * GB, discrete)).toBe(96 * GB);
     // Larger hosts keep the same default cap unless explicitly overridden.
-    expect(autoDetectBudgetBytes(192 * GB)).toBe(96 * GB);
-    expect(autoDetectBudgetBytes(512 * GB)).toBe(96 * GB);
+    expect(autoDetectBudgetBytes(192 * GB, discrete)).toBe(96 * GB);
+    expect(autoDetectBudgetBytes(512 * GB, discrete)).toBe(96 * GB);
+  });
+
+  it('auto-detect gives unified-memory hosts a larger share less a flat OS reserve', () => {
+    const uma = { unifiedMemory: true };
+    // The case this exists for: a 16 GB Mac. The old shared 60% fraction
+    // capped it at 9.6 GiB, below an 8B-class model at 8-bit — the machine
+    // could hold the model, the budget said otherwise. gemma4-e4b-q8 on
+    // MLX reserves ~10.8 GiB, so the new value has to clear that.
+    expect(autoDetectBudgetBytes(16 * GB, uma)).toBe(Math.floor(16 * GB * 0.7));
+    expect(autoDetectBudgetBytes(16 * GB, uma)).toBeGreaterThan(11 * GB);
+    expect(autoDetectBudgetBytes(16 * GB, uma)).toBeGreaterThan(
+      autoDetectBudgetBytes(16 * GB, { unifiedMemory: false }),
+    );
+    // The 4 GB reserve binds at the small end where the fraction alone
+    // would leave the OS too little.
+    expect(autoDetectBudgetBytes(8 * GB, uma)).toBe(4 * GB);
+    // The fraction binds everywhere above it.
+    expect(autoDetectBudgetBytes(32 * GB, uma)).toBe(Math.floor(32 * GB * 0.7));
+    // Big Macs keep the workstation share they already had — no regression.
+    expect(autoDetectBudgetBytes(96 * GB, uma)).toBe(Math.floor(96 * GB * 0.8));
+    expect(autoDetectBudgetBytes(128 * GB, uma)).toBe(96 * GB);
   });
 
   it('auto-detect kicks in when budgetBytes is omitted', () => {
-    const b = new CapacityBroker({ systemRamBytes: () => 64 * GB });
+    const b = new CapacityBroker({ systemRamBytes: () => 64 * GB, unifiedMemory: false });
     expect(b.committed().budgetBytes).toBe(Math.floor(64 * GB * 0.6));
     expect(b.committed().enforced).toBe(true);
+    expect(b.committed().overridden).toBe(false);
   });
 
   it('committed() reports the system RAM the budget was derived from', () => {
     const b = new CapacityBroker({ systemRamBytes: () => 16 * GB });
     expect(b.committed().systemRamBytes).toBe(16 * GB);
+  });
+
+  it('committed() reports the auto value even while an override is in force', () => {
+    const b = new CapacityBroker({
+      systemRamBytes: () => 16 * GB,
+      unifiedMemory: true,
+      budgetBytes: 14 * GB,
+    });
+    const snap = b.committed();
+    expect(snap.budgetBytes).toBe(14 * GB);
+    expect(snap.autoBudgetBytes).toBe(Math.floor(16 * GB * 0.7));
+    expect(snap.overridden).toBe(true);
+  });
+
+  it('setBudgetBytes re-points the budget live and null reverts to auto', () => {
+    const auto = Math.floor(16 * GB * 0.7);
+    const b = new CapacityBroker({ systemRamBytes: () => 16 * GB, unifiedMemory: true });
+    expect(b.committed().budgetBytes).toBe(auto);
+
+    b.setBudgetBytes(14 * GB);
+    expect(b.committed().budgetBytes).toBe(14 * GB);
+    expect(b.committed().overridden).toBe(true);
+    expect(b.canReserve(13 * GB)).toBe(true);
+
+    b.setBudgetBytes(null);
+    expect(b.committed().budgetBytes).toBe(auto);
+    expect(b.committed().overridden).toBe(false);
+    expect(b.canReserve(13 * GB)).toBe(false);
+  });
+
+  it('shrinking the budget below what is committed keeps reservations but denies the next', () => {
+    // Moving the slider down must not sever a running engine — the pool's
+    // LRU path frees room on the next spawn instead.
+    const b = new CapacityBroker({ systemRamBytes: () => 32 * GB, budgetBytes: 20 * GB });
+    b.reserve('mlx:resident:0', 12 * GB);
+    b.setBudgetBytes(10 * GB);
+    expect(b.committed().committedBytes).toBe(12 * GB);
+    expect(b.canReserve(1 * GB)).toBe(false);
+    b.release('mlx:resident:0');
+    expect(b.canReserve(1 * GB)).toBe(true);
   });
 
   it('formatCapacityDenial produces a human-readable, actionable message', () => {
@@ -132,7 +195,10 @@ describe('CapacityBroker', () => {
     expect(msg).toMatch(/9\.6 GB/); // budget ~10.3e9 bytes → 9.6 GiB
     expect(msg).toMatch(/16\.0 GB/); // machine RAM
     expect(msg).toMatch(/60%/); // budget fraction of RAM
-    expect(msg).toMatch(/GEZEL_CAPACITY_BUDGET_GB/);
+    // Points at the in-app setting, not an environment variable — the
+    // person reading this is blocked in a desktop app, not a shell.
+    expect(msg).toMatch(/Settings/);
+    expect(msg).not.toMatch(/GEZEL_CAPACITY_BUDGET_GB/);
     expect(msg).not.toMatch(/\d{10}/); // no raw byte dump
   });
 
@@ -346,7 +412,7 @@ describe('localEngineSlotCeiling', () => {
     // (SIGABRT — the "Python quit unexpectedly" crash). Must collapse to serial.
     const n = localEngineSlotCeiling({
       engine: 'mlx',
-      budgetBytes: autoDetectBudgetBytes(64 * GB),
+      budgetBytes: autoDetectBudgetBytes(64 * GB, { unifiedMemory: true }),
       weightsBytes: 28 * GB,
       perTurnCtxTokens: 32_768,
       kvCacheType: 'f16',
@@ -357,7 +423,7 @@ describe('localEngineSlotCeiling', () => {
   it('still allows real batching for a small model on a big machine', () => {
     const n = localEngineSlotCeiling({
       engine: 'mlx',
-      budgetBytes: autoDetectBudgetBytes(64 * GB),
+      budgetBytes: autoDetectBudgetBytes(64 * GB, { unifiedMemory: true }),
       weightsBytes: 4 * GB,
       perTurnCtxTokens: 8_192,
       kvCacheType: 'f16',

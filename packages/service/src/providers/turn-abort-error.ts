@@ -23,6 +23,14 @@
  * real model misbehavior) while sparing the user the internal jargon.
  */
 export class TurnAbortError extends Error {
+  /**
+   * Machine-readable failure class. A structured gezel error carries a
+   * `readonly code: string`; `describeTurnError` reads that duck-typed
+   * rather than by `instanceof`, so classifying a new failure class is one
+   * field on the class and nothing else.
+   */
+  readonly code = 'turn-aborted';
+
   /** Plain-language summary for the user-facing failure banner. */
   readonly userMessage: string;
 

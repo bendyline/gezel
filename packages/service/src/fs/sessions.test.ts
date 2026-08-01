@@ -274,6 +274,43 @@ describe('Store session CRUD', () => {
     });
   });
 
+  it('round-trips a structured last-turn-error detail', async () => {
+    await store.writeSession(
+      sessionFixture({
+        id: 'crashed',
+        lastTurnError: '[llama-cpp] on-device engine crashed (SIGILL)',
+        lastTurnErrorDetail: {
+          code: 'native-engine-crash',
+          engine: 'llama-cpp',
+          incidentId: 'native-51832-1785547847453',
+          exitCode: null,
+          signal: 'SIGILL',
+          diagnostics: { model: 'gemma4-26b-q4', contextTotal: 32768, flashAttention: true },
+        },
+      }),
+    );
+    const hit = await store.getSession('ada', 'crashed');
+    expect(hit?.lastTurnErrorDetail).toEqual({
+      code: 'native-engine-crash',
+      engine: 'llama-cpp',
+      incidentId: 'native-51832-1785547847453',
+      exitCode: null,
+      signal: 'SIGILL',
+      diagnostics: { model: 'gemma4-26b-q4', contextTotal: 32768, flashAttention: true },
+    });
+  });
+
+  it('reads a session written before the structured detail existed', async () => {
+    // Old installs have no `lastTurnErrorDetail` key at all. Absent is a
+    // valid value, not a parse failure — no migration, no version bump.
+    await store.writeSession(
+      sessionFixture({ id: 'legacy', lastTurnError: 'something went wrong' }),
+    );
+    const hit = await store.getSession('ada', 'legacy');
+    expect(hit?.lastTurnError).toBe('something went wrong');
+    expect(hit?.lastTurnErrorDetail).toBeUndefined();
+  });
+
   it('summary fields strip messages', async () => {
     await store.writeSession(
       sessionFixture({

@@ -1,4 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react';
+import { ReportErrorLink } from './ReportErrorLink.js';
 
 /**
  * Guards a single tab's content. A render crash inside one tab (e.g. a
@@ -18,29 +19,35 @@ interface Props {
 
 interface State {
   error: Error | null;
+  componentStack: string | null;
 }
 
+const CLEAR: State = { error: null, componentStack: null };
+
 export class TabErrorBoundary extends Component<Props, State> {
-  override state: State = { error: null };
+  override state: State = CLEAR;
 
   static getDerivedStateFromError(error: Error): State {
-    return { error };
+    return { error, componentStack: null };
   }
 
   override componentDidUpdate(prev: Props) {
     // New tab activated → drop any prior crash so the new tab renders clean.
     if (prev.resetKey !== this.props.resetKey && this.state.error) {
-      this.setState({ error: null });
+      this.setState(CLEAR);
     }
   }
 
   override componentDidCatch(error: Error, info: ErrorInfo) {
     // Surface to the console so the stack is recoverable in DevTools / logs.
     console.error('[TabErrorBoundary] tab content crashed:', error, info.componentStack);
+    // Also keep it: this is the one place in the UI holding a real Error,
+    // and the component stack is what makes a crash report actionable.
+    this.setState({ componentStack: info.componentStack ?? null });
   }
 
   override render() {
-    const { error } = this.state;
+    const { error, componentStack } = this.state;
     if (error) {
       return (
         <div className="tab-error-boundary" role="alert">
@@ -50,9 +57,20 @@ export class TabErrorBoundary extends Component<Props, State> {
             close this tab or switch to another.
           </p>
           <pre className="tab-error-boundary-detail">{error.message}</pre>
-          <button type="button" className="primary" onClick={() => this.setState({ error: null })}>
-            Try again
-          </button>
+          <div className="tab-error-boundary-actions">
+            <button type="button" className="primary" onClick={() => this.setState(CLEAR)}>
+              Try again
+            </button>
+            <ReportErrorLink
+              className="home-link"
+              report={{
+                surface: 'tab-crash',
+                message: error.message,
+                stack: error.stack,
+                componentStack: componentStack ?? undefined,
+              }}
+            />
+          </div>
         </div>
       );
     }

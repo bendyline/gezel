@@ -793,28 +793,30 @@ jobs:
           # backend-specific peer has been stable across the relevant
           # range.
           #
-          # CMake naming conventions:
-          #   Windows: ggml-cuda.dll          (no `lib` prefix)
-          #   Linux:   libggml-cuda.so
-          #   macOS:   libggml-metal.dylib
+          # Match on the `ggml-<backend>` stem only, never a full filename.
+          # The extension and any version infix move around: under
+          # GGML_BACKEND_DL the backends are cmake MODULE libraries, which
+          # get a `.so` suffix even on macOS (libggml-metal.so, NOT
+          # libggml-metal.dylib), carry no SOVERSION, and the CPU backend
+          # is not one file but a set — libggml-cpu-haswell.so,
+          # libggml-cpu-apple_m1.so, ggml-cpu-icelake.dll — one per
+          # instruction-set level, chosen at load time. Pinning the exact
+          # name here just re-breaks the build on the next upstream
+          # naming shift; the shape of the CPU set is asserted by the
+          # engine build scripts' own cpu-dispatch guard.
+          #
+          # Prefix: Windows drops the `lib`, Linux and macOS keep it.
           if [[ "${{ matrix.engine }}" == llama-cpp ]]; then
             case "${{ matrix.platform }}" in
-              win32-*)  lib_prefix=""    ; lib_ext=dll   ;;
-              darwin-*) lib_prefix="lib" ; lib_ext=dylib ;;
-              linux-*)  lib_prefix="lib" ; lib_ext=so    ;;
+              win32-*)  lib_prefix=""    ;;
+              *)        lib_prefix="lib" ;;
             esac
-            case "${{ matrix.variant }}" in
-              cuda)   peer="${lib_prefix}ggml-cuda.${lib_ext}"   ;;
-              vulkan) peer="${lib_prefix}ggml-vulkan.${lib_ext}" ;;
-              metal)  peer="${lib_prefix}ggml-metal.${lib_ext}"  ;;
-              cpu)    peer="${lib_prefix}ggml-cpu.${lib_ext}"    ;;
-            esac
-            # Also accept versioned suffixes (e.g. libggml-cuda.so.1).
+            peer="${lib_prefix}ggml-${{ matrix.variant }}"
             if ! ls "$out"/${peer}* >/dev/null 2>&1; then
-              echo "::error::missing backend peer lib ${peer} alongside ${{ matrix.artifact }} — build script likely failed to glob it from the cmake output"
+              echo "::error::missing backend peer lib ${peer}* alongside ${{ matrix.artifact }} — build script likely failed to glob it from the cmake output"
               exit 1
             fi
-            echo "[smoke] backend peer lib ${peer} present ✓"
+            echo "[smoke] backend peer lib ${peer}* present ✓"
           fi
           # CUDA bundles must have cudart/cublas beside the executable so the
           # binary works on machines without the matching toolkit. Only the
@@ -832,9 +834,13 @@ jobs:
         run: |
           set -euo pipefail
           out="${{ steps.outdir.outputs.dir }}"
-          lib="$(find "$out" -maxdepth 1 -type f -name 'libggml-cuda.so.*' | sort -V | tail -n1)"
+          # Versioned (libggml-cuda.so.0.17.0) when the backend is a SHARED
+          # lib, unversioned (libggml-cuda.so) when GGML_BACKEND_DL makes it
+          # a dlopen-able MODULE. Accept either; `sort -V | tail -n1` still
+          # picks the newest if several generations somehow coexist.
+          lib="$(find "$out" -maxdepth 1 -type f -name 'libggml-cuda.so*' | sort -V | tail -n1)"
           if [[ -z "$lib" ]]; then
-            echo "::error::no real versioned libggml-cuda.so found under $out"
+            echo "::error::no real libggml-cuda.so found under $out"
             exit 1
           fi
           node scripts/verify-cuda-architecture.mjs \

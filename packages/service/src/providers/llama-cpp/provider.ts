@@ -120,9 +120,19 @@ export class NativeEngineCrashedError extends Error {
       : snapshot.signal
         ? ` (${snapshot.signal})`
         : '';
+    // An unrunnable build is not a transient fault, so it must not be
+    // described as one. "It will restart on the next request" is true of
+    // a CUDA OOM and actively misleading here: the restart reproduces
+    // the crash byte-for-byte. Say what happened and what changes.
+    const unrunnable = snapshot.panicKind === 'illegal-instruction' && !snapshot.reachedReady;
+    const outcome = unrunnable
+      ? 'This build cannot run on this machine — it uses CPU instructions this processor does not ' +
+        'support, or faulted inside GPU library startup. Gezel will switch to another engine ' +
+        'backend on the next request.'
+      : 'It will restart on the next request.';
     super(
       `[llama-cpp] on-device engine crashed${detail}; incident=${snapshot.incidentId}. ` +
-        `It will restart on the next request.${causeMessage ? ` Transport reported: ${causeMessage}` : ''}`,
+        `${outcome}${causeMessage ? ` Transport reported: ${causeMessage}` : ''}`,
       { cause },
     );
     this.name = 'NativeEngineCrashedError';

@@ -78,7 +78,10 @@ export class MockProvider implements LLMProvider {
   private readonly toolCallQueue: ScriptedToolCall[][] = [];
   private resumeFailureQueued = false;
   /** Error message to throw from the next `sendAndWait`, if any. */
-  private readonly sendFailureQueue: string[] = [];
+  private readonly sendFailureQueue: Array<{
+    message: string;
+    fields?: Record<string, unknown>;
+  }> = [];
   /** Per-send deliberate delays for deterministic SessionQueue tests. */
   private readonly sendDelayQueue: number[] = [];
   /**
@@ -163,9 +166,16 @@ export class MockProvider implements LLMProvider {
   /**
    * Make the next `sendAndWait` call throw — used to simulate a provider
    * silently GC'ing the server-side session mid-conversation.
+   *
+   * `fields` are assigned onto the thrown Error, so a test can reproduce a
+   * structured provider error (`code`, `engine`, `incidentId`, `panicKind`,
+   * …) without importing a real provider's error class.
    */
-  scriptSendFailure(message = 'Session not found: mock-session-1'): void {
-    this.sendFailureQueue.push(message);
+  scriptSendFailure(
+    message = 'Session not found: mock-session-1',
+    fields?: Record<string, unknown>,
+  ): void {
+    this.sendFailureQueue.push({ message, ...(fields ? { fields } : {}) });
   }
 
   /**
@@ -253,7 +263,7 @@ export class MockProvider implements LLMProvider {
   }
 
   /** @internal */
-  nextScriptedSendFailure(): string | undefined {
+  nextScriptedSendFailure(): { message: string; fields?: Record<string, unknown> } | undefined {
     return this.sendFailureQueue.shift();
   }
 
@@ -390,7 +400,7 @@ class MockSession extends StreamingSessionBase implements LLMSession {
 
     const scriptedFailure = this.provider.nextScriptedSendFailure();
     if (scriptedFailure) {
-      throw new Error(scriptedFailure);
+      throw Object.assign(new Error(scriptedFailure.message), scriptedFailure.fields ?? {});
     }
 
     const streamThenHang = this.provider.nextStreamThenHang();

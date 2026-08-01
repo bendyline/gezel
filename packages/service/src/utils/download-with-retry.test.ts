@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -7,6 +8,10 @@ import {
   type DownloadResult,
   downloadWithRetry,
 } from './download-with-retry.js';
+
+function sha256(buf: Buffer): string {
+  return createHash('sha256').update(buf).digest('hex');
+}
 
 /** Small async iterator helper to drain the generator + collect events. */
 async function runDownload(
@@ -378,6 +383,103 @@ describe('downloadWithRetry', () => {
     } finally {
       process.off('uncaughtException', onUncaught);
       process.off('unhandledRejection', onUncaught);
+    }
+  });
+
+  it('keeps resuming past maxRetries while each attempt makes real progress', async () => {
+    // The first-run regression: `maxRetries` used to mean "attempts per file",
+    // so a big model over a link that drops every few minutes exhausted the
+    // budget and surfaced a bare "network error" — even though every attempt
+    // had written megabytes to disk. The budget now counts CONSECUTIVE
+    // failures that made no headway, so a transfer that is advancing keeps
+    // going. Three failures here, against a budget of two.
+    const step = 5 * 1024 * 1024; // > PROGRESS_REFUND_BYTES
+    const failures = 3;
+    const total = step * (failures + 1);
+    const full = Buffer.alloc(total, 0x5a);
+
+    // A range server that hands over `step` bytes and then drops the socket,
+    // until the final attempt, which delivers the rest.
+    let served = 0;
+    const fetchImpl: typeof fetch = async (_input, init) => {
+      const headers = init?.headers as Record<string, string> | undefined;
+      const from = Number.parseInt(/bytes=(\d+)-/.exec(headers?.Range ?? '')?.[1] ?? '0', 10);
+      const lastAttempt = served >= failures;
+      served++;
+      const slice = full.subarray(from, lastAttempt ? total : Math.min(from + step, total));
+      // `controller.error()` discards anything still queued, so the drop has
+      // to land on the *next* pull — after the consumer has taken the bytes.
+      let delivered = false;
+      const body = new ReadableStream<Uint8Array>({
+        pull(controller) {
+          if (!delivered) {
+            delivered = true;
+            controller.enqueue(new Uint8Array(slice));
+            return;
+          }
+          if (lastAttempt) controller.close();
+          else controller.error(new Error('socket hang up'));
+        },
+      });
+      return new Response(body, {
+        status: from > 0 ? 206 : 200,
+        headers: {
+          'content-length': String(slice.byteLength),
+          ...(from > 0 ? { 'content-range': `bytes ${from}-${total - 1}/${total}` } : {}),
+        },
+      });
+    };
+
+    const destPath = join(workDir, 'flaky.bin');
+    const { result, events } = await runDownload(
+      downloadWithRetry({
+        url: 'https://hf.test/flaky',
+        destPath,
+        approxSizeBytes: total,
+        fetchImpl,
+        maxRetries: 2,
+        chunkTimeoutMs: 2_000,
+      }),
+    );
+
+    expect(result.kind).toBe('ok');
+    expect(statSync(`${destPath}.partial`).size).toBe(total);
+    // Compare by digest — `toEqual` on a 20 MB buffer OOMs the differ.
+    expect(sha256(readFileSync(`${destPath}.partial`))).toBe(sha256(full));
+    const retries = events.filter((e) => e.type === 'retrying');
+    expect(retries).toHaveLength(failures);
+    // Each retry resumes from where the last one stopped, and the refunded
+    // budget shows the attempt counter back at 1 rather than creeping to 3/2.
+    expect(retries.every((e) => e.type === 'retrying' && e.attempt === 1)).toBe(true);
+    expect(retries.map((e) => (e.type === 'retrying' ? e.resumeFromBytes : 0))).toEqual([
+      step,
+      step * 2,
+      step * 3,
+    ]);
+  });
+
+  it('still gives up when repeated failures make no headway', async () => {
+    // The refund must not turn a genuinely dead link into an infinite loop.
+    const { fetchImpl } = makeFetchSequence(
+      Array.from({ length: 3 }, () => async () => {
+        throw new Error('socket hang up');
+      }),
+    );
+    const destPath = join(workDir, 'dead.bin');
+    const { result } = await runDownload(
+      downloadWithRetry({
+        url: 'https://hf.test/dead',
+        destPath,
+        approxSizeBytes: 4096,
+        fetchImpl,
+        maxRetries: 3,
+        chunkTimeoutMs: 100,
+      }),
+    );
+    expect(result.kind).toBe('error');
+    if (result.kind === 'error') {
+      expect(result.attemptsMade).toBe(3);
+      expect(result.error).toMatch(/gave up after 3 attempts/);
     }
   });
 

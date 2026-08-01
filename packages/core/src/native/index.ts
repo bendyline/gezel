@@ -29,6 +29,14 @@ export type {
   ResolvedLlamaBinary,
 } from './llama-backend.js';
 export { detectLlamaBackend, resolveAvailableLlamaBinary } from './llama-backend.js';
+export type { LlamaQuarantineEntry, QuarantineIo } from './llama-quarantine.js';
+export {
+  binaryFingerprint,
+  isBinaryQuarantined,
+  llamaQuarantinePath,
+  readLlamaQuarantine,
+  recordLlamaQuarantine,
+} from './llama-quarantine.js';
 export type {
   DiscoverInput,
   DiscoverResult,

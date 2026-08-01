@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { describe, expect, it, vi } from 'vitest';
 import { GezelClient } from './client.js';
-import { discoverOrSpawn } from './discover-or-spawn.js';
+import { type SpawnLike, discoverOrSpawn } from './discover-or-spawn.js';
 import type { RuntimeInfo } from './discovery.js';
 
 function makeFakeChild() {
@@ -46,6 +46,70 @@ function fakeClient() {
 }
 
 describe('discoverOrSpawn', () => {
+  // Regression: the supervisor spawns `process.execPath`, which under Electron
+  // is the app binary. Without this flag Electron ignores the script argument
+  // and boots a second copy of the app — it never writes runtime files, so the
+  // caller waited out its whole startup budget and fell back to embedded on
+  // every packaged per-user launch.
+  describe('daemon child environment', () => {
+    // Must await inside: discoverOrSpawn reaches its spawn only after the
+    // runtime-file await, so a synchronous finally would restore the real
+    // process.versions before the code under test ever reads it.
+    async function withElectron<T>(version: string | undefined, run: () => Promise<T>): Promise<T> {
+      const original = process.versions;
+      const patched = { ...original };
+      if (version === undefined) delete (patched as { electron?: string }).electron;
+      else (patched as { electron?: string }).electron = version;
+      Object.defineProperty(process, 'versions', { value: patched, configurable: true });
+      try {
+        return await run();
+      } finally {
+        Object.defineProperty(process, 'versions', { value: original, configurable: true });
+      }
+    }
+
+    async function spawnAndCaptureEnv(
+      electronVersion: string | undefined,
+      env?: NodeJS.ProcessEnv,
+    ): Promise<NodeJS.ProcessEnv | undefined> {
+      // Typed as SpawnLike so `mock.calls[0][2].env` is checked, not `never`.
+      const spawnFn = vi.fn<SpawnLike>(() => makeFakeChild());
+      await withElectron(electronVersion, () =>
+        discoverOrSpawn({
+          daemonEntry: '/fake/gezeld.js',
+          timeoutMs: 20,
+          pollIntervalMs: 5,
+          ...(env ? { env } : {}),
+          spawnFn,
+          readRuntimeFn: async () => null,
+          isProcessAliveFn: () => false,
+          clientFactory: fakeClient,
+        }).catch(() => undefined),
+      );
+      expect(spawnFn).toHaveBeenCalled();
+      return spawnFn.mock.calls[0]?.[2]?.env;
+    }
+
+    it('runs the Electron binary as node so it starts gezeld, not a second app', async () => {
+      const spawned = await spawnAndCaptureEnv('39.0.0', { GEZEL_HOME: '/tmp/home' });
+      expect(spawned?.ELECTRON_RUN_AS_NODE).toBe('1');
+      expect(spawned?.GEZEL_HOME).toBe('/tmp/home');
+    });
+
+    it('leaves the flag off outside Electron, where execPath is already node', async () => {
+      const spawned = await spawnAndCaptureEnv(undefined, { GEZEL_HOME: '/tmp/home' });
+      expect(spawned?.ELECTRON_RUN_AS_NODE).toBeUndefined();
+    });
+
+    it('never mutates the caller env, so the flag cannot leak into later spawns', async () => {
+      const callerEnv: NodeJS.ProcessEnv = { GEZEL_HOME: '/tmp/home' };
+      const spawned = await spawnAndCaptureEnv('39.0.0', callerEnv);
+      expect(spawned?.ELECTRON_RUN_AS_NODE).toBe('1');
+      expect(callerEnv.ELECTRON_RUN_AS_NODE).toBeUndefined();
+      expect(spawned).not.toBe(callerEnv);
+    });
+  });
+
   it('adopts a running daemon when runtime files + pid are live', async () => {
     const spawnFn = vi.fn(() => makeFakeChild());
     const result = await discoverOrSpawn({

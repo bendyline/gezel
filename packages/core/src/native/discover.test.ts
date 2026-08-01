@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { discoverNativeBinaries } from './discover.js';
+import { recordLlamaQuarantine } from './llama-quarantine.js';
 
 let home: string;
 let nativeBinDir: string;
@@ -356,5 +357,100 @@ describe('discoverNativeBinaries — override', () => {
     expect(process.env.GEZEL_LLAMA_DETECTED_BACKEND).toBe('cuda');
     expect(result.llamaBackend?.backend).toBe('cpu');
     expect(result.llamaBackend?.detectedBackend).toBe('cuda');
+  });
+});
+
+describe('discoverNativeBinaries — a bundled build that cannot run here', () => {
+  /**
+   * Reproduces the shape of the field incident: an NVIDIA box where the
+   * probe correctly says CUDA, the CUDA binary is present, and the CUDA
+   * binary dies on launch. Before the quarantine existed, resolution kept
+   * handing back the same unrunnable build on every request while the
+   * working Vulkan build sat in the next directory.
+   */
+  function stageAllVariants() {
+    return {
+      cuda: stageBinary(nativeBinDir, 'linux-x64-cuda', 'gezel-llama-server', 'linux'),
+      vulkan: stageBinary(nativeBinDir, 'linux-x64-vulkan', 'gezel-llama-server', 'linux'),
+      cpu: stageBinary(nativeBinDir, 'linux-x64-cpu', 'gezel-llama-server', 'linux'),
+    };
+  }
+
+  const cudaProbe = { fileExists: (p: string) => p.endsWith('libcuda.so.1') };
+
+  it('demotes to the next backend and says so', () => {
+    const bins = stageAllVariants();
+    recordLlamaQuarantine(home, {
+      backend: 'cuda',
+      binaryPath: bins.cuda,
+      signal: 'SIGILL',
+      reason: 'crashed with SIGILL before the engine became ready',
+    });
+    const warnings: string[] = [];
+
+    const result = discoverNativeBinaries({
+      home,
+      nativeBinDirOverride: nativeBinDir,
+      platform: 'linux',
+      arch: 'x64',
+      llamaProbeOverride: cudaProbe,
+      logger: { warn: (m) => void warnings.push(m) },
+    });
+
+    expect(process.env.GEZEL_LLAMA_SERVER_BIN).toBe(bins.vulkan);
+    expect(process.env.GEZEL_LLAMA_SERVER_BACKEND).toBe('vulkan');
+    // The dropdown must still offer CUDA — the hardware has it, and the
+    // user needs a way back after fixing the cause.
+    expect(process.env.GEZEL_LLAMA_DETECTED_BACKEND).toBe('cuda');
+    expect(result.llamaBackend?.backend).toBe('vulkan');
+    expect(result.llamaBackend?.quarantined).toEqual(['cuda']);
+    expect(result.llamaBackend?.reason).toContain('quarantined');
+    expect(warnings.some((w) => w.includes('quarantined') && w.includes('SIGILL'))).toBe(true);
+  });
+
+  it('re-enables the backend once the binary is replaced', () => {
+    const bins = stageAllVariants();
+    recordLlamaQuarantine(home, {
+      backend: 'cuda',
+      binaryPath: bins.cuda,
+      signal: 'SIGILL',
+      reason: 'crashed with SIGILL before the engine became ready',
+    });
+    // A native release lands a repaired build at the same path.
+    writeFileSync(bins.cuda, 'rebuilt with portable CPU dispatch');
+
+    const result = discoverNativeBinaries({
+      home,
+      nativeBinDirOverride: nativeBinDir,
+      platform: 'linux',
+      arch: 'x64',
+      llamaProbeOverride: cudaProbe,
+    });
+
+    expect(process.env.GEZEL_LLAMA_SERVER_BIN).toBe(bins.cuda);
+    expect(result.llamaBackend?.backend).toBe('cuda');
+    expect(result.llamaBackend?.quarantined).toBeUndefined();
+  });
+
+  it('respects an explicit pin rather than overriding the user', () => {
+    const bins = stageAllVariants();
+    recordLlamaQuarantine(home, {
+      backend: 'cuda',
+      binaryPath: bins.cuda,
+      signal: 'SIGILL',
+      reason: 'crashed with SIGILL before the engine became ready',
+    });
+
+    const result = discoverNativeBinaries({
+      home,
+      nativeBinDirOverride: nativeBinDir,
+      platform: 'linux',
+      arch: 'x64',
+      llamaCppBackendOverride: 'cuda',
+      llamaProbeOverride: cudaProbe,
+    });
+
+    expect(process.env.GEZEL_LLAMA_SERVER_BIN).toBe(bins.cuda);
+    expect(result.llamaBackend?.backend).toBe('cuda');
   });
 });

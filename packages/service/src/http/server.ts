@@ -405,6 +405,14 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
     const llamaCppBackend = known.find((b) => b === backendRaw);
     const llamaCppDetectedBackend = known.find((b) => b === detectedRaw);
     const llamaCppDetectedVendor = knownVendors.find((v) => v === vendorRaw);
+    // A fourth: backends whose bundled build crashed on this machine and
+    // were routed around. Without it the UI can see that the resolved and
+    // detected backends differ but not why, which reads identically to a
+    // user pin — and leaves someone silently on a slow engine.
+    const llamaCppQuarantinedBackends = (process.env.GEZEL_LLAMA_QUARANTINED ?? '')
+      .split(',')
+      .map((v) => v.trim())
+      .filter((v): v is (typeof known)[number] => known.some((b) => b === v));
     return c.json({
       ok: true as const,
       version: GEZEL_VERSION,
@@ -414,6 +422,7 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
       ...(llamaCppBackend ? { llamaCppBackend } : {}),
       ...(llamaCppDetectedBackend ? { llamaCppDetectedBackend } : {}),
       ...(llamaCppDetectedVendor ? { llamaCppDetectedVendor } : {}),
+      ...(llamaCppQuarantinedBackends.length > 0 ? { llamaCppQuarantinedBackends } : {}),
     });
   });
 

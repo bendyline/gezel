@@ -79,12 +79,18 @@ describe('macOS machine-service filesystem security', () => {
     expect(macPostinstall).toContain('[ "${group_id_count:-0}" -ne 1 ]');
     expect(macPostinstall).toContain('abort_bad_service_identity()');
     expect(macPostinstall).toContain('launchctl disable "system/${DAEMON_LABEL}"');
-    expect(macPostinstall).toContain('daemon_shell=$(dscl . -read');
+    expect(macPostinstall).toContain(
+      'daemon_shell=$(read_daemon_attribute "/Users/${DAEMON_USER}" UserShell)',
+    );
     expect(macPostinstall).toContain('[ "$daemon_shell" != "/usr/bin/false" ]');
     expect(macPostinstall).toContain('[ "$daemon_home" != "/var/empty" ]');
     expect(macPostinstall).toContain(
-      'daemon_hidden=$(dscl . -read "/Users/${DAEMON_USER}" IsHidden | awk \'$1 ~ /(^|:)IsHidden:$/ { print $2 }\')',
+      'daemon_hidden=$(read_daemon_attribute "/Users/${DAEMON_USER}" IsHidden)',
     );
+    // macOS 26 renders native attributes as `dsAttrTypeNative:IsHidden: 1`,
+    // older releases as `IsHidden: 1`. The shared reader must accept either
+    // label without accepting a different value.
+    expect(macPostinstall).toContain('awk -v key="$2" \'$1 ~ "(^|:)" key ":$" { print $2 }\'');
     expect(macPostinstall).toContain('[ "$daemon_hidden" != "1" ]');
     expect(macPlist).toMatch(/<key>Umask<\/key>\s*<integer>63<\/integer>/);
     expect(macPlist).toMatch(/<key>GEZEL_PORT<\/key>\s*<string>6228<\/string>/);
@@ -128,7 +134,9 @@ describe('macOS machine-service filesystem security', () => {
 
     // Repaired from the user's own PrimaryGroupID, not a freshly-picked id:
     // the account already owns files under that gid.
-    expect(macPostinstall).toContain('dscl . -create "/Groups/${DAEMON_USER}" PrimaryGroupID "$repair_gid"');
+    expect(macPostinstall).toContain(
+      'dscl . -create "/Groups/${DAEMON_USER}" PrimaryGroupID "$repair_gid"',
+    );
     // …and only when that id is genuinely free. Minting a group over a gid
     // another group already holds would manufacture the shared-GID collision
     // the checks below exist to reject.
@@ -145,7 +153,9 @@ describe('macOS machine-service filesystem security', () => {
     // only "installation failed" plus a line number. Absent values have to
     // survive to the named checks instead.
     expect(macPostinstall).toContain('read_daemon_attribute() {');
-    expect(macPostinstall).toMatch(/dscl \. -read "\$1" "\$2" 2>\/dev\/null \|\n\s*awk .* \|\| true/);
+    expect(macPostinstall).toMatch(
+      /dscl \. -read "\$1" "\$2" 2>\/dev\/null \|\n\s*awk .* \|\| true/,
+    );
     expect(macPostinstall).toContain('the dedicated user record is missing or incomplete');
     expect(macPostinstall).toContain(
       'the matching ${DAEMON_USER} group is missing and could not be repaired',
@@ -155,7 +165,9 @@ describe('macOS machine-service filesystem security', () => {
     // unguarded dscl pipeline.
     const unguarded = macPostinstall
       .split('\n')
-      .filter((line) => /^\s*(daemon_|user_id_count|group_id_count|repair_)\w*=\$\(\s*dscl/.test(line))
+      .filter((line) =>
+        /^\s*(daemon_|user_id_count|group_id_count|repair_)\w*=\$\(\s*dscl/.test(line),
+      )
       .filter((line) => !line.includes('2>/dev/null'));
     expect(unguarded, `unguarded dscl assignment: ${unguarded.join(' | ')}`).toEqual([]);
   });

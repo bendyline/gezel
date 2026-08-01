@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { railSystemNotices, serviceNotice, updateNotice } from './system-notices.js';
+import {
+  engineBackendNotice,
+  railSystemNotices,
+  serviceNotice,
+  updateNotice,
+} from './system-notices.js';
 
 describe('serviceNotice', () => {
   it('says nothing when the launch was healthy', () => {
@@ -127,5 +132,52 @@ describe('railSystemNotices', () => {
     });
 
     expect(notices.map((n) => n.id)).toEqual(['service-unavailable']);
+  });
+});
+
+describe('engineBackendNotice', () => {
+  it('names the demoted backend and what is running instead', () => {
+    const notice = engineBackendNotice({ quarantined: ['cuda'], running: 'vulkan' });
+    expect(notice?.id).toBe('engine-backend-quarantined');
+    expect(notice?.title).toContain('NVIDIA GPU (CUDA)');
+    expect(notice?.body).toContain('GPU (Vulkan)');
+    // Must not read as broken — the app works, it is just slower.
+    expect(notice?.body).toContain('Everything still works');
+    expect(notice?.railLabel).toBe('Running on GPU (Vulkan)');
+  });
+
+  it('is absent when nothing is quarantined', () => {
+    expect(engineBackendNotice({})).toBeNull();
+    expect(engineBackendNotice({ quarantined: [], running: 'cuda' })).toBeNull();
+  });
+
+  it('reaches the rail alongside the other install-health notices', () => {
+    const notices = railSystemNotices({
+      update: null,
+      quarantinedBackends: ['cuda'],
+      runningBackend: 'vulkan',
+    });
+    expect(notices.map((n) => n.id)).toContain('engine-backend-quarantined');
+  });
+});
+
+describe('which notices are worth a bug report', () => {
+  it('marks every genuine install failure reportable', () => {
+    const reason = 'spawn failed';
+    for (const code of ['machine-service-not-installed', 'system-service-version-mismatch', null]) {
+      expect(serviceNotice({ reason, code })?.reportable).toBe(true);
+    }
+    expect(updateNotice({ kind: 'error', stage: 'install', message: 'boom' })?.reportable).toBe(
+      true,
+    );
+    expect(engineBackendNotice({ quarantined: ['cuda'], running: 'cpu' })?.reportable).toBe(true);
+  });
+
+  it('does not solicit a bug report for being offline', () => {
+    // A failed update *check* is what an offline launch looks like. Nothing
+    // is wrong with the install, so an issue for it is pure noise.
+    expect(updateNotice({ kind: 'error', stage: 'check', message: 'ENOTFOUND' })?.reportable).toBe(
+      undefined,
+    );
   });
 });

@@ -141,6 +141,14 @@ export interface ResolvedLlamaBinary {
    * because the detected GPU variant was not bundled for this platform.
    */
   fallbackFrom?: LlamaBackend;
+  /**
+   * Backends passed over because `isUsable` rejected them — a build that
+   * is present but known to crash on this machine. Distinct from
+   * `fallbackFrom`, which covers a variant that simply isn't bundled:
+   * this one shipped, exists on disk, and does not run here. Callers
+   * surface it so the demotion is visible instead of silent.
+   */
+  skippedUnusable?: LlamaBackend[];
 }
 
 /**
@@ -162,6 +170,17 @@ export function resolveAvailableLlamaBinary(
   preferredBackend: LlamaBackend,
   resolveBinary: (backend: LlamaBackend) => string | null,
   allowFallbacks: boolean,
+  /**
+   * Optional veto on a binary that exists. Returning false continues down
+   * the fallback chain as if the build were absent — the quarantine hook
+   * (see `llama-quarantine.ts`) uses this to route around a variant that
+   * crashed before it was ever ready.
+   *
+   * Only consulted while fallbacks are allowed. With an explicit user
+   * pin there is nowhere to demote TO, and silently refusing the pinned
+   * backend would replace one confusing failure with a stranger one.
+   */
+  isUsable?: (backend: LlamaBackend, path: string) => boolean,
 ): ResolvedLlamaBinary | null {
   const fallbackOrder: Record<LlamaBackend, LlamaBackend[]> = {
     cuda: ['cuda', 'vulkan', 'cpu'],
@@ -170,16 +189,21 @@ export function resolveAvailableLlamaBinary(
     cpu: ['cpu'],
   };
   const candidates = allowFallbacks ? fallbackOrder[preferredBackend] : [preferredBackend];
+  const skippedUnusable: LlamaBackend[] = [];
 
   for (const backend of candidates) {
     const path = resolveBinary(backend);
-    if (path) {
-      return {
-        backend,
-        path,
-        ...(backend === preferredBackend ? {} : { fallbackFrom: preferredBackend }),
-      };
+    if (!path) continue;
+    if (allowFallbacks && isUsable && !isUsable(backend, path)) {
+      skippedUnusable.push(backend);
+      continue;
     }
+    return {
+      backend,
+      path,
+      ...(backend === preferredBackend ? {} : { fallbackFrom: preferredBackend }),
+      ...(skippedUnusable.length > 0 ? { skippedUnusable: [...skippedUnusable] } : {}),
+    };
   }
 
   return null;
