@@ -28,6 +28,7 @@
     [
       "@semantic-release/exec",
       {
+        "prepareCmd": "node ../../scripts/prepare-package.mjs ${nextRelease.version}",
         "publishCmd": "node ../../scripts/publish-package.mjs"
       }
     ],

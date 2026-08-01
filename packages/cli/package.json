@@ -1,6 +1,6 @@
 {
   "name": "@bendyline/gezel-cli",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "The `gezel` command-line tool.",
   "license": "MIT",
   "keywords": ["gezel", "ai", "agents", "local-first", "cli", "terminal", "tui"],
@@ -22,6 +22,9 @@
     "provenance": true
   },
   "type": "module",
+  "engines": {
+    "node": ">=24.0.0"
+  },
   "bin": {
     "gezel": "./dist/bin/gezel.js"
   },

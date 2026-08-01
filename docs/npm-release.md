@@ -30,11 +30,15 @@ Three tiers, and the tier is a property of the manifest, not a list:
   `private: true`, and [`scripts/publish-package.mjs`](../scripts/publish-package.mjs)
   skips anything private. They ship through electron-builder and the VS Code
   Marketplace.
-- **Ignored** — `packages/ui`, `packages/eval-viewer`, `evals`, excluded via
-  `--ignore-packages`. The UI is not published separately because
-  `packages/service/tsup.config.ts` stages `packages/ui/dist` into
-  `packages/service/dist/ui/`; it ships inside the service tarball so a
-  Node-only install can serve `gezel start --web` with nothing else to fetch.
+- **Ignored** — `packages/ui`, `packages/eval-viewer`, `packages/sharp-compat`
+  and `evals`, excluded via `--ignore-packages`. The UI is not published
+  separately because `packages/service/tsup.config.ts` stages
+  `packages/ui/dist` into `packages/service/dist/ui/`; it ships inside the
+  service tarball so a Node-only install can serve `gezel start --web` with
+  nothing else to fetch. `sharp-compat` is ignored rather than left to its
+  `private: true` flag: that flag stops the publish, but not the versioning —
+  multi-semantic-release would give it a CHANGELOG and a git tag named
+  literally `sharp@x.y.z`.
 
 Adding or removing a published package means editing
 [`tests/published/_packages.ts`](../tests/published/_packages.ts) and the
@@ -56,6 +60,31 @@ Conventional Commits are enforced by the `commitlint` job in
 [quality.yml](../.github/workflows/quality.yml) on pull requests **and** on
 pushes to `main`. There is no local git hook, deliberately — but the messages
 are load-bearing, because every published version bump derives from them.
+
+### `GEZEL_VERSION` is stamped during `prepare`
+
+The version a running install *reports* — `gezel --version`, `/api/health`
+(which the UI renders as "development build" when it reads `0.0.0`), the system
+diagnostics, the OpenAPI document, the MCP server handshake and the
+engine-download User-Agent — all come from one source constant,
+`GEZEL_VERSION` in [`packages/core/src/index.ts`](../packages/core/src/index.ts).
+It is a literal rather than a read of `package.json` because core is bundled for
+the browser and cannot reach for `node:module` at runtime.
+
+The release workflow's `pnpm build` necessarily runs *before* semantic-release
+computes any version, so without intervention every published package would
+report `0.0.0` forever.
+[`scripts/prepare-package.mjs`](../scripts/prepare-package.mjs) closes that gap:
+`@semantic-release/exec`'s `prepareCmd` runs it once per package, it no-ops for
+everything except `packages/core`, and for core it stamps the constant, rebuilds
+core, and asserts the rebuilt `dist` actually carries the version before the
+publish step is allowed to pack it.
+
+One stamp covers everything because core is `external` to every other package's
+tsup build — the constant lives in core's `dist` alone and the rest import it.
+Like the Electron stamp, the rewritten source is deliberately **not** committed:
+`.releaserc.json`'s git assets are `CHANGELOG.md` and `package.json` only, and
+each release re-stamps from a `0.0.0` checkout.
 
 ## `workspace:*` and why we publish with pnpm
 
@@ -130,6 +159,38 @@ and a failure in the native prebuild chain (`node-pty`, `@napi-rs/keyring`,
 
 `GEZEL_CONSUMER_SKIP_DAEMON=1` skips step 4; `--keep` leaves the temp project
 for inspection.
+
+## npm consumers get a different dependency graph
+
+`pnpm-workspace.yaml` pins eighteen transitive packages under `overrides`, and
+patches `app-builder-lib`. **None of that reaches an npm consumer.** npm honours
+`overrides` only from the root project being installed, never from inside a
+dependency, so there is no manifest change that could carry these across — this
+is a property of the package manager, not an oversight. `check:packages` is the
+only gate that sees the graph npm actually resolves, which is why it installs
+real tarballs into a non-pnpm project rather than trusting the workspace.
+
+Two of the overrides are worth knowing by name:
+
+- **`sharp`.** In this workspace the slot is filled by
+  [`packages/sharp-compat`](../packages/sharp-compat/README.md), a no-image stub.
+  Transformers.js imports Sharp unconditionally from its Node bundle even though
+  gezel only uses it for text embeddings and Kokoro TTS, and the stub keeps
+  libvips and its dependency set out of the desktop app. An npm install resolves
+  **real `sharp`** instead. That is accepted: it is strictly more capable than
+  the stub, and gezel exposes no Transformers.js vision path for the difference
+  to show up in. The cost is install weight and one more native prebuild in the
+  chain — `sharp` publishes prebuilds for the mainstream platforms, so a
+  platform without one falls back to building libvips. **The Electron app must
+  stay on the stub**; the packaging guard that verifies it is deliberate.
+- **`onnxruntime-node`,** pinned to a single version because Transformers.js
+  3.x and 4.x otherwise load two incompatible native ONNX runtimes into the same
+  daemon process. npm consumers get whatever the graph resolves. If a bug report
+  ever shows two `onnxruntime-node` copies in an npm install's tree, that is the
+  cause.
+
+The `app-builder-lib` patch is electron-builder only and never reaches a
+consumer at all.
 
 ## Native engine binaries
 
@@ -210,14 +271,39 @@ npm token. Three things make that work, and all three are load-bearing:
 
 ### First publish (one time per package)
 
-Trusted publishing can only be configured on a package that already exists.
+Trusted publishing can only be configured on a package that already exists, so
+the eleven are bootstrapped by hand once. Two things about that hand-publish are
+not obvious:
 
-1. Publish each package once by hand with a granular npm token:
+- **It must use `--no-provenance`.** Every manifest sets
+  `publishConfig.provenance: true`, and npm can only mint provenance inside a
+  supported CI with an OIDC token. From a workstation the publish fails without
+  the flag. CI is unaffected — it wants provenance and can produce it. If a pnpm
+  version ever stops forwarding the flag, `npm_config_provenance=false` in the
+  environment does the same job.
+- **The bootstrap version must stay below what semantic-release will compute.**
+  With no `@bendyline/gezel*` git tags in the repo, multi-semantic-release treats
+  every package as an initial release and computes `1.0.0`. Hand-publishing
+  `1.0.0` makes the first CI release fail with `E403 cannot publish over the
+  previously published version` — after some packages have already gone out.
+  The bootstrap went out at `0.1.0`, so the first CI release is `1.0.0`.
+
+1. From a clean `main`, with `pnpm validate` green, publish each package in
+   dependency order with a granular npm token:
    ```bash
    pnpm build
-   pnpm --filter @bendyline/gezel publish --access public
-   # …repeat for the other ten
+   # No semantic-release run means no prepareCmd, so stamp GEZEL_VERSION by
+   # hand — otherwise the bootstrap ships packages that report 0.0.0.
+   (cd packages/core && node ../../scripts/prepare-package.mjs 0.1.0)
+   for d in core client sdk app-sdk plugin-sdk catalog connectors-spectral \
+            script-stdlib mcp service cli; do
+     (cd "packages/$d" && pnpm publish --access public --no-provenance --no-git-checks)
+   done
    ```
+   Order matters for installability, not for correctness of the manifests:
+   `pnpm publish` rewrites `workspace:*` from the sibling's version **on disk**,
+   so every package must already carry the bootstrap version before the first
+   `publish` runs.
 2. On npmjs.com, register a trusted publisher per package — npm's bulk
    trusted-publisher configuration makes eleven manageable:
    - repository: `bendyline/gezel`
@@ -225,6 +311,9 @@ Trusted publishing can only be configured on a package that already exists.
    - environment: **none** (the release job configures none, so the trusted
      publisher must not require one)
 3. Delete the token. Every release after this is token-free.
+4. Confirm `@semantic-release/git` can push to `main`. `.releaserc.json` commits
+   `CHANGELOG.md` and `package.json` back, and branch protection that rejects a
+   `GITHUB_TOKEN` push fails the release *after* the packages are on npm.
 
 ### `ENONPMTOKEN` is not a missing secret
 

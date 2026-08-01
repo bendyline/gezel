@@ -143,13 +143,19 @@ jobs:
       # `workspace:*` to a sibling's CURRENT version at pack time, so every
       # dependency must have its new version written before a dependent is
       # packed.
+      #
+      # packages/sharp-compat is ignored rather than left to its `private: true`
+      # flag. That flag stops the publish, but multi-semantic-release would
+      # still version it, write it a CHANGELOG, and cut a git tag named
+      # literally `sharp@x.y.z` — it occupies the `sharp` dependency slot for
+      # Transformers.js and is not a gezel release line.
       - name: Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GEZEL_RELEASE_DRY_RUN: ${{ inputs.dry_run && '1' || '0' }}
         run: |
           set -euo pipefail
-          args=(--ignore-packages=packages/ui,packages/eval-viewer,evals --sequential-prepare)
+          args=(--ignore-packages=packages/ui,packages/eval-viewer,packages/sharp-compat,evals --sequential-prepare)
           if [[ "$GEZEL_RELEASE_DRY_RUN" == "1" ]]; then
             args+=(--dry-run)
           fi
