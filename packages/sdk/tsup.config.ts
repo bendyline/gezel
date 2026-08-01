@@ -1,4 +1,5 @@
 import { defineConfig } from 'tsup';
+import { stripSourcemapCommentsFromBuild } from '../../scripts/strip-sourcemap-comments.mjs';
 
 export default defineConfig({
   entry: ['src/index.ts', 'src/checks.ts', 'src/stores.ts'],
@@ -15,4 +16,5 @@ export default defineConfig({
   // the SDK dist stays self-contained when vendored into script sandboxes
   // (sandboxes have no node_modules beyond the vendored SDK itself).
   noExternal: ['@bendyline/gezel'],
+  onSuccess: () => stripSourcemapCommentsFromBuild(),
 });

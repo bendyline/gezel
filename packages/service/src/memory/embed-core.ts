@@ -110,7 +110,11 @@ export async function loadPipeline(): Promise<Pipeline> {
         if (modelId !== DEFAULT_EMBED_MODEL) log.info(`[embed] using model ${modelId}`);
         return (await pipeline('feature-extraction', modelId)) as Pipeline;
       } catch (err) {
-        throw new PipelineLoadError(err instanceof Error ? err.message : String(err));
+        const detail = err instanceof Error ? err.message : String(err);
+        const message = detail.includes('@huggingface/transformers')
+          ? 'Local memory embeddings are an optional npm feature. Install @huggingface/transformers@^3.8.1 alongside @bendyline/gezel-service (see the service README).'
+          : detail;
+        throw new PipelineLoadError(message);
       }
     })();
     // A transient load failure (e.g. network blip during the first download)

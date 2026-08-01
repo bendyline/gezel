@@ -30,8 +30,8 @@ Three tiers, and the tier is a property of the manifest, not a list:
   `private: true`, and [`scripts/publish-package.mjs`](../scripts/publish-package.mjs)
   skips anything private. They ship through electron-builder and the VS Code
   Marketplace.
-- **Ignored** — `packages/ui`, `packages/eval-viewer`, `packages/sharp-compat`
-  and `evals`, excluded via `--ignore-packages`. The UI is not published
+- **Ignored** — `packages/ui`, `packages/eval-viewer`, `packages/sharp-compat`,
+  `packages/ml-runtime`, and `evals`, excluded via `--ignore-packages`. The UI is not published
   separately because `packages/service/tsup.config.ts` stages
   `packages/ui/dist` into `packages/service/dist/ui/`; it ships inside the
   service tarball so a Node-only install can serve `gezel start --web` with
@@ -39,6 +39,13 @@ Three tiers, and the tier is a property of the manifest, not a list:
   `private: true` flag: that flag stops the publish, but not the versioning —
   multi-semantic-release would give it a CHANGELOG and a git tag named
   literally `sharp@x.y.z`.
+
+`packages/ml-runtime` is a private deployment-only dependency holder. Public
+`@bendyline/gezel-service` installs keep Transformers/Kokoro as optional peers
+so a cloud/headless npm consumer does not pay for two large native inference
+stacks. The Electron and relocatable Node bundle builders deploy this private
+package into their runtime trees, preserving the full local-embedding and TTS
+feature set in complete distributions.
 
 Adding or removing a published package means editing
 [`tests/published/_packages.ts`](../tests/published/_packages.ts) and the
@@ -144,33 +151,45 @@ They catch publishing-shape bugs no per-package suite can see:
 packs all eleven packages, `npm install`s the tarballs into a throwaway
 **non-pnpm, non-workspace** project, and then:
 
-1. imports every public subpath under plain node,
-2. resolves the runtime-resolved specifiers,
-3. runs the installed `gezel` binary,
-4. boots the installed `gezeld` with the mock provider, probes `/api/health`,
+1. enforces an 800 MiB logical `node_modules` budget,
+2. runs `npm audit --omit=dev --audit-level=high`,
+3. proves a clean-install macOS `node-pty` can spawn a shell,
+4. imports every public subpath under plain node,
+5. resolves the runtime-resolved specifiers,
+6. runs the installed `gezel` binary,
+7. boots the installed `gezeld` with the mock provider, probes `/api/health`,
    creates a gezel, and asserts the daemon found its bundled UI and handboek.
 
 The separate project is the whole point. Inside this repo everything resolves
 through pnpm's workspace links and hoisted store, which hides two classes of
 bug: a runtime dependency that is only present because a sibling hoisted it,
-and a failure in the native prebuild chain (`node-pty`, `@napi-rs/keyring`,
-`@resvg/resvg-js`, `sqlite-vec`, `onnxruntime-node`, `kokoro-js`,
-`playwright-core`) that nothing else installs outside pnpm.
+and a failure in the default native/prebuild chain (`node-pty`,
+`@napi-rs/keyring`, `@resvg/resvg-js`, `sqlite-vec`, `playwright-core`) that
+nothing else installs outside pnpm. The optional ML stack has separate complete-
+bundle checks.
 
-`GEZEL_CONSUMER_SKIP_DAEMON=1` skips step 4; `--keep` leaves the temp project
-for inspection.
+`GEZEL_CONSUMER_SKIP_DAEMON=1` skips step 7; `--keep` leaves the temp project
+for inspection. `--tarball-dir <path>` skips packing and tests an existing set
+of candidate artifacts byte-for-byte.
 
-## npm consumers get a different dependency graph
+## npm consumers get a lean dependency graph
 
-`pnpm-workspace.yaml` pins eighteen transitive packages under `overrides`, and
-patches `app-builder-lib`. **None of that reaches an npm consumer.** npm honours
+`pnpm-workspace.yaml` pins transitive packages under `overrides`, and patches
+`app-builder-lib`. **None of that reaches an npm consumer.** npm honours
 `overrides` only from the root project being installed, never from inside a
 dependency, so there is no manifest change that could carry these across — this
 is a property of the package manager, not an oversight. `check:packages` is the
 only gate that sees the graph npm actually resolves, which is why it installs
 real tarballs into a non-pnpm project rather than trusting the workspace.
 
-Two of the overrides are worth knowing by name:
+The local-ML packages are therefore optional peers of the published service.
+The default npm install is the cloud/headless/runtime surface and carries no
+Transformers, Sharp, or ONNX tree. Consumers that opt into in-process memory
+embeddings or Kokoro TTS must use the safe root overrides documented in the
+service README. Complete Electron and relocatable Node artifacts merge the
+private `packages/ml-runtime` deployment, where workspace overrides do apply.
+
+Two overrides in that complete distribution are worth knowing by name:
 
 - **`sharp`.** In this workspace the slot is filled by
   [`packages/sharp-compat`](../packages/sharp-compat/README.md), a no-image stub.
@@ -183,11 +202,10 @@ Two of the overrides are worth knowing by name:
   chain — `sharp` publishes prebuilds for the mainstream platforms, so a
   platform without one falls back to building libvips. **The Electron app must
   stay on the stub**; the packaging guard that verifies it is deliberate.
-- **`onnxruntime-node`,** pinned to a single version because Transformers.js
-  3.x and 4.x otherwise load two incompatible native ONNX runtimes into the same
-  daemon process. npm consumers get whatever the graph resolves. If a bug report
-  ever shows two `onnxruntime-node` copies in an npm install's tree, that is the
-  cause.
+- **`onnxruntime-node`,** pinned to the reviewed runtime used by the single
+  Transformers.js 3.x line. Embeddings and Kokoro intentionally share that
+  installation; two `onnxruntime-node` copies in a complete bundle are a
+  packaging regression.
 
 The `app-builder-lib` patch is electron-builder only and never reaches a
 consumer at all.

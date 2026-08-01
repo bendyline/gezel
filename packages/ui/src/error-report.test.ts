@@ -86,7 +86,7 @@ describe('formatErrorReport', () => {
   it('carries the error and the structured detail', () => {
     const body = formatErrorReport(crash());
     expect(body).toContain(`### Error\n${SIGILL}\n\n### Details`);
-    expect(body).not.toContain(`### Error\n\n\`\`\`text`);
+    expect(body).not.toContain('### Error\n\n```text');
     expect(body).toContain('on-device engine crashed');
     expect(body).toContain('code: native-engine-crash');
     expect(body).toContain('engine: llama-cpp');

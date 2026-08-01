@@ -98,7 +98,9 @@ describe('Checkers bundled project type', () => {
 
     expect(applied.scriptsInstalled).toEqual(['game-store']);
     const scriptBody = await readFile(projectScriptFile(home, project.id, 'game-store'), 'utf8');
-    expect(scriptBody.startsWith('// @gezel-project-type: checkers@1.1.1\n')).toBe(true);
+    expect(scriptBody.startsWith(`// @gezel-project-type: checkers@${applied.version}\n`)).toBe(
+      true,
+    );
 
     const workspaceDir = await store.projectWorkspaceDir(project.id);
     const seed = JSON.parse(await readFile(join(workspaceDir, 'game.json'), 'utf8'));

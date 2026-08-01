@@ -12,4 +12,12 @@ export default defineConfig({
   // Bundle the vendored components + shims; keep spectral external (resolved
   // from this package's own node_modules at runtime).
   external: ['@prismatic-io/spectral'],
+  // Dynamic import: this package is CJS (no `"type": "module"`), so a static
+  // import of the ESM-only strip script is a `require` of an ES module.
+  onSuccess: async () => {
+    const { stripSourcemapCommentsFromBuild } = await import(
+      '../../scripts/strip-sourcemap-comments.mjs'
+    );
+    await stripSourcemapCommentsFromBuild();
+  },
 });

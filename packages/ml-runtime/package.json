@@ -1,0 +1,12 @@
+{
+  "name": "@bendyline/internal-ml-runtime",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Deployment-only local ML dependencies for Gezel installer and node bundles.",
+  "license": "MIT",
+  "type": "module",
+  "dependencies": {
+    "@huggingface/transformers": "^3.8.1",
+    "kokoro-js": "^1.2.1"
+  }
+}

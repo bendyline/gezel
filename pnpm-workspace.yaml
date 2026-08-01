@@ -41,6 +41,7 @@ minimumReleaseAgeExclude:
   - "tar@7.5.21"
 
 allowBuilds:
+  '@bendyline/gezel-service@file:packages/service': true
   "@biomejs/biome": true
   "electron": true
   "electron-winstaller": true
@@ -63,8 +64,8 @@ overrides:
   "ip-address": "10.2.0"
   "js-yaml@<4": "3.15.0"
   "js-yaml@>=4 <5": "4.3.0"
-  # Transformers.js 3.x and 4.x otherwise load incompatible native ONNX
-  # runtimes into the same daemon process.
+  # Keep the single Transformers.js 3.x line on the reviewed native runtime;
+  # the matching adm-zip override closes its transitive advisory.
   "onnxruntime-node": "1.24.3"
   "protobufjs": "7.6.5"
   "qs": "6.15.2"

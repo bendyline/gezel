@@ -35,6 +35,8 @@ import { readFile, readdir, readlink, unlink, writeFile } from 'node:fs/promises
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
+import { deployMlRuntime } from './deploy-ml-runtime.mjs';
+import { fixDeployedNodePtyPermissions } from './fix-deployed-node-pty-perms.mjs';
 import { pruneForeignBinariesWithReport } from './prune-foreign-binaries.mjs';
 import {
   pruneRuntimeFilesWithReport,
@@ -138,6 +140,10 @@ async function main() {
   if (stdout.trim()) process.stdout.write(stdout);
   if (stderr.trim()) process.stderr.write(stderr);
 
+  // Public npm consumers opt into the large local-ML stack. Installer builds
+  // remain full-featured by merging the private deployment-only package.
+  await deployMlRuntime(repoRoot, target, 'build-service-bundle');
+
   const gezeldBin = join(target, 'dist', 'bin', 'gezeld.js');
   if (!existsSync(gezeldBin)) {
     throw new Error(
@@ -176,6 +182,7 @@ async function main() {
   // the service actually loads, the verification spawn fails here rather than
   // shipping a bundle that breaks on a user's machine.
   await pruneForeignBinariesWithReport(target);
+  await fixDeployedNodePtyPermissions(target);
 
   await stageSharpCompatibilityStub(target);
   const sharpCompatibility = await verifySharpCompatibilityTree(target);
@@ -211,6 +218,25 @@ async function main() {
   await exec(
     process.execPath,
     ['--input-type=module', '-e', `await import(${JSON.stringify(indexUrl)});`],
+    { cwd: target, maxBuffer: 16 * 1024 * 1024 },
+  );
+
+  // The service imports Transformers/Kokoro lazily. Exercise that complete
+  // distribution path explicitly so the dependency merge and Sharp stub are
+  // proven before packaging.
+  const transformersUrl = pathToFileURL(
+    join(target, 'node_modules', '@huggingface', 'transformers', 'dist', 'transformers.node.mjs'),
+  ).href;
+  const kokoroUrl = pathToFileURL(
+    join(target, 'node_modules', 'kokoro-js', 'dist', 'kokoro.js'),
+  ).href;
+  await exec(
+    process.execPath,
+    [
+      '--input-type=module',
+      '-e',
+      `const t=await import(${JSON.stringify(transformersUrl)}); const k=await import(${JSON.stringify(kokoroUrl)}); if(typeof t.pipeline!=='function'||typeof k.KokoroTTS!=='function') throw new Error('bundled ML runtime exports missing');`,
+    ],
     { cwd: target, maxBuffer: 16 * 1024 * 1024 },
   );
 

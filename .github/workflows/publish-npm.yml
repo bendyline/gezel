@@ -155,7 +155,7 @@ jobs:
           GEZEL_RELEASE_DRY_RUN: ${{ inputs.dry_run && '1' || '0' }}
         run: |
           set -euo pipefail
-          args=(--ignore-packages=packages/ui,packages/eval-viewer,packages/sharp-compat,evals --sequential-prepare)
+          args=(--ignore-packages=packages/ui,packages/eval-viewer,packages/sharp-compat,packages/ml-runtime,evals --sequential-prepare)
           if [[ "$GEZEL_RELEASE_DRY_RUN" == "1" ]]; then
             args+=(--dry-run)
           fi

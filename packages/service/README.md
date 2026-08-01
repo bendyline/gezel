@@ -35,8 +35,38 @@ npx gezeld
 ```ts
 import { startService } from '@bendyline/gezel-service';
 
-const { port, token, stop } = await startService({ home: '/tmp/gezel-home' });
+const { port, clientToken, stop } = await startService({ home: '/tmp/gezel-home' });
+console.log({ port, clientToken });
+await stop();
 ```
+
+## Optional local ML runtime
+
+The base npm install intentionally omits Transformers.js and Kokoro. Cloud
+providers, native engines, the HTTP API, terminal, MCP, UI, tasks, and file
+features work without them. Install the optional peers only when this npm
+deployment needs in-process memory embeddings or Kokoro text-to-speech:
+
+```bash
+npm install @huggingface/transformers@^3.8.1 kokoro-js@^1.2.1
+```
+
+Until their upstream dependency ranges move to the fixed releases, npm
+consumers should also pin the secure transitive versions in the application's
+root `package.json` (npm ignores overrides declared by dependencies):
+
+```json
+{
+  "overrides": {
+    "adm-zip": "0.6.0",
+    "sharp": "0.35.3"
+  }
+}
+```
+
+The desktop installers and the relocatable Node distribution already include
+this ML runtime with the reviewed overrides. Both paths use one Transformers
+3.x / ONNX Runtime line rather than installing independent 3.x and 4.x stacks.
 
 ## Native engines
 

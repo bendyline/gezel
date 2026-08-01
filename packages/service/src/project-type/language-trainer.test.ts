@@ -63,7 +63,9 @@ describe('Language Trainer bundled project type', () => {
       projectScriptFile(home, project.id, 'progress-store'),
       'utf8',
     );
-    expect(scriptBody.startsWith('// @gezel-project-type: language-trainer@1.0.0\n')).toBe(true);
+    expect(
+      scriptBody.startsWith(`// @gezel-project-type: language-trainer@${applied.version}\n`),
+    ).toBe(true);
     expect(scriptBody).toContain("name: 'progress-store'");
 
     // The seed lands in the workspace with the language substituted.

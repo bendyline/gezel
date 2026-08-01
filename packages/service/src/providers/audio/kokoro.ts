@@ -458,8 +458,17 @@ async function defaultKokoroLoader(): Promise<KokoroJsModule> {
   // kokoro-js being installed (mocked via `loadKokoroJs`). The cast
   // assumes upstream's CommonJS-flavored module shape — kokoro-js
   // re-exports `KokoroTTS` directly.
-  const mod = (await import('kokoro-js')) as unknown as KokoroJsModule;
-  return mod;
+  try {
+    return (await import('kokoro-js')) as unknown as KokoroJsModule;
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    if (detail.includes('kokoro-js')) {
+      throw new Error(
+        'Local text-to-speech is an optional npm feature. Install kokoro-js@^1.2.1 and @huggingface/transformers@^3.8.1 alongside @bendyline/gezel-service (see the service README).',
+      );
+    }
+    throw err;
+  }
 }
 
 /**

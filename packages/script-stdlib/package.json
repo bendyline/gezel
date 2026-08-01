@@ -29,14 +29,16 @@
     "./package.json": "./package.json",
     "./scripts/*": "./scripts/*"
   },
-  "files": ["scripts"],
+  "files": ["scripts", "!scripts/**/*.test.ts"],
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests",
     "clean": "rm -rf .turbo"
   },
+  "dependencies": {
+    "@bendyline/gezel-sdk": "workspace:*"
+  },
   "devDependencies": {
-    "@bendyline/gezel-sdk": "workspace:*",
     "@types/node": "^24.13.3",
     "typescript": "^6.0.3",
     "vitest": "^4.1.10"

@@ -1,4 +1,5 @@
 import { defineConfig } from 'tsup';
+import { stripSourcemapCommentsFromBuild } from '../../scripts/strip-sourcemap-comments.mjs';
 
 export default defineConfig({
   // The TUI is a separate entry so the default `gezel` command can lazily
@@ -22,4 +23,5 @@ export default defineConfig({
     options.jsx = 'automatic';
   },
   banner: { js: '#!/usr/bin/env node' },
+  onSuccess: () => stripSourcemapCommentsFromBuild(),
 });

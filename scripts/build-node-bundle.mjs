@@ -40,10 +40,13 @@ import { readFile, readdir, readlink, unlink, writeFile } from 'node:fs/promises
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
+import { deployMlRuntime } from './deploy-ml-runtime.mjs';
+import { fixDeployedNodePtyPermissions } from './fix-deployed-node-pty-perms.mjs';
 import {
   pruneRuntimeFilesWithReport,
   verifyRuntimeDeclarationAssets,
 } from './prune-runtime-files.mjs';
+import { stageSharpCompatibilityStub, verifySharpCompatibilityTree } from './sharp-compat.mjs';
 
 const exec = promisify(execFile);
 
@@ -76,19 +79,38 @@ async function main() {
     '--prod',
     '--legacy',
     '--node-linker=hoisted',
+    '--config.allow-unused-patches=true',
     target,
   ];
   console.log(`[build-node-bundle] pnpm ${args.join(' ')}`);
-  const { stdout, stderr } = await exec('pnpm', args, {
-    cwd: repoRoot,
-    env: process.env,
-    maxBuffer: 64 * 1024 * 1024,
-    // Windows: `pnpm` on PATH is `pnpm.cmd`; child_process needs a shell to
-    // launch a .cmd. Args are 100% internal, so no injection concern.
-    shell: process.platform === 'win32',
-  });
+  const workspaceStatePath = join(repoRoot, 'node_modules', '.pnpm-workspace-state-v1.json');
+  const workspaceStateBefore = existsSync(workspaceStatePath)
+    ? await readFile(workspaceStatePath)
+    : null;
+  let stdout = '';
+  let stderr = '';
+  try {
+    ({ stdout, stderr } = await exec('pnpm', args, {
+      cwd: repoRoot,
+      env: process.env,
+      maxBuffer: 64 * 1024 * 1024,
+      // Windows: `pnpm` on PATH is `pnpm.cmd`; child_process needs a shell to
+      // launch a .cmd. Args are 100% internal, so no injection concern.
+      shell: process.platform === 'win32',
+    }));
+  } finally {
+    if (workspaceStateBefore) {
+      await writeFile(workspaceStatePath, workspaceStateBefore);
+    } else if (existsSync(workspaceStatePath)) {
+      await unlink(workspaceStatePath);
+    }
+  }
   if (stdout.trim()) process.stdout.write(stdout);
   if (stderr.trim()) process.stderr.write(stderr);
+
+  // Like the Electron artifact, the relocatable Node bundle is a complete
+  // distribution even though the public service package keeps ML optional.
+  await deployMlRuntime(repoRoot, target, 'build-node-bundle');
 
   // Verify the three things that make this bundle actually runnable.
   const cliBin = join(target, 'dist', 'bin', 'gezel.js');
@@ -126,6 +148,12 @@ async function main() {
   // the workspace; prune any that escape the bundle so `tar` doesn't follow
   // them out of the tree.
   await pruneEscapingSymlinks(target);
+  await fixDeployedNodePtyPermissions(target);
+  await stageSharpCompatibilityStub(target);
+  const sharpCompatibility = await verifySharpCompatibilityTree(target);
+  console.log(
+    `[sharp-compat] verified ${sharpCompatibility.stubs} no-image stub(s); no native Sharp/libvips payload`,
+  );
 
   // Keep the standalone runtime consistent with the Electron service bundle:
   // package-consumer maps/types are not needed after deployment, except for
@@ -148,6 +176,25 @@ async function main() {
   await exec(
     process.execPath,
     ['--input-type=module', '-e', `await import(${JSON.stringify(indexUrl)});`],
+    { cwd: target, maxBuffer: 16 * 1024 * 1024 },
+  );
+
+  // Main-service import does not touch the lazy local-ML path. Import both
+  // optional libraries explicitly so a missing Sharp stub or merge omission
+  // cannot hide until the first memory/TTS request on a user's machine.
+  const transformersUrl = pathToFileURL(
+    join(target, 'node_modules', '@huggingface', 'transformers', 'dist', 'transformers.node.mjs'),
+  ).href;
+  const kokoroUrl = pathToFileURL(
+    join(target, 'node_modules', 'kokoro-js', 'dist', 'kokoro.js'),
+  ).href;
+  await exec(
+    process.execPath,
+    [
+      '--input-type=module',
+      '-e',
+      `const t=await import(${JSON.stringify(transformersUrl)}); const k=await import(${JSON.stringify(kokoroUrl)}); if(typeof t.pipeline!=='function'||typeof k.KokoroTTS!=='function') throw new Error('bundled ML runtime exports missing');`,
+    ],
     { cwd: target, maxBuffer: 16 * 1024 * 1024 },
   );
 

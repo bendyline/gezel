@@ -10,10 +10,9 @@
  *   1. A missing runtime dependency. It resolves in the workspace because
  *      some sibling hoisted it; it is absent in a consumer's tree.
  *   2. A native/prebuild install failure. `@bendyline/gezel-service` pulls
- *      node-pty, @napi-rs/keyring, @resvg/resvg-js, sqlite-vec,
- *      onnxruntime-node (via @huggingface/transformers), kokoro-js and
- *      playwright-core. Nothing else in this repo installs that chain
- *      outside pnpm.
+ *      node-pty, @napi-rs/keyring, @resvg/resvg-js, sqlite-vec and
+ *      playwright-core. The heavyweight Transformers/Kokoro stack is an
+ *      optional peer for npm consumers and is tested in complete bundles.
  *
  * So: pnpm pack (which resolves `workspace:*`), then `npm install` into an
  * empty non-workspace directory, then exercise it.
@@ -21,18 +20,34 @@
  * Usage:
  *   node scripts/check-package-consumers.mjs
  *   node scripts/check-package-consumers.mjs --keep   # leave the temp dir
+ *   node scripts/check-package-consumers.mjs --tarball-dir artifacts/npm-tarballs
  *
  * Env:
  *   GEZEL_CONSUMER_SKIP_DAEMON=1   skip the daemon boot (fastest useful run)
  */
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, delimiter, dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const keep = process.argv.includes('--keep');
+const tarballDirFlag = process.argv.indexOf('--tarball-dir');
+const suppliedTarballDir =
+  tarballDirFlag === -1 ? null : resolve(process.argv[tarballDirFlag + 1] ?? '');
+if (tarballDirFlag !== -1 && !process.argv[tarballDirFlag + 1]) {
+  throw new Error('--tarball-dir requires a directory path');
+}
+const MAX_NODE_MODULES_BYTES = 800 * 1024 * 1024;
 
 /** Mirrors tests/published/_packages.ts. Keep the two in step. */
 const PUBLISHED = [
@@ -79,6 +94,16 @@ function fail(message) {
 }
 function ok(message) {
   console.log(`  ok   ${message}`);
+}
+
+function logicalTreeBytes(root) {
+  let total = 0;
+  for (const entry of readdirSync(root, { withFileTypes: true })) {
+    const path = join(root, entry.name);
+    if (entry.isDirectory()) total += logicalTreeBytes(path);
+    else total += lstatSync(path).size;
+  }
+  return total;
 }
 
 function run(command, args, options = {}) {
@@ -148,21 +173,23 @@ function runPackageManager(manager, args, options = {}) {
 }
 
 const root = mkdtempSync(join(tmpdir(), 'gezel-packed-consumer-'));
-const tarballDir = join(root, 'tarballs');
+const tarballDir = suppliedTarballDir ?? join(root, 'tarballs');
 const consumer = join(root, 'consumer');
 mkdirSync(tarballDir, { recursive: true });
 mkdirSync(consumer, { recursive: true });
 
 try {
   // ── 1. Pack ────────────────────────────────────────────────────────────
-  step('packing');
+  step(suppliedTarballDir ? 'loading supplied tarballs' : 'packing');
   const tarballs = [];
-  for (const dir of PUBLISHED) {
-    const packageDir = resolve(repoRoot, 'packages', dir);
-    const result = runPackageManager('pnpm', ['pack', '--pack-destination', tarballDir], {
-      cwd: packageDir,
-    });
-    if (result.status !== 0) fail(`pnpm pack ${dir}\n${result.stderr}`);
+  if (!suppliedTarballDir) {
+    for (const dir of PUBLISHED) {
+      const packageDir = resolve(repoRoot, 'packages', dir);
+      const result = runPackageManager('pnpm', ['pack', '--pack-destination', tarballDir], {
+        cwd: packageDir,
+      });
+      if (result.status !== 0) fail(`pnpm pack ${dir}\n${result.stderr}`);
+    }
   }
   for (const file of readdirSync(tarballDir)) {
     if (file.endsWith('.tgz')) tarballs.push(join(tarballDir, file));
@@ -187,6 +214,52 @@ try {
     throw new Error('cannot continue without a successful install');
   }
   ok('npm install succeeded (including the native prebuild chain)');
+
+  const installedBytes = logicalTreeBytes(join(consumer, 'node_modules'));
+  const installedMiB = installedBytes / 1024 / 1024;
+  if (installedBytes > MAX_NODE_MODULES_BYTES) {
+    fail(
+      `node_modules is ${installedMiB.toFixed(1)} MiB; budget is ${MAX_NODE_MODULES_BYTES / 1024 / 1024} MiB`,
+    );
+  } else {
+    ok(`node_modules is ${installedMiB.toFixed(1)} MiB (budget 800 MiB)`);
+  }
+
+  step('auditing the npm consumer graph');
+  const audit = runPackageManager('npm', ['audit', '--omit=dev', '--audit-level=high', '--json'], {
+    cwd: consumer,
+  });
+  if (audit.status !== 0) {
+    fail(`npm audit found a high-severity issue\n${audit.stdout}\n${audit.stderr}`);
+  } else {
+    ok('npm audit reports no high-severity vulnerabilities');
+  }
+
+  if (process.platform === 'darwin') {
+    step('spawning a clean-install macOS PTY');
+    const ptyProbe = join(consumer, 'probe-pty.cjs');
+    writeFileSync(
+      ptyProbe,
+      [
+        "const pty = require('node-pty');",
+        "const shell = process.env.SHELL || '/bin/sh';",
+        "const terminal = pty.spawn(shell, ['-lc', 'printf GEZEL_PTY_OK'], { cols: 80, rows: 24 });",
+        "let output = '';",
+        'const timer = setTimeout(() => { terminal.kill(); throw new Error(`PTY timed out: ${output}`); }, 10000);',
+        'terminal.onData((data) => { output += data; });',
+        'terminal.onExit(({ exitCode }) => {',
+        '  clearTimeout(timer);',
+        "  if (exitCode !== 0 || !output.includes('GEZEL_PTY_OK')) {",
+        '    console.error(JSON.stringify({ exitCode, output }));',
+        '    process.exit(1);',
+        '  }',
+        '});',
+      ].join('\n'),
+    );
+    const ptyResult = run(process.execPath, [ptyProbe], { cwd: consumer });
+    if (ptyResult.status !== 0) fail(`node-pty spawn failed\n${ptyResult.stderr}`);
+    else ok('node-pty spawned a shell and captured output');
+  }
 
   // ── 3. Import every public subpath ─────────────────────────────────────
   step('importing every public subpath');

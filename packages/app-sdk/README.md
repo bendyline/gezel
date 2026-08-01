@@ -12,7 +12,7 @@ If you ship a desktop app and want to use the user's locally-installed models wi
 npm install @bendyline/gezel-app-sdk
 ```
 
-Node 20+. The Node entry uses `undici` to trust gezel's loopback TLS cert.
+Node 24+. The Node entry uses `undici` to trust gezel's loopback TLS cert.
 
 ## Quickstart
 
@@ -27,14 +27,6 @@ const app = await connect({
   appId: 'docblocks',
   appName: 'DocBlocks',
   scopes: ['openai'],
-  tokenStorage: {
-    async save(id, token) {
-      await keychain.set(`gezel:${id}`, token);
-    },
-    async load(id) {
-      return keychain.get(`gezel:${id}`);
-    },
-  },
 });
 
 // Make sure the model is downloaded and warm.

@@ -9,14 +9,27 @@ npm install @bendyline/gezel-client
 ```
 
 ```ts
-import { GezelClient } from '@bendyline/gezel-client';
+import { GezelClient, streamChatEvents } from '@bendyline/gezel-client';
 
+const token = process.env.GEZEL_TOKEN;
+const gezelId = process.env.GEZEL_ID;
+if (!token || !gezelId) throw new Error('set GEZEL_TOKEN and GEZEL_ID');
 const client = new GezelClient({ baseUrl: 'https://127.0.0.1:8080', token });
 
 const gezels = await client.listGezels();
-for await (const event of client.streamChat(sessionId, { text: 'hello' })) {
-  process.stdout.write(event.delta ?? '');
-}
+console.log(gezels);
+
+const session = await client.createChatSession({ gezelId, projectId: 'default' });
+const reply = (async () => {
+  for await (const event of streamChatEvents({
+    url: client.sessionEventsUrl(session.id),
+    headers: { Authorization: `Bearer ${token}` },
+  })) {
+    if (event.type === 'delta') process.stdout.write(event.content);
+  }
+})();
+await client.sendToChatSession(session.id, 'hello');
+await reply;
 ```
 
 ## Entry points

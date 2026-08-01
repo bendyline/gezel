@@ -205,7 +205,9 @@ describe.each(WAVE1)('Wave-1 bundled project type: $typeId', (row) => {
 
     expect(applied.scriptsInstalled).toEqual([row.script]);
     const scriptBody = await readFile(projectScriptFile(home, project.id, row.script), 'utf8');
-    expect(scriptBody.startsWith(`// @gezel-project-type: ${row.typeId}@1.0.0\n`)).toBe(true);
+    expect(
+      scriptBody.startsWith(`// @gezel-project-type: ${row.typeId}@${applied.version}\n`),
+    ).toBe(true);
 
     expect(applied.craftbooksInstalled).toEqual(row.craftbooks);
 
