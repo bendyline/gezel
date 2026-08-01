@@ -820,3 +820,66 @@ describe('score-trial modelTier passthrough (Theme E / E1-B)', () => {
     expect(facts.modelTier).toBeUndefined();
   });
 });
+
+describe('score-trial failReason with embedded quotes', () => {
+  it('keeps the whole reason when the scenario quotes a value inside it', async () => {
+    // Scenario writers interpolate the reason raw, so a reason that quotes a
+    // section name used to terminate the match at the inner quote — the eval
+    // said "out-of-order at " and dropped the one fact that made it actionable.
+    await writeFile(
+      join(tempRoot, 'result.json'),
+      JSON.stringify({
+        trialId: 'quote-trial',
+        scenarioId: 'incident-postmortem',
+        modelId: 'qwen3.6-27b-q8',
+        startedAt: '2026-08-01T00:00:00.000Z',
+        finishedAt: '2026-08-01T00:00:10.000Z',
+        durationMs: 10_000,
+        success: false,
+        reason: 'stalled',
+        failureMode: 'model-stuck',
+      }),
+    );
+    await writeFile(
+      join(tempRoot, 'log.txt'),
+      [
+        '[2026-08-01T00:00:00.000Z] [poll] starting (interval=5000ms maxDuration=720000ms)',
+        '[2026-08-01T00:00:10.000Z] [scenario] postmortem.md bytes=8951 score=8/9 signals=file-present failReason="all-sections: missing or out-of-order at "Timeline""',
+      ].join('\n'),
+    );
+    await writeFile(join(tempRoot, 'history.jsonl'), '');
+
+    const facts = score(tempRoot);
+
+    expect(facts.sniff.latest?.failReason).toBe(
+      'all-sections: missing or out-of-order at "Timeline"',
+    );
+  });
+
+  it('still handles a properly escaped reason', async () => {
+    await writeFile(
+      join(tempRoot, 'result.json'),
+      JSON.stringify({
+        trialId: 'escaped-trial',
+        scenarioId: 'incident-postmortem',
+        modelId: 'gemma4-e4b-q8',
+        startedAt: '2026-08-01T00:00:00.000Z',
+        finishedAt: '2026-08-01T00:00:10.000Z',
+        durationMs: 10_000,
+        success: false,
+        reason: 'stalled',
+        failureMode: 'model-stuck',
+      }),
+    );
+    await writeFile(
+      join(tempRoot, 'log.txt'),
+      [
+        '[2026-08-01T00:00:00.000Z] [poll] starting (interval=5000ms maxDuration=720000ms)',
+        '[2026-08-01T00:00:10.000Z] [scenario] postmortem.md bytes=100 score=1/9 signals=none failReason="missing \\"Timeline\\" header"',
+      ].join('\n'),
+    );
+    await writeFile(join(tempRoot, 'history.jsonl'), '');
+
+    expect(score(tempRoot).sniff.latest?.failReason).toBe('missing "Timeline" header');
+  });
+});

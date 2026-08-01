@@ -439,7 +439,14 @@ function parseSniffLogLine(line: string): {
   const filePath = bareTokens[bareTokens.length - 1] ?? '';
   const signals = payload[4] === 'none' ? [] : (payload[4] ?? '').split(',').filter(Boolean);
   const rest = payload[5] ?? '';
-  const failReasonMatch = rest.match(/\sfailReason="((?:[^"\\]|\\.)*)"/);
+  // Scenario writers interpolate the reason raw — `failReason="${reason}"` —
+  // so a reason that itself quotes something ("…out-of-order at "Timeline"")
+  // terminates the strict match at the inner quote and the useful half is
+  // silently dropped. failReason is always the last field on the line, so fall
+  // back to a greedy match through the final quote. Keeps working if a writer
+  // ever starts escaping properly, and recovers reasons from existing logs.
+  const failReasonMatch =
+    rest.match(/\sfailReason="((?:[^"\\]|\\.)*)"\s*$/) ?? rest.match(/\sfailReason="(.*)"\s*$/s);
   return {
     atIso,
     filePath,
