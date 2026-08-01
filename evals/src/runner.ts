@@ -2059,14 +2059,26 @@ export async function pollUntilDone(
         }
         if (fastPathTripped || longPathTripped || stallPathTripped || chatterPathTripped) {
           if (imageGenerationActive) continue;
+          // STALL joins LONG here: both are wall-clock-only triggers, so both
+          // have to check whether a turn is still running before calling it
+          // stuck. FAST and CHATTER stay out — they are count-based and hold
+          // regardless of decode speed. See shouldDeferRetryLoopForInflight.
           const shouldWaitForInflightTurns =
-            longPathTripped && !fastPathTripped && !stallPathTripped && !chatterPathTripped;
+            (longPathTripped || stallPathTripped) && !fastPathTripped && !chatterPathTripped;
           const retryLoopInflightTurns = shouldWaitForInflightTurns
             ? await listInflightTurnsForWatchdog(args.client).catch(() => [])
             : [];
           if (
-            shouldWaitForInflightTurns &&
-            shouldDeferSoftWatchdog(retryLoopInflightTurns, args.inflightDeferMs)
+            shouldDeferRetryLoopForInflight({
+              fastPathTripped,
+              longPathTripped,
+              stallPathTripped,
+              chatterPathTripped,
+              inflightTurns: retryLoopInflightTurns,
+              ...(args.inflightDeferMs === undefined
+                ? {}
+                : { inflightDeferMs: args.inflightDeferMs }),
+            })
           ) {
             if (Date.now() - inflightRetryLoopDeferralLoggedAt >= 60_000) {
               inflightRetryLoopDeferralLoggedAt = Date.now();
@@ -2482,6 +2494,52 @@ export function shouldDeferSoftWatchdog(
   deferMs: number = WATCHDOG_INFLIGHT_DEFER_MS,
 ): boolean {
   return inflightTurns.some((turn) => turn.elapsedMs < deferMs);
+}
+
+/**
+ * In-flight defer window for the retry-loop STALL path.
+ *
+ * The 4-min default was tuned on llama.cpp/CUDA hosts running small models,
+ * where a turn is over in seconds. A 27B model at ~4.6 t/s is a different
+ * regime: one repair turn that rewrites a 9 KB artifact decodes 3,000+ tokens
+ * and legitimately holds the slot for 8-11 minutes. Under the 4-min cap such a
+ * turn reads as "not deferrable" and the STALL path kills it mid-stream.
+ *
+ * Wild-caught on incident-postmortem / qwen3.6-27b-q8 (2026-08-01): the trial
+ * was failed at 04:23:17 as "stalled 18m ... 0 re-writes" while the engine was
+ * 2,275 tokens into a turn at 4.62 t/s that released 1.6 s later. Same failure
+ * shape as {@link MLX_WATCHDOG_INFLIGHT_DEFER_MS}, different engine.
+ *
+ * 15 min clears realistic slow-model turns while staying well under the 45-min
+ * HARD progress watchdog, which remains the backstop for a genuinely wedged
+ * engine.
+ */
+const STALL_INFLIGHT_DEFER_MS = 15 * 60 * 1000;
+
+/**
+ * Should a tripped retry-loop watchdog hold off because a turn is still
+ * running?
+ *
+ * Only the wall-clock-only paths defer. FAST ("N re-writes without sniff
+ * movement") and CHATTER ("N turn starts, no artifact write") both carry a
+ * count component, so they stay throughput-invariant: a model that re-wrote
+ * three times without moving the sniff is looping whether it decodes at 5 t/s
+ * or 50. STALL is a pure elapsed-time plateau with no count component at all —
+ * it cannot distinguish "wedged" from "slow", so it must ask.
+ */
+export function shouldDeferRetryLoopForInflight(args: {
+  fastPathTripped: boolean;
+  longPathTripped: boolean;
+  stallPathTripped: boolean;
+  chatterPathTripped: boolean;
+  inflightTurns: InflightTurnSnapshot[];
+  inflightDeferMs?: number;
+}): boolean {
+  if (args.fastPathTripped || args.chatterPathTripped) return false;
+  if (!args.longPathTripped && !args.stallPathTripped) return false;
+  const base = args.inflightDeferMs ?? WATCHDOG_INFLIGHT_DEFER_MS;
+  const deferMs = args.stallPathTripped ? Math.max(base, STALL_INFLIGHT_DEFER_MS) : base;
+  return shouldDeferSoftWatchdog(args.inflightTurns, deferMs);
 }
 
 export function summarizeInflightTurnsForLog(inflightTurns: InflightTurnSnapshot[]): string {
