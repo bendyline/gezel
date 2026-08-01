@@ -574,6 +574,21 @@ export interface EngineStatusResponse {
   autoBudgetBytes?: number;
   /** True when `localEngineMemoryGb` overrides the auto value. */
   overridden?: boolean;
+  /**
+   * Which memory pools the budget draws on. A discrete-GPU host's budget is
+   * graphics memory PLUS a system-RAM share, so describing it as a slice of
+   * RAM (the only shape this response used to carry) names the wrong pool.
+   * Absent pre-boot and on daemons that predate the field.
+   */
+  pools?: {
+    kind: 'unified' | 'discrete-gpu' | 'system-ram';
+    /** Usable VRAM on a discrete card; 0 on unified / CPU-only hosts. */
+    vramBytes: number;
+    /** The system-RAM share of the budget. */
+    ramShareBytes: number;
+    /** Fast (on-accelerator) memory — VRAM on a card, the budget otherwise. */
+    fastBytes: number;
+  };
 }
 
 export interface ReconcileEnginePoolRequest {
@@ -2475,7 +2490,14 @@ export class GezelClient {
     totalRamBytes: number;
     gpuVramBytes: number | null;
     source: 'darwin-unified' | 'gpu-nvidia' | 'gpu-vulkan' | 'system-ram-fallback';
+    /** Fast memory: VRAM on a discrete card, a RAM fraction otherwise. */
     usableBytes: number;
+    /**
+     * What the capacity broker will admit, summed across every pool a
+     * resident engine can use — VRAM PLUS a system-RAM share on a discrete
+     * card. Optional: daemons that predate the field omit it.
+     */
+    budgetBytes?: number;
     gpuVendor?: 'amd' | 'nvidia' | 'intel';
   }> {
     return this.request('GET', '/api/system/memory');

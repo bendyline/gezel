@@ -197,6 +197,7 @@ export function BootstrapGate(props: {
           gpuVramBytes: memory.gpuVramBytes,
           totalRamBytes: memory.totalRamBytes,
           usableBytes: memory.usableBytes,
+          ...(memory.budgetBytes !== undefined ? { budgetBytes: memory.budgetBytes } : {}),
         },
         chatCatalog: chatCatalog.items,
         nativeStatus,

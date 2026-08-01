@@ -29,9 +29,29 @@ interface MemoryProfile {
   gpuVramBytes: number | null;
   source: 'darwin-unified' | 'gpu-nvidia' | 'gpu-vulkan' | 'system-ram-fallback';
   usableBytes: number;
+  /**
+   * What the daemon's capacity broker will admit across VRAM + system RAM.
+   * Absent on daemons that predate the field — the fit check then falls back
+   * to its own RAM fraction.
+   */
+  budgetBytes?: number;
 }
 
 const MEMORY_OVERHEAD_FACTOR = 1.2;
+
+/**
+ * The machine half of a {@link computeModelFit} call. Every fit check on this
+ * page reads the same profile, and the admission ceiling has to travel with
+ * the rest of it — a fit computed without it offers models the broker refuses.
+ */
+function fitMachine(memory: MemoryProfile) {
+  return {
+    usableBytes: memory.usableBytes,
+    totalRamBytes: memory.totalRamBytes,
+    gpuVramBytes: memory.gpuVramBytes,
+    ...(memory.budgetBytes !== undefined ? { admissibleBytes: memory.budgetBytes } : {}),
+  };
+}
 
 /**
  * Adapt the /api/system/memory profile to the recommendation module's
@@ -45,6 +65,7 @@ function recoDeviceFromMemory(memory: MemoryProfile): RecoDevice {
     gpuVramBytes: memory.gpuVramBytes,
     totalRamBytes: memory.totalRamBytes,
     usableBytes: memory.usableBytes,
+    ...(memory.budgetBytes !== undefined ? { budgetBytes: memory.budgetBytes } : {}),
   };
 }
 
@@ -568,9 +589,7 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
                     ? computeModelFit({
                         residentBytes: m.approxSizeBytes * MEMORY_OVERHEAD_FACTOR,
                         isMoE: isMoEFromTags(catalogManifest?.tags),
-                        usableBytes: memory.usableBytes,
-                        totalRamBytes: memory.totalRamBytes,
-                        gpuVramBytes: memory.gpuVramBytes,
+                        ...fitMachine(memory),
                       })
                     : undefined;
                   const badge = composeFitnessBadge({
@@ -757,9 +776,7 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
               const fit = computeModelFit({
                 residentBytes: m.llamaCpp.approxSizeBytes * MEMORY_OVERHEAD_FACTOR,
                 isMoE: isMoEFromTags(item.manifest.tags),
-                usableBytes: memory.usableBytes,
-                totalRamBytes: memory.totalRamBytes,
-                gpuVramBytes: memory.gpuVramBytes,
+                ...fitMachine(memory),
               });
               if (!fit.runnable) return false;
             }
@@ -778,9 +795,7 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
               ? computeModelFit({
                   residentBytes: m.llamaCpp.approxSizeBytes * MEMORY_OVERHEAD_FACTOR,
                   isMoE: isMoEFromTags(item.manifest.tags),
-                  usableBytes: memory.usableBytes,
-                  totalRamBytes: memory.totalRamBytes,
-                  gpuVramBytes: memory.gpuVramBytes,
+                  ...fitMachine(memory),
                 })
               : null;
             return (

@@ -238,6 +238,7 @@ export function RecommendedMediaDownloads({ config }: { config: ConfigResponse |
           gpuVramBytes: mem.gpuVramBytes,
           totalRamBytes: mem.totalRamBytes,
           usableBytes: mem.usableBytes,
+          ...(mem.budgetBytes !== undefined ? { budgetBytes: mem.budgetBytes } : {}),
         };
         const out: Reco[] = [];
 

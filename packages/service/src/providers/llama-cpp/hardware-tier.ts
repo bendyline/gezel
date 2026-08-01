@@ -89,6 +89,9 @@ export async function detectModelTier(models: readonly ChatModelManifest[]): Pro
     gpuVramBytes: mem.gpuVramBytes,
     totalRamBytes: mem.totalRamBytes,
     usableBytes: mem.usableBytes,
+    // The broker's ceiling, so first run never installs a model the very
+    // next chat turn refuses to load.
+    budgetBytes: mem.budgetBytes,
   });
 
   if (!pick) {

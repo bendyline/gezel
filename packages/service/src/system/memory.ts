@@ -4,7 +4,11 @@ import { promisify } from 'node:util';
 import type { MachineMemoryUsage } from '@bendyline/gezel';
 import type { DeviceHealthStatusSnapshot } from '@bendyline/gezel/native';
 import { detectLlamaGpuVram } from '../providers/llama-cpp/devices.js';
-import { autoDetectBudgetBytes } from '../providers/native/capacity-budget.js';
+import {
+  autoDetectBudgetBytes,
+  computeCapacityBudget,
+  setDetectedGpuVramBytes,
+} from '../providers/native/capacity-budget.js';
 import type { GezelProcessMemorySnapshot } from './gezel-process-memory.js';
 
 const exec = promisify(execFile);
@@ -21,10 +25,22 @@ export interface MemoryProfile {
   /** Where `usableBytes` comes from. Drives the UI's wording. */
   source: MemorySource;
   /**
-   * The conservative resident-memory budget available to local engines.
-   * Leaves room for the OS, foreground apps, and other engine processes.
+   * The conservative FAST-memory budget available to local engines: VRAM on
+   * a discrete card, a RAM fraction on unified / CPU-only hosts. A model
+   * within this runs entirely where the compute happens.
    */
   usableBytes: number;
+  /**
+   * What the capacity broker will actually admit — the same auto-derived
+   * ceiling {@link autoDetectBudgetBytes} gives it, summed across every pool
+   * a resident engine can use. On a discrete card that is VRAM PLUS a system-
+   * RAM share, because a MoE model streams its experts from RAM.
+   *
+   * Larger than {@link usableBytes} on a discrete card and equal to it on a
+   * Mac. Fit checks gate on this: anything above it is a model the broker
+   * refuses to load, so offering it as a download is a promise we break.
+   */
+  budgetBytes: number;
   /** GPU vendor when a GPU backs the budget — lets the UI say "AMD GPU". */
   gpuVendor?: GpuVendor;
 }
@@ -56,28 +72,36 @@ export async function detectMemoryProfile(): Promise<MemoryProfile> {
   const totalRam = totalmem();
 
   if (plat === 'darwin') {
+    setDetectedGpuVramBytes(null);
     return {
       platform: 'darwin',
       totalRamBytes: totalRam,
       gpuVramBytes: null,
       source: 'darwin-unified',
       usableBytes: autoDetectBudgetBytes(totalRam),
+      budgetBytes: autoDetectBudgetBytes(totalRam),
     };
   }
 
   // Don't dock a dedicated card — the whole VRAM pool is available in
   // practice. A small 5% safety margin covers the display framebuffer and
   // driver overhead. Same budget rule for NVIDIA and non-NVIDIA cards.
-  const vramBudget = (vram: number) => Math.floor(vram * 0.95);
+  // `computeCapacityBudget` owns the same 5%, so read both from it rather
+  // than keeping a second copy of the constant here.
+  const gpuBudget = (vram: number) => {
+    const budget = computeCapacityBudget({ systemRamBytes: totalRam, gpuVramBytes: vram });
+    return { usableBytes: budget.fastBytes, budgetBytes: budget.budgetBytes };
+  };
 
   const nvidiaVram = await probeNvidiaVram();
   if (nvidiaVram !== null) {
+    setDetectedGpuVramBytes(nvidiaVram);
     return {
       platform: plat,
       totalRamBytes: totalRam,
       gpuVramBytes: nvidiaVram,
       source: 'gpu-nvidia',
-      usableBytes: vramBudget(nvidiaVram),
+      ...gpuBudget(nvidiaVram),
       gpuVendor: 'nvidia',
     };
   }
@@ -89,6 +113,7 @@ export async function detectMemoryProfile(): Promise<MemoryProfile> {
   // lying) instead of the 50%-of-RAM CPU fallback below.
   const gpu = await detectLlamaGpuVram();
   if (gpu !== null) {
+    setDetectedGpuVramBytes(gpu.vramBytes);
     // Vendor comes from the device name in the SAME probe (e.g. "AMD Radeon
     // …" / "Intel Arc …"), so the label always matches the card we sized —
     // never "AMD" for an Intel GPU. Undefined for unrecognized names → the
@@ -98,11 +123,12 @@ export async function detectMemoryProfile(): Promise<MemoryProfile> {
       totalRamBytes: totalRam,
       gpuVramBytes: gpu.vramBytes,
       source: 'gpu-vulkan',
-      usableBytes: vramBudget(gpu.vramBytes),
+      ...gpuBudget(gpu.vramBytes),
       ...(gpu.vendor ? { gpuVendor: gpu.vendor } : {}),
     };
   }
 
+  setDetectedGpuVramBytes(null);
   return {
     platform: plat,
     totalRamBytes: totalRam,
@@ -111,6 +137,9 @@ export async function detectMemoryProfile(): Promise<MemoryProfile> {
     // CPU inference needs the OS + your apps + inference buffers. Be
     // conservative — 50% of system RAM is a safer ceiling than 60%.
     usableBytes: Math.floor(totalRam * 0.5),
+    // The broker will still admit up to its 60% share; a model between the
+    // two runs, just without comfortable headroom ("may run slowly").
+    budgetBytes: autoDetectBudgetBytes(totalRam, { gpuVramBytes: null }),
   };
 }
 

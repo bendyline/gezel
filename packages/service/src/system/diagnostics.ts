@@ -159,6 +159,7 @@ export async function collectSystemDiagnostics(
       totalRamBytes: memory.totalRamBytes,
       gpuVramBytes: memory.gpuVramBytes,
       usableBytes: memory.usableBytes,
+      budgetBytes: memory.budgetBytes,
       source: memory.source,
       ...(memory.gpuVendor ? { gpuVendor: memory.gpuVendor } : {}),
       description: hardware.description,

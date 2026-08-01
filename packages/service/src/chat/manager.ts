@@ -8899,7 +8899,23 @@ export class ChatManager {
       typeof config.localEngineMemoryGb === 'number'
         ? Math.round(config.localEngineMemoryGb * 1024 ** 3)
         : undefined;
-    const broker = new CapacityBroker(budgetBytes !== undefined ? { budgetBytes } : {});
+    // Measure the accelerator before deriving the budget. Without this the
+    // broker sizes a discrete-GPU host off system RAM alone — the shape that
+    // told a 64 GB / 24 GB-VRAM box its models get "60% of your 63.9 GB
+    // machine" and then refused a model that fit the card plus offload.
+    // The probe caches, and a failure degrades to the RAM-only curve.
+    const gpuVramBytes = await (async () => {
+      try {
+        const { detectMemoryProfileCached } = await import('../system/memory.js');
+        return (await detectMemoryProfileCached()).gpuVramBytes;
+      } catch {
+        return null;
+      }
+    })();
+    const broker = new CapacityBroker({
+      ...(budgetBytes !== undefined ? { budgetBytes } : {}),
+      gpuVramBytes,
+    });
     const pool = new ProviderPool({ broker, builders: {} });
 
     // Builders close over `this` so they can re-read config and use the
@@ -16238,7 +16254,7 @@ export async function buildLlamaCppProvider(opts: {
   // Explicit `providerConcurrency['llama-cpp']` overrides verbatim.
   // (Co-resident pool models aren't subtracted here — the broker still
   // denies an over-commit at spawn; threading committed bytes is a TODO.)
-  const { autoDetectBudgetBytes, defaultLocalEngineSlots, llamaCppSlotCeiling } = await import(
+  const { fastMemoryBudgetBytes, defaultLocalEngineSlots, llamaCppSlotCeiling } = await import(
     '../providers/native/capacity-broker.js'
   );
   // Subtract co-resident model reservations from the budget when the pool
@@ -16246,8 +16262,16 @@ export async function buildLlamaCppProvider(opts: {
   // overridden) budget. Caveat: the broker tracks each model's resident
   // WEIGHTS, not its slot KV, so co-resident KV isn't fully captured — a
   // broader broker improvement. Singleton path has no broker → full budget.
+  //
+  // Slots are sized against FAST memory, not the admission budget. On a
+  // discrete card those differ: the budget also covers the system RAM an
+  // offloaded MoE streams experts from, and KV that follows that number
+  // instead of the card's own capacity is how a GPU runs out of memory.
+  // Unified and CPU-only hosts have one pool, so the two are the same there.
   const brokerSnap = opts.broker?.committed();
-  const budgetBytes = brokerSnap?.enforced ? brokerSnap.budgetBytes : autoDetectBudgetBytes();
+  const budgetBytes = brokerSnap?.enforced
+    ? (opts.broker?.fastBudgetBytes() ?? brokerSnap.budgetBytes)
+    : fastMemoryBudgetBytes();
   const committedOtherBytes = brokerSnap?.enforced ? brokerSnap.committedBytes : 0;
   let slots =
     configuredSlots ??
@@ -16995,13 +17019,15 @@ export async function buildMlxProvider(opts: {
     defaultLocalEngineSlots,
     localEngineSlotCeiling,
     localEngineKvBudgetBytes,
-    autoDetectBudgetBytes,
+    fastMemoryBudgetBytes,
   } = await import('../providers/native/capacity-broker.js');
   const mlxWeightsBytes = modelCatalogInfo?.approxSizeBytes ?? 8 * 1024 ** 3;
   const mlxBrokerSnap = opts.broker?.committed();
+  // Fast memory, not the admission budget — same reason as the llama path.
+  // MLX only runs on unified-memory Macs today, where the two are equal.
   const mlxBudgetBytes = mlxBrokerSnap?.enforced
-    ? mlxBrokerSnap.budgetBytes
-    : autoDetectBudgetBytes();
+    ? (opts.broker?.fastBudgetBytes() ?? mlxBrokerSnap.budgetBytes)
+    : fastMemoryBudgetBytes();
   const mlxCommittedOther = mlxBrokerSnap?.enforced ? mlxBrokerSnap.committedBytes : 0;
   const mlxKvCacheType = kvBits === 4 ? 'q4_0' : kvBits === 8 ? 'q8_0' : 'f16';
   const mlxKvBudgetBytes = localEngineKvBudgetBytes({

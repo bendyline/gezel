@@ -165,7 +165,15 @@ export const SystemDiagnosticsSchema = z.object({
   hardware: z.object({
     totalRamBytes: z.number().nonnegative(),
     gpuVramBytes: z.number().nonnegative().nullable(),
+    /** Fast memory: VRAM on a discrete card, a RAM fraction otherwise. */
     usableBytes: z.number().nonnegative(),
+    /**
+     * What the capacity broker admits across every pool. Differs from
+     * `usableBytes` on a discrete card (VRAM plus a system-RAM share), and a
+     * memory bug report is unreadable without knowing which of the two a
+     * refusal was measured against.
+     */
+    budgetBytes: z.number().nonnegative().optional(),
     source: z.enum(['darwin-unified', 'gpu-nvidia', 'gpu-vulkan', 'system-ram-fallback']),
     gpuVendor: z.enum(['amd', 'nvidia', 'intel']).optional(),
     /** Prose sentence — the same copy local-model onboarding shows. */

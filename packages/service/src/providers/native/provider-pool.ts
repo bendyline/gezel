@@ -133,6 +133,8 @@ export interface PoolSnapshot {
   autoBudgetBytes: number;
   /** True when `localEngineMemoryGb` is overriding the auto value. */
   overridden: boolean;
+  /** Which pools back the budget — see {@link CapacityCommitted.pools}. */
+  pools: import('./capacity-broker.js').CapacityCommitted['pools'];
 }
 
 /**
@@ -366,6 +368,7 @@ export class ProviderPool {
           budgetBytes: c.budgetBytes,
           committedBytes: c.committedBytes,
           systemRamBytes: c.systemRamBytes,
+          pools: c.pools,
         }),
       );
     }
@@ -393,6 +396,7 @@ export class ProviderPool {
             budgetBytes: c.budgetBytes,
             committedBytes: c.committedBytes,
             systemRamBytes: c.systemRamBytes,
+            pools: c.pools,
           }),
         );
       }
@@ -784,6 +788,7 @@ export class ProviderPool {
       systemRamBytes: committed.systemRamBytes,
       autoBudgetBytes: committed.autoBudgetBytes,
       overridden: committed.overridden,
+      pools: committed.pools,
     };
   }
 

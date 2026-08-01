@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import {
   CapacityBroker,
   autoDetectBudgetBytes,
+  computeCapacityBudget,
   defaultLocalEngineSlots,
+  fastMemoryBudgetBytes,
   estimatePerSlotKvBytes,
   formatCapacityDenial,
   llamaCppSlotCeiling,
@@ -429,5 +431,127 @@ describe('localEngineSlotCeiling', () => {
       kvCacheType: 'f16',
     });
     expect(n).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe('discrete-GPU hosts — VRAM is memory, not a rounding error', () => {
+  // The reported shape: Windows, 63.9 GB RAM, a 24 GB RTX 4090. The budget
+  // was 60% of system RAM and nothing else, so a 42 GB MoE the card could
+  // run with expert offload was refused, and the refusal explained itself as
+  // a percentage of the pool the model would mostly not have lived in.
+  const RAM = 64 * GB;
+  const VRAM = 24 * GB;
+  const host = { unifiedMemory: false, gpuVramBytes: VRAM };
+
+  it('adds usable VRAM to the system-RAM share instead of ignoring it', () => {
+    const budget = computeCapacityBudget({ systemRamBytes: RAM, ...host });
+    expect(budget.kind).toBe('discrete-gpu');
+    expect(budget.vramBytes).toBe(Math.floor(VRAM * 0.95));
+    expect(budget.ramShareBytes).toBe(Math.floor(RAM * 0.6));
+    expect(budget.budgetBytes).toBe(budget.vramBytes + budget.ramShareBytes);
+    // The model from the report: ~42.2 GB resident. Admitted now, denied before.
+    expect(budget.budgetBytes).toBeGreaterThan(42.2 * GB);
+    expect(autoDetectBudgetBytes(RAM, host)).toBe(budget.budgetBytes);
+  });
+
+  it('keeps the RAM share bounded no matter what the card absorbs', () => {
+    // Every admissible set of models can put at most `ramShareBytes` in RAM:
+    // VRAM absorbs the first `vramBytes` of any total under the budget. That
+    // bound is why adding the pools together is safe rather than optimistic.
+    const budget = computeCapacityBudget({ systemRamBytes: RAM, ...host });
+    const worstCaseInRam = budget.budgetBytes - budget.vramBytes;
+    expect(worstCaseInRam).toBe(budget.ramShareBytes);
+    expect(worstCaseInRam).toBeLessThan(RAM * 0.61);
+  });
+
+  it('sizes KV against the card, not the combined budget', () => {
+    // The other half of the confusion: slots sized off 38 GB of system RAM
+    // on a 24 GB card is how a GPU runs out of memory mid-generation.
+    const budget = computeCapacityBudget({ systemRamBytes: RAM, ...host });
+    expect(budget.fastBytes).toBe(budget.vramBytes);
+    expect(budget.fastBytes).toBeLessThan(budget.budgetBytes);
+    expect(fastMemoryBudgetBytes(RAM, host)).toBe(budget.vramBytes);
+  });
+
+  it('treats a shared pool reported as VRAM as unified, not as a second pool', () => {
+    // GB10 / DGX Spark and integrated GPUs report host memory as VRAM.
+    // Adding it to the RAM share would count the same bytes twice.
+    const shared = computeCapacityBudget({ systemRamBytes: RAM, gpuVramBytes: 60 * GB });
+    expect(shared.kind).toBe('unified');
+    expect(shared.vramBytes).toBe(0);
+    expect(shared.budgetBytes).toBe(Math.floor(RAM * 0.7));
+    expect(shared.fastBytes).toBe(shared.budgetBytes);
+  });
+
+  it('a host with no card is unchanged', () => {
+    const cpuOnly = computeCapacityBudget({
+      systemRamBytes: RAM,
+      gpuVramBytes: null,
+      unifiedMemory: false,
+    });
+    expect(cpuOnly.kind).toBe('system-ram');
+    expect(cpuOnly.budgetBytes).toBe(Math.floor(RAM * 0.6));
+    expect(cpuOnly.fastBytes).toBe(cpuOnly.budgetBytes);
+  });
+
+  it('the broker reports the pools behind its budget', () => {
+    const b = new CapacityBroker({
+      systemRamBytes: () => RAM,
+      unifiedMemory: false,
+      gpuVramBytes: VRAM,
+    });
+    const snap = b.committed();
+    expect(snap.pools.kind).toBe('discrete-gpu');
+    expect(snap.pools.vramBytes).toBe(Math.floor(VRAM * 0.95));
+    expect(snap.budgetBytes).toBe(snap.pools.vramBytes + snap.pools.ramShareBytes);
+    expect(b.fastBudgetBytes()).toBe(snap.pools.vramBytes);
+  });
+
+  it('an explicit budget lowers the fast ceiling but never raises the card', () => {
+    const b = new CapacityBroker({
+      systemRamBytes: () => RAM,
+      unifiedMemory: false,
+      gpuVramBytes: VRAM,
+      budgetBytes: 12 * GB,
+    });
+    expect(b.fastBudgetBytes()).toBe(12 * GB);
+    b.setBudgetBytes(null);
+    expect(b.fastBudgetBytes()).toBe(Math.floor(VRAM * 0.95));
+  });
+
+  it('names the graphics card in the denial instead of a share of system RAM', () => {
+    const b = new CapacityBroker({
+      systemRamBytes: () => RAM,
+      unifiedMemory: false,
+      gpuVramBytes: VRAM,
+    });
+    const c = b.committed();
+    const msg = formatCapacityDenial({
+      modelLabel: 'qwen3.6-35b-a3b-q8',
+      requestedBytes: 70 * GB,
+      budgetBytes: c.budgetBytes,
+      committedBytes: 0,
+      systemRamBytes: c.systemRamBytes,
+      pools: c.pools,
+    });
+    expect(msg).toMatch(/graphics memory/);
+    expect(msg).toMatch(/22\.8 GB/);
+    expect(msg).toMatch(/38\.4 GB/);
+    // The old copy told a Windows user their memory was being kept free for
+    // macOS, and framed a GPU budget as a percentage of system RAM.
+    expect(msg).not.toMatch(/macOS/);
+    expect(msg).not.toMatch(/% of your/);
+  });
+
+  it('leaves the RAM-only denial wording alone', () => {
+    const msg = formatCapacityDenial({
+      modelLabel: 'gemma4-12b-q4',
+      requestedBytes: 20 * GB,
+      budgetBytes: 10 * GB,
+      committedBytes: 0,
+      systemRamBytes: 16 * GB,
+    });
+    expect(msg).toMatch(/about 63% of your 16\.0 GB machine/);
+    expect(msg).not.toMatch(/macOS/);
   });
 });

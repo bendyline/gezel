@@ -112,6 +112,14 @@ export function EngineBudgetStrip({ provider, pollMs = 2000 }: Props) {
       </div>
       <div style={{ fontSize: 12, color: 'var(--gz-color-muted, #888)' }}>
         {fmtGB(status.committedBytes)} of {fmtGB(status.budgetBytes)} used
+        {/* Name the pools on a discrete card. "38.3 GB" alone reads as system
+            RAM, which is the pool a GPU user's models are mostly NOT in. */}
+        {status.pools?.kind === 'discrete-gpu' && status.pools.vramBytes > 0 ? (
+          <>
+            {' '}
+            ({fmtGB(status.pools.vramBytes)} graphics + {fmtGB(status.pools.ramShareBytes)} system)
+          </>
+        ) : null}
         {filtered.length > 0 ? (
           <>
             {' · '}

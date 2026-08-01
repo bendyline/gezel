@@ -11,6 +11,7 @@ function profile(overrides: Partial<MemoryProfile> = {}): MemoryProfile {
     gpuVramBytes: 24 * GiB,
     source: 'gpu-nvidia',
     usableBytes: 22 * GiB,
+    budgetBytes: 60 * GiB,
     gpuVendor: 'nvidia',
     ...overrides,
   };

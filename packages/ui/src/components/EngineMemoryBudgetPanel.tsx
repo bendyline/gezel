@@ -49,6 +49,13 @@ export function EngineMemoryBudgetPanel({ status, onSaved }: EngineMemoryBudgetP
   const systemRamBytes = status.systemRamBytes ?? 0;
   const autoBytes = status.autoBudgetBytes ?? 0;
   const overridden = status.overridden ?? false;
+  const pools = status.pools;
+  // On a discrete card the memory models can hold is graphics memory plus a
+  // share of system RAM, so the track cannot stop at physical RAM and the
+  // copy cannot call the whole thing a slice of "this 64 GB machine" — that
+  // sentence names the one pool the models mostly aren't in.
+  const onCard = pools?.kind === 'discrete-gpu' && pools.vramBytes > 0;
+  const ceilingBytes = onCard ? systemRamBytes + pools.vramBytes : systemRamBytes;
 
   // null = follow auto; a number = explicit slider position.
   const [draftGb, setDraftGb] = useState<number | null>(null);
@@ -84,7 +91,9 @@ export function EngineMemoryBudgetPanel({ status, onSaved }: EngineMemoryBudgetP
   if (systemRamBytes <= 0 || autoBytes <= 0) return null;
 
   const autoGb = autoBytes / GIB;
-  const totalGb = systemRamBytes / GIB;
+  const totalGb = ceilingBytes / GIB;
+  const ramGb = systemRamBytes / GIB;
+  const vramGb = (pools?.vramBytes ?? 0) / GIB;
   const minGb = Math.min(FLOOR_GB, autoGb);
   const maxGb = Math.max(autoGb, totalGb - CEILING_RESERVE_GB);
   const valueGb = Math.min(Math.max(draftGb ?? autoGb, minGb), maxGb);
@@ -98,8 +107,12 @@ export function EngineMemoryBudgetPanel({ status, onSaved }: EngineMemoryBudgetP
       <h4>Memory for on-device models</h4>
       <p className="muted small">
         The most memory all your on-device models may hold at once. Raise it to run a larger model;
-        lower it to leave more of this {totalGb >= 1 ? `${Math.round(totalGb)} GB ` : ''}machine to
-        everything else.
+        lower it to leave more room for everything else.{' '}
+        {onCard
+          ? `This machine has ${fmtGb(Math.round(vramGb))} of graphics memory and ${fmtGb(Math.round(ramGb))} of system memory; a model larger than the graphics card runs partly from system memory.`
+          : ramGb >= 1
+            ? `This machine has ${fmtGb(Math.round(ramGb))} of memory in total.`
+            : ''}
       </p>
 
       <div className="gz-budget-slider">
