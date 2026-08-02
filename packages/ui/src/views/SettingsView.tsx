@@ -1617,7 +1617,7 @@ export function SettingsView() {
               <h3>Klerk</h3>
               <p className="muted" style={{ marginTop: 0 }}>
                 The Klerk is your workshop scribe — they handle utility text work (about.md drafts,
-                rewrites, end-of-session summaries, memory consolidation) so you can route grunt
+                rewrites, end-of-thread summaries, memory consolidation) so you can route grunt
                 tasks to a different model than your conversational gezellen. Their{' '}
                 <code>provider</code> and <code>model</code> overrides on the gezel itself decide
                 what runs.
@@ -2570,8 +2570,8 @@ export function SettingsView() {
             <section className="provider-card">
               <h3>Sandbox Copilot actions</h3>
               <p className="muted small" style={{ marginTop: 0 }}>
-                When on, new Copilot sessions deny the CLI&rsquo;s built-in tools (<code>bash</code>
-                , <code>web_fetch</code>, <code>view</code>, file ops, <code>grep</code>) and force
+                When on, new Copilot threads deny the CLI&rsquo;s built-in tools (<code>bash</code>,{' '}
+                <code>web_fetch</code>, <code>view</code>, file ops, <code>grep</code>) and force
                 the model to work through gezel&rsquo;s MCP tools instead. Gives you an audit trail
                 for every action and consistent behavior across providers. Per-gezel override lives
                 on each gezel&rsquo;s Settings tab.
@@ -2848,7 +2848,7 @@ export function SettingsView() {
                     onChange={(e) => void saveCodexCli({ manageRuntimeFiles: e.target.checked })}
                     style={{ marginRight: '0.5rem' }}
                   />
-                  Write a per-session <code>CODEX_HOME</code> so Codex can call gezel-mcp tools
+                  Write a per-thread <code>CODEX_HOME</code> so Codex can call gezel-mcp tools
                 </label>
               </div>
               <p className="muted" style={{ fontSize: '0.85rem', marginTop: '0.25rem' }}>
@@ -3072,7 +3072,7 @@ export function SettingsView() {
                     }
                     style={{ marginRight: '0.5rem' }}
                   />
-                  Write a per-session <code>.mcp.json</code> so Claude can call gezel-mcp tools
+                  Write a per-thread <code>.mcp.json</code> so Claude can call gezel-mcp tools
                 </label>
               </div>
               <p className="muted" style={{ fontSize: '0.85rem', marginTop: '0.25rem' }}>
@@ -3102,8 +3102,8 @@ export function SettingsView() {
                 </span>
               </div>
               <p className="muted" style={{ fontSize: '0.85rem', marginTop: '0.25rem' }}>
-                Each pool slot holds one <code>claude</code> process pinned to a chat session; turn
-                2+ of a session skips the cold-start cost. More slots = lower per-turn latency for
+                Each pool slot holds one <code>claude</code> process pinned to a chat thread; turn
+                2+ of a thread skips the cold-start cost. More slots = lower per-turn latency for
                 parallel gezellen, more memory (~100–200 MB per warm process). When at cap, the
                 least-recently-used non-busy worker is evicted.
               </p>
@@ -3820,7 +3820,7 @@ function ProviderUsagePanel({ label, data }: { label: string; data: ProviderUsag
           </div>
         </div>
         <div className="usage-card">
-          <div className="usage-label">This session</div>
+          <div className="usage-label">Since startup</div>
           <div className="usage-value">{data.totalTurns} turns</div>
           <div className="usage-detail">
             <span>
@@ -3945,8 +3945,8 @@ function MemorySection({ config, onAutoRecallChange, onSummarizationChange }: Me
     <section style={{ marginTop: '2rem' }}>
       <h3>Memory</h3>
       <p className="muted" style={{ marginTop: 0 }}>
-        Cross-session context: pull relevant memories into new sessions, and distill finished
-        sessions into the project memory bank so the next gezel can pick up where you left off.
+        Cross-thread context: pull relevant memories into new threads, and distill finished threads
+        into the project memory bank so the next gezel can pick up where you left off.
       </p>
 
       <div style={{ marginBottom: '1.25rem' }}>

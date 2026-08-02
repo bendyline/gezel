@@ -26,5 +26,5 @@ When you use local downloaded models, everything gezel does is powered by your d
 ## Where to go next
 
 - Meet the crew model in [Your crew](the-crew.md).
-- See how work is organized in [Projects and sessions](projects-and-sessions.md).
+- See how work is organized in [Projects and threads](projects-and-threads.md).
 - Browse what your gezellen can do by role in the Gezel Roles section of this Handboek.

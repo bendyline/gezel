@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { chmod, lstat, mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 /**
@@ -359,6 +359,97 @@ async function chmodTree(path: string): Promise<void> {
   } catch {
     // Windows permissions are established by the installer DACL.
   }
+}
+
+export interface ReclaimedDownload {
+  id: string;
+  bytes: number;
+}
+
+/** Grace period before an abandoned download is reclaimed. Within it the
+ *  `.partial` files still serve as resume credit for a retried install. */
+export const ABANDONED_DOWNLOAD_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * Delete abandoned model downloads from the writable root.
+ *
+ * A directory qualifies only when ALL of these hold — the gates are meant to
+ * make "we delete something the user wanted" impossible:
+ *   - no `manifest.json` (never completed an install, invisible to every
+ *     listing surface),
+ *   - contains at least one `.partial` file (the downloader's signature —
+ *     a hand-placed model directory without one is never touched),
+ *   - nothing in it was written for `ttlMs` (default 7 days — within that
+ *     window the `.partial` files are resume credit for a retried install),
+ *   - not currently being installed (`activeIds`).
+ *
+ * Only the writable root is swept — read-only machine roots belong to the
+ * machine service, which runs its own sweep. Callers run this once at boot;
+ * errors are contained per-directory so one unreadable entry can't stop the
+ * sweep.
+ */
+export async function reclaimAbandonedModelDownloads(opts: {
+  writableRoot: string;
+  activeIds?: ReadonlySet<string>;
+  ttlMs?: number;
+  now?: number;
+}): Promise<ReclaimedDownload[]> {
+  const ttlMs = opts.ttlMs ?? ABANDONED_DOWNLOAD_TTL_MS;
+  const now = opts.now ?? Date.now();
+  const reclaimed: ReclaimedDownload[] = [];
+  let entries: string[];
+  try {
+    entries = await readdir(opts.writableRoot);
+  } catch {
+    return reclaimed;
+  }
+  for (const id of entries) {
+    if (id.startsWith('.') || opts.activeIds?.has(id)) continue;
+    const dir = join(opts.writableRoot, id);
+    try {
+      const info = await lstat(dir);
+      if (!info.isDirectory() || info.isSymbolicLink()) continue;
+      const scan = await scanAbandonedCandidate(dir);
+      if (!scan || !scan.hasPartial || now - scan.newestMtimeMs < ttlMs) continue;
+      await rm(dir, { recursive: true, force: true });
+      reclaimed.push({ id, bytes: scan.totalBytes });
+    } catch {
+      // Skip directories we can't read or remove; the next sweep retries.
+    }
+  }
+  return reclaimed;
+}
+
+/**
+ * Returns null when the directory holds a `manifest.json` (a real install —
+ * never a reclamation candidate), else its abandoned-download profile.
+ */
+async function scanAbandonedCandidate(
+  dir: string,
+): Promise<{ hasPartial: boolean; newestMtimeMs: number; totalBytes: number } | null> {
+  let hasPartial = false;
+  let totalBytes = 0;
+  const dirInfo = await lstat(dir);
+  let newestMtimeMs = dirInfo.mtimeMs;
+  const visit = async (current: string): Promise<boolean> => {
+    for (const entry of await readdir(current, { withFileTypes: true })) {
+      const absolute = join(current, entry.name);
+      if (entry.isSymbolicLink()) continue;
+      if (entry.isDirectory()) {
+        if (!(await visit(absolute))) return false;
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      if (entry.name === 'manifest.json') return false;
+      const info = await lstat(absolute);
+      newestMtimeMs = Math.max(newestMtimeMs, info.mtimeMs);
+      totalBytes += info.size;
+      if (entry.name.endsWith('.partial')) hasPartial = true;
+    }
+    return true;
+  };
+  if (!(await visit(dir))) return null;
+  return { hasPartial, newestMtimeMs, totalBytes };
 }
 
 function isSafeModelPath(path: string): boolean {

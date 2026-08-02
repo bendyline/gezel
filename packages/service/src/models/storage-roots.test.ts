@@ -9,6 +9,7 @@ import {
   listOverlayModelIds,
   migrateLegacySystemModels,
   modelStorageRoots,
+  reclaimAbandonedModelDownloads,
   verifyReadOnlyModelPayload,
 } from './storage-roots.js';
 
@@ -128,6 +129,43 @@ describe('model storage overlay', () => {
     ).toBe(false);
     expect(reasons).toHaveLength(1);
     expect(reasons[0]).toContain('fileSha256');
+  });
+
+  it('reclaims only stale manifest-less directories containing .partial files', async () => {
+    const home = await tempRoot();
+    const roots = modelStorageRoots({ home, engine: 'mlx', env: {} });
+    const root = roots.writableRoot;
+    const weekAndDayLater = Date.now() + 8 * 24 * 60 * 60 * 1000;
+
+    // Abandoned download: .partial files, no manifest — reclaim after TTL.
+    await mkdir(join(root, 'abandoned'), { recursive: true });
+    await writeFile(join(root, 'abandoned', 'model-00001.safetensors.partial'), 'half');
+    await writeFile(join(root, 'abandoned', 'config.json'), '{}');
+    // Completed install: manifest present — never touched.
+    await mkdir(join(root, 'installed'), { recursive: true });
+    await writeFile(join(root, 'installed', 'manifest.json'), '{}');
+    await writeFile(join(root, 'installed', 'weights.gguf.partial'), 'update-in-flight');
+    // Hand-placed directory: no .partial signature — never touched.
+    await mkdir(join(root, 'hand-placed'), { recursive: true });
+    await writeFile(join(root, 'hand-placed', 'weights.gguf'), 'mine');
+    // In-flight install: excluded via activeIds even when stale.
+    await mkdir(join(root, 'downloading'), { recursive: true });
+    await writeFile(join(root, 'downloading', 'weights.gguf.partial'), 'streaming');
+
+    const reclaimed = await reclaimAbandonedModelDownloads({
+      writableRoot: root,
+      activeIds: new Set(['downloading']),
+      now: weekAndDayLater,
+    });
+    expect(reclaimed).toEqual([{ id: 'abandoned', bytes: 6 }]);
+    expect(await listOverlayModelIds(roots)).toEqual(
+      expect.arrayContaining(['installed', 'hand-placed', 'downloading']),
+    );
+
+    // Within the TTL the .partial files are resume credit — left alone.
+    await mkdir(join(root, 'fresh'), { recursive: true });
+    await writeFile(join(root, 'fresh', 'weights.gguf.partial'), 'young');
+    expect(await reclaimAbandonedModelDownloads({ writableRoot: root })).toEqual([]);
   });
 
   it('moves legacy system models and backfills their public payload hashes', async () => {

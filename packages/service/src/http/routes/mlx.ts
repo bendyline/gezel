@@ -1,10 +1,8 @@
-import { createLogger } from '@bendyline/gezel';
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import type { ServiceContext } from '../context.js';
+import { subscribeToInstallSse } from './install-sse.js';
 import { invalidateModelsCache } from './models.js';
-
-const log = createLogger('mlx-install');
 
 /**
  * MLX local model management — install / list / delete MLX-format
@@ -40,7 +38,11 @@ export function mlxRoutes(ctx: ServiceContext): Hono {
    * Install an MLX model directory from HuggingFace. Same SSE shape as
    * the llama-cpp install endpoint; event body carries `fileIndex` +
    * `fileCount` so the UI can render per-file progress inside the
-   * overall model install.
+   * overall model install. The install runs as a background job owned by
+   * {@link ServiceContext.chatInstalls} — this SSE is just a subscriber,
+   * so a client disconnect does not abandon the download. Idempotent: a
+   * second `POST` for a running id attaches to the in-flight install.
+   * Cancel is the explicit `DELETE` below.
    */
   app.post('/models/:catalogId/install', async (c) => {
     const catalogId = c.req.param('catalogId');
@@ -51,36 +53,14 @@ export function mlxRoutes(ctx: ServiceContext): Hono {
     const skipShaRaw = c.req.query('skipSha');
     const skipSha =
       skipShaRaw != null && skipShaRaw !== '' && skipShaRaw !== '0' && skipShaRaw !== 'false';
-    return streamSSE(c, async (stream) => {
-      // Track the terminal frame we stream so a silent close (the install
-      // generator unwinding, or the SSE connection dropping, without a
-      // `done`/`error`) is visible in the logs — that's the failure mode
-      // where the catalog card reverts to "Download" with no explanation.
-      let terminal: 'done' | 'error' | null = null;
-      try {
-        for await (const event of ctx.mlxModels.install(catalogId, { skipSha })) {
-          if (event.type === 'error') {
-            terminal = 'error';
-            log.warn(`install "${catalogId}" failed: ${event.error}`);
-          } else if (event.type === 'done') {
-            terminal = 'done';
-          }
-          await stream.writeSSE({ data: JSON.stringify(event) });
-        }
-        invalidateModelsCache('mlx');
-        if (terminal === null) {
-          log.warn(
-            `install "${catalogId}" stream ended without a terminal done/error event — client will see an interrupted install`,
-          );
-        }
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        log.warn(`install "${catalogId}" threw mid-stream: ${message}`);
-        await stream.writeSSE({
-          data: JSON.stringify({ type: 'error', error: message }),
-        });
-      }
-    });
+    ctx.chatInstalls.mlx.start(catalogId, { skipSha });
+    return streamSSE(c, (stream) => subscribeToInstallSse(ctx.chatInstalls.mlx, catalogId, stream));
+  });
+
+  /** Explicitly cancel an in-flight install. Disconnect alone does not cancel. */
+  app.delete('/models/:catalogId/install', (c) => {
+    const catalogId = c.req.param('catalogId');
+    return c.json({ aborted: ctx.chatInstalls.mlx.cancel(catalogId) });
   });
 
   app.delete('/models/:id', async (c) => {

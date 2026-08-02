@@ -834,7 +834,10 @@ export class LlamaCppModelManager {
       return null;
     }
     if (!parsed.id || !parsed.name || !parsed.weightsFilename || !parsed.installedAt) {
-      this.warnSkip(id, 'manifest.json is missing required fields (id/name/weightsFilename/installedAt)');
+      this.warnSkip(
+        id,
+        'manifest.json is missing required fields (id/name/weightsFilename/installedAt)',
+      );
       return null;
     }
     if (

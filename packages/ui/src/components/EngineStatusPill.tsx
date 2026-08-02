@@ -804,8 +804,8 @@ function EngineStatusPillForProvider({
                 <dt>Concurrency</dt>
                 <dd>
                   {queueState.maxConcurrency <= 1
-                    ? '1 session at a time'
-                    : `up to ${queueState.maxConcurrency} concurrent sessions`}
+                    ? '1 thread at a time'
+                    : `up to ${queueState.maxConcurrency} concurrent threads`}
                 </dd>
               </>
             )}
@@ -838,7 +838,7 @@ function EngineStatusPillForProvider({
                 <dt>Cache</dt>
                 <dd>
                   {cacheState.warmSessionCount}{' '}
-                  {cacheState.warmSessionCount === 1 ? 'session' : 'sessions'} ·{' '}
+                  {cacheState.warmSessionCount === 1 ? 'thread' : 'threads'} ·{' '}
                   {formatBytes(cacheState.totalBytes)} of {formatBytes(cacheState.budgetBytes)}
                   {cacheState.recentHitRate > 0 && (
                     <> · {Math.round(cacheState.recentHitRate * 100)}% hit rate</>

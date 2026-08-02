@@ -18,7 +18,6 @@
  */
 
 import { readFileSync } from 'node:fs';
-import { closestFileNames } from './near-miss.js';
 import {
   AdvanceWhenSchema,
   type Craftbook,
@@ -69,6 +68,7 @@ import {
   shouldPromoteStartJobToProject,
   shouldRouteStartProjectToJob,
 } from './kickoff-text.js';
+import { closestFileNames } from './near-miss.js';
 import { normalizeMarkdown } from './normalize.js';
 import { unavailableToolsForPlatform } from './platform-tool-availability.js';
 import { repoIntakeRedirect } from './repo-intake-policy.js';

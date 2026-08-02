@@ -105,11 +105,12 @@ interface ActiveInstall {
   error?: string;
   /**
    * `local` — this React instance kicked off the install via SSE and
-   * owns the AbortController.
+   * owns the AbortController for its own event stream.
    * `remote` — the install was discovered via the polled
    * `/active-installs` endpoint; another path (the first-run
-   * bootstrap, or another open Settings tab) is driving it. The
-   * cancel button is hidden because we don't own the lifecycle.
+   * bootstrap, or another open Settings tab) started it. Either way the
+   * install itself is a server-owned background job, so Cancel works for
+   * both origins via the explicit cancel endpoint.
    */
   origin: 'local' | 'remote';
   controller?: AbortController;
@@ -448,9 +449,17 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
 
   const cancelInstall = useCallback(
     (catalogId: string) => {
+      // Installs run as background jobs on the service — closing the SSE
+      // stream only detaches this view, so cancellation must be the
+      // explicit server-side call. Works for `remote`-origin rows too.
       const inflight = installs.get(catalogId);
-      if (!inflight || !inflight.controller) return;
-      inflight.controller.abort();
+      inflight?.controller?.abort();
+      void api.cancelLlamaCppModelInstall(catalogId).catch(() => {});
+      setInstalls((prev) => {
+        const next = new Map(prev);
+        next.delete(catalogId);
+        return next;
+      });
     },
     [installs],
   );
@@ -932,11 +941,11 @@ function InstallProgress({
             Retry
           </button>
         ) : (
-          inst.controller && (
-            <button type="button" className="home-link" onClick={onCancel}>
-              Cancel
-            </button>
-          )
+          /* Cancel always available: installs are server-owned background
+             jobs, so this view can cancel remote-origin rows too. */
+          <button type="button" className="home-link" onClick={onCancel}>
+            Cancel
+          </button>
         )}
       </div>
       {indeterminate ? (

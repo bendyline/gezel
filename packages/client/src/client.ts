@@ -2692,6 +2692,21 @@ export class GezelClient {
     return this.request('DELETE', `/api/llama-cpp/models/${encodeURIComponent(id)}`);
   }
 
+  /**
+   * Cancel an in-flight llama-cpp model install. Installs run as background
+   * jobs on the service — closing the SSE consumer no longer aborts them, so
+   * this is the only way to stop one. `.partial` files stay on disk as
+   * resume credit for a retried install.
+   */
+  cancelLlamaCppModelInstall(catalogId: string): Promise<{ aborted: boolean }> {
+    return this.request('DELETE', `/api/llama-cpp/models/${encodeURIComponent(catalogId)}/install`);
+  }
+
+  /** Cancel an in-flight ds4 model install. Same contract as {@link cancelLlamaCppModelInstall}. */
+  cancelDs4ModelInstall(catalogId: string): Promise<{ aborted: boolean }> {
+    return this.request('DELETE', `/api/ds4/models/${encodeURIComponent(catalogId)}/install`);
+  }
+
   // ── Evals (in-app Benchmarks panel) ──
 
   listEvalScenarios(): Promise<{ scenarios: readonly EvalScenarioManifest[] }> {
@@ -2794,6 +2809,11 @@ export class GezelClient {
 
   deleteMlxModel(id: string): Promise<{ ok: true }> {
     return this.request('DELETE', `/api/mlx/models/${encodeURIComponent(id)}`);
+  }
+
+  /** Cancel an in-flight MLX model install. Same contract as {@link cancelLlamaCppModelInstall}. */
+  cancelMlxModelInstall(catalogId: string): Promise<{ aborted: boolean }> {
+    return this.request('DELETE', `/api/mlx/models/${encodeURIComponent(catalogId)}/install`);
   }
 
   /**

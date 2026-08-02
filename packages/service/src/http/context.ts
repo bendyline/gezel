@@ -24,6 +24,7 @@ import type { MailManager } from '../mail/manager.js';
 import type { MeesterStatusGenerator } from '../meester/status-generator.js';
 import type { MemoryManager } from '../memory/manager.js';
 import type { EnsureModelOrchestrator } from '../models/ensure.js';
+import type { ChatModelInstallRegistries } from '../models/install-jobs.js';
 import type { PreviewLogBuffer } from '../preview-log/buffer.js';
 import type { SpeechToTextProviderManager } from '../providers/audio/stt-manager.js';
 import type { TextToSpeechProviderManager } from '../providers/audio/tts-manager.js';
@@ -108,6 +109,13 @@ export interface ServiceContext {
    * [pull-registry.ts](../providers/image/pull-registry.ts).
    */
   imagePulls: ImageModelPullRegistry;
+  /**
+   * Background chat-model install registries (llama-cpp / ds4 / mlx). The
+   * install routes start-or-attach here so a client disconnect no longer
+   * abandons a download — see
+   * [install-registry.ts](../models/install-registry.ts).
+   */
+  chatInstalls: ChatModelInstallRegistries;
   /**
    * Video-generation provider manager. Holds a lazily-built underlying
    * provider (bundled diffusers / mock). Same lifecycle pattern as

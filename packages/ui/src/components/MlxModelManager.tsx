@@ -364,9 +364,17 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
 
   const cancelInstall = useCallback(
     (catalogId: string) => {
+      // Installs run as background jobs on the service — closing the SSE
+      // stream only detaches this view, so cancellation must be the
+      // explicit server-side call. Works for `remote`-origin rows too.
       const inflight = installs.get(catalogId);
-      if (!inflight || !inflight.controller) return;
-      inflight.controller.abort();
+      inflight?.controller?.abort();
+      void api.cancelMlxModelInstall(catalogId).catch(() => {});
+      setInstalls((prev) => {
+        const next = new Map(prev);
+        next.delete(catalogId);
+        return next;
+      });
     },
     [installs],
   );
@@ -741,11 +749,11 @@ function InstallProgress({
             Retry
           </button>
         ) : (
-          inst.controller && (
-            <button type="button" className="home-link" onClick={onCancel}>
-              Cancel
-            </button>
-          )
+          /* Cancel always available: installs are server-owned background
+             jobs, so this view can cancel remote-origin rows too. */
+          <button type="button" className="home-link" onClick={onCancel}>
+            Cancel
+          </button>
         )}
       </div>
       {indeterminate ? (
