@@ -29,7 +29,18 @@ pnpm eval:run tictactoe --model gemma4-e4b-q4 --timeout 20m
 
 # Image-gen scenario; provider-specific chat default + SDXL Lightning. Override either:
 pnpm eval:run petshop --image-model sdxl-lightning-4step --timeout 25m
+
+# Slow model on a single scenario: scale the authored ceiling by measured decode rate.
+pnpm eval:run conflict-synthesis --model qwen3.6-27b-q8 --decode-rate 4.8
 ```
+
+Scenario `timeoutMs` values are hand-authored against a ~20 tok/s reference
+machine, so a slower model can hit the wall while still making forward
+progress — the capability verdict inverts with hardware. Batch and matrix
+runs scale each ceiling automatically from the preflight probe's measured
+throughput; a single `eval:run` has no probe, so pass `--decode-rate` when
+the model is well under the reference. An explicit `--timeout` is absolute
+and is never scaled.
 
 Per-trial output lands at `evals/runs/<trialId>/`:
 

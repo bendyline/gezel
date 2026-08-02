@@ -305,8 +305,23 @@ export interface TrialOptions {
   executionDensity?: 'auto' | 'flat' | 'scaffold';
   /** Override the default poll cadence (ms). */
   pollIntervalMs?: number;
-  /** Override the scenario's timeout. */
+  /**
+   * Override the scenario's timeout. Absolute: an explicit override is
+   * taken at face value and is NOT throughput-scaled — the operator asked
+   * for this wall clock. See {@link TrialOptions.decodeRateTokensPerSec}.
+   */
   timeoutMs?: number;
+  /**
+   * Measured decode throughput (tok/s) for this model on this host, used
+   * to scale the scenario-authored hard ceiling. `runBatch` threads the
+   * preflight probe's `genTokensPerSec` in; leave unset to skip scaling.
+   *
+   * Scenario ceilings are hand-authored against a ~20 tok/s reference
+   * machine, so a slow model fails them on wall clock while making real
+   * forward progress — the capability verdict inverts with hardware. See
+   * {@link throughputScaledMaxDurationMs} in `runner.ts`.
+   */
+  decodeRateTokensPerSec?: number | null;
   /** Where to put the per-trial output. Defaults to `<repo>/evals/runs/<trialId>/`. */
   runsDir?: string;
   /** Shared model cache root. Defaults to `<HOME>/.gezel-eval-cache`. */

@@ -167,6 +167,16 @@ export async function runBatch(scenario: EvalScenario, opts: BatchOptions): Prom
     preflight = { ran: true, admitted: report.admitted, genTokensPerSec: report.genTokensPerSec };
   }
 
+  // The probe's measured throughput scales each scenario's authored hard
+  // ceiling for this model/host pair, so a slow model isn't failed on wall
+  // clock while making real progress. An explicit `--timeout` still wins;
+  // see `throughputScaledMaxDurationMs`. Caller-supplied rates (A/B drivers
+  // that skip preflight) are respected over the probe's.
+  const measuredDecodeRate =
+    opts.decodeRateTokensPerSec === undefined && preflight.genTokensPerSec != null
+      ? { decodeRateTokensPerSec: preflight.genTokensPerSec }
+      : {};
+
   const parallel = Math.max(1, opts.parallel ?? 1);
   const results: TrialResult[] = [];
 
@@ -191,7 +201,7 @@ export async function runBatch(scenario: EvalScenario, opts: BatchOptions): Prom
     const chunk = Array.from({ length: Math.min(parallel, opts.count - i) }, (_, k) => i + k);
     const settled = await Promise.allSettled(
       chunk.map((idx) => {
-        const perTrialOpts = { ...opts, runsDir };
+        const perTrialOpts = { ...opts, runsDir, ...measuredDecodeRate };
         // eslint-disable-next-line no-console
         console.log(`[batch] starting trial ${idx + 1}/${opts.count}`);
         return runTrialWithSpawnRetry(scenario, perTrialOpts);
