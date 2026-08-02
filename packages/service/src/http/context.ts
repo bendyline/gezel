@@ -17,6 +17,7 @@ import type { GrowthEngine } from '../growth/engine.js';
 import type { HandboekEngine } from '../handboek/engine.js';
 import type { HistoryManager } from '../history/manager.js';
 import type { ContentIndex } from '../index-store/content-index.js';
+import type { IndexEnrichmentManager } from '../index-store/enrichment-manager.js';
 import type { GlobalIndex } from '../index-store/global-index.js';
 import type { IndexingJobControl } from '../index-store/indexing-job.js';
 import type { MailManager } from '../mail/manager.js';
@@ -44,6 +45,7 @@ import type { ReportActionManager } from '../report-actions/report-action-manage
 import type { ScriptRunner } from '../scripts/runner.js';
 import type { SearchService } from '../search/search-service.js';
 import type { SecretStore } from '../secrets/types.js';
+import type { SystemToolsetInstallRegistry } from '../system-toolsets/install-registry.js';
 import type { SystemStatusBus } from '../system-toolsets/status-bus.js';
 import type { SystemIdleState } from '../system/idle-state.js';
 import type { TaskManager } from '../tasks/manager.js';
@@ -69,6 +71,7 @@ export interface ServiceContext {
   tasks: TaskManager;
   taskRunner: TaskRunner;
   nightShift: NightShiftManager;
+  indexEnrichment: IndexEnrichmentManager;
   /**
    * The meester's occasional status report (Home greeting headline +
    * dashboard). In context so `POST /api/meester-status/run` can kick a
@@ -124,6 +127,14 @@ export interface ServiceContext {
    * {@link imagePulls}. See [engines/registry.ts](../engines/registry.ts).
    */
   engineBinaries: EngineBinaryRegistry;
+  /**
+   * Installs `onDemand` system toolsets (today only the GitHub Copilot SDK)
+   * when the user asks, with the same background-job + SSE lifecycle as
+   * {@link engineBinaries}. Distinct from {@link systemStatus}, which tracks
+   * the eager boot install and must not move for a user-triggered one. See
+   * [system-toolsets/install-registry.ts](../system-toolsets/install-registry.ts).
+   */
+  systemToolsetInstalls: SystemToolsetInstallRegistry;
   /**
    * Speech-to-text provider manager. Holds a lazily-built underlying
    * provider (whisper.cpp / mock). Same lifecycle pattern as

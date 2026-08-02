@@ -32,6 +32,14 @@ const BATCH = 5;
 const NIGHT_BATCH = 25;
 const NIGHT_TICK_BUDGET_MS = 90_000;
 
+export interface IndexEnrichmentActivity {
+  id: 'index-enrichment';
+  title: 'Workspace indexing';
+  detail: string;
+  projectId?: string;
+  projectName?: string;
+}
+
 export interface IndexEnrichmentManagerOptions {
   store: Store;
   chat: ChatManager;
@@ -75,6 +83,7 @@ export class IndexEnrichmentManager {
   private startupTimer: ReturnType<typeof setTimeout> | null = null;
   private tickTimer: ReturnType<typeof setInterval> | null = null;
   private running = false;
+  private activity: IndexEnrichmentActivity | null = null;
 
   constructor(opts: IndexEnrichmentManagerOptions) {
     this.store = opts.store;
@@ -111,12 +120,22 @@ export class IndexEnrichmentManager {
     this.tickTimer = null;
   }
 
+  /** Live, durable-for-the-tick status consumed by the Night Shift menu. */
+  getActivity(): IndexEnrichmentActivity | null {
+    return this.activity ? { ...this.activity } : null;
+  }
+
   /** Exposed for tests: run one batch ignoring the timers (still idle-gated). */
   async tick(): Promise<void> {
     if (this.running) return;
     if (await this.isPaused()) return;
     if (!this.isIdle()) return;
     this.running = true;
+    this.activity = {
+      id: 'index-enrichment',
+      title: 'Workspace indexing',
+      detail: 'Checking projects for new files',
+    };
     try {
       const night = this.isNightShiftActive();
       const batch = night ? NIGHT_BATCH : BATCH;
@@ -133,6 +152,13 @@ export class IndexEnrichmentManager {
         const boekwachter = await this.resolveBoekwachter(p.id);
         if (!boekwachter) continue;
         if (this.chat.isProjectActive(p.id)) continue;
+        this.activity = {
+          id: 'index-enrichment',
+          title: 'Workspace indexing',
+          detail: 'Studying workspace files',
+          projectId: p.id,
+          ...(p.name ? { projectName: p.name } : {}),
+        };
         const deps = await this.buildDeps(night, boekwachter);
         const rubrics: Map<string, ResolvedRubric> = deps.model
           ? await resolveRubrics(this.store).catch(() => new Map<string, ResolvedRubric>())
@@ -167,6 +193,13 @@ export class IndexEnrichmentManager {
         if (drained) {
           // File tier done for this project → hash-gated deep pass (folder +
           // architecture rollups). Costs nothing when nothing changed.
+          this.activity = {
+            id: 'index-enrichment',
+            title: 'Workspace indexing',
+            detail: 'Updating the project map',
+            projectId: p.id,
+            ...(p.name ? { projectName: p.name } : {}),
+          };
           const areas = await this.contentIndex.enrichAreas(p.id, deps).catch(() => null);
           if (areas && (areas.areasUpdated > 0 || areas.architectureUpdated)) {
             didWork = true;
@@ -187,6 +220,13 @@ export class IndexEnrichmentManager {
           // embedding pipeline feeds search coverage (the benchmarked metric)
           // and must never wait behind reviews.
           if (rubrics.size > 0) {
+            this.activity = {
+              id: 'index-enrichment',
+              title: 'Workspace indexing',
+              detail: 'Reviewing indexed files',
+              projectId: p.id,
+              ...(p.name ? { projectName: p.name } : {}),
+            };
             for (;;) {
               if (this.chat.isAnyActive()) return; // yield to live work immediately
               const r = await this.contentIndex
@@ -216,6 +256,7 @@ export class IndexEnrichmentManager {
         if (deadline && Date.now() >= deadline) return;
       }
     } finally {
+      this.activity = null;
       this.running = false;
     }
   }

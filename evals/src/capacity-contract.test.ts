@@ -23,7 +23,7 @@ import { readCapacityDenialFromLog } from './runner.ts';
  * If this fails after a deliberate change, update BOTH the eval regexes
  * and provider-pool.ts in lockstep.
  */
-const KEY = 'llama-cpp/gemma4-e4b-q8#0';
+const KEY = 'llama-cpp/gemma4-e4b-q4#0';
 const REASON = 'budget exhausted: would commit 103079215104 against 103079215104';
 const CANONICAL_LINE = `capacity broker denied ${KEY}: ${REASON}`;
 

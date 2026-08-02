@@ -10,7 +10,7 @@
  * their vendor released them — byte-identical, hash-comparable against
  * the vendor's own manifest.
  *
- * Three consumers, one list:
+ * Four consumers, one policy:
  *   - scripts/after-pack.cjs        skips these in the signing sweep
  *   - release-electron.yml          exempts these in "Verify Windows
  *                                   signatures", which otherwise requires
@@ -19,6 +19,8 @@
  *                                   service bundle before it is sealed into
  *                                   service-bundle.tar.gz, which neither of
  *                                   the above can see inside
+ *   - the same consumers also read WINDOWS_LOADABLE_EXTENSIONS so `.node`
+ *                                   addons cannot fall outside the sweep
  *
  * Keep it an explicit allowlist, never a blanket "skip unsigned". The
  * point of the release gate is that a first-party DLL which silently
@@ -31,7 +33,6 @@
  * with no team identifier). There, re-signing is the price of
  * notarization, not a choice. See the macOS note in build-native.yml.
  */
-
 /**
  * Matched against the file's basename, case-insensitively. Anchored so a
  * first-party binary cannot be exempted by having a vendor name inside it.
@@ -57,7 +58,6 @@ const THIRD_PARTY_PATTERNS = [
     pattern: '^fastlist-[\\w.-]+\\.exe$',
     source: 'pnpm fastlist helper (ordinary pnpm package)',
   },
-
   // Prebuilt native addons inside the gezeld service bundle. npm ships these
   // as compiled artifacts; we never build them, so the same authorship rule
   // that exempts cuBLAS exempts them. Listed explicitly because
@@ -85,6 +85,9 @@ const THIRD_PARTY_PATTERNS = [
   { pattern: '^winpty-agent\\.exe$', source: 'node-pty (prebuilt winpty backend)' },
 ];
 
+/** Every Windows executable/loadable format the payload policy must visit. */
+const WINDOWS_LOADABLE_EXTENSIONS = ['.exe', '.dll', '.node'];
+
 const COMPILED = THIRD_PARTY_PATTERNS.map((entry) => ({
   ...entry,
   regex: new RegExp(entry.pattern, 'i'),
@@ -102,7 +105,30 @@ function thirdPartySource(filePath) {
   return COMPILED.find((entry) => entry.regex.test(base))?.source ?? null;
 }
 
-module.exports = { THIRD_PARTY_PATTERNS, isThirdPartyBinary, thirdPartySource };
+/** Full reviewed policy record for a vendor path, or null. */
+function thirdPartyMetadata(filePath) {
+  const base = String(filePath).split(/[\\/]/).pop() ?? '';
+  const entry = COMPILED.find((candidate) => candidate.regex.test(base));
+  if (!entry) return null;
+  const { regex: _regex, ...metadata } = entry;
+  return metadata;
+}
+
+function isWindowsLoadableBinary(filePath) {
+  const base = String(filePath).split(/[\\/]/).pop() ?? '';
+  const dot = base.lastIndexOf('.');
+  const extension = dot >= 0 ? base.slice(dot).toLowerCase() : '';
+  return WINDOWS_LOADABLE_EXTENSIONS.includes(extension);
+}
+
+module.exports = {
+  THIRD_PARTY_PATTERNS,
+  WINDOWS_LOADABLE_EXTENSIONS,
+  isThirdPartyBinary,
+  isWindowsLoadableBinary,
+  thirdPartyMetadata,
+  thirdPartySource,
+};
 
 // `node third-party-binaries.cjs --patterns` emits the raw pattern list as
 // JSON so the release workflow's PowerShell verification step reads the same
@@ -110,4 +136,7 @@ module.exports = { THIRD_PARTY_PATTERNS, isThirdPartyBinary, thirdPartySource };
 // only constructs .NET's regex engine shares with JavaScript's.
 if (require.main === module && process.argv.includes('--patterns')) {
   console.log(JSON.stringify(THIRD_PARTY_PATTERNS.map((entry) => entry.pattern)));
+}
+if (require.main === module && process.argv.includes('--extensions')) {
+  console.log(JSON.stringify(WINDOWS_LOADABLE_EXTENSIONS));
 }

@@ -61,6 +61,39 @@ describe('computeModelFit', () => {
   });
 });
 
+describe('computeModelFit — the admission ceiling', () => {
+  // The reported failure: on a 24 GB card + 64 GB RAM the browser offered a
+  // 42 GB MoE (80% of system RAM says yes), the daemon's broker refused it,
+  // and the download was already done. Fit has to stop where admission does.
+  const gpuHost = {
+    usableBytes: Math.floor(24 * GiB * 0.95),
+    totalRamBytes: 64 * GiB,
+    gpuVramBytes: 24 * GiB,
+    // VRAM + 60% of RAM — what the broker will actually admit.
+    admissibleBytes: Math.floor(24 * GiB * 0.95) + Math.floor(64 * GiB * 0.6),
+  };
+
+  it('runs a MoE the broker admits', () => {
+    const r = computeModelFit({ residentBytes: 42 * GiB, isMoE: true, ...gpuHost });
+    expect(r.tier).toBe('fits-offload');
+    expect(r.runnable).toBe(true);
+  });
+
+  it('calls a model the broker would refuse too big, however much RAM there is', () => {
+    // Inside 80% of 64 GB, outside the broker's ceiling. The old rule said
+    // "runs"; the load then failed.
+    const r = computeModelFit({ residentBytes: 64 * GiB, isMoE: true, ...gpuHost });
+    expect(r.tier).toBe('too-big');
+    expect(r.runnable).toBe(false);
+  });
+
+  it('falls back to the RAM fraction when the daemon does not report a ceiling', () => {
+    const { admissibleBytes: _omitted, ...noCeiling } = gpuHost;
+    const r = computeModelFit({ residentBytes: 48 * GiB, isMoE: true, ...noCeiling });
+    expect(r.tier).toBe('fits-offload');
+  });
+});
+
 describe('isMoEFromTags', () => {
   it('matches the inconsistent MoE tag spellings across the catalog', () => {
     expect(isMoEFromTags(['alibaba', 'moe'])).toBe(true); // qwen3.6-35b-a3b

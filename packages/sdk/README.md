@@ -12,16 +12,21 @@ npm install @bendyline/gezel-sdk
 ```
 
 ```ts
-import { defineScript } from '@bendyline/gezel-sdk';
+import { defineScript, gezel } from '@bendyline/gezel-sdk';
 
-export default defineScript({
+export const meta = defineScript({
   name: 'has-tests',
-  async run(ctx) {
-    const files = await ctx.workspace.readdir('.');
-    return files.some((f) => f.includes('.test.'))
-      ? { pass: true }
-      : { pass: false, reason: 'no test files found' };
+  description: 'Require at least one test file.',
+  kind: 'gate',
+  outputs: {
+    decision: { type: 'string', description: "'approve' or 'reject'." },
   },
+  requires: ['workspace.read'],
+} as const);
+
+const files = await gezel.fs.listAll();
+gezel.output({
+  decision: files.some((file) => file.includes('.test.')) ? 'approve' : 'reject',
 });
 ```
 

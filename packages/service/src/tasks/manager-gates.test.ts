@@ -29,6 +29,10 @@ beforeEach(async () => {
   home = await mkdtemp(join(tmpdir(), 'gezel-tasks-gates-test-'));
   store = new Store({ home });
   await store.ensureLayout();
+  // This suite injects a mock under the 'copilot' key. Pin it as the default
+  // too — otherwise routing falls through to the platform default (an
+  // on-device engine) and the injected mock is never reached.
+  await store.writeConfig({ provider: 'copilot' });
   await store.createProject({ name: 'Default' });
   await store.createGezel({ name: 'Ada', role: 'Developer' });
 
@@ -877,7 +881,7 @@ describe('completion gates — task.step.gated telemetry events', () => {
     await store.writeSession({
       ...base,
       id: 'newer-session',
-      model: 'gemma4-e4b-q8',
+      model: 'gemma4-e4b-q4',
       createdAt: '2026-07-07T01:00:00.000Z',
       lastActivityAt: '2026-07-07T01:00:00.000Z',
     });
@@ -890,7 +894,7 @@ describe('completion gates — task.step.gated telemetry events', () => {
     const gated = events.filter((e) => e.kind === 'task.step.gated');
     expect(gated).toHaveLength(1);
     expect(gated[0]?.details).toMatchObject({
-      model: 'gemma4-e4b-q8',
+      model: 'gemma4-e4b-q4',
       provider: 'llama-cpp',
     });
 

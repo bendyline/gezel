@@ -129,7 +129,7 @@ describe('parseGemmaNativeToolCall', () => {
   });
 
   describe('embedded, unterminated envelope (no closing <tool_call|>)', () => {
-    // Wild-caught on gemma4-e4b-q8 / plan-and-estimate: the model echoed its
+    // Wild-caught on gemma4-e4b-q4 / plan-and-estimate: the model echoed its
     // instruction prose and slid straight into a malformed
     // `…Owner |<channel|><|tool_call>call:write_file{content:<|"|># …` with no
     // closing envelope. Before the embedded-marker fallback this produced zero

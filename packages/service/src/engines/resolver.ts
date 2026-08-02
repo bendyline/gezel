@@ -2,11 +2,21 @@ import { createHash } from 'node:crypto';
 import { createReadStream, existsSync } from 'node:fs';
 import { chmod, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { type NativeEngineResolveEvent, createLogger, nowIso } from '@bendyline/gezel';
+import {
+  HttpStatusError,
+  type NativeEngineResolveEvent,
+  createLogger,
+  nowIso,
+  retryTransient,
+} from '@bendyline/gezel';
 import { type NativeBinaryName, resolvePlatformKey } from '@bendyline/gezel/native';
 import AdmZip from 'adm-zip';
 import * as tar from 'tar';
-import { type DownloadResult, downloadWithRetry } from '../utils/download-with-retry.js';
+import {
+  type DownloadResult,
+  downloadWithRetry,
+  friendlyErrors,
+} from '../utils/download-with-retry.js';
 import {
   NATIVE_ENGINE_ARCHIVE_SHA256,
   SHA256SUMS_DIGEST,
@@ -471,23 +481,54 @@ function makeAuthedFetch(base: typeof fetch, token: string | null): typeof fetch
     })) as typeof fetch;
 }
 
+/**
+ * The archive itself goes through `downloadWithRetry`, but the two small
+ * requests in front of it — the release metadata and the SHA256SUMS manifest —
+ * used to be single-shot. One dropped packet against api.github.com during
+ * first-run setup aborted the whole engine install, which is a miserable
+ * outcome for a request that would have succeeded a second later.
+ */
+const GH_METADATA_ATTEMPTS = 3;
+
+function ghRetryLog(what: string) {
+  return (info: {
+    attempt: number;
+    maxAttempts: number;
+    delayMs: number;
+    reason: string;
+  }): void => {
+    log.warn(
+      `[engine-resolver] ${what} failed (${info.reason}); retrying in ${info.delayMs}ms (attempt ${info.attempt}/${info.maxAttempts})`,
+    );
+  };
+}
+
 async function ghJson(
   url: string,
   fetchImpl: typeof fetch,
   token: string | null,
 ): Promise<GhRelease> {
-  const res = await fetchImpl(url, {
-    headers: {
-      Accept: 'application/vnd.github+json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  return retryTransient(
+    async () => {
+      const res = await fetchImpl(url, {
+        headers: {
+          Accept: 'application/vnd.github+json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      });
+      if (!res.ok) {
+        await res.body?.cancel().catch(() => {});
+        // A transient status is thrown as HttpStatusError so retryTransient
+        // takes another pass; 4xx becomes the terminal EngineUnavailableError.
+        throw new HttpStatusError(
+          res.status,
+          `GitHub API returned ${res.status} for ${url}${res.status === 404 ? ' (release not found — or no access while private)' : ''}`,
+        );
+      }
+      return (await res.json()) as GhRelease;
     },
-  });
-  if (!res.ok) {
-    throw new EngineUnavailableError(
-      `GitHub API returned ${res.status} for ${url}${res.status === 404 ? ' (release not found — or no access while private)' : ''}`,
-    );
-  }
-  return (await res.json()) as GhRelease;
+    { attempts: GH_METADATA_ATTEMPTS, onRetry: ghRetryLog('GitHub release lookup') },
+  ).catch(rethrowAsEngineUnavailable);
 }
 
 async function ghBytes(
@@ -495,15 +536,34 @@ async function ghBytes(
   fetchImpl: typeof fetch,
   token: string | null,
 ): Promise<Buffer> {
-  const res = await fetchImpl(assetApiUrl, {
-    headers: {
-      Accept: 'application/octet-stream',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  return retryTransient(
+    async () => {
+      const res = await fetchImpl(assetApiUrl, {
+        headers: {
+          Accept: 'application/octet-stream',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      });
+      if (!res.ok) {
+        await res.body?.cancel().catch(() => {});
+        throw new HttpStatusError(
+          res.status,
+          `asset download returned ${res.status} for ${assetApiUrl}`,
+        );
+      }
+      return Buffer.from(await res.arrayBuffer());
     },
-  });
-  if (!res.ok)
-    throw new EngineUnavailableError(`asset download returned ${res.status} for ${assetApiUrl}`);
-  return Buffer.from(await res.arrayBuffer());
+    { attempts: GH_METADATA_ATTEMPTS, onRetry: ghRetryLog('GitHub asset fetch') },
+  ).catch(rethrowAsEngineUnavailable);
+}
+
+function rethrowAsEngineUnavailable(err: unknown): never {
+  if (err instanceof EngineUnavailableError) throw err;
+  if (err instanceof HttpStatusError) throw new EngineUnavailableError(err.message);
+  // Raw `TypeError: fetch failed` reads as a gezel bug rather than a bad link.
+  throw new EngineUnavailableError(
+    `${friendlyErrors.fetch(err)} while contacting GitHub for the engine download (after ${GH_METADATA_ATTEMPTS} attempts)`,
+  );
 }
 
 /** Parse `sha256sum`-style lines: `<64-hex>␠␠[*]<filename>`. */

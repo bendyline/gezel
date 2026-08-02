@@ -1,4 +1,5 @@
 import { defineConfig } from 'tsup';
+import { stripSourcemapCommentsFromBuild } from '../../scripts/strip-sourcemap-comments.mjs';
 
 export default defineConfig({
   entry: {
@@ -13,4 +14,5 @@ export default defineConfig({
   target: 'es2022',
   splitting: false,
   banner: { js: '#!/usr/bin/env node' },
+  onSuccess: () => stripSourcemapCommentsFromBuild(),
 });

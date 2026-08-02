@@ -4,7 +4,8 @@ Core types, Zod schemas, path helpers and the gezel-markdown parser shared by
 every part of [gezel](https://github.com/bendyline/gezel).
 
 This package is the single source of truth for gezel's wire types. Both the
-daemon and the web UI import it, so it depends on nothing beyond Node built-ins.
+daemon and the web UI import it; its small runtime dependency set is limited to
+Zod and YAML parsing in addition to Node built-ins.
 
 ```bash
 npm install @bendyline/gezel
@@ -22,11 +23,12 @@ npm install @bendyline/gezel
 | `@bendyline/gezel/checks` | Gate-check primitives used by craftbook scripts |
 
 ```ts
-import { GezelSchema } from '@bendyline/gezel/schemas';
+import { GezelFrontmatterSchema } from '@bendyline/gezel/schemas';
 import { gezelPaths } from '@bendyline/gezel/paths';
 
 const paths = gezelPaths();
-const gezel = GezelSchema.parse(await loadSomething());
+const gezel = GezelFrontmatterSchema.parse({ name: 'Ada', role: 'Reviewer' });
+console.log(paths.gezels, gezel.name);
 ```
 
 ## Stability

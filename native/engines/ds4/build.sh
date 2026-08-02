@@ -138,6 +138,40 @@ echo "[build] applied ds4 prefill client-cancel patch"
 make_args=(ds4-server)
 source_map_flags="-ffile-prefix-map=$src=ds4 -fmacro-prefix-map=$src=ds4 -fdebug-prefix-map=$src=ds4"
 make_cc="${CC:-cc} $source_map_flags"
+
+# ── CPU instruction-set floor ──────────────────────────────────────
+# ds4's Makefile defaults NATIVE_CPU_FLAG to `-march=native` (Linux) /
+# `-mcpu=native` (Apple) and threads it through CFLAGS, OBJCFLAGS and
+# NVCCFLAGS. That tunes every release to whatever CPU the CI runner was
+# scheduled on: native-v0.1.29's linux-x64 gezel-ds4-server carries
+# AVX-512 because one runner had it, and dies with SIGILL on the far
+# more common consumer CPUs that don't. CI can never catch this — the
+# machine that built the binary can by definition execute it.
+#
+# ds4 has no runtime CPU dispatch to fall back on. Its only hand-written
+# SIMD is ARM NEON (`__ARM_NEON` / `__ARM_FEATURE_DOTPROD` in ds4.c);
+# everything on x86 is compiler auto-vectorization. So whatever ISA the
+# compiler is allowed to emit IS the hardware requirement, and it has to
+# be a floor we choose rather than one the runner pool chooses for us:
+#
+#   x86-64-v2        SSE4.2/POPCNT, ~2009 and later.
+#   armv8.2-a+dotprod  Cortex-A76 (Raspberry Pi 5), Jetson Orin, Ampere
+#                    — and what the DOTPROD fast paths in ds4.c need.
+#                    Excludes SVE on purpose: the arm64 runner has it,
+#                    Jetson and Pi do not.
+#   apple-m1         the oldest Apple Silicon; a macos runner refresh to
+#                    M3/M4 hardware must not strand M1 users.
+#
+# Override with NATIVE_CPU_FLAG for a self-build tuned to one machine.
+case "$platform" in
+  darwin-arm64) default_cpu_flag="-mcpu=apple-m1" ;;
+  linux-arm64)  default_cpu_flag="-march=armv8.2-a+dotprod" ;;
+  *)            default_cpu_flag="-march=x86-64-v2" ;;
+esac
+native_cpu_flag="${NATIVE_CPU_FLAG:-$default_cpu_flag}"
+make_args+=("NATIVE_CPU_FLAG=$native_cpu_flag")
+echo "[build] cpu floor: $native_cpu_flag"
+
 case "$platform" in
   darwin-arm64)
     backend="metal"
@@ -156,7 +190,9 @@ case "$platform" in
     # hosted-runner source paths and ships debug metadata we do not consume.
     # Keep the release optimization/architecture flags while passing prefix
     # maps to nvcc's host compiler for __FILE__ and debug-path hygiene.
-    native_cpu_flag="${NATIVE_CPU_FLAG:--march=native}"
+    # Overriding NVCCFLAGS wholesale drops the Makefile's own
+    # `-Xcompiler $(NATIVE_CPU_FLAG)`, so re-apply the resolved CPU floor
+    # here — the make_args entry above only reaches CFLAGS/OBJCFLAGS.
     nvcc_flags="-O3 --use_fast_math"
     if [[ "$cuda_arch" != "spark" && -n "$cuda_arch" ]]; then
       nvcc_flags+=" -arch=$cuda_arch"

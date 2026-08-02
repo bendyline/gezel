@@ -1,11 +1,23 @@
 /**
  * The pinned system-toolset list.
  *
- * Every entry here is auto-installed into `~/.gezel/system-toolsets/` on
- * first launch (and re-installed whenever the Gezel app ships with a
- * different version pin). This file IS the lockfile — we never install
- * a range, never resolve `latest`. Bumping a version is a PR whose diff
- * includes both the new version string and the new integrity hash.
+ * Entries come in two classes, and the distinction decides what a version
+ * bump does to people who already have the old one:
+ *
+ *   - **Eager** (the default). Auto-installed into `~/.gezel/system-toolsets/`
+ *     on first launch by `runSystemBootstrap`, and re-installed whenever the
+ *     shipped pin moves. Bumping the version silently upgrades everyone on
+ *     their next boot.
+ *   - **On-demand** (`onDemand: true`). Never installed at boot. The user
+ *     asks for it — today only from Settings → GitHub Copilot — and
+ *     `SystemToolsetInstallRegistry` runs the same install. Bumping the
+ *     version does NOT upgrade anyone: callers resolve through
+ *     `resolveInstalledSystemLibrary`, which keeps the on-disk copy working
+ *     and reports `matchesPin: false` so the UI can offer an update.
+ *
+ * This file IS the lockfile — we never install a range, never resolve
+ * `latest`. Bumping a version is a PR whose diff includes both the new
+ * version string and the new integrity hash.
  *
  * `integrity` is the `dist.integrity` string from the npm registry
  * packument for the pinned version (format: `sha512-<base64>`). pnpm
@@ -52,6 +64,20 @@ export interface PinnedSystemToolset {
    * revision with progress reported on the status bus.
    */
   postInstall?: 'playwright-chromium';
+  /**
+   * When true, `runSystemBootstrap` skips this entry entirely. It is
+   * installed only when the user asks, via `SystemToolsetInstallRegistry`
+   * / `POST /api/system-toolsets/:toolsetId/install`.
+   *
+   * The pin, the integrity hash, and the `SYSTEM_LOCKFILES` entry are all
+   * still what an on-demand install uses — `onDemand` changes *when* we
+   * install, never *what*.
+   *
+   * An uninstalled on-demand entry is not a boot failure: the status bus
+   * still reaches `phase: 'ready'`, because "ready" means every eagerly-
+   * installed toolset is in place.
+   */
+  onDemand?: boolean;
 }
 
 /**
@@ -97,6 +123,13 @@ export const SYSTEM_TOOLSETS: PinnedSystemToolset[] = [
     toolsetId: '@github/copilot-sdk',
     displayName: 'GitHub Copilot SDK + CLI',
     kind: 'library',
+    // On-demand: this pulls GitHub's proprietary Copilot CLI and its
+    // per-platform binaries, which is a lot of bandwidth and disk to spend
+    // on users who never enable Copilot. Installed from
+    // Settings → GitHub Copilot instead. Users who already have a Copilot
+    // CLI (global npm install, or COPILOT_CLI_PATH) are never offered it —
+    // see `resolveCopilotAvailability`.
+    onDemand: true,
     pkg: '@github/copilot-sdk',
     version: '1.0.7',
     integrity:

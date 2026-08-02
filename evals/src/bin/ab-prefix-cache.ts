@@ -7,7 +7,7 @@
  * win is a *new* session, same gezel+project but DIFFERENT volatile state
  * (task/workspace/recall), inheriting the warm `[system+tools]` prefix.
  *
- * Experiment (per arm, on `gemma4-e4b-q8` / llama-cpp, `--parallel 1`):
+ * Experiment (per arm, on `gemma4-e4b-q4` / llama-cpp, `--parallel 1`):
  *   1. spawn one daemon against a shared GEZEL_HOME
  *   2. session A scoped to task T1 → send → wait (cold; seeds the prefix
  *      file when A's slot is recycled for B)
@@ -35,7 +35,7 @@ import { defaultCacheRoot, ensureWarmModel, linkModelIntoTrial } from '../model-
 import { resolveLlamaBinary } from '../native-bin.ts';
 import { shutdownTrialDaemon, spawnTrialDaemon } from '../spawn.ts';
 
-const MODEL = 'gemma4-e4b-q8';
+const MODEL = 'gemma4-e4b-q4';
 const PROMPT = 'Reply with exactly the single word: ready.';
 const TURN_TIMEOUT_MS = 240_000;
 

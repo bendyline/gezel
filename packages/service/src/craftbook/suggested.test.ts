@@ -48,6 +48,7 @@ describe('suggestedCraftbookIdsForType', () => {
       description: '',
       detect: {},
       craftbookTags: ['SVG'],
+      gezelRoles: { default: [], suggested: [] },
     };
     expect(suggestedCraftbookIdsForType(items, type)).toContain('animated-svg-hero');
   });

@@ -18,7 +18,7 @@ exact-pinned dependency resolved at runtime through `gildeDataDir()`.
 import { CatalogService } from '@bendyline/gezel-catalog';
 
 const catalog = new CatalogService();
-const models = await catalog.listChatModels();
+const models = await catalog.list('chat-model');
 ```
 
 Override the content root with `GEZEL_GILDE_DATA_DIR` for tests, evals or

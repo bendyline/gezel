@@ -7,6 +7,7 @@ import { CatalogService } from '@bendyline/gezel-catalog';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Store } from '../fs/store.js';
 import type { MemoryManager } from '../memory/manager.js';
+import { resolveDefaultProviderName } from '../providers/default-provider.js';
 import { MockProvider } from '../providers/mock.js';
 import { FileSecretStore } from '../secrets/file-store.js';
 import { ChatEventBus } from './events.js';
@@ -16,7 +17,9 @@ import { ChatManager } from './manager.js';
  * Lock the resolution contract for `ChatManager.providerForGezel`:
  *   1. Per-gezel frontmatter `provider:` wins over the global config.
  *   2. Without an override, we use `config.provider`.
- *   3. Without either, we fall back to `'copilot'`.
+ *   3. Without either, we fall back to the platform default —
+ *      `resolveDefaultProviderName`, i.e. the on-device engine where one
+ *      is bundled.
  *
  * The bug this guards against: previous impls re-checked each provider
  * variant with string literals (`if (x === 'copilot') ...`) and silently
@@ -76,9 +79,16 @@ afterEach(async () => {
 });
 
 describe('ChatManager.providerForGezel — exhaustiveness', () => {
-  it('falls back to copilot when no override and no config default', async () => {
+  // With neither an override nor a config default, the fallback is
+  // platform-derived — the on-device engine wherever we bundle one, and
+  // copilot only where we don't. It used to be an unconditional 'copilot',
+  // which stopped being defensible once the Copilot runtime became an opt-in
+  // download: the default pointed at something a fresh install couldn't run.
+  // `resolveDefaultProviderName` owns that decision and has its own tests;
+  // asserting against it here keeps the two from drifting.
+  it('falls back to the platform default when no override and no config default', async () => {
     const resolved = await manager.providerForGezel('ada');
-    expect(resolved).toBe('copilot');
+    expect(resolved).toBe(resolveDefaultProviderName({}));
   });
 
   for (const provider of ProviderNameSchema.options) {

@@ -43,6 +43,7 @@ import {
   projectWorkspaceWritable,
   pronounFormsForGender,
   pronounsForGender,
+  redactCredentials,
   resolveExecutionDensity,
   resolveSandboxCopilot,
   resolveSecurityPolicy,
@@ -57,6 +58,8 @@ import {
   BUILTIN_TOOL_TO_GROUP,
   type CatalogService,
 } from '@bendyline/gezel-catalog';
+import type { LlamaBackend } from '@bendyline/gezel/native';
+import { recordLlamaQuarantine } from '@bendyline/gezel/native';
 import { gezelPaths } from '@bendyline/gezel/paths';
 import { autoAllowedToolsForToolsets, buildAutoAllowHook } from '../craftbook/auto-allow.js';
 import { effectiveEngineRelease, isEnginePinned } from '../engines/native-manifest.js';
@@ -107,6 +110,7 @@ import {
   CopilotProvider,
   NON_SANDBOX_EXCLUDED_MCP_TOOLS,
 } from '../providers/copilot.js';
+import { resolveDefaultProviderName } from '../providers/default-provider.js';
 import {
   extractDirectFileWorkTargetPath,
   extractExplicitFileEditTools,
@@ -130,7 +134,7 @@ import { LlamaCppProvider, createLlamaCppPatientFetch } from '../providers/llama
 import { resolveLlamaCppKvCacheType } from '../providers/llama-cpp/kv-cache-type.js';
 import { planMoeOffload } from '../providers/llama-cpp/offload-planner.js';
 import { resolveSpecDraft } from '../providers/llama-cpp/spec-draft.js';
-import { stripReasoningTags } from '../providers/local-tool-call-salvage.js';
+import { extractReasoning, stripReasoningTags } from '../providers/local-tool-call-salvage.js';
 import { McpBridgePool } from '../providers/mcp-bridge-pool.js';
 import type { OpenAIFunctionTool } from '../providers/mcp-bridge.js';
 import {
@@ -168,7 +172,7 @@ import { getPairedRemoteFetch } from '../remotes/pinned-fetch.js';
 import type { RemotesRegistry } from '../remotes/registry.js';
 import { listStdlibScripts } from '../scripts/stdlib-source.js';
 import type { SecretStore } from '../secrets/types.js';
-import { resolveSystemLibraryPath } from '../system-toolsets/resolve.js';
+import { resolveInstalledSystemLibrary } from '../system-toolsets/resolve.js';
 import {
   buildStageOneNudge,
   buildStageTwoNudge,
@@ -252,6 +256,7 @@ import {
 } from './task-budget.js';
 import { extractReferencedTasks } from './task-references.js';
 import { type AvailableToolInfo, renderAvailableToolsBlock } from './tools-block.js';
+import { describeTurnError } from './turn-error.js';
 import { UsageTracker } from './usage.js';
 import type { RecognitionMode } from './vision-capability.js';
 import { renderWorkspaceGestalt } from './workspace-gestalt.js';
@@ -618,6 +623,25 @@ interface InflightTurn {
   abort?: AbortController;
   /** Set by `cancelInflight`; remains attached to this exact turn object. */
   cancelled?: boolean;
+  /**
+   * Per-turn buffers copied off the session-keyed maps by
+   * `cancelInflight`, before it releases the session slot.
+   *
+   * A cancelled turn's provider call can outlive the cancel — by 16s in
+   * the observed Copilot case, where the SDK ran the response to
+   * completion. By then the next turn has started and reset those maps,
+   * so the late `catch` would salvage its successor's half-written reply
+   * and file it as this turn's `turn-aborted` record: one stream, split
+   * across two bubbles, the second turn's text attributed to the first.
+   * Snapshotting at cancel time keeps this turn's own trace.
+   */
+  salvage?: {
+    tools: ChatMessageToolCall[];
+    warnings: string[];
+    contentText: string;
+    reasoning?: string;
+    reasoningTiming?: { firstDeltaAt: number; lastDeltaAt: number };
+  };
 }
 
 /**
@@ -996,6 +1020,19 @@ export class ChatManager {
    * the conversation. Cleared at the start of every turn.
    */
   private readonly currentTurnWarnings = new Map<string, string[]>();
+  /**
+   * Which turn currently owns the per-turn maps above for a session.
+   *
+   * Every one of those maps is keyed by sessionId, not by turn, so they
+   * hold exactly one turn's state at a time. That is fine while turns
+   * are strictly sequential — but `cancelInflight` frees the session
+   * slot synchronously while the cancelled turn's provider call is still
+   * running, so a successor can start and take the maps over before the
+   * cancelled turn unwinds. This pointer lets a late-unwinding turn tell
+   * "these buffers are still mine" from "my successor owns these now",
+   * and skip both the salvage read and the teardown when they aren't.
+   */
+  private readonly turnBufferOwner = new Map<string, InflightTurn>();
   /**
    * Directed graph of in-flight sync `ask_gezel` calls — each entry
    * records "asker session ID is currently blocked waiting on target
@@ -1914,6 +1951,40 @@ export class ChatManager {
   }
 
   /**
+   * Drop one cached provider so the next {@link ensureProvider} rebuilds it
+   * against current on-disk state.
+   *
+   * The narrow counterpart to {@link resetClient}: used when a background
+   * install changes what a *single* provider would resolve to — the
+   * on-demand Copilot SDK landing in `~/.gezel/system-toolsets/` is the
+   * motivating case. `resetClient` would be disproportionate there; in its
+   * default mode it disconnects every live session on every provider and
+   * tears down the engine router, so a finished Copilot install would sever
+   * an unrelated in-flight local-model turn.
+   *
+   * Seeded providers are never evicted — they are the test/mock factory
+   * override, not a disposable cache entry.
+   *
+   * Caveat: any live session still holding this provider's client is severed
+   * by the `shutdown()` below and rebuilds on its next turn. For the
+   * install case that set is empty by construction (nothing could have been
+   * chatting on a provider that wasn't installed); for an upgrade it may not
+   * be, and that is the same tradeoff a config provider-change already makes.
+   */
+  async evictProvider(name: ProviderName): Promise<void> {
+    if (this.seededProviders.has(name)) return;
+    const provider = this.providers.get(name);
+    if (!provider) return;
+    this.providers.delete(name);
+    this.cacheController?.invalidateProvider(name);
+    try {
+      await provider.shutdown();
+    } catch {
+      /* a provider that can't shut down cleanly is still evicted */
+    }
+  }
+
+  /**
    * Live-update the controller's per-provider budget. Called from the
    * config PUT handler when the operator changes `cacheBudgetMb` —
    * eviction kicks in immediately if the new budget is below current
@@ -1921,6 +1992,31 @@ export class ChatManager {
    */
   setCacheBudget(providerName: string, bytes: number): void {
     this.cacheController?.setBudget(providerName, bytes);
+  }
+
+  /**
+   * Live-update the capacity broker's total budget for resident local
+   * engines. Called from the config PUT handler when the operator moves the
+   * memory slider (`localEngineMemoryGb`); `null` reverts to the host's
+   * auto-derived value.
+   *
+   * No-op when no router exists yet — {@link buildEngineRouter} reads the
+   * config itself, so a router built later already picks the new value up.
+   * The in-flight case is the one that needs care: a build that read the
+   * config *before* this write would otherwise install the stale budget and
+   * keep it until shutdown, so chain onto the pending promise rather than
+   * only checking the resolved cache.
+   */
+  async setLocalEngineMemoryBudget(bytes: number | null): Promise<void> {
+    const live = this.engineRouter ?? this.engineRouterCache;
+    if (live) {
+      live.broker.setBudgetBytes(bytes);
+      return;
+    }
+    const pending = this.engineRouterInitPromise;
+    if (!pending) return;
+    const router = await pending.catch(() => null);
+    router?.broker.setBudgetBytes(bytes);
   }
 
   /**
@@ -2013,6 +2109,28 @@ export class ChatManager {
     // abort propagates) is what previously produced an empty aborted
     // bubble with the committed tool calls dropped. `send()`'s `finally`
     // clears them once the catch has salvaged what it needs.
+    //
+    // Do snapshot them onto this turn object, though. Freeing the slot on
+    // the line above lets the next turn start and reset those maps while
+    // this turn's provider call is still running, so by the time the
+    // catch reads them they may belong to a successor. Copy now, while
+    // this turn demonstrably still owns them, and read the copy there.
+    // Reasoning has to come from the live session before the
+    // `disconnect()` below nulls it out.
+    const cancelledState = this.states.get(sessionId);
+    entry.salvage = {
+      tools: [...(this.currentTurnTools.get(sessionId) ?? [])],
+      warnings: [...(this.currentTurnWarnings.get(sessionId) ?? [])],
+      contentText: this.currentTurnContentText.get(sessionId) ?? '',
+      ...(() => {
+        const reasoning = cancelledState?.session?.getLastTurnReasoning?.();
+        return reasoning && reasoning.length > 0 ? { reasoning } : {};
+      })(),
+      ...(() => {
+        const timing = this.currentTurnReasoningTiming.get(sessionId);
+        return timing ? { reasoningTiming: { ...timing } } : {};
+      })(),
+    };
     // Abort the in-flight provider call so it unwinds now, rather
     // than running to completion against an already-started stream
     // while the user waits for their cancel to actually take
@@ -3924,7 +4042,7 @@ export class ChatManager {
    * event — visible in the UI but invisible to the SENDER'S MODEL — so an
    * unattended team went permanently idle: the sender kept waiting for a
    * reply that could never come. Wild-caught (core sweep,
-   * gemma4-e4b-q8): schema-migration and symptom-debug both died as "chat
+   * gemma4-e4b-q4): schema-migration and symptom-debug both died as "chat
    * stalled — no model turns; re-engage nudge ignored" after a handoff
    * send threw. Delivering the failure as a real handoff message gives
    * the sender a turn to retry, reassign, or do the work itself.
@@ -4256,7 +4374,12 @@ export class ChatManager {
     const fail = (err: unknown): never => {
       const message = err instanceof Error ? err.message : String(err);
       log.error('notifyUserMessage error:', message);
-      this.events.publishSessionOnly(sessionId, { type: 'error', error: message });
+      const detail = describeTurnError(err);
+      this.events.publishSessionOnly(sessionId, {
+        type: 'error',
+        error: redactCredentials(message),
+        ...(detail ? { errorDetail: detail } : {}),
+      });
       this.events.publishSessionOnly(sessionId, { type: 'done' });
       throw err;
     };
@@ -4340,8 +4463,14 @@ export class ChatManager {
   async clearLastTurnError(sessionId: string): Promise<ChatSession | null> {
     const record = await this.getSessionRecord(sessionId);
     if (!record) return null;
-    if (record.lastTurnError === undefined) return record;
+    // Both fields, and the early-return guards on both: a structured detail
+    // that outlived the error it describes would have the UI offering to
+    // report a problem the user already cleared.
+    if (record.lastTurnError === undefined && record.lastTurnErrorDetail === undefined) {
+      return record;
+    }
     record.lastTurnError = undefined;
+    record.lastTurnErrorDetail = undefined;
     await this.store.writeSession(record);
     const live = this.states.get(sessionId);
     if (live) live.record = record;
@@ -4940,7 +5069,12 @@ export class ChatManager {
       if (inflightTurn.cancelled) {
         this.events.publishSessionOnly(sessionId, { type: 'cancelled' });
       } else {
-        this.events.publishSessionOnly(sessionId, { type: 'error', error: message });
+        const detail = describeTurnError(err);
+        this.events.publishSessionOnly(sessionId, {
+          type: 'error',
+          error: redactCredentials(message),
+          ...(detail ? { errorDetail: detail } : {}),
+        });
       }
       this.events.publishSessionOnly(sessionId, { type: 'done' });
       throw err;
@@ -5052,6 +5186,9 @@ export class ChatManager {
     // bridge handler (built in buildSessionOpts) pushes here; we drain
     // into the final assistant message below.
     this.currentTurnTools.set(sessionId, []);
+    // Claim the session-keyed buffers for this turn. A predecessor whose
+    // provider call is still unwinding checks this before touching them.
+    this.turnBufferOwner.set(sessionId, inflightTurn);
     // Same pattern for intents + the running content char counter that
     // pins each intent's offset into the final reply.
     this.currentTurnIntents.set(sessionId, []);
@@ -6112,6 +6249,7 @@ export class ChatManager {
         // Same for the last-turn-error banner: a fresh successful turn
         // clears it. Otherwise the banner would linger across successes.
         state.record.lastTurnError = undefined;
+        state.record.lastTurnErrorDetail = undefined;
         await this.store.writeSession(state.record);
 
         // Publish each turn so the timeline renders incremental progress —
@@ -6755,10 +6893,21 @@ export class ChatManager {
       // `userMessage`; `message` stays the technical record (logs +
       // turn-aborted warnings). Every other error has no split — `message`
       // already reads for a human — so `userMessage` falls back to it.
-      const userMessage = err instanceof TurnAbortError ? err.userMessage : message;
+      // Credential-scrub before the string is published AND before it is
+      // persisted: a token that leaks into an error message would otherwise
+      // sit in session JSON forever, which is exactly what gets copied into
+      // debug bundles and pasted into support threads.
+      const userMessage = redactCredentials(
+        err instanceof TurnAbortError ? err.userMessage : message,
+      );
+      const errorDetail = describeTurnError(err);
       log.error('error:', message);
       if (!intentionallyCancelled) {
-        this.events.publish(scope, { type: 'error', error: userMessage });
+        this.events.publish(scope, {
+          type: 'error',
+          error: userMessage,
+          ...(errorDetail ? { errorDetail } : {}),
+        });
         this.events.publish(scope, { type: 'done' });
       }
       // Persist the error on the session record so a user who was away
@@ -6776,8 +6925,19 @@ export class ChatManager {
       // Best-effort: if writing fails, the in-memory bus already
       // published the error.
       try {
-        const drainedTools = this.currentTurnTools.get(sessionId) ?? [];
-        const drainedWarnings = this.currentTurnWarnings.get(sessionId) ?? [];
+        // Read this turn's own state, never a successor's. `salvage` is
+        // the snapshot `cancelInflight` took while this turn still owned
+        // the buffers; absent that, only read the live maps when this
+        // turn is still their owner. A cancelled turn that unwound after
+        // its successor claimed them has neither, and records an empty
+        // trace rather than one attributed to the wrong turn.
+        const snapshot = inflightTurn.salvage;
+        const ownsBuffers = this.turnBufferOwner.get(sessionId) === inflightTurn;
+        const drainedTools =
+          snapshot?.tools ?? (ownsBuffers ? (this.currentTurnTools.get(sessionId) ?? []) : []);
+        const drainedWarnings =
+          snapshot?.warnings ??
+          (ownsBuffers ? (this.currentTurnWarnings.get(sessionId) ?? []) : []);
         // Salvage the partial reply the model streamed before the abort so
         // the record reflects what the user actually saw, not an empty
         // bubble. Content comes from the per-turn stream buffer; reasoning
@@ -6786,11 +6946,41 @@ export class ChatManager {
         // and we simply omit the field). Together with the tool calls +
         // warnings already carried here, a turn cut short after committing
         // real work leaves a faithful trace instead of a blank message.
-        const salvagedContent = this.currentTurnContentText.get(sessionId) ?? '';
-        const salvagedReasoning = this.states.get(sessionId)?.session?.getLastTurnReasoning?.();
-        const reasoningTiming = this.currentTurnReasoningTiming.get(sessionId);
+        // The stream buffer is RAW — it never went through the provider's
+        // end-of-turn `extractReasoningWithProfile` pass, because the turn
+        // never reached one. Persisting it verbatim bakes reasoning markup
+        // into `content`, and this message is replayed to the model like
+        // any other: Gemma 4 then reads back its own `<|channel>thought`
+        // framing and copies the pattern (see stripReasoningTags' docstring
+        // on self-feedback). Wild-caught on MLX — 305 stray `<|channel>`
+        // markers across 19 aborted messages, and zero across the 222
+        // normal ones, because only this path skips the scrub.
+        const rawSalvagedContent =
+          snapshot?.contentText ??
+          (ownsBuffers ? (this.currentTurnContentText.get(sessionId) ?? '') : '');
+        const salvagedSplit = extractReasoning(rawSalvagedContent);
+        const salvagedContent = salvagedSplit.visible;
+        const providerReasoning = snapshot
+          ? snapshot.reasoning
+          : ownsBuffers
+            ? this.states.get(sessionId)?.session?.getLastTurnReasoning?.()
+            : undefined;
+        // Keep the trace: whatever the scrub pulled out of `content` is
+        // real reasoning prose, so it goes to the reasoning channel rather
+        // than being dropped. The provider's own capture wins when both
+        // exist — it saw the structured deltas, this only sees leftovers.
+        const salvagedReasoning =
+          providerReasoning && providerReasoning.length > 0
+            ? providerReasoning
+            : salvagedSplit.reasoning || undefined;
+        const reasoningTiming = snapshot
+          ? snapshot.reasoningTiming
+          : ownsBuffers
+            ? this.currentTurnReasoningTiming.get(sessionId)
+            : undefined;
         if (!intentionallyCancelled) {
           state.record.lastTurnError = userMessage.slice(0, 500);
+          state.record.lastTurnErrorDetail = errorDetail;
         }
         const abortMessage: ChatMessage = {
           role: 'assistant',
@@ -6860,7 +7050,11 @@ export class ChatManager {
         this.keurmeester &&
         (isSilentStallAbort(message) || consecutiveGuardAbort)
       ) {
-        const abortedTurnTools = this.currentTurnTools.get(sessionId) ?? [];
+        const abortedTurnTools =
+          inflightTurn.salvage?.tools ??
+          (this.turnBufferOwner.get(sessionId) === inflightTurn
+            ? (this.currentTurnTools.get(sessionId) ?? [])
+            : []);
         const abortCtx = {
           trigger: 'turn_aborted' as const,
           triggerSummary: consecutiveGuardAbort
@@ -6904,13 +7098,20 @@ export class ChatManager {
       throw err;
     } finally {
       liveUnsub();
-      this.currentTurnTools.delete(sessionId);
-      this.currentTurnIntents.delete(sessionId);
-      this.currentTurnWarnings.delete(sessionId);
-      this.currentTurnContentChars.delete(sessionId);
-      this.currentTurnContentText.delete(sessionId);
-      this.currentTurnReasoningTiming.delete(sessionId);
-      this.telemetry.noteTurnEnd(sessionId);
+      // Only tear down the buffers this turn still owns. A cancelled turn
+      // whose provider call outlived the cancel gets here after its
+      // successor has claimed them — clearing them then would wipe the
+      // running turn's accumulators mid-stream and end its telemetry.
+      if (this.turnBufferOwner.get(sessionId) === inflightTurn) {
+        this.turnBufferOwner.delete(sessionId);
+        this.currentTurnTools.delete(sessionId);
+        this.currentTurnIntents.delete(sessionId);
+        this.currentTurnWarnings.delete(sessionId);
+        this.currentTurnContentChars.delete(sessionId);
+        this.currentTurnContentText.delete(sessionId);
+        this.currentTurnReasoningTiming.delete(sessionId);
+        this.telemetry.noteTurnEnd(sessionId);
+      }
     }
   }
 
@@ -6943,7 +7144,12 @@ export class ChatManager {
       const message = err instanceof Error ? err.message : String(err);
       log.error(`fixed-function#${tag} error: ${message}`);
       this.telemetry.noteTurnEnd(sessionId);
-      this.events.publishSessionOnly(sessionId, { type: 'error', error: message });
+      const detail = describeTurnError(err);
+      this.events.publishSessionOnly(sessionId, {
+        type: 'error',
+        error: redactCredentials(message),
+        ...(detail ? { errorDetail: detail } : {}),
+      });
       this.events.publishSessionOnly(sessionId, { type: 'done' });
       throw err;
     };
@@ -8660,7 +8866,7 @@ export class ChatManager {
     ) {
       return config.nightShift.modelOverride.provider;
     }
-    return config.provider ?? 'copilot';
+    return resolveDefaultProviderName(config);
   }
 
   /**
@@ -8747,7 +8953,23 @@ export class ChatManager {
       typeof config.localEngineMemoryGb === 'number'
         ? Math.round(config.localEngineMemoryGb * 1024 ** 3)
         : undefined;
-    const broker = new CapacityBroker(budgetBytes !== undefined ? { budgetBytes } : {});
+    // Measure the accelerator before deriving the budget. Without this the
+    // broker sizes a discrete-GPU host off system RAM alone — the shape that
+    // told a 64 GB / 24 GB-VRAM box its models get "60% of your 63.9 GB
+    // machine" and then refused a model that fit the card plus offload.
+    // The probe caches, and a failure degrades to the RAM-only curve.
+    const gpuVramBytes = await (async () => {
+      try {
+        const { detectMemoryProfileCached } = await import('../system/memory.js');
+        return (await detectMemoryProfileCached()).gpuVramBytes;
+      } catch {
+        return null;
+      }
+    })();
+    const broker = new CapacityBroker({
+      ...(budgetBytes !== undefined ? { budgetBytes } : {}),
+      gpuVramBytes,
+    });
     const pool = new ProviderPool({ broker, builders: {} });
 
     // Builders close over `this` so they can re-read config and use the
@@ -9296,7 +9518,7 @@ export class ChatManager {
    * `model` rather than spawning a second, unbudgeted engine for the
    * same model.
    *
-   * Wild-caught: an interactive `gemma4-e4b-q8` session and a
+   * Wild-caught: an interactive `gemma4-e4b-q4` session and a
    * background memory-summarize one-shot each held a copy of the model
    * (the one-shot fell through to the singleton {@link ensureProvider}
    * path, which spawns a parallel supervisor outside the
@@ -9510,15 +9732,20 @@ export class ChatManager {
       // Prefer the `~/.gezel/system-toolsets/` install (the prod path —
       // the SDK doesn't ship inside the Electron bundle). Falls back to
       // the workspace's own devDependency when not installed yet, which
-      // keeps dev-mode happy and lets fresh packaged installs still
-      // produce a clear "not installed yet" error from the SDK probe
-      // rather than a module-resolution crash.
-      const sdkEntryPath =
-        (await resolveSystemLibraryPath(this.home, '@github/copilot-sdk', { withEntry: true })) ??
-        undefined;
+      // keeps dev-mode happy; in a packaged build that bare import fails
+      // and `CopilotProvider.initialize` turns it into an actionable
+      // "install it in Settings" error.
+      //
+      // Version-tolerant on purpose: the SDK is an on-demand toolset, so a
+      // bumped pin must not un-install everyone who is one release behind.
+      const [sdkInstallRoot, sdkEntry] = await Promise.all([
+        resolveInstalledSystemLibrary(this.home, '@github/copilot-sdk'),
+        resolveInstalledSystemLibrary(this.home, '@github/copilot-sdk', { withEntry: true }),
+      ]);
       provider = new CopilotProvider({
         githubToken: githubToken ?? undefined,
-        sdkEntryPath,
+        sdkEntryPath: sdkEntry?.path,
+        sdkInstallRoot: sdkInstallRoot?.path,
         ...(config.providerConcurrency?.copilot
           ? { concurrency: config.providerConcurrency.copilot }
           : {}),
@@ -14623,9 +14850,28 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
       // is actionable, but the PR/issue toolset prose names tools an
       // executor usually can't call. Keep the header + checkout, drop the
       // toolset sentence for executors.
+      // Name only the GitHub tools this role actually holds. The literal
+      // list used to be unconditional, so a Chief Security Officer whose
+      // roster has no `search_code` was still told to use it — one of the
+      // `directive-missing-tool` warnings this build logs, and the drift
+      // ADR 0001 exists to prevent. The *sentence* still stands either
+      // way: these names come from an installed third-party GitHub
+      // toolset, whose tool names never appear in the predicted roster,
+      // so an empty intersection means "can't confirm", not "absent".
+      const githubTools = toolsFrom([
+        'get_pull_request',
+        'list_pull_requests',
+        'get_issue',
+        'search_code',
+        'add_issue_comment',
+      ]);
       if (!trimExecutor) {
+        const named =
+          githubTools.length > 0
+            ? `${formatToolList(githubTools)}, …`
+            : 'the `github_*` / PR + issue tools on your function schema';
         lines.push(
-          'Use the GitHub toolset (`get_pull_request`, `list_pull_requests`, `get_issue`, `search_code`, `add_issue_comment`, …) for repo and PR actions; treat the owner/repo above as the default.',
+          `Use the GitHub toolset (${named}) for repo and PR actions; treat the owner/repo above as the default.`,
         );
       }
       projectContext += lines.join('\n');
@@ -14795,11 +15041,18 @@ ${artifactsLine}
   // setup step. Only a genuinely missing install gets the bootstrap
   // line. All three keep the McKinley-Park guard: never emit fake
   // `browser_*` markup for tools that aren't on the schema.
-  const browsingGuidance = hasPlaywright
+  // `hasPlaywright` means the toolset is INSTALLED, not that this role can
+  // run scripts with it. A Chief Security Officer with Playwright
+  // installed but no `run_playwright_script` on their post-allowlist
+  // roster was still told to write and run one.
+  const scriptedBrowsing = hasPlaywright && availableToolNameSet.has('run_playwright_script');
+  const browsingGuidance = scriptedBrowsing
     ? `**Web work.** For anything re-runnable (multi-step flows, data extraction, repeated lookups), write a Playwright script to \`scripts/<name>.ts\` via \`write_artifact\` and run it with \`run_playwright_script\`. For one-shot reads, use the \`browser_*\` tools on your function schema. Playwright + Chromium are pre-installed; \`import { chromium } from 'playwright'\` just works — don't \`npm_install\` any \`playwright*\` package.`
-    : browserAutomationRoleExcluded
-      ? "**Browser tools are not part of this role's kit** (they are installed on this machine). Workspace HTML you write is still runtime-checked automatically after each write. If the user needs live browsing or scraping, suggest a web-focused teammate (Web Developer, Researcher, Designer) or ask them to retag your role. Don't emit fake `<browser_*>` markup."
-      : "**Browser automation is not installed.** If the user asks you to browse or scrape, tell them the Playwright toolset hasn't been bootstrapped (Settings → Daemon). Don't emit fake `<browser_*>` markup.";
+    : hasPlaywright
+      ? "**Web work.** Use the `browser_*` tools on your function schema for reads. Scripted browsing is not part of your kit this turn — if the job needs a re-runnable script, hand it to a teammate who can run one. Don't emit fake `<browser_*>` markup."
+      : browserAutomationRoleExcluded
+        ? "**Browser tools are not part of this role's kit** (they are installed on this machine). Workspace HTML you write is still runtime-checked automatically after each write. If the user needs live browsing or scraping, suggest a web-focused teammate (Web Developer, Researcher, Designer) or ask them to retag your role. Don't emit fake `<browser_*>` markup."
+        : "**Browser automation is not installed.** If the user asks you to browse or scrape, tell them the Playwright toolset hasn't been bootstrapped (Settings → Daemon). Don't emit fake `<browser_*>` markup.";
 
   // Is the active step a "gate" — a phase the model must hold at until its
   // exit criteria are met, rather than advance past on its first attempt?
@@ -16058,7 +16311,7 @@ export async function buildLlamaCppProvider(opts: {
   // Explicit `providerConcurrency['llama-cpp']` overrides verbatim.
   // (Co-resident pool models aren't subtracted here — the broker still
   // denies an over-commit at spawn; threading committed bytes is a TODO.)
-  const { autoDetectBudgetBytes, defaultLocalEngineSlots, llamaCppSlotCeiling } = await import(
+  const { fastMemoryBudgetBytes, defaultLocalEngineSlots, llamaCppSlotCeiling } = await import(
     '../providers/native/capacity-broker.js'
   );
   // Subtract co-resident model reservations from the budget when the pool
@@ -16066,8 +16319,16 @@ export async function buildLlamaCppProvider(opts: {
   // overridden) budget. Caveat: the broker tracks each model's resident
   // WEIGHTS, not its slot KV, so co-resident KV isn't fully captured — a
   // broader broker improvement. Singleton path has no broker → full budget.
+  //
+  // Slots are sized against FAST memory, not the admission budget. On a
+  // discrete card those differ: the budget also covers the system RAM an
+  // offloaded MoE streams experts from, and KV that follows that number
+  // instead of the card's own capacity is how a GPU runs out of memory.
+  // Unified and CPU-only hosts have one pool, so the two are the same there.
   const brokerSnap = opts.broker?.committed();
-  const budgetBytes = brokerSnap?.enforced ? brokerSnap.budgetBytes : autoDetectBudgetBytes();
+  const budgetBytes = brokerSnap?.enforced
+    ? (opts.broker?.fastBudgetBytes() ?? brokerSnap.budgetBytes)
+    : fastMemoryBudgetBytes();
   const committedOtherBytes = brokerSnap?.enforced ? brokerSnap.committedBytes : 0;
   let slots =
     configuredSlots ??
@@ -16302,6 +16563,33 @@ export async function buildLlamaCppProvider(opts: {
     onExit: (snapshot) => {
       if (snapshot.expected) return;
       logFile.writeIncident(snapshot);
+      // A build that dies by SIGILL before it ever answers /health has
+      // not failed at a task — it cannot run on this CPU at all, and
+      // relaunching it on every request just reproduces the crash while
+      // a working lower-tier build sits in the same directory. Write it
+      // down so the next launch routes around it.
+      //
+      // Deliberately narrow: only SIGILL, and only before readiness.
+      // A SIGSEGV during startup can be a corrupt model file, and any
+      // crash after readiness is attributable to the work rather than
+      // the binary — quarantining a backend over either would demote
+      // users to slow engines for transient reasons.
+      if (snapshot.signal !== 'SIGILL' || snapshot.reachedReady) return;
+      const backend = process.env.GEZEL_LLAMA_SERVER_BACKEND as LlamaBackend | undefined;
+      if (!backend) return;
+      const entry = recordLlamaQuarantine(home, {
+        backend,
+        binaryPath: binary,
+        signal: 'SIGILL',
+        reason:
+          'crashed with SIGILL before the engine became ready — this build uses CPU instructions ' +
+          'this machine does not support, or faulted inside GPU library startup',
+      });
+      if (entry) {
+        log.warn(
+          `[llama-server] quarantined the ${backend} build after SIGILL (incident=${snapshot.incidentId}); the next launch will fall back to another backend`,
+        );
+      }
     },
     onRawLine: (line) => providerHolder.current?.onStdoutLine(line),
     resolveLaunch: async () => {
@@ -16788,13 +17076,15 @@ export async function buildMlxProvider(opts: {
     defaultLocalEngineSlots,
     localEngineSlotCeiling,
     localEngineKvBudgetBytes,
-    autoDetectBudgetBytes,
+    fastMemoryBudgetBytes,
   } = await import('../providers/native/capacity-broker.js');
   const mlxWeightsBytes = modelCatalogInfo?.approxSizeBytes ?? 8 * 1024 ** 3;
   const mlxBrokerSnap = opts.broker?.committed();
+  // Fast memory, not the admission budget — same reason as the llama path.
+  // MLX only runs on unified-memory Macs today, where the two are equal.
   const mlxBudgetBytes = mlxBrokerSnap?.enforced
-    ? mlxBrokerSnap.budgetBytes
-    : autoDetectBudgetBytes();
+    ? (opts.broker?.fastBudgetBytes() ?? mlxBrokerSnap.budgetBytes)
+    : fastMemoryBudgetBytes();
   const mlxCommittedOther = mlxBrokerSnap?.enforced ? mlxBrokerSnap.committedBytes : 0;
   const mlxKvCacheType = kvBits === 4 ? 'q4_0' : kvBits === 8 ? 'q8_0' : 'f16';
   const mlxKvBudgetBytes = localEngineKvBudgetBytes({

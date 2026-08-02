@@ -119,6 +119,118 @@ describe('runSystemBootstrap', () => {
       },
     });
   });
+
+  // An on-demand entry is installed by SystemToolsetInstallRegistry when the
+  // user asks, never at boot. If this regressed, the boot pass would start
+  // downloading GitHub's proprietary Copilot CLI on every fresh install —
+  // exactly what making it on-demand was meant to stop. The install here
+  // would also hit the network, so a regression fails loudly rather than
+  // quietly costing bandwidth.
+  it('skips on-demand entries and still reports ready', async () => {
+    const EAGER: PinnedSystemToolset = {
+      toolsetId: '@fake/eager',
+      displayName: 'Fake eager',
+      kind: 'mcp-toolset',
+      pkg: '@fake/eager',
+      version: '1.0.0',
+      integrity: `sha512-${'C'.repeat(86)}==`,
+      entry: 'dist/cli.js',
+    };
+    const ON_DEMAND: PinnedSystemToolset = {
+      toolsetId: '@fake/on-demand',
+      displayName: 'Fake on-demand',
+      kind: 'library',
+      onDemand: true,
+      pkg: '@fake/on-demand',
+      version: '2.0.0',
+      integrity: `sha512-${'D'.repeat(86)}==`,
+      entry: 'dist/index.js',
+    };
+
+    // Seed only the eager entry as satisfied. The on-demand one is
+    // deliberately absent — the bootstrap must not try to fetch it.
+    await writeSystemTracking(home, {
+      toolsets: {
+        [EAGER.toolsetId]: {
+          toolsetId: EAGER.toolsetId,
+          version: EAGER.version,
+          integrity: EAGER.integrity,
+          installedAt: '2026-08-01T00:00:00.000Z',
+        },
+      },
+      updatedAt: '2026-08-01T00:00:00.000Z',
+    });
+    const eagerPath = join(systemToolsetsInstallDir(home), installDirName(EAGER), 'package');
+    await mkdir(eagerPath, { recursive: true });
+
+    const bus = new SystemStatusBus();
+    const received: SystemBootstrapStatus[] = [];
+    const unsub = bus.subscribe((s) => received.push(s));
+
+    await runSystemBootstrap({ home, store, statusBus: bus, manifest: [EAGER, ON_DEMAND] });
+
+    unsub();
+    expect(received.at(-1)?.phase).toBe('ready');
+    expect(received.some((s) => s.currentToolset === ON_DEMAND.toolsetId)).toBe(false);
+    expect(received.some((s) => s.phase === 'error')).toBe(false);
+    // Nothing was written for the on-demand entry.
+    const installed = await store.listInstalledToolsets({ kind: 'system' });
+    expect(installed.some((t) => t.toolsetId === ON_DEMAND.toolsetId)).toBe(false);
+  });
+
+  // Pins the ordering inside runSystemBootstrap: the placeholder check reads
+  // the full manifest, and only then is the on-demand set filtered out.
+  // Reversing those two makes a build whose only real pin is on-demand look
+  // unpinned, which turns the Home health pill amber for no reason.
+  it('reports setup-incomplete when every entry is a placeholder, on-demand included', async () => {
+    const PLACEHOLDER_ON_DEMAND: PinnedSystemToolset = {
+      toolsetId: '@fake/on-demand',
+      displayName: 'Fake on-demand',
+      kind: 'library',
+      onDemand: true,
+      pkg: '@fake/on-demand',
+      version: '0.0.0',
+      integrity: `sha512-${'A'.repeat(86)}==`,
+      entry: 'dist/index.js',
+    };
+    const bus = new SystemStatusBus();
+    const received: SystemBootstrapStatus[] = [];
+    const unsub = bus.subscribe((s) => received.push(s));
+
+    await runSystemBootstrap({
+      home,
+      store,
+      statusBus: bus,
+      manifest: [...ALL_PLACEHOLDERS, PLACEHOLDER_ON_DEMAND],
+    });
+
+    unsub();
+    expect(received.at(-1)?.phase).toBe('setup-incomplete');
+  });
+
+  // The inverse: a real on-demand pin alongside nothing else must NOT read as
+  // an unpinned build. `ready` is the honest answer — every eagerly-installed
+  // toolset (of which there are none) is in place.
+  it('reports ready when the only real entry is on-demand', async () => {
+    const ON_DEMAND: PinnedSystemToolset = {
+      toolsetId: '@fake/on-demand',
+      displayName: 'Fake on-demand',
+      kind: 'library',
+      onDemand: true,
+      pkg: '@fake/on-demand',
+      version: '2.0.0',
+      integrity: `sha512-${'E'.repeat(86)}==`,
+      entry: 'dist/index.js',
+    };
+    const bus = new SystemStatusBus();
+    const received: SystemBootstrapStatus[] = [];
+    const unsub = bus.subscribe((s) => received.push(s));
+
+    await runSystemBootstrap({ home, store, statusBus: bus, manifest: [ON_DEMAND] });
+
+    unsub();
+    expect(received.at(-1)?.phase).toBe('ready');
+  });
 });
 
 describe('SystemStatusBus', () => {

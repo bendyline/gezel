@@ -129,7 +129,7 @@ describe('score-trial F4.1 latency timing', () => {
       JSON.stringify({
         trialId: 'ttft-trial',
         scenarioId: 'tictactoe',
-        modelId: 'gemma4-e4b-q8',
+        modelId: 'gemma4-e4b-q4',
         startedAt: '2026-06-04T00:00:00.000Z',
         finishedAt: '2026-06-04T00:00:10.000Z',
         durationMs: 10_000,
@@ -360,7 +360,7 @@ describe('score-trial sniff parsing', () => {
       JSON.stringify({
         trialId: 'craftbook-trial',
         scenarioId: 'craftbook-press-release',
-        modelId: 'gemma4-e4b-q8',
+        modelId: 'gemma4-e4b-q4',
         startedAt: '2026-06-28T00:00:00.000Z',
         finishedAt: '2026-06-28T00:02:00.000Z',
         durationMs: 120_000,
@@ -397,7 +397,7 @@ describe('score-trial sniff parsing', () => {
       JSON.stringify({
         trialId: 'codebase-trial',
         scenarioId: 'codebase-evolution',
-        modelId: 'gemma4-e4b-q8',
+        modelId: 'gemma4-e4b-q4',
         startedAt: '2026-06-04T00:00:00.000Z',
         finishedAt: '2026-06-04T00:00:20.000Z',
         durationMs: 20_000,
@@ -480,7 +480,7 @@ describe('score-trial sniff parsing', () => {
       JSON.stringify({
         trialId: 'craftbook-trial',
         scenarioId: 'craftbook-form-wizard',
-        modelId: 'gemma4-e4b-q8',
+        modelId: 'gemma4-e4b-q4',
         startedAt: '2026-06-27T00:00:00.000Z',
         finishedAt: '2026-06-27T00:00:20.000Z',
         durationMs: 20_000,
@@ -516,7 +516,7 @@ describe('score-trial sniff parsing', () => {
       JSON.stringify({
         trialId: 'craftbook-trial',
         scenarioId: 'craftbook-form-wizard',
-        modelId: 'gemma4-e4b-q8',
+        modelId: 'gemma4-e4b-q4',
         startedAt: '2026-06-27T00:00:00.000Z',
         finishedAt: '2026-06-27T00:00:20.000Z',
         durationMs: 20_000,
@@ -553,7 +553,7 @@ describe('score-trial runtime sniff reporting', () => {
       JSON.stringify({
         trialId: 'runtime-failure-trial',
         scenarioId: 'petshop',
-        modelId: 'gemma4-e4b-q8',
+        modelId: 'gemma4-e4b-q4',
         startedAt: '2026-07-10T00:00:00.000Z',
         finishedAt: '2026-07-10T00:00:20.000Z',
         durationMs: 20_000,
@@ -597,7 +597,7 @@ describe('score-trial runtime sniff reporting', () => {
       JSON.stringify({
         trialId: 'runtime-success-trial',
         scenarioId: 'tankcombat',
-        modelId: 'gemma4-e4b-q8',
+        modelId: 'gemma4-e4b-q4',
         startedAt: '2026-07-10T00:00:00.000Z',
         finishedAt: '2026-07-10T00:00:20.000Z',
         durationMs: 20_000,
@@ -629,7 +629,7 @@ describe('score-trial runtime sniff reporting', () => {
       JSON.stringify({
         trialId: 'runtime-bootstrap-trial',
         scenarioId: 'petshop',
-        modelId: 'gemma4-e4b-q8',
+        modelId: 'gemma4-e4b-q4',
         startedAt: '2026-07-10T00:00:00.000Z',
         finishedAt: '2026-07-10T00:00:20.000Z',
         durationMs: 20_000,
@@ -657,7 +657,7 @@ describe('score-trial runtime sniff reporting', () => {
       JSON.stringify({
         trialId: 'legacy-static-trial',
         scenarioId: 'petshop',
-        modelId: 'gemma4-e4b-q8',
+        modelId: 'gemma4-e4b-q4',
         startedAt: '2026-06-01T00:00:00.000Z',
         finishedAt: '2026-06-01T00:00:20.000Z',
         durationMs: 20_000,
@@ -775,7 +775,7 @@ describe('score-trial modelTier passthrough (Theme E / E1-B)', () => {
       JSON.stringify({
         trialId: 'tier-trial',
         scenarioId: 'petshop',
-        modelId: 'gemma4-e2b-q8',
+        modelId: 'gemma4-e2b-q4',
         modelTier: 'tiny',
         startedAt: '2026-07-08T00:00:00.000Z',
         finishedAt: '2026-07-08T00:00:10.000Z',
@@ -793,7 +793,7 @@ describe('score-trial modelTier passthrough (Theme E / E1-B)', () => {
 
     const facts = score(tempRoot);
     expect(facts.modelTier).toBe('tiny');
-    expect(facts.modelId).toBe('gemma4-e2b-q8');
+    expect(facts.modelId).toBe('gemma4-e2b-q4');
   });
 
   it('omits modelTier when result.json predates the stamp', async () => {
@@ -802,7 +802,7 @@ describe('score-trial modelTier passthrough (Theme E / E1-B)', () => {
       JSON.stringify({
         trialId: 'legacy-trial',
         scenarioId: 'petshop',
-        modelId: 'gemma4-e2b-q8',
+        modelId: 'gemma4-e2b-q4',
         startedAt: '2026-06-01T00:00:00.000Z',
         finishedAt: '2026-06-01T00:00:10.000Z',
         durationMs: 10_000,

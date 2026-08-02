@@ -21,7 +21,13 @@ async function estimateFirstRun(): Promise<boolean> {
   try {
     const cfg = await api.getConfig();
     const p = cfg.provider;
-    if (p === 'copilot') return !cfg.hasGithubToken;
+    if (p === 'copilot') {
+      // Copilot's runtime is an opt-in download, so "installed" is the real
+      // question — a stored PAT with no SDK on disk still can't chat. Fall
+      // back to the token check only when the daemon predates the endpoint.
+      const status = await api.getCopilotStatus().catch(() => null);
+      return status ? !status.available : !cfg.hasGithubToken;
+    }
     if (p === 'openai') return !cfg.hasOpenaiApiKey;
     if (p === 'mlx') {
       const { models } = await api.listMlxModels().catch(() => ({ models: [] }));

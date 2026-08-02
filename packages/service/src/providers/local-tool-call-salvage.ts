@@ -169,7 +169,7 @@ export function findGemmaNativeToolCallSpans(
   // tolerates a missing closer and an unterminated `<|"|>` string, returning
   // the rest of the buffer as the value. Still strict: the name must resolve
   // in knownToolNames, so this can't fabricate a call out of pure prose.
-  // (Wild-caught on gemma4-e4b-q8 / plan-and-estimate.)
+  // (Wild-caught on gemma4-e4b-q4 / plan-and-estimate.)
   const markerIdx = text.lastIndexOf('<|tool_call>');
   if (markerIdx !== -1) {
     const parsedFromMarker = parseGemmaNativeToolCall(text.slice(markerIdx), knownToolNames);
@@ -189,7 +189,7 @@ export function findGemmaNativeToolCallSpans(
 // `<|tool_call>call:NAME{` prefix and then chokes, streaming the REST of
 // the call into `content` — so what reaches us starts directly at the
 // first arg key: `content:<|"|>…<|"|>,path:<|"|>x<|"|>}`. No opener, no
-// tool name. (Wild-caught on gemma4-e2b-q8 / craftbook-documentation-
+// tool name. (Wild-caught on gemma4-e2b-q4 / craftbook-documentation-
 // drift-review, cbmx-20260720-195716.) The `<|"|>` token right after the
 // key is the load-bearing gate — it never occurs in organic prose.
 const HEADLESS_GEMMA_BODY_RE = /^\s*[a-zA-Z_][a-zA-Z0-9_-]*\s*:\s*<\|"\|>/;
@@ -1497,7 +1497,7 @@ export function stripGlmToolCallsFromText(
 
 // Bare `invoke NAME {json}` — the literal word `invoke`, a tool name, and a
 // JSON argument object, with NO angle-bracket markup, parens, or Gemma
-// special tokens. Wild-caught on `gemma4-e2b-q8` / MLX: a weak model that
+// special tokens. Wild-caught on `gemma4-e2b-q4` / MLX: a weak model that
 // never emits Gemma's `<|tool_call>` trigger token (so the llguidance grammar
 // never engages) narrates the call in this shape instead, e.g.:
 //
@@ -2974,7 +2974,7 @@ export function extractReasoning(text: string): { visible: string; reasoning: st
   out = out.replace(/<\|end\|>/gi, '');
   // Chat-template framing tokens — turn / sequence / tool-response
   // delimiters the model sometimes emits as literal special-token text
-  // on tight quants. Wild-caught from gemma4-e4b-q8, which streamed
+  // on tight quants. Wild-caught from gemma4-e4b-q4, which streamed
   // `<eos><|tool_response><eos>` as visible content after firing its
   // tool calls (the detokenizer renders special tokens because
   // `decode()` keeps them). These are pure framing, never reasoning or

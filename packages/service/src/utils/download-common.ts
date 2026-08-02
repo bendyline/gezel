@@ -8,7 +8,13 @@
  */
 
 import { statSync } from 'node:fs';
-import { GEZEL_VERSION, createLogger } from '@bendyline/gezel';
+import {
+  DEFAULT_BACKOFF_SCHEDULE_MS,
+  GEZEL_VERSION,
+  backoffDelayMs,
+  createLogger,
+  sleepWithAbort,
+} from '@bendyline/gezel';
 
 export const downloadLog = createLogger('download');
 
@@ -21,14 +27,26 @@ export const downloadLog = createLogger('download');
  */
 export const GEZEL_DOWNLOAD_UA = `gezel/${GEZEL_VERSION} (+https://github.com/bendyline/gezel)`;
 
-/** Default upper bound on retry attempts (per file). 5 covers the dominant
- * on-device failure modes (transient ISP blip, mid-day congestion, brief HF
- * rate-limit) without giving up too readily. */
+/** Upper bound on *consecutive* failed attempts that made no headway. 5 covers
+ * the dominant on-device failure modes (transient ISP blip, mid-day
+ * congestion, brief HF rate-limit) without giving up too readily. An attempt
+ * that moved real bytes refunds this budget — see `DownloadRetryBudget`. */
 export const DEFAULT_MAX_RETRIES = 5;
+
+/** Absolute ceiling on attempts for one file, however much progress is being
+ * made. A 30 GB download over a link that drops every 200 MB legitimately
+ * needs a lot of resumes; this only exists so a pathological
+ * fails-after-one-chunk loop can't spin forever. */
+export const MAX_TOTAL_ATTEMPTS = 100;
+
+/** Forward progress that counts as "this transfer is alive" and refunds the
+ * consecutive-failure budget. Deliberately larger than one HTTP chunk so a
+ * server that hands us 64 KiB and hangs up can't refill the budget forever. */
+export const PROGRESS_REFUND_BYTES = 4 * 1024 * 1024;
 
 /** Backoff schedule (ms). Index = attempt number (0-based). Jitter is added on
  * top so two parallel downloads don't retry in lockstep. */
-const BACKOFF_SCHEDULE_MS = [1_000, 2_000, 4_000, 6_000, 8_000];
+const BACKOFF_SCHEDULE_MS = DEFAULT_BACKOFF_SCHEDULE_MS;
 
 /** No-bytes-arrived window before we declare a transfer dead. */
 export const DEFAULT_CHUNK_TIMEOUT_MS = 20_000;
@@ -74,28 +92,85 @@ export function existingPartialSize(path: string): number {
 }
 
 export function retryDelayMs(retryIndex: number): number {
-  const base = BACKOFF_SCHEDULE_MS[Math.min(retryIndex, BACKOFF_SCHEDULE_MS.length - 1)] ?? 8_000;
-  // ±20% jitter so concurrent transfers don't retry in lockstep.
-  const jitter = base * (Math.random() * 0.4 - 0.2);
-  return Math.round(base + jitter);
+  return backoffDelayMs(retryIndex, BACKOFF_SCHEDULE_MS);
 }
 
 export async function sleepRespectingAbort(
   ms: number,
   signal: AbortSignal | undefined,
 ): Promise<boolean> {
-  if (signal?.aborted) return true;
-  return new Promise<boolean>((resolve) => {
-    const t = setTimeout(() => {
-      signal?.removeEventListener('abort', onAbort);
-      resolve(false);
-    }, ms);
-    const onAbort = (): void => {
-      clearTimeout(t);
-      resolve(true);
-    };
-    signal?.addEventListener('abort', onAbort, { once: true });
-  });
+  return sleepWithAbort(ms, signal);
+}
+
+/**
+ * Attempt accounting for a resumable download.
+ *
+ * The naive "5 attempts per file, then give up" budget is what made the
+ * first-run model install fail with a bare "network error": a 12 GB GGUF over
+ * a link that drops every couple of minutes burns all five attempts inside the
+ * first ten minutes and quits — even though every one of those attempts moved
+ * hundreds of megabytes onto disk and the transfer was, in the only sense the
+ * user cares about, working.
+ *
+ * So the budget counts *consecutive failures that made no headway*. An attempt
+ * that pushed the byte high-water mark forward by at least
+ * `PROGRESS_REFUND_BYTES` resets the counter (and the backoff schedule with
+ * it, since the network clearly isn't down). `MAX_TOTAL_ATTEMPTS` is the
+ * backstop for a server that hands us a little data and dies every single
+ * time.
+ *
+ * A budget constructed with `maxConsecutive <= 1` never refunds, so callers
+ * that pass `maxRetries: 1` still get exactly one attempt.
+ */
+export class DownloadRetryBudget {
+  private consecutiveFailures = 0;
+  private attemptsStarted = 0;
+  private highWaterBytes: number;
+
+  constructor(
+    private readonly maxConsecutive: number,
+    startBytes = 0,
+    private readonly maxTotal: number = MAX_TOTAL_ATTEMPTS,
+  ) {
+    this.highWaterBytes = startBytes;
+  }
+
+  /** True while another attempt is permitted. */
+  canAttempt(): boolean {
+    return this.consecutiveFailures < this.maxConsecutive && this.attemptsStarted < this.maxTotal;
+  }
+
+  /** Call once at the top of each attempt. */
+  beginAttempt(): number {
+    return ++this.attemptsStarted;
+  }
+
+  /** Total attempts started so far — reported in the terminal error. */
+  get attemptsMade(): number {
+    return this.attemptsStarted;
+  }
+
+  /** Record a transient failure at `bytesWritten` bytes of on-disk progress. */
+  recordFailure(bytesWritten: number): void {
+    const refundable =
+      this.maxConsecutive > 1 && bytesWritten >= this.highWaterBytes + PROGRESS_REFUND_BYTES;
+    if (bytesWritten > this.highWaterBytes) this.highWaterBytes = bytesWritten;
+    this.consecutiveFailures = refundable ? 0 : this.consecutiveFailures + 1;
+  }
+
+  /** Wait to serve before the next attempt, based on the consecutive streak. */
+  nextDelayMs(): number {
+    return retryDelayMs(Math.max(0, this.consecutiveFailures - 1));
+  }
+
+  /** 1-based number of the attempt about to start, for `retrying` events. */
+  get nextAttemptLabel(): number {
+    return this.consecutiveFailures + 1;
+  }
+
+  get maxAttempts(): number {
+    return this.maxConsecutive;
+  }
 }
 
 /**

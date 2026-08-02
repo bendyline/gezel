@@ -3,14 +3,17 @@ import type {
   GezelGender,
   GezelSummary,
   ProjectDetail,
+  ProjectTypeGezelRole,
 } from '@bendyline/gezel';
 import {
   displayName,
+  getProjectType,
   initialPoppetjeForGezel,
   pickRandomNameWithGender,
   poppetjeFromSeed,
+  resolveProjectTypeId,
 } from '@bendyline/gezel';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
 import { Poppetje } from '../poppetje/index.js';
 import { Dialog } from '../primitives/index.js';
@@ -19,6 +22,15 @@ import { GezelIcon } from './GezelIcon.js';
 type GezelTemplateItem = CatalogItemSummary & {
   manifest: Extract<CatalogItemSummary['manifest'], { kind: 'gezel-template' }>;
 };
+
+type ProjectRoleAffinity = ProjectTypeGezelRole & {
+  tier: 'default' | 'suggested';
+  rank: number;
+};
+
+type SuggestedRoleOption =
+  | { kind: 'existing'; gezel: GezelSummary; affinity: ProjectRoleAffinity }
+  | { kind: 'template'; template: GezelTemplateItem; affinity: ProjectRoleAffinity };
 
 export interface ProjectTemplateGezelOptions {
   name: string;
@@ -38,13 +50,34 @@ function roleIdentity(value: string | undefined): string {
   return (value ?? '').toLocaleLowerCase().replaceAll(/[^a-z0-9]+/g, '');
 }
 
+function gezelMatchesQuery(
+  gezel: GezelSummary,
+  query: string,
+  roleBasedNameOnlyMode: boolean,
+): boolean {
+  return [displayName(gezel, roleBasedNameOnlyMode), gezel.role ?? ''].some((value) =>
+    value.toLocaleLowerCase().includes(query),
+  );
+}
+
+function templateMatchesQuery(template: GezelTemplateItem, query: string): boolean {
+  return [
+    template.manifest.name,
+    template.manifest.role,
+    template.manifest.description,
+    ...template.manifest.tags,
+  ].some((value) => value.toLocaleLowerCase().includes(query));
+}
+
 /**
  * Project-scoped crew picker.
  *
  * Existing gezels attach in one click. Catalog roles that do not have an
  * instance in the global roster open a small character step first, except in
  * boring mode where role identity is the whole point and the template is
- * created immediately.
+ * created immediately. The effective project type's role affinity promotes
+ * both existing people and uncreated role templates into one recommendation
+ * section; detection remains advisory and never changes the crew by itself.
  */
 export function ProjectAddGezelDialog({
   open,
@@ -72,6 +105,7 @@ export function ProjectAddGezelDialog({
   const [name, setName] = useState('');
   const [gender, setGender] = useState<GezelGender | undefined>();
   const [appearanceSeed, setAppearanceSeed] = useState(freshAppearanceSeed);
+  const projectType = getProjectType(resolveProjectTypeId(project));
 
   useEffect(() => {
     if (!open) return;
@@ -111,6 +145,33 @@ export function ProjectAddGezelDialog({
       ]),
     [project.gezelIds, project.voormanGezelId],
   );
+  const roleAffinities = useMemo(() => {
+    const result = new Map<string, ProjectRoleAffinity>();
+    let rank = 0;
+    for (const role of projectType?.gezelRoles.default ?? []) {
+      result.set(role.templateId, { ...role, tier: 'default', rank: rank++ });
+    }
+    for (const role of projectType?.gezelRoles.suggested ?? []) {
+      if (!result.has(role.templateId)) {
+        result.set(role.templateId, { ...role, tier: 'suggested', rank: rank++ });
+      }
+    }
+    return result;
+  }, [projectType]);
+  const affinityByRoleIdentity = useMemo(() => {
+    const result = new Map<string, ProjectRoleAffinity>();
+    for (const template of templates) {
+      const affinity = roleAffinities.get(template.manifest.id);
+      if (!affinity) continue;
+      for (const identity of [
+        roleIdentity(template.manifest.role),
+        roleIdentity(template.manifest.name),
+      ]) {
+        if (identity && !result.has(identity)) result.set(identity, affinity);
+      }
+    }
+    return result;
+  }, [roleAffinities, templates]);
   const createdTemplateIds = useMemo(
     () => new Set(gezels.flatMap((gezel) => (gezel.templateId ? [gezel.templateId] : []))),
     [gezels],
@@ -147,31 +208,100 @@ export function ProjectAddGezelDialog({
         .sort((a, b) => a.manifest.name.localeCompare(b.manifest.name)),
     [createdRoleIdentities, createdTemplateIds, templates],
   );
+  const affinityForGezel = useCallback(
+    (gezel: GezelSummary): ProjectRoleAffinity | undefined => {
+      if (gezel.templateId) {
+        const templateAffinity = roleAffinities.get(gezel.templateId);
+        if (templateAffinity) return templateAffinity;
+      }
+      for (const identity of [roleIdentity(gezel.role), roleIdentity(gezel.roleBasedName)]) {
+        const roleAffinity = affinityByRoleIdentity.get(identity);
+        if (roleAffinity) return roleAffinity;
+      }
+      return undefined;
+    },
+    [affinityByRoleIdentity, roleAffinities],
+  );
+  const suggestedOptions = useMemo(() => {
+    const result: SuggestedRoleOption[] = [];
+    for (const gezel of availableGezels) {
+      const affinity = affinityForGezel(gezel);
+      if (affinity) result.push({ kind: 'existing', gezel, affinity });
+    }
+    for (const template of availableTemplates) {
+      const affinity = roleAffinities.get(template.manifest.id);
+      if (affinity) result.push({ kind: 'template', template, affinity });
+    }
+    return result.sort(
+      (a, b) =>
+        a.affinity.rank - b.affinity.rank ||
+        (a.kind === 'existing'
+          ? displayName(a.gezel, roleBasedNameOnlyMode)
+          : a.template.manifest.name
+        ).localeCompare(
+          b.kind === 'existing'
+            ? displayName(b.gezel, roleBasedNameOnlyMode)
+            : b.template.manifest.name,
+        ),
+    );
+  }, [
+    affinityForGezel,
+    availableGezels,
+    availableTemplates,
+    roleAffinities,
+    roleBasedNameOnlyMode,
+  ]);
+  const suggestedGezelIds = useMemo(
+    () =>
+      new Set(
+        suggestedOptions.flatMap((option) => (option.kind === 'existing' ? [option.gezel.id] : [])),
+      ),
+    [suggestedOptions],
+  );
+  const suggestedTemplateIds = useMemo(
+    () =>
+      new Set(
+        suggestedOptions.flatMap((option) =>
+          option.kind === 'template' ? [option.template.manifest.id] : [],
+        ),
+      ),
+    [suggestedOptions],
+  );
+  const otherAvailableGezels = useMemo(
+    () => availableGezels.filter((gezel) => !suggestedGezelIds.has(gezel.id)),
+    [availableGezels, suggestedGezelIds],
+  );
+  const otherAvailableTemplates = useMemo(
+    () => availableTemplates.filter((template) => !suggestedTemplateIds.has(template.manifest.id)),
+    [availableTemplates, suggestedTemplateIds],
+  );
   const normalizedQuery = query.trim().toLocaleLowerCase();
+  const visibleSuggestedOptions = useMemo(
+    () =>
+      normalizedQuery
+        ? suggestedOptions.filter((option) =>
+            option.kind === 'existing'
+              ? gezelMatchesQuery(option.gezel, normalizedQuery, roleBasedNameOnlyMode)
+              : templateMatchesQuery(option.template, normalizedQuery),
+          )
+        : suggestedOptions,
+    [normalizedQuery, roleBasedNameOnlyMode, suggestedOptions],
+  );
   const visibleGezels = useMemo(
     () =>
       normalizedQuery
-        ? availableGezels.filter((gezel) =>
-            [displayName(gezel, roleBasedNameOnlyMode), gezel.role ?? ''].some((value) =>
-              value.toLocaleLowerCase().includes(normalizedQuery),
-            ),
+        ? otherAvailableGezels.filter((gezel) =>
+            gezelMatchesQuery(gezel, normalizedQuery, roleBasedNameOnlyMode),
           )
-        : availableGezels,
-    [availableGezels, normalizedQuery, roleBasedNameOnlyMode],
+        : otherAvailableGezels,
+    [normalizedQuery, otherAvailableGezels, roleBasedNameOnlyMode],
   );
   const visibleTemplates = useMemo(
     () =>
       normalizedQuery
-        ? availableTemplates.filter((item) =>
-            [
-              item.manifest.name,
-              item.manifest.role,
-              item.manifest.description,
-              ...item.manifest.tags,
-            ].some((value) => value.toLocaleLowerCase().includes(normalizedQuery)),
-          )
-        : availableTemplates,
-    [availableTemplates, normalizedQuery],
+        ? otherAvailableTemplates.filter((item) => templateMatchesQuery(item, normalizedQuery))
+        : otherAvailableTemplates,
+    [normalizedQuery, otherAvailableTemplates],
   );
 
   const close = () => {
@@ -323,6 +453,80 @@ export function ProjectAddGezelDialog({
               </label>
 
               <div className="project-add-gezel-options">
+                {visibleSuggestedOptions.length > 0 && (
+                  <section
+                    className="project-add-gezel-suggestions"
+                    aria-labelledby="project-add-suggested-title"
+                  >
+                    <h4 id="project-add-suggested-title">Suggested for this project type</h4>
+                    {projectType && (
+                      <p className="muted small project-add-gezel-section-hint">
+                        {projectType.label} projects often benefit from these roles.
+                      </p>
+                    )}
+                    <ul className="project-add-gezel-list">
+                      {visibleSuggestedOptions.map((option) => {
+                        const badge =
+                          option.affinity.tier === 'default' ? 'Core role' : 'Suggested';
+                        if (option.kind === 'existing') {
+                          const rendered = displayName(option.gezel, roleBasedNameOnlyMode);
+                          return (
+                            <li key={`existing:${option.gezel.id}`}>
+                              <button
+                                type="button"
+                                className="project-add-gezel-option"
+                                disabled={busy}
+                                onClick={() => void addExisting(option.gezel.id)}
+                              >
+                                <GezelIcon
+                                  svg={option.gezel.icon ?? null}
+                                  poppetje={option.gezel.poppetje}
+                                  iconOverride={option.gezel.iconOverride}
+                                  name={rendered}
+                                  size={36}
+                                />
+                                <span className="project-add-gezel-option-copy">
+                                  <span className="project-add-gezel-option-name">{rendered}</span>
+                                  <span className="muted small">
+                                    {option.gezel.role ?? 'Gezel'} · {option.affinity.reason}
+                                  </span>
+                                </span>
+                                <span className="gz-badge">{badge}</span>
+                              </button>
+                            </li>
+                          );
+                        }
+                        return (
+                          <li key={`template:${option.template.manifest.id}`}>
+                            <button
+                              type="button"
+                              className="project-add-gezel-option"
+                              disabled={busy}
+                              onClick={() => chooseTemplate(option.template)}
+                            >
+                              <GezelIcon
+                                poppetje={initialPoppetjeForGezel(
+                                  `project-role:${option.template.manifest.id}`,
+                                  option.template.manifest.name,
+                                )}
+                                name={option.template.manifest.name}
+                                size={36}
+                              />
+                              <span className="project-add-gezel-option-copy">
+                                <span className="project-add-gezel-option-name">
+                                  {option.template.manifest.name}
+                                </span>
+                                <span className="muted small">{option.affinity.reason}</span>
+                              </span>
+                              <span className="gz-badge">{badge}</span>
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </section>
+                )}
+
                 <section aria-labelledby="project-add-existing-title">
                   <h4 id="project-add-existing-title">From your workshop</h4>
                   {visibleGezels.length > 0 ? (
@@ -357,15 +561,17 @@ export function ProjectAddGezelDialog({
                     </ul>
                   ) : (
                     <p className="muted small project-add-gezel-empty">
-                      {availableGezels.length > 0
+                      {otherAvailableGezels.length > 0
                         ? 'No workshop gezels match that search.'
-                        : 'Every available gezel is already on this project.'}
+                        : suggestedOptions.some((option) => option.kind === 'existing')
+                          ? 'No other workshop gezels are available.'
+                          : 'Every available gezel is already on this project.'}
                     </p>
                   )}
                 </section>
 
                 <section aria-labelledby="project-add-role-title">
-                  <h4 id="project-add-role-title">Create a new role</h4>
+                  <h4 id="project-add-role-title">Add a new gezel for a role</h4>
                   {loading && <p className="muted small">Loading roles…</p>}
                   {!loading && visibleTemplates.length > 0 ? (
                     <ul className="project-add-gezel-list">
@@ -399,9 +605,11 @@ export function ProjectAddGezelDialog({
                   ) : (
                     !loading && (
                       <p className="muted small project-add-gezel-empty">
-                        {availableTemplates.length > 0
+                        {otherAvailableTemplates.length > 0
                           ? 'No new roles match that search.'
-                          : 'Every role type already has a gezel.'}
+                          : suggestedOptions.some((option) => option.kind === 'template')
+                            ? 'No other role types are available.'
+                            : 'Every role type already has a gezel.'}
                       </p>
                     )
                   )}

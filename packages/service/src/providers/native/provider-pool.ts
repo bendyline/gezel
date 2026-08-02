@@ -19,7 +19,11 @@
 
 import { createLogger } from '@bendyline/gezel';
 import type { LLMProvider } from '../types.js';
-import { type CapacityBroker, formatCapacityDenial } from './capacity-broker.js';
+import {
+  type CapacityBroker,
+  CapacityDeniedError,
+  formatCapacityDenial,
+} from './capacity-broker.js';
 import {
   type LocalProviderName,
   type ParsedEngineKey,
@@ -123,6 +127,14 @@ export interface PoolSnapshot {
   committedBytes: number;
   budgetBytes: number;
   enforced: boolean;
+  /** Physical RAM — the Settings slider's ceiling. */
+  systemRamBytes: number;
+  /** What the host would auto-derive; the slider's "Auto" mark. */
+  autoBudgetBytes: number;
+  /** True when `localEngineMemoryGb` is overriding the auto value. */
+  overridden: boolean;
+  /** Which pools back the budget — see {@link CapacityCommitted.pools}. */
+  pools: import('./capacity-broker.js').CapacityCommitted['pools'];
 }
 
 /**
@@ -349,13 +361,14 @@ export class ProviderPool {
     if (!this.broker.canReserve(residentBytes)) {
       const c = this.broker.committed();
       log.error(capacityDenialLogLine(key, this.broker.denialReason(residentBytes)));
-      throw new Error(
+      throw new CapacityDeniedError(
         formatCapacityDenial({
           modelLabel: modelId,
           requestedBytes: residentBytes,
           budgetBytes: c.budgetBytes,
           committedBytes: c.committedBytes,
           systemRamBytes: c.systemRamBytes,
+          pools: c.pools,
         }),
       );
     }
@@ -376,13 +389,14 @@ export class ProviderPool {
       if (!r2.granted) {
         const c = this.broker.committed();
         log.error(capacityDenialLogLine(key, r2.reason ?? this.broker.denialReason(finalBytes)));
-        throw new Error(
+        throw new CapacityDeniedError(
           formatCapacityDenial({
             modelLabel: modelId,
             requestedBytes: finalBytes,
             budgetBytes: c.budgetBytes,
             committedBytes: c.committedBytes,
             systemRamBytes: c.systemRamBytes,
+            pools: c.pools,
           }),
         );
       }
@@ -771,6 +785,10 @@ export class ProviderPool {
       committedBytes: committed.committedBytes,
       budgetBytes: committed.budgetBytes,
       enforced: committed.enforced,
+      systemRamBytes: committed.systemRamBytes,
+      autoBudgetBytes: committed.autoBudgetBytes,
+      overridden: committed.overridden,
+      pools: committed.pools,
     };
   }
 

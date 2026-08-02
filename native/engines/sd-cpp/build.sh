@@ -88,6 +88,16 @@ cmake_flags=(
   # here into sd-server itself. See the longer note in
   # native/engines/llama-cpp/build.sh.
   -DGGML_OPENMP=OFF
+  # Do not pin the CPU backend to the build host. ggml defaults
+  # GGML_NATIVE=ON, i.e. `-march=native`, so the shipped binary would
+  # require whatever ISA the CI runner happened to have and SIGILL on
+  # anything less. NATIVE=OFF gives ggml's declared baseline instead —
+  # a floor we choose rather than one the runner pool chooses for us.
+  # Unlike llama-cpp, sd.cpp cannot take the GGML_BACKEND_DL route to
+  # per-ISA runtime dispatch: nothing in its sources calls
+  # ggml_backend_load_all(), so dlopen-able backend modules would
+  # register nothing and the server would find no backend at all.
+  -DGGML_NATIVE=OFF
   # Upstream's examples/server/CMakeLists.txt auto-builds the
   # sdcpp-webui React frontend via `pnpm install && pnpm run
   # build` whenever `pnpm` is on PATH. CI's ubuntu-latest runner

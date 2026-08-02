@@ -27,6 +27,8 @@
 import type { ConfigResponse, LocalActiveInstall } from '@bendyline/gezel-client';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
+import { ReportErrorLink } from './ReportErrorLink.js';
+import { useCopilotAvailability } from './useCopilotAvailability.js';
 
 interface Props {
   config: ConfigResponse;
@@ -112,6 +114,7 @@ export function FirstRunInstallBanner({ config, onConfigChanged, onModelInstalle
   const [fallbackBusy, setFallbackBusy] = useState(false);
   const [downloadBusy, setDownloadBusy] = useState(false);
   const installedNotifiedRef = useRef(false);
+  const copilotAvailability = useCopilotAvailability();
 
   const check = useCallback(async () => {
     // Only applies to the two on-device first-run flows.
@@ -335,14 +338,28 @@ export function FirstRunInstallBanner({ config, onConfigChanged, onModelInstalle
 
   /**
    * Cloud fallback — only valid when the error left the user with no
-   * working on-device setup. Swaps provider to Copilot; the user can
-   * still manually retry the on-device install later from Settings.
+   * working on-device setup. The user can still manually retry the
+   * on-device install later from Settings.
+   *
+   * Copilot's runtime is an opt-in download, so switching the provider is
+   * only honest once it's installed. When it isn't, send the user to the
+   * tab that can install it rather than pointing their config at something
+   * that would fail on the first message. This is the one place we keep
+   * offering Copilot when it's unavailable — it's the user's escape from a
+   * broken on-device install, so hiding it outright would strand them.
    */
   const switchToCopilot = useCallback(async () => {
+    if (copilotAvailability?.available === false) {
+      window.dispatchEvent(
+        new CustomEvent('gezel:navigate', { detail: { view: 'settings', section: 'copilot' } }),
+      );
+      setState({ kind: 'hidden' });
+      return;
+    }
     const next = await api.updateConfig({ provider: 'copilot' });
     onConfigChanged(next);
     setState({ kind: 'hidden' });
-  }, [onConfigChanged]);
+  }, [onConfigChanged, copilotAvailability]);
 
   /**
    * MLX-specific escape hatch. If MLX first-run failed (Python venv
@@ -491,8 +508,24 @@ export function FirstRunInstallBanner({ config, onConfigChanged, onModelInstalle
           onClick={() => void switchToCopilot()}
           disabled={retryBusy || fallbackBusy}
         >
-          Use GitHub Copilot instead
+          {copilotAvailability?.available === false
+            ? 'Set up GitHub Copilot'
+            : 'Use GitHub Copilot instead'}
         </button>
+        {/* Not offered on a checksum mismatch: that is Hugging Face
+            republishing a file, which the copy above already explains as
+            expected — not something wrong with Gezel. Last in the row,
+            because a report is what you do after the fixes fail. */}
+        {!isMismatch && (
+          <ReportErrorLink
+            className="first-run-banner-btn"
+            report={{
+              surface: 'model-download',
+              message: state.error,
+              detail: { code: 'first-run-install-failed', engine: state.provider },
+            }}
+          />
+        )}
       </div>
     </output>
   );
@@ -612,11 +645,11 @@ function modelDisplay(id: string): string {
   // in `config.defaultModel` — keep the alias so labels stay correct until
   // the next install rewrites the pin. Unknown ids fall back to the raw id.
   switch (id) {
-    case 'gemma4-e2b-q8':
+    case 'gemma4-e2b-q4':
     case 'gemma4-e2b':
     case 'gemma4-e2b-mlx':
       return 'Gemma 4 (E2B)';
-    case 'gemma4-e4b-q8':
+    case 'gemma4-e4b-q4':
     case 'gemma4-e4b':
     case 'gemma4-e4b-mlx':
       return 'Gemma 4 (E4B)';

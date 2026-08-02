@@ -7,9 +7,10 @@ import {
 } from '../../gezels/autonomous-roles.js';
 import { ensureIndexingJobTask } from '../../index-store/indexing-job.js';
 import { getCliDetections } from '../../providers/cli-detection.js';
+import { resolveDefaultProviderName } from '../../providers/default-provider.js';
 import { resolveGpuPolicy } from '../../providers/gpu-arbiter.js';
 import type { ProviderCredentialName, SecretStore } from '../../secrets/types.js';
-import { resolveSystemLibraryPath } from '../../system-toolsets/resolve.js';
+import { resolveInstalledSystemLibrary } from '../../system-toolsets/resolve.js';
 import type { ServiceContext } from '../context.js';
 import { invalidateModelsCache } from './models.js';
 
@@ -142,12 +143,14 @@ export function configRoutes(ctx: ServiceContext): Hono {
   app.get('/', async (c) => {
     const config = await ctx.store.readConfig();
     const creds = await readCredentialView(ctx.secrets);
-    // Where the Copilot CLI has been unpacked at runtime (if bootstrap
-    // has run). Drives the Home tab's sign-in hint: `cd <path> && npx
-    // copilot login` reuses the pinned + integrity-verified copy
-    // instead of downloading fresh from npm.
-    const copilotCliInstallDir =
-      (await resolveSystemLibraryPath(ctx.home, '@github/copilot-sdk')) ?? undefined;
+    // Where the Copilot CLI has been unpacked at runtime (if the user has
+    // installed it). Drives the Copilot tab's sign-in hint: `cd <path> &&
+    // npx copilot login` reuses the integrity-verified copy instead of
+    // downloading fresh from npm. Version-tolerant so a pin bump doesn't
+    // strip the login command out from under someone mid-upgrade.
+    const copilotCliInstallDir = (
+      await resolveInstalledSystemLibrary(ctx.home, '@github/copilot-sdk')
+    )?.path;
     // CLI-binary health probes for the `anthropic-cli` / `codex-cli`
     // providers. Cached 60s — the Settings UI polls config across most
     // user interactions, and we don't want to spawn `<bin> --version`
@@ -161,7 +164,7 @@ export function configRoutes(ctx: ServiceContext): Hono {
     // Mask secrets so they don't leak into the UI. The has* booleans let
     // the UI know whether a given credential is configured.
     return c.json({
-      provider: config.provider ?? 'copilot',
+      provider: resolveDefaultProviderName(config),
       ...creds,
       ollamaBaseUrl: config.ollamaBaseUrl,
       autoStartOllama: config.autoStartOllama ?? true,
@@ -499,6 +502,15 @@ export function configRoutes(ctx: ServiceContext): Hono {
         ctx.chat.setCacheBudget('llama-cpp', mb['llama-cpp'] * 1024 * 1024);
       }
     }
+    // Same contract for the local-engine memory budget: push it into the
+    // live broker so the slider takes effect on the next model spawn
+    // instead of the next daemon restart. `null` reverts to auto. A shrink
+    // never evicts — it just makes the next reserve fail until the pool's
+    // LRU frees room, so moving the slider can't sever a running turn.
+    if (body.localEngineMemoryGb !== undefined) {
+      const gb = body.localEngineMemoryGb;
+      await ctx.chat.setLocalEngineMemoryBudget(gb === null ? null : Math.round(gb * 1024 ** 3));
+    }
     // GPU memory policy: hot-swap on the live arbiter so the next
     // chat turn / image gen sees the new behavior without a restart.
     // `'auto'` is resolved to a concrete policy via the same helper
@@ -528,7 +540,7 @@ export function configRoutes(ctx: ServiceContext): Hono {
     }
     const creds = await readCredentialView(ctx.secrets);
     return c.json({
-      provider: updated.provider ?? 'copilot',
+      provider: resolveDefaultProviderName(updated),
       ...creds,
       ollamaBaseUrl: updated.ollamaBaseUrl,
       autoStartOllama: updated.autoStartOllama ?? true,
@@ -643,7 +655,7 @@ export function configRoutes(ctx: ServiceContext): Hono {
       {
         gezel: created,
         config: {
-          provider: updated.provider ?? 'copilot',
+          provider: resolveDefaultProviderName(updated),
           ...creds,
           ollamaBaseUrl: updated.ollamaBaseUrl,
           autoStartOllama: updated.autoStartOllama ?? true,
@@ -689,7 +701,7 @@ export function configRoutes(ctx: ServiceContext): Hono {
       {
         gezel: created,
         config: {
-          provider: updated.provider ?? 'copilot',
+          provider: resolveDefaultProviderName(updated),
           ...creds,
           ollamaBaseUrl: updated.ollamaBaseUrl,
           autoStartOllama: updated.autoStartOllama ?? true,
@@ -729,7 +741,7 @@ export function configRoutes(ctx: ServiceContext): Hono {
       {
         gezel: created,
         config: {
-          provider: updated.provider ?? 'copilot',
+          provider: resolveDefaultProviderName(updated),
           ...creds,
           ollamaBaseUrl: updated.ollamaBaseUrl,
           autoStartOllama: updated.autoStartOllama ?? true,
@@ -776,7 +788,7 @@ export function configRoutes(ctx: ServiceContext): Hono {
       {
         gezel: created,
         config: {
-          provider: updated.provider ?? 'copilot',
+          provider: resolveDefaultProviderName(updated),
           ...creds,
           ollamaBaseUrl: updated.ollamaBaseUrl,
           autoStartOllama: updated.autoStartOllama ?? true,

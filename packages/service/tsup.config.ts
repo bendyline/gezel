@@ -1,6 +1,7 @@
 import { cpSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { defineConfig } from 'tsup';
+import { stripSourcemapCommentsFromBuild } from '../../scripts/strip-sourcemap-comments.mjs';
 
 export default defineConfig({
   entry: {
@@ -14,6 +15,10 @@ export default defineConfig({
     // inference runs off the Electron main thread; must exist as its own file
     // for `new Worker(...)` to resolve at runtime.
     'memory/embed-worker': 'src/memory/embed-worker.ts',
+    // npm's macOS node-pty prebuild currently publishes spawn-helper without
+    // its execute bit. This lifecycle entry repairs the installed dependency
+    // after npm has laid out the consumer tree.
+    postinstall: 'src/postinstall.ts',
     // Standalone subpath (`@bendyline/gezel-service/handboek`) so the CLI's
     // static-site export can run the documentation engine without importing
     // the whole daemon.
@@ -108,5 +113,6 @@ export default defineConfig({
         `[tsup] no UI bundle at ${uiSrc} — run \`pnpm --filter @bendyline/gezel-ui build\` before building the service to ship the browser UI (\`gezel start --web\`). The daemon still runs headless without it.`,
       );
     }
+    await stripSourcemapCommentsFromBuild();
   },
 });

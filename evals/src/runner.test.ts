@@ -285,7 +285,7 @@ describe('evalDaemonEnvForTrial', () => {
 
 describe('slugifyForDirName', () => {
   it('passes through already-clean ids', () => {
-    expect(slugifyForDirName('gemma4-e4b-q8')).toBe('gemma4-e4b-q8');
+    expect(slugifyForDirName('gemma4-e4b-q4')).toBe('gemma4-e4b-q4');
     expect(slugifyForDirName('gpt-5')).toBe('gpt-5');
   });
 
@@ -338,7 +338,7 @@ describe('makeTrialId', () => {
     // keeps the old shape for `llama-cpp` so ad-hoc shell scripts
     // grepping `tictactoe-2026-...` keep matching when nothing
     // changed about how they're running trials.
-    const id = makeTrialId('tictactoe', 'llama-cpp', 'gemma4-e4b-q8');
+    const id = makeTrialId('tictactoe', 'llama-cpp', 'gemma4-e4b-q4');
     expect(id.startsWith('tictactoe-gemma4-e4b-')).toBe(true);
     expect(id).not.toContain('-llama-cpp-');
   });

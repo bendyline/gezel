@@ -62,15 +62,16 @@ fileAssociations:
 # above; loose is fine.
 files:
   - dist/main.js
-  - dist/main.js.map
   - dist/preload.cjs
   - dist/extract-service-bundle.js
-  - dist/extract-service-bundle.js.map
   - dist/service-bundle.tar.gz
   - dist/service-bundle.meta.json
   - dist/pnpm-bundle/**/*
   - dist/node-bundle/**/*
   - dist/ui/**/*
+  # Vite source maps are useful in the build tree but not loaded by the
+  # packaged renderer. The RC shipped 215 of them (70.8 MiB) as loose files.
+  - '!dist/ui/**/*.map'
   - native-bin/**/*
   - assets/icon.png
   - assets/icon.ico
@@ -132,11 +133,9 @@ asarUnpack:
   # the corrupted asar window entirely. Delete the four entries below when
   # electron-builder fixes the underlying bug.
   - dist/main.js
-  - dist/main.js.map
   - dist/preload.cjs
   - package.json
   - dist/extract-service-bundle.js
-  - dist/extract-service-bundle.js.map
   - dist/service-bundle.tar.gz
   - dist/service-bundle.meta.json
   - dist/pnpm-bundle/**/*
@@ -267,10 +266,27 @@ mac:
     - target: pkg
       arch:
         - arm64
-    # electron-updater's MacUpdater consumes a signed app ZIP and
-    # latest-mac.yml; it cannot install the privileged first-install PKG.
-    # Ship both: PKG for initial installation/system-service registration,
-    # ZIP for Squirrel.Mac application updates.
+    # DO NOT REMOVE, even though nothing ever downloads this ZIP.
+    #
+    # It looks like dead weight — ~447 MB per release for a file no user
+    # fetches. Squirrel.Mac never sees it: src/updater/mac-pkg.ts sets
+    # `autoDownload = false` on darwin and downloads the signed PKG itself
+    # (MacUpdater excludes pkg/dmg and cannot elevate for the LaunchDaemon).
+    # So MacUpdater.doDownloadUpdate — the only code that resolves this file —
+    # is unreachable, and `quitAndInstall` is guarded off on darwin too.
+    #
+    # But the ZIP *target* is the only macOS target that emits
+    # `latest-mac.yml`. `PkgTarget` writes no update info at all, and
+    # `ArchiveTarget` gates its update-info generation on
+    # `isWriteUpdateInfo && format === "zip"` (app-builder-lib
+    # macPackager.ts constructs the mac zip target with that flag set).
+    # Delete this target and the feed disappears, so
+    # `GenericProvider.getLatestVersion()` 404s on latest-mac.yml and throws
+    # ERR_UPDATER_CHANNEL_FILE_NOT_FOUND — macOS stops discovering updates
+    # entirely, silently, because the PKG download path never gets that far.
+    #
+    # Verified against electron-updater 6.8.9 / app-builder-lib 26.15.3 and
+    # pinned by scripts/mac-update-contract.test.mjs.
     - target: zip
       arch:
         - arm64

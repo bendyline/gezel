@@ -175,7 +175,7 @@ export async function discoverOrSpawn(
   const child = spawnFn(process.execPath, [daemonEntry], {
     detached,
     stdio,
-    env: env ?? process.env,
+    env: daemonSpawnEnv(env ?? process.env),
   });
   if (detached) child.unref();
 
@@ -209,6 +209,35 @@ export async function discoverOrSpawn(
   throw new Error(
     `Timed out after ${timeoutMs}ms waiting for gezeld to start. Check ~/.gezel/logs/.`,
   );
+}
+
+/**
+ * Environment for the spawned daemon.
+ *
+ * We launch `process.execPath`, and under Electron that is the *app* binary,
+ * not node. Without `ELECTRON_RUN_AS_NODE` Electron ignores the script
+ * argument and boots a second copy of Gezel, which never writes runtime files
+ * — so the caller waits out its entire startup budget, kills the child, and
+ * falls back to embedded. Worse, that second app reaches this same branch and
+ * spawns a third, leaving orphans behind when the parent gives up. Electron
+ * reads the variable at launch, so it has to be in the child's environment;
+ * there is no command-line equivalent.
+ *
+ * Keyed off `process.versions.electron` rather than set unconditionally,
+ * because the CLI's `execPath` is already node and node has no use for it.
+ * That also keeps the non-Electron path byte-identical to before, including
+ * passing `process.env` through by reference.
+ *
+ * Always a fresh object when we do add it: `env` is usually `process.env`
+ * itself, and mutating that would leak the flag into every later spawn from
+ * this process — including any relaunch of the app, which the flag breaks.
+ *
+ * The macOS LaunchDaemon sets exactly this for the installed service, so the
+ * daemon and its own children are already proven to run under it.
+ */
+function daemonSpawnEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  if (!process.versions.electron) return env;
+  return { ...env, ELECTRON_RUN_AS_NODE: '1' };
 }
 
 function remainingMs(deadline: number): number {

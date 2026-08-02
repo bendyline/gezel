@@ -15,16 +15,15 @@ import { writeFileAtomic } from '../fs/atomic.js';
  * Shape:
  *   { scripts: { build: 'approved' | 'declined', ... },
  *     npx:     { vitest: 'approved', ... },
- *     scriptHashes: { build: '<sha256 of the approved body>' },
+ *     scriptHashes: { build: '<sha256 of the approved invocation>' },
  *     npxHashes:    { ... } }
  *
- * An `approved` decision is honored ONLY while the command's body hash
- * still matches the hash captured at approval time. Args are NOT part of
- * the key (consistent with how `npm_install` approves a package, not a
- * version-arg combo), but the BODY is — otherwise a prompt-injected model
- * could rewrite an approved `build` script to run arbitrary code and
- * replay the old approval with no fresh prompt. A changed body (or a
- * legacy approval stored before hashing existed) forces a re-prompt.
+ * An `approved` decision is honored ONLY while the command body/path and
+ * ordered argument vector match what the user saw. Otherwise a
+ * prompt-injected model could approve a benign invocation and replay the
+ * stored decision with shell metacharacters or materially different tool
+ * arguments. A changed body, changed arguments, or a legacy body-only
+ * approval forces a re-prompt.
  */
 
 export type CommandApprovalDecision = 'approved' | 'declined';
@@ -36,10 +35,13 @@ export interface CommandApprovalsFile {
   npxHashes?: Record<string, string>;
 }
 
-/** sha256 of the resolved command body; the approval key's content anchor. */
-export function hashCommandBody(body: string | undefined): string | undefined {
-  if (body === undefined) return undefined;
-  return createHash('sha256').update(body).digest('hex');
+/** sha256 of the exact body/path + ordered args the user approved. */
+export function hashCommandInvocation(body: string | undefined, args: readonly string[]): string {
+  // The versioned JSON envelope is unambiguous and deliberately differs
+  // from legacy sha256(body) values, so upgrades fail closed and prompt
+  // once under the new exact-invocation contract.
+  const payload = JSON.stringify({ version: 1, body: body ?? null, args });
+  return createHash('sha256').update('gezel-command-invocation\0').update(payload).digest('hex');
 }
 
 function approvalsPath(home: string, projectId: string): string {
@@ -79,18 +81,17 @@ export function lookupApproval(
   file: CommandApprovalsFile,
   scope: CommandApprovalScope,
   name: string,
-  contentHash?: string,
+  invocationHash?: string,
 ): CommandApprovalDecision | undefined {
   const bucket = scope === 'script' ? file.scripts : file.npx;
   const decision = bucket[name];
   // A decline (or no decision) passes through unchanged.
   if (decision !== 'approved') return decision;
-  // An approval is honored only while the body still hashes to what the
-  // user approved. No caller-supplied hash → legacy name-only match. A
-  // missing (pre-hashing) or mismatched stored hash forces a re-prompt.
-  if (contentHash === undefined) return 'approved';
+  // An approval without an exact invocation hash is never executable.
+  // Missing legacy hashes and body-only hashes both force a re-prompt.
+  if (invocationHash === undefined) return undefined;
   const hashes = scope === 'script' ? file.scriptHashes : file.npxHashes;
-  return hashes?.[name] === contentHash ? 'approved' : undefined;
+  return hashes?.[name] === invocationHash ? 'approved' : undefined;
 }
 
 export async function recordApproval(
@@ -99,7 +100,7 @@ export async function recordApproval(
   scope: CommandApprovalScope,
   name: string,
   decision: CommandApprovalDecision,
-  contentHash?: string,
+  invocationHash?: string,
 ): Promise<void> {
   const existing = await readCommandApprovals(home, projectId);
   const scriptHashes = { ...existing.scriptHashes };
@@ -113,8 +114,8 @@ export async function recordApproval(
   const bucket = scope === 'script' ? next.scripts : next.npx;
   const hashes = scope === 'script' ? scriptHashes : npxHashes;
   bucket[name] = decision;
-  // Only an approval pins a body hash; a decline clears any stale one.
-  if (decision === 'approved' && contentHash) hashes[name] = contentHash;
+  // Only an approval pins an exact invocation hash; a decline clears any stale one.
+  if (decision === 'approved' && invocationHash) hashes[name] = invocationHash;
   else delete hashes[name];
   await writeCommandApprovals(home, projectId, next);
 }

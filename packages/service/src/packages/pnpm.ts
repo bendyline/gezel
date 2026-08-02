@@ -40,6 +40,12 @@ export interface RunPnpmOptions {
   /** Called with each chunk of combined output as it streams in. */
   onLine?: (chunk: string) => void;
   /**
+   * Terminates the child when aborted. Resolves like any other failure
+   * (`ok: false`) rather than rejecting — callers decide whether a
+   * cancellation is an error in their context.
+   */
+  signal?: AbortSignal;
+  /**
    * Lifecycle-script policy:
    *   - `'ignore'` (default): prepend `--ignore-scripts`, blocking
    *     post-install hooks — the supply-chain vector install paths
@@ -159,11 +165,21 @@ export function runPnpm(args: string[], opts: RunPnpmOptions): Promise<PnpmResul
       opts.onLine?.(s);
     });
 
+    const onAbort = () => child.kill('SIGTERM');
+    if (opts.signal) {
+      if (opts.signal.aborted) onAbort();
+      else opts.signal.addEventListener('abort', onAbort, { once: true });
+    }
+    const settle = (result: PnpmResult) => {
+      opts.signal?.removeEventListener('abort', onAbort);
+      resolve(result);
+    };
+
     child.on('error', (err) => {
-      resolve({ ok: false, code: null, stdout, stderr: `${stderr}\n${err.message}`, log });
+      settle({ ok: false, code: null, stdout, stderr: `${stderr}\n${err.message}`, log });
     });
     child.on('close', (code) => {
-      resolve({ ok: code === 0, code, stdout, stderr, log });
+      settle({ ok: code === 0, code, stdout, stderr, log });
     });
   });
 }

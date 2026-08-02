@@ -1,5 +1,5 @@
 import type { CommandApprovalIntent, QuestionAnswer } from '@bendyline/gezel';
-import { hashCommandBody, recordApproval } from './command-approvals.js';
+import { hashCommandInvocation, recordApproval } from './command-approvals.js';
 
 /**
  * Translate an answered `command-approval` question into:
@@ -25,9 +25,9 @@ export async function applyCommandApprovalAnswer(
     opts.intent.scope === 'script'
       ? `\`npm run ${opts.intent.name}\``
       : `\`npx ${opts.intent.name}\``;
-  // Pin the approval to the body the user actually saw, so a later
-  // rewrite of an approved script forces a fresh prompt.
-  const contentHash = hashCommandBody(opts.intent.body);
+  // Pin the approval to the exact body/path and argument vector the user
+  // saw, so neither can be changed on replay without a fresh prompt.
+  const invocationHash = hashCommandInvocation(opts.intent.body, opts.intent.args ?? []);
   const answer = opts.answer;
   if (!answer || answer.declined) {
     await recordApproval(
@@ -36,7 +36,7 @@ export async function applyCommandApprovalAnswer(
       opts.intent.scope,
       opts.intent.name,
       'declined',
-      contentHash,
+      invocationHash,
     );
     return `[command-approval follow-up: user declined ${verb}. Don't retry; try a different approach.]`;
   }
@@ -49,7 +49,7 @@ export async function applyCommandApprovalAnswer(
     opts.intent.scope,
     opts.intent.name,
     decision,
-    contentHash,
+    invocationHash,
   );
   if (decision === 'approved') {
     return `[command-approval follow-up: user approved ${verb}. You may now call the tool again to run it.]`;

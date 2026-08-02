@@ -26,7 +26,11 @@ import {
   streamAllChatEvents,
 } from '@bendyline/gezel-client/node';
 import { autostart } from './autostart/index.js';
-import { isAllowedTopLevelNavigation, isExactApprovedPath } from './electron-boundaries.js';
+import {
+  daemonEntrypointArgument,
+  isAllowedTopLevelNavigation,
+  isExactApprovedPath,
+} from './electron-boundaries.js';
 import { findGezmodelArguments, portableGezmodelFilename } from './model-bundle-files.js';
 import { QuitCoordinator } from './quit-coordinator.js';
 import { splashStage } from './splash-stage.js';
@@ -133,6 +137,23 @@ const packagedSmokeExpectedVersion =
 // productName in electron-builder.yml only takes effect inside
 // packaged builds — dev runs need this explicit setName to match.
 app.setName('Gezel');
+
+// We were handed the daemon entrypoint but booted as an application, which
+// means whoever spawned us forgot `ELECTRON_RUN_AS_NODE=1` (see
+// `daemonSpawnEnv` in @bendyline/gezel-client). Electron silently ignores a
+// script argument in app mode, so without this the supervisor's spawn branch
+// starts a second Gezel instead of gezeld: it never writes runtime files, the
+// parent burns its whole startup budget waiting, falls back to embedded, and
+// this copy spawns a third before anyone gives up. Fail immediately and name
+// the cause instead.
+const daemonEntryArgument = daemonEntrypointArgument(process.argv);
+if (daemonEntryArgument) {
+  console.error(
+    `[app] refusing to boot: launched as an application with the daemon entrypoint ${daemonEntryArgument}. Spawn gezeld with ELECTRON_RUN_AS_NODE=1 in the child environment.`,
+  );
+  app.exit(1);
+}
+
 if (packagedSmoke) {
   process.stderr.write('[packaged-smoke] main module imported\n');
 }

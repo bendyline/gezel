@@ -55,6 +55,13 @@ export interface RecoDevice {
   totalRamBytes: number;
   /** The fast memory budget (VRAM on a discrete card, a RAM fraction otherwise). */
   usableBytes: number;
+  /**
+   * What the capacity broker will admit across every pool — `budgetBytes`
+   * from `/api/system/memory`. Optional so older callers keep working; when
+   * present it becomes the runnable ceiling, so we never recommend a model
+   * the daemon then refuses to load.
+   */
+  budgetBytes?: number;
 }
 
 export interface RecoPick {
@@ -190,6 +197,7 @@ export function pickRecommendedModel(
         usableBytes: device.usableBytes,
         totalRamBytes: device.totalRamBytes,
         gpuVramBytes: device.gpuVramBytes,
+        ...(device.budgetBytes !== undefined ? { admissibleBytes: device.budgetBytes } : {}),
       });
       return {
         m,

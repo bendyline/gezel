@@ -148,7 +148,7 @@ describe('lintChatModelManifest rules', () => {
   describe('cross-engine quant parity', () => {
     const twoEngine = (llamaCpp: object, mlx: object) => ({ ...complete, llamaCpp, mlx });
 
-    it('flags a bit-width mismatch (the gemma4-e4b-q8 8-bit-vs-4-bit case)', () => {
+    it('flags a bit-width mismatch (the gemma4-e4b-q4 8-bit-vs-4-bit case)', () => {
       const r = lintChatModelManifest(
         twoEngine(
           {

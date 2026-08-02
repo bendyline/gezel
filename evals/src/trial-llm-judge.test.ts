@@ -22,7 +22,7 @@ beforeEach(async () => {
     JSON.stringify({
       trialId: 'judge-trial',
       scenarioId: 'tictactoe',
-      modelId: 'gemma4-e4b-q8',
+      modelId: 'gemma4-e4b-q4',
       startedAt: '2026-07-10T00:00:00.000Z',
       finishedAt: '2026-07-10T00:00:01.000Z',
       durationMs: 1000,

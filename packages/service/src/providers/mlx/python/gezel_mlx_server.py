@@ -73,10 +73,10 @@ import tool_grammar  # noqa: E402
 # ───────── Leaked special-token scrub ─────────
 
 # Chat-template framing tokens — turn / sequence / tool-response
-# delimiters that tight quants (e.g. gemma4-e4b-q8) sometimes emit as
+# delimiters that tight quants (e.g. gemma4-e4b-q4) sometimes emit as
 # literal special-token text. `tokenizer.decode()` keeps special tokens,
 # so these render into the SSE content stream verbatim; wild-caught case
-# was gemma4-e4b-q8 streaming `<eos><|tool_response><eos>` after firing
+# was gemma4-e4b-q4 streaming `<eos><|tool_response><eos>` after firing
 # its tool calls. We scrub them at every detokenization site so they
 # never reach the client.
 #
@@ -104,7 +104,7 @@ def _generation_config_eos_ids(model_dir: str) -> "List[int]":
     """Read the stop-token set a model declares in generation_config.json.
 
     mlx's tokenizer wrapper doesn't always surface the full eos set the
-    model author declared. gemma4-e4b-q8 is the wild-caught case: it
+    model author declared. gemma4-e4b-q4 is the wild-caught case: it
     declares `eos_token_id: [1, 106, 50]` (`<eos>`, `<turn|>`,
     `<|tool_response>`), but the wrapper resolved a narrower set, so the
     batch engine never stopped on `<eos>` / `<|tool_response>` and
@@ -410,7 +410,7 @@ def _augment_serial_stop_set(processor, model_dir: str) -> None:
     The serial (non-batch) stream path stops on
     `tokenizer.stopping_criteria.eos_token_ids`, seeded at load from the
     tokenizer's own (sometimes narrower) eos set — the same gap that let
-    gemma4-e4b-q8 stream `<eos>` / `<|tool_response>` as text. We append
+    gemma4-e4b-q4 stream `<eos>` / `<|tool_response>` as text. We append
     the declared ids directly (not via `add_eos_token_ids`, which expects
     token *strings*). Defensive: mlx internals vary by version, so any
     structural mismatch is logged and skipped rather than crashing
@@ -1260,6 +1260,16 @@ class ChatMessageReq(BaseModel):
     role: str
     content: Any  # str or list[dict] (vision); we coerce to str below
     tool_call_id: Optional[str] = None
+    # Undeclared fields are dropped by pydantic, and a dropped
+    # `tool_calls` silently costs the model its own tool-call history:
+    # Gemma's template renders a `role: "tool"` message only when it can
+    # pair it with the preceding assistant call, so without this the
+    # whole call/result exchange vanishes from the prompt. Wild-caught
+    # on gemma4-26b-q4 — 62% of turns re-sent a prompt just ~5 tokens
+    # longer than the last, the model never saw a single tool result,
+    # and it re-issued the same call until the repeat-guard killed the
+    # turn. Qwen masked it: Hermes templates render a bare tool message.
+    tool_calls: Optional[List[Dict[str, Any]]] = None
 
 
 class ChatRequest(BaseModel):
@@ -1532,6 +1542,42 @@ async def cache_warm(req: CacheWarmRequest) -> JSONResponse:
     )
 
 
+def _template_tool_calls(tool_calls: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Shape OpenAI-wire tool calls for Jinja chat templates.
+
+    The wire format carries `function.arguments` as a JSON *string*;
+    HF chat templates near-universally expect a *mapping* and iterate it
+    (`arguments | items`, `arguments.path`). Qwen's template raises
+    `TypeError: Can only get item pairs from a mapping` on a string,
+    which `apply_chat_template`'s caller catches — and its last-resort
+    recovery is to re-render with `tools` dropped entirely, so a string
+    here costs the model its whole tool surface rather than one message.
+    Gemma's template tolerates both, which is why this only bites some
+    families. Parse when we can; pass through untouched when we can't
+    (a non-JSON string is still better than an exception).
+    """
+    shaped: List[Dict[str, Any]] = []
+    for call in tool_calls:
+        if not isinstance(call, dict):
+            shaped.append(call)
+            continue
+        fn = call.get("function")
+        args = fn.get("arguments") if isinstance(fn, dict) else None
+        if not isinstance(args, str):
+            shaped.append(call)
+            continue
+        try:
+            parsed = json.loads(args)
+        except (ValueError, TypeError):
+            shaped.append(call)
+            continue
+        if not isinstance(parsed, dict):
+            shaped.append(call)
+            continue
+        shaped.append({**call, "function": {**fn, "arguments": parsed}})
+    return shaped
+
+
 def _build_prompt(
     messages: List[ChatMessageReq],
     tools: Optional[List[Dict[str, Any]]] = None,
@@ -1568,7 +1614,18 @@ def _build_prompt(
         if isinstance(content, list):
             parts = [p.get("text", "") for p in content if isinstance(p, dict)]
             content = "\n".join(p for p in parts if p)
-        raw.append({"role": m.role, "content": content or ""})
+        entry: Dict[str, Any] = {"role": m.role, "content": content or ""}
+        # Carry the tool-call linkage through to the template. Rebuilding
+        # every message as bare {role, content} drops it, and Gemma's
+        # template then renders neither the assistant's call nor the
+        # `role: "tool"` result it belongs to — see ChatMessageReq.
+        # Only set when present so non-tool turns render byte-identically
+        # to before (the prompt cache keys on the rendered prefix).
+        if m.tool_calls:
+            entry["tool_calls"] = _template_tool_calls(m.tool_calls)
+        if m.tool_call_id:
+            entry["tool_call_id"] = m.tool_call_id
+        raw.append(entry)
 
     tokenizer = getattr(PROCESSOR, "tokenizer", None)
     use_tokenizer = (

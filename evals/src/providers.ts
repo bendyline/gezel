@@ -132,8 +132,10 @@ export function isSelfOrchestratingProvider(p: ChatProvider): boolean {
  * Default chat model id for each provider. Used when the user runs
  * `pnpm eval:run <scenario>` with `--provider <p>` but no `--model`.
  *
- * llama-cpp keeps its historical default (`gemma4-e4b-q8`) — what every
- * existing tuning postmortem is calibrated against. MLX uses the smaller
+ * llama-cpp keeps the Gemma-4 E4B slot as its default, now `gemma4-e4b-q4`.
+ * Postmortems written before the QAT-Q4 swap were calibrated against the
+ * Q8_0 weights this id used to name, so treat scores across that boundary as
+ * a different baseline rather than a continuous series. MLX uses the smaller
  * `qwen3.5-4b-q4` as its fast default; both it and Gemma-4 E4B now ship
  * working MLX sources, so explicit E4B trials remain available. Cloud / CLI
  * providers pick a current flagship that's a reasonable fit for the anchored
@@ -145,7 +147,7 @@ export function isSelfOrchestratingProvider(p: ChatProvider): boolean {
 export function defaultModelFor(p: ChatProvider): string {
   switch (p) {
     case 'llama-cpp':
-      return 'gemma4-e4b-q8';
+      return 'gemma4-e4b-q4';
     case 'mlx':
       return 'qwen3.5-4b-q4';
     case 'ds4':

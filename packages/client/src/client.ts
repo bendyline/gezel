@@ -47,6 +47,7 @@ import type {
   CodeReviewResponse,
   CompleteStepRequest,
   CompleteStepResponse,
+  CopilotAvailability,
   CopyArtifactToWorkspaceRequest,
   CopyArtifactToWorkspaceResponse,
   Craftbook,
@@ -279,6 +280,9 @@ import type {
   SuggestedWorkItem,
   SuggestedWorkResponse,
   SystemBootstrapStatus,
+  SystemDiagnostics,
+  SystemToolsetInstallEvent,
+  SystemToolsetInstallSnapshot,
   Task,
   TaskAssignee,
   TaskStatus,
@@ -325,6 +329,7 @@ import {
   type RecognitionPullEvent,
   RecognitionPullEventSchema,
   type RecognitionRequest,
+  SystemToolsetInstallEventSchema,
   VideoModelPullEventSchema,
 } from '@bendyline/gezel/schemas';
 import { z } from 'zod';
@@ -567,6 +572,27 @@ export interface EngineStatusResponse {
   budgetBytes: number;
   committedBytes: number;
   entries: EngineStatusEntry[];
+  /** Physical RAM — the memory slider's ceiling. Absent pre-boot. */
+  systemRamBytes?: number;
+  /** Host-derived budget; the slider's "Auto" mark. Absent pre-boot. */
+  autoBudgetBytes?: number;
+  /** True when `localEngineMemoryGb` overrides the auto value. */
+  overridden?: boolean;
+  /**
+   * Which memory pools the budget draws on. A discrete-GPU host's budget is
+   * graphics memory PLUS a system-RAM share, so describing it as a slice of
+   * RAM (the only shape this response used to carry) names the wrong pool.
+   * Absent pre-boot and on daemons that predate the field.
+   */
+  pools?: {
+    kind: 'unified' | 'discrete-gpu' | 'system-ram';
+    /** Usable VRAM on a discrete card; 0 on unified / CPU-only hosts. */
+    vramBytes: number;
+    /** The system-RAM share of the budget. */
+    ramShareBytes: number;
+    /** Fast (on-accelerator) memory — VRAM on a card, the budget otherwise. */
+    fastBytes: number;
+  };
 }
 
 export interface ReconcileEnginePoolRequest {
@@ -837,10 +863,12 @@ export interface ConfigResponse {
   mlxKvBits?: number;
   /**
    * Multi-engine pool: combined RAM budget (GB) across all resident
-   * local engines. Unset → auto-derive as
-   * `min(systemRamGB * 0.6, 96)`. Authoritative when present.
+   * local engines. Unset → auto-derive from the host (unified-memory
+   * machines get a larger share than discrete-GPU ones — see
+   * `autoDetectBudgetBytes`). Authoritative when present; `null` clears
+   * the override and returns to auto.
    */
-  localEngineMemoryGb?: number;
+  localEngineMemoryGb?: number | null;
   /**
    * Multi-engine pool: per-model clone count keyed by catalog `modelId`.
    * Missing keys default to 1 resident replica.
@@ -1763,8 +1791,8 @@ export class GezelClient {
     return this.request('POST', '/api/night-shift/manual', { action });
   }
 
-  /** What the night shift is working on now (active) and queued (upcoming).
-   *  Both lists are empty when no shift is running. */
+  /** What the shift is working on now (background + active tasks), plus tasks
+   *  genuinely present in the runner queue (upcoming). */
   getNightShiftTasks(): Promise<NightShiftTasksResponse> {
     return this.request('GET', '/api/night-shift/tasks');
   }
@@ -2466,7 +2494,14 @@ export class GezelClient {
     totalRamBytes: number;
     gpuVramBytes: number | null;
     source: 'darwin-unified' | 'gpu-nvidia' | 'gpu-vulkan' | 'system-ram-fallback';
+    /** Fast memory: VRAM on a discrete card, a RAM fraction otherwise. */
     usableBytes: number;
+    /**
+     * What the capacity broker will admit, summed across every pool a
+     * resident engine can use — VRAM PLUS a system-RAM share on a discrete
+     * card. Optional: daemons that predate the field omit it.
+     */
+    budgetBytes?: number;
     gpuVendor?: 'amd' | 'nvidia' | 'intel';
   }> {
     return this.request('GET', '/api/system/memory');
@@ -2474,6 +2509,14 @@ export class GezelClient {
 
   getMachineMemoryUsage(): Promise<MachineMemoryUsage> {
     return this.request('GET', '/api/system/memory/usage');
+  }
+
+  /**
+   * Shareable machine profile for a bug report. Contains no paths, usernames,
+   * hostnames, or user content — see `SystemDiagnosticsSchema`.
+   */
+  getSystemDiagnostics(signal?: AbortSignal): Promise<SystemDiagnostics> {
+    return this.request('GET', '/api/system/diagnostics', undefined, undefined, signal);
   }
 
   deleteOllamaModel(name: string): Promise<{ ok: true }> {
@@ -4260,6 +4303,59 @@ export class GezelClient {
 
   systemToolsetStatusStreamUrl(): string {
     return `${this.baseUrl}/api/system-toolsets/status/stream`;
+  }
+
+  /** In-flight (and recently-finished) on-demand system-toolset installs. */
+  listSystemToolsetInstalls(): Promise<{ installs: SystemToolsetInstallSnapshot[] }> {
+    return this.request('GET', '/api/system-toolsets/installs');
+  }
+
+  /**
+   * Install — or attach to a running install of — an on-demand system
+   * toolset. Only entries flagged `onDemand` in the pinned manifest are
+   * installable this way; today that is the GitHub Copilot SDK.
+   *
+   * The job is server-owned and survives a listener disconnect, so aborting
+   * `signal` stops watching without stopping the install. Use
+   * {@link cancelSystemToolsetInstall} to actually stop it. Resolves on the
+   * terminal `done` or `error` event.
+   */
+  async installSystemToolset(
+    toolsetId: string,
+    onEvent: (event: SystemToolsetInstallEvent) => void,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    await consumeApiSseJson({
+      ...MODEL_DOWNLOAD_SSE_POLICY,
+      url: `${this.baseUrl}/api/system-toolsets/${encodeURIComponent(toolsetId)}/install`,
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${this.token}`,
+      },
+      signal,
+      fetch: this.fetchImpl,
+      schema: SystemToolsetInstallEventSchema,
+      onEvent,
+      isTerminal: (event) => event.type === 'done' || event.type === 'error',
+      label: `System toolset install stream for "${toolsetId}"`,
+    });
+  }
+
+  cancelSystemToolsetInstall(toolsetId: string): Promise<{ aborted: boolean }> {
+    return this.request('DELETE', `/api/system-toolsets/${encodeURIComponent(toolsetId)}/install`);
+  }
+
+  /**
+   * Whether GitHub Copilot is usable on this device, and via which rung of
+   * the resolution ladder (explicit `COPILOT_CLI_PATH`, our managed install,
+   * or a CLI the user installed themselves).
+   *
+   * The gate every "should we offer Copilot?" decision in the UI reads. Note
+   * `available: true` with `managed: 'absent'` is a normal state — it means
+   * the user brought their own CLI and must not be offered a download.
+   */
+  getCopilotStatus(): Promise<CopilotAvailability> {
+    return this.request('GET', '/api/system/copilot-status');
   }
 
   getMlxRuntimeStatus(): Promise<MlxRuntimeStatus> {

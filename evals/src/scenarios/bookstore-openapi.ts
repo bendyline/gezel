@@ -494,7 +494,7 @@ export function formatContractFailure(
   // Prefer the actionable error line: Node's ReferenceError/TypeError
   // messages carry their own remediation hint ("you can use import
   // instead"), and the old 200-char cap cut it off right before the
-  // hint (wild-caught: gemma4-e4b-q8 received the truncated half,
+  // hint (wild-caught: gemma4-e4b-q4 received the truncated half,
   // claimed it had fixed the file, and idled to a watchdog kill).
   const errorLine = stderr
     .split('\n')

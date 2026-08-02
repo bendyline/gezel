@@ -58,6 +58,13 @@ export function quoteWinShellToken(token: string): string {
  * CreateProcess, where quoting would be taken literally and become part
  * of the value.
  *
+ * When a shell is involved, return one fully quoted command line and an
+ * empty argv. Passing a non-empty argv alongside `shell: true` asks Node
+ * to concatenate the tokens itself, which is both the source of DEP0190
+ * and an easy way for a future caller to reintroduce injection by adding
+ * one unquoted argument. Keeping the shell command atomic makes the safe
+ * boundary explicit at the type-compatible spawn call site.
+ *
  * Use at every `shell: true` spawn site so command and arguments cannot
  * drift apart again; quoting one without the other is the bug this
  * module exists to prevent.
@@ -68,8 +75,9 @@ export function winShellSafe(
   shell: boolean,
 ): { command: string; args: string[] } {
   if (!shell) return { command, args: [...args] };
+  const tokens = [quoteWinShellToken(command), ...args.map(quoteWinShellToken)];
   return {
-    command: quoteWinShellToken(command),
-    args: args.map(quoteWinShellToken),
+    command: tokens.join(' '),
+    args: [],
   };
 }

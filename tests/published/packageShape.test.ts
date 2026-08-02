@@ -7,7 +7,7 @@
  * both.
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
@@ -130,6 +130,18 @@ describe('published package payloads', () => {
     expect(maps.map((f) => f.path)).toEqual([]);
   });
 
+  it.each(packages)('$name ships no dangling source-map references', ({ name, path }) => {
+    const references = packed
+      .get(name)!
+      .files.filter((file) => /\.(?:c|m)?js$/i.test(file.path))
+      .filter((file) => {
+        const source = readFileSync(resolve(path, file.path), 'utf8');
+        return /^(?:[\t ]*\/\/[#@]|[\t ]*\/\*[#@])\s*sourceMappingURL\s*=/m.test(source);
+      })
+      .map((file) => file.path);
+    expect(references).toEqual([]);
+  });
+
   it.each(packages)('$name stays inside its packed-size budget', ({ name }) => {
     const budget = PACKED_SIZE_BUDGETS[name];
     expect(budget, `no size budget declared for ${name}`).toBeDefined();
@@ -139,6 +151,22 @@ describe('published package payloads', () => {
   it.each(packages)('$name ships a README for its npm page', ({ name }) => {
     const files = packed.get(name)!.files.map((f) => f.path.toLowerCase());
     expect(files).toContain('readme.md');
+  });
+
+  it('does not ship the script stdlib test suite as runtime source', () => {
+    const files = packed
+      .get('@bendyline/gezel-script-stdlib')!
+      .files.map((file) => file.path.replace(/\\/g, '/'));
+    expect(files.some((file) => file.endsWith('.test.ts'))).toBe(false);
+  });
+
+  it('does not ship Python caches or test modules in the service payload', () => {
+    const files = packed
+      .get('@bendyline/gezel-service')!
+      .files.map((file) => file.path.replace(/\\/g, '/'));
+    expect(files.some((file) => file.includes('/__pycache__/'))).toBe(false);
+    expect(files.some((file) => file.endsWith('.pyc'))).toBe(false);
+    expect(files.some((file) => /\/(?:[^/]+_test|[^/]+_modeltest)\.py$/.test(file))).toBe(false);
   });
 
   it.each(packages)(
@@ -151,6 +179,9 @@ describe('published package payloads', () => {
         pkg.main,
         pkg.module,
         pkg.types,
+        (pkg as unknown as { scripts?: Record<string, string> }).scripts?.postinstall
+          ?.replace(/^node\s+/, '')
+          .replace(/^\.\//, './'),
       ].filter((t): t is string => typeof t === 'string' && t.startsWith('./'));
 
       for (const target of new Set(referenced)) {

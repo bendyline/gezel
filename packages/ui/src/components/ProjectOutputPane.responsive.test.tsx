@@ -14,7 +14,7 @@ class ResizeObserverMock {
   disconnect(): void {}
 }
 
-const longPageLabel = 'evals/src/scenarios/fixtures/petshop-gemma4-e4b-q8-2026-07-10-malformed';
+const longPageLabel = 'evals/src/scenarios/fixtures/petshop-gemma4-e4b-q4-2026-07-10-malformed';
 
 beforeEach(() => {
   (globalThis as { ResizeObserver?: typeof ResizeObserver }).ResizeObserver =

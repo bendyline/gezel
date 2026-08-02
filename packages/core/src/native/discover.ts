@@ -37,6 +37,8 @@ import { join } from 'node:path';
 import { detectLlamaBackend, resolveAvailableLlamaBinary } from './llama-backend.js';
 import type { DetectInput, GpuVendorHint, LlamaBackend } from './llama-backend.js';
 import { LLAMA_ENGINE_VERSION } from './llama-engine-version.js';
+import { isBinaryQuarantined, readLlamaQuarantine } from './llama-quarantine.js';
+import type { LlamaQuarantineEntry } from './llama-quarantine.js';
 import { resolvePlatformKey } from './platform-key.js';
 
 export type NativeBinaryName =
@@ -74,6 +76,11 @@ export interface DiscoverInput {
    * Production callers leave this unset and the probe uses real fs.
    */
   llamaProbeOverride?: DetectInput['probe'];
+  /**
+   * Test seam — pre-read quarantine entries. Production callers leave
+   * this unset and the list is read from `<home>/engines/llama-cpp/`.
+   */
+  quarantine?: readonly LlamaQuarantineEntry[];
   /** Optional logger; the service passes its own to thread service-style logs. */
   logger?: { info?: (m: string) => void; warn?: (m: string) => void };
 }
@@ -99,6 +106,12 @@ export interface DiscoverResult {
     reason: string;
     cached: boolean;
     vendorHint?: GpuVendorHint;
+    /**
+     * Backends skipped because they crashed on this machine. Present so
+     * the UI can say the GPU engine was demoted rather than leaving the
+     * user to infer it from a slow session.
+     */
+    quarantined?: LlamaBackend[];
   };
 }
 
@@ -201,6 +214,11 @@ export function discoverNativeBinaries(input: DiscoverInput): DiscoverResult {
     } else {
       const allowFallbacks =
         input.llamaCppBackendOverride === undefined || input.llamaCppBackendOverride === 'auto';
+      // Builds that crashed on this machine before ever becoming ready
+      // are routed around — see llama-quarantine.ts. Read once per
+      // discovery; the common case is an empty list and no extra I/O
+      // beyond the (missing) file.
+      const quarantine = input.quarantine ?? readLlamaQuarantine(input.home);
       const resolved = resolveAvailableLlamaBinary(
         probe.backend,
         (backend) =>
@@ -215,11 +233,35 @@ export function discoverNativeBinaries(input: DiscoverInput): DiscoverResult {
           // native trees staged before multi-variant packaging.
           resolveNativeBinaryUnder(dir, 'llama-server', platformKey, platform, fileExists),
         allowFallbacks,
+        quarantine.length > 0
+          ? (backend, path) => !isBinaryQuarantined(quarantine, backend, path)
+          : undefined,
       );
       if (resolved) {
         process.env.GEZEL_LLAMA_SERVER_BIN = resolved.path;
         process.env.GEZEL_LLAMA_SERVER_BACKEND = resolved.backend;
-        if (resolved.fallbackFrom) {
+        // Two different demotions, and conflating them sends whoever
+        // reads the log looking for a packaging bug that isn't there.
+        // `skippedUnusable` means the build shipped and does not run
+        // here; `fallbackFrom` alone means it was never bundled.
+        for (const skipped of resolved.skippedUnusable ?? []) {
+          const entry = quarantine.find((e) => e.backend === skipped);
+          log?.warn?.(
+            `[native] llama-server ${skipped} build is quarantined on this machine ` +
+              `(${entry?.signal ?? 'crashed'} at ${entry?.at ?? 'unknown time'}): ${entry?.reason ?? 'crashed before becoming ready'}`,
+          );
+        }
+        if (resolved.skippedUnusable?.length) {
+          result.llamaBackend.backend = resolved.backend;
+          result.llamaBackend.reason =
+            `${probe.reason}; ${resolved.skippedUnusable.join(', ')} quarantined after crashing ` +
+            `on this machine, using ${resolved.backend}`;
+          result.llamaBackend.quarantined = [...resolved.skippedUnusable];
+          // Published like the other backend facts so /api/health can
+          // forward it — a demotion the user never sees is the failure
+          // mode this whole mechanism exists to end.
+          process.env.GEZEL_LLAMA_QUARANTINED = resolved.skippedUnusable.join(',');
+        } else if (resolved.fallbackFrom) {
           result.llamaBackend.backend = resolved.backend;
           result.llamaBackend.reason = `${probe.reason}; no bundled ${resolved.fallbackFrom} binary, using ${resolved.backend}`;
           log?.info?.(

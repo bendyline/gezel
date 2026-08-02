@@ -78,7 +78,10 @@ export class MockProvider implements LLMProvider {
   private readonly toolCallQueue: ScriptedToolCall[][] = [];
   private resumeFailureQueued = false;
   /** Error message to throw from the next `sendAndWait`, if any. */
-  private readonly sendFailureQueue: string[] = [];
+  private readonly sendFailureQueue: Array<{
+    message: string;
+    fields?: Record<string, unknown>;
+  }> = [];
   /** Per-send deliberate delays for deterministic SessionQueue tests. */
   private readonly sendDelayQueue: number[] = [];
   /**
@@ -89,6 +92,8 @@ export class MockProvider implements LLMProvider {
    * shape a real provider unwinds with on `cancelInflight`.
    */
   private readonly streamThenHangQueue: string[] = [];
+  /** See {@link scriptStreamThenStall}. */
+  private readonly streamThenStallQueue: Array<{ content: string; gate: Promise<void> }> = [];
   /**
    * Scripted external tool-call payloads. Each entry is the array a
    * single `sendAndWait` should emit (and halt on) when the session's
@@ -161,9 +166,16 @@ export class MockProvider implements LLMProvider {
   /**
    * Make the next `sendAndWait` call throw — used to simulate a provider
    * silently GC'ing the server-side session mid-conversation.
+   *
+   * `fields` are assigned onto the thrown Error, so a test can reproduce a
+   * structured provider error (`code`, `engine`, `incidentId`, `panicKind`,
+   * …) without importing a real provider's error class.
    */
-  scriptSendFailure(message = 'Session not found: mock-session-1'): void {
-    this.sendFailureQueue.push(message);
+  scriptSendFailure(
+    message = 'Session not found: mock-session-1',
+    fields?: Record<string, unknown>,
+  ): void {
+    this.sendFailureQueue.push({ message, ...(fields ? { fields } : {}) });
   }
 
   /**
@@ -190,6 +202,30 @@ export class MockProvider implements LLMProvider {
   /** @internal */
   nextStreamThenHang(): string | undefined {
     return this.streamThenHangQueue.shift();
+  }
+
+  /**
+   * Make the next `sendAndWait` stream `content` and then **ignore its
+   * abort signal**, settling only when the returned `release` fires.
+   *
+   * Models a provider whose in-flight call outlives a cancel — which is
+   * what the Copilot SDK did before `session.abort()` was wired: a
+   * cancelled turn kept generating for seconds while the manager had
+   * already freed the session slot and started the next turn. Tests use
+   * it to drive two overlapping turns deterministically.
+   */
+  scriptStreamThenStall(content: string): { release: () => void } {
+    let release = (): void => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    this.streamThenStallQueue.push({ content, gate });
+    return { release };
+  }
+
+  /** @internal */
+  nextStreamThenStall(): { content: string; gate: Promise<void> } | undefined {
+    return this.streamThenStallQueue.shift();
   }
 
   /**
@@ -227,7 +263,7 @@ export class MockProvider implements LLMProvider {
   }
 
   /** @internal */
-  nextScriptedSendFailure(): string | undefined {
+  nextScriptedSendFailure(): { message: string; fields?: Record<string, unknown> } | undefined {
     return this.sendFailureQueue.shift();
   }
 
@@ -364,7 +400,7 @@ class MockSession extends StreamingSessionBase implements LLMSession {
 
     const scriptedFailure = this.provider.nextScriptedSendFailure();
     if (scriptedFailure) {
-      throw new Error(scriptedFailure);
+      throw Object.assign(new Error(scriptedFailure.message), scriptedFailure.fields ?? {});
     }
 
     const streamThenHang = this.provider.nextStreamThenHang();
@@ -379,6 +415,15 @@ class MockSession extends StreamingSessionBase implements LLMSession {
         }
         signal?.addEventListener('abort', fail, { once: true });
       });
+    }
+
+    const stall = this.provider.nextStreamThenStall();
+    if (stall) {
+      if (stall.content.length > 0) this.emitDelta(stall.content);
+      // Deliberately not linked to `sendOpts.queue.signal` — the point is
+      // to outlive the cancel.
+      await stall.gate;
+      return stall.content;
     }
 
     const delay = this.provider.nextScriptedSendDelay();

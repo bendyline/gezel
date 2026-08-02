@@ -1,4 +1,5 @@
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockApi } from './test-utils/mockApi.js';
@@ -39,6 +40,94 @@ vi.mock('./theme.js', () => ({ syncThemeFromConfig: vi.fn() }));
 vi.mock('./views/HomeView.js', () => ({ HomeView: () => <div>Home view</div> }));
 
 const { App } = await import('./App.js');
+const { api } = await import('./api.js');
+
+describe('Night Shift header status', () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    vi.mocked(api.getNightShiftStatus).mockResolvedValue({ active: false, source: null });
+    vi.mocked(api.getNightShiftTasks).mockResolvedValue({
+      background: [],
+      active: [],
+      upcoming: [],
+    });
+  });
+
+  it('adds passing clouds only while a shift is running', async () => {
+    vi.mocked(api.getNightShiftStatus).mockResolvedValue({ active: true, source: 'manual' });
+    render(<App />);
+
+    const trigger = await screen.findByRole('button', { name: 'Night Shift: on (manual)' });
+    expect(trigger.querySelectorAll('.app-nightshift-cloud')).toHaveLength(2);
+    expect(trigger.querySelector('.app-nightshift-moon')).toHaveClass('is-active');
+  });
+
+  it('keeps the resting moon still when Night Shift is off', async () => {
+    render(<App />);
+
+    const trigger = await screen.findByRole('button', { name: 'Night Shift: off' });
+    expect(trigger.querySelector('.app-nightshift-cloud')).not.toBeInTheDocument();
+    expect(trigger.querySelector('.app-nightshift-moon')).not.toHaveClass('is-active');
+  });
+
+  it('sets the start command into a raised key tray', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole('button', { name: 'Night Shift: off' }));
+
+    const action = await screen.findByRole('menuitem', { name: /Start night shift now/ });
+    expect(action).toHaveClass('app-nightshift-action', 'gz-key', 'gz-key--stacked');
+    expect(action.parentElement).toHaveClass('app-nightshift-action-tray', 'gz-tray');
+  });
+
+  it('sets the stop command into the same raised key tray', async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.getNightShiftStatus).mockResolvedValue({ active: true, source: 'manual' });
+    render(<App />);
+
+    await user.click(await screen.findByRole('button', { name: 'Night Shift: on (manual)' }));
+
+    const action = await screen.findByRole('menuitem', { name: /Stop night shift/ });
+    expect(action).toHaveClass('app-nightshift-action', 'gz-key', 'gz-key--stacked');
+    expect(action.parentElement).toHaveClass('app-nightshift-action-tray', 'gz-tray');
+  });
+
+  it('lists live indexing as work instead of leaving it implicit', async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.getNightShiftStatus).mockResolvedValue({ active: true, source: 'manual' });
+    vi.mocked(api.getNightShiftTasks).mockResolvedValue({
+      background: [
+        {
+          id: 'index-enrichment',
+          title: 'Workspace indexing',
+          projectName: 'molen-internal',
+          detail: 'Studying workspace files',
+        },
+      ],
+      active: [],
+      upcoming: [],
+    });
+    render(<App />);
+
+    await user.click(await screen.findByRole('button', { name: 'Night Shift: on (manual)' }));
+
+    expect(await screen.findByText('Workspace indexing')).toBeInTheDocument();
+    expect(screen.getByText('molen-internal · Studying workspace files')).toBeInTheDocument();
+    expect(screen.getByText('Working on')).toBeInTheDocument();
+  });
+
+  it('says plainly when an active shift has no real work in flight or queued', async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.getNightShiftStatus).mockResolvedValue({ active: true, source: 'manual' });
+    render(<App />);
+
+    await user.click(await screen.findByRole('button', { name: 'Night Shift: on (manual)' }));
+
+    expect(await screen.findByText('No work is running or queued.')).toBeInTheDocument();
+    expect(screen.queryByText('Up next')).not.toBeInTheDocument();
+  });
+});
 
 describe('App project deletion navigation', () => {
   beforeEach(() => {
@@ -61,5 +150,80 @@ describe('App project deletion navigation', () => {
 
     expect(await screen.findByText('Home view')).toBeInTheDocument();
     await waitFor(() => expect(window.localStorage.getItem('gezel:nav:selection')).toBeNull());
+  });
+});
+
+describe('quota meter', () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    vi.mocked(api.getUsage).mockResolvedValue({
+      lastUpdated: '2026-07-31T20:00:00.000Z',
+      providers: {
+        copilot: {
+          quotaBuckets: [
+            {
+              name: 'premium_interactions',
+              isUnlimited: false,
+              limit: 1500,
+              used: 1239,
+              remaining: 261,
+              remainingPercent: 17.4,
+              overage: 0,
+              resetDate: '2026-08-01T00:00:00.000Z',
+            },
+          ],
+          todayTurns: 7,
+          todayTokensIn: 0,
+          todayTokensOut: 0,
+          todayCost: 0,
+          totalTurns: 7,
+          totalTokensIn: 0,
+          totalTokensOut: 0,
+          totalCost: 0,
+          lastUpdated: '2026-07-31T20:00:00.000Z',
+        },
+      },
+    });
+  });
+
+  // Clicking used to jump straight to Settings, which buried the numbers
+  // the tooltip already had. The stats now open in place; Settings stays
+  // reachable from inside the dropdown.
+  it('opens the stats dropdown on click without leaving the current view', async () => {
+    render(<App />);
+    const pill = await screen.findByRole('button', { name: /1239\/1500/ });
+
+    // Tooltip is preserved — it's the only affordance a hovering mouse gets.
+    expect(pill).toHaveAttribute('title', expect.stringContaining('Premium interactions'));
+    expect(screen.queryByText('Remaining')).not.toBeInTheDocument();
+
+    fireEvent.click(pill);
+
+    expect(await screen.findByText('Premium interactions')).toBeInTheDocument();
+    expect(screen.getByText('Remaining')).toBeInTheDocument();
+    expect(screen.getByText('261')).toBeInTheDocument();
+    expect(screen.getByText('1,239 / 1,500 (83%)')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Provider settings' })).toBeInTheDocument();
+    expect(pill).toHaveAttribute('aria-expanded', 'true');
+    // Still on Home — the click no longer navigates.
+    expect(screen.getByText('Home view')).toBeInTheDocument();
+
+    fireEvent.click(pill);
+    await waitFor(() => expect(screen.queryByText('Remaining')).not.toBeInTheDocument());
+  });
+
+  it('closes when another header popover opens', async () => {
+    render(<App />);
+    const pill = await screen.findByRole('button', { name: /1239\/1500/ });
+    fireEvent.click(pill);
+    expect(await screen.findByText('Remaining')).toBeInTheDocument();
+
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent('gezel:close-header-popovers', { detail: { source: 'engine' } }),
+      );
+    });
+
+    await waitFor(() => expect(screen.queryByText('Remaining')).not.toBeInTheDocument());
   });
 });

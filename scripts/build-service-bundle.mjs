@@ -35,7 +35,13 @@ import { readFile, readdir, readlink, unlink, writeFile } from 'node:fs/promises
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
+import { deployMlRuntime } from './deploy-ml-runtime.mjs';
+import { fixDeployedNodePtyPermissions } from './fix-deployed-node-pty-perms.mjs';
 import { pruneForeignBinariesWithReport } from './prune-foreign-binaries.mjs';
+import {
+  pruneRuntimeFilesWithReport,
+  verifyRuntimeDeclarationAssets,
+} from './prune-runtime-files.mjs';
 import { stageSharpCompatibilityStub, verifySharpCompatibilityTree } from './sharp-compat.mjs';
 import { signMachOTree } from './sign-macho-tree.mjs';
 import { verifyPeTree } from './verify-pe-tree.mjs';
@@ -134,6 +140,10 @@ async function main() {
   if (stdout.trim()) process.stdout.write(stdout);
   if (stderr.trim()) process.stderr.write(stderr);
 
+  // Public npm consumers opt into the large local-ML stack. Installer builds
+  // remain full-featured by merging the private deployment-only package.
+  await deployMlRuntime(repoRoot, target, 'build-service-bundle');
+
   const gezeldBin = join(target, 'dist', 'bin', 'gezeld.js');
   if (!existsSync(gezeldBin)) {
     throw new Error(
@@ -172,11 +182,24 @@ async function main() {
   // the service actually loads, the verification spawn fails here rather than
   // shipping a bundle that breaks on a user's machine.
   await pruneForeignBinariesWithReport(target);
+  await fixDeployedNodePtyPermissions(target);
 
   await stageSharpCompatibilityStub(target);
   const sharpCompatibility = await verifySharpCompatibilityTree(target);
   console.log(
     `[sharp-compat] verified ${sharpCompatibility.stubs} no-image stub(s); no native Sharp/libvips payload`,
+  );
+
+  // `pnpm deploy` includes published source maps and declaration files. They
+  // are useful to package consumers, but this tree is an application runtime:
+  // every extra file costs a tar extraction + Defender scan on first launch.
+  // Run after staging the Sharp compatibility package so its declaration is
+  // covered too. The pruner preserves the declarations read by the script
+  // editor at runtime.
+  await pruneRuntimeFilesWithReport(target);
+  const declarationAssets = await verifyRuntimeDeclarationAssets(target);
+  console.log(
+    `[prune-runtime] verified ${declarationAssets.total} runtime declaration assets for script-editor IntelliSense`,
   );
 
   console.log('[build-service-bundle] verifying the bundle imports cleanly');
@@ -195,6 +218,42 @@ async function main() {
   await exec(
     process.execPath,
     ['--input-type=module', '-e', `await import(${JSON.stringify(indexUrl)});`],
+    { cwd: target, maxBuffer: 16 * 1024 * 1024 },
+  );
+
+  // The service imports Transformers/Kokoro lazily. Exercise that complete
+  // distribution path explicitly so the dependency merge and Sharp stub are
+  // proven before packaging.
+  const transformersUrl = pathToFileURL(
+    join(target, 'node_modules', '@huggingface', 'transformers', 'dist', 'transformers.node.mjs'),
+  ).href;
+  const kokoroUrl = pathToFileURL(
+    join(target, 'node_modules', 'kokoro-js', 'dist', 'kokoro.js'),
+  ).href;
+  await exec(
+    process.execPath,
+    [
+      '--input-type=module',
+      '-e',
+      `const t=await import(${JSON.stringify(transformersUrl)}); const k=await import(${JSON.stringify(kokoroUrl)}); if(typeof t.pipeline!=='function'||typeof k.KokoroTTS!=='function') throw new Error('bundled ML runtime exports missing');`,
+    ],
+    { cwd: target, maxBuffer: 16 * 1024 * 1024 },
+  );
+
+  // TypeScript is deliberately external in the service bundle and is used at
+  // runtime for parsing/transpiling user scripts. Exercise that lazy path
+  // after declarations have been pruned; importing the service alone does not
+  // call it and would miss an over-aggressive prune.
+  const typescriptUrl = pathToFileURL(
+    join(target, 'node_modules', 'typescript', 'lib', 'typescript.js'),
+  ).href;
+  await exec(
+    process.execPath,
+    [
+      '--input-type=module',
+      '-e',
+      `const ts=(await import(${JSON.stringify(typescriptUrl)})).default; const out=ts.transpileModule('const value: number = 1;', { compilerOptions: { module: ts.ModuleKind.ESNext } }); if (!out.outputText.includes('const value = 1')) throw new Error('bundled TypeScript transpile smoke failed');`,
+    ],
     { cwd: target, maxBuffer: 16 * 1024 * 1024 },
   );
 

@@ -58,7 +58,9 @@ describe('Design Scheme bundled project type', () => {
 
     expect(applied.scriptsInstalled).toContain('scheme-store');
     const scriptBody = await readFile(projectScriptFile(home, project.id, 'scheme-store'), 'utf8');
-    expect(scriptBody.startsWith('// @gezel-project-type: design-scheme@1.0.0\n')).toBe(true);
+    expect(
+      scriptBody.startsWith(`// @gezel-project-type: design-scheme@${applied.version}\n`),
+    ).toBe(true);
 
     // The starter palette is seeded into the project's artifacts (not the
     // workspace) — the gallery page reads it from there.

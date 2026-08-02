@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockApi } from '../test-utils/mockApi.js';
 import { primitivesMock } from '../test-utils/primitivesMock.js';
@@ -41,9 +41,23 @@ vi.mock('../components/ProviderModelSelect.js', () => ({ ProviderModelSelect: ()
 const { SettingsView } = await import('./SettingsView.js');
 const { api } = await import('../api.js');
 const { resetUpdateStateForTests } = await import('../update-state.js');
+const { refreshCopilotAvailability } = await import('../components/useCopilotAvailability.js');
+
+/** Copilot present in the manifest, absent from this device. */
+const UNAVAILABLE = {
+  available: false,
+  source: null,
+  managed: 'absent',
+  pinnedVersion: '1.0.7',
+  updateAvailable: false,
+};
 
 describe('SettingsView', () => {
   beforeEach(() => {
+    // The availability hook memoizes module-wide so the several gates that
+    // read it don't each fetch. That cache outlives a test, so drop it or the
+    // first case's answer decides every later one.
+    refreshCopilotAvailability();
     window.__GEZEL__ = {
       ...window.__GEZEL__,
       token: window.__GEZEL__?.token ?? 'test-token',
@@ -308,6 +322,49 @@ describe('SettingsView', () => {
     ).toBeChecked();
     expect(screen.getByRole('radiogroup', { name: 'Night Shift provider' })).toBeInTheDocument();
     expect(screen.getByTestId('model-picker-openai')).toBeInTheDocument();
+  });
+
+  /** The default-provider pill row, scoped so Night Shift's row can't match. */
+  async function defaultProviderSwitch() {
+    fireEvent.click(await screen.findByRole('button', { name: 'Artificial Intelligence' }));
+    return within(await screen.findByTestId('default-provider-switch'));
+  }
+
+  // Copilot's runtime is an opt-in download. Offering it as a default
+  // provider before it exists on disk sets the user up to fail on their first
+  // message, so the pill is gated on the availability probe.
+  it('hides the GitHub Copilot provider pill when Copilot is not installed', async () => {
+    vi.mocked(api.getCopilotStatus).mockResolvedValue(UNAVAILABLE as never);
+    render(<SettingsView />);
+    const pills = await defaultProviderSwitch();
+
+    // OpenAI proves the row rendered at all.
+    expect(await pills.findByRole('button', { name: 'OpenAI' })).toBeInTheDocument();
+    await waitFor(() => expect(pills.queryByRole('button', { name: 'GitHub Copilot' })).toBeNull());
+  });
+
+  it('keeps the Copilot pill when Copilot is already the configured provider', async () => {
+    vi.mocked(api.getConfig).mockResolvedValue({
+      provider: 'copilot',
+      meesterGezelId: 'gz-meester',
+      hasGithubToken: true,
+    } as never);
+    vi.mocked(api.getCopilotStatus).mockResolvedValue(UNAVAILABLE as never);
+    render(<SettingsView />);
+    const pills = await defaultProviderSwitch();
+
+    // Never strand a configured user without the control to change it.
+    expect(await pills.findByRole('button', { name: 'GitHub Copilot' })).toBeInTheDocument();
+  });
+
+  it('offers the Copilot pill while availability is still unknown', async () => {
+    // `null` means "not answered yet", not "unavailable" — treating it as the
+    // latter makes the pill blink out on every mount.
+    vi.mocked(api.getCopilotStatus).mockRejectedValue(new Error('older daemon'));
+    render(<SettingsView />);
+    const pills = await defaultProviderSwitch();
+
+    expect(await pills.findByRole('button', { name: 'GitHub Copilot' })).toBeInTheDocument();
   });
 
   it('lists gezellen for the Meester picker', async () => {

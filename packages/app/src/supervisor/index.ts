@@ -16,6 +16,8 @@ import {
 import {
   LLAMA_ENGINE_VERSION,
   detectLlamaBackend,
+  isBinaryQuarantined,
+  readLlamaQuarantine,
   resolveAvailableLlamaBinary,
 } from '@bendyline/gezel/native';
 import { gezelPaths } from '@bendyline/gezel/paths';
@@ -602,15 +604,34 @@ export async function connectOrStart(opts: ConnectOptions): Promise<SupervisedSe
     if (probe.vendorHint) {
       process.env.GEZEL_LLAMA_DETECTED_VENDOR = probe.vendorHint;
     }
+    // Same quarantine the daemon's own discovery consults. It has to be
+    // applied HERE too: once this branch stamps GEZEL_LLAMA_SERVER_BIN,
+    // `discoverNativeBinaries` treats the binary as pre-set and skips its
+    // resolution entirely — so spawn and embedded launches would keep
+    // relaunching a build already known to crash on this machine.
+    const quarantine = readLlamaQuarantine(opts.home);
     const resolved = resolveAvailableLlamaBinary(
       probe.backend,
       (backend) => resolveNativeBinaryPath('llama-server', import.meta.url, backend),
       override === undefined || override === 'auto',
+      quarantine.length > 0
+        ? (backend, path) => !isBinaryQuarantined(quarantine, backend, path)
+        : undefined,
     );
     if (resolved) {
       process.env.GEZEL_LLAMA_SERVER_BIN = resolved.path;
       process.env.GEZEL_LLAMA_SERVER_BACKEND = resolved.backend;
-      if (resolved.fallbackFrom) {
+      for (const skipped of resolved.skippedUnusable ?? []) {
+        const entry = quarantine.find((e) => e.backend === skipped);
+        opts.logger?.warn?.(
+          `[supervisor] llama-server ${skipped} build is quarantined on this machine ` +
+            `(${entry?.signal ?? 'crashed'}): ${entry?.reason ?? 'crashed before becoming ready'}`,
+        );
+      }
+      if (resolved.skippedUnusable?.length) {
+        process.env.GEZEL_LLAMA_QUARANTINED = resolved.skippedUnusable.join(',');
+      }
+      if (resolved.fallbackFrom && !resolved.skippedUnusable?.length) {
         opts.logger?.info?.(
           `[supervisor] no bundled llama-server for ${resolved.fallbackFrom}; using ${resolved.backend} fallback: ${resolved.path}`,
         );

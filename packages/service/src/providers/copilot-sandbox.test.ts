@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   CopilotProvider,
   NON_SANDBOX_EXCLUDED_MCP_TOOLS,
-  SANDBOX_EXCLUDED_TOOLS,
+  SANDBOX_ALLOWED_TOOL_PATTERNS,
   buildSandboxPermissionHandler,
   buildSandboxSystemMessage,
 } from './copilot.js';
@@ -15,7 +15,8 @@ function fakeCopilotSdk(configs: Array<Record<string, unknown>>) {
     disconnect: async () => {},
   };
   return {
-    approveAll: () => ({ kind: 'approved' }),
+    // Mirrors the real SDK export, which returns the decision-request kind.
+    approveAll: () => ({ kind: 'approve-once' }),
     CopilotClient: class {
       async start() {}
       async stop() {}
@@ -38,18 +39,33 @@ function fakeCopilotSdk(configs: Array<Record<string, unknown>>) {
 }
 
 describe('sandbox permission handler', () => {
-  it('approves mcp and custom-tool kinds', () => {
+  // The CLI accepts only the decision-*request* kinds. Answering with an
+  // outcome kind (`approved`, `denied-by-rules`) is refused with
+  // "unexpected user permission response", which errors the tool call
+  // instead of allowing or denying it.
+  it('approves mcp and custom-tool kinds with a decision the CLI accepts', () => {
     const handler = buildSandboxPermissionHandler();
-    expect(handler({ kind: 'mcp', toolName: 'read_file' })).toEqual({ kind: 'approved' });
+    expect(handler({ kind: 'mcp', toolName: 'read_file' })).toEqual({ kind: 'approve-once' });
     expect(handler({ kind: 'custom-tool', toolName: 'lookup_issue' })).toEqual({
-      kind: 'approved',
+      kind: 'approve-once',
     });
   });
 
-  it('denies every built-in permission kind', () => {
+  it('denies every built-in permission kind with feedback for the model', () => {
     const handler = buildSandboxPermissionHandler();
     for (const kind of ['shell', 'write', 'read', 'url', 'memory', 'hook', 'unknown']) {
-      expect(handler({ kind })).toEqual({ kind: 'denied-by-rules' });
+      expect(handler({ kind })).toEqual({
+        kind: 'reject',
+        feedback: expect.stringContaining('Sandbox mode'),
+      });
+    }
+  });
+
+  it('never answers with a CLI-side outcome kind', () => {
+    const handler = buildSandboxPermissionHandler();
+    const outcomes = ['approved', 'denied-by-rules', 'cancelled', 'denied-interactively-by-user'];
+    for (const kind of ['mcp', 'custom-tool', 'shell', 'write', 'read', 'url']) {
+      expect(outcomes).not.toContain(handler({ kind }).kind);
     }
   });
 
@@ -73,7 +89,7 @@ describe('sandbox permission handler', () => {
       throw new Error('denial hook exploded');
     });
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    expect(handler({ kind: 'url', toolName: 'web_fetch' })).toEqual({ kind: 'denied-by-rules' });
+    expect(handler({ kind: 'url', toolName: 'web_fetch' }).kind).toBe('reject');
     warn.mockRestore();
   });
 
@@ -94,10 +110,20 @@ describe('sandbox system message hint', () => {
   });
 });
 
-describe('sandbox excluded-tools list', () => {
-  it('covers the Copilot built-ins we explicitly deny', () => {
-    for (const name of ['bash', 'web_fetch', 'view', 'edit_file', 'str_replace_editor']) {
-      expect(SANDBOX_EXCLUDED_TOOLS).toContain(name);
+describe('sandbox tool surface', () => {
+  // A deny-list of built-in NAMES rotted silently when the CLI renamed
+  // them: five of the eight we excluded no longer existed, so shell and
+  // file-write tools stayed advertised. Patterns can't rot that way.
+  it('allows only the MCP + custom surface the permission handler approves', () => {
+    expect(SANDBOX_ALLOWED_TOOL_PATTERNS).toEqual(['mcp:*', 'custom:*']);
+    for (const pattern of SANDBOX_ALLOWED_TOOL_PATTERNS) {
+      expect(pattern.endsWith(':*')).toBe(true);
+    }
+  });
+
+  it('names no built-in tool, so an upstream rename cannot silently widen it', () => {
+    for (const stale of ['bash', 'write_file', 'edit_file', 'powershell', 'create', 'edit']) {
+      expect(SANDBOX_ALLOWED_TOOL_PATTERNS).not.toContain(stale);
     }
   });
 });
@@ -113,22 +139,25 @@ describe('Copilot provider sandbox default', () => {
 
     await provider.createSession({ systemMessage: 'default' });
     const defaultConfig = configs[0]!;
-    expect(defaultConfig.excludedTools).toEqual(SANDBOX_EXCLUDED_TOOLS);
+    expect(defaultConfig.availableTools).toEqual(SANDBOX_ALLOWED_TOOL_PATTERNS);
+    expect(defaultConfig.excludedTools).toBeUndefined();
     expect(defaultConfig.systemMessage).toEqual({
       mode: 'replace',
       content: expect.stringContaining('Sandbox mode is active'),
     });
     expect(
-      (defaultConfig.onPermissionRequest as (request: object) => object)({ kind: 'shell' }),
-    ).toEqual({ kind: 'denied-by-rules' });
+      (defaultConfig.onPermissionRequest as (request: object) => { kind: string })({
+        kind: 'shell',
+      }).kind,
+    ).toBe('reject');
 
     await provider.createSession({ systemMessage: 'opt out', sandboxCopilot: false });
     const optedOutConfig = configs[1]!;
-    expect(optedOutConfig.excludedTools).toBeUndefined();
+    expect(optedOutConfig.availableTools).toBeUndefined();
     expect(optedOutConfig.systemMessage).toEqual({ mode: 'replace', content: 'opt out' });
     expect(
       (optedOutConfig.onPermissionRequest as (request: object) => object)({ kind: 'shell' }),
-    ).toEqual({ kind: 'approved' });
+    ).toEqual({ kind: 'approve-once' });
 
     await provider.shutdown();
   });

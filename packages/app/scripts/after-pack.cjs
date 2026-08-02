@@ -1,11 +1,16 @@
 /**
- * electron-builder `afterPack` hook — two jobs, in order:
+ * electron-builder `afterPack` hook — three jobs, in order:
  *
  * 1. Run the asar offset-bug workaround + license verification that used
  *    to be the hook directly (see fix-asar.cjs for the full story).
  *
- * 2. On Windows, sweep the packed app directory and Authenticode-sign
- *    every `.exe`/`.dll` that doesn't already carry a valid signature.
+ * 2. On macOS, narrow the App Transport Security block electron-builder
+ *    injects — it hardcodes a blanket `NSAllowsArbitraryLoads` that
+ *    `mac.extendInfo` cannot override. afterPack is the last point before
+ *    codesign seals the plist. See harden-mac-ats.cjs.
+ *
+ * 3. On Windows, sweep the packed app directory and Authenticode-sign
+ *    every `.exe`/`.dll`/`.node` that doesn't already carry a valid signature.
  *    electron-builder's own pass covers `gezel.exe` and the installer, and
  *    it DOES also reach into the asar-unpacked payload — it called the sign
  *    hook for the vendored node.exe and clobbered OpenJS's signature, which
@@ -35,20 +40,25 @@
  * The sweep no-ops entirely when Trusted Signing env vars are unset
  * (every local dev build), matching sign.cjs behavior. The release
  * workflow's "Verify Windows signatures" step asserts the sweep worked:
- * every exe/dll in the shipped payload must validate.
+ * every executable/loadable binary in the shipped payload must validate.
  */
 const path = require('node:path');
 const fs = require('node:fs');
 
 const fixAsar = require('./fix-asar.cjs');
+const hardenMacAts = require('./harden-mac-ats.cjs');
 const { isValidlySigned, signFile, signingConfigured } = require('./sign.cjs');
-const { isThirdPartyBinary, thirdPartySource } = require('./third-party-binaries.cjs');
+const {
+  isThirdPartyBinary,
+  isWindowsLoadableBinary,
+  thirdPartySource,
+} = require('./third-party-binaries.cjs');
 
 function walk(dir, out = []) {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) walk(full, out);
-    else if (entry.isFile() && /\.(exe|dll)$/i.test(entry.name)) out.push(full);
+    else if (entry.isFile() && isWindowsLoadableBinary(entry.name)) out.push(full);
   }
   return out;
 }
@@ -87,7 +97,7 @@ async function signSweep(appOutDir, mainExecutable) {
     console.log(`[sign-sweep] left vendor binary untouched: ${entry}`);
   }
   console.log(
-    `[sign-sweep] ${candidates.length} exe/dll files: signed ${signed}, ` +
+    `[sign-sweep] ${candidates.length} executable/loadable files: signed ${signed}, ` +
       `kept ${kept} existing signatures, skipped ${vendor.length} third-party`,
   );
 }
@@ -113,6 +123,10 @@ function mainExecutablePath(context) {
 
 module.exports = async function afterPack(context) {
   await fixAsar(context);
+  // Narrow the ATS block electron-builder injects, before codesign seals the
+  // plist. Must run here: `mac.extendInfo` is deep-assigned before
+  // `configureLocalhostAts` overwrites the key. See harden-mac-ats.cjs.
+  await hardenMacAts(context);
   if (context.electronPlatformName === 'win32') {
     const mainExecutable = mainExecutablePath(context);
     if (!mainExecutable) {

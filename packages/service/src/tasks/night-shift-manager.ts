@@ -156,6 +156,15 @@ export class NightShiftManager {
   private settledNotifiedKey: string | null = null;
 
   /**
+   * Register late-bound work reconciliation for each OFF → ON transition.
+   * Awaited so manual start wakes real work before its response is returned.
+   */
+  setOnActivated(fn: () => Promise<void>): void {
+    this.onActivated = fn;
+  }
+  private onActivated?: () => Promise<void>;
+
+  /**
    * Whether `task` still has night-shift work to do today — false for a
    * `onceADay` task whose `lastRunDay` is today's window-start date. Used
    * by the runner to hold a daily task after its single run. Uses the
@@ -251,7 +260,13 @@ export class NightShiftManager {
     }
 
     this.keepAwake = active && ns.keepAwakeWhileRunning === true;
+    const activating = active && !this.active;
     this.setActive(active, src);
+    if (activating && this.onActivated) {
+      await this.onActivated().catch((err) => {
+        log.warn(`[night-shift] activation callback failed: ${String(err)}`);
+      });
+    }
 
     // Morning-review trigger: whenever we're OUTSIDE the window, the most
     // recently completed window is "settled". Notify once per key —

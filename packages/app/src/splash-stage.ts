@@ -12,15 +12,16 @@
  *
  * This exists because first launch is slow: `connectOrStart` unpacks the
  * service bundle and provisions the bundled Node/pnpm runtimes before the UI
- * can load, which measured ~135s on a cold Windows machine in the v1.26211.26
- * release audit. The window is painted up front now, and these lines are what
- * make that wait read as progress rather than a hang.
+ * can load, which measured ~156s on a cold Windows machine in the release-
+ * candidate audit. The window is painted up front now, and these lines are
+ * what make that wait read as progress rather than a hang.
  */
 
 /** Ordered most-specific first; the first match wins. */
 export const SPLASH_STAGES: ReadonlyArray<{ readonly match: RegExp; readonly text: string }> = [
-  // The long pole on a cold install: ~46k files out of service-bundle.tar.gz,
-  // measured at ~100s on this hardware with Defender scanning each one.
+  // The long pole on a cold install: ~33k files out of service-bundle.tar.gz
+  // after runtime pruning (down from ~46k). A same-session Windows benchmark
+  // fell from 25.7s to 20.8s; a cold Defender scan can still take minutes.
   // Naming the minutes is the point — a caption that says only "unpacking"
   // still reads as a hang once it has sat there past thirty seconds.
   { match: /extracting service bundle/i, text: 'Setting up Gezel — first run takes a few minutes' },

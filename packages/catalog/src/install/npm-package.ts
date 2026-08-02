@@ -3,7 +3,12 @@ import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { mkdir, open, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
-import { type ToolsetManifest, resolvePnpmInvocation } from '@bendyline/gezel';
+import {
+  HttpStatusError,
+  type ToolsetManifest,
+  resolvePnpmInvocation,
+  retryTransient,
+} from '@bendyline/gezel';
 import * as tar from 'tar';
 
 const DEFAULT_REGISTRY = 'https://registry.npmjs.org';
@@ -14,6 +19,10 @@ const MAX_ARCHIVE_ENTRIES = 50_000;
 const REGISTRY_TIMEOUT_MS = 30_000;
 const DOWNLOAD_TIMEOUT_MS = 2 * 60_000;
 const INSTALL_TIMEOUT_MS = 5 * 60_000;
+/** Registry reads are retried on transient faults; a toolset install shouldn't
+ * die because one packument request lost a packet. The tarball write opens
+ * with 'wx' and unlinks on failure, so re-running it is safe. */
+const NETWORK_ATTEMPTS = 3;
 
 export interface NpmInstallOptions {
   manifest: ToolsetManifest & { runtime: { kind: 'npm-package' } };
@@ -40,9 +49,15 @@ export async function installNpmPackageToolset(opts: NpmInstallOptions): Promise
   await recoverInterruptedNpmInstall(target, backup);
   await mkdir(staging, { recursive: true });
   try {
-    const tarballUrl = await resolveTarballUrl(packageName, version, registry);
+    const tarballUrl = await retryTransient(
+      () => resolveTarballUrl(packageName, version, registry),
+      { attempts: NETWORK_ATTEMPTS, label: `${packageName}@${version} metadata` },
+    );
     const tarballPath = join(staging, 'package.tgz');
-    const actualHash = await downloadTarball(tarballUrl, tarballPath, registry.origin);
+    const actualHash = await retryTransient(
+      () => downloadTarball(tarballUrl, tarballPath, registry.origin),
+      { attempts: NETWORK_ATTEMPTS, label: `${packageName}@${version} tarball` },
+    );
     if (actualHash !== expectedHash) {
       throw new Error(
         `[catalog] sha256 mismatch for ${packageName}@${version}: manifest=${expectedHash} actual=${actualHash}. Refusing to install.`,
@@ -108,7 +123,12 @@ async function resolveTarballUrl(
   const url = new URL(encodePackumentPath(packageName), registry);
   const { response, dispose } = await fetchSameOrigin(url, registry.origin, REGISTRY_TIMEOUT_MS);
   try {
-    if (!response.ok) throw new Error(`[catalog] registry returned HTTP ${response.status}`);
+    if (!response.ok) {
+      throw new HttpStatusError(
+        response.status,
+        `[catalog] registry returned HTTP ${response.status}`,
+      );
+    }
     const raw = await readBoundedBody(response, MAX_PACKUMENT_BYTES);
     let packument: { versions?: Record<string, { dist?: { tarball?: string } }> };
     try {
@@ -137,7 +157,10 @@ async function downloadTarball(url: string, dest: string, origin: string): Promi
   const hash = createHash('sha256');
   try {
     if (!response.ok || !response.body) {
-      throw new Error(`[catalog] tarball download returned HTTP ${response.status}`);
+      throw new HttpStatusError(
+        response.status,
+        `[catalog] tarball download returned HTTP ${response.status}`,
+      );
     }
     const declared = Number(response.headers.get('content-length'));
     if (Number.isFinite(declared) && declared > MAX_TARBALL_BYTES) {
@@ -295,7 +318,13 @@ async function fetchSameOrigin(
   for (let redirects = 0; redirects <= 3; redirects++) {
     assertSameOrigin(current, origin);
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    // Abort with a reason: a bare abort surfaces as a generic AbortError, which
+    // the retry layer deliberately treats as "the caller cancelled, stop". A
+    // registry that ran out the clock is exactly the case worth another pass.
+    const timer = setTimeout(
+      () => controller.abort(new Error('[catalog] registry request timed out')),
+      timeoutMs,
+    );
     try {
       const response = await fetch(current, { redirect: 'manual', signal: controller.signal });
       if (response.status >= 300 && response.status < 400) {

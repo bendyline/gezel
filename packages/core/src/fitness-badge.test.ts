@@ -9,7 +9,7 @@ function record(overrides: Partial<ModelFitnessRecord> = {}): ModelFitnessRecord
   return {
     schemaVersion: 1,
     provider: 'llama-cpp',
-    modelId: 'gemma4-e4b-q8',
+    modelId: 'gemma4-e4b-q4',
     status: 'probed',
     admitted: true,
     genTokensPerSec: 24.3,

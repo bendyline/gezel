@@ -1,19 +1,19 @@
 {
-  "id": "gemma4-e4b-q8",
-  "name": "Gemma 4 (E4B)",
-  "description": "Google's edge-optimized Gemma 4 at ~4B effective parameters. Multimodal (text + image + audio), 256K context on the MLX/E4B-it variant, native tool calling. Strong compact default for laptops with 16GB+ memory.",
-  "tags": ["google", "multimodal", "vision", "audio", "tools"],
+  "id": "gemma4-e4b-q4",
+  "name": "Gemma 4 (E4B, Q4)",
+  "description": "Google's edge-optimized Gemma 4 at ~4B effective parameters. Multimodal (text + image + audio), native tool calling. Quantization-aware-trained 4-bit weights — a strong compact default that leaves room to work on a 16GB laptop.",
+  "tags": ["google", "multimodal", "vision", "audio", "tools", "qat"],
   "category": "general",
   "maintainer": {
     "name": "Google",
     "url": "https://huggingface.co/google/gemma-4-E4B-it"
   },
-  "version": "1.1.2",
-  "updatedAt": "2026-07-28T00:00:00Z",
+  "version": "1.2.0",
+  "updatedAt": "2026-07-31T00:00:00Z",
   "license": "Apache-2.0",
   "recoScore": 15,
   "parameterSize": "4.5B",
-  "approxSizeBytes": 8031242688,
+  "approxSizeBytes": 4215695776,
   "supportsTools": true,
   "contextWindow": 128000,
   "upstream": "https://huggingface.co/google/gemma-4-E4B-it",
@@ -38,11 +38,11 @@
     "tag": "gemma4:e4b"
   },
   "llamaCpp": {
-    "huggingfaceRepo": "ggml-org/gemma-4-E4B-it-GGUF",
-    "filename": "gemma-4-E4B-it-Q8_0.gguf",
-    "quantization": "Q8_0",
-    "residentBytes": 9755875162,
-    "draftModelFilename": "mtp-gemma-4-E4B-it-Q8_0.gguf"
+    "huggingfaceRepo": "unsloth/gemma-4-E4B-it-qat-GGUF",
+    "filename": "gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf",
+    "quantization": "UD-Q4_K_XL",
+    "residentBytes": 5940328250,
+    "draftModelFilename": "MTP/mtp-gemma-4-E4B-it-Q4_0.gguf"
   },
   "releasePatch": {
     "tuning": {
@@ -59,7 +59,7 @@
     }
   },
   "mlx": {
-    "huggingfaceRepo": "mlx-community/gemma-4-E4B-it-qat-8bit",
-    "quantization": "8bit"
+    "huggingfaceRepo": "mlx-community/gemma-4-E4B-it-qat-4bit",
+    "quantization": "4bit"
   }
 }

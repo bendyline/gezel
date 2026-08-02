@@ -17,7 +17,7 @@ describe('CatalogService against bundled data', () => {
     expect(ids).toContain('llama3.2-3b-q4');
     expect(ids).toContain('qwen3.6-27b-q4');
     expect(ids).toContain('ternary-bonsai-27b-q2');
-    expect(ids).toContain('gemma4-e4b-q8');
+    expect(ids).toContain('gemma4-e4b-q4');
   });
 
   it('exposes Ternary Bonsai 27B through the MLX engine', async () => {
@@ -36,7 +36,7 @@ describe('CatalogService against bundled data', () => {
   });
 
   it('caps Gemma E4B thinking so llama.cpp does not use the unrestricted default', async () => {
-    const detail = await service.get('chat-model', 'gemma4-e4b-q8');
+    const detail = await service.get('chat-model', 'gemma4-e4b-q4');
     expect(detail?.manifest.kind).toBe('chat-model');
     if (detail?.manifest.kind === 'chat-model') {
       expect(detail.manifest.tuning?.reasoning?.thinkingBudget).toBe(96);

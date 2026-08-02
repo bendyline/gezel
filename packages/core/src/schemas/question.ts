@@ -93,8 +93,9 @@ export type NpmInstallApprovalPackage = z.infer<typeof NpmInstallApprovalPackage
  *
  * `body` carries the script body (or resolved bin path) verbatim so the
  * approval UI can show the user what they're consenting to. `args` are
- * the extra args the gezel wanted to pass on this specific run — shown
- * for context but not persisted across future runs.
+ * the extra args the gezel wanted to pass on this specific run. The
+ * service hashes the ordered argument vector together with `body`, so a
+ * persisted approval cannot be replayed with different arguments.
  */
 export const CommandApprovalScopeSchema = z.enum(['script', 'npx']);
 export type CommandApprovalScope = z.infer<typeof CommandApprovalScopeSchema>;

@@ -11,9 +11,10 @@ each production package to the exact text shipped for it.
 
 ## Runtime dependencies
 
-These ship in the Electron app or the `gezeld` daemon. Two optional toolsets
+These ship in the Electron app or the `gezeld` daemon. Two further components
 — the GitHub Copilot CLI and the Playwright MCP server — are deliberately
-*not* among them; see **Installed on demand** below.
+*not* among them; Gezel downloads them on first run instead. See
+**Downloaded on first run** below.
 
 | Package | License | Homepage |
 |---|---|---|
@@ -54,6 +55,42 @@ attribution file is taken from the exact Electron distribution being packaged.
 | **Electron** | `43.2.0` | MIT, with bundled Chromium notices | [electron/electron](https://github.com/electron/electron) |
 | **Node.js** | `24.18.1` | MIT, with bundled third-party notices | [nodejs/node](https://github.com/nodejs/node) |
 | **pnpm** | `11.15.1` | MIT | [pnpm/pnpm](https://github.com/pnpm/pnpm) |
+
+### pnpm embedded dependency graph
+
+The ordinary pnpm package carries its own private `dist/node_modules/` graph;
+those packages are executable runtime content, not dependencies from Gezel's
+workspace lockfile. The table below is derived from the exact pnpm tarball
+bound by `PNPM_PACKAGE_SHA256`. Packaging verifies the original graph, removes
+foreign-platform packages, and removes pnpm's optional `@reflink` package scope
+after routing its three clone call sites to Node's built-in
+`COPYFILE_FICLONE_FORCE` with pnpm's existing ordinary-copy fallback. The
+staged graph is then verified again. Packages that cannot occur in a currently
+published installer are intentionally omitted.
+
+| Package | Version | License | Installer targets |
+|---|---|---|---|
+| `@isaacs/fs-minipass` | `4.0.1` | ISC | all released targets |
+| `abbrev` | `4.0.0` | ISC | all released targets |
+| `chownr` | `3.0.0` | BlueOak-1.0.0 | all released targets |
+| `env-paths` | `2.2.1` | MIT | all released targets |
+| `exponential-backoff` | `3.1.3` | Apache-2.0 | all released targets |
+| `fdir` | `6.5.0` | MIT | all released targets |
+| `graceful-fs` | `4.2.11` | ISC | all released targets |
+| `isexe` | `4.0.0` | BlueOak-1.0.0 | all released targets |
+| `minipass` | `7.1.3` | BlueOak-1.0.0 | all released targets |
+| `minizlib` | `3.1.0` | MIT | all released targets |
+| `node-gyp` | `12.4.0` | MIT | all released targets |
+| `nopt` | `9.0.0` | ISC | all released targets |
+| `picomatch` | `4.0.5` | MIT | all released targets |
+| `proc-log` | `6.1.0` | ISC | all released targets |
+| `semver` | `7.8.5` | ISC | all released targets |
+| `tar` | `7.5.20` | BlueOak-1.0.0 | all released targets |
+| `tinyglobby` | `0.2.17` | MIT | all released targets |
+| `undici` | `6.27.0` | MIT | all released targets |
+| `v8-compile-cache` | `2.4.0` | MIT | all released targets |
+| `which` | `6.0.1` | ISC | all released targets |
+| `yallist` | `5.0.0` | BlueOak-1.0.0 | all released targets |
 
 ### Sibling packages (same author)
 
@@ -178,26 +215,26 @@ weights are third-party and carry their own licenses.
 
 ---
 
-## Installed on demand
+## Downloaded on first run
 
-Some optional toolsets are **not** bundled into any installer. When a user
-enables the feature that needs one, Gezel installs it from the public npm
-registry into that user's own Gezel home (`system-toolsets/`), using the
-bundled pnpm and a version+integrity set pinned in
+These third-party components are **not** bundled into any installer. Gezel
+downloads them on first run, from the public npm registry into the user's own
+Gezel home (`system-toolsets/`), using the bundled pnpm and a
+version+integrity set pinned in
 [`packages/service/src/system-toolsets/locks.ts`](packages/service/src/system-toolsets/locks.ts).
 
-Gezel does **not** redistribute these packages — they are fetched from npm at
-the user's direction, and each is governed by its own license as published by
-its author. The install is pinned rather than floating so every machine
+Gezel does **not** redistribute these packages — they are fetched from npm on
+the user's own machine, and each is governed by its own license as published
+by its author. The install is pinned rather than floating so every machine
 resolves the exact versions reviewed at release time.
 
-| Package | Installed for | License |
+| Package | Used for | License |
 |---|---|---|
 | [@github/copilot-sdk](https://github.com/github/copilot-sdk) | GitHub Copilot chat provider | MIT |
 | [@github/copilot](https://github.com/github/copilot-cli) and its `@github/copilot-{darwin,linux,linuxmusl,win32}-{arm64,x64}` binary siblings, pulled in transitively by the SDK | GitHub Copilot chat provider | **Proprietary** — GitHub Copilot CLI License |
 | [@playwright/mcp](https://github.com/microsoft/playwright-mcp) | browser-automation MCP toolset | Apache-2.0 |
 
-Enabling the Playwright toolset additionally downloads a **Chromium** build
+The Playwright component additionally downloads a **Chromium** build
 (~281 MB) from Playwright's own CDN into `~/.gezel/playwright-browsers/`, via
 `playwright install chromium`. That browser is not bundled either, and carries
 Chromium's own BSD-3-Clause license plus the third-party notices shipped inside
@@ -320,9 +357,9 @@ component is redistributed:
 Separately, the **GitHub Copilot CLI** (`@github/copilot` and its
 platform-specific binary siblings, pulled in transitively by
 `@github/copilot-sdk`) is proprietary, under the free-of-charge **GitHub
-Copilot CLI License**. Gezel does not redistribute it: it is installed from
-npm into the user's own Gezel home only when they enable the Copilot
-provider — see **Installed on demand** above.
+Copilot CLI License**. Gezel does not redistribute it: it is downloaded from
+npm into the user's own Gezel home on first run — see **Downloaded on first
+run** above.
 
 Some **catalog models** likewise ship under non-OSI licenses with
 acceptable-use or commercial restrictions (Llama Community License,

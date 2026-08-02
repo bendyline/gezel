@@ -1,6 +1,8 @@
 import { pathToFileURL } from 'node:url';
 import { createLogger, resolveSandboxCopilot } from '@bendyline/gezel';
+import { ALWAYS_REGISTERED_TOOLS, CONDITIONALLY_REGISTERED_TOOLS } from '@bendyline/gezel-mcp';
 import type { QuotaBucket } from '../chat/usage.js';
+import { resolveCopilotCliPath } from './copilot-cli.js';
 import { ProviderQueue, runInQueue } from './queue.js';
 import { StreamingSessionBase } from './streaming-session.js';
 import {
@@ -30,6 +32,18 @@ const log = createLogger('copilot');
  * has started speaking, 30s of dead silence means it's done.
  */
 const IDLE_SILENCE_MS = 30_000;
+
+/**
+ * Raised when the caller's abort signal fires mid-send. Distinct from
+ * every other rejection so the buffered-content fallback below doesn't
+ * dress a user cancel up as a completed reply.
+ */
+class CopilotTurnAbortedError extends Error {
+  constructor() {
+    super('Copilot turn aborted by cancel.');
+    this.name = 'CopilotTurnAbortedError';
+  }
+}
 /** How often the idle-silence watchdog re-checks. Cheap poll. */
 const WATCHDOG_INTERVAL_MS = 2_000;
 
@@ -60,6 +74,11 @@ interface CopilotSessionHandle {
     opts: CopilotSendOpts,
     timeout?: number,
   ) => Promise<{ data?: { content?: string } } | undefined>;
+  /**
+   * Cancels the in-flight request and leaves the session usable. Optional
+   * because the test doubles predate it — a real SDK session always has it.
+   */
+  abort?: () => Promise<void>;
   disconnect: () => Promise<void>;
 }
 
@@ -114,15 +133,23 @@ export class CopilotProvider implements LLMProvider {
    * devDependency copy of the SDK.
    */
   private readonly sdkEntryPath?: string;
+  /**
+   * Root of that same system-toolsets install. The CLI binary the SDK
+   * drives ships as an optional dep beneath it, and the SDK cannot find
+   * it on its own — see `resolveCopilotCliPath`.
+   */
+  private readonly sdkInstallRoot?: string;
 
   constructor(opts: {
     githubToken?: string;
     sdkEntryPath?: string;
+    sdkInstallRoot?: string;
     concurrency?: number;
     affinity?: boolean;
   }) {
     this.githubToken = opts.githubToken;
     this.sdkEntryPath = opts.sdkEntryPath;
+    this.sdkInstallRoot = opts.sdkInstallRoot;
     this.queue = new ProviderQueue({
       concurrency: opts.concurrency ?? 10,
       ...(opts.affinity !== undefined ? { affinity: opts.affinity } : {}),
@@ -131,12 +158,27 @@ export class CopilotProvider implements LLMProvider {
 
   async initialize(): Promise<void> {
     if (this.client) return;
-    const mod = await this.loadSdk();
+    let mod: unknown;
+    try {
+      mod = await this.loadSdk();
+    } catch (err) {
+      throw translateCopilotSdkMissingError(err);
+    }
     const CopilotClient = (mod as Record<string, unknown>).CopilotClient as new (
       opts?: Record<string, unknown>,
     ) => CopilotClientHandle;
     const clientOpts: Record<string, unknown> = {};
     if (this.githubToken) clientOpts.githubToken = this.githubToken;
+    // `COPILOT_CLI_PATH` rather than a `RuntimeConnection.forStdio({ path })`
+    // override: it feeds both the spawned-child and in-process FFI code
+    // paths, and leaves the caller's choice of connection kind alone.
+    const cli = resolveCopilotCliPath({ installRoot: this.sdkInstallRoot ?? null });
+    if (cli) {
+      log.info(`[copilot] CLI resolved (${cli.source}): ${cli.path}`);
+      clientOpts.env = { ...definedEnv(), COPILOT_CLI_PATH: cli.path };
+    } else {
+      log.warn('[copilot] no Copilot CLI found; falling back to the SDK lookup');
+    }
     const client = new CopilotClient(clientOpts);
     log.info('[copilot] starting CopilotClient...');
     try {
@@ -185,7 +227,7 @@ export class CopilotProvider implements LLMProvider {
     if (!this.client) throw new Error('[copilot] client not initialized');
     const sessionConfig = await this.buildSessionConfig(opts);
     const session = await this.client.createSession(sessionConfig);
-    return new CopilotSession(session, this.queue, opts.onToolCall);
+    return new CopilotSession(session, this.queue, opts.onToolCall, registeredToolNames(opts));
   }
 
   async resumeSession(sessionId: string, opts: SessionOpts): Promise<LLMSession> {
@@ -197,7 +239,7 @@ export class CopilotProvider implements LLMProvider {
     try {
       log.info(`[copilot] resuming session ${sessionId}`);
       const session = await this.client.resumeSession(sessionId, sessionConfig);
-      return new CopilotSession(session, this.queue, opts.onToolCall);
+      return new CopilotSession(session, this.queue, opts.onToolCall, registeredToolNames(opts));
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       throw new SessionResumeError(`Copilot session ${sessionId} could not be resumed: ${message}`);
@@ -223,17 +265,15 @@ export class CopilotProvider implements LLMProvider {
       systemMessage: { mode: 'replace' as const, content: systemMessage },
       onPermissionRequest: sandboxCopilot
         ? buildSandboxPermissionHandler(opts.onSandboxDenial)
-        : (approveAllFn ?? (() => ({ kind: 'approved' }))),
+        : (approveAllFn ?? (() => ({ kind: PERMISSION_APPROVE }))),
     };
-    // `excludedTools` at the session level only accepts Copilot built-in
-    // tool names — the SDK logs "Unknown tool name in the tool excludedlist"
-    // for anything it doesn't recognize. Our overlapping MCP tools are
-    // stripped by not registering them in the MCP subprocess (see
-    // `GEZEL_MCP_EXCLUDE` handling in gezel-mcp's server). Here we only
-    // use excludedTools for the sandbox-on case, where the targets are
-    // real Copilot built-ins.
+    // Sandbox mode is expressed as an allowlist, not a deny-list of
+    // built-in names — see `SANDBOX_ALLOWED_TOOL_PATTERNS`. Our own
+    // overlapping MCP tools are stripped by not registering them in the
+    // MCP subprocess (see `GEZEL_MCP_EXCLUDE` handling in gezel-mcp's
+    // server), so nothing here needs to name them.
     if (sandboxCopilot) {
-      sessionConfig.excludedTools = SANDBOX_EXCLUDED_TOOLS;
+      sessionConfig.availableTools = SANDBOX_ALLOWED_TOOL_PATTERNS;
     }
     if (opts.model) sessionConfig.model = opts.model;
     if (opts.reasoningEffort) sessionConfig.reasoningEffort = opts.reasoningEffort;
@@ -329,6 +369,7 @@ class CopilotSession extends StreamingSessionBase implements LLMSession {
     private readonly session: CopilotSessionHandle,
     private readonly queue: ProviderQueue,
     private readonly onToolCall?: (info: ToolCallEvent) => void | Promise<void>,
+    private readonly toolNames: readonly string[] = [],
   ) {
     super();
     // Text deltas — the model's actual reply, streamed token-by-token.
@@ -523,6 +564,30 @@ class CopilotSession extends StreamingSessionBase implements LLMSession {
           }, WATCHDOG_INTERVAL_MS);
         });
 
+        // The SDK's `timeout` argument documents itself as "does not
+        // abort in-flight agent work", so without this a user stop only
+        // marks the turn cancelled and then waits out the entire
+        // response — 16s in one observed case, during which the next
+        // turn is already running. `session.abort()` cancels the request
+        // and leaves the session usable for the next send.
+        const externalSignal = opts?.queue?.signal;
+        let onExternalAbort: (() => void) | undefined;
+        const cancelled = new Promise<never>((_, reject) => {
+          if (!externalSignal) return;
+          const fire = () => {
+            void Promise.resolve(this.session.abort?.()).catch(() => {
+              /* already gone — the rejection below is what unwinds us */
+            });
+            reject(new CopilotTurnAbortedError());
+          };
+          if (externalSignal.aborted) {
+            fire();
+            return;
+          }
+          onExternalAbort = fire;
+          externalSignal.addEventListener('abort', fire, { once: true });
+        });
+
         try {
           const winner = await Promise.race([
             sdkCall.then((result) => {
@@ -531,9 +596,14 @@ class CopilotSession extends StreamingSessionBase implements LLMSession {
               return apiContent || this.stripReasoningPrefix(buffer);
             }),
             watchdog.then((buffered) => this.stripReasoningPrefix(buffered)),
+            cancelled,
           ]);
           return winner;
         } finally {
+          if (onExternalAbort) externalSignal?.removeEventListener('abort', onExternalAbort);
+          cancelled.catch(() => {
+            /* nobody awaits this once the race settles */
+          });
           if (watchdogTimer) clearInterval(watchdogTimer);
           // If the watchdog won, the SDK promise is still in flight — swallow
           // its eventual rejection so Node doesn't log an unhandled rejection.
@@ -542,6 +612,9 @@ class CopilotSession extends StreamingSessionBase implements LLMSession {
           });
         }
       } catch (err) {
+        // A cancel is not a failed reply — returning the buffer here would
+        // hand the manager a "successful" turn it then has to discard.
+        if (err instanceof CopilotTurnAbortedError) throw err;
         // Ephemeral sessions can reject on session.idle even when the full
         // response streamed via deltas. Use buffered content if present.
         if (buffer.length > 0) {
@@ -578,6 +651,26 @@ class CopilotSession extends StreamingSessionBase implements LLMSession {
 
   getLastTurnReasoning(): string | undefined {
     return this.lastTurnReasoning.length > 0 ? this.lastTurnReasoning : undefined;
+  }
+
+  /**
+   * The gezel-mcp tools this session was configured to expose.
+   *
+   * The Copilot CLI spawns our MCP server itself rather than going
+   * through gezel's bridge, so there is no live handshake to read a
+   * roster from and the SDK exposes no tool-listing API. This is
+   * therefore the *configured* roster — what we asked the CLI to serve —
+   * derived the same way `CodexCliSession` derives its own.
+   *
+   * Without it every consumer saw `[]` on Copilot: the chat-coded-file
+   * salvage (gated on `includes('write_file')`) never fired at all, and
+   * the unsaved-file-claim nudge always told a write-capable gezel it
+   * could not write. Names are unprefixed to match those membership
+   * tests and gezel's own tool-call records — the CLI's user-visible
+   * `gezel-<tool>` wire form is a different vocabulary.
+   */
+  getRegisteredToolNames(): string[] {
+    return [...this.toolNames];
   }
 
   providerState(): ProviderSessionState {
@@ -661,6 +754,42 @@ function parseUsage(d: Record<string, unknown>): TurnUsage {
 }
 
 /**
+ * The gezel-mcp tools a session will expose, given its MCP wiring and
+ * role allowlist. Mirrors `CodexCliSession.getRegisteredToolNames` —
+ * always-on tools plus the conditionally-registered ones whose env gate
+ * is satisfied, minus anything the role allowlist drops. Returns `[]`
+ * when no MCP server is wired (one-shot completions).
+ */
+function registeredToolNames(opts: SessionOpts): string[] {
+  if (!opts.mcpServer) return [];
+  const allow = opts.toolAllowlist;
+  const out: string[] = [];
+  for (const name of ALWAYS_REGISTERED_TOOLS) {
+    if (allow && !allow.has(name)) continue;
+    out.push(name);
+  }
+  for (const [name, gate] of Object.entries(CONDITIONALLY_REGISTERED_TOOLS)) {
+    const value = opts.mcpServer.env[gate.envVar];
+    if (!value || (gate.envValue !== '*' && value !== gate.envValue)) continue;
+    if (allow && !allow.has(name)) continue;
+    out.push(name);
+  }
+  return out;
+}
+
+/**
+ * `process.env` with the `undefined` values dropped — the SDK passes the
+ * env we hand it straight to `child_process.spawn`.
+ */
+function definedEnv(): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value !== undefined) out[key] = value;
+  }
+  return out;
+}
+
+/**
  * The Copilot CLI subprocess writes `(node:NNNN) ExperimentalWarning: ...`
  * lines to stderr even on a healthy run. On an unauthenticated machine, the
  * process also exits with code 0 before printing `listening on port ...`,
@@ -675,7 +804,11 @@ function parseUsage(d: Record<string, unknown>): TurnUsage {
 function translateCopilotStartError(err: unknown, hasToken: boolean): Error {
   const raw = err instanceof Error ? err.message : String(err);
   const stripped = stripExperimentalWarnings(raw);
-  const cleanedExit = /CLI server exited with code 0\b/.test(stripped);
+  // The SDK words this two ways: "exited with code 0" when the CLI died
+  // during startup, "exited unexpectedly with code 0" when it died after
+  // reporting ready with nothing on stderr. Both mean the same thing to
+  // a user.
+  const cleanedExit = /CLI server exited (?:unexpectedly )?with code 0\b/.test(stripped);
   if (cleanedExit) {
     const guidance = hasToken
       ? 'The saved GitHub token was rejected by Copilot. Confirm the token has Copilot access, or run `npx @github/copilot login` to re-authenticate.'
@@ -684,28 +817,67 @@ function translateCopilotStartError(err: unknown, hasToken: boolean): Error {
     wrapped.isActionable = true;
     return wrapped;
   }
+  if (/@github\/copilot platform package/.test(stripped)) {
+    const wrapped = new Error(
+      'The Copilot CLI binary is missing from this install. Install the CLI yourself ' +
+        '(`npm i -g @github/copilot`), or set COPILOT_CLI_PATH to an existing one.',
+    ) as Error & { isActionable?: boolean };
+    wrapped.isActionable = true;
+    return wrapped;
+  }
   const wrapped = new Error(stripped) as Error & { isActionable?: boolean };
   return wrapped;
 }
 
 /**
- * Copilot SDK built-ins the model will propose by name. In sandbox mode
- * we blacklist them explicitly so the SDK doesn't even serialize their
- * schemas into the request — saves turns the model would otherwise waste
- * asking for something we'll deny. The `onPermissionRequest` kind filter
- * below is the real load-bearing check; this list is an optimization.
- * Any built-ins added by future SDK versions will still be caught there.
+ * The Copilot SDK is an on-demand system toolset, so an install where the
+ * user has never enabled Copilot has nothing at `sdkEntryPath` *and* nothing
+ * under the bare specifier — it's a devDependency, stripped from the shipped
+ * bundle by `pnpm deploy --prod`. Node's raw `ERR_MODULE_NOT_FOUND` names a
+ * path inside `~/.gezel/system-toolsets/` and tells the user nothing about
+ * what to do.
+ *
+ * `.isActionable = true` is load-bearing: without it `ChatManager.ensureProvider`
+ * rewrites this into "copilot provider failed to start: … check your
+ * credentials", which points at entirely the wrong problem.
  */
-export const SANDBOX_EXCLUDED_TOOLS = [
-  'bash',
-  'web_fetch',
-  'view',
-  'read_file',
-  'write_file',
-  'edit_file',
-  'str_replace_editor',
-  'grep',
-];
+function translateCopilotSdkMissingError(err: unknown): Error {
+  const raw = err instanceof Error ? err.message : String(err);
+  const code = (err as NodeJS.ErrnoException | undefined)?.code;
+  const looksMissing =
+    code === 'ERR_MODULE_NOT_FOUND' ||
+    code === 'MODULE_NOT_FOUND' ||
+    /Cannot find (module|package)/i.test(raw);
+  if (!looksMissing) return err instanceof Error ? err : new Error(raw);
+  const wrapped = new Error(
+    "GitHub Copilot isn't installed on this device yet. Open Settings → GitHub Copilot " +
+      'and choose Install, then try again.',
+  ) as Error & { isActionable?: boolean };
+  wrapped.isActionable = true;
+  return wrapped;
+}
+
+/**
+ * Sandbox mode's tool surface: our MCP tools and host-registered custom
+ * tools, nothing else. Expressed with the SDK's source-qualified filter
+ * patterns rather than a list of built-in names.
+ *
+ * The name list this replaces had rotted silently. Copilot's built-ins
+ * are now `powershell` / `read_powershell` / `stop_powershell` /
+ * `list_powershell`, `view`, `create`, `edit`, `web_fetch`, `grep`,
+ * `glob`, `sql`, `skill`, `task`, `*_agent` — so of the eight names we
+ * were excluding (`bash`, `read_file`, `write_file`, `edit_file`,
+ * `str_replace_editor`, plus `view`/`web_fetch`/`grep`) only three still
+ * existed. The CLI logs the rest as "Unknown tool name in the tool
+ * excludedlist" and moves on, which left the entire PowerShell family
+ * and `create`/`edit`/`sql`/`glob` advertised to a sandboxed gezel.
+ *
+ * These patterns also match exactly what `buildSandboxPermissionHandler`
+ * approves (`mcp` + `custom-tool` kinds), so the model is never offered
+ * a tool whose permission request we would reject. Verified against CLI
+ * 1.0.73: the session's advertised roster is the MCP/custom set alone.
+ */
+export const SANDBOX_ALLOWED_TOOL_PATTERNS = ['mcp:*', 'custom:*'];
 
 /**
  * Our MCP tools that duplicate a Copilot built-in. When the user has
@@ -724,6 +896,26 @@ export const NON_SANDBOX_EXCLUDED_MCP_TOOLS = [
 ];
 
 /**
+ * The two permission decisions a client is allowed to send back.
+ *
+ * The SDK's `PermissionDecision` union mixes two directions of travel:
+ * *request* variants a handler may return (`approve-once`,
+ * `approve-for-session`, `reject`, `user-not-available`, …) and *outcome*
+ * variants the CLI emits to describe what happened (`approved`,
+ * `denied-by-rules`, `cancelled`, …). Returning an outcome kind is
+ * rejected by the CLI with `unexpected user permission response: <kind>`,
+ * which fails the tool call rather than allowing or denying it — every
+ * MCP call in the session errors out and the model retries forever.
+ * `approveAll()` from the SDK returns `approve-once` for the same reason.
+ */
+const PERMISSION_APPROVE = 'approve-once';
+const PERMISSION_REJECT = 'reject';
+
+/** Told to the model on denial so it stops retrying the built-in. */
+const SANDBOX_DENIAL_FEEDBACK =
+  'Sandbox mode: Copilot built-in tools are disabled. Use the gezel MCP tools instead.';
+
+/**
  * Permission handler used when sandbox mode is on. Denies every
  * Copilot-SDK permission kind except `mcp` (our MCP tools) and
  * `custom-tool` (host-registered custom tools — we don't use them
@@ -739,11 +931,11 @@ export function buildSandboxPermissionHandler(
     fileName?: string;
     fullCommandText?: string;
   }) => void | Promise<void>,
-): (request: Record<string, unknown>) => { kind: string } {
+): (request: Record<string, unknown>) => { kind: string; feedback?: string } {
   return (request) => {
     const kind = typeof request?.kind === 'string' ? (request.kind as string) : 'unknown';
     if (kind === 'mcp' || kind === 'custom-tool') {
-      return { kind: 'approved' };
+      return { kind: PERMISSION_APPROVE };
     }
     try {
       const toolName =
@@ -763,7 +955,7 @@ export function buildSandboxPermissionHandler(
     } catch (err) {
       log.warn('[copilot] sandbox denial callback threw:', err);
     }
-    return { kind: 'denied-by-rules' };
+    return { kind: PERMISSION_REJECT, feedback: SANDBOX_DENIAL_FEEDBACK };
   };
 }
 
@@ -772,11 +964,16 @@ export function buildSandboxPermissionHandler(
  * built-ins are off-limits and reaches for MCP tools instead of wasting
  * a turn proposing something we'll deny.
  */
+// Deliberately names no built-in. The previous version listed eight by
+// name; the CLI had since renamed five of them, so the prompt was
+// telling the model that tools it could actually still see were
+// disabled, and saying nothing about the ones that were. Your function
+// schema is the authority on what exists — this only states the rule.
 const SANDBOX_PROMPT_HINT =
-  '\n\nSandbox mode is active: only tools exposed via MCP are available. ' +
-  'The Copilot built-ins (bash, web_fetch, view, read_file, write_file, edit_file, ' +
-  'str_replace_editor, grep) are disabled — attempting them will be denied. ' +
-  'Use the gezel MCP tools (list_dir, read_file, write_file, search_files, fetch_url, etc.) instead.';
+  '\n\nSandbox mode is active: only the gezel MCP tools on your function schema are ' +
+  "available. Copilot's own built-in tools are not — they are absent from your schema, " +
+  'and any attempt to call one is denied. Use the MCP tools for everything, including ' +
+  'shell-shaped work.';
 
 export function buildSandboxSystemMessage(base: string): string {
   return base + SANDBOX_PROMPT_HINT;

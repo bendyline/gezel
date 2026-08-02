@@ -71,6 +71,22 @@ $cmakeFlags = @(
   # which we do not ship. ggml's native threadpool covers the OFF path.
   # See the longer note in native/engines/llama-cpp/build.sh.
   '-DGGML_OPENMP=OFF',
+  # Portable CPU code. ggml defaults GGML_NATIVE=ON, and on MSVC that
+  # runs FindSIMD.cmake against the BUILD HOST, baking /arch:AVX512 (or
+  # whatever the runner supports) into ggml-cpu.dll. The shipped binary
+  # then SIGILLs - reported as an illegal-instruction crash before the
+  # engine ever binds its port - on any user CPU that lacks the runner's
+  # instruction set, and CI cannot catch it because the machine that
+  # built the binary can by definition execute it. See the much longer
+  # note in build.sh; this is the same defect on the same runner pool.
+  #
+  # NATIVE=OFF + BACKEND_DL + CPU_ALL_VARIANTS is upstream's own release
+  # recipe: one dlopen-able ggml-cpu-<variant>.dll per ISA level, chosen
+  # at load time by ggml_backend_load_all() from what the running CPU
+  # actually reports.
+  '-DGGML_NATIVE=OFF',
+  '-DGGML_BACKEND_DL=ON',
+  '-DGGML_CPU_ALL_VARIANTS=ON',
   '-DLLAMA_BUILD_SERVER=ON',
   '-DLLAMA_BUILD_TESTS=OFF',
   '-DLLAMA_BUILD_EXAMPLES=OFF',
@@ -180,6 +196,19 @@ Get-ChildItem -Path $buildOutDir -Filter '*.dll' -ErrorAction SilentlyContinue |
     Copy-Item $_.FullName (Join-Path $outDir $_.Name) -Force
     Write-Host "[build] bundled $($_.Name)"
   }
+
+# CPU-dispatch guard, mirroring build.sh section 6b2. GGML_CPU_ALL_VARIANTS
+# is only doing its job if several ggml-cpu-<variant>.dll modules landed;
+# if a pin bump drops the option or renames them, cmake does NOT fail - it
+# quietly reverts to one host-tuned ggml-cpu.dll and the symptom is a SIGILL
+# on somebody else's machine weeks later. Assert the shape while we can.
+$variantDlls = @(Get-ChildItem -Path $outDir -Filter 'ggml-cpu-*.dll' -ErrorAction SilentlyContinue)
+if ($variantDlls.Count -lt 2) {
+  throw ("expected multiple ggml-cpu-<variant>.dll modules, found $($variantDlls.Count) - " +
+         "GGML_CPU_ALL_VARIANTS did not take effect, so the CPU backend is compiled for " +
+         "THIS build host's instruction set and will SIGILL on any user CPU that lacks it")
+}
+Write-Host "[build] cpu-dispatch guard passed ($($variantDlls.Count) variant modules)"
 
 # CUDA builds also depend on cuBLAS / cuDART DLLs from the CUDA Toolkit
 # (NOT produced by the llama.cpp build itself). llama.cpp does not

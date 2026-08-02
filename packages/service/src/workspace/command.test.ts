@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
@@ -146,4 +147,58 @@ describe('runWorkspaceCommand', () => {
       });
     }
   });
+
+  if (process.platform === 'win32') {
+    it.each(['cmd', 'bat'])(
+      'quotes a spaced .%s path and prevents model args from becoming shell syntax',
+      async (extension) => {
+        const probeDir = join(dir, 'folder with spaces');
+        await mkdir(probeDir, { recursive: true });
+        const probe = join(probeDir, `safe-probe.${extension}`);
+        await writeFile(probe, '@echo off\r\necho SAFE-COMMAND %~1\r\n', 'utf8');
+
+        const res = await runWorkspaceCommand({
+          bin: probe,
+          args: [
+            'hello',
+            '&',
+            'echo',
+            'INJECTED-BY-SHELL',
+            '|',
+            '<',
+            '>',
+            '^',
+            '(',
+            ')',
+            '!',
+            'spaced value',
+            'Zażółć',
+            'say "hi"',
+          ],
+          cwd: dir,
+        });
+
+        expect(res.ok).toBe(true);
+        expect(res.stdout.trim()).toBe('SAFE-COMMAND hello');
+        expect(res.stdout).not.toContain('INJECTED-BY-SHELL');
+        expect(res.stderr).not.toContain('DEP0190');
+      },
+    );
+
+    it('fails closed before spawning when a shell token contains percent expansion', async () => {
+      const probe = join(dir, 'percent-probe.cmd');
+      await writeFile(probe, '@echo off\r\necho ran>ran.txt\r\n', 'utf8');
+
+      const res = await runWorkspaceCommand({
+        bin: probe,
+        args: ['%PATH%'],
+        cwd: dir,
+      });
+
+      expect(res.ok).toBe(false);
+      expect(res.code).toBe(-1);
+      expect(res.error).toContain('cannot safely quote for the Windows shell');
+      expect(existsSync(join(dir, 'ran.txt'))).toBe(false);
+    });
+  }
 });

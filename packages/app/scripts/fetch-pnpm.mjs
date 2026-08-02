@@ -21,6 +21,12 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { x as extractTar } from 'tar';
 
+import {
+  removePnpmReflinkDependency,
+  smokeTestPnpmCloneMode,
+  verifyPnpmReflinkRemoval,
+} from '../../../scripts/pnpm-reflink-compat.mjs';
+import { pnpmTargetFor, verifyPnpmRuntimeTree } from '../../../scripts/pnpm-runtime-inventory.mjs';
 import { pruneForeignBinariesWithReport } from '../../../scripts/prune-foreign-binaries.mjs';
 
 // See fetch-node.mjs: Node's default 250ms per-address connect timeout
@@ -91,8 +97,10 @@ async function main() {
       (await readFile(cacheVersion, 'utf8')).trim() === version &&
       (await readFile(cachePackageSha, 'utf8')).trim() === packageSha &&
       (await sha256File(cacheLicense)) === licenseSha;
+    if (cacheValid) await verifyPnpmRuntimeTree(cacheDir);
   } catch {
     /* no valid existing cache */
+    cacheValid = false;
   }
 
   if (cacheValid) {
@@ -143,6 +151,7 @@ async function main() {
     await cp(embeddedLicense, cacheLicense);
     await writeFile(cacheVersion, `${version}\n`, 'utf8');
     await writeFile(cachePackageSha, `${packageSha}\n`, 'utf8');
+    await verifyPnpmRuntimeTree(cacheDir);
     console.log(`[fetch-pnpm] cached pnpm v${version} (package + license sha256 verified)`);
   }
 
@@ -150,16 +159,31 @@ async function main() {
   await rm(distDir, { recursive: true, force: true });
   await cp(cacheDir, distDir, { recursive: true });
   await pruneForeignBinariesWithReport(distDir);
+  const reflinkRemoval = await removePnpmReflinkDependency(distDir);
+  const target = pnpmTargetFor(
+    process.env.GEZEL_BUNDLE_PLATFORM ?? process.platform,
+    process.env.GEZEL_BUNDLE_ARCH ?? process.arch,
+  );
+  await verifyPnpmRuntimeTree(distDir, { target });
+  await verifyPnpmReflinkRemoval(distDir);
+  await smokeTestPnpmCloneMode(distDir);
   await writeFile(join(distDir, 'version.txt'), `${version}\n`, 'utf8');
 
-  // The supervisor re-hashes both load-bearing JavaScript entrypoints
-  // before installing the bundle into the Gezel home.
+  // The supervisor re-hashes every load-bearing JavaScript file before
+  // installing the bundle into the Gezel home. The manifest text also acts as
+  // the bundle revision, so a packaging patch upgrades an already-extracted
+  // runtime even when the upstream pnpm version did not change.
   const manifest = [
     `${await sha256File(join(distDir, 'bin', 'pnpm.mjs'))}  bin/pnpm.mjs`,
     `${await sha256File(join(distDir, 'dist', 'pnpm.mjs'))}  dist/pnpm.mjs`,
+    `${await sha256File(join(distDir, 'dist', 'worker.js'))}  dist/worker.js`,
+    `${await sha256File(join(distDir, 'dist', 'gezel-reflink-compat.cjs'))}  dist/gezel-reflink-compat.cjs`,
   ];
   await writeFile(join(distDir, 'sha256.txt'), `${manifest.join('\n')}\n`, 'utf8');
-  console.log(`[fetch-pnpm] staged ${join(distDir, 'bin', 'pnpm.mjs')}`);
+  console.log(
+    `[fetch-pnpm] staged ${join(distDir, 'bin', 'pnpm.mjs')} ` +
+      `(${reflinkRemoval.removedPackage} replaced with Node fs compatibility)`,
+  );
 }
 
 main().catch((err) => {

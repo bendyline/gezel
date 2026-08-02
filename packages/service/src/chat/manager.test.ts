@@ -100,6 +100,21 @@ describe('resolveMlxEffectiveNumCtx', () => {
   });
 });
 
+/**
+ * The properties `NativeEngineCrashedError` carries. Assigned onto a
+ * scripted mock failure so the structured-detail path is exercised without
+ * dragging the llama-cpp provider into these tests.
+ */
+const NATIVE_CRASH_FIELDS = {
+  code: 'native-engine-crash',
+  engine: 'llama-cpp',
+  incidentId: 'native-51832-1785547847453',
+  panicKind: 'cuda-out-of-memory',
+  exitCode: null,
+  signal: 'SIGILL',
+  diagnostics: { model: 'gemma4-26b-q4', backend: 'vulkan' },
+};
+
 let home: string;
 let store: Store;
 let events: ChatEventBus;
@@ -110,6 +125,10 @@ beforeEach(async () => {
   home = await mkdtemp(join(tmpdir(), 'gezel-mgr-test-'));
   store = new Store({ home });
   await store.ensureLayout();
+  // This suite injects a mock under the 'copilot' key. Pin it as the default
+  // too — otherwise routing falls through to the platform default (an
+  // on-device engine) and the injected mock is never reached.
+  await store.writeConfig({ provider: 'copilot' });
   await store.createGezel({ name: 'Ada', role: 'Developer' });
   await store.createProject({ name: 'Default' });
   events = new ChatEventBus();
@@ -373,6 +392,69 @@ describe('ChatManager — send + persistence', () => {
     expect(disk!.lastTurnError).toMatch(/list_tasks.*5 times/);
   });
 
+  it('publishes the structured detail alongside the error event', async () => {
+    const session = await manager.createSession({ gezelId: 'ada' });
+    const received: Array<{ type: string; errorDetail?: { code?: string } }> = [];
+    events.subscribe(session.id, (event) => received.push(event));
+    mock.scriptSendFailure('[llama-cpp] on-device engine crashed (SIGILL)', NATIVE_CRASH_FIELDS);
+
+    await expect(manager.send(session.id, 'go')).rejects.toThrow();
+
+    expect(received).toContainEqual(
+      expect.objectContaining({
+        type: 'error',
+        errorDetail: expect.objectContaining({
+          code: 'native-engine-crash',
+          engine: 'llama-cpp',
+          incidentId: 'native-51832-1785547847453',
+        }),
+      }),
+    );
+  });
+
+  it('clears the structured detail on the next successful turn', async () => {
+    // Regression guard: a stale detail outliving the error it describes
+    // would have the UI offering to report an already-fixed problem.
+    const session = await manager.createSession({ gezelId: 'ada' });
+    mock.scriptSendFailure('[llama-cpp] on-device engine crashed (SIGILL)', NATIVE_CRASH_FIELDS);
+    await expect(manager.send(session.id, 'go')).rejects.toThrow();
+    expect((await store.getSession('ada', session.id))!.lastTurnErrorDetail).toBeDefined();
+
+    mock.script('recovered');
+    await manager.send(session.id, 'try again');
+
+    const disk = await store.getSession('ada', session.id);
+    expect(disk!.lastTurnError).toBeUndefined();
+    expect(disk!.lastTurnErrorDetail).toBeUndefined();
+  });
+
+  it('clears the structured detail through clearLastTurnError', async () => {
+    // Guards the early-return in `clearLastTurnError`, which used to bail
+    // on `lastTurnError === undefined` alone.
+    const session = await manager.createSession({ gezelId: 'ada' });
+    mock.scriptSendFailure('[llama-cpp] on-device engine crashed (SIGILL)', NATIVE_CRASH_FIELDS);
+    await expect(manager.send(session.id, 'go')).rejects.toThrow();
+
+    await manager.clearLastTurnError(session.id);
+
+    const disk = await store.getSession('ada', session.id);
+    expect(disk!.lastTurnError).toBeUndefined();
+    expect(disk!.lastTurnErrorDetail).toBeUndefined();
+  });
+
+  it('scrubs credentials out of the persisted lastTurnError', async () => {
+    // A token that leaked into an error message would otherwise sit in
+    // session JSON forever — and session JSON is what gets copied into
+    // debug bundles and pasted into support threads.
+    const session = await manager.createSession({ gezelId: 'ada' });
+    mock.scriptSendFailure('auth failed: ghp_ABCdefGHIjklMNOpqrSTUvwxYZ0123456789');
+    await expect(manager.send(session.id, 'go')).rejects.toThrow();
+
+    const disk = await store.getSession('ada', session.id);
+    expect(disk!.lastTurnError).toContain('[REDACTED]');
+    expect(disk!.lastTurnError).not.toContain('ghp_');
+  });
+
   it('salvages the streamed reply onto the turn-aborted message when cancelled mid-stream', async () => {
     // A turn cancelled mid-flight (user stop, or a superseding task
     // handoff) used to persist an EMPTY assistant bubble: cancelInflight
@@ -407,12 +489,97 @@ describe('ChatManager — send + persistence', () => {
     const disk = await store.getSession('ada', session.id);
     expect(disk).not.toBeNull();
     expect(disk!.lastTurnError).toBeUndefined();
+    expect(disk!.lastTurnErrorDetail).toBeUndefined();
     expect(received).toContain('cancelled');
     expect(received).not.toContain('error');
     const aborted = disk!.messages.at(-1)!;
     expect(aborted.role).toBe('assistant');
     expect(aborted.synthetic).toBe('turn-aborted');
     expect(aborted.content).toBe('Partial answer the user already saw');
+  }, 20_000);
+
+  it('scrubs reasoning markup off the turn-aborted message instead of baking it into content', async () => {
+    // The salvaged buffer is RAW — the turn died before the provider's
+    // end-of-turn reasoning extraction ran. Persisting it verbatim put
+    // `<|channel>thought` framing into `content`, and this message gets
+    // replayed to the model like any other, so Gemma 4 read back its own
+    // markup and copied the pattern. Measured on MLX: 305 stray markers
+    // across 19 aborted messages, 0 across the 222 normal ones — the
+    // abort path was the only one skipping the scrub.
+    const session = await manager.createSession({ gezelId: 'ada' });
+    mock.scriptStreamThenHang('<|channel>thought\nWeighing the options.<channel|>Visible answer');
+
+    const pending = manager.send(session.id, 'go').catch(() => {
+      /* cancel surfaces as cancelled/done events */
+    });
+    await vi.waitFor(() => expect(mock.calls.some((c) => c.kind === 'send')).toBe(true), {
+      timeout: 5000,
+      interval: 10,
+    });
+    await manager.cancelInflight(session.id);
+    await pending;
+
+    const disk = await store.getSession('ada', session.id);
+    const aborted = disk!.messages.at(-1)!;
+    expect(aborted.synthetic).toBe('turn-aborted');
+    expect(aborted.content).not.toMatch(/<\|?\/?channel\|?>/);
+    expect(aborted.content).toContain('Visible answer');
+    // Scrubbed, not discarded — the prose still reaches the reasoning channel.
+    expect(aborted.reasoning ?? '').toContain('Weighing the options.');
+  }, 20_000);
+
+  it('does not let a late-unwinding cancelled turn steal or wipe its successor', async () => {
+    // Wild-caught on Copilot: `cancelInflight` frees the session slot
+    // synchronously, but the SDK ran the cancelled response to completion
+    // ~16s later. By then the next turn owned the session-keyed per-turn
+    // buffers, so the cancelled turn's catch salvaged ITS SUCCESSOR's
+    // half-streamed text and filed it as its own `turn-aborted` record —
+    // one continuous stream split across two bubbles, the second turn's
+    // words attributed to the first — and then its `finally` wiped the
+    // running turn's accumulators.
+    const session = await manager.createSession({ gezelId: 'ada' });
+    const stalled = mock.scriptStreamThenStall('FIRST turn text');
+
+    const first = manager.send(session.id, 'first').catch(() => {
+      /* cancel surfaces as events, not a rejection here */
+    });
+    await vi.waitFor(() => expect(mock.calls.filter((c) => c.kind === 'send')).toHaveLength(1), {
+      timeout: 5000,
+      interval: 10,
+    });
+
+    // Cancel frees the slot; the provider call is still running.
+    await manager.cancelInflight(session.id);
+
+    // Successor starts and takes over the per-turn buffers. Left in
+    // flight on purpose: its half-streamed text is sitting in exactly the
+    // buffers the cancelled turn is about to read.
+    const stalledSuccessor = mock.scriptStreamThenStall('SECOND turn text');
+    const second = manager.send(session.id, 'second');
+    await vi.waitFor(() => expect(mock.calls.filter((c) => c.kind === 'send')).toHaveLength(2), {
+      timeout: 5000,
+      interval: 10,
+    });
+
+    // Only now does the cancelled turn's provider call settle.
+    stalled.release();
+    await first;
+
+    stalledSuccessor.release();
+    await second;
+
+    const disk = await store.getSession('ada', session.id);
+    const aborted = disk!.messages.find((m) => m.synthetic === 'turn-aborted');
+    expect(aborted).toBeDefined();
+    // Its own streamed text — never the successor's.
+    expect(aborted!.content).toBe('FIRST turn text');
+    expect(aborted!.content).not.toContain('SECOND');
+
+    // The successor committed a real reply, and the late teardown did not
+    // eat it.
+    const replies = disk!.messages.filter((m) => m.role === 'assistant' && !m.synthetic);
+    expect(replies).toHaveLength(1);
+    expect(replies[0]!.content).toBe('SECOND turn text');
   }, 20_000);
 
   it('honors a stop pressed during setup, before the turn wires its abort signal', async () => {
@@ -2970,6 +3137,10 @@ describe('ChatManager — memory extraction isolation', () => {
       const home = await mkdtemp(join(tmpdir(), `gezel-extract-${providerName}-`));
       const store = new Store({ home });
       await store.ensureLayout();
+      // This suite injects a mock under the 'copilot' key. Pin it as the default
+      // too — otherwise routing falls through to the platform default (an
+      // on-device engine) and the injected mock is never reached.
+      await store.writeConfig({ provider: 'copilot' });
       await store.createGezel({ name: 'Ada', role: 'Developer' });
       await store.createProject({ name: 'Default' });
       await store.writeConfig({ provider: providerName });
@@ -3075,6 +3246,10 @@ describe('ChatManager — context-window pressure (Ollama)', () => {
     const home = await mkdtemp(join(tmpdir(), 'gezel-ctx-test-'));
     const store = new Store({ home });
     await store.ensureLayout();
+    // This suite injects a mock under the 'copilot' key. Pin it as the default
+    // too — otherwise routing falls through to the platform default (an
+    // on-device engine) and the injected mock is never reached.
+    await store.writeConfig({ provider: 'copilot' });
     await store.createGezel({ name: 'Ada', role: 'Developer' });
     await store.createProject({ name: 'Default' });
     await store.writeConfig({ provider: 'ollama' });
@@ -3283,6 +3458,10 @@ describe('ChatManager — context-window pressure (Ollama)', () => {
     const home = await mkdtemp(join(tmpdir(), 'gezel-ctx-llama-test-'));
     const store = new Store({ home });
     await store.ensureLayout();
+    // This suite injects a mock under the 'copilot' key. Pin it as the default
+    // too — otherwise routing falls through to the platform default (an
+    // on-device engine) and the injected mock is never reached.
+    await store.writeConfig({ provider: 'copilot' });
     await store.createGezel({ name: 'Ada', role: 'Developer' });
     await store.createProject({ name: 'Default' });
     await store.writeConfig({ provider: 'llama-cpp' });
@@ -3399,6 +3578,10 @@ describe('ChatManager — context-window pressure (Ollama)', () => {
     const home = await mkdtemp(join(tmpdir(), 'gezel-loop-test-'));
     const store = new Store({ home });
     await store.ensureLayout();
+    // This suite injects a mock under the 'copilot' key. Pin it as the default
+    // too — otherwise routing falls through to the platform default (an
+    // on-device engine) and the injected mock is never reached.
+    await store.writeConfig({ provider: 'copilot' });
     await store.createGezel({ name: 'Ada', role: 'Developer' });
     await store.createProject({ name: 'Default' });
     await store.writeConfig({ provider: 'ollama' });

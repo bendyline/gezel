@@ -28,7 +28,25 @@ async function writeBundle(version: string, content = '// fake pnpm entry\n'): P
   await mkdir(join(bundleDir, 'dist'), { recursive: true });
   await writeFile(join(bundleDir, 'bin', 'pnpm.mjs'), content, 'utf8');
   await writeFile(join(bundleDir, 'dist', 'pnpm.mjs'), '// fake runtime\n', 'utf8');
+  await writeFile(join(bundleDir, 'dist', 'worker.js'), '// fake worker\n', 'utf8');
+  await writeFile(
+    join(bundleDir, 'dist', 'gezel-reflink-compat.cjs'),
+    '// fake reflink compatibility\n',
+    'utf8',
+  );
   await writeFile(join(bundleDir, 'version.txt'), `${version}\n`, 'utf8');
+}
+
+function bundleManifest(entryDigest: string): string {
+  const runtimeDigest = createHash('sha256').update('// fake runtime\n').digest('hex');
+  const workerDigest = createHash('sha256').update('// fake worker\n').digest('hex');
+  const compatDigest = createHash('sha256').update('// fake reflink compatibility\n').digest('hex');
+  return (
+    `${entryDigest}  bin/pnpm.mjs\n` +
+    `${runtimeDigest}  dist/pnpm.mjs\n` +
+    `${workerDigest}  dist/worker.js\n` +
+    `${compatDigest}  dist/gezel-reflink-compat.cjs\n`
+  );
 }
 
 describe('installPnpmIfNeeded', () => {
@@ -96,25 +114,34 @@ describe('installPnpmIfNeeded', () => {
   it('installs when the bundle sha256 manifest matches', async () => {
     await writeBundle('11.15.1');
     const entryDigest = createHash('sha256').update('// fake pnpm entry\n').digest('hex');
-    const mjsDigest = createHash('sha256').update('// fake runtime\n').digest('hex');
-    await writeFile(
-      join(bundleDir, 'sha256.txt'),
-      `${entryDigest}  bin/pnpm.mjs\n${mjsDigest}  dist/pnpm.mjs\n`,
-      'utf8',
-    );
+    await writeFile(join(bundleDir, 'sha256.txt'), bundleManifest(entryDigest), 'utf8');
     const res = await installPnpmIfNeeded({ home, bundleDir });
     expect(res.action).toBe('fresh-install');
+  });
+
+  it('upgrades the same pnpm version when the staged bundle manifest changes', async () => {
+    await writeBundle('11.15.1');
+    const firstDigest = createHash('sha256').update('// fake pnpm entry\n').digest('hex');
+    await writeFile(join(bundleDir, 'sha256.txt'), bundleManifest(firstDigest), 'utf8');
+    await installPnpmIfNeeded({ home, bundleDir });
+
+    await writeBundle('11.15.1', '// packaging patch at same pnpm version\n');
+    const nextDigest = createHash('sha256')
+      .update('// packaging patch at same pnpm version\n')
+      .digest('hex');
+    await writeFile(join(bundleDir, 'sha256.txt'), bundleManifest(nextDigest), 'utf8');
+    const next = await installPnpmIfNeeded({ home, bundleDir });
+
+    expect(next.action).toBe('upgraded');
+    expect(await readFile(next.entryPath!, 'utf8')).toBe(
+      '// packaging patch at same pnpm version\n',
+    );
   });
 
   it('refuses to install a bundle whose files fail the sha256 manifest', async () => {
     await writeBundle('11.15.1');
     const wrongDigest = createHash('sha256').update('tampered').digest('hex');
-    const mjsDigest = createHash('sha256').update('// fake runtime\n').digest('hex');
-    await writeFile(
-      join(bundleDir, 'sha256.txt'),
-      `${wrongDigest}  bin/pnpm.mjs\n${mjsDigest}  dist/pnpm.mjs\n`,
-      'utf8',
-    );
+    await writeFile(join(bundleDir, 'sha256.txt'), bundleManifest(wrongDigest), 'utf8');
     const warnings: string[] = [];
     const res = await installPnpmIfNeeded({
       home,

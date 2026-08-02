@@ -1401,29 +1401,6 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
           <p className="placeholder">Pick a project on the left to view it here.</p>
         ) : selected ? (
           <>
-            <ProjectGitStatusBar
-              projectId={selected.id}
-              compact={effectiveCompact}
-              allowGezelWrites={selected.allowGezelWrites}
-              workingDir={selected.workingDir ?? null}
-              onAllowWritesChange={(next) => {
-                // Enabling writes on a user-supplied external dir prompts the
-                // same confirmation the Settings checkbox uses; everything
-                // else flips directly.
-                if (next && selected.workingDir) {
-                  setShowAllowWritesConfirm(true);
-                } else {
-                  void saveAllowGezelWrites(next);
-                }
-              }}
-              onOpenGitHub={selected.github?.url ? () => setTab('github') : undefined}
-              status={selected.status ?? 'active'}
-              onStatusChange={async (v) => {
-                const updated = await api.updateProject(selected.id, { status: v });
-                setSelected(updated);
-              }}
-            />
-
             <div className="entity-tabs-row">
               {/* Wide layout: the toggle shows/hides the side-by-side
                   output pane. In compact mode the pane becomes a tab
@@ -1634,28 +1611,6 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                         className="project-about-section project-about-anchor"
                       >
                         <ProjectConnectionsTab project={selected} onProjectChange={setSelected} />
-                      </section>
-
-                      <section
-                        id="project-about-history"
-                        className="project-about-section project-about-anchor"
-                      >
-                        <h3 className="project-about-section-title">History</h3>
-                        <div className="project-about-history">
-                          <HistoryView projectId={selected.id} />
-                        </div>
-                      </section>
-
-                      <section
-                        id="project-about-toolsets"
-                        className="project-about-section project-about-anchor"
-                      >
-                        <h3 className="project-about-section-title">Toolsets</h3>
-                        <ToolsetsEditor
-                          scope={{ kind: 'project', projectId: selected.id }}
-                          subject={selected.name}
-                          hint="Available to every gezel working in this project. Project MCP files are discovered automatically."
-                        />
                       </section>
 
                       <section
@@ -1972,15 +1927,37 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                         </div>
                       </section>
 
+                      <section
+                        id="project-about-toolsets"
+                        className="project-about-section project-about-anchor"
+                      >
+                        <h3 className="project-about-section-title">Toolsets</h3>
+                        <ToolsetsEditor
+                          scope={{ kind: 'project', projectId: selected.id }}
+                          subject={selected.name}
+                          hint="Available to every gezel working in this project. Project MCP files are discovered automatically."
+                        />
+                      </section>
+
+                      <section
+                        id="project-about-history"
+                        className="project-about-section project-about-anchor"
+                      >
+                        <h3 className="project-about-section-title">History</h3>
+                        <div className="project-about-history">
+                          <HistoryView projectId={selected.id} />
+                        </div>
+                      </section>
+
                       <nav className="project-about-toc" aria-label="About sections">
                         <div className="project-about-toc-title">On this page</div>
                         <a href="#project-about-crew">Assigned gezellen</a>
                         <a href="#project-about-overview">About this project</a>
                         <a href="#project-about-mission">Mission objectives</a>
                         <a href="#project-about-connections">Connections</a>
-                        <a href="#project-about-history">History</a>
-                        <a href="#project-about-toolsets">Toolsets</a>
                         <a href="#project-about-settings">Settings</a>
+                        <a href="#project-about-toolsets">Toolsets</a>
+                        <a href="#project-about-history">History</a>
                       </nav>
                     </div>
                   )}
@@ -2307,6 +2284,33 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                 </div>
               )}
             </div>
+
+            {/* Ambient project state (index, branch, status, edits) reads as a
+                status bar along the bottom edge rather than a row of chrome
+                above the tabs — same controls, out of the way of the content
+                they describe. Its menus open upward from here. */}
+            <ProjectGitStatusBar
+              projectId={selected.id}
+              compact={effectiveCompact}
+              allowGezelWrites={selected.allowGezelWrites}
+              workingDir={selected.workingDir ?? null}
+              onAllowWritesChange={(next) => {
+                // Enabling writes on a user-supplied external dir prompts the
+                // same confirmation the Settings checkbox uses; everything
+                // else flips directly.
+                if (next && selected.workingDir) {
+                  setShowAllowWritesConfirm(true);
+                } else {
+                  void saveAllowGezelWrites(next);
+                }
+              }}
+              onOpenGitHub={selected.github?.url ? () => setTab('github') : undefined}
+              status={selected.status ?? 'active'}
+              onStatusChange={async (v) => {
+                const updated = await api.updateProject(selected.id, { status: v });
+                setSelected(updated);
+              }}
+            />
           </>
         ) : (
           <p className="placeholder project-loading">Loading project…</p>

@@ -16,9 +16,11 @@
  *     is present. HuggingFace CDN honors this; falls back gracefully
  *     when the server replies with `200` instead of `206` (mid-file
  *     restart).
- *   - Auto-retry with exponential backoff + jitter, up to `maxRetries`
- *     (default 5). Yields `retrying` events so the UI can surface
- *     "Retrying in 4s (attempt 3/5)…" instead of a stuck error banner.
+ *   - Auto-retry with exponential backoff + jitter. The budget counts
+ *     *consecutive failures that made no headway* (default 5) rather than
+ *     attempts-per-file, so a big transfer over a flaky link keeps resuming
+ *     as long as it is actually advancing. Yields `retrying` events so the UI
+ *     can surface "Retrying in 4s (attempt 3/5)…" instead of a stuck banner.
  *   - Per-chunk idle-timeout — a stalled connection that returns no
  *     bytes for `chunkTimeoutMs` aborts and is retried.
  *   - Friendly error mapping for the common cases (DNS, refused,
@@ -42,6 +44,7 @@ import {
   DEFAULT_MAX_RETRIES,
   type DownloadEvent,
   type DownloadResult,
+  DownloadRetryBudget,
   GEZEL_DOWNLOAD_UA,
   existingPartialSize,
   friendlyErrors,
@@ -50,7 +53,6 @@ import {
   friendlyStreamError,
   downloadLog as log,
   rawErrorString,
-  retryDelayMs,
   sleepRespectingAbort,
 } from './download-common.js';
 import { type XetDetection, downloadXet } from './xet-download.js';
@@ -71,7 +73,9 @@ export interface DownloadOptions {
    * Content-Length (e.g. some HF mirrors). */
   approxSizeBytes: number;
   fetchImpl?: typeof fetch;
-  /** Stop after this many ATTEMPTS (not retries). 1 = no retry; 5 = up to 4 retries. */
+  /** Give up after this many CONSECUTIVE failed attempts that made no
+   * forward progress. 1 = no retry. Progressing attempts refund the budget,
+   * bounded by `MAX_TOTAL_ATTEMPTS`. */
   maxRetries?: number;
   /** Per-chunk idle timeout. */
   chunkTimeoutMs?: number;
@@ -108,10 +112,10 @@ export async function* downloadWithRetry(
   const maxAttempts = opts.maxRetries ?? DEFAULT_MAX_RETRIES;
   const chunkTimeoutMs = opts.chunkTimeoutMs ?? DEFAULT_CHUNK_TIMEOUT_MS;
 
-  let attempt = 0;
+  const budget = new DownloadRetryBudget(maxAttempts, existingPartialSize(partialPath));
   let lastFriendlyError = 'download failed';
-  while (attempt < maxAttempts) {
-    attempt++;
+  while (budget.canAttempt()) {
+    budget.beginAttempt();
     if (opts.signal?.aborted) {
       return {
         kind: 'aborted',
@@ -164,21 +168,22 @@ export async function* downloadWithRetry(
       return {
         kind: 'error',
         error: attemptResult.friendlyError,
-        attemptsMade: attempt,
+        attemptsMade: budget.attemptsMade,
         bytesWritten: attemptResult.bytesWritten,
       };
     }
     // Transient — schedule a retry (or give up if we're out of attempts).
     lastFriendlyError = attemptResult.friendlyError;
+    budget.recordFailure(attemptResult.bytesWritten);
     log.warn(
-      `[download] attempt ${attempt}/${maxAttempts} failed: ${attemptResult.friendlyError} (rawError=${attemptResult.rawError})`,
+      `[download] attempt ${budget.attemptsMade} failed at ${attemptResult.bytesWritten} bytes: ${attemptResult.friendlyError} (rawError=${attemptResult.rawError})`,
     );
-    if (attempt >= maxAttempts) break;
-    const delay = retryDelayMs(attempt - 1);
+    if (!budget.canAttempt()) break;
+    const delay = budget.nextDelayMs();
     yield {
       type: 'retrying',
-      attempt: attempt + 1,
-      maxAttempts,
+      attempt: budget.nextAttemptLabel,
+      maxAttempts: budget.maxAttempts,
       delayMs: delay,
       reason: attemptResult.friendlyError,
       resumeFromBytes: attemptResult.bytesWritten,
@@ -193,10 +198,11 @@ export async function* downloadWithRetry(
     }
   }
 
+  const attemptsMade = budget.attemptsMade;
   return {
     kind: 'error',
-    error: `${lastFriendlyError} (gave up after ${maxAttempts} attempt${maxAttempts === 1 ? '' : 's'})`,
-    attemptsMade: attempt,
+    error: `${lastFriendlyError} (gave up after ${attemptsMade} attempt${attemptsMade === 1 ? '' : 's'})`,
+    attemptsMade,
     bytesWritten: existingPartialSize(partialPath),
   };
 }

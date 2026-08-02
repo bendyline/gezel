@@ -9,6 +9,7 @@ import gezelLogotypeUrl from '../assets/gezellogotype.png';
 import { FirstRunInstallBanner } from '../components/FirstRunInstallBanner.js';
 import { RecommendedMediaDownloads } from '../components/RecommendedMediaDownloads.js';
 import { useRoleBasedNameOnlyMode } from '../components/useRoleBasedNameOnlyMode.js';
+import { UI_FALLBACK_PROVIDER } from '../provider-default.js';
 import { SECURITY_LEVEL_PRESETS } from '../security-levels.js';
 import { requestSettingsSection } from '../settings-nav.js';
 import { useUpdateState } from '../update-state.js';
@@ -157,7 +158,7 @@ export function HomeView({
       .catch(() => {});
   }, [config?.meesterGezelId]);
 
-  const provider: Provider = config?.provider ?? 'copilot';
+  const provider: Provider = config?.provider ?? UI_FALLBACK_PROVIDER;
   // Resolve the effective default model name for the banner. For
   // llama-cpp, when the user hasn't pinned a default, the supervisor
   // falls through to the first installed model (see
@@ -330,27 +331,20 @@ export function HomeView({
   // mid-flight. This is what keeps "First run setup" from flashing past on a
   // slow cold boot before the probe confirms a model is already installed.
   if (!config || configured === null) {
-    // Deliberately no banner here. This branch lives for a few hundred
-    // milliseconds at boot, and rendering the banner in it only to hand the
-    // same element to a different parent a moment later tears the node down
-    // and rebuilds it — the banner visibly flickers, and a click landing in
-    // that window hits a detached button and is swallowed. Nothing is lost:
-    // the settled branches below render it as soon as there is a screen worth
-    // putting it on.
+    // Nothing first-run-flavoured renders here — not the intro, not the
+    // "What is gezel?" Handboek article, not the banner. On a configured
+    // install this branch lives for a few hundred milliseconds before
+    // HomeWorkshop takes over, and anything with visual weight in it reads
+    // as a flash of the wrong screen. The banner has a second reason:
+    // handing the same element to a different parent a moment later tears
+    // the node down and rebuilds it, so it visibly flickers and a click
+    // landing in that window hits a detached button. Both are rendered by
+    // the settled branches below as soon as there is a screen worth putting
+    // them on. The placeholder itself fades in only after a delay (see
+    // .home-loading-placeholder) so a fast boot shows an empty surface
+    // rather than a spinner blink.
     return (
-      <div className="home-view home-view-loading">
-        <IntroSection
-          collapsed={false}
-          onToggle={() => {}}
-          version={health?.version}
-          meesterName={meesterDisplayName}
-          isConfigured={false}
-          loading
-          provider={provider}
-          defaultModel={effectiveDefaultModel}
-          llamaCppBackend={health?.llamaCppBackend}
-          llamaCppDetectedVendor={health?.llamaCppDetectedVendor}
-        />
+      <div className="home-view home-view-loading" aria-busy="true">
         <div className="home-loading-placeholder" aria-live="polite">
           <span className="home-loading-spinner" aria-hidden />
           <span>Loading…</span>
@@ -381,22 +375,25 @@ export function HomeView({
   return (
     <div className="home-view">
       {banner}
-      {/* ── 1. Intro ─────────────────────────────────────────────── */}
-      <IntroSection
-        collapsed={collapseIntro ?? false}
-        onToggle={() => setCollapseIntro((c) => !(c ?? false))}
-        version={health?.version}
-        meesterName={meesterDisplayName}
-        isConfigured={false}
-        provider={provider}
-        defaultModel={effectiveDefaultModel}
-        llamaCppBackend={health?.llamaCppBackend}
-      />
-
       {/* ── First run setup ──────────────────────────────────────── */}
+      {/* Setup leads, the intro follows. A first-run user's one job is to get a
+          model onto the machine, so the download affordance owns the top of the
+          screen; the "what is gezel?" pitch is reading material for after. */}
       {/* Everything below the intro is grouped + slightly indented so the
           steps read as one "First run setup" block. */}
       <h1 className="home-firstrun-heading">First run setup</h1>
+      <p className="home-firstrun-lede muted">
+        Use the buttons below to download local models from{' '}
+        <a
+          href="https://huggingface.co"
+          target="_blank"
+          rel="noreferrer"
+          style={{ color: 'inherit' }}
+        >
+          Hugging Face
+        </a>{' '}
+        that will get you started.
+      </p>
       <div className="home-firstrun-body">
         {/* First-run on-device install banner. Visible only while
           the bootstrapped default model is still downloading (or
@@ -489,6 +486,19 @@ export function HomeView({
           }}
         />
       </div>
+
+      {/* ── Intro ────────────────────────────────────────────────── */}
+      <IntroSection
+        collapsed={collapseIntro ?? false}
+        onToggle={() => setCollapseIntro((c) => !(c ?? false))}
+        version={health?.version}
+        meesterName={meesterDisplayName}
+        isConfigured={false}
+        provider={provider}
+        defaultModel={effectiveDefaultModel}
+        llamaCppBackend={health?.llamaCppBackend}
+        llamaCppDetectedVendor={health?.llamaCppDetectedVendor}
+      />
     </div>
   );
 }
@@ -611,7 +621,6 @@ function IntroSection({
   version,
   meesterName,
   isConfigured,
-  loading = false,
   provider,
   defaultModel,
   llamaCppBackend,
@@ -622,11 +631,6 @@ function IntroSection({
   version?: string;
   meesterName?: string;
   isConfigured: boolean;
-  // While the verdict is still settling we don't yet know whether this is
-  // first-run or a returning user — omit the closing call-to-action entirely
-  // so the loading splash doesn't assert "download a model" over a user who
-  // already has one.
-  loading?: boolean;
   provider: Provider;
   defaultModel?: string;
   llamaCppBackend?: 'cuda' | 'vulkan' | 'metal' | 'cpu';
@@ -673,7 +677,7 @@ function IntroSection({
             (docs/handboek/conceptual/welcome.md) — embedded here as a live
             page so the first-run pitch and the documentation never drift. */}
         <IntroHandboekArticle />
-        {loading ? null : isConfigured ? (
+        {isConfigured ? (
           <p>
             Get started with <strong>{meesterName ?? 'your Meester'}</strong>, your meester, who
             acts as your concierge. You can work with{' '}
@@ -683,7 +687,7 @@ function IntroSection({
         ) : (
           <>
             <p>
-              To get started, download the recommended <strong>on-device</strong> model below — it
+              To get started, download the recommended <strong>on-device</strong> model above — it
               runs privately on your machine, with no account or network required.
             </p>
             <p className="muted small">

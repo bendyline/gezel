@@ -1,19 +1,19 @@
 {
-  "id": "gemma4-e2b-q8",
-  "name": "Gemma 4 (E2B)",
-  "description": "Google's edge-optimized Gemma 4 at ~2B effective parameters. Multimodal (text + image + audio), 256K context, native tool calling. Safe small-model default for any modern laptop.",
-  "tags": ["google", "multimodal", "vision", "audio", "tools", "small"],
+  "id": "gemma4-e2b-q4",
+  "name": "Gemma 4 (E2B, Q4)",
+  "description": "Google's edge-optimized Gemma 4 at ~2B effective parameters. Multimodal (text + image + audio), native tool calling. Quantization-aware-trained 4-bit weights — the safe small-model default for any modern laptop.",
+  "tags": ["google", "multimodal", "vision", "audio", "tools", "small", "qat"],
   "category": "general",
   "maintainer": {
     "name": "Google",
     "url": "https://huggingface.co/google/gemma-4-E2B-it"
   },
-  "version": "1.1.2",
-  "updatedAt": "2026-07-28T00:00:00Z",
+  "version": "1.2.0",
+  "updatedAt": "2026-07-31T00:00:00Z",
   "license": "Apache-2.0",
   "recoScore": 15,
   "parameterSize": "2.3B",
-  "approxSizeBytes": 4967497152,
+  "approxSizeBytes": 2620370976,
   "supportsTools": true,
   "contextWindow": 128000,
   "upstream": "https://huggingface.co/google/gemma-4-E2B-it",
@@ -44,11 +44,11 @@
     "tag": "gemma4:e2b"
   },
   "llamaCpp": {
-    "huggingfaceRepo": "ggml-org/gemma-4-E2B-it-GGUF",
-    "filename": "gemma-4-E2B-it-Q8_0.gguf",
-    "quantization": "Q8_0",
-    "residentBytes": 6078377818,
-    "draftModelFilename": "mtp-gemma-4-E2B-it-Q8_0.gguf"
+    "huggingfaceRepo": "unsloth/gemma-4-E2B-it-qat-GGUF",
+    "filename": "gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf",
+    "quantization": "UD-Q4_K_XL",
+    "residentBytes": 3731251642,
+    "draftModelFilename": "MTP/mtp-gemma-4-E2B-it-Q4_0.gguf"
   },
   "releasePatch": {
     "tuning": {
@@ -63,7 +63,7 @@
     }
   },
   "mlx": {
-    "huggingfaceRepo": "mlx-community/gemma-4-E2B-it-qat-8bit",
-    "quantization": "8bit"
+    "huggingfaceRepo": "mlx-community/gemma-4-E2B-it-qat-4bit",
+    "quantization": "4bit"
   }
 }

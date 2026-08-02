@@ -139,6 +139,18 @@ describe('ChatTimelineView — jumping to a failed turn', () => {
     expect(screen.queryByRole('button', { name: 'Continue' })).not.toBeInTheDocument();
   });
 
+  it('does not offer a GitHub report for a caller-cancelled turn', async () => {
+    renderTimeline(vi.fn(), [
+      message({
+        sessionLastTurnError: '[Mac AI] turn cancelled by caller',
+      }),
+    ]);
+
+    await screen.findByText(/turn cancelled by caller/);
+    expect(screen.getByRole('button', { name: 'Continue' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /report error on github/i })).toBeNull();
+  });
+
   it('keeps the scrollbar visible briefly while the timeline is scrolling', async () => {
     renderTimeline();
     const timeline = await screen.findByTestId('chat-timeline');

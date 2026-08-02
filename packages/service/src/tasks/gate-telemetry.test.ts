@@ -84,7 +84,7 @@ describe('aggregateModelGateEvidence', () => {
           decision: 'approve',
           paused: false,
           bookCatalogId: 'board-game-web',
-          model: 'gemma4-e4b-q8',
+          model: 'gemma4-e4b-q4',
           provider: 'llama-cpp',
         }),
         gatedEvent({
@@ -92,7 +92,7 @@ describe('aggregateModelGateEvidence', () => {
           decision: 'reject',
           paused: false,
           bookCatalogId: 'board-game-web',
-          model: 'gemma4-e4b-q8',
+          model: 'gemma4-e4b-q4',
           provider: 'llama-cpp',
         }),
         gatedEvent({
@@ -112,7 +112,7 @@ describe('aggregateModelGateEvidence', () => {
         }),
       ]),
     );
-    expect(evidence.get('llama-cpp:gemma4-e4b-q8')).toEqual({
+    expect(evidence.get('llama-cpp:gemma4-e4b-q4')).toEqual({
       attempts: 2,
       approves: 1,
       holds: 1,

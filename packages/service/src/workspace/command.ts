@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { OutputRingBuffer } from '../fs/ring.js';
+import { winShellSafe } from '../packages/win-shell.js';
 import { runUnderMacSandbox } from '../sandbox/macos.js';
 import { canApplyMacSandbox, sandboxEnv } from '../sandbox/runner.js';
 
@@ -72,9 +73,26 @@ export async function runWorkspaceCommand(
   });
 
   const startedAt = Date.now();
+  const shell = process.platform === 'win32' && needsShellExpansion(command);
+  let target: { command: string; args: string[] };
+  try {
+    target = winShellSafe(command, args, shell);
+  } catch (err) {
+    return {
+      ok: false,
+      code: -1,
+      stdout: '',
+      stderr: '',
+      stdoutTruncated: false,
+      stderrTruncated: false,
+      timedOut: false,
+      durationMs: Date.now() - startedAt,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
 
   return await new Promise<RunWorkspaceCommandResult>((resolve) => {
-    const child = spawn(command, args, {
+    const child = spawn(target.command, target.args, {
       cwd: opts.cwd,
       stdio: ['ignore', 'pipe', 'pipe'],
       env,
@@ -91,7 +109,11 @@ export async function runWorkspaceCommand(
       // reports `'C:\Program' is not recognized as an internal or
       // external command`. The Node 24 deprecation DEP0190 also flags
       // shell:true with args as a quoting/injection footgun.
-      shell: process.platform === 'win32' && needsShellExpansion(command),
+      // `.cmd` / `.bat` shims need cmd.exe, but the command line above is
+      // already one atomic, safely quoted token stream. Its argv is empty,
+      // so Node neither re-concatenates model-controlled values nor emits
+      // DEP0190. Ordinary executables stay on the shell:false path.
+      shell,
       // The machine-wide daemon runs in non-interactive Session 0. Keep
       // console-subsystem build tools headless so CreateProcess does not
       // attempt console/DLL initialization there. Ignored off Windows.

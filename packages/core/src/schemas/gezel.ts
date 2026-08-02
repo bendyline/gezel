@@ -658,6 +658,47 @@ export const ChatMessageSchema = z.object({
 export type ChatMessage = z.infer<typeof ChatMessageSchema>;
 
 /**
+ * Machine-readable classification of a failed turn, carried beside the
+ * human-readable `error` string on the chat event and persisted alongside
+ * `ChatSession.lastTurnError`.
+ *
+ * Without this every field a structured error class carries — the incident
+ * id, the engine, the crash class, the launch configuration that produced
+ * it — is flattened into `Error.message` at the wire boundary and has to be
+ * scraped back out of prose. The bug-report dialog reads this instead.
+ *
+ * Additive and fully optional: existing consumers read only `error`,
+ * sessions written before this field simply lack it, and an older daemon
+ * reading a newer session strips the key (Zod objects strip unknown
+ * properties) rather than failing to parse.
+ *
+ * `code` is an open string, not an enum, so a daemon that learns a new
+ * failure class cannot break a UI built against an older core. Known
+ * values: `native-engine-crash`, `turn-aborted`, `capacity-denied` — plus
+ * any Node errno, which arrives for free because Node system errors already
+ * carry a string `.code`.
+ */
+export const ChatTurnErrorDetailSchema = z.object({
+  code: z.string().max(64).optional(),
+  /** Component that failed — a provider name (`llama-cpp`) or a subsystem. */
+  engine: z.string().max(64).optional(),
+  /** Correlation key, also written into the engine's own incident log. */
+  incidentId: z.string().max(64).optional(),
+  /** Native crash class from the exit snapshot, e.g. `cuda-out-of-memory`. */
+  panicKind: z.string().max(64).optional(),
+  exitCode: z.number().int().nullable().optional(),
+  signal: z.string().max(32).nullable().optional(),
+  /**
+   * Request-independent launch facts copied from the crash snapshot, which
+   * is contractually free of prompts, tool arguments, and secrets. Bounded
+   * by the extractor. A machine profile cannot reconstruct which model at
+   * which context size with which KV type crashed; this can.
+   */
+  diagnostics: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
+});
+export type ChatTurnErrorDetail = z.infer<typeof ChatTurnErrorDetailSchema>;
+
+/**
  * Server-sent events on the chat stream — same pattern as TaskEvent.
  * `delta` messages land while the model is still streaming; `complete`
  * marks the final assistant message; `done` closes the stream.
@@ -737,7 +778,14 @@ export const ChatEventSchema = z.discriminatedUnion('type', [
     addedLines: z.number().int().nonnegative().optional(),
     removedLines: z.number().int().nonnegative().optional(),
   }),
-  z.object({ type: z.literal('error'), error: z.string() }),
+  z.object({
+    type: z.literal('error'),
+    error: z.string(),
+    // Not `detail` — three sibling variants in this union already use that
+    // name for free-form progress prose, and one union with two meanings for
+    // one key is a trap.
+    errorDetail: ChatTurnErrorDetailSchema.optional(),
+  }),
   /**
    * The running turn was intentionally stopped through the cancellation
    * surface. This is terminal for the live UI, but is deliberately not an

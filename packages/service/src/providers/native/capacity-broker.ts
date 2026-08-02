@@ -19,10 +19,17 @@
 
 import { totalmem } from 'node:os';
 import { createLogger } from '@bendyline/gezel';
-import { autoDetectBudgetBytes } from './capacity-budget.js';
+import { type CapacityBudget, computeCapacityBudget } from './capacity-budget.js';
 import type { LocalProviderName } from './engine-key.js';
 
-export { autoDetectBudgetBytes } from './capacity-budget.js';
+export {
+  autoDetectBudgetBytes,
+  computeCapacityBudget,
+  fastMemoryBudgetBytes,
+  getDetectedGpuVramBytes,
+  setDetectedGpuVramBytes,
+  type CapacityBudget,
+} from './capacity-budget.js';
 
 const log = createLogger('capacity-broker');
 
@@ -39,6 +46,19 @@ export interface CapacityBrokerOptions {
   budgetBytes?: number;
   /** Test seam — defaults to {@link totalmem}. */
   systemRamBytes?: () => number;
+  /**
+   * Whether this host shares one memory pool between CPU and GPU, which
+   * changes the auto-derived budget. Defaults to detecting the running
+   * host; pass it explicitly in tests so the expected budget doesn't
+   * depend on which machine the suite runs on.
+   */
+  unifiedMemory?: boolean;
+  /**
+   * Measured discrete-GPU VRAM, or null for none. A card's memory is added
+   * to the RAM share rather than replacing it — see
+   * {@link computeCapacityBudget}. Omit to read the last published probe.
+   */
+  gpuVramBytes?: number | null;
 }
 
 export interface CapacityCommitted {
@@ -47,6 +67,28 @@ export interface CapacityCommitted {
   enforced: boolean;
   /** Total physical RAM the budget was derived from (for messaging). */
   systemRamBytes: number;
+  /**
+   * What {@link autoDetectBudgetBytes} would pick for this host, whether or
+   * not an explicit budget is in force. The Settings slider marks it on the
+   * track so "Auto" stays a visible position rather than a hidden default.
+   */
+  autoBudgetBytes: number;
+  /** True when an explicit budget is overriding {@link autoBudgetBytes}. */
+  overridden: boolean;
+  /**
+   * Which pools the auto budget draws on, so the UI and the denial message
+   * can name the memory a person actually has instead of describing a 24 GB
+   * card's models as a percentage of system RAM.
+   */
+  pools: {
+    kind: CapacityBudget['kind'];
+    /** Usable VRAM on a discrete card; 0 on unified / CPU-only hosts. */
+    vramBytes: number;
+    /** The system-RAM share of the auto budget. */
+    ramShareBytes: number;
+    /** Fast (on-accelerator) memory — VRAM on a card, the budget otherwise. */
+    fastBytes: number;
+  };
   byKey: Array<{ key: EngineKey; bytes: number }>;
 }
 
@@ -73,18 +115,30 @@ export function formatCapacityDenial(opts: {
   committedBytes: number;
   /** Physical RAM the budget was derived from; 0 when unknown. */
   systemRamBytes: number;
+  /**
+   * Which pools the budget draws on. Omit on a RAM-only host. Without this
+   * the message describes a 24 GB card's budget as a percentage of system
+   * RAM — the number a person with a GPU is least likely to recognize.
+   */
+  pools?: CapacityCommitted['pools'];
 }): string {
-  const { modelLabel, requestedBytes, budgetBytes, committedBytes, systemRamBytes } = opts;
+  const { modelLabel, requestedBytes, budgetBytes, committedBytes, systemRamBytes, pools } = opts;
   const free = Math.max(0, budgetBytes - committedBytes);
   const parts = [
     `Not enough memory to run ${modelLabel}: it needs about ${formatGb(requestedBytes)}, ` +
       `but only ${formatGb(free)} is available for models`,
   ];
-  if (systemRamBytes > 0) {
+  if (pools && pools.kind === 'discrete-gpu' && pools.vramBytes > 0) {
+    parts.push(
+      ` (the model budget is ${formatGb(budgetBytes)} — ${formatGb(pools.vramBytes)} of ` +
+        `graphics memory plus ${formatGb(pools.ramShareBytes)} of this machine's ` +
+        `${formatGb(systemRamBytes)} system memory, with the rest left for everything else)`,
+    );
+  } else if (systemRamBytes > 0) {
     const pct = Math.round((budgetBytes / systemRamBytes) * 100);
     parts.push(
       ` (the model budget is ${formatGb(budgetBytes)} — about ${pct}% of your ` +
-        `${formatGb(systemRamBytes)} machine, with the rest kept free for macOS)`,
+        `${formatGb(systemRamBytes)} machine, with the rest left for everything else)`,
     );
   } else {
     parts.push(` (model budget ${formatGb(budgetBytes)})`);
@@ -96,24 +150,62 @@ export function formatCapacityDenial(opts: {
     );
   }
   parts.push(
-    'Try a smaller or more-quantized model. To raise the limit at your own ' +
-      'risk (may cause the app to run out of memory), set the ' +
-      'GEZEL_CAPACITY_BUDGET_GB environment variable.',
+    'Try a smaller or more-quantized model, or raise the memory budget in ' +
+      'Settings under the engine that runs it — at your own risk, since a ' +
+      'budget the machine cannot back may make the app run out of memory.',
   );
   return parts.join('');
 }
 
+/**
+ * A model that could not be admitted for lack of memory. The message is
+ * unchanged from what `formatCapacityDenial` always produced — the class
+ * exists purely so `describeTurnError` can tell an out-of-memory refusal
+ * apart from an engine crash, since the two need very different advice in
+ * a bug report.
+ */
+export class CapacityDeniedError extends Error {
+  readonly code = 'capacity-denied';
+
+  constructor(message: string) {
+    super(message);
+    this.name = 'CapacityDeniedError';
+  }
+}
+
 export class CapacityBroker {
-  private readonly budgetBytes: number;
-  private readonly enforced: boolean;
+  private budgetBytes: number;
+  private enforced: boolean;
+  private explicitBudgetBytes: number | null;
   private readonly systemRamBytes: number;
+  private readonly unifiedMemory: boolean | undefined;
+  private readonly gpuVramBytes: number | null | undefined;
   private readonly reservations = new Map<EngineKey, number>();
 
   constructor(opts: CapacityBrokerOptions = {}) {
     this.systemRamBytes = (opts.systemRamBytes ?? totalmem)();
-    const explicit = opts.budgetBytes;
-    if (explicit === undefined) {
-      this.budgetBytes = autoDetectBudgetBytes(this.systemRamBytes);
+    this.unifiedMemory = opts.unifiedMemory;
+    this.gpuVramBytes = opts.gpuVramBytes;
+    this.explicitBudgetBytes = opts.budgetBytes ?? null;
+    // Assigned by applyBudget; the definite-assignment dance TS wants for
+    // fields a constructor sets through a helper.
+    this.budgetBytes = 0;
+    this.enforced = false;
+    this.applyBudget();
+  }
+
+  private autoBudget(): CapacityBudget {
+    return computeCapacityBudget({
+      systemRamBytes: this.systemRamBytes,
+      ...(this.unifiedMemory === undefined ? {} : { unifiedMemory: this.unifiedMemory }),
+      ...(this.gpuVramBytes === undefined ? {} : { gpuVramBytes: this.gpuVramBytes }),
+    });
+  }
+
+  private applyBudget(): void {
+    const explicit = this.explicitBudgetBytes;
+    if (explicit === null) {
+      this.budgetBytes = this.autoBudget().budgetBytes;
       this.enforced = true;
     } else if (explicit < 1024 ** 3) {
       this.budgetBytes = explicit;
@@ -122,6 +214,27 @@ export class CapacityBroker {
       this.budgetBytes = explicit;
       this.enforced = true;
     }
+  }
+
+  /**
+   * Re-point the budget without rebuilding the broker. `null` reverts to
+   * {@link autoDetectBudgetBytes}. Existing reservations are untouched: a
+   * shrink below current commitments doesn't evict anything, it just makes
+   * the next `reserve` fail until the pool's LRU path frees room. That is
+   * the same shape as the cache controller's live budget, and it keeps the
+   * Settings slider from severing a mid-turn engine.
+   *
+   * Without this the budget was read once when the engine router was built
+   * and cached until shutdown, so changing the setting did nothing until
+   * the daemon restarted.
+   */
+  setBudgetBytes(bytes: number | null): void {
+    this.explicitBudgetBytes = bytes;
+    this.applyBudget();
+    log.info(
+      `budget set to ${this.budgetBytes} (${bytes === null ? 'auto' : 'explicit'}), ` +
+        `committed ${this.committedBytes()}`,
+    );
   }
 
   /** True iff a fresh reservation of `bytes` would fit under the budget. */
@@ -191,13 +304,30 @@ export class CapacityBroker {
     return sum;
   }
 
+  /** Fast (on-accelerator) memory for this host — see {@link CapacityBudget.fastBytes}. */
+  fastBudgetBytes(): number {
+    const auto = this.autoBudget();
+    // An explicit budget can only lower what we'll put on the accelerator,
+    // never raise the card's capacity.
+    return this.enforced ? Math.min(auto.fastBytes, this.budgetBytes) : auto.fastBytes;
+  }
+
   /** Snapshot used by the UX status endpoint and tests. */
   committed(): CapacityCommitted {
+    const auto = this.autoBudget();
     return {
       budgetBytes: this.budgetBytes,
       committedBytes: this.committedBytes(),
       enforced: this.enforced,
       systemRamBytes: this.systemRamBytes,
+      autoBudgetBytes: auto.budgetBytes,
+      overridden: this.explicitBudgetBytes !== null,
+      pools: {
+        kind: auto.kind,
+        vramBytes: auto.vramBytes,
+        ramShareBytes: auto.ramShareBytes,
+        fastBytes: auto.fastBytes,
+      },
       byKey: [...this.reservations.entries()]
         .map(([key, bytes]) => ({ key, bytes }))
         .sort((a, b) => b.bytes - a.bytes),

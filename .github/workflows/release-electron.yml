@@ -285,8 +285,10 @@ jobs:
           # it. Same list, same module — see third-party-binaries.cjs.
           $patterns = node packages/app/scripts/third-party-binaries.cjs --patterns | ConvertFrom-Json
           if (-not $patterns) { throw 'third-party-binaries.cjs --patterns returned nothing' }
+          $extensions = node packages/app/scripts/third-party-binaries.cjs --extensions | ConvertFrom-Json
+          if (-not $extensions) { throw 'third-party-binaries.cjs --extensions returned nothing' }
           $nativeCode = Get-ChildItem 'packages/app/native-bin' -Recurse -File |
-            Where-Object { $_.Extension -in '.exe', '.dll' }
+            Where-Object { $extensions -contains $_.Extension.ToLowerInvariant() }
           if ($nativeCode.Count -eq 0) { throw 'No native executable/loadable binaries staged' }
           $verified = 0
           foreach ($exe in $nativeCode) {
@@ -445,6 +447,8 @@ jobs:
           # to get signed still fails here.
           $patterns = node packages/app/scripts/third-party-binaries.cjs --patterns | ConvertFrom-Json
           if (-not $patterns) { throw 'third-party-binaries.cjs --patterns returned nothing' }
+          $extensions = node packages/app/scripts/third-party-binaries.cjs --extensions | ConvertFrom-Json
+          if (-not $extensions) { throw 'third-party-binaries.cjs --extensions returned nothing' }
           function Test-ThirdParty([string]$name) {
             foreach ($p in $patterns) { if ($name -imatch $p) { return $true } }
             return $false
@@ -456,7 +460,8 @@ jobs:
             Get-Item "$unpacked/gezel.exe" -ErrorAction Stop
             Get-Item "$unpacked/gezel-service-host.exe" -ErrorAction Stop
           )
-          $payload += Get-ChildItem "$unpacked/resources/app.asar.unpacked" -Recurse -Include '*.exe', '*.dll' -ErrorAction SilentlyContinue
+          $payload += Get-ChildItem "$unpacked/resources/app.asar.unpacked" -Recurse -File -ErrorAction SilentlyContinue |
+            Where-Object { $extensions -contains $_.Extension.ToLowerInvariant() }
           $checked = 0
           $skipped = @()
           foreach ($executable in @($installers) + $payload) {
@@ -683,6 +688,11 @@ jobs:
           codesign --verify --strict --deep --verbose=2 "$app"
           node scripts/verify-macos-entitlements.mjs "$app"
           node scripts/verify-macos-version-floor.mjs "$app" 13.5
+          # electron-builder hardcodes a blanket NSAllowsArbitraryLoads that
+          # `mac.extendInfo` cannot override; an afterPack hook narrows it just
+          # before codesign. Dropping that hook still packs, signs and
+          # notarizes cleanly, so assert the shipped plist rather than trust it.
+          node scripts/verify-macos-ats.mjs "$app"
 
           # The official Node runtime arrives signed/notarized by the Node.js
           # Foundation, and fetch-node.mjs records its vendor bytes before

@@ -301,6 +301,17 @@ link that lands on the same article.
 `.gezel-icon--pulse`) is the canonical "this thing is working in the
 background" signal.
 
+**Status bars.** Ambient state that describes a whole surface — what branch
+it's on, whether the index is fresh, whether gezels may edit — belongs along
+the *bottom* edge of that surface, not in a row of chrome above the content.
+Separate it with a single hairline `border-top` and no fill: the bar has no
+weight of its own, and the controls inside stay ordinary keys so they still
+read as pressable. Everything that overlays out of a bottom bar opens upward
+— hand-positioned menus anchor with `bottom: calc(100% + …)`, Radix surfaces
+take `side="top"` (selects flip on their own). The project status bar
+([ProjectGitStatusBar](../packages/ui/src/components/ProjectGitStatusBar.tsx))
+is the reference.
+
 **Terminal output.** Terminal text is spatial, not prose: preserve whitespace
 and columns exactly, and contain overflow in a keyboard-focusable viewport with
 horizontal and vertical scrolling. Never reflow output to fit a chat bubble.
@@ -318,6 +329,22 @@ command provides the keyboard-first version of the same action.
 use toasts for errors. If the operation is dismissable, show the error
 until the next user action; if it blocks something, show it until the user
 fixes it.
+
+**Reporting an error.** A clear *system* error may carry a "Report error on
+GitHub…" link beside it ([ReportErrorLink](../packages/ui/src/components/ReportErrorLink.tsx)),
+and Settings → About carries a permanent one. It opens a dialog holding the
+exact text that will be filed — the user's own description, the error, and a
+machine profile — which they can edit before "Create issue on GitHub" opens a
+pre-filled issue in their browser. The report never contains logs, absolute
+paths, or anything identifying;
+[error-report.ts](../packages/ui/src/error-report.ts) composes the body and
+scrubs it in one pass, and is the only place that decides what goes in. Put
+the link where the app itself failed — an engine crash, a tab that would not
+render, a service that never came up — not next to a validation message the
+user can fix themselves, and not on a condition that is simply the offline
+case. It is not a new control shape: it reuses `.timeline-session-error-link`
+inline in a red banner, `.home-link` on a neutral surface, and the host's own
+button class inside an action row.
 
 **Status indicators take you to the thing.** A signal in the nav (the
 sidebar's per-project needs-input `?`, failed-turn `!`, working dots) is a

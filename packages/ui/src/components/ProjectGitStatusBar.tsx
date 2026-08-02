@@ -117,7 +117,7 @@ function ProjectControlsOverflow({
             …
           </button>
         </Popover.Trigger>
-        <Popover.Content className="project-controls-overflow-popover" side="bottom" align="end">
+        <Popover.Content className="project-controls-overflow-popover" side="top" align="end">
           <fieldset className="project-controls-overflow-fieldset">
             <legend className="sr-only">Project controls overflow</legend>
             {onStatusChange && (
@@ -168,12 +168,18 @@ function ProjectControlsOverflow({
 }
 
 /**
- * Sticky strip rendered above the per-project tabs whenever a project
- * is GitHub-linked. The AMBIENT git surface: branch picker, a plain-
- * language status chip ("3 unsaved changes · 1 to get") that clicks
- * through to the GitHub tab, and one Sync button. Saving, diffs, and
- * conflict resolution live in the GitHub tab — the workbench — so the
- * two surfaces never compete over the same actions.
+ * The status bar along the bottom edge of a project. The AMBIENT surface:
+ * workspace index, project status, the edits switch, and — when the project
+ * is GitHub-linked — a branch picker, a plain-language status chip ("3
+ * unsaved changes · 1 to get") that clicks through to the GitHub tab, and
+ * one Sync button. Saving, diffs, and conflict resolution live in the
+ * GitHub tab — the workbench — so the two surfaces never compete over the
+ * same actions.
+ *
+ * Everything that overlays out of this bar opens *upward*: the branch menu
+ * and toast are hand-positioned (see styles.css), the Radix tooltip and
+ * overflow popover are told `side="top"`, and the Radix selects flip on
+ * their own via collision detection.
  */
 export function ProjectGitStatusBar({
   projectId,
@@ -571,7 +577,7 @@ export function ProjectGitStatusBar({
                 <span className="project-index-dot" aria-hidden />
               </button>
             </Tooltip.Trigger>
-            <Tooltip.Content side="bottom">
+            <Tooltip.Content side="top">
               <div className="project-index-tooltip">
                 <div className="project-index-tooltip-heading">
                   <span

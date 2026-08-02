@@ -25,6 +25,7 @@ import { TabErrorBoundary } from './components/TabErrorBoundary.js';
 import { TitlebarSearch } from './components/TitlebarSearch.js';
 import { type RecentTabInput, tabKey, toRecentTab } from './components/recent-tabs.js';
 import { EmbeddedChat } from './embedded/EmbeddedChat.js';
+import { UI_FALLBACK_PROVIDER } from './provider-default.js';
 import { requestSettingsSection } from './settings-nav.js';
 import { streamSharedAllChatEvents } from './shared-chat-events.js';
 import { syncSidebarSideFromConfig } from './sidebar-side.js';
@@ -211,7 +212,7 @@ function FullApp() {
       .getConfig()
       .then((cfg) => {
         setEngagementMode((cfg.aiEngagementMode ?? 'proactive') as EngagementMode);
-        setProvider(cfg.provider ?? 'copilot');
+        setProvider(cfg.provider ?? UI_FALLBACK_PROVIDER);
       })
       .catch(() => {});
     api
@@ -378,7 +379,7 @@ function FullApp() {
     // EngineStatusPill — picks it up by polling.
     api
       .getConfig()
-      .then((cfg) => setProvider(cfg.provider ?? 'copilot'))
+      .then((cfg) => setProvider(cfg.provider ?? UI_FALLBACK_PROVIDER))
       .catch(() => {});
   }, []);
 
@@ -648,7 +649,11 @@ function FullApp() {
           <ClaudeCliPoolPill />
           <NightShiftMenu state={nightShift} onChange={setNightShift} />
           <EngagementMenu mode={engagementMode} />
-          <QuotaMeter usage={usage} provider={provider} onClick={() => openArea('settings')} />
+          <QuotaMeter
+            usage={usage}
+            provider={provider}
+            onOpenSettings={() => openArea('settings')}
+          />
         </div>
       </header>
       {questionsOpen && (
@@ -831,10 +836,10 @@ function EngagementMenu({ mode }: { mode: EngagementMode }) {
 type NightShiftState = { active: boolean; source: 'scheduled' | 'manual' | null };
 
 /**
- * Header control for Night Shift. The moon glows when a shift is active;
- * the dropdown lets the user start a shift on demand (e.g. stepping out)
- * and end a manual one. Scheduled shifts can't be force-ended here — they
- * latch off on their own once their work drains.
+ * Header control for Night Shift. Passing clouds + a quiet moon glow show
+ * when a shift is active; the dropdown lets the user start a shift on demand
+ * (e.g. stepping out) and end a manual one. Scheduled shifts can't be
+ * force-ended here — they latch off on their own once their work drains.
  */
 function NightShiftMenu({
   state,
@@ -908,7 +913,10 @@ function NightShiftMenu({
       });
   };
 
-  const hasTasks = tasks !== null && (tasks.active.length > 0 || tasks.upcoming.length > 0);
+  const backgroundWork = tasks?.background ?? [];
+  const hasWork =
+    tasks !== null &&
+    (backgroundWork.length > 0 || tasks.active.length > 0 || tasks.upcoming.length > 0);
 
   return (
     <DropdownMenu.Root open={open} onOpenChange={handleOpenChange}>
@@ -919,8 +927,31 @@ function NightShiftMenu({
           aria-label={title}
           title={title}
         >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-            <path d="M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.39 5.39 0 0 1-8.54-6.5A8.97 8.97 0 0 0 12 3z" />
+          <svg
+            className="app-nightshift-glyph"
+            width="24"
+            height="18"
+            viewBox="0 0 32 24"
+            fill="currentColor"
+            aria-hidden="true"
+          >
+            {state.active && (
+              <g className="app-nightshift-cloud app-nightshift-cloud-far">
+                <g transform="translate(0 -4) scale(.74)">
+                  <path d="M1 17h10.4a2 2 0 0 0 .1-4 3.2 3.2 0 0 0-6.15-1.1A2.5 2.5 0 0 0 1 13.4 1.8 1.8 0 0 0 1 17Z" />
+                </g>
+              </g>
+            )}
+            <path
+              className={`app-nightshift-moon${state.active ? ' is-active' : ''}`}
+              transform="translate(4 0)"
+              d="M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.39 5.39 0 0 1-8.54-6.5A8.97 8.97 0 0 0 12 3z"
+            />
+            {state.active && (
+              <g className="app-nightshift-cloud app-nightshift-cloud-near">
+                <path d="M1 17h10.4a2 2 0 0 0 .1-4 3.2 3.2 0 0 0-6.15-1.1A2.5 2.5 0 0 0 1 13.4 1.8 1.8 0 0 0 1 17Z" />
+              </g>
+            )}
           </svg>
         </button>
       </DropdownMenu.Trigger>
@@ -931,11 +962,19 @@ function NightShiftMenu({
               ? `Running — ${state.source === 'manual' ? 'manual shift' : 'scheduled window'}`
               : 'Not running'}
           </div>
-          {state.active && hasTasks && tasks && (
+          {state.active && hasWork && tasks && (
             <div className="app-nightshift-tasks">
-              {tasks.active.length > 0 && (
+              {(backgroundWork.length > 0 || tasks.active.length > 0) && (
                 <div className="app-nightshift-task-group">
                   <div className="app-nightshift-task-heading">Working on</div>
+                  {backgroundWork.map((work) => (
+                    <NightShiftWorkRow
+                      key={work.id}
+                      title={work.title}
+                      meta={[work.projectName, work.detail].filter(Boolean).join(' · ')}
+                      active
+                    />
+                  ))}
                   {tasks.active.map((t) => (
                     <NightShiftTaskRow key={t.ref} task={t} active />
                   ))}
@@ -950,6 +989,9 @@ function NightShiftMenu({
                 </div>
               )}
             </div>
+          )}
+          {state.active && tasks !== null && !hasWork && (
+            <div className="app-nightshift-empty">No work is running or queued.</div>
           )}
           {review && (review.tasksCompleted.length > 0 || review.reports.length > 0) && (
             <div className="app-nightshift-tasks">
@@ -1003,23 +1045,31 @@ function NightShiftMenu({
               </div>
             </div>
           )}
-          {state.active ? (
-            <DropdownMenu.Item className="app-nav-menu-item" onSelect={() => run('stop')}>
-              <span className="app-engagement-menu-label">Stop night shift</span>
-              <span className="app-engagement-menu-hint">
-                {state.source === 'manual'
-                  ? 'Stop now and revert to the schedule.'
-                  : "Stop for tonight — it won't auto-restart until the next window."}
-              </span>
-            </DropdownMenu.Item>
-          ) : (
-            <DropdownMenu.Item className="app-nav-menu-item" onSelect={() => run('start')}>
-              <span className="app-engagement-menu-label">Start night shift now</span>
-              <span className="app-engagement-menu-hint">
-                Run deferred indexing + the meester review while you're away.
-              </span>
-            </DropdownMenu.Item>
-          )}
+          <div className="app-nightshift-action-tray gz-tray" role="presentation">
+            {state.active ? (
+              <DropdownMenu.Item
+                className="app-nav-menu-item app-nightshift-action gz-key gz-key--stacked"
+                onSelect={() => run('stop')}
+              >
+                <span className="app-engagement-menu-label">Stop night shift</span>
+                <span className="app-engagement-menu-hint">
+                  {state.source === 'manual'
+                    ? 'Stop now and revert to the schedule.'
+                    : "Stop for tonight — it won't auto-restart until the next window."}
+                </span>
+              </DropdownMenu.Item>
+            ) : (
+              <DropdownMenu.Item
+                className="app-nav-menu-item app-nightshift-action gz-key gz-key--stacked"
+                onSelect={() => run('start')}
+              >
+                <span className="app-engagement-menu-label">Start night shift now</span>
+                <span className="app-engagement-menu-hint">
+                  Run deferred indexing + the meester review while you're away.
+                </span>
+              </DropdownMenu.Item>
+            )}
+          </div>
         </DropdownMenu.Content>
       </DropdownMenu.Portal>
     </DropdownMenu.Root>
@@ -1035,11 +1085,23 @@ function NightShiftTaskRow({
   active?: boolean;
 }) {
   const meta = task.stepName ? `${task.projectName} · ${task.stepName}` : task.projectName;
+  return <NightShiftWorkRow title={task.title} meta={meta} active={active} />;
+}
+
+function NightShiftWorkRow({
+  title,
+  meta,
+  active = false,
+}: {
+  title: string;
+  meta: string;
+  active?: boolean;
+}) {
   return (
     <div className="app-nightshift-task">
       <span className={`app-nightshift-task-dot${active ? ' is-active' : ''}`} aria-hidden="true" />
       <span className="app-nightshift-task-text">
-        <span className="app-nightshift-task-title">{task.title}</span>
+        <span className="app-nightshift-task-title">{title}</span>
         <span className="app-nightshift-task-meta">{meta}</span>
       </span>
     </div>
@@ -1049,12 +1111,52 @@ function NightShiftTaskRow({
 function QuotaMeter({
   usage,
   provider,
-  onClick,
+  onOpenSettings,
 }: {
   usage: UsageResponse | null;
   provider: ProviderName;
-  onClick: () => void;
+  onOpenSettings: () => void;
 }) {
+  // Clicking the pill opens the same numbers the tooltip carries, so they
+  // survive a pointer leaving the pill (and exist at all for keyboard and
+  // touch, which never see a `title`). Settings moves into the popover
+  // rather than being the click target. Open/close mirrors
+  // EngineStatusPill — the sibling pill in this header.
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (ev: MouseEvent) => {
+      if (rootRef.current && !rootRef.current.contains(ev.target as Node)) {
+        setOpen(false);
+      }
+    };
+    window.addEventListener('mousedown', handler);
+    return () => window.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  // Cooperative dismissal with the other header popovers — a Radix trigger
+  // can swallow the mousedown before it reaches the handler above.
+  useEffect(() => {
+    const close = (event: Event) => {
+      if ((event as CustomEvent<{ source?: string }>).detail?.source === 'quota') return;
+      setOpen(false);
+    };
+    window.addEventListener('gezel:close-header-popovers', close);
+    return () => window.removeEventListener('gezel:close-header-popovers', close);
+  }, []);
+
+  const toggle = useCallback(() => {
+    setOpen((current) => {
+      if (!current) {
+        window.dispatchEvent(
+          new CustomEvent('gezel:close-header-popovers', { detail: { source: 'quota' } }),
+        );
+      }
+      return !current;
+    });
+  }, []);
   // Local-compute engines (on-device MLX/llama.cpp, paired remote, Ollama)
   // don't bill against a cloud quota. When one of them is the active
   // provider, any quota number we'd show is a leftover from an earlier
@@ -1082,18 +1184,40 @@ function QuotaMeter({
   const totalTurnsToday =
     (usage.providers.copilot?.todayTurns ?? 0) + (usage.providers.openai?.todayTurns ?? 0);
 
-  // No limited quota surfaced (e.g. OpenAI-only or Copilot hasn't reported yet).
+  // No limited quota surfaced (e.g. OpenAI-only or Copilot hasn't reported
+  // yet). Thin, but it still gets the popover so a click means the same
+  // thing on both variants of this pill.
   if (!mostConstrained) {
     if (totalTurnsToday === 0) return null;
     return (
-      <button
-        type="button"
-        className="quota-meter"
-        onClick={onClick}
-        title={`${totalTurnsToday} turns today`}
-      >
-        <span className="quota-label">{totalTurnsToday} today</span>
-      </button>
+      <div className="quota-meter-root" ref={rootRef}>
+        <button
+          type="button"
+          className="quota-meter"
+          onClick={toggle}
+          aria-expanded={open}
+          title={`${totalTurnsToday} turns today`}
+        >
+          <span className="quota-label">{totalTurnsToday} today</span>
+        </button>
+        {open && (
+          <div className="quota-popover">
+            <div className="quota-popover-header">Usage</div>
+            <dl className="quota-popover-stats">
+              <dt>Today</dt>
+              <dd>
+                {totalTurnsToday} {totalTurnsToday === 1 ? 'turn' : 'turns'}
+              </dd>
+            </dl>
+            <p className="quota-popover-note">
+              No quota limit reported yet — it appears after the provider returns one.
+            </p>
+            <button type="button" className="quota-popover-action" onClick={onOpenSettings}>
+              Provider settings
+            </button>
+          </div>
+        )}
+      </div>
     );
   }
 
@@ -1109,28 +1233,75 @@ function QuotaMeter({
   const tooltip = `${humanizeBucketName(q.name)}: ${q.used.toLocaleString()} / ${q.limit.toLocaleString()} (${usedPercent}%)\n${q.remaining.toLocaleString()} remaining${q.resetDate ? `\nResets ${formatResetDate(q.resetDate)}` : ''}${q.overage > 0 ? `\n${q.overage} overage` : ''}\n${totalTurnsToday} turns today`;
 
   return (
-    <button type="button" className="quota-meter" onClick={onClick} title={tooltip}>
-      <div className="quota-ring-wrap">
-        <svg className="quota-ring" viewBox="0 0 36 36" aria-hidden="true">
-          <circle className="quota-ring-bg" cx="18" cy="18" r="15.5" fill="none" strokeWidth="4" />
-          <circle
-            className={`quota-ring-fill${isCritical ? ' critical' : isWarn ? ' warn' : ''}`}
-            cx="18"
-            cy="18"
-            r="15.5"
-            fill="none"
-            strokeWidth="4"
-            pathLength={100}
-            strokeDasharray={`${clampedUsedPercent} ${100 - clampedUsedPercent}`}
-            strokeDashoffset="25"
-            strokeLinecap="round"
-          />
-        </svg>
-      </div>
-      <span className="quota-label">
-        {q.used}/{q.limit}
-      </span>
-    </button>
+    <div className="quota-meter-root" ref={rootRef}>
+      <button
+        type="button"
+        className="quota-meter"
+        onClick={toggle}
+        aria-expanded={open}
+        title={tooltip}
+      >
+        <div className="quota-ring-wrap">
+          <svg className="quota-ring" viewBox="0 0 36 36" aria-hidden="true">
+            <circle
+              className="quota-ring-bg"
+              cx="18"
+              cy="18"
+              r="15.5"
+              fill="none"
+              strokeWidth="4"
+            />
+            <circle
+              className={`quota-ring-fill${isCritical ? ' critical' : isWarn ? ' warn' : ''}`}
+              cx="18"
+              cy="18"
+              r="15.5"
+              fill="none"
+              strokeWidth="4"
+              pathLength={100}
+              strokeDasharray={`${clampedUsedPercent} ${100 - clampedUsedPercent}`}
+              strokeDashoffset="25"
+              strokeLinecap="round"
+            />
+          </svg>
+        </div>
+        <span className="quota-label">
+          {q.used}/{q.limit}
+        </span>
+      </button>
+      {open && (
+        <div className="quota-popover">
+          <div className="quota-popover-header">{humanizeBucketName(q.name)}</div>
+          <dl className="quota-popover-stats">
+            <dt>Used</dt>
+            <dd>
+              {q.used.toLocaleString()} / {q.limit.toLocaleString()} ({usedPercent}%)
+            </dd>
+            <dt>Remaining</dt>
+            <dd>{q.remaining.toLocaleString()}</dd>
+            {q.overage > 0 && (
+              <>
+                <dt>Overage</dt>
+                <dd>{q.overage.toLocaleString()}</dd>
+              </>
+            )}
+            {q.resetDate && (
+              <>
+                <dt>Resets</dt>
+                <dd>{formatResetDate(q.resetDate)}</dd>
+              </>
+            )}
+            <dt>Today</dt>
+            <dd>
+              {totalTurnsToday} {totalTurnsToday === 1 ? 'turn' : 'turns'}
+            </dd>
+          </dl>
+          <button type="button" className="quota-popover-action" onClick={onOpenSettings}>
+            Provider settings
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 

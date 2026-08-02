@@ -26,7 +26,7 @@
  *                        extended-retrieval, headroom). `core` is the
  *                        standard model scorecard. Mutually exclusive
  *                        with --scenarios.
- *   --model <id>         chat model catalog id, default `gemma4-e4b-q8`
+ *   --model <id>         chat model catalog id, default `gemma4-e4b-q4`
  *   --image-model <id>   image model catalog id; falls back to each
  *                        scenario's `defaultImageModelId` when unset.
  *   --timeout <duration> override scenario.timeoutMs, e.g. `20m`, `300000`

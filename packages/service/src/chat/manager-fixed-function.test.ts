@@ -44,6 +44,9 @@ beforeEach(async () => {
   home = await mkdtemp(join(tmpdir(), 'gezel-mgr-ff-test-'));
   svc = await startService({ home });
   store = svc.context.store;
+  // `provider` pins the injected mock: without it, routing falls through to
+  // the platform default (an on-device engine) and the mock is never reached.
+  await store.writeConfig({ provider: 'copilot' });
   events = new ChatEventBus();
   mock = new MockProvider({ name: 'copilot' });
   manager = new ChatManager({

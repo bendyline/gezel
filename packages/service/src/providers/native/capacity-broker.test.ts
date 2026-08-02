@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
   CapacityBroker,
   autoDetectBudgetBytes,
+  computeCapacityBudget,
   defaultLocalEngineSlots,
   estimatePerSlotKvBytes,
+  fastMemoryBudgetBytes,
   formatCapacityDenial,
   llamaCppSlotCeiling,
   localEngineKvBudgetBytes,
@@ -97,25 +99,88 @@ describe('CapacityBroker', () => {
   });
 
   it('auto-detect: 60% on ordinary machines, 80% on workstation machines, capped at 96GB', () => {
-    expect(autoDetectBudgetBytes(16 * GB)).toBe(Math.floor(16 * GB * 0.6));
-    expect(autoDetectBudgetBytes(64 * GB)).toBe(Math.floor(64 * GB * 0.6));
-    expect(autoDetectBudgetBytes(96 * GB)).toBe(Math.floor(96 * GB * 0.8));
+    const discrete = { unifiedMemory: false };
+    expect(autoDetectBudgetBytes(16 * GB, discrete)).toBe(Math.floor(16 * GB * 0.6));
+    expect(autoDetectBudgetBytes(64 * GB, discrete)).toBe(Math.floor(64 * GB * 0.6));
+    expect(autoDetectBudgetBytes(96 * GB, discrete)).toBe(Math.floor(96 * GB * 0.8));
     // 128 GB × 0.8 = 102.4 GB → cap of 96 GB applies.
-    expect(autoDetectBudgetBytes(128 * GB)).toBe(96 * GB);
+    expect(autoDetectBudgetBytes(128 * GB, discrete)).toBe(96 * GB);
     // Larger hosts keep the same default cap unless explicitly overridden.
-    expect(autoDetectBudgetBytes(192 * GB)).toBe(96 * GB);
-    expect(autoDetectBudgetBytes(512 * GB)).toBe(96 * GB);
+    expect(autoDetectBudgetBytes(192 * GB, discrete)).toBe(96 * GB);
+    expect(autoDetectBudgetBytes(512 * GB, discrete)).toBe(96 * GB);
+  });
+
+  it('auto-detect gives unified-memory hosts a larger share less a flat OS reserve', () => {
+    const uma = { unifiedMemory: true };
+    // The case this exists for: a 16 GB Mac. The old shared 60% fraction
+    // capped it at 9.6 GiB, below an 8B-class model at 8-bit — the machine
+    // could hold the model, the budget said otherwise. gemma4-e4b-q4 on
+    // MLX reserves ~10.8 GiB, so the new value has to clear that.
+    expect(autoDetectBudgetBytes(16 * GB, uma)).toBe(Math.floor(16 * GB * 0.7));
+    expect(autoDetectBudgetBytes(16 * GB, uma)).toBeGreaterThan(11 * GB);
+    expect(autoDetectBudgetBytes(16 * GB, uma)).toBeGreaterThan(
+      autoDetectBudgetBytes(16 * GB, { unifiedMemory: false }),
+    );
+    // The 4 GB reserve binds at the small end where the fraction alone
+    // would leave the OS too little.
+    expect(autoDetectBudgetBytes(8 * GB, uma)).toBe(4 * GB);
+    // The fraction binds everywhere above it.
+    expect(autoDetectBudgetBytes(32 * GB, uma)).toBe(Math.floor(32 * GB * 0.7));
+    // Big Macs keep the workstation share they already had — no regression.
+    expect(autoDetectBudgetBytes(96 * GB, uma)).toBe(Math.floor(96 * GB * 0.8));
+    expect(autoDetectBudgetBytes(128 * GB, uma)).toBe(96 * GB);
   });
 
   it('auto-detect kicks in when budgetBytes is omitted', () => {
-    const b = new CapacityBroker({ systemRamBytes: () => 64 * GB });
+    const b = new CapacityBroker({ systemRamBytes: () => 64 * GB, unifiedMemory: false });
     expect(b.committed().budgetBytes).toBe(Math.floor(64 * GB * 0.6));
     expect(b.committed().enforced).toBe(true);
+    expect(b.committed().overridden).toBe(false);
   });
 
   it('committed() reports the system RAM the budget was derived from', () => {
     const b = new CapacityBroker({ systemRamBytes: () => 16 * GB });
     expect(b.committed().systemRamBytes).toBe(16 * GB);
+  });
+
+  it('committed() reports the auto value even while an override is in force', () => {
+    const b = new CapacityBroker({
+      systemRamBytes: () => 16 * GB,
+      unifiedMemory: true,
+      budgetBytes: 14 * GB,
+    });
+    const snap = b.committed();
+    expect(snap.budgetBytes).toBe(14 * GB);
+    expect(snap.autoBudgetBytes).toBe(Math.floor(16 * GB * 0.7));
+    expect(snap.overridden).toBe(true);
+  });
+
+  it('setBudgetBytes re-points the budget live and null reverts to auto', () => {
+    const auto = Math.floor(16 * GB * 0.7);
+    const b = new CapacityBroker({ systemRamBytes: () => 16 * GB, unifiedMemory: true });
+    expect(b.committed().budgetBytes).toBe(auto);
+
+    b.setBudgetBytes(14 * GB);
+    expect(b.committed().budgetBytes).toBe(14 * GB);
+    expect(b.committed().overridden).toBe(true);
+    expect(b.canReserve(13 * GB)).toBe(true);
+
+    b.setBudgetBytes(null);
+    expect(b.committed().budgetBytes).toBe(auto);
+    expect(b.committed().overridden).toBe(false);
+    expect(b.canReserve(13 * GB)).toBe(false);
+  });
+
+  it('shrinking the budget below what is committed keeps reservations but denies the next', () => {
+    // Moving the slider down must not sever a running engine — the pool's
+    // LRU path frees room on the next spawn instead.
+    const b = new CapacityBroker({ systemRamBytes: () => 32 * GB, budgetBytes: 20 * GB });
+    b.reserve('mlx:resident:0', 12 * GB);
+    b.setBudgetBytes(10 * GB);
+    expect(b.committed().committedBytes).toBe(12 * GB);
+    expect(b.canReserve(1 * GB)).toBe(false);
+    b.release('mlx:resident:0');
+    expect(b.canReserve(1 * GB)).toBe(true);
   });
 
   it('formatCapacityDenial produces a human-readable, actionable message', () => {
@@ -132,7 +197,10 @@ describe('CapacityBroker', () => {
     expect(msg).toMatch(/9\.6 GB/); // budget ~10.3e9 bytes → 9.6 GiB
     expect(msg).toMatch(/16\.0 GB/); // machine RAM
     expect(msg).toMatch(/60%/); // budget fraction of RAM
-    expect(msg).toMatch(/GEZEL_CAPACITY_BUDGET_GB/);
+    // Points at the in-app setting, not an environment variable — the
+    // person reading this is blocked in a desktop app, not a shell.
+    expect(msg).toMatch(/Settings/);
+    expect(msg).not.toMatch(/GEZEL_CAPACITY_BUDGET_GB/);
     expect(msg).not.toMatch(/\d{10}/); // no raw byte dump
   });
 
@@ -346,7 +414,7 @@ describe('localEngineSlotCeiling', () => {
     // (SIGABRT — the "Python quit unexpectedly" crash). Must collapse to serial.
     const n = localEngineSlotCeiling({
       engine: 'mlx',
-      budgetBytes: autoDetectBudgetBytes(64 * GB),
+      budgetBytes: autoDetectBudgetBytes(64 * GB, { unifiedMemory: true }),
       weightsBytes: 28 * GB,
       perTurnCtxTokens: 32_768,
       kvCacheType: 'f16',
@@ -357,11 +425,133 @@ describe('localEngineSlotCeiling', () => {
   it('still allows real batching for a small model on a big machine', () => {
     const n = localEngineSlotCeiling({
       engine: 'mlx',
-      budgetBytes: autoDetectBudgetBytes(64 * GB),
+      budgetBytes: autoDetectBudgetBytes(64 * GB, { unifiedMemory: true }),
       weightsBytes: 4 * GB,
       perTurnCtxTokens: 8_192,
       kvCacheType: 'f16',
     });
     expect(n).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe('discrete-GPU hosts — VRAM is memory, not a rounding error', () => {
+  // The reported shape: Windows, 63.9 GB RAM, a 24 GB RTX 4090. The budget
+  // was 60% of system RAM and nothing else, so a 42 GB MoE the card could
+  // run with expert offload was refused, and the refusal explained itself as
+  // a percentage of the pool the model would mostly not have lived in.
+  const RAM = 64 * GB;
+  const VRAM = 24 * GB;
+  const host = { unifiedMemory: false, gpuVramBytes: VRAM };
+
+  it('adds usable VRAM to the system-RAM share instead of ignoring it', () => {
+    const budget = computeCapacityBudget({ systemRamBytes: RAM, ...host });
+    expect(budget.kind).toBe('discrete-gpu');
+    expect(budget.vramBytes).toBe(Math.floor(VRAM * 0.95));
+    expect(budget.ramShareBytes).toBe(Math.floor(RAM * 0.6));
+    expect(budget.budgetBytes).toBe(budget.vramBytes + budget.ramShareBytes);
+    // The model from the report: ~42.2 GB resident. Admitted now, denied before.
+    expect(budget.budgetBytes).toBeGreaterThan(42.2 * GB);
+    expect(autoDetectBudgetBytes(RAM, host)).toBe(budget.budgetBytes);
+  });
+
+  it('keeps the RAM share bounded no matter what the card absorbs', () => {
+    // Every admissible set of models can put at most `ramShareBytes` in RAM:
+    // VRAM absorbs the first `vramBytes` of any total under the budget. That
+    // bound is why adding the pools together is safe rather than optimistic.
+    const budget = computeCapacityBudget({ systemRamBytes: RAM, ...host });
+    const worstCaseInRam = budget.budgetBytes - budget.vramBytes;
+    expect(worstCaseInRam).toBe(budget.ramShareBytes);
+    expect(worstCaseInRam).toBeLessThan(RAM * 0.61);
+  });
+
+  it('sizes KV against the card, not the combined budget', () => {
+    // The other half of the confusion: slots sized off 38 GB of system RAM
+    // on a 24 GB card is how a GPU runs out of memory mid-generation.
+    const budget = computeCapacityBudget({ systemRamBytes: RAM, ...host });
+    expect(budget.fastBytes).toBe(budget.vramBytes);
+    expect(budget.fastBytes).toBeLessThan(budget.budgetBytes);
+    expect(fastMemoryBudgetBytes(RAM, host)).toBe(budget.vramBytes);
+  });
+
+  it('treats a shared pool reported as VRAM as unified, not as a second pool', () => {
+    // GB10 / DGX Spark and integrated GPUs report host memory as VRAM.
+    // Adding it to the RAM share would count the same bytes twice.
+    const shared = computeCapacityBudget({ systemRamBytes: RAM, gpuVramBytes: 60 * GB });
+    expect(shared.kind).toBe('unified');
+    expect(shared.vramBytes).toBe(0);
+    expect(shared.budgetBytes).toBe(Math.floor(RAM * 0.7));
+    expect(shared.fastBytes).toBe(shared.budgetBytes);
+  });
+
+  it('a host with no card is unchanged', () => {
+    const cpuOnly = computeCapacityBudget({
+      systemRamBytes: RAM,
+      gpuVramBytes: null,
+      unifiedMemory: false,
+    });
+    expect(cpuOnly.kind).toBe('system-ram');
+    expect(cpuOnly.budgetBytes).toBe(Math.floor(RAM * 0.6));
+    expect(cpuOnly.fastBytes).toBe(cpuOnly.budgetBytes);
+  });
+
+  it('the broker reports the pools behind its budget', () => {
+    const b = new CapacityBroker({
+      systemRamBytes: () => RAM,
+      unifiedMemory: false,
+      gpuVramBytes: VRAM,
+    });
+    const snap = b.committed();
+    expect(snap.pools.kind).toBe('discrete-gpu');
+    expect(snap.pools.vramBytes).toBe(Math.floor(VRAM * 0.95));
+    expect(snap.budgetBytes).toBe(snap.pools.vramBytes + snap.pools.ramShareBytes);
+    expect(b.fastBudgetBytes()).toBe(snap.pools.vramBytes);
+  });
+
+  it('an explicit budget lowers the fast ceiling but never raises the card', () => {
+    const b = new CapacityBroker({
+      systemRamBytes: () => RAM,
+      unifiedMemory: false,
+      gpuVramBytes: VRAM,
+      budgetBytes: 12 * GB,
+    });
+    expect(b.fastBudgetBytes()).toBe(12 * GB);
+    b.setBudgetBytes(null);
+    expect(b.fastBudgetBytes()).toBe(Math.floor(VRAM * 0.95));
+  });
+
+  it('names the graphics card in the denial instead of a share of system RAM', () => {
+    const b = new CapacityBroker({
+      systemRamBytes: () => RAM,
+      unifiedMemory: false,
+      gpuVramBytes: VRAM,
+    });
+    const c = b.committed();
+    const msg = formatCapacityDenial({
+      modelLabel: 'qwen3.6-35b-a3b-q8',
+      requestedBytes: 70 * GB,
+      budgetBytes: c.budgetBytes,
+      committedBytes: 0,
+      systemRamBytes: c.systemRamBytes,
+      pools: c.pools,
+    });
+    expect(msg).toMatch(/graphics memory/);
+    expect(msg).toMatch(/22\.8 GB/);
+    expect(msg).toMatch(/38\.4 GB/);
+    // The old copy told a Windows user their memory was being kept free for
+    // macOS, and framed a GPU budget as a percentage of system RAM.
+    expect(msg).not.toMatch(/macOS/);
+    expect(msg).not.toMatch(/% of your/);
+  });
+
+  it('leaves the RAM-only denial wording alone', () => {
+    const msg = formatCapacityDenial({
+      modelLabel: 'gemma4-12b-q4',
+      requestedBytes: 20 * GB,
+      budgetBytes: 10 * GB,
+      committedBytes: 0,
+      systemRamBytes: 16 * GB,
+    });
+    expect(msg).toMatch(/about 63% of your 16\.0 GB machine/);
+    expect(msg).not.toMatch(/macOS/);
   });
 });

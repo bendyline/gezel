@@ -227,7 +227,7 @@ describe('ProviderPool', () => {
     // Human-readable: names the model, uses GB, and points at a fix.
     expect(err?.message).toContain('gemma4-12b-q4');
     expect(err?.message).toMatch(/14\.0 GB/);
-    expect(err?.message).toMatch(/GEZEL_CAPACITY_BUDGET_GB/);
+    expect(err?.message).toMatch(/raise the memory budget in Settings/);
     // No raw byte dump.
     expect(err?.message).not.toMatch(/\d{10}/);
     // Pre-flight denial: the model was never built/spawned.
@@ -255,7 +255,7 @@ describe('ProviderPool', () => {
     const write = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
     try {
       await expect(pool.ensure('mlx', 'big-model', 0, 14 * GB)).rejects.toThrow(
-        /GEZEL_CAPACITY_BUDGET_GB/,
+        /raise the memory budget in Settings/,
       );
       const logged = write.mock.calls.map((c) => String(c[0])).join('');
       expect(logged).toMatch(
@@ -275,7 +275,7 @@ describe('ProviderPool', () => {
     const write = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
     try {
       await expect(pool.ensure('mlx', 'grower', 0, 5 * GB)).rejects.toThrow(
-        /GEZEL_CAPACITY_BUDGET_GB/,
+        /raise the memory budget in Settings/,
       );
       const logged = write.mock.calls.map((c) => String(c[0])).join('');
       expect(logged).toMatch(

@@ -110,6 +110,35 @@ describe('runPackageScript', () => {
     expect(b.questionId).toBe(a.questionId);
   });
 
+  it('does not reuse a pending approval when the argument vector changes', async () => {
+    const p = await store.createProject({ name: 'p' });
+    await seedWorkspace(p.id, { scripts: { greet: 'echo hi' } });
+    const a = await runPackageScript({
+      store,
+      home,
+      projectId: p.id,
+      script: 'greet',
+      args: ['safe'],
+      gezelId: 'g',
+      sessionId: 's',
+    });
+    const b = await runPackageScript({
+      store,
+      home,
+      projectId: p.id,
+      script: 'greet',
+      args: ['&', 'echo', 'changed'],
+      gezelId: 'g',
+      sessionId: 's',
+    });
+    expect(b.questionId).not.toBe(a.questionId);
+    const questions = await store.listProjectQuestions(p.id);
+    expect(questions).toHaveLength(2);
+    expect(questions.map((q) => q.intent?.kind === 'command-approval' && q.intent.args)).toEqual(
+      expect.arrayContaining([['safe'], ['&', 'echo', 'changed']]),
+    );
+  });
+
   it('blocks with `declined` after a previously-declined decision', async () => {
     const p = await store.createProject({ name: 'p' });
     await seedWorkspace(p.id, { scripts: { build: 'echo ok' } });

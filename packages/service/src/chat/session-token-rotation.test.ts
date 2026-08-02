@@ -118,7 +118,9 @@ describe('ChatManager bridge auth — production-wired issueSessionToken (end-to
       revokeSessionToken: (appId) => svc.context.tokenStore.revokeSession(appId),
     });
     await store.createGezel({ name: 'Ada', role: 'Developer' });
-    await store.writeConfig({ toolFilterMode: 'never' });
+    // 'provider' pins the injected mock: without it, routing falls through to
+    // the platform default (an on-device engine) and the mock is never reached.
+    await store.writeConfig({ provider: 'copilot', toolFilterMode: 'never' });
   }, 30_000);
 
   afterEach(async () => {

@@ -1,7 +1,7 @@
 import { type WriteStream, createWriteStream } from 'node:fs';
 import { mkdir, readFile, readdir, stat, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
-import { redactLogLine } from '../llama-cpp/log-redact.js';
+import { redactCredentials } from '@bendyline/gezel';
 
 /**
  * Rolling append-only log for the MLX server's stdout/stderr (the
@@ -86,7 +86,7 @@ export class MlxLogFile {
    * subsequent `tail()` / `close()` awaits the drain.
    */
   write(line: string): void {
-    const safe = redactLogLine(line);
+    const safe = redactCredentials(line);
     const run = async () => {
       await this.readyPromise;
       await this.rollIfNeeded();

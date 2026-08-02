@@ -669,6 +669,21 @@ describe('TaskRunner — startup rehydration', () => {
       updatedAt: now,
       createdBy: { kind: 'user' },
     });
+    // Task-level ownership is the fallback for inline system tasks whose
+    // single step does not repeat the assignee (the bundled oversight task).
+    await store.writeTask({
+      projectId: 'p1',
+      num: 3,
+      ref: 'p1/3',
+      title: 'system work',
+      status: 'active',
+      assignee: { kind: 'gezel', gezelId: 'bea' },
+      craftbook: fixtureCraftbook([{ id: 'plan', name: 'plan', createdAt: now }]),
+      activeStepId: 'plan',
+      createdAt: now,
+      updatedAt: now,
+      createdBy: { kind: 'user' },
+    });
     // A completed task — should NOT be rehydrated.
     await store.writeTask({
       projectId: 'p1',
@@ -693,11 +708,11 @@ describe('TaskRunner — startup rehydration', () => {
     const runner = new TaskRunner({ store, dispatcher });
     await runner.rehydrateFromStore();
 
-    expect(runner.snapshot().pendingCount).toBe(2);
-    expect(runner.snapshot().pendingByGezel).toEqual({ bea: 1, cid: 1 });
+    expect(runner.snapshot().pendingCount).toBe(3);
+    expect(runner.snapshot().pendingByGezel).toEqual({ bea: 2, cid: 1 });
   });
 
-  it('skips tasks that already have a live session for the current phase', async () => {
+  it('requeues active tasks even when a stale non-archived session exists', async () => {
     await store.createProject({ name: 'p1' });
     const bea = await store.createGezel({ name: 'Bea' });
     const now = new Date().toISOString();
@@ -717,7 +732,9 @@ describe('TaskRunner — startup rehydration', () => {
       updatedAt: now,
       createdBy: { kind: 'user' },
     });
-    // Previous process already created a session for this (task, phase).
+    // A prior process created a session for this phase but no process-local
+    // turn survives restart. This may be a failed handoff and must not strand
+    // the active task forever.
     await store.writeSession({
       version: 1,
       id: 'existing-session',
@@ -737,7 +754,46 @@ describe('TaskRunner — startup rehydration', () => {
     const dispatcher = new FakeDispatcher(new Map([[bea.id, 'copilot']]));
     const runner = new TaskRunner({ store, dispatcher });
     await runner.rehydrateFromStore();
-    expect(runner.snapshot().pendingCount).toBe(0);
+    expect(runner.snapshot().pendingCount).toBe(1);
+    expect(runner.workSnapshot().queuedTaskRefs).toEqual(['p1/1']);
+  });
+
+  it('can reconcile only night-shift work when a shift opens', async () => {
+    await store.createProject({ name: 'p1' });
+    const bea = await store.createGezel({ name: 'Bea' });
+    const now = new Date().toISOString();
+    const writeTask = (num: number, nightShift: boolean) =>
+      store.writeTask({
+        projectId: 'p1',
+        num,
+        ref: `p1/${num}`,
+        title: `t${num}`,
+        status: 'active',
+        assignee: { kind: 'gezel' as const, gezelId: bea.id },
+        craftbook: fixtureCraftbook([
+          {
+            id: 'plan',
+            name: 'plan',
+            assignee: { kind: 'gezel', gezelId: bea.id },
+            createdAt: now,
+          },
+        ]),
+        activeStepId: 'plan',
+        ...(nightShift ? { nightShift: { enabled: true } } : {}),
+        createdAt: now,
+        updatedAt: now,
+        createdBy: { kind: 'user' as const },
+      });
+    await writeTask(1, true);
+    await writeTask(2, false);
+
+    const runner = new TaskRunner({
+      store,
+      dispatcher: new FakeDispatcher(new Map([[bea.id, 'copilot']])),
+    });
+    await runner.rehydrateFromStore({ nightShiftOnly: true });
+
+    expect(runner.workSnapshot().queuedTaskRefs).toEqual(['p1/1']);
   });
 });
 

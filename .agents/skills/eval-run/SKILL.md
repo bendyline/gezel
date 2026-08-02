@@ -32,7 +32,7 @@ Avoid test overfit:
 
 ## Phase 0 — Pre-flight
 
-1. **Resolve suite, count, and model.** With no scenario or suite named, run the named `core` suite — the standardized 11-scenario scorecard — rather than every registered scenario. Run one scenario only when the user explicitly names it; run the full registry only when they explicitly ask for an exhaustive sweep. `eval:all` requires `--count`; honor a supplied count, otherwise use `--count 1` for the first comprehensive pass (use `--count 3` or more when the user asks for comparative/statistical confidence). Default local model: the exact catalog id `gemma4-e4b-q8`; honor any model the user names.
+1. **Resolve suite, count, and model.** With no scenario or suite named, run the named `core` suite — the standardized 11-scenario scorecard — rather than every registered scenario. Run one scenario only when the user explicitly names it; run the full registry only when they explicitly ask for an exhaustive sweep. `eval:all` requires `--count`; honor a supplied count, otherwise use `--count 1` for the first comprehensive pass (use `--count 3` or more when the user asks for comparative/statistical confidence). Default local model: the exact catalog id `gemma4-e4b-q4`; honor any model the user names.
 
 2. **Resolve the platform-aware provider and binary.** The harness defaults to `mlx` on Apple Silicon (`darwin-arm64`) and `llama-cpp` elsewhere. MLX needs no llama binary. For llama.cpp, check the current platform/variant roots and both the branded and legacy filenames:
 
@@ -45,7 +45,7 @@ Avoid test overfit:
 
    The resolver prefers CUDA → Vulkan → Metal → CPU and also checks an installed `Gezel.app` on macOS. An explicit `--provider` or `--llama-bin` overrides these defaults.
 
-3. **Probe the platform-aware Gemma cache.** For the default `gemma4-e4b-q8`, Apple Silicon/MLX reads `~/.gezel-dev/engines/mlx/models/gemma4-e4b-q8/`; llama.cpp reads `~/.gezel-eval-cache/engines/llama-cpp/models/gemma4-e4b-q8/`. A missing MLX source is a hard preflight failure and must be installed in the dev home first. A missing llama.cpp cache is warmed automatically by `ensureWarmModel` (about 8 GB for Q8); if the same complete weights already exist under `~/.gezel-dev`, offer a symlink instead of duplicating them.
+3. **Probe the platform-aware Gemma cache.** For the default `gemma4-e4b-q4`, Apple Silicon/MLX reads `~/.gezel-dev/engines/mlx/models/gemma4-e4b-q4/`; llama.cpp reads `~/.gezel-eval-cache/engines/llama-cpp/models/gemma4-e4b-q4/`. A missing MLX source is a hard preflight failure and must be installed in the dev home first. A missing llama.cpp cache is warmed automatically by `ensureWarmModel` (about 8 GB for Q8); if the same complete weights already exist under `~/.gezel-dev`, offer a symlink instead of duplicating them.
 
 4. **SDXL preflight (the core `petshop` scenario).** The current default is `sdxl-lightning-4step`, not SDXL Base. Check both `~/.gezel-dev/engines/sd-cpp/models/sdxl-lightning-4step/` and `~/.gezel-eval-cache/engines/sd-cpp/models/sdxl-lightning-4step/`. If neither is complete, warn before starting: first-time warm is about 7 GB and can take roughly 10 minutes.
 
@@ -63,7 +63,7 @@ pnpm eval:all --count <N> --scenarios <comma,list>
 
 Named core scorecard (the default for an unspecified eval request):
 ```bash
-pnpm eval:all --suite core --count <N> --model gemma4-e4b-q8
+pnpm eval:all --suite core --count <N> --model gemma4-e4b-q4
 ```
 
 `--count` has no implicit CLI default and must always carry a value. Use `--scenarios` only for an explicitly requested ad-hoc subset; it is mutually exclusive with `--suite`.

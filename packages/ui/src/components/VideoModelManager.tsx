@@ -125,6 +125,7 @@ export function VideoModelManager({
           gpuVramBytes: mem.gpuVramBytes,
           totalRamBytes: mem.totalRamBytes,
           usableBytes: mem.usableBytes,
+          ...(mem.budgetBytes !== undefined ? { budgetBytes: mem.budgetBytes } : {}),
         }),
       )
       .catch(() => {

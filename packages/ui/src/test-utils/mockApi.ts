@@ -86,7 +86,53 @@ const DEFAULT_RESPONSES: Record<string, unknown> = {
   listGilde: { gilde: [] },
   listToolsets: { toolsets: [] },
   health: { ok: true, version: 'test' },
+  // A realistic, PII-free profile so any view test that mounts a surface
+  // hosting a "Report error on GitHub…" link renders a plausible machine
+  // block rather than the fetch-failed fallback.
+  getSystemDiagnostics: {
+    version: '1.0.0-test',
+    sampledAt: '2026-07-31T18:32:00.000Z',
+    runtime: {
+      nodeVersion: '22.14.0',
+      platform: 'linux',
+      arch: 'x64',
+      osRelease: '6.8.0-51-generic',
+      platformKey: 'linux-x64',
+    },
+    hardware: {
+      totalRamBytes: 64_000_000_000,
+      gpuVramBytes: 24_000_000_000,
+      usableBytes: 22_800_000_000,
+      source: 'gpu-vulkan',
+      gpuVendor: 'amd',
+      description: 'AMD GPU: 24.0 GB VRAM',
+      tier: 'medium',
+      gpuDevices: [{ name: 'AMD Radeon RX 7900 XTX', totalMiB: 24_560 }],
+    },
+    engine: {
+      nativeRelease: 'native-v0.0.0',
+      nativePinned: true,
+      installedEngines: ['llama-server'],
+      llamaCppBackend: 'vulkan',
+    },
+    models: {
+      defaultProvider: 'llama-cpp',
+      defaultModel: 'gemma4-26b-q4',
+      installed: [{ id: 'gemma4-26b-q4', provider: 'llama-cpp', parameterSize: '26B' }],
+    },
+  },
   getConfig: { provider: 'mock' },
+  // Copilot is an on-demand install, so most gates read this rather than a
+  // stored token. Default to installed so tests that predate the gating keep
+  // seeing the provider offered.
+  getCopilotStatus: {
+    available: true,
+    source: 'managed',
+    managed: 'current',
+    installedVersion: '1.0.7',
+    pinnedVersion: '1.0.7',
+    updateAvailable: false,
+  },
   getChatSessionInflight: { inflight: null },
   getMemoryProfile: {
     platform: 'darwin',

@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "about": {
+    "hash": "2afaadf14665a4bdaa345bff95e9871a934b647a9131327f9618524599ba412e",
+    "sourceFile": "AGENTS.md"
+  },
+  "craftbooks": {
+    ".claude\\skills\\craftbook-eval-matrix\\SKILL.md": {
+      "hash": "51b5b559e7a025efe29eeb9a7b9db3dce098c09b2d83f8820716c1b65f6ddc0d",
+      "craftbookId": "proj-skill-craftbook-eval-matrix",
+      "scriptNames": []
+    },
+    ".claude\\skills\\eval-run\\SKILL.md": {
+      "hash": "7b90052d8a44aef50083a12791d20e962d85764e656688493c682840a2ef1123",
+      "craftbookId": "proj-skill-eval-run",
+      "scriptNames": []
+    },
+    ".claude\\skills\\native-bump\\SKILL.md": {
+      "hash": "3d38ce5b1616299cfa9cdf35deaa9580b0c97c50e848f59e75c531b8be079056",
+      "craftbookId": "proj-skill-native-bump",
+      "scriptNames": []
+    },
+    ".claude\\skills\\tune-model\\SKILL.md": {
+      "hash": "438b4e83a2559b4f67d489342d1bbf8e9a8575b177637a86e4a8567bdc0dcc47",
+      "craftbookId": "proj-skill-tune-model",
+      "scriptNames": []
+    }
+  }
+}

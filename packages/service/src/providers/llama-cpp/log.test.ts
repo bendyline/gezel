@@ -24,6 +24,7 @@ describe('native engine logs', () => {
       code: null,
       signal: 'SIGABRT',
       expected: false,
+      reachedReady: true,
       panicKind: 'cuda-invalid-argument',
       panicLine: 'CUDA error: invalid argument token=sk-abcdefghijklmnopqrstuvwxyz123456',
       outputTail: 'user prompt that must not be persisted',

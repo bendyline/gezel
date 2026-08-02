@@ -1,0 +1,98 @@
+# Gitleaks configuration — commit-time / CI secret gate for gezel.
+#
+# Complements the runtime security scanner (packages/service/src/security/
+# code-patterns.ts), which runs in the file-indexing hot path inside the app.
+# This config is for the *repository* side: scan the working tree and git
+# history for real credential material before it reaches `main`.
+#
+# Philosophy: ZERO NOISE. A gate that cries wolf gets ignored, so the
+# allowlist below is deliberately tuned against the known false-positive
+# sources in this repo (documented per-entry). If gitleaks flags something
+# NOT covered here, treat it as a real lead until proven otherwise.
+#
+# Usage:
+#   gitleaks detect --config .gitleaks.toml --redact --no-banner      # history
+#   gitleaks detect --config .gitleaks.toml --no-git --redact          # tree only
+#   gitleaks protect --staged --config .gitleaks.toml --redact         # pre-commit
+#
+# The repo deliberately ships no local git hook (see .github/workflows/
+# quality.yml), so the authoritative gate is a CI job on pull_request. A
+# ready-to-paste job snippet accompanies the change that introduced this file;
+# the gitleaks action MUST be pinned to a full-length commit SHA to satisfy
+# scripts/check-workflow-action-pins.mjs.
+
+title = "gezel gitleaks policy"
+
+# Inherit the full upstream ruleset (AWS keys, GitHub PATs, private keys,
+# Stripe/Slack/GCP tokens, generic high-entropy assignments, etc.) and layer
+# repo-specific allowlisting on top rather than re-deriving rules by hand.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "gezel false-positive suppression — test fixtures, eval scaffolding, vendor artifacts, and documented public identifiers"
+
+# `OR` semantics: a finding is suppressed if its path matches, OR its matched
+# secret matches a regex, OR the secret contains a stopword.
+
+# -- Paths that legitimately contain secret-SHAPED strings ------------------
+paths = [
+  # Test & spec files seed deterministic sentinel credentials on purpose
+  # (e.g. `ghp_outbound_sentinel_ABC`, `sk-body-sentinel-DEF`). Verified in
+  # the 2026-07-31 audit as fixtures, not live keys.
+  '''\.test\.(ts|tsx|js|mjs|cjs)$''',
+  '''\.spec\.(ts|tsx|js|mjs|cjs)$''',
+
+  # The eval harness and its generated run outputs are throwaway scaffolding:
+  # mock servers, synthetic datasets, model-produced workspaces.
+  '''(^|/)evals/runs/''',
+  '''(^|/)evals/.*/(fixtures|mock|mocks|workspace)/''',
+  '''(^|/)evals/scripts/m2-live-mocks\.ts$''',
+
+  # The runtime security scanner's OWN pattern catalog embeds secret-shaped
+  # regexes (AKIA..., -----BEGIN ... PRIVATE KEY-----). Scanning the detector
+  # for the things it detects is pure self-match noise.
+  '''(^|/)packages/service/src/security/code-patterns\.ts$''',
+
+  # Per-launch self-signed loopback TLS cert test: asserts on PEM header
+  # strings, holds no key material (audited FP — was the lone "critical").
+  '''(^|/)packages/service/src/http/cert\.test\.ts$''',
+
+  # Extracted third-party app under review (Chromium license bundle, packaged
+  # binaries) — vendor artifacts, not gezel source.
+  '''(^|/)ship-audit/''',
+
+  # Lockfiles carry integrity hashes that trip generic high-entropy rules.
+  '''(^|/)pnpm-lock\.yaml$''',
+  '''(^|/)package-lock\.json$''',
+
+  # Third-party license / notice text.
+  '''(^|/)legal/''',
+  '''(^|/)NOTICE\.md$''',
+  '''(^|/)docs/.*[Ll]icen[cs]es?/''',
+]
+
+# -- Specific known-safe literals (documented as public / non-secret) -------
+regexes = [
+  # GitHub OAuth App *Client ID* for the device-flow sign-in. Public by
+  # design — shipped in the binary exactly like VS Code / gh-cli ship theirs
+  # (packages/service/src/github/oauth-config.ts). Not a secret.
+  '''Ov23li[A-Za-z0-9]{14}''',
+
+  # Deterministic test sentinels, belt-and-suspenders alongside the path rules.
+  '''ghp_(outbound|header|harmless)[A-Za-z0-9_]*''',
+  '''sk-(body|test|mock)[A-Za-z0-9_-]*''',
+]
+
+# -- Stopwords: any matched secret CONTAINING one of these is a fixture -----
+stopwords = [
+  "sentinel",
+  "example",
+  "dummy",
+  "placeholder",
+  "redacted",
+  "changeme",
+  "notreal",
+  "fixture",
+  "test-token",
+]

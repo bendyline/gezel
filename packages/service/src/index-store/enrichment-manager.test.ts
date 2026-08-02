@@ -81,6 +81,30 @@ describe('IndexEnrichmentManager idle gating', () => {
     await mgr.tick();
     expect(enrich).toHaveBeenCalledTimes(1);
   });
+
+  it('keeps a live activity snapshot for the full indexing tick', async () => {
+    let release!: (value: { files: number; summarized: number; embedded: number }) => void;
+    const { mgr, enrich } = make({ active: false });
+    enrich.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          release = resolve;
+        }),
+    );
+
+    const tick = mgr.tick();
+    await vi.waitFor(() => expect(enrich).toHaveBeenCalled());
+    expect(mgr.getActivity()).toEqual({
+      id: 'index-enrichment',
+      title: 'Workspace indexing',
+      detail: 'Studying workspace files',
+      projectId: 'p1',
+    });
+
+    release({ files: 1, summarized: 1, embedded: 1 });
+    await tick;
+    expect(mgr.getActivity()).toBeNull();
+  });
 });
 
 describe('review tier scheduling', () => {

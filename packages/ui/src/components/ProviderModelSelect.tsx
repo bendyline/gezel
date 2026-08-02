@@ -1,5 +1,5 @@
 import type { ModelInfo, ProviderName } from '@bendyline/gezel';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { Select } from '../primitives/index.js';
 import { requestSettingsSection } from '../settings-nav.js';
@@ -113,13 +113,26 @@ export function ProviderModelSelect({
   const [entries, setEntries] = useState<ProviderEntry[] | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // Read through a ref rather than an effect dependency: whether Copilot is
+  // already the chosen provider must be current when the fetch runs, but it
+  // is not a reason to re-fetch every provider's model list.
+  const copilotAlreadyChosenRef = useRef(false);
+  copilotAlreadyChosenRef.current = globalProvider === 'copilot' || provider === 'copilot';
+
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     void (async () => {
       let cfg: Awaited<ReturnType<typeof api.getConfig>> | null = null;
+      let copilot: Awaited<ReturnType<typeof api.getCopilotStatus>> | null = null;
       try {
-        cfg = await api.getConfig();
+        // A daemon older than this UI has no `/copilot-status`; falling back
+        // to `available: true` keeps the pre-existing behavior rather than
+        // silently hiding a provider that works.
+        [cfg, copilot] = await Promise.all([
+          api.getConfig(),
+          api.getCopilotStatus().catch(() => null),
+        ]);
       } catch {
         if (!cancelled) {
           setEntries([]);
@@ -136,9 +149,14 @@ export function ProviderModelSelect({
       // ollama always probes (the auto-start helper handles "not
       // running yet").
       const candidates: ProviderName[] = [];
-      // Copilot can authenticate via gh-CLI even without a stored
-      // token — same logic the Home onboarding probe uses.
-      candidates.push('copilot');
+      // Copilot's runtime is an opt-in download (Settings → GitHub Copilot),
+      // so offer it only once it's actually installed — or when it's already
+      // the chosen provider somewhere, so an existing selection isn't
+      // stranded. We don't gate on a stored token: Copilot can authenticate
+      // via the CLI without one, same as the Home onboarding probe assumes.
+      if (copilot?.available !== false || copilotAlreadyChosenRef.current) {
+        candidates.push('copilot');
+      }
       if (cfg.hasOpenaiApiKey) candidates.push('openai');
       if (cfg.hasAnthropicApiKey) candidates.push('anthropic');
       // CLI providers — only show when the underlying binary is

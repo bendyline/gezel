@@ -12,7 +12,16 @@ const ignoredDirectories = new Set([
   'dist',
   'node_modules',
 ]);
-const ignoredRepoDirectories = new Set(['evals/runs', 'reports', 'runs', 'ship-audit']);
+// `.gezel/craftbooks` holds craftbook copies synced verbatim out of
+// `.claude/skills/*/SKILL.md`. Their relative links resolve from the skill
+// directory, not from the copy, so checking them only ever reports the sync.
+const ignoredRepoDirectories = new Set([
+  '.gezel/craftbooks',
+  'evals/runs',
+  'reports',
+  'runs',
+  'ship-audit',
+]);
 
 async function markdownFiles(root) {
   const files = [];

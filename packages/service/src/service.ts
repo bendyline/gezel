@@ -105,6 +105,7 @@ import { CATALOG_RELEVANT_HISTORY_KINDS, SearchService } from './search/search-s
 import { openSecretStore } from './secrets/index.js';
 import { seedSecretsFromEnvFile } from './secrets/seed.js';
 import { runSystemBootstrap } from './system-toolsets/bootstrap.js';
+import { SystemToolsetInstallRegistry } from './system-toolsets/install-registry.js';
 import { SystemStatusBus } from './system-toolsets/status-bus.js';
 import { reapOrphanedGezelEngineProcesses } from './system/gezel-process-cleanup.js';
 import { SystemIdleState } from './system/idle-state.js';
@@ -524,6 +525,13 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     const { MockProvider } = await import('./providers/mock.js');
     mockProviders.push(['copilot', new MockProvider({ name: 'copilot' })]);
     mockProviders.push(['openai', new MockProvider({ name: 'openai' })]);
+    // Mock mode also skips the on-device first-run bootstrap, so nothing
+    // would otherwise write `config.provider` — and an unset provider now
+    // resolves to the platform's on-device engine, which a mock-mode home
+    // has no model for. Pin the mock so routing reaches it.
+    if (!bootConfig.provider) {
+      await store.writeConfig({ provider: 'copilot' });
+    }
     log.info('[service] GEZEL_MOCK_PROVIDER=1 — LLM calls routed to MockProvider');
   }
 
@@ -664,6 +672,10 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
       : {}),
   });
 
+  // User-triggered installs of `onDemand` system toolsets (the Copilot SDK).
+  // Separate from the boot bootstrap below, which only handles eager entries.
+  const systemToolsetInstalls = new SystemToolsetInstallRegistry({ home });
+
   // Preview-shim runtime errors → next-turn chat prelude. Shared between
   // the HTTP intake route and ChatManager's drain-on-send.
   const previewLog = new PreviewLogBuffer();
@@ -774,6 +786,10 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     ...(config.taskRunner?.tickIntervalMs
       ? { tickIntervalMs: config.taskRunner.tickIntervalMs }
       : {}),
+  });
+  nightShift.setOnActivated(async () => {
+    await taskRunner.rehydrateFromStore({ nightShiftOnly: true });
+    await taskRunner.wake();
   });
   // A model-owned completion-gate loop keeps repairing inside its existing
   // turn; TaskManager therefore does not enqueue a replacement handoff. Move
@@ -1685,6 +1701,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     tasks,
     taskRunner,
     nightShift,
+    indexEnrichment,
     meesterStatus,
     scriptRunner,
     catalog,
@@ -1703,6 +1720,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     videoProvider,
     videoPulls,
     engineBinaries,
+    systemToolsetInstalls,
     stt,
     recognition,
     tts,
@@ -1883,20 +1901,18 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
 
   scheduler.start();
   nightShift.start();
+  // Install the always-bundled daily meester oversight task before runner
+  // rehydration so a first-run install queues it in the same boot.
+  await ensureNightShiftOversightTask(store, tasks).catch((err) => {
+    log.warn('[night-shift] oversight ensure failed:', err instanceof Error ? err.message : err);
+  });
   // Rehydrate pending handoffs from disk (any active task whose
-  // current phase has an assignee but no open session) before starting
-  // the runner's tick loop. Ensures work dropped by a prior process
-  // gets picked up on restart.
+  // current phase has an effective assignee) before starting the runner's
+  // tick loop. Ensures work dropped by a prior process gets picked up.
   await taskRunner.rehydrateFromStore().catch((err) => {
     log.warn('[task-runner] rehydrate failed:', err instanceof Error ? err.message : err);
   });
   taskRunner.start();
-  // Install the always-bundled daily meester oversight task (idempotent).
-  // After the runner is wired so its entry-step handoff enqueues and is
-  // then held by night-shift gating until the next window.
-  await ensureNightShiftOversightTask(store, tasks).catch((err) => {
-    log.warn('[night-shift] oversight ensure failed:', err instanceof Error ? err.message : err);
-  });
   // Install the boekwachter indexing job task (idempotent) — the visible,
   // pausable control surface for the background indexing loops.
   await ensureIndexingJobTask(store, tasks).catch((err) => {
@@ -2062,6 +2078,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
       imagePulls.clear();
       videoPulls.clear();
       engineBinaries.clear();
+      systemToolsetInstalls.clear();
       await imageProvider.shutdown();
       await videoProvider.shutdown();
       await stt.shutdown();

@@ -97,6 +97,7 @@ export function rankChatModels(
       usableBytes: device.usableBytes,
       totalRamBytes: device.totalRamBytes,
       gpuVramBytes: device.gpuVramBytes,
+      ...(device.budgetBytes !== undefined ? { admissibleBytes: device.budgetBytes } : {}),
     }).tier;
     candidates.push({
       id: manifest.id,

@@ -44,6 +44,10 @@ beforeEach(async () => {
   home = await mkdtemp(join(tmpdir(), 'gezel-attach-e2e-'));
   store = new Store({ home });
   await store.ensureLayout();
+  // This suite injects a mock under the 'copilot' key. Pin it as the default
+  // too — otherwise routing falls through to the platform default (an
+  // on-device engine) and the injected mock is never reached.
+  await store.writeConfig({ provider: 'copilot' });
   await store.createGezel({ name: 'Mira', role: 'Designer' });
   await store.createProject({ name: 'Default' });
   mock = new MockProvider({ name: 'copilot' });

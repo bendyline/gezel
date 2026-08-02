@@ -96,3 +96,45 @@ test('the macOS updater derives the real release asset name and URL', async () =
     'a failed macOS update must remain retryable for the same version',
   );
 });
+
+/**
+ * The macOS ZIP is the most deletable-looking artifact in the release: ~447 MB
+ * that no user ever downloads, because the darwin update path sets
+ * `autoDownload = false` and fetches the PKG itself. Removing the target would
+ * also remove `latest-mac.yml` — `PkgTarget` emits no update info, and
+ * `ArchiveTarget` writes it only for `format === "zip"`. The updater would
+ * then 404 on the channel file and macOS would stop seeing updates at all,
+ * with no error visible at build time.
+ */
+test('the macOS zip target is retained because it is what emits latest-mac.yml', async () => {
+  const [builder, workflow] = await Promise.all([
+    readFile(join(appDir, 'electron-builder.yml'), 'utf8'),
+    readFile(join(root, '.github', 'workflows', 'release-electron.yml'), 'utf8'),
+  ]);
+
+  const macBlock = builder.slice(builder.indexOf('\nmac:'), builder.indexOf('\npkg:'));
+  const targets = [...macBlock.matchAll(/^\s*-\s*target:\s*(\S+)/gm)].map((m) => m[1]);
+  assert.deepEqual(
+    targets,
+    ['pkg', 'zip'],
+    'macOS targets changed. The pkg is the first-install artifact; the zip is the only ' +
+      'target that emits latest-mac.yml. Dropping the zip silently disables macOS update ' +
+      'discovery — see the comment above it in electron-builder.yml.',
+  );
+
+  // The reason has to travel with the config, or the next reader deletes it.
+  assert.match(
+    macBlock,
+    /DO NOT REMOVE, even though nothing ever downloads this ZIP/,
+    'the zip target lost the comment explaining why it cannot be deleted',
+  );
+
+  // Publishing the feed without the artifact it names would leave latest-mac.yml
+  // advertising a 404, which is fine only while nothing resolves it. The release
+  // job asserts both exist; keep that assertion.
+  assert.match(
+    workflow,
+    /verified PKG first-install artifact and ZIP-based macOS update feed/,
+    'release job no longer verifies that both the PKG and the ZIP feed were produced',
+  );
+});

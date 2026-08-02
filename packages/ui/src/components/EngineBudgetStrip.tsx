@@ -1,6 +1,7 @@
 import type { EngineStatusResponse } from '@bendyline/gezel-client';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
+import { EngineMemoryBudgetPanel } from './EngineMemoryBudgetPanel.js';
 
 interface Props {
   /**
@@ -27,6 +28,18 @@ function fmtGB(bytes: number): string {
 export function EngineBudgetStrip({ provider, pollMs = 2000 }: Props) {
   const [status, setStatus] = useState<EngineStatusResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Shared by the poll loop and the budget panel's post-save refresh, so a
+  // saved budget shows on the bar immediately instead of up to `pollMs`
+  // later.
+  const refresh = useCallback(async () => {
+    try {
+      setStatus(await api.getEngineStatus());
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -99,6 +112,14 @@ export function EngineBudgetStrip({ provider, pollMs = 2000 }: Props) {
       </div>
       <div style={{ fontSize: 12, color: 'var(--gz-color-muted, #888)' }}>
         {fmtGB(status.committedBytes)} of {fmtGB(status.budgetBytes)} used
+        {/* Name the pools on a discrete card. "38.3 GB" alone reads as system
+            RAM, which is the pool a GPU user's models are mostly NOT in. */}
+        {status.pools?.kind === 'discrete-gpu' && status.pools.vramBytes > 0 ? (
+          <>
+            {' '}
+            ({fmtGB(status.pools.vramBytes)} graphics + {fmtGB(status.pools.ramShareBytes)} system)
+          </>
+        ) : null}
         {filtered.length > 0 ? (
           <>
             {' · '}
@@ -113,6 +134,7 @@ export function EngineBudgetStrip({ provider, pollMs = 2000 }: Props) {
           </>
         ) : null}
       </div>
+      <EngineMemoryBudgetPanel status={status} onSaved={refresh} />
     </div>
   );
 }

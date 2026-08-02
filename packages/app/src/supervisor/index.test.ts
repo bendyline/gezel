@@ -52,6 +52,11 @@ const ctx = vi.hoisted(() => ({
     reason: 'mock',
   },
   nativeLlamaPaths: {} as Partial<Record<'cuda' | 'vulkan' | 'metal' | 'cpu', string>>,
+  llamaQuarantine: [] as Array<{
+    backend: 'cuda' | 'vulkan' | 'metal' | 'cpu';
+    signal: string;
+    reason: string;
+  }>,
 }));
 
 vi.mock('./extract-pnpm.js', () => ({
@@ -93,10 +98,18 @@ vi.mock('./native-bin.js', () => ({
 vi.mock('@bendyline/gezel/native', () => ({
   LLAMA_ENGINE_VERSION: 'mock-engine',
   detectLlamaBackend: () => ctx.llamaProbe,
+  // Quarantine is exercised for real in core's own suite; these
+  // supervisor branch tests only need it to be inert.
+  readLlamaQuarantine: () => ctx.llamaQuarantine,
+  isBinaryQuarantined: (
+    entries: Array<{ backend: string }>,
+    backend: 'cuda' | 'vulkan' | 'metal' | 'cpu',
+  ) => entries.some((e) => e.backend === backend),
   resolveAvailableLlamaBinary: (
     preferredBackend: 'cuda' | 'vulkan' | 'metal' | 'cpu',
     resolveBinary: (backend: 'cuda' | 'vulkan' | 'metal' | 'cpu') => string | null,
     allowFallbacks: boolean,
+    isUsable?: (backend: 'cuda' | 'vulkan' | 'metal' | 'cpu', path: string) => boolean,
   ) => {
     const fallbackOrder = {
       cuda: ['cuda', 'vulkan', 'cpu'],
@@ -105,15 +118,20 @@ vi.mock('@bendyline/gezel/native', () => ({
       cpu: ['cpu'],
     } as const;
     const candidates = allowFallbacks ? fallbackOrder[preferredBackend] : [preferredBackend];
+    const skippedUnusable: string[] = [];
     for (const backend of candidates) {
       const path = resolveBinary(backend);
-      if (path) {
-        return {
-          backend,
-          path,
-          ...(backend === preferredBackend ? {} : { fallbackFrom: preferredBackend }),
-        };
+      if (!path) continue;
+      if (allowFallbacks && isUsable && !isUsable(backend, path)) {
+        skippedUnusable.push(backend);
+        continue;
       }
+      return {
+        backend,
+        path,
+        ...(backend === preferredBackend ? {} : { fallbackFrom: preferredBackend }),
+        ...(skippedUnusable.length > 0 ? { skippedUnusable: [...skippedUnusable] } : {}),
+      };
     }
     return null;
   },
@@ -628,6 +646,43 @@ describe('native llama-server selection', () => {
       .mock.calls.filter(([name]) => name === 'llama-server')
       .map(([, , variant]) => variant);
     expect(llamaVariants).toEqual(['cuda', 'vulkan']);
+    await svc.shutdown();
+  });
+
+  it('routes around a bundled CUDA build that crashed on this machine', async () => {
+    // Spawn and embedded launches resolve the binary HERE and stamp
+    // GEZEL_LLAMA_SERVER_BIN, which makes the daemon's own discovery
+    // treat it as pre-set and skip its quarantine check. So this branch
+    // has to apply the quarantine itself or those two modes would keep
+    // relaunching a build already known to die on startup.
+    ctx.llamaProbe = {
+      backend: 'cuda',
+      detectedBackend: 'cuda',
+      cached: false,
+      reason: 'mock CUDA driver',
+    };
+    ctx.nativeLlamaPaths = {
+      cuda: '/mock/native-bin/linux-x64-cuda/gezel-llama-server',
+      vulkan: '/mock/native-bin/linux-x64-vulkan/gezel-llama-server',
+      cpu: '/mock/native-bin/linux-x64-cpu/gezel-llama-server',
+    };
+    ctx.llamaQuarantine = [
+      { backend: 'cuda', signal: 'SIGILL', reason: 'crashed before becoming ready' },
+    ];
+    const warnings: string[] = [];
+    vi.mocked(resolveMode).mockResolvedValue({ kind: 'embedded' });
+
+    const svc = await connectOrStart(
+      baseOpts({
+        forceEmbedded: true,
+        logger: { info: () => {}, warn: (m: string) => void warnings.push(m) },
+      }),
+    );
+
+    expect(process.env.GEZEL_LLAMA_SERVER_BACKEND).toBe('vulkan');
+    // The hardware still has CUDA, so Settings must keep offering it.
+    expect(process.env.GEZEL_LLAMA_DETECTED_BACKEND).toBe('cuda');
+    expect(warnings.some((w) => w.includes('quarantined') && w.includes('SIGILL'))).toBe(true);
     await svc.shutdown();
   });
 });

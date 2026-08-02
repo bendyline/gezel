@@ -556,31 +556,37 @@ describe('ProjectsView', () => {
     fireEvent.mouseUp(window);
   });
 
-  it('indexes every section of the project About page', async () => {
+  it('orders and indexes every section of the project Settings page', async () => {
     render(<ProjectsView forceProjectId="pj-alpha" />);
     await screen.findByTestId('project-chat');
 
     fireEvent.click(screen.getByRole('tab', { name: 'Settings' }));
 
     const toc = await screen.findByRole('navigation', { name: 'About sections' });
+    const settings = document.querySelector('#project-about-settings');
+    const toolsets = document.querySelector('#project-about-toolsets');
+    const history = document.querySelector('#project-about-history');
+    expect(settings?.nextElementSibling).toBe(toolsets);
+    expect(toolsets?.nextElementSibling).toBe(history);
+
     const links = within(toc).getAllByRole('link');
     expect(links.map((link) => link.textContent)).toEqual([
       'Assigned gezellen',
       'About this project',
       'Mission objectives',
       'Connections',
-      'History',
-      'Toolsets',
       'Settings',
+      'Toolsets',
+      'History',
     ]);
     expect(links.map((link) => link.getAttribute('href'))).toEqual([
       '#project-about-crew',
       '#project-about-overview',
       '#project-about-mission',
       '#project-about-connections',
-      '#project-about-history',
-      '#project-about-toolsets',
       '#project-about-settings',
+      '#project-about-toolsets',
+      '#project-about-history',
     ]);
   });
 

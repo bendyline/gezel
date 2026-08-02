@@ -1,6 +1,6 @@
 {
   "name": "@bendyline/gezel-sdk",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "SDK imported by scripts running in the Gezel sandbox. Exposes the `gezel` object and `defineScript` helper.",
   "license": "MIT",
   "keywords": ["gezel", "ai", "agents", "local-first", "sdk", "extensions"],
@@ -22,6 +22,9 @@
     "provenance": true
   },
   "type": "module",
+  "engines": {
+    "node": ">=24.0.0"
+  },
   "main": "./dist/index.js",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",

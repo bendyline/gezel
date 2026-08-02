@@ -29,6 +29,18 @@ export interface ModelFitInput {
   totalRamBytes: number;
   /** Discrete GPU VRAM in bytes, or null on unified-memory / CPU-only machines. */
   gpuVramBytes: number | null;
+  /**
+   * What the capacity broker will actually admit on this machine
+   * (`/api/system/memory` → `budgetBytes`). Anything above it is refused at
+   * load time, so it — not a raw fraction of RAM — is where `too-big` starts.
+   *
+   * Optional for callers that predate the field; they keep the old
+   * {@link RAM_OFFLOAD_FRACTION} ceiling, which on a discrete-GPU host
+   * over-promised: it offered a 42 GB MoE against 80% of system RAM while
+   * the broker's budget stopped at 60%, so the download succeeded and the
+   * load did not.
+   */
+  admissibleBytes?: number;
 }
 
 export interface ModelFitResult {
@@ -50,7 +62,7 @@ const RAM_OFFLOAD_FRACTION = 0.8;
  */
 export function computeModelFit(input: ModelFitInput): ModelFitResult {
   const { residentBytes, isMoE, usableBytes, totalRamBytes, gpuVramBytes } = input;
-  const ramBudget = totalRamBytes * RAM_OFFLOAD_FRACTION;
+  const ramBudget = input.admissibleBytes ?? totalRamBytes * RAM_OFFLOAD_FRACTION;
 
   // Fits in the fast budget — fully GPU-resident on a discrete card, or
   // within the RAM fraction on a unified-memory / CPU machine.

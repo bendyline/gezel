@@ -42,8 +42,10 @@ export function nightShiftRoutes(ctx: ServiceContext): Hono {
   // those with a turn in flight (`active`) and the rest (`upcoming`).
   // Empty when no shift is running.
   app.get('/tasks', async (c) => {
-    if (!ctx.nightShift.isActive()) return c.json({ active: [], upcoming: [] });
+    if (!ctx.nightShift.isActive()) return c.json({ background: [], active: [], upcoming: [] });
     const running = ctx.chat.activeTaskRefs();
+    const runner = ctx.taskRunner.workSnapshot();
+    const queued = new Set([...runner.queuedTaskRefs, ...runner.dispatchedTaskRefs]);
     const tasks = await ctx.nightShift.listPendingTasks();
     const projectNames = new Map<string, string>();
     const active: NightShiftTaskBrief[] = [];
@@ -62,9 +64,21 @@ export function nightShiftRoutes(ctx: ServiceContext): Hono {
         projectName,
         ...(stepName ? { stepName } : {}),
       };
-      (running.has(t.ref) ? active : upcoming).push(brief);
+      if (running.has(t.ref)) active.push(brief);
+      else if (queued.has(t.ref)) upcoming.push(brief);
     }
-    return c.json({ active, upcoming });
+    const indexActivity = ctx.indexEnrichment.getActivity();
+    const background = indexActivity
+      ? [
+          {
+            id: indexActivity.id,
+            title: indexActivity.title,
+            detail: indexActivity.detail,
+            ...(indexActivity.projectName ? { projectName: indexActivity.projectName } : {}),
+          },
+        ]
+      : [];
+    return c.json({ background, active, upcoming });
   });
 
   app.get('/power-intent', (c) => c.json(ctx.nightShift.getPowerIntent()));

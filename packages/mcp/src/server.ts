@@ -27,6 +27,7 @@ import {
   type DeliverableKind,
   DeliverableKindSchema,
   ExpectedDeliverableSchema,
+  GEZEL_VERSION,
   GateSpecSchema,
   ModelTierSchema,
   type NewCraftbookStep,
@@ -140,7 +141,7 @@ const sessionExpectedDeliverable = parseSessionExpectedDeliverable(
 
 export const server = new McpServer({
   name: 'gezel',
-  version: '0.0.0',
+  version: GEZEL_VERSION,
 });
 
 function parseSessionExpectedDeliverable(raw: string | undefined) {

@@ -27,8 +27,10 @@ const SHA_SENTINEL = '.gezel-bundle.sha256';
  *   - electron-builder's `asarUnpack` glob walks fewer entries at pack time.
  *   - The .deb/.rpm/.pkg payloads benefit too — fewer inodes to install.
  *
- * The trade-off is a one-time ~30–80 seconds of extraction either at install
- * time (system service) or on first user launch (per-user spawn / embedded).
+ * The trade-off is a one-time extraction either at install time (system
+ * service) or on first user launch (per-user spawn / embedded): about 20s in
+ * a warm-cache Windows benchmark, but potentially several minutes under a
+ * cold Defender scan. The startup splash makes that work explicit.
  */
 export interface BundleMeta {
   version: string;

@@ -104,7 +104,7 @@ describe('runFitnessProbe', () => {
     ]);
     const record = await runFitnessProbe(
       deps({ getProviderForModel: async () => fakeProvider(session) }),
-      { provider: 'llama-cpp', modelId: 'gemma4-e4b-q8', trigger: 'manual' },
+      { provider: 'llama-cpp', modelId: 'gemma4-e4b-q4', trigger: 'manual' },
     );
     expect(record.status).toBe('probed');
     expect(record.admitted).toBe(true);

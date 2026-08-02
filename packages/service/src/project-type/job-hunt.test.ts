@@ -113,7 +113,9 @@ describe('Job Hunt bundled project type', () => {
       projectScriptFile(home, project.id, 'application-store'),
       'utf8',
     );
-    expect(scriptBody.startsWith('// @gezel-project-type: job-hunt@1.0.0\n')).toBe(true);
+    expect(scriptBody.startsWith(`// @gezel-project-type: job-hunt@${applied.version}\n`)).toBe(
+      true,
+    );
     expect(scriptBody).toContain("from '@bendyline/gezel-sdk/stores'");
 
     expect(applied.workspaceSeeded).toEqual(['pipeline.json', 'activity.json']);

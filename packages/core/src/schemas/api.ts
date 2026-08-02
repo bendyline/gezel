@@ -12,6 +12,7 @@ import {
 } from './gezel.js';
 import { GezelGrowthStateSchema } from './growth.js';
 import { ChatModelTuningSchema } from './model-tuning.js';
+import { NativeEngineNameSchema } from './native-engines.js';
 import {
   HttpsOriginSchema,
   ProjectDetailSchema,
@@ -66,6 +67,22 @@ export const HealthResponseSchema = z.object({
    * (macOS, headless containers, exotic GPU drivers).
    */
   llamaCppDetectedVendor: z.enum(['amd', 'nvidia', 'intel']).optional(),
+  /**
+   * Backends whose bundled build crashed on this machine before the
+   * engine ever became ready, and which backend resolution therefore
+   * routed around this launch.
+   *
+   * Distinct from a user pin, and the distinction matters: with a pin,
+   * `llamaCppBackend` differs from `llamaCppDetectedBackend` because the
+   * user asked for that. Here it differs because a build we shipped does
+   * not run on their hardware — which they did not ask for, cannot infer
+   * from the two backend fields alone, and would otherwise only notice as
+   * an unexplained drop in speed.
+   *
+   * Empty/undefined in the normal case. Entries clear themselves when the
+   * offending binary is replaced (see `llama-quarantine.ts`).
+   */
+  llamaCppQuarantinedBackends: z.array(z.enum(['cuda', 'vulkan', 'metal', 'cpu'])).optional(),
 });
 export type HealthResponse = z.infer<typeof HealthResponseSchema>;
 
@@ -114,6 +131,96 @@ export const MachineMemoryUsageSchema = z.object({
   deviceNames: z.array(z.string()),
 });
 export type MachineMemoryUsage = z.infer<typeof MachineMemoryUsageSchema>;
+
+/**
+ * Shareable machine profile for a user-authored bug report.
+ *
+ * The contract of this shape is that every field is safe to paste into a
+ * PUBLIC GitHub issue: no absolute paths, no hostname, no username, no
+ * session/gezel/project identifiers, no prompts, no transcripts, no log
+ * tails, no credentials.
+ *
+ * GPU card model names ARE included. "NVIDIA GeForce RTX 4070" is a hardware
+ * SKU, not an identifier — no serial, no UUID, no bus address — and it is the
+ * single most triage-relevant fact for the native-engine crash class this
+ * report exists to capture.
+ *
+ * The route parses its response through this schema on the way out, so a
+ * field the handler assembles but does not declare here is stripped rather
+ * than shipped. That strip is the privacy boundary, not a formality: adding
+ * a field here is the deliberate act that the route's guard test watches.
+ */
+export const SystemDiagnosticsSchema = z.object({
+  version: z.string(),
+  sampledAt: z.string(),
+  runtime: z.object({
+    nodeVersion: z.string(),
+    platform: z.string(),
+    arch: z.string(),
+    /** `os.release()` — kernel/build string, e.g. `24.5.0`, `10.0.26100`. */
+    osRelease: z.string(),
+    /** Native-binary subtree key, e.g. `darwin-arm64`. Null off shipped targets. */
+    platformKey: z.string().nullable(),
+  }),
+  hardware: z.object({
+    totalRamBytes: z.number().nonnegative(),
+    gpuVramBytes: z.number().nonnegative().nullable(),
+    /** Fast memory: VRAM on a discrete card, a RAM fraction otherwise. */
+    usableBytes: z.number().nonnegative(),
+    /**
+     * What the capacity broker admits across every pool. Differs from
+     * `usableBytes` on a discrete card (VRAM plus a system-RAM share), and a
+     * memory bug report is unreadable without knowing which of the two a
+     * refusal was measured against.
+     */
+    budgetBytes: z.number().nonnegative().optional(),
+    source: z.enum(['darwin-unified', 'gpu-nvidia', 'gpu-vulkan', 'system-ram-fallback']),
+    gpuVendor: z.enum(['amd', 'nvidia', 'intel']).optional(),
+    /** Prose sentence — the same copy local-model onboarding shows. */
+    description: z.string(),
+    tier: z.enum(['tiny', 'small', 'medium', 'large']),
+    /** Card model names as the engine reports them. No bus ids, no serials. */
+    gpuDevices: z.array(
+      z.object({
+        name: z.string(),
+        totalMiB: z.number().nonnegative(),
+        computeCapability: z.string().optional(),
+        driverVersion: z.string().optional(),
+      }),
+    ),
+  }),
+  engine: z.object({
+    nativeRelease: z.string(),
+    nativePinned: z.boolean(),
+    /** Engine names resolvable by this daemon. Names only — never paths. */
+    installedEngines: z.array(NativeEngineNameSchema),
+    llamaCppBackend: z.enum(['cuda', 'vulkan', 'metal', 'cpu']).optional(),
+    llamaCppDetectedBackend: z.enum(['cuda', 'vulkan', 'metal', 'cpu']).optional(),
+    llamaCppBackendOverride: z.enum(['auto', 'cuda', 'vulkan', 'metal', 'cpu']).optional(),
+    /** From `gezel-llama-build.json` beside the binary. */
+    llamaCppRevision: z.string().optional(),
+    llamaCppBuildBackend: z.string().optional(),
+    cudaArchitectures: z.array(z.string()).optional(),
+    cudaToolkit: z.string().optional(),
+  }),
+  models: z.object({
+    defaultProvider: ProviderNameSchema,
+    defaultModel: z.string().optional(),
+    /**
+     * Local chat models installed on this daemon. Catalog ids only, and
+     * deliberately excluding Ollama: Ollama tags are user-authored
+     * (`acme-corp/internal-7b:latest`) and can name an employer.
+     */
+    installed: z.array(
+      z.object({
+        id: z.string(),
+        provider: z.enum(['llama-cpp', 'mlx', 'ds4']),
+        parameterSize: z.string().optional(),
+      }),
+    ),
+  }),
+});
+export type SystemDiagnostics = z.infer<typeof SystemDiagnosticsSchema>;
 
 /**
  * Non-secret metadata about the user's GitHub auth state. The token itself
@@ -898,7 +1005,7 @@ export const GezelConfigSchema = z.object({
    * windowed SWA cache, it cannot — so it logs `cache_reuse is not
    * supported by this context, it will be disabled` and drops the flag no
    * matter what `cacheReuse` is set to. Measured 2026-07-31 on
-   * gemma4-e4b-q8 at 64K context: windowed = 8,772 MB RSS + cache_reuse
+   * gemma4-e4b-q4 at 64K context: windowed = 8,772 MB RSS + cache_reuse
    * refused; `--swa-full` = 11,415 MB RSS (+30%) + cache_reuse accepted.
    * Qwen 3.5/3.6 cannot KV-shift at all (hybrid attention) and this flag
    * does not help them.
@@ -1034,9 +1141,10 @@ export const GezelConfigSchema = z.object({
    * `min(systemRamGB * 0.6, 96)`. Hard-set to a low number on
    * tight-RAM hosts to keep gezel from monopolizing memory; raise
    * on Mac Studio / 128 GB machines that want the pool to keep
-   * multiple models warm.
+   * multiple models warm. Explicit `null` clears the override and
+   * returns the broker to the auto-derived value.
    */
-  localEngineMemoryGb: z.number().positive().optional(),
+  localEngineMemoryGb: z.number().positive().nullable().optional(),
   /**
    * Per-model clone count, keyed by catalog `modelId`. Missing keys
    * default to 1 (one resident replica). Drives the warm-pool
@@ -2788,6 +2896,104 @@ export const CopilotLoginEventSchema = z.union([
   z.object({ kind: z.literal('error'), message: z.string() }),
 ]);
 export type CopilotLoginEvent = z.infer<typeof CopilotLoginEventSchema>;
+
+/**
+ * Progress from a user-triggered on-demand system-toolset install
+ * (`POST /api/system-toolsets/:toolsetId/install`).
+ *
+ * Deliberately separate from {@link SystemBootstrapStatusSchema}: that one
+ * is boot health, a single global phase with no job identity. This one
+ * belongs to one install the user asked for, and an in-flight copy of it
+ * must never move the Home health pill.
+ *
+ * `log` carries raw pnpm output for the details pane — chunk-sized, not
+ * necessarily one line each.
+ */
+export const SystemToolsetInstallEventSchema = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('phase'),
+    phase: z.enum(['resolving', 'downloading', 'extracting', 'installing-deps', 'publishing']),
+  }),
+  z.object({
+    type: z.literal('progress'),
+    bytesWritten: z.number().nonnegative(),
+    /** 0 when the registry sent no `content-length`. */
+    totalBytes: z.number().nonnegative(),
+  }),
+  z.object({
+    type: z.literal('retrying'),
+    attempt: z.number().int().positive(),
+    maxAttempts: z.number().int().positive(),
+    delayMs: z.number().nonnegative(),
+    reason: z.string(),
+  }),
+  z.object({ type: z.literal('log'), line: z.string() }),
+  z.object({ type: z.literal('done'), installPath: z.string(), version: z.string() }),
+  z.object({ type: z.literal('error'), error: z.string() }),
+]);
+export type SystemToolsetInstallEvent = z.infer<typeof SystemToolsetInstallEventSchema>;
+
+/** Phases an on-demand system-toolset install moves through, in order. */
+export type SystemToolsetInstallPhase = Extract<
+  SystemToolsetInstallEvent,
+  { type: 'phase' }
+>['phase'];
+
+/**
+ * Server-owned snapshot of one on-demand install, replayed to every new
+ * subscriber so a late SSE connection doesn't render a blank progress bar.
+ */
+export const SystemToolsetInstallSnapshotSchema = z.object({
+  toolsetId: z.string(),
+  version: z.string(),
+  startedAt: z.string(),
+  phase: z.enum(['resolving', 'downloading', 'extracting', 'installing-deps', 'publishing']),
+  bytesWritten: z.number().nonnegative(),
+  totalBytes: z.number().nonnegative(),
+  retrying: z
+    .object({
+      attempt: z.number().int().positive(),
+      maxAttempts: z.number().int().positive(),
+      delayMs: z.number().nonnegative(),
+      reason: z.string(),
+    })
+    .optional(),
+  /** Tail of the pnpm output, capped so replay stays cheap. */
+  log: z.array(z.string()),
+  finished: z.boolean(),
+  error: z.string().optional(),
+  installPath: z.string().optional(),
+});
+export type SystemToolsetInstallSnapshot = z.infer<typeof SystemToolsetInstallSnapshotSchema>;
+
+/**
+ * Whether GitHub Copilot can be used on this device, and how we got there.
+ *
+ * The Copilot SDK is an on-demand system toolset, so "is it available?" is a
+ * ladder, not a boolean on disk: an explicit `COPILOT_CLI_PATH`, then our own
+ * managed install, then a Copilot CLI the user installed themselves. The last
+ * rung is why this exists — someone who ran `npm i -g @github/copilot` must
+ * never be offered a second copy.
+ */
+export const CopilotAvailabilitySchema = z.object({
+  /** The single boolean every "should we offer Copilot?" gate reads. */
+  available: z.boolean(),
+  /** Which rung answered, or null when none did. */
+  source: z.enum(['env', 'managed', 'path']).nullable(),
+  /** Our managed install specifically, independent of the other rungs. */
+  managed: z.enum(['current', 'outdated', 'absent']),
+  /** Version on disk, when `managed !== 'absent'`. */
+  installedVersion: z.string().optional(),
+  /** Version this build pins. */
+  pinnedVersion: z.string(),
+  /** Package root of the managed install, for the `copilot login` hint. */
+  installDir: z.string().optional(),
+  /** Path of a CLI found via `COPILOT_CLI_PATH` or PATH, for display. */
+  cliPath: z.string().optional(),
+  /** True when a managed install exists but this build pins a different version. */
+  updateAvailable: z.boolean(),
+});
+export type CopilotAvailability = z.infer<typeof CopilotAvailabilitySchema>;
 
 export const ListProjectsResponseSchema = z.object({
   projects: z.array(
@@ -5277,12 +5483,22 @@ export const NightShiftTaskBriefSchema = z.object({
 });
 export type NightShiftTaskBrief = z.infer<typeof NightShiftTaskBriefSchema>;
 
+/** Live service-owned work performed during Night Shift, outside TaskRunner. */
+export const NightShiftBackgroundWorkBriefSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  detail: z.string(),
+  projectName: z.string().optional(),
+});
+export type NightShiftBackgroundWorkBrief = z.infer<typeof NightShiftBackgroundWorkBriefSchema>;
+
 /**
- * What the night shift is doing right now: tasks with a turn in flight
- * (`active`) and the pending night-shift tasks queued behind them
- * (`upcoming`). Both empty when no shift is running.
+ * What the night shift is doing right now: service-owned background work,
+ * tasks with a turn in flight (`active`), and tasks genuinely present in the
+ * runner queue (`upcoming`). All three are empty when no shift is running.
  */
 export const NightShiftTasksResponseSchema = z.object({
+  background: z.array(NightShiftBackgroundWorkBriefSchema),
   active: z.array(NightShiftTaskBriefSchema),
   upcoming: z.array(NightShiftTaskBriefSchema),
 });
