@@ -1578,6 +1578,94 @@ def _template_tool_calls(tool_calls: List[Dict[str, Any]]) -> List[Dict[str, Any
     return shaped
 
 
+_TOOL_LINKAGE_PROBE: Dict[str, bool] = {}
+_LINKAGE_PROBE_MARK = "__gezel_tool_linkage_probe__"
+
+
+def _tool_linkage_probe_messages(linked: bool) -> List[Dict[str, Any]]:
+    call = {
+        "id": "probe1",
+        "type": "function",
+        "function": {"name": "probe_tool", "arguments": {"q": "x"}},
+    }
+    assistant: Dict[str, Any] = {"role": "assistant", "content": ""}
+    result: Dict[str, Any] = {"role": "tool", "content": _LINKAGE_PROBE_MARK}
+    if linked:
+        assistant["tool_calls"] = [call]
+        result["tool_call_id"] = "probe1"
+    return [{"role": "user", "content": "go"}, assistant, result]
+
+
+def _template_needs_tool_linkage(tokenizer: Any, chat_template_override: Any) -> bool:
+    """Does this model's template DROP a tool result unless the assistant
+    call it answers is linked to it?
+
+    Gemma renders a `role: "tool"` message only as the response half of a
+    call/response pair, so without the linkage the entire exchange vanishes
+    and the model never sees a single tool result. Hermes-style templates
+    (Qwen et al.) render a bare tool message just fine.
+
+    That difference is why this is probed rather than always-on. Feeding
+    Qwen the linkage is *more* correct on paper but measurably worse in
+    practice: it starts seeing its own past `<tool_call>` blocks echoed in
+    the transcript and imitates them — core-suite MLX went 8/11 -> 5/11,
+    tool calls 457 -> 753, three fast passes turning into slow model-stuck
+    retry loops. So we only add the linkage where its absence actually
+    costs the model information, and leave every other template on the byte-
+    identical legacy shape.
+
+    Probed once per template: render a marker-bearing tool result with and
+    without linkage; if the bare render loses the marker, linkage is
+    required. Failures answer "no" — the legacy shape is the safe default.
+    """
+    key = str(chat_template_override) if chat_template_override else "<model>"
+    cached = _TOOL_LINKAGE_PROBE.get(key)
+    if cached is not None:
+        return cached
+    probe_tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "probe_tool",
+                "description": "probe",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"q": {"type": "string"}},
+                },
+            },
+        }
+    ]
+    kwargs: Dict[str, Any] = dict(
+        tools=probe_tools, add_generation_prompt=True, tokenize=False
+    )
+    if chat_template_override:
+        kwargs["chat_template"] = chat_template_override
+    needs = False
+    try:
+        bare = tokenizer.apply_chat_template(
+            _tool_linkage_probe_messages(False), **kwargs
+        )
+        linked = tokenizer.apply_chat_template(
+            _tool_linkage_probe_messages(True), **kwargs
+        )
+        needs = (_LINKAGE_PROBE_MARK not in bare) and (_LINKAGE_PROBE_MARK in linked)
+    except Exception as exc:
+        print(
+            f"[tool-prompt] tool-linkage probe failed ({exc}); "
+            f"using legacy message shape",
+            flush=True,
+        )
+        needs = False
+    _TOOL_LINKAGE_PROBE[key] = needs
+    print(
+        f"[tool-prompt] tool-linkage probe: template "
+        f"{'REQUIRES' if needs else 'does not need'} assistant/tool pairing"
+        f"{' — passing tool_calls + tool_call_id through' if needs else ''}",
+        flush=True,
+    )
+    return needs
+
+
 def _build_prompt(
     messages: List[ChatMessageReq],
     tools: Optional[List[Dict[str, Any]]] = None,
@@ -1608,6 +1696,13 @@ def _build_prompt(
     Vision support is out of scope for v1; list-shaped content is
     flattened to text by extracting text parts.
     """
+    _probe_tokenizer = getattr(PROCESSOR, "tokenizer", None)
+    link_tools = (
+        any(m.tool_calls or m.tool_call_id for m in messages)
+        and _probe_tokenizer is not None
+        and hasattr(_probe_tokenizer, "apply_chat_template")
+        and _template_needs_tool_linkage(_probe_tokenizer, chat_template_override)
+    )
     raw = []
     for m in messages:
         content = m.content
@@ -1615,16 +1710,15 @@ def _build_prompt(
             parts = [p.get("text", "") for p in content if isinstance(p, dict)]
             content = "\n".join(p for p in parts if p)
         entry: Dict[str, Any] = {"role": m.role, "content": content or ""}
-        # Carry the tool-call linkage through to the template. Rebuilding
-        # every message as bare {role, content} drops it, and Gemma's
-        # template then renders neither the assistant's call nor the
-        # `role: "tool"` result it belongs to — see ChatMessageReq.
-        # Only set when present so non-tool turns render byte-identically
-        # to before (the prompt cache keys on the rendered prefix).
-        if m.tool_calls:
-            entry["tool_calls"] = _template_tool_calls(m.tool_calls)
-        if m.tool_call_id:
-            entry["tool_call_id"] = m.tool_call_id
+        # Carry the tool-call linkage through to the template, but ONLY for
+        # templates that actually need it — see _template_needs_tool_linkage.
+        # Templates that render a bare tool message stay byte-identical to
+        # the legacy shape (which also keeps their prompt caches valid).
+        if link_tools:
+            if m.tool_calls:
+                entry["tool_calls"] = _template_tool_calls(m.tool_calls)
+            if m.tool_call_id:
+                entry["tool_call_id"] = m.tool_call_id
         raw.append(entry)
 
     tokenizer = getattr(PROCESSOR, "tokenizer", None)
