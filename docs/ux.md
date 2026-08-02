@@ -398,6 +398,22 @@ what is off, and what the user would have to do. Derivation lives in
 Settings can never drift apart. The one update outcome that *is* worth
 interrupting for — a verified update waiting to install — stays a banner.
 
+**Scheduled work is not a backlog.** A count in the chrome says "there is
+something here you are waiting on." Work that is deliberately parked until
+a future window — night-shift handoffs sitting on the task queue at
+eleven in the morning — is waiting on nothing and asks nothing of the
+user, so it never gets a badge, a count, or a chip. Left in one it reads as
+a stuck queue, and the user goes looking for the jam that isn't there. Keep
+it out of the header entirely (the QueueMeter's `taskHandoffSplit` is the
+reference: the runner reports `dispatchable` and `scheduled` separately, and
+only the first is counted), give it a muted section in the relevant popover
+that leads with *when it runs* rather than how many there are, and let the
+feature's own surface — the Night Shift menu — be where it's browsable.
+The corollary is a duty: once it's out of the chrome, that surface has to
+answer for it all day, not only while the window is open. And when queued
+work genuinely *is* stuck, say which of the two it is — a busy engine
+resolves itself, an engagement switch set to Off does not.
+
 **Landing cues.** When navigation scrolls a surface to a specific row
 rather than the top or bottom of it, flash the row so the jump doesn't read
 as the view moving on its own: add `.timeline-focus-flash` (a ~2s ring that

@@ -911,6 +911,68 @@ describe('TaskRunner — night-shift gating + priority', () => {
     expect(dispatcher.dispatches[0]?.nightShift).toBe(true);
   });
 
+  it('files held night work under `scheduled`, not the pending backlog', async () => {
+    await store.createProject({ name: 'p1' });
+    await store.createGezel({ name: 'Bea' });
+    await writeStepTask(1, { nightShift: true });
+    await writeStepTask(2, {});
+
+    const dispatcher = new FakeDispatcher(new Map([['bea', 'copilot']]));
+    // One slot, already taken — so the normal handoff is held too, and the
+    // two buckets have to stay distinguishable while both are stuck.
+    const queue = new ProviderQueue({ concurrency: 1 });
+    await queue.acquire({ lane: 'interactive' });
+    dispatcher.setProvider('copilot', queue);
+
+    const runner = new TaskRunner({ store, dispatcher, isNightShiftActive: () => false });
+    runner.enqueueHandoff({ taskRef: 'p1/1', stepId: 'plan', gezelId: 'bea', projectId: 'p1' });
+    runner.enqueueHandoff({ taskRef: 'p1/2', stepId: 'plan', gezelId: 'bea', projectId: 'p1' });
+    await runner.tick();
+
+    const snap = runner.snapshot();
+    expect(snap.pendingCount).toBe(2);
+    expect(snap.scheduled).toEqual({ count: 1, byGezel: { bea: 1 } });
+    expect(snap.dispatchable).toEqual({ count: 1, byGezel: { bea: 1 } });
+    expect(snap.holdReason).toBe('provider-busy');
+  });
+
+  it('classifies night work as scheduled the moment it is enqueued', async () => {
+    // Without the enqueue-time seed, a night task activated during the day
+    // counts as a backlog item until the first tick reads it back off disk
+    // — long enough for the header to flash a task count at the user.
+    const runner = new TaskRunner({
+      store,
+      dispatcher: new FakeDispatcher(new Map()),
+      isNightShiftActive: () => false,
+    });
+    runner.enqueueHandoff({
+      taskRef: 'p1/1',
+      stepId: 'plan',
+      gezelId: 'bea',
+      projectId: 'p1',
+      nightShift: true,
+    });
+
+    expect(runner.snapshot().scheduled).toEqual({ count: 1, byGezel: { bea: 1 } });
+    expect(runner.snapshot().dispatchable.count).toBe(0);
+  });
+
+  it('reports engagement-off as the hold reason', async () => {
+    await store.createProject({ name: 'p1' });
+    await store.createGezel({ name: 'Bea' });
+    await writeStepTask(1, {});
+    await store.writeConfig({ aiEngagementMode: 'off' });
+
+    const dispatcher = new FakeDispatcher(new Map([['bea', 'copilot']]));
+    dispatcher.setProvider('copilot', new ProviderQueue({ concurrency: 10 }));
+
+    const runner = new TaskRunner({ store, dispatcher });
+    runner.enqueueHandoff({ taskRef: 'p1/1', stepId: 'plan', gezelId: 'bea', projectId: 'p1' });
+    await runner.tick();
+
+    expect(runner.snapshot().holdReason).toBe('engagement-off');
+  });
+
   it('holds a night-shift task that already ran today (not pending)', async () => {
     await store.createProject({ name: 'p1' });
     await store.createGezel({ name: 'Bea' });

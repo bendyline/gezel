@@ -5,7 +5,11 @@ import { basename, join, posix, relative, resolve, sep } from 'node:path';
 import { resolvePlatformKey } from '@bendyline/gezel/native';
 import pinnedManifestJson from './native-file-manifest.json';
 import { effectiveEngineRelease } from './native-manifest.js';
-import { verifyCodeSignature } from './signature.js';
+import {
+  BENDYLINE_APPLE_TEAM_ID,
+  BENDYLINE_PUBLISHER,
+  verifyCodeSignature,
+} from './signature.js';
 
 type FileSignatureExpectation = 'bendyline' | 'vendor-hash-only' | 'hash-only';
 
@@ -160,7 +164,8 @@ async function verifyCandidate(opts: {
         const outcome = await opts.verifySignature(absolute, {
           platform: opts.platform,
           policy: 'require',
-          expectedPublisher: 'Bendyline LLC',
+          expectedPublisher: BENDYLINE_PUBLISHER,
+          expectedAppleTeamId: BENDYLINE_APPLE_TEAM_ID,
         });
         if (!outcome.accepted) {
           throw new Error(
@@ -195,7 +200,8 @@ async function verifyCandidate(opts: {
     const outcome = await opts.verifySignature(appBundle, {
       platform: 'darwin',
       policy: 'require',
-      expectedPublisher: 'Bendyline LLC',
+      expectedPublisher: BENDYLINE_PUBLISHER,
+      expectedAppleTeamId: BENDYLINE_APPLE_TEAM_ID,
       requireNotarizedApp: true,
     });
     if (!outcome.accepted) {

@@ -84,4 +84,41 @@ describe('night-shift task status', () => {
       ],
     });
   });
+
+  // Handoffs parked for the night window are deliberately kept out of the
+  // header's task queue, so this menu is the only place the user can see
+  // that tonight's work is accounted for. Answering it only while a shift
+  // runs would make the work invisible for the whole day.
+  it('lists work queued for tonight while the shift is off', async () => {
+    const ctx = {
+      nightShift: {
+        isActive: () => false,
+        listPendingTasks: async () => [task('p1/2', 'Queued for tonight')],
+      },
+      chat: { activeTaskRefs: () => new Set<string>() },
+      taskRunner: {
+        workSnapshot: () => ({ queuedTaskRefs: ['p1/2'], dispatchedTaskRefs: [] }),
+      },
+      indexEnrichment: {
+        getActivity: () => ({ id: 'index-enrichment', title: 'Workspace indexing' }),
+      },
+      store: { getProject: async () => ({ id: 'p1', name: 'Project One' }) },
+    } as unknown as ServiceContext;
+
+    const response = await nightShiftRoutes(ctx).request('/tasks');
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      // Daytime indexing belongs to the day, not to tonight's plan.
+      background: [],
+      active: [],
+      upcoming: [
+        {
+          ref: 'p1/2',
+          title: 'Queued for tonight',
+          projectName: 'Project One',
+          stepName: 'Work',
+        },
+      ],
+    });
+  });
 });

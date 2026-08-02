@@ -81,6 +81,8 @@ export class NightShiftManager {
   private wakeAtIso: string | null = null;
   /** Whether the configured window is currently open (cached each tick). */
   private windowOpen = false;
+  /** Master feature flag from the last tick — drives the synchronous reads. */
+  private enabled = true;
   /** Window config from the last tick — drives the synchronous day-key. */
   private window: NightShiftWindow = DEFAULT_NIGHT_SHIFT_WINDOW;
 
@@ -138,6 +140,18 @@ export class NightShiftManager {
   /** The window config cached from the last tick. */
   currentWindow(): NightShiftWindow {
     return this.window;
+  }
+
+  /**
+   * When the next scheduled window opens, or null while the feature is
+   * switched off. Distinct from `getPowerIntent().wakeAtIso`, which is
+   * additionally gated on `wakeOnStart` because it arms an OS wake — this
+   * one is just the clock time, for telling the user when parked
+   * night-shift work will pick up.
+   */
+  nextStartIso(): string | null {
+    if (!this.enabled) return null;
+    return nextNightShiftStart(this.now(), this.window).toISOString();
   }
 
   /**
@@ -218,6 +232,7 @@ export class NightShiftManager {
     const enabled = ns.enabled !== false;
     const window = ns.window ?? DEFAULT_NIGHT_SHIFT_WINDOW;
     this.window = window;
+    this.enabled = enabled;
     const now = this.now();
     this.windowOpen = enabled && isInNightShiftWindow(now, window);
 

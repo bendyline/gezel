@@ -480,10 +480,37 @@ export interface ProviderQueueState {
  * TaskRunner pending-handoff summary — a separate layer from the
  * provider queue (phase handoffs that haven't been dispatched yet).
  */
+/** One side of the pending-handoff split. */
+export interface TaskHandoffBucket {
+  count: number;
+  byGezel: Record<string, number>;
+}
+
 export interface TaskRunnerState {
+  /** Every queued handoff, whatever is holding it. */
   pendingCount: number;
   pendingByGezel: Record<string, number>;
   pendingByProject: Record<string, number>;
+  /**
+   * Handoffs waiting on a free provider slot — a real backlog, and the
+   * only bucket the header's Tasks chip counts. Optional so a UI newer
+   * than its daemon degrades to the `pending*` totals.
+   */
+  dispatchable?: TaskHandoffBucket;
+  /**
+   * Handoffs parked until the next Night Shift window. Not a backlog:
+   * nobody is waiting on them and there is nothing to act on, so they
+   * stay out of the header badge and live in the Night Shift menu.
+   */
+  scheduled?: TaskHandoffBucket;
+  /** Why `dispatchable` work isn't moving. Absent when it is. */
+  holdReason?: 'engagement-off' | 'provider-busy';
+  /** Night Shift state, for dating the `scheduled` bucket. */
+  nightShift?: {
+    active: boolean;
+    /** ISO time the next window opens; null when Night Shift is off. */
+    opensAt: string | null;
+  };
 }
 
 /**

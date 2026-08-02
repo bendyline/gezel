@@ -52,6 +52,15 @@ import { mainBookSource, stepOwnerGezelId } from './manager.js';
 
 const log = createLogger('tasks');
 
+/**
+ * Why a queued handoff didn't move on the last pass.
+ *
+ * `'night-shift'` is the one that is NOT a backlog: the work is parked
+ * until tonight's window by design, so the UI files it under scheduled
+ * work rather than counting it as something the user is waiting on.
+ */
+export type TaskHandoffHoldReason = 'engagement-off' | 'provider-busy';
+
 export interface PendingHandoff {
   /** `{projectId}/{num}` ref of the task. */
   taskRef: string;
@@ -68,6 +77,22 @@ export interface PendingHandoff {
   enqueuedAt: number;
   /** Monotonic id for stable sort + debugging. */
   id: number;
+  /**
+   * Why this item is still on the queue, recomputed every tick.
+   * `undefined` means "ready — it goes out as soon as a slot frees".
+   *
+   * Seeded at enqueue from the caller's `nightShift` flag so a night task
+   * activated during the day is filed as scheduled work immediately,
+   * rather than counting as a backlog item for the up-to-one-tick window
+   * before the first `tick` reads it back off disk.
+   */
+  heldFor?: 'night-shift' | 'provider-busy';
+}
+
+/** One side of the pending split — see {@link TaskRunner.snapshot}. */
+export interface TaskHandoffBucket {
+  count: number;
+  byGezel: Record<string, number>;
 }
 
 export interface TaskRunnerDispatcher {
@@ -171,6 +196,8 @@ export class TaskRunner {
     }
   >();
   private nextId = 1;
+  /** Why `dispatchable` work isn't moving, as of the last tick. */
+  private holdReason: TaskHandoffHoldReason | undefined;
   private ticker: ReturnType<typeof setInterval> | null = null;
   /** Resolves while a tick is in flight — prevents overlapping ticks. */
   private tickInFlight: Promise<void> | null = null;
@@ -202,14 +229,25 @@ export class TaskRunner {
     if (this.tickInFlight) await this.tickInFlight;
   }
 
-  enqueueHandoff(handoff: Omit<PendingHandoff, 'enqueuedAt' | 'id'>): void {
+  enqueueHandoff(
+    handoff: Omit<PendingHandoff, 'enqueuedAt' | 'id' | 'heldFor'> & {
+      /**
+       * Whether the task carries `nightShift.enabled`. Callers have the task
+       * in hand; passing it lets the snapshot classify the item as scheduled
+       * work from the moment it lands instead of one tick later.
+       */
+      nightShift?: boolean;
+    },
+  ): void {
     const key = handoffKey(handoff);
     if (this.pending.some((existing) => handoffKey(existing) === key)) {
       log.debug(`[task-runner] duplicate pending handoff suppressed: ${key}`);
       return;
     }
+    const { nightShift, ...rest } = handoff;
     this.pending.push({
-      ...handoff,
+      ...rest,
+      ...(nightShift && !this.isNightShiftActive() ? { heldFor: 'night-shift' as const } : {}),
       enqueuedAt: this.now(),
       id: this.nextId++,
     });
@@ -263,22 +301,44 @@ export class TaskRunner {
    * Current queue state. Useful for tests and for the nudge-
    * suppression check that wants to ask "is there handoff work
    * already queued for this voorman?"
+   *
+   * `pending*` are the totals — every item on the queue, whatever is
+   * holding it. They are split into two buckets because the two mean
+   * very different things to a user:
+   *
+   *   - `dispatchable` — work waiting on a free provider slot. This is a
+   *     real backlog and is what the header's Tasks chip counts.
+   *   - `scheduled` — night-shift work parked until the next window. It
+   *     is not waiting on anything and nobody needs to act on it, so
+   *     surfacing it as a pending count all day reads as a stuck queue.
+   *     Belongs in the Night Shift menu, not in a badge.
    */
   snapshot(): {
     pendingCount: number;
     pendingByGezel: Record<string, number>;
     pendingByProject: Record<string, number>;
+    dispatchable: TaskHandoffBucket;
+    scheduled: TaskHandoffBucket;
+    holdReason?: TaskHandoffHoldReason;
   } {
     const byGezel: Record<string, number> = {};
     const byProject: Record<string, number> = {};
+    const dispatchable: TaskHandoffBucket = { count: 0, byGezel: {} };
+    const scheduled: TaskHandoffBucket = { count: 0, byGezel: {} };
     for (const h of this.pending) {
       byGezel[h.gezelId] = (byGezel[h.gezelId] ?? 0) + 1;
       byProject[h.projectId] = (byProject[h.projectId] ?? 0) + 1;
+      const bucket = h.heldFor === 'night-shift' ? scheduled : dispatchable;
+      bucket.count += 1;
+      bucket.byGezel[h.gezelId] = (bucket.byGezel[h.gezelId] ?? 0) + 1;
     }
     return {
       pendingCount: this.pending.length,
       pendingByGezel: byGezel,
       pendingByProject: byProject,
+      dispatchable,
+      scheduled,
+      ...(dispatchable.count > 0 && this.holdReason ? { holdReason: this.holdReason } : {}),
     };
   }
 
@@ -334,6 +394,7 @@ export class TaskRunner {
           stepId: step.id,
           gezelId: assigneeId,
           projectId: proj.id,
+          ...(task.nightShift?.enabled === true ? { nightShift: true as const } : {}),
           ...(step.lastActivatedAt ? { activationAt: step.lastActivatedAt } : {}),
         });
       }
@@ -347,11 +408,17 @@ export class TaskRunner {
    */
   async tick(): Promise<void> {
     await this.pruneActiveDispatches();
-    if (this.pending.length === 0) return;
+    if (this.pending.length === 0) {
+      this.holdReason = undefined;
+      return;
+    }
     // Engagement mode "off" pauses dispatch — leave items on the queue so
     // they pick back up the moment the user flips engagement on.
     const config = await this.store.readConfig().catch(() => ({}));
-    if (!isEngagementAllowed(config)) return;
+    if (!isEngagementAllowed(config)) {
+      this.holdReason = 'engagement-off';
+      return;
+    }
 
     // Work on a snapshot: mutating `pending` mid-loop from async
     // dispatches would thrash the iteration.
@@ -415,6 +482,7 @@ export class TaskRunner {
       // work wraps up while queued night work waits for the shift /
       // interactive work to drain.
       if (isNight && (!nightShiftOn || !this.isNightShiftPending(task))) {
+        handoff.heldFor = 'night-shift';
         keep.push(handoff);
         continue;
       }
@@ -439,10 +507,12 @@ export class TaskRunner {
         // status-change cancellation (paused/canceled tasks) drop
         // work cleanly before a session is ever created.
         if (snap.running + inFlight >= provider.queue.concurrency) {
+          handoff.heldFor = 'provider-busy';
           keep.push(handoff);
           continue;
         }
       }
+      handoff.heldFor = undefined;
 
       // Effective capability floor, derived at dispatch (not enqueue)
       // so it covers every enqueue source — activation hook, command
@@ -498,6 +568,9 @@ export class TaskRunner {
     // the original order for anything we kept.
     this.pending.length = 0;
     this.pending.push(...keep);
+    this.holdReason = keep.some((handoff) => handoff.heldFor === 'provider-busy')
+      ? 'provider-busy'
+      : undefined;
   }
 
   private async pruneActiveDispatches(): Promise<void> {

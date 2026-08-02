@@ -1331,6 +1331,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
       projectId,
       taskRef: task.ref,
       stepId: newStep.id,
+      ...(task.nightShift?.enabled === true ? { nightShift: true } : {}),
       ...(newStep.lastActivatedAt ? { activationAt: newStep.lastActivatedAt } : {}),
       ...(fromGezel?.name ? { fromGezelName: fromGezel.name } : {}),
     });

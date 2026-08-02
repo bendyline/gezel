@@ -1706,6 +1706,42 @@ html.embedded-chat #root {
   font-weight: 600;
 }
 
+/* One muted line under a section heading explaining why its items are
+   sitting still. Reads as an aside, never as an alert — the conditions it
+   covers (a busy engine, a shift that has not opened yet) resolve on their
+   own. Only the engagement-off copy asks for anything. */
+.queue-meter-panel-note {
+  margin: 0 0 0.35rem 0;
+  font-size: var(--text-xs);
+  line-height: 1.35;
+}
+
+/* Scheduled section: night work is not a backlog, so the whole block sits
+   a step back from the live queue above it. */
+.queue-meter-panel-section-scheduled .queue-meter-panel-list {
+  opacity: 0.8;
+}
+
+.queue-meter-panel-jump {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: transparent;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-weight: 600;
+  color: inherit;
+  cursor: pointer;
+}
+.queue-meter-panel-jump:hover {
+  text-decoration: underline;
+}
+.queue-meter-panel-moon {
+  opacity: 0.75;
+  flex: none;
+}
+
 .queue-meter-panel-empty {
   margin: 0.2rem 0 0 0;
 }

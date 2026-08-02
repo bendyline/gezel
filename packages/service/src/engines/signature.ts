@@ -22,6 +22,24 @@ export type SignaturePolicy = 'require' | 'prefer' | 'off';
 
 export type SignatureStatus = 'valid' | 'invalid' | 'unsigned' | 'unsupported';
 
+/**
+ * Our signing identity, as it actually appears in each platform's certificate.
+ *
+ * The two platforms disagree on punctuation for the same legal entity, which
+ * is why the name is matched punctuation-insensitively and the Apple team id
+ * is matched exactly:
+ *
+ *   macOS   `Developer ID Application: Bendyline, LLC (JXA5M4VK3V)`   ← comma
+ *   Windows `CN=Bendyline LLC,O=Bendyline LLC,L=Sammamish,ST=…,C=US`  ← none
+ *
+ * A literal `includes('… Application: Bendyline LLC')` therefore never matched
+ * a real macOS binary, and every native engine download failed closed once the
+ * default policy became `require`. The team id is the durable anchor — it is
+ * bound to the certificate and cannot drift with a display-name reissue.
+ */
+export const BENDYLINE_PUBLISHER = 'Bendyline LLC';
+export const BENDYLINE_APPLE_TEAM_ID = 'JXA5M4VK3V';
+
 export interface SignatureResult {
   status: SignatureStatus;
   detail?: string;
@@ -43,6 +61,11 @@ export interface VerifyOptions {
   platform?: NodeJS.Platform;
   /** Expected organization in the Authenticode/Developer ID identity. */
   expectedPublisher?: string;
+  /**
+   * Expected Apple Developer team id (macOS only). Matched exactly against the
+   * `(TEAMID)` suffix of the leaf `Developer ID Application` authority.
+   */
+  expectedAppleTeamId?: string;
   /**
    * Require Gatekeeper to identify a parent `.app` bundle as Notarized
    * Developer ID. Never use this for a bare command-line binary: Apple
@@ -89,7 +112,11 @@ export async function verifyCodeSignature(
     platform === 'win32'
       ? await verifyWindows(binPath, run, opts.expectedPublisher)
       : platform === 'darwin'
-        ? await verifyMac(binPath, run, opts.expectedPublisher, opts.requireNotarizedApp === true)
+        ? await verifyMac(binPath, run, {
+            expectedPublisher: opts.expectedPublisher,
+            expectedAppleTeamId: opts.expectedAppleTeamId,
+            requireNotarizedApp: opts.requireNotarizedApp === true,
+          })
         : { status: 'unsupported' as const, detail: 'no signing standard for this platform' };
 
   const accepted = policyAccepts(result.status, opts.policy, platform);
@@ -138,7 +165,14 @@ async function verifyWindows(
   const [status = '', ...subjectLines] = res.stdout.trim().split(/\r?\n/);
   const subject = subjectLines.join(' ').trim();
   if (status === 'Valid') {
-    if (expectedPublisher && !subject.toLowerCase().includes(expectedPublisher.toLowerCase())) {
+    // Substring, not equality: this is a full DN
+    // (`CN=Bendyline LLC,O=Bendyline LLC,L=…`), and normalizing both sides
+    // keeps the match working if the CN is ever reissued with the comma form
+    // Apple's certificate already uses.
+    if (
+      expectedPublisher &&
+      !normalizeIdentityName(subject).includes(normalizeIdentityName(expectedPublisher))
+    ) {
       return {
         status: 'invalid',
         detail: `unexpected Authenticode publisher: ${subject || 'missing signer subject'}`,
@@ -150,28 +184,70 @@ async function verifyWindows(
   return { status: 'invalid', detail: `Authenticode status: ${status || 'unknown'}` };
 }
 
+/**
+ * Collapse case, punctuation, and spacing so the same organization compares
+ * equal across certificates that spell it differently — `Bendyline, LLC` on
+ * Apple's leaf vs `Bendyline LLC` on the Authenticode DN.
+ */
+function normalizeIdentityName(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, '');
+}
+
+/** Leaf `Developer ID Application` authority, split into name and team id. */
+function parseDeveloperIdAuthority(text: string): { name: string; teamId?: string } | null {
+  const withTeam = /^Authority=Developer ID Application:\s*(.*?)\s*\(([A-Za-z0-9]+)\)\s*$/im.exec(
+    text,
+  );
+  if (withTeam?.[1] && withTeam[2]) return { name: withTeam[1], teamId: withTeam[2] };
+  const bare = /^Authority=Developer ID Application:\s*(.+?)\s*$/im.exec(text);
+  return bare?.[1] ? { name: bare[1] } : null;
+}
+
 async function verifyMac(
   binPath: string,
   run: Runner,
-  expectedPublisher?: string,
-  requireNotarizedApp = false,
+  opts: {
+    expectedPublisher?: string;
+    expectedAppleTeamId?: string;
+    requireNotarizedApp?: boolean;
+  } = {},
 ): Promise<SignatureResult> {
+  const { expectedPublisher, expectedAppleTeamId, requireNotarizedApp = false } = opts;
   // `codesign --verify` exits 0 for a valid signature, non-zero otherwise.
   const verify = await run('codesign', ['--verify', '--strict', binPath]);
   if (isSpawnFailure(verify.code)) {
     return { status: 'unsupported', detail: `could not run codesign (${verify.code})` };
   }
-  const info = await run('codesign', ['-dv', binPath]);
-  const blob = `${info.stdout}\n${info.stderr}`.toLowerCase();
+  // `-dvv`, not `-dv`: `Authority=` lines only appear from the second
+  // verbosity level up. At `-dv` the publisher check can never pass, because
+  // the string it looks for is never printed.
+  const info = await run('codesign', ['-dvv', binPath]);
+  const raw = `${info.stdout}\n${info.stderr}`;
+  const blob = raw.toLowerCase();
   if (verify.code === 0) {
-    if (
-      expectedPublisher &&
-      !blob.includes(`authority=developer id application: ${expectedPublisher.toLowerCase()}`)
-    ) {
-      return {
-        status: 'invalid',
-        detail: `unexpected Developer ID authority for ${binPath}`,
-      };
+    if (expectedPublisher || expectedAppleTeamId) {
+      const authority = parseDeveloperIdAuthority(raw);
+      if (!authority) {
+        return {
+          status: 'invalid',
+          detail: `no Developer ID Application authority for ${binPath}`,
+        };
+      }
+      if (
+        expectedPublisher &&
+        normalizeIdentityName(authority.name) !== normalizeIdentityName(expectedPublisher)
+      ) {
+        return {
+          status: 'invalid',
+          detail: `unexpected Developer ID authority for ${binPath}: ${authority.name}`,
+        };
+      }
+      if (expectedAppleTeamId && authority.teamId !== expectedAppleTeamId) {
+        return {
+          status: 'invalid',
+          detail: `unexpected Apple team for ${binPath}: ${authority.teamId ?? 'none'}`,
+        };
+      }
     }
     if (requireNotarizedApp) {
       if (!/\.app\/?$/i.test(binPath)) {

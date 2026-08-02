@@ -24,6 +24,8 @@ import {
   isPlaceholderDigest,
 } from './native-manifest.js';
 import {
+  BENDYLINE_APPLE_TEAM_ID,
+  BENDYLINE_PUBLISHER,
   type SignaturePolicy,
   type SignatureResult,
   stripQuarantine,
@@ -180,7 +182,7 @@ export async function* resolveEngine(
     policy,
     ...(engine === 'uv' && process.platform === 'win32'
       ? {}
-      : { expectedPublisher: 'Bendyline LLC' }),
+      : { expectedPublisher: BENDYLINE_PUBLISHER, expectedAppleTeamId: BENDYLINE_APPLE_TEAM_ID }),
   } as const;
 
   const versionDir = join(opts.home, 'engines', 'native-bin', version);

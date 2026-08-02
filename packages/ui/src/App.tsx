@@ -23,6 +23,7 @@ import { Sidebar } from './components/Sidebar.js';
 import { TabContent } from './components/TabContent.js';
 import { TabErrorBoundary } from './components/TabErrorBoundary.js';
 import { TitlebarSearch } from './components/TitlebarSearch.js';
+import { NIGHT_SHIFT_MOON_PATH } from './components/night-shift-glyph.js';
 import { type RecentTabInput, tabKey, toRecentTab } from './components/recent-tabs.js';
 import { EmbeddedChat } from './embedded/EmbeddedChat.js';
 import { UI_FALLBACK_PROVIDER } from './provider-default.js';
@@ -877,11 +878,22 @@ function NightShiftMenu({
     };
   }, [open]);
 
-  // While the menu is open during a running shift, surface what it's working
-  // on. Poll lightly so the active/upcoming split tracks progress as tasks
-  // finish and the next one picks up.
+  // Opened from elsewhere — the queue popover's scheduled-work section
+  // sends the user here rather than explaining the shift twice.
   useEffect(() => {
-    if (!open || !state.active) {
+    const openMenu = () => setOpen(true);
+    window.addEventListener('gezel:open-night-shift', openMenu);
+    return () => window.removeEventListener('gezel:open-night-shift', openMenu);
+  }, []);
+
+  // While the menu is open, surface what the shift is working on — or, when
+  // it isn't running, what is already queued up for tonight. Answering that
+  // during the day is the point: work parked for the night window is
+  // deliberately absent from the header queue, so this is where the user
+  // confirms it's accounted for. Poll lightly so the active/upcoming split
+  // tracks progress as tasks finish and the next one picks up.
+  useEffect(() => {
+    if (!open) {
       setTasks(null);
       return;
     }
@@ -902,7 +914,7 @@ function NightShiftMenu({
       cancelled = true;
       window.clearInterval(id);
     };
-  }, [open, state.active]);
+  }, [open]);
 
   const run = (action: 'start' | 'stop') => {
     void api
@@ -945,7 +957,7 @@ function NightShiftMenu({
             <path
               className={`app-nightshift-moon${state.active ? ' is-active' : ''}`}
               transform="translate(4 0)"
-              d="M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.39 5.39 0 0 1-8.54-6.5A8.97 8.97 0 0 0 12 3z"
+              d={NIGHT_SHIFT_MOON_PATH}
             />
             {state.active && (
               <g className="app-nightshift-cloud app-nightshift-cloud-near">
@@ -962,7 +974,7 @@ function NightShiftMenu({
               ? `Running — ${state.source === 'manual' ? 'manual shift' : 'scheduled window'}`
               : 'Not running'}
           </div>
-          {state.active && hasWork && tasks && (
+          {hasWork && tasks && (
             <div className="app-nightshift-tasks">
               {(backgroundWork.length > 0 || tasks.active.length > 0) && (
                 <div className="app-nightshift-task-group">
@@ -982,7 +994,9 @@ function NightShiftMenu({
               )}
               {tasks.upcoming.length > 0 && (
                 <div className="app-nightshift-task-group">
-                  <div className="app-nightshift-task-heading">Up next</div>
+                  <div className="app-nightshift-task-heading">
+                    {state.active ? 'Up next' : 'Queued for tonight'}
+                  </div>
                   {tasks.upcoming.map((t) => (
                     <NightShiftTaskRow key={t.ref} task={t} />
                   ))}

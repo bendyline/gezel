@@ -87,9 +87,16 @@ export function queueRoutes(ctx: ServiceContext): Hono {
       ctx.chat.getAnthropicCliPoolSnapshot(),
       ctx.gpuArbiter.getDeviceHealthStatus(),
     ]);
+    // Night Shift context travels with the queue snapshot rather than as a
+    // second poll: the QueueMeter needs it on every refresh to say when the
+    // scheduled bucket picks up ("waiting for Night Shift · starts 22:00").
+    const nightShift = {
+      active: ctx.nightShift.isActive(),
+      opensAt: ctx.nightShift.nextStartIso(),
+    };
     return c.json({
       providers,
-      taskRunner: ctx.taskRunner.snapshot(),
+      taskRunner: { ...ctx.taskRunner.snapshot(), nightShift },
       sessions,
       cache,
       ...(deviceHealth ? { deviceHealth } : {}),
