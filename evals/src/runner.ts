@@ -1422,7 +1422,18 @@ export async function pollUntilDone(
   finalSniff?: TrialFinalSniff;
 }> {
   const startedAt = Date.now();
-  const hardDeadline = startedAt + args.maxDurationMs;
+  // Progress-aware hard ceiling. The ceiling is a runaway backstop, not a
+  // budget (see "Throughput-invariance" in the eval-run skill): capability
+  // is invariant to decode speed, so a slow trial that is still visibly
+  // advancing must not be killed by the clock. When the deadline arrives
+  // but hard progress moved within the recency window, extend in steps —
+  // capped at 2× the requested ceiling so a genuinely looping trial still
+  // dies. Wild-caught: 5 of the 2026-08-01 sweep "failures" were ceiling
+  // kills whose own reason text admitted progress was ongoing.
+  let hardDeadline = startedAt + args.maxDurationMs;
+  const hardCeilingCapMs = args.maxDurationMs * 2;
+  const ceilingExtendIfProgressWithinMs = 10 * 60_000;
+  const ceilingExtendStepMs = 15 * 60_000;
   args.log(
     `[poll] starting (interval=${args.pollIntervalMs}ms maxDuration=${args.maxDurationMs}ms hardProgressTimeout=${args.hardProgressTimeoutMs}ms softProgressTimeout=${args.softProgressTimeoutMs}ms)`,
   );
@@ -1660,7 +1671,19 @@ export async function pollUntilDone(
   let inflightRetryLoopDeferralLoggedAt = 0;
   const poisonedSessionRecovery = new PoisonedSessionRecoveryTracker();
 
-  while (Date.now() < hardDeadline) {
+  while (true) {
+    if (Date.now() >= hardDeadline) {
+      const sinceHardMs = Date.now() - lastHardChangeAt;
+      const step = Math.min(ceilingExtendStepMs, hardCeilingCapMs - (hardDeadline - startedAt));
+      if (sinceHardMs <= ceilingExtendIfProgressWithinMs && step > 0) {
+        hardDeadline += step;
+        args.log(
+          `[poll] hard ceiling reached but hard progress moved ${Math.round(sinceHardMs / 1000)}s ago — extending ${Math.round(step / 60_000)}m (${Math.round((hardDeadline - startedAt) / 60_000)}m of ${Math.round(hardCeilingCapMs / 60_000)}m cap)`,
+        );
+      } else {
+        break;
+      }
+    }
     if (args.signal?.aborted) {
       args.log('[poll] aborted by signal');
       return {
@@ -1777,10 +1800,15 @@ export async function pollUntilDone(
           `[poll] poisoned-session recovery: ${poisonedTarget.gezelId}/${poisonedTarget.sessionId.slice(0, 8)} last turn aborted; sending one direct repair turn${filePath ? ` for ${filePath}` : ''}`,
         );
         try {
+          const abortTeaching = await lastAbortTeachingWarning(
+            args.client,
+            poisonedTarget.sessionId,
+          );
           await args.client.sendChatMessage(poisonedTarget.gezelId, {
             projectId: poisonedTarget.projectId,
             message: buildPoisonedSessionRecoveryMessage({
               lastTurnError: poisonedTarget.lastTurnError,
+              ...(abortTeaching ? { abortTeaching } : {}),
               filePath,
               sniff: latestSniff,
             }),
@@ -2231,9 +2259,15 @@ export async function pollUntilDone(
       `[poll] post-ceiling final-check threw (non-fatal): ${err instanceof Error ? err.message : String(err)}`,
     );
   }
+  // Honest reason text: the old fixed "forward progress kept happening"
+  // wording was unconditional, so a trial whose maxDuration was SHORTER
+  // than the hard-progress watchdog could stall and still be reported as
+  // progressing. Report what actually happened.
+  const ceilingExtendedMs = hardDeadline - (startedAt + args.maxDurationMs);
+  const sinceHardAtEndS = Math.round((Date.now() - lastHardChangeAt) / 1000);
   return {
     success: false,
-    reason: `hit hard ceiling (${args.maxDurationMs}ms) — forward progress kept happening, but the deliverable never closed`,
+    reason: `hit hard ceiling (${args.maxDurationMs}ms${ceilingExtendedMs > 0 ? ` + ${Math.round(ceilingExtendedMs / 60_000)}m progress extensions` : ''}) — last hard progress ${sinceHardAtEndS}s before the end; the deliverable never closed`,
     failureMode: 'timeout',
     ...finalSniffOf(),
   };
@@ -2620,8 +2654,39 @@ export function summarizeInflightTurnsForLog(inflightTurns: InflightTurnSnapshot
   return `${top.gezelId}/${top.sessionId.slice(0, 8)} in ${top.projectId} for ${seconds}s${suffix}`;
 }
 
+/**
+ * Pull the aborting guard's own teaching text off the poisoned session's
+ * last `turn-aborted` message. The session-level `lastTurnError` is the
+ * user-facing toast ("The model got stuck… Try sending your message again,
+ * or rephrase your request") — advice for a human, useless to the gezel we
+ * are about to re-drive. The guard that killed the turn wrote its
+ * actionable version ("You already have what you need. Your next message
+ * MUST start with a single action-tool call…") onto the aborted message's
+ * `warnings`; wild-caught on ops-runbook-anomaly, where every recovery
+ * nudge quoted the toast and every model re-died the same way.
+ */
+async function lastAbortTeachingWarning(
+  client: GezelClient,
+  sessionId: string,
+): Promise<string | undefined> {
+  try {
+    const full = await client.getChatSession(sessionId);
+    for (let i = full.messages.length - 1; i >= 0; i--) {
+      const m = full.messages[i]!;
+      if (m.role !== 'assistant' || m.synthetic !== 'turn-aborted') continue;
+      const teaching = (m.warnings ?? []).find((w) => typeof w === 'string' && w.trim().length > 0);
+      return teaching ? teaching.replace(/\s+/g, ' ').trim().slice(0, 600) : undefined;
+    }
+  } catch {
+    // Snapshot fetch is best-effort; the toast-based fallback still sends.
+  }
+  return undefined;
+}
+
 export function buildPoisonedSessionRecoveryMessage(args: {
   lastTurnError?: string;
+  /** The aborting guard's teaching text — preferred over the toast. */
+  abortTeaching?: string;
   filePath?: string | null;
   sniff?: {
     key: string;
@@ -2634,16 +2699,24 @@ export function buildPoisonedSessionRecoveryMessage(args: {
   } | null;
 }): string {
   const error = args.lastTurnError?.trim();
+  const teaching = args.abortTeaching?.trim();
   const filePath = args.filePath ?? null;
   const sniff = args.sniff ?? null;
   const scoreLine = sniff
     ? `Latest scenario check: score ${sniff.score}, bytes ${sniff.bytes}${sniff.failReason ? `, failure: ${sniff.failReason}` : ''}.`
     : 'Latest scenario check has not identified a scored deliverable yet.';
   const taskGraphLine = taskGraphPoisonedSessionRecoveryLine(sniff?.failReason);
+  // Strategy detection scans the teaching text too — the guard's version
+  // names the failing tool where the toast often doesn't.
+  const errorForStrategy = [error, teaching].filter(Boolean).join(' ');
+  // Two shapes demand a strategy change away from line edits: the edit was
+  // explicitly rejected, or the SAME edit call was repeated verbatim until
+  // the repeat guard killed the turn (repeating it once more is the one
+  // move guaranteed not to work).
   const explicitLineEditFailure =
-    !!error &&
-    /(?:\b(?:replace_lines|replace_in_file|apply_patch)\b.{0,160}\b(?:fail(?:ed|ure)?|reject(?:ed|ion)?|invalid|atomic)\b|\b(?:fail(?:ed|ure)?|reject(?:ed|ion)?|invalid|atomic)\b.{0,160}\b(?:replace_lines|replace_in_file|apply_patch)\b)/i.test(
-      error,
+    errorForStrategy.length > 0 &&
+    /(?:\b(?:replace_lines|replace_in_file|apply_patch)\b.{0,160}\b(?:fail(?:ed|ure)?|reject(?:ed|ion)?|invalid|atomic|(?:same|exact|identical)\s+arguments|repeat(?:ed|ing)?)\b|\b(?:fail(?:ed|ure)?|reject(?:ed|ion)?|invalid|atomic)\b.{0,160}\b(?:replace_lines|replace_in_file|apply_patch)\b)/i.test(
+      errorForStrategy,
     );
   const existingCheckedFile = !!filePath && !!sniff && sniff.bytes > 0;
   const editLine =
@@ -2661,7 +2734,7 @@ export function buildPoisonedSessionRecoveryMessage(args: {
   return [
     '[eval recovery]',
     'Your previous turn aborted, so the scheduler stopped automatic follow-up for this project.',
-    error ? `Abort reason: ${error}` : null,
+    teaching ? `Why the turn was stopped: ${teaching}` : error ? `Abort reason: ${error}` : null,
     scoreLine,
     editLine,
     closingLine,

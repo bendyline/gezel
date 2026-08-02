@@ -18,6 +18,7 @@
  */
 
 import { readFileSync } from 'node:fs';
+import { closestFileNames } from './near-miss.js';
 import {
   AdvanceWhenSchema,
   type Craftbook,
@@ -609,7 +610,35 @@ server.tool(
         ],
       };
     } catch (err) {
-      return { content: [{ type: 'text' as const, text: unwrapApiError(err) }], isError: true };
+      const base = unwrapApiError(err);
+      // A bare "not found" strands the model. Wild-caught on gemma4-12b ×
+      // data-wrangle: a sampler artifact mangled the dot in `customers_a.csv`
+      // eleven different ways, each attempt got back the two-word error, and
+      // 47s later the failure tracker killed the whole trial — the model was
+      // never told its path was a near-miss of a real file. Echo the path and
+      // suggest near-matches from the parent directory so a typo is
+      // self-evident from the tool result alone.
+      let text = `read_file "${path}": ${base}`;
+      if (/not found|404|no such file/i.test(base)) {
+        try {
+          const dir = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
+          const listing = await api.listProjectWorkspace(projectId, dir, false);
+          const names = listing.files
+            .filter((f) => !f.isDirectory)
+            .map((f) => f.path.split('/').pop() ?? f.path);
+          const target = path.split('/').pop() ?? path;
+          const near = closestFileNames(target, names);
+          const where = dir === '' ? 'the project root' : `${dir}/`;
+          if (near.length > 0) {
+            text += `. Nearest existing in ${where}: ${near.join(', ')}`;
+          } else if (names.length > 0) {
+            text += `. ${where} contains: ${names.slice(0, 10).join(', ')}${names.length > 10 ? ', …' : ''}`;
+          }
+        } catch {
+          // Listing failed (directory itself missing) — the base error stands.
+        }
+      }
+      return { content: [{ type: 'text' as const, text }], isError: true };
     }
   },
 );
