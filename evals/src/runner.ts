@@ -278,7 +278,17 @@ export async function runTrial(scenario: EvalScenario, opts: TrialOptions): Prom
   // `pollUntilDone` for the long-form rationale on why we moved away
   // from fixed-time per-trial budgets. `opts.timeoutMs` is treated as
   // a `maxDurationMs` override for back-compat with existing callers.
-  const requestedMaxDurationMs = opts.timeoutMs ?? scenario.timeoutMs ?? DEFAULT_MAX_DURATION_MS;
+  // An explicit `opts.timeoutMs` is an operator override and stands as
+  // given; only the scenario-authored ceiling gets throughput-scaled, since
+  // that value was calibrated against a ~20 tok/s reference machine and
+  // otherwise makes the verdict a property of the hardware.
+  const authoredMaxDurationMs = scenario.timeoutMs ?? DEFAULT_MAX_DURATION_MS;
+  const requestedMaxDurationMs =
+    opts.timeoutMs ??
+    throughputScaledMaxDurationMs({
+      authoredMaxDurationMs,
+      decodeRateTokensPerSec: opts.decodeRateTokensPerSec,
+    });
   const maxDurationMs = Math.max(requestedMaxDurationMs, llamaEvalLaunch?.minTrialTimeoutMs ?? 0);
   // `scenario.progressTimeoutMs`, when set, acts as the HARD timeout
   // override (real-progress watchdog). Soft timeout stays at the
@@ -567,6 +577,11 @@ export async function runTrial(scenario: EvalScenario, opts: TrialOptions): Prom
   }
 
   // Phase 3: spawn trial daemon.
+  if (requestedMaxDurationMs !== authoredMaxDurationMs && opts.timeoutMs === undefined) {
+    log(
+      `[trial] throughput-scaled ceiling: ${Math.round(authoredMaxDurationMs / 60_000)}m → ${Math.round(requestedMaxDurationMs / 60_000)}m at ${opts.decodeRateTokensPerSec} tok/s (reference ${CEILING_REFERENCE_TOKENS_PER_SEC} tok/s)`,
+    );
+  }
   if (llamaEvalLaunch?.summary) {
     log(`[trial] ${llamaEvalLaunch.summary}`);
     if (maxDurationMs > requestedMaxDurationMs) {
@@ -1061,6 +1076,60 @@ export function evalDaemonEnvForTrial(opts: {
     ...(opts.launch?.extraEnv ?? {}),
     ...behaviorEnvForTrial(opts),
   };
+}
+
+/**
+ * Decode rate the scenario ceilings were hand-authored against. Every
+ * `timeoutMs` in `scenarios/` was calibrated by watching a gemma-class
+ * model on a CUDA box, which measures 21-23 tok/s; 20 is that class's
+ * round number.
+ */
+const CEILING_REFERENCE_TOKENS_PER_SEC = 20;
+
+/**
+ * Cap on the throughput multiplier. The absolute {@link DEFAULT_MAX_DURATION_MS}
+ * clamp already bounds a runaway, but without a multiplier cap a single bad
+ * rate measurement (a mis-parsed 0.01 tok/s) would silently lift every
+ * ceiling to the 8 h backstop and disable the safety net wholesale. 8x
+ * covers everything down to 2.5 tok/s linearly, which is below the
+ * `DEFAULT_PREFLIGHT_MIN_TPS` admission floor.
+ */
+const MAX_CEILING_THROUGHPUT_SCALE = 8;
+
+/**
+ * Scale a scenario-authored hard ceiling by measured decode throughput.
+ *
+ * The eval measures capability, which is invariant to decode speed — a
+ * trial reaches the same verdict at 5 tok/s or 50 tok/s, just over
+ * different wall-clock. A fixed ceiling breaks that invariance and makes
+ * the verdict a property of the hardware: `conflict-synthesis` was pinned
+ * at 30 min, which gemma cleared in 1.8 min at 22.5 tok/s while qwen
+ * needed 36.8 min at 4.8 tok/s and died on the wall with the harness
+ * itself reporting "forward progress kept happening". Re-run with room,
+ * it passed 13/13.
+ *
+ * Scaling is one-directional: a model faster than the reference keeps the
+ * authored ceiling rather than getting a tighter one, because the authored
+ * value is a runaway safety net and not a performance target. The result
+ * is clamped to {@link DEFAULT_MAX_DURATION_MS} so no amount of slowness
+ * defeats the 8 h backstop.
+ *
+ * This replaces hand-tuning ~29 constants every time a slower model joins
+ * the matrix. The no-progress watchdogs remain the primary terminators.
+ */
+export function throughputScaledMaxDurationMs(args: {
+  authoredMaxDurationMs: number;
+  decodeRateTokensPerSec?: number | null;
+}): number {
+  const rate = args.decodeRateTokensPerSec;
+  if (rate === undefined || rate === null || !Number.isFinite(rate) || rate <= 0) {
+    return args.authoredMaxDurationMs;
+  }
+  const scale = Math.min(
+    Math.max(CEILING_REFERENCE_TOKENS_PER_SEC / rate, 1),
+    MAX_CEILING_THROUGHPUT_SCALE,
+  );
+  return Math.min(Math.round(args.authoredMaxDurationMs * scale), DEFAULT_MAX_DURATION_MS);
 }
 
 export function defaultSoftProgressTimeoutMsForModel(

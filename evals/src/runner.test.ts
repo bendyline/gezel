@@ -33,6 +33,7 @@ import {
   sniffKeyToWorkspaceFilePath,
   summarizeInflightTurnsForLog,
   taskGraphPoisonedSessionRecoveryLine,
+  throughputScaledMaxDurationMs,
 } from './runner.ts';
 import type { EvalScenario } from './types.ts';
 
@@ -1141,6 +1142,101 @@ describe('defaultSoftProgressTimeoutMsForModel', () => {
     expect(defaultSoftProgressTimeoutMsForModel('claude-sonnet-4-6', 'anthropic')).toBe(
       5 * 60 * 1000,
     );
+  });
+});
+
+describe('throughputScaledMaxDurationMs', () => {
+  const MINUTE = 60_000;
+
+  it('leaves the authored ceiling alone when no rate was measured', () => {
+    expect(throughputScaledMaxDurationMs({ authoredMaxDurationMs: 40 * MINUTE })).toBe(40 * MINUTE);
+    expect(
+      throughputScaledMaxDurationMs({
+        authoredMaxDurationMs: 40 * MINUTE,
+        decodeRateTokensPerSec: null,
+      }),
+    ).toBe(40 * MINUTE);
+  });
+
+  it('never tightens the ceiling for a model faster than the reference', () => {
+    // The authored value is a runaway safety net, not a performance target,
+    // so beating the reference machine must not buy a shorter wall.
+    expect(
+      throughputScaledMaxDurationMs({
+        authoredMaxDurationMs: 40 * MINUTE,
+        decodeRateTokensPerSec: 22.5,
+      }),
+    ).toBe(40 * MINUTE);
+    expect(
+      throughputScaledMaxDurationMs({
+        authoredMaxDurationMs: 40 * MINUTE,
+        decodeRateTokensPerSec: 300,
+      }),
+    ).toBe(40 * MINUTE);
+  });
+
+  it('replays the conflict-synthesis false negative', () => {
+    // The trial that motivated this: authored 30m, gemma cleared it in 1.8m
+    // at 22.5 tok/s, qwen needed 36.8m at 4.8 tok/s and died on the wall
+    // while the harness reported "forward progress kept happening".
+    const gemma = throughputScaledMaxDurationMs({
+      authoredMaxDurationMs: 30 * MINUTE,
+      decodeRateTokensPerSec: 22.5,
+    });
+    const qwen = throughputScaledMaxDurationMs({
+      authoredMaxDurationMs: 30 * MINUTE,
+      decodeRateTokensPerSec: 4.8,
+    });
+    expect(gemma).toBe(30 * MINUTE);
+    expect(qwen).toBe(125 * MINUTE);
+    expect(qwen).toBeGreaterThan(36.8 * MINUTE);
+  });
+
+  it('gives the two tightest observed scenarios room at 4.8 tok/s', () => {
+    // incident-postmortem (40m) failed at 78% of ceiling; schema-migration
+    // (35m) at 83%. Both need headroom before the next slow-model sweep.
+    expect(
+      throughputScaledMaxDurationMs({
+        authoredMaxDurationMs: 40 * MINUTE,
+        decodeRateTokensPerSec: 4.8,
+      }),
+    ).toBe(166 * MINUTE + 40_000);
+    expect(
+      throughputScaledMaxDurationMs({
+        authoredMaxDurationMs: 35 * MINUTE,
+        decodeRateTokensPerSec: 4.8,
+      }),
+    ).toBe(145 * MINUTE + 50_000);
+  });
+
+  it('caps the multiplier so one bad measurement cannot disable the safety net', () => {
+    // A mis-parsed rate would otherwise lift every ceiling to the 8h backstop.
+    expect(
+      throughputScaledMaxDurationMs({
+        authoredMaxDurationMs: 20 * MINUTE,
+        decodeRateTokensPerSec: 0.01,
+      }),
+    ).toBe(160 * MINUTE);
+  });
+
+  it('never exceeds the 8h runaway backstop', () => {
+    expect(
+      throughputScaledMaxDurationMs({
+        authoredMaxDurationMs: 240 * MINUTE,
+        decodeRateTokensPerSec: 4.8,
+      }),
+    ).toBe(8 * 60 * MINUTE);
+  });
+
+  it('ignores nonsense rates rather than scaling by them', () => {
+    for (const rate of [0, -5, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(
+        throughputScaledMaxDurationMs({
+          authoredMaxDurationMs: 40 * MINUTE,
+          decodeRateTokensPerSec: rate,
+        }),
+      ).toBe(40 * MINUTE);
+    }
   });
 });
 

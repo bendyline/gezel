@@ -11,6 +11,7 @@ import {
   runBatch,
   runMatrix,
 } from './batch.ts';
+import { type PreflightReport, ensurePreflightAdmission } from './preflight.ts';
 import { runTrial } from './runner.ts';
 import type { EvalScenario, TrialResult } from './types.ts';
 
@@ -28,8 +29,14 @@ vi.mock('./runner.ts', () => ({
   runTrial: vi.fn(),
 }));
 
+vi.mock('./preflight.ts', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./preflight.ts')>()),
+  ensurePreflightAdmission: vi.fn(),
+}));
+
 const execFileMock = vi.mocked(execFile);
 const runTrialMock = vi.mocked(runTrial);
+const ensurePreflightAdmissionMock = vi.mocked(ensurePreflightAdmission);
 
 const scenario = (id: string): EvalScenario => ({
   id,
@@ -87,7 +94,17 @@ beforeEach(async () => {
   tempRoot = await mkdtemp(join(tmpdir(), 'gezel-evals-batch-test-'));
   execFileMock.mockClear();
   runTrialMock.mockReset();
+  ensurePreflightAdmissionMock.mockReset();
 });
+
+/** A passing admission report carrying a measured decode rate. */
+const admittedAt = (genTokensPerSec: number | null): PreflightReport =>
+  ({
+    modelId: 'gemma4-e4b-q4',
+    engine: 'llama-cpp',
+    admitted: true,
+    genTokensPerSec,
+  }) as PreflightReport;
 
 afterEach(async () => {
   await rm(tempRoot, { recursive: true, force: true });
@@ -383,6 +400,64 @@ describe('daemon-spawn timeout retry', () => {
 
     expect(runTrialMock).toHaveBeenCalledTimes(1);
     expect(summary.perTrial[0]?.failureMode).toBe('spawn-error');
+  });
+});
+
+describe('preflight decode rate feeds the throughput-scaled ceiling', () => {
+  it('threads the probe throughput into every trial in the batch', async () => {
+    ensurePreflightAdmissionMock.mockResolvedValue(admittedAt(4.8));
+    runTrialMock.mockResolvedValue(trialResult('incident-postmortem', { success: true }));
+
+    await runBatch(scenario('incident-postmortem'), {
+      modelId: 'gemma4-e4b-q4',
+      count: 2,
+      runsDir: tempRoot,
+    });
+
+    expect(runTrialMock).toHaveBeenCalledTimes(2);
+    for (const call of runTrialMock.mock.calls) {
+      expect(call[1]?.decodeRateTokensPerSec).toBe(4.8);
+    }
+  });
+
+  it('leaves the rate unset when preflight is skipped, so ceilings stay as authored', async () => {
+    runTrialMock.mockResolvedValue(trialResult('tictactoe', { success: true }));
+
+    await runBatch(scenario('tictactoe'), {
+      modelId: 'gemma4-e4b-q4',
+      count: 1,
+      runsDir: tempRoot,
+      skipPreflight: true,
+    });
+
+    expect(runTrialMock.mock.calls[0]?.[1]?.decodeRateTokensPerSec).toBeUndefined();
+  });
+
+  it('lets a caller-supplied rate win over the probe (A/B drivers set their own)', async () => {
+    ensurePreflightAdmissionMock.mockResolvedValue(admittedAt(4.8));
+    runTrialMock.mockResolvedValue(trialResult('tictactoe', { success: true }));
+
+    await runBatch(scenario('tictactoe'), {
+      modelId: 'gemma4-e4b-q4',
+      count: 1,
+      runsDir: tempRoot,
+      decodeRateTokensPerSec: 30,
+    });
+
+    expect(runTrialMock.mock.calls[0]?.[1]?.decodeRateTokensPerSec).toBe(30);
+  });
+
+  it('tolerates an unmeasured throughput without scaling', async () => {
+    ensurePreflightAdmissionMock.mockResolvedValue(admittedAt(null));
+    runTrialMock.mockResolvedValue(trialResult('tictactoe', { success: true }));
+
+    await runBatch(scenario('tictactoe'), {
+      modelId: 'gemma4-e4b-q4',
+      count: 1,
+      runsDir: tempRoot,
+    });
+
+    expect(runTrialMock.mock.calls[0]?.[1]?.decodeRateTokensPerSec).toBeUndefined();
   });
 });
 

@@ -6,7 +6,11 @@
  *   --model <id>         chat model catalog id, default `gemma4-e4b-q4`
  *   --image-model <id>   image model catalog id (e.g. `sdxl-base-1.0`).
  *                        Default comes from scenario.defaultImageModelId.
- *   --timeout <duration> override scenario.timeoutMs, e.g. `5m`, `30s`, `300000`
+ *   --timeout <duration> override scenario.timeoutMs, e.g. `5m`, `30s`, `300000`.
+ *                        Absolute — not throughput-scaled.
+ *   --decode-rate <n>    measured decode tok/s, scales the scenario's authored
+ *                        ceiling for a slow model (batch runs read this from
+ *                        preflight; a single trial has no probe to read).
  *   --runs-dir <path>    override `<repo>/evals/runs/`
  *   --cache-root <path>  override `~/.gezel-eval-cache`
  *   --llama-bin <path>   override the auto-resolved llama-server binary
@@ -80,6 +84,12 @@ async function main() {
   const timeoutOverride = args.flags.timeout
     ? parseDuration(String(args.flags.timeout))
     : undefined;
+  const decodeRateOverride = args.flags['decode-rate']
+    ? Number(args.flags['decode-rate'])
+    : undefined;
+  if (decodeRateOverride !== undefined && !(decodeRateOverride > 0)) {
+    throw new Error(`--decode-rate must be a positive number, got "${args.flags['decode-rate']}"`);
+  }
   const parseCsv = (v: unknown): string[] =>
     typeof v === 'string'
       ? v
@@ -111,6 +121,7 @@ async function main() {
         : {}),
       ...(args.flags['image-model'] ? { imageModelId: String(args.flags['image-model']) } : {}),
       ...(timeoutOverride !== undefined ? { timeoutMs: timeoutOverride } : {}),
+      ...(decodeRateOverride !== undefined ? { decodeRateTokensPerSec: decodeRateOverride } : {}),
       ...(args.flags['runs-dir'] ? { runsDir: String(args.flags['runs-dir']) } : {}),
       ...(args.flags['cache-root'] ? { cacheRoot: String(args.flags['cache-root']) } : {}),
       ...(args.flags['llama-bin'] ? { llamaBin: String(args.flags['llama-bin']) } : {}),
