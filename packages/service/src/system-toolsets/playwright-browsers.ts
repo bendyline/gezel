@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs';
 import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
+import { PNPM_HOISTED_NODE_LINKER } from '@bendyline/gezel';
 import { playwrightBrowsersDir } from '@bendyline/gezel/paths';
 import { resolvePnpmCommand, spawnPnpm } from '../packages/pnpm.js';
 import type { SystemStatusBus } from './status-bus.js';
@@ -48,7 +49,10 @@ export async function ensureChromiumInstalled(args: {
 
   // `pnpm exec playwright install chromium` resolves Playwright from the
   // MCP toolset's own node_modules, so there's no global Playwright dep.
+  // The linker flag must match the install-time config or pnpm rebuilds
+  // the tree before exec'ing (see PNPM_HOISTED_NODE_LINKER).
   const pnpm = resolvePnpmCommand([
+    PNPM_HOISTED_NODE_LINKER,
     '--dir',
     args.playwrightInstallPath,
     'exec',

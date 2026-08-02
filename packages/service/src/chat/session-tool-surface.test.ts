@@ -215,6 +215,47 @@ describe('resolveSessionToolSurface — step-scoped sessions', () => {
     expect(lockedStep.allowlist?.has('replace_in_file')).toBe(false);
   });
 
+  it('a writes-off step session keeps the artifact drawer as its write channel', async () => {
+    // Wild-caught (molen dependency-audit night shift): kit narrowing
+    // stripped the drawer tools from a Developer on a writes-off project,
+    // leaving zero write channels while the gate demanded a deliverable.
+    const clamps: string[] = [];
+    const { allowlist } = await resolveSessionToolSurface({
+      ...baseOpts,
+      role: 'Developer',
+      session: baseSession({ taskRef: 'molen/3', stepId: 'scan' }),
+      tier: 'large',
+      workspaceWritable: false,
+      activeStep: {
+        advanceWhen: { file: 'notes/scan.md', minBytes: 1, sniff: 'nonempty' },
+        gate: {
+          at: 'completion',
+          checks: [{ kind: 'minBytes', file: 'notes/scan.md', bytes: 120 }],
+          onReject: 'scan',
+        },
+        gateAttempts: 1,
+        lastGateReject: {
+          messageFingerprint: 'fp',
+          message: 'notes/scan.md is 0 bytes, need >= 120',
+          at: '2026-08-01T00:00:00.000Z',
+        },
+      },
+      onClamp: (kind) => clamps.push(kind),
+    });
+
+    expect(allowlist).not.toBeNull();
+    expect(allowlist!.has('write_file')).toBe(false);
+    expect(allowlist!.has('replace_in_file')).toBe(false);
+    expect(allowlist!.has('write_artifact')).toBe(true);
+    expect(allowlist!.has('read_artifact')).toBe(true);
+    expect(allowlist!.has('list_artifacts')).toBe(true);
+    expect(allowlist!.has('write_task_note')).toBe(true);
+    expect(allowlist!.has('advance_task_step')).toBe(true);
+    // The repair clamp applies (write_artifact satisfies the starvation
+    // guard) instead of silently skipping and leaving the wide surface.
+    expect(clamps).toContain('gate-repair');
+  });
+
   it('does NOT grant step tools to a session with no active step', async () => {
     const { allowlist } = await resolveSessionToolSurface({
       ...baseOpts,

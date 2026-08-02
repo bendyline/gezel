@@ -40,6 +40,7 @@ import {
   nowIso,
   parseTaskRef,
   planGuardrails,
+  projectWorkspaceWritable,
   removeStepAndCleanEdges,
   reorderStepsArray,
   resolveSecurityPolicy,
@@ -67,7 +68,7 @@ import {
   plateauScore,
   stageForPlateau,
 } from './gate-escalation.js';
-import type { GateCheckOutcome, GateWorkspaceReader } from './gate-eval.js';
+import { type GateCheckOutcome, type GateWorkspaceReader, gateCheckLabel } from './gate-eval.js';
 import { execNodeRunsInSandbox } from './node-runs-exec.js';
 import { type StepGateOutcome, evaluateStepGate, gateMessageFingerprint } from './step-gate.js';
 
@@ -309,6 +310,29 @@ export type TaskSettledHook = (ctx: {
   outcome: 'complete' | 'canceled';
 }) => Promise<void> | void;
 
+export type TaskNeedsHelpReason =
+  | 'gate_exhausted'
+  | 'gate_plateau'
+  | 'gate_unsatisfiable'
+  | 'gate_infrastructure'
+  | 'step_stalled'
+  | 'budget_exhausted';
+
+/**
+ * Fired when a task PAUSES FOR HELP — a gate budget spent, a plateau, an
+ * unsatisfiable-by-policy gate, a stalled assignee. Settle hooks only
+ * cover complete/canceled, so without this a background task that hit a
+ * wall paused silently: a note on the task and a history row, nothing
+ * pushed to the user. `detail` is a one-line human summary of why.
+ */
+export type TaskNeedsHelpHook = (ctx: {
+  projectId: string;
+  task: Task;
+  stepId?: string;
+  reason: TaskNeedsHelpReason;
+  detail: string;
+}) => Promise<void> | void;
+
 /**
  * Resolves a craftbook step's `suggestedRole` into a concrete gezel id
  * (via roster reuse or gilde-template creation). Wired by `service.ts`
@@ -375,6 +399,13 @@ export interface GateHoldInfo {
   cached: boolean;
   /** The gate runtime/configuration failed; no deliverable attempt was charged. */
   infrastructureError?: true;
+  /**
+   * The rejection cannot be repaired by any assignee under current policy
+   * (a failing workspace-tree check while gezel workspace writes are off
+   * for the project). No deliverable attempt was charged; the task paused
+   * for a human decision instead of climbing the escalation ladder.
+   */
+  unsatisfiable?: true;
   /** Script-run identifiers and redacted log tails for gate infrastructure failures. */
   scriptRuns?: StepGateOutcome['runs'];
   /** Per-check structured outcomes from the gate's declarative floor. */
@@ -420,6 +451,7 @@ export class TaskManager {
   private onCurrentTurnStepReactivated?: CurrentTurnStepReactivatedHook;
   private onTaskCreated?: TaskCreatedHook;
   private onTaskSettled?: TaskSettledHook;
+  private onTaskNeedsHelp?: TaskNeedsHelpHook;
   private scriptRunner?: ScriptRunner;
   private craftbookResolver?: CraftbookResolver;
   private roleResolver?: RoleResolver;
@@ -535,6 +567,33 @@ export class TaskManager {
 
   setTaskSettledHook(fn: TaskSettledHook): void {
     this.onTaskSettled = fn;
+  }
+
+  setTaskNeedsHelpHook(fn: TaskNeedsHelpHook): void {
+    this.onTaskNeedsHelp = fn;
+  }
+
+  /**
+   * Fire the needs-help hook (fire-and-forget, errors logged). Public so
+   * the scheduler's stalled-step escalation can report through the same
+   * channel as the gate pauses.
+   */
+  async emitNeedsHelp(ctx: {
+    projectId: string;
+    task: Task;
+    stepId?: string;
+    reason: TaskNeedsHelpReason;
+    detail: string;
+  }): Promise<void> {
+    if (!this.onTaskNeedsHelp) return;
+    try {
+      await this.onTaskNeedsHelp(ctx);
+    } catch (err) {
+      log.warn(
+        `[tasks] needs-help hook failed for ${ctx.task.ref}:`,
+        err instanceof Error ? err.message : err,
+      );
+    }
   }
 
   private async notifyTaskSettled(task: Task, outcome: 'complete' | 'canceled'): Promise<void> {
@@ -2309,6 +2368,13 @@ export class TaskManager {
           escalationStage: 3,
           frozen: true,
         });
+        await this.emitNeedsHelp({
+          projectId,
+          task,
+          stepId: step.id,
+          reason: 'gate_plateau',
+          detail: `${score} byte-identical resubmits against the same gate verdict: ${step.lastGateReject.message.split('\n')[0] ?? ''}`,
+        });
         return {
           kind: 'held',
           task: { ...updated, status: 'paused' },
@@ -2316,17 +2382,20 @@ export class TaskManager {
         };
       }
 
+      const frozenSurface = step.advanceWhen?.artifact ? ('artifact' as const) : ('workspace' as const);
       const nudge =
         stage === 2 && deliverableFile
           ? buildStageTwoNudge({
               file: deliverableFile,
               failingBullets: step.lastGateReject.message,
               repeats: score,
+              surface: frozenSurface,
             })
           : buildStageOneNudge({
               ...(deliverableFile ? { file: deliverableFile } : {}),
               failingBullets: step.lastGateReject.message,
               frozen: true,
+              surface: frozenSurface,
             });
       const updated = await persistTrail();
       log.info(
@@ -2415,6 +2484,13 @@ export class TaskManager {
         `[gate] ${task.ref} step "${step.id}" could not be evaluated — pausing without consuming an attempt: ${message}${diagnostics ? ` diagnostics=${JSON.stringify(diagnostics)}` : ''}`,
       );
       await logGated('reject', priorAttempts, true, outcome);
+      await this.emitNeedsHelp({
+        projectId,
+        task,
+        stepId: step.id,
+        reason: 'gate_infrastructure',
+        detail: message.split('\n')[0] ?? message,
+      });
       return {
         kind: 'held',
         task: paused,
@@ -2461,6 +2537,55 @@ export class TaskManager {
       return { kind: 'approved', outcome };
     }
 
+    // Satisfiability pre-flight: a rejection no assignee can repair under
+    // current policy must not burn the attempt budget or climb the nudge
+    // ladder toward tools nobody has. The known case: a workspace-tree
+    // check failing while gezel workspace writes are OFF for the project
+    // (a workspace-path deliverable gate on a writes-off project). Pause
+    // like a gate-infrastructure failure — no attempt consumed, a note
+    // naming the real cause and the real fixes — instead of charging the
+    // budget and then demanding `write_file` from a roster it was
+    // stripped from.
+    const unsatFiles = await this.unsatisfiableWorkspaceGateFiles(projectId, gate, outcome);
+    if (unsatFiles) {
+      const fileList = unsatFiles.length > 0 ? unsatFiles.map((f) => `\`${f}\``).join(', ') : 'files';
+      const message = `This gate cannot be met right now: it requires workspace ${fileList} to change, but gezel workspace writes are OFF for this project — no gezel can create or edit workspace files. The task is paused for a human decision; do not retry. See the task notes for the fixes.`;
+      const paused = await this.setStatus(projectId, task.num, 'paused').catch(() => ({
+        ...task,
+        status: 'paused' as const,
+      }));
+      await this.appendNote(projectId, task.num, {
+        text: `# Gate unsatisfiable — task paused\n\nStep "${step.name}" (\`${step.id}\`) is gated on workspace ${fileList}, but gezel workspace writes are OFF for this project — no assignee can create or edit workspace files, so retrying cannot succeed. No completion attempt was consumed.\n\nFix one of these, then set the task active again:\n\n- Enable "Allow gezels to modify the workspace directory" in Project → Settings.\n- Change the step's deliverable to the artifacts drawer (\`artifact: true\`, written with \`write_artifact\`) — the drawer stays writable when workspace writes are off.\n- Create or fix the file(s) by hand from the content in task notes.`,
+        author: { kind: 'user' },
+        stepId: step.id,
+      }).catch(() => {});
+      log.warn(
+        `[gate] ${task.ref} step "${step.id}" gate is unsatisfiable (workspace writes off) — pausing without consuming an attempt`,
+      );
+      await logGated('reject', priorAttempts, true, outcome);
+      await this.emitNeedsHelp({
+        projectId,
+        task,
+        stepId: step.id,
+        reason: 'gate_unsatisfiable',
+        detail: `The gate requires workspace ${fileList}, but gezel workspace writes are off for this project.`,
+      });
+      return {
+        kind: 'held',
+        task: paused,
+        info: {
+          message,
+          messageFingerprint: gateMessageFingerprint(message),
+          attempt: priorAttempts,
+          maxAttempts: gate.maxAttempts,
+          paused: true,
+          cached: false,
+          unsatisfiable: true,
+          ...(outcome.checkResults ? { checkResults: outcome.checkResults } : {}),
+        },
+      };
+    }
+
     const attempt = priorAttempts + 1;
     const rawMessage = outcome.message ?? 'Gate rejected the step.';
     // Plateau scoring: same failing-check identity set as the trailing
@@ -2471,18 +2596,21 @@ export class TaskManager {
     let stage: EscalationStage = modelDriven ? stageForPlateau(score) : 0;
     const deliverableFile = step.advanceWhen?.file;
     if (stage === 2 && !deliverableFile) stage = 1;
+    const rejectSurface = step.advanceWhen?.artifact ? ('artifact' as const) : ('workspace' as const);
     const message =
       stage === 1
         ? buildStageOneNudge({
             ...(deliverableFile ? { file: deliverableFile } : {}),
             failingBullets: rawMessage,
             frozen: false,
+            surface: rejectSurface,
           })
         : stage === 2 && deliverableFile
           ? buildStageTwoNudge({
               file: deliverableFile,
               failingBullets: rawMessage,
               repeats: score,
+              surface: rejectSurface,
             })
           : rawMessage;
     const fingerprint = gateMessageFingerprint(message);
@@ -2655,6 +2783,13 @@ export class TaskManager {
         outcome,
         stage > 0 ? { escalationStage: 3 } : undefined,
       );
+      await this.emitNeedsHelp({
+        projectId,
+        task,
+        stepId: step.id,
+        reason: stage === 3 && attempt < gate.maxAttempts ? 'gate_plateau' : 'gate_exhausted',
+        detail: `Gate rejected ${attempt}/${gate.maxAttempts}: ${rawMessage.split('\n')[0] ?? ''}`,
+      });
       return {
         kind: 'held',
         task: { ...updated, status: 'paused' },
@@ -2696,6 +2831,35 @@ export class TaskManager {
         ...(stage > 0 ? { escalationStage: stage } : {}),
       },
     };
+  }
+
+  /**
+   * A rejected gate is unsatisfiable when a FAILING check reads the
+   * workspace tree while gezel workspace writes are off for the project
+   * (gate scripts always read the workspace, so a script rejection
+   * qualifies too). Returns the workspace files the failing checks name
+   * (possibly empty), or null when the gate is repairable. Drawer-only
+   * failures stay repairable — the artifacts drawer is deliberately
+   * exempt from the writes-off policy.
+   */
+  private async unsatisfiableWorkspaceGateFiles(
+    projectId: string,
+    gate: NormalizedStepGate,
+    outcome: StepGateOutcome,
+  ): Promise<string[] | null> {
+    const project = await this.store.getProject(projectId).catch(() => null);
+    if (!project || projectWorkspaceWritable(project)) return null;
+    const workspaceChecks = new Map<string, string | undefined>();
+    for (const c of gate.checks) {
+      if ((c as { artifact?: boolean }).artifact === true) continue;
+      workspaceChecks.set(gateCheckLabel(c), (c as { file?: string }).file);
+    }
+    const failingWorkspace = (outcome.checkResults ?? []).filter(
+      (o) => !o.ok && workspaceChecks.has(o.label),
+    );
+    const scriptRejected = outcome.runs.some((r) => r.decision === 'reject');
+    if (failingWorkspace.length === 0 && !scriptRejected) return null;
+    return [...new Set(failingWorkspace.map((o) => o.file).filter((f): f is string => !!f))];
   }
 
   /**

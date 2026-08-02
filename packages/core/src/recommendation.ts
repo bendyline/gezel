@@ -46,6 +46,8 @@ export interface RecoModelInput {
   tags?: readonly string[];
   /** Provider-appropriate working set (manifest `residentBytes`, or on-disk × overhead). */
   residentBytes: number;
+  /** Exact GPU-resident residue under `--cpu-moe`, when the GGUF has been scanned. */
+  nonExpertBytes?: number;
 }
 
 export interface RecoDevice {
@@ -198,6 +200,7 @@ export function pickRecommendedModel(
         totalRamBytes: device.totalRamBytes,
         gpuVramBytes: device.gpuVramBytes,
         ...(device.budgetBytes !== undefined ? { admissibleBytes: device.budgetBytes } : {}),
+        ...(m.nonExpertBytes !== undefined ? { nonExpertBytes: m.nonExpertBytes } : {}),
       });
       return {
         m,

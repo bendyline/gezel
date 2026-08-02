@@ -11,6 +11,7 @@ import {
   FetchRepoRequestSchema,
   InsertAtMarkerInProjectWorkspaceFileRequestSchema,
   InstallPackageRequestSchema,
+  PNPM_HOISTED_NODE_LINKER,
   ProjectAboutPreviewRequestSchema,
   type ProjectAboutPreviewResponse,
   ProjectFolderPreviewRequestSchema,
@@ -1034,8 +1035,16 @@ export function projectRoutes(ctx: ServiceContext): Hono {
     const isTest =
       body.mode === 'test' || /\.(spec|test)\.(mts|mjs|ts|js|cjs|cts)$/.test(scriptRel);
     const args = isTest
-      ? ['--dir', playwright.installPath, 'exec', 'playwright', 'test', scriptAbs]
-      : ['--dir', playwright.installPath, 'exec', 'node', '--experimental-strip-types', scriptAbs];
+      ? [PNPM_HOISTED_NODE_LINKER, '--dir', playwright.installPath, 'exec', 'playwright', 'test', scriptAbs]
+      : [
+          PNPM_HOISTED_NODE_LINKER,
+          '--dir',
+          playwright.installPath,
+          'exec',
+          'node',
+          '--experimental-strip-types',
+          scriptAbs,
+        ];
     const pnpm = resolvePnpmCommand(args);
 
     const result = await new Promise<{ ok: boolean; code: number | null; log: string }>(

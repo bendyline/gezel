@@ -1,5 +1,13 @@
 import type { GezelSummary, HistoryEntry, HistoryEventKind, Project } from '@bendyline/gezel';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { api } from '../api.js';
 import { ToolDiffBlock } from '../components/ToolDiffBlock.js';
 import { Select } from '../primitives/index.js';
@@ -39,6 +47,27 @@ const KINDS: Array<{ value: string; label: string }> = [
   { value: 'v1.chat.completion', label: 'App chat (connected apps)' },
   { value: 'debug.bridge.failed', label: 'Debug: MCP bridge failed to start' },
 ];
+
+const LIST_FRACTION_STORAGE_KEY = 'gezel:history-list-fraction:v1';
+const MIN_LIST_FRACTION = 0.2;
+const MAX_LIST_FRACTION = 0.7;
+const DEFAULT_LIST_FRACTION = 0.36;
+
+function clampListFraction(f: number): number {
+  if (!Number.isFinite(f)) return DEFAULT_LIST_FRACTION;
+  return Math.max(MIN_LIST_FRACTION, Math.min(MAX_LIST_FRACTION, f));
+}
+
+function readStoredListFraction(): number {
+  if (typeof window === 'undefined') return DEFAULT_LIST_FRACTION;
+  try {
+    const raw = window.localStorage.getItem(LIST_FRACTION_STORAGE_KEY);
+    if (!raw) return DEFAULT_LIST_FRACTION;
+    return clampListFraction(Number.parseFloat(raw));
+  } catch {
+    return DEFAULT_LIST_FRACTION;
+  }
+}
 
 export function HistoryView({ projectId }: { projectId?: string } = {}) {
   const [entries, setEntries] = useState<HistoryEntry[]>([]);
@@ -119,6 +148,69 @@ export function HistoryView({ projectId }: { projectId?: string } = {}) {
     void refresh();
   }, [refresh]);
 
+  // Resizable splitter between the entry list and the detail pane. The
+  // list is the LEFT column, so dragging the grip right grows it. Reuses
+  // the chat-rail `body.chat-rail-resizing` class to block text selection
+  // for the duration of the drag.
+  const splitRef = useRef<HTMLDivElement | null>(null);
+  const [listFraction, setListFraction] = useState<number>(() => readStoredListFraction());
+  const dragState = useRef<{ startX: number; startFraction: number; width: number } | null>(null);
+  const commitListFraction = useCallback((next: number) => {
+    const clamped = clampListFraction(next);
+    setListFraction(clamped);
+    try {
+      window.localStorage.setItem(LIST_FRACTION_STORAGE_KEY, clamped.toFixed(4));
+    } catch {
+      /* quota / private mode — state still in memory */
+    }
+  }, []);
+  const onGripMouseDown = useCallback(
+    (e: ReactMouseEvent<HTMLDivElement>) => {
+      e.preventDefault();
+      dragState.current = {
+        startX: e.clientX,
+        startFraction: listFraction,
+        width: splitRef.current?.clientWidth ?? 1,
+      };
+      document.body.classList.add('chat-rail-resizing');
+      document.body.style.cursor = 'col-resize';
+      const onMove = (ev: MouseEvent) => {
+        const st = dragState.current;
+        if (!st || st.width <= 0) return;
+        commitListFraction(st.startFraction + (ev.clientX - st.startX) / st.width);
+      };
+      const onUp = () => {
+        dragState.current = null;
+        document.body.style.cursor = '';
+        document.body.classList.remove('chat-rail-resizing');
+        window.removeEventListener('mousemove', onMove);
+        window.removeEventListener('mouseup', onUp);
+      };
+      window.addEventListener('mousemove', onMove);
+      window.addEventListener('mouseup', onUp);
+    },
+    [listFraction, commitListFraction],
+  );
+  const onGripKeyDown = useCallback(
+    (e: ReactKeyboardEvent<HTMLDivElement>) => {
+      const step = e.shiftKey ? 0.08 : 0.02;
+      if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        commitListFraction(listFraction + step);
+      } else if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        commitListFraction(listFraction - step);
+      } else if (e.key === 'Home') {
+        e.preventDefault();
+        commitListFraction(MIN_LIST_FRACTION);
+      } else if (e.key === 'End') {
+        e.preventDefault();
+        commitListFraction(MAX_LIST_FRACTION);
+      }
+    },
+    [listFraction, commitListFraction],
+  );
+
   return (
     <div className="history-view" data-testid="history-view">
       <header className="history-header">
@@ -194,7 +286,11 @@ export function HistoryView({ projectId }: { projectId?: string } = {}) {
         </p>
       )}
 
-      <div className="history-split">
+      <div
+        className="history-split"
+        ref={splitRef}
+        style={{ ['--history-list-width' as string]: `${(listFraction * 100).toFixed(2)}%` }}
+      >
         <ul className="history-list">
           {entries.map((e) => {
             const entryId = e.entryType === 'event' ? e.id : `session:${e.id}`;
@@ -224,6 +320,15 @@ export function HistoryView({ projectId }: { projectId?: string } = {}) {
             );
           })}
         </ul>
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize history list"
+          tabIndex={0}
+          className="chat-rail-grip history-split-grip"
+          onMouseDown={onGripMouseDown}
+          onKeyDown={onGripKeyDown}
+        />
         <section className="history-detail">
           {(() => {
             const selected = entries.find(
@@ -322,14 +427,16 @@ function HistoryEventRow({
 }) {
   return (
     <>
-      <span className="history-summary">{entry.summary}</span>
-      <span className="history-kind" title={entry.kind}>
-        {kindLabel(entry.kind)}
+      <span className="history-line">
+        <span className="history-summary">{entry.summary}</span>
+        <time className="history-time">{formatRelative(entry.at)}</time>
       </span>
       <span className="history-meta">
+        <span className="history-kind" title={entry.kind}>
+          {kindLabel(entry.kind)}
+        </span>
         {projectName && <span className="history-chip">{projectName}</span>}
         {gezelName && <span className="history-chip">{gezelName}</span>}
-        <time className="history-time">{formatRelative(entry.at)}</time>
       </span>
     </>
   );
@@ -348,13 +455,18 @@ function HistorySessionRow({
   const activity = entry.durationMs < 60_000 ? '<1m' : `${mins}m`;
   return (
     <>
-      <span className="history-summary">
-        {gezelName || entry.gezelId} · {entry.title} ({entry.messageCount} msgs, {activity})
-      </span>
-      <span className="history-kind">Thread</span>
-      <span className="history-meta">
-        {projectName && <span className="history-chip">{projectName}</span>}
+      <span className="history-line">
+        <span className="history-summary">
+          {gezelName || entry.gezelId} · {entry.title}
+        </span>
         <time className="history-time">{formatRelative(entry.lastActivityAt)}</time>
+      </span>
+      <span className="history-meta">
+        <span className="history-kind">Thread</span>
+        {projectName && <span className="history-chip">{projectName}</span>}
+        <span className="history-stat">
+          {entry.messageCount} msgs, {activity}
+        </span>
       </span>
     </>
   );

@@ -1112,3 +1112,134 @@ not a process row
     });
   });
 });
+
+describe('NativeEngineSupervisor — startup recovery (recoverStartup)', () => {
+  beforeEach(() => __resetLiveEnginePidsForTest());
+
+  it('classifies Vulkan out-of-device-memory lines', () => {
+    expect(
+      classifyNativeEnginePanic('ggml_vulkan: Device memory allocation of size 1024 failed'),
+    ).toMatchObject({ kind: 'vulkan-out-of-memory' });
+    expect(classifyNativeEnginePanic('terminate called: vk::OutOfDeviceMemoryError')).toMatchObject(
+      { kind: 'vulkan-out-of-memory' },
+    );
+    expect(classifyNativeEnginePanic('ggml_vulkan: found 1 Vulkan devices')).toBeUndefined();
+  });
+
+  /** A fake child whose stderr can carry engine diagnostics into the classifier. */
+  function makeDiagnosableChild(pid: number) {
+    let stderrHandler: ((buf: Buffer) => void) | undefined;
+    const child = makeFakeChild(pid);
+    child.stderr = {
+      on: (ev: string, fn: (buf: Buffer) => void) => {
+        if (ev === 'data') stderrHandler = fn;
+      },
+    };
+    return {
+      child,
+      dieOfGpuOom(line = 'ggml_cuda: CUDA error: out of memory') {
+        stderrHandler?.(Buffer.from(`${line}\n`));
+        child.emitExit(1, null);
+      },
+    };
+  }
+
+  it('retries with the owner-degraded plan after a GPU OOM startup death', async () => {
+    const recoverCalls: Array<{ panicKind?: string | undefined; attempt: number }> = [];
+    const spawned: ReturnType<typeof makeDiagnosableChild>[] = [];
+    const fakeSpawn = (() => {
+      const entry = makeDiagnosableChild(6100 + spawned.length);
+      spawned.push(entry);
+      if (spawned.length === 1) queueMicrotask(() => entry.dieOfGpuOom());
+      return entry.child as unknown as ReturnType<typeof import('node:child_process').spawn>;
+    }) as unknown as typeof import('node:child_process').spawn;
+    const sup = new NativeEngineSupervisor({
+      resolveLaunch: async () => ({
+        command: '/opt/gezel/gezel-llama-server',
+        args: [],
+        baseUrl: 'http://127.0.0.1:9999',
+      }),
+      spawn: fakeSpawn,
+      // The OOM'd first child never answers /health; its replacement does.
+      fetchImpl: async () => {
+        if (spawned.length >= 2) return new Response('ok', { status: 200 });
+        throw new Error('connection refused');
+      },
+      startupTimeoutMs: 2_000,
+      healthIntervalMs: 10_000_000,
+      idleTimeoutMs: 0,
+      onLog: () => {},
+      psRunner: async () => [],
+      recoverStartup: (info) => {
+        recoverCalls.push(info);
+        return true;
+      },
+    });
+
+    await sup.ensureRunning();
+    expect(spawned).toHaveLength(2);
+    expect(recoverCalls).toEqual([{ panicKind: 'cuda-out-of-memory', attempt: 0 }]);
+  });
+
+  it('gives up once the recovery cap is exhausted', async () => {
+    const recoverCalls: number[] = [];
+    const spawned: ReturnType<typeof makeDiagnosableChild>[] = [];
+    const fakeSpawn = (() => {
+      const entry = makeDiagnosableChild(6200 + spawned.length);
+      spawned.push(entry);
+      queueMicrotask(() => entry.dieOfGpuOom());
+      return entry.child as unknown as ReturnType<typeof import('node:child_process').spawn>;
+    }) as unknown as typeof import('node:child_process').spawn;
+    const sup = new NativeEngineSupervisor({
+      resolveLaunch: async () => ({
+        command: '/opt/gezel/gezel-llama-server',
+        args: [],
+        baseUrl: 'http://127.0.0.1:9999',
+      }),
+      spawn: fakeSpawn,
+      fetchImpl: async () => {
+        throw new Error('connection refused');
+      },
+      startupTimeoutMs: 2_000,
+      healthIntervalMs: 10_000_000,
+      idleTimeoutMs: 0,
+      onLog: () => {},
+      psRunner: async () => [],
+      recoverStartup: ({ attempt }) => {
+        recoverCalls.push(attempt);
+        return true;
+      },
+    });
+
+    await expect(sup.ensureRunning()).rejects.toThrow(/before becoming ready/);
+    // Initial start + two recoveries, then the cap stops the ladder without
+    // consulting the hook a third time.
+    expect(spawned).toHaveLength(3);
+    expect(recoverCalls).toEqual([0, 1]);
+  });
+
+  it('does not consult the hook when the failure is not a recoverable start', async () => {
+    let recoverCalled = false;
+    const fakeSpawn = (() => {
+      throw Object.assign(new Error('spawn EACCES'), { code: 'EACCES' });
+    }) as unknown as typeof import('node:child_process').spawn;
+    const sup = new NativeEngineSupervisor({
+      resolveLaunch: async () => ({
+        command: '/opt/gezel/gezel-llama-server',
+        args: [],
+        baseUrl: 'http://127.0.0.1:9999',
+      }),
+      spawn: fakeSpawn,
+      idleTimeoutMs: 0,
+      onLog: () => {},
+      psRunner: async () => [],
+      recoverStartup: () => {
+        recoverCalled = true;
+        return true;
+      },
+    });
+
+    await expect(sup.ensureRunning()).rejects.toThrow(/EACCES/);
+    expect(recoverCalled).toBe(false);
+  });
+});

@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { systemToolsetsInstallDir } from '@bendyline/gezel/paths';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Store } from '../fs/store.js';
 import { reconcileSystemToolsetFromDisk, runSystemBootstrap } from './bootstrap.js';
 import type { PinnedSystemToolset } from './manifest.js';
@@ -20,6 +20,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.unstubAllGlobals();
   await rm(home, { recursive: true, force: true });
 });
 
@@ -208,6 +209,117 @@ describe('runSystemBootstrap', () => {
     expect(received.at(-1)?.phase).toBe('setup-incomplete');
   });
 
+  // Regression for the Windows relocated-junction incident: a tracking
+  // record that matches the pin is NOT proof of a working install. Builds
+  // before the hoisted-linker fix left trees whose node_modules links
+  // dangled, and the satisfied check kept vetoing the reinstall that
+  // would have fixed them — the Chromium post-install then failed with
+  // "Cannot find module 'playwright…'" on every boot, forever. A broken
+  // tree must be treated as not installed.
+  it('reinstalls a satisfied toolset whose dependency tree is broken', async () => {
+    const BROKEN: PinnedSystemToolset = {
+      toolsetId: '@fake/broken',
+      displayName: 'Fake broken',
+      kind: 'mcp-toolset',
+      pkg: '@fake/broken',
+      version: '1.0.0',
+      integrity: `sha512-${'F'.repeat(86)}==`,
+      entry: 'dist/cli.js',
+    };
+    await writeSystemTracking(home, {
+      toolsets: {
+        [BROKEN.toolsetId]: {
+          toolsetId: BROKEN.toolsetId,
+          version: BROKEN.version,
+          integrity: BROKEN.integrity,
+          installedAt: '2026-08-01T00:00:00.000Z',
+        },
+      },
+      updatedAt: '2026-08-01T00:00:00.000Z',
+    });
+    const pkgDir = join(systemToolsetsInstallDir(home), installDirName(BROKEN), 'package');
+    await mkdir(pkgDir, { recursive: true });
+    // Declares a dependency but has no node_modules — the on-disk shape a
+    // dangling-junction tree presents to the health check.
+    await writeFile(
+      join(pkgDir, 'package.json'),
+      JSON.stringify({
+        name: BROKEN.pkg,
+        version: BROKEN.version,
+        dependencies: { 'left-pad': '1.0.0' },
+      }),
+    );
+
+    // The reinstall's registry read must not hit the network: answer 404,
+    // which retryTransient treats as non-transient and fails fast.
+    const fetchStub = vi.fn(async () => new Response('{}', { status: 404 }));
+    vi.stubGlobal('fetch', fetchStub);
+
+    const bus = new SystemStatusBus();
+    const received: SystemBootstrapStatus[] = [];
+    const unsub = bus.subscribe((s) => received.push(s));
+    await runSystemBootstrap({ home, store, statusBus: bus, manifest: [BROKEN] });
+    unsub();
+
+    // The bootstrap decided to reinstall (rather than trusting tracking)…
+    expect(
+      received.some(
+        (s) => s.phase === 'installing-toolsets' && s.currentToolset === BROKEN.toolsetId,
+      ),
+    ).toBe(true);
+    expect(fetchStub).toHaveBeenCalled();
+    // …and the stubbed registry failure surfaced as an install error.
+    expect(received.at(-1)?.phase).toBe('error');
+  });
+
+  it('keeps trusting a satisfied toolset whose dependency tree resolves', async () => {
+    const HEALTHY: PinnedSystemToolset = {
+      toolsetId: '@fake/healthy',
+      displayName: 'Fake healthy',
+      kind: 'mcp-toolset',
+      pkg: '@fake/healthy',
+      version: '1.0.0',
+      integrity: `sha512-${'G'.repeat(86)}==`,
+      entry: 'dist/cli.js',
+    };
+    await writeSystemTracking(home, {
+      toolsets: {
+        [HEALTHY.toolsetId]: {
+          toolsetId: HEALTHY.toolsetId,
+          version: HEALTHY.version,
+          integrity: HEALTHY.integrity,
+          installedAt: '2026-08-01T00:00:00.000Z',
+        },
+      },
+      updatedAt: '2026-08-01T00:00:00.000Z',
+    });
+    const pkgDir = join(systemToolsetsInstallDir(home), installDirName(HEALTHY), 'package');
+    const depDir = join(pkgDir, 'node_modules', 'left-pad');
+    await mkdir(depDir, { recursive: true });
+    await writeFile(
+      join(pkgDir, 'package.json'),
+      JSON.stringify({
+        name: HEALTHY.pkg,
+        version: HEALTHY.version,
+        dependencies: { 'left-pad': '1.0.0' },
+      }),
+    );
+    await writeFile(join(depDir, 'package.json'), JSON.stringify({ name: 'left-pad' }));
+
+    const fetchStub = vi.fn(async () => new Response('{}', { status: 404 }));
+    vi.stubGlobal('fetch', fetchStub);
+
+    const bus = new SystemStatusBus();
+    const received: SystemBootstrapStatus[] = [];
+    const unsub = bus.subscribe((s) => received.push(s));
+    await runSystemBootstrap({ home, store, statusBus: bus, manifest: [HEALTHY] });
+    unsub();
+
+    expect(received.some((s) => s.phase === 'installing-toolsets')).toBe(false);
+    expect(fetchStub).not.toHaveBeenCalled();
+    expect(received.at(-1)?.phase).toBe('ready');
+  });
+
   // The inverse: a real on-demand pin alongside nothing else must NOT read as
   // an unpinned build. `ready` is the honest answer — every eagerly-installed
   // toolset (of which there are none) is in place.
@@ -330,6 +442,38 @@ describe('reconcileSystemToolsetFromDisk', () => {
       manifest: [PLAYWRIGHT_ENTRY],
     });
     expect(result.reconciled).toBe(false);
+  });
+
+  // A tree whose declared deps don't resolve (the relocated-junction
+  // breakage) must not be vouched for — re-registering it would just move
+  // the failure into the user's next tool call. The bootstrap reinstalls
+  // it on the next boot instead.
+  it('returns reconciled=false when the install tree is broken', async () => {
+    const pkgDir = await seedOnDisk();
+    await writeFile(
+      join(pkgDir, 'package.json'),
+      JSON.stringify({ version: '1.2.3', dependencies: { 'left-pad': '1.0.0' } }),
+    );
+    await writeSystemTracking(home, {
+      chromiumRevision: undefined,
+      toolsets: {
+        '@playwright/mcp': {
+          toolsetId: '@playwright/mcp',
+          version: '1.2.3',
+          integrity: VALID_INTEGRITY,
+          installedAt: new Date().toISOString(),
+        },
+      },
+      updatedAt: new Date().toISOString(),
+    });
+    const result = await reconcileSystemToolsetFromDisk({
+      home,
+      store,
+      toolsetId: '@playwright/mcp',
+      manifest: [PLAYWRIGHT_ENTRY],
+    });
+    expect(result.reconciled).toBe(false);
+    expect(await store.listInstalledToolsets({ kind: 'system' })).toEqual([]);
   });
 
   it('re-registers the Store record when tracking + files agree but Store is empty', async () => {

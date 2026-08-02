@@ -7,15 +7,24 @@ vi.mock('../components/Ds4ModelManager.js', () => ({
   Ds4ModelManager: () => <div data-testid="ds4-model-manager">models</div>,
 }));
 
-vi.mock('./ds4-availability.js', () => ({
-  detectDs4Availability: () => ({ status: 'available', backend: 'metal' }),
+const { detectDs4Availability } = vi.hoisted(() => ({
+  detectDs4Availability: vi.fn(() => ({ status: 'available', backend: 'metal' })),
 }));
+
+vi.mock('./ds4-availability.js', () => ({ detectDs4Availability }));
 
 vi.mock('../api.js', () => ({
   api: {
     getDs4Log: vi.fn().mockResolvedValue({
       path: '/tmp/ds4-server-2026-07-18.log',
       tail: '[ds4-server] --ssd-streaming enabled',
+    }),
+    getMemoryProfile: vi.fn().mockResolvedValue({
+      platform: 'darwin',
+      totalRamBytes: 128 * 1024 ** 3,
+      gpuVramBytes: null,
+      source: 'darwin-unified',
+      usableBytes: 112 * 1024 ** 3,
     }),
   },
 }));
@@ -54,5 +63,20 @@ describe('Ds4Settings', () => {
 
     await waitFor(() => expect(api.getDs4Log).toHaveBeenCalledWith(4096));
     expect(await screen.findByText(/--ssd-streaming enabled/)).toBeInTheDocument();
+  });
+
+  // The RAM floor lives in the detector; the panel's job is to hand it this
+  // machine's size once the probe answers, so an under-spec box gets the
+  // unavailable banner instead of a download list it can't use.
+  it('feeds the measured system RAM into the availability check', async () => {
+    render(
+      <Ds4Settings config={{ provider: 'ds4' } as ConfigResponse} onConfigChanged={vi.fn()} />,
+    );
+
+    await waitFor(() =>
+      expect(detectDs4Availability).toHaveBeenCalledWith(
+        expect.objectContaining({ totalRamBytes: 128 * 1024 ** 3 }),
+      ),
+    );
   });
 });

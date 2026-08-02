@@ -41,4 +41,47 @@ describe('detectDs4Availability', () => {
     });
     expect(r.status).toBe('requires-cuda');
   });
+
+  const GIB = 1024 ** 3;
+
+  it('under the RAM floor → unavailable, even on an otherwise-capable Mac', () => {
+    const r = detectDs4Availability({
+      navigatorOverride: nav('MacIntel', 'Mac Apple', 'arm'),
+      totalRamBytes: 32 * GIB,
+    });
+    expect(r.status).toBe('unavailable');
+    if (r.status === 'unavailable') expect(r.reason).toContain('48 GB');
+  });
+
+  it('under the RAM floor → unavailable on Linux too (the check precedes CUDA)', () => {
+    const r = detectDs4Availability({
+      navigatorOverride: nav('Linux x86_64', 'X11; Linux x86_64'),
+      totalRamBytes: 16 * GIB,
+    });
+    expect(r.status).toBe('unavailable');
+  });
+
+  // Linux `os.totalmem()` reports MemTotal, which is short of the sticker
+  // figure — a real 48 GB box lands near 47 GiB and must still qualify.
+  it('a 48 GB machine reporting 47 GiB still qualifies', () => {
+    const r = detectDs4Availability({
+      navigatorOverride: nav('MacIntel', 'Mac Apple', 'arm'),
+      totalRamBytes: 47 * GIB,
+    });
+    expect(r.status).toBe('available');
+  });
+
+  it('unknown RAM is not treated as too little', () => {
+    const r = detectDs4Availability({ navigatorOverride: nav('MacIntel', 'Mac Apple', 'arm') });
+    expect(r.status).toBe('available');
+  });
+
+  it('an external server wins over the RAM floor', () => {
+    const r = detectDs4Availability({
+      externalBaseUrl: 'http://127.0.0.1:8000',
+      navigatorOverride: nav('MacIntel', 'Mac Apple', 'arm'),
+      totalRamBytes: 8 * GIB,
+    });
+    expect(r.status).toBe('external');
+  });
 });

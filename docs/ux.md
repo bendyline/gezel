@@ -384,6 +384,17 @@ as the view moving on its own: add `.timeline-focus-flash` (a ~2s ring that
 fades, no-motion variant included) and remove it once it settles. Never
 leave a permanent highlight behind — the ring is a cue, not a selection.
 
+**Figure lists in articles.** A Handboek list whose items lead with a
+poppetje — what `::handboek-gezel-roster` expands to — renders as a card
+per figure: portrait, name, role, and the role's one-line summary, in an
+`auto-fill` grid on the article's own surface tokens
+(`--squisq-page-bg-alt`, `--squisq-page-radius`). A row of bare portraits
+makes the reader match faces to a name list somewhere else; the nametag
+belongs on the figure. The item's *shape* is the CSS hook — squisq's
+markdown carries block attributes on headings only, so a macro cannot
+class the list it expands into — which means any figure-first article
+list gets this treatment, and should.
+
 ## Poppetjes: painted wooden crew
 
 Poppetjes are the app's character system, not generic avatars. Their visual

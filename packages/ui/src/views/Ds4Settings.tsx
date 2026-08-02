@@ -2,6 +2,7 @@ import type { ConfigResponse } from '@bendyline/gezel-client';
 import { useCallback, useState } from 'react';
 import { api } from '../api.js';
 import { Ds4ModelManager } from '../components/Ds4ModelManager.js';
+import { useTotalRamBytes } from '../components/useTotalRamBytes.js';
 import { detectDs4Availability } from './ds4-availability.js';
 
 interface Props {
@@ -19,7 +20,11 @@ interface Props {
  * safely fit.
  */
 export function Ds4Settings({ config }: Props) {
-  const availability = detectDs4Availability({ externalBaseUrl: config?.ds4BaseUrl });
+  const totalRamBytes = useTotalRamBytes();
+  const availability = detectDs4Availability({
+    externalBaseUrl: config?.ds4BaseUrl,
+    totalRamBytes: totalRamBytes ?? undefined,
+  });
 
   return (
     <div>

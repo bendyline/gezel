@@ -250,6 +250,13 @@ export function questionRoutes(ctx: ServiceContext): Hono {
       return c.json(question);
     }
 
+    // Task-paused cards are the same shape: service-synthesized, no live
+    // session. Dismiss collapses the card; fixing/resuming the task
+    // happens through the attached "Open task" link, not the answer.
+    if (question.intent?.kind === 'task-paused') {
+      return c.json(question);
+    }
+
     // Schedule-approval questions come from project-type adoption —
     // there is no live session to seed (sessionId is ''). Approving
     // arms the paused host: the cron update re-derives `nextTickAt`

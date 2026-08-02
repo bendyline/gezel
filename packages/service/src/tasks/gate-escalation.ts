@@ -89,47 +89,69 @@ export function appendGateAttempt(
 }
 
 /**
+ * Which tree the deliverable lives in — decides which write tool the
+ * stage directives name. A directive that demands `write_file` for a
+ * drawer deliverable (or on a surface that has no workspace write tools
+ * at all) sends the model chasing a tool it does not have; the molen
+ * dependency-audit night shift burned its whole gate budget exactly
+ * that way. Default 'workspace' keeps legacy call sites byte-stable.
+ */
+export type DeliverableSurface = 'workspace' | 'artifact';
+
+/**
  * Stage 1 — smallest-targeted-edit directive. Ports the eval harness's
  * state-aware pre-trigger wording ("your file EXISTS but fails the
  * check; do NOT recreate it"). The GATE_TARGETED_EDIT marker MUST trip
  * the llama-cpp `isGateSurgicalEditTurn` mode (low-temp, patch-only
  * tool surface) and MUST NOT contain any immediate-write trigger phrase
  * or scenario-check header — this stage wants a surgical edit, not a
- * whole-file rewrite (both directions pinned by unit tests).
+ * whole-file rewrite (both directions pinned by unit tests). The
+ * artifact surface has no partial-edit tool, so its "targeted edit" is
+ * a minimal rewrite through `write_artifact`.
  */
 export function buildStageOneNudge(opts: {
   file?: string;
   failingBullets: string;
   frozen: boolean;
+  surface?: DeliverableSurface;
 }): string {
+  const artifact = opts.surface === 'artifact';
   const fileRef = opts.file ? `\`${opts.file}\`` : 'the deliverable';
   const opener = opts.frozen
     ? 'Continue. You resubmitted the SAME deliverable and the gate rejected it again for the same reasons — resubmitting unchanged content cannot pass.'
     : 'Continue. Your last edits did not move the gate — the same checks fail after each attempt.';
-  return `GATE_TARGETED_EDIT: ${opener} The file ${fileRef} EXISTS but fails exactly these checks:
+  const fix = artifact
+    ? 'Fix the FIRST failure above with the smallest change — read the artifact with read_artifact, correct only the section the check names, and save it back with write_artifact. Do NOT switch to a different file, do NOT re-read everything, and do NOT reply that you already finished.'
+    : 'Fix the FIRST failure above with the smallest targeted edit — use replace_in_file on the exact section the check names. Do NOT recreate the file, do NOT re-read everything, and do NOT reply that you already finished.';
+  return `GATE_TARGETED_EDIT: ${opener} The ${artifact ? 'artifact' : 'file'} ${fileRef} EXISTS but fails exactly these checks:
 
 ${opts.failingBullets}
 
-Fix the FIRST failure above with the smallest targeted edit — use replace_in_file on the exact section the check names. Do NOT recreate the file, do NOT re-read everything, and do NOT reply that you already finished.`;
+${fix}`;
 }
 
 /**
- * Stage 2 — complete-rewrite directive. Embeds two verified llama-cpp
- * immediate-write trigger phrases ("Do not end your turn until
- * `write_file`", "write_file({ path:") plus the GATE_FULL_REWRITE marker
- * (the eval TICTACTOE_FULL_REWRITE convention) so the provider clamps
- * the turn to a write_file-only surface with thinking off.
+ * Stage 2 — complete-rewrite directive. The workspace wording embeds two
+ * verified llama-cpp immediate-write trigger phrases ("Do not end your
+ * turn until `write_file`", "write_file({ path:") plus the
+ * GATE_FULL_REWRITE marker (the eval TICTACTOE_FULL_REWRITE convention)
+ * so the provider clamps the turn to a write_file-only surface with
+ * thinking off. The artifact wording deliberately avoids both trigger
+ * phrases — a write_file-only clamp on a drawer deliverable would strand
+ * the turn — and names `write_artifact` instead.
  */
 export function buildStageTwoNudge(opts: {
   file: string;
   failingBullets: string;
   repeats: number;
+  surface?: DeliverableSurface;
 }): string {
-  return `GATE_FULL_REWRITE: targeted edits have not cleared the gate after ${opts.repeats} attempts — replace the deliverable whole. Do not end your turn until \`write_file\` has rewritten \`${opts.file}\` as one complete corrected version fixing every failure below:
+  const tool = opts.surface === 'artifact' ? 'write_artifact' : 'write_file';
+  return `GATE_FULL_REWRITE: targeted edits have not cleared the gate after ${opts.repeats} attempts — replace the deliverable whole. Do not end your turn until \`${tool}\` has rewritten \`${opts.file}\` as one complete corrected version fixing every failure below:
 
 ${opts.failingBullets}
 
-Call write_file({ path: "${opts.file}", content: <the complete corrected file> }) as your next tool call. No planning prose, no reads first, no partial appends.`;
+Call ${tool}({ path: "${opts.file}", content: <the complete corrected file> }) as your next tool call. No planning prose, no reads first, no partial appends.`;
 }
 
 /**

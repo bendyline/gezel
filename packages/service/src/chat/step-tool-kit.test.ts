@@ -73,6 +73,15 @@ describe('stepToolKit', () => {
     });
     expect(kit?.tools.has('write_artifact')).toBe(true);
     expect(kit?.tools.has('read_artifact')).toBe(true);
+    expect(kit?.tools.has('grep_artifact')).toBe(true);
+  });
+
+  it('workspace-targeted steps keep the drawer too — the writes-off escape hatch', () => {
+    const kit = stepToolKit(expandedStep('notes/scan.md', 'markdown-notes'));
+    expect(kit?.tools.has('write_artifact')).toBe(true);
+    expect(kit?.tools.has('read_artifact')).toBe(true);
+    expect(kit?.tools.has('list_artifacts')).toBe(true);
+    expect(kit?.tools.has('grep_artifact')).toBe(true);
   });
 
   it('a step with no file signal has no kit', () => {
@@ -100,6 +109,11 @@ describe('gateRepairToolsForKind', () => {
     const tools = gateRepairToolsForKind('markdown-doc');
     expect(tools.has('write_file')).toBe(true);
     expect(tools.has('derive_file')).toBe(false);
+  });
+
+  it('every repair set carries the drawer write channel', () => {
+    expect(gateRepairToolsForKind('markdown-doc').has('write_artifact')).toBe(true);
+    expect(gateRepairToolsForKind(null).has('write_artifact')).toBe(true);
   });
 });
 

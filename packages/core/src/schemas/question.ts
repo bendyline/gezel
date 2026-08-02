@@ -241,6 +241,41 @@ export const NightShiftReviewIntentSchema = z.object({
 });
 export type NightShiftReviewIntent = z.infer<typeof NightShiftReviewIntentSchema>;
 
+/**
+ * Why a task paused for help. `gate_unsatisfiable` and
+ * `gate_infrastructure` pause without consuming a deliverable attempt
+ * (policy / runtime problems, not failed work); the others are spent
+ * budgets. Mirrors `TaskNeedsHelpReason` in the service task manager.
+ */
+export const TaskPausedReasonSchema = z.enum([
+  'gate_exhausted',
+  'gate_plateau',
+  'gate_unsatisfiable',
+  'gate_infrastructure',
+  'step_stalled',
+  'budget_exhausted',
+]);
+export type TaskPausedReason = z.infer<typeof TaskPausedReasonSchema>;
+
+/**
+ * Service-created "task paused for help" card. A background task that
+ * pauses (gate budget spent, plateau, unsatisfiable-by-policy gate,
+ * stalled assignee) would otherwise go silent — only complete/canceled
+ * fire settle notifications, so a night-shift task that hit a wall was
+ * discoverable only by opening the Tasks view. Like the night-shift
+ * review card there is no live session (`sessionId` is ''); answering
+ * just collapses the card, and the attached `taskRef` gives the UI its
+ * "Open task" link.
+ */
+export const TaskPausedIntentSchema = z.object({
+  kind: z.literal('task-paused'),
+  /** `projectId/num` of the paused task — the dedup key. */
+  taskRef: z.string(),
+  stepId: z.string().optional(),
+  reason: TaskPausedReasonSchema,
+});
+export type TaskPausedIntent = z.infer<typeof TaskPausedIntentSchema>;
+
 export const QuestionIntentSchema = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('npm-install-approval'),
@@ -257,6 +292,7 @@ export const QuestionIntentSchema = z.discriminatedUnion('kind', [
   VideoGenerationApprovalIntentSchema,
   ScheduleApprovalIntentSchema,
   NightShiftReviewIntentSchema,
+  TaskPausedIntentSchema,
 ]);
 export type QuestionIntent = z.infer<typeof QuestionIntentSchema>;
 

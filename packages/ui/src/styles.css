@@ -3677,6 +3677,16 @@ body.app-resizing webview {
   border-radius: 0;
 }
 
+/* Integer fields hold a handful of digits; letting them take the text-input
+   `flex: 1` above paints a paragraph-wide box around a "4". Cap them. */
+input[type="number"] {
+  max-width: 100px;
+}
+
+.new-row input[type="number"] {
+  flex: 0 1 auto;
+}
+
 button {
   padding: 0.4rem 0.75rem;
   background: var(--accent);
@@ -8984,11 +8994,23 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
 }
 
 .history-split {
+  --history-list-width: 36%;
   display: grid;
-  grid-template-columns: minmax(280px, 420px) minmax(0, 1fr);
-  gap: 1rem;
+  grid-template-columns:
+    minmax(14rem, var(--history-list-width))
+    10px
+    minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  gap: 0.25rem;
   flex: 1;
   min-height: 0;
+}
+
+/* Fill the 10px track rather than keeping .chat-rail-grip's fixed 14px,
+   which would overhang the detail pane and push the two indicator lines
+   off the centre of the gutter. */
+.history-split-grip {
+  width: auto;
 }
 
 .history-list {
@@ -9000,6 +9022,7 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
   flex-direction: column;
   gap: 0.25rem;
   min-height: 0;
+  min-width: 0;
 }
 
 .history-detail {
@@ -9029,18 +9052,31 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
   background: var(--surface);
 }
 
+/* Two lines: the summary (with its timestamp) on top, the kind and the
+   project / gezel chips below. A single line put the summary in a
+   flex-shrink race with the chips, and the summary always lost — at the
+   pane widths this list actually gets, rows read "W… Workspace write"
+   with the one piece of per-entry content ellipsed to a letter. */
 .history-row {
   display: flex;
-  align-items: center;
-  gap: 0.75rem;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.3rem;
   width: 100%;
-  padding: 0.6rem 0.8rem;
+  padding: 0.55rem 0.8rem;
   background: transparent;
   border: none;
   color: var(--text);
   text-align: left;
   cursor: pointer;
   font-size: 0.9rem;
+}
+
+.history-line {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  min-width: 0;
 }
 
 .history-row:hover {
@@ -9065,6 +9101,7 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
 
 .history-summary {
   flex: 1 1 auto;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -9072,10 +9109,16 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
 }
 
 .history-meta {
-  flex: 0 0 auto;
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 0.4rem;
+  min-width: 0;
+}
+
+.history-stat {
+  font-size: 0.75rem;
+  color: var(--muted);
 }
 
 .history-chip {
@@ -9087,9 +9130,10 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
 }
 
 .history-time {
+  flex: 0 0 auto;
+  margin-left: auto;
   font-size: 0.75rem;
   color: var(--muted);
-  min-width: 5rem;
   text-align: right;
 }
 
@@ -11406,6 +11450,62 @@ button.bench-step-foot:disabled {
 
 .gezel-article-view .squisq-page-card-title {
   font-size: 1.15rem;
+}
+
+/* Gezel roster — one card per companion: poppetje, name, role, and what
+   that role does. The Handboek's `::handboek-gezel-roster` macro expands
+   to a list whose items lead with a figure, and that shape is the hook:
+   squisq's markdown carries block attributes on headings only, so a
+   macro cannot put a class on the list it expands into. Any article list
+   written figure-first wants this treatment anyway. */
+.gezel-article-view .squisq-md-ul:has(> li > p > .squisq-md-image:first-child) {
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr));
+  gap: 0.7rem;
+  padding: 0;
+  margin: 1rem 0;
+}
+
+.gezel-article-view .squisq-md-ul:has(> li > p > .squisq-md-image:first-child) > li {
+  margin: 0;
+  padding: 0.9rem 0.7rem 1rem;
+  border: 1px solid var(--squisq-page-divider-color);
+  border-radius: var(--squisq-page-radius);
+  background: var(--squisq-page-bg-alt);
+}
+
+/* Stacking the item's inline runs is what turns it into a card. The role
+   summary is a bare text node — an anonymous flex item — so its type is
+   set here on the container and the name/role override it. */
+.gezel-article-view .squisq-md-ul:has(> li > p > .squisq-md-image:first-child) > li > p {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.15rem;
+  text-align: center;
+  font-size: 0.82em;
+  line-height: 1.4;
+  color: var(--squisq-page-text-muted);
+}
+
+.gezel-article-view .squisq-md-ul:has(> li > p > .squisq-md-image:first-child) .squisq-md-image {
+  width: 88px;
+  height: auto;
+  margin-bottom: 0.2rem;
+}
+
+.gezel-article-view .squisq-md-ul:has(> li > p > .squisq-md-image:first-child) .squisq-md-strong {
+  font-size: 1.05em;
+  font-weight: 600;
+  color: var(--squisq-page-text);
+}
+
+.gezel-article-view .squisq-md-ul:has(> li > p > .squisq-md-image:first-child) .squisq-md-em {
+  font-style: normal;
+  font-size: 0.95em;
+  color: var(--squisq-page-accent);
 }
 
 .home-intro-player {
@@ -15552,6 +15652,34 @@ button.timeline-session-divider-continuing::before {
   margin-top: auto;
 }
 
+/* Hand-rolled catalog lists — the managers that read a small fixed
+   catalog (audio STT/TTS, image recognition) instead of going through
+   CatalogBrowser. The rows they hold are the same object the browser
+   shows as a `.catalog-item` card, so they get the same bounded card:
+   unbounded, a full-width row let the description run into the next
+   model's identifier and stranded the Download key at the far edge of
+   the pane, half a screen from the model it belongs to. */
+.catalog-ollama-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(20rem, 1fr));
+  gap: 0.6rem;
+}
+
+.catalog-ollama-list > .catalog-ollama-action {
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.02);
+  /* Cards in a row share the tallest one's height: start their text at
+     the top edge and keep the key on the bottom one, rather than letting
+     the whole row float to the bottom of a short card. */
+  align-items: stretch;
+}
+
+.catalog-ollama-list > .catalog-ollama-action > button {
+  align-self: flex-end;
+}
+
 .catalog-ollama-action {
   display: flex;
   justify-content: space-between;
@@ -16425,6 +16553,14 @@ a.license-button:hover {
    line where the row border and the list border stack. */
 .entity-tabs-row > .gz-tabs-root .gz-tabs-list {
   border-bottom: none;
+}
+
+/* The project tab row sits directly under the window chrome with no
+   panel header above it, so without these the first tab reads as
+   welded to the top-left corner of the pane. */
+.entity-tabs-row.project-tabs-row {
+  padding-top: 2px;
+  padding-left: 4px;
 }
 
 /* ---------- Output pane (persistent workspace preview) ---------- */

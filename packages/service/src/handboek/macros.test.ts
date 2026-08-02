@@ -100,18 +100,33 @@ describe('gezel-roster macro', () => {
   const jack = gezel('g2', 'Jack', 'Meester');
   const device = stubDevice([alice, jack, gezel('g3', 'Iris', 'Researcher')], 'g1');
 
-  it('app mode: names the matching gezels and emits their figures', async () => {
+  it('app mode: one card per gezel, and no role summary on a role-filtered roster', async () => {
     const { markdown, figures } = await expandMacros('::handboek-gezel-roster{role=meester}', {
       ...ctx('app', device),
     });
-    expect(markdown).toContain('You have two meester gezellen: **Alice** and **Jack**.');
-    expect(markdown).toContain('![Alice](poppetje/g1.headshot.svg)');
+    expect(markdown).toContain('You have two meester gezellen.');
+    expect(markdown).toContain('- ![Alice](poppetje/g1.headshot.svg) **Alice** *Meester*');
+    expect(markdown).toContain('- ![Jack](poppetje/g2.headshot.svg) **Jack** *Meester*');
+    expect(markdown).not.toContain('Coordinator:');
     expect(figures).toHaveLength(2);
     expect(figures[0]).toMatchObject({
       gezelId: 'g1',
       variant: 'headshot',
       path: 'poppetje/g1.headshot.svg',
     });
+  });
+
+  it('app mode: an unfiltered roster reads each gezel its own role', async () => {
+    const { markdown } = await expandMacros('::handboek-gezel-roster', { ...ctx('app', device) });
+    expect(markdown).toContain('**Alice** *Meester*');
+    expect(markdown).toContain('**Iris** *Researcher* Answers questions from sources;');
+  });
+
+  it('app mode: a gezel with an unknown role keeps its own label and no summary', async () => {
+    const device = stubDevice([gezel('g9', 'Bram', 'Wagonmaker')]);
+    const { markdown } = await expandMacros('::handboek-gezel-roster', { ...ctx('app', device) });
+    expect(markdown).toContain('**Bram** *Wagonmaker*');
+    expect(markdown.trimEnd().endsWith('*Wagonmaker*')).toBe(true);
   });
 
   it('site mode: renders nothing personal', async () => {

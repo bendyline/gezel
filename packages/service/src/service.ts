@@ -863,6 +863,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
         attempt: outcome.gate.attempt,
         ...(outcome.gate.paused ? { paused: true } : {}),
         ...(outcome.gate.infrastructureError ? { infrastructureError: true } : {}),
+        ...(outcome.gate.unsatisfiable ? { unsatisfiable: true } : {}),
         ...(outcome.gate.scriptRuns ? { scriptRuns: outcome.gate.scriptRuns } : {}),
         ...(outcome.gate.escalationStage !== undefined
           ? { escalationStage: outcome.gate.escalationStage }
@@ -895,6 +896,15 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
       .appendNote(projectId, num, { text: noteText, author: { kind: 'user' } })
       .catch(() => {});
     await tasks.setStatus(projectId, num, 'paused').catch(() => {});
+    const budgetTask = await tasks.get(projectId, num).catch(() => null);
+    if (budgetTask) {
+      await tasks.emitNeedsHelp({
+        projectId,
+        task: budgetTask,
+        reason: 'budget_exhausted',
+        detail: `The task crossed its fail-fast budget (${spent}, model tier ${info.tier}) without completing.`,
+      });
+    }
   });
 
   // Role auto-assignment: a craftbook step's `suggestedRole` resolves
@@ -1481,6 +1491,43 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
           title: r.title,
           actionCount: r.actionCounts.total,
         })),
+      },
+      createdAt: new Date().toISOString(),
+    });
+  });
+  // Paused-for-help fan-in: every pause-for-help path (gate exhausted /
+  // plateau / unsatisfiable / infrastructure, stalled step, spent budget)
+  // files ONE needs-input card so the pause is pushed to the user instead
+  // of discovered by opening the Tasks view. Deduped on an unanswered
+  // card for the same task; a task that pauses again after the card was
+  // answered files a fresh one. No live session — answering collapses
+  // the card; the `taskRef` attachment gives the UI its "Open task" link.
+  tasks.setTaskNeedsHelpHook(async ({ projectId, task, stepId, reason, detail }) => {
+    const existing = await store.listProjectQuestions(projectId).catch(() => []);
+    if (
+      existing.some(
+        (q) => q.intent?.kind === 'task-paused' && q.intent.taskRef === task.ref && !q.answer,
+      )
+    ) {
+      return;
+    }
+    const config = await store.readConfig().catch(() => ({}) as GezelConfig);
+    const stepPart = stepId ? ` at step \`${stepId}\`` : '';
+    await store.writeQuestion({
+      id: randomUUID(),
+      projectId,
+      gezelId: config.meesterGezelId ?? '',
+      sessionId: '',
+      prompt: `Task ${task.ref} ("${task.title}") paused for help${stepPart}: ${detail}`,
+      choices: ['Dismiss'],
+      allowWriteIn: false,
+      multiSelect: false,
+      taskRef: task.ref,
+      intent: {
+        kind: 'task-paused',
+        taskRef: task.ref,
+        ...(stepId ? { stepId } : {}),
+        reason,
       },
       createdAt: new Date().toISOString(),
     });

@@ -1401,7 +1401,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
           <p className="placeholder">Pick a project on the left to view it here.</p>
         ) : selected ? (
           <>
-            <div className="entity-tabs-row">
+            <div className="entity-tabs-row project-tabs-row">
               {/* Wide layout: the toggle shows/hides the side-by-side
                   output pane. In compact mode the pane becomes a tab
                   instead (below), so the toggle is suppressed. */}

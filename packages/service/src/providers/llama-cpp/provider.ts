@@ -591,6 +591,10 @@ export function isGateSurgicalEditTurn(
 ): boolean {
   if (!prompt.includes('GATE_TARGETED_EDIT:')) return false;
   if (isScenarioFileRepairPrompt(prompt)) return false;
+  // Artifact-surface stage-1 directives repair through `write_artifact`
+  // (the drawer has no patch tool) — clamping that turn to the workspace
+  // patch tools would strand it.
+  if (prompt.includes('write_artifact')) return false;
   const names = (tools ?? [])
     .map((tool) => chatCompletionToolName(tool))
     .filter((name): name is string => !!name);

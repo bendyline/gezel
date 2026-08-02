@@ -4506,6 +4506,7 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
       provider: 'codex-cli',
       defaultModel: { 'codex-cli': 'gpt-5.5' },
     });
+    await store.updateGezelSettings('ada', { reasoningEffort: 'ultra' });
 
     const session = await manager.createSession({ gezelId: 'ada', projectId: 'default' });
     mock.script('ok');
@@ -4515,6 +4516,7 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
     const allow = create!.opts!.toolAllowlist!;
     const env = create!.opts!.mcpServer!.env;
     expect(create!.opts!.codexCliContext).toBeTruthy();
+    expect(create!.opts!.codexCliContext?.reasoningEffortOverride).toBe('ultra');
     expect(env.GEZEL_MCP_EXCLUDE).toBeTruthy();
     expect(env.GEZEL_MCP_ALLOW).toBe([...allow].sort().join(','));
   });

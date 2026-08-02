@@ -10,6 +10,7 @@ import {
   type GitHubRepoSummary,
   type GitHubReposResponse,
   MachineMemoryUsageSchema,
+  PNPM_HOISTED_NODE_LINKER,
   SystemDiagnosticsSchema,
   createLogger,
 } from '@bendyline/gezel';
@@ -212,7 +213,7 @@ export function systemRoutes(ctx: ServiceContext): Hono {
       const extendedPath = nodeDir
         ? `${nodeDir}${delimiter}${process.env.PATH ?? ''}`
         : (process.env.PATH ?? '');
-      const pnpm = resolvePnpmCommand(['exec', 'copilot', 'login']);
+      const pnpm = resolvePnpmCommand([PNPM_HOISTED_NODE_LINKER, 'exec', 'copilot', 'login']);
       const child = spawnPnpm(pnpm, {
         cwd: installDir,
         env: { ...process.env, PATH: extendedPath, FORCE_COLOR: '0' },

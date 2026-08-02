@@ -3,6 +3,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { createLogger } from '@bendyline/gezel';
 import { writeFileAtomic } from '../../fs/atomic.js';
+import type { CodexReasoningEffort } from './reasoning.js';
 
 const log = createLogger('codex-cli');
 
@@ -56,8 +57,8 @@ export interface CodexRuntimeConfig {
   instructions: string;
   /** Model id passed via `-m`; also written as `model = "..."` for tools that read config first. */
   model: string;
-  /** Optional `model_reasoning_effort` knob — `low | medium | high`. */
-  reasoningEffort?: 'low' | 'medium' | 'high';
+  /** Optional model-dependent `model_reasoning_effort` knob. */
+  reasoningEffort?: CodexReasoningEffort;
   /**
    * Codex's `model_auto_compact_token_limit` — the input-token
    * threshold at which codex's built-in rollout compactor kicks in.

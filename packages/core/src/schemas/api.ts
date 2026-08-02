@@ -1841,7 +1841,8 @@ export const GezelConfigSchema = z.object({
    *     `bypassPermissions` → `--dangerously-bypass-approvals-and-sandbox`.
    *   - `defaultReasoningEffort`: per-install fallback for Codex's
    *     `model_reasoning_effort` config knob. Forwarded as `-c
-   *     model_reasoning_effort="<low|medium|high>"`.
+   *     model_reasoning_effort="<effort>"`; supported values remain
+   *     model-dependent.
    *   - `extraModels`: extend the hardcoded model list (e.g. to pin
    *     a newly-released id ahead of an app update).
    *   - `extraConfigOverrides`: power-user escape hatch — extra
@@ -1856,7 +1857,9 @@ export const GezelConfigSchema = z.object({
       defaultPermissionMode: z
         .enum(['default', 'acceptEdits', 'plan', 'bypassPermissions'])
         .optional(),
-      defaultReasoningEffort: z.enum(['low', 'medium', 'high']).optional(),
+      defaultReasoningEffort: z
+        .enum(['minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'])
+        .optional(),
       extraModels: z.array(z.object({ id: z.string(), name: z.string() })).optional(),
       extraConfigOverrides: z.record(z.string(), z.string()).optional(),
     })

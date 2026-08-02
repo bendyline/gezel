@@ -1118,7 +1118,7 @@ export interface ConfigResponse {
     binaryPath?: string;
     manageRuntimeFiles?: boolean;
     defaultPermissionMode?: 'default' | 'acceptEdits' | 'plan' | 'bypassPermissions';
-    defaultReasoningEffort?: 'low' | 'medium' | 'high';
+    defaultReasoningEffort?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra';
     extraModels?: Array<{ id: string; name: string }>;
     extraConfigOverrides?: Record<string, string>;
   };

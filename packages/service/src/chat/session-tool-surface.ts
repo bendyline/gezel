@@ -406,6 +406,11 @@ export async function resolveSessionToolSurface(
     // Starvation guard: only apply when the clamped surface still
     // carries a mutation tool — a role whose kit has no write access
     // (mis-assignment) is fixed by reassignment, not by starving.
+    // `write_artifact` counts only when the drawer is where the repair
+    // must land: an artifact-flagged deliverable, or a writes-off
+    // project where the drawer is the one remaining write channel. A
+    // read-only-workspace role facing a workspace deliverable still
+    // skips — drawer access can't fix that file.
     const MUTATION_TOOLS = [
       'write_file',
       'append_to_file',
@@ -414,7 +419,12 @@ export async function resolveSessionToolSurface(
       'apply_patch',
       'derive_file',
     ];
-    if (MUTATION_TOOLS.some((name) => clamped.has(name))) {
+    const drawerIsRepairChannel =
+      opts.activeStep?.advanceWhen?.artifact === true || opts.workspaceWritable === false;
+    if (
+      MUTATION_TOOLS.some((name) => clamped.has(name)) ||
+      (drawerIsRepairChannel && clamped.has('write_artifact'))
+    ) {
       // Fire even when the kit already narrowed to the same set — the
       // clamp being IN EFFECT is the telemetry signal, not the delta.
       allowlist = clamped;

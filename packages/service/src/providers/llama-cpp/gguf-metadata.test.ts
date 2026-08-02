@@ -32,9 +32,12 @@ const VTYPE = {
   FLOAT64: 12,
 } as const;
 
+const TENSOR_ALIGNMENT = 32;
+
 class GgufBuilder {
   private parts: Buffer[] = [];
   private metaCount = 0n;
+  private tensors: { name: string; sizeBytes: number }[] = [];
 
   header(version = 3, tensorCount = 0n) {
     this.parts.push(Buffer.from('GGUF', 'ascii'));
@@ -43,6 +46,16 @@ class GgufBuilder {
     // metadata-count slot (8 bytes), patched in finish() once we
     // know how many entries we wrote.
     this.parts.push(this.u64(0n));
+    return this;
+  }
+
+  /**
+   * Declare a tensor with an exact data payload size. finish() writes the
+   * info section (offsets aligned like the spec demands) and a zero-filled
+   * data section to match, so offset-delta sizing has real bytes to check.
+   */
+  tensor(name: string, sizeBytes: number) {
+    this.tensors.push({ name, sizeBytes });
     return this;
   }
 
@@ -96,10 +109,31 @@ class GgufBuilder {
   }
 
   finish(): Buffer {
-    // Patch the metadata-count field: it sits at offset
-    // 4 (magic) + 4 (version) + 8 (tensor_count) = 16.
-    const blob = Buffer.concat(this.parts);
-    blob.writeBigUInt64LE(this.metaCount, 16);
+    const tensorParts: Buffer[] = [];
+    let dataOffset = 0;
+    const dataSpans: { offset: number; sizeBytes: number }[] = [];
+    for (const t of this.tensors) {
+      tensorParts.push(this.gguf_string(t.name));
+      tensorParts.push(this.u32(1)); // n_dims
+      tensorParts.push(this.u64(1n)); // dim[0]
+      tensorParts.push(this.u32(0)); // ggml type (F32 — irrelevant to sizing)
+      tensorParts.push(this.u64(BigInt(dataOffset)));
+      dataSpans.push({ offset: dataOffset, sizeBytes: t.sizeBytes });
+      dataOffset += Math.ceil(t.sizeBytes / TENSOR_ALIGNMENT) * TENSOR_ALIGNMENT;
+    }
+
+    const header = Buffer.concat([...this.parts, ...tensorParts]);
+    header.writeBigUInt64LE(this.metaCount, 16);
+    if (this.tensors.length === 0) return header;
+    // Tensor-count slot sits at offset 8; only meaningful (and only
+    // patched) when this builder declared real tensor infos — metadata-only
+    // tests pass a synthetic count through header() untouched.
+    header.writeBigUInt64LE(BigInt(this.tensors.length), 8);
+
+    const dataStart = Math.ceil(header.byteLength / TENSOR_ALIGNMENT) * TENSOR_ALIGNMENT;
+    const last = dataSpans[dataSpans.length - 1] as { offset: number; sizeBytes: number };
+    const blob = Buffer.alloc(dataStart + last.offset + last.sizeBytes);
+    header.copy(blob, 0);
     return blob;
   }
 
@@ -220,5 +254,90 @@ describe('readGgufSummary', () => {
     const s = readGgufSummary(path);
     expect(s.fileType).toBe(999);
     expect(s.fileTypeName).toBe('UNKNOWN_999');
+  });
+
+  it('reads the KV-estimate attention dims', () => {
+    const blob = new GgufBuilder()
+      .header(3, 0n)
+      .metaString('general.architecture', 'qwen3moe')
+      .metaU32('qwen3moe.block_count', 48)
+      .metaU32('qwen3moe.embedding_length', 4096)
+      .metaU32('qwen3moe.attention.head_count', 32)
+      .metaU32('qwen3moe.attention.head_count_kv', 8)
+      .metaU32('qwen3moe.attention.key_length', 128)
+      .metaU32('qwen3moe.attention.value_length', 128)
+      .finish();
+    const path = join(dir, 'kv-dims.gguf');
+    writeFileSync(path, blob);
+
+    const s = readGgufSummary(path);
+    expect(s.blockCount).toBe(48);
+    expect(s.embeddingLength).toBe(4096);
+    expect(s.headCount).toBe(32);
+    expect(s.headCountKv).toBe(8);
+    expect(s.keyLength).toBe(128);
+    expect(s.valueLength).toBe(128);
+  });
+});
+
+describe('readGgufSummary — tensor sizing (includeTensorSizes)', () => {
+  it('splits expert vs non-expert bytes and sums experts per layer', () => {
+    // Sizes are multiples of the 32-byte alignment so offset-delta sizing
+    // is exact, matching how real GGUFs pack quantized blocks.
+    const blob = new GgufBuilder()
+      .header(3)
+      .metaString('general.architecture', 'mixtral-ish')
+      .metaU32('mixtral-ish.expert_count', 8)
+      .metaU32('mixtral-ish.block_count', 2)
+      .tensor('token_embd.weight', 1024)
+      .tensor('blk.0.attn_q.weight', 2048)
+      .tensor('blk.0.ffn_gate_exps.weight', 4096)
+      .tensor('blk.0.ffn_up_exps.weight', 4096)
+      .tensor('blk.1.ffn_down_exps.weight', 8192)
+      .tensor('blk.1.ffn_gate_shexp.weight', 512)
+      .tensor('output.weight', 1024)
+      .finish();
+    const path = join(dir, 'moe-tensors.gguf');
+    writeFileSync(path, blob);
+
+    const s = readGgufSummary(path, { includeTensorSizes: true });
+    // Routed experts only — the shared expert (`_shexp`) stays GPU-resident
+    // under --cpu-moe and must count as non-expert.
+    expect(s.expertBytesTotal).toBe(4096 + 4096 + 8192);
+    expect(s.nonExpertBytes).toBe(1024 + 2048 + 512 + 1024);
+    expect(s.expertBytesByLayer).toEqual([8192, 8192]);
+  });
+
+  it('reports zero expert bytes for a dense model', () => {
+    const blob = new GgufBuilder()
+      .header(3)
+      .metaString('general.architecture', 'llama')
+      .tensor('token_embd.weight', 1024)
+      .tensor('blk.0.attn_q.weight', 2048)
+      .tensor('blk.0.ffn_gate.weight', 4096)
+      .finish();
+    const path = join(dir, 'dense-tensors.gguf');
+    writeFileSync(path, blob);
+
+    const s = readGgufSummary(path, { includeTensorSizes: true });
+    expect(s.expertBytesTotal).toBe(0);
+    expect(s.nonExpertBytes).toBe(1024 + 2048 + 4096);
+    expect(s.expertBytesByLayer).toEqual([]);
+  });
+
+  it('leaves sizing fields unset when not asked for them', () => {
+    const blob = new GgufBuilder()
+      .header(3)
+      .metaString('general.architecture', 'llama')
+      .tensor('blk.0.ffn_gate_exps.weight', 4096)
+      .finish();
+    const path = join(dir, 'unsized.gguf');
+    writeFileSync(path, blob);
+
+    const s = readGgufSummary(path, { includeTensors: true });
+    expect(s.tensorNames).toEqual(['blk.0.ffn_gate_exps.weight']);
+    expect(s.expertBytesTotal).toBeUndefined();
+    expect(s.nonExpertBytes).toBeUndefined();
+    expect(s.expertBytesByLayer).toBeUndefined();
   });
 });

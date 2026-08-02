@@ -431,6 +431,23 @@ describe('UpdateTaskRequestSchema', () => {
   });
 });
 
+describe('Codex CLI config', () => {
+  it('accepts current model-dependent reasoning effort values', () => {
+    for (const effort of ['minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']) {
+      expect(
+        GezelConfigSchema.parse({ codexCli: { defaultReasoningEffort: effort } }).codexCli
+          ?.defaultReasoningEffort,
+      ).toBe(effort);
+    }
+  });
+
+  it('rejects reasoning labels that Codex CLI does not understand', () => {
+    expect(() =>
+      GezelConfigSchema.parse({ codexCli: { defaultReasoningEffort: 'none' } }),
+    ).toThrow();
+  });
+});
+
 describe('openaiEndpoints config', () => {
   it('parses the Connected Apps endpoint controls and tolerates absence', () => {
     const cfg = GezelConfigSchema.parse({

@@ -3,7 +3,12 @@ import { existsSync } from 'node:fs';
 import { mkdir, open, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { SystemToolsetInstallEvent } from '@bendyline/gezel';
-import { HttpStatusError, createLogger, retryTransient } from '@bendyline/gezel';
+import {
+  HttpStatusError,
+  PNPM_HOISTED_NODE_LINKER,
+  createLogger,
+  retryTransient,
+} from '@bendyline/gezel';
 import {
   extractNpmPackageTarball,
   publishStagedNpmInstall,
@@ -19,6 +24,7 @@ import {
   SYSTEM_TOOLSETS,
   isPlaceholder,
 } from './manifest.js';
+import { checkInstallTree } from './install-health.js';
 import { ensureChromiumInstalled } from './playwright-browsers.js';
 import { installDirName } from './resolve.js';
 import type { SystemStatusBus } from './status-bus.js';
@@ -112,8 +118,25 @@ export async function runSystemBootstrap(opts: SystemBootstrapOptions): Promise<
   // Install / refresh each eager manifest entry.
   for (const entry of eager) {
     const existing = tracking.toolsets[entry.toolsetId];
-    const satisfied =
+    const trackingSatisfied =
       existing && existing.version === entry.version && existing.integrity === entry.integrity;
+    const installedPath = join(systemToolsetsInstallDir(home), installDirName(entry), 'package');
+    // A satisfied tracking record is not proof of a working install:
+    // builds before the hoisted-linker fix produced trees whose Windows
+    // junctions dangled after the staging rename (see install-health.ts).
+    // Those machines re-fail the Chromium post-install on every boot
+    // while the tracking record keeps vetoing the reinstall that would
+    // fix them. Verify the tree actually resolves before trusting it.
+    const health = trackingSatisfied
+      ? await checkInstallTree(installedPath)
+      : { ok: false as const };
+    if (trackingSatisfied && !health.ok) {
+      logger?.warn?.(
+        `[system-toolsets] ${entry.toolsetId}@${entry.version} is recorded as installed but its ` +
+          `dependency tree is broken (cannot resolve ${health.missingDep}); reinstalling`,
+      );
+    }
+    const satisfied = trackingSatisfied && health.ok;
     if (satisfied) {
       logger?.info?.(`[system-toolsets] ${entry.toolsetId}@${entry.version} already installed`);
       if (debugOn) {
@@ -130,7 +153,7 @@ export async function runSystemBootstrap(opts: SystemBootstrapOptions): Promise<
       // sitting on disk. Re-derive the install path and ensure the
       // record exists.
       if (entry.kind === 'mcp-toolset' && entry.entry) {
-        const expectedPath = join(systemToolsetsInstallDir(home), installDirName(entry), 'package');
+        const expectedPath = installedPath;
         if (existsSync(expectedPath)) {
           const list = await store.listInstalledToolsets({ kind: 'system' });
           const hasRecord = list.some(
@@ -297,6 +320,13 @@ export async function reconcileSystemToolsetFromDisk(opts: {
 
   const expectedPath = join(systemToolsetsInstallDir(home), installDirName(entry), 'package');
   if (!existsSync(expectedPath)) return { reconciled: false };
+  // Never re-register a tree whose dependency links dangle (the
+  // relocated-junction failure mode — see install-health.ts). The next
+  // boot's bootstrap detects the same breakage and reinstalls; vouching
+  // for the broken tree here would just move the failure into the
+  // user's tool call.
+  const health = await checkInstallTree(expectedPath);
+  if (!health.ok) return { reconciled: false };
 
   const list = await store.listInstalledToolsets({ kind: 'system' });
   const hasRecord = list.some(
@@ -494,8 +524,15 @@ export async function* installSystemToolsetStreaming(
     logger?.info?.(`[system-toolsets] running pnpm install --prod for ${entry.toolsetId}`);
     // `runPnpm` prepends `--ignore-scripts` itself — passing it here would
     // duplicate the flag.
+    //
+    // Hoisted node-linker because this install runs in a staging dir that
+    // is renamed into place afterwards — pnpm's default isolated linker
+    // produces a tree that does not survive that rename on Windows (see
+    // PNPM_HOISTED_NODE_LINKER's doc comment; surfaced as "Cannot find
+    // module 'playwright…'" from the Chromium post-install on clean
+    // Windows machines).
     const pnpmResult = yield* pump<SystemToolsetInstallEvent, PnpmResult>((emit) =>
-      runPnpm(['install', '--prod', '--frozen-lockfile'], {
+      runPnpm(['install', '--prod', '--frozen-lockfile', PNPM_HOISTED_NODE_LINKER], {
         cwd: pkgDir,
         ...(signal ? { signal } : {}),
         onLine: (chunk) => emit({ type: 'log', line: chunk }),

@@ -1,3 +1,20 @@
+/**
+ * Config override for every pnpm command that installs or operates inside
+ * a relocatable install tree (system toolsets, catalog npm toolsets).
+ *
+ * Those trees are `pnpm install`ed in a staging directory and renamed into
+ * place. pnpm's default isolated linker uses NTFS junctions on Windows,
+ * whose targets are stored as absolute paths — after the rename every link
+ * dangles and the first cross-package require fails. A hoisted tree
+ * contains no links and survives relocation on every platform.
+ *
+ * Later invocations against the same tree (`pnpm exec playwright …`) must
+ * repeat the flag: when the current config disagrees with the linker
+ * recorded in `node_modules/.modules.yaml`, pnpm silently rebuilds the
+ * tree with the default isolated linker before running the command.
+ */
+export const PNPM_HOISTED_NODE_LINKER = '--config.node-linker=hoisted';
+
 export interface PnpmInvocationOptions {
   pnpmPath?: string;
   nodePath?: string;

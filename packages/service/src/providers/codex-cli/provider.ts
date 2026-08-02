@@ -3,7 +3,8 @@ import { ProviderQueue } from '../queue.js';
 import { ExternalToolsUnsupportedError, SessionResumeError } from '../types.js';
 import type { LLMProvider, LLMSession, ModelInfo, ProviderName, SessionOpts } from '../types.js';
 import { type CodexBinary, resolveCodexBinary } from './binary.js';
-import type { CodexPermissionMode, CodexReasoningEffort } from './invoker.js';
+import type { CodexPermissionMode } from './invoker.js';
+import { type CodexReasoningEffort, isCodexReasoningEffort } from './reasoning.js';
 import { CodexCliSession, type CodexSessionDeps } from './session.js';
 
 const DEFAULT_MODEL = 'gpt-5.5';
@@ -17,23 +18,45 @@ const log = createLogger('codex-cli');
  * fine-tunes, OSS models via `--oss`) can extend the list via
  * `config.codexCli.extraModels`.
  *
- * Display labels are cosmetic — the id is what's passed to `-m`. Update
- * here when OpenAI ships a new revision; a stale label just means the
- * dropdown reads the older revision number while the alias still routes
- * to whatever Codex's resolver picks.
+ * Display labels are cosmetic — the id is what's passed to `-m`. Keep these
+ * entries and their model-specific effort lists synchronized with Codex's
+ * model catalog when OpenAI ships a new family or revision.
  */
 const HARDCODED_MODELS: ModelInfo[] = [
+  {
+    id: 'gpt-5.6-sol',
+    name: 'gpt-5.6-sol — GPT-5.6 Sol',
+    supportsReasoning: true,
+    reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
+    defaultReasoningEffort: 'low',
+  },
+  {
+    id: 'gpt-5.6-terra',
+    name: 'gpt-5.6-terra — GPT-5.6 Terra',
+    supportsReasoning: true,
+    reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
+    defaultReasoningEffort: 'medium',
+  },
+  {
+    id: 'gpt-5.6-luna',
+    name: 'gpt-5.6-luna — GPT-5.6 Luna',
+    supportsReasoning: true,
+    reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+    defaultReasoningEffort: 'medium',
+  },
   {
     id: 'gpt-5.5',
     name: 'gpt-5.5 — GPT-5.5',
     supportsReasoning: true,
-    reasoningEfforts: ['low', 'medium', 'high'],
+    reasoningEfforts: ['low', 'medium', 'high', 'xhigh'],
+    defaultReasoningEffort: 'medium',
   },
   {
     id: 'gpt-5.4',
     name: 'gpt-5.4 — GPT-5.4',
     supportsReasoning: true,
-    reasoningEfforts: ['low', 'medium', 'high'],
+    reasoningEfforts: ['low', 'medium', 'high', 'xhigh'],
+    defaultReasoningEffort: 'medium',
   },
   {
     id: 'gpt-5.3',
@@ -220,18 +243,16 @@ export class CodexCliProvider implements LLMProvider {
  *      frontmatter resolved by ChatManager).
  *   3. Provider-level `defaultReasoningEffort`.
  *
- * Codex only accepts `low | medium | high`. Any other string is dropped
- * silently — gezels with arbitrary reasoning effort labels (e.g. Ollama's
- * `none`) just run without the override.
+ * Codex accepts a wider effort vocabulary than most providers, but individual
+ * models expose only a subset. Unknown cross-provider labels are dropped so a
+ * gezel configured for another provider still runs with Codex's model default.
  */
 function pickReasoningEffort(
   perTurn: string | undefined,
-  perGezel: 'low' | 'medium' | 'high' | undefined,
+  perGezel: CodexReasoningEffort | undefined,
   providerDefault: CodexReasoningEffort | undefined,
 ): CodexReasoningEffort | undefined {
-  if (perTurn === 'low' || perTurn === 'medium' || perTurn === 'high') {
-    return perTurn;
-  }
+  if (isCodexReasoningEffort(perTurn)) return perTurn;
   if (perGezel) return perGezel;
   return providerDefault;
 }

@@ -14,12 +14,8 @@ import type {
   TurnUsage,
 } from '../types.js';
 import { CODEX_CLI_EXCLUDED_MCP_TOOLS } from './excluded-mcp-tools.js';
-import {
-  type CodexInvokerHooks,
-  type CodexPermissionMode,
-  type CodexReasoningEffort,
-  runCodexTurn,
-} from './invoker.js';
+import { type CodexInvokerHooks, type CodexPermissionMode, runCodexTurn } from './invoker.js';
+import type { CodexReasoningEffort } from './reasoning.js';
 import {
   type CodexMcpServerEntry,
   type CodexRuntimeConfig,

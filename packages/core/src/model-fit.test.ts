@@ -61,6 +61,60 @@ describe('computeModelFit', () => {
   });
 });
 
+describe('computeModelFit — the non-expert VRAM gate on fits-offload', () => {
+  // A 4 GB card + 32 GB RAM — the GTX 1650 report that motivated the gate.
+  const smallGpu = {
+    usableBytes: Math.floor(4 * GiB * 0.95),
+    totalRamBytes: 32 * GiB,
+    gpuVramBytes: 4 * GiB,
+    admissibleBytes: Math.floor(4 * GiB * 0.95) + Math.floor(32 * GiB * 0.6),
+  };
+
+  it('still offers expert offload on a 4 GB card when the estimated residue fits', () => {
+    // gemma4-26b-q4 shape: ~16.2 GiB resident MoE; 15% residue ≈ 2.4 GiB ≤ 3.8.
+    const r = computeModelFit({ residentBytes: 16.2 * GiB, isMoE: true, ...smallGpu });
+    expect(r.tier).toBe('fits-offload');
+  });
+
+  it('demotes to tight when the estimated always-active residue exceeds VRAM', () => {
+    // 2 GB card: 15% of 16.2 GiB ≈ 2.4 GiB > 1.9 GiB usable — "runs on the
+    // GPU" would be a false promise; the engine has to spill layers to CPU.
+    const r = computeModelFit({
+      residentBytes: 16.2 * GiB,
+      isMoE: true,
+      usableBytes: Math.floor(2 * GiB * 0.95),
+      totalRamBytes: 32 * GiB,
+      gpuVramBytes: 2 * GiB,
+      admissibleBytes: Math.floor(2 * GiB * 0.95) + Math.floor(32 * GiB * 0.6),
+    });
+    expect(r.tier).toBe('tight');
+    expect(r.runnable).toBe(true);
+    expect(r.detail).toMatch(/always-active/i);
+  });
+
+  it('an exact scanned residue overrides the estimate in both directions', () => {
+    // Estimate would pass (2.4 ≤ 3.8) but the real GGUF says 5 GiB → tight.
+    const heavyResidue = computeModelFit({
+      residentBytes: 16.2 * GiB,
+      isMoE: true,
+      nonExpertBytes: 5 * GiB,
+      ...smallGpu,
+    });
+    expect(heavyResidue.tier).toBe('tight');
+    // Estimate would fail on a 2 GB card, but the real residue is tiny → offload.
+    const lightResidue = computeModelFit({
+      residentBytes: 16.2 * GiB,
+      isMoE: true,
+      nonExpertBytes: 1 * GiB,
+      usableBytes: Math.floor(2 * GiB * 0.95),
+      totalRamBytes: 32 * GiB,
+      gpuVramBytes: 2 * GiB,
+      admissibleBytes: Math.floor(2 * GiB * 0.95) + Math.floor(32 * GiB * 0.6),
+    });
+    expect(lightResidue.tier).toBe('fits-offload');
+  });
+});
+
 describe('computeModelFit — the admission ceiling', () => {
   // The reported failure: on a 24 GB card + 64 GB RAM the browser offered a
   // 42 GB MoE (80% of system RAM says yes), the daemon's broker refused it,
