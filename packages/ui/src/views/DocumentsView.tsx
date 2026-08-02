@@ -4,6 +4,7 @@ import { api } from '../api.js';
 import { ConfirmDialog } from '../components/ConfirmDialog.js';
 import { type FileEntry, FileTree } from '../components/FileTree.js';
 import { NewPathDialog } from '../components/NewPathDialog.js';
+import { documentLabel } from '../components/document-label.js';
 import { flushSerializedAutosave } from '../hooks/useSerializedAutosave.js';
 import { useEffectiveTheme } from '../theme.js';
 import { DocumentDetail } from './DocumentDetail.js';
@@ -353,6 +354,7 @@ export function DocumentsView() {
             ) : (
               <FileTree
                 entries={entries}
+                labelFor={(e) => documentLabel(e.name)}
                 onSelect={(e) => selectDocument(e)}
                 onRename={(e) => renameDocument(e)}
                 onDelete={(e) => deleteDocument(e)}

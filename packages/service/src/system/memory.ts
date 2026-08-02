@@ -9,6 +9,7 @@ import {
   computeCapacityBudget,
   setDetectedGpuVramBytes,
 } from '../providers/native/capacity-budget.js';
+import type { DarwinSystemMemorySnapshot } from './darwin-memory.js';
 import type { GezelProcessMemorySnapshot } from './gezel-process-memory.js';
 
 const exec = promisify(execFile);
@@ -174,12 +175,14 @@ export interface SampleMachineMemoryUsageOptions {
   engineModelWeightsBytes?: number;
   /** macOS physical footprint for gezeld + same-home engine processes. */
   gezelProcessMemory?: GezelProcessMemorySnapshot | null;
+  /** macOS Activity Monitor-style used/cache/free counters. */
+  darwinSystemMemory?: DarwinSystemMemorySnapshot | null;
   /**
    * CPU inference deliberately uses main RAM even when a discrete GPU exists.
    * The UI should describe the pool actually backing the selected backend.
    */
   forceMainMemory?: boolean;
-  /** Test seams; production defaults come from node:os / process.memoryUsage. */
+  /** Portable fallback test seams; macOS production uses darwinSystemMemory. */
   freeRamBytes?: number;
   serviceRssBytes?: number;
   sampledAt?: string;
@@ -211,8 +214,19 @@ export function sampleMachineMemoryUsage(
   const sampledAt = opts.sampledAt ?? new Date().toISOString();
 
   if (mainMemory) {
-    const freeRamBytes = clamp(finiteNonNegative(opts.freeRamBytes ?? freemem()), 0, totalRamBytes);
-    const usedBytes = Math.max(0, totalRamBytes - freeRamBytes);
+    const freeRamBytes = clamp(
+      finiteNonNegative(opts.darwinSystemMemory?.freeBytes ?? opts.freeRamBytes ?? freemem()),
+      0,
+      totalRamBytes,
+    );
+    const cachedBytes = opts.darwinSystemMemory
+      ? clamp(
+          finiteNonNegative(opts.darwinSystemMemory.cachedBytes),
+          0,
+          totalRamBytes - freeRamBytes,
+        )
+      : null;
+    const usedBytes = Math.max(0, totalRamBytes - freeRamBytes - (cachedBytes ?? 0));
     const serviceRssBytes = finiteNonNegative(opts.serviceRssBytes ?? process.memoryUsage().rss);
     const observedBytes =
       opts.gezelProcessMemory &&
@@ -239,7 +253,8 @@ export function sampleMachineMemoryUsage(
       gezelEngineProcessCount: opts.gezelProcessMemory?.engineProcessCount ?? 0,
       orphanedGezelEngineProcessCount: opts.gezelProcessMemory?.orphanedEngineProcessCount ?? 0,
       otherBytes: Math.max(0, usedBytes - gezelBytesAttributed),
-      freeBytes: Math.max(0, totalRamBytes - usedBytes),
+      cachedBytes,
+      freeBytes: freeRamBytes,
       sampledAt,
       source: 'system-memory',
       deviceNames: [],
@@ -298,6 +313,7 @@ export function sampleMachineMemoryUsage(
     gezelEngineProcessCount: 0,
     orphanedGezelEngineProcessCount: 0,
     otherBytes: usedBytes === null ? null : Math.max(0, usedBytes - gezelBytesEstimated),
+    cachedBytes: null,
     freeBytes: usedBytes === null ? null : Math.max(0, totalBytes - usedBytes),
     sampledAt,
     source: memoryReadings.length > 0 ? 'device-health' : 'capacity-only',

@@ -154,6 +154,7 @@ const DEFAULT_RESPONSES: Record<string, unknown> = {
     gezelEngineProcessCount: 1,
     orphanedGezelEngineProcessCount: 0,
     otherBytes: 36_000_000_000,
+    cachedBytes: 0,
     freeBytes: 80_000_000_000,
     sampledAt: '2026-07-29T12:00:00.000Z',
     source: 'system-memory',

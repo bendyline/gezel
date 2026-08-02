@@ -27,7 +27,8 @@ function percent(bytes: number, totalBytes: number): number {
  * allocations) separately from the engine broker's capacity reservation.
  * Platforms without portable per-process accelerator accounting retain the
  * reservation estimate. Aggregate used/free figures come from the OS on
- * UMA/CPU hosts and the GPU driver on discrete cards.
+ * UMA/CPU hosts and the GPU driver on discrete cards. macOS file cache stays
+ * separate because it is reclaimable capacity, not "Other" app use.
  */
 export function MachineMemoryStrip({ pollMs = 1_000 }: Props) {
   const [usage, setUsage] = useState<MachineMemoryUsage | null>(null);
@@ -77,6 +78,8 @@ export function MachineMemoryStrip({ pollMs = 1_000 }: Props) {
   const observed = typeof usage.gezelBytesObserved === 'number';
   const gezelBytes = usage.gezelBytesObserved ?? usage.gezelBytesEstimated;
   const otherPercent = usage.otherBytes === null ? 0 : percent(usage.otherBytes, usage.totalBytes);
+  const cachedBytes = typeof usage.cachedBytes === 'number' ? usage.cachedBytes : null;
+  const cachedPercent = cachedBytes === null ? 0 : percent(cachedBytes, usage.totalBytes);
   const gezelSegments = [
     {
       key: 'infra',
@@ -112,6 +115,7 @@ export function MachineMemoryStrip({ pollMs = 1_000 }: Props) {
         } from an earlier service session`
       : null,
     usage.otherBytes === null ? null : `other use ${formatBytes(usage.otherBytes)}`,
+    cachedBytes === null ? null : `cached files ${formatBytes(cachedBytes)}, available to apps`,
     usage.freeBytes === null ? null : `free ${formatBytes(usage.freeBytes)}`,
   ]
     .filter(Boolean)
@@ -152,6 +156,12 @@ export function MachineMemoryStrip({ pollMs = 1_000 }: Props) {
             className="machine-memory-segment machine-memory-segment-other"
             style={{ width: `${otherPercent}%` }}
           />
+          {cachedBytes !== null && cachedBytes > 0 && (
+            <span
+              className="machine-memory-segment machine-memory-segment-cached"
+              style={{ width: `${cachedPercent}%` }}
+            />
+          )}
         </div>
       </Tooltip.Provider>
       <div className="machine-memory-legend">
@@ -164,6 +174,12 @@ export function MachineMemoryStrip({ pollMs = 1_000 }: Props) {
           <span>
             <i className="machine-memory-swatch machine-memory-swatch-other" aria-hidden />
             Other {formatBytes(usage.otherBytes)}
+          </span>
+        )}
+        {cachedBytes !== null && (
+          <span title="Reclaimable file cache available to apps">
+            <i className="machine-memory-swatch machine-memory-swatch-cached" aria-hidden />
+            Cached {formatBytes(cachedBytes)}
           </span>
         )}
         {usage.freeBytes !== null && (

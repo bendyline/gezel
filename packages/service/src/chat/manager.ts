@@ -101,6 +101,7 @@ import {
 import {
   AnthropicCliProvider,
   CLAUDE_CLI_EXCLUDED_MCP_TOOLS,
+  isClaudeReasoningEffort,
 } from '../providers/anthropic-cli/index.js';
 import { AnthropicProvider } from '../providers/anthropic.js';
 import { salvageCodeBlocks } from '../providers/code-block-salvage.js';
@@ -9804,6 +9805,7 @@ export class ChatManager {
       });
     } else if (name === 'anthropic-cli') {
       const cli = config.anthropicCli ?? {};
+      const configuredReasoningEffort = config.defaultReasoningEffort?.['anthropic-cli'];
       provider = new AnthropicCliProvider({
         ...(cli.binaryPath ? { binaryPath: cli.binaryPath } : {}),
         ...(config.defaultModel?.['anthropic-cli']
@@ -9811,6 +9813,9 @@ export class ChatManager {
           : {}),
         ...(cli.extraModels ? { extraModels: cli.extraModels } : {}),
         ...(cli.defaultPermissionMode ? { defaultPermissionMode: cli.defaultPermissionMode } : {}),
+        ...(isClaudeReasoningEffort(configuredReasoningEffort)
+          ? { defaultReasoningEffort: configuredReasoningEffort }
+          : {}),
         ...(cli.manageRuntimeFiles !== undefined
           ? { manageRuntimeFiles: cli.manageRuntimeFiles }
           : {}),

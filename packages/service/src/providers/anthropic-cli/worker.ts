@@ -5,6 +5,7 @@ import { SessionResumeError } from '../types.js';
 import type { SessionOpts, ToolCallEvent, TurnUsage } from '../types.js';
 import { buildTurnUsage } from '../usage-builder.js';
 import type { ClaudePermissionMode } from './provider.js';
+import type { ClaudeReasoningEffort } from './reasoning.js';
 import {
   type ClaudeMcpServerEntry,
   writeRuntimeMcpConfig,
@@ -90,6 +91,7 @@ export interface WorkerTurnHooks {
 export interface ClaudeWorkerOpts {
   binaryPath: string;
   model: string;
+  reasoningEffort?: ClaudeReasoningEffort;
   permissionMode: ClaudePermissionMode;
   systemMessage: string;
   context: NonNullable<SessionOpts['claudeCliContext']>;
@@ -282,7 +284,12 @@ export class ClaudeWorker {
     try {
       child = this.spawn(this.opts.binaryPath, args, {
         cwd: this.opts.context.cwd,
-        env: process.env,
+        env: {
+          ...process.env,
+          ...(this.opts.reasoningEffort
+            ? { CLAUDE_CODE_EFFORT_LEVEL: this.opts.reasoningEffort }
+            : {}),
+        },
         stdio: ['pipe', 'pipe', 'pipe'],
       });
     } catch (err) {

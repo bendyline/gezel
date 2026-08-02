@@ -28,6 +28,7 @@ import { GezelIcon } from './GezelIcon.js';
 import { NewPathDialog } from './NewPathDialog.js';
 import { ProjectActionsMenu } from './ProjectActionsMenu.js';
 import { ProjectQuestionsDialog } from './ProjectQuestionsDialog.js';
+import { documentLabel } from './document-label.js';
 import { type CreateKind, requestCreate } from './nav-intents.js';
 import { queueFocusSessionError } from './pending-focus-session-error.js';
 import { tabKey, toRecentTab } from './recent-tabs.js';
@@ -681,6 +682,7 @@ export function Sidebar({
             <li className="app-sidebar-tree">
               <FileTree
                 entries={docs}
+                labelFor={(entry) => documentLabel(entry.name)}
                 selectedPath={selection?.kind === 'document' ? selection.path : undefined}
                 onSelect={(entry) => {
                   if (entry.isDirectory) return;

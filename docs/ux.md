@@ -129,6 +129,15 @@ Rules:
   danger-red (emergency stop), the security posture latches sealed-green
   on Super Lockdown and open-amber on Unrestricted. Middle options keep
   the accent; never give every key its own color.
+- **State groups are the exception: they latch in the state's own color.**
+  A tray that sets an entity's **lifecycle state** rather than a preference —
+  the task status keys (active / paused / complete / canceled) — may give
+  every key its own latch, because the color is data the app already shows
+  elsewhere (the task list's status dots) and only one key is ever latched,
+  so the tray still reads as a single color. Each key also carries the glyph
+  its state is already understood by: play, pause, check, circle-slash. This
+  holds only for states the app colors elsewhere; a preference group with no
+  meaningful ends stays on the accent.
 - **Native `<input type="radio">` stays native** in dense config forms
   (folder scopes, engine settings) — the round dot is a true circle and
   keeps its shape. Reach for keys when the choice is prominent enough to
@@ -236,7 +245,7 @@ they respond; Dialogs are dismissable with Escape/backdrop-click.
 the choice, use **Tabs**. If it's one of many equivalent values (a long
 model list), use **Select**. If there are roughly 2–5 mutually exclusive
 options and the choices themselves carry the meaning (Copilot / OpenAI /
-Ollama, engagement modes, tempo), use **keys in a tray** — see
+Ollama, engagement modes, tempo, a task's status), use **keys in a tray** — see
 [Controls: keys in trays](#controls-keys-in-trays). The Home + Settings
 provider switches are this pattern.
 
@@ -311,6 +320,17 @@ read as pressable. Everything that overlays out of a bottom bar opens upward
 take `side="top"` (selects flip on their own). The project status bar
 ([ProjectGitStatusBar](../packages/ui/src/components/ProjectGitStatusBar.tsx))
 is the reference.
+
+**Save state is ambient, so it lives in the status bar.** An editor's
+saved/unsaved indicator goes in the shell's status bar
+([AutosaveStatus](../packages/ui/src/components/AutosaveStatus.tsx) into
+Squisq's `statusBarSlotRight`), never in the toolbar beside the actions —
+put it up there and a routine autosave reads as loud as the buttons around
+it. It takes the bar's own small muted type rather than a colored chip, and
+the unsaved state is a bare `--warning` dot with its words in the tooltip
+and an `.sr-only` label: a document being typed into is the normal case and
+doesn't deserve a sentence. Only the transient "Saving…"/"Saved" pair and
+the actionable failure ("Save failed" + Retry, in `--danger`) carry text.
 
 **Terminal output.** Terminal text is spatial, not prose: preserve whitespace
 and columns exactly, and contain overflow in a keyboard-focusable viewport with

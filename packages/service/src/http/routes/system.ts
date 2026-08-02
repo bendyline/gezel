@@ -33,6 +33,7 @@ import {
 import { resolvePnpmCommand, spawnPnpm } from '../../packages/pnpm.js';
 import { resolveCopilotAvailability } from '../../providers/copilot-availability.js';
 import { resolveInstalledSystemLibrary } from '../../system-toolsets/resolve.js';
+import { sampleDarwinSystemMemoryCached } from '../../system/darwin-memory.js';
 import { collectSystemDiagnosticsCached } from '../../system/diagnostics.js';
 import { sampleDarwinGezelProcessMemoryCached } from '../../system/gezel-process-memory.js';
 import {
@@ -78,16 +79,19 @@ export function systemRoutes(ctx: ServiceContext): Hono {
     const unifiedMemory =
       profile.source === 'darwin-unified' ||
       (profile.gpuVramBytes !== null && profile.gpuVramBytes >= profile.totalRamBytes * 0.75);
-    // Main/UMA memory comes directly from node:os. Avoid spawning any SMI
-    // adapter on Mac and CPU-only hosts, where it cannot improve this sample.
-    const deviceHealth =
+    // Main/UMA memory comes from host counters (`vm_stat` on macOS). Avoid
+    // spawning any SMI adapter there or on CPU-only hosts, where it cannot
+    // improve this sample.
+    const sampleDarwinMemory = profile.platform === 'darwin' && (forceMainMemory || unifiedMemory);
+    const [deviceHealth, gezelProcessMemory, darwinSystemMemory] = await Promise.all([
       forceMainMemory || profile.source === 'system-ram-fallback' || unifiedMemory
         ? undefined
-        : await ctx.gpuArbiter.getDeviceHealthStatus(1_000);
-    const gezelProcessMemory =
-      profile.platform === 'darwin' && (forceMainMemory || unifiedMemory)
-        ? await sampleDarwinGezelProcessMemoryCached({ home: ctx.home })
-        : null;
+        : ctx.gpuArbiter.getDeviceHealthStatus(1_000),
+      sampleDarwinMemory ? sampleDarwinGezelProcessMemoryCached({ home: ctx.home }) : null,
+      sampleDarwinMemory
+        ? sampleDarwinSystemMemoryCached({ totalBytes: profile.totalRamBytes })
+        : null,
+    ]);
     const engineSnapshot = ctx.chat.peekEngineStatus();
     const engineModelWeightsBytes = (engineSnapshot?.entries ?? []).reduce(
       (sum, entry) =>
@@ -100,6 +104,7 @@ export function systemRoutes(ctx: ServiceContext): Hono {
       engineCommittedBytes: engineSnapshot?.committedBytes ?? 0,
       engineModelWeightsBytes,
       gezelProcessMemory,
+      darwinSystemMemory,
       forceMainMemory,
     });
     return c.json(MachineMemoryUsageSchema.parse(snapshot));

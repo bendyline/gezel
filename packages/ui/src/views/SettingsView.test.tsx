@@ -430,6 +430,40 @@ describe('SettingsView', () => {
     expect(within(effortSelect).getByRole('option', { name: 'ultra' })).toBeInTheDocument();
   });
 
+  it('offers model-specific Claude CLI reasoning levels', async () => {
+    vi.mocked(api.getConfig).mockResolvedValue({
+      provider: 'anthropic-cli',
+      meesterGezelId: 'gz-meester',
+      hasGithubToken: true,
+      defaultModel: { 'anthropic-cli': 'opus' },
+      defaultReasoningEffort: { 'anthropic-cli': 'xhigh' },
+      anthropicCliStatus: { installed: true, path: '/usr/local/bin/claude', version: '2.1.144' },
+    } as never);
+    vi.mocked(api.listProviderModels).mockResolvedValue({
+      models: [
+        {
+          id: 'opus',
+          name: 'opus — Latest Claude Opus',
+          supportsReasoning: true,
+          reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+          defaultReasoningEffort: 'xhigh',
+        },
+      ],
+    } as never);
+
+    render(<SettingsView />);
+    fireEvent.click(await screen.findByTestId('settings-nav-anthropicCli'));
+
+    expect(await screen.findByTestId('model-picker-anthropic-cli')).toBeInTheDocument();
+    const effortSelect = await screen.findByDisplayValue('xhigh');
+    expect(
+      within(effortSelect).getByRole('option', { name: 'Default (xhigh)' }),
+    ).toBeInTheDocument();
+    expect(within(effortSelect).getByRole('option', { name: 'low' })).toBeInTheDocument();
+    expect(within(effortSelect).getByRole('option', { name: 'max' })).toBeInTheDocument();
+    expect(within(effortSelect).queryByRole('option', { name: 'ultra' })).toBeNull();
+  });
+
   it('lists gezellen for the Meester picker', async () => {
     render(<SettingsView />);
     await waitFor(() => {

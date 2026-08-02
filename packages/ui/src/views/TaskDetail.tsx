@@ -19,6 +19,7 @@ import { GezelIcon } from '../components/GezelIcon.js';
 import { PromoteToTabButton } from '../components/PromoteToTabButton.js';
 import { PromptDialog } from '../components/PromptDialog.js';
 import { TaskChatPane } from '../components/TaskChatPane.js';
+import { TaskStatusKeys } from '../components/TaskStatusKeys.js';
 import { TaskStepPanel } from '../components/TaskStepPanel.js';
 import { TaskStepTracker } from '../components/TaskStepTracker.js';
 import { Select } from '../primitives/index.js';
@@ -26,7 +27,9 @@ import { useEffectiveTheme } from '../theme.js';
 
 type CronOverlap = 'skip' | 'queue' | 'concurrent';
 
-const STATUS_VALUES: TaskStatus[] = ['active', 'paused', 'complete', 'canceled'];
+/* A service-run job is only ever held or let run — it can't be marked done or
+   canceled by hand, since the schedule decides when it next fires. */
+const SYSTEM_JOB_STATUS_VALUES: Array<Exclude<TaskStatus, 'draft'>> = ['active', 'paused'];
 
 function formatTimestamp(at: string): string {
   const date = new Date(at);
@@ -522,25 +525,12 @@ export function TaskDetail({
               </button>
             </div>
           ) : (
-            <Select.Root
+            <TaskStatusKeys
               value={task.status}
+              options={isSystemJob ? SYSTEM_JOB_STATUS_VALUES : undefined}
               disabled={busy}
-              onValueChange={(v) => void setStatus(v as TaskStatus)}
-            >
-              <Select.Trigger>
-                <Select.Value />
-              </Select.Trigger>
-              <Select.Content>
-                {(isSystemJob
-                  ? STATUS_VALUES.filter((status) => status === 'active' || status === 'paused')
-                  : STATUS_VALUES
-                ).map((s) => (
-                  <Select.Item key={s} value={s}>
-                    {s}
-                  </Select.Item>
-                ))}
-              </Select.Content>
-            </Select.Root>
+              onChange={(status) => void setStatus(status)}
+            />
           )}
           {isSystemJob ? (
             <div

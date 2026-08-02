@@ -1443,6 +1443,9 @@ html.embedded-chat #root {
 .machine-memory-segment-other {
   background: color-mix(in srgb, var(--warning) 62%, var(--surface));
 }
+.machine-memory-segment-cached {
+  background: color-mix(in srgb, var(--success) 28%, var(--surface));
+}
 .machine-memory-legend {
   display: flex;
   flex-wrap: wrap;
@@ -1468,6 +1471,9 @@ html.embedded-chat #root {
 }
 .machine-memory-swatch-other {
   background: color-mix(in srgb, var(--warning) 62%, var(--surface));
+}
+.machine-memory-swatch-cached {
+  background: color-mix(in srgb, var(--success) 28%, var(--surface));
 }
 .machine-memory-swatch-free {
   background: color-mix(in srgb, var(--surface) 75%, var(--panel));
@@ -3878,56 +3884,36 @@ button.danger {
   margin: 0 0 0.25rem;
 }
 
-/* Title row of a doc editor: heading left, autosave status chip right. */
-.project-doc-editor-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 0.5rem;
-}
-
-/* Autosave status as a small chip, not a sentence suffix. Idle renders
-   nothing (`:empty`) so a freshly opened editor shows no status at all. */
-.autosave-chip {
+/* Autosave status, rendered into the editor shell's bottom status bar. It
+   inherits that bar's small muted type rather than carrying a chip of its
+   own — save state is ambient, not an announcement. Idle renders nothing
+   (`:empty`), and dirty is a bare dot with the words behind the tooltip. */
+.autosave-status {
   display: inline-flex;
-  align-items: baseline;
+  align-items: center;
   gap: 0.4rem;
-  font-size: var(--text-2xs);
-  font-weight: 600;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  padding: 0.14rem 0.5rem;
-  border-radius: var(--radius-sm);
   white-space: nowrap;
 }
 
-.autosave-chip:empty {
+.autosave-status:empty {
   display: none;
 }
 
-.autosave-chip-dirty {
-  color: var(--warning);
-  background: var(--warning-bg);
+.autosave-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--warning);
 }
 
-.autosave-chip-saving {
-  color: var(--text-muted);
-  background: var(--surface);
-}
-
-.autosave-chip-saved {
-  color: var(--success);
-  background: var(--success-bg);
-}
-
-.autosave-chip-error {
+.autosave-status-error {
   color: var(--danger);
-  background: var(--danger-bg);
 }
 
-.autosave-chip-error .link-btn {
-  text-transform: none;
-  letter-spacing: normal;
+.autosave-status .link-btn {
+  font-size: inherit;
+  padding: 0 0.2rem;
 }
 
 .project-about-section {
@@ -9384,6 +9370,61 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
 }
 .task-status-dot.task-status-canceled {
   background: #e57373;
+}
+
+/* Task status keys (docs/ux.md → "State groups latch in the state's color").
+   The tray sets a lifecycle state rather than a preference, so the latched
+   key wears that state's own color and its glyph — go-green play, held-amber
+   pause, sealed-green check, struck-brick circle-slash. Only one key is ever
+   latched, so the tray still shows a single color at a time. Fixed inks, like
+   the engagement switch's emergency red: these fills hold on both themes. */
+.task-status-tray {
+  gap: 0.25rem;
+}
+
+.task-status-key {
+  padding: 0.35rem 0.65rem;
+}
+
+.task-status-key svg {
+  opacity: 0.7;
+}
+
+/* The latch has to survive the brief disabled window while the change saves,
+   or the current state visibly pops out mid-click. Unlatched keys still dim,
+   which is the saving signal. */
+.task-status-key.gz-key-active:disabled {
+  opacity: 1;
+  transform: translateY(1px);
+  box-shadow: var(--key-pressed-shadow);
+}
+
+.task-status-key.gz-key-active svg {
+  opacity: 1;
+}
+
+.task-status-key.gz-key-active[data-status="active"] {
+  background: linear-gradient(to bottom, #587f46, #689154);
+  border-color: #446837;
+  color: #f1f7ea;
+}
+
+.task-status-key.gz-key-active[data-status="paused"] {
+  background: linear-gradient(to bottom, #a87e22, #bb9132);
+  border-color: #8a671b;
+  color: #2b2007;
+}
+
+.task-status-key.gz-key-active[data-status="complete"] {
+  background: linear-gradient(to bottom, #446551, #4f785e);
+  border-color: #365343;
+  color: #ecf4ee;
+}
+
+.task-status-key.gz-key-active[data-status="canceled"] {
+  background: linear-gradient(to bottom, #8b463a, #9d5344);
+  border-color: #6c352b;
+  color: #fbeae6;
 }
 
 .task-ref {

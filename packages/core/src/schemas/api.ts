@@ -125,6 +125,8 @@ export const MachineMemoryUsageSchema = z.object({
   gezelEngineProcessCount: z.number().int().nonnegative(),
   orphanedGezelEngineProcessCount: z.number().int().nonnegative(),
   otherBytes: z.number().nonnegative().nullable(),
+  /** Reclaimable file cache, when the host exposes it separately from used RAM. */
+  cachedBytes: z.number().nonnegative().nullable().optional(),
   freeBytes: z.number().nonnegative().nullable(),
   sampledAt: z.string(),
   source: z.enum(['device-health', 'system-memory', 'capacity-only']),

@@ -179,6 +179,7 @@ describe('EngineStatusPill — simultaneous local engines', () => {
       gezelEngineProcessCount: 0,
       orphanedGezelEngineProcessCount: 0,
       otherBytes: 4 * GiB,
+      cachedBytes: null,
       freeBytes: 15 * GiB,
       sampledAt: '2026-07-29T12:00:00.000Z',
       source: 'device-health',
@@ -227,6 +228,7 @@ describe('EngineStatusPill — simultaneous local engines', () => {
       gezelEngineProcessCount: 0,
       orphanedGezelEngineProcessCount: 0,
       otherBytes: null,
+      cachedBytes: null,
       freeBytes: null,
       sampledAt: '2026-07-29T12:00:00.000Z',
       source: 'capacity-only',
@@ -263,7 +265,8 @@ describe('EngineStatusPill — simultaneous local engines', () => {
       gezelEngineProcessCount: 2,
       orphanedGezelEngineProcessCount: 2,
       otherBytes: 24 * GiB,
-      freeBytes: 28 * GiB,
+      cachedBytes: 20 * GiB,
+      freeBytes: 8 * GiB,
       sampledAt: '2026-07-29T12:00:00.000Z',
       source: 'system-memory',
       deviceNames: [],
@@ -285,6 +288,8 @@ describe('EngineStatusPill — simultaneous local engines', () => {
     expect(strip).toHaveAccessibleName(/models reserve about 36\.0 GiB/i);
     expect(strip).toHaveAccessibleName(/2 leftover Gezel engine processes/i);
     expect(screen.getByText('Gezel 76.0 GiB')).toBeInTheDocument();
+    expect(screen.getByText('Cached 20.0 GiB')).toBeInTheDocument();
+    expect(strip).toHaveAccessibleName(/cached files 20\.0 GiB, available to apps/i);
     expect(screen.getByText('Models reserve ~36.0 GiB for capacity planning')).toBeInTheDocument();
     expect(
       screen.getByText(

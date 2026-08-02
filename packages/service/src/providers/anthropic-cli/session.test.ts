@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ProviderQueue } from '../queue.js';
 import { SessionResumeError } from '../types.js';
+import type { ClaudeReasoningEffort } from './reasoning.js';
 import { AnthropicCliSession, isResumeFailureSignal } from './session.js';
 import type { ClaudeWorkerPool, ClaudeWorkerSpec, PoolSnapshot } from './worker-pool.js';
 
@@ -64,11 +65,16 @@ function makeMockPool(): MockPoolControl {
   return ctrl;
 }
 
-function buildSession(pool: ClaudeWorkerPool, initialResumeId?: string): AnthropicCliSession {
+function buildSession(
+  pool: ClaudeWorkerPool,
+  initialResumeId?: string,
+  reasoningEffort?: ClaudeReasoningEffort,
+): AnthropicCliSession {
   const queue = new ProviderQueue({ concurrency: 4 });
   return new AnthropicCliSession({
     binaryPath: '/fake/claude',
     model: 'sonnet',
+    ...(reasoningEffort ? { reasoningEffort } : {}),
     permissionMode: 'acceptEdits',
     systemMessage: 'You are a test gezel.',
     context: { sessionId: 'sess-1', gezelId: 'g-1', projectId: 'p-1', cwd: '/tmp' },
@@ -90,6 +96,13 @@ describe('AnthropicCliSession — façade contract', () => {
     expect(ctrl.runTurnCalls[0]?.prompt).toBe('hello');
     expect(ctrl.runTurnCalls[0]?.spec.context.sessionId).toBe('sess-1');
     expect(ctrl.runTurnCalls[0]?.spec.model).toBe('sonnet');
+  });
+
+  it('passes the configured reasoning effort to the worker spec', async () => {
+    const ctrl = makeMockPool();
+    const session = buildSession(ctrl.pool, undefined, 'xhigh');
+    await session.sendAndWait('think carefully');
+    expect(ctrl.runTurnCalls[0]?.spec.reasoningEffort).toBe('xhigh');
   });
 
   it('refreshes the cached claudeSessionId from the pool snapshot after each turn', async () => {

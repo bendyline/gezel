@@ -12,6 +12,7 @@ import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { AiToolbarButtons } from '../components/AiToolbarButtons.js';
+import { AutosaveStatus } from '../components/AutosaveStatus.js';
 import { queueComposerPrefill } from '../components/ChatComposer.js';
 import { ConfirmDialog } from '../components/ConfirmDialog.js';
 import { ExportToolbarControls } from '../components/DocumentExport/index.js';
@@ -2846,26 +2847,7 @@ function ProjectDocEditor({
 
   return (
     <section id={id} className="project-doc-editor project-about-anchor">
-      <div className="project-doc-editor-head">
-        <h3 className="project-doc-editor-title">{label}</h3>
-        <output className={`autosave-chip autosave-chip-${autosave.phase}`} aria-live="polite">
-          {autosave.phase === 'dirty' && 'Unsaved changes'}
-          {autosave.phase === 'saving' && 'Saving…'}
-          {autosave.phase === 'saved' && 'Saved'}
-          {autosave.phase === 'error' && (
-            <>
-              <span title={autosave.error?.message ?? 'unknown error'}>Save failed</span>
-              <button
-                type="button"
-                className="link-btn"
-                onClick={() => void autosave.retry().catch(() => {})}
-              >
-                Retry
-              </button>
-            </>
-          )}
-        </output>
-      </div>
+      <h3 className="project-doc-editor-title">{label}</h3>
       <p className="muted small" style={{ marginTop: 0, marginBottom: '0.4rem' }}>
         {hint}
       </p>
@@ -2878,6 +2860,7 @@ function ProjectDocEditor({
           showPlayTab={false}
           fullWidth
           toolbarSlotAfterActions={<AiToolbarButtons context="generic" />}
+          statusBarSlotRight={<AutosaveStatus autosave={autosave} />}
         />
       </div>
     </section>

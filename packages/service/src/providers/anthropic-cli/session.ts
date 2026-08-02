@@ -12,12 +12,14 @@ import type {
   TurnUsage,
 } from '../types.js';
 import type { ClaudePermissionMode } from './provider.js';
+import type { ClaudeReasoningEffort } from './reasoning.js';
 import type { ClaudeWorkerPool, ClaudeWorkerSpec } from './worker-pool.js';
 import type { WorkerTurnHooks } from './worker.js';
 
 export interface SessionDeps {
   binaryPath: string;
   model: string;
+  reasoningEffort?: ClaudeReasoningEffort;
   permissionMode: ClaudePermissionMode;
   systemMessage: string;
   context: NonNullable<SessionOpts['claudeCliContext']>;
@@ -84,6 +86,7 @@ export class AnthropicCliSession extends StreamingSessionBase implements LLMSess
     const spec: ClaudeWorkerSpec = {
       binaryPath: this.deps.binaryPath,
       model: this.deps.model,
+      ...(this.deps.reasoningEffort ? { reasoningEffort: this.deps.reasoningEffort } : {}),
       permissionMode: this.deps.permissionMode,
       systemMessage: this.deps.systemMessage,
       context: this.deps.context,

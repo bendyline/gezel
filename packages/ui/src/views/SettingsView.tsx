@@ -3032,6 +3032,22 @@ export function SettingsView() {
               />
             </div>
 
+            <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
+              <label className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
+                Reasoning effort
+              </label>
+              <EffortPicker
+                provider="anthropic-cli"
+                model={config?.defaultModel?.['anthropic-cli']}
+                value={config?.defaultReasoningEffort?.['anthropic-cli']}
+                onChange={(value) => void saveDefaultEffort('anthropic-cli', value)}
+              />
+            </div>
+            <p className="muted" style={{ fontSize: '0.85rem', marginTop: '0.25rem' }}>
+              Passed to Claude Code through <code>CLAUDE_CODE_EFFORT_LEVEL</code>. Options follow
+              the selected model; gezels can override it with their own effort setting.
+            </p>
+
             <details style={{ marginTop: '1rem' }}>
               <summary style={{ cursor: 'pointer' }}>
                 <strong>Advanced</strong>
