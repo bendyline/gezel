@@ -264,9 +264,7 @@ export function estimateKvReserveBytes(input: KvReserveInput): number | undefine
   const { blockCount, headCountKv, ctxTokens } = input;
   if (!blockCount || !headCountKv || !ctxTokens) return undefined;
   const headDim =
-    input.headCount && input.embeddingLength
-      ? input.embeddingLength / input.headCount
-      : undefined;
+    input.headCount && input.embeddingLength ? input.embeddingLength / input.headCount : undefined;
   const kDim = input.keyLength ?? headDim;
   const vDim = input.valueLength ?? headDim;
   if (!kDim || !vDim) return undefined;

@@ -1035,7 +1035,15 @@ export function projectRoutes(ctx: ServiceContext): Hono {
     const isTest =
       body.mode === 'test' || /\.(spec|test)\.(mts|mjs|ts|js|cjs|cts)$/.test(scriptRel);
     const args = isTest
-      ? [PNPM_HOISTED_NODE_LINKER, '--dir', playwright.installPath, 'exec', 'playwright', 'test', scriptAbs]
+      ? [
+          PNPM_HOISTED_NODE_LINKER,
+          '--dir',
+          playwright.installPath,
+          'exec',
+          'playwright',
+          'test',
+          scriptAbs,
+        ]
       : [
           PNPM_HOISTED_NODE_LINKER,
           '--dir',

@@ -1226,9 +1226,9 @@ describe('completion gates — unsatisfiable under writes-off', () => {
 
     const notes = await tasks.listNotes('default', task.num, buildId);
     expect(notes.some((n) => n.text.includes('Gate unsatisfiable — task paused'))).toBe(true);
-    expect(notes.some((n) => n.text.includes('Allow gezels to modify the workspace directory'))).toBe(
-      true,
-    );
+    expect(
+      notes.some((n) => n.text.includes('Allow gezels to modify the workspace directory')),
+    ).toBe(true);
   });
 
   it('a drawer-targeted gate stays repairable on a writes-off project', async () => {

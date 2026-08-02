@@ -418,9 +418,8 @@ export function readGgufSummary(
         const byLayer: number[] = [];
         for (let i = 0; i < infos.length; i++) {
           const info = infos[i] as { name: string; offset: number };
-          const end = i + 1 < infos.length
-            ? (infos[i + 1] as { offset: number }).offset
-            : dataBytes;
+          const end =
+            i + 1 < infos.length ? (infos[i + 1] as { offset: number }).offset : dataBytes;
           const size = Math.max(0, end - info.offset);
           if (EXPERT_TENSOR_RE.test(info.name)) {
             expertTotal += size;

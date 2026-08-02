@@ -338,7 +338,7 @@ describe('archetypeToCraftbook', () => {
     const doc = JSON.parse(archetypeToFiles(spec, '2026-06-05T00:00:00Z').files[1]!.content) as {
       description: string;
     };
-    expect(doc.description).toContain("artifacts drawer (`write_artifact` / `read_artifact`)");
+    expect(doc.description).toContain('artifacts drawer (`write_artifact` / `read_artifact`)');
     expect(doc.description).toContain('gated on artifact `audit.md`');
   });
 

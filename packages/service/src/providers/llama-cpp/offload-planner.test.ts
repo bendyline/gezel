@@ -148,9 +148,7 @@ describe('estimateKvReserveBytes', () => {
 
   it('computes full-attention KV bytes from header dims (f16)', () => {
     // 40 layers × 16384 ctx × 8 kv-heads × (128+128) dims × 2 B.
-    expect(estimateKvReserveBytes({ ...dims, kvCacheType: 'f16' })).toBe(
-      40 * 16384 * 8 * 256 * 2,
-    );
+    expect(estimateKvReserveBytes({ ...dims, kvCacheType: 'f16' })).toBe(40 * 16384 * 8 * 256 * 2);
   });
 
   it('honors explicit key/value lengths over embd/heads', () => {

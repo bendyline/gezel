@@ -2382,7 +2382,9 @@ export class TaskManager {
         };
       }
 
-      const frozenSurface = step.advanceWhen?.artifact ? ('artifact' as const) : ('workspace' as const);
+      const frozenSurface = step.advanceWhen?.artifact
+        ? ('artifact' as const)
+        : ('workspace' as const);
       const nudge =
         stage === 2 && deliverableFile
           ? buildStageTwoNudge({
@@ -2548,7 +2550,8 @@ export class TaskManager {
     // stripped from.
     const unsatFiles = await this.unsatisfiableWorkspaceGateFiles(projectId, gate, outcome);
     if (unsatFiles) {
-      const fileList = unsatFiles.length > 0 ? unsatFiles.map((f) => `\`${f}\``).join(', ') : 'files';
+      const fileList =
+        unsatFiles.length > 0 ? unsatFiles.map((f) => `\`${f}\``).join(', ') : 'files';
       const message = `This gate cannot be met right now: it requires workspace ${fileList} to change, but gezel workspace writes are OFF for this project — no gezel can create or edit workspace files. The task is paused for a human decision; do not retry. See the task notes for the fixes.`;
       const paused = await this.setStatus(projectId, task.num, 'paused').catch(() => ({
         ...task,
@@ -2596,7 +2599,9 @@ export class TaskManager {
     let stage: EscalationStage = modelDriven ? stageForPlateau(score) : 0;
     const deliverableFile = step.advanceWhen?.file;
     if (stage === 2 && !deliverableFile) stage = 1;
-    const rejectSurface = step.advanceWhen?.artifact ? ('artifact' as const) : ('workspace' as const);
+    const rejectSurface = step.advanceWhen?.artifact
+      ? ('artifact' as const)
+      : ('workspace' as const);
     const message =
       stage === 1
         ? buildStageOneNudge({

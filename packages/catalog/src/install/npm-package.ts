@@ -79,7 +79,13 @@ export async function installNpmPackageToolset(opts: NpmInstallOptions): Promise
     // isolated linker produces a tree that does not survive that rename
     // on Windows (see PNPM_HOISTED_NODE_LINKER's doc comment).
     const pnpm = resolvePnpmInvocation(
-      ['install', '--prod', '--ignore-scripts', '--frozen-lockfile=false', PNPM_HOISTED_NODE_LINKER],
+      [
+        'install',
+        '--prod',
+        '--ignore-scripts',
+        '--frozen-lockfile=false',
+        PNPM_HOISTED_NODE_LINKER,
+      ],
       {
         pnpmPath: process.env.GEZEL_PNPM_PATH,
         nodePath: process.env.GEZEL_NODE_PATH,

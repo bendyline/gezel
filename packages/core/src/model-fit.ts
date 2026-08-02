@@ -98,8 +98,7 @@ export function computeModelFit(input: ModelFitInput): ModelFitResult {
   // promise when the always-active residue actually fits VRAM, else the
   // engine has to spill layers to the CPU too and it belongs in `tight`.
   if (isMoE && gpuVramBytes != null && residentBytes <= ramBudget) {
-    const residueBytes =
-      input.nonExpertBytes ?? residentBytes * MOE_NON_EXPERT_FRACTION_ESTIMATE;
+    const residueBytes = input.nonExpertBytes ?? residentBytes * MOE_NON_EXPERT_FRACTION_ESTIMATE;
     if (residueBytes <= usableBytes) {
       return {
         tier: 'fits-offload',

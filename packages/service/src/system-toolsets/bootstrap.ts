@@ -17,6 +17,7 @@ import {
 import { systemToolsetsInstallDir } from '@bendyline/gezel/paths';
 import type { Store } from '../fs/store.js';
 import { type PnpmResult, runPnpm } from '../packages/pnpm.js';
+import { checkInstallTree } from './install-health.js';
 import { SYSTEM_LOCKFILES } from './locks.js';
 import {
   CHROMIUM_REVISION,
@@ -24,7 +25,6 @@ import {
   SYSTEM_TOOLSETS,
   isPlaceholder,
 } from './manifest.js';
-import { checkInstallTree } from './install-health.js';
 import { ensureChromiumInstalled } from './playwright-browsers.js';
 import { installDirName } from './resolve.js';
 import type { SystemStatusBus } from './status-bus.js';

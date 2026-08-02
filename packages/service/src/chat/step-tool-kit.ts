@@ -165,7 +165,14 @@ export function capPriorityPrefixForKind(kind: DeliverableKind | null): readonly
   if (kind === 'image-set') {
     return ['generate_image', 'render_image', 'list_dir', 'write_file'];
   }
-  return ['write_file', 'write_artifact', 'read_file', 'append_to_file', 'replace_in_file', 'validate'];
+  return [
+    'write_file',
+    'write_artifact',
+    'read_file',
+    'append_to_file',
+    'replace_in_file',
+    'validate',
+  ];
 }
 
 /** Kill switch for kit narrowing (D4 feature half). */
