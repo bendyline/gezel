@@ -60,6 +60,7 @@ import { setDefaultAutoSelectFamilyAttemptTimeout } from 'node:net';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isNativeDataFile } from './native-file-manifest-lib.mjs';
 import { detectPlatform, platformVariants } from './native-payload.mjs';
 
 setDefaultAutoSelectFamilyAttemptTimeout(5000);
@@ -465,9 +466,16 @@ async function downloadAndExtract({
       await rm(payload, { force: true });
     }
 
+    // Zip re-packing drops the exec bit, so restore it on everything that is
+    // not sidecar data. Marking data executable is not cosmetic: the manifest
+    // verifier treats any executable file as loadable, so an executable
+    // `gezel-llama-build.json` reads as an unpinned binary and fails the
+    // release. Deliberately shallow — nested trees like THIRD_PARTY_LICENSES/
+    // hold legal text that must stay unmarked, while the directory entry
+    // itself still needs 0755 here to stay traversable.
     if (process.platform !== 'win32') {
       for (const f of await readdir(targetDir)) {
-        if (!f.endsWith('.exe') && !f.endsWith('.txt')) {
+        if (!f.endsWith('.exe') && !isNativeDataFile(f)) {
           await chmod(join(targetDir, f), 0o755);
         }
       }

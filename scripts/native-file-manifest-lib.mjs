@@ -8,6 +8,30 @@ export const NATIVE_FILE_MANIFEST_SCHEMA_VERSION = 2;
 const SIGNATURE_EXPECTATIONS = new Set(['bendyline', 'vendor-hash-only', 'hash-only']);
 
 /**
+ * Sidecar data that travels with the binaries — engine build metadata and
+ * legal texts. Keep this set tight: an extension listed here ships unpinned,
+ * so a genuinely new kind of sidecar should fail the manifest loudly rather
+ * than be waved through by a broad rule.
+ */
+const NATIVE_DATA_EXTENSIONS = ['.json', '.md', '.txt'];
+
+/**
+ * Classify sidecar data by extension alone, never by file mode.
+ *
+ * The two sides of the manifest see different modes for the same bytes. The
+ * native release generates the manifest from the build tree, where
+ * `gezel-llama-build.json` is written 0644. Staging in
+ * fetch-native-binaries.mjs then restores the exec bits that zip re-packing
+ * drops, and it cannot tell data from a stripped executable, so the same file
+ * arrives 0755. Mode-independent classification is what keeps generator and
+ * verifier from disagreeing about which files are supposed to be pinned.
+ */
+export function isNativeDataFile(name) {
+  const lower = name.toLowerCase();
+  return NATIVE_DATA_EXTENSIONS.some((extension) => lower.endsWith(extension));
+}
+
+/**
  * Build the source-pinnable manifest entry for one native platform directory.
  *
  * Every executable/loadable regular file is hashed. Every symlink is recorded
@@ -291,6 +315,7 @@ async function inventoryNativePlatform(dir, platformKey) {
 
 function isLoadableNativeFile(platformKey, path, mode) {
   const name = basename(path).toLowerCase();
+  if (isNativeDataFile(name)) return false;
   if (platformKey.startsWith('win32-')) return name.endsWith('.exe') || name.endsWith('.dll');
   if (platformKey.startsWith('darwin-')) {
     return name.endsWith('.dylib') || (mode & 0o111) !== 0;

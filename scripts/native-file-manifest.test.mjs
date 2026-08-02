@@ -15,6 +15,7 @@ const buildNativeWorkflow = join(here, '..', '.github', 'workflows', 'build-nati
 const releaseElectronWorkflow = join(here, '..', '.github', 'workflows', 'release-electron.yml');
 const electronBuilderConfig = join(here, '..', 'packages', 'app', 'electron-builder.yml');
 const windowsSignHook = join(here, '..', 'packages', 'app', 'scripts', 'sign.cjs');
+const fetchNativeBinaries = join(here, 'fetch-native-binaries.mjs');
 
 test(
   'generator records an internal SONAME chain separately from concrete files',
@@ -129,6 +130,56 @@ test(
     }
   },
 );
+
+test(
+  'an executable-bit data sidecar stays out of the pinned set',
+  { skip: process.platform === 'win32' },
+  async () => {
+    const temp = await mkdtemp(join(tmpdir(), 'gezel-native-manifest-'));
+    try {
+      const root = join(temp, 'native');
+      const dir = join(root, 'darwin-arm64-metal');
+      const output = join(temp, 'NATIVE_FILE_MANIFESTS.json');
+      await mkdir(dir, { recursive: true });
+      await writeFile(join(dir, 'gezel-llama-server'), 'executable fixture');
+      await chmod(join(dir, 'gezel-llama-server'), 0o755);
+      // 0644, exactly as the engine build writes its metadata sidecar.
+      await writeFile(join(dir, 'gezel-llama-build.json'), '{"schemaVersion":1}\n');
+
+      await execFileP(process.execPath, [
+        generator,
+        '--root',
+        root,
+        '--version',
+        '9.9.9',
+        '--out',
+        output,
+      ]);
+
+      const manifest = JSON.parse(await readFile(output, 'utf8'));
+      assert.deepEqual(Object.keys(manifest.platforms['darwin-arm64-metal'].files), [
+        'gezel-llama-server',
+      ]);
+
+      // Staging restores the exec bits that zip re-packing drops. A sidecar
+      // caught by that pass must not read back as an unpinned binary.
+      await chmod(join(dir, 'gezel-llama-build.json'), 0o755);
+      const verified = await verifyNativeFileTree({ root, manifest, expectedRelease: '9.9.9' });
+      assert.deepEqual(verified, { platformCount: 1, fileCount: 1, symlinkCount: 0 });
+    } finally {
+      await rm(temp, { recursive: true, force: true });
+    }
+  },
+);
+
+test('staging does not mark native sidecar data executable', async () => {
+  const source = await readFile(fetchNativeBinaries, 'utf8');
+  assert.match(
+    source,
+    /if \(!f\.endsWith\('\.exe'\) && !isNativeDataFile\(f\)\) \{/,
+    'the staging chmod must classify sidecars through the manifest predicate',
+  );
+});
 
 test('generator rejects an empty native root', async () => {
   const temp = await mkdtemp(join(tmpdir(), 'gezel-native-manifest-'));
