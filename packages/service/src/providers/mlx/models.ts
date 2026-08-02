@@ -36,6 +36,7 @@ import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { createLogger } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import {
   type ModelBundleSource,
@@ -191,6 +192,8 @@ const PROGRESS_INTERVAL_MS = 250;
  */
 const MLX_DOWNLOAD_CONCURRENCY = 3;
 
+const log = createLogger('models');
+
 /**
  * Minimal single-consumer async queue bridging the concurrent download
  * workers (which `push` events synchronously) to the `install()` async
@@ -255,6 +258,12 @@ export class MlxModelManager {
    * polled view of it.
    */
   private readonly activeInstalls = new Map<string, MlxActiveInstallSnapshot>();
+  /**
+   * Model directories we've already warned about skipping. `listInstalled`
+   * runs on every picker/settings poll; a broken directory should be loud
+   * exactly once per process, not once per poll.
+   */
+  private readonly skipWarned = new Set<string>();
 
   constructor(opts: MlxModelManagerOptions) {
     this.storageRoots = modelStorageRoots({ home: opts.home, engine: 'mlx' });
@@ -274,6 +283,7 @@ export class MlxModelManager {
     for (const id of entries) {
       const summary = await this.loadInstalled(id);
       if (summary) out.push(summary);
+      else this.warnSkip(id, 'no readable manifest.json (incomplete or interrupted download?)');
     }
     out.sort((a, b) => a.name.localeCompare(b.name));
     return out;
@@ -784,6 +794,13 @@ export class MlxModelManager {
     return 'ok';
   }
 
+  /** Warn once per model directory per process, then stay quiet. */
+  private warnSkip(id: string, reason: string): void {
+    if (this.skipWarned.has(id)) return;
+    this.skipWarned.add(id);
+    log.warn(`[mlx] hiding model directory "${id}": ${reason}`);
+  }
+
   private async loadInstalled(id: string): Promise<InstalledMlxModel | null> {
     const root = await findModelRoot(this.storageRoots, id);
     if (!root) return null;
@@ -792,18 +809,25 @@ export class MlxModelManager {
     try {
       raw = await readFile(metaPath, 'utf8');
     } catch {
+      this.warnSkip(id, `manifest.json is unreadable at ${metaPath}`);
       return null;
     }
     let parsed: Partial<InstalledManifest>;
     try {
       parsed = JSON.parse(raw) as Partial<InstalledManifest>;
     } catch {
+      this.warnSkip(id, `manifest.json is not valid JSON at ${metaPath}`);
       return null;
     }
     if (!parsed.id || !parsed.name || !parsed.installedAt || !Array.isArray(parsed.files)) {
+      this.warnSkip(id, 'manifest.json is missing required fields (id/name/installedAt/files)');
       return null;
     }
-    if (!(await verifyReadOnlyModelPayload(this.storageRoots, root, id, parsed.fileSha256))) {
+    if (
+      !(await verifyReadOnlyModelPayload(this.storageRoots, root, id, parsed.fileSha256, (reason) =>
+        this.warnSkip(id, reason),
+      ))
+    ) {
       return null;
     }
     return {

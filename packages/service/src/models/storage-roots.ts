@@ -160,6 +160,10 @@ export async function listOverlayModelIds(roots: ModelStorageRoots): Promise<str
       continue;
     }
     for (const id of entries) {
+      // Dot-entries are never model ids: `publishStagedModel` parks the old
+      // install at `.<id>.gezmodel-backup-<uuid>` during a replace, and a
+      // crash mid-publish must not surface that backup as a duplicate model.
+      if (id.startsWith('.')) continue;
       if (seen.has(id)) continue;
       seen.add(id);
       ids.push(id);
@@ -219,24 +223,31 @@ export async function verifyReadOnlyModelPayload(
   modelRoot: string,
   id: string,
   expected: Record<string, string> | undefined,
+  onReject?: (reason: string) => void,
 ): Promise<boolean> {
+  let reason: string | null;
   try {
-    return await verifyReadOnlyModelPayloadUnchecked(roots, modelRoot, id, expected);
-  } catch {
-    return false;
+    reason = await verifyReadOnlyModelPayloadUnchecked(roots, modelRoot, id, expected);
+  } catch (err) {
+    reason = err instanceof Error ? err.message : String(err);
   }
+  if (reason !== null) onReject?.(reason);
+  return reason === null;
 }
 
+/** Returns null when the payload verifies, else a human-readable rejection reason. */
 async function verifyReadOnlyModelPayloadUnchecked(
   roots: ModelStorageRoots,
   modelRoot: string,
   id: string,
   expected: Record<string, string> | undefined,
-): Promise<boolean> {
-  if (resolve(modelRoot) === resolve(roots.writableRoot)) return true;
-  if (!expected || Object.keys(expected).length === 0) return false;
+): Promise<string | null> {
+  if (resolve(modelRoot) === resolve(roots.writableRoot)) return null;
+  if (!expected || Object.keys(expected).length === 0) {
+    return 'shared manifest has no fileSha256 map (published before hash backfill?)';
+  }
   if (Object.entries(expected).some(([path, sha]) => !isSafeModelPath(path) || !isSha256(sha))) {
-    return false;
+    return 'shared manifest fileSha256 map contains an unsafe path or malformed hash';
   }
 
   const modelDir = resolve(modelRoot, id);
@@ -246,7 +257,9 @@ async function verifyReadOnlyModelPayloadUnchecked(
     actualPaths.length !== expectedPaths.length ||
     actualPaths.some((path, index) => path !== expectedPaths[index])
   ) {
-    return false;
+    const extra = actualPaths.filter((path) => !expectedPaths.includes(path));
+    const missing = expectedPaths.filter((path) => !actualPaths.includes(path));
+    return `shared payload files do not match the manifest (extra: [${extra.join(', ')}], missing: [${missing.join(', ')}])`;
   }
 
   const identities: Record<
@@ -256,7 +269,9 @@ async function verifyReadOnlyModelPayloadUnchecked(
   for (const path of expectedPaths) {
     const absolute = join(modelDir, ...path.split('/'));
     const info = await lstat(absolute);
-    if (!info.isFile() || info.isSymbolicLink()) return false;
+    if (!info.isFile() || info.isSymbolicLink()) {
+      return `shared payload entry is not a regular file: ${path}`;
+    }
     identities[path] = {
       dev: info.dev,
       ino: info.ino,
@@ -269,15 +284,17 @@ async function verifyReadOnlyModelPayloadUnchecked(
   const cachePath = join(dirname(roots.writableRoot), 'shared-model-verification.json');
   const cacheKey = `${resolve(modelRoot)}\n${id}`;
   const cache = await readVerificationCache(cachePath);
-  if (JSON.stringify(cache[cacheKey]) === JSON.stringify(identities)) return true;
+  if (JSON.stringify(cache[cacheKey]) === JSON.stringify(identities)) return null;
 
   for (const path of expectedPaths) {
     const actual = await sha256File(join(modelDir, ...path.split('/')));
-    if (actual !== expected[path]!.toLowerCase()) return false;
+    if (actual !== expected[path]!.toLowerCase()) {
+      return `shared payload hash mismatch for ${path}`;
+    }
   }
   cache[cacheKey] = identities;
   await writeVerificationCache(cachePath, cache);
-  return true;
+  return null;
 }
 
 /**
@@ -365,6 +382,11 @@ async function listModelPayloadFiles(modelDir: string): Promise<string[]> {
       if (entry.isDirectory()) {
         await visit(absolute);
       } else if (entry.isFile()) {
+        // `.partial` is an in-flight download (same rule as
+        // listBundleModelFiles); dot-files are OS droppings like .DS_Store.
+        // Neither is payload — an interrupted update or a Finder visit must
+        // not make an otherwise-complete shared model fail verification.
+        if (entry.name.endsWith('.partial') || entry.name.startsWith('.')) continue;
         const path = relative(root, absolute).split(sep).join('/');
         if (path !== 'manifest.json') result.push(path);
       }

@@ -36,6 +36,7 @@ import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
+import { createLogger } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import {
   type ModelBundleSource,
@@ -284,6 +285,8 @@ export interface LlamaCppModelManagerOptions {
  */
 const PROGRESS_INTERVAL_MS = 250;
 
+const log = createLogger('models');
+
 export class LlamaCppModelManager {
   private readonly modelsRoot: string;
   private readonly storageRoots: ModelStorageRoots;
@@ -298,6 +301,12 @@ export class LlamaCppModelManager {
    * subset regardless of which code path drove the install.
    */
   private readonly activeInstalls = new Map<string, ActiveInstallSnapshot>();
+  /**
+   * Model directories we've already warned about skipping. `listInstalled`
+   * runs on every picker/settings poll; a broken directory should be loud
+   * exactly once per process, not once per poll.
+   */
+  private readonly skipWarned = new Set<string>();
 
   constructor(opts: LlamaCppModelManagerOptions) {
     this.engine = opts.engine ?? 'llama-cpp';
@@ -344,7 +353,10 @@ export class LlamaCppModelManager {
     const out: InstalledLlamaCppModel[] = [];
     for (const id of entries) {
       const summary = await this.loadInstalled(id);
-      if (!summary) continue;
+      if (!summary) {
+        this.warnSkip(id, 'no readable manifest.json (incomplete or interrupted download?)');
+        continue;
+      }
       // Drift flag: does the catalog now ship a different version than the
       // one on disk? If so, mark `updateAvailable` so the model manager can
       // offer "Update" instead of delete + re-fetch. Best-effort — a
@@ -796,6 +808,13 @@ export class LlamaCppModelManager {
     yield { type: 'done', id: catalogId, ...(warning ? { warning } : {}) };
   }
 
+  /** Warn once per model directory per process, then stay quiet. */
+  private warnSkip(id: string, reason: string): void {
+    if (this.skipWarned.has(id)) return;
+    this.skipWarned.add(id);
+    log.warn(`[${this.engine}] hiding model directory "${id}": ${reason}`);
+  }
+
   private async loadInstalled(id: string): Promise<InstalledLlamaCppModel | null> {
     const root = await findModelRoot(this.storageRoots, id);
     if (!root) return null;
@@ -804,18 +823,25 @@ export class LlamaCppModelManager {
     try {
       raw = await readFile(metaPath, 'utf8');
     } catch {
+      this.warnSkip(id, `manifest.json is unreadable at ${metaPath}`);
       return null;
     }
     let parsed: Partial<InstalledManifest>;
     try {
       parsed = JSON.parse(raw) as Partial<InstalledManifest>;
     } catch {
+      this.warnSkip(id, `manifest.json is not valid JSON at ${metaPath}`);
       return null;
     }
     if (!parsed.id || !parsed.name || !parsed.weightsFilename || !parsed.installedAt) {
+      this.warnSkip(id, 'manifest.json is missing required fields (id/name/weightsFilename/installedAt)');
       return null;
     }
-    if (!(await verifyReadOnlyModelPayload(this.storageRoots, root, id, parsed.fileSha256))) {
+    if (
+      !(await verifyReadOnlyModelPayload(this.storageRoots, root, id, parsed.fileSha256, (reason) =>
+        this.warnSkip(id, reason),
+      ))
+    ) {
       return null;
     }
     return {

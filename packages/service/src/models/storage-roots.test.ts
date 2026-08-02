@@ -80,6 +80,56 @@ describe('model storage overlay', () => {
     expect(expected['weights.gguf']).toBe(createHash('sha256').update('trusted').digest('hex'));
   });
 
+  it('never surfaces dot-directories (publish backups) as model ids', async () => {
+    const home = await tempRoot();
+    const roots = modelStorageRoots({ home, engine: 'llama-cpp', env: {} });
+    await mkdir(join(roots.writableRoot, 'real-model'), { recursive: true });
+    await mkdir(join(roots.writableRoot, '.real-model.gezmodel-backup-1234'), { recursive: true });
+
+    expect(await listOverlayModelIds(roots)).toEqual(['real-model']);
+  });
+
+  it('ignores in-flight .partial files and OS dot-files during shared verification', async () => {
+    const home = await tempRoot();
+    const shared = join(home, 'public-assets');
+    const roots = modelStorageRoots({
+      home,
+      engine: 'llama-cpp',
+      env: { GEZEL_SHARED_ASSETS_DIR: shared },
+    });
+    const modelRoot = join(shared, 'models', 'llama-cpp');
+    const modelDir = join(modelRoot, 'test');
+    await mkdir(modelDir, { recursive: true });
+    await writeFile(join(modelDir, 'weights.gguf'), 'trusted');
+    await writeFile(join(modelDir, 'manifest.json'), '{}');
+    const expected = await hashModelPayloadFiles(modelDir);
+
+    await writeFile(join(modelDir, 'weights-update.gguf.partial'), 'interrupted');
+    await writeFile(join(modelDir, '.DS_Store'), 'finder');
+    expect(await verifyReadOnlyModelPayload(roots, modelRoot, 'test', expected)).toBe(true);
+  });
+
+  it('reports a rejection reason for a shared manifest without payload hashes', async () => {
+    const home = await tempRoot();
+    const shared = join(home, 'public-assets');
+    const roots = modelStorageRoots({
+      home,
+      engine: 'llama-cpp',
+      env: { GEZEL_SHARED_ASSETS_DIR: shared },
+    });
+    const modelRoot = join(shared, 'models', 'llama-cpp');
+    await mkdir(join(modelRoot, 'test'), { recursive: true });
+
+    const reasons: string[] = [];
+    expect(
+      await verifyReadOnlyModelPayload(roots, modelRoot, 'test', undefined, (reason) =>
+        reasons.push(reason),
+      ),
+    ).toBe(false);
+    expect(reasons).toHaveLength(1);
+    expect(reasons[0]).toContain('fileSha256');
+  });
+
   it('moves legacy system models and backfills their public payload hashes', async () => {
     const home = await tempRoot();
     const shared = join(home, 'public-assets');

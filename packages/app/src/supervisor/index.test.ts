@@ -158,6 +158,7 @@ vi.mock('@bendyline/gezel-client/node', () => ({
   readRuntime: vi.fn(() => Promise.resolve(ctx.runtime)),
   isProcessAlive: vi.fn(() => ctx.processAlive),
   resolveDaemonEntry: () => '/fake/daemon-entry.js',
+  systemSharedAssetsDir: () => '/mock/shared-assets',
 }));
 vi.mock('@bendyline/gezel-service', () => ({
   startService: vi.fn().mockResolvedValue({
@@ -189,6 +190,7 @@ const ENV_KEYS = [
   'GEZEL_WHISPER_SERVER_BIN',
   'GEZEL_UV_BIN',
   'GEZEL_NATIVE_BIN_DIR',
+  'GEZEL_SHARED_ASSETS_DIR',
 ];
 let envSnapshot: Record<string, string | undefined>;
 let testHome: string;
