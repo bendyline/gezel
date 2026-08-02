@@ -73,7 +73,12 @@ The proeve result renders as a single badge, composed from the RAM-axis fit
 ([computeModelFit](../packages/core/src/model-fit.ts)) plus the fitness record by
 the pure [composeFitnessBadge](../packages/core/src/fitness-badge.ts):
 
-- **`proeve passed · 24 t/s`** — admitted, with the measured decode rate.
+- **A speed band with the measured decode rate** — admitted, described in plain
+  English rather than by naming the trial: `runs fast (128 t/s)` at 100 t/s and
+  up, `runs well (42 t/s)` from 30, `runs slow (8.9 t/s)` from 2, and
+  `runs, but too slow (1.4 t/s)` below that (a warn pill — it passed the trial
+  but is not practical here). `runs (speed unknown)` when the rate was not
+  measured.
 - **A named warning** — the first failing axis names it: `slow decoding`,
   `tool calls failed`, `unbounded reasoning`, `small context`, `did not start`.
 - **`checking fitness…`** — a probe is running.

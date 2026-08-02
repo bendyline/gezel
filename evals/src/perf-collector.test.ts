@@ -1,9 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
   extractBilling,
+  parseAmdSysfsGpu,
   parseDs4Timings,
+  parseEngineTimings,
   parseLlamaCppTimings,
   parseMlxTimings,
+  parseRocmProductName,
+  parseWindowsGpuCounters,
+  resolveUsageTotals,
   sumProcessTree,
   sumProviderTokens,
   winCpuPercent,
@@ -190,6 +195,128 @@ describe('parseLlamaCppTimings', () => {
   it('returns null when the log carries no llama.cpp timing lines', () => {
     expect(parseLlamaCppTimings('')).toBeNull();
     expect(parseLlamaCppTimings('some unrelated daemon log\nwith no timing lines\n')).toBeNull();
+  });
+});
+
+describe('parseEngineTimings', () => {
+  it('reports which engine format matched', () => {
+    const llama = parseEngineTimings(
+      '[llama-server] prompt eval time = 1000.00 ms / 500 tokens ( 2.00 ms per token, 500.00 tokens per second)\n[llama-server]        eval time = 1000.00 ms / 100 tokens ( 10.00 ms per token, 100.00 tokens per second)',
+    );
+    expect(llama?.engine).toBe('llama-cpp');
+    expect(llama?.timings.genTokens).toBe(100);
+  });
+
+  it('returns null when no engine format matches', () => {
+    expect(parseEngineTimings('nothing to see here')).toBeNull();
+  });
+});
+
+describe('resolveUsageTotals', () => {
+  const timings = {
+    promptTokens: 35792,
+    genTokens: 10823,
+    promptMs: 1000,
+    genMs: 1000,
+    genTokensPerSec: 88.3,
+    promptTokensPerSec: 674,
+    requestCount: 5,
+  };
+
+  // Regression for the 2026-08-02 core-suite matrix: the daemon's usage
+  // tracker reported 54 output tokens for a tankcombat trial whose engine log
+  // showed 10,823 generated. The old `usage.totalOutputTokens ?? genTokens`
+  // let any non-nullish tracker value win — including an absurd one — while
+  // still stamping `source: 'engine-log'`.
+  it('lets the llama-cpp log override an undercounting HTTP tracker', () => {
+    const resolved = resolveUsageTotals(
+      { available: true, totalInputTokens: 31159, totalOutputTokens: 54 },
+      { engine: 'llama-cpp', timings },
+    );
+    expect(resolved.totalOutputTokens).toBe(10823);
+    expect(resolved.totalInputTokens).toBe(35792);
+    expect(resolved.source).toBe('engine-log');
+  });
+
+  it('treats the ds4 log as authoritative too', () => {
+    const resolved = resolveUsageTotals(
+      { available: true, totalInputTokens: 1, totalOutputTokens: 2 },
+      { engine: 'ds4', timings },
+    );
+    expect(resolved.totalOutputTokens).toBe(10823);
+    expect(resolved.source).toBe('engine-log');
+  });
+
+  // MLX has no per-request block — its counts are reconstructed from
+  // heartbeats, so the tracker stays the stronger signal there.
+  it('prefers the HTTP tracker for MLX and reports source honestly', () => {
+    const resolved = resolveUsageTotals(
+      { available: true, totalInputTokens: 900, totalOutputTokens: 400 },
+      { engine: 'mlx', timings },
+    );
+    expect(resolved.totalInputTokens).toBe(900);
+    expect(resolved.totalOutputTokens).toBe(400);
+    expect(resolved.source).toBe('http');
+  });
+
+  it('falls back to the parsed figures when the MLX tracker is empty', () => {
+    const resolved = resolveUsageTotals({ available: false }, { engine: 'mlx', timings });
+    expect(resolved.totalInputTokens).toBe(35792);
+    expect(resolved.totalOutputTokens).toBe(10823);
+    expect(resolved.source).toBe('engine-log');
+    expect(resolved.available).toBe(true);
+  });
+
+  it('preserves rawProviders so billing extraction still works', () => {
+    const resolved = resolveUsageTotals(
+      { available: true, totalOutputTokens: 54, rawProviders: { 'llama-cpp': { totalTurns: 5 } } },
+      { engine: 'llama-cpp', timings },
+    );
+    expect(resolved.rawProviders).toEqual({ 'llama-cpp': { totalTurns: 5 } });
+  });
+});
+
+describe('parseWindowsGpuCounters', () => {
+  it('reads utilization + memory and applies the passed VRAM total', () => {
+    const r = parseWindowsGpuCounters('GPU 37.5 2219593728\n', 32626)!;
+    expect(r.utilPercent).toBe(37.5);
+    expect(r.memUsedMb).toBe(2117);
+    expect(r.memTotalMb).toBe(32626);
+  });
+
+  it('clamps summed per-process utilization to 100', () => {
+    expect(parseWindowsGpuCounters('GPU 104.2 0', 0)!.utilPercent).toBe(100);
+  });
+
+  it('returns null when the script printed no GPU line', () => {
+    expect(parseWindowsGpuCounters('', 0)).toBeNull();
+    expect(parseWindowsGpuCounters('some\nother\noutput', 0)).toBeNull();
+  });
+});
+
+describe('parseAmdSysfsGpu', () => {
+  it('parses amdgpu busy percent and VRAM bytes', () => {
+    const r = parseAmdSysfsGpu('42\n', '2147483648\n', '34359738368\n')!;
+    expect(r.utilPercent).toBe(42);
+    expect(r.memUsedMb).toBe(2048);
+    expect(r.memTotalMb).toBe(32768);
+  });
+
+  it('returns null when busy percent is unreadable', () => {
+    expect(parseAmdSysfsGpu('', '0', '0')).toBeNull();
+  });
+});
+
+describe('parseRocmProductName', () => {
+  it('skips the CSV header and the card id cell', () => {
+    expect(parseRocmProductName('device,Card series\ncard0,Instinct MI210\n')).toBe(
+      'Instinct MI210',
+    );
+  });
+
+  it('returns null when nothing usable is present', () => {
+    expect(parseRocmProductName('')).toBeNull();
+    expect(parseRocmProductName('device,Card series\n')).toBeNull();
   });
 });
 

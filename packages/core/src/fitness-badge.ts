@@ -49,6 +49,52 @@ const CHECK_LABELS: ReadonlyArray<{
   { key: 'contextFit', label: 'small context' },
 ];
 
+/**
+ * Speed bands for an admitted model, fastest first. The badge says how it
+ * runs on *this* machine in plain English rather than naming the trial —
+ * "proeve passed" told a user nothing about whether they would enjoy using
+ * the model.
+ */
+const SPEED_BANDS: ReadonlyArray<{
+  minTps: number;
+  label: string;
+  tier: FitnessBadgeTier;
+  detail: string;
+}> = [
+  {
+    minTps: 100,
+    label: 'runs fast',
+    tier: 'ok',
+    detail: 'It decodes faster than you can read.',
+  },
+  {
+    minTps: 30,
+    label: 'runs well',
+    tier: 'ok',
+    detail: 'It decodes at a comfortable working speed.',
+  },
+  {
+    minTps: 2,
+    label: 'runs slow',
+    tier: 'ok',
+    detail: 'It works, but long answers and tool loops will take a while.',
+  },
+  {
+    minTps: 0,
+    label: 'runs, but too slow',
+    tier: 'warn',
+    detail: 'It is too slow on this machine for practical agentic work.',
+  },
+];
+
+/**
+ * `128` above 10, `8.9` below. Bands are picked from this rounded value, not
+ * the raw one, so the label never reads "runs well (100 t/s)" at 99.6.
+ */
+function displayTps(tps: number): number {
+  return tps >= 10 ? Math.round(tps) : Number(tps.toFixed(1));
+}
+
 function ramCaveat(ramFit: ModelFitResult | undefined): string {
   if (!ramFit || ramFit.tier === 'fits' || ramFit.tier === 'fits-offload') return '';
   return ` Memory fit: ${ramFit.label} — ${ramFit.detail}`;
@@ -108,10 +154,21 @@ export function composeFitnessBadge(input: FitnessBadgeInput): FitnessBadge {
     };
   }
 
-  const tps = record.genTokensPerSec != null ? ` · ${Math.round(record.genTokensPerSec)} t/s` : '';
+  const passed = 'It starts, calls tools, and answers.';
+  const tps = record.genTokensPerSec;
+  if (tps == null) {
+    return {
+      tier: 'ok',
+      label: 'runs (speed unknown)',
+      detail: `${passed} Its decode speed was not measured.${softener}${ramCaveat(ramFit)}`,
+    };
+  }
+
+  const shown = displayTps(tps);
+  const band = SPEED_BANDS.find((b) => shown >= b.minTps) ?? SPEED_BANDS[SPEED_BANDS.length - 1]!;
   return {
-    tier: 'ok',
-    label: `proeve passed${tps}`,
-    detail: `This model passed its fitness check: it starts, calls tools, and decodes at a workable speed.${softener}${ramCaveat(ramFit)}`,
+    tier: band.tier,
+    label: `${band.label} (${shown} t/s)`,
+    detail: `${passed} ${band.detail}${softener}${ramCaveat(ramFit)}`,
   };
 }
