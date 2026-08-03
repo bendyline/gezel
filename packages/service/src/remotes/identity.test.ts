@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { SecretKey, SecretStore } from '../secrets/types.js';
 import { stringifySecretKey } from '../secrets/types.js';
 import {
+  deviceIdentityScope,
   fingerprintOfPublicKeyPem,
   loadOrCreateDeviceIdentity,
   signCertFingerprint,
@@ -45,7 +46,9 @@ describe('device identity', () => {
   it('generates, persists, and reloads a stable identity', async () => {
     const secrets = memSecrets();
     const first = await loadOrCreateDeviceIdentity(home, secrets);
-    expect(first.deviceId).toBeTruthy();
+    expect(first.deviceId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    );
     expect(first.publicKeyPem).toContain('BEGIN PUBLIC KEY');
     expect(first.fingerprint).toMatch(/^[0-9a-f]{64}$/);
     // Reload returns the SAME identity (no regeneration).
@@ -63,7 +66,7 @@ describe('device identity', () => {
   it('signs a cert fingerprint and verifies against the public key', async () => {
     const secrets = memSecrets();
     const id = await loadOrCreateDeviceIdentity(home, secrets);
-    const sig = await signCertFingerprint(secrets, 'abc123');
+    const sig = await signCertFingerprint(secrets, home, 'abc123');
     expect(sig).toBeTruthy();
     expect(verifyIdentitySignature(id.publicKeyPem, 'abc123', sig!)).toBe(true);
     // Tampered data / signature fail.
@@ -74,16 +77,18 @@ describe('device identity', () => {
   it('regenerates (new identity) when the private key is missing', async () => {
     const secrets = memSecrets();
     const first = await loadOrCreateDeviceIdentity(home, secrets);
-    await secrets.delete({ kind: 'deviceIdentity' }); // keyring wiped
+    // Wipe the key this home actually uses. Deleting the un-scoped legacy
+    // account instead would leave the real entry in place and prove nothing.
+    await secrets.delete({ kind: 'deviceIdentity', scope: deviceIdentityScope(home) });
     const second = await loadOrCreateDeviceIdentity(home, secrets);
     expect(second.deviceId).not.toBe(first.deviceId);
     expect(second.fingerprint).not.toBe(first.fingerprint);
     // And the new one can sign again.
-    const sig = await signCertFingerprint(secrets, 'xyz');
+    const sig = await signCertFingerprint(secrets, home, 'xyz');
     expect(verifyIdentitySignature(second.publicKeyPem, 'xyz', sig!)).toBe(true);
   });
 
   it('returns null sig when no identity key exists', async () => {
-    expect(await signCertFingerprint(memSecrets(), 'data')).toBeNull();
+    expect(await signCertFingerprint(memSecrets(), home, 'data')).toBeNull();
   });
 });

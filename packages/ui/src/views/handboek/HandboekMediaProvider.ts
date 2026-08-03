@@ -31,6 +31,23 @@ const BUNDLED_ASSETS: Record<string, string> = {
   'assets/gezel-mark.png': gezelMarkUrl,
 };
 
+/**
+ * Point curated markdown's brand images at the bundled originals before
+ * the doc is built. `resolveUrl` answers the same paths, but squisq's
+ * `useMediaUrl` paints the unresolved relative path first and swaps in
+ * the provider's answer a microtask later — long enough for the browser
+ * to request `/assets/<name>`, which no service route serves (404 in the
+ * console on every Handboek open). Rewriting up front means the first
+ * paint is already correct. Only the image target changes, so block
+ * structure — and the narration segments aligned to it — is untouched.
+ */
+export function inlineBundledAssets(markdown: string): string {
+  return markdown.replace(/(!\[[^\]]*\]\()([^)\s]+)/g, (match, prefix: string, target: string) => {
+    const bundled = BUNDLED_ASSETS[target.replace(/^(\.\.?\/)+/, '')];
+    return bundled ? `${prefix}${bundled}` : match;
+  });
+}
+
 export function createHandboekMediaProvider(figures: HandboekFigure[]): MediaProvider {
   const byPath = new Map(figures.map((f) => [f.path, f]));
   const blobUrlCache = new Map<string, string>();

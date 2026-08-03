@@ -187,6 +187,12 @@ export interface MlxModelManagerOptions {
    * download, regardless of which HTTP install surface initiated it.
    */
   onInstallStart?: (info: { catalogId: string }) => void;
+  /**
+   * Fire-and-forget hook invoked once a model is fully installed and
+   * readable on disk. The service uses it to queue the post-install
+   * fitness probe (the proeve), mirroring the llama.cpp manager.
+   */
+  onInstalled?: (info: { engine: 'mlx'; id: string }) => void;
   /** Test seam. */
   fetchImpl?: typeof fetch;
 }
@@ -263,6 +269,7 @@ export class MlxModelManager {
   private readonly catalog: CatalogService;
   private readonly fetchImpl: typeof fetch;
   private readonly onInstallStart?: (info: { catalogId: string }) => void;
+  private readonly onInstalled?: (info: { engine: 'mlx'; id: string }) => void;
   /**
    * In-flight installs. See {@link LlamaCppModelManager.activeInstalls}
    * — same rationale, same shape: the first-run bootstrap fires
@@ -283,6 +290,7 @@ export class MlxModelManager {
     this.catalog = opts.catalog;
     this.fetchImpl = opts.fetchImpl ?? fetch;
     if (opts.onInstallStart) this.onInstallStart = opts.onInstallStart;
+    if (opts.onInstalled) this.onInstalled = opts.onInstalled;
   }
 
   getActiveInstalls(): MlxActiveInstallSnapshot[] {
@@ -425,6 +433,11 @@ export class MlxModelManager {
       replace: opts.replace,
     });
     await makeSharedModelReadable(join(this.modelsRoot, opts.id));
+    try {
+      this.onInstalled?.({ engine: 'mlx', id: opts.id });
+    } catch {
+      // A post-install fitness hook is best-effort, as in the download path.
+    }
   }
 
   /**
@@ -712,6 +725,11 @@ export class MlxModelManager {
           ? 'Upstream tokenizer_config had no chat_template — injected the known-good template pinned in the catalog entry.'
           : undefined
         : 'Model has no embedded chat template (tokenizer_config.json missing chat_template and no sidecar). mlx_vlm.server will fall back to a generic template that may not match this model — replies may be incoherent.';
+      try {
+        this.onInstalled?.({ engine: 'mlx', id: catalogId });
+      } catch {
+        // Fire-and-forget: a hook failure must never fail a completed install.
+      }
       yield { type: 'done', id: catalogId, ...(warning ? { warning } : {}) };
     } finally {
       this.activeInstalls.delete(catalogId);

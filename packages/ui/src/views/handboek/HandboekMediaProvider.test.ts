@@ -1,6 +1,6 @@
 import { poppetjeFromSeed, seedFromKey } from '@bendyline/gezel';
 import { describe, expect, it, vi } from 'vitest';
-import { createHandboekMediaProvider } from './HandboekMediaProvider.js';
+import { createHandboekMediaProvider, inlineBundledAssets } from './HandboekMediaProvider.js';
 
 const capturedBlobs: Blob[] = [];
 Object.assign(URL, {
@@ -39,5 +39,21 @@ describe('createHandboekMediaProvider', () => {
     expect(await provider.resolveUrl('poppetje/ghost.headshot.svg')).toBe(
       'poppetje/ghost.headshot.svg',
     );
+  });
+});
+
+describe('inlineBundledAssets', () => {
+  // squisq paints the relative path before the provider answers, so a
+  // surviving `../assets/…` src means a 404 request the app never needs.
+  it('rewrites brand images to the bundled url', () => {
+    const out = inlineBundledAssets('# Hi\n\n![gezel-mark](../assets/gezel-mark.png)\n');
+    expect(out).not.toContain('../assets/gezel-mark.png');
+    expect(out).toMatch(/!\[gezel-mark\]\(.+gezel-mark.*\)/);
+  });
+
+  it('leaves poppetje figures and unknown images alone', () => {
+    const md =
+      '![Adam](poppetje/adam.headshot.svg)\n![x](../assets/nope.png)\n[link](../assets/gezel-mark.png)';
+    expect(inlineBundledAssets(md)).toBe(md);
   });
 });

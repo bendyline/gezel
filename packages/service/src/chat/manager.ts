@@ -12286,19 +12286,25 @@ export class ChatManager {
       existingSubstantialFileForImmediate: readExistingSubstantialFileForImmediate,
       ...(requiredBridgeTool ? { requiredTool: requiredBridgeTool } : {}),
       onCapTrim: ({ before, after, dropped }) => {
-        const warning = buildToolCapWarning({
-          tier: localModelTier,
-          role: gezel?.role,
-          before,
-          after,
-          dropped,
-        });
-        toolCapWarnings.push(warning);
         log.warn(
           `tool-cap: ${localModelTier} tier trimmed bridge ${before} -> ${after} tools for ${record.gezelId} (role=${gezel?.role ?? 'unknown'}): ${dropped.join(', ')}`,
         );
-        log.debug(
-          `tool-cap: ${localModelTier} tier trimmed bridge ${before} → ${after} tools for ${record.gezelId} (role=${gezel?.role ?? 'unknown'})`,
+        // Debug-only in the chat surface, same reasoning as the heavy-roster
+        // advisory in `refreshLiveToolSurface`: the trim is the tier policy
+        // working as designed, not a fault. The tool names it lists are
+        // meaningless to someone who never picked tools by name, and the
+        // suggested remedies (bigger model, fewer toolsets) are settings
+        // changes nobody should be asked to make mid-sentence. The log line
+        // above is unconditional so anyone tailing logs still sees every trim.
+        if (globalConfig.debugMode !== true) return;
+        toolCapWarnings.push(
+          buildToolCapWarning({
+            tier: localModelTier,
+            role: gezel?.role,
+            before,
+            after,
+            dropped,
+          }),
         );
       },
       onClamp: (kind) => {

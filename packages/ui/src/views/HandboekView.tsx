@@ -7,7 +7,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { AreaIcon } from '../components/AreaIcon.js';
 import { gezelChatTheme } from '../components/chat-theme.js';
-import { createHandboekMediaProvider } from './handboek/HandboekMediaProvider.js';
+import {
+  createHandboekMediaProvider,
+  inlineBundledAssets,
+} from './handboek/HandboekMediaProvider.js';
 
 const SELECTED_KEY = 'gezel:handboek:article';
 
@@ -118,7 +121,7 @@ export function HandboekView() {
   const doc = useMemo(() => {
     if (!article) return null;
     try {
-      return markdownToDoc(parseMarkdown(article.markdown), {
+      return markdownToDoc(parseMarkdown(inlineBundledAssets(article.markdown)), {
         articleId: article.id,
         defaultDuration: article.defaultDuration ?? 6,
       });

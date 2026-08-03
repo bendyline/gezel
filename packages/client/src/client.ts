@@ -2654,7 +2654,10 @@ export class GezelClient {
   }
 
   /** Queue a manual fitness probe. 202 on accept; 404 when not installed. */
-  runModelFitnessProbe(provider: 'llama-cpp' | 'ds4', modelId: string): Promise<{ started: true }> {
+  runModelFitnessProbe(
+    provider: 'llama-cpp' | 'ds4' | 'mlx',
+    modelId: string,
+  ): Promise<{ started: true }> {
     return this.request(
       'POST',
       `/api/model-fitness/${encodeURIComponent(provider)}/${encodeURIComponent(modelId)}/probe`,

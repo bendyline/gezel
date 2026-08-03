@@ -1,5 +1,7 @@
+import { randomUUID } from 'node:crypto';
 import { Entry } from '@napi-rs/keyring';
 import {
+  LEGACY_DEVICE_IDENTITY_ACCOUNT,
   SecretBackendUnavailableError,
   type SecretKey,
   type SecretStore,
@@ -50,6 +52,8 @@ export interface KeyringSecretStoreOptions {
   entryFactory?: KeyringEntryFactory;
   /** Override the clock (tests). Defaults to `Date.now`. */
   now?: () => number;
+  /** Current home's identity scope, used for backend migration exports. */
+  identityScope?: string;
 }
 
 interface CacheSlot {
@@ -83,11 +87,13 @@ export class KeyringSecretStore implements SecretStore {
 
   private readonly entryFactory: KeyringEntryFactory;
   private readonly now: () => number;
+  private readonly identityScope: string | undefined;
   private readonly cache = new Map<string, CacheSlot>();
 
   constructor(opts: KeyringSecretStoreOptions = {}) {
     this.entryFactory = opts.entryFactory ?? defaultEntryFactory;
     this.now = opts.now ?? Date.now;
+    this.identityScope = opts.identityScope;
   }
 
   async get(key: SecretKey): Promise<string | null> {
@@ -101,13 +107,17 @@ export class KeyringSecretStore implements SecretStore {
   async set(key: SecretKey, value: string): Promise<void> {
     const name = stringifySecretKey(key);
     this.writeEntry(name, value);
-    await this.addToIndex(name);
+    // Identity accounts are known from GEZEL_HOME and never need global
+    // enumeration. Keeping them out of the legacy login-global index is what
+    // lets a new scoped identity boot even when an older signed build left an
+    // unreadable `__gezel_index__` item behind.
+    if (key.kind !== 'deviceIdentity') await this.addToIndex(name);
   }
 
   async delete(key: SecretKey): Promise<void> {
     const name = stringifySecretKey(key);
     this.deleteEntry(name);
-    await this.removeFromIndex(name);
+    if (key.kind !== 'deviceIdentity') await this.removeFromIndex(name);
   }
 
   async listForToolset(toolsetId: string): Promise<string[]> {
@@ -118,20 +128,47 @@ export class KeyringSecretStore implements SecretStore {
 
   /** Internal backend-migration seam; existing keyring values always win. */
   async importEntries(entries: ReadonlyMap<string, string>, overwrite = false): Promise<void> {
+    const scopedIdentityAccount = this.scopedIdentityAccount();
+    const hasScopedIdentity = scopedIdentityAccount ? entries.has(scopedIdentityAccount) : false;
     for (const [name, value] of entries) {
-      if (!overwrite && this.readEntry(name) !== null) continue;
-      this.writeEntry(name, value);
-      await this.addToIndex(name);
+      // Moving an old file-backed store into the keyring must not recreate the
+      // login-global identity account. It may already exist under another
+      // build's ACL, which is the collision this namespace is designed to end.
+      if (name === LEGACY_DEVICE_IDENTITY_ACCOUNT && hasScopedIdentity) continue;
+      const targetName =
+        name === LEGACY_DEVICE_IDENTITY_ACCOUNT && scopedIdentityAccount
+          ? scopedIdentityAccount
+          : name;
+      if (!overwrite && this.readEntry(targetName) !== null) continue;
+      this.writeEntry(targetName, value);
+      if (!isDeviceIdentityAccount(targetName)) await this.addToIndex(targetName);
     }
   }
 
   async exportEntries(): Promise<Map<string, string>> {
     const out = new Map<string, string>();
     for (const name of await this.readIndex()) {
+      // Pre-v2 indexes can contain the singleton identity. Probe it below so
+      // a retained but inaccessible legacy item does not prevent exporting a
+      // healthy scoped identity.
+      if (isDeviceIdentityAccount(name)) continue;
       const value = this.readEntry(name);
       if (value !== null) out.set(name, value);
     }
+
+    const scopedName = this.scopedIdentityAccount();
+    const scopedValue = scopedName ? this.readEntry(scopedName) : null;
+    if (scopedName && scopedValue !== null) {
+      out.set(scopedName, scopedValue);
+    } else {
+      const legacyValue = this.readEntry(LEGACY_DEVICE_IDENTITY_ACCOUNT);
+      if (legacyValue !== null) out.set(LEGACY_DEVICE_IDENTITY_ACCOUNT, legacyValue);
+    }
     return out;
+  }
+
+  private scopedIdentityAccount(): string | undefined {
+    return this.identityScope === undefined ? undefined : `deviceIdentity:${this.identityScope}`;
   }
 
   private readEntry(account: string): string | null {
@@ -173,7 +210,15 @@ export class KeyringSecretStore implements SecretStore {
   }
 
   private writeEntry(account: string, value: string): void {
-    this.entryFactory(SERVICE_NAME, account).setPassword(value);
+    try {
+      this.entryFactory(SERVICE_NAME, account).setPassword(value);
+    } catch (cause) {
+      throw new SecretBackendUnavailableError(
+        'keyring',
+        `OS keychain is unavailable while writing ${account}`,
+        { cause },
+      );
+    }
     this.cache.set(account, { value, expiresAt: this.now() + POSITIVE_TTL_MS, backoffMs: 0 });
   }
 
@@ -226,6 +271,10 @@ export class KeyringSecretStore implements SecretStore {
   }
 }
 
+function isDeviceIdentityAccount(name: string): boolean {
+  return name === LEGACY_DEVICE_IDENTITY_ACCOUNT || name.startsWith('deviceIdentity:');
+}
+
 function isMissingEntry(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
   return /no matching entry|not found|no such item|item does not exist|missing entry/i.test(
@@ -238,20 +287,40 @@ function isMissingEntry(error: unknown): boolean {
  * success, a reason string on failure. Keep this separate from the class
  * so the factory can decide before any real secret goes near the
  * keyring.
+ *
+ * Every probe uses a fresh account. A process crash between set and delete
+ * can leave an item behind; reusing one fixed account would then turn that
+ * harmless orphan into a cross-signature duplicate-item boot failure.
  */
-export function probeKeyringAvailable(): string | null {
-  const probeAccount = '__gezel_probe__';
+export function probeKeyringAvailable(
+  opts: { entryFactory?: KeyringEntryFactory; probeId?: string } = {},
+): string | null {
+  const probeAccount = `__gezel_probe__:${opts.probeId ?? randomUUID()}`;
   const probeValue = 'ok';
+  const entryFactory = opts.entryFactory ?? defaultEntryFactory;
+  let entry: KeyringEntry | null = null;
+  let wrote = false;
   try {
-    const e = new Entry(SERVICE_NAME, probeAccount);
-    e.setPassword(probeValue);
-    const got = e.getPassword();
-    e.deletePassword();
+    entry = entryFactory(SERVICE_NAME, probeAccount);
+    entry.setPassword(probeValue);
+    wrote = true;
+    const got = entry.getPassword();
+    entry.deletePassword();
+    wrote = false;
     if (got !== probeValue) {
       return `probe value mismatch (got ${JSON.stringify(got)})`;
     }
     return null;
   } catch (err) {
+    // A failed read should not leak the just-created sentinel. Cleanup is
+    // best-effort so the original diagnostic remains the one callers see.
+    if (wrote && entry) {
+      try {
+        entry.deletePassword();
+      } catch {
+        // A unique account makes any orphan harmless to later probes.
+      }
+    }
     return err instanceof Error ? err.message : String(err);
   }
 }

@@ -213,6 +213,17 @@ describe('ModelFitnessManager', () => {
     expect(resolved?.stale).toBe(true);
   });
 
+  it('staleness applies to mlx records too — a catalog-version bump invalidates', async () => {
+    const mgr = makeManager({
+      resolveInstalled: async () => ({ catalogVersion: '2.0.0', approxSizeBytes: 11 * GB }),
+    });
+    mgr.scheduleProbe('mlx', 'gemma4-12b-q4', { trigger: 'manual' });
+    await drained(mgr);
+    // The probe stub records catalogVersion '1.0.0'; installed says '2.0.0'.
+    const resolved = await mgr.get('mlx', 'gemma4-12b-q4');
+    expect(resolved?.stale).toBe(true);
+  });
+
   it('a model no longer installed reads as stale', async () => {
     const mgr = makeManager();
     mgr.scheduleProbe('llama-cpp', 'gemma4-e4b-q4', { trigger: 'manual' });

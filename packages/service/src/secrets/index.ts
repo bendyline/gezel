@@ -9,6 +9,7 @@ import {
   SecretBackendUnavailableError,
   type SecretStore,
   SecretStoreCorruptError,
+  deviceIdentityScope,
 } from './types.js';
 
 const log = createLogger('secrets');
@@ -31,6 +32,8 @@ export {
 export interface OpenSecretStoreOptions {
   /** Force the file-backed fallback. Used in tests + explicit dev opt-out. */
   forceFile?: boolean;
+  /** Override the native availability probe. Test seam only. */
+  keyringProbe?: () => string | null;
 }
 
 /**
@@ -42,6 +45,8 @@ export async function openSecretStore(
   home: string,
   opts: OpenSecretStoreOptions = {},
 ): Promise<SecretStore> {
+  const identityScope = deviceIdentityScope(home);
+  const keyringProbe = opts.keyringProbe ?? probeKeyringAvailable;
   const markerPath = join(home, 'secrets.backend');
   const previousBackend = await readBackendMarker(markerPath);
   const hasIdentity = await exists(deviceIdentityFile(home));
@@ -63,24 +68,24 @@ export async function openSecretStore(
     log.info('[secrets] using encrypted file store (test or forced)');
     const store = new FileSecretStore(home);
     if (!testMode && previousBackend === 'keyring') {
-      const reason = probeKeyringAvailable();
+      const reason = keyringProbe();
       if (reason !== null) {
         throw new SecretBackendUnavailableError(
           'keyring',
           `OS keychain is unavailable (${reason}); cannot migrate secrets to the file backend`,
         );
       }
-      const entries = await new KeyringSecretStore().exportEntries();
+      const entries = await new KeyringSecretStore({ identityScope }).exportEntries();
       await store.importEntries(entries, true);
       log.info(`[secrets] migrated ${entries.size} keyring secret(s) to encrypted file storage`);
     }
     await writeFileAtomic(markerPath, 'file\n', { mode: 0o600 });
     return store;
   }
-  const reason = probeKeyringAvailable();
+  const reason = keyringProbe();
   if (reason === null) {
     log.info('[secrets] using OS keychain');
-    const keyring = new KeyringSecretStore();
+    const keyring = new KeyringSecretStore({ identityScope });
     if (previousBackend === 'file' && hasEncryptedFile) {
       const entries = await new FileSecretStore(home).exportEntries();
       await keyring.importEntries(entries, true);

@@ -236,6 +236,31 @@ describe('runFitnessProbe', () => {
     expect(record.checks.reasoningBudget.ok).toBe(false);
   });
 
+  it('mlx probes ask for the mlx launch ctx and ignore GEZEL_LLAMA_NUM_CTX', async () => {
+    const session = new FakeSession([{ text: 'story', tokensPerSec: 42 }, { calls: [VALID_CALL] }]);
+    const asked: string[] = [];
+    const record = await runFitnessProbe(
+      deps({
+        getProviderForModel: async () => fakeProvider(session),
+        resolveInstalled: async () =>
+          ({ catalogVersion: '2.0.0', contextWindow: 256_000 }) as never,
+        configuredNumCtx: async (engine) => {
+          asked.push(engine);
+          return 40_960;
+        },
+        // The llama.cpp/ds4 supervisors read this; the MLX one never does.
+        env: { GEZEL_LLAMA_NUM_CTX: '8192' },
+      }),
+      { provider: 'mlx', modelId: 'gemma4-12b-q4', trigger: 'manual' },
+    );
+    expect(asked).toEqual(['mlx']);
+    expect(record.provider).toBe('mlx');
+    expect(record.status).toBe('probed');
+    expect(record.admitted).toBe(true);
+    expect(record.genTokensPerSec).toBeCloseTo(42);
+    expect(record.checks.contextFit.detail).toContain('40,960');
+  });
+
   it('context fit uses min(GGUF ctx, launch ctx): small GGUF window fails the floor', async () => {
     const session = new FakeSession([{ text: 'story', tokensPerSec: 20 }, { calls: [VALID_CALL] }]);
     const record = await runFitnessProbe(

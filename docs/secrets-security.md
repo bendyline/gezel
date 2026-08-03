@@ -20,10 +20,26 @@ picks one per process at boot.
 | `KeyringSecretStore` | OS keychain (macOS Keychain / Windows Credential Manager / Linux Secret Service) | Keychain probe succeeds — typically dev, embedded mode, or a user-context daemon |
 | `FileSecretStore` | `~/.gezel/secrets.enc` (encrypted) + `~/.gezel/secrets.key` (32-byte key, 0600) | Keychain probe fails, or `GEZEL_SECRETS_BACKEND=file`, or under VITEST / mock provider |
 
-The probe is a set/get/delete round-trip against a sentinel keychain
-entry. It fails (and we fall through to the file backend) in exactly the
-situations where the keychain is unreachable — most importantly, when
-the process is running as a non-login system user.
+The probe is a set/get/delete round-trip against a fresh, randomly named
+sentinel keychain entry. A unique account matters on macOS: if a process
+crashes before deleting a probe, a later build with a different code-signing
+ACL must not collide with the orphan. The probe fails (and we fall through to
+the file backend) in exactly the situations where the keychain is unreachable
+— most importantly, when the process is running as a non-login system user.
+
+The Ed25519 device-identity private key is stored under a deterministic
+home-scoped account, `deviceIdentity:<hash-of-GEZEL_HOME>`. Its public half is
+stored in that home's `device-identity.json`, so the private and public halves
+now have the same scope even though a login Keychain is shared by every Gezel
+home for that macOS user. The scoped secret is a versioned envelope containing
+both the private key and device ID, which lets Gezel reconstruct the complete
+public identity if both copies of the public file are deleted. Legacy installs
+used the unscoped `deviceIdentity` account with a bare PKCS#8 PEM. On upgrade,
+Gezel copies that key into the scoped envelope only when it can read the key and
+prove that it matches the public file; the legacy item is left untouched for
+downgrade safety. If a prior build's ACL makes the legacy item unreadable,
+Gezel creates a new scoped identity without deleting or overwriting the
+retained item.
 
 ## Effective backend per deployment mode
 

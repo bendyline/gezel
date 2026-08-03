@@ -43,6 +43,7 @@ const DEFAULT_RESPONSES: Record<string, unknown> = {
   listIncompleteLlamaCppModels: { incomplete: [] },
   listIncompleteDs4Models: { incomplete: [] },
   listIncompleteMlxModels: { incomplete: [] },
+  listModelFitness: { records: [], probing: [] },
   listActiveVideoPulls: { pulls: [] },
   listCatalogItems: { items: [] },
   listFolders: { folders: [] },

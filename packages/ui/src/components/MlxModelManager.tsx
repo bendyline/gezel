@@ -1,10 +1,12 @@
 import type { CatalogItemSummary, ChatModelCategory, ChatModelManifest } from '@bendyline/gezel';
+import { composeFitnessBadge } from '@bendyline/gezel';
 import type {
   IncompleteModelDownload,
   MlxInstallEvent,
   MlxInstalledModel,
+  ModelFitnessEntry,
 } from '@bendyline/gezel-client';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { CatalogBrowser } from './CatalogBrowser.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
@@ -136,6 +138,20 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
   const [showAll, setShowAll] = useState(false);
   const [activeCategory, setActiveCategory] = useState<CategoryTab>('all');
   const [catalogItems, setCatalogItems] = useState<CatalogItemSummary[]>([]);
+  const [fitness, setFitness] = useState<Map<string, ModelFitnessEntry>>(new Map());
+  const [probing, setProbing] = useState<string[]>([]);
+  const probingRef = useRef<string[]>([]);
+
+  const refreshFitness = useCallback(async () => {
+    try {
+      const res = await api.listModelFitness();
+      setFitness(new Map(res.records.map((r) => [r.key, r])));
+      setProbing(res.probing);
+      probingRef.current = res.probing;
+    } catch {
+      /* fitness surface is advisory — a blip just keeps the last state */
+    }
+  }, []);
 
   const refreshIncomplete = useCallback(async () => {
     try {
@@ -154,8 +170,9 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
     } catch (err) {
       setModelsError(err instanceof Error ? err.message : String(err));
     }
+    void refreshFitness();
     void refreshIncomplete();
-  }, [refreshIncomplete]);
+  }, [refreshFitness, refreshIncomplete]);
 
   useEffect(() => {
     void refresh();
@@ -212,6 +229,11 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
       } catch {
         /* service blip — try again on the next tick */
       }
+      // While a proeve runs, keep the fitness pills live on the same
+      // cadence as the install poll.
+      if (probingRef.current.length > 0) {
+        void refreshFitness();
+      }
     };
     void tick();
     const t = setInterval(() => void tick(), 2_000);
@@ -219,7 +241,7 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
       cancelled = true;
       clearInterval(t);
     };
-  }, [refresh]);
+  }, [refresh, refreshFitness]);
 
   const handleEvent = useCallback((catalogId: string, ev: MlxInstallEvent) => {
     if (ev.type === 'progress') {
@@ -531,6 +553,7 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
                   <th>Size</th>
                   <th>Quant</th>
                   <th>Context</th>
+                  <th>Fitness</th>
                   <th />
                 </tr>
               </thead>
@@ -541,6 +564,20 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
                     latest && m.catalogVersion && m.catalogVersion !== latest,
                   );
                   const reinstalling = Boolean(installs.get(m.id));
+                  const fitnessKey = `mlx:${m.id}`;
+                  const entry = fitness.get(fitnessKey);
+                  const badge = composeFitnessBadge({
+                    ...(entry
+                      ? {
+                          fitness: {
+                            record: entry.record,
+                            stale: entry.stale,
+                            hardwareChanged: entry.hardwareChanged,
+                          },
+                        }
+                      : {}),
+                    probing: probing.includes(fitnessKey),
+                  });
                   return (
                     <tr key={m.id}>
                       <td>
@@ -560,6 +597,42 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
                         {approximateQuantizationLabel(m.quantization)}
                       </td>
                       <td>{m.contextWindow ? m.contextWindow.toLocaleString() : '—'}</td>
+                      <td className="model-fitness-table-cell">
+                        <div className="model-fitness-cell">
+                          <span
+                            className={`home-status-pill model-fitness-badge${
+                              badge.tier === 'probing' ? ' model-fitness-badge--probing' : ''
+                            }${
+                              badge.tier === 'ok'
+                                ? ' home-status-ok'
+                                : badge.tier === 'warn'
+                                  ? ' home-status-warn'
+                                  : ''
+                            }`}
+                            title={badge.detail}
+                          >
+                            {badge.label}
+                          </span>
+                          <button
+                            type="button"
+                            className="home-link"
+                            disabled={badge.tier === 'probing'}
+                            title="Run the fitness check (proeve): spawn, tool round-trip, decode speed, reasoning budget, and context fit."
+                            onClick={() => {
+                              void api
+                                .runModelFitnessProbe('mlx', m.id)
+                                .then(() => refreshFitness())
+                                .catch(() => {});
+                            }}
+                          >
+                            {badge.tier === 'probing'
+                              ? 'Checking…'
+                              : entry && !entry.stale && entry.record.status !== 'blocked'
+                                ? 'Re-run'
+                                : 'Run fitness check'}
+                          </button>
+                        </div>
+                      </td>
                       <td>
                         <span style={{ marginRight: '0.75rem' }}>
                           <ExportModelBundleButton engine="mlx" id={m.id} />

@@ -31,8 +31,8 @@ import {
 
 const log = createLogger('fitness');
 
-/** Engines the probe supports today. MLX/Ollama can join later. */
-export type FitnessEngine = 'llama-cpp' | 'ds4';
+/** Engines the probe supports today. Ollama can join later. */
+export type FitnessEngine = 'llama-cpp' | 'ds4' | 'mlx';
 
 /** Turn A dominates on cold GGUF load; generous by design. */
 const GENERATION_TURN_TIMEOUT_MS = 360_000;
@@ -92,8 +92,8 @@ export interface FitnessProbeDeps {
   resolveReasoningBudget(modelId: string): Promise<number | undefined>;
   /** Host memory profile, recorded on the report. */
   detectMemory(): Promise<{ totalRamBytes: number; gpuVramBytes: number | null; source: string }>;
-  /** The user-facing launch numCtx setting, when configured. */
-  configuredNumCtx(): Promise<number | undefined>;
+  /** The user-facing launch numCtx setting for this engine, when configured. */
+  configuredNumCtx(engine: FitnessEngine): Promise<number | undefined>;
   env?: NodeJS.ProcessEnv;
   now?: () => number;
 }
@@ -135,9 +135,13 @@ export async function runFitnessProbe(
     .catch(() => ({ totalRamBytes: 0, gpuVramBytes: null, source: 'unknown' }));
   const installed = await deps.resolveInstalled(args.provider, args.modelId).catch(() => null);
   const reasoningBudget = await deps.resolveReasoningBudget(args.modelId).catch(() => undefined);
-  const configuredCtx = await deps.configuredNumCtx().catch(() => undefined);
+  const configuredCtx = await deps.configuredNumCtx(args.provider).catch(() => undefined);
 
-  const envCtxRaw = (deps.env ?? process.env).GEZEL_LLAMA_NUM_CTX;
+  // GEZEL_LLAMA_NUM_CTX only reaches the llama.cpp/ds4 supervisors; the
+  // MLX supervisor has no env override, so honouring it here would report
+  // a launch context the engine never uses.
+  const envCtxRaw =
+    args.provider === 'mlx' ? undefined : (deps.env ?? process.env).GEZEL_LLAMA_NUM_CTX;
   const envCtx = envCtxRaw ? Number.parseInt(envCtxRaw, 10) : Number.NaN;
   const launchCtx =
     Number.isFinite(envCtx) && envCtx > 0 ? envCtx : (configuredCtx ?? DEFAULT_LAUNCH_NUM_CTX);
@@ -187,7 +191,7 @@ export async function runFitnessProbe(
         }
       });
 
-      const queue = { lane: 'background' as const, job: `proeve · ${args.modelId}` };
+      const queue = { lane: 'background' as const, job: `fitness check · ${args.modelId}` };
 
       try {
         await session.sendAndWait(GENERATION_PROMPT, {
