@@ -316,7 +316,7 @@ describe('resolveSessionToolSurface — step-scoped sessions', () => {
     expect(allowlist!.has('write_task_note')).toBe(true);
     expect(allowlist!.has('advance_task_step')).toBe(true);
     expect(allowlist!.has('set_task_status')).toBe(true);
-    expect(allowlist!.has('run_script')).toBe(true);
+    expect(allowlist!.has('run_installed_script')).toBe(true);
     expect(allowlist!.has('read_file')).toBe(false);
   });
 });

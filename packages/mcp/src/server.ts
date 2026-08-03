@@ -9476,14 +9476,31 @@ server.tool(
 );
 
 server.tool(
-  'run_script',
-  "Run an installed project script by NAME — the scripts `list_scripts` shows, including ops/probe scripts a craftbook installed. When a task, kickoff, or step tells you to run a named script, THIS is the runner — not `run_package_script`, `run_npx`, or `run_nodejs_script`. Input is validated against the script's meta.inputs. Returns the stamped output, per-call trace summary, and run id. Runs with undeclared capabilities or missing required inputs fail fast.",
+  'run_installed_script',
+  "Run an ALREADY-INSTALLED project script by NAME — one of the scripts `list_scripts` shows, including ops/probe scripts a craftbook installed. Takes a name, never a file path. To run a file you just wrote yourself (e.g. `tools/derive.mjs`), use `run_nodejs_script` — not this. When a task, kickoff, or step tells you to run a named script, THIS is the runner — not `run_package_script` or `run_npx`. Input is validated against the script's meta.inputs. Returns the stamped output, per-call trace summary, and run id. Runs with undeclared capabilities or missing required inputs fail fast.",
   {
     project: z.string().optional(),
     name: z.string().describe('Script name (matches meta.name and the .ts filename).'),
     input: z.record(z.string(), z.unknown()).optional(),
   },
   async ({ project, name, input }) => {
+    // A path-shaped `name` means the model wanted to run a file it wrote,
+    // not an installed script — the dead end that produced fabricated data
+    // in the 2026-08-02 core suite (six failed calls, then hand-authored
+    // output). A generic "script not found" left it concluding the platform
+    // was broken, so name the right tool at the moment of the mistake.
+    const looksLikePath = /[/\\]/.test(name) || /\.(mjs|cjs|js|ts|py|sh)$/i.test(name);
+    if (looksLikePath) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `"${name}" looks like a file path, but run_installed_script takes the NAME of a script already installed in the project (see list_scripts). To run a script file you wrote yourself, use run_nodejs_script instead. To build a derived data file from other files, derive_file is usually better still.`,
+          },
+        ],
+        isError: true as const,
+      };
+    }
     const resolved = project ? await resolveProjectId(project) : projectId;
     try {
       const res = await api.runProjectScript(resolved, {
@@ -9494,7 +9511,7 @@ server.tool(
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       return {
-        content: [{ type: 'text' as const, text: `run_script failed: ${msg}` }],
+        content: [{ type: 'text' as const, text: `run_installed_script failed: ${msg}` }],
         isError: true,
       };
     }

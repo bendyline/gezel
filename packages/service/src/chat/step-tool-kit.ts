@@ -122,7 +122,7 @@ export function stepToolKit(
   const tools = new Set<string>(FILE_CORE);
   for (const t of KIND_ADDITIONS[kind] ?? []) tools.add(t);
   for (const t of gateDrivenAdditions(step)) tools.add(t);
-  if (normalizeScriptRefs(step.onExit).length > 0) tools.add('run_script');
+  if (normalizeScriptRefs(step.onExit).length > 0) tools.add('run_installed_script');
   for (const t of ARTIFACT_DRAWER_TOOLS) tools.add(t);
   return { kind, path: stepDeliverablePath(step), tools };
 }

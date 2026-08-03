@@ -372,9 +372,9 @@ export async function resolveSessionToolSurface(
     if (
       opts.activeStep &&
       normalizeScriptRefs(opts.activeStep.onExit).length > 0 &&
-      rawAllowlist.has('run_script')
+      rawAllowlist.has('run_installed_script')
     ) {
-      withStepCompletion.add('run_script');
+      withStepCompletion.add('run_installed_script');
     }
     allowlist = withStepCompletion;
   }
@@ -399,7 +399,7 @@ export async function resolveSessionToolSurface(
       ...SELF_CHECK_TOOL_CAP_ALWAYS_KEEP,
       'ask_user_question',
       ...(opts.activeStep && normalizeScriptRefs(opts.activeStep.onExit).length > 0
-        ? ['run_script']
+        ? ['run_installed_script']
         : []),
     ]);
     const clamped = new Set([...allowlist].filter((name) => repairKeep.has(name)));

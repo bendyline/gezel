@@ -269,7 +269,7 @@ export const BUILTIN_TOOLSETS: BuiltinToolsetGroup[] = [
       'derive_file',
       'npm_install',
       'run_npx',
-      'run_script',
+      'run_installed_script',
       'run_package_script',
       'list_packages',
       'list_package_scripts',

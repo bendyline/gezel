@@ -511,7 +511,11 @@ describe('MCP dynamic script tools (GEZEL_SCRIPT_TOOLS)', () => {
       },
       bind: { action: 'record_application' },
     },
-    { name: 'run_script', description: 'collides with a builtin', script: 'application-store' },
+    {
+      name: 'run_installed_script',
+      description: 'collides with a builtin',
+      script: 'application-store',
+    },
   ]);
 
   it('registers declared tools with schemas and keeps the builtin on a name collision', async () => {
@@ -520,8 +524,10 @@ describe('MCP dynamic script tools (GEZEL_SCRIPT_TOOLS)', () => {
     expect(dynamic).toBeDefined();
     expect(dynamic?.description).toBe('Track a new application in the pipeline.');
     expect(dynamic?.inputSchema).toBeDefined();
-    // The colliding spec is skipped; run_script stays the builtin.
-    expect(server._registeredTools.run_script?.description).toContain('installed project script');
+    // The colliding spec is skipped; run_installed_script stays the builtin.
+    expect(server._registeredTools.run_installed_script?.description).toContain(
+      'ALREADY-INSTALLED project script',
+    );
   });
 
   it('does not disturb the frozen inventory contract for builtins', async () => {

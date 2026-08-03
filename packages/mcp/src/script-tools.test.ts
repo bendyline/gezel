@@ -114,14 +114,14 @@ describe('registerScriptTools', () => {
       server as unknown as McpServer,
       parseScriptToolSpecs(
         JSON.stringify([
-          { name: 'run_script', description: 'collides', script: 's' },
+          { name: 'run_installed_script', description: 'collides', script: 's' },
           { name: 'record_application', description: 'ok', script: 'application-store' },
         ]),
       ),
       {
         api: {} as GezelClient,
         projectId: 'p1',
-        reservedNames: new Set(['run_script']),
+        reservedNames: new Set(['run_installed_script']),
       },
     );
     expect(registered).toEqual(['record_application']);

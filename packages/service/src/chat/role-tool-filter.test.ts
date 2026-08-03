@@ -721,7 +721,7 @@ describe('computeToolAllowlist', () => {
     expect(shouldConstrainToImmediateFileWrite({ role: 'Builder', latestUserMessage: nudge })).toBe(
       true,
     );
-    expect([...constrained!]).toEqual(['write_file', 'run_script', 'get_script_run']);
+    expect([...constrained!]).toEqual(['write_file', 'run_installed_script', 'get_script_run']);
   });
 
   it('constrains initial index.html deliverable handoffs to write_file only', () => {
@@ -743,7 +743,7 @@ describe('computeToolAllowlist', () => {
     expect(
       shouldConstrainToImmediateFileWrite({ role: 'Developer', latestUserMessage: nudge }),
     ).toBe(true);
-    expect([...constrained!]).toEqual(['write_file', 'run_script', 'get_script_run']);
+    expect([...constrained!]).toEqual(['write_file', 'run_installed_script', 'get_script_run']);
   });
 
   it('still recognizes pre-rename `writeFile` spellings in handoff messages', () => {
@@ -766,7 +766,7 @@ describe('computeToolAllowlist', () => {
       role: 'Developer',
       latestUserMessage: nudge,
     });
-    expect([...constrained!]).toEqual(['write_file', 'run_script', 'get_script_run']);
+    expect([...constrained!]).toEqual(['write_file', 'run_installed_script', 'get_script_run']);
   });
 
   it('does not collapse an explicit append-only repair to write_file-only', () => {
@@ -814,7 +814,7 @@ describe('computeToolAllowlist', () => {
     expect(
       shouldConstrainToImmediateFileWrite({ role: 'Developer', latestUserMessage: nudge }),
     ).toBe(true);
-    expect([...constrained!]).toEqual(['write_file', 'run_script', 'get_script_run']);
+    expect([...constrained!]).toEqual(['write_file', 'run_installed_script', 'get_script_run']);
   });
 
   it('constrains copywriter expected markdown handoffs to write_file only', () => {
@@ -1091,7 +1091,7 @@ describe('computeToolAllowlist', () => {
       'replace_lines',
       'write_file',
       'append_to_file',
-      'run_script',
+      'run_installed_script',
       'get_script_run',
     ]);
   });
@@ -1146,7 +1146,7 @@ describe('computeToolAllowlist', () => {
     expect(shouldConstrainToImmediateFileWrite({ role: 'Builder', latestUserMessage: nudge })).toBe(
       true,
     );
-    expect([...constrained!]).toEqual(['write_file', 'run_script', 'get_script_run']);
+    expect([...constrained!]).toEqual(['write_file', 'run_installed_script', 'get_script_run']);
   });
 
   it('constrains concise workspace-file first-move handoffs to write_file only', () => {
@@ -1168,7 +1168,7 @@ describe('computeToolAllowlist', () => {
     expect(shouldConstrainToImmediateFileWrite({ role: 'Builder', latestUserMessage: nudge })).toBe(
       true,
     );
-    expect([...constrained!]).toEqual(['write_file', 'run_script', 'get_script_run']);
+    expect([...constrained!]).toEqual(['write_file', 'run_installed_script', 'get_script_run']);
   });
 
   it('constrains direct first-version source creation asks to write_file only', () => {
@@ -1189,7 +1189,7 @@ describe('computeToolAllowlist', () => {
     expect(
       shouldConstrainToImmediateFileWrite({ role: 'Developer', latestUserMessage: prompt }),
     ).toBe(true);
-    expect([...constrained!]).toEqual(['write_file', 'run_script', 'get_script_run']);
+    expect([...constrained!]).toEqual(['write_file', 'run_installed_script', 'get_script_run']);
   });
 
   it('does not treat existing-codebase feature requests as immediate create writes', () => {
@@ -1220,7 +1220,7 @@ describe('computeToolAllowlist', () => {
     expect(shouldConstrainToImmediateFileWrite({ role: 'Builder', latestUserMessage: nudge })).toBe(
       true,
     );
-    expect([...constrained!]).toEqual(['write_file', 'run_script', 'get_script_run']);
+    expect([...constrained!]).toEqual(['write_file', 'run_installed_script', 'get_script_run']);
   });
 
   it('constrains urgent missing review deliverables for reviewer roles', () => {
@@ -1488,7 +1488,7 @@ describe('computeToolAllowlist', () => {
     expect(
       shouldConstrainToScenarioFileRepair({ role: 'Developer', latestUserMessage: repair }),
     ).toBe(true);
-    expect([...constrained!]).toEqual(['write_file', 'run_script', 'get_script_run']);
+    expect([...constrained!]).toEqual(['write_file', 'run_installed_script', 'get_script_run']);
   });
 
   it('keeps a prepended mandatory first-write directive authoritative over patch fallback prose', () => {
@@ -1520,7 +1520,7 @@ describe('computeToolAllowlist', () => {
     expect(
       shouldConstrainToScenarioFileRepair({ role: 'Developer', latestUserMessage: repair }),
     ).toBe(true);
-    expect([...constrained!]).toEqual(['write_file', 'run_script', 'get_script_run']);
+    expect([...constrained!]).toEqual(['write_file', 'run_installed_script', 'get_script_run']);
   });
 
   it('constrains direct single-file source repair requests to repair tools', () => {
@@ -1612,7 +1612,7 @@ describe('computeToolAllowlist', () => {
     expect(
       shouldConstrainToScenarioFileRepair({ role: 'Builder', latestUserMessage: repair }),
     ).toBe(true);
-    expect([...constrained!]).toEqual(['write_file', 'run_script', 'get_script_run']);
+    expect([...constrained!]).toEqual(['write_file', 'run_installed_script', 'get_script_run']);
   });
 
   it('collapses tic-tac-toe full sniff rewrites to write_file only', () => {
@@ -1644,7 +1644,7 @@ describe('computeToolAllowlist', () => {
     expect(
       shouldConstrainToScenarioFileRepair({ role: 'Builder', latestUserMessage: repair }),
     ).toBe(true);
-    expect([...constrained!]).toEqual(['write_file', 'run_script', 'get_script_run']);
+    expect([...constrained!]).toEqual(['write_file', 'run_installed_script', 'get_script_run']);
   });
 
   it('keeps repeated runtime repair nudges on the direct file repair surface', () => {
