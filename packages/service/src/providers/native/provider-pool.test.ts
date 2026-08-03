@@ -86,6 +86,13 @@ class QueueFakeProvider extends FakeProvider {
       queuedInteractive: this.desc.queuedInteractive,
       queuedBackground: this.desc.queuedBackground,
     }),
+    cancelPending: (id: number) => {
+      const before = this.desc.pending.length;
+      this.desc.pending = this.desc.pending.filter((p) => p.id !== id);
+      return this.desc.pending.length < before;
+    },
+    movePending: (id: number, _direction: 'up' | 'down') =>
+      this.desc.pending.some((p) => p.id === id),
   } as unknown as import('../queue.js').ProviderQueue;
   get batch(): import('../types.js').BatchCapability {
     return { maxConcurrency: this.batchWidth } as unknown as import('../types.js').BatchCapability;
@@ -487,7 +494,10 @@ describe('ProviderPool', () => {
     await pool.ensure('mlx', 'a', 0, 10 * GB);
     made[0]!.busy = true;
 
-    await expect(pool.evict(makeEngineKey('mlx', 'a', 0))).rejects.toThrow(/busy/);
+    await expect(pool.evict(makeEngineKey('mlx', 'a', 0))).rejects.toMatchObject({
+      code: 'engine-busy',
+      message: expect.stringMatching(/busy/),
+    });
     // Engine untouched: still resident, never shut down, capacity kept.
     expect(pool.has(makeEngineKey('mlx', 'a', 0))).toBe(true);
     expect(made[0]!.shutdownCalls).toBe(0);
@@ -611,6 +621,30 @@ describe('ProviderPool', () => {
     const broker = new CapacityBroker({ budgetBytes: 64 * GB });
     const pool = new ProviderPool({ broker, builders: {} });
     expect(pool.queueSummaries().size).toBe(0);
+  });
+
+  it('cancelPendingQueueItem cancels on the replica that holds the id', async () => {
+    const made: QueueFakeProvider[] = [];
+    const broker = new CapacityBroker({ budgetBytes: 64 * GB });
+    const pool = new ProviderPool({
+      broker,
+      builders: { 'llama-cpp': mkQueueBuilder(5 * GB, made) },
+    });
+    await pool.ensure('llama-cpp', 'qwen', 0, 5 * GB);
+    await pool.ensure('llama-cpp', 'qwen', 1, 5 * GB);
+    made[1]!.desc = mkDesc({
+      queuedBackground: 1,
+      pending: [{ id: 7, lane: 'background', job: 'memory', waitedMs: 300 }],
+    });
+
+    expect(pool.cancelPendingQueueItem('llama-cpp', 7)).toBe(true);
+    expect(made[1]!.desc.pending).toHaveLength(0);
+    // A second cancel of the same id finds nothing on any replica.
+    expect(pool.cancelPendingQueueItem('llama-cpp', 7)).toBe(false);
+    // A different provider name never matches these llama-cpp replicas.
+    made[1]!.desc = mkDesc({ pending: [{ id: 9, lane: 'background', waitedMs: 10 }] });
+    expect(pool.cancelPendingQueueItem('mlx', 9)).toBe(false);
+    expect(pool.movePendingQueueItem('llama-cpp', 9, 'up')).toBe(true);
   });
 
   it('onChange fires on spawn and evict', async () => {

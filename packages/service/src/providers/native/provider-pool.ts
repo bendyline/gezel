@@ -22,6 +22,7 @@ import type { LLMProvider } from '../types.js';
 import {
   type CapacityBroker,
   CapacityDeniedError,
+  EngineBusyError,
   formatCapacityDenial,
 } from './capacity-broker.js';
 import {
@@ -512,7 +513,7 @@ export class ProviderPool {
         if (this.now() >= deadline) {
           entry.draining = false;
           this.fireChange();
-          throw new Error(
+          throw new EngineBusyError(
             `engine ${key} is busy serving requests and did not drain within ${Math.round(
               this.drainWaitMs / 1000,
             )}s — not evicting. Retry shortly, or wait for current turns to finish.`,
@@ -828,6 +829,34 @@ export class ProviderPool {
       out.set(name, cur);
     }
     return out;
+  }
+
+  /**
+   * Cancel a pending queue entry on whichever resident replica of
+   * `provider` holds it — the write side of {@link queueSummaries},
+   * which the singleton `getProviderIfReady` path can't reach for
+   * pool-routed local engines. Queue ids are replica-local (each
+   * {@link ProviderQueue} counts from 1), so we cancel on the first
+   * replica of this provider whose queue knows the id; in the common
+   * single-replica case that is unambiguous, and a stale id simply
+   * matches nothing. Returns true when an entry was removed.
+   */
+  cancelPendingQueueItem(provider: string, id: number): boolean {
+    for (const entry of this.entries.values()) {
+      if (entry.parsed.provider !== provider) continue;
+      if (entry.provider.queue?.cancelPending(id)) return true;
+    }
+    return false;
+  }
+
+  /** Reorder a pending queue entry across this provider's replicas. See
+   *  {@link cancelPendingQueueItem} for the id-matching contract. */
+  movePendingQueueItem(provider: string, id: number, direction: 'up' | 'down'): boolean {
+    for (const entry of this.entries.values()) {
+      if (entry.parsed.provider !== provider) continue;
+      if (entry.provider.queue?.movePending(id, direction)) return true;
+    }
+    return false;
   }
 
   private fireChange(): void {

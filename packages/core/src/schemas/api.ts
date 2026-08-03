@@ -2115,7 +2115,10 @@ export const UpdateConfigRequestSchema = GezelConfigSchema.extend({
   llamaCppModelPath: z.string().nullable().optional(),
   llamaCppBackendOverride: z.enum(['auto', 'cuda', 'vulkan', 'metal', 'cpu']).nullable().optional(),
   llamaCppKvCacheType: z.enum(['f16', 'q8_0', 'q4_0']).nullable().optional(),
-  llamaCppFlashAttn: z.union([z.boolean(), z.enum(['on', 'off', 'auto'])]).nullable().optional(),
+  llamaCppFlashAttn: z
+    .union([z.boolean(), z.enum(['on', 'off', 'auto'])])
+    .nullable()
+    .optional(),
   llamaCppSpecType: z
     .enum([
       'none',

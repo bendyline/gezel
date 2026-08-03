@@ -9665,6 +9665,29 @@ export class ChatManager {
   }
 
   /**
+   * Cancel a pending provider-queue entry by (provider, id). Resolves
+   * the queue the SAME two ways {@link localEngineQueueSummaries} +
+   * `/api/queues` surface it: the singleton `providers` map first
+   * (cloud providers, seeded test mocks), then the engine pool for
+   * pool-routed local engines whose queue the singleton never sees.
+   * Returns true when an entry was removed, false when the id is
+   * unknown (already running, already cancelled, or no such provider).
+   */
+  cancelProviderQueueItem(name: ProviderName, id: number): boolean {
+    if (this.getProviderIfReady(name)?.queue?.cancelPending(id)) return true;
+    const router = this.engineRouter ?? this.engineRouterCache;
+    return router ? router.pool.cancelPendingQueueItem(name, id) : false;
+  }
+
+  /** Reorder a pending provider-queue entry. Same singleton-then-pool
+   *  resolution as {@link cancelProviderQueueItem}. */
+  moveProviderQueueItem(name: ProviderName, id: number, direction: 'up' | 'down'): boolean {
+    if (this.getProviderIfReady(name)?.queue?.movePending(id, direction)) return true;
+    const router = this.engineRouter ?? this.engineRouterCache;
+    return router ? router.pool.movePendingQueueItem(name, id, direction) : false;
+  }
+
+  /**
    * Resolve a local provider through the engine pool when possible, so
    * the {@link CapacityBroker} sees every spawn. Returns null — meaning
    * "the pool can't serve this; use the singleton path" — for any of:

@@ -127,6 +127,14 @@ export function composeFitnessBadge(input: FitnessBadgeInput): FitnessBadge {
     ? ' Hardware has changed since this check — consider re-running it.'
     : '';
 
+  if (record.status === 'blocked') {
+    return {
+      tier: 'unknown',
+      label: 'did not run',
+      detail: `The fitness check could not run — the engine was busy serving other requests. Nothing is wrong with the model; run the check again in a moment.${softener}${ramCaveat(ramFit)}`,
+    };
+  }
+
   if (record.status === 'failed') {
     return {
       tier: 'warn',

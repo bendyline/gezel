@@ -25,7 +25,7 @@ export const FitnessCheckSchema = z.object({
 });
 export type FitnessCheck = z.infer<typeof FitnessCheckSchema>;
 
-export const ModelFitnessStatusSchema = z.enum(['probed', 'failed', 'deferred']);
+export const ModelFitnessStatusSchema = z.enum(['probed', 'failed', 'deferred', 'blocked']);
 export type ModelFitnessStatus = z.infer<typeof ModelFitnessStatusSchema>;
 
 export const ModelFitnessTriggerSchema = z.enum(['install', 'manual']);
@@ -41,7 +41,9 @@ export const ModelFitnessRecordSchema = z.object({
    * `probed` — the trial ran to completion (checks may still fail);
    * `failed` — probe machinery broke (spawn throw, timeout) before a
    * verdict; `deferred` — install-triggered probe gave up waiting for
-   * capacity headroom.
+   * capacity headroom; `blocked` — the engine was busy serving other
+   * requests and could not be freed in time, so the check never ran
+   * (transient, retriable — not a model defect).
    */
   status: ModelFitnessStatusSchema,
   /** All gating checks passed (eval-report parity). */

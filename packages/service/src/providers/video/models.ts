@@ -26,9 +26,9 @@ import { createLogger } from '@bendyline/gezel';
 import type { VideoModelLoad } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import {
+  MODEL_HASH_READ_BUFFER_BYTES,
   type ModelStorageRoots,
   findModelRoot,
-  MODEL_HASH_READ_BUFFER_BYTES,
   hashModelPayloadFiles,
   listOverlayModelIds,
   makeSharedModelReadable,

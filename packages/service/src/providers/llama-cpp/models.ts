@@ -35,7 +35,7 @@
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
-import { basename, join } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import { createLogger } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import {
@@ -46,8 +46,8 @@ import {
 } from '../../models/bundle-storage.js';
 import {
   type IncompleteModelDownloadInfo,
-  type ModelStorageRoots,
   MODEL_HASH_READ_BUFFER_BYTES,
+  type ModelStorageRoots,
   findModelRoot,
   hashModelPayloadFiles,
   listIncompleteModelDownloads,
@@ -110,6 +110,13 @@ export interface InstalledLlamaCppModel {
   catalogVersion?: string;
   /** sha256 of the weights recorded at install (first shard for sharded installs). */
   sha256?: string;
+  /**
+   * True when this model resolves from a read-only overlay (the machine/shared
+   * asset store) rather than this daemon's writable root. `delete` refuses
+   * these, so the UI shows them as machine-provided instead of offering a
+   * Delete action that can only fail.
+   */
+  readOnly?: boolean;
   /**
    * True when the catalog now ships a different version than the one this
    * model was downloaded against — a newer build is available. Lets the
@@ -931,6 +938,10 @@ export class LlamaCppModelManager {
       ...(parsed.architecture ? { architecture: parsed.architecture } : {}),
       ...(parsed.catalogVersion ? { catalogVersion: parsed.catalogVersion } : {}),
       ...(parsed.sha256 ? { sha256: parsed.sha256 } : {}),
+      // Read-only when it lives in a machine/shared overlay rather than this
+      // daemon's writable root — the delete endpoint refuses it, so the UI
+      // must not offer a Delete action that can only 400.
+      ...(resolve(root) !== resolve(this.storageRoots.writableRoot) ? { readOnly: true } : {}),
     };
   }
 }

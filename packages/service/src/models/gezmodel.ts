@@ -19,10 +19,10 @@ import type { CatalogService } from '@bendyline/gezel-catalog';
 import * as yauzl from 'yauzl';
 import * as yazl from 'yazl';
 import { safeJoin } from '../fs/safe-paths.js';
-import { MODEL_HASH_READ_BUFFER_BYTES } from './storage-roots.js';
 import type { LlamaCppModelManager } from '../providers/llama-cpp/models.js';
 import type { MlxModelManager } from '../providers/mlx/models.js';
 import { type ModelBundleSource, safeBundleModelPath } from './bundle-storage.js';
+import { MODEL_HASH_READ_BUFFER_BYTES } from './storage-roots.js';
 
 const MAX_ARCHIVE_BYTES = 2 * 1024 ** 4; // 2 TiB compressed upload ceiling.
 const MAX_ENTRIES = 16_384;

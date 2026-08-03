@@ -110,6 +110,16 @@ describe('composeFitnessBadge', () => {
     expect(b.detail).toContain('probe timed out');
   });
 
+  it('status blocked → unknown "did not run", not a warn failure', () => {
+    const r = record({ status: 'blocked', admitted: false });
+    r.checks.spawn = { ok: false, detail: 'engine busy serving requests and did not drain' };
+    const b = composeFitnessBadge({ fitness: fresh(r) });
+    expect(b.tier).toBe('unknown');
+    expect(b.label).toBe('did not run');
+    expect(b.detail).toMatch(/busy serving other requests/);
+    expect(b.detail).toMatch(/again in a moment/);
+  });
+
   it('status deferred → unknown with a manual-run nudge', () => {
     const b = composeFitnessBadge({
       fitness: fresh(record({ status: 'deferred', admitted: false })),

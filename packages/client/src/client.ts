@@ -1411,6 +1411,12 @@ export interface LlamaCppInstalledModel {
   updateAvailable?: boolean;
   /** The catalog's current version, when it differs from the installed one. */
   availableVersion?: string;
+  /**
+   * True when the model lives in a read-only overlay (the machine/shared asset
+   * store), not this daemon's writable root. The delete endpoint refuses these,
+   * so the UI shows them as machine-provided instead of offering Delete.
+   */
+  readOnly?: boolean;
 }
 
 /**
@@ -1426,7 +1432,7 @@ export interface ModelFitnessEntry {
     schemaVersion: 1;
     provider: string;
     modelId: string;
-    status: 'probed' | 'failed' | 'deferred';
+    status: 'probed' | 'failed' | 'deferred' | 'blocked';
     admitted: boolean;
     genTokensPerSec: number | null;
     createdAt: string;
@@ -1511,6 +1517,12 @@ export interface MlxInstalledModel {
    * bump changed the upstream repo or file set.
    */
   catalogVersion?: string;
+  /**
+   * True when the model lives in a read-only overlay (the machine/shared asset
+   * store), not this daemon's writable root. Delete refuses these, so the UI
+   * shows them as machine-provided instead of offering Delete.
+   */
+  readOnly?: boolean;
 }
 
 /** Snapshot of the Python runtime powering MLX venvs. */

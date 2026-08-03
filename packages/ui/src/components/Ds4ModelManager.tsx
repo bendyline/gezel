@@ -54,6 +54,10 @@ export function Ds4ModelManager({ onModelsChanged }: { onModelsChanged?: () => v
   // real empty catalog.
   const [items, setItems] = useState<CatalogItemSummary[] | null>(null);
   const [installed, setInstalled] = useState<Set<string>>(new Set());
+  // Ids that resolve from a read-only machine/shared overlay — delete refuses
+  // these, so the row shows them as machine-provided rather than offering a
+  // Delete that only 400s.
+  const [readOnlyIds, setReadOnlyIds] = useState<Set<string>>(new Set());
   const [mem, setMem] = useState<Mem | null>(null);
   const [installing, setInstalling] = useState<Map<string, InstallState>>(new Map());
   const [error, setError] = useState<string | null>(null);
@@ -75,6 +79,7 @@ export function Ds4ModelManager({ onModelsChanged }: { onModelsChanged?: () => v
     try {
       const r = await api.listDs4Models();
       setInstalled(new Set(r.models.map((m) => m.id)));
+      setReadOnlyIds(new Set(r.models.filter((m) => m.readOnly).map((m) => m.id)));
     } catch {
       /* the row's own error surfaces install failures */
     }
@@ -388,9 +393,18 @@ export function Ds4ModelManager({ onModelsChanged }: { onModelsChanged?: () => v
                 <>
                   <span className="home-status-pill home-status-ok">on device</span>
                   <ExportModelBundleButton engine="ds4" id={m.id} />
-                  <button type="button" onClick={() => void remove(m.id)}>
-                    Delete
-                  </button>
+                  {readOnlyIds.has(m.id) ? (
+                    <span
+                      className="muted small"
+                      title="Provided by the machine-wide install (shared asset store). It can't be removed from here — manage it with the machine installer, or install a user-owned copy to shadow it."
+                    >
+                      Machine model
+                    </span>
+                  ) : (
+                    <button type="button" onClick={() => void remove(m.id)}>
+                      Delete
+                    </button>
+                  )}
                 </>
               ) : canRunSafely ? (
                 <button type="button" onClick={() => startInstall(m.id)}>

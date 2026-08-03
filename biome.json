@@ -32,6 +32,7 @@
       "**/.upstream/**",
       "**/.vscode-test/**",
       "native/build/**",
+      "packages/app/native-bin/**",
       "native/helpers/service-host/.build/**",
       "temp/**",
       "packages/catalog/scripts/harvested-auth/**",

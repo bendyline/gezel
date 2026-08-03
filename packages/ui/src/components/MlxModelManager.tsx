@@ -575,13 +575,22 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
                             {reinstalling ? 'Downloading…' : 'Download again'}
                           </button>
                         )}
-                        <button
-                          type="button"
-                          className="home-link"
-                          onClick={() => setToDelete(m.id)}
-                        >
-                          Delete
-                        </button>
+                        {m.readOnly ? (
+                          <span
+                            className="muted small"
+                            title="Provided by the machine-wide install (shared asset store). It can't be removed from here — manage it with the machine installer, or install a user-owned copy to shadow it."
+                          >
+                            Machine model
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            className="home-link"
+                            onClick={() => setToDelete(m.id)}
+                          >
+                            Delete
+                          </button>
+                        )}
                       </td>
                     </tr>
                   );

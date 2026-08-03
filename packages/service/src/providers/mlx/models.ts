@@ -35,7 +35,7 @@
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, resolve as resolvePath } from 'node:path';
 import { createLogger } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import {
@@ -45,8 +45,8 @@ import {
 } from '../../models/bundle-storage.js';
 import {
   type IncompleteModelDownloadInfo,
-  type ModelStorageRoots,
   MODEL_HASH_READ_BUFFER_BYTES,
+  type ModelStorageRoots,
   findModelRoot,
   hashModelPayloadFiles,
   listIncompleteModelDownloads,
@@ -87,6 +87,13 @@ export interface InstalledMlxModel {
    * the catalog now describes).
    */
   catalogVersion?: string;
+  /**
+   * True when this model resolves from a read-only overlay (the machine/shared
+   * asset store) rather than this daemon's writable root. `delete` refuses
+   * these, so the UI shows them as machine-provided rather than offering a
+   * Delete that can only fail.
+   */
+  readOnly?: boolean;
 }
 
 /**
@@ -888,6 +895,12 @@ export class MlxModelManager {
       chatTemplatePresent: parsed.chatTemplatePresent ?? true,
       ...(parsed.architecture ? { architecture: parsed.architecture } : {}),
       ...(parsed.catalogVersion ? { catalogVersion: parsed.catalogVersion } : {}),
+      // Read-only when it resolves from a machine/shared overlay rather than
+      // this daemon's writable root — delete refuses these; the UI shows them
+      // as machine-provided instead of offering a Delete that only 400s.
+      ...(resolvePath(root) !== resolvePath(this.storageRoots.writableRoot)
+        ? { readOnly: true }
+        : {}),
     };
   }
 }

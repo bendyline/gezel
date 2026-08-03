@@ -715,7 +715,7 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
                           >
                             {badge.tier === 'probing'
                               ? 'Checking…'
-                              : entry && !entry.stale
+                              : entry && !entry.stale && entry.record.status !== 'blocked'
                                 ? 'Re-run'
                                 : 'Run fitness check'}
                           </button>
@@ -741,13 +741,22 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
                             {updating ? 'Updating…' : 'Update'}
                           </button>
                         )}
-                        <button
-                          type="button"
-                          className="home-link"
-                          onClick={() => setToDelete(m.id)}
-                        >
-                          Delete
-                        </button>
+                        {m.readOnly ? (
+                          <span
+                            className="muted small"
+                            title="Provided by the machine-wide install (shared asset store). It can't be removed from here — manage it with the machine installer, or install a user-owned copy to shadow it."
+                          >
+                            Machine model
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            className="home-link"
+                            onClick={() => setToDelete(m.id)}
+                          >
+                            Delete
+                          </button>
+                        )}
                       </td>
                     </tr>
                   );

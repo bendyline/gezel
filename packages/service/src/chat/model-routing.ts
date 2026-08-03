@@ -13,7 +13,8 @@
  * Evidence is ADVISORY, never load-bearing:
  * - A fresh fitness record that says `probed` + not admitted (or a
  *   measured decode rate below the floor) removes a candidate; a
- *   missing, stale, `failed`, or `deferred` record removes nothing.
+ *   missing, stale, `failed`, `deferred`, or `blocked` record removes
+ *   nothing.
  * - Gate history DEMOTES (stable-partitions to the back), never
  *   excludes — the only clearing candidate still gets picked even
  *   with an ugly record.
@@ -49,7 +50,7 @@ export interface RoutingCandidate {
 }
 
 export interface ModelFitnessEvidence {
-  status: 'probed' | 'failed' | 'deferred';
+  status: 'probed' | 'failed' | 'deferred' | 'blocked';
   admitted: boolean;
   genTokensPerSec?: number | null;
   stale: boolean;
