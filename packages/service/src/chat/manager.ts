@@ -11902,6 +11902,11 @@ export class ChatManager {
         ...(process.env.GEZEL_MCP_TOOL_NAMING
           ? { GEZEL_MCP_TOOL_NAMING: process.env.GEZEL_MCP_TOOL_NAMING }
           : {}),
+        // Same reason: the post-edit re-anchor kill switch has to be forwarded
+        // explicitly or the control arm would still get re-anchored output.
+        ...(process.env.GEZEL_DISABLE_EDIT_REANCHOR
+          ? { GEZEL_DISABLE_EDIT_REANCHOR: process.env.GEZEL_DISABLE_EDIT_REANCHOR }
+          : {}),
       };
       // Diagnostic for the recurring "game tools missing after a model
       // switch" bug: record exactly what script-tool env THIS bridge spawn

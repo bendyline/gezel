@@ -923,6 +923,34 @@ describe('McpBridge', () => {
   });
 
   describe('write_file syntax validation (HTML + JS/TS)', () => {
+    it('replace_lines re-anchors the model with fresh line numbers after the edit', async () => {
+      // gemma4-e4b-q8 fired two replace_lines against one stale read (line
+      // numbers had shifted underneath it), missed, then fell back to
+      // rewriting whole files — bookstore-openapi / codebase-evolution,
+      // 2026-08-02. The edit result now states the shift and re-prints the
+      // region renumbered, so a second edit can be aimed without a re-read.
+      await bridge.callTool('write_file', {
+        path: 'reanchor.txt',
+        content: ['alpha', 'bravo', 'charlie', 'delta', 'echo'].join('\n'),
+      });
+
+      const out = await bridge.callTool('replace_lines', {
+        path: 'reanchor.txt',
+        startLine: 2,
+        endLine: 2,
+        content: ['bravo-one', 'bravo-two', 'bravo-three'].join('\n'),
+      });
+
+      expect(out).toContain('Edited reanchor.txt');
+      expect(out).toContain('shifted by +2');
+      expect(out).toContain('stale');
+      // Fresh gutters for the region, so the next edit can target them.
+      expect(out).toContain('2→bravo-one');
+      expect(out).toContain('4→bravo-three');
+      // `charlie` was line 3 before the edit and is line 5 after it.
+      expect(out).toContain('5→charlie');
+    });
+
     it('write_file persists a first-write HTML draft with unparseable inline <script>', async () => {
       // Mirrors the gemma4-e4b tictactoe failure mode:
       // 4 KB of valid HTML with one truncated `function` body, all

@@ -441,9 +441,14 @@ export class PerfCollector {
             const gpu = this.gpuSampler.sample();
             this.lastGpuSampleAtMs = Date.now();
             if (gpu) this.gpuSamples.push({ atMs: at, ...gpu });
-        this.systemMemorySamples.push({ atMs: at, ...sampleSystemMemory() });
           }
         }
+        // Outside the GPU branch on purpose: host RAM is free to read and is
+        // the ONLY memory-headroom signal on a unified-memory host, which is
+        // exactly where the GPU sampler reports no memory (or none at all).
+        // Nesting this under the sampler would zero it on the hosts that need
+        // it most, and throttle it to the GPU interval everywhere else.
+        this.systemMemorySamples.push({ atMs: at, ...sampleSystemMemory() });
       }
       // Sleep in small steps so stop() exits quickly. Even with
       // sampling disabled we still spin so `stop()` can be awaited
