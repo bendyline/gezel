@@ -9,6 +9,8 @@ interface Props {
   onModelsChanged?: () => void;
 }
 
+type MemoryProfile = Awaited<ReturnType<typeof api.getMemoryProfile>>;
+
 type ProbeState =
   | { kind: 'idle' | 'probing' }
   | { kind: 'ready'; status: VideoEngineStatusResponse }
@@ -27,13 +29,23 @@ export function VideoEngineSettings({ onModelsChanged }: Props) {
   const [probe, setProbe] = useState<ProbeState>({ kind: 'idle' });
   const [refreshTick, setRefreshTick] = useState(0);
   const [config, setConfig] = useState<ConfigResponse | null>(null);
+  const [memory, setMemory] = useState<MemoryProfile | null>(null);
   const [status, setStatus] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     setProbe({ kind: 'probing' });
     try {
-      const [statusRes, cfg] = await Promise.all([api.getVideoEngineStatus(), api.getConfig()]);
+      const [statusRes, cfg, mem] = await Promise.all([
+        api.getVideoEngineStatus(),
+        api.getConfig(),
+        // Only feeds the CPU-fallback wording — a failure here must not turn
+        // the whole panel into "service unreachable".
+        api
+          .getMemoryProfile()
+          .catch(() => null),
+      ]);
       setConfig(cfg);
+      setMemory(mem);
       if (statusRes.engine.status === 'not-configured') {
         setProbe({ kind: 'engine-not-configured', status: statusRes });
       } else if (statusRes.engine.status === 'unreachable') {
@@ -95,13 +107,7 @@ export function VideoEngineSettings({ onModelsChanged }: Props) {
 
       <VideoGeneratorGezelHint />
 
-      {accelerator === 'cpu' && (
-        <p className="error">
-          No GPU detected — video will be generated on the <strong>CPU</strong>, which is extremely
-          slow (minutes to hours per clip). A CUDA (NVIDIA) GPU or Apple Silicon is strongly
-          recommended.
-        </p>
-      )}
+      {accelerator === 'cpu' && <CpuFallbackNotice memory={memory} />}
       {probe.kind === 'probe-failed' && (
         <p className="error">Couldn't reach the Gezel service. Details: {probe.error}</p>
       )}
@@ -153,6 +159,77 @@ export function VideoEngineSettings({ onModelsChanged }: Props) {
 
       {status && <p className="muted small">{status}</p>}
     </div>
+  );
+}
+
+const VENDOR_LABEL: Record<'amd' | 'nvidia' | 'intel', string> = {
+  amd: 'AMD',
+  nvidia: 'Nvidia',
+  intel: 'Intel',
+};
+
+export type CpuFallbackCause =
+  /** The machine has no usable GPU at all. */
+  | { kind: 'no-gpu' }
+  /** A GPU is present, but PyTorch has no backend for it on this platform. */
+  | { kind: 'unsupported-gpu'; vendorLabel: string | null }
+  /** An NVIDIA card is present but the engine could not resolve CUDA. */
+  | { kind: 'cuda-unavailable' };
+
+/**
+ * Why video generation resolved to the CPU. The distinction is the whole
+ * point of this function: on a Radeon or Arc card gezel *can* see the GPU
+ * — chat runs on it, and the engine pill in the header says so — because
+ * llama.cpp has a vendor-agnostic Vulkan backend. The video engine is
+ * PyTorch/diffusers, which ships CUDA, MPS and CPU backends and nothing
+ * else. Reporting that as "no GPU detected" contradicts the rest of the
+ * app and reads as a gezel bug rather than an upstream limitation.
+ *
+ * `memory` is null when the profile probe failed; unknown hardware must
+ * not assert a cause, so it falls back to the vaguer no-gpu copy.
+ */
+export function cpuFallbackCause(memory: MemoryProfile | null): CpuFallbackCause {
+  const hasGpu = memory?.source === 'gpu-nvidia' || memory?.source === 'gpu-vulkan';
+  if (!hasGpu) return { kind: 'no-gpu' };
+  const vendor = memory?.gpuVendor;
+  // nvidia + CPU fallback means both probes disagreed about the same card,
+  // so the driver is the suspect — never tell an NVIDIA owner their GPU is
+  // unsupported.
+  if (vendor === 'nvidia') return { kind: 'cuda-unavailable' };
+  return { kind: 'unsupported-gpu', vendorLabel: vendor ? VENDOR_LABEL[vendor] : null };
+}
+
+const SLOWNESS = 'which is extremely slow (minutes to hours per clip)';
+
+function CpuFallbackNotice({ memory }: { memory: MemoryProfile | null }) {
+  const cause = cpuFallbackCause(memory);
+
+  if (cause.kind === 'unsupported-gpu') {
+    const who = cause.vendorLabel ? `Your ${cause.vendorLabel} GPU` : "This machine's GPU";
+    return (
+      <p className="error">
+        {who} can't be used for video generation — the video engine is built on PyTorch, which only
+        accelerates on NVIDIA (CUDA) cards and Apple Silicon. Chat still runs on your GPU; video
+        will be generated on the <strong>CPU</strong>, {SLOWNESS}.
+      </p>
+    );
+  }
+
+  if (cause.kind === 'cuda-unavailable') {
+    return (
+      <p className="error">
+        An NVIDIA GPU is present, but the video engine couldn't reach CUDA — check that the NVIDIA
+        driver is installed and that <code>nvidia-smi</code> runs. Until then video will be
+        generated on the <strong>CPU</strong>, {SLOWNESS}.
+      </p>
+    );
+  }
+
+  return (
+    <p className="error">
+      No GPU detected — video will be generated on the <strong>CPU</strong>, {SLOWNESS}. A CUDA
+      (NVIDIA) GPU or Apple Silicon is strongly recommended.
+    </p>
   );
 }
 

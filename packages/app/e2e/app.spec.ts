@@ -79,6 +79,43 @@ test('02 - header shows the brand and the left sidebar lists every area', async 
   expect(sidebarText).not.toContain('Agents');
 });
 
+// The native window-control overlay paints a flat sage patch that the
+// header's wood-grain texture cannot reach, and it paints only its own
+// height and width. Any drift between the header band and that patch shows
+// up as a seam — texture peeking out below the buttons, or the cordon rule
+// landing a pixel off the boundary. Both are easy to introduce (a vertical
+// margin on any header pill grew the band 6px past the overlay once) and
+// invisible without measuring, so assert the geometry directly.
+test('02b - the header band matches the native window-control overlay', async () => {
+  test.skip(process.platform === 'darwin', 'macOS uses traffic lights, not a painted overlay');
+
+  const geometry = await page.evaluate(() => {
+    const wco = navigator.windowControlsOverlay;
+    if (!wco?.visible) return null;
+    const header = document.querySelector('.app-header');
+    if (!header) return null;
+    const rect = wco.getTitlebarAreaRect();
+    const after = getComputedStyle(header, '::after');
+    return {
+      headerHeight: header.getBoundingClientRect().height,
+      overlayHeight: rect.height,
+      // Distance from the right window edge to the inner edge of the
+      // buttons, and to the cordon rule that is supposed to sit on it.
+      overlayInset: header.getBoundingClientRect().width - (rect.x + rect.width),
+      ruleInset: Number.parseFloat(after.right),
+      ruleWidth: Number.parseFloat(after.width),
+    };
+  });
+
+  // Older Electron/Chromium or a hidden overlay leaves nothing to compare.
+  test.skip(geometry === null, 'window controls overlay unavailable');
+  if (!geometry) return;
+
+  expect(geometry.headerHeight).toBeCloseTo(geometry.overlayHeight, 0);
+  expect(geometry.ruleInset).toBeCloseTo(geometry.overlayInset, 0);
+  expect(geometry.ruleWidth).toBe(1);
+});
+
 async function openArea(area: string): Promise<void> {
   await page.locator(`[data-testid="sidebar-area-${area}"]`).click();
 }

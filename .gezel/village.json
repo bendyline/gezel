@@ -766,6 +766,20 @@
         },
         {
           "k": "block",
+          "id": "docs/decisions/0003-throughput-scaled-eval-ceilings.md",
+          "r": [
+            5358.8,
+            4053.9,
+            22.7,
+            31.1
+          ],
+          "p": "docs/decisions",
+          "h": "e0284aff824f9cc39ace91fc6dcb340234d69d55968fa53904e5e1356ed2751a",
+          "w": 133,
+          "a": "2026-08-03T15:50:16.864Z"
+        },
+        {
+          "k": "block",
           "id": "docs/decisions/README.md",
           "r": [
             2730.5,
@@ -774,8 +788,8 @@
             13.2
           ],
           "p": "docs/decisions",
-          "h": "9a731a5095982adf22688b6082f243cb84e27e8fd4ac24e8edcffcda766dfd62",
-          "w": 12,
+          "h": "aa1e0c077e3c6d949631c0df49697db6bc29f2fb2560164ed8099d3078ffc927",
+          "w": 13,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -1418,8 +1432,8 @@
             46.7
           ],
           "p": "docs",
-          "h": "683dea34cb1d1da44aa670a5313542080afb8526da4e618feb1a1d689b937428",
-          "w": 627,
+          "h": "ce1112d2cce8aba4b57ce0b301cb7e9d962aa39ab035429539e3f13a5b0447f6",
+          "w": 633,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -10560,8 +10574,8 @@
             42.1
           ],
           "p": "evals/src",
-          "h": "038fa556572a706ba959a26b5443f4a4e4f2b7ff4cf4a20acbe71894546329c5",
-          "w": 612,
+          "h": "0e6ccd5939da33b9ea7ab0be355755698225f5f3a61d2d1594ec378e99c2d067",
+          "w": 614,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -10700,8 +10714,8 @@
             25.9
           ],
           "p": "evals/src/bin",
-          "h": "ee37fdf6e8833c6403ec3e87c127a27bf9ffaa1c233589de78eb5aed81ed707f",
-          "w": 234,
+          "h": "67a0b8335f73edf9ac48843611e095fe5ed1bca97a7097ff2c88eedd490b69ef",
+          "w": 240,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -10896,8 +10910,8 @@
             17.7
           ],
           "p": "evals/src/bin",
-          "h": "c4db693f62d55eb477fbe3af44f5a0b96a2734a850c0f77973e0eae4998ca714",
-          "w": 61,
+          "h": "1e345242bd83cb16356fa609df0d038ae457c6131f1b648fb17f047ccf0b72f0",
+          "w": 64,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -11350,6 +11364,20 @@
         },
         {
           "k": "block",
+          "id": "evals/src/host-state.ts",
+          "r": [
+            3446.3,
+            3027.2,
+            25.6,
+            26.7
+          ],
+          "p": "evals/src",
+          "h": "e3a41dd979561279cf11c5ed05144fafa8e5d5d54a3b77d68299b51e452b5cd1",
+          "w": 132,
+          "a": "2026-08-03T15:50:16.864Z"
+        },
+        {
+          "k": "block",
           "id": "evals/src/html-validation.ts",
           "r": [
             3365.1,
@@ -11568,8 +11596,8 @@
             58.6
           ],
           "p": "evals/src",
-          "h": "95788e37407ce97fcc6b3446aa6e14d091076c01c9d39dcf6f7ac03fabaa3a5f",
-          "w": 1334,
+          "h": "04c915226582dd6ab97fd40d3347de68bd50f1d48eba1a40e9f1857672504352",
+          "w": 1424,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -11582,8 +11610,8 @@
             34.4
           ],
           "p": "evals/src",
-          "h": "90e9aea616caece530acaff590f3e0f831d867a1ebe7819eff99ab197e6ea325",
-          "w": 323,
+          "h": "62f1ab6a28e946943a02bc685f57d16e522ee7f89c0764d885a7b7105fb70a4c",
+          "w": 333,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -11596,8 +11624,8 @@
             44.7
           ],
           "p": "evals/src",
-          "h": "4871ebf8617292e67b6c0f7cbd10bbc83d5e6f7eb63bc4b2f62c083c67d93d2e",
-          "w": 581,
+          "h": "670153ad0a53ac4eb44078cf261b0f15c24d1f950270649f49c402c545fa0ef6",
+          "w": 614,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -11638,8 +11666,8 @@
             59.6
           ],
           "p": "evals/src",
-          "h": "9d45e8a8f820ad8d0426febf08afb41b8c0860a4d98615b26514da095fd4cb3f",
-          "w": 3136,
+          "h": "51224c98a86422580ef4fd6a7fb5195f9fb8d10428522332bc07f18d57d6febe",
+          "w": 3216,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -11708,8 +11736,8 @@
             45.7
           ],
           "p": "evals/src/scenarios",
-          "h": "4e45682b53332dc9f9fe0774a4511ce221e881de717c1655a109c44ba6cd4a89",
-          "w": 842,
+          "h": "c41fe7b7899e4cf944e01ab29334128a9afa111abf4b889c43c3a310207525bc",
+          "w": 843,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -12254,8 +12282,8 @@
             57.8
           ],
           "p": "evals/src",
-          "h": "488e653aa1aaf1969f272eb59ef592d335394ff9c153ee44d1928a424231af5b",
-          "w": 1487,
+          "h": "1cb404cd6e2e70517d562a209e3eeb69622d0e9028b35798c7ed32aaba6688b6",
+          "w": 1502,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -12380,8 +12408,8 @@
             49.8
           ],
           "p": "evals/src",
-          "h": "71f035cd785d158776018bf45ebf6214a2a61352f6b6ee6eebff8dcdeb3971d5",
-          "w": 647,
+          "h": "d89401eed90d40261fe38b79dc2e19e585f307203d47103ace8a63a415991ba4",
+          "w": 656,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -15953,8 +15981,8 @@
             29.2
           ],
           "p": "packages/cli/src/tui",
-          "h": "ce24e9cb384d613f678f985c1d67dc5dc95d6d69a500b52ddd0ea3d3bc544c48",
-          "w": 258,
+          "h": "b0c87334eccf9ca4d60dc345e50a3462a8f9fd03567fc495b8890982180c3cf5",
+          "w": 261,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -17423,8 +17451,8 @@
             30.8
           ],
           "p": "packages/core/src",
-          "h": "c300d9dced506ba0ee8d2915dbf491d73eb2e96d90d9c3b7c20711ca5c9024b5",
-          "w": 281,
+          "h": "0c96dd2d6ec401bf97c34b8ea07dfe92fe9a8079de36bbf5ee526706358cc295",
+          "w": 313,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -17535,8 +17563,8 @@
             62
           ],
           "p": "packages/core/src/schemas",
-          "h": "5944dedf118cfea79ae41cc1f5917021d799bfe262d39d78d3a87372eb7f18fe",
-          "w": 2187,
+          "h": "dbb9b2438b6831d4baa0bfa4905bad07251d41bd94e84ae9492637f8e58e24d6",
+          "w": 2191,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -18745,6 +18773,20 @@
         },
         {
           "k": "block",
+          "id": "packages/mcp/src/reanchor.ts",
+          "r": [
+            141.8,
+            1156.7,
+            20.6,
+            26.1
+          ],
+          "p": "packages/mcp/src",
+          "h": "8326af3e93d0436595047cbd743266bd2efea02e3a5ddadfa1b68539599bb8e0",
+          "w": 84,
+          "a": "2026-08-03T15:50:16.864Z"
+        },
+        {
+          "k": "block",
           "id": "packages/mcp/src/repo-intake-policy.ts",
           "r": [
             12,
@@ -18781,8 +18823,8 @@
             54.6
           ],
           "p": "packages/mcp/src",
-          "h": "806bc1bc73b1b299c031acf3fb3dc6e34974c66f71e26357f256b85ae1df8ac2",
-          "w": 9927,
+          "h": "664f4de4a1ec1498ab300635e4cbcbeb7983e30ffeb4956d4f9dbbea036897e9",
+          "w": 9918,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -25574,8 +25616,8 @@
             29.2
           ],
           "p": "packages/service/src/providers/llama-cpp",
-          "h": "f68df9446e11c3a2a256a1ac7f1ea45b419975b17fdb1a76335bc8acfd18f4e4",
-          "w": 106,
+          "h": "11c12d4e4a219012af8c12f8d61eb4638d985863c4cb345c739cb0e2e8e010e8",
+          "w": 108,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -26043,6 +26085,34 @@
         },
         {
           "k": "block",
+          "id": "packages/service/src/providers/mlx/python/cache_seed.py",
+          "r": [
+            5778.2,
+            2687.9,
+            27.5,
+            37.2
+          ],
+          "p": "packages/service/src/providers/mlx/python",
+          "h": "d9a72738aab2684c1683b6ffed531805ad5dbd3de56e087423d01e0b0eec317c",
+          "w": 237,
+          "a": "2026-08-03T15:50:16.864Z"
+        },
+        {
+          "k": "block",
+          "id": "packages/service/src/providers/mlx/python/cache_seed_test.py",
+          "r": [
+            5767.5,
+            2646.6,
+            26.1,
+            38.3
+          ],
+          "p": "packages/service/src/providers/mlx/python",
+          "h": "e6c45e3e824cdcb1799d2a191ccf25dabb3c46cfb228ee5d5ec8e2af0b824c0f",
+          "w": 223,
+          "a": "2026-08-03T15:50:16.864Z"
+        },
+        {
+          "k": "block",
           "id": "packages/service/src/providers/mlx/python/gezel_mlx_server.py",
           "r": [
             418.1,
@@ -26051,8 +26121,8 @@
             59.9
           ],
           "p": "packages/service/src/providers/mlx/python",
-          "h": "fd91e669971831033f2ef933a78217b0b04a13ddffb3abd60af70fe01bb0636d",
-          "w": 2109,
+          "h": "1d97bedc39f1ec9a87ec990ef3c75b2b259a3e64cdcbd847a8b6335cc932fb13",
+          "w": 2359,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -28781,8 +28851,8 @@
             46.6
           ],
           "p": "packages/ui/src",
-          "h": "f108deb5f691f51b5c289f45ccc6a4ab373a34429117b87fca27898c402071b0",
-          "w": 1353,
+          "h": "e59bffe218261f78310bf5887e4d186f6baeb6f553d0b8ada4d952e7dc0da86e",
+          "w": 1359,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -30660,8 +30730,8 @@
             25.9
           ],
           "p": "packages/ui/src/components",
-          "h": "b687f62d5f082a2f3023c0cae327aa91f24ef77ce745e1a72c204db85ba65fd2",
-          "w": 232,
+          "h": "399e5b777662c59cf361ddc8298141c983a19997459710809afd11db56c29bfd",
+          "w": 233,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -30702,8 +30772,8 @@
             48.7
           ],
           "p": "packages/ui/src/components",
-          "h": "86f2d04fbb24d8fc661ac9f4c85f24ec88b1a07c6d50c13eefcf92fcec95f775",
-          "w": 652,
+          "h": "f02eb1267df642e568d7fef991855604462615d9a4c3b5906b310f7a8cea661a",
+          "w": 657,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -30716,8 +30786,8 @@
             48.1
           ],
           "p": "packages/ui/src/components",
-          "h": "0203f3c9697f11d74702d7ef2472e4affc04763300be648e09c70ec187c7da0f",
-          "w": 1078,
+          "h": "9d8ef4bc21478b3c0088a998393e730f72525f753378d688b1517c84e709b3f6",
+          "w": 1076,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -30856,8 +30926,8 @@
             19.8
           ],
           "p": "packages/ui/src/components",
-          "h": "2ff5fd597ae0de0e0b64ab878b415ff7e161ced52efc80011f330080463a6a4a",
-          "w": 35,
+          "h": "7d8eb0366b93a6104521e3d2c56f2c2f4215bb6a9ed1a41d13b6130e0d9b34da",
+          "w": 43,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -30940,8 +31010,8 @@
             16.5
           ],
           "p": "packages/ui/src/components",
-          "h": "e081b9025c72a0a45eb2cd01a863e0148cf797cbf8dbb1841e6d621c60b6d3e6",
-          "w": 30,
+          "h": "0b7fc4e2af0c639be2430cdf1674951894bc3b9c1a64f7587b6c6f699296cc83",
+          "w": 31,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -30954,7 +31024,7 @@
             33.9
           ],
           "p": "packages/ui/src/components",
-          "h": "d85993f1e7f8eadf4544e37b9f7d4040bfc3acb5b828fd8c71930be9505eb3a0",
+          "h": "ea58df74ec74a61c8360236794467993f3d205450c9d98b458631e317144d67d",
           "w": 473,
           "a": "2026-07-29T12:45:34.302Z"
         },
@@ -31290,8 +31360,8 @@
             27.5
           ],
           "p": "packages/ui/src/components",
-          "h": "95d7feccfc31149fc65b93817f52ceefce9fb85a239ababe78c413d2a0f4397c",
-          "w": 208,
+          "h": "544d1b7d62455cb5f47cf9f0671b3b5f9ea9370bdd584e3510b3d895d06dff65",
+          "w": 199,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -31870,6 +31940,20 @@
         },
         {
           "k": "block",
+          "id": "packages/ui/src/components/nav-actions.ts",
+          "r": [
+            1785.9,
+            2838.9,
+            24.4,
+            18.4
+          ],
+          "p": "packages/ui/src/components",
+          "h": "dca1dfffea712bcba71a3e2aeb06ce40ab09facc2909de31b2d07d0ffcafcefe",
+          "w": 48,
+          "a": "2026-08-03T15:50:16.864Z"
+        },
+        {
+          "k": "block",
           "id": "packages/ui/src/components/nav-intents.ts",
           "r": [
             1748.9,
@@ -31979,6 +32063,20 @@
           "h": "53340930bb774ea7b1a782a57ce3f27c92dece0007e49df4af21e4bfe605a289",
           "w": 78,
           "a": "2026-07-29T12:45:34.302Z"
+        },
+        {
+          "k": "block",
+          "id": "packages/ui/src/components/question-nav.ts",
+          "r": [
+            1924.7,
+            2839,
+            20.2,
+            21.2
+          ],
+          "p": "packages/ui/src/components",
+          "h": "869eef92910225b15f4e4fbfd469e6a7ad09278c3f352f41f16894736596f516",
+          "w": 44,
+          "a": "2026-08-03T15:50:16.864Z"
         },
         {
           "k": "block",
@@ -32116,8 +32214,8 @@
             21.3
           ],
           "p": "packages/ui/src/components",
-          "h": "27d66d57b07607f05af707a73dcd2dc86dfe534f80a8f44f941f5ec93d4b463c",
-          "w": 106,
+          "h": "865f5312afd59cb714b42262d5693b8c1792a61805a2375ef99925d1f3d74a45",
+          "w": 97,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -32298,7 +32396,7 @@
             30.4
           ],
           "p": "packages/ui/src/components/transform",
-          "h": "bc8f2852e39c989285da53bcb98de22d832dbcec43f7ccaa34581323273c24e2",
+          "h": "86c3c4bdc6572f3c16897ce4cc2f343bfd038718aebe7524a75457a9cb703c45",
           "w": 236,
           "a": "2026-08-03T14:26:57.350Z"
         },
