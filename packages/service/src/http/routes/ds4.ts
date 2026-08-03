@@ -3,6 +3,7 @@ import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import { tailLatestEngineLog } from '../../providers/llama-cpp/log.js';
 import type { ServiceContext } from '../context.js';
+import { subscribeToInstallSse } from './install-sse.js';
 import { invalidateModelsCache } from './models.js';
 
 /**
@@ -29,33 +30,35 @@ export function ds4Routes(ctx: ServiceContext): Hono {
     return c.json({ installs: ctx.ds4Models.getActiveInstalls() });
   });
 
+  /** Incomplete downloads (mirrors llama-cpp `/incomplete`). Doubly relevant
+   *  here — ds4 models run to hundreds of GB, so a stalled download is a lot
+   *  of hidden disk. */
+  app.get('/incomplete', async (c) => {
+    const incomplete = await ctx.ds4Models.listIncomplete();
+    return c.json({ incomplete });
+  });
+
   /**
-   * Install a chat-model entry's ds4 source. SSE-streams the model
-   * manager's progress events (download → sha256-verify → metadata) so
-   * the UI can render a live progress bar. These are large (~81–153 GB)
-   * DeepSeek-V4 quants — the same machinery handles the long transfer +
-   * resume as llama.cpp's sharded GGUFs.
+   * Install a chat-model entry's ds4 source. The install runs as a
+   * background job owned by {@link ServiceContext.chatInstalls}; this SSE
+   * is just a subscriber, so a client disconnect does not abandon the
+   * download. That matters doubly here — these are large (~81–153 GB)
+   * DeepSeek-V4 quants. Idempotent: a second `POST` for a running id
+   * attaches to the in-flight install. Cancel is the explicit `DELETE`.
    */
   app.post('/models/:catalogId/install', async (c) => {
     const catalogId = c.req.param('catalogId');
     const skipShaRaw = c.req.query('skipSha');
     const skipSha =
       skipShaRaw != null && skipShaRaw !== '' && skipShaRaw !== '0' && skipShaRaw !== 'false';
-    return streamSSE(c, async (stream) => {
-      try {
-        for await (const event of ctx.ds4Models.install(catalogId, { skipSha })) {
-          await stream.writeSSE({ data: JSON.stringify(event) });
-        }
-        invalidateModelsCache('ds4');
-      } catch (err) {
-        await stream.writeSSE({
-          data: JSON.stringify({
-            type: 'error',
-            error: err instanceof Error ? err.message : String(err),
-          }),
-        });
-      }
-    });
+    ctx.chatInstalls.ds4.start(catalogId, { skipSha, includeMmproj: false });
+    return streamSSE(c, (stream) => subscribeToInstallSse(ctx.chatInstalls.ds4, catalogId, stream));
+  });
+
+  /** Explicitly cancel an in-flight install. Disconnect alone does not cancel. */
+  app.delete('/models/:catalogId/install', (c) => {
+    const catalogId = c.req.param('catalogId');
+    return c.json({ aborted: ctx.chatInstalls.ds4.cancel(catalogId) });
   });
 
   app.delete('/models/:id', async (c) => {

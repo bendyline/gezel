@@ -11,9 +11,11 @@ vi.mock('@bendyline/squisq-editor-react', () => ({
   EditorShell: ({
     initialMarkdown,
     onChange,
+    statusBarSlotRight,
   }: {
     initialMarkdown?: string;
     onChange?: (source: string) => void;
+    statusBarSlotRight?: React.ReactNode;
   }) => (
     <div data-testid="editor" data-initial={initialMarkdown}>
       {onChange && (
@@ -21,6 +23,7 @@ vi.mock('@bendyline/squisq-editor-react', () => ({
           edit
         </button>
       )}
+      <div data-testid="editor-status-bar-right">{statusBarSlotRight}</div>
     </div>
   ),
   JsonEditor: ({

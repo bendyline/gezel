@@ -24,6 +24,14 @@ type ConcreteBackend = Exclude<BackendOverride, 'auto'>;
 type KvCacheType = NonNullable<ConfigResponse['llamaCppKvCacheType']>;
 type SpecType = NonNullable<ConfigResponse['llamaCppSpecType']>;
 type FlashAttnMode = 'auto' | 'on' | 'off';
+type TriState = 'auto' | 'on' | 'off';
+
+/** Map a nullable boolean config override to the tri-state select value. */
+function triStateValue(v: boolean | null | undefined): TriState {
+  if (v === true) return 'on';
+  if (v === false) return 'off';
+  return 'auto';
+}
 
 /**
  * Backends the dropdown should offer for this machine, given:
@@ -156,7 +164,7 @@ export function LlamaCppSettings({ config, onConfigChanged, health }: Props) {
     setSaving('saving');
     try {
       const next = await api.updateConfig({
-        llamaCppBaseUrl: trimmed === '' ? undefined : trimmed,
+        llamaCppBaseUrl: trimmed === '' ? null : trimmed,
       });
       onConfigChanged(next);
       setSaving('saved');
@@ -171,8 +179,10 @@ export function LlamaCppSettings({ config, onConfigChanged, health }: Props) {
       setSaving('saving');
       try {
         const next = await api.updateConfig({
-          // 'auto' clears the override (returns to auto-detect).
-          llamaCppBackendOverride: value === 'auto' ? undefined : value,
+          // 'auto' clears the override (returns to auto-detect). Send null,
+          // not undefined: undefined is stripped by JSON.stringify and the
+          // store only clears a field on explicit null.
+          llamaCppBackendOverride: value === 'auto' ? null : value,
         });
         onConfigChanged(next);
         setSaving('saved');
@@ -189,7 +199,7 @@ export function LlamaCppSettings({ config, onConfigChanged, health }: Props) {
     setSaving('saving');
     try {
       const next = await api.updateConfig({
-        llamaCppModelPath: trimmed === '' ? undefined : trimmed,
+        llamaCppModelPath: trimmed === '' ? null : trimmed,
       });
       onConfigChanged(next);
       setSaving('saved');
@@ -204,9 +214,11 @@ export function LlamaCppSettings({ config, onConfigChanged, health }: Props) {
       setSaving('saving');
       try {
         const next = await api.updateConfig({
-          // q8_0 is the default — store undefined when it's selected so we
-          // don't pin a value that just tracks the default.
-          llamaCppKvCacheType: value === 'q8_0' ? undefined : value,
+          // q8_0 is the default — clear the override when it's selected so
+          // we don't pin a value that just tracks the default. Send null,
+          // not undefined: undefined is stripped by JSON.stringify and the
+          // store only clears a field on explicit null.
+          llamaCppKvCacheType: value === 'q8_0' ? null : value,
         });
         onConfigChanged(next);
         setSaving('saved');
@@ -224,8 +236,9 @@ export function LlamaCppSettings({ config, onConfigChanged, health }: Props) {
       try {
         const next = await api.updateConfig({
           // 'auto' is the server default — clear the override so we don't
-          // pin a value that just tracks the default.
-          llamaCppFlashAttn: value === 'auto' ? undefined : value,
+          // pin a value that just tracks the default. Send null, not
+          // undefined (see saveKvCacheType).
+          llamaCppFlashAttn: value === 'auto' ? null : value,
         });
         onConfigChanged(next);
         setSaving('saved');
@@ -238,11 +251,14 @@ export function LlamaCppSettings({ config, onConfigChanged, health }: Props) {
   );
 
   const saveCpuMoe = useCallback(
-    async (value: boolean) => {
+    async (value: TriState) => {
       setSaving('saving');
       try {
+        // Auto (null) clears the override → the launch-time offload planner
+        // decides. On (true) forces --cpu-moe; Off (false) forces experts
+        // onto the GPU and suppresses the planner's partial offload too.
         const next = await api.updateConfig({
-          llamaCppCpuMoe: value ? true : undefined,
+          llamaCppCpuMoe: value === 'auto' ? null : value === 'on',
         });
         onConfigChanged(next);
         setSaving('saved');
@@ -255,11 +271,13 @@ export function LlamaCppSettings({ config, onConfigChanged, health }: Props) {
   );
 
   const saveSwaFull = useCallback(
-    async (value: boolean) => {
+    async (value: TriState) => {
       setSaving('saving');
       try {
+        // Auto (null) clears the override → on for the Gemma family, off
+        // otherwise. On/Off force the flag regardless of architecture.
         const next = await api.updateConfig({
-          llamaCppSwaFull: value ? true : undefined,
+          llamaCppSwaFull: value === 'auto' ? null : value === 'on',
         });
         onConfigChanged(next);
         setSaving('saved');
@@ -277,8 +295,9 @@ export function LlamaCppSettings({ config, onConfigChanged, health }: Props) {
       try {
         const next = await api.updateConfig({
           // Unset is the persisted off/default state. Catalog MTP capability
-          // metadata never activates speculative decoding by itself.
-          llamaCppSpecType: value === 'none' ? undefined : value,
+          // metadata never activates speculative decoding by itself. Send
+          // null, not undefined (see saveKvCacheType).
+          llamaCppSpecType: value === 'none' ? null : value,
         });
         onConfigChanged(next);
         setSaving('saved');
@@ -366,12 +385,6 @@ export function LlamaCppSettings({ config, onConfigChanged, health }: Props) {
 
       <EngineBudgetStrip provider="llama-cpp" />
 
-      <MachineHealthSettings
-        config={config}
-        onConfigChanged={onConfigChanged}
-        platform={window.__GEZEL__?.platform ?? health?.platform}
-      />
-
       <section style={{ marginBottom: '2rem' }}>
         <h4>Models</h4>
         <LlamaCppModelManager onModelsChanged={refreshInstalled} />
@@ -391,6 +404,12 @@ export function LlamaCppSettings({ config, onConfigChanged, health }: Props) {
           onConfigChanged={onConfigChanged}
         />
       </section>
+
+      <MachineHealthSettings
+        config={config}
+        onConfigChanged={onConfigChanged}
+        platform={window.__GEZEL__?.platform ?? health?.platform}
+      />
 
       <section style={{ marginBottom: '2rem' }}>
         <h4>Advanced</h4>
@@ -506,47 +525,44 @@ export function LlamaCppSettings({ config, onConfigChanged, health }: Props) {
           <label className="muted" style={{ fontSize: '0.9rem', minWidth: '10rem' }}>
             MoE expert offload
           </label>
-          <label
-            className="muted"
-            style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.9rem' }}
+          <select
+            value={triStateValue(config?.llamaCppCpuMoe)}
+            onChange={(e) => void saveCpuMoe(e.target.value as TriState)}
+            style={{ flex: 1, maxWidth: '20rem' }}
           >
-            <input
-              type="checkbox"
-              checked={Boolean(config?.llamaCppCpuMoe)}
-              onChange={(e) => void saveCpuMoe(e.target.checked)}
-            />
-            Keep Mixture-of-Experts weights in system RAM (<code>--cpu-moe</code>)
-          </label>
+            <option value="auto">Auto — detect when offload is needed (default)</option>
+            <option value="on">On — always offload experts (--cpu-moe)</option>
+            <option value="off">Off — keep experts on the GPU</option>
+          </select>
         </div>
         <p className="muted small" style={{ marginTop: '0.25rem', marginLeft: '10rem' }}>
           For big Mixture-of-Experts models on a small GPU: run attention on the GPU while streaming
           the sparse expert weights from system RAM — lets a model that wouldn't fit in VRAM run
-          anyway. Leave off to let the engine size the offload automatically. Takes effect the next
-          time the engine starts.
+          anyway. <em>Auto</em> turns this on only for a MoE model that won't fit in VRAM (and sizes
+          a partial split when it can), and leaves dense models and UMA machines alone. Takes effect
+          the next time the engine starts.
         </p>
         <div className="new-row" style={{ marginTop: '0.75rem', alignItems: 'center' }}>
           <label className="muted" style={{ fontSize: '0.9rem', minWidth: '10rem' }}>
             Full SWA cache
           </label>
-          <label
-            className="muted"
-            style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.9rem' }}
+          <select
+            value={triStateValue(config?.llamaCppSwaFull)}
+            onChange={(e) => void saveSwaFull(e.target.value as TriState)}
+            style={{ flex: 1, maxWidth: '20rem' }}
           >
-            <input
-              type="checkbox"
-              checked={Boolean(config?.llamaCppSwaFull)}
-              onChange={(e) => void saveSwaFull(e.target.checked)}
-            />
-            Allocate a full-size sliding-window KV cache (<code>--swa-full</code>)
-          </label>
+            <option value="auto">Auto — on for the Gemma family (default)</option>
+            <option value="on">On — always full cache (--swa-full)</option>
+            <option value="off">Off — memory-efficient windowed cache</option>
+          </select>
         </div>
         <p className="muted small" style={{ marginTop: '0.25rem', marginLeft: '10rem' }}>
           For sliding-window models (the Gemma family): swap the memory-efficient windowed KV cache
           for a full-size one. Costs roughly 30% more memory at long context, and in exchange the
           engine will accept prompt reuse — with the windowed cache it refuses, logging{' '}
-          <code>cache_reuse is not supported by this context</code>. Worth trying if you run long
-          multi-turn sessions and have headroom; it does nothing for Qwen models, which cannot reuse
-          this way at all. Takes effect the next time the engine starts.
+          <code>cache_reuse is not supported by this context</code>. <em>Auto</em> enables it for
+          Gemma models, where it helps long multi-turn sessions; it does nothing for Qwen models,
+          which cannot reuse this way at all. Takes effect the next time the engine starts.
         </p>
         <p className="muted small" style={{ marginTop: '0.5rem', marginLeft: '10rem' }}>
           More engine flags (an explicit GPU-layer count, partial expert split, prompt-reuse size,

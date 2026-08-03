@@ -350,3 +350,110 @@ describe('QueueMeter — preparing window', () => {
     expect(screen.getAllByText(/deferred until idle/)).toHaveLength(3);
   });
 });
+
+describe('QueueMeter — night-shift handoffs', () => {
+  /** Four handoffs parked for tonight's window, engine idle. */
+  const SCHEDULED_ONLY: QueueStatusResponse = {
+    providers: {},
+    taskRunner: {
+      pendingCount: 4,
+      pendingByGezel: { 'gez-1': 4 },
+      pendingByProject: { 'project-7': 4 },
+      dispatchable: { count: 0, byGezel: {} },
+      scheduled: { count: 4, byGezel: { 'gez-1': 4 } },
+      nightShift: { active: false, opensAt: '2026-08-02T22:00:00.000Z' },
+    },
+    sessions: [],
+    cache: [],
+    at: '',
+  };
+
+  beforeEach(() => {
+    mockLiveTurns = new Map();
+    vi.mocked(api.getConfig).mockResolvedValue({ provider: 'llama-cpp' } as ConfigResponse);
+    vi.mocked(api.listGezels).mockResolvedValue({ gezels: [ALEJANDRO] } as never);
+    vi.mocked(api.listProjects).mockResolvedValue({
+      projects: [{ id: 'project-7', name: 'Spanish lessons' }],
+    } as never);
+  });
+
+  // The bug this guards: a "Tasks 4" chip sat in the header all day for
+  // work that was never stuck — it was waiting for 22:00 by design.
+  it('stays hidden when the only queued work is scheduled for the night shift', async () => {
+    vi.mocked(api.getQueueStatus).mockResolvedValue(SCHEDULED_ONLY);
+
+    const { container } = render(<QueueMeter />);
+    await waitFor(() => expect(api.getQueueStatus).toHaveBeenCalled());
+    expect(container.querySelector('.queue-meter-button')).toBeNull();
+  });
+
+  it('counts only dispatchable work in the chip and explains the rest', async () => {
+    vi.mocked(api.getQueueStatus).mockResolvedValue({
+      ...SCHEDULED_ONLY,
+      taskRunner: {
+        ...SCHEDULED_ONLY.taskRunner,
+        pendingCount: 5,
+        dispatchable: { count: 1, byGezel: { 'gez-1': 1 } },
+        holdReason: 'provider-busy',
+      },
+    });
+
+    render(<QueueMeter />);
+    const button = await screen.findByRole('button', {
+      name: 'AI chat queue — click for details',
+    });
+    expect(button).toHaveTextContent('Tasks1');
+    expect(button).not.toHaveTextContent('Tasks5');
+
+    await userEvent.click(button);
+    const panel = await screen.findByLabelText('AI chat queue');
+    expect(within(panel).getByText('1 pending dispatch')).toBeInTheDocument();
+    expect(within(panel).getByText('Waiting for a free slot.')).toBeInTheDocument();
+    expect(within(panel).getByText('4 scheduled')).toBeInTheDocument();
+    expect(within(panel).getByText(/Nothing to do\./)).toBeInTheDocument();
+  });
+
+  it('names the sticky reason when AI engagement is switched off', async () => {
+    vi.mocked(api.getQueueStatus).mockResolvedValue({
+      ...SCHEDULED_ONLY,
+      taskRunner: {
+        pendingCount: 1,
+        pendingByGezel: { 'gez-1': 1 },
+        pendingByProject: { 'project-7': 1 },
+        dispatchable: { count: 1, byGezel: { 'gez-1': 1 } },
+        scheduled: { count: 0, byGezel: {} },
+        holdReason: 'engagement-off',
+      },
+    });
+
+    render(<QueueMeter />);
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'AI chat queue — click for details' }),
+    );
+    const panel = await screen.findByLabelText('AI chat queue');
+    expect(within(panel).getByText(/AI engagement is off/)).toBeInTheDocument();
+  });
+
+  // A daemon older than this UI sends only the totals. Falling back to
+  // "everything is dispatchable" keeps the old behavior rather than
+  // silently hiding work the UI can't classify.
+  it('falls back to the legacy totals when the daemon sends no split', async () => {
+    vi.mocked(api.getQueueStatus).mockResolvedValue({
+      providers: {},
+      taskRunner: {
+        pendingCount: 3,
+        pendingByGezel: { 'gez-1': 3 },
+        pendingByProject: { 'project-7': 3 },
+      },
+      sessions: [],
+      cache: [],
+      at: '',
+    });
+
+    render(<QueueMeter />);
+    const button = await screen.findByRole('button', {
+      name: 'AI chat queue — click for details',
+    });
+    expect(button).toHaveTextContent('Tasks3');
+  });
+});

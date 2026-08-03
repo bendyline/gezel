@@ -13,12 +13,14 @@ vi.mock('@bendyline/squisq-editor-react', () => ({
     onChange,
     toolbarSlotAfterActions,
     toolbarSlotRight,
+    statusBarSlotRight,
   }: {
     initialMarkdown: string;
     fileName: string;
     onChange: (s: string) => void;
     toolbarSlotAfterActions?: React.ReactNode;
     toolbarSlotRight?: React.ReactNode;
+    statusBarSlotRight?: React.ReactNode;
   }) => (
     <div data-testid="editor-shell" data-file={fileName}>
       <div data-testid="editor-initial">{initialMarkdown}</div>
@@ -34,6 +36,7 @@ vi.mock('@bendyline/squisq-editor-react', () => ({
       </button>
       <div data-testid="editor-toolbar">{toolbarSlotAfterActions}</div>
       <div data-testid="editor-toolbar-right">{toolbarSlotRight}</div>
+      <div data-testid="editor-status-bar-right">{statusBarSlotRight}</div>
     </div>
   ),
 }));
@@ -123,6 +126,24 @@ describe('DocumentDetail', () => {
 
     await vi.advanceTimersByTimeAsync(1100);
     expect(api.writeDocument).toHaveBeenCalledWith('mission.md', 'edited content');
+  });
+
+  it('reports save state in the status bar, with unsaved changes as a bare dot', async () => {
+    render(<DocumentDetail path="mission.md" />);
+    await screen.findByTestId('editor-shell');
+
+    screen.getByTestId('editor-emit').click();
+    const status = await waitFor(() => {
+      const el = screen.getByRole('status');
+      expect(el).toHaveTextContent('Unsaved changes');
+      return el;
+    });
+    expect(screen.getByTestId('editor-status-bar-right')).toContainElement(status);
+    expect(screen.getByTestId('editor-toolbar-right')).not.toContainElement(status);
+    expect(status.querySelector('.autosave-status-dot')).toBeInTheDocument();
+
+    await vi.advanceTimersByTimeAsync(1100);
+    await waitFor(() => expect(status).toHaveTextContent('Saved'));
   });
 
   it('keeps a failed draft visible and retries without another edit', async () => {

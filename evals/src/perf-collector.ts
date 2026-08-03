@@ -10,8 +10,11 @@
  *      `sampleIntervalMs` (`ps` on POSIX, `Win32_Process` via PowerShell
  *      on Windows). Peak RSS + peak CPU% retained; raw samples
  *      ring-buffered for the report. Lives inside `metrics.json`.
- *   3. GPU samples — `nvidia-smi` polled every `sampleIntervalMs` when
- *      available. Skipped silently on hosts without NVIDIA.
+ *   3. GPU samples — polled from whichever vendor telemetry the host has:
+ *      `nvidia-smi`, Windows GPU performance counters (any vendor), or
+ *      Linux amdgpu sysfs. The sampler is resolved once at start and carries
+ *      its own minimum interval, since their costs differ ~1000x. Skipped
+ *      silently on hosts with no GPU telemetry at all.
  *   4. Token usage — pulled from the trial daemon's `/api/usage` once at
  *      shutdown. Best-effort; missing on providers that don't surface
  *      usage (Copilot CLI under some configurations).
@@ -28,6 +31,7 @@
  */
 
 import { spawn, spawnSync } from 'node:child_process';
+import { existsSync, readFileSync } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
 import { cpus, freemem, hostname, platform, release, totalmem } from 'node:os';
 import { setTimeout as wait } from 'node:timers/promises';
@@ -45,7 +49,11 @@ export interface HostInfo {
   cpuModel: string;
   /** Total system RAM in GB, rounded. */
   totalRamGb: number;
-  /** GPU model (NVIDIA-only on Linux/Win for v1; null on hosts without nvidia-smi). */
+  /**
+   * GPU model. nvidia-smi first, then Win32_VideoController on Windows (any
+   * vendor) and rocm-smi on Linux, then the Apple-Silicon chip brand. Null
+   * only when no probe identified an adapter.
+   */
   gpuModel: string | null;
   /** Which engine the trial was driven by. */
   framework: string;
@@ -219,10 +227,7 @@ export function captureHostInfo(opts: {
 
 function detectGpuModel(): string | null {
   // Single-shot nvidia-smi query. On hosts without nvidia-smi this errors
-  // out and we return null — the GPU sampler does the same probe and
-  // gracefully no-ops. AMD ROCm detection would go here too (rocm-smi)
-  // but isn't wired yet; the eval harness today only runs CUDA-variant
-  // binaries when CUDA is detected, so the ROCm path is unexercised.
+  // out and we fall through to the vendor-neutral probes below.
   try {
     const r = spawnSync('nvidia-smi', ['--query-gpu=name', '--format=csv,noheader'], {
       encoding: 'utf8',
@@ -233,7 +238,48 @@ function detectGpuModel(): string | null {
       if (name) return name;
     }
   } catch {
-    /* fall through to the Apple-Silicon probe */
+    /* fall through to the vendor-neutral probes */
+  }
+  // Windows: Win32_VideoController names ANY adapter (AMD, Intel, NVIDIA),
+  // so an AMD/Vulkan eval host stops reporting `gpuModel: null`. Every trial
+  // in the 2026-08-02 core-suite matrix ran on a Radeon AI PRO R9700 and
+  // recorded a null model purely because the only probe was nvidia-smi.
+  // Basic Display Adapter is the driverless fallback device — naming it
+  // would be worse than null, so it's filtered out.
+  if (process.platform === 'win32') {
+    try {
+      const r = spawnSync(
+        'powershell',
+        [
+          '-NoProfile',
+          '-NonInteractive',
+          '-Command',
+          '(Get-CimInstance Win32_VideoController | Where-Object { $_.Name -notmatch "Basic Display" } | Select-Object -First 1).Name',
+        ],
+        { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] },
+      );
+      const name = r.status === 0 ? r.stdout.trim() : '';
+      if (name) return name;
+    } catch {
+      /* fall through */
+    }
+  }
+  // Linux AMD: rocm-smi ships with ROCm. Absent on a plain Vulkan/Mesa box,
+  // where the sysfs sampler still works but has no product-name file — null
+  // is the honest answer there.
+  if (process.platform === 'linux') {
+    try {
+      const r = spawnSync('rocm-smi', ['--showproductname', '--csv'], {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      });
+      if (r.status === 0) {
+        const name = parseRocmProductName(r.stdout);
+        if (name) return name;
+      }
+    } catch {
+      /* fall through */
+    }
   }
   // Apple Silicon: the GPU is an on-die part of the SoC with no
   // nvidia-smi equivalent, so the discrete-GPU query above returns
@@ -275,6 +321,13 @@ export class PerfCollector {
   private readonly daemonLogPath?: string;
   private stopped = false;
   private loop?: Promise<void>;
+  /**
+   * Chosen once at `start()` — see {@link resolveGpuSampler}. `undefined`
+   * means "not resolved yet", `null` means "resolved: nothing available".
+   */
+  private gpuSampler?: GpuSampler | null;
+  /** Wall-clock of the last GPU sample, for honoring `minIntervalMs`. */
+  private lastGpuSampleAtMs = Number.NEGATIVE_INFINITY;
   /**
    * Previous Windows CPU-time reading, for turning cumulative CPU ticks
    * into an instantaneous percent via cross-sample deltas. Unused on
@@ -343,8 +396,26 @@ export class PerfCollector {
           const ps = sampleProcessTree(pid);
           if (ps) this.processSamples.push({ atMs: at, ...ps });
         }
-        const gpu = sampleNvidia();
-        if (gpu) this.gpuSamples.push({ atMs: at, ...gpu });
+        if (this.gpuSampler === undefined) {
+          this.gpuSampler = resolveGpuSampler();
+          this.log(
+            this.gpuSampler
+              ? `[perf] gpu sampler=${this.gpuSampler.kind} interval=${Math.max(this.sampleIntervalMs, this.gpuSampler.minIntervalMs)}ms`
+              : '[perf] gpu sampler=none (no GPU telemetry available on this host)',
+          );
+          if (this.gpuSampler) {
+            this.gpuSamples.push({ atMs: at, ...this.gpuSampler.firstReading });
+            this.lastGpuSampleAtMs = Date.now();
+          }
+        }
+        if (this.gpuSampler) {
+          const gpuIntervalMs = Math.max(this.sampleIntervalMs, this.gpuSampler.minIntervalMs);
+          if (Date.now() - this.lastGpuSampleAtMs >= gpuIntervalMs) {
+            const gpu = this.gpuSampler.sample();
+            this.lastGpuSampleAtMs = Date.now();
+            if (gpu) this.gpuSamples.push({ atMs: at, ...gpu });
+          }
+        }
       }
       // Sleep in small steps so stop() exits quickly. Even with
       // sampling disabled we still spin so `stop()` can be awaited
@@ -406,29 +477,19 @@ export class PerfCollector {
     // usage tracker undercounts vs its own per-request logs — so always parse it
     // here regardless of any partial HTTP usage the tracker may also hold.
     if (this.enableLocalSampling && this.daemonLogPath) {
+      let parsed: EngineTimingParse | null = null;
       try {
         const logText = await readFile(this.daemonLogPath, 'utf8');
-        // llama-server and ds4-server print different per-request timing
-        // formats; a trial is single-engine, so at most one parser matches.
-        engineTimings =
-          parseLlamaCppTimings(logText) ?? parseDs4Timings(logText) ?? parseMlxTimings(logText);
+        parsed = parseEngineTimings(logText);
       } catch {
         /* no log / unreadable — leave usage untouched */
       }
-      if (engineTimings) {
-        usage = {
-          ...usage,
-          available: true,
-          source: 'engine-log',
-          // MLX reconstructs token counts from heartbeats rather than a
-          // per-request block, so prefer the daemon's usage tracker when it
-          // has real totals and only fall back to the parsed figures.
-          totalInputTokens: usage.totalInputTokens ?? engineTimings.promptTokens,
-          totalOutputTokens: usage.totalOutputTokens ?? engineTimings.genTokens,
-        };
+      if (parsed) {
+        engineTimings = parsed.timings;
+        usage = resolveUsageTotals(usage, parsed);
         const cached = engineTimings.cachedPromptTokens;
         this.log(
-          `[perf] tokens from engine log: ${usage.totalInputTokens} in / ${usage.totalOutputTokens} out · decode ${engineTimings.genTokensPerSec ?? 'n/a'} t/s · prefill ${engineTimings.promptTokensPerSec ?? 'n/a'} t/s · ${engineTimings.requestCount} requests${cached ? ` · ${cached} prompt tokens served from cache` : ''}`,
+          `[perf] tokens from ${usage.source} (${parsed.engine}): ${usage.totalInputTokens} in / ${usage.totalOutputTokens} out · decode ${engineTimings.genTokensPerSec ?? 'n/a'} t/s · prefill ${engineTimings.promptTokensPerSec ?? 'n/a'} t/s · ${engineTimings.requestCount} requests${cached ? ` · ${cached} prompt tokens served from cache` : ''}`,
         );
       }
     }
@@ -724,6 +785,67 @@ export function winCpuPercent(
   return Math.round((dCpuMs / dtMs) * 1000) / 10;
 }
 
+/** Which engine's log format produced a {@link LlamaCppTimings}. */
+export type EngineLogKind = 'llama-cpp' | 'ds4' | 'mlx';
+
+export interface EngineTimingParse {
+  engine: EngineLogKind;
+  timings: LlamaCppTimings;
+}
+
+/**
+ * Parse whichever engine's per-request timing format the daemon log carries,
+ * keeping WHICH engine matched — the caller needs it to decide whether the log
+ * or the HTTP usage tracker is authoritative (see {@link resolveUsageTotals}).
+ * A trial is single-engine, so at most one parser matches.
+ */
+export function parseEngineTimings(logText: string): EngineTimingParse | null {
+  const llama = parseLlamaCppTimings(logText);
+  if (llama) return { engine: 'llama-cpp', timings: llama };
+  const ds4 = parseDs4Timings(logText);
+  if (ds4) return { engine: 'ds4', timings: ds4 };
+  const mlx = parseMlxTimings(logText);
+  if (mlx) return { engine: 'mlx', timings: mlx };
+  return null;
+}
+
+/**
+ * Decide the final token totals from the HTTP usage tracker and the parsed
+ * engine log, and report honestly which one won via `source`.
+ *
+ * llama-server and ds4-server print EXACT per-request token counts, so their
+ * logs replace the tracker's totals outright. The tracker undercounts them
+ * badly and silently: in the 2026-08-02 core-suite matrix, 10 of 11 trials
+ * disagreed with their own engine log — `tankcombat` reported 54 output tokens
+ * for a run that generated 10,823, and `petshop` 271 against 34,401. The old
+ * code used `usage.totalOutputTokens ?? timings.genTokens`, so any non-nullish
+ * tracker value — including an absurd one — beat the engine log, while
+ * `source` was still stamped `engine-log`. Only trials whose tracker happened
+ * to be empty (`symptom-debug`) fell through to the correct numbers, which is
+ * exactly why the defect stayed invisible.
+ *
+ * MLX is the deliberate exception: it prints no per-request block, so its
+ * figures are reconstructed from heartbeat + cache lines and are the weaker
+ * signal. There the tracker wins and the parse only fills gaps.
+ *
+ * Exported pure for tests.
+ */
+export function resolveUsageTotals(
+  httpUsage: TrialMetrics['usage'],
+  parsed: EngineTimingParse,
+): TrialMetrics['usage'] {
+  const engineIsAuthoritative = parsed.engine !== 'mlx';
+  const inputFromEngine = engineIsAuthoritative || httpUsage.totalInputTokens === undefined;
+  const outputFromEngine = engineIsAuthoritative || httpUsage.totalOutputTokens === undefined;
+  return {
+    ...httpUsage,
+    available: true,
+    source: inputFromEngine || outputFromEngine ? 'engine-log' : 'http',
+    totalInputTokens: inputFromEngine ? parsed.timings.promptTokens : httpUsage.totalInputTokens,
+    totalOutputTokens: outputFromEngine ? parsed.timings.genTokens : httpUsage.totalOutputTokens,
+  };
+}
+
 export interface LlamaCppTimings {
   /** Prompt (prefill) tokens summed across all requests. */
   promptTokens: number;
@@ -978,7 +1100,7 @@ export function parseDs4Timings(logText: string): LlamaCppTimings | null {
  * so memory unparseable → 0 instead of discarding the sample. Only a
  * missing utilization value disqualifies a row.
  */
-function sampleNvidia(): { utilPercent: number; memUsedMb: number; memTotalMb: number } | null {
+function sampleNvidia(): GpuReading | null {
   try {
     const r = spawnSync(
       'nvidia-smi',
@@ -999,6 +1121,197 @@ function sampleNvidia(): { utilPercent: number; memUsedMb: number; memTotalMb: n
   } catch {
     return null;
   }
+}
+
+/** One GPU reading, vendor-agnostic. */
+export interface GpuReading {
+  utilPercent: number;
+  memUsedMb: number;
+  memTotalMb: number;
+}
+
+/**
+ * A selected GPU sampler plus the minimum interval it may be polled at.
+ *
+ * The interval is per-sampler because their costs differ by more than an
+ * order of magnitude: `nvidia-smi` returns in ~50 ms, Linux amdgpu sysfs is
+ * three file reads (~1 ms), but Windows `Get-Counter` costs ~1.35 s on this
+ * class of host — it enumerates every GPU-engine instance on the box (325 on
+ * the 2026-08-02 eval host) and pays PDH init each call. Polling that every
+ * 5 s alongside the process sampler would spend ~30% of the trial measuring
+ * the trial. Peak-over-trial is a coarse axis, so a slower cadence costs
+ * almost nothing in signal.
+ */
+interface GpuSampler {
+  kind: string;
+  minIntervalMs: number;
+  sample(): GpuReading | null;
+  /**
+   * The reading taken while probing whether this sampler works. Handed back
+   * so the caller can bank it instead of immediately sampling again — on the
+   * Windows counter path a discarded probe costs a redundant ~1.4 s.
+   */
+  firstReading: GpuReading;
+}
+
+/** `rocm-smi --showproductname --csv` → the first non-header product name. */
+export function parseRocmProductName(stdout: string): string | null {
+  for (const line of stdout.split('\n')) {
+    const t = line.trim();
+    if (!t || /^device/i.test(t)) continue;
+    // `card0,Instinct MI210` — the name is the last non-empty CSV cell.
+    const cells = t
+      .split(',')
+      .map((c) => c.trim())
+      .filter(Boolean);
+    const name = cells[cells.length - 1];
+    if (name && !/^card\d+$/i.test(name)) return name;
+  }
+  return null;
+}
+
+/**
+ * Parse the `GPU <utilPercent> <memUsedBytes>` line emitted by the Windows
+ * counter script. Returns null when the script printed nothing (no GPU
+ * counters registered, or the PDH query failed and the script swallowed it).
+ */
+export function parseWindowsGpuCounters(stdout: string, memTotalMb: number): GpuReading | null {
+  const line = stdout.split('\n').find((l) => l.trim().startsWith('GPU '));
+  if (!line) return null;
+  const [, u, mem] = line.trim().split(/\s+/);
+  const utilPercent = Number.parseFloat(u ?? '');
+  if (!Number.isFinite(utilPercent)) return null;
+  const memBytes = Number.parseFloat(mem ?? '0');
+  return {
+    // Per-process engine utilization can sum fractionally past 100 under
+    // rounding; clamp so a postmortem never shows "104% GPU".
+    utilPercent: Math.min(100, Math.round(utilPercent * 10) / 10),
+    memUsedMb: Number.isFinite(memBytes) ? Math.round(memBytes / 1024 ** 2) : 0,
+    memTotalMb,
+  };
+}
+
+// Sums per-process GPU-engine utilization within each engine type, then takes
+// the largest type — the same aggregation Task Manager's "GPU %" column uses.
+// Summing across ALL instances instead would multiply-count a GPU running 3D
+// and copy engines concurrently and routinely exceed 100%.
+const WIN_GPU_SCRIPT = [
+  '$u=@{}; $m=0.0',
+  "foreach ($s in (Get-Counter -Counter @('\\GPU Engine(*)\\Utilization Percentage','\\GPU Adapter Memory(*)\\Dedicated Usage') -ErrorAction Stop).CounterSamples) {",
+  "  if ($s.Path -like '*dedicated usage*') { if ($s.CookedValue -gt $m) { $m = $s.CookedValue } }",
+  "  elseif ($s.InstanceName -match 'engtype_(\\w+)') { $k = $Matches[1]; $u[$k] = [double]$u[$k] + $s.CookedValue }",
+  '}',
+  '$peak = 0.0; foreach ($v in $u.Values) { if ($v -gt $peak) { $peak = $v } }',
+  "'GPU {0} {1}' -f [math]::Round($peak,2), [int64]$m",
+].join('\n');
+
+/**
+ * Total dedicated VRAM in MB, read once. `Win32_VideoController.AdapterRAM` is
+ * a 32-bit field that saturates at 4 GB — it reported "4 GB" for the 32 GB
+ * R9700 — so read the driver's `qwMemorySize` QWORD instead, which is exact.
+ */
+function readWindowsGpuMemTotalMb(): number {
+  try {
+    const r = spawnSync(
+      'powershell',
+      [
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        "(Get-ItemProperty -Path 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Class\\{4d36e968-e325-11ce-bfc1-08002be10318}\\0*' -Name 'HardwareInformation.qwMemorySize' -ErrorAction SilentlyContinue | Measure-Object -Property 'HardwareInformation.qwMemorySize' -Maximum).Maximum",
+      ],
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] },
+    );
+    const bytes = Number.parseFloat(r.stdout.trim());
+    return Number.isFinite(bytes) && bytes > 0 ? Math.round(bytes / 1024 ** 2) : 0;
+  } catch {
+    return 0;
+  }
+}
+
+/** amdgpu exposes busy% and VRAM as plain sysfs files — no binary needed. */
+export function parseAmdSysfsGpu(
+  busy: string,
+  vramUsed: string,
+  vramTotal: string,
+): GpuReading | null {
+  const utilPercent = Number.parseFloat(busy.trim());
+  if (!Number.isFinite(utilPercent)) return null;
+  const used = Number.parseFloat(vramUsed.trim());
+  const total = Number.parseFloat(vramTotal.trim());
+  return {
+    utilPercent: Math.min(100, utilPercent),
+    memUsedMb: Number.isFinite(used) ? Math.round(used / 1024 ** 2) : 0,
+    memTotalMb: Number.isFinite(total) ? Math.round(total / 1024 ** 2) : 0,
+  };
+}
+
+/** First `/sys/class/drm/card<N>/device` exposing `gpu_busy_percent`. */
+function findAmdSysfsDir(): string | null {
+  for (let card = 0; card < 8; card += 1) {
+    const dir = `/sys/class/drm/card${card}/device`;
+    if (existsSync(`${dir}/gpu_busy_percent`)) return dir;
+  }
+  return null;
+}
+
+/**
+ * Pick the GPU sampler for this host, once, at collector start. Probing per
+ * sample would pay the miss cost forever on hosts with no GPU telemetry.
+ * Returns null when nothing is available, which keeps `gpu.available: false`
+ * meaning "we could not measure" rather than "the GPU was idle".
+ */
+export function resolveGpuSampler(): GpuSampler | null {
+  const nvidia = sampleNvidia();
+  if (nvidia) {
+    return {
+      kind: 'nvidia-smi',
+      minIntervalMs: 0,
+      sample: sampleNvidia,
+      firstReading: nvidia,
+    };
+  }
+  if (process.platform === 'win32') {
+    const memTotalMb = readWindowsGpuMemTotalMb();
+    const sample = (): GpuReading | null => {
+      try {
+        const r = spawnSync(
+          'powershell',
+          ['-NoProfile', '-NonInteractive', '-Command', WIN_GPU_SCRIPT],
+          { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 4 * 1024 * 1024 },
+        );
+        if (r.status !== 0) return null;
+        return parseWindowsGpuCounters(r.stdout, memTotalMb);
+      } catch {
+        return null;
+      }
+    };
+    const probe = sample();
+    if (probe) {
+      return { kind: 'windows-gpu-counters', minIntervalMs: 15_000, sample, firstReading: probe };
+    }
+    return null;
+  }
+  if (process.platform === 'linux') {
+    const dir = findAmdSysfsDir();
+    if (dir) {
+      const sample = (): GpuReading | null => {
+        try {
+          return parseAmdSysfsGpu(
+            readFileSync(`${dir}/gpu_busy_percent`, 'utf8'),
+            readFileSync(`${dir}/mem_info_vram_used`, 'utf8'),
+            readFileSync(`${dir}/mem_info_vram_total`, 'utf8'),
+          );
+        } catch {
+          return null;
+        }
+      };
+      const probe = sample();
+      if (probe) return { kind: 'amdgpu-sysfs', minIntervalMs: 0, sample, firstReading: probe };
+    }
+    return null;
+  }
+  return null;
 }
 
 // ── File output helpers ────────────────────────────────────────────

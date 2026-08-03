@@ -129,6 +129,15 @@ Rules:
   danger-red (emergency stop), the security posture latches sealed-green
   on Super Lockdown and open-amber on Unrestricted. Middle options keep
   the accent; never give every key its own color.
+- **State groups are the exception: they latch in the state's own color.**
+  A tray that sets an entity's **lifecycle state** rather than a preference —
+  the task status keys (active / paused / complete / canceled) — may give
+  every key its own latch, because the color is data the app already shows
+  elsewhere (the task list's status dots) and only one key is ever latched,
+  so the tray still reads as a single color. Each key also carries the glyph
+  its state is already understood by: play, pause, check, circle-slash. This
+  holds only for states the app colors elsewhere; a preference group with no
+  meaningful ends stays on the accent.
 - **Native `<input type="radio">` stays native** in dense config forms
   (folder scopes, engine settings) — the round dot is a true circle and
   keeps its shape. Reach for keys when the choice is prominent enough to
@@ -236,7 +245,7 @@ they respond; Dialogs are dismissable with Escape/backdrop-click.
 the choice, use **Tabs**. If it's one of many equivalent values (a long
 model list), use **Select**. If there are roughly 2–5 mutually exclusive
 options and the choices themselves carry the meaning (Copilot / OpenAI /
-Ollama, engagement modes, tempo), use **keys in a tray** — see
+Ollama, engagement modes, tempo, a task's status), use **keys in a tray** — see
 [Controls: keys in trays](#controls-keys-in-trays). The Home + Settings
 provider switches are this pattern.
 
@@ -312,6 +321,17 @@ take `side="top"` (selects flip on their own). The project status bar
 ([ProjectGitStatusBar](../packages/ui/src/components/ProjectGitStatusBar.tsx))
 is the reference.
 
+**Save state is ambient, so it lives in the status bar.** An editor's
+saved/unsaved indicator goes in the shell's status bar
+([AutosaveStatus](../packages/ui/src/components/AutosaveStatus.tsx) into
+Squisq's `statusBarSlotRight`), never in the toolbar beside the actions —
+put it up there and a routine autosave reads as loud as the buttons around
+it. It takes the bar's own small muted type rather than a colored chip, and
+the unsaved state is a bare `--warning` dot with its words in the tooltip
+and an `.sr-only` label: a document being typed into is the normal case and
+doesn't deserve a sentence. Only the transient "Saving…"/"Saved" pair and
+the actionable failure ("Save failed" + Retry, in `--danger`) carry text.
+
 **Terminal output.** Terminal text is spatial, not prose: preserve whitespace
 and columns exactly, and contain overflow in a keyboard-focusable viewport with
 horizontal and vertical scrolling. Never reflow output to fit a chat bubble.
@@ -378,11 +398,38 @@ what is off, and what the user would have to do. Derivation lives in
 Settings can never drift apart. The one update outcome that *is* worth
 interrupting for — a verified update waiting to install — stays a banner.
 
+**Scheduled work is not a backlog.** A count in the chrome says "there is
+something here you are waiting on." Work that is deliberately parked until
+a future window — night-shift handoffs sitting on the task queue at
+eleven in the morning — is waiting on nothing and asks nothing of the
+user, so it never gets a badge, a count, or a chip. Left in one it reads as
+a stuck queue, and the user goes looking for the jam that isn't there. Keep
+it out of the header entirely (the QueueMeter's `taskHandoffSplit` is the
+reference: the runner reports `dispatchable` and `scheduled` separately, and
+only the first is counted), give it a muted section in the relevant popover
+that leads with *when it runs* rather than how many there are, and let the
+feature's own surface — the Night Shift menu — be where it's browsable.
+The corollary is a duty: once it's out of the chrome, that surface has to
+answer for it all day, not only while the window is open. And when queued
+work genuinely *is* stuck, say which of the two it is — a busy engine
+resolves itself, an engagement switch set to Off does not.
+
 **Landing cues.** When navigation scrolls a surface to a specific row
 rather than the top or bottom of it, flash the row so the jump doesn't read
 as the view moving on its own: add `.timeline-focus-flash` (a ~2s ring that
 fades, no-motion variant included) and remove it once it settles. Never
 leave a permanent highlight behind — the ring is a cue, not a selection.
+
+**Figure lists in articles.** A Handboek list whose items lead with a
+poppetje — what `::handboek-gezel-roster` expands to — renders as a card
+per figure: portrait, name, role, and the role's one-line summary, in an
+`auto-fill` grid on the article's own surface tokens
+(`--squisq-page-bg-alt`, `--squisq-page-radius`). A row of bare portraits
+makes the reader match faces to a name list somewhere else; the nametag
+belongs on the figure. The item's *shape* is the CSS hook — squisq's
+markdown carries block attributes on headings only, so a macro cannot
+class the list it expands into — which means any figure-first article
+list gets this treatment, and should.
 
 ## Poppetjes: painted wooden crew
 

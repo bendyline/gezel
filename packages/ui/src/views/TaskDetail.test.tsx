@@ -136,21 +136,38 @@ describe('TaskDetail', () => {
     });
   });
 
-  it('changing the status select calls setTaskStatus and propagates via onChanged', async () => {
+  it('picking a status key calls setTaskStatus and propagates via onChanged', async () => {
     const onChanged = vi.fn();
     render(<TaskDetail task={TASK} gezels={GEZELS} projectName="Alpha" onChanged={onChanged} />);
 
-    // Two Select dropdowns — status (first) + assignee (second).
-    const selects = screen.getAllByTestId('mock-select');
-    const statusSelect = selects.find(
-      (el) => within(el).queryByText('paused') !== null,
-    ) as HTMLSelectElement;
-    fireEvent.change(statusSelect, { target: { value: 'paused' } });
+    const group = screen.getByRole('radiogroup', { name: 'Task status' });
+    expect(within(group).getByRole('radio', { name: 'Active' })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
+    fireEvent.click(within(group).getByRole('radio', { name: 'Paused' }));
 
     await waitFor(() => {
       expect(api.setTaskStatus).toHaveBeenCalledWith('pj-alpha', 42, 'paused');
     });
     expect(onChanged).toHaveBeenCalled();
+  });
+
+  it('offers a system job only the active/paused keys', () => {
+    const systemTask = {
+      ...TASK,
+      origin: { kind: 'system-job', jobId: 'boekwachter-indexing', managedByGezelId: 'noor' },
+    } as Task;
+    render(
+      <TaskDetail task={systemTask} gezels={GEZELS} projectName="Alpha" onChanged={vi.fn()} />,
+    );
+
+    const group = screen.getByRole('radiogroup', { name: 'Task status' });
+    expect(
+      within(group)
+        .getAllByRole('radio')
+        .map((el) => el.textContent),
+    ).toEqual(['Active', 'Paused']);
   });
 
   it('reassigning to user dispatches setTaskAssignee with kind:user', async () => {

@@ -35,7 +35,8 @@
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, resolve as resolvePath } from 'node:path';
+import { createLogger } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import {
   type ModelBundleSource,
@@ -43,14 +44,19 @@ import {
   publishStagedModel,
 } from '../../models/bundle-storage.js';
 import {
+  type IncompleteModelDownloadInfo,
+  MODEL_HASH_READ_BUFFER_BYTES,
   type ModelStorageRoots,
   findModelRoot,
   hashModelPayloadFiles,
+  listIncompleteModelDownloads,
   listOverlayModelIds,
   makeSharedModelReadable,
   modelExistsOnlyReadOnly,
   modelStorageRoots,
+  pruneModelPayloadFiles,
   readOnlyModelError,
+  removeModelDir,
   verifyReadOnlyModelPayload,
 } from '../../models/storage-roots.js';
 import { checkDiskSpace, describeDiskShortfall } from '../../utils/disk-space.js';
@@ -81,6 +87,13 @@ export interface InstalledMlxModel {
    * the catalog now describes).
    */
   catalogVersion?: string;
+  /**
+   * True when this model resolves from a read-only overlay (the machine/shared
+   * asset store) rather than this daemon's writable root. `delete` refuses
+   * these, so the UI shows them as machine-provided rather than offering a
+   * Delete that can only fail.
+   */
+  readOnly?: boolean;
 }
 
 /**
@@ -191,6 +204,8 @@ const PROGRESS_INTERVAL_MS = 250;
  */
 const MLX_DOWNLOAD_CONCURRENCY = 3;
 
+const log = createLogger('models');
+
 /**
  * Minimal single-consumer async queue bridging the concurrent download
  * workers (which `push` events synchronously) to the `install()` async
@@ -255,6 +270,12 @@ export class MlxModelManager {
    * polled view of it.
    */
   private readonly activeInstalls = new Map<string, MlxActiveInstallSnapshot>();
+  /**
+   * Model directories we've already warned about skipping. `listInstalled`
+   * runs on every picker/settings poll; a broken directory should be loud
+   * exactly once per process, not once per poll.
+   */
+  private readonly skipWarned = new Set<string>();
 
   constructor(opts: MlxModelManagerOptions) {
     this.storageRoots = modelStorageRoots({ home: opts.home, engine: 'mlx' });
@@ -274,8 +295,39 @@ export class MlxModelManager {
     for (const id of entries) {
       const summary = await this.loadInstalled(id);
       if (summary) out.push(summary);
+      else this.warnSkip(id, 'no readable manifest.json (incomplete or interrupted download?)');
     }
     out.sort((a, b) => a.name.localeCompare(b.name));
+    return out;
+  }
+
+  /**
+   * List incomplete MLX downloads — directories that hold bytes but no
+   * `manifest.json`, so they never surface in {@link listInstalled}. Tagged
+   * `resumable` when the id still resolves to an MLX-capable catalog entry.
+   * In-flight installs are excluded. See {@link LlamaCppModelManager.listIncomplete}.
+   */
+  async listIncomplete(): Promise<IncompleteModelDownloadInfo[]> {
+    const activeIds = new Set(this.activeInstalls.keys());
+    const rows = await listIncompleteModelDownloads({ writableRoot: this.modelsRoot, activeIds });
+    const out: IncompleteModelDownloadInfo[] = [];
+    for (const row of rows) {
+      let resumable = false;
+      let name: string | undefined;
+      if (isSafeId(row.id)) {
+        const detail = await this.catalog.get('chat-model', row.id).catch(() => null);
+        if (
+          detail &&
+          detail.manifest.kind === 'chat-model' &&
+          detail.manifest.mlx &&
+          !detail.manifest.mlx.disabledReason
+        ) {
+          resumable = true;
+          name = detail.manifest.name;
+        }
+      }
+      out.push({ ...row, resumable, ...(name ? { name } : {}) });
+    }
     return out;
   }
 
@@ -303,7 +355,7 @@ export class MlxModelManager {
     if (await modelExistsOnlyReadOnly(this.storageRoots, id)) {
       throw readOnlyModelError(id);
     }
-    await rm(join(this.modelsRoot, id), { recursive: true, force: true });
+    await removeModelDir(join(this.modelsRoot, id));
   }
 
   /** Provider-owned snapshot used by the streaming `.gezmodel` exporter. */
@@ -552,6 +604,16 @@ export class MlxModelManager {
         }
       }
 
+      // Drop files a previous install of this id left behind that the new file
+      // set no longer references (e.g. shards from a different quant). Keeps the
+      // slot from accumulating orphaned multi-GB weights.
+      const pruned = await pruneModelPayloadFiles(itemDir, new Set(files.map((f) => f.name)));
+      if (pruned.length > 0) {
+        log.info(
+          `[models] [mlx] pruned ${pruned.length} stale file(s) from "${catalogId}": ${pruned.join(', ')}`,
+        );
+      }
+
       tracked.phase = 'extracting-metadata';
       yield { type: 'extracting-metadata' };
       let summary: Awaited<ReturnType<typeof readMlxSummary>>;
@@ -760,7 +822,9 @@ export class MlxModelManager {
     // miss the resumed prefix).
     const hasher = createHash('sha256');
     await new Promise<void>((resolve, reject) => {
-      const stream = createReadStream(tmpPath);
+      // Big read buffer so the hash doesn't starve inside the busy daemon
+      // event loop. See MODEL_HASH_READ_BUFFER_BYTES.
+      const stream = createReadStream(tmpPath, { highWaterMark: MODEL_HASH_READ_BUFFER_BYTES });
       stream.on('data', (chunk) => hasher.update(chunk));
       stream.on('end', () => resolve());
       stream.on('error', reject);
@@ -784,6 +848,13 @@ export class MlxModelManager {
     return 'ok';
   }
 
+  /** Warn once per model directory per process, then stay quiet. */
+  private warnSkip(id: string, reason: string): void {
+    if (this.skipWarned.has(id)) return;
+    this.skipWarned.add(id);
+    log.warn(`[mlx] hiding model directory "${id}": ${reason}`);
+  }
+
   private async loadInstalled(id: string): Promise<InstalledMlxModel | null> {
     const root = await findModelRoot(this.storageRoots, id);
     if (!root) return null;
@@ -792,18 +863,25 @@ export class MlxModelManager {
     try {
       raw = await readFile(metaPath, 'utf8');
     } catch {
+      this.warnSkip(id, `manifest.json is unreadable at ${metaPath}`);
       return null;
     }
     let parsed: Partial<InstalledManifest>;
     try {
       parsed = JSON.parse(raw) as Partial<InstalledManifest>;
     } catch {
+      this.warnSkip(id, `manifest.json is not valid JSON at ${metaPath}`);
       return null;
     }
     if (!parsed.id || !parsed.name || !parsed.installedAt || !Array.isArray(parsed.files)) {
+      this.warnSkip(id, 'manifest.json is missing required fields (id/name/installedAt/files)');
       return null;
     }
-    if (!(await verifyReadOnlyModelPayload(this.storageRoots, root, id, parsed.fileSha256))) {
+    if (
+      !(await verifyReadOnlyModelPayload(this.storageRoots, root, id, parsed.fileSha256, (reason) =>
+        this.warnSkip(id, reason),
+      ))
+    ) {
       return null;
     }
     return {
@@ -817,6 +895,12 @@ export class MlxModelManager {
       chatTemplatePresent: parsed.chatTemplatePresent ?? true,
       ...(parsed.architecture ? { architecture: parsed.architecture } : {}),
       ...(parsed.catalogVersion ? { catalogVersion: parsed.catalogVersion } : {}),
+      // Read-only when it resolves from a machine/shared overlay rather than
+      // this daemon's writable root — delete refuses these; the UI shows them
+      // as machine-provided instead of offering a Delete that only 400s.
+      ...(resolvePath(root) !== resolvePath(this.storageRoots.writableRoot)
+        ? { readOnly: true }
+        : {}),
     };
   }
 }

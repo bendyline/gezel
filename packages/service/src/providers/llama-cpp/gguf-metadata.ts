@@ -85,6 +85,20 @@ export interface GgufSummary {
   expertUsedCount?: number;
   /** `<arch>.block_count` — transformer layer count (bounds `--n-cpu-moe N`). */
   blockCount?: number;
+  /** `<arch>.embedding_length` — hidden size (KV-cache estimate input). */
+  embeddingLength?: number;
+  /** `<arch>.attention.head_count` — query heads. */
+  headCount?: number;
+  /**
+   * `<arch>.attention.head_count_kv` — KV heads (GQA). Some archs store a
+   * per-layer array here; the scalar reader returns undefined for those and
+   * the KV estimate degrades to unavailable rather than guessing.
+   */
+  headCountKv?: number;
+  /** `<arch>.attention.key_length` — per-head K dim when it differs from embd/heads. */
+  keyLength?: number;
+  /** `<arch>.attention.value_length` — per-head V dim when it differs from embd/heads. */
+  valueLength?: number;
   /**
    * `<arch>.nextn_predict_layers` — number of multi-token-prediction
    * (MTP / "nextn") layers. `> 0` means the GGUF carries an MTP head,
@@ -99,6 +113,27 @@ export interface GgufSummary {
    * weights, the ground truth when metadata is ambiguous.
    */
   tensorNames?: string[];
+  /**
+   * On-disk bytes of the routed-expert weights — exactly the tensors
+   * llama.cpp's `--cpu-moe` override matches (`ffn_{up,down,gate}_exps`).
+   * Populated with `{ includeTensorSizes: true }`. Shared experts
+   * (`*_shexp`) stay GPU-resident under `--cpu-moe`, so they count as
+   * non-expert here.
+   */
+  expertBytesTotal?: number;
+  /**
+   * On-disk bytes of everything `--cpu-moe` leaves on the GPU: attention,
+   * dense/shared FFN, norms, embeddings, output head. The VRAM floor a
+   * full-offload MoE launch cannot go below.
+   */
+  nonExpertBytes?: number;
+  /**
+   * Routed-expert bytes per transformer block, indexed by `blk.N` — the
+   * exact input `--n-cpu-moe N` planning needs (N puts blocks `0..N-1`'s
+   * experts on the CPU). Blocks without expert tensors (dense-start
+   * hybrids) hold 0.
+   */
+  expertBytesByLayer?: number[];
   /** Total on-disk size of the GGUF (a resident-footprint proxy for the planner). */
   fileSizeBytes: number;
   // Read stats — for confirming we really don't have to slurp the file.
@@ -253,7 +288,21 @@ function readUintScalar(r: Reader, type: GgufValueType): number | undefined {
   }
 }
 
-export function readGgufSummary(path: string, opts?: { includeTensors?: boolean }): GgufSummary {
+/**
+ * The tensors `--cpu-moe` / `--n-cpu-moe` keep in system RAM — mirrors
+ * llama.cpp's own buffer-type override pattern (`common/arg.cpp`), so the
+ * planner's byte math matches what the engine will actually place.
+ */
+const EXPERT_TENSOR_RE = /\.ffn_(?:up|down|gate)_exps\./;
+const BLOCK_INDEX_RE = /^blk\.(\d+)\./;
+
+/** GGUF default tensor-data alignment when `general.alignment` is absent. */
+const DEFAULT_ALIGNMENT = 32;
+
+export function readGgufSummary(
+  path: string,
+  opts?: { includeTensors?: boolean; includeTensorSizes?: boolean },
+): GgufSummary {
   const fd = openSync(path, 'r');
   try {
     const stat = fstatSync(fd);
@@ -282,6 +331,8 @@ export function readGgufSummary(path: string, opts?: { includeTensors?: boolean 
       bytesRead: 0,
     };
 
+    let alignment = DEFAULT_ALIGNMENT;
+
     for (let i = 0n; i < metadataCount; i++) {
       const key = r.string();
       const type = r.u32() as GgufValueType;
@@ -290,7 +341,10 @@ export function readGgufSummary(path: string, opts?: { includeTensors?: boolean 
       // else. For arch-qualified keys like `llama.context_length` we
       // match on the suffix since the arch prefix varies (llama,
       // gemma, qwen2, ...).
-      if (key === 'general.architecture' && type === GgufValueType.STRING) {
+      if (key === 'general.alignment') {
+        const v = readUintScalar(r, type);
+        if (v !== undefined && v > 0) alignment = v;
+      } else if (key === 'general.architecture' && type === GgufValueType.STRING) {
         summary.architecture = r.string();
       } else if (key === 'general.name' && type === GgufValueType.STRING) {
         summary.name = r.string();
@@ -317,25 +371,71 @@ export function readGgufSummary(path: string, opts?: { includeTensors?: boolean 
         summary.expertUsedCount = readUintScalar(r, type);
       } else if (key.endsWith('.block_count')) {
         summary.blockCount = readUintScalar(r, type);
+      } else if (key.endsWith('.embedding_length')) {
+        summary.embeddingLength = readUintScalar(r, type);
+      } else if (key.endsWith('.attention.head_count')) {
+        summary.headCount = readUintScalar(r, type);
+      } else if (key.endsWith('.attention.head_count_kv')) {
+        summary.headCountKv = readUintScalar(r, type);
+      } else if (key.endsWith('.attention.key_length')) {
+        summary.keyLength = readUintScalar(r, type);
+      } else if (key.endsWith('.attention.value_length')) {
+        summary.valueLength = readUintScalar(r, type);
       } else {
         r.skipValue(type);
       }
     }
 
-    // Tensor-info section follows the metadata. Read just the names
-    // (skip dims/type/offset) when the caller opts in — the ground-truth
-    // way to detect MoE (`*_exps`) and MTP (`nextn`/`eh_proj`) tensors.
-    if (opts?.includeTensors) {
+    // Tensor-info section follows the metadata. `includeTensors` reads
+    // just the names — the ground-truth way to detect MoE (`*_exps`) and
+    // MTP (`nextn`/`eh_proj`) tensors. `includeTensorSizes` additionally
+    // sizes each tensor from the offset deltas: tensor data is packed in
+    // offset order with only alignment padding between entries, so
+    // `next.offset - this.offset` is exact to within one alignment unit
+    // (≤32 B/tensor) — and needs no per-quant GGML type-size table that
+    // would go stale as upstream adds formats.
+    if (opts?.includeTensors || opts?.includeTensorSizes) {
       const names: string[] = [];
+      const infos: { name: string; offset: number }[] = [];
       for (let i = 0n; i < tensorCount; i++) {
         const name = r.string();
         const nDims = r.u32();
         for (let d = 0; d < nDims; d++) r.u64(); // dims
         r.u32(); // ggml tensor type
-        r.u64(); // data offset
+        const offset = r.u64(); // data offset, relative to the data section
         names.push(name);
+        if (opts?.includeTensorSizes) infos.push({ name, offset: Number(offset) });
       }
-      summary.tensorNames = names;
+      if (opts?.includeTensors) summary.tensorNames = names;
+
+      if (opts?.includeTensorSizes && infos.length > 0) {
+        const headerEnd = r.currentPos();
+        const dataStart = Math.ceil(headerEnd / alignment) * alignment;
+        const dataBytes = Math.max(0, stat.size - dataStart);
+        infos.sort((a, b) => a.offset - b.offset);
+        let expertTotal = 0;
+        let nonExpertTotal = 0;
+        const byLayer: number[] = [];
+        for (let i = 0; i < infos.length; i++) {
+          const info = infos[i] as { name: string; offset: number };
+          const end =
+            i + 1 < infos.length ? (infos[i + 1] as { offset: number }).offset : dataBytes;
+          const size = Math.max(0, end - info.offset);
+          if (EXPERT_TENSOR_RE.test(info.name)) {
+            expertTotal += size;
+            const block = BLOCK_INDEX_RE.exec(info.name);
+            if (block) {
+              const idx = Number(block[1]);
+              byLayer[idx] = (byLayer[idx] ?? 0) + size;
+            }
+          } else {
+            nonExpertTotal += size;
+          }
+        }
+        summary.expertBytesTotal = expertTotal;
+        summary.nonExpertBytes = nonExpertTotal;
+        summary.expertBytesByLayer = Array.from(byLayer, (v) => v ?? 0);
+      }
     }
 
     summary.bytesRead = r.totalBytesRead();

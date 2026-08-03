@@ -607,7 +607,7 @@ describe('applyProjectType', () => {
         yankedVersions: [],
       },
       '1.0.0',
-      { ...base, tools: [{ name: 'run_script', description: 'x', script: 'store' }] },
+      { ...base, tools: [{ name: 'run_installed_script', description: 'x', script: 'store' }] },
     );
     await expect(preflightProjectType({ catalog }, { typeId: 'bad-tool-name' })).rejects.toThrow(
       /collides with a builtin tool/,

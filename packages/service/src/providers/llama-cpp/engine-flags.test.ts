@@ -119,6 +119,56 @@ describe('buildLlamaCppEngineArgs — GPU / MoE offload', () => {
       argValue(buildLlamaCppEngineArgs({ config: { llamaCppNCpuMoe: 12 } }), '--n-cpu-moe'),
     ).toBe('12');
   });
+  it('explicit cpu-moe:false forces experts on the GPU, suppressing the planner split', () => {
+    // Tri-state "Off": the planner wanted a partial offload, but the user
+    // said no. Neither --cpu-moe nor --n-cpu-moe should be emitted.
+    const args = buildLlamaCppEngineArgs({
+      config: { llamaCppCpuMoe: false },
+      planner: { cpuMoe: false, nCpuMoe: 6, reason: 'partial split fits' },
+    });
+    expect(has(args, '--cpu-moe')).toBe(false);
+    expect(has(args, '--n-cpu-moe')).toBe(false);
+  });
+  it('an explicit partial split survives an explicit cpu-moe:false', () => {
+    // Force-off suppresses only the PLANNER's split, never an explicit one.
+    const args = buildLlamaCppEngineArgs({
+      config: { llamaCppCpuMoe: false, llamaCppNCpuMoe: 4 },
+    });
+    expect(has(args, '--cpu-moe')).toBe(false);
+    expect(argValue(args, '--n-cpu-moe')).toBe('4');
+  });
+});
+
+describe('buildLlamaCppEngineArgs — SWA full cache (Gemma auto)', () => {
+  it('auto-enables --swa-full for the Gemma family', () => {
+    expect(has(buildLlamaCppEngineArgs({ config: {}, architecture: 'gemma3' }), '--swa-full')).toBe(
+      true,
+    );
+    expect(
+      has(buildLlamaCppEngineArgs({ config: {}, modelId: 'gemma-3-12b-it' }), '--swa-full'),
+    ).toBe(true);
+  });
+  it('leaves --swa-full off for non-Gemma models by default', () => {
+    expect(has(buildLlamaCppEngineArgs({ config: {}, architecture: 'qwen3' }), '--swa-full')).toBe(
+      false,
+    );
+  });
+  it('an explicit false forces --swa-full off even for Gemma', () => {
+    expect(
+      has(
+        buildLlamaCppEngineArgs({ config: { llamaCppSwaFull: false }, architecture: 'gemma3' }),
+        '--swa-full',
+      ),
+    ).toBe(false);
+  });
+  it('an explicit true forces --swa-full on for a non-Gemma model', () => {
+    expect(
+      has(
+        buildLlamaCppEngineArgs({ config: { llamaCppSwaFull: true }, architecture: 'qwen3' }),
+        '--swa-full',
+      ),
+    ).toBe(true);
+  });
 });
 
 describe('buildLlamaCppEngineArgs — precedence (global > perModel > planner)', () => {

@@ -3305,7 +3305,7 @@ export function ChatTimelineView({
                 ⚠
               </span>
               <span className="chat-context-banner-body">
-                <strong>Context window getting full</strong> — this session{' '}
+                <strong>Context window getting full</strong> — this thread{' '}
                 {activeContextPercent === null
                   ? 'is approaching'
                   : activeContextPercent > 100

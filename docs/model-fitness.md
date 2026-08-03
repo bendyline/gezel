@@ -65,7 +65,11 @@ invalidating.
 An install-triggered probe that would have to **evict a resident model** to
 spawn defers (retrying for ~20 minutes, then persisting a `deferred` record);
 a manual probe proceeds immediately — you asked for it. Probe turns ride the
-background queue lane, so a probe never preempts your chat.
+background queue lane, so a probe never preempts your chat. When a manual
+probe *does* need to evict a resident engine and that engine will not drain in
+time (it is mid-turn), the pool refuses to kill live work and the probe
+records a `blocked` result ("did not run") rather than a `failed` one — the
+model is fine; the machine was just busy. Run it again once turns finish.
 
 ## Capability-honest badges
 
@@ -73,10 +77,19 @@ The proeve result renders as a single badge, composed from the RAM-axis fit
 ([computeModelFit](../packages/core/src/model-fit.ts)) plus the fitness record by
 the pure [composeFitnessBadge](../packages/core/src/fitness-badge.ts):
 
-- **`proeve passed · 24 t/s`** — admitted, with the measured decode rate.
+- **A speed band with the measured decode rate** — admitted, described in plain
+  English rather than by naming the trial: `runs fast (128 t/s)` at 100 t/s and
+  up, `runs well (42 t/s)` from 30, `runs slow (8.9 t/s)` from 2, and
+  `runs, but too slow (1.4 t/s)` below that (a warn pill — it passed the trial
+  but is not practical here). `runs (speed unknown)` when the rate was not
+  measured.
 - **A named warning** — the first failing axis names it: `slow decoding`,
   `tool calls failed`, `unbounded reasoning`, `small context`, `did not start`.
 - **`checking fitness…`** — a probe is running.
+- **`did not run`** — the check could not run because the engine was busy
+  serving other requests and could not be freed in time (a `blocked` record).
+  Transient, not a model defect — a neutral pill, not a warning; run it again
+  in a moment.
 - **`not checked yet`** — no fresh record; run the check.
 
 Badges appear on the installed-models table (Settings → Local models) with the
@@ -139,7 +152,7 @@ the **cheapest installed local model that clears it**
 1. Keep models whose tier clears the floor.
 2. Drop a model only on **fresh, completed negative fitness evidence** (probed
    and not admitted, or a measured decode rate below the floor). Missing,
-   stale, failed, or deferred records exclude nothing — advisory only.
+   stale, failed, deferred, or blocked records exclude nothing — advisory only.
 3. **Demote** (never exclude) a model with a poor gate-history against this book
    (≥2 pauses, or ≥6 attempts with zero approvals). Ordinary repair-loop holds
    are *not* a demotion signal.

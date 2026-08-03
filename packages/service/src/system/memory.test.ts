@@ -45,6 +45,7 @@ describe('sampleMachineMemoryUsage', () => {
       gezelEngineProcessCount: 0,
       orphanedGezelEngineProcessCount: 0,
       otherBytes: 32 * GiB,
+      cachedBytes: null,
       freeBytes: 20 * GiB,
       sampledAt: 'now',
       source: 'system-memory',
@@ -82,6 +83,39 @@ describe('sampleMachineMemoryUsage', () => {
       gezelEngineProcessCount: 2,
       orphanedGezelEngineProcessCount: 1,
       otherBytes: 14 * GiB,
+    });
+  });
+
+  it('keeps macOS file cache out of used and other memory', () => {
+    const usage = sampleMachineMemoryUsage({
+      profile: profile({
+        platform: 'darwin',
+        gpuVramBytes: null,
+        source: 'darwin-unified',
+      }),
+      engineCommittedBytes: 10 * GiB,
+      engineModelWeightsBytes: 8 * GiB,
+      gezelProcessMemory: {
+        bytes: 30 * GiB,
+        engineProcessCount: 2,
+        orphanedEngineProcessCount: 0,
+      },
+      darwinSystemMemory: {
+        usedBytes: 40 * GiB,
+        cachedBytes: 20 * GiB,
+        freeBytes: 4 * GiB,
+      },
+      serviceRssBytes: 2 * GiB,
+      sampledAt: 'now',
+    });
+
+    expect(usage).toMatchObject({
+      totalBytes: 64 * GiB,
+      usedBytes: 40 * GiB,
+      gezelBytesObserved: 30 * GiB,
+      otherBytes: 10 * GiB,
+      cachedBytes: 20 * GiB,
+      freeBytes: 4 * GiB,
     });
   });
 

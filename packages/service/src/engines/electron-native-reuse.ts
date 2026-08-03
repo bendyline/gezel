@@ -5,7 +5,7 @@ import { basename, join, posix, relative, resolve, sep } from 'node:path';
 import { resolvePlatformKey } from '@bendyline/gezel/native';
 import pinnedManifestJson from './native-file-manifest.json';
 import { effectiveEngineRelease } from './native-manifest.js';
-import { verifyCodeSignature } from './signature.js';
+import { BENDYLINE_APPLE_TEAM_ID, BENDYLINE_PUBLISHER, verifyCodeSignature } from './signature.js';
 
 type FileSignatureExpectation = 'bendyline' | 'vendor-hash-only' | 'hash-only';
 
@@ -160,7 +160,8 @@ async function verifyCandidate(opts: {
         const outcome = await opts.verifySignature(absolute, {
           platform: opts.platform,
           policy: 'require',
-          expectedPublisher: 'Bendyline LLC',
+          expectedPublisher: BENDYLINE_PUBLISHER,
+          expectedAppleTeamId: BENDYLINE_APPLE_TEAM_ID,
         });
         if (!outcome.accepted) {
           throw new Error(
@@ -195,7 +196,8 @@ async function verifyCandidate(opts: {
     const outcome = await opts.verifySignature(appBundle, {
       platform: 'darwin',
       policy: 'require',
-      expectedPublisher: 'Bendyline LLC',
+      expectedPublisher: BENDYLINE_PUBLISHER,
+      expectedAppleTeamId: BENDYLINE_APPLE_TEAM_ID,
       requireNotarizedApp: true,
     });
     if (!outcome.accepted) {
@@ -331,10 +333,16 @@ function enclosingMacApp(path: string): string | null {
   return index < 0 ? null : normalized.slice(0, index + 4);
 }
 
+// Big read buffer so hashing a native binary doesn't starve inside the busy
+// daemon event loop (a 64 KB stream yields ~100k times and queues behind other
+// work). Engines is a lower layer than models, so this mirrors models'
+// MODEL_HASH_READ_BUFFER_BYTES rather than importing it.
+const HASH_READ_BUFFER_BYTES = 16 * 1024 * 1024;
+
 function sha256File(path: string): Promise<string> {
   return new Promise((resolveHash, reject) => {
     const hash = createHash('sha256');
-    const stream = createReadStream(path);
+    const stream = createReadStream(path, { highWaterMark: HASH_READ_BUFFER_BYTES });
     stream.on('data', (chunk) => hash.update(chunk));
     stream.on('error', reject);
     stream.on('end', () => resolveHash(hash.digest('hex')));

@@ -51,15 +51,29 @@ describe('composeFitnessBadge', () => {
     expect(b.detail).toMatch(/changed since/);
   });
 
-  it('fresh admitted → ok with rounded t/s in the label', () => {
-    const b = composeFitnessBadge({ fitness: fresh(record()) });
-    expect(b.tier).toBe('ok');
-    expect(b.label).toBe('proeve passed · 24 t/s');
+  it.each([
+    [420, 'runs fast (420 t/s)', 'ok'],
+    [128.4, 'runs fast (128 t/s)', 'ok'],
+    [100, 'runs fast (100 t/s)', 'ok'],
+    [99.6, 'runs fast (100 t/s)', 'ok'],
+    [30, 'runs well (30 t/s)', 'ok'],
+    [42.1, 'runs well (42 t/s)', 'ok'],
+    [24.3, 'runs slow (24 t/s)', 'ok'],
+    [8.94, 'runs slow (8.9 t/s)', 'ok'],
+    [10, 'runs slow (10 t/s)', 'ok'],
+    [2, 'runs slow (2 t/s)', 'ok'],
+    [1.87, 'runs, but too slow (1.9 t/s)', 'warn'],
+    [0.4, 'runs, but too slow (0.4 t/s)', 'warn'],
+  ] as const)('fresh admitted at %s t/s → %s', (genTokensPerSec, label, tier) => {
+    const b = composeFitnessBadge({ fitness: fresh(record({ genTokensPerSec })) });
+    expect(b.label).toBe(label);
+    expect(b.tier).toBe(tier);
   });
 
-  it('fresh admitted without a measured t/s → plain pass label', () => {
+  it('fresh admitted without a measured t/s → speed-unknown label', () => {
     const b = composeFitnessBadge({ fitness: fresh(record({ genTokensPerSec: null })) });
-    expect(b.label).toBe('proeve passed');
+    expect(b.tier).toBe('ok');
+    expect(b.label).toBe('runs (speed unknown)');
   });
 
   it.each([
@@ -94,6 +108,16 @@ describe('composeFitnessBadge', () => {
     expect(b.tier).toBe('warn');
     expect(b.label).toBe('fitness check failed');
     expect(b.detail).toContain('probe timed out');
+  });
+
+  it('status blocked → unknown "did not run", not a warn failure', () => {
+    const r = record({ status: 'blocked', admitted: false });
+    r.checks.spawn = { ok: false, detail: 'engine busy serving requests and did not drain' };
+    const b = composeFitnessBadge({ fitness: fresh(r) });
+    expect(b.tier).toBe('unknown');
+    expect(b.label).toBe('did not run');
+    expect(b.detail).toMatch(/busy serving other requests/);
+    expect(b.detail).toMatch(/again in a moment/);
   });
 
   it('status deferred → unknown with a manual-run nudge', () => {

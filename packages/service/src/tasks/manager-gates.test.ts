@@ -1193,3 +1193,133 @@ describe('completion gates — judge checks (advisory ride-along + budget)', () 
     expect(judgeCalls).toBe(3);
   });
 });
+
+describe('completion gates — unsatisfiable under writes-off', () => {
+  it('pauses without consuming an attempt when a failing workspace check cannot be repaired', async () => {
+    await store.updateProject('default', { allowGezelWrites: false });
+    const task = await tasks.create('default', {
+      title: 'Dependency audit',
+      description: 'workspace-path deliverable gate on a writes-off project.',
+      assignee: { kind: 'user' },
+      steps: gatedSteps({
+        at: 'completion',
+        checks: [{ kind: 'minBytes', file: 'notes/scan.md', bytes: 120 }],
+      }),
+    });
+    const buildId = task.craftbook.steps[0]!.id;
+
+    const outcome = await tasks.completeStepChecked('default', task.num, buildId, undefined, {
+      cause: 'model',
+    });
+    expect(outcome.status).toBe('held');
+    if (outcome.status !== 'held') return;
+    expect(outcome.gate.paused).toBe(true);
+    expect(outcome.gate.unsatisfiable).toBe(true);
+    expect(outcome.gate.attempt).toBe(0);
+    expect(outcome.gate.message).toContain('workspace writes are OFF');
+
+    const after = await tasks.get('default', task.num);
+    expect(after!.status).toBe('paused');
+    const step = after!.craftbook.steps[0]!;
+    expect(step.completedAt).toBeUndefined();
+    expect(step.gateAttempts ?? 0).toBe(0);
+
+    const notes = await tasks.listNotes('default', task.num, buildId);
+    expect(notes.some((n) => n.text.includes('Gate unsatisfiable — task paused'))).toBe(true);
+    expect(
+      notes.some((n) => n.text.includes('Allow gezels to modify the workspace directory')),
+    ).toBe(true);
+  });
+
+  it('a drawer-targeted gate stays repairable on a writes-off project', async () => {
+    await store.updateProject('default', { allowGezelWrites: false });
+    const task = await tasks.create('default', {
+      title: 'Threat model',
+      description: 'artifact-drawer deliverable gate on a writes-off project.',
+      assignee: { kind: 'user' },
+      steps: gatedSteps({
+        at: 'completion',
+        checks: [{ kind: 'minBytes', file: 'reports/threat-model.md', bytes: 120, artifact: true }],
+      }),
+    });
+    const buildId = task.craftbook.steps[0]!.id;
+
+    const outcome = await tasks.completeStepChecked('default', task.num, buildId, undefined, {
+      cause: 'model',
+    });
+    expect(outcome.status).toBe('held');
+    if (outcome.status !== 'held') return;
+    expect(outcome.gate.unsatisfiable).toBeUndefined();
+    expect(outcome.gate.paused).toBe(false);
+    expect(outcome.gate.attempt).toBe(1);
+
+    const after = await tasks.get('default', task.num);
+    expect(after!.status).not.toBe('paused');
+    expect(after!.craftbook.steps[0]!.gateAttempts).toBe(1);
+  });
+
+  it('a writable project keeps the ordinary attempt-charging reject path', async () => {
+    const task = await tasks.create('default', {
+      title: 'Gated build',
+      description: 'control: same gate, writable project.',
+      assignee: { kind: 'user' },
+      steps: gatedSteps({
+        at: 'completion',
+        checks: [{ kind: 'minBytes', file: 'notes/scan.md', bytes: 120 }],
+      }),
+    });
+    const buildId = task.craftbook.steps[0]!.id;
+    const outcome = await tasks.completeStepChecked('default', task.num, buildId, undefined, {
+      cause: 'model',
+    });
+    expect(outcome.status).toBe('held');
+    if (outcome.status !== 'held') return;
+    expect(outcome.gate.unsatisfiable).toBeUndefined();
+    expect(outcome.gate.attempt).toBe(1);
+  });
+
+  it('fires the needs-help hook with gate_unsatisfiable on the policy pause', async () => {
+    await store.updateProject('default', { allowGezelWrites: false });
+    const events: { reason: string; ref: string; stepId?: string }[] = [];
+    tasks.setTaskNeedsHelpHook(({ task, reason, stepId }) => {
+      events.push({ reason, ref: task.ref, ...(stepId ? { stepId } : {}) });
+    });
+    const task = await tasks.create('default', {
+      title: 'Dependency audit',
+      description: 'needs-help hook coverage for the unsatisfiable pause.',
+      assignee: { kind: 'user' },
+      steps: gatedSteps({
+        at: 'completion',
+        checks: [{ kind: 'minBytes', file: 'notes/scan.md', bytes: 120 }],
+      }),
+    });
+    const buildId = task.craftbook.steps[0]!.id;
+    await tasks.completeStepChecked('default', task.num, buildId, undefined, { cause: 'model' });
+    expect(events).toEqual([{ reason: 'gate_unsatisfiable', ref: task.ref, stepId: buildId }]);
+  });
+
+  it('fires the needs-help hook with gate_exhausted when the budget is spent', async () => {
+    const events: string[] = [];
+    tasks.setTaskNeedsHelpHook(({ reason }) => {
+      events.push(reason);
+    });
+    const task = await tasks.create('default', {
+      title: 'Gated build',
+      description: 'needs-help hook coverage for the exhausted pause.',
+      assignee: { kind: 'user' },
+      steps: gatedSteps({
+        at: 'completion',
+        checks: [{ kind: 'minBytes', file: 'notes/scan.md', bytes: 120 }],
+        maxAttempts: 1,
+      }),
+    });
+    const buildId = task.craftbook.steps[0]!.id;
+    const outcome = await tasks.completeStepChecked('default', task.num, buildId, undefined, {
+      cause: 'model',
+    });
+    expect(outcome.status).toBe('held');
+    if (outcome.status !== 'held') return;
+    expect(outcome.gate.paused).toBe(true);
+    expect(events).toEqual(['gate_exhausted']);
+  });
+});

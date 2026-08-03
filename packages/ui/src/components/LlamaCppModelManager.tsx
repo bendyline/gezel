@@ -11,6 +11,7 @@ import {
   isMoEFromTags,
 } from '@bendyline/gezel';
 import type {
+  IncompleteModelDownload,
   LlamaCppInstallEvent,
   LlamaCppInstalledModel,
   ModelFitnessEntry,
@@ -19,6 +20,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { CatalogBrowser } from './CatalogBrowser.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
+import { IncompleteDownloads } from './IncompleteDownloads.js';
 import { LicenseButton } from './LicenseButton.js';
 import { ExportModelBundleButton, ImportModelBundleButton } from './ModelBundleControls.js';
 import { RecommendedBadge } from './RecommendedBadge.js';
@@ -105,11 +107,12 @@ interface ActiveInstall {
   error?: string;
   /**
    * `local` — this React instance kicked off the install via SSE and
-   * owns the AbortController.
+   * owns the AbortController for its own event stream.
    * `remote` — the install was discovered via the polled
    * `/active-installs` endpoint; another path (the first-run
-   * bootstrap, or another open Settings tab) is driving it. The
-   * cancel button is hidden because we don't own the lifecycle.
+   * bootstrap, or another open Settings tab) started it. Either way the
+   * install itself is a server-owned background job, so Cancel works for
+   * both origins via the explicit cancel endpoint.
    */
   origin: 'local' | 'remote';
   controller?: AbortController;
@@ -160,6 +163,10 @@ type CategoryTab = ChatModelCategory | 'all';
 export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props) {
   const [models, setModels] = useState<LlamaCppInstalledModel[]>([]);
   const [modelsError, setModelsError] = useState<string | null>(null);
+  // Interrupted/unverified downloads holding disk with no install manifest —
+  // invisible to the installed list. Surfaced so the user can resume or
+  // delete them before the daemon's 7-day reclaim sweep.
+  const [incomplete, setIncomplete] = useState<IncompleteModelDownload[]>([]);
   const [installs, setInstalls] = useState<Map<string, ActiveInstall>>(new Map());
   const [installWarning, setInstallWarning] = useState<{ id: string; message: string } | null>(
     null,
@@ -193,6 +200,15 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
     }
   }, []);
 
+  const refreshIncomplete = useCallback(async () => {
+    try {
+      const res = await api.listIncompleteLlamaCppModels();
+      setIncomplete(res.incomplete ?? []);
+    } catch {
+      /* advisory surface — a blip just keeps the last state */
+    }
+  }, []);
+
   const refresh = useCallback(async () => {
     try {
       const res = await api.listLlamaCppModels();
@@ -202,7 +218,8 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
       setModelsError(err instanceof Error ? err.message : String(err));
     }
     void refreshFitness();
-  }, [refreshFitness]);
+    void refreshIncomplete();
+  }, [refreshFitness, refreshIncomplete]);
 
   useEffect(() => {
     void refresh();
@@ -448,22 +465,40 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
 
   const cancelInstall = useCallback(
     (catalogId: string) => {
+      // Installs run as background jobs on the service — closing the SSE
+      // stream only detaches this view, so cancellation must be the
+      // explicit server-side call. Works for `remote`-origin rows too.
       const inflight = installs.get(catalogId);
-      if (!inflight || !inflight.controller) return;
-      inflight.controller.abort();
+      inflight?.controller?.abort();
+      void api.cancelLlamaCppModelInstall(catalogId).catch(() => {});
+      setInstalls((prev) => {
+        const next = new Map(prev);
+        next.delete(catalogId);
+        return next;
+      });
     },
     [installs],
   );
 
   const deleteOne = useCallback(async () => {
-    if (!toDelete) return;
+    const id = toDelete;
+    if (!id) return;
+    setToDelete(null);
+    setModelsError(null);
+    // Optimistically drop the row (from both the installed and incomplete
+    // lists) so the delete feels instant even when the daemon is briefly busy
+    // — a concurrent download verify can otherwise delay the round-trip and
+    // make a successful delete look like a no-op. On failure we refresh (which
+    // restores whatever still exists) and surface the error.
+    setModels((cur) => cur.filter((m) => m.id !== id));
+    setIncomplete((cur) => cur.filter((d) => d.id !== id));
     try {
-      await api.deleteLlamaCppModel(toDelete);
-      setToDelete(null);
+      await api.deleteLlamaCppModel(id);
       await refresh();
       onModelsChanged?.();
     } catch (err) {
       setModelsError(`delete failed: ${describe(err)}`);
+      void refresh();
     }
   }, [toDelete, refresh, onModelsChanged]);
 
@@ -519,6 +554,12 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
           </div>
         </div>
       )}
+
+      <IncompleteDownloads
+        items={incomplete.filter((d) => !installs.has(d.id))}
+        onResume={(id) => startInstall(id)}
+        onDelete={(id) => setToDelete(id)}
+      />
 
       {installMismatch && (
         <div className="ollama-section">
@@ -674,7 +715,7 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
                           >
                             {badge.tier === 'probing'
                               ? 'Checking…'
-                              : entry && !entry.stale
+                              : entry && !entry.stale && entry.record.status !== 'blocked'
                                 ? 'Re-run'
                                 : 'Run fitness check'}
                           </button>
@@ -700,13 +741,22 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
                             {updating ? 'Updating…' : 'Update'}
                           </button>
                         )}
-                        <button
-                          type="button"
-                          className="home-link"
-                          onClick={() => setToDelete(m.id)}
-                        >
-                          Delete
-                        </button>
+                        {m.readOnly ? (
+                          <span
+                            className="muted small"
+                            title="Provided by the machine-wide install (shared asset store). It can't be removed from here — manage it with the machine installer, or install a user-owned copy to shadow it."
+                          >
+                            Machine model
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            className="home-link"
+                            onClick={() => setToDelete(m.id)}
+                          >
+                            Delete
+                          </button>
+                        )}
                       </td>
                     </tr>
                   );
@@ -932,11 +982,11 @@ function InstallProgress({
             Retry
           </button>
         ) : (
-          inst.controller && (
-            <button type="button" className="home-link" onClick={onCancel}>
-              Cancel
-            </button>
-          )
+          /* Cancel always available: installs are server-owned background
+             jobs, so this view can cancel remote-origin rows too. */
+          <button type="button" className="home-link" onClick={onCancel}>
+            Cancel
+          </button>
         )}
       </div>
       {indeterminate ? (

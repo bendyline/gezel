@@ -241,7 +241,7 @@ const PROJECT_RETRIEVAL_ROLES: ReadonlySet<string> = new Set([
  * logged zero requests. Same precedent as `run_nodejs_script` in
  * DIRECT_FILE_WORK_TOOLS.
  */
-const FILE_WORK_SCRIPT_TOOLS: readonly string[] = ['run_script', 'get_script_run'];
+const FILE_WORK_SCRIPT_TOOLS: readonly string[] = ['run_installed_script', 'get_script_run'];
 const IMMEDIATE_FILE_WRITE_TOOLS: ReadonlySet<string> = new Set([
   'write_file',
   ...FILE_WORK_SCRIPT_TOOLS,

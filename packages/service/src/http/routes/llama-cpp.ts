@@ -1,82 +1,8 @@
-import { type GezelConfig, createLogger } from '@bendyline/gezel';
 import { Hono } from 'hono';
-import type { SSEStreamingApi } from 'hono/streaming';
 import { streamSSE } from 'hono/streaming';
-import type { InstallEvent } from '../../providers/llama-cpp/models.js';
-import { decideAutoInstall } from '../../providers/recognition/auto-install.js';
 import type { ServiceContext } from '../context.js';
+import { subscribeToInstallSse } from './install-sse.js';
 import { invalidateModelsCache } from './models.js';
-
-const log = createLogger('llama-cpp');
-
-/**
- * Pull an image reader alongside a chat model that can't see images, and
- * report its progress on the same stream.
- *
- * A failure here is logged and surfaced as a `companion` error, never as an
- * install failure: the chat model the user actually asked for is already on
- * disk and working.
- */
-async function streamCompanionRecognition(
-  ctx: ServiceContext,
-  catalogId: string,
-  config: GezelConfig | null,
-  stream: SSEStreamingApi,
-): Promise<void> {
-  if (!config) return;
-  let decision: Awaited<ReturnType<typeof decideAutoInstall>> = null;
-  try {
-    decision = await decideAutoInstall({
-      home: ctx.home,
-      config,
-      catalogId,
-      llamaCppModels: ctx.llamaCppModels,
-      recognition: ctx.recognition,
-    });
-  } catch (err) {
-    log.warn(`image-reader auto-install check failed: ${String(err)}`);
-    return;
-  }
-  if (!decision) return;
-
-  const { entry } = decision;
-  log.info(`auto-installing image reader ${entry.id} — ${decision.reason}`);
-  const send = (extra: Partial<Extract<InstallEvent, { type: 'companion' }>>) =>
-    stream.writeSSE({
-      data: JSON.stringify({
-        type: 'companion',
-        kind: 'image-recognition',
-        id: entry.id,
-        name: entry.name,
-        bytesWritten: 0,
-        totalBytes: entry.approxSizeBytes,
-        ...extra,
-      }),
-    });
-
-  try {
-    await send({});
-    const provider = await ctx.recognition.current();
-    for await (const event of provider.pullModel(entry.id, entry.spec)) {
-      if (event.type === 'progress') {
-        await send({
-          bytesWritten: event.bytesWritten,
-          totalBytes: event.totalBytes ?? entry.approxSizeBytes,
-        });
-      } else if (event.type === 'error') {
-        await send({ error: event.error });
-        return;
-      }
-    }
-    await send({ bytesWritten: entry.approxSizeBytes });
-    // The engine picks up the newly-installed weights on its next start.
-    await ctx.recognition.reset();
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    log.warn(`image-reader auto-install failed: ${message}`);
-    await send({ error: message }).catch(() => {});
-  }
-}
 
 /**
  * llama.cpp local model management — install / list / delete GGUF
@@ -108,10 +34,24 @@ export function llamaCppRoutes(ctx: ServiceContext): Hono {
   });
 
   /**
-   * Install a chat-model entry's llama.cpp source. SSE-streams the
-   * progress events the model manager yields so the UI can render a
-   * live progress bar with sha256-verify and metadata-extract phases
-   * called out separately.
+   * Incomplete downloads: interrupted or unverified downloads that hold
+   * bytes on disk but have no `manifest.json`, so they never appear in
+   * `/models`. The Settings UI surfaces these so the user can resume or
+   * delete them instead of losing GBs to the silent 7-day reclaim sweep.
+   */
+  app.get('/incomplete', async (c) => {
+    const incomplete = await ctx.llamaCppModels.listIncomplete();
+    return c.json({ incomplete });
+  });
+
+  /**
+   * Install a chat-model entry's llama.cpp source. The install itself runs
+   * as a background job owned by {@link ServiceContext.chatInstalls} — this
+   * SSE is just a subscriber, so a client disconnect detaches the consumer
+   * without abandoning the download. Idempotent: a second `POST` for a
+   * running id attaches to the in-flight install rather than starting (or
+   * erroring on) a parallel one. Cancel is the explicit `DELETE` below.
+   * The companion image-reader pull rides the same background job.
    */
   app.post('/models/:catalogId/install', async (c) => {
     const catalogId = c.req.param('catalogId');
@@ -127,39 +67,16 @@ export function llamaCppRoutes(ctx: ServiceContext): Hono {
     // picks up just the missing file — completed files are skipped.
     const config = await ctx.store.readConfig().catch(() => null);
     const includeMmproj = config?.nativeVision?.[catalogId] === true;
-    return streamSSE(c, async (stream) => {
-      try {
-        // The chat model's own `done` is held back until any companion pull
-        // finishes — the UI treats `done` as terminal and would close the
-        // stream while the image reader was still downloading.
-        let finished: InstallEvent | null = null;
-        for await (const event of ctx.llamaCppModels.install(catalogId, {
-          skipSha,
-          includeMmproj,
-        })) {
-          if (event.type === 'done') {
-            finished = event;
-            continue;
-          }
-          await stream.writeSSE({ data: JSON.stringify(event) });
-        }
-        // listModels caches per-provider results — bust the llama-cpp
-        // entry so the next /api/models call picks up the new install.
-        invalidateModelsCache('llama-cpp');
+    ctx.chatInstalls.llamaCpp.start(catalogId, { skipSha, includeMmproj });
+    return streamSSE(c, (stream) =>
+      subscribeToInstallSse(ctx.chatInstalls.llamaCpp, catalogId, stream),
+    );
+  });
 
-        if (finished) {
-          await streamCompanionRecognition(ctx, catalogId, config, stream);
-          await stream.writeSSE({ data: JSON.stringify(finished) });
-        }
-      } catch (err) {
-        await stream.writeSSE({
-          data: JSON.stringify({
-            type: 'error',
-            error: err instanceof Error ? err.message : String(err),
-          }),
-        });
-      }
-    });
+  /** Explicitly cancel an in-flight install. Disconnect alone does not cancel. */
+  app.delete('/models/:catalogId/install', (c) => {
+    const catalogId = c.req.param('catalogId');
+    return c.json({ aborted: ctx.chatInstalls.llamaCpp.cancel(catalogId) });
   });
 
   app.delete('/models/:id', async (c) => {

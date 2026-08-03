@@ -551,6 +551,25 @@ describe('poisoned-session recovery', () => {
     expect(picked[1]?.lastTurnError).toBe('old abort');
   });
 
+  it('prefers the guard teaching text over the user-facing toast', () => {
+    // The toast tells a human to "try sending your message again" — advice
+    // that re-drives the model into the identical loop. The guard's own
+    // warning names the mechanism and the required next action.
+    const message = buildPoisonedSessionRecoveryMessage({
+      lastTurnError:
+        'The model got stuck repeating the same action without making progress, so the turn was stopped. Try sending your message again, or rephrase your request.',
+      abortTeaching:
+        '[Mac AI] aborting — `replace_lines` was called with these exact arguments 5 times this turn without making progress. Your next message MUST start with a single action-tool call.',
+      filePath: 'runlog.md',
+      sniff: { key: 'runlog.md', score: 3, bytes: 900, failReason: 'step 2 heading missing' },
+    });
+    expect(message).toContain('Why the turn was stopped:');
+    expect(message).toContain('MUST start with a single action-tool call');
+    expect(message).not.toContain('Try sending your message again');
+    // Teaching text names replace_lines failing → strategy switches to write_file.
+    expect(message).toContain('use `write_file`');
+  });
+
   it('builds a direct edit recovery prompt for line-edit aborts', () => {
     const message = buildPoisonedSessionRecoveryMessage({
       lastTurnError: '`replace_lines` failed 5 times in a row',

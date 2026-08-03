@@ -91,7 +91,7 @@ export function IntroHandboekArticle() {
     }
   }, [article]);
 
-  // Intra-article links (`the-crew.md`, `projects-and-sessions.md`) can't
+  // Intra-article links (`the-crew.md`, `projects-and-threads.md`) can't
   // resolve inside the Home card — send them to the Handboek, landing on
   // the linked article (curated ids equal their file stems; HandboekView
   // falls back to its default when a stem doesn't match the TOC).

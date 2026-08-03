@@ -87,9 +87,16 @@ export function queueRoutes(ctx: ServiceContext): Hono {
       ctx.chat.getAnthropicCliPoolSnapshot(),
       ctx.gpuArbiter.getDeviceHealthStatus(),
     ]);
+    // Night Shift context travels with the queue snapshot rather than as a
+    // second poll: the QueueMeter needs it on every refresh to say when the
+    // scheduled bucket picks up ("waiting for Night Shift · starts 22:00").
+    const nightShift = {
+      active: ctx.nightShift.isActive(),
+      opensAt: ctx.nightShift.nextStartIso(),
+    };
     return c.json({
       providers,
-      taskRunner: ctx.taskRunner.snapshot(),
+      taskRunner: { ...ctx.taskRunner.snapshot(), nightShift },
       sessions,
       cache,
       ...(deviceHealth ? { deviceHealth } : {}),
@@ -103,35 +110,35 @@ export function queueRoutes(ctx: ServiceContext): Hono {
    * this. Returns `{cancelled: true}` when the entry was found and
    * removed, false when the id is unknown — typically because the
    * entry already started running between the user's poll and click.
+   *
+   * Resolution goes through `ChatManager.cancelProviderQueueItem`, which
+   * checks the singleton `providers` map AND the engine pool — the
+   * pool path is why on-device engines (llama-cpp / MLX / DS4), whose
+   * queues the singleton `getProviderIfReady` can't see, are cancelable
+   * at all. Reaching only the singleton here silently no-op'd the ✕ for
+   * every pool-routed local turn.
    */
   app.delete('/:provider/:id', async (c) => {
     const provider = c.req.param('provider');
     if (!PROVIDER_SET.has(provider)) {
       return c.json({ error: `unknown provider: ${provider}` }, 404);
     }
-    const handle = ctx.chat.getProviderIfReady(provider as ProviderName);
-    if (!handle?.queue) {
-      return c.json({ error: `provider not initialized: ${provider}` }, 404);
-    }
     const id = Number.parseInt(c.req.param('id'), 10);
     if (!Number.isFinite(id)) return c.json({ error: 'id must be a number' }, 400);
-    const cancelled = handle.queue.cancelPending(id);
+    const cancelled = ctx.chat.cancelProviderQueueItem(provider as ProviderName, id);
     return c.json({ cancelled });
   });
 
   /**
    * Reorder a pending entry within its lane (`'up'` / `'down'`). The
    * dispatcher is affinity-aware, so this nudges priority by adjusting
-   * the entry's `enqueuedAt`; it's not a strict positional swap.
+   * the entry's `enqueuedAt`; it's not a strict positional swap. Same
+   * singleton-then-pool resolution as the cancel route above.
    */
   app.post('/:provider/:id/move', async (c) => {
     const provider = c.req.param('provider');
     if (!PROVIDER_SET.has(provider)) {
       return c.json({ error: `unknown provider: ${provider}` }, 404);
-    }
-    const handle = ctx.chat.getProviderIfReady(provider as ProviderName);
-    if (!handle?.queue) {
-      return c.json({ error: `provider not initialized: ${provider}` }, 404);
     }
     const id = Number.parseInt(c.req.param('id'), 10);
     if (!Number.isFinite(id)) return c.json({ error: 'id must be a number' }, 400);
@@ -143,7 +150,7 @@ export function queueRoutes(ctx: ServiceContext): Hono {
     if (direction !== 'up' && direction !== 'down') {
       return c.json({ error: "direction must be 'up' or 'down'" }, 400);
     }
-    const moved = handle.queue.movePending(id, direction);
+    const moved = ctx.chat.moveProviderQueueItem(provider as ProviderName, id, direction);
     return c.json({ moved });
   });
 

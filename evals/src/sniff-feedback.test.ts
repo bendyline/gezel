@@ -7,7 +7,7 @@ import {
   structuralOrderRepairLine,
 } from './sniff-feedback.ts';
 import type { SniffResult } from './success-check.ts';
-import type { EvalContext } from './types.ts';
+import type { EvalContext, EvalTerminalFailure } from './types.ts';
 
 interface MockedClient {
   messageGezel: ReturnType<typeof vi.fn>;
@@ -1897,7 +1897,7 @@ describe('sniff escalation ladder', () => {
     expect(exhausted).toMatchObject({ status: 'exhausted', attempts: 4 });
     expect(requestTerminalFailure).toHaveBeenCalledTimes(1);
     expect(logs.join('\n')).toContain(
-      'counted completed post-nudge file mutation for openapi.yaml despite byte-identical checked content (attempt 4)',
+      'counted completed post-nudge file mutation for openapi.yaml despite byte-identical checked content (signature attempt 4)',
     );
   });
 
@@ -2268,7 +2268,118 @@ describe('sniff escalation ladder', () => {
     expect(exhausted).toMatchObject({ status: 'exhausted', attempts: 4 });
     expect(requestTerminalFailure).toHaveBeenCalledTimes(1);
     expect(logs.join('\n')).toContain(
-      'counted completed post-nudge file mutation for runlog.md despite byte-identical checked content (attempt 4)',
+      'counted completed post-nudge file mutation for runlog.md despite byte-identical checked content (signature attempt 4)',
     );
+  });
+});
+
+describe('score-plateau escalation (progressive failures)', () => {
+  // The signature ladder is blind to the progressive shape: every repair
+  // fixes the named detail, a DIFFERENT check surfaces (new failReason,
+  // often a new file), the signature resets, and no escalation ever fires
+  // while the score sits still. These drive that exact shape.
+  const progressive = (
+    n: number,
+  ): { filePath: string; sniff: SniffResult; sourceText: string } => ({
+    filePath: [
+      'src/store.ts',
+      'src/migrate.ts',
+      'src/handlers.ts',
+      'src/types.ts',
+      'src/extra.ts',
+      'src/more.ts',
+      'src/final.ts',
+    ][n % 7]!,
+    sniff: {
+      ok: false,
+      signals: ['types-updated'],
+      score: 4,
+      failReason: `distinct failure class number ${'abcdefg'[n % 7]!} with its own wording`,
+      missingRequiredSignals: ['handlers-updated'],
+    },
+    sourceText: `revision ${n} of the checked content`,
+  });
+
+  async function drive(ctx: EvalContext, n: number) {
+    const step = progressive(n);
+    return postSniffFeedback(ctx, step.filePath, step.sniff, { sourceText: step.sourceText });
+  }
+
+  it('escalates on a frozen score even when the failure signature churns', async () => {
+    const client = makeClient({
+      sessions: [{ id: 's', gezelId: 'builder-1', lastActivityAt: '2026-08-02T05:00:00Z' }],
+    });
+    const ctx = makeCtx(client);
+
+    await drive(ctx, 0); // plateau attempt 1, delivered
+    await drive(ctx, 1); // revision+churn -> plateau attempt 2
+    await drive(ctx, 2); // -> plateau attempt 3 -> stage 1
+
+    const texts = client.messageGezel.mock.calls.map((c) => c[1].text as string);
+    expect(texts.length).toBe(3);
+    // The signature ladder saw three fresh signatures — no REPEAT MISS.
+    expect(texts.join('\n')).not.toContain('REPEAT MISS');
+    expect(texts[2]).toContain('SCORE PLATEAU — 3 completed repairs');
+    expect(texts[2]).toContain('score is still 4');
+    expect(texts[2]).toContain('read_file');
+  });
+
+  it('a score improvement starts a fresh plateau', async () => {
+    const client = makeClient({
+      sessions: [{ id: 's', gezelId: 'builder-1', lastActivityAt: '2026-08-02T05:00:00Z' }],
+    });
+    const ctx = makeCtx(client);
+
+    await drive(ctx, 0);
+    await drive(ctx, 1);
+    // Score rises to 5 — new plateau key, counter starts over.
+    const improved = progressive(2);
+    improved.sniff.score = 5;
+    await postSniffFeedback(ctx, improved.filePath, improved.sniff, {
+      sourceText: improved.sourceText,
+    });
+    const next = progressive(3);
+    next.sniff.score = 5;
+    await postSniffFeedback(ctx, next.filePath, next.sniff, { sourceText: next.sourceText });
+
+    const texts = client.messageGezel.mock.calls.map((c) => c[1].text as string);
+    expect(texts.length).toBe(4);
+    expect(texts.join('\n')).not.toContain('SCORE PLATEAU');
+  });
+
+  it('reaches a plateau-flavored terminal only at the later threshold', async () => {
+    const client = makeClient({
+      sessions: [{ id: 's', gezelId: 'builder-1', lastActivityAt: '2026-08-02T05:00:00Z' }],
+    });
+    const failures: EvalTerminalFailure[] = [];
+    const ctx: EvalContext = {
+      ...makeCtx(client),
+      requestTerminalFailure: (f) => failures.push(f),
+    };
+
+    let last: Awaited<ReturnType<typeof postSniffFeedback>> | undefined;
+    for (let n = 0; n < 6; n++) last = await drive(ctx, n);
+
+    expect(last).toMatchObject({ status: 'exhausted', attempts: 6 });
+    expect(failures.length).toBeGreaterThan(0);
+    expect(failures[0]!.reason).toContain('repair-exhausted (score plateau)');
+    expect(failures[0]!.reason).toContain('score frozen at 4');
+    expect(failures[0]!.failureMode).toBe('model-stuck');
+  });
+
+  it('the frozen-signature ladder still wins when the same failure repeats', async () => {
+    const client = makeClient({
+      sessions: [{ id: 's', gezelId: 'builder-1', lastActivityAt: '2026-08-02T05:00:00Z' }],
+    });
+    const ctx = makeCtx(client);
+    const fixed = progressive(0);
+
+    await postSniffFeedback(ctx, fixed.filePath, fixed.sniff, { sourceText: 'rev A' });
+    await postSniffFeedback(ctx, fixed.filePath, fixed.sniff, { sourceText: 'rev B' });
+
+    const texts = client.messageGezel.mock.calls.map((c) => c[1].text as string);
+    expect(texts.length).toBe(2);
+    expect(texts[1]).toContain('REPEAT MISS — attempt 2');
+    expect(texts[1]).not.toContain('SCORE PLATEAU');
   });
 });

@@ -125,13 +125,16 @@ export function ProviderModelSelect({
     void (async () => {
       let cfg: Awaited<ReturnType<typeof api.getConfig>> | null = null;
       let copilot: Awaited<ReturnType<typeof api.getCopilotStatus>> | null = null;
+      let memory: Awaited<ReturnType<typeof api.getMemoryProfile>> | null = null;
       try {
         // A daemon older than this UI has no `/copilot-status`; falling back
         // to `available: true` keeps the pre-existing behavior rather than
-        // silently hiding a provider that works.
-        [cfg, copilot] = await Promise.all([
+        // silently hiding a provider that works. Same for the memory profile:
+        // null leaves the ds4 RAM gate unapplied instead of guessing.
+        [cfg, copilot, memory] = await Promise.all([
           api.getConfig(),
           api.getCopilotStatus().catch(() => null),
+          api.getMemoryProfile().catch(() => null),
         ]);
       } catch {
         if (!cancelled) {
@@ -173,10 +176,15 @@ export function ProviderModelSelect({
       if (/Mac/i.test(ua)) candidates.push('mlx');
       candidates.push('llama-cpp');
       // DwarfStar (ds4) — a separate on-device engine. Offer it unless the
-      // platform definitively can't run it (Intel Mac / Windows without an
-      // external ds4-server); the empty-list filter below drops the entry when
-      // no ds4 model is installed.
-      if (detectDs4Availability({ externalBaseUrl: cfg.ds4BaseUrl }).status !== 'unavailable') {
+      // device definitively can't run it (Intel Mac / Windows / under the RAM
+      // floor, all without an external ds4-server); the empty-list filter below
+      // drops the entry when no ds4 model is installed.
+      if (
+        detectDs4Availability({
+          externalBaseUrl: cfg.ds4BaseUrl,
+          totalRamBytes: memory?.totalRamBytes,
+        }).status !== 'unavailable'
+      ) {
         candidates.push('ds4');
       }
 

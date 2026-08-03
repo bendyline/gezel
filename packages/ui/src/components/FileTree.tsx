@@ -28,6 +28,12 @@ export interface FileTreeProps {
    *  (e.g. a FontAwesome `<i>` element or an emoji string). */
   iconFor?: (entry: FileEntry) => ReactNode;
   /**
+   * Row label override. Defaults to the raw entry name. Hosts that show a
+   * single known format (the documents library) pass `documentLabel` to drop
+   * the redundant extension; anything file-manager-shaped leaves it alone.
+   */
+  labelFor?: (entry: FileEntry) => string;
+  /**
    * When true, clicking a folder's *label* selects it (`onSelect`) instead
    * of toggling its expansion; the chevron still expands/collapses. Lets a
    * host show a folder-detail surface on selection. Default false — the
@@ -81,6 +87,10 @@ function defaultIconFor(entry: FileEntry): ReactNode {
   return <i className="tree-icon fa-regular fa-file-lines fa-fw" aria-hidden="true" />;
 }
 
+function defaultLabelFor(entry: FileEntry): string {
+  return entry.name;
+}
+
 export function FileTree({
   entries,
   selectedPath,
@@ -89,6 +99,7 @@ export function FileTree({
   onDelete,
   defaultExpandedDepth = 2,
   iconFor = defaultIconFor,
+  labelFor = defaultLabelFor,
   selectableFolders = false,
 }: FileTreeProps) {
   const tree = buildTree(entries);
@@ -105,6 +116,7 @@ export function FileTree({
           onDelete={onDelete}
           defaultExpandedDepth={defaultExpandedDepth}
           iconFor={iconFor}
+          labelFor={labelFor}
           selectableFolders={selectableFolders}
         />
       ))}
@@ -121,6 +133,7 @@ interface TreeItemProps {
   onDelete?: (entry: FileEntry) => void;
   defaultExpandedDepth: number;
   iconFor: (entry: FileEntry) => ReactNode;
+  labelFor: (entry: FileEntry) => string;
   selectableFolders: boolean;
 }
 
@@ -133,6 +146,7 @@ function TreeItem({
   onDelete,
   defaultExpandedDepth,
   iconFor,
+  labelFor,
   selectableFolders,
 }: TreeItemProps) {
   const [expanded, setExpanded] = useState(depth < defaultExpandedDepth);
@@ -141,6 +155,7 @@ function TreeItem({
     path: node.path,
     isDirectory: node.isDirectory,
   };
+  const label = labelFor(entry);
   const hasActions = Boolean(onRename || onDelete);
 
   const row = (
@@ -154,7 +169,7 @@ function TreeItem({
           className="tree-toggle"
           onClick={() => setExpanded(!expanded)}
           aria-expanded={expanded}
-          aria-label={expanded ? `Collapse ${node.name}` : `Expand ${node.name}`}
+          aria-label={expanded ? `Collapse ${label}` : `Expand ${label}`}
         >
           {/* Rotating chevron matching the sidebar group caret, so folder
               toggles read consistently with the section headers (\u25B8 \u2192 \u2304)
@@ -190,7 +205,7 @@ function TreeItem({
           else setExpanded(!expanded);
         }}
       >
-        {iconFor(entry)} {node.name}
+        {iconFor(entry)} {label}
       </button>
       {hasActions && (
         <DropdownMenu.Root>
@@ -198,8 +213,8 @@ function TreeItem({
             <button
               type="button"
               className="tree-actions-trigger"
-              aria-label={`Actions for ${node.name}`}
-              title={`Actions for ${node.name}`}
+              aria-label={`Actions for ${label}`}
+              title={`Actions for ${label}`}
             >
               <span aria-hidden="true">⋯</span>
             </button>
@@ -269,6 +284,7 @@ function TreeItem({
               onDelete={onDelete}
               defaultExpandedDepth={defaultExpandedDepth}
               iconFor={iconFor}
+              labelFor={labelFor}
               selectableFolders={selectableFolders}
             />
           ))}

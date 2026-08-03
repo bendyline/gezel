@@ -40,9 +40,13 @@ export function nightShiftRoutes(ctx: ServiceContext): Hono {
 
   // What the shift is working on: pending night-shift tasks split into
   // those with a turn in flight (`active`) and the rest (`upcoming`).
-  // Empty when no shift is running.
+  //
+  // Answered whether or not a shift is running. While it's off, everything
+  // eligible lands in `upcoming` — that's the daytime question ("what will
+  // my crew do tonight?"), and it's the only place it gets answered, since
+  // handoffs parked for the night window are deliberately kept out of the
+  // header's task queue rather than sitting there looking stuck.
   app.get('/tasks', async (c) => {
-    if (!ctx.nightShift.isActive()) return c.json({ background: [], active: [], upcoming: [] });
     const running = ctx.chat.activeTaskRefs();
     const runner = ctx.taskRunner.workSnapshot();
     const queued = new Set([...runner.queuedTaskRefs, ...runner.dispatchedTaskRefs]);
@@ -67,7 +71,9 @@ export function nightShiftRoutes(ctx: ServiceContext): Hono {
       if (running.has(t.ref)) active.push(brief);
       else if (queued.has(t.ref)) upcoming.push(brief);
     }
-    const indexActivity = ctx.indexEnrichment.getActivity();
+    // Background chores are only the shift's business while it's running —
+    // daytime indexing belongs to the day, not to tonight's plan.
+    const indexActivity = ctx.nightShift.isActive() ? ctx.indexEnrichment.getActivity() : null;
     const background = indexActivity
       ? [
           {

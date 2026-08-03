@@ -22,6 +22,7 @@ import { safeJoin } from '../fs/safe-paths.js';
 import type { LlamaCppModelManager } from '../providers/llama-cpp/models.js';
 import type { MlxModelManager } from '../providers/mlx/models.js';
 import { type ModelBundleSource, safeBundleModelPath } from './bundle-storage.js';
+import { MODEL_HASH_READ_BUFFER_BYTES } from './storage-roots.js';
 
 const MAX_ARCHIVE_BYTES = 2 * 1024 ** 4; // 2 TiB compressed upload ceiling.
 const MAX_ENTRIES = 16_384;
@@ -387,7 +388,10 @@ export class GezmodelManager {
 
 async function hashFile(path: string): Promise<string> {
   const hash = createHash('sha256');
-  for await (const chunk of createReadStream(path)) hash.update(chunk as Buffer);
+  // Big read buffer so hashing a multi-GB bundle doesn't starve inside the
+  // busy daemon event loop. See MODEL_HASH_READ_BUFFER_BYTES.
+  const stream = createReadStream(path, { highWaterMark: MODEL_HASH_READ_BUFFER_BYTES });
+  for await (const chunk of stream) hash.update(chunk as Buffer);
   return hash.digest('hex');
 }
 

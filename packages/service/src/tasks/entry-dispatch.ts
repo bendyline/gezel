@@ -85,6 +85,7 @@ export async function dispatchTaskEntry(
     projectId: task.projectId,
     taskRef: task.ref,
     stepId,
+    ...(task.nightShift?.enabled === true ? { nightShift: true } : {}),
     ...(step?.lastActivatedAt ? { activationAt: step.lastActivatedAt } : {}),
     kind: 'entry',
   });

@@ -31,6 +31,7 @@ import { PromptMinimalContext } from './prompt-minimal-context.js';
 import { PromptPreferWritefileEdits } from './prompt-prefer-writefile-edits.js';
 import { PromptPrivateReasoningGuidance } from './prompt-private-reasoning-guidance.js';
 import { PromptRetrievalFirst } from './prompt-retrieval-first.js';
+import { PromptSourceFilesReadOnly } from './prompt-source-files-read-only.js';
 import { PromptTerseVisibleReply } from './prompt-terse-visible-reply.js';
 import { PromptToolCookbookCondensed } from './prompt-tool-cookbook-condensed.js';
 import { PromptToolCookbookFull } from './prompt-tool-cookbook-full.js';
@@ -77,6 +78,10 @@ export const ALL_BEHAVIORS: ReadonlyArray<Behavior<unknown>> = [
   // local models). See each behavior's header for the override rationale.
   PromptPreferWritefileEdits as Behavior<unknown>,
   PromptDeriveByExecution as Behavior<unknown>,
+  // After prefer-writefile-edits: that behavior steers small models toward
+  // positional edits, which is exactly the surface that mis-targets onto a
+  // read-only input. The guard must be read after the steer.
+  PromptSourceFilesReadOnly as Behavior<unknown>,
   PromptTerseVisibleReply as Behavior<unknown>,
   ReasoningStripThinkTags as Behavior<unknown>,
   ReasoningStripChannelTags as Behavior<unknown>,

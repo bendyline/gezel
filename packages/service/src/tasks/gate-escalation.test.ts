@@ -202,6 +202,60 @@ describe('escalation nudges vs llama-cpp turn-mode matchers', () => {
   });
 });
 
+describe('artifact-surface escalation nudges', () => {
+  const bullets = '- reports/audit.md is 40 bytes, need ≥ 120';
+
+  it('stage 2 names write_artifact and never write_file', () => {
+    const stage2 = buildStageTwoNudge({
+      file: 'reports/audit.md',
+      failingBullets: bullets,
+      repeats: 3,
+      surface: 'artifact',
+    });
+    expect(stage2).toContain('GATE_FULL_REWRITE');
+    expect(stage2).toContain('write_artifact({ path: "reports/audit.md"');
+    expect(stage2).not.toContain('write_file');
+    // The write_file-only immediate-write clamp must NOT trip — the drawer
+    // deliverable is written with write_artifact, which that clamp strips.
+    expect(isImmediateFileWriteTurn(stage2, WRITE_FILE_TOOL)).toBe(false);
+  });
+
+  it('stage 1 steers to read_artifact + write_artifact instead of replace_in_file', () => {
+    const stage1 = buildStageOneNudge({
+      file: 'reports/audit.md',
+      failingBullets: bullets,
+      frozen: true,
+      surface: 'artifact',
+    });
+    expect(stage1).toContain('GATE_TARGETED_EDIT:');
+    expect(stage1).toContain('write_artifact');
+    expect(stage1).toContain('read_artifact');
+    expect(stage1).not.toContain('replace_in_file');
+    // The patch-tools-only surgical-edit clamp must NOT trip for a drawer
+    // deliverable even when patch tools are on the surface.
+    const patchTools = [
+      {
+        type: 'function' as const,
+        function: { name: 'replace_in_file', description: 'Edit.', parameters: {} },
+      },
+      ...WRITE_FILE_TOOL,
+    ];
+    expect(isGateSurgicalEditTurn(stage1, patchTools)).toBe(false);
+  });
+
+  it('the default surface stays byte-identical to the legacy workspace wording', () => {
+    const explicit = buildStageTwoNudge({
+      file: 'index.html',
+      failingBullets: bullets,
+      repeats: 3,
+      surface: 'workspace',
+    });
+    const legacy = buildStageTwoNudge({ file: 'index.html', failingBullets: bullets, repeats: 3 });
+    expect(explicit).toBe(legacy);
+    expect(legacy).toContain('write_file({ path: "index.html"');
+  });
+});
+
 describe('buildPlateauDiagnosisNote', () => {
   it('lists the trail with frozen markers and the last verdict', () => {
     const note = buildPlateauDiagnosisNote({

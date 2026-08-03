@@ -12,6 +12,7 @@ import {
   isProcessAlive,
   readRuntime,
   resolveDaemonEntry,
+  systemSharedAssetsDir,
 } from '@bendyline/gezel-client/node';
 import {
   LLAMA_ENGINE_VERSION,
@@ -564,6 +565,20 @@ export async function connectOrStart(opts: ConnectOptions): Promise<SupervisedSe
   // Idempotent — operator-set values win.
   if (!process.env.GEZEL_NATIVE_BIN_DIR) {
     process.env.GEZEL_NATIVE_BIN_DIR = nativeBinDir(import.meta.url);
+  }
+  // Mirror the CLI's defensive overlay (packages/cli/src/connection.ts): a
+  // user-context daemon may read immutable machine-published model bundles
+  // even when the machine service itself is unreachable. Without this, a
+  // fallback launch after a failed system-service health check comes up with
+  // an empty model list — every machine-scope model appears uninstalled.
+  // Spawned children inherit via `{ ...process.env }`; embedded reads it
+  // directly. Operator-set values win.
+  if (!process.env.GEZEL_SHARED_ASSETS_DIR) {
+    const sharedAssets = systemSharedAssetsDir();
+    if (sharedAssets) {
+      process.env.GEZEL_SHARED_ASSETS_DIR = sharedAssets;
+      opts.logger?.info?.(`[supervisor] machine asset overlay: ${sharedAssets}`);
+    }
   }
   if (!process.env.GEZEL_SD_SERVER_BIN) {
     const bin = resolveNativeBinaryPath('sd-server', import.meta.url);

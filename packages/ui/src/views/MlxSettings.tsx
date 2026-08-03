@@ -86,7 +86,7 @@ export function MlxSettings({
     const trimmed = baseUrlDraft.trim();
     setSaving('saving');
     try {
-      const next = await api.updateConfig({ mlxBaseUrl: trimmed === '' ? undefined : trimmed });
+      const next = await api.updateConfig({ mlxBaseUrl: trimmed === '' ? null : trimmed });
       onConfigChanged(next);
       setSaving('saved');
       setTimeout(() => setSaving('idle'), 1200);
@@ -100,7 +100,7 @@ export function MlxSettings({
     setSaving('saving');
     try {
       const next = await api.updateConfig({
-        mlxModelPath: trimmed === '' ? undefined : trimmed,
+        mlxModelPath: trimmed === '' ? null : trimmed,
       });
       onConfigChanged(next);
       setSaving('saved');
@@ -115,7 +115,7 @@ export function MlxSettings({
     setSaving('saving');
     try {
       const next = await api.updateConfig({
-        mlxPackageSpec: trimmed === '' ? undefined : trimmed,
+        mlxPackageSpec: trimmed === '' ? null : trimmed,
       });
       onConfigChanged(next);
       setSaving('saved');
@@ -130,8 +130,9 @@ export function MlxSettings({
       setSaving('saving');
       try {
         const next = await api.updateConfig({
-          // 0 = off, the default — store undefined to keep the config clean.
-          mlxKvBits: value === 0 ? undefined : value,
+          // 0 = off, the default — send null to clear the pinned value.
+          // undefined is stripped by JSON.stringify and never clears it.
+          mlxKvBits: value === 0 ? null : value,
         });
         onConfigChanged(next);
         setSaving('saved');

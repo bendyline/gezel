@@ -173,6 +173,29 @@ test('Electron release configuration pins the audited packaging contracts', asyn
     /^\s+prerelease: true$/m,
     'native-v* releases must not replace the Electron app at /releases/latest',
   );
+  assert.match(
+    nativeRelease,
+    /^\s+make_latest: false$/m,
+    'prerelease alone is editable at publish time; make_latest is the flag the API consults',
+  );
+
+  // A native release in the stable channel makes the updater find no release at
+  // all, which is silent from the release side. Both halves must fail closed.
+  assert.match(
+    workflow,
+    /Native release \$\{NATIVE_TAG\} is not marked as a prerelease/,
+    'preflight must reject a native release that could take /releases/latest',
+  );
+  assert.match(
+    workflow,
+    /releases\/latest currently resolves to/,
+    'preflight must reject a repository whose /releases/latest is not an app tag',
+  );
+  assert.match(
+    workflow,
+    /check-latest-release-namespace\.mjs/,
+    'the release must hand the operator a post-publish update-discovery check',
+  );
 });
 
 test('macOS release installs the finished PKG and exercises recovery', async () => {

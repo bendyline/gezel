@@ -59,6 +59,7 @@ import {
 } from './http/ollama-emulation.js';
 import { PreviewCapabilityStore } from './http/preview-capability.js';
 import { buildRemoteApp } from './http/remote-server.js';
+import { invalidateModelsCache } from './http/routes/models.js';
 import { type UnexpectedHttpErrorHandler, buildApp, buildPreviewApp } from './http/server.js';
 import { createTokenStore } from './http/token-store.js';
 import { ContentIndex } from './index-store/content-index.js';
@@ -76,7 +77,12 @@ import { MemoryCompactor } from './memory/compaction.js';
 import { MemoryHealthMonitor } from './memory/health.js';
 import { MemoryManager } from './memory/manager.js';
 import { createEnsureModelOrchestrator } from './models/ensure.js';
-import { migrateLegacySystemModels } from './models/storage-roots.js';
+import { buildChatModelInstallRegistries } from './models/install-jobs.js';
+import {
+  migrateLegacySystemModels,
+  modelStorageRoots,
+  reclaimAbandonedModelDownloads,
+} from './models/storage-roots.js';
 import { normalizeBundledPnpmPath } from './packages/pnpm.js';
 import { PreviewLogBuffer } from './preview-log/buffer.js';
 import { recoverTypedProjectCreations } from './project-type/create.js';
@@ -863,6 +869,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
         attempt: outcome.gate.attempt,
         ...(outcome.gate.paused ? { paused: true } : {}),
         ...(outcome.gate.infrastructureError ? { infrastructureError: true } : {}),
+        ...(outcome.gate.unsatisfiable ? { unsatisfiable: true } : {}),
         ...(outcome.gate.scriptRuns ? { scriptRuns: outcome.gate.scriptRuns } : {}),
         ...(outcome.gate.escalationStage !== undefined
           ? { escalationStage: outcome.gate.escalationStage }
@@ -895,6 +902,15 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
       .appendNote(projectId, num, { text: noteText, author: { kind: 'user' } })
       .catch(() => {});
     await tasks.setStatus(projectId, num, 'paused').catch(() => {});
+    const budgetTask = await tasks.get(projectId, num).catch(() => null);
+    if (budgetTask) {
+      await tasks.emitNeedsHelp({
+        projectId,
+        task: budgetTask,
+        reason: 'budget_exhausted',
+        detail: `The task crossed its fail-fast budget (${spent}, model tier ${info.tier}) without completing.`,
+      });
+    }
   });
 
   // Role auto-assignment: a craftbook step's `suggestedRole` resolves
@@ -997,6 +1013,20 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   // Settings → Image generation page. The HTTP routes are just consumers
   // that subscribe to its event fan-out + snapshot list.
   const imagePulls = new ImageModelPullRegistry({ imageProvider, catalog });
+  // Chat-model install registries — same design for llama-cpp / ds4 / mlx:
+  // the install runs as a background job owned by the registry, HTTP
+  // requests are subscribers, and a client disconnect no longer abandons a
+  // multi-GB download. Cache busting happens on `done` BEFORE the event
+  // reaches subscribers, so a UI observing `done` re-fetches fresh state.
+  const chatInstalls = buildChatModelInstallRegistries({
+    home,
+    readConfig: () => store.readConfig().catch(() => null),
+    llamaCppModels,
+    ds4Models,
+    mlxModels,
+    recognition,
+    onDone: (engine) => invalidateModelsCache(engine),
+  });
   // Video-generation provider + pull registry. Same lazy-build / reset
   // shape as `imageProvider`; the bundled diffusers engine shares the
   // `uvRuntime` (Python venv) and `gpuArbiter` (VRAM tenancy).
@@ -1301,6 +1331,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
       projectId,
       taskRef: task.ref,
       stepId: newStep.id,
+      ...(task.nightShift?.enabled === true ? { nightShift: true } : {}),
       ...(newStep.lastActivatedAt ? { activationAt: newStep.lastActivatedAt } : {}),
       ...(fromGezel?.name ? { fromGezelName: fromGezel.name } : {}),
     });
@@ -1481,6 +1512,43 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
           title: r.title,
           actionCount: r.actionCounts.total,
         })),
+      },
+      createdAt: new Date().toISOString(),
+    });
+  });
+  // Paused-for-help fan-in: every pause-for-help path (gate exhausted /
+  // plateau / unsatisfiable / infrastructure, stalled step, spent budget)
+  // files ONE needs-input card so the pause is pushed to the user instead
+  // of discovered by opening the Tasks view. Deduped on an unanswered
+  // card for the same task; a task that pauses again after the card was
+  // answered files a fresh one. No live session — answering collapses
+  // the card; the `taskRef` attachment gives the UI its "Open task" link.
+  tasks.setTaskNeedsHelpHook(async ({ projectId, task, stepId, reason, detail }) => {
+    const existing = await store.listProjectQuestions(projectId).catch(() => []);
+    if (
+      existing.some(
+        (q) => q.intent?.kind === 'task-paused' && q.intent.taskRef === task.ref && !q.answer,
+      )
+    ) {
+      return;
+    }
+    const config = await store.readConfig().catch(() => ({}) as GezelConfig);
+    const stepPart = stepId ? ` at step \`${stepId}\`` : '';
+    await store.writeQuestion({
+      id: randomUUID(),
+      projectId,
+      gezelId: config.meesterGezelId ?? '',
+      sessionId: '',
+      prompt: `Task ${task.ref} ("${task.title}") paused for help${stepPart}: ${detail}`,
+      choices: ['Dismiss'],
+      allowWriteIn: false,
+      multiSelect: false,
+      taskRef: task.ref,
+      intent: {
+        kind: 'task-paused',
+        taskRef: task.ref,
+        ...(stepId ? { stepId } : {}),
+        reason,
       },
       createdAt: new Date().toISOString(),
     });
@@ -1717,6 +1785,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     renderer,
     imageProvider,
     imagePulls,
+    chatInstalls,
     videoProvider,
     videoPulls,
     engineBinaries,
@@ -1943,6 +2012,31 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     });
   }
 
+  // Reclaim abandoned chat-model downloads: directories with `.partial`
+  // files, no manifest.json, and no writes for 7 days. These are invisible
+  // to every listing surface (no manifest → hidden) yet can hold tens of
+  // GB. Runs once per boot, in the background, before any install this
+  // boot could start; a directory younger than the TTL is left alone
+  // because its `.partial` files are resume credit for a retried install.
+  void (async () => {
+    for (const { engine, manager } of [
+      { engine: 'llama-cpp', manager: llamaCppModels },
+      { engine: 'ds4', manager: ds4Models },
+      { engine: 'mlx', manager: mlxModels },
+    ] as const) {
+      const activeIds = new Set(manager.getActiveInstalls().map((i) => i.catalogId));
+      const reclaimed = await reclaimAbandonedModelDownloads({
+        writableRoot: modelStorageRoots({ home, engine }).writableRoot,
+        activeIds,
+      }).catch(() => []);
+      for (const item of reclaimed) {
+        log.info(
+          `[models] reclaimed abandoned ${engine} download "${item.id}" (${Math.round(item.bytes / 1024 ** 2)} MB of stale .partial data)`,
+        );
+      }
+    }
+  })();
+
   // On-device first-run recommendation: if the user hasn't picked a
   // provider, default to the best-fitting local catalog model. This only
   // pins the choice; the desktop or TUI asks before starting a download.
@@ -2076,6 +2170,9 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
       connectorSync.stop();
       cacheController.stop();
       imagePulls.clear();
+      chatInstalls.llamaCpp.clear();
+      chatInstalls.ds4.clear();
+      chatInstalls.mlx.clear();
       videoPulls.clear();
       engineBinaries.clear();
       systemToolsetInstalls.clear();

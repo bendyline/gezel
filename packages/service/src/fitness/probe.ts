@@ -56,6 +56,21 @@ const WRITE_FILE_SPEC: ExternalToolSpec = {
   },
 };
 
+/**
+ * The pool throws {@link EngineBusyError} (code `engine-busy`) when it
+ * cannot evict a busy resident engine to make room for the probe model.
+ * That is contention, not a model defect — the record is marked `blocked`
+ * ("did not run") rather than `failed`. Match the code first, and fall
+ * back to the stable message so a rewrapped error still classifies right.
+ */
+function isEngineBusy(err: unknown): boolean {
+  if (err && typeof err === 'object' && (err as { code?: unknown }).code === 'engine-busy') {
+    return true;
+  }
+  const message = err instanceof Error ? err.message : String(err);
+  return /did not drain|busy serving requests/i.test(message);
+}
+
 const PROBE_SYSTEM_MESSAGE =
   'You are running a short capability check. Follow each instruction exactly.';
 
@@ -137,6 +152,7 @@ export async function runFitnessProbe(
     minGenTokensPerSec: fitnessMinTps(deps.env),
   };
   let machineryFailed = false;
+  let contended = false;
 
   const runTurns = async (): Promise<void> => {
     let provider: LLMProvider;
@@ -145,6 +161,7 @@ export async function runFitnessProbe(
     } catch (err) {
       evidence.spawnError = err instanceof Error ? err.message : String(err);
       machineryFailed = true;
+      if (isEngineBusy(err)) contended = true;
       return;
     }
 
@@ -227,7 +244,7 @@ export async function runFitnessProbe(
     schemaVersion: 1,
     provider: args.provider,
     modelId: args.modelId,
-    status: machineryFailed ? 'failed' : 'probed',
+    status: contended ? 'blocked' : machineryFailed ? 'failed' : 'probed',
     admitted: machineryFailed ? false : admitted,
     genTokensPerSec: evidence.genTokensPerSec,
     createdAt: new Date(now()).toISOString(),

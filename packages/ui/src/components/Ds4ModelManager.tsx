@@ -1,7 +1,8 @@
 import type { CatalogItemSummary, ChatModelManifest } from '@bendyline/gezel';
-import type { LlamaCppInstallEvent } from '@bendyline/gezel-client';
+import type { IncompleteModelDownload, LlamaCppInstallEvent } from '@bendyline/gezel-client';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
+import { IncompleteDownloads } from './IncompleteDownloads.js';
 import { ExportModelBundleButton, ImportModelBundleButton } from './ModelBundleControls.js';
 
 /**
@@ -53,18 +54,37 @@ export function Ds4ModelManager({ onModelsChanged }: { onModelsChanged?: () => v
   // real empty catalog.
   const [items, setItems] = useState<CatalogItemSummary[] | null>(null);
   const [installed, setInstalled] = useState<Set<string>>(new Set());
+  // Ids that resolve from a read-only machine/shared overlay — delete refuses
+  // these, so the row shows them as machine-provided rather than offering a
+  // Delete that only 400s.
+  const [readOnlyIds, setReadOnlyIds] = useState<Set<string>>(new Set());
   const [mem, setMem] = useState<Mem | null>(null);
   const [installing, setInstalling] = useState<Map<string, InstallState>>(new Map());
   const [error, setError] = useState<string | null>(null);
+  // Interrupted/unverified downloads with no manifest — invisible to the
+  // installed set. ds4 models run to hundreds of GB, so a stalled one is a lot
+  // of hidden disk. Surfaced for resume/delete before the reclaim sweep.
+  const [incomplete, setIncomplete] = useState<IncompleteModelDownload[]>([]);
+
+  const refreshIncomplete = useCallback(async () => {
+    try {
+      const res = await api.listIncompleteDs4Models();
+      setIncomplete(res.incomplete ?? []);
+    } catch {
+      /* advisory surface — a blip just keeps the last state */
+    }
+  }, []);
 
   const refresh = useCallback(async () => {
     try {
       const r = await api.listDs4Models();
       setInstalled(new Set(r.models.map((m) => m.id)));
+      setReadOnlyIds(new Set(r.models.filter((m) => m.readOnly).map((m) => m.id)));
     } catch {
       /* the row's own error surfaces install failures */
     }
-  }, []);
+    void refreshIncomplete();
+  }, [refreshIncomplete]);
 
   const loadCatalog = useCallback(async () => {
     setError(null);
@@ -207,12 +227,23 @@ export function Ds4ModelManager({ onModelsChanged }: { onModelsChanged?: () => v
 
   const remove = useCallback(
     async (id: string) => {
+      // Optimistically drop the row (installed + incomplete) so the delete
+      // feels instant even when the daemon is busy; refresh restores it and
+      // surfaces the error on failure.
+      setError(null);
+      setInstalled((cur) => {
+        const next = new Set(cur);
+        next.delete(id);
+        return next;
+      });
+      setIncomplete((cur) => cur.filter((d) => d.id !== id));
       try {
         await api.deleteDs4Model(id);
         await refresh();
         onModelsChanged?.();
       } catch (e) {
         setError(`delete failed: ${e instanceof Error ? e.message : String(e)}`);
+        void refresh();
       }
     },
     [refresh, onModelsChanged],
@@ -249,6 +280,11 @@ export function Ds4ModelManager({ onModelsChanged }: { onModelsChanged?: () => v
 
   return (
     <div>
+      <IncompleteDownloads
+        items={incomplete.filter((d) => !installing.has(d.id))}
+        onResume={(id) => startInstall(id)}
+        onDelete={(id) => void remove(id)}
+      />
       {ds4Models.map(({ m }) => {
         const resident = m.ds4.residentBytes;
         const cache = m.ds4.cacheExpertsBytes ?? 0;
@@ -357,9 +393,18 @@ export function Ds4ModelManager({ onModelsChanged }: { onModelsChanged?: () => v
                 <>
                   <span className="home-status-pill home-status-ok">on device</span>
                   <ExportModelBundleButton engine="ds4" id={m.id} />
-                  <button type="button" onClick={() => void remove(m.id)}>
-                    Delete
-                  </button>
+                  {readOnlyIds.has(m.id) ? (
+                    <span
+                      className="muted small"
+                      title="Provided by the machine-wide install (shared asset store). It can't be removed from here — manage it with the machine installer, or install a user-owned copy to shadow it."
+                    >
+                      Machine model
+                    </span>
+                  ) : (
+                    <button type="button" onClick={() => void remove(m.id)}>
+                      Delete
+                    </button>
+                  )}
                 </>
               ) : canRunSafely ? (
                 <button type="button" onClick={() => startInstall(m.id)}>

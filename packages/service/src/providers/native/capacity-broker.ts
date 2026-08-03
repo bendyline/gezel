@@ -173,6 +173,22 @@ export class CapacityDeniedError extends Error {
   }
 }
 
+/**
+ * A resident engine could not be evicted in time to make room because it
+ * was still serving requests. Unlike {@link CapacityDeniedError} this is a
+ * *transient* condition — nothing is wrong with the model that wanted room;
+ * the caller should retry once current turns drain. The `code` lets the
+ * fitness probe classify the failure as "did not run" rather than "failed".
+ */
+export class EngineBusyError extends Error {
+  readonly code = 'engine-busy';
+
+  constructor(message: string) {
+    super(message);
+    this.name = 'EngineBusyError';
+  }
+}
+
 export class CapacityBroker {
   private budgetBytes: number;
   private enforced: boolean;

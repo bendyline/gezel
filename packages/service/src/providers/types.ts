@@ -1,6 +1,7 @@
 import type { ProviderName } from '@bendyline/gezel';
 import type { QuotaBucket } from '../chat/usage.js';
 import type { ResolvedModelProfile } from '../model-profile/types.js';
+import type { CodexReasoningEffort } from './codex-cli/reasoning.js';
 import type { McpServerSpec } from './mcp-bridge.js';
 
 export type { ProviderName };
@@ -116,12 +117,10 @@ export interface SessionOpts {
    * once at session-build time; the provider maps it onto Codex's
    * two-axis `--sandbox` / `--ask-for-approval` flags.
    *
-   * `reasoningEffortOverride` carries either the per-gezel
-   * `reasoningEffort` (when set to a Codex-recognized value
-   * `low`/`medium`/`high`) or the install-level default; the provider
-   * forwards it as `-c model_reasoning_effort=…` for models that
-   * support reasoning. Codex silently ignores it for models that
-   * don't, so a stale override is non-fatal.
+   * `reasoningEffortOverride` carries the per-gezel `reasoningEffort`
+   * when it is a Codex-recognized value. The provider forwards it as
+   * `-c model_reasoning_effort=…`; the supported subset remains
+   * model-dependent.
    */
   codexCliContext?: {
     sessionId: string;
@@ -129,7 +128,7 @@ export interface SessionOpts {
     projectId: string;
     cwd: string;
     permissionModeOverride?: 'default' | 'acceptEdits' | 'plan' | 'bypassPermissions';
-    reasoningEffortOverride?: 'low' | 'medium' | 'high';
+    reasoningEffortOverride?: CodexReasoningEffort;
   };
   /**
    * Local MCP server to launch and expose to the session. The primary

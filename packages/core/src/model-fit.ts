@@ -41,6 +41,13 @@ export interface ModelFitInput {
    * load did not.
    */
   admissibleBytes?: number;
+  /**
+   * Bytes `--cpu-moe` leaves GPU-resident (attention, dense/shared layers,
+   * embeddings) — from the installed GGUF's tensor table, when scanned.
+   * Absent (browse-time, pre-download) the check falls back to
+   * {@link MOE_NON_EXPERT_FRACTION_ESTIMATE} of `residentBytes`.
+   */
+  nonExpertBytes?: number;
 }
 
 export interface ModelFitResult {
@@ -55,6 +62,16 @@ export interface ModelFitResult {
 
 /** Headroom left in system RAM (OS + other apps) when experts stream from RAM. */
 const RAM_OFFLOAD_FRACTION = 0.8;
+
+/**
+ * Browse-time estimate of the non-expert share of a MoE's footprint —
+ * what `--cpu-moe` keeps on the GPU. Measured GGUFs run 5–10% for
+ * DeepSeek-class giants and ~10–20% for consumer-size MoEs; 15% sits at
+ * the honest end without gating out the machines full offload does serve
+ * (a 4 GB card still clears a 26B-A4B). The exact per-tensor figure
+ * replaces this whenever the caller has scanned the installed GGUF.
+ */
+export const MOE_NON_EXPERT_FRACTION_ESTIMATE = 0.15;
 
 /**
  * Classify a model's fit against a machine's memory. See the module
@@ -77,13 +94,25 @@ export function computeModelFit(input: ModelFitInput): ModelFitResult {
 
   // MoE on a discrete GPU: bigger than VRAM, but the sparse experts can
   // stream from system RAM while attention stays on the GPU. Runnable as
-  // long as the whole model fits in RAM.
+  // long as the whole model fits in RAM — and only worth the "runs"
+  // promise when the always-active residue actually fits VRAM, else the
+  // engine has to spill layers to the CPU too and it belongs in `tight`.
   if (isMoE && gpuVramBytes != null && residentBytes <= ramBudget) {
+    const residueBytes = input.nonExpertBytes ?? residentBytes * MOE_NON_EXPERT_FRACTION_ESTIMATE;
+    if (residueBytes <= usableBytes) {
+      return {
+        tier: 'fits-offload',
+        label: 'runs (expert offload)',
+        detail:
+          'Larger than VRAM, but this is a Mixture-of-Experts model — its experts stream from system RAM while attention runs on the GPU.',
+        runnable: true,
+      };
+    }
     return {
-      tier: 'fits-offload',
-      label: 'runs (expert offload)',
+      tier: 'tight',
+      label: 'may run slowly',
       detail:
-        'Larger than VRAM, but this is a Mixture-of-Experts model — its experts stream from system RAM while attention runs on the GPU.',
+        'A Mixture-of-Experts model, but even its always-active layers exceed this GPU — parts run from system RAM on the CPU, so expect slower generation.',
       runnable: true,
     };
   }

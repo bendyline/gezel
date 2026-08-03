@@ -132,6 +132,36 @@ describe('runFitnessProbe', () => {
     expect(record.checks.spawn.detail).toContain('Not enough memory');
   });
 
+  it('engine-busy contention (typed code) → status blocked, not failed', async () => {
+    const busy = Object.assign(
+      new Error('engine llama-cpp:gemma4-12b-q4:0 is busy serving requests — not evicting'),
+      { code: 'engine-busy' },
+    );
+    const record = await runFitnessProbe(
+      deps({
+        getProviderForModel: async () => {
+          throw busy;
+        },
+      }),
+      { provider: 'llama-cpp', modelId: 'gemma4-12b-q4', trigger: 'manual' },
+    );
+    expect(record.status).toBe('blocked');
+    expect(record.admitted).toBe(false);
+    expect(record.checks.spawn.ok).toBe(false);
+  });
+
+  it('engine-busy contention (message fallback) → status blocked', async () => {
+    const record = await runFitnessProbe(
+      deps({
+        getProviderForModel: async () => {
+          throw new Error('engine is busy serving requests and did not drain within 30s');
+        },
+      }),
+      { provider: 'llama-cpp', modelId: 'gemma4-12b-q4', trigger: 'manual' },
+    );
+    expect(record.status).toBe('blocked');
+  });
+
   it('invalid tool args → probed but not admitted (toolRoundTrip fails)', async () => {
     const session = new FakeSession([
       { text: 'story', tokensPerSec: 20 },

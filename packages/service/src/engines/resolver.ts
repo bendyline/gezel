@@ -24,6 +24,8 @@ import {
   isPlaceholderDigest,
 } from './native-manifest.js';
 import {
+  BENDYLINE_APPLE_TEAM_ID,
+  BENDYLINE_PUBLISHER,
   type SignaturePolicy,
   type SignatureResult,
   stripQuarantine,
@@ -130,16 +132,7 @@ export async function* resolveEngine(
   }
   const engine = opts.engine;
   const version = stripVer(opts.version ?? effectiveEngineRelease());
-  // ds4-server on Linux lives in the `-cuda` archive, sharing one copy of the
-  // NVIDIA redistributables with llama-server's CUDA build instead of shipping
-  // them twice (see scripts/native-payload.mjs). It is the engine's only Linux
-  // build, so this is a fact about where the archive is, not a backend choice
-  // the caller makes — derive it here rather than making every call site pass
-  // `variant: 'cuda'` and risk one forgetting. macOS ds4 is Metal and stays in
-  // the bare key.
-  const impliedVariant =
-    engine === 'ds4-server' && process.platform === 'linux' ? 'cuda' : undefined;
-  const variant = opts.variant ?? impliedVariant;
+  const variant = opts.variant ?? impliedEngineVariant(engine, process.platform);
   const assetPlatformKey = variant ? `${platformKey}-${variant}` : (platformKey as string);
   const isWin = process.platform === 'win32';
   const ext = isWin ? 'zip' : 'tar.gz';
@@ -180,7 +173,7 @@ export async function* resolveEngine(
     policy,
     ...(engine === 'uv' && process.platform === 'win32'
       ? {}
-      : { expectedPublisher: 'Bendyline LLC' }),
+      : { expectedPublisher: BENDYLINE_PUBLISHER, expectedAppleTeamId: BENDYLINE_APPLE_TEAM_ID }),
   } as const;
 
   const versionDir = join(opts.home, 'engines', 'native-bin', version);
@@ -441,6 +434,34 @@ function stripVer(v: string): string {
   return v.replace(/^native-v/, '').replace(/^v/, '');
 }
 
+/**
+ * The archive variant an engine lives in when the caller names none.
+ *
+ * These are facts about *where the archive is*, not backend choices:
+ *
+ *  - **ds4-server on Linux** ships only in the `-cuda` archive, sharing one
+ *    copy of the NVIDIA redistributables with llama-server's CUDA build
+ *    instead of shipping them twice (see scripts/native-payload.mjs).
+ *  - **llama-server on macOS** ships only in the `-metal` archive; there is no
+ *    `darwin-arm64-cpu` asset, and the bare `darwin-arm64` key holds
+ *    ds4/sd/whisper/uv but no llama-server. Omitting the variant there fails
+ *    the extract with "none of [gezel-llama-server, llama-server] were inside
+ *    it" — a loud error, but an avoidable one.
+ *
+ * Deriving both here is the point: every call site would otherwise have to
+ * remember, and one eventually won't. Where the variant is a genuine choice
+ * (llama-server on Linux/Windows: cuda / vulkan / cpu) this returns undefined
+ * and the decision stays with the caller.
+ */
+export function impliedEngineVariant(
+  engine: NativeBinaryName,
+  platform: NodeJS.Platform,
+): string | undefined {
+  if (engine === 'ds4-server' && platform === 'linux') return 'cuda';
+  if (engine === 'llama-server' && platform === 'darwin') return 'metal';
+  return undefined;
+}
+
 function stampEnv(
   engine: NativeBinaryName,
   binPath: string,
@@ -578,10 +599,17 @@ function parseSums(text: string): Map<string, string> {
   return map;
 }
 
+// Big read buffer so hashing a multi-hundred-MB engine archive doesn't starve
+// inside the busy daemon event loop — a 64 KB stream yields to the loop ~100k
+// times and the hash queues behind chat/scheduler/index work. Engines is a
+// lower layer than models, so this mirrors models' MODEL_HASH_READ_BUFFER_BYTES
+// rather than importing it.
+const HASH_READ_BUFFER_BYTES = 16 * 1024 * 1024;
+
 async function sha256File(path: string): Promise<string> {
   const hash = createHash('sha256');
   await new Promise<void>((resolve, reject) => {
-    const stream = createReadStream(path);
+    const stream = createReadStream(path, { highWaterMark: HASH_READ_BUFFER_BYTES });
     stream.on('data', (chunk) => hash.update(chunk));
     stream.on('end', () => resolve());
     stream.on('error', reject);

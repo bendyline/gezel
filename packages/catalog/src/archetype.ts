@@ -155,6 +155,53 @@ export interface ArchetypeSpec {
 
 const RESERVED_STEP_IDS = new Set(['evaluate', 'finish']);
 
+/**
+ * Deliverable kinds that are review/analysis output rather than product
+ * source. Phases producing these default to the artifacts drawer — the
+ * night-shift contract is "reports, findings, and sidecar files land in
+ * the artifacts drawer, not the shipped workspace" — which also keeps
+ * report books runnable on projects where gezel workspace writes are
+ * off. A spec opts a phase back into the workspace with
+ * `artifact: false`.
+ */
+const DRAWER_DEFAULT_KINDS: ReadonlySet<DeliverableKind> = new Set([
+  'markdown-report',
+  'markdown-notes',
+  'security-report',
+]);
+
+function withArtifactDefault<T extends { kind: DeliverableKind; artifact?: boolean }>(
+  produces: T,
+): T {
+  if (produces.artifact !== undefined) return produces;
+  if (!DRAWER_DEFAULT_KINDS.has(produces.kind)) return produces;
+  return { ...produces, artifact: true };
+}
+
+/** The spec with the kind-based drawer default materialized on every deliverable. */
+function normalizeArchetypeSpec(spec: ArchetypeSpec): ArchetypeSpec {
+  return {
+    ...spec,
+    phases: spec.phases.map((p) =>
+      p.produces ? { ...p, produces: withArtifactDefault(p.produces) } : p,
+    ),
+    evaluate: spec.evaluate.deliverable
+      ? { ...spec.evaluate, deliverable: withArtifactDefault(spec.evaluate.deliverable) }
+      : spec.evaluate,
+  };
+}
+
+/**
+ * Deterministic per-step steering for a drawer deliverable. Spec prompts
+ * are written path-first ("write `notes/scan.md`"); without this line a
+ * model with both write channels reliably picks `write_file`, the file
+ * lands in the workspace, and the drawer-reading gate rejects every
+ * attempt. Skipped when the spec prompt already teaches `write_artifact`.
+ */
+function drawerPromptNote(path: string): string {
+  return `The deliverable \`${path}\` lands in the project's artifacts drawer — write it with \`write_artifact\` and read it back with \`read_artifact\`; the shipped workspace stays untouched.`;
+}
+
 export interface ArchetypeCraftbook {
   steps: CraftbookStep[];
   entryStepId: string;
@@ -169,7 +216,8 @@ export interface ArchetypeCraftbook {
  * cannot make), then a terminal `finish`. The safe failure mode is
  * always "loop back and fix", never "ship half-done".
  */
-export function archetypeToCraftbook(spec: ArchetypeSpec): ArchetypeCraftbook {
+export function archetypeToCraftbook(rawSpec: ArchetypeSpec): ArchetypeCraftbook {
+  const spec = normalizeArchetypeSpec(rawSpec);
   if (spec.phases.length === 0) throw new Error(`archetype "${spec.id}": needs at least one phase`);
   const ids = new Set<string>();
   for (const p of spec.phases) {
@@ -205,13 +253,17 @@ export function archetypeToCraftbook(spec: ArchetypeSpec): ArchetypeCraftbook {
     // gate on their own artifact; the last phase gates on the FINAL
     // deliverable (which defaults to its own `produces`).
     const gated = isLast ? deliverable : p.produces;
+    const prompt =
+      gated?.artifact && !p.prompt.includes('write_artifact')
+        ? `${p.prompt.trim()}\n\n${drawerPromptNote(gated.path)}`
+        : p.prompt;
 
     steps.push({
       id: p.id,
       name: p.name,
       description: p.summary,
       suggestedRole: p.role,
-      prompt: p.prompt,
+      prompt,
       // Observable progress: the phase auto-advances the moment its
       // artifact lands (no `advance_task_step` call needed) — and the
       // completion gate judges that advance like any other.
@@ -242,7 +294,13 @@ export function archetypeToCraftbook(spec: ArchetypeSpec): ArchetypeCraftbook {
     description:
       'Grade the deliverable against every acceptance criterion. All pass → finish; any fail → loop back and fix the gap.',
     suggestedRole: spec.evaluate.role ?? 'reviewer',
-    prompt: `${spec.evaluate.prompt.trim()}\n\n${evaluateRoutingFooter(loopBackTo, deliverable !== undefined)}`,
+    prompt: `${spec.evaluate.prompt.trim()}\n\n${evaluateRoutingFooter(
+      loopBackTo,
+      deliverable !== undefined,
+      deliverable?.artifact && !spec.evaluate.prompt.includes('read_artifact')
+        ? deliverable.path
+        : null,
+    )}`,
     // Default forward edge loops back to the build phase — the safe failure
     // mode is "keep improving", never "ship half-done".
     next: loopBackTo,
@@ -262,11 +320,21 @@ export function archetypeToCraftbook(spec: ArchetypeSpec): ArchetypeCraftbook {
   return { steps, entryStepId: spec.phases[0]!.id };
 }
 
-function evaluateRoutingFooter(loopBackTo: string, hasGate: boolean): string {
+function evaluateRoutingFooter(
+  loopBackTo: string,
+  hasGate: boolean,
+  artifactPath: string | null = null,
+): string {
   const lastLine = hasGate
     ? "Never route to `finish` while any criterion is unmet. The build phase's completion gate already blocked a grossly-incomplete deliverable; your job is the judgment an automated check cannot make (does it actually work, read well, look right). After ~3 unproductive loops, stop and report DONE_WITH_CONCERNS so the user can step in."
     : 'Never route to `finish` while any criterion is unmet. If you advance without a target, the loop sends you back by design. After ~3 unproductive loops, stop and report DONE_WITH_CONCERNS so the user can step in.';
   return [
+    ...(artifactPath
+      ? [
+          `The deliverable lives in the project's artifacts drawer — open \`${artifactPath}\` with \`read_artifact\`, not \`read_file\`.`,
+          '',
+        ]
+      : []),
     'Then route — this is the whole point of the loop:',
     '',
     `- **Every criterion PASSES →** call \`advance_task_step({ ref, stepId: "evaluate", next: "finish" })\`.`,
@@ -328,7 +396,11 @@ export interface GeneratedCraftbookFiles {
  * step prompts inlined on the steps. The generation script writes these,
  * then `build-index` folds them into `craftbook-templates/index.json`.
  */
-export function archetypeToFiles(spec: ArchetypeSpec, releasedAt: string): GeneratedCraftbookFiles {
+export function archetypeToFiles(
+  rawSpec: ArchetypeSpec,
+  releasedAt: string,
+): GeneratedCraftbookFiles {
+  const spec = normalizeArchetypeSpec(rawSpec);
   const { steps, entryStepId } = archetypeToCraftbook(spec);
 
   // Guarantee the generated book is runtime-valid (graph integrity, gate +
@@ -423,8 +495,17 @@ unmet criterion, and loops back to the build phase to fix named gaps.
   // Optional hand-authored blocks folded into specs. `artifactNote` sits
   // between the standing boilerplate and the phase list; `sourceDiscipline`
   // sits after the phase list, either before the trailing boilerplate
-  // (default) or at the very end (`after-boilerplate`).
-  const artifactNote = spec.artifactNote ? `${spec.artifactNote}\n\n` : '';
+  // (default) or at the very end (`after-boilerplate`). Books with drawer
+  // deliverables and no hand-authored note get the standing one so the
+  // about always says where the deliverables land.
+  const anyDrawerDeliverable =
+    spec.phases.some((p) => p.produces?.artifact) || spec.evaluate.deliverable?.artifact === true;
+  const artifactNoteText =
+    spec.artifactNote ??
+    (anyDrawerDeliverable
+      ? 'Deliverables marked "artifact" land in the project\'s artifacts drawer (`write_artifact` / `read_artifact`), not the shipped workspace — review output is not product source.'
+      : undefined);
+  const artifactNote = artifactNoteText ? `${artifactNoteText}\n\n` : '';
   // `in-description` splices into the prose ABOVE the standing boilerplate
   // (about-only, keeps the catalog description clean); the default places
   // the block after the phase list; `after-boilerplate` at the very end.

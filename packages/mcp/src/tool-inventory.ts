@@ -211,7 +211,7 @@ export const ALWAYS_REGISTERED_TOOLS = [
 
   // Scripts
   'list_scripts',
-  'run_script',
+  'run_installed_script',
   'get_script_run',
 
   // Craftbooks (procedures)
@@ -297,6 +297,16 @@ export const RENAMED_TOOLS = {
   draftEmail: 'draft_email',
   queueEmail: 'queue_email',
   sendEmail: 'send_email',
+  // Not part of the snake_case sweep — a later, semantic rename. `run_script`
+  // read as "run a script", so models that had just written `derive.mjs`
+  // called it with a file path and got a "script not found" dead end; the
+  // 2026-08-02 core suite caught gemma4-e4b doing this 6 times in one trial
+  // and then fabricating the output it could not compute. Measured, not
+  // assumed: forcing `prompt.derive-by-execution` (whose text names
+  // `derive_file` and `run_nodejs_script` outright) did NOT redirect it —
+  // the model still reached for `run_script`. The name is the pull, so the
+  // name changes; `run_script` stays callable here forever.
+  run_script: 'run_installed_script',
 } as const satisfies Record<string, AlwaysRegisteredToolName | ConditionallyRegisteredToolName>;
 
 export type LegacyToolName = keyof typeof RENAMED_TOOLS;

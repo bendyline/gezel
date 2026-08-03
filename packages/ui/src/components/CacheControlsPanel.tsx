@@ -154,18 +154,18 @@ export function CacheControlsPanel({
     <div className="cache-controls-panel">
       <h4>Memory budget</h4>
       <p className="muted small">
-        The most memory {label} keeps for warm sessions before older ones are released.
+        The most memory {label} keeps for warm threads before older ones are released.
       </p>
       {stats && stats.warmSessionCount > 0 ? (
         <p className="muted small">
-          {stats.warmSessionCount} warm {stats.warmSessionCount === 1 ? 'session' : 'sessions'} ·{' '}
+          {stats.warmSessionCount} warm {stats.warmSessionCount === 1 ? 'thread' : 'threads'} ·{' '}
           {fmtMemory(totalMb)} used of {fmtMemory(budgetMb)}
           {stats.recentHitRate > 0 && (
             <> · {Math.round(stats.recentHitRate * 100)}% hit rate (last 50 turns)</>
           )}
         </p>
       ) : (
-        <p className="muted small">No warm sessions yet — cache populates after the first turn.</p>
+        <p className="muted small">No warm threads yet — cache populates after the first turn.</p>
       )}
 
       <div className="gz-budget-slider">

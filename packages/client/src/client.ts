@@ -480,10 +480,37 @@ export interface ProviderQueueState {
  * TaskRunner pending-handoff summary — a separate layer from the
  * provider queue (phase handoffs that haven't been dispatched yet).
  */
+/** One side of the pending-handoff split. */
+export interface TaskHandoffBucket {
+  count: number;
+  byGezel: Record<string, number>;
+}
+
 export interface TaskRunnerState {
+  /** Every queued handoff, whatever is holding it. */
   pendingCount: number;
   pendingByGezel: Record<string, number>;
   pendingByProject: Record<string, number>;
+  /**
+   * Handoffs waiting on a free provider slot — a real backlog, and the
+   * only bucket the header's Tasks chip counts. Optional so a UI newer
+   * than its daemon degrades to the `pending*` totals.
+   */
+  dispatchable?: TaskHandoffBucket;
+  /**
+   * Handoffs parked until the next Night Shift window. Not a backlog:
+   * nobody is waiting on them and there is nothing to act on, so they
+   * stay out of the header badge and live in the Night Shift menu.
+   */
+  scheduled?: TaskHandoffBucket;
+  /** Why `dispatchable` work isn't moving. Absent when it is. */
+  holdReason?: 'engagement-off' | 'provider-busy';
+  /** Night Shift state, for dating the `scheduled` bucket. */
+  nightShift?: {
+    active: boolean;
+    /** ISO time the next window opens; null when Night Shift is off. */
+    opensAt: string | null;
+  };
 }
 
 /**
@@ -1118,7 +1145,7 @@ export interface ConfigResponse {
     binaryPath?: string;
     manageRuntimeFiles?: boolean;
     defaultPermissionMode?: 'default' | 'acceptEdits' | 'plan' | 'bypassPermissions';
-    defaultReasoningEffort?: 'low' | 'medium' | 'high';
+    defaultReasoningEffort?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra';
     extraModels?: Array<{ id: string; name: string }>;
     extraConfigOverrides?: Record<string, string>;
   };
@@ -1342,6 +1369,27 @@ export interface LocalActiveInstall {
 }
 
 /**
+ * An incomplete on-disk download — bytes present but no install manifest, so
+ * it's invisible to the installed-model listings. Returned by the per-engine
+ * `listIncomplete*` methods so the Settings UI can surface resume/delete
+ * before the daemon's 7-day reclaim sweep removes it. Shape mirrors the
+ * service's `IncompleteModelDownloadInfo`.
+ */
+export interface IncompleteModelDownload {
+  id: string;
+  /** Total bytes on disk (payload + `.partial`). */
+  bytes: number;
+  /** ISO timestamp of the newest write in the directory. */
+  updatedAt: string;
+  /** Whether a `.partial` file is present. */
+  hasPartial: boolean;
+  /** True when re-installing this id would resume from the on-disk bytes. */
+  resumable: boolean;
+  /** Catalog display name, when the id still resolves. */
+  name?: string;
+}
+
+/**
  * One installed llama.cpp model on disk. Returned by
  * {@link GezelClient.listLlamaCppModels}.
  */
@@ -1363,6 +1411,12 @@ export interface LlamaCppInstalledModel {
   updateAvailable?: boolean;
   /** The catalog's current version, when it differs from the installed one. */
   availableVersion?: string;
+  /**
+   * True when the model lives in a read-only overlay (the machine/shared asset
+   * store), not this daemon's writable root. The delete endpoint refuses these,
+   * so the UI shows them as machine-provided instead of offering Delete.
+   */
+  readOnly?: boolean;
 }
 
 /**
@@ -1378,7 +1432,7 @@ export interface ModelFitnessEntry {
     schemaVersion: 1;
     provider: string;
     modelId: string;
-    status: 'probed' | 'failed' | 'deferred';
+    status: 'probed' | 'failed' | 'deferred' | 'blocked';
     admitted: boolean;
     genTokensPerSec: number | null;
     createdAt: string;
@@ -1463,6 +1517,12 @@ export interface MlxInstalledModel {
    * bump changed the upstream repo or file set.
    */
   catalogVersion?: string;
+  /**
+   * True when the model lives in a read-only overlay (the machine/shared asset
+   * store), not this daemon's writable root. Delete refuses these, so the UI
+   * shows them as machine-provided instead of offering Delete.
+   */
+  readOnly?: boolean;
 }
 
 /** Snapshot of the Python runtime powering MLX venvs. */
@@ -2529,6 +2589,11 @@ export class GezelClient {
     return this.request('GET', '/api/llama-cpp/models');
   }
 
+  /** Incomplete (interrupted/unverified) llama.cpp downloads on disk. */
+  listIncompleteLlamaCppModels(): Promise<{ incomplete: IncompleteModelDownload[] }> {
+    return this.request('GET', '/api/llama-cpp/incomplete');
+  }
+
   // ── portable `.gezmodel` bundles ──
 
   /** Fetch a streaming model export response. Callers must consume the body. */
@@ -2600,6 +2665,11 @@ export class GezelClient {
 
   listDs4Models(): Promise<{ models: LlamaCppInstalledModel[] }> {
     return this.request('GET', '/api/ds4/models');
+  }
+
+  /** Incomplete (interrupted/unverified) ds4 downloads on disk. */
+  listIncompleteDs4Models(): Promise<{ incomplete: IncompleteModelDownload[] }> {
+    return this.request('GET', '/api/ds4/incomplete');
   }
 
   listDs4ActiveInstalls(): Promise<{ installs: LocalActiveInstall[] }> {
@@ -2692,6 +2762,21 @@ export class GezelClient {
     return this.request('DELETE', `/api/llama-cpp/models/${encodeURIComponent(id)}`);
   }
 
+  /**
+   * Cancel an in-flight llama-cpp model install. Installs run as background
+   * jobs on the service — closing the SSE consumer no longer aborts them, so
+   * this is the only way to stop one. `.partial` files stay on disk as
+   * resume credit for a retried install.
+   */
+  cancelLlamaCppModelInstall(catalogId: string): Promise<{ aborted: boolean }> {
+    return this.request('DELETE', `/api/llama-cpp/models/${encodeURIComponent(catalogId)}/install`);
+  }
+
+  /** Cancel an in-flight ds4 model install. Same contract as {@link cancelLlamaCppModelInstall}. */
+  cancelDs4ModelInstall(catalogId: string): Promise<{ aborted: boolean }> {
+    return this.request('DELETE', `/api/ds4/models/${encodeURIComponent(catalogId)}/install`);
+  }
+
   // ── Evals (in-app Benchmarks panel) ──
 
   listEvalScenarios(): Promise<{ scenarios: readonly EvalScenarioManifest[] }> {
@@ -2762,6 +2847,11 @@ export class GezelClient {
     return this.request('GET', '/api/mlx/models');
   }
 
+  /** Incomplete (interrupted/unverified) MLX downloads on disk. */
+  listIncompleteMlxModels(): Promise<{ incomplete: IncompleteModelDownload[] }> {
+    return this.request('GET', '/api/mlx/incomplete');
+  }
+
   /**
    * Install an MLX model from the catalog, streaming progress events
    * to `onEvent`. Same shape as `installLlamaCppModel`; MLX events
@@ -2794,6 +2884,11 @@ export class GezelClient {
 
   deleteMlxModel(id: string): Promise<{ ok: true }> {
     return this.request('DELETE', `/api/mlx/models/${encodeURIComponent(id)}`);
+  }
+
+  /** Cancel an in-flight MLX model install. Same contract as {@link cancelLlamaCppModelInstall}. */
+  cancelMlxModelInstall(catalogId: string): Promise<{ aborted: boolean }> {
+    return this.request('DELETE', `/api/mlx/models/${encodeURIComponent(catalogId)}/install`);
   }
 
   /**

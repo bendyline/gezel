@@ -71,7 +71,19 @@ export type DownloadEvent =
     };
 
 export type DownloadResult =
-  | { kind: 'ok'; bytesWritten: number; partialPath: string }
+  | {
+      kind: 'ok';
+      bytesWritten: number;
+      partialPath: string;
+      /**
+       * sha256 of the file, computed inline while streaming, IFF the whole
+       * file was written from offset 0 in a single attempt (HTTP 200, no
+       * resume). Absent on resumed/appended transfers and the Xet path,
+       * where the inline hasher never saw the earlier bytes — the caller
+       * must fall back to reading the file back to verify in those cases.
+       */
+      sha256?: string;
+    }
   | { kind: 'aborted'; bytesWritten: number; partialPath: string }
   | {
       kind: 'error';

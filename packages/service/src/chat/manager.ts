@@ -101,10 +101,15 @@ import {
 import {
   AnthropicCliProvider,
   CLAUDE_CLI_EXCLUDED_MCP_TOOLS,
+  isClaudeReasoningEffort,
 } from '../providers/anthropic-cli/index.js';
 import { AnthropicProvider } from '../providers/anthropic.js';
 import { salvageCodeBlocks } from '../providers/code-block-salvage.js';
-import { CODEX_CLI_EXCLUDED_MCP_TOOLS, CodexCliProvider } from '../providers/codex-cli/index.js';
+import {
+  CODEX_CLI_EXCLUDED_MCP_TOOLS,
+  CodexCliProvider,
+  isCodexReasoningEffort,
+} from '../providers/codex-cli/index.js';
 import {
   type CopilotAuthStatus,
   CopilotProvider,
@@ -132,7 +137,11 @@ import {
 import { readGgufSummary } from '../providers/llama-cpp/gguf-metadata.js';
 import { LlamaCppProvider, createLlamaCppPatientFetch } from '../providers/llama-cpp/index.js';
 import { resolveLlamaCppKvCacheType } from '../providers/llama-cpp/kv-cache-type.js';
-import { planMoeOffload } from '../providers/llama-cpp/offload-planner.js';
+import {
+  degradeMoeOffloadDecision,
+  estimateKvReserveBytes,
+  planMoeOffload,
+} from '../providers/llama-cpp/offload-planner.js';
 import { resolveSpecDraft } from '../providers/llama-cpp/spec-draft.js';
 import { extractReasoning, stripReasoningTags } from '../providers/local-tool-call-salvage.js';
 import { McpBridgePool } from '../providers/mcp-bridge-pool.js';
@@ -483,6 +492,8 @@ export type TaskAdvancerOutcome =
       paused?: boolean;
       /** The gate runtime/configuration failed before judging the deliverable. */
       infrastructureError?: boolean;
+      /** The gate cannot be met under current policy (workspace writes off); paused for a human. */
+      unsatisfiable?: boolean;
       /** Gate script diagnostics for durable/user-visible failure reporting. */
       scriptRuns?: GateScriptDiagnostic[];
       /** Escalation rung of `message` (≥1 = deliver raw, it IS the directive). */
@@ -1469,6 +1480,7 @@ export class ChatManager {
       paused?: boolean;
       escalationStage?: number;
       infrastructureError?: boolean;
+      unsatisfiable?: boolean;
       scriptRuns?: GateScriptDiagnostic[];
     };
   }> {
@@ -1543,6 +1555,9 @@ export class ChatManager {
             ...(outcome.paused !== undefined ? { paused: outcome.paused } : {}),
             ...(outcome.infrastructureError !== undefined
               ? { infrastructureError: outcome.infrastructureError }
+              : {}),
+            ...(outcome.unsatisfiable !== undefined
+              ? { unsatisfiable: outcome.unsatisfiable }
               : {}),
             ...(outcome.scriptRuns !== undefined ? { scriptRuns: outcome.scriptRuns } : {}),
             ...(outcome.escalationStage !== undefined
@@ -1690,18 +1705,24 @@ export class ChatManager {
         at: nowIso(),
       };
       await this.store.writeSession(state.record).catch(() => {});
+      const adHocSurface =
+        checks.length > 0 && checks.every((c) => (c as { artifact?: boolean }).artifact === true)
+          ? ('artifact' as const)
+          : ('workspace' as const);
       const message =
         stage === 1
           ? buildStageOneNudge({
               ...(filePath ? { file: filePath } : {}),
               failingBullets: verdict.message,
               frozen: false,
+              surface: adHocSurface,
             })
           : stage === 2 && filePath
             ? buildStageTwoNudge({
                 file: filePath,
                 failingBullets: verdict.message,
                 repeats: count,
+                surface: adHocSurface,
               })
             : verdict.message;
       log.info(
@@ -6312,7 +6333,9 @@ export class ChatManager {
             ? `The step gate for ${ref} could not run, so the task was paused without counting a deliverable attempt.${
                 failedRun?.runId ? ` Script run: ${failedRun.runId}.` : ''
               }${failedRun?.error ? ` ${failedRun.error}` : ''} See the task notes for diagnostics.`
-            : `The step gate paused ${ref} after repeated failures — see the task notes for the attempt history.`;
+            : advanceOutcome.gateRejected.unsatisfiable
+              ? `The step gate for ${ref} requires workspace files, but gezel workspace writes are off for this project — the task was paused for a human decision without counting a deliverable attempt. See the task notes for the fixes.`
+              : `The step gate paused ${ref} after repeated failures — see the task notes for the attempt history.`;
           assistantMessage.warnings = [...(assistantMessage.warnings ?? []), gateWarning];
           await this.store.writeSession(state.record);
           this.events.publish(scope, {
@@ -9642,6 +9665,29 @@ export class ChatManager {
   }
 
   /**
+   * Cancel a pending provider-queue entry by (provider, id). Resolves
+   * the queue the SAME two ways {@link localEngineQueueSummaries} +
+   * `/api/queues` surface it: the singleton `providers` map first
+   * (cloud providers, seeded test mocks), then the engine pool for
+   * pool-routed local engines whose queue the singleton never sees.
+   * Returns true when an entry was removed, false when the id is
+   * unknown (already running, already cancelled, or no such provider).
+   */
+  cancelProviderQueueItem(name: ProviderName, id: number): boolean {
+    if (this.getProviderIfReady(name)?.queue?.cancelPending(id)) return true;
+    const router = this.engineRouter ?? this.engineRouterCache;
+    return router ? router.pool.cancelPendingQueueItem(name, id) : false;
+  }
+
+  /** Reorder a pending provider-queue entry. Same singleton-then-pool
+   *  resolution as {@link cancelProviderQueueItem}. */
+  moveProviderQueueItem(name: ProviderName, id: number, direction: 'up' | 'down'): boolean {
+    if (this.getProviderIfReady(name)?.queue?.movePending(id, direction)) return true;
+    const router = this.engineRouter ?? this.engineRouterCache;
+    return router ? router.pool.movePendingQueueItem(name, id, direction) : false;
+  }
+
+  /**
    * Resolve a local provider through the engine pool when possible, so
    * the {@link CapacityBroker} sees every spawn. Returns null — meaning
    * "the pool can't serve this; use the singleton path" — for any of:
@@ -9782,6 +9828,7 @@ export class ChatManager {
       });
     } else if (name === 'anthropic-cli') {
       const cli = config.anthropicCli ?? {};
+      const configuredReasoningEffort = config.defaultReasoningEffort?.['anthropic-cli'];
       provider = new AnthropicCliProvider({
         ...(cli.binaryPath ? { binaryPath: cli.binaryPath } : {}),
         ...(config.defaultModel?.['anthropic-cli']
@@ -9789,6 +9836,9 @@ export class ChatManager {
           : {}),
         ...(cli.extraModels ? { extraModels: cli.extraModels } : {}),
         ...(cli.defaultPermissionMode ? { defaultPermissionMode: cli.defaultPermissionMode } : {}),
+        ...(isClaudeReasoningEffort(configuredReasoningEffort)
+          ? { defaultReasoningEffort: configuredReasoningEffort }
+          : {}),
         ...(cli.manageRuntimeFiles !== undefined
           ? { manageRuntimeFiles: cli.manageRuntimeFiles }
           : {}),
@@ -9802,14 +9852,10 @@ export class ChatManager {
       });
     } else if (name === 'codex-cli') {
       const cli = config.codexCli ?? {};
+      const configuredReasoningEffort = config.defaultReasoningEffort?.['codex-cli'];
       const reasoningEffort =
         cli.defaultReasoningEffort ??
-        (typeof config.defaultReasoningEffort?.['codex-cli'] === 'string' &&
-        (config.defaultReasoningEffort?.['codex-cli'] === 'low' ||
-          config.defaultReasoningEffort?.['codex-cli'] === 'medium' ||
-          config.defaultReasoningEffort?.['codex-cli'] === 'high')
-          ? (config.defaultReasoningEffort['codex-cli'] as 'low' | 'medium' | 'high')
-          : undefined);
+        (isCodexReasoningEffort(configuredReasoningEffort) ? configuredReasoningEffort : undefined);
       provider = new CodexCliProvider({
         ...(cli.binaryPath ? { binaryPath: cli.binaryPath } : {}),
         ...(config.defaultModel?.['codex-cli']
@@ -12198,15 +12244,11 @@ export class ChatManager {
       // CodexCliProvider maps it onto Codex's two-axis sandbox /
       // approval flags internally.
       const permissionModeOverride = gezelFm?.claudePermissionMode;
-      // Codex only accepts low/medium/high; if the gezel's reasoning
-      // effort is unrecognized, drop it (the provider's pickReasoningEffort
-      // helper falls back to the install default).
-      const reasoningEffortOverride =
-        gezelFm?.reasoningEffort === 'low' ||
-        gezelFm?.reasoningEffort === 'medium' ||
-        gezelFm?.reasoningEffort === 'high'
-          ? (gezelFm.reasoningEffort as 'low' | 'medium' | 'high')
-          : undefined;
+      // If the gezel's effort belongs to another provider's vocabulary,
+      // drop it and let Codex fall back to the install/model default.
+      const reasoningEffortOverride = isCodexReasoningEffort(gezelFm?.reasoningEffort)
+        ? gezelFm.reasoningEffort
+        : undefined;
       opts.codexCliContext = {
         sessionId: record.id,
         gezelId: record.gezelId,
@@ -16469,7 +16511,10 @@ export async function buildLlamaCppProvider(opts: {
   }
   if (binary && modelPath) {
     try {
-      const summary = readGgufSummary(modelPath);
+      // `includeTensorSizes` walks the tensor table (~5 MB read on a 100 GB
+      // GGUF, <500 ms) so the planner can budget the exact expert/non-expert
+      // byte split instead of a flat resident estimate.
+      const summary = readGgufSummary(modelPath, { includeTensorSizes: true });
       const isMoE = (summary.expertCount ?? 0) > 1;
       mtpLayerCount = summary.nextnPredictLayers ?? 0;
       ggufHasMtp = mtpLayerCount > 0;
@@ -16481,7 +16526,37 @@ export async function buildLlamaCppProvider(opts: {
       const approxBytes = modelCatalogInfo?.approxSizeBytes ?? summary.fileSizeBytes;
       const residentBytes = Math.round(approxBytes * 1.2);
       const vramBytes = maxGpuVramBytes(llamaDevices);
-      offloadDecision = planMoeOffload({ isMoE, residentBytes, vramBytes });
+      const split =
+        summary.nonExpertBytes !== undefined &&
+        summary.expertBytesByLayer !== undefined &&
+        summary.expertBytesByLayer.length > 0
+          ? {
+              nonExpertBytes: summary.nonExpertBytes,
+              expertBytesByLayer: summary.expertBytesByLayer,
+            }
+          : undefined;
+      const kvReserveBytes = estimateKvReserveBytes({
+        blockCount: summary.blockCount,
+        embeddingLength: summary.embeddingLength,
+        headCount: summary.headCount,
+        headCountKv: summary.headCountKv,
+        keyLength: summary.keyLength,
+        valueLength: summary.valueLength,
+        ctxTokens: effectiveNumCtx * slots,
+        kvCacheType,
+      });
+      offloadDecision = planMoeOffload({
+        isMoE,
+        residentBytes,
+        vramBytes,
+        ...(split
+          ? {
+              split,
+              ...(summary.blockCount !== undefined ? { blockCount: summary.blockCount } : {}),
+              ...(kvReserveBytes !== undefined ? { kvReserveBytes } : {}),
+            }
+          : {}),
+      });
       if (offloadDecision.reason) {
         log.info(
           `[llama-cpp] offload plan (${modelCatalogInfo?.id ?? 'model'}): ${offloadDecision.reason}`,
@@ -16592,6 +16667,36 @@ export async function buildLlamaCppProvider(opts: {
       }
     },
     onRawLine: (line) => providerHolder.current?.onStdoutLine(line),
+    // GPU-OOM recovery ladder: when a start dies of VRAM exhaustion and the
+    // planner's offload decision was in play, degrade it one step
+    // (partial split → all experts to RAM → engine-owned fit) and let the
+    // supervisor retry — `resolveLaunch` below re-reads `offloadDecision`
+    // on every spawn. The degraded plan sticks for later restarts of this
+    // provider, so a recovered engine doesn't re-OOM on its next boot.
+    recoverStartup: ({ panicKind }) => {
+      if (panicKind !== 'cuda-out-of-memory' && panicKind !== 'vulkan-out-of-memory') {
+        return false;
+      }
+      // Explicit config/manifest offload settings shadow the planner
+      // per-field (see `buildLlamaCppEngineArgs`); when every field the
+      // ladder would change is pinned, a retry replays the same argv.
+      const pinned = (globalValue: unknown, manifestValue: unknown) =>
+        globalValue !== undefined || manifestValue !== undefined;
+      if (
+        pinned(config.llamaCppNGpuLayers, resolvedManifestEngineConfig?.nGpuLayers) &&
+        pinned(config.llamaCppCpuMoe, resolvedManifestEngineConfig?.cpuMoe) &&
+        pinned(config.llamaCppNCpuMoe, resolvedManifestEngineConfig?.nCpuMoe)
+      ) {
+        return false;
+      }
+      const degraded = degradeMoeOffloadDecision(offloadDecision);
+      if (!degraded) return false;
+      log.warn(
+        `[llama-cpp] ${panicKind} while starting ${modelCatalogInfo?.id ?? 'model'} — ${degraded.reason}`,
+      );
+      offloadDecision = degraded;
+      return true;
+    },
     resolveLaunch: async () => {
       const port = cachedPort ?? (await pickFreePort());
       cachedPort = port;
@@ -16618,6 +16723,8 @@ export async function buildLlamaCppProvider(opts: {
         // disables llama-server's chat-template output parsing so mangled
         // model output reaches `delta.content` for provider-side salvage.
         reasoningFormat: process.env.GEZEL_LLAMA_REASONING_FORMAT?.trim() || undefined,
+        architecture: modelCatalogInfo?.architecture,
+        modelId: defaultModelId ?? undefined,
       });
       return {
         command: binary,

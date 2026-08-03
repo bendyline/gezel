@@ -23,6 +23,7 @@ import { RemoteServersPanel } from '../components/RemoteServersPanel.js';
 import { ReportErrorLink } from '../components/ReportErrorLink.js';
 import { ToolsetsEditor } from '../components/ToolsetsEditor.js';
 import { useCopilotAvailability } from '../components/useCopilotAvailability.js';
+import { useTotalRamBytes } from '../components/useTotalRamBytes.js';
 import { Poppetje } from '../poppetje/index.js';
 import { Select } from '../primitives/index.js';
 import { UI_FALLBACK_PROVIDER } from '../provider-default.js';
@@ -44,6 +45,10 @@ import { OllamaSettings, TimeoutRow } from './OllamaSettings.js';
 import { SecurityComplianceSettings } from './SecurityComplianceSettings.js';
 import { VideoEngineSettings } from './VideoEngineSettings.js';
 import { detectDs4Availability } from './ds4-availability.js';
+
+type CodexCliReasoningEffort = NonNullable<
+  NonNullable<ConfigResponse['codexCli']>['defaultReasoningEffort']
+>;
 
 type SectionId =
   | 'general'
@@ -950,6 +955,13 @@ export function SettingsView() {
     }
   }, []);
 
+  useEffect(() => {
+    if (section === 'anthropicCli') void runAnthropicCliProbe();
+  }, [section, runAnthropicCliProbe]);
+  useEffect(() => {
+    if (section === 'codexCli') void runCodexCliProbe();
+  }, [section, runCodexCliProbe]);
+
   const saveToolFilterMode = useCallback(async (mode: 'always' | 'never' | 'small-model') => {
     setStatus('saving…');
     try {
@@ -1031,6 +1043,7 @@ export function SettingsView() {
   const hasAnthropicKey = config?.hasAnthropicApiKey ?? false;
   const copilotUsage = usage?.providers.copilot;
   const copilotAvailability = useCopilotAvailability();
+  const totalRamBytes = useTotalRamBytes();
   const openaiUsage = usage?.providers.openai;
   // The Electron bridge is authoritative when present; health keeps the
   // platform-aware navigation correct in the standalone web UI too.
@@ -1075,10 +1088,17 @@ export function SettingsView() {
   // build). Offer it as a default-provider option only where it can actually
   // run — or wherever the user has already selected it, so a config-set
   // provider never strands them without the pill to change it.
+  // The RAM floor is part of that constraint set: a machine under 48 GB can
+  // technically launch the engine but can't stream its models at a usable
+  // speed. `totalRamBytes` is null until the probe answers, and the helper
+  // skips the check then rather than reading unknown as too-small.
   const showDs4Provider =
     provider === 'ds4' ||
     nightShiftProvider === 'ds4' ||
-    detectDs4Availability({ externalBaseUrl: config?.ds4BaseUrl }).status !== 'unavailable';
+    detectDs4Availability({
+      externalBaseUrl: config?.ds4BaseUrl,
+      totalRamBytes: totalRamBytes ?? undefined,
+    }).status !== 'unavailable';
 
   // GitHub Copilot needs GitHub's proprietary CLI, which we don't ship — it's
   // an opt-in download from the Copilot tab. Don't offer it as a provider
@@ -1090,6 +1110,16 @@ export function SettingsView() {
     provider === 'copilot' ||
     nightShiftProvider === 'copilot' ||
     copilotAvailability?.available !== false;
+
+  // The API-key OpenAI and Anthropic surfaces are untested and stay hidden for
+  // now; their CLI counterparts (codex-cli, anthropic-cli) are unaffected and
+  // remain on offer. Same escape hatch as ds4/Copilot above: an already-chosen
+  // provider — or one that already has a key on file — keeps its tab and pill
+  // so a configured user is never stranded without a way to change it.
+  const showOpenaiProvider =
+    provider === 'openai' || nightShiftProvider === 'openai' || hasOpenaiKey;
+  const showAnthropicProvider =
+    provider === 'anthropic' || nightShiftProvider === 'anthropic' || hasAnthropicKey;
 
   const nightShiftProviderChoices: Array<{
     id: ProviderName;
@@ -1120,9 +1150,9 @@ export function SettingsView() {
         ]
       : []),
     ...(showCopilotProvider ? [{ id: 'copilot' as const, label: 'GitHub Copilot' }] : []),
-    { id: 'openai', label: 'OpenAI' },
+    ...(showOpenaiProvider ? [{ id: 'openai' as const, label: 'OpenAI' }] : []),
     { id: 'codex-cli', label: 'OpenAI Codex CLI' },
-    { id: 'anthropic', label: 'Anthropic Claude' },
+    ...(showAnthropicProvider ? [{ id: 'anthropic' as const, label: 'Anthropic Claude' }] : []),
     { id: 'anthropic-cli', label: 'Anthropic Claude CLI' },
     { id: 'ollama', label: 'Ollama' },
   ];
@@ -1137,12 +1167,22 @@ export function SettingsView() {
       // matter on Windows, where ds4 has no native build but remains usable
       // through an external server.
       if (s.id === 'ds4' && !showDs4Provider) return false;
+      if (s.id === 'openai' && !showOpenaiProvider) return false;
+      if (s.id === 'anthropic' && !showAnthropicProvider) return false;
       // Benchmarks is a debug-only surface — hidden until the user turns on
       // Debug mode under the About tab.
       if (s.id === 'benchmarks' && config?.debugMode !== true) return false;
       return true;
     });
-  }, [uiPlatform, isDarwin, showLlamaCppTab, showDs4Provider, config?.debugMode]);
+  }, [
+    uiPlatform,
+    isDarwin,
+    showLlamaCppTab,
+    showDs4Provider,
+    showOpenaiProvider,
+    showAnthropicProvider,
+    config?.debugMode,
+  ]);
 
   const activeSectionGroup = useMemo(
     () => sections.find((s) => s.id === section)?.group,
@@ -1577,7 +1617,7 @@ export function SettingsView() {
               <h3>Klerk</h3>
               <p className="muted" style={{ marginTop: 0 }}>
                 The Klerk is your workshop scribe — they handle utility text work (about.md drafts,
-                rewrites, end-of-session summaries, memory consolidation) so you can route grunt
+                rewrites, end-of-thread summaries, memory consolidation) so you can route grunt
                 tasks to a different model than your conversational gezellen. Their{' '}
                 <code>provider</code> and <code>model</code> overrides on the gezel itself decide
                 what runs.
@@ -1861,12 +1901,18 @@ export function SettingsView() {
                                 Copilot{hasGithubToken ? ' ✓' : ''}
                               </Select.Item>
                             )}
-                            <Select.Item value="anthropic">
-                              Anthropic{hasAnthropicKey ? ' ✓' : ''}
-                            </Select.Item>
-                            <Select.Item value="openai">
-                              OpenAI{hasOpenaiKey ? ' ✓' : ''}
-                            </Select.Item>
+                            {(showAnthropicProvider ||
+                              config?.keurmeester?.providerName === 'anthropic') && (
+                              <Select.Item value="anthropic">
+                                Anthropic{hasAnthropicKey ? ' ✓' : ''}
+                              </Select.Item>
+                            )}
+                            {(showOpenaiProvider ||
+                              config?.keurmeester?.providerName === 'openai') && (
+                              <Select.Item value="openai">
+                                OpenAI{hasOpenaiKey ? ' ✓' : ''}
+                              </Select.Item>
+                            )}
                             <Select.Item value="anthropic-cli">Anthropic CLI</Select.Item>
                             <Select.Item value="codex-cli">Codex CLI</Select.Item>
                           </Select.Content>
@@ -2064,13 +2110,15 @@ export function SettingsView() {
                     GitHub Copilot
                   </button>
                 )}
-                <button
-                  type="button"
-                  className={`provider-pill${provider === 'openai' ? ' provider-pill-active' : ''}`}
-                  onClick={() => void setProvider('openai')}
-                >
-                  OpenAI
-                </button>
+                {showOpenaiProvider && (
+                  <button
+                    type="button"
+                    className={`provider-pill${provider === 'openai' ? ' provider-pill-active' : ''}`}
+                    onClick={() => void setProvider('openai')}
+                  >
+                    OpenAI
+                  </button>
+                )}
                 <button
                   type="button"
                   className={`provider-pill${provider === 'codex-cli' ? ' provider-pill-active' : ''}`}
@@ -2079,13 +2127,15 @@ export function SettingsView() {
                 >
                   OpenAI Codex CLI
                 </button>
-                <button
-                  type="button"
-                  className={`provider-pill${provider === 'anthropic' ? ' provider-pill-active' : ''}`}
-                  onClick={() => void setProvider('anthropic')}
-                >
-                  Anthropic Claude
-                </button>
+                {showAnthropicProvider && (
+                  <button
+                    type="button"
+                    className={`provider-pill${provider === 'anthropic' ? ' provider-pill-active' : ''}`}
+                    onClick={() => void setProvider('anthropic')}
+                  >
+                    Anthropic Claude
+                  </button>
+                )}
                 <button
                   type="button"
                   className={`provider-pill${provider === 'anthropic-cli' ? ' provider-pill-active' : ''}`}
@@ -2520,8 +2570,8 @@ export function SettingsView() {
             <section className="provider-card">
               <h3>Sandbox Copilot actions</h3>
               <p className="muted small" style={{ marginTop: 0 }}>
-                When on, new Copilot sessions deny the CLI&rsquo;s built-in tools (<code>bash</code>
-                , <code>web_fetch</code>, <code>view</code>, file ops, <code>grep</code>) and force
+                When on, new Copilot threads deny the CLI&rsquo;s built-in tools (<code>bash</code>,{' '}
+                <code>web_fetch</code>, <code>view</code>, file ops, <code>grep</code>) and force
                 the model to work through gezel&rsquo;s MCP tools instead. Gives you an audit trail
                 for every action and consistent behavior across providers. Per-gezel override lives
                 on each gezel&rsquo;s Settings tab.
@@ -2652,44 +2702,50 @@ export function SettingsView() {
               >
                 Codex CLI
               </a>{' '}
-              once per chat turn. Auth is whatever <code>codex</code> is already logged in with on
-              this host (either <code>codex login</code> for ChatGPT-account auth, or an{' '}
-              <code>OPENAI_API_KEY</code> in your environment) — no API key field here. Each gezel
-              still gets gezel-mcp tools wired in via Codex's MCP support.
+              once per chat turn.
             </p>
-            <ol className="muted" style={{ lineHeight: 1.7, paddingLeft: '1.25rem' }}>
-              <li>
-                Install the Codex CLI globally and run <code>codex login</code> (or export an{' '}
-                <code>OPENAI_API_KEY</code>) so the binary is ready to use.
-              </li>
-              <li>
-                Optionally pin an explicit binary path below — gezel uses <code>$PATH</code> by
-                default.
-              </li>
-              <li>Pick a default model and permission mode, then test the connection.</li>
-            </ol>
-
             <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
               <label className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
-                Binary path
+                Connection
               </label>
-              <input
-                type="text"
-                placeholder="(auto — found on PATH)"
-                value={codexCliBinaryDraft}
-                onChange={(e) => setCodexCliBinaryDraft(e.target.value)}
-                style={{ flex: 1 }}
-              />
+              {codexCliProbe.kind === 'ok' && (
+                <span style={{ color: 'var(--success)', fontSize: '0.9rem' }}>
+                  ✓ Codex CLI ready ({codexCliProbe.modelCount} models)
+                </span>
+              )}
+              {codexCliProbe.kind === 'fail' && (
+                <span style={{ color: 'var(--danger, #c66)', fontSize: '0.9rem' }}>
+                  ✗ {codexCliProbe.error}
+                </span>
+              )}
+              {(codexCliProbe.kind === 'idle' || codexCliProbe.kind === 'probing') && (
+                <span className="muted" style={{ fontSize: '0.9rem' }}>
+                  Testing…
+                </span>
+              )}
               <button
                 type="button"
-                onClick={() => {
-                  const trimmed = codexCliBinaryDraft.trim();
-                  void saveCodexCli({ binaryPath: trimmed || undefined });
-                }}
+                onClick={() => void runCodexCliProbe()}
+                disabled={codexCliProbe.kind === 'probing'}
+                style={{ marginLeft: '0.75rem' }}
               >
-                Save
+                {codexCliProbe.kind === 'probing' ? 'Testing…' : 'Test connection'}
               </button>
             </div>
+
+            {codexCliProbe.kind === 'fail' && (
+              <ol className="muted" style={{ lineHeight: 1.7, paddingLeft: '1.25rem' }}>
+                <li>
+                  Install the Codex CLI globally and run <code>codex login</code> (or export an{' '}
+                  <code>OPENAI_API_KEY</code>) so the binary is ready to use.
+                </li>
+                <li>
+                  Optionally pin an explicit binary path under Advanced — gezel uses{' '}
+                  <code>$PATH</code> by default.
+                </li>
+                <li>Pick a default model and permission mode.</li>
+              </ol>
+            )}
 
             <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
               <label className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
@@ -2725,25 +2781,6 @@ export function SettingsView() {
 
             <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
               <label className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
-                MCP wiring
-              </label>
-              <label className="muted" style={{ fontSize: '0.9rem' }}>
-                <input
-                  type="checkbox"
-                  checked={config?.codexCli?.manageRuntimeFiles !== false}
-                  onChange={(e) => void saveCodexCli({ manageRuntimeFiles: e.target.checked })}
-                  style={{ marginRight: '0.5rem' }}
-                />
-                Write a per-session <code>CODEX_HOME</code> so Codex can call gezel-mcp tools
-              </label>
-            </div>
-            <p className="muted" style={{ fontSize: '0.85rem', marginTop: '0.25rem' }}>
-              Files land under <code>~/.gezel/runtime/codex-cli/</code> and never touch your repo.
-              Disable to run Codex against your own <code>~/.codex/</code> with no gezel-mcp wiring.
-            </p>
-
-            <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
-              <label className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
                 Default model
               </label>
               <ModelPicker
@@ -2757,47 +2794,69 @@ export function SettingsView() {
               <label className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
                 Reasoning effort
               </label>
-              <select
+              <EffortPicker
+                provider="codex-cli"
+                model={config?.defaultModel?.['codex-cli']}
                 value={config?.codexCli?.defaultReasoningEffort ?? ''}
-                onChange={(e) =>
+                onChange={(value) =>
                   void saveCodexCli({
-                    defaultReasoningEffort:
-                      e.target.value === ''
-                        ? undefined
-                        : (e.target.value as 'low' | 'medium' | 'high'),
+                    defaultReasoningEffort: value as CodexCliReasoningEffort | undefined,
                   })
                 }
-              >
-                <option value="">(model default)</option>
-                <option value="low">low</option>
-                <option value="medium">medium</option>
-                <option value="high">high</option>
-              </select>
+              />
             </div>
             <p className="muted" style={{ fontSize: '0.85rem', marginTop: '0.25rem' }}>
-              Forwarded as <code>-c model_reasoning_effort="…"</code>. Gezels can override per-turn
-              via their effort picker.
+              Forwarded as <code>-c model_reasoning_effort="…"</code>. Options follow the selected
+              model; gezels can override per turn via their effort picker.
             </p>
 
-            <div className="new-row" style={{ alignItems: 'center', marginTop: '1rem' }}>
-              <button
-                type="button"
-                onClick={() => void runCodexCliProbe()}
-                disabled={codexCliProbe.kind === 'probing'}
-              >
-                {codexCliProbe.kind === 'probing' ? 'Testing…' : 'Test connection'}
-              </button>
-              {codexCliProbe.kind === 'ok' && (
-                <span className="muted" style={{ fontSize: '0.9rem' }}>
-                  ✓ Codex CLI ready ({codexCliProbe.modelCount} models)
-                </span>
-              )}
-              {codexCliProbe.kind === 'fail' && (
-                <span style={{ color: 'var(--danger, #c66)', fontSize: '0.9rem' }}>
-                  ✗ {codexCliProbe.error}
-                </span>
-              )}
-            </div>
+            <details style={{ marginTop: '1rem' }}>
+              <summary style={{ cursor: 'pointer' }}>
+                <strong>Advanced</strong>
+              </summary>
+
+              <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
+                <label className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
+                  Binary path
+                </label>
+                <input
+                  type="text"
+                  placeholder="(auto — found on PATH)"
+                  value={codexCliBinaryDraft}
+                  onChange={(e) => setCodexCliBinaryDraft(e.target.value)}
+                  style={{ flex: 1 }}
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    const trimmed = codexCliBinaryDraft.trim();
+                    void saveCodexCli({ binaryPath: trimmed || undefined });
+                  }}
+                >
+                  Save
+                </button>
+              </div>
+
+              <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
+                <label className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
+                  MCP wiring
+                </label>
+                <label className="muted" style={{ fontSize: '0.9rem' }}>
+                  <input
+                    type="checkbox"
+                    checked={config?.codexCli?.manageRuntimeFiles !== false}
+                    onChange={(e) => void saveCodexCli({ manageRuntimeFiles: e.target.checked })}
+                    style={{ marginRight: '0.5rem' }}
+                  />
+                  Write a per-thread <code>CODEX_HOME</code> so Codex can call gezel-mcp tools
+                </label>
+              </div>
+              <p className="muted" style={{ fontSize: '0.85rem', marginTop: '0.25rem' }}>
+                Files land under <code>~/.gezel/runtime/codex-cli/</code> and never touch your repo.
+                Disable to run Codex against your own <code>~/.codex/</code> with no gezel-mcp
+                wiring.
+              </p>
+            </details>
           </section>
         )}
 
@@ -2886,45 +2945,50 @@ export function SettingsView() {
               >
                 Claude Code CLI
               </a>{' '}
-              once per chat turn. Auth is whatever <code>claude</code> is already logged in with on
-              this host — no API key field here. Each gezel still gets gezel-mcp tools (memories,
-              tasks, team management, documents, history) wired in via Claude's native MCP support;
-              tools that overlap with Claude's built-in Read/Write/Edit/Grep/Bash are filtered out
-              automatically.
+              once per chat turn.
             </p>
-            <ol className="muted" style={{ lineHeight: 1.7, paddingLeft: '1.25rem' }}>
-              <li>
-                Install the Claude CLI globally and run <code>claude /status</code> in a terminal to
-                confirm it's authenticated.
-              </li>
-              <li>
-                Optionally pin an explicit binary path below — gezel uses <code>$PATH</code> by
-                default.
-              </li>
-              <li>Pick a default model and permission mode, then test the connection.</li>
-            </ol>
-
             <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
               <label className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
-                Binary path
+                Connection
               </label>
-              <input
-                type="text"
-                placeholder="(auto — found on PATH)"
-                value={anthropicCliBinaryDraft}
-                onChange={(e) => setAnthropicCliBinaryDraft(e.target.value)}
-                style={{ flex: 1 }}
-              />
+              {anthropicCliProbe.kind === 'ok' && (
+                <span style={{ color: 'var(--success)', fontSize: '0.9rem' }}>
+                  ✓ Claude CLI ready ({anthropicCliProbe.modelCount} models)
+                </span>
+              )}
+              {anthropicCliProbe.kind === 'fail' && (
+                <span style={{ color: 'var(--danger, #c66)', fontSize: '0.9rem' }}>
+                  ✗ {anthropicCliProbe.error}
+                </span>
+              )}
+              {(anthropicCliProbe.kind === 'idle' || anthropicCliProbe.kind === 'probing') && (
+                <span className="muted" style={{ fontSize: '0.9rem' }}>
+                  Testing…
+                </span>
+              )}
               <button
                 type="button"
-                onClick={() => {
-                  const trimmed = anthropicCliBinaryDraft.trim();
-                  void saveAnthropicCli({ binaryPath: trimmed || undefined });
-                }}
+                onClick={() => void runAnthropicCliProbe()}
+                disabled={anthropicCliProbe.kind === 'probing'}
+                style={{ marginLeft: '0.75rem' }}
               >
-                Save
+                {anthropicCliProbe.kind === 'probing' ? 'Testing…' : 'Test connection'}
               </button>
             </div>
+
+            {anthropicCliProbe.kind === 'fail' && (
+              <ol className="muted" style={{ lineHeight: 1.7, paddingLeft: '1.25rem' }}>
+                <li>
+                  Install the Claude CLI globally and run <code>claude /status</code> in a terminal
+                  to confirm it's authenticated.
+                </li>
+                <li>
+                  Optionally pin an explicit binary path under Advanced — gezel uses{' '}
+                  <code>$PATH</code> by default.
+                </li>
+                <li>Pick a default model and permission mode.</li>
+              </ol>
+            )}
 
             <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
               <label className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
@@ -2959,25 +3023,6 @@ export function SettingsView() {
 
             <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
               <label className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
-                MCP wiring
-              </label>
-              <label className="muted" style={{ fontSize: '0.9rem' }}>
-                <input
-                  type="checkbox"
-                  checked={config?.anthropicCli?.manageRuntimeFiles !== false}
-                  onChange={(e) => void saveAnthropicCli({ manageRuntimeFiles: e.target.checked })}
-                  style={{ marginRight: '0.5rem' }}
-                />
-                Write a per-session <code>.mcp.json</code> so Claude can call gezel-mcp tools
-              </label>
-            </div>
-            <p className="muted" style={{ fontSize: '0.85rem', marginTop: '0.25rem' }}>
-              Files land under <code>~/.gezel/runtime/anthropic-cli/</code> and never touch the
-              user's repo. Disable to run Claude with only its built-in tools.
-            </p>
-
-            <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
-              <label className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
                 Default model
               </label>
               <ModelPicker
@@ -2989,110 +3034,155 @@ export function SettingsView() {
 
             <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
               <label className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
-                Pool size
+                Reasoning effort
               </label>
-              <input
-                type="number"
-                min={1}
-                max={32}
-                value={config?.anthropicCli?.poolSize ?? 4}
-                onChange={(e) => {
-                  const n = Number.parseInt(e.target.value, 10);
-                  if (Number.isFinite(n) && n >= 1 && n <= 32) {
-                    void saveAnthropicCli({ poolSize: n });
-                  }
-                }}
-                style={{ width: '5rem' }}
+              <EffortPicker
+                provider="anthropic-cli"
+                model={config?.defaultModel?.['anthropic-cli']}
+                value={config?.defaultReasoningEffort?.['anthropic-cli']}
+                onChange={(value) => void saveDefaultEffort('anthropic-cli', value)}
               />
-              <span className="muted" style={{ fontSize: '0.85rem' }}>
-                warm <code>claude</code> subprocesses to keep around
-              </span>
             </div>
             <p className="muted" style={{ fontSize: '0.85rem', marginTop: '0.25rem' }}>
-              Each pool slot holds one <code>claude</code> process pinned to a chat session; turn 2+
-              of a session skips the cold-start cost. More slots = lower per-turn latency for
-              parallel gezellen, more memory (~100–200 MB per warm process). When at cap, the
-              least-recently-used non-busy worker is evicted.
+              Passed to Claude Code through <code>CLAUDE_CODE_EFFORT_LEVEL</code>. Options follow
+              the selected model; gezels can override it with their own effort setting.
             </p>
 
-            <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
-              <label className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
-                Concurrency
-              </label>
-              <input
-                type="number"
-                min={1}
-                max={32}
-                value={
-                  config?.providerConcurrency?.['anthropic-cli'] ??
-                  config?.anthropicCli?.poolSize ??
-                  4
-                }
-                onChange={(e) => {
-                  const n = Number.parseInt(e.target.value, 10);
-                  if (Number.isFinite(n) && n >= 1 && n <= 32) {
-                    void saveAnthropicCliConcurrency(n);
-                  }
-                }}
-                style={{ width: '5rem' }}
-              />
-              <span className="muted" style={{ fontSize: '0.85rem' }}>
-                turns running in parallel
-              </span>
-            </div>
-            <p className="muted" style={{ fontSize: '0.85rem', marginTop: '0.25rem' }}>
-              How many gezel turns can dispatch to <code>claude</code> at once. Defaults to the pool
-              size — every warm slot can be running a turn. Lower this if you want a memory headroom
-              buffer (warm processes that aren't currently executing). Setting it above the pool
-              size logs a warning at provider init; the pool will spawn over-cap transiently to
-              honor the request.
-            </p>
+            <details style={{ marginTop: '1rem' }}>
+              <summary style={{ cursor: 'pointer' }}>
+                <strong>Advanced</strong>
+              </summary>
 
-            <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
-              <label className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
-                Idle timeout
-              </label>
-              <input
-                type="number"
-                min={60}
-                max={3600}
-                step={60}
-                value={config?.anthropicCli?.workerIdleSec ?? 600}
-                onChange={(e) => {
-                  const n = Number.parseInt(e.target.value, 10);
-                  if (Number.isFinite(n) && n >= 60 && n <= 3600) {
-                    void saveAnthropicCli({ workerIdleSec: n });
-                  }
-                }}
-                style={{ width: '5rem' }}
-              />
-              <span className="muted" style={{ fontSize: '0.85rem' }}>
-                seconds
-              </span>
-            </div>
-            <p className="muted" style={{ fontSize: '0.85rem', marginTop: '0.25rem' }}>
-              Shut down a warm subprocess after this long without a turn. Resets on every turn.
-            </p>
+              <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
+                <label className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
+                  Binary path
+                </label>
+                <input
+                  type="text"
+                  placeholder="(auto — found on PATH)"
+                  value={anthropicCliBinaryDraft}
+                  onChange={(e) => setAnthropicCliBinaryDraft(e.target.value)}
+                  style={{ flex: 1 }}
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    const trimmed = anthropicCliBinaryDraft.trim();
+                    void saveAnthropicCli({ binaryPath: trimmed || undefined });
+                  }}
+                >
+                  Save
+                </button>
+              </div>
 
-            <div className="new-row" style={{ alignItems: 'center', marginTop: '1rem' }}>
-              <button
-                type="button"
-                onClick={() => void runAnthropicCliProbe()}
-                disabled={anthropicCliProbe.kind === 'probing'}
-              >
-                {anthropicCliProbe.kind === 'probing' ? 'Testing…' : 'Test connection'}
-              </button>
-              {anthropicCliProbe.kind === 'ok' && (
-                <span className="muted" style={{ fontSize: '0.9rem' }}>
-                  ✓ Claude CLI ready ({anthropicCliProbe.modelCount} models)
+              <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
+                <label className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
+                  MCP wiring
+                </label>
+                <label className="muted" style={{ fontSize: '0.9rem' }}>
+                  <input
+                    type="checkbox"
+                    checked={config?.anthropicCli?.manageRuntimeFiles !== false}
+                    onChange={(e) =>
+                      void saveAnthropicCli({ manageRuntimeFiles: e.target.checked })
+                    }
+                    style={{ marginRight: '0.5rem' }}
+                  />
+                  Write a per-thread <code>.mcp.json</code> so Claude can call gezel-mcp tools
+                </label>
+              </div>
+              <p className="muted" style={{ fontSize: '0.85rem', marginTop: '0.25rem' }}>
+                Files land under <code>~/.gezel/runtime/anthropic-cli/</code> and never touch the
+                user's repo. Disable to run Claude with only its built-in tools.
+              </p>
+
+              <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
+                <label className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
+                  Pool size
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  max={32}
+                  value={config?.anthropicCli?.poolSize ?? 4}
+                  onChange={(e) => {
+                    const n = Number.parseInt(e.target.value, 10);
+                    if (Number.isFinite(n) && n >= 1 && n <= 32) {
+                      void saveAnthropicCli({ poolSize: n });
+                    }
+                  }}
+                  style={{ width: '5rem' }}
+                />
+                <span className="muted" style={{ fontSize: '0.85rem' }}>
+                  warm <code>claude</code> subprocesses to keep around
                 </span>
-              )}
-              {anthropicCliProbe.kind === 'fail' && (
-                <span style={{ color: 'var(--danger, #c66)', fontSize: '0.9rem' }}>
-                  ✗ {anthropicCliProbe.error}
+              </div>
+              <p className="muted" style={{ fontSize: '0.85rem', marginTop: '0.25rem' }}>
+                Each pool slot holds one <code>claude</code> process pinned to a chat thread; turn
+                2+ of a thread skips the cold-start cost. More slots = lower per-turn latency for
+                parallel gezellen, more memory (~100–200 MB per warm process). When at cap, the
+                least-recently-used non-busy worker is evicted.
+              </p>
+
+              <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
+                <label className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
+                  Concurrency
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  max={32}
+                  value={
+                    config?.providerConcurrency?.['anthropic-cli'] ??
+                    config?.anthropicCli?.poolSize ??
+                    4
+                  }
+                  onChange={(e) => {
+                    const n = Number.parseInt(e.target.value, 10);
+                    if (Number.isFinite(n) && n >= 1 && n <= 32) {
+                      void saveAnthropicCliConcurrency(n);
+                    }
+                  }}
+                  style={{ width: '5rem' }}
+                />
+                <span className="muted" style={{ fontSize: '0.85rem' }}>
+                  turns running in parallel
                 </span>
-              )}
-            </div>
+              </div>
+              <p className="muted" style={{ fontSize: '0.85rem', marginTop: '0.25rem' }}>
+                How many gezel turns can dispatch to <code>claude</code> at once. Defaults to the
+                pool size — every warm slot can be running a turn. Lower this if you want a memory
+                headroom buffer (warm processes that aren't currently executing). Setting it above
+                the pool size logs a warning at provider init; the pool will spawn over-cap
+                transiently to honor the request.
+              </p>
+
+              <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
+                <label className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
+                  Idle timeout
+                </label>
+                <input
+                  type="number"
+                  min={60}
+                  max={3600}
+                  step={60}
+                  value={config?.anthropicCli?.workerIdleSec ?? 600}
+                  onChange={(e) => {
+                    const n = Number.parseInt(e.target.value, 10);
+                    if (Number.isFinite(n) && n >= 60 && n <= 3600) {
+                      void saveAnthropicCli({ workerIdleSec: n });
+                    }
+                  }}
+                  style={{ width: '5rem' }}
+                />
+                <span className="muted" style={{ fontSize: '0.85rem' }}>
+                  seconds
+                </span>
+              </div>
+              <p className="muted" style={{ fontSize: '0.85rem', marginTop: '0.25rem' }}>
+                Shut down a warm subprocess after this long without a turn. Resets on every turn.
+              </p>
+            </details>
           </section>
         )}
 
@@ -3746,7 +3836,7 @@ function ProviderUsagePanel({ label, data }: { label: string; data: ProviderUsag
           </div>
         </div>
         <div className="usage-card">
-          <div className="usage-label">This session</div>
+          <div className="usage-label">Since startup</div>
           <div className="usage-value">{data.totalTurns} turns</div>
           <div className="usage-detail">
             <span>
@@ -3871,8 +3961,8 @@ function MemorySection({ config, onAutoRecallChange, onSummarizationChange }: Me
     <section style={{ marginTop: '2rem' }}>
       <h3>Memory</h3>
       <p className="muted" style={{ marginTop: 0 }}>
-        Cross-session context: pull relevant memories into new sessions, and distill finished
-        sessions into the project memory bank so the next gezel can pick up where you left off.
+        Cross-thread context: pull relevant memories into new threads, and distill finished threads
+        into the project memory bank so the next gezel can pick up where you left off.
       </p>
 
       <div style={{ marginBottom: '1.25rem' }}>

@@ -8,7 +8,7 @@ import type {
   HandboekRenderMode,
   ProjectTypeManifest,
 } from '@bendyline/gezel';
-import type { ModelTier } from '@bendyline/gezel';
+import type { ModelTier, RoleId } from '@bendyline/gezel';
 import {
   MODEL_TIER_ORDER,
   ROLES,
@@ -18,7 +18,7 @@ import {
 } from '@bendyline/gezel';
 import { BUILTIN_TOOLSETS } from '@bendyline/gezel-catalog';
 import { computeToolAllowlist, expandToolsetGroups } from '../chat/role-tool-filter.js';
-import type { HandboekDeviceInfo, HandboekModelInfo } from './device.js';
+import type { HandboekDeviceInfo, HandboekGezelInfo, HandboekModelInfo } from './device.js';
 import { unwrapSoftBreaks } from './unwrap.js';
 
 const log = createLogger('handboek');
@@ -169,8 +169,15 @@ function formatNames(names: string[]): string {
 
 /**
  * `::handboek-gezel-roster{role=meester}` — "You have two meester
- * gezellen: Alice and Jack" with their figures. Personalized: app/agent
- * modes only; the static site has no idea who your crew is.
+ * gezellen" and a card per gezel. Personalized: app/agent modes only;
+ * the static site has no idea who your crew is.
+ *
+ * App mode emits one list item per gezel — figure, name, role label,
+ * role summary — which the article stylesheet lays out as a card grid
+ * (the shape of the item is the CSS hook: squisq's markdown carries
+ * block attributes on headings only, so the macro can't class the list
+ * it emits). Agent mode has no figures, so it keeps the flat sentence
+ * with the names in it instead.
  */
 async function gezelRoster(attrs: Record<string, string>, ctx: MacroContext): Promise<string> {
   if (ctx.mode === 'site') return '';
@@ -184,13 +191,36 @@ async function gezelRoster(attrs: Record<string, string>, ctx: MacroContext): Pr
   }
   const label = roleId ? `${ROLES[roleId].label.toLowerCase()} ` : '';
   const plural = matching.length === 1 ? `${label}gezel` : `${label}gezellen`;
-  const sentence = `You have ${countWord(matching.length)} ${plural}: ${formatNames(matching.map((g) => g.name))}.`;
-  if (ctx.mode === 'agent') return sentence;
-  const figures = matching
-    .map((g) => figureRef(ctx, g, roleId ? ROLES[roleId].label : g.role))
-    .filter(Boolean)
-    .join(' ');
-  return figures ? `${sentence}\n\n${figures}` : sentence;
+  const count = `You have ${countWord(matching.length)} ${plural}`;
+  if (ctx.mode === 'agent') {
+    return `${count}: ${formatNames(matching.map((g) => g.name))}.`;
+  }
+  const cards = matching.map((g) => rosterCard(ctx, g, roleId));
+  return `${count}.\n\n${cards.join('\n')}`;
+}
+
+/**
+ * One roster list item: figure, name, role, and what that role does.
+ * Separator characters are deliberately absent — each part is its own
+ * inline node so the stylesheet can stack them, and a stray dash would
+ * land on a line of its own.
+ *
+ * A role-filtered roster drops the summary: those rosters sit inside the
+ * role's own article, directly under the same sentence, so repeating it
+ * once per card says nothing new.
+ */
+function rosterCard(
+  ctx: MacroContext,
+  gezel: HandboekGezelInfo,
+  filterRoleId: RoleId | null,
+): string {
+  const id = filterRoleId ?? resolveRoleId(gezel.role);
+  const role = id ? ROLES[id] : null;
+  const roleLabel = role?.label ?? gezel.role?.trim();
+  const parts = [figureRef(ctx, gezel, roleLabel), `**${gezel.name}**`];
+  if (roleLabel) parts.push(`*${roleLabel}*`);
+  if (role && !filterRoleId) parts.push(role.summary);
+  return `- ${parts.filter(Boolean).join(' ')}`;
 }
 
 /** `::handboek-meester-card` — who your Meester is right now. */

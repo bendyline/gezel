@@ -93,9 +93,26 @@ export interface StepKit {
 }
 
 /**
+ * The artifacts drawer is "deliberately never gated" (role-tool-filter's
+ * security-gate contract): it is the write-to-the-sandbox escape hatch that
+ * must survive every ceiling, including a writes-off project where the
+ * whole `workspace-fs-write` group is stripped. Kit narrowing removing
+ * these stranded a step-scoped Developer with zero write channels while
+ * its gate demanded a deliverable (molen dependency-audit night shift).
+ */
+const ARTIFACT_DRAWER_TOOLS: readonly string[] = [
+  'list_artifacts',
+  'read_artifact',
+  'write_artifact',
+  'grep_artifact',
+];
+
+/**
  * The kit for a persisted step, or null when the step targets no file
- * (pure-routing / user steps) — null means "no kit narrowing".
- * Artifact-targeted deliverables swap in the artifact drawer tools.
+ * (pure-routing / user steps) — null means "no kit narrowing". The
+ * artifact drawer tools ride along for every kit so drawer-targeted
+ * deliverables work and workspace-targeted steps keep the drawer as
+ * their fallback output surface.
  */
 export function stepToolKit(
   step: Pick<CraftbookStep, 'advanceWhen' | 'gate' | 'onExit'>,
@@ -105,12 +122,8 @@ export function stepToolKit(
   const tools = new Set<string>(FILE_CORE);
   for (const t of KIND_ADDITIONS[kind] ?? []) tools.add(t);
   for (const t of gateDrivenAdditions(step)) tools.add(t);
-  if (normalizeScriptRefs(step.onExit).length > 0) tools.add('run_script');
-  if (step.advanceWhen?.artifact) {
-    tools.add('list_artifacts');
-    tools.add('read_artifact');
-    tools.add('write_artifact');
-  }
+  if (normalizeScriptRefs(step.onExit).length > 0) tools.add('run_installed_script');
+  for (const t of ARTIFACT_DRAWER_TOOLS) tools.add(t);
   return { kind, path: stepDeliverablePath(step), tools };
 }
 
@@ -123,6 +136,7 @@ export function stepToolKit(
  */
 export function gateRepairToolsForKind(kind: DeliverableKind | null): ReadonlySet<string> {
   const base = new Set<string>(FILE_CORE);
+  for (const t of ARTIFACT_DRAWER_TOOLS) base.add(t);
   if (kind === 'data-file' || kind === 'json') {
     base.add('derive_file');
     base.add('run_nodejs_script');
@@ -151,7 +165,14 @@ export function capPriorityPrefixForKind(kind: DeliverableKind | null): readonly
   if (kind === 'image-set') {
     return ['generate_image', 'render_image', 'list_dir', 'write_file'];
   }
-  return ['write_file', 'read_file', 'append_to_file', 'replace_in_file', 'validate'];
+  return [
+    'write_file',
+    'write_artifact',
+    'read_file',
+    'append_to_file',
+    'replace_in_file',
+    'validate',
+  ];
 }
 
 /** Kill switch for kit narrowing (D4 feature half). */

@@ -61,6 +61,30 @@ describe('MLX sidecar tool-call linkage', () => {
     expect(build).toMatch(/\["tool_call_id"\]\s*=/);
   });
 
+  it('gates the linkage on a per-template probe rather than sending it always', () => {
+    // Always-on is more correct on paper and measurably worse for Hermes
+    // templates: Qwen starts seeing its own past `<tool_call>` blocks in the
+    // transcript and imitates them. Core-suite MLX went 8/11 -> 5/11, tool
+    // calls 457 -> 753, and three fast passes became slow model-stuck retry
+    // loops. Only templates that actually LOSE the tool result without the
+    // pairing get it; everything else stays on the byte-identical legacy
+    // shape (which also keeps their prompt caches valid).
+    const build = sliceBlock(SERVER_SRC, 'def _build_prompt(');
+    expect(build).toMatch(/if link_tools:/);
+    expect(build).toMatch(/_template_needs_tool_linkage\(/);
+
+    const probe = sliceBlock(SERVER_SRC, 'def _template_needs_tool_linkage(');
+    // The verdict must come from comparing a linked render against a bare
+    // one, not from a hardcoded family list.
+    expect(probe).toMatch(/_LINKAGE_PROBE_MARK not in bare/);
+    expect(probe).toMatch(/_LINKAGE_PROBE_MARK in linked/);
+    // A probe that raises must fall back to the legacy shape, never to
+    // "send it anyway" — that would reintroduce the Qwen regression on any
+    // template whose probe render happens to fail.
+    expect(probe).toMatch(/needs = False/);
+    expect(probe).toMatch(/_TOOL_LINKAGE_PROBE\[key\] = needs/);
+  });
+
   it('normalizes stringified function.arguments to a mapping', () => {
     const shaper = sliceBlock(SERVER_SRC, 'def _template_tool_calls(');
     expect(shaper).toMatch(/json\.loads/);

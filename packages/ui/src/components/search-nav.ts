@@ -11,7 +11,7 @@ const GROUP_ORDER: Array<{ kind: UnifiedSearchResultKind; label: string }> = [
   { kind: 'document', label: 'Documents' },
   { kind: 'content', label: 'Content' },
   { kind: 'symbol', label: 'Symbols' },
-  { kind: 'session', label: 'Sessions' },
+  { kind: 'session', label: 'Threads' },
   { kind: 'memory', label: 'Memories' },
 ];
 

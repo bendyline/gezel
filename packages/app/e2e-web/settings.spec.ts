@@ -39,20 +39,36 @@ const SECTIONS = [
 ];
 
 test.describe('settings', () => {
-  test('section tour', async ({ page }) => {
-    await gotoHome(page);
-    await openAreaView(page, 'settings');
+  test('section tour', async ({ page, daemon }) => {
+    const client = new GezelClient({ baseUrl: daemon.baseURL, token: daemon.token });
+    // API-key providers stay hidden until configured. Seed inert credentials so
+    // this tour covers their settings panels without changing the active mock
+    // provider or making an external request.
+    await client.updateConfig({
+      openaiApiKey: 'sk-e2e-openai',
+      anthropicApiKey: 'sk-ant-e2e-anthropic',
+    });
 
-    for (const s of SECTIONS) {
-      await page.getByTestId(`settings-nav-${s.id}`).click();
-      const panel = page.getByTestId(`settings-section-${s.id}`);
-      await expect(panel).toBeVisible();
-      await settle(page);
-      await shot(page, s.name, {
-        area: 'settings',
-        clip: panel,
-        selector: `[data-testid=settings-section-${s.id}]`,
-        description: s.desc,
+    try {
+      await gotoHome(page);
+      await openAreaView(page, 'settings');
+
+      for (const s of SECTIONS) {
+        await page.getByTestId(`settings-nav-${s.id}`).click();
+        const panel = page.getByTestId(`settings-section-${s.id}`);
+        await expect(panel).toBeVisible();
+        await settle(page);
+        await shot(page, s.name, {
+          area: 'settings',
+          clip: panel,
+          selector: `[data-testid=settings-section-${s.id}]`,
+          description: s.desc,
+        });
+      }
+    } finally {
+      await client.updateConfig({
+        openaiApiKey: '',
+        anthropicApiKey: '',
       });
     }
   });

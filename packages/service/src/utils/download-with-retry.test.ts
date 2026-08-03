@@ -107,6 +107,9 @@ describe('downloadWithRetry', () => {
     if (result.kind === 'ok') {
       expect(result.bytesWritten).toBe(8);
       expect(result.partialPath).toBe(`${destPath}.partial`);
+      // A clean single-pass (200) transfer hashes inline, so the caller
+      // can skip re-reading the file to verify.
+      expect(result.sha256).toBe(sha256(Buffer.from(payload)));
     }
     expect(readFileSync(`${destPath}.partial`)).toEqual(Buffer.from(payload));
     // At least one progress event, none of them `retrying`.
@@ -257,6 +260,9 @@ describe('downloadWithRetry', () => {
     expect(result.kind).toBe('ok');
     if (result.kind === 'ok') {
       expect(result.bytesWritten).toBe(8);
+      // A 206 resume appended to bytes the inline hasher never saw, so no
+      // inline digest — the caller must read the file back to verify.
+      expect(result.sha256).toBeUndefined();
     }
     // First attempt should have Range (we already had bytes on disk).
     // Second attempt should also have Range (the failed first didn't
@@ -266,6 +272,65 @@ describe('downloadWithRetry', () => {
     expect(callLog[1]?.range).toBe('bytes=4-');
     // Final file should be the concatenation of the seeded + retry payload.
     expect(readFileSync(partialPath)).toEqual(Buffer.from([1, 2, 3, 4, 5, 6, 7, 8]));
+  });
+
+  it('caps the file at the server-declared size when the body over-delivers', async () => {
+    // A quirky CDN / Xet reconstruction streams MORE bytes than Content-Length
+    // claims. The write cap must stop at the declared size so the `.partial`
+    // can never end up larger than the real file (which would fail sha256
+    // forever). Body = 10 bytes, Content-Length = 8.
+    const tenBytes = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    const { fetchImpl } = makeFetchSequence([
+      async () => bytesResponse(tenBytes, 200, { 'content-length': '8' }),
+    ]);
+    const destPath = join(workDir, 'weights.bin');
+    const { result } = await runDownload(
+      downloadWithRetry({ url: 'https://hf.test/foo', destPath, approxSizeBytes: 8, fetchImpl }),
+    );
+    expect(result.kind).toBe('ok');
+    if (result.kind === 'ok') {
+      expect(result.bytesWritten).toBe(8);
+      // Inline digest must cover exactly the 8 kept bytes, not the 10 streamed.
+      expect(result.sha256).toBe(sha256(Buffer.from(tenBytes.subarray(0, 8))));
+    }
+    expect(statSync(`${destPath}.partial`).size).toBe(8);
+    expect(readFileSync(`${destPath}.partial`)).toEqual(Buffer.from(tenBytes.subarray(0, 8)));
+  });
+
+  it('repairs an over-sized .partial on 416 by truncating to the server size', async () => {
+    // A partial left over-sized by an old (pre-cap) resume. On the next
+    // attempt the server 416s (our Range start is past EOF) and reports the
+    // true size via Content-Range; we trim the excess instead of re-downloading
+    // gigabytes.
+    const destPath = join(workDir, 'weights.bin');
+    const partialPath = `${destPath}.partial`;
+    writeFileSync(partialPath, Buffer.from([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])); // 10 B, real is 6
+    const { fetchImpl } = makeFetchSequence([
+      async () => new Response(null, { status: 416, headers: { 'content-range': 'bytes */6' } }),
+    ]);
+    const { result } = await runDownload(
+      downloadWithRetry({ url: 'https://hf.test/foo', destPath, approxSizeBytes: 6, fetchImpl }),
+    );
+    expect(result.kind).toBe('ok');
+    if (result.kind === 'ok') expect(result.bytesWritten).toBe(6);
+    expect(statSync(partialPath).size).toBe(6);
+    expect(readFileSync(partialPath)).toEqual(Buffer.from([1, 2, 3, 4, 5, 6]));
+  });
+
+  it('leaves the .partial intact on 416 when the server omits the total size', async () => {
+    // No Content-Range → we can't know the true size, so keep the file and let
+    // the caller's sha256 check arbitrate (don't nuke a possibly-complete
+    // download).
+    const destPath = join(workDir, 'weights.bin');
+    const partialPath = `${destPath}.partial`;
+    writeFileSync(partialPath, Buffer.from([1, 2, 3, 4]));
+    const { fetchImpl } = makeFetchSequence([async () => new Response(null, { status: 416 })]);
+    const { result } = await runDownload(
+      downloadWithRetry({ url: 'https://hf.test/foo', destPath, approxSizeBytes: 4, fetchImpl }),
+    );
+    expect(result.kind).toBe('ok');
+    if (result.kind === 'ok') expect(result.bytesWritten).toBe(4);
+    expect(statSync(partialPath).size).toBe(4);
   });
 
   it('handles 200 OK after we sent Range (server ignored resume): restarts from byte zero', async () => {
@@ -284,6 +349,11 @@ describe('downloadWithRetry', () => {
       }),
     );
     expect(result.kind).toBe('ok');
+    if (result.kind === 'ok') {
+      // Server ignored Range and sent a full 200 body from byte 0, so the
+      // whole file was written fresh — the inline digest is valid.
+      expect(result.sha256).toBe(sha256(Buffer.from(fullPayload)));
+    }
     expect(readFileSync(partialPath)).toEqual(Buffer.from(fullPayload));
   });
 

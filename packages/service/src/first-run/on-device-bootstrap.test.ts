@@ -162,6 +162,36 @@ describe('bootstrapOnDeviceFirstRun', () => {
     expect(config.defaultModel?.['llama-cpp']).toMatch(/^(gemma4|qwen3\.6)-/);
   });
 
+  it('re-pins to an already-installed model when the pinned one is missing', async () => {
+    // The "forgot my models" upgrade scenario: the pinned model vanished
+    // (deleted from Settings, or a home flip hid it) but other working
+    // models are on disk. Re-pinning to the tier winner would make Home
+    // offer a fresh multi-GB download; instead we adopt an installed model.
+    await store.writeConfig({
+      provider: 'llama-cpp',
+      defaultModel: { 'llama-cpp': 'gemma4-26b-q4' },
+      firstRunCompleted: true,
+      firstRunInstallError: 'stale error from the abandoned install',
+    });
+    const { manager: llama, calls: llamaCalls } = fakeModelManager(
+      [],
+      [{ id: 'gemma4-e2b-q4' }, { id: 'qwen3.6-27b-q8' }],
+    );
+    const { manager: mlx } = fakeMlxManager();
+    await bootstrapOnDeviceFirstRun({
+      store,
+      llamaCppModels: llama,
+      mlxModels: mlx,
+      catalog: new CatalogService(),
+      platformOverride: 'win32',
+      archOverride: 'x64',
+    });
+    const config = await store.readConfig();
+    expect(config.defaultModel?.['llama-cpp']).toBe('gemma4-e2b-q4');
+    expect(config.firstRunInstallError).toBeUndefined();
+    expect(llamaCalls).toEqual([]);
+  });
+
   it('leaves the pin alone when the same model is already installed on disk', async () => {
     // User finished an E2B install successfully — even if a new tier
     // is now available, we don't tear down their working setup. The

@@ -546,6 +546,11 @@ describe('evaluateSchemaMigrationStructure', () => {
   });
 });
 
+// Every case here spawns a real `tsc --project` (and usually a Node probe on
+// top of it), so the default 5s ceiling is below the cost of the work itself.
+// The helpers own their own 90s/30s spawn budgets; these timeouts sit above
+// them so a genuine hang still surfaces as the helper's timedOut result rather
+// than an opaque Vitest timeout.
 describe('schema migration harness-owned migrateUser gate', () => {
   it('passes the reference full-record migration', async () => {
     await expect(runMigrationFunctionFixture(REFERENCE_MIGRATE)).resolves.toEqual({
@@ -554,7 +559,7 @@ describe('schema migration harness-owned migrateUser gate', () => {
       exitCode: 0,
       timedOut: false,
     });
-  });
+  }, 60_000);
 
   it('rejects the exact captured field-dropping artifact even though its authored suite typechecks', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'gezel-schema-captured-field-drop-'));
@@ -584,7 +589,7 @@ describe('schema migration harness-owned migrateUser gate', () => {
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
-  });
+  }, 120_000);
 
   it('rejects a type-compatible migration that substitutes a non-name field', async () => {
     const result = await runMigrationFunctionFixture(`
@@ -604,7 +609,7 @@ describe('schema migration harness-owned migrateUser gate', () => {
     expect(result).toMatchObject({ ok: false, stage: 'runtime', timedOut: false });
     expect(result?.firstError).toContain('did not preserve id');
     expect(result?.firstError).toContain('hard-coded-id');
-  });
+  }, 60_000);
 
   it('checks email preservation independently after id is correct', async () => {
     const result = await runMigrationFunctionFixture(`
@@ -624,7 +629,7 @@ describe('schema migration harness-owned migrateUser gate', () => {
     expect(result).toMatchObject({ ok: false, stage: 'runtime', timedOut: false });
     expect(result?.firstError).toContain('did not preserve email');
     expect(result?.firstError).toContain('replacement@example.test');
-  });
+  }, 60_000);
 
   it('rejects spreading the legacy name back into an otherwise preserved User', async () => {
     const result = await runMigrationFunctionFixture(`
@@ -638,7 +643,7 @@ describe('schema migration harness-owned migrateUser gate', () => {
 
     expect(result).toMatchObject({ ok: false, stage: 'runtime', timedOut: false });
     expect(result?.firstError).toContain('still has the legacy name field');
-  });
+  }, 60_000);
 });
 
 describe('schema migration generated-test gate', () => {
@@ -742,7 +747,7 @@ describe('schema migration generated-test gate', () => {
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
-  });
+  }, 120_000);
 });
 
 describe('schemaMigrationFeedbackFor', () => {

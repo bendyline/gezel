@@ -8,7 +8,11 @@ import { resolvePlatformKey } from '@bendyline/gezel/native';
 import AdmZip from 'adm-zip';
 import * as tar from 'tar';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { EngineUnavailableError, resolveEngineToCompletion } from './resolver.js';
+import {
+  EngineUnavailableError,
+  impliedEngineVariant,
+  resolveEngineToCompletion,
+} from './resolver.js';
 
 const PLATFORM_KEY = resolvePlatformKey() as string;
 const IS_WIN = process.platform === 'win32';
@@ -345,6 +349,32 @@ describe('resolveEngine — availability gates', () => {
     } finally {
       if (prior !== undefined) process.env.GEZEL_NATIVE_ENGINE_VERSION = prior;
       await rm(home, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('impliedEngineVariant', () => {
+  it('derives -metal for llama-server on macOS (the only darwin build)', () => {
+    // Wild-caught: `POST /api/engines/binaries/llama-server/ensure` with no
+    // variant extracted the bare darwin-arm64 archive and failed with
+    // "none of [gezel-llama-server, llama-server] were inside it".
+    expect(impliedEngineVariant('llama-server', 'darwin')).toBe('metal');
+  });
+
+  it('derives -cuda for ds4-server on Linux, but not on macOS', () => {
+    expect(impliedEngineVariant('ds4-server', 'linux')).toBe('cuda');
+    expect(impliedEngineVariant('ds4-server', 'darwin')).toBeUndefined();
+  });
+
+  it('leaves llama-server variant to the caller where it is a real choice', () => {
+    expect(impliedEngineVariant('llama-server', 'linux')).toBeUndefined();
+    expect(impliedEngineVariant('llama-server', 'win32')).toBeUndefined();
+  });
+
+  it('implies nothing for engines that ship in the bare archive', () => {
+    for (const engine of ['sd-server', 'whisper-server', 'uv'] as const) {
+      expect(impliedEngineVariant(engine, 'darwin')).toBeUndefined();
+      expect(impliedEngineVariant(engine, 'linux')).toBeUndefined();
     }
   });
 });

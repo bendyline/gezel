@@ -3,6 +3,7 @@ import { ProviderQueue } from '../queue.js';
 import { ExternalToolsUnsupportedError, SessionResumeError } from '../types.js';
 import type { LLMProvider, LLMSession, ModelInfo, ProviderName, SessionOpts } from '../types.js';
 import { type ClaudeBinary, resolveClaudeBinary } from './binary.js';
+import { type ClaudeReasoningEffort, isClaudeReasoningEffort } from './reasoning.js';
 import { AnthropicCliSession, type SessionDeps } from './session.js';
 import { ClaudeWorkerPool } from './worker-pool.js';
 
@@ -11,30 +12,64 @@ const DEFAULT_MODEL = 'sonnet';
 const log = createLogger('anthropic-cli');
 
 /**
- * Hardcoded model list. Claude Code's `--model` flag accepts either a fully-
- * versioned API id (e.g. `claude-sonnet-4-6-20251015`) or one of these stable
- * aliases. We ship the aliases by default — they keep working across CLI
- * upgrades, where versioned ids drift every release. Users who want to pin
- * a specific version can add it via `config.anthropicCli.extraModels`.
+ * Claude Code's stable `--model` aliases. They keep working across CLI/model
+ * upgrades, while users who need a provider-specific or pinned id can add it
+ * through `config.anthropicCli.extraModels`.
  *
  * `opusplan` is the CLI-specific hybrid: Opus for `/plan` mode, Sonnet for
  * execution. Useful for review-style gezels that we don't expose as a
  * separate provider but is worth surfacing here.
  *
- * The display labels include the *current* version Anthropic ships so the
- * dropdown reads "sonnet — Claude Sonnet 4.6" instead of a bare alias.
- * They're cosmetic — the alias is what's passed to `--model`, so the label
- * staying stale across an Anthropic release just means the dropdown
- * undercounts the version (the alias still picks up the new model). Update
- * the labels here when a new x.y ships. The CLI doesn't expose an alias-
- * resolution endpoint we could probe, and a real probe would cost a
- * paid turn on every Settings open.
+ * Display names intentionally describe the alias rather than today's
+ * version. Alias resolution depends on the user's account/provider and moves
+ * independently of Gezel, so embedding version numbers here creates cosmetic
+ * drift even though the actual model selection remains current.
  */
 const HARDCODED_MODELS: ModelInfo[] = [
-  { id: 'sonnet', name: 'sonnet — Claude Sonnet 4.6' },
-  { id: 'opus', name: 'opus — Claude Opus 4.7' },
-  { id: 'haiku', name: 'haiku — Claude Haiku 4.5' },
-  { id: 'opusplan', name: 'opusplan — Opus 4.7 (plan) + Sonnet 4.6 (execute)' },
+  { id: 'default', name: 'default — Recommended for your account' },
+  {
+    id: 'best',
+    name: 'best — Latest Claude Opus',
+    supportsReasoning: true,
+    reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+    defaultReasoningEffort: 'xhigh',
+  },
+  {
+    id: 'sonnet',
+    name: 'sonnet — Latest Claude Sonnet',
+    supportsReasoning: true,
+    reasoningEfforts: ['low', 'medium', 'high', 'max'],
+    defaultReasoningEffort: 'high',
+  },
+  {
+    id: 'sonnet[1m]',
+    name: 'sonnet[1m] — Latest Claude Sonnet · 1M context',
+    supportsReasoning: true,
+    reasoningEfforts: ['low', 'medium', 'high', 'max'],
+    defaultReasoningEffort: 'high',
+  },
+  {
+    id: 'opus',
+    name: 'opus — Latest Claude Opus',
+    supportsReasoning: true,
+    reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+    defaultReasoningEffort: 'xhigh',
+  },
+  {
+    id: 'opus[1m]',
+    name: 'opus[1m] — Latest Claude Opus · 1M context',
+    supportsReasoning: true,
+    reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+    defaultReasoningEffort: 'xhigh',
+  },
+  { id: 'haiku', name: 'haiku — Latest Claude Haiku' },
+  {
+    id: 'opusplan',
+    name: 'opusplan — Opus planning + Sonnet execution',
+    supportsReasoning: true,
+    reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+    defaultReasoningEffort: 'xhigh',
+  },
 ];
 
 export type ClaudePermissionMode = 'default' | 'acceptEdits' | 'plan' | 'bypassPermissions';
@@ -44,6 +79,8 @@ export interface AnthropicCliProviderOptions {
   binaryPath?: string;
   /** Default model when neither the gezel nor session opts pin one. */
   defaultModel?: string;
+  /** Default effort when the session does not provide a recognized value. */
+  defaultReasoningEffort?: ClaudeReasoningEffort;
   /** User-supplied additions to the hardcoded model list. */
   extraModels?: ModelInfo[];
   /** Per-install permission mode default. Falls back to `acceptEdits`. */
@@ -122,6 +159,7 @@ export class AnthropicCliProvider implements LLMProvider {
   private resolved: ClaudeBinary | null = null;
   private readonly binaryPathOverride?: string;
   private readonly defaultModel: string;
+  private readonly defaultReasoningEffort?: ClaudeReasoningEffort;
   private readonly extraModels: ModelInfo[];
   private readonly defaultPermissionMode: ClaudePermissionMode;
   private readonly runtimeDir: string;
@@ -130,6 +168,9 @@ export class AnthropicCliProvider implements LLMProvider {
   constructor(opts: AnthropicCliProviderOptions) {
     if (opts.binaryPath !== undefined) this.binaryPathOverride = opts.binaryPath;
     this.defaultModel = opts.defaultModel ?? DEFAULT_MODEL;
+    if (opts.defaultReasoningEffort) {
+      this.defaultReasoningEffort = opts.defaultReasoningEffort;
+    }
     this.extraModels = opts.extraModels ?? [];
     this.defaultPermissionMode = opts.defaultPermissionMode ?? 'acceptEdits';
     this.runtimeDir = opts.runtimeDir;
@@ -190,9 +231,11 @@ export class AnthropicCliProvider implements LLMProvider {
       projectId: 'oneshot',
       cwd: process.cwd(),
     };
+    const reasoningEffort = pickReasoningEffort(opts.reasoningEffort, this.defaultReasoningEffort);
     const deps: SessionDeps = {
       binaryPath: this.resolved.path,
       model: opts.model ?? this.defaultModel,
+      ...(reasoningEffort ? { reasoningEffort } : {}),
       permissionMode: ctx.permissionModeOverride ?? this.defaultPermissionMode,
       systemMessage: opts.systemMessage,
       context: ctx,
@@ -222,4 +265,11 @@ export class AnthropicCliProvider implements LLMProvider {
     for (const m of this.extraModels) merged.set(m.id, m);
     return [...merged.values()].sort((a, b) => a.id.localeCompare(b.id));
   }
+}
+
+function pickReasoningEffort(
+  sessionValue: string | undefined,
+  providerDefault: ClaudeReasoningEffort | undefined,
+): ClaudeReasoningEffort | undefined {
+  return isClaudeReasoningEffort(sessionValue) ? sessionValue : providerDefault;
 }

@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { SessionResumeError } from '../types.js';
 import type { ToolCallEvent, TurnUsage } from '../types.js';
+import type { ClaudeReasoningEffort } from './reasoning.js';
 import { ClaudeWorker, type WorkerTurnHooks } from './worker.js';
 
 let dir: string;
@@ -478,11 +479,13 @@ describe('ClaudeWorker — system prompt delivery', () => {
     systemMessage: string;
     manageRuntimeFiles: boolean;
     sessionId: string;
-    capture: (args: string[]) => void;
+    reasoningEffort?: ClaudeReasoningEffort;
+    capture: (args: string[], spawnOptions: unknown) => void;
   }): ClaudeWorker {
     return new ClaudeWorker({
       binaryPath: 'node',
       model: 'sonnet',
+      ...(opts.reasoningEffort ? { reasoningEffort: opts.reasoningEffort } : {}),
       permissionMode: 'acceptEdits',
       systemMessage: opts.systemMessage,
       context: { sessionId: opts.sessionId, gezelId: 'g-1', projectId: 'p-1', cwd: dir },
@@ -490,13 +493,32 @@ describe('ClaudeWorker — system prompt delivery', () => {
       manageRuntimeFiles: opts.manageRuntimeFiles,
       idleTimeoutMs: 60_000,
       spawnImpl: ((command: string, args: readonly string[], spawnOptions: unknown) => {
-        opts.capture([...args]);
+        opts.capture([...args], spawnOptions);
         // eslint-disable-next-line @typescript-eslint/no-require-imports
         const cp = require('node:child_process') as typeof import('node:child_process');
         return cp.spawn(command, [opts.binPath, ...args], spawnOptions as never);
       }) as never,
     });
   }
+
+  it("passes reasoning effort through Claude Code's supported environment variable", async () => {
+    const binPath = await makeFakeClaude({ sessionId: 'cli-effort', turns: [] });
+    let capturedEnv: NodeJS.ProcessEnv | undefined;
+    const worker = buildCapturingWorker({
+      binPath,
+      systemMessage: 'You are a test gezel.',
+      manageRuntimeFiles: false,
+      sessionId: 'sess-effort',
+      reasoningEffort: 'xhigh',
+      capture: (_args, spawnOptions) => {
+        capturedEnv = (spawnOptions as { env?: NodeJS.ProcessEnv }).env;
+      },
+    });
+
+    await worker.start();
+    expect(capturedEnv?.CLAUDE_CODE_EFFORT_LEVEL).toBe('xhigh');
+    await worker.shutdown();
+  });
 
   it('passes the prompt via --append-system-prompt-file (off the command line) when managing runtime files', async () => {
     const binPath = await makeFakeClaude({ sessionId: 'cli-sp', turns: [] });

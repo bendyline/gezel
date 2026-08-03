@@ -21,10 +21,10 @@ Your first conversations are with a **Meester** gezel: the guildmaster who acts 
 
 ## Your data stays yours {[pullQuote]}
 
-Everything gezel creates lives on your own disk as ordinary files you can open, copy, and back up. There is no gezel cloud account, no server of ours between you and your work. Gezel talks directly to whichever AI provider you choose — including models that run entirely on your own machine.
+When you use local downloaded models, everything gezel does is powered by your device - no cloud account or expense required, and everything gezel creates lives on your own device.
 
 ## Where to go next
 
 - Meet the crew model in [Your crew](the-crew.md).
-- See how work is organized in [Projects and sessions](projects-and-sessions.md).
+- See how work is organized in [Projects and threads](projects-and-threads.md).
 - Browse what your gezellen can do by role in the Gezel Roles section of this Handboek.

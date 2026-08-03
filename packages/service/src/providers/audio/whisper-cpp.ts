@@ -23,6 +23,7 @@ import { createReadStream } from 'node:fs';
 import { mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import {
+  MODEL_HASH_READ_BUFFER_BYTES,
   type ModelStorageRoots,
   findModelRoot,
   hashModelPayloadFiles,
@@ -440,7 +441,9 @@ export async function* downloadWithSha256(
 
   const hasher = createHash('sha256');
   await new Promise<void>((resolve, reject) => {
-    const stream = createReadStream(tmpPath);
+    // Big read buffer so the hash doesn't starve in the busy daemon event
+    // loop. See MODEL_HASH_READ_BUFFER_BYTES.
+    const stream = createReadStream(tmpPath, { highWaterMark: MODEL_HASH_READ_BUFFER_BYTES });
     stream.on('data', (chunk) => hasher.update(chunk));
     stream.on('end', resolve);
     stream.on('error', reject);

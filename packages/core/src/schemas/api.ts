@@ -125,6 +125,8 @@ export const MachineMemoryUsageSchema = z.object({
   gezelEngineProcessCount: z.number().int().nonnegative(),
   orphanedGezelEngineProcessCount: z.number().int().nonnegative(),
   otherBytes: z.number().nonnegative().nullable(),
+  /** Reclaimable file cache, when the host exposes it separately from used RAM. */
+  cachedBytes: z.number().nonnegative().nullable().optional(),
   freeBytes: z.number().nonnegative().nullable(),
   sampledAt: z.string(),
   source: z.enum(['device-health', 'system-memory', 'capacity-only']),
@@ -1841,7 +1843,8 @@ export const GezelConfigSchema = z.object({
    *     `bypassPermissions` → `--dangerously-bypass-approvals-and-sandbox`.
    *   - `defaultReasoningEffort`: per-install fallback for Codex's
    *     `model_reasoning_effort` config knob. Forwarded as `-c
-   *     model_reasoning_effort="<low|medium|high>"`.
+   *     model_reasoning_effort="<effort>"`; supported values remain
+   *     model-dependent.
    *   - `extraModels`: extend the hardcoded model list (e.g. to pin
    *     a newly-released id ahead of an app update).
    *   - `extraConfigOverrides`: power-user escape hatch — extra
@@ -1856,7 +1859,9 @@ export const GezelConfigSchema = z.object({
       defaultPermissionMode: z
         .enum(['default', 'acceptEdits', 'plan', 'bypassPermissions'])
         .optional(),
-      defaultReasoningEffort: z.enum(['low', 'medium', 'high']).optional(),
+      defaultReasoningEffort: z
+        .enum(['minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'])
+        .optional(),
       extraModels: z.array(z.object({ id: z.string(), name: z.string() })).optional(),
       extraConfigOverrides: z.record(z.string(), z.string()).optional(),
     })
@@ -2100,6 +2105,43 @@ export type GezelConfig = z.infer<typeof GezelConfigSchema>;
 export const UpdateConfigRequestSchema = GezelConfigSchema.extend({
   ollamaThink: z.boolean().nullable().optional(),
   firstRunInstallError: z.string().nullable().optional(),
+  // llama-cpp Advanced overrides the Settings UI can reset to their
+  // default. The read/on-disk shape stays non-null (`.optional()`); the
+  // request side accepts `null` so picking the default sentinel (Auto /
+  // q8_0 / Off) clears a previously-pinned value. `writeConfig` strips
+  // the null before persistence. Without this, sending `undefined` is
+  // dropped by JSON.stringify and the field can never be un-pinned.
+  llamaCppBaseUrl: z.string().nullable().optional(),
+  llamaCppModelPath: z.string().nullable().optional(),
+  llamaCppBackendOverride: z.enum(['auto', 'cuda', 'vulkan', 'metal', 'cpu']).nullable().optional(),
+  llamaCppKvCacheType: z.enum(['f16', 'q8_0', 'q4_0']).nullable().optional(),
+  llamaCppFlashAttn: z
+    .union([z.boolean(), z.enum(['on', 'off', 'auto'])])
+    .nullable()
+    .optional(),
+  llamaCppSpecType: z
+    .enum([
+      'none',
+      'draft-mtp',
+      'draft-eagle3',
+      'draft-dflash',
+      'draft-simple',
+      'ngram-mod',
+      'ngram-simple',
+      'ngram-map-k',
+      'ngram-map-k4v',
+      'ngram-cache',
+    ])
+    .nullable()
+    .optional(),
+  llamaCppCpuMoe: z.boolean().nullable().optional(),
+  llamaCppSwaFull: z.boolean().nullable().optional(),
+  // MLX Advanced overrides the Settings UI can reset to their default —
+  // same reset-on-null contract as the llama-cpp fields above.
+  mlxBaseUrl: z.string().nullable().optional(),
+  mlxModelPath: z.string().nullable().optional(),
+  mlxPackageSpec: z.string().nullable().optional(),
+  mlxKvBits: z.number().int().min(0).max(8).nullable().optional(),
   /**
    * Direct mutation is rejected by the route — the move worker is the
    * only writer, immediately before triggering a service restart. The

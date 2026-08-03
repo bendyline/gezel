@@ -18,10 +18,13 @@ import type {
   ConfigResponse,
   ProviderQueueState,
   QueueStatusResponse,
+  TaskHandoffBucket,
+  TaskRunnerState,
 } from '@bendyline/gezel-client';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { GezelIcon } from './GezelIcon.js';
+import { NightShiftMoonGlyph } from './night-shift-glyph.js';
 import { queueOpenSession } from './pending-open-session.js';
 import { providerLabel } from './provider-label.js';
 import { type LiveTurnState, useOnDeviceLiveTurns } from './useOnDeviceLiveTurns.js';
@@ -57,6 +60,63 @@ function isBusy(state: ProviderQueueState): boolean {
 
 function totalQueued(state: ProviderQueueState): number {
   return state.queuedInteractive + state.queuedBackground;
+}
+
+const NO_HANDOFFS: TaskHandoffBucket = { count: 0, byGezel: {} };
+
+/**
+ * Split the task runner's queue into work that is actually waiting on the
+ * engine and work parked until the next Night Shift window.
+ *
+ * Only the first is a backlog. Night-shift handoffs sit on the queue all
+ * day by design — counting them in the header reads as a stuck queue and
+ * asks the user to worry about something that will take care of itself,
+ * so they stay out of the chip entirely and are explained in the popover.
+ *
+ * A daemon older than this UI sends only the totals; treat those as
+ * dispatchable so the meter keeps its previous behavior rather than
+ * silently hiding work it can't classify.
+ */
+function taskHandoffSplit(state: TaskRunnerState | undefined): {
+  dispatchable: TaskHandoffBucket;
+  scheduled: TaskHandoffBucket;
+} {
+  if (!state) return { dispatchable: NO_HANDOFFS, scheduled: NO_HANDOFFS };
+  return {
+    dispatchable: state.dispatchable ?? {
+      count: state.pendingCount,
+      byGezel: state.pendingByGezel,
+    },
+    scheduled: state.scheduled ?? NO_HANDOFFS,
+  };
+}
+
+/** Why nothing in the dispatchable bucket is moving, in the user's terms. */
+function handoffHoldNote(state: TaskRunnerState): string | undefined {
+  if (state.holdReason === 'engagement-off') {
+    return 'AI engagement is off — turn it back on in Settings to start these.';
+  }
+  if (state.holdReason === 'provider-busy') return 'Waiting for a free slot.';
+  return undefined;
+}
+
+function formatClock(iso: string): string | undefined {
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return undefined;
+  return at.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+}
+
+/**
+ * When the scheduled bucket picks up. Deliberately says what will happen
+ * on its own versus what the user would have to do — a shift that is
+ * simply not open yet needs no action, a Night Shift switched off does.
+ */
+function scheduledHandoffNote(nightShift: TaskRunnerState['nightShift']): string {
+  if (!nightShift) return 'Held for the next Night Shift.';
+  if (!nightShift.opensAt) return 'Night Shift is off — turn it on to run these.';
+  if (nightShift.active) return 'Held for the next window.';
+  const opensAt = formatClock(nightShift.opensAt);
+  return opensAt ? `Starts ${opensAt}. Nothing to do.` : 'Starts tonight. Nothing to do.';
 }
 
 interface QueueActorIdentity {
@@ -443,7 +503,9 @@ export function QueueMeter() {
           : null;
   const liveTurns = useOnDeviceLiveTurns(onDeviceProvider !== null);
 
-  const taskRunnerPending = status?.taskRunner.pendingCount ?? 0;
+  // Only work waiting on the engine counts here. Night-shift handoffs are
+  // excluded on purpose — see `taskHandoffSplit`.
+  const taskRunnerPending = taskHandoffSplit(status?.taskRunner).dispatchable.count;
 
   // Preparing-window turns: in-flight on-device turns that aren't yet
   // represented in the provider queue because the engine is still
@@ -617,6 +679,8 @@ function QueueMeterPanel({
   // engine loads, so the "No providers initialized yet" empty state
   // should defer to it.
   const showPreparing = onDeviceProvider !== null && preparingTurns.length > 0;
+  const handoffs = taskHandoffSplit(status.taskRunner);
+  const holdNote = handoffHoldNote(status.taskRunner);
 
   return (
     <div className="queue-meter-panel" aria-label="AI chat queue">
@@ -868,32 +932,82 @@ function QueueMeterPanel({
         );
       })}
 
-      {status.taskRunner.pendingCount > 0 && (
+      {handoffs.dispatchable.count > 0 && (
         <section className="queue-meter-panel-section">
           <header className="queue-meter-panel-provider">
             <span className="queue-meter-panel-provider-name">Task handoffs</span>
-            <span className="muted small">{status.taskRunner.pendingCount} pending dispatch</span>
+            <span className="muted small">{handoffs.dispatchable.count} pending dispatch</span>
           </header>
-          <ul className="queue-meter-panel-list">
-            {Object.entries(status.taskRunner.pendingByGezel).map(([gezelId, count]) => (
-              <li key={gezelId} className="queue-meter-panel-item queue-meter-panel-item-pending">
-                <QueueItemMarker
-                  gezelId={gezelId}
-                  actorLabel={undefined}
-                  gezels={gezels}
-                  boringMode={boringMode}
-                  kind="task"
-                />
-                <span className="queue-meter-panel-gezel">
-                  {describeActor(gezelId, undefined, gezels, boringMode)}
-                </span>
-                <span className="queue-meter-panel-time muted">×{count}</span>
-              </li>
-            ))}
-          </ul>
+          {holdNote && <p className="queue-meter-panel-note muted small">{holdNote}</p>}
+          <QueueHandoffList
+            byGezel={handoffs.dispatchable.byGezel}
+            gezels={gezels}
+            boringMode={boringMode}
+          />
+        </section>
+      )}
+
+      {/* Scheduled work, kept out of the header chip. The section exists to
+          answer "what is my crew going to do tonight?", not to prompt an
+          action — so it leads with when it runs, not with a count. */}
+      {handoffs.scheduled.count > 0 && (
+        <section className="queue-meter-panel-section queue-meter-panel-section-scheduled">
+          <header className="queue-meter-panel-provider">
+            <button
+              type="button"
+              className="queue-meter-panel-provider-name queue-meter-panel-jump"
+              onClick={() => {
+                onClose();
+                window.dispatchEvent(new CustomEvent('gezel:open-night-shift'));
+              }}
+              title="Open the Night Shift menu"
+            >
+              <NightShiftMoonGlyph className="queue-meter-panel-moon" />
+              Night Shift
+            </button>
+            <span className="muted small">{handoffs.scheduled.count} scheduled</span>
+          </header>
+          <p className="queue-meter-panel-note muted small">
+            {scheduledHandoffNote(status.taskRunner.nightShift)}
+          </p>
+          <QueueHandoffList
+            byGezel={handoffs.scheduled.byGezel}
+            gezels={gezels}
+            boringMode={boringMode}
+          />
         </section>
       )}
     </div>
+  );
+}
+
+function QueueHandoffList({
+  byGezel,
+  gezels,
+  boringMode,
+}: {
+  byGezel: Record<string, number>;
+  gezels: Map<string, GezelSummary>;
+  boringMode: boolean;
+}) {
+  return (
+    <ul className="queue-meter-panel-list">
+      {Object.entries(byGezel).map(([gezelId, count]) => (
+        <li key={gezelId} className="queue-meter-panel-item queue-meter-panel-item-pending">
+          <QueueItemMarker
+            gezelId={gezelId}
+            actorLabel={undefined}
+            gezels={gezels}
+            boringMode={boringMode}
+            kind="task"
+          />
+          <span className="queue-meter-panel-gezel">
+            {describeActor(gezelId, undefined, gezels, boringMode)}
+          </span>
+          <span className="queue-meter-panel-time muted">×{count}</span>
+        </li>
+      ))}
+    </ul>
   );
 }
 

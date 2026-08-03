@@ -163,6 +163,23 @@ export async function bootstrapOnDeviceFirstRun(opts: {
       const pinned = config.defaultModel?.[provider];
       const installed = await installer.listInstalled();
       const pinnedIsOnDisk = pinned ? installed.some((m) => m.id === pinned) : false;
+      if (!pinnedIsOnDisk && installed.length > 0) {
+        // The pin is stale but the user has working models — repoint at one
+        // of those instead of the tier winner. Re-pinning to a not-installed
+        // recommendation here would make Home offer a fresh multi-GB
+        // download while gigabytes of working weights sit on disk, which
+        // reads as "the app forgot my models."
+        const fallback = installed[0]!.id;
+        log.warn(
+          `[first-run] pinned ${provider}/${pinned ?? '<none>'} is not installed but ` +
+            `${installed.length} model(s) are; re-pinning to installed ${fallback}.`,
+        );
+        await store.writeConfig({
+          defaultModel: { ...config.defaultModel, [provider]: fallback },
+          firstRunInstallError: null as unknown as undefined,
+        });
+        return;
+      }
       if (!pinnedIsOnDisk) {
         const decision = await detectModelTier(await listChatModelManifests(opts.catalog));
         const target = resolveFirstRunTarget(decision.tier, effPlatform, effArch);

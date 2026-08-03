@@ -146,27 +146,72 @@ def test_gemma(model_dir):
     )
 
 
+def _find_model_dirs(prefix: str):
+    """Every installed match, one per distinct tokenizer CONTENT.
+
+    Testing only the first alphabetical match leaves every other
+    tokenizer untested: `sorted()` always picked gemma4-12b, so nobody
+    knew whether the E-models shared its vocab or not until a wild
+    grammar-vs-vocab suspicion forced a manual check (they do — their
+    tokenizer.json is byte-identical to mainline's). Dedupe by content
+    hash so identical tokenizers run once, and any future model that
+    ships a genuinely different vocab is guaranteed its own pass.
+    """
+    import hashlib
+
+    seen = set()
+    out = []
+    for home in CANDIDATE_HOMES:
+        if not os.path.isdir(home):
+            continue
+        for d in sorted(x for x in os.listdir(home) if x.startswith(prefix)):
+            cand = os.path.join(home, d)
+            tok_file = next(
+                (
+                    p
+                    for p in (
+                        os.path.join(cand, "tokenizer.json"),
+                        os.path.join(cand, "tokenizer_config.json"),
+                    )
+                    if os.path.exists(p)
+                ),
+                None,
+            )
+            if tok_file is None:
+                continue
+            h = hashlib.md5()
+            with open(tok_file, "rb") as fh:
+                for chunk in iter(lambda: fh.read(1 << 20), b""):
+                    h.update(chunk)
+            key = h.hexdigest()
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(cand)
+    return out
+
+
 def main():
-    qwen = _find_model_dir("qwen")
-    gemma = _find_model_dir("gemma")
-    if qwen is None and gemma is None:
+    qwens = _find_model_dirs("qwen")
+    gemmas = _find_model_dirs("gemma")
+    if not qwens and not gemmas:
         print("SKIP: no installed Qwen or Gemma MLX model found (tokenizer needed)")
         sys.exit(0)
 
     failed = total = 0
-    if qwen:
+    for qwen in qwens:
         print(f"== hermes / tokenizer: {qwen} ==")
         f, t = test_hermes(qwen)
         failed += f
         total += t
-    else:
+    if not qwens:
         print("SKIP hermes: no installed Qwen MLX model")
-    if gemma:
+    for gemma in gemmas:
         print(f"== gemma / tokenizer: {gemma} ==")
         f, t = test_gemma(gemma)
         failed += f
         total += t
-    else:
+    if not gemmas:
         print("SKIP gemma: no installed Gemma MLX model")
 
     print(f"\n{total - failed}/{total} passed")

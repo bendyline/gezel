@@ -252,6 +252,96 @@ describe('archetypeToCraftbook', () => {
     expect(doc.description).toContain('gated on artifact `reports/scope.md`');
   });
 
+  it('report/notes kinds default to the artifacts drawer; product-source kinds stay in the workspace', () => {
+    const spec: ArchetypeSpec = {
+      ...arcade,
+      phases: [
+        {
+          id: 'scan',
+          name: 'Scan',
+          role: 'developer',
+          summary: 'inventory deps',
+          prompt: 'Inventory every dependency into `notes/scan.md`.',
+          produces: { path: 'notes/scan.md', kind: 'markdown-notes' },
+        },
+        {
+          id: 'build',
+          name: 'Build',
+          role: 'developer',
+          summary: 'implement',
+          prompt: 'Build the page.',
+          produces: { path: 'index.html', kind: 'html-page' },
+        },
+        {
+          id: 'report',
+          name: 'Report',
+          role: 'reviewer',
+          summary: 'write the audit report',
+          prompt: 'Write `dependency-audit.md`.',
+          produces: { path: 'dependency-audit.md', kind: 'markdown-report' },
+        },
+      ],
+    };
+    const { steps } = archetypeToCraftbook(spec);
+    const byId = new Map(steps.map((s) => [s.id, s]));
+
+    expect(byId.get('scan')?.advanceWhen).toMatchObject({ file: 'notes/scan.md', artifact: true });
+    expect(byId.get('report')?.advanceWhen).toMatchObject({
+      file: 'dependency-audit.md',
+      artifact: true,
+    });
+    const buildAdvance = byId.get('build')?.advanceWhen as { artifact?: boolean } | undefined;
+    expect(buildAdvance?.artifact).toBeUndefined();
+
+    const scanChecks =
+      byId.get('scan')?.gate && 'checks' in byId.get('scan')!.gate!
+        ? (byId.get('scan')!.gate!.checks ?? [])
+        : [];
+    expect(scanChecks.length).toBeGreaterThan(0);
+    expect(scanChecks.every((c) => (c as { artifact?: boolean }).artifact === true)).toBe(true);
+
+    // Deterministic drawer steering lands on the step prompt and the
+    // evaluate footer so path-first spec prose can't send the model to
+    // `write_file`/`read_file` against a drawer-gated deliverable.
+    expect(byId.get('scan')?.prompt).toContain('write_artifact');
+    expect(byId.get('build')?.prompt).not.toContain('write_artifact');
+    expect(byId.get('evaluate')?.prompt).toContain('read_artifact');
+  });
+
+  it('an explicit artifact:false keeps a notes deliverable in the workspace', () => {
+    const spec: ArchetypeSpec = {
+      ...arcade,
+      phases: [
+        {
+          id: 'notes',
+          name: 'Notes',
+          role: 'developer',
+          summary: 'working notes',
+          prompt: 'Write working notes.',
+          produces: { path: 'notes/working.md', kind: 'markdown-notes', artifact: false },
+        },
+      ],
+    };
+    const { steps } = archetypeToCraftbook(spec);
+    const notes = steps.find((s) => s.id === 'notes');
+    expect((notes?.advanceWhen as { artifact?: boolean } | undefined)?.artifact).toBeUndefined();
+    expect(notes?.prompt).not.toContain('write_artifact');
+    const checks = notes?.gate && 'checks' in notes.gate ? (notes.gate.checks ?? []) : [];
+    expect(checks.some((c) => (c as { artifact?: boolean }).artifact === true)).toBe(false);
+  });
+
+  it('drawer-defaulted books get the standing artifact note in the about when the spec has none', () => {
+    const spec: ArchetypeSpec = {
+      ...disciplineSpec,
+      sourceDiscipline: undefined,
+    };
+    const doc = JSON.parse(archetypeToFiles(spec, '2026-06-05T00:00:00Z').files[1]!.content) as {
+      description: string;
+    };
+    expect(doc.description).toContain('artifacts drawer (`write_artifact` / `read_artifact`)');
+    expect(doc.description).toContain('gated on artifact `audit.md`');
+  });
+
   it('regeneration is deterministic: same spec → byte-identical files', () => {
     const a = archetypeToFiles(arcade, '2026-06-05T00:00:00Z');
     const b = archetypeToFiles(arcade, '2026-06-05T00:00:00Z');

@@ -3,6 +3,7 @@ import '@bendyline/squisq-editor-react/styles';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
 import { AiToolbarButtons } from '../components/AiToolbarButtons.js';
+import { AutosaveStatus } from '../components/AutosaveStatus.js';
 import { ExportToolbarControls } from '../components/DocumentExport/index.js';
 import { PromoteToTabButton } from '../components/PromoteToTabButton.js';
 import {
@@ -115,25 +116,6 @@ export function DocumentDetail({ path, standalone = false }: DocumentDetailProps
   }
 
   const markdown = isMarkdown(path);
-  const autosaveStatus = (
-    <output className={`autosave-chip autosave-chip-${autosave.phase}`} aria-live="polite">
-      {autosave.phase === 'dirty' && 'Unsaved changes'}
-      {autosave.phase === 'saving' && 'Saving…'}
-      {autosave.phase === 'saved' && 'Saved'}
-      {autosave.phase === 'error' && (
-        <>
-          <span title={autosave.error?.message ?? 'unknown error'}>Save failed</span>
-          <button
-            type="button"
-            className="link-btn"
-            onClick={() => void autosave.retry().catch(() => {})}
-          >
-            Retry
-          </button>
-        </>
-      )}
-    </output>
-  );
 
   return (
     <section className="document-detail" data-testid="document-detail">
@@ -149,7 +131,6 @@ export function DocumentDetail({ path, standalone = false }: DocumentDetailProps
           documentLinkProvider={markdown ? documentLinkProvider : null}
           allowVersioning={markdown}
           versionBasename={primaryDocumentFilename}
-          outline={markdown}
           toolbarSlotAfterActions={
             markdown || !standalone ? (
               <>
@@ -159,17 +140,15 @@ export function DocumentDetail({ path, standalone = false }: DocumentDetailProps
             ) : undefined
           }
           toolbarSlotRight={
-            <>
-              {autosaveStatus}
-              {markdown && (
-                <ExportToolbarControls
-                  selectedFile={path}
-                  mediaContainer={container}
-                  mediaSource={{ kind: 'documents' }}
-                />
-              )}
-            </>
+            markdown ? (
+              <ExportToolbarControls
+                selectedFile={path}
+                mediaContainer={container}
+                mediaSource={{ kind: 'documents' }}
+              />
+            ) : undefined
           }
+          statusBarSlotRight={<AutosaveStatus autosave={autosave} />}
         />
       </div>
     </section>

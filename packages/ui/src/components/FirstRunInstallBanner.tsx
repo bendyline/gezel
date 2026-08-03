@@ -159,15 +159,21 @@ export function FirstRunInstallBanner({ config, onConfigChanged, onModelInstalle
         return;
       }
       const sizeBytes = readSizeFromCatalog(catalog, provider);
-      const active = activeRes.installs.find((i) => i.catalogId === targetModel);
+      // Prefer the pinned model's install, but fall back to any other
+      // in-flight install for this provider (e.g. the user kicked off a
+      // different model from Settings). Offering the pinned download while
+      // another multi-GB install streams would run two downloads at once
+      // and leave the visible one untracked.
+      const active =
+        activeRes.installs.find((i) => i.catalogId === targetModel) ?? activeRes.installs[0];
       if (active) {
         // Genuine in-flight install (user clicked the button, or
         // another tab kicked it) — show the spinner banner.
         setState({
           kind: 'installing',
           provider,
-          modelId: targetModel,
-          sizeBytes,
+          modelId: active.catalogId,
+          sizeBytes: active.catalogId === targetModel ? sizeBytes : null,
           progress: {
             bytesWritten: active.bytesWritten,
             totalBytes: active.totalBytes,

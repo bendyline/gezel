@@ -779,7 +779,7 @@ function TaskTabMenu({
                 className={`app-nav-menu-item chat-rail-task-menu-item${active ? ' active' : ''}`}
                 aria-current={active ? 'true' : undefined}
                 onSelect={() => onSelect(task.ref)}
-                title={task.scoped ? `${task.ref} (this session's task)` : task.ref}
+                title={task.scoped ? `${task.ref} (this thread's task)` : task.ref}
               >
                 <span className="chat-rail-menu-check" aria-hidden="true">
                   {active && (
@@ -795,7 +795,7 @@ function TaskTabMenu({
                   )}
                 </span>
                 <code className="chat-rail-task-menu-ref">{task.ref}</code>
-                {task.scoped && <span className="chat-rail-task-menu-scope">This session</span>}
+                {task.scoped && <span className="chat-rail-task-menu-scope">This thread</span>}
               </DropdownMenu.Item>
             );
           })}

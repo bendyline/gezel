@@ -57,6 +57,7 @@ export type NativeEnginePanicKind =
   | 'cuda-illegal-memory-access'
   | 'cuda-device-assert'
   | 'cuda-error'
+  | 'vulkan-out-of-memory'
   | 'assertion-failed'
   /**
    * SIGILL. Every other kind is recognized from a line the engine
@@ -185,6 +186,19 @@ export interface NativeEngineSupervisorOptions {
   /** Called for both expected and unexpected exits after a snapshot is sealed. */
   onExit?: (snapshot: NativeEngineExitSnapshot) => void | Promise<void>;
   /**
+   * Consulted after a start attempt fails (child died or never became
+   * ready — not spawn errors, and not crashes after readiness). Return
+   * true to re-resolve the launch spec and try again in the same
+   * `ensureRunning` call; the owner degrades its plan first (e.g. the
+   * MoE offload ladder after a GPU OOM). Capped at
+   * {@link MAX_STARTUP_RECOVERIES} retries per start, on top of the
+   * one-shot singleton-conflict retry.
+   */
+  recoverStartup?: (info: {
+    panicKind?: NativeEnginePanicKind | undefined;
+    attempt: number;
+  }) => boolean | Promise<boolean>;
+  /**
    * Called on every raw stdout/stderr line BEFORE `onLog`. Optional —
    * when set, callers can parse the engine's log output and emit
    * structured signals (e.g. llama-server's startup-phase classifier).
@@ -247,6 +261,12 @@ type State =
 
 const RESTART_BUDGET = 3;
 const RESTART_WINDOW_MS = 60_000;
+/**
+ * Ceiling on `recoverStartup` retries within one start. Two covers the
+ * full MoE degradation ladder (partial split → all experts to RAM →
+ * engine-owned fit); a hook that keeps asking past that is looping.
+ */
+const MAX_STARTUP_RECOVERIES = 2;
 const HEALTH_FAIL_THRESHOLD = 3;
 const RECENT_OUTPUT_MAX_BYTES = 64 * 1024;
 const EXIT_ATTRIBUTION_WAIT_MS = 250;
@@ -305,6 +325,10 @@ export class NativeEngineSupervisor {
   private readonly fetchImpl: typeof fetch;
   private readonly onLog: (line: string) => void;
   private readonly onExit?: (snapshot: NativeEngineExitSnapshot) => void | Promise<void>;
+  private readonly recoverStartup?: (info: {
+    panicKind?: NativeEnginePanicKind | undefined;
+    attempt: number;
+  }) => boolean | Promise<boolean>;
   private readonly onRawLine?: (line: string) => void;
   private readonly logPrefix: string;
   private readonly readinessPath: string;
@@ -378,6 +402,7 @@ export class NativeEngineSupervisor {
     this.fetchImpl = opts.fetchImpl ?? fetch;
     this.onLog = opts.onLog ?? ((line) => log.info(line));
     if (opts.onExit) this.onExit = opts.onExit;
+    if (opts.recoverStartup) this.recoverStartup = opts.recoverStartup;
     if (opts.onRawLine) this.onRawLine = opts.onRawLine;
     this.logPrefix = opts.logPrefix ?? '[native]';
     this.readinessPath = opts.readinessPath ?? '/health';
@@ -517,7 +542,7 @@ export class NativeEngineSupervisor {
     await killGracefully(child);
   }
 
-  private async startFresh(isRetry = false): Promise<void> {
+  private async startFresh(isRetry = false, recoveryAttempt = 0): Promise<void> {
     const now = Date.now();
     this.recentStarts = this.recentStarts.filter((t) => now - t < RESTART_WINDOW_MS);
     if (this.recentStarts.length >= RESTART_BUDGET) {
@@ -664,6 +689,16 @@ export class NativeEngineSupervisor {
       this.resetIdleTimer();
       this.startHealthWatch();
     } catch (err) {
+      // The panic classifier state is cleared by handleExit — read it now,
+      // before killGracefully drives the exit, so the recovery hook below
+      // sees the fatal line however the failure was surfaced (stdout abort
+      // vs. child death vs. readiness timeout). Cast because TS narrows the
+      // field to `undefined` from the pre-spawn reset above and cannot see
+      // the stdout-callback writes in between.
+      const panicAtFailure = this.currentPanic as
+        | { kind: NativeEnginePanicKind; line: string }
+        | undefined;
+      const attemptStartedAt = this.currentStartedAt;
       // A child that failed before the OS assigned a pid cannot be signalled
       // and may never emit `exit`; waiting for killGracefully would wedge the
       // chat turn while reporting the original spawn failure.
@@ -688,7 +723,32 @@ export class NativeEngineSupervisor {
             `${this.logPrefix} cleared ${cleared} blocking orphan(s) after a failed start — retrying once`,
           );
           this.startupAbort = null;
-          return await this.startFresh(true);
+          return await this.startFresh(true, recoveryAttempt);
+        }
+      }
+      // Owner-driven recovery: give the launch resolver a chance to degrade
+      // its plan (the MoE offload ladder after a GPU OOM) and try again.
+      // Spawn failures are excluded — a missing binary cannot be planned
+      // around, and the child never produced a diagnosable panic.
+      if (!spawnFailed && this.recoverStartup && recoveryAttempt < MAX_STARTUP_RECOVERIES) {
+        const exit = this.lastExit;
+        const panicKind =
+          panicAtFailure?.kind ??
+          (exit && exit.exitedAt >= attemptStartedAt ? exit.panicKind : undefined);
+        let retry = false;
+        try {
+          retry = await this.recoverStartup({ panicKind, attempt: recoveryAttempt });
+        } catch (hookErr) {
+          this.onLog(
+            `${this.logPrefix} recoverStartup hook threw (not retrying): ${hookErr instanceof Error ? hookErr.message : hookErr}`,
+          );
+        }
+        if (retry) {
+          this.onLog(
+            `${this.logPrefix} start failed (${panicKind ?? 'no panic classified'}) — owner degraded the launch plan, retrying (${recoveryAttempt + 1}/${MAX_STARTUP_RECOVERIES})`,
+          );
+          this.startupAbort = null;
+          return await this.startFresh(isRetry, recoveryAttempt + 1);
         }
       }
       throw err;
@@ -1152,6 +1212,15 @@ export function classifyNativeEnginePanic(
   }
   if (/CUDA error:\s*(?:out of memory|memory allocation)/i.test(line)) {
     return { kind: 'cuda-out-of-memory', line: clipped };
+  }
+  // Vulkan's spellings of the same condition — the backend a non-CUDA
+  // discrete card (or a CUDA card without nvidia-smi) runs on.
+  if (
+    /ErrorOutOfDeviceMemory|OutOfDeviceMemoryError|ggml_vulkan:.*(?:allocation|memory).*failed/i.test(
+      line,
+    )
+  ) {
+    return { kind: 'vulkan-out-of-memory', line: clipped };
   }
   if (/CUDA error:\s*(?:an )?illegal memory access/i.test(line)) {
     return { kind: 'cuda-illegal-memory-access', line: clipped };

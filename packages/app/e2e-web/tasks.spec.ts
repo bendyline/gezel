@@ -90,6 +90,7 @@ test.describe('tasks', () => {
     await expect(detail.locator('.task-detail-status-badge')).toHaveText('ready');
     await detail.getByRole('button', { name: 'Fire task' }).click();
     await expect(detail.locator('.task-detail-status-badge')).toHaveCount(0);
-    await expect(detail.getByRole('combobox').first()).toContainText('active');
+    const status = detail.getByRole('radiogroup', { name: 'Task status' });
+    await expect(status.getByRole('radio', { name: 'Active' })).toBeChecked();
   });
 });

@@ -30,12 +30,17 @@ vi.mock('../components/HealthStrip.js', () => ({ HealthStrip: () => null }));
 vi.mock('../components/InstallModelTuningEditor.js', () => ({
   InstallModelTuningEditor: () => null,
 }));
-vi.mock('../components/ModelPicker.js', () => ({
-  ModelPicker: ({ provider }: { provider: string }) => (
-    <div data-testid={`model-picker-${provider}`} />
-  ),
-  EffortPicker: () => null,
-}));
+vi.mock('../components/ModelPicker.js', async () => {
+  const actual = await vi.importActual<typeof import('../components/ModelPicker.js')>(
+    '../components/ModelPicker.js',
+  );
+  return {
+    ...actual,
+    ModelPicker: ({ provider }: { provider: string }) => (
+      <div data-testid={`model-picker-${provider}`} />
+    ),
+  };
+});
 vi.mock('../components/ProviderModelSelect.js', () => ({ ProviderModelSelect: () => null }));
 
 const { SettingsView } = await import('./SettingsView.js');
@@ -338,9 +343,34 @@ describe('SettingsView', () => {
     render(<SettingsView />);
     const pills = await defaultProviderSwitch();
 
-    // OpenAI proves the row rendered at all.
-    expect(await pills.findByRole('button', { name: 'OpenAI' })).toBeInTheDocument();
+    // Codex CLI proves the row rendered at all.
+    expect(await pills.findByRole('button', { name: 'OpenAI Codex CLI' })).toBeInTheDocument();
     await waitFor(() => expect(pills.queryByRole('button', { name: 'GitHub Copilot' })).toBeNull());
+  });
+
+  // The API-key OpenAI and Anthropic surfaces are hidden until they've been
+  // tested; the CLI-driven variants are untouched.
+  it('hides the API-key OpenAI and Anthropic pills but keeps the CLI ones', async () => {
+    render(<SettingsView />);
+    const pills = await defaultProviderSwitch();
+
+    expect(await pills.findByRole('button', { name: 'OpenAI Codex CLI' })).toBeInTheDocument();
+    expect(pills.getByRole('button', { name: 'Anthropic Claude CLI' })).toBeInTheDocument();
+    expect(pills.queryByRole('button', { name: 'OpenAI' })).toBeNull();
+    expect(pills.queryByRole('button', { name: 'Anthropic Claude' })).toBeNull();
+  });
+
+  it('keeps the Anthropic pill when a key is already on file', async () => {
+    vi.mocked(api.getConfig).mockResolvedValue({
+      provider: 'mlx',
+      meesterGezelId: 'gz-meester',
+      hasAnthropicApiKey: true,
+    } as never);
+    render(<SettingsView />);
+    const pills = await defaultProviderSwitch();
+
+    // Never strand a configured user without the control to change it.
+    expect(await pills.findByRole('button', { name: 'Anthropic Claude' })).toBeInTheDocument();
   });
 
   it('keeps the Copilot pill when Copilot is already the configured provider', async () => {
@@ -365,6 +395,73 @@ describe('SettingsView', () => {
     const pills = await defaultProviderSwitch();
 
     expect(await pills.findByRole('button', { name: 'GitHub Copilot' })).toBeInTheDocument();
+  });
+
+  it('offers the expanded Codex CLI reasoning levels', async () => {
+    vi.mocked(api.getConfig).mockResolvedValue({
+      provider: 'codex-cli',
+      meesterGezelId: 'gz-meester',
+      hasGithubToken: true,
+      defaultModel: { 'codex-cli': 'gpt-5.6-sol' },
+      codexCli: { defaultReasoningEffort: 'max' },
+      codexCliStatus: { installed: true, path: '/usr/local/bin/codex', version: '0.145.0' },
+    } as never);
+    vi.mocked(api.listProviderModels).mockResolvedValue({
+      models: [
+        {
+          id: 'gpt-5.6-sol',
+          name: 'gpt-5.6-sol — GPT-5.6 Sol',
+          supportsReasoning: true,
+          reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
+          defaultReasoningEffort: 'low',
+        },
+      ],
+    } as never);
+
+    render(<SettingsView />);
+    fireEvent.click(await screen.findByTestId('settings-nav-codexCli'));
+
+    expect(await screen.findByTestId('model-picker-codex-cli')).toBeInTheDocument();
+    const effortSelect = await screen.findByDisplayValue('max');
+    expect(within(effortSelect).getByRole('option', { name: 'Default (low)' })).toBeInTheDocument();
+    expect(within(effortSelect).queryByRole('option', { name: 'minimal' })).toBeNull();
+    expect(within(effortSelect).getByRole('option', { name: 'xhigh' })).toBeInTheDocument();
+    expect(within(effortSelect).getByRole('option', { name: 'max' })).toBeInTheDocument();
+    expect(within(effortSelect).getByRole('option', { name: 'ultra' })).toBeInTheDocument();
+  });
+
+  it('offers model-specific Claude CLI reasoning levels', async () => {
+    vi.mocked(api.getConfig).mockResolvedValue({
+      provider: 'anthropic-cli',
+      meesterGezelId: 'gz-meester',
+      hasGithubToken: true,
+      defaultModel: { 'anthropic-cli': 'opus' },
+      defaultReasoningEffort: { 'anthropic-cli': 'xhigh' },
+      anthropicCliStatus: { installed: true, path: '/usr/local/bin/claude', version: '2.1.144' },
+    } as never);
+    vi.mocked(api.listProviderModels).mockResolvedValue({
+      models: [
+        {
+          id: 'opus',
+          name: 'opus — Latest Claude Opus',
+          supportsReasoning: true,
+          reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+          defaultReasoningEffort: 'xhigh',
+        },
+      ],
+    } as never);
+
+    render(<SettingsView />);
+    fireEvent.click(await screen.findByTestId('settings-nav-anthropicCli'));
+
+    expect(await screen.findByTestId('model-picker-anthropic-cli')).toBeInTheDocument();
+    const effortSelect = await screen.findByDisplayValue('xhigh');
+    expect(
+      within(effortSelect).getByRole('option', { name: 'Default (xhigh)' }),
+    ).toBeInTheDocument();
+    expect(within(effortSelect).getByRole('option', { name: 'low' })).toBeInTheDocument();
+    expect(within(effortSelect).getByRole('option', { name: 'max' })).toBeInTheDocument();
+    expect(within(effortSelect).queryByRole('option', { name: 'ultra' })).toBeNull();
   });
 
   it('lists gezellen for the Meester picker', async () => {

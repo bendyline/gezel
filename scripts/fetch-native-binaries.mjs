@@ -124,6 +124,27 @@ async function resolveToken() {
 
 // ── Release path ───────────────────────────────────────────────────
 
+/**
+ * Compare two `native-vX.Y.Z` tags numerically. Returns >0 when `a` is newer,
+ * <0 when older, 0 when equal. Numeric per-component compare, not string — so
+ * 0.1.29 correctly sorts above 0.1.9 and 0.1.23. Non-numeric/short tags sort
+ * last (treated as 0.0.0) rather than throwing.
+ */
+function compareNativeVersion(a, b) {
+  const parse = (tag) =>
+    String(tag ?? '')
+      .replace(/^native-v/, '')
+      .split('.')
+      .map((n) => Number.parseInt(n, 10) || 0);
+  const av = parse(a);
+  const bv = parse(b);
+  for (let i = 0; i < Math.max(av.length, bv.length); i++) {
+    const diff = (av[i] ?? 0) - (bv[i] ?? 0);
+    if (diff !== 0) return diff;
+  }
+  return 0;
+}
+
 async function fetchFromRelease({ token, platform, version, variant }) {
   let release;
   if (version) {
@@ -148,18 +169,28 @@ async function fetchFromRelease({ token, platform, version, variant }) {
     }
   } else {
     console.log('looking up the latest native-v* release…');
-    // /releases/latest skips prereleases AND will surface app releases — we
-    // want the most recent native-v* specifically, so iterate.
-    const all = await api(`/repos/${REPO_OWNER}/${REPO_NAME}/releases?per_page=30`, token);
-    release = all.find((r) => r.tag_name?.startsWith('native-v'));
+    // Can't use /releases/latest: native releases are marked prerelease, which
+    // that endpoint skips. The list endpoint works, BUT its order is not "newest
+    // version first" — GitHub returns ALL drafts (by created_at) ahead of
+    // published releases, and app-v* releases interleave with native-v*. So a
+    // naive `.find(first native-v*)` grabbed whatever draft sorted highest
+    // (e.g. a stale native-v0.1.23 draft over the published native-v0.1.29).
+    // Instead: collect every published native-v*, then pick the highest SEMVER.
+    // Drafts are deliberately excluded here — validate a draft explicitly with
+    // `--version <X.Y.Z>` (which resolves drafts) or `--run <id>`.
+    const all = await api(`/repos/${REPO_OWNER}/${REPO_NAME}/releases?per_page=100`, token);
+    const native = all
+      .filter((r) => r.tag_name?.startsWith('native-v') && !r.draft)
+      .sort((a, b) => compareNativeVersion(b.tag_name, a.tag_name));
+    release = native[0];
     if (!release) {
-      console.error('error: no native-v* release found in the most recent 30 releases.');
+      console.error('error: no published native-v* release found in the most recent 100 releases.');
       console.error(
-        '       Either no native release exists yet, or use --run <id> to pull build-run artifacts directly.',
+        '       Either no native release exists yet, use --version <X.Y.Z> for a draft, or --run <id> to pull build-run artifacts directly.',
       );
       process.exit(1);
     }
-    console.log(`  → ${release.tag_name}`);
+    console.log(`  → ${release.tag_name} (highest published native version)`);
   }
 
   const ext = platform.startsWith('win32') ? 'zip' : 'tar.gz';

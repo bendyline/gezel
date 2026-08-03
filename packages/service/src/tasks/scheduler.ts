@@ -422,6 +422,13 @@ export class TaskScheduler {
       })
       .catch(() => {});
     await this.manager.setStatus(task.projectId, task.num, 'paused').catch(() => {});
+    await this.manager.emitNeedsHelp({
+      projectId: task.projectId,
+      task,
+      stepId: step.id,
+      reason: 'step_stalled',
+      detail: `Step "${step.name}" was re-driven ${maxRedrives}x without producing its deliverable or advancing.`,
+    });
     await this.store.historyManager?.log({
       kind: 'task.step.stalled',
       projectId: task.projectId,
@@ -968,14 +975,16 @@ function stuckStepGateNudgeText(task: Task, step: TaskCraftbookStep): string {
   const score = lastSig ? plateauScore(trail, lastSig) : 1;
   let stage = stageForPlateau(score);
   if (stage === 2 && !file) stage = 1;
+  const surface = step.advanceWhen?.artifact ? ('artifact' as const) : ('workspace' as const);
   const directive =
     stage >= 2 && file && verdict
-      ? buildStageTwoNudge({ file, failingBullets: verdict, repeats: score })
+      ? buildStageTwoNudge({ file, failingBullets: verdict, repeats: score, surface })
       : verdict
         ? buildStageOneNudge({
             ...(file ? { file } : {}),
             failingBullets: verdict,
             frozen: true,
+            surface,
           })
         : 'Fix the failing checks the gate named in the task notes, then call `advance_task_step` again.';
   return `You're still assigned step \`${step.id}\` ("${step.name}") of task ${task.ref}. The completion gate keeps rejecting the current deliverable — it has not changed since the last rejection.\n\n${directive}`;

@@ -26,6 +26,7 @@ import { createLogger } from '@bendyline/gezel';
 import type { VideoModelLoad } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import {
+  MODEL_HASH_READ_BUFFER_BYTES,
   type ModelStorageRoots,
   findModelRoot,
   hashModelPayloadFiles,
@@ -407,7 +408,9 @@ export class VideoModelManager {
     push({ type: 'verifying', file: file.name });
     const hasher = createHash('sha256');
     await new Promise<void>((resolve, reject) => {
-      const stream = createReadStream(tmpPath);
+      // Big read buffer so the hash doesn't starve in the busy daemon event
+      // loop. See MODEL_HASH_READ_BUFFER_BYTES.
+      const stream = createReadStream(tmpPath, { highWaterMark: MODEL_HASH_READ_BUFFER_BYTES });
       stream.on('data', (chunk) => hasher.update(chunk));
       stream.on('end', () => resolve());
       stream.on('error', reject);

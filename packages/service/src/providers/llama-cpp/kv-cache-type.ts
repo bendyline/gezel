@@ -8,6 +8,17 @@
 export type LlamaCppKvCacheType = 'f16' | 'q8_0' | 'q4_0';
 
 /**
+ * Is this model in the Gemma 3/4 family? The single source of truth for
+ * the Gemma-specific engine defaults (f16 KV cache, sliding-window
+ * full-cache). Prefers the GGUF architecture string; falls back to the
+ * model id for installs whose header didn't record an architecture.
+ */
+export function isGemmaModel(args: { architecture?: string; modelId?: string }): boolean {
+  const arch = (args.architecture ?? '').toLowerCase();
+  return arch.startsWith('gemma') || /gemma/i.test(args.modelId ?? '');
+}
+
+/**
  * Pick the `--cache-type-k/v` value for a model.
  *
  * Gemma 3/4 are unusually sensitive to a quantized KV cache: large
@@ -29,7 +40,5 @@ export function resolveLlamaCppKvCacheType(args: {
   override?: LlamaCppKvCacheType;
 }): LlamaCppKvCacheType {
   if (args.override) return args.override;
-  const arch = (args.architecture ?? '').toLowerCase();
-  const isGemma = arch.startsWith('gemma') || /gemma/i.test(args.modelId ?? '');
-  return isGemma ? 'f16' : 'q8_0';
+  return isGemmaModel(args) ? 'f16' : 'q8_0';
 }

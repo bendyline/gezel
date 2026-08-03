@@ -2,6 +2,7 @@ import { type ChildProcess, spawn as nodeSpawn } from 'node:child_process';
 import { createLogger, prettifyToolName } from '@bendyline/gezel';
 import { SessionResumeError } from '../types.js';
 import type { ToolCallEvent, TurnUsage } from '../types.js';
+import type { CodexReasoningEffort } from './reasoning.js';
 import { salvageAgentMessage } from './salvage.js';
 import { type CodexStreamEvent, parseCodexLine } from './stream-parser.js';
 
@@ -21,7 +22,7 @@ const log = createLogger('codex-cli');
  *       exec --json --skip-git-repo-check \
  *       --cd <cwd> -m <model> \
  *       --image <path> \
- *       -c model_reasoning_effort=<low|medium|high> \
+ *       -c model_reasoning_effort=<effort> \
  *       <prompt>
  *
  *   Follow-up turn (when we have a thread_id):
@@ -29,7 +30,7 @@ const log = createLogger('codex-cli');
  *       exec resume --json --skip-git-repo-check \
  *       -m <model> \
  *       --image <path> \
- *       -c model_reasoning_effort=<low|medium|high> \
+ *       -c model_reasoning_effort=<effort> \
  *       <thread_id> <prompt>
  *
  *   NB1: `codex exec resume` does not accept `--cd`; the child
@@ -67,7 +68,6 @@ const HEARTBEAT_INTERVAL_MS = 3_000;
 const SILENCE_THRESHOLD_MS = 15_000;
 
 export type CodexPermissionMode = 'default' | 'acceptEdits' | 'plan' | 'bypassPermissions';
-export type CodexReasoningEffort = 'low' | 'medium' | 'high';
 
 export interface CodexInvokerHooks {
   emitDelta(text: string): void;
