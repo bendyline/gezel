@@ -44,6 +44,21 @@ const UNIFIED_OS_RESERVE_BYTES = 4 * GIB;
 const VRAM_USABLE_FRACTION = 0.95;
 
 /**
+ * Usable VRAM at or below which co-resident models may spill into system RAM
+ * by default. Not a statement about where spilling is fast — it never is —
+ * but about what the alternative costs. Under this line almost nothing the
+ * catalog offers co-resides on the card, so refusing to spill would mean a
+ * cold reload (10–30s) every time a user moves between two gezels on
+ * different models. Above it several models genuinely fit together, so
+ * eviction is both rare and cheap, and spilling is the worse trade —
+ * especially with several tasks in flight.
+ *
+ * Compared against usable VRAM ({@link VRAM_USABLE_FRACTION} of the card),
+ * so a 12 GB card lands under it with room to spare.
+ */
+const RAM_SPILLOVER_AUTO_MAX_VRAM_BYTES = 12 * GIB;
+
+/**
  * A reported "VRAM" at or above this share of system RAM is a shared pool
  * (GB10 / DGX Spark, or an integrated GPU reporting host memory), not a
  * dedicated card. Adding it to the RAM share would double-count the same
@@ -199,6 +214,17 @@ export function computeCapacityBudget(input: CapacityBudgetInput = {}): Capacity
     kind,
     overriddenByEnv: false,
   };
+}
+
+/**
+ * The default answer to "may co-resident models spill into system RAM?" for
+ * this host, when the user has expressed no preference. Only a discrete card
+ * has two pools to choose between; unified and CPU-only hosts have one, so
+ * there is nothing to spill *into* and the rule never binds.
+ */
+export function autoAllowRamSpillover(budget: Pick<CapacityBudget, 'kind' | 'vramBytes'>): boolean {
+  if (budget.kind !== 'discrete-gpu') return true;
+  return budget.vramBytes <= RAM_SPILLOVER_AUTO_MAX_VRAM_BYTES;
 }
 
 function envOverrideBytes(): number | null {

@@ -40,6 +40,7 @@ import {
   detectMemoryProfile,
   detectMemoryProfileCached,
   sampleMachineMemoryUsage,
+  summarizeResidentModels,
 } from '../../system/memory.js';
 import type { ServiceContext } from '../context.js';
 
@@ -102,6 +103,8 @@ export function systemRoutes(ctx: ServiceContext): Hono {
       profile,
       ...(deviceHealth ? { deviceHealth } : {}),
       engineCommittedBytes: engineSnapshot?.committedBytes ?? 0,
+      engineBudgetBytes: engineSnapshot?.enforced ? engineSnapshot.budgetBytes : null,
+      residentModels: summarizeResidentModels(engineSnapshot?.entries ?? []),
       engineModelWeightsBytes,
       gezelProcessMemory,
       darwinSystemMemory,

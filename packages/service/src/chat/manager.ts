@@ -2042,6 +2042,25 @@ export class ChatManager {
   }
 
   /**
+   * Live-update whether co-resident local models may spill into system RAM.
+   * `null` reverts to the host's auto choice. Same in-flight care as
+   * {@link setLocalEngineMemoryBudget}, and the same non-eviction contract:
+   * turning spillover off doesn't unload anything, it changes what the next
+   * spawn is allowed to add.
+   */
+  async setAllowRamSpillover(allow: boolean | null): Promise<void> {
+    const live = this.engineRouter ?? this.engineRouterCache;
+    if (live) {
+      live.broker.setAllowRamSpillover(allow);
+      return;
+    }
+    const pending = this.engineRouterInitPromise;
+    if (!pending) return;
+    const router = await pending.catch(() => null);
+    router?.broker.setAllowRamSpillover(allow);
+  }
+
+  /**
    * Pre-warm a session's prompt cache on the engine that owns it.
    * Phase 4 hook — called by the UI when the user opens a chat so the
    * first message returns near-instantly instead of paying the full
@@ -9012,6 +9031,7 @@ export class ChatManager {
     const broker = new CapacityBroker({
       ...(budgetBytes !== undefined ? { budgetBytes } : {}),
       gpuVramBytes,
+      allowRamSpillover: config.allowRamSpillover ?? null,
     });
     const pool = new ProviderPool({ broker, builders: {} });
 

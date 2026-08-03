@@ -518,6 +518,9 @@ export function configRoutes(ctx: ServiceContext): Hono {
       const gb = body.localEngineMemoryGb;
       await ctx.chat.setLocalEngineMemoryBudget(gb === null ? null : Math.round(gb * 1024 ** 3));
     }
+    if (body.allowRamSpillover !== undefined) {
+      await ctx.chat.setAllowRamSpillover(body.allowRamSpillover);
+    }
     // GPU memory policy: hot-swap on the live arbiter so the next
     // chat turn / image gen sees the new behavior without a restart.
     // `'auto'` is resolved to a concrete policy via the same helper

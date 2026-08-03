@@ -176,6 +176,8 @@ describe('EngineStatusPill — simultaneous local engines', () => {
       gezelModelWeightsBytes: 4 * GiB,
       gezelModelCacheBytes: 1 * GiB,
       engineReservedBytes: 5 * GiB,
+      engineBudgetBytes: 40 * GiB,
+      residentModels: [],
       gezelEngineProcessCount: 0,
       orphanedGezelEngineProcessCount: 0,
       otherBytes: 4 * GiB,
@@ -198,7 +200,8 @@ describe('EngineStatusPill — simultaneous local engines', () => {
     });
     expect(strip).toBeInTheDocument();
     expect(screen.getByText('Gezel ~5.0 GiB')).toBeInTheDocument();
-    expect(strip).toHaveAccessibleName(/Core Gezel infra about 0 B/i);
+    // Zero-byte pieces of the breakdown stay out of the announcement.
+    expect(strip).not.toHaveAccessibleName(/Core Gezel infra/i);
     expect(strip).toHaveAccessibleName(/Model weights about 4\.0 GiB/i);
     expect(strip).toHaveAccessibleName(/Model cache about 1\.0 GiB/i);
     expect(screen.getByText('Other 4.0 GiB')).toBeInTheDocument();
@@ -212,19 +215,34 @@ describe('EngineStatusPill — simultaneous local engines', () => {
     );
   });
 
-  it('omits other use when the GPU driver cannot report it', async () => {
+  it('states the reservation and its models instead of filling the bar the driver cannot measure', async () => {
     const user = userEvent.setup();
     const GiB = 1024 ** 3;
     vi.mocked(api.getMachineMemoryUsage).mockResolvedValue({
       kind: 'vram',
-      totalBytes: 96 * GiB,
+      totalBytes: 31.9 * GiB,
       usedBytes: null,
-      gezelBytesEstimated: 19.1 * GiB,
+      gezelBytesEstimated: 0,
       gezelBytesObserved: null,
-      gezelInfraBytes: 0.7 * GiB,
-      gezelModelWeightsBytes: 17 * GiB,
-      gezelModelCacheBytes: 1.4 * GiB,
-      engineReservedBytes: 19.1 * GiB,
+      gezelInfraBytes: 0,
+      gezelModelWeightsBytes: 0,
+      gezelModelCacheBytes: 0,
+      engineReservedBytes: 50 * GiB,
+      engineBudgetBytes: 68.4 * GiB,
+      residentModels: [
+        {
+          provider: 'llama-cpp',
+          modelId: 'qwen3.6-27b-q4',
+          reservedBytes: 19.1 * GiB,
+          replicaCount: 1,
+        },
+        {
+          provider: 'llama-cpp',
+          modelId: 'talkie-1930-13b-q4',
+          reservedBytes: 30.9 * GiB,
+          replicaCount: 2,
+        },
+      ],
       gezelEngineProcessCount: 0,
       orphanedGezelEngineProcessCount: 0,
       otherBytes: null,
@@ -236,17 +254,26 @@ describe('EngineStatusPill — simultaneous local engines', () => {
     });
     render(<EngineStatusPill />);
 
-    await user.click(
-      await screen.findByRole('button', {
-        name: /DwarfStar.*DeepSeek V4 Flash/i,
-      }),
-    );
+    await user.click(await screen.findByRole('button', { name: /Talkie 1930 13B/i }));
 
-    const strip = await screen.findByRole('img', {
-      name: /VRAM: 96\.0 GiB total, Gezel estimated 19\.1 GiB/i,
-    });
+    const strip = await screen.findByRole('img', { name: /VRAM: 31\.9 GiB total/i });
+    // The pool is unmeasured, so nothing is attributed to it — the old
+    // behaviour clamped the reservation to the card and drew a full bar.
+    expect(strip).not.toHaveAccessibleName(/Gezel estimated/i);
     expect(strip).not.toHaveAccessibleName(/other use/i);
-    expect(screen.queryByText(/Other use unavailable/i)).not.toBeInTheDocument();
+    expect(strip.querySelector('.machine-memory-segment-gezel')).toBeNull();
+    expect(strip).toHaveClass('machine-memory-bar-unknown');
+    expect(document.querySelector('.machine-memory-swatch-gezel')).toBeNull();
+
+    expect(
+      screen.getByText(
+        "Models reserve ~50.0 GiB of ~68.4 GiB — this card's memory plus a share of system memory",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText('2 models loaded')).toBeInTheDocument();
+    // Known ids take their catalog name; the rest fall back to the id.
+    expect(screen.getByText('Talkie 1930 13B ×2')).toBeInTheDocument();
+    expect(screen.getByText('qwen3.6-27b-q4')).toBeInTheDocument();
   });
 
   it('separates observed macOS footprint, model reservation, and orphaned engines', async () => {
@@ -262,6 +289,8 @@ describe('EngineStatusPill — simultaneous local engines', () => {
       gezelModelWeightsBytes: 30 * GiB,
       gezelModelCacheBytes: 6 * GiB,
       engineReservedBytes: 36 * GiB,
+      engineBudgetBytes: null,
+      residentModels: [],
       gezelEngineProcessCount: 2,
       orphanedGezelEngineProcessCount: 2,
       otherBytes: 24 * GiB,
@@ -285,7 +314,7 @@ describe('EngineStatusPill — simultaneous local engines', () => {
     expect(strip).toHaveAccessibleName(/Core Gezel infra about 40\.0 GiB/i);
     expect(strip).toHaveAccessibleName(/Model weights about 30\.0 GiB/i);
     expect(strip).toHaveAccessibleName(/Model cache about 6\.0 GiB/i);
-    expect(strip).toHaveAccessibleName(/models reserve about 36\.0 GiB/i);
+    expect(strip).toHaveAccessibleName(/Models reserve ~36\.0 GiB for capacity planning/i);
     expect(strip).toHaveAccessibleName(/2 leftover Gezel engine processes/i);
     expect(screen.getByText('Gezel 76.0 GiB')).toBeInTheDocument();
     expect(screen.getByText('Cached 20.0 GiB')).toBeInTheDocument();

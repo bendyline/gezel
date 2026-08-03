@@ -384,6 +384,13 @@ function EngineStatusPillForProvider({
     ? (activeInstalledModel?.name ?? activeInflightModel)
     : (installedDefault?.name ?? installedModels[0]?.name);
   const modelId = activeInflightModel ?? installedDefault?.id ?? installedModels[0]?.id;
+  // The memory strip lists every resident model by id; lend it the catalog
+  // names we already fetched so the popover doesn't mix "Gemma 4 (E4B, Q4)"
+  // with a raw `qwen3.6-27b-q4` two lines below.
+  const installedModelNames = useMemo(
+    () => new Map(installedModels.map((model) => [model.id, model.name])),
+    [installedModels],
+  );
 
   // Pill-specific telemetry (per-turn stats + static RAM footprint).
   // Kept on its own subscription so QueueMeter — which doesn't need
@@ -741,7 +748,7 @@ function EngineStatusPillForProvider({
             )}
             <dt>Memory</dt>
             <dd className="engine-pill-memory">
-              <MachineMemoryStrip />
+              <MachineMemoryStrip modelNames={installedModelNames} />
             </dd>
             <dt>Status</dt>
             <dd>{statusText}</dd>

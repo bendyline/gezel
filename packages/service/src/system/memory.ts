@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { freemem, platform as osPlatform, totalmem } from 'node:os';
 import { promisify } from 'node:util';
-import type { MachineMemoryUsage } from '@bendyline/gezel';
+import type { MachineMemoryUsage, ResidentEngineModel } from '@bendyline/gezel';
 import {
   type DeviceHealthStatusSnapshot,
   windowsDetachedSpawnOptions,
@@ -174,6 +174,10 @@ export interface SampleMachineMemoryUsageOptions {
   deviceHealth?: DeviceHealthStatusSnapshot;
   /** Capacity broker reservation across resident Gezel local-engine replicas. */
   engineCommittedBytes?: number;
+  /** The broker budget that reservation is measured against; spans pools. */
+  engineBudgetBytes?: number | null;
+  /** Resident replicas behind the reservation, aggregated per model. */
+  residentModels?: ResidentEngineModel[];
   /** Installed parameter payloads for the resident replicas, when known. */
   engineModelWeightsBytes?: number;
   /** macOS physical footprint for gezeld + same-home engine processes. */
@@ -198,9 +202,15 @@ export interface SampleMachineMemoryUsageOptions {
  * Driver telemetry reliably gives aggregate GPU use but not portable
  * per-process VRAM. On macOS, physical-footprint sampling observes gezeld and
  * same-home engine processes directly, including Metal allocations. UMA/CPU
- * hosts without that sample fall back to the broker reservation + daemon RSS;
- * discrete GPUs retain the reservation estimate. The remainder is labelled
- * "Other", never as an exact process audit.
+ * hosts without that sample fall back to the broker reservation + daemon RSS.
+ * The remainder is labelled "Other", never as an exact process audit.
+ *
+ * A discrete card gets NO reservation-derived attribution when the driver
+ * cannot report pool use: the broker's number is a budget spanning VRAM and a
+ * system-RAM share, and folding it into the card's pool clamped a 50 GiB
+ * three-model reservation to a 32 GiB card and drew the bar at 100%. The
+ * reservation travels as `engineReservedBytes` with its own budget and model
+ * list so the surface can state it as what it is.
  */
 export function sampleMachineMemoryUsage(
   opts: SampleMachineMemoryUsageOptions,
@@ -214,6 +224,11 @@ export function sampleMachineMemoryUsage(
     opts.forceMainMemory === true || profile.source === 'system-ram-fallback' || unified;
   const engineBytes = finiteNonNegative(opts.engineCommittedBytes);
   const engineModelWeightsBytes = finiteNonNegative(opts.engineModelWeightsBytes);
+  const engineBudgetBytes =
+    typeof opts.engineBudgetBytes === 'number' && Number.isFinite(opts.engineBudgetBytes)
+      ? Math.max(0, opts.engineBudgetBytes)
+      : null;
+  const residentModels = opts.residentModels ?? [];
   const sampledAt = opts.sampledAt ?? new Date().toISOString();
 
   if (mainMemory) {
@@ -253,6 +268,8 @@ export function sampleMachineMemoryUsage(
       gezelBytesObserved: observedBytes,
       ...breakdown,
       engineReservedBytes: engineBytes,
+      engineBudgetBytes,
+      residentModels,
       gezelEngineProcessCount: opts.gezelProcessMemory?.engineProcessCount ?? 0,
       orphanedGezelEngineProcessCount: opts.gezelProcessMemory?.orphanedEngineProcessCount ?? 0,
       otherBytes: Math.max(0, usedBytes - gezelBytesAttributed),
@@ -290,7 +307,12 @@ export function sampleMachineMemoryUsage(
         totalBytes,
       )
     : null;
-  const gezelBytesEstimated = clamp(engineBytes, 0, usedBytes ?? totalBytes);
+  // Only a measured pool figure can bound what we attribute to Gezel here.
+  // Without one there is nothing to clamp against but the card's own
+  // capacity, and the reservation exceeds that as soon as a second model
+  // loads — which drew a full bar and a "Gezel ~31.9 GiB" legend on a card
+  // holding a single 5.5 GiB model. Report nothing rather than the total.
+  const gezelBytesEstimated = usedBytes === null ? 0 : clamp(engineBytes, 0, usedBytes);
   const breakdown = splitGezelMemory({
     attributedBytes: gezelBytesEstimated,
     engineReservedBytes: engineBytes,
@@ -313,6 +335,8 @@ export function sampleMachineMemoryUsage(
     gezelBytesObserved: null,
     ...breakdown,
     engineReservedBytes: engineBytes,
+    engineBudgetBytes,
+    residentModels,
     gezelEngineProcessCount: 0,
     orphanedGezelEngineProcessCount: 0,
     otherBytes: usedBytes === null ? null : Math.max(0, usedBytes - gezelBytesEstimated),
@@ -322,6 +346,37 @@ export function sampleMachineMemoryUsage(
     source: memoryReadings.length > 0 ? 'device-health' : 'capacity-only',
     deviceNames,
   };
+}
+
+/**
+ * Collapse the engine pool's per-replica entries into one row per model,
+ * heaviest first. Clones of the same model share a row because a reader
+ * looking for "what is holding my memory" wants the model named once with
+ * its whole reservation, not N lines that differ only by replica index.
+ */
+export function summarizeResidentModels(
+  entries: ReadonlyArray<{ provider: string; modelId: string; residentBytes: number }>,
+): ResidentEngineModel[] {
+  const byModel = new Map<string, ResidentEngineModel>();
+  for (const entry of entries) {
+    const key = `${entry.provider}:${entry.modelId}`;
+    const existing = byModel.get(key);
+    const bytes = finiteNonNegative(entry.residentBytes);
+    if (existing) {
+      existing.reservedBytes += bytes;
+      existing.replicaCount += 1;
+      continue;
+    }
+    byModel.set(key, {
+      provider: entry.provider,
+      modelId: entry.modelId,
+      reservedBytes: bytes,
+      replicaCount: 1,
+    });
+  }
+  return [...byModel.values()].sort(
+    (a, b) => b.reservedBytes - a.reservedBytes || a.modelId.localeCompare(b.modelId),
+  );
 }
 
 /**

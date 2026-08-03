@@ -622,6 +622,19 @@ export interface EngineStatusResponse {
     /** Fast (on-accelerator) memory — VRAM on a card, the budget otherwise. */
     fastBytes: number;
   };
+  /**
+   * Whether models sharing a discrete card may spill into system RAM. Governs
+   * co-residency only — one model alone always gets the full budget. Absent
+   * pre-boot and on daemons that predate the field.
+   */
+  ramSpillover?: {
+    allowed: boolean;
+    /** What the host picks on its own; the toggle's "Automatic" position. */
+    auto: boolean;
+    overridden: boolean;
+    /** Ceiling the resident set fits under while more than one model is loaded. */
+    coResidencyBytes: number;
+  };
 }
 
 export interface ReconcileEnginePoolRequest {

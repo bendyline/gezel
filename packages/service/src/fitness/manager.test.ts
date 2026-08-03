@@ -130,6 +130,7 @@ describe('ModelFitnessManager', () => {
       autoBudgetBytes: 96 * GB,
       overridden: false,
       pools: { kind: 'unified', vramBytes: 0, ramShareBytes: 96 * GB, fastBytes: 96 * GB },
+      ramSpillover: { allowed: true, auto: true, overridden: false, coResidencyBytes: 96 * GB },
       entries: [
         {
           key: 'llama-cpp:qwen3.6-27b-q4:0',

@@ -19,10 +19,15 @@
 
 import { totalmem } from 'node:os';
 import { createLogger } from '@bendyline/gezel';
-import { type CapacityBudget, computeCapacityBudget } from './capacity-budget.js';
+import {
+  type CapacityBudget,
+  autoAllowRamSpillover,
+  computeCapacityBudget,
+} from './capacity-budget.js';
 import type { LocalProviderName } from './engine-key.js';
 
 export {
+  autoAllowRamSpillover,
   autoDetectBudgetBytes,
   computeCapacityBudget,
   fastMemoryBudgetBytes,
@@ -59,6 +64,12 @@ export interface CapacityBrokerOptions {
    * {@link computeCapacityBudget}. Omit to read the last published probe.
    */
   gpuVramBytes?: number | null;
+  /**
+   * May co-resident models spill into system RAM? `null`/omitted follows
+   * {@link autoAllowRamSpillover} for this host. See
+   * {@link CapacityBroker.coResidencyBytes}.
+   */
+  allowRamSpillover?: boolean | null;
 }
 
 export interface CapacityCommitted {
@@ -88,6 +99,19 @@ export interface CapacityCommitted {
     ramShareBytes: number;
     /** Fast (on-accelerator) memory — VRAM on a card, the budget otherwise. */
     fastBytes: number;
+  };
+  /** Whether co-resident models may spill into system RAM, and how that was decided. */
+  ramSpillover: {
+    allowed: boolean;
+    /** What this host would pick on its own; the toggle's "Auto" position. */
+    auto: boolean;
+    /** True when an explicit setting is overriding {@link auto}. */
+    overridden: boolean;
+    /**
+     * The ceiling the resident set must fit under while more than one model
+     * is loaded. Equals {@link budgetBytes} when spilling is allowed.
+     */
+    coResidencyBytes: number;
   };
   byKey: Array<{ key: EngineKey; bytes: number }>;
 }
@@ -121,8 +145,29 @@ export function formatCapacityDenial(opts: {
    * RAM — the number a person with a GPU is least likely to recognize.
    */
   pools?: CapacityCommitted['pools'];
+  /**
+   * The co-residency ceiling, when it is tighter than the budget — i.e. when
+   * this refusal is "keep models on the card", not "out of memory".
+   */
+  coResidencyBytes?: number;
 }): string {
   const { modelLabel, requestedBytes, budgetBytes, committedBytes, systemRamBytes, pools } = opts;
+  // A co-residency refusal is a different problem with different advice: the
+  // machine has the memory, but keeping this model on the card means the
+  // others cannot stay. It only reaches a user when eviction couldn't clear
+  // the room (every other model busy), so "wait or close a chat" is the fix,
+  // not "buy a smaller model".
+  if (opts.coResidencyBytes !== undefined && opts.coResidencyBytes < budgetBytes) {
+    return (
+      `Not enough graphics memory to add ${modelLabel} (about ${formatGb(requestedBytes)}) ` +
+      `next to the models already loaded (${formatGb(committedBytes)} of ` +
+      `${formatGb(opts.coResidencyBytes)}). Gezel is set to keep models on the graphics card ` +
+      'rather than let them spill into system memory, so it unloads one model to make room for ' +
+      'another — but every loaded model is busy right now. Wait for a turn to finish, or allow ' +
+      'system-memory spillover in Settings under the engine that runs it, which keeps them all ' +
+      'loaded at reduced speed.'
+    );
+  }
   const free = Math.max(0, budgetBytes - committedBytes);
   const parts = [
     `Not enough memory to run ${modelLabel}: it needs about ${formatGb(requestedBytes)}, ` +
@@ -196,12 +241,14 @@ export class CapacityBroker {
   private readonly systemRamBytes: number;
   private readonly unifiedMemory: boolean | undefined;
   private readonly gpuVramBytes: number | null | undefined;
+  private explicitAllowRamSpillover: boolean | null;
   private readonly reservations = new Map<EngineKey, number>();
 
   constructor(opts: CapacityBrokerOptions = {}) {
     this.systemRamBytes = (opts.systemRamBytes ?? totalmem)();
     this.unifiedMemory = opts.unifiedMemory;
     this.gpuVramBytes = opts.gpuVramBytes;
+    this.explicitAllowRamSpillover = opts.allowRamSpillover ?? null;
     this.explicitBudgetBytes = opts.budgetBytes ?? null;
     // Assigned by applyBudget; the definite-assignment dance TS wants for
     // fields a constructor sets through a helper.
@@ -253,10 +300,68 @@ export class CapacityBroker {
     );
   }
 
-  /** True iff a fresh reservation of `bytes` would fit under the budget. */
+  /**
+   * Live-update whether co-resident models may spill into system RAM.
+   * `null` reverts to {@link autoAllowRamSpillover}. Like
+   * {@link setBudgetBytes}, tightening never evicts anything itself — it
+   * makes the next reserve fail, and the pool's LRU path does the freeing.
+   */
+  setAllowRamSpillover(allow: boolean | null): void {
+    this.explicitAllowRamSpillover = allow;
+    log.info(
+      `ram spillover ${this.ramSpilloverAllowed() ? 'allowed' : 'denied'} ` +
+        `(${allow === null ? 'auto' : 'explicit'}), co-residency ceiling ${this.coResidencyBytes()}`,
+    );
+  }
+
+  /** Whether co-resident models may spill into system RAM right now. */
+  ramSpilloverAllowed(): boolean {
+    return this.explicitAllowRamSpillover ?? autoAllowRamSpillover(this.autoBudget());
+  }
+
+  /**
+   * The ceiling the resident set must fit under **while more than one model
+   * is loaded**. Equal to the budget when spilling is allowed; the card's
+   * usable VRAM when it isn't.
+   *
+   * The single-model carve-out is the whole point of expressing this as a
+   * co-residency rule rather than a smaller budget: one model may still use
+   * the full budget, so a MoE larger than the card keeps running by streaming
+   * its experts from system RAM. What the rule forbids is a *second* model
+   * pushing the resident set off the card, where every model in it gets slow
+   * at once. Capping the budget instead would have made that big MoE
+   * unloadable and quietly shrunk the catalog to what fits in VRAM.
+   */
+  coResidencyBytes(): number {
+    if (this.ramSpilloverAllowed()) return this.budgetBytes;
+    return Math.min(this.budgetBytes, this.fastBudgetBytes());
+  }
+
+  /** True iff a fresh reservation of `bytes` would fit. */
   canReserve(bytes: number): boolean {
-    if (!this.enforced) return true;
-    return this.committedBytes() + bytes <= this.budgetBytes;
+    return this.shortfallFor(bytes) <= 0;
+  }
+
+  /**
+   * Bytes of existing reservation that must be released before `bytes` fits
+   * — 0 when it already does. Both constraints in one number so the pool can
+   * size an eviction batch without knowing which rule bound it.
+   *
+   * `priorBytes` is an existing reservation for the same key being resized;
+   * it is not an obstacle to itself.
+   */
+  shortfallFor(bytes: number, priorBytes = 0): number {
+    if (!this.enforced) return 0;
+    const others = Math.max(0, this.committedBytes() - priorBytes);
+    const budgetShort = others + bytes - this.budgetBytes;
+    // Co-residency binds only while something else is loaded. Releasing X
+    // satisfies it once `others - X + bytes <= ceiling` OR `others - X === 0`
+    // — hence the min: a model bigger than the ceiling needs the pool empty,
+    // never more than everything.
+    const ceiling = this.coResidencyBytes();
+    const coShort =
+      others > 0 ? Math.min(others, others + bytes - ceiling) : Number.NEGATIVE_INFINITY;
+    return Math.max(0, budgetShort, coShort);
   }
 
   /**
@@ -275,8 +380,7 @@ export class CapacityBroker {
       this.reservations.set(key, bytes);
       return { granted: true };
     }
-    const committedExcludingThis = this.committedBytes() - prior;
-    if (committedExcludingThis + bytes > this.budgetBytes) {
+    if (this.shortfallFor(bytes, prior) > 0) {
       return {
         granted: false,
         reason: this.denialReason(bytes, prior),
@@ -299,10 +403,19 @@ export class CapacityBroker {
    * the `budget exhausted: would commit N against M` string — it feeds
    * both `reserve()` results and the pool's `capacity broker denied`
    * log line, whose shape is a contract with the eval harness (see
-   * provider-pool.ts). Do not reword.
+   * provider-pool.ts). Do not reword. A co-residency denial keeps that
+   * exact prefix and only appends its own clause, so the harness's
+   * `capacity broker denied … budget exhausted` match still classifies it.
    */
   denialReason(bytes: number, priorBytes = 0): string {
     const wouldCommit = this.committedBytes() - priorBytes + bytes;
+    const ceiling = this.coResidencyBytes();
+    if (this.enforced && ceiling < this.budgetBytes && wouldCommit > ceiling) {
+      return (
+        `budget exhausted: would commit ${wouldCommit} against ${ceiling} ` +
+        '(co-residency ceiling — RAM spillover off)'
+      );
+    }
     return `budget exhausted: would commit ${wouldCommit} against ${this.budgetBytes}`;
   }
 
@@ -343,6 +456,12 @@ export class CapacityBroker {
         vramBytes: auto.vramBytes,
         ramShareBytes: auto.ramShareBytes,
         fastBytes: auto.fastBytes,
+      },
+      ramSpillover: {
+        allowed: this.ramSpilloverAllowed(),
+        auto: autoAllowRamSpillover(auto),
+        overridden: this.explicitAllowRamSpillover !== null,
+        coResidencyBytes: this.coResidencyBytes(),
       },
       byKey: [...this.reservations.entries()]
         .map(([key, bytes]) => ({ key, bytes }))

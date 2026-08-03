@@ -328,6 +328,16 @@ link that lands on the same article.
 `.gezel-icon--pulse`) is the canonical "this thing is working in the
 background" signal.
 
+**Meters show what was measured.** A bar is a claim about a pool, so only a
+figure measured against that pool may fill it. Budgets and reservations are not
+measurements: the engine broker's reservation spans graphics memory *plus* a
+share of system RAM, and folding it into the VRAM bar pegged a 32 GiB card at
+100% while the session's model was 5.5 GiB. When the platform can't report use,
+leave the bar in its hatched unknown state and drop the legend entry rather than
+printing a zero — then state the number as text beside its own denominator, and
+name what is holding it. [MachineMemoryStrip](../packages/ui/src/components/MachineMemoryStrip.tsx)
+is the reference.
+
 **Status bars.** Ambient state that describes a whole surface — what branch
 it's on, whether the index is fresh, whether gezels may edit — belongs along
 the *bottom* edge of that surface, not in a row of chrome above the content.

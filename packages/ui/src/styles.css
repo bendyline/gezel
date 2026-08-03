@@ -1529,6 +1529,25 @@ html.embedded-chat #root {
   font-size: 0.66rem;
   line-height: 1.3;
 }
+.machine-memory-models-heading {
+  color: var(--text);
+}
+.machine-memory-models {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  margin: 0.15rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+.machine-memory-models > li {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+.machine-memory-model-name {
+  overflow-wrap: anywhere;
+}
 .machine-memory-device {
   overflow-wrap: anywhere;
 }
@@ -6143,6 +6162,22 @@ button.danger {
 
 .gezel-chat-project-select {
   min-width: 240px;
+}
+
+/* Same self-contained compose surface project chat and Home already use:
+   a warm header band grouping recipient + thread picker + toolbar above the
+   lighter draft, inside one rounded frame. The horizontal inset matches the
+   timeline's content gutter so the frame lines up with the bubbles above it.
+   Unlike project chat there are no attached @/> mode tabs here, so all four
+   corners stay rounded. */
+.gezel-chat-tab .chat-composer {
+  --compose-frame-bg: var(--chat-compose-header-bg);
+  --compose-frame-border: color-mix(in srgb, var(--accent) 62%, var(--border));
+  --compose-toolbar-bg: var(--chat-compose-header-bg);
+  margin: 0 0.75rem 0.25rem;
+  border: 1px solid var(--compose-frame-border);
+  border-radius: var(--radius-md);
+  background: var(--compose-frame-bg);
 }
 
 .chat-composer {
@@ -23075,6 +23110,21 @@ button.linklike {
   display: flex;
   gap: 0.5rem;
   margin-top: 0.75rem;
+}
+.engine-spillover {
+  margin-top: 1.1rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--gz-color-border, var(--border));
+}
+.engine-spillover h4 {
+  margin: 0 0 0.25rem;
+  font-size: var(--text-md);
+}
+.engine-spillover p {
+  max-width: 34rem;
+}
+.engine-spillover-tray {
+  margin: 0.6rem 0;
 }
 
 /* ── Project Overview tab (index-derived gestalt) ─────────────────────── */

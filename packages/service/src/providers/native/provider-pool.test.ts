@@ -150,6 +150,64 @@ describe('ProviderPool', () => {
     expect(pool.has(makeEngineKey('mlx', 'c', 0))).toBe(true);
   });
 
+  it('serializes instead of spilling when a second model would leave the card', async () => {
+    // 64 GB host / 32 GB card with spillover off: usable VRAM ~30.4 GB, so
+    // 20 + 20 fits the BUDGET (68 GB) but not the card. The co-residency
+    // rule must reach the pool as an eviction, not a hard denial — and it
+    // must be the idle-victim path, since falling through to the busy path
+    // is how this shows up as a torn-down in-flight turn.
+    const t = { now: 1000 };
+    const broker = new CapacityBroker({
+      systemRamBytes: () => 64 * GB,
+      gpuVramBytes: 32 * GB,
+      unifiedMemory: false,
+      allowRamSpillover: false,
+    });
+    const pool = new ProviderPool({
+      broker,
+      builders: { mlx: mkBuilder(20 * GB) },
+      now: () => t.now,
+    });
+
+    await pool.ensure('mlx', 'a', 0, 20 * GB);
+    t.now += 1000;
+    await pool.ensure('mlx', 'b', 0, 20 * GB);
+
+    expect(pool.has(makeEngineKey('mlx', 'a', 0))).toBe(false);
+    expect(pool.has(makeEngineKey('mlx', 'b', 0))).toBe(true);
+    expect(broker.committedBytes()).toBe(20 * GB);
+  });
+
+  it('keeps both models resident when spillover is allowed', async () => {
+    const broker = new CapacityBroker({
+      systemRamBytes: () => 64 * GB,
+      gpuVramBytes: 32 * GB,
+      unifiedMemory: false,
+      allowRamSpillover: true,
+    });
+    const pool = new ProviderPool({ broker, builders: { mlx: mkBuilder(20 * GB) } });
+
+    await pool.ensure('mlx', 'a', 0, 20 * GB);
+    await pool.ensure('mlx', 'b', 0, 20 * GB);
+
+    expect(pool.has(makeEngineKey('mlx', 'a', 0))).toBe(true);
+    expect(pool.has(makeEngineKey('mlx', 'b', 0))).toBe(true);
+  });
+
+  it('still loads a single model larger than the card with spillover off', async () => {
+    const broker = new CapacityBroker({
+      systemRamBytes: () => 64 * GB,
+      gpuVramBytes: 32 * GB,
+      unifiedMemory: false,
+      allowRamSpillover: false,
+    });
+    const pool = new ProviderPool({ broker, builders: { mlx: mkBuilder(40 * GB) } });
+
+    await pool.ensure('mlx', 'big-moe', 0, 40 * GB);
+
+    expect(pool.has(makeEngineKey('mlx', 'big-moe', 0))).toBe(true);
+  });
+
   it('demand-weighted eviction keeps a frequently-hit model over a newer idle one', async () => {
     const t = { now: 1000 };
     const broker = new CapacityBroker({ budgetBytes: 25 * GB });
