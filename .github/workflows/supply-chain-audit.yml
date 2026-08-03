@@ -1,0 +1,33 @@
+# Daily advisory alarm. The PR-time and release-workflow gates block at
+# critical only (and must stay in lockstep — a publish must never fail on
+# something CI passed), because advisories are published against our pinned
+# versions on npm's clock, not ours. This schedule is the one place that
+# fails at high, so a new high-severity advisory surfaces as a failed
+# scheduled run within a day instead of blocking anyone's PR or release.
+name: Supply-chain audit
+
+on:
+  schedule:
+    - cron: '45 5 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: '24'
+  PNPM_VERSION: '11.15.1'
+
+jobs:
+  vulnerabilities:
+    name: Production dependency vulnerability alarm
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-workspace
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          pnpm-version: ${{ env.PNPM_VERSION }}
+      - name: Production dependency vulnerability audit at high severity
+        run: pnpm audit:vulnerabilities --audit-level=high

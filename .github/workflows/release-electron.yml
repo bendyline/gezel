@@ -224,7 +224,9 @@ jobs:
             --version "${{ needs.release-preflight.outputs.version }}" \
             --sbom artifacts/gezel.cdx.json
       - name: Production dependency vulnerability gate
-        run: pnpm audit:vulnerabilities
+        # critical matches the PR-time gate in quality.yml — the two must
+        # stay in lockstep so a release never fails on something CI passed.
+        run: pnpm audit:vulnerabilities --audit-level=critical
       - name: Dependency license policy gate
         run: pnpm audit:licenses
       - name: Preserve supply-chain inventory
