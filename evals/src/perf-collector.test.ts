@@ -9,6 +9,7 @@ import {
   parseRocmProductName,
   parseWindowsGpuCounters,
   resolveUsageTotals,
+  parseNvidiaSmiRow,
   sumProcessTree,
   sumProviderTokens,
   winCpuPercent,
@@ -142,6 +143,44 @@ describe('extractBilling', () => {
     expect(billing!.limitedQuota).toEqual([
       { name: 'good', used: 42, limit: 100, remainingPercent: 58 },
     ]);
+  });
+});
+
+describe('parseNvidiaSmiRow', () => {
+  it('reads utilization and memory from a discrete-GPU row', () => {
+    expect(parseNvidiaSmiRow('42, 8192, 24576')).toEqual({
+      utilPercent: 42,
+      memUsedMb: 8192,
+      memTotalMb: 24576,
+    });
+  });
+
+  it('returns null memory — not 0 — on a unified-memory host', () => {
+    // Verbatim from a DGX Spark (GB10): nvidia-smi has no discrete VRAM pool
+    // to report, so both memory fields come back `[N/A]`. Collapsing these to
+    // 0 made every trial read "peakGpuMem 0 MB", indistinguishable from a GPU
+    // that genuinely used nothing, on the one host where 100B-class models
+    // are validated.
+    expect(parseNvidiaSmiRow('96, [N/A], [N/A]')).toEqual({
+      utilPercent: 96,
+      memUsedMb: null,
+      memTotalMb: null,
+    });
+  });
+
+  it('keeps the utilization sample when only memory is unreadable', () => {
+    const parsed = parseNvidiaSmiRow('5, [N/A], [N/A]');
+    expect(parsed?.utilPercent).toBe(5);
+  });
+
+  it('rejects a row with no readable utilization', () => {
+    expect(parseNvidiaSmiRow('[N/A], 100, 200')).toBeNull();
+    expect(parseNvidiaSmiRow('')).toBeNull();
+    expect(parseNvidiaSmiRow('   ')).toBeNull();
+  });
+
+  it('reads only the first GPU on a multi-GPU host', () => {
+    expect(parseNvidiaSmiRow('10, 100, 200\n90, 900, 1000')?.utilPercent).toBe(10);
   });
 });
 

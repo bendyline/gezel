@@ -118,6 +118,9 @@ function performanceRows(facts: TrialFacts): string[] {
   const peakGpu = recordAt(facts, 'perf.gpu.peakUtilPercent');
   const peakGpuMem = recordAt(facts, 'perf.gpu.peakMemUsedMb');
   const totalGpuMem = recordAt(facts, 'perf.gpu.memTotalMb');
+  const memoryModel = recordAt(facts, 'perf.gpu.memoryModel');
+  const peakSysMem = recordAt(facts, 'perf.systemMemory.peakUsedMb');
+  const totalSysMem = recordAt(facts, 'perf.systemMemory.totalMb');
   const meanTps = recordAt(facts, 'perf.derived.meanTokensPerSec');
   const inputTokens = recordAt(facts, 'perf.usage.totalInputTokens');
   const outputTokens = recordAt(facts, 'perf.usage.totalOutputTokens');
@@ -144,7 +147,14 @@ function performanceRows(facts: TrialFacts): string[] {
   return [
     `| Peak RSS | ${metric(peakRss, ' MB')} | \`facts.perf.process.peakRssMb\` |`,
     `| Peak GPU util | ${metric(peakGpu, '%')} | \`facts.perf.gpu.peakUtilPercent\` |`,
-    `| Peak GPU memory | ${metric(peakGpuMem, ' MB')} / ${metric(totalGpuMem, ' MB')} | \`facts.perf.gpu.peakMemUsedMb\`, \`facts.perf.gpu.memTotalMb\` |`,
+    // On a unified-memory host there is no discrete VRAM to report; saying so
+    // beats printing "n/a" (or the old 0, which read as "used no memory").
+    `| Peak GPU memory | ${
+      memoryModel === 'unified'
+        ? 'unified with system RAM — see next row'
+        : `${metric(peakGpuMem, ' MB')} / ${metric(totalGpuMem, ' MB')}`
+    } | \`facts.perf.gpu.peakMemUsedMb\`, \`facts.perf.gpu.memoryModel\` |`,
+    `| Peak system memory | ${metric(peakSysMem, ' MB')} / ${metric(totalSysMem, ' MB')} | \`facts.perf.systemMemory.peakUsedMb\`, \`facts.perf.systemMemory.totalMb\` |`,
     `| Mean tokens/sec | ${metric(meanTps)} | \`facts.perf.derived.meanTokensPerSec\` |`,
     `| Total tokens | ${tokenText} | \`facts.perf.usage.totalInputTokens\`, \`facts.perf.usage.totalOutputTokens\` |`,
     `| Host | ${escapeTable(hostText || 'n/a')} | \`facts.host.cpuModel\`, \`facts.host.totalRamGb\`, \`facts.host.gpuModel\` |`,

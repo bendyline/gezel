@@ -6,6 +6,7 @@
  * ignores a cached passing report and re-probes.
  */
 import { acquireEvalDeviceLockIfNeeded } from '../eval-device-lock.ts';
+import { formatHostState } from '../host-state.ts';
 import { assertLocalEngineSource } from '../model-sources.ts';
 import { ensurePreflightAdmission, runPreflight } from '../preflight.ts';
 import { defaultModelFor, defaultProvider } from '../providers.ts';
@@ -44,6 +45,8 @@ async function main() {
     console.log(`model:    ${report.modelId} (${report.engine})`);
     console.log(`verdict:  ${report.admitted ? 'ADMITTED' : 'EXCLUDED'}`);
     console.log(`gen t/s:  ${report.genTokensPerSec ?? 'unmeasured'}`);
+    console.log(`prefill t/s: ${report.promptTokensPerSec ?? 'unmeasured'} (corroborates gen t/s)`);
+    console.log(`host:     ${formatHostState(report.hostState ?? {})}`);
     for (const [name, check] of Object.entries(report.checks)) {
       console.log(`  ${check.ok ? 'PASS' : 'FAIL'}  ${name.padEnd(18)} ${check.detail}`);
     }
