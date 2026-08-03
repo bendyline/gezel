@@ -72,6 +72,22 @@ interface SniffEscalationState {
 }
 const escalationMemory = new WeakMap<EvalContext, Map<string, SniffEscalationState>>();
 
+/**
+ * Last successfully DELIVERED sniff nudge per trial, with its stage. The
+ * runner's retry-loop guard reads this to grant one bounded plateau reset
+ * per ladder rung — on slow local models a rung takes 2-4 min to deliver
+ * (the target is perpetually mid-turn, wild-caught: 54 deferrals in one
+ * trial), and without the grace the count-based watchdog kills the trial
+ * while the intervention it would be judged by is still in the mail.
+ */
+const lastNudgeDelivery = new WeakMap<EvalContext, { at: number; stage: number }>();
+
+export function lastDeliveredSniffNudge(
+  ctx: EvalContext,
+): { at: number; stage: number } | null {
+  return lastNudgeDelivery.get(ctx) ?? null;
+}
+
 function ensureEscalationState(
   escalation: Map<string, SniffEscalationState>,
   key: string,
@@ -536,6 +552,7 @@ export async function postSniffFeedback(
       );
     }
     posted.add(key);
+    lastNudgeDelivery.set(ctx, { at: Date.now(), stage });
     // A delivered nudge arms BOTH ladders' delivered-then-completed
     // counters — the plateau must keep counting across signature churn.
     const armedStates = plateauState ? [state, plateauState] : [state];

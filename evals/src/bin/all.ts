@@ -14,7 +14,12 @@
  *       └── petshop-<ts>-cccc/
  *
  * Flags:
- *   --count <N>          trials per scenario (required)
+ *   --count <N>          trials per scenario (required). Saturated scenarios
+ *                        (`suggestedTrials`) still cap below N unless
+ *                        --count-strict is passed.
+ *   --count-strict       honor --count exactly; ignore per-scenario
+ *                        suggestedTrials saturation caps (use for variance
+ *                        runs that need real repetition statistics)
  *   --parallel <K>       within a scenario, run trials in parallel chunks
  *                        of K (default 1). Scenarios themselves always run
  *                        sequentially.
@@ -193,6 +198,7 @@ async function main() {
     const matrix = await runMatrix(scenarios, {
       modelId,
       count,
+      ...(args.flags['count-strict'] ? { countStrict: true } : {}),
       parallel,
       ...(forceBehaviors.length > 0 ? { forceBehaviors } : {}),
       ...(removeBehaviors.length > 0 ? { removeBehaviors } : {}),
