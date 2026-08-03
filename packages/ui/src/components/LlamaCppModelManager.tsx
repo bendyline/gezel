@@ -289,12 +289,6 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
       } catch {
         /* service blip — try again on the next tick */
       }
-      // While a proeve runs, keep the fitness pills live on the same
-      // cadence as the install poll. (The install-done path re-syncs
-      // via refresh() → refreshFitness(), which primes this ref.)
-      if (probingRef.current.length > 0) {
-        void refreshFitness();
-      }
     };
     void tick();
     const t = setInterval(() => void tick(), 2_000);
@@ -302,7 +296,30 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
       cancelled = true;
       clearInterval(t);
     };
-  }, [refresh, refreshFitness]);
+  }, [refresh]);
+
+  // Fitness polling owns its own timer, deliberately NOT the install tick's.
+  // It used to run at the tail of that tick, behind `await
+  // listLlamaCppActiveInstalls()` — so while a multi-GB download had the
+  // daemon busy, the pills froze on "checking fitness…" for as long as that
+  // request stayed slow, long after the probe had finished and failed.
+  // Self-scheduling (not setInterval) so a slow request never stacks up.
+  useEffect(() => {
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const loop = async () => {
+      await refreshFitness();
+      if (cancelled) return;
+      // Fast while a proeve is in flight; slow otherwise, which is what lets
+      // an install-triggered probe appear without the user doing anything.
+      timer = setTimeout(() => void loop(), probingRef.current.length > 0 ? 2_000 : 15_000);
+    };
+    void loop();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [refreshFitness]);
 
   const handleEvent = useCallback((catalogId: string, ev: LlamaCppInstallEvent) => {
     if (ev.type === 'progress') {

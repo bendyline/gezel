@@ -136,10 +136,16 @@ export function composeFitnessBadge(input: FitnessBadgeInput): FitnessBadge {
   }
 
   if (record.status === 'failed') {
+    // Name the axis that actually failed. Reading `checks.spawn` blindly
+    // reported "engine spawned and served the probe session" as the reason a
+    // check failed, because spawn passes whenever the session was created —
+    // and native engines start lazily, on the first turn.
+    const cause = CHECK_LABELS.find((c) => !record.checks[c.key].ok);
+    const detail = cause ? record.checks[cause.key].detail : record.checks.spawn.detail;
     return {
       tier: 'warn',
       label: 'fitness check failed',
-      detail: `The fitness check could not complete: ${record.checks.spawn.detail}${softener}${ramCaveat(ramFit)}`,
+      detail: `The fitness check could not complete: ${detail}${softener}${ramCaveat(ramFit)}`,
     };
   }
 

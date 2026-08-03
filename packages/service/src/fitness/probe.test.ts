@@ -117,6 +117,30 @@ describe('runFitnessProbe', () => {
     expect(session.disconnected).toBe(true);
   });
 
+  // Regression: native engines start lazily on the FIRST TURN, not in
+  // createSession, so a launch failure arrives as a turn rejection. Filed
+  // under `throughput` it left `spawn` reading "engine spawned and served
+  // the probe session" — which is what the badge shows as the failure
+  // reason. Every packaged machine-service install reported an engine that
+  // had never started as a healthy spawn.
+  it('lazy engine-launch failure lands on spawn, not the turn that surfaced it', async () => {
+    const session = new FakeSession([
+      {
+        fail:
+          '[llama-server] could not launch gezel-llama-server.exe (EPERM). ' +
+          'Executable: C:\\native-bin\\win32-x64-cuda\\gezel-llama-server.exe. spawn EPERM',
+      },
+    ]);
+    const record = await runFitnessProbe(
+      deps({ getProviderForModel: async () => fakeProvider(session) }),
+      { provider: 'llama-cpp', modelId: 'gemma4-e4b-q4', trigger: 'install' },
+    );
+    expect(record.status).toBe('failed');
+    expect(record.checks.spawn.ok).toBe(false);
+    expect(record.checks.spawn.detail).toContain('could not launch');
+    expect(record.checks.throughput.detail).toBe('not reached — an earlier probe stage failed');
+  });
+
   it('spawn throw (capacity denial) → status failed with the denial in spawn.detail', async () => {
     const record = await runFitnessProbe(
       deps({

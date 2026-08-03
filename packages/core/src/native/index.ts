@@ -43,6 +43,7 @@ export type {
   NativeBinaryName,
 } from './discover.js';
 export { discoverNativeBinaries, resolveNativeBinaryUnder } from './discover.js';
+export { windowsDetachedSpawnOptions } from './console-detach.js';
 export { LLAMA_ENGINE_VERSION } from './llama-engine-version.js';
 export { resolvePlatformKey } from './platform-key.js';
 export type {

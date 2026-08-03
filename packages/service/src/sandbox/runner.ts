@@ -3,6 +3,7 @@ import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { windowsDetachedSpawnOptions } from '@bendyline/gezel/native';
 import { runUnderMacSandbox } from './macos.js';
 
 export interface SandboxRunOptions {
@@ -286,10 +287,11 @@ async function readNodeHelp(nodeBin: string): Promise<string> {
     const child = spawn(nodeBin, ['--help'], {
       stdio: ['ignore', 'pipe', 'pipe'],
       env: sandboxEnv(process.env),
-      // Bundled Node is a console-subsystem executable. The machine service
-      // has no interactive console, so keep even this capability probe
-      // headless on Windows (ignored elsewhere).
-      windowsHide: true,
+      // Bundled Node is a console-subsystem executable, and the machine
+      // service cannot allocate a console under its restricted SID — so even
+      // this capability probe must start with DETACHED_PROCESS. `windowsHide`
+      // (CREATE_NO_WINDOW) does not do that; it still allocates.
+      ...windowsDetachedSpawnOptions(),
     });
     let stdout = '';
     let stderr = '';
@@ -320,11 +322,12 @@ async function runSandboxChild(
       // group. Workspace commands already do this; doing the same
       // here prevents an unrelated process-group kill from closing a
       // short-lived derive/script child with a null exit code.
-      detached: process.platform !== 'win32',
-      // Required when the command resolves to bundled Node under the
-      // machine-wide Session 0 service. Without CREATE_NO_WINDOW the child
-      // can fail during DLL initialization before user code runs.
-      windowsHide: true,
+      // On Windows the same option is DETACHED_PROCESS, which is also what
+      // lets a console-subsystem child start at all under the machine
+      // service's restricted SID — `windowsHide` (CREATE_NO_WINDOW) does not,
+      // because it still allocates a console. `taskkill /T` is unaffected:
+      // detaching changes console and process group, not the recorded parent.
+      detached: true,
       // Allowlist-scrub the env — inheriting everything leaked tokens
       // (GEZEL_TOKEN, OPENAI_API_KEY, GITHUB_PERSONAL_ACCESS_TOKEN,
       // etc.) into the sandboxed script, letting it `fetch` them

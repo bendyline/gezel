@@ -21,6 +21,7 @@
 
 import type { ModelFitnessRecord, ModelFitnessTrigger } from '@bendyline/gezel';
 import { createLogger } from '@bendyline/gezel';
+import { isEngineLaunchError } from '../providers/native/supervisor.js';
 import type { ExternalToolCall, ExternalToolSpec, LLMProvider } from '../providers/types.js';
 import {
   type FitnessEvidence,
@@ -69,6 +70,25 @@ function isEngineBusy(err: unknown): boolean {
   }
   const message = err instanceof Error ? err.message : String(err);
   return /did not drain|busy serving requests/i.test(message);
+}
+
+/**
+ * Attribute a turn failure to the axis that actually failed.
+ *
+ * Native engines start lazily on the first turn, so an engine that never
+ * launches surfaces as a *turn* error, not as a `getProviderForModel`
+ * throw. Filed under the turn axis it would leave `spawn` reading
+ * "engine spawned and served the probe session" — the badge's failure
+ * detail — while the engine had in fact never started.
+ */
+function recordTurnFailure(
+  evidence: FitnessEvidence,
+  err: unknown,
+  axis: 'generationError' | 'toolTurnError',
+): void {
+  const message = err instanceof Error ? err.message : String(err);
+  if (isEngineLaunchError(err)) evidence.spawnError = message;
+  else evidence[axis] = message;
 }
 
 const PROBE_SYSTEM_MESSAGE =
@@ -199,7 +219,7 @@ export async function runFitnessProbe(
           queue,
         });
       } catch (err) {
-        evidence.generationError = err instanceof Error ? err.message : String(err);
+        recordTurnFailure(evidence, err, 'generationError');
         machineryFailed = true;
         return;
       }
@@ -212,7 +232,7 @@ export async function runFitnessProbe(
           queue,
         });
       } catch (err) {
-        evidence.toolTurnError = err instanceof Error ? err.message : String(err);
+        recordTurnFailure(evidence, err, 'toolTurnError');
         machineryFailed = true;
         return;
       }

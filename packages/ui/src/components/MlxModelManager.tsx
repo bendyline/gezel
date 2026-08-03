@@ -229,11 +229,6 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
       } catch {
         /* service blip — try again on the next tick */
       }
-      // While a proeve runs, keep the fitness pills live on the same
-      // cadence as the install poll.
-      if (probingRef.current.length > 0) {
-        void refreshFitness();
-      }
     };
     void tick();
     const t = setInterval(() => void tick(), 2_000);
@@ -241,7 +236,26 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
       cancelled = true;
       clearInterval(t);
     };
-  }, [refresh, refreshFitness]);
+  }, [refresh]);
+
+  // Own timer, not the install tick's: running behind that tick's
+  // `await listMlxActiveInstalls()` froze the pills on "checking fitness…"
+  // whenever a large download kept that request slow. Self-scheduling so a
+  // slow request never stacks up.
+  useEffect(() => {
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const loop = async () => {
+      await refreshFitness();
+      if (cancelled) return;
+      timer = setTimeout(() => void loop(), probingRef.current.length > 0 ? 2_000 : 15_000);
+    };
+    void loop();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [refreshFitness]);
 
   const handleEvent = useCallback((catalogId: string, ev: MlxInstallEvent) => {
     if (ev.type === 'progress') {

@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createLogger } from '@bendyline/gezel';
+import { windowsDetachedSpawnOptions } from '@bendyline/gezel/native';
 
 const log = createLogger('engine-signature');
 const execFileAsync = promisify(execFile);
@@ -80,7 +81,12 @@ const defaultRun: Runner = async (cmd, args) => {
   try {
     const { stdout, stderr } = await execFileAsync(cmd, args, {
       maxBuffer: 4 * 1024 * 1024,
-      windowsHide: true,
+      // Signature tools (signtool/powershell/codesign) are console-subsystem.
+      // The machine service's restricted SID cannot allocate a console, so
+      // DETACHED_PROCESS is the only way they start; `windowsHide`
+      // (CREATE_NO_WINDOW) still allocates one. A failure here would reject
+      // a perfectly good bundled engine as unverifiable.
+      ...windowsDetachedSpawnOptions(),
     });
     return { code: 0, stdout: String(stdout), stderr: String(stderr) };
   } catch (err) {

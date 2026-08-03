@@ -97,9 +97,13 @@ export async function runWorkspaceCommand(
       stdio: ['ignore', 'pipe', 'pipe'],
       env,
       // New process group on POSIX so a runaway child tree can be
-      // killed with `process.kill(-pid)` on timeout. Harmless no-op
-      // on Windows (the flag has no effect without `shell: true`).
-      detached: process.platform !== 'win32',
+      // killed with `process.kill(-pid)` on timeout. On Windows the same
+      // option is DETACHED_PROCESS — not the no-op the previous comment
+      // here claimed — and that is exactly what a console-subsystem build
+      // tool needs under the machine service, whose restricted SID cannot
+      // allocate a console. `killTree` is unaffected: detaching changes the
+      // console and process group, not the parent PID `taskkill /T` walks.
+      detached: true,
       // Windows: only force a shell when we're running a .cmd/.bat
       // shim that the loader can't exec directly. For absolute paths
       // to .exe binaries (pnpm, node, `.bin/*` after our resolution),
@@ -114,10 +118,6 @@ export async function runWorkspaceCommand(
       // so Node neither re-concatenates model-controlled values nor emits
       // DEP0190. Ordinary executables stay on the shell:false path.
       shell,
-      // The machine-wide daemon runs in non-interactive Session 0. Keep
-      // console-subsystem build tools headless so CreateProcess does not
-      // attempt console/DLL initialization there. Ignored off Windows.
-      windowsHide: true,
     });
 
     let timedOut = false;
@@ -205,8 +205,11 @@ function killTree(child: import('node:child_process').ChildProcess): void {
     // Node's ChildProcess.kill() terminates only the immediate process on
     // Windows. taskkill /T walks the descendant tree (watchers and compiler
     // workers included) before force-terminating it.
+    // taskkill is itself a console-subsystem executable, so it needs the
+    // same DETACHED_PROCESS treatment — a timeout kill that cannot spawn
+    // its killer would leave the runaway tree running.
     const killer = spawn('taskkill.exe', ['/PID', String(pid), '/T', '/F'], {
-      windowsHide: true,
+      detached: true,
       stdio: 'ignore',
     });
     killer.once('error', () => child.kill('SIGKILL'));

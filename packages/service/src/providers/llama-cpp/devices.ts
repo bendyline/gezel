@@ -20,6 +20,7 @@ import { execFile } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { delimiter, dirname, join } from 'node:path';
 import { promisify } from 'node:util';
+import { windowsDetachedSpawnOptions } from '@bendyline/gezel/native';
 import { gezelHome } from '@bendyline/gezel/paths';
 
 const execFileAsync = promisify(execFile);
@@ -99,7 +100,7 @@ export async function probeNvidiaRuntimeDevices(): Promise<NvidiaRuntimeDevice[]
     const { stdout } = await execFileAsync(
       'nvidia-smi',
       ['--query-gpu=index,name,compute_cap,driver_version', '--format=csv,noheader,nounits'],
-      { timeout: 5_000 },
+      { timeout: 5_000, ...windowsDetachedSpawnOptions() },
     );
     return parseNvidiaRuntimeDevices(stdout);
   } catch {
@@ -194,6 +195,10 @@ export async function probeLlamaDevices(opts: {
         ...process.env,
         PATH: inheritedPath ? `${binDir}${delimiter}${inheritedPath}` : binDir,
       },
+      // Same engine binary the supervisor launches, so the same rule: no
+      // console under the machine service's restricted SID, or this probe
+      // fails and VRAM reads as unknown.
+      ...windowsDetachedSpawnOptions(),
     });
     devices = parseLlamaDevices(stdout);
   } catch {

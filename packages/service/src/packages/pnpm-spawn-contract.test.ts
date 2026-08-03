@@ -43,13 +43,28 @@ describe('machine-service child-process contract', () => {
     const body = source('./pnpm.ts');
     expect(body).toContain('function pnpmSpawnTarget(');
     expect(body).not.toContain('export function pnpmSpawnTarget(');
-    expect(body).toContain('windowsHide: true');
+    expect(body).toContain('windowsDetachedSpawnOptions()');
   });
 
-  it('launches workspace and sandboxed Node children headlessly too', () => {
-    expect(source('../workspace/command.ts')).toContain('windowsHide: true');
+  it('launches workspace and sandboxed Node children with no console at all', () => {
+    expect(source('../workspace/command.ts')).toContain('detached: true');
 
     const sandbox = source('../sandbox/runner.ts');
-    expect(sandbox.match(/windowsHide: true/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
+    const detached =
+      (sandbox.match(/windowsDetachedSpawnOptions\(\)/g)?.length ?? 0) +
+      (sandbox.match(/detached: true/g)?.length ?? 0);
+    expect(detached).toBeGreaterThanOrEqual(2);
+  });
+
+  // CREATE_NO_WINDOW reads like the headless flag and is not one: it still
+  // allocates a console, and console allocation fails under the machine
+  // service's restricted SID. Every native engine launch in packaged
+  // installs died as `spawn EPERM` for as long as this option was set.
+  // DETACHED_PROCESS (`detached`) is the flag that allocates nothing.
+  it('never asks for CREATE_NO_WINDOW in production service code', () => {
+    for (const caller of productionTypeScriptFiles()) {
+      const name = relative(serviceSrc, caller).replaceAll('\\', '/');
+      expect(readFileSync(caller, 'utf8'), name).not.toContain('windowsHide: true');
+    }
   });
 });
