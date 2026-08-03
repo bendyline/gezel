@@ -25,11 +25,13 @@ vi.mock('@bendyline/squisq-editor-react', async () => {
       placeholder,
       toolbarSlotRight,
       onChange,
+      submitOnEnter,
     }: {
       initialMarkdown?: string;
       placeholder?: string;
       toolbarSlotRight?: React.ReactNode;
       onChange?: (value: string) => void;
+      submitOnEnter?: () => void;
     }) => {
       // Match Squisq's mount-time-only placeholder configuration so this
       // mock catches regressions where a recipient change merely updates a
@@ -48,6 +50,9 @@ vi.mock('@bendyline/squisq-editor-react', async () => {
             }}
           >
             Fill draft
+          </button>
+          <button type="button" onClick={() => submitOnEnter?.()}>
+            Press Enter
           </button>
           {toolbarSlotRight}
         </div>
@@ -251,6 +256,98 @@ describe('ChatComposer server-authoritative cancellation', () => {
   });
 });
 
+describe('ChatComposer mid-turn nudge + interrupt', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(api.getChatSessionInflight).mockResolvedValue({
+      inflight: {
+        userText: 'Create the deck',
+        startedAt: Date.now() - 5_000,
+        elapsedMs: 5_000,
+      },
+    });
+    vi.mocked(api.sendToChatSession).mockResolvedValue({
+      accepted: true,
+      sessionId: 'session-1',
+    });
+    vi.mocked(api.interruptChatSession).mockResolvedValue({
+      accepted: true,
+      sessionId: 'session-1',
+    });
+  });
+
+  it('shows only Stop while the draft is empty', async () => {
+    render(
+      <ChatComposer gezelId="tomas" gezelName="Tomas" projectId="default" sessionId="session-1" />,
+    );
+
+    expect(await screen.findByRole('button', { name: /stop/i })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /^nudge$/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^interrupt$/i })).toBeNull();
+  });
+
+  it('typing mid-turn reveals Nudge + Interrupt, and Nudge queues with the flag', async () => {
+    render(
+      <ChatComposer gezelId="tomas" gezelName="Tomas" projectId="default" sessionId="session-1" />,
+    );
+
+    await screen.findByRole('button', { name: /stop/i });
+    fireEvent.click(screen.getByRole('button', { name: 'Fill draft' }));
+
+    const nudgeBtn = await screen.findByRole('button', { name: /^nudge$/i });
+    expect(screen.getByRole('button', { name: /^interrupt$/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /stop/i })).toBeTruthy();
+
+    fireEvent.click(nudgeBtn);
+    await waitFor(() => {
+      expect(api.sendToChatSession).toHaveBeenCalledWith('session-1', {
+        message: 'Hello from the test',
+        nudge: true,
+      });
+    });
+    // The draft cleared: the editor remounted empty and the mid-turn
+    // action buttons folded back to Stop only.
+    await waitFor(() => {
+      expect(screen.getByTestId('editor-draft').textContent).toBe('');
+    });
+    expect(screen.queryByRole('button', { name: /^nudge$/i })).toBeNull();
+  });
+
+  it('Enter mid-turn queues a nudge instead of silently doing nothing', async () => {
+    render(
+      <ChatComposer gezelId="tomas" gezelName="Tomas" projectId="default" sessionId="session-1" />,
+    );
+
+    await screen.findByRole('button', { name: /stop/i });
+    fireEvent.click(screen.getByRole('button', { name: 'Fill draft' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Press Enter' }));
+
+    await waitFor(() => {
+      expect(api.sendToChatSession).toHaveBeenCalledWith('session-1', {
+        message: 'Hello from the test',
+        nudge: true,
+      });
+    });
+  });
+
+  it('Interrupt sends the draft through the interrupt endpoint', async () => {
+    render(
+      <ChatComposer gezelId="tomas" gezelName="Tomas" projectId="default" sessionId="session-1" />,
+    );
+
+    await screen.findByRole('button', { name: /stop/i });
+    fireEvent.click(screen.getByRole('button', { name: 'Fill draft' }));
+    fireEvent.click(screen.getByRole('button', { name: /^interrupt$/i }));
+
+    await waitFor(() => {
+      expect(api.interruptChatSession).toHaveBeenCalledWith('session-1', {
+        message: 'Hello from the test',
+      });
+    });
+    expect(api.sendToChatSession).not.toHaveBeenCalled();
+  });
+});
+
 describe('ChatComposer recipient picker', () => {
   const gezels = [
     { id: 'tomas', name: 'Tomas', role: 'Meester', updatedAt: '2026-07-30T00:00:00.000Z' },
@@ -354,5 +451,126 @@ describe('ChatComposer recipient picker', () => {
         mentions: ['ada'],
       });
     });
+  });
+});
+
+describe('ChatComposer transport resilience', () => {
+  const toolEvent = (name: string) => ({
+    type: 'tool' as const,
+    name,
+    durationMs: 10,
+    success: true,
+  });
+  const transportError = () => {
+    // Chromium's exact message when a fetch body stream dies mid-read —
+    // the raw string that used to land verbatim in the composer.
+    return new TypeError('network error');
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(api.sendToChatSession).mockResolvedValue({
+      accepted: true,
+      sessionId: 'session-1',
+    });
+  });
+
+  it('reconnects after a mid-turn transport break and dedupes replayed tool events', async () => {
+    // Mount poll idle; the post-send poll must report the turn still
+    // running so it doesn't settle the turn before the reconnect fires;
+    // later polls go idle again once the reconnected stream delivers done.
+    vi.mocked(api.getChatSessionInflight)
+      .mockResolvedValueOnce({ inflight: null })
+      .mockResolvedValueOnce({
+        inflight: { userText: 'Hello from the test', startedAt: Date.now(), elapsedMs: 0 },
+      })
+      .mockResolvedValue({ inflight: null });
+
+    const onToolActivity = vi.fn();
+    vi.mocked(streamChatEvents)
+      .mockImplementationOnce(() =>
+        (async function* firstConnection() {
+          yield toolEvent('read_file');
+          yield toolEvent('write_file');
+          throw transportError();
+        })(),
+      )
+      .mockImplementationOnce(() =>
+        (async function* reconnectedWithReplay() {
+          // The event bus replays the in-flight turn's history on
+          // resubscribe — the composer must not re-emit these two.
+          yield toolEvent('read_file');
+          yield toolEvent('write_file');
+          yield toolEvent('list_dir');
+          yield { type: 'done' as const };
+        })(),
+      );
+
+    render(
+      <ChatComposer
+        gezelId="tomas"
+        gezelName="Tomas"
+        projectId="default"
+        sessionId="session-1"
+        onToolActivity={onToolActivity}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Fill draft' }));
+    fireEvent.click(screen.getByRole('button', { name: /^send$/i }));
+
+    await waitFor(() => expect(streamChatEvents).toHaveBeenCalledTimes(2), { timeout: 3_000 });
+    expect(await screen.findByRole('button', { name: /^send$/i }, { timeout: 3_000 })).toBeTruthy();
+    expect(onToolActivity).toHaveBeenCalledTimes(3);
+    expect(onToolActivity.mock.calls.map(([tool]) => tool.name)).toEqual([
+      'read_file',
+      'write_file',
+      'list_dir',
+    ]);
+    expect(screen.queryByText(/network error/i)).toBeNull();
+  });
+
+  it('gives up after repeated transport failures with a readable message, not the raw error', async () => {
+    vi.useFakeTimers();
+    try {
+      // Mount poll idle, then the daemon is unreachable — the inflight
+      // poll rejecting must not mask or clear the transport failure.
+      vi.mocked(api.getChatSessionInflight)
+        .mockResolvedValueOnce({ inflight: null })
+        .mockRejectedValue(new Error('Gezel API transport unavailable on GET: Failed to fetch'));
+      vi.mocked(streamChatEvents).mockImplementation(() =>
+        // biome-ignore lint/correctness/useYield: the stream dies before yielding any frame
+        (async function* alwaysBroken() {
+          throw transportError();
+        })(),
+      );
+
+      render(
+        <ChatComposer
+          gezelId="tomas"
+          gezelName="Tomas"
+          projectId="default"
+          sessionId="session-1"
+        />,
+      );
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: 'Fill draft' }));
+      fireEvent.click(screen.getByRole('button', { name: /^send$/i }));
+
+      // Walk through every reconnect backoff (500+1000+2000+4000+5000ms).
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(20_000);
+      });
+
+      expect(streamChatEvents).toHaveBeenCalledTimes(6);
+      expect(screen.getByText(/lost the connection to the gezel service/i)).toBeTruthy();
+      expect(screen.queryByText(/^network error$/i)).toBeNull();
+      expect(screen.getByRole('button', { name: /^send$/i })).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

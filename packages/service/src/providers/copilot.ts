@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { createLogger, resolveSandboxCopilot } from '@bendyline/gezel';
 import { ALWAYS_REGISTERED_TOOLS, CONDITIONALLY_REGISTERED_TOOLS } from '@bendyline/gezel-mcp';
@@ -162,7 +163,17 @@ export class CopilotProvider implements LLMProvider {
     try {
       mod = await this.loadSdk();
     } catch (err) {
-      throw translateCopilotSdkMissingError(err);
+      // The raw loader error names the exact unresolvable path — gold when
+      // diagnosing a damaged tree from a log bundle, and about to be
+      // translated away for the user. Keep it in the log.
+      log.warn(
+        `[copilot] SDK failed to load from ${this.sdkEntryPath ?? 'bare specifier'}: ` +
+          `${err instanceof Error ? err.message.split('\n')[0] : String(err)}`,
+      );
+      throw translateCopilotSdkMissingError(
+        err,
+        Boolean(this.sdkInstallRoot && existsSync(this.sdkInstallRoot)),
+      );
     }
     const CopilotClient = (mod as Record<string, unknown>).CopilotClient as new (
       opts?: Record<string, unknown>,
@@ -840,8 +851,16 @@ function translateCopilotStartError(err: unknown, hasToken: boolean): Error {
  * `.isActionable = true` is load-bearing: without it `ChatManager.ensureProvider`
  * rewrites this into "copilot provider failed to start: … check your
  * credentials", which points at entirely the wrong problem.
+ *
+ * `installRootExists` splits the module-not-found family in two. A missing
+ * *install* gets "install it in Settings". But a module-not-found thrown out
+ * of an install that IS on disk means the tree is damaged — dangling links
+ * from a pre-hoisted-linker staging rename, or a truncated extraction — and
+ * telling that user "choose Install" strands them: the Settings card sees the
+ * directory, says "Installed", and shows no install button at all. Name the
+ * real problem and point at the repair affordance instead.
  */
-function translateCopilotSdkMissingError(err: unknown): Error {
+function translateCopilotSdkMissingError(err: unknown, installRootExists: boolean): Error {
   const raw = err instanceof Error ? err.message : String(err);
   const code = (err as NodeJS.ErrnoException | undefined)?.code;
   const looksMissing =
@@ -849,10 +868,11 @@ function translateCopilotSdkMissingError(err: unknown): Error {
     code === 'MODULE_NOT_FOUND' ||
     /Cannot find (module|package)/i.test(raw);
   if (!looksMissing) return err instanceof Error ? err : new Error(raw);
-  const wrapped = new Error(
-    "GitHub Copilot isn't installed on this device yet. Open Settings → GitHub Copilot " +
-      'and choose Install, then try again.',
-  ) as Error & { isActionable?: boolean };
+  const missingModule = /Cannot find (?:module|package) '([^']+)'/.exec(raw)?.[1];
+  const message = installRootExists
+    ? `The GitHub Copilot install on this device is damaged${missingModule ? ` (cannot load ${missingModule})` : ''}. Open Settings → GitHub Copilot and choose Repair, then try again.`
+    : "GitHub Copilot isn't installed on this device yet. Open Settings → GitHub Copilot and choose Install, then try again.";
+  const wrapped = new Error(message) as Error & { isActionable?: boolean };
   wrapped.isActionable = true;
   return wrapped;
 }

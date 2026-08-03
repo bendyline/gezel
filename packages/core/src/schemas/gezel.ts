@@ -589,6 +589,14 @@ export const ChatMessageSchema = z.object({
    */
   hidden: z.boolean().optional(),
   /**
+   * This user message was delivered from the session's mid-turn queue
+   * as a nudge — typed while the previous turn was still streaming and
+   * held until it finished (contiguous nudges merge into one message).
+   * Display-only marker: the model sees a normal user turn; the UI
+   * renders a small "nudged" chip on the bubble.
+   */
+  nudge: z.boolean().optional(),
+  /**
    * Persistent warnings attached to this assistant turn — fabricated
    * tool-use detection, degraded provider state, etc. The streaming
    * `warning` events show during the live render but vanish when the
@@ -877,6 +885,14 @@ export const ChatEventSchema = z.discriminatedUnion('type', [
     queueId: z.string(),
     preview: z.string(),
     enqueuedAt: z.string(),
+    /**
+     * The entry was queued as a mid-turn nudge — the ghost bubble labels
+     * it "nudge" and contiguous nudges merge into one turn on drain.
+     * Full text is deliberately NOT on the event (it re-publishes on
+     * every coalesce/edit); the edit affordance fetches it lazily via
+     * `GET /api/sessions/:id/queue`.
+     */
+    nudge: z.boolean().optional(),
   }),
   /**
    * Emitted when a queued entry leaves the queue — either because

@@ -163,6 +163,79 @@ describe('sessions API — send + events', () => {
   }, 15_000);
 });
 
+describe('sessions API — queue + interrupt', () => {
+  it('GET /:id/queue on an idle session returns an empty list', async () => {
+    const created = (await (await api('POST', '/api/sessions', { gezelId })).json()) as {
+      id: string;
+    };
+    const res = await api('GET', `/api/sessions/${created.id}/queue`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ sessionId: created.id, entries: [] });
+  });
+
+  it('PATCH /:id/queue/:queueId 404s when the entry does not exist', async () => {
+    const created = (await (await api('POST', '/api/sessions', { gezelId })).json()) as {
+      id: string;
+    };
+    const res = await api('PATCH', `/api/sessions/${created.id}/queue/no-such-id`, {
+      message: 'edited',
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it('POST /:id/interrupt on an idle session degrades to a plain send', async () => {
+    const created = (await (await api('POST', '/api/sessions', { gezelId })).json()) as {
+      id: string;
+    };
+    const res = await api('POST', `/api/sessions/${created.id}/interrupt`, {
+      message: 'interrupt with nothing to interrupt',
+    });
+    expect(res.status).toBe(202);
+    expect(await res.json()).toEqual({ accepted: true, sessionId: created.id });
+
+    // The message went straight through as a normal turn.
+    const deadline = Date.now() + 8_000;
+    let messages: Array<{ role: string; content: string; nudge?: boolean }> = [];
+    while (Date.now() < deadline) {
+      const full = (await (await api('GET', `/api/sessions/${created.id}`)).json()) as {
+        messages: typeof messages;
+      };
+      messages = full.messages;
+      if (messages.some((m) => m.role === 'assistant')) break;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    const user = messages.find((m) => m.role === 'user');
+    expect(user?.content).toBe('interrupt with nothing to interrupt');
+    expect(user?.nudge).toBeUndefined();
+    expect(messages.some((m) => m.role === 'assistant')).toBe(true);
+  }, 12_000);
+
+  it('POST /:id/send with nudge on an idle session persists without the marker', async () => {
+    const created = (await (await api('POST', '/api/sessions', { gezelId })).json()) as {
+      id: string;
+    };
+    const res = await api('POST', `/api/sessions/${created.id}/send`, {
+      message: 'nudge that never queued',
+      nudge: true,
+    });
+    expect(res.status).toBe(202);
+
+    const deadline = Date.now() + 8_000;
+    let messages: Array<{ role: string; content: string; nudge?: boolean }> = [];
+    while (Date.now() < deadline) {
+      const full = (await (await api('GET', `/api/sessions/${created.id}`)).json()) as {
+        messages: typeof messages;
+      };
+      messages = full.messages;
+      if (messages.some((m) => m.role === 'assistant')) break;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    const user = messages.find((m) => m.role === 'user');
+    expect(user?.content).toBe('nudge that never queued');
+    expect(user?.nudge).toBeUndefined();
+  }, 12_000);
+});
+
 describe('sessions API — back-compat', () => {
   it('legacy /api/gezels/:id/chat resolves to most-recent session', async () => {
     // Send via legacy endpoint — should create + route to most-recent session.

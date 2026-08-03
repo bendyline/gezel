@@ -3065,6 +3065,226 @@ describe('ChatManager — per-session message queue', () => {
     expect(mA.content).toBe('slow-reply-A');
     expect(mB.content).toBe('reply-B');
   });
+
+  it('mid-turn nudges stay separate while queued, then merge into one turn on drain', async () => {
+    const session = await manager.createSession({ gezelId: 'ada' });
+    const stall = mock.scriptStreamThenStall('reply-A');
+    mock.script('merged-reply');
+
+    const recorded: string[] = [];
+    const unsub = events.subscribe(session.id, (ev) => {
+      if (ev.type === 'user_message') recorded.push(`user:${ev.message.content}`);
+      else if (ev.type === 'queue_removed') recorded.push(`rm:${ev.reason}:${ev.queueId}`);
+    });
+
+    const pA = manager.send(session.id, 'long question');
+    await vi.waitFor(() => expect(mock.calls.some((c) => c.kind === 'send')).toBe(true), {
+      timeout: 5000,
+      interval: 10,
+    });
+    const pN1 = manager.send(session.id, 'nudge one', { nudge: true });
+    const pN2 = manager.send(session.id, 'nudge two', { nudge: true });
+
+    // Nudges never coalesce at enqueue time — each stays its own
+    // entry so it remains individually editable / discardable.
+    const mid = manager.listQueued();
+    expect(mid[0]?.depth).toBe(2);
+    expect(mid[0]?.entries.every((e) => e.nudge === true)).toBe(true);
+    const queuedIds = mid[0]!.entries.map((e) => e.queueId);
+
+    stall.release();
+    const [mA, mN1, mN2] = await Promise.all([pA, pN1, pN2]);
+    unsub();
+
+    expect(mA.content).toBe('reply-A');
+    // Both nudge callers resolve with the SAME merged-turn reply.
+    expect(mN1.content).toBe('merged-reply');
+    expect(mN2.content).toBe('merged-reply');
+
+    // ONE merged user message, joined content, nudge marker set.
+    const rec = await store.getSession('ada', session.id);
+    const userTurns = rec?.messages.filter((m) => m.role === 'user') ?? [];
+    expect(userTurns).toHaveLength(2);
+    expect(userTurns[1]?.content).toBe('nudge one\n\nnudge two');
+    expect(userTurns[1]?.nudge).toBe(true);
+    // The title came from the original message, not the nudges.
+    expect(rec?.title).toContain('long question');
+
+    // Exactly one merged user_message event, and a
+    // queue_removed('started') for BOTH consumed entries.
+    expect(recorded.filter((r) => r.startsWith('user:'))).toEqual([
+      'user:long question',
+      'user:nudge one\n\nnudge two',
+    ]);
+    for (const id of queuedIds) {
+      expect(recorded).toContain(`rm:started:${id}`);
+    }
+  });
+
+  it('a non-nudge queued message breaks the nudge merge run', async () => {
+    const session = await manager.createSession({ gezelId: 'ada' });
+    const stall = mock.scriptStreamThenStall('reply-A');
+    mock.script('reply-N1', 'reply-C', 'reply-N2');
+
+    const pA = manager.send(session.id, 'start');
+    await vi.waitFor(() => expect(mock.calls.some((c) => c.kind === 'send')).toBe(true), {
+      timeout: 5000,
+      interval: 10,
+    });
+    const pN1 = manager.send(session.id, 'nudge one', { nudge: true });
+    const pC = manager.send(session.id, 'plain follow-up');
+    const pN2 = manager.send(session.id, 'nudge two', { nudge: true });
+
+    expect(manager.listQueued()[0]?.depth).toBe(3);
+
+    stall.release();
+    const [, mN1, mC, mN2] = await Promise.all([pA, pN1, pC, pN2]);
+    expect(mN1.content).toBe('reply-N1');
+    expect(mC.content).toBe('reply-C');
+    expect(mN2.content).toBe('reply-N2');
+
+    // Four separate user turns — the plain message between the two
+    // nudges kept each drain to a single entry.
+    const rec = await store.getSession('ada', session.id);
+    expect(rec?.messages.filter((m) => m.role === 'user')).toHaveLength(4);
+  });
+
+  it('updateQueuedMessage edits a pending entry in place and the drain uses the new text', async () => {
+    const session = await manager.createSession({ gezelId: 'ada' });
+    const stall = mock.scriptStreamThenStall('reply-A');
+    mock.script('reply-N');
+
+    const enqueued: Array<{ queueId: string; preview: string; nudge?: boolean }> = [];
+    const unsub = events.subscribe(session.id, (ev) => {
+      if (ev.type === 'queue_enqueued') {
+        enqueued.push({ queueId: ev.queueId, preview: ev.preview, nudge: ev.nudge });
+      }
+    });
+
+    const pA = manager.send(session.id, 'start');
+    await vi.waitFor(() => expect(mock.calls.some((c) => c.kind === 'send')).toBe(true), {
+      timeout: 5000,
+      interval: 10,
+    });
+    const pN = manager.send(session.id, 'original nudge', { nudge: true });
+
+    const listed = manager.listSessionQueue(session.id);
+    expect(listed).toHaveLength(1);
+    expect(listed[0]?.text).toBe('original nudge');
+    expect(listed[0]?.nudge).toBe(true);
+    const queueId = listed[0]!.queueId;
+
+    const updated = manager.updateQueuedMessage(session.id, queueId, 'edited nudge text');
+    expect(updated?.text).toBe('edited nudge text');
+    expect(updated?.nudge).toBe(true);
+    // Unknown id → null (entry gone / never existed).
+    expect(manager.updateQueuedMessage(session.id, 'no-such-id', 'x')).toBeNull();
+
+    // The edit re-published under the SAME queueId so the UI upserts
+    // its ghost bubble rather than adding a second one.
+    const republished = enqueued.filter((e) => e.queueId === queueId);
+    expect(republished).toHaveLength(2);
+    expect(republished.at(-1)?.preview).toBe('edited nudge text');
+    expect(republished.at(-1)?.nudge).toBe(true);
+
+    stall.release();
+    const [, mN] = await Promise.all([pA, pN]);
+    unsub();
+    expect(mN.content).toBe('reply-N');
+
+    const rec = await store.getSession('ada', session.id);
+    expect(rec?.messages.filter((m) => m.role === 'user')[1]?.content).toBe('edited nudge text');
+    // Once drained, the entry can no longer be edited.
+    expect(manager.updateQueuedMessage(session.id, queueId, 'too late')).toBeNull();
+  });
+
+  it('interruptWithMessage cancels the in-flight turn and runs ahead of queued messages', async () => {
+    const session = await manager.createSession({ gezelId: 'ada' });
+    mock.scriptStreamThenHang('partial-A');
+    mock.script('reply-M', 'reply-B');
+
+    const pA = manager.send(session.id, 'long job').catch(() => undefined);
+    await vi.waitFor(() => expect(mock.calls.some((c) => c.kind === 'send')).toBe(true), {
+      timeout: 5000,
+      interval: 10,
+    });
+    const pB = manager.send(session.id, 'queued nudge', { nudge: true });
+    const pM = manager.interruptWithMessage(session.id, 'do this instead');
+
+    const [mM, mB] = await Promise.all([pM, pB]);
+    await pA;
+    expect(mM.content).toBe('reply-M');
+    expect(mB.content).toBe('reply-B');
+
+    const rec = await store.getSession('ada', session.id);
+    // Transcript order: the aborted turn keeps its salvaged partial,
+    // then the interrupt message runs BEFORE the earlier-queued nudge.
+    expect(
+      rec?.messages.map((m) => (m.synthetic === 'turn-aborted' ? 'aborted' : m.content)),
+    ).toEqual(['long job', 'aborted', 'do this instead', 'reply-M', 'queued nudge', 'reply-B']);
+    const aborted = rec?.messages[1];
+    expect(aborted?.content).toBe('partial-A');
+    // The interrupt message is a plain send (no nudge marker); the
+    // queued nudge keeps its marker.
+    const users = rec?.messages.filter((m) => m.role === 'user') ?? [];
+    expect(users[1]?.nudge).toBeUndefined();
+    expect(users[2]?.nudge).toBe(true);
+  }, 20_000);
+
+  it('interruptWithMessage on an idle session degrades to a plain send', async () => {
+    const session = await manager.createSession({ gezelId: 'ada' });
+    mock.script('reply');
+
+    const queueEvents: string[] = [];
+    const unsub = events.subscribe(session.id, (ev) => {
+      if (ev.type === 'queue_enqueued' || ev.type === 'queue_removed') queueEvents.push(ev.type);
+    });
+
+    const m = await manager.interruptWithMessage(session.id, 'just send this');
+    unsub();
+    expect(m.content).toBe('reply');
+    // Nothing was queued — the message went straight through.
+    expect(queueEvents).toEqual([]);
+
+    const rec = await store.getSession('ada', session.id);
+    expect(rec?.messages.map((x) => x.content)).toEqual(['just send this', 'reply']);
+    expect(rec?.messages[0]?.nudge).toBeUndefined();
+  });
+
+  it('cancelInflight (Stop) keeps queued nudges — they run after the abort unwinds', async () => {
+    const session = await manager.createSession({ gezelId: 'ada' });
+    mock.scriptStreamThenHang('partial-A');
+    mock.script('reply-N');
+
+    const pA = manager.send(session.id, 'long job').catch(() => undefined);
+    await vi.waitFor(() => expect(mock.calls.some((c) => c.kind === 'send')).toBe(true), {
+      timeout: 5000,
+      interval: 10,
+    });
+    const pN = manager.send(session.id, 'still want this', { nudge: true });
+
+    await manager.cancelInflight(session.id);
+    const mN = await pN;
+    await pA;
+
+    expect(mN.content).toBe('reply-N');
+    const rec = await store.getSession('ada', session.id);
+    const users = rec?.messages.filter((m) => m.role === 'user') ?? [];
+    expect(users.map((m) => m.content)).toEqual(['long job', 'still want this']);
+    expect(users[1]?.nudge).toBe(true);
+  }, 20_000);
+
+  it('a nudge that never queued (idle session) is a plain send without the marker', async () => {
+    const session = await manager.createSession({ gezelId: 'ada' });
+    mock.script('reply');
+
+    const m = await manager.send(session.id, 'not really a nudge', { nudge: true });
+    expect(m.content).toBe('reply');
+
+    const rec = await store.getSession('ada', session.id);
+    expect(rec?.messages[0]?.content).toBe('not really a nudge');
+    expect(rec?.messages[0]?.nudge).toBeUndefined();
+  });
 });
 
 describe('ChatManager — one-shot attribution', () => {

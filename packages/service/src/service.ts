@@ -1931,6 +1931,38 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     log.info(`[service] serving HTTP/1.1 on 127.0.0.1:${port}`);
   }
 
+  // Connection-level failure visibility. Every renderer SSE stream and
+  // poll multiplexes over ONE h2 connection (that's the point of the ALPN
+  // order above), so a single session-level error drops them all at once
+  // — the UI sees a burst of "network error" with no server-side trace.
+  // These handlers are the trace. `sessionError` is the h2 death that
+  // matters; `tlsClientError`/`clientError` are handshake noise (port
+  // scanners, curl without -k) kept at debug.
+  const describeSocketError = (err: unknown): string => {
+    if (!(err instanceof Error)) return String(err);
+    const code = (err as NodeJS.ErrnoException).code;
+    return code && !err.message.includes(code) ? `${err.message} (${code})` : err.message;
+  };
+  const rawServer = server as unknown as NodeJS.EventEmitter;
+  if (cert) {
+    rawServer.on('sessionError', (err: unknown) => {
+      log.warn(
+        `[http] h2 session error — every stream multiplexed on that connection drops: ${describeSocketError(err)}`,
+      );
+    });
+    rawServer.on('tlsClientError', (err: unknown) => {
+      log.debug(`[http] TLS client error: ${describeSocketError(err)}`);
+    });
+  } else {
+    // Registering 'clientError' suppresses Node's default 400-and-destroy,
+    // so the listener must tear the socket down itself or bad connections
+    // leak.
+    rawServer.on('clientError', (err: unknown, socket: { destroy: () => void }) => {
+      log.debug(`[http] client connection error: ${describeSocketError(err)}`);
+      socket.destroy();
+    });
+  }
+
   // Plain-HTTP preview sidecar (only when the main transport is TLS). Serves
   // the capability-gated `/preview` route on its own ephemeral loopback port
   // so external browsers open previews without the self-signed-cert warning.

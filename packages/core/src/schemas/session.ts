@@ -354,6 +354,15 @@ export const SendToSessionRequestSchema = z.object({
    * convenience, not a fan-out mechanism.
    */
   passiveCcGezelIds: z.array(z.string().min(1)).max(5).optional(),
+  /**
+   * Mid-turn nudge. When a turn is in flight the message queues behind
+   * it as usual, but contiguous queued nudges merge into ONE follow-up
+   * turn when the turn ends (joined with paragraph breaks) instead of
+   * running one turn each. The persisted user message carries
+   * `ChatMessage.nudge` so the transcript can mark it. On an idle
+   * session the flag is a no-op — the message sends as a normal turn.
+   */
+  nudge: z.boolean().optional(),
 });
 export type SendToSessionRequest = z.infer<typeof SendToSessionRequestSchema>;
 
@@ -362,6 +371,52 @@ export const SendToSessionResponseSchema = z.object({
   sessionId: z.string(),
 });
 export type SendToSessionResponse = z.infer<typeof SendToSessionResponseSchema>;
+
+/**
+ * One pending entry in a session's mid-turn message queue, as returned
+ * by `GET /api/sessions/:id/queue`. Unlike the `queue_enqueued` event's
+ * 160-char `preview`, `text` is the full message body — the edit
+ * affordance on ghost queue bubbles loads it lazily through this shape.
+ */
+export const QueuedMessageSchema = z.object({
+  queueId: z.string(),
+  /** Full message text (the SSE event only carries a truncated preview). */
+  text: z.string(),
+  preview: z.string(),
+  /** ISO timestamp of when the entry was enqueued. */
+  enqueuedAt: z.string(),
+  /** True when the entry was queued as a mid-turn nudge (merges on drain). */
+  nudge: z.boolean(),
+});
+export type QueuedMessage = z.infer<typeof QueuedMessageSchema>;
+
+export const ListSessionQueueResponseSchema = z.object({
+  sessionId: z.string(),
+  entries: z.array(QueuedMessageSchema),
+});
+export type ListSessionQueueResponse = z.infer<typeof ListSessionQueueResponseSchema>;
+
+export const UpdateQueuedMessageRequestSchema = z.object({
+  message: z.string().min(1),
+});
+export type UpdateQueuedMessageRequest = z.infer<typeof UpdateQueuedMessageRequestSchema>;
+
+export const UpdateQueuedMessageResponseSchema = z.object({
+  updated: z.literal(true),
+  entry: QueuedMessageSchema,
+});
+export type UpdateQueuedMessageResponse = z.infer<typeof UpdateQueuedMessageResponseSchema>;
+
+/**
+ * Body for `POST /api/sessions/:id/interrupt` — cancel the in-progress
+ * turn (partial reply salvaged exactly like a plain cancel) and send
+ * `message` immediately, ahead of any queued entries. Response reuses
+ * `SendToSessionResponseSchema` (202 accepted; reply streams over SSE).
+ */
+export const InterruptSessionRequestSchema = z.object({
+  message: z.string().min(1),
+});
+export type InterruptSessionRequest = z.infer<typeof InterruptSessionRequestSchema>;
 
 /**
  * One row in an interleaved cross-session timeline. Built by flattening
@@ -417,6 +472,11 @@ export const TimelineMessageSchema = z.object({
    * this to render an inter-gezel handoff bubble.
    */
   from: z.object({ gezelId: z.string(), gezelName: z.string() }).optional(),
+  /**
+   * Mirrors `ChatMessage.nudge` — this user message was delivered from
+   * the mid-turn queue as a nudge. The bubble renders a small chip.
+   */
+  nudge: z.boolean().optional(),
   /**
    * Mirrors `ChatMessage.referencedArtifacts` — validated artifact paths
    * the assistant reply mentioned. Populated on write and backfilled on

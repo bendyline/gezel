@@ -166,6 +166,13 @@ const DEFAULT_RESPONSES: Record<string, unknown> = {
     source: 'system-memory',
     deviceNames: [],
   },
+  checkModelDownloadSpace: {
+    known: true,
+    ok: true,
+    freeBytes: 80_000_000_000,
+    requiredBytes: 4_000_000_000,
+    storageLocation: 'Gezel model storage',
+  },
   getQueueStatus: {
     providers: {},
     taskRunner: { pendingCount: 0, pendingByGezel: {}, pendingByProject: {} },

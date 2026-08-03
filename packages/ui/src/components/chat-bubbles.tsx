@@ -171,6 +171,12 @@ export interface MessageBubbleProps {
    */
   from?: { gezelId: string; gezelName: string };
   /**
+   * This user message was delivered from the mid-turn queue as a nudge
+   * (typed while the previous turn was streaming). Renders a small
+   * "nudged" chip after the author label. User bubbles only.
+   */
+  nudge?: boolean;
+  /**
    * Name of the gezel whose session this bubble lives in — used as the
    * receiver label in the "sender → receiver" header. Required when
    * `from` is set.
@@ -384,6 +390,7 @@ export function MessageBubble({
   authorTooltip,
   driftLabel,
   from,
+  nudge,
   receiverLabel,
   projectLabel,
   extraClass,
@@ -579,7 +586,14 @@ export function MessageBubble({
       {!headerless && (
         <div className="msg-role" title={!isUser ? authorTooltip : undefined}>
           {isUser ? (
-            'You'
+            <>
+              {'You'}
+              {nudge && (
+                <span className="msg-nudge-chip" title="Sent while the previous turn was running">
+                  nudged
+                </span>
+              )}
+            </>
           ) : (
             <>
               <GezelIcon
@@ -2036,10 +2050,25 @@ export interface GhostQueuedBubbleProps {
   queueId: string;
   preview: string;
   enqueuedAt: string;
+  /** Queued as a mid-turn nudge — the label reads "nudge" instead of "queued". */
+  nudge?: boolean;
   /** Drop this queued message from the session's queue without running it. */
   onDiscard: () => void | Promise<void>;
   /** Cancel the session's currently-running turn so this one runs sooner. */
   onCancelCurrent: () => void | Promise<void>;
+  /**
+   * Fetch the entry's FULL text for editing (the event preview is
+   * truncated at 160 chars). Resolve `null` when the entry is gone —
+   * already started or discarded — in which case edit mode never opens
+   * (the `queue_removed` event clears this bubble moments later).
+   */
+  onLoadText?: () => Promise<string | null>;
+  /**
+   * Persist an edit. Resolve `true` on success, `false` when the entry
+   * vanished mid-edit (the moment passed — edit mode exits silently).
+   * Reject for real failures, surfaced as an inline error.
+   */
+  onSaveEdit?: (text: string) => Promise<boolean>;
   extraClass?: string;
 }
 
@@ -2047,41 +2076,132 @@ export interface GhostQueuedBubbleProps {
  * Ghost bubble shown for a message that's waiting in the per-session
  * queue. Rendered under the session's streaming bubble in the
  * timeline, dimmed to signal "this hasn't been sent to the model
- * yet." Two actions: drop it, or cancel the current turn so the
- * queue drains faster.
+ * yet." Actions: edit it in place, drop it, or cancel the current
+ * turn so the queue drains faster.
  */
 export function GhostQueuedBubble({
   preview,
   enqueuedAt,
+  nudge,
   onDiscard,
   onCancelCurrent,
+  onLoadText,
+  onSaveEdit,
   extraClass,
 }: GhostQueuedBubbleProps) {
   const waited = useWaitedSeconds(enqueuedAt);
+  const [editing, setEditing] = useState(false);
+  const [editDraft, setEditDraft] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+  const editable = onLoadText !== undefined && onSaveEdit !== undefined;
+
+  const beginEdit = async () => {
+    if (!onLoadText) return;
+    setEditError(null);
+    const text = await onLoadText().catch(() => null);
+    if (text === null) return;
+    setEditDraft(text);
+    setEditing(true);
+  };
+
+  const saveEdit = async () => {
+    if (!onSaveEdit) return;
+    const text = editDraft.trim();
+    if (!text) return;
+    setSaving(true);
+    setEditError(null);
+    try {
+      await onSaveEdit(text);
+      // `false` means the entry vanished mid-edit — the bubble is about
+      // to disappear via `queue_removed`, so exit either way.
+      setEditing(false);
+    } catch (err) {
+      setEditError((err as Error).message ?? String(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <div className={`msg msg-user msg-ghost-queued${extraClass ? ` ${extraClass}` : ''}`}>
       <div className="msg-role">
-        <span className="msg-ghost-queued-label">⋯ queued</span>
+        <span className="msg-ghost-queued-label">{nudge ? '⋯ nudge' : '⋯ queued'}</span>
         {waited !== null && <span className="muted small"> · {formatElapsed(waited)}</span>}
       </div>
-      <div className="msg-body msg-body-rendered">{preview}</div>
+      {editing ? (
+        <div className="msg-ghost-queued-edit">
+          <textarea
+            className="msg-ghost-queued-editor"
+            value={editDraft}
+            onChange={(e) => setEditDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                e.preventDefault();
+                setEditing(false);
+              }
+            }}
+            disabled={saving}
+            // biome-ignore lint/a11y/noAutofocus: the user just clicked Edit — focus follows their intent.
+            autoFocus
+          />
+          {editError && <div className="msg-ghost-queued-edit-error">{editError}</div>}
+        </div>
+      ) : (
+        <div className="msg-body msg-body-rendered">{preview}</div>
+      )}
       <div className="msg-ghost-queued-actions">
-        <button
-          type="button"
-          className="msg-ghost-queued-btn"
-          onClick={() => void onDiscard()}
-          title="Remove this message from the queue — it won't be sent."
-        >
-          Discard
-        </button>
-        <button
-          type="button"
-          className="msg-ghost-queued-btn"
-          onClick={() => void onCancelCurrent()}
-          title="Stop the current turn so this queued message runs sooner."
-        >
-          Cancel current turn
-        </button>
+        {editing ? (
+          <>
+            <button
+              type="button"
+              className="msg-ghost-queued-btn"
+              onClick={() => void saveEdit()}
+              disabled={saving || editDraft.trim().length === 0}
+              title="Save the edited message — it stays at its place in the queue."
+            >
+              Save
+            </button>
+            <button
+              type="button"
+              className="msg-ghost-queued-btn"
+              onClick={() => setEditing(false)}
+              disabled={saving}
+              title="Discard the edit and keep the original text."
+            >
+              Cancel
+            </button>
+          </>
+        ) : (
+          <>
+            {editable && (
+              <button
+                type="button"
+                className="msg-ghost-queued-btn"
+                onClick={() => void beginEdit()}
+                title="Edit this message before it's sent."
+              >
+                Edit
+              </button>
+            )}
+            <button
+              type="button"
+              className="msg-ghost-queued-btn"
+              onClick={() => void onDiscard()}
+              title="Remove this message from the queue — it won't be sent."
+            >
+              Discard
+            </button>
+            <button
+              type="button"
+              className="msg-ghost-queued-btn"
+              onClick={() => void onCancelCurrent()}
+              title="Stop the current turn so this queued message runs sooner."
+            >
+              Cancel current turn
+            </button>
+          </>
+        )}
       </div>
     </div>
   );

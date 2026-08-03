@@ -429,7 +429,8 @@ export class TaskRunner {
     // stops mid-craftbook reads as broken, not as paused.
     const config = await this.store.readConfig().catch(() => ({}));
     if (!isSchedulingAllowed(config)) {
-      this.holdReason = getEngagementMode(config) === 'off' ? 'engagement-off' : 'engagement-paused';
+      this.holdReason =
+        getEngagementMode(config) === 'off' ? 'engagement-off' : 'engagement-paused';
       return;
     }
 

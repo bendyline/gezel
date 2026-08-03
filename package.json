@@ -55,6 +55,7 @@
     "typecheck": "pnpm -r --filter \"@bendyline/gezel*\" run typecheck",
     "audit:licenses": "node scripts/check-licenses.mjs",
     "check:docs": "node scripts/check-markdown-links.mjs",
+    "docs:site": "node scripts/export-handboek-site.mjs",
     "check:notice": "node scripts/check-notice.mjs",
     "stage:licenses": "node scripts/stage-third-party-licenses.mjs",
     "verify:licenses": "node scripts/verify-packaged-licenses.mjs packages/app/dist/licenses",

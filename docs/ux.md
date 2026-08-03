@@ -290,6 +290,21 @@ skeleton the same way — extend it rather than fork it. Lead the gallery
 with the curated, context-relevant subset (e.g. craftbooks recommended
 for the project's type) and keep the full catalog one rail-click away.
 
+**Mid-turn composer actions.** While a gezel is working, the composer keeps
+accepting text. With an empty draft the toolbar shows only the quiet
+secondary `■ Stop`. The moment there's a draft, two actions join it:
+**Nudge** (primary — reuses the Send recipe so terracotta stays on the one
+primary) queues the text for delivery when the turn ends, and **Interrupt**
+(secondary) stops the turn and sends immediately. Enter mid-turn means
+Nudge, Escape means Stop. Queued nudges render in the timeline as the
+existing dashed ghost bubbles ("⋯ nudge") with Edit / Discard / Cancel
+current turn actions — editing swaps the preview for an inline textarea in
+the same dashed not-yet-sent vocabulary and never opens a dialog. A user
+message that was delivered from the queue carries a small uppercase
+`nudged` badge (`--text-2xs`, `--radius-sm`) after "You". Stop never
+discards queued nudges; each ghost keeps its own Discard so the user
+decides.
+
 **Transformation dialog.** AI edits to user text never land silently. The
 editor toolbar's single transform button opens the transformation dialog
 (`TransformDialog`, `gz-transform-*` block in styles.css): an instruction

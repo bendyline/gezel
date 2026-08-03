@@ -178,6 +178,29 @@ export const MachineMemoryUsageSchema = z.object({
 export type MachineMemoryUsage = z.infer<typeof MachineMemoryUsageSchema>;
 
 /**
+ * Preflight a user-approved batch of model downloads against the filesystem
+ * that owns Gezel's writable model store. The response deliberately names the
+ * location generically: absolute service paths are not renderer data.
+ */
+export const ModelDownloadPreflightRequestSchema = z.object({
+  sizeBytes: z
+    .number()
+    .int()
+    .positive()
+    .max(10 * 1024 ** 4),
+});
+export type ModelDownloadPreflightRequest = z.infer<typeof ModelDownloadPreflightRequestSchema>;
+
+export const ModelDownloadPreflightResponseSchema = z.object({
+  known: z.boolean(),
+  ok: z.boolean(),
+  freeBytes: z.number().nonnegative(),
+  requiredBytes: z.number().positive(),
+  storageLocation: z.literal('Gezel model storage'),
+});
+export type ModelDownloadPreflightResponse = z.infer<typeof ModelDownloadPreflightResponseSchema>;
+
+/**
  * Shareable machine profile for a user-authored bug report.
  *
  * The contract of this shape is that every field is safe to paste into a
@@ -3123,8 +3146,15 @@ export const CopilotAvailabilitySchema = z.object({
   available: z.boolean(),
   /** Which rung answered, or null when none did. */
   source: z.enum(['env', 'managed', 'path']).nullable(),
-  /** Our managed install specifically, independent of the other rungs. */
-  managed: z.enum(['current', 'outdated', 'absent']),
+  /**
+   * Our managed install specifically, independent of the other rungs.
+   * `damaged` means the tracking record and install directory exist but the
+   * tree won't load (dangling links, missing entry file) — the install must
+   * be repaired, and the managed rung never answers `available` from it.
+   */
+  managed: z.enum(['current', 'outdated', 'absent', 'damaged']),
+  /** Human-readable detail for `managed: 'damaged'` — what failed the probe. */
+  damagedReason: z.string().optional(),
   /** Version on disk, when `managed !== 'absent'`. */
   installedVersion: z.string().optional(),
   /** Version this build pins. */
