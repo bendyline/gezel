@@ -882,7 +882,15 @@ export async function runTrial(scenario: EvalScenario, opts: TrialOptions): Prom
       await writeMetrics(runDir, metrics);
       log(
         `[perf] metrics: peakRss=${metrics.process.peakRssMb}MB` +
-          `${metrics.gpu.available ? `, peakGpuUtil=${metrics.gpu.peakUtilPercent}%, peakGpuMem=${metrics.gpu.peakMemUsedMb}/${metrics.gpu.memTotalMb}MB` : ', gpu=n/a'}` +
+          `${
+            metrics.gpu.available
+              ? `, peakGpuUtil=${metrics.gpu.peakUtilPercent}%${
+                  metrics.gpu.memoryModel === 'unified'
+                    ? `, gpuMem=unified(peakSysMem=${metrics.systemMemory.peakUsedMb}/${metrics.systemMemory.totalMb}MB)`
+                    : `, peakGpuMem=${metrics.gpu.peakMemUsedMb}/${metrics.gpu.memTotalMb}MB`
+                }`
+              : ', gpu=n/a'
+          }` +
           `${metrics.derived.meanTokensPerSec ? `, ~${metrics.derived.meanTokensPerSec} t/s` : ''}`,
       );
     } catch (err) {

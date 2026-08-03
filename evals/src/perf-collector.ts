@@ -71,8 +71,15 @@ export interface ProcessSample {
 export interface GpuSample {
   atMs: number;
   utilPercent: number;
-  memUsedMb: number;
-  memTotalMb: number;
+  /** null on unified-memory hosts, where nvidia-smi reports `[N/A]`. */
+  memUsedMb: number | null;
+  memTotalMb: number | null;
+}
+
+export interface SystemMemorySample {
+  atMs: number;
+  usedMb: number;
+  totalMb: number;
 }
 
 export interface TrialMetrics {
@@ -89,8 +96,27 @@ export interface TrialMetrics {
     available: boolean;
     sampleCount: number;
     peakUtilPercent: number;
-    peakMemUsedMb: number;
-    memTotalMb: number;
+    /** null when {@link TrialMetrics.gpu.memoryModel} is `unified`. */
+    peakMemUsedMb: number | null;
+    memTotalMb: number | null;
+    /**
+     * `discrete` — nvidia-smi reported a real VRAM pool.
+     * `unified` — it reported `[N/A]`; the GPU shares system RAM
+     * (DGX Spark, Jetson). Read {@link TrialMetrics.systemMemory} for
+     * headroom on those hosts.
+     * `unknown` — no GPU samples at all.
+     */
+    memoryModel: 'discrete' | 'unified' | 'unknown';
+  };
+  /**
+   * Host RAM, sampled alongside the process/GPU samplers. Always useful, but
+   * it is *the* memory-headroom figure on unified-memory hosts, where the
+   * model's weights live in this pool rather than in discrete VRAM.
+   */
+  systemMemory: {
+    sampleCount: number;
+    peakUsedMb: number;
+    totalMb: number;
   };
   /** Token usage queried at shutdown via `client.getUsage()`. */
   usage: {
@@ -314,6 +340,7 @@ export class PerfCollector {
   private readonly startedAt = Date.now();
   private readonly processSamples: ProcessSample[] = [];
   private readonly gpuSamples: GpuSample[] = [];
+  private readonly systemMemorySamples: SystemMemorySample[] = [];
   private readonly sampleIntervalMs: number;
   private readonly log: (line: string) => void;
   private readonly client: GezelClient;
@@ -416,6 +443,12 @@ export class PerfCollector {
             if (gpu) this.gpuSamples.push({ atMs: at, ...gpu });
           }
         }
+        // Outside the GPU branch on purpose: host RAM is free to read and is
+        // the ONLY memory-headroom signal on a unified-memory host, which is
+        // exactly where the GPU sampler reports no memory (or none at all).
+        // Nesting this under the sampler would zero it on the hosts that need
+        // it most, and throttle it to the GPU interval everywhere else.
+        this.systemMemorySamples.push({ atMs: at, ...sampleSystemMemory() });
       }
       // Sleep in small steps so stop() exits quickly. Even with
       // sampling disabled we still spin so `stop()` can be awaited
@@ -506,8 +539,19 @@ export class PerfCollector {
     const peakRssKb = this.processSamples.reduce((m, s) => Math.max(m, s.rssKb), 0);
     const peakCpu = this.processSamples.reduce((m, s) => Math.max(m, s.cpuPercent), 0);
     const peakGpu = this.gpuSamples.reduce((m, s) => Math.max(m, s.utilPercent), 0);
-    const peakGpuMem = this.gpuSamples.reduce((m, s) => Math.max(m, s.memUsedMb), 0);
-    const gpuMemTotal = this.gpuSamples[0]?.memTotalMb ?? 0;
+    // A unified-memory host reports `[N/A]` for both fields on every sample,
+    // so "no sample carried a number" is the discriminator. Collapsing that to
+    // 0 would be indistinguishable from a GPU that genuinely used no memory.
+    const gpuMemSamples = this.gpuSamples.filter(
+      (s): s is GpuSample & { memUsedMb: number } => s.memUsedMb !== null,
+    );
+    const peakGpuMem =
+      gpuMemSamples.length > 0 ? gpuMemSamples.reduce((m, s) => Math.max(m, s.memUsedMb), 0) : null;
+    const gpuMemTotal = this.gpuSamples.find((s) => s.memTotalMb !== null)?.memTotalMb ?? null;
+    const memoryModel: 'discrete' | 'unified' | 'unknown' =
+      this.gpuSamples.length === 0 ? 'unknown' : peakGpuMem === null ? 'unified' : 'discrete';
+    const peakSystemMemUsed = this.systemMemorySamples.reduce((m, s) => Math.max(m, s.usedMb), 0);
+    const systemMemTotal = this.systemMemorySamples[0]?.totalMb ?? 0;
     const durationMs = Date.now() - this.startedAt;
     const totalTokens = (usage.totalInputTokens ?? 0) + (usage.totalOutputTokens ?? 0);
     // Prefer the engine's true decode rate; fall back to a whole-trial
@@ -533,6 +577,12 @@ export class PerfCollector {
         peakUtilPercent: Math.round(peakGpu * 10) / 10,
         peakMemUsedMb: peakGpuMem,
         memTotalMb: gpuMemTotal,
+        memoryModel,
+      },
+      systemMemory: {
+        sampleCount: this.systemMemorySamples.length,
+        peakUsedMb: peakSystemMemUsed,
+        totalMb: systemMemTotal,
       },
       usage,
       derived: {
@@ -1096,11 +1146,59 @@ export function parseDs4Timings(logText: string): LlamaCppTimings | null {
  *
  * Unified-memory platforms (DGX Spark, Jetson) report memory.used /
  * memory.total as `[N/A]` because there's no discrete VRAM to count —
- * the iGPU shares system RAM. We still want the utilization sample,
- * so memory unparseable → 0 instead of discarding the sample. Only a
- * missing utilization value disqualifies a row.
+ * the iGPU shares system RAM. We still want the utilization sample, so
+ * unparseable memory yields `null` and only a missing utilization value
+ * disqualifies a row.
+ *
+ * `null` rather than 0 is load-bearing: these fields previously collapsed
+ * to 0, which reads as "the GPU used no memory" and is indistinguishable
+ * from a real zero. On the DGX Spark — the one host where 100B-class
+ * models get validated — every trial reported `peakMemUsedMb: 0` beside a
+ * correct `peakUtilPercent: 96`, silently losing the headroom signal. The
+ * substitute on those hosts is {@link TrialMetrics.systemMemory}, since
+ * unified memory means system RAM *is* the GPU's memory budget.
  */
-function sampleNvidia(): GpuReading | null {
+/**
+ * Host RAM at this instant. Cheap (no subprocess) and always available, which
+ * is why it is sampled unconditionally rather than only on unified-memory
+ * hosts — it is the memory-headroom signal there, and useful context
+ * everywhere else.
+ */
+function sampleSystemMemory(): { usedMb: number; totalMb: number } {
+  const total = totalmem();
+  const free = freemem();
+  return {
+    usedMb: Math.round((total - free) / (1024 * 1024)),
+    totalMb: Math.round(total / (1024 * 1024)),
+  };
+}
+
+/**
+ * Parse one `utilization.gpu,memory.used,memory.total` CSV row. Split out from
+ * the subprocess call so the `[N/A]` handling is unit-testable without a GPU.
+ */
+export function parseNvidiaSmiRow(
+  row: string,
+): { utilPercent: number; memUsedMb: number | null; memTotalMb: number | null } | null {
+  const first = row.split('\n')[0]?.trim();
+  if (!first) return null;
+  const [u, used, total] = first.split(/,\s*/);
+  const utilPercent = Number.parseFloat(u ?? '');
+  if (Number.isNaN(utilPercent)) return null;
+  const usedParsed = Number.parseInt(used ?? '', 10);
+  const totalParsed = Number.parseInt(total ?? '', 10);
+  return {
+    utilPercent,
+    memUsedMb: Number.isNaN(usedParsed) ? null : usedParsed,
+    memTotalMb: Number.isNaN(totalParsed) ? null : totalParsed,
+  };
+}
+
+function sampleNvidia(): {
+  utilPercent: number;
+  memUsedMb: number | null;
+  memTotalMb: number | null;
+} | null {
   try {
     const r = spawnSync(
       'nvidia-smi',
@@ -1108,16 +1206,7 @@ function sampleNvidia(): GpuReading | null {
       { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] },
     );
     if (r.status !== 0) return null;
-    const first = r.stdout.split('\n')[0]?.trim();
-    if (!first) return null;
-    const [u, used, total] = first.split(/,\s*/);
-    const utilPercent = Number.parseFloat(u ?? '0');
-    if (Number.isNaN(utilPercent)) return null;
-    const usedParsed = Number.parseInt(used ?? '0', 10);
-    const totalParsed = Number.parseInt(total ?? '0', 10);
-    const memUsedMb = Number.isNaN(usedParsed) ? 0 : usedParsed;
-    const memTotalMb = Number.isNaN(totalParsed) ? 0 : totalParsed;
-    return { utilPercent, memUsedMb, memTotalMb };
+    return parseNvidiaSmiRow(r.stdout);
   } catch {
     return null;
   }

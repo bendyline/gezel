@@ -71,6 +71,7 @@ import {
 import { closestFileNames } from './near-miss.js';
 import { normalizeMarkdown } from './normalize.js';
 import { unavailableToolsForPlatform } from './platform-tool-availability.js';
+import { reanchorAfterEdit, withLineNumbers } from './reanchor.js';
 import { repoIntakeRedirect } from './repo-intake-policy.js';
 import {
   formatScriptRunResult,
@@ -791,23 +792,6 @@ server.tool(
     }
   },
 );
-
-/**
- * Prefix each line with a right-aligned 1-based line number and a `→`
- * gutter, so the model can target edits by line (`replace_lines`, or a
- * located parse error from `validate`/`write_file`). The gutter is a
- * display aid only — the edit tools never see it. A trailing newline is
- * preserved without numbering a phantom final empty line.
- */
-function withLineNumbers(content: string): string {
-  if (content === '') return '';
-  const hadTrailingNewline = content.endsWith('\n');
-  const body = hadTrailingNewline ? content.slice(0, -1) : content;
-  const lines = body.split('\n');
-  const width = String(lines.length).length;
-  const numbered = lines.map((line, i) => `${String(i + 1).padStart(width)}→${line}`).join('\n');
-  return hadTrailingNewline ? `${numbered}\n` : numbered;
-}
 
 function normalizeFetchRepoUrl(value: string): string {
   return value
@@ -1572,7 +1556,7 @@ server.tool(
 
 server.tool(
   'replace_lines',
-  "Replace an inclusive range of lines in an existing file with new content — the easiest surgical edit when you know *which lines* are wrong (e.g. `read_file` shows `142→` gutters, or `validate`/`write_file` reported a parse error 'at line 142'). You just give `startLine`/`endLine` and the replacement `content`; no need to reproduce an exact `find` string or count diff coordinates. To replace one line, set `startLine === endLine`. To delete lines, pass an empty `content`. **Do NOT include the `N→` line-number gutter in `content`** — that's a display aid, not file text. Returns a unified diff of what changed.",
+  "Replace an inclusive range of lines in an existing file with new content — the easiest surgical edit when you know *which lines* are wrong (e.g. `read_file` shows `142→` gutters, or `validate`/`write_file` reported a parse error 'at line 142'). You just give `startLine`/`endLine` and the replacement `content`; no need to reproduce an exact `find` string or count diff coordinates. To replace one line, set `startLine === endLine`. To delete lines, pass an empty `content`. **Do NOT include the `N→` line-number gutter in `content`** — that's a display aid, not file text. **Each edit shifts the lines below it**, so line numbers from an earlier `read_file` go stale after the first edit; this tool reports the shift and re-prints the edited region with fresh numbers, so target your next edit from that, not from the original read.",
   {
     path: z.string().describe('File path relative to the project root.'),
     startLine: z
@@ -1613,11 +1597,18 @@ server.tool(
           isError: true,
         };
       }
+      const reanchor = await reanchorAfterEdit({
+        path,
+        startLine,
+        addedLines: result.addedLines,
+        removedLines: result.removedLines,
+        readFile: async () => (await api.readProjectWorkspaceFile(projectId, path)).content,
+      });
       return {
         content: [
           {
             type: 'text' as const,
-            text: `Edited ${path} (+${result.addedLines} −${result.removedLines}).${await htmlRuntimeCheckSuffix(path)}`,
+            text: `Edited ${path} (+${result.addedLines} −${result.removedLines}).${await htmlRuntimeCheckSuffix(path)}${reanchor}`,
           },
         ],
         structuredContent: {

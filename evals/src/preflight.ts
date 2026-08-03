@@ -35,6 +35,7 @@ import { join } from 'node:path';
 import { gildeDataDir } from '@bendyline/gezel-catalog';
 import type { GezelClient } from '@bendyline/gezel-client/node';
 import { readDaemonLogTailSync } from './failure-class.ts';
+import { type HostStateSnapshot, readHostStateSnapshot } from './host-state.ts';
 import { repoRoot, resolveLlamaBinary } from './native-bin.ts';
 import {
   ds4EvalLaunchOverridesForModel,
@@ -78,6 +79,26 @@ export interface PreflightReport {
   createdAt: string;
   admitted: boolean;
   genTokensPerSec: number | null;
+  /**
+   * Prefill throughput from the same probe. Not an admission criterion — it is
+   * recorded as a corroborating signal for the decode rate, which now scales
+   * every scenario's hard ceiling (`throughputScaledMaxDurationMs`).
+   *
+   * The two move together with the host's state: across four probes of the
+   * identical model+binary+host, decode spanned 3.94-7.89 tok/s and prefill
+   * 169.8-703.4 tok/s, correlating at r=0.996. That is real host variance, not
+   * a sampling artifact — so a future probe where the two DIVERGE is the
+   * signature of a measurement problem rather than a slow day, and without
+   * this field that distinction is unrecoverable after the fact.
+   */
+  promptTokensPerSec: number | null;
+  /**
+   * Machine state at probe time. Recorded because the probe's rate varied
+   * 2-4x on an identical model+binary+host, tracking machine **uptime**
+   * (<1 day fast, >2 days slow) with a reboot sitting exactly on the
+   * boundary. The mechanism is unproven — see [host-state.ts](./host-state.ts).
+   */
+  hostState?: HostStateSnapshot;
   checks: {
     spawn: PreflightCheck;
     toolRoundTrip: PreflightCheck;
@@ -494,15 +515,25 @@ export async function runPreflight(opts: PreflightOptions): Promise<PreflightRep
     ...(opts.llamaBin ? { llamaBin: opts.llamaBin } : {}),
   });
 
+  // Captured after the probe, so the memory figures reflect the state the
+  // probe actually ran against rather than a pre-load snapshot.
+  const hostState = await readHostStateSnapshot();
   const daemonLog = readDaemonLogTailSync(join(result.runDir, 'daemon.log'));
   let genTokensPerSec: number | null = null;
+  let promptTokensPerSec: number | null = null;
   try {
     const metrics = JSON.parse(await readFile(join(result.runDir, 'metrics.json'), 'utf8')) as {
-      derived?: { genTokensPerSec?: number; meanTokensPerSec?: number };
+      derived?: {
+        genTokensPerSec?: number;
+        meanTokensPerSec?: number;
+        promptTokensPerSec?: number | null;
+      };
     };
     genTokensPerSec = metrics.derived?.genTokensPerSec ?? metrics.derived?.meanTokensPerSec ?? null;
+    promptTokensPerSec = metrics.derived?.promptTokensPerSec ?? null;
   } catch {
     genTokensPerSec = null;
+    promptTokensPerSec = null;
   }
 
   const { checks, admitted } = buildPreflightChecks({
@@ -522,6 +553,8 @@ export async function runPreflight(opts: PreflightOptions): Promise<PreflightRep
     createdAt: new Date().toISOString(),
     admitted,
     genTokensPerSec,
+    promptTokensPerSec,
+    ...(Object.keys(hostState).length > 0 ? { hostState } : {}),
     checks,
   };
   await writeFile(
