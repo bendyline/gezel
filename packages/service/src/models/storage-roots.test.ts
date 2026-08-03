@@ -6,10 +6,13 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   findModelRoot,
   hashModelPayloadFiles,
+  listIncompleteModelDownloads,
   listOverlayModelIds,
   migrateLegacySystemModels,
   modelStorageRoots,
+  pruneModelPayloadFiles,
   reclaimAbandonedModelDownloads,
+  removeModelDir,
   verifyReadOnlyModelPayload,
 } from './storage-roots.js';
 
@@ -52,6 +55,20 @@ describe('model storage overlay', () => {
 
     await writeFile(join(roots.writableRoot, 'same', 'manifest.json'), '{}');
     expect(await findModelRoot(roots, 'same')).toBe(roots.writableRoot);
+  });
+
+  it('reuses precomputed digests and only hashes uncached payload files', async () => {
+    const modelDir = await tempRoot();
+    await writeFile(join(modelDir, 'weights.gguf'), 'trusted');
+    await writeFile(join(modelDir, 'stale-shard.gguf'), 'leftover');
+    await writeFile(join(modelDir, 'manifest.json'), '{}');
+
+    const sentinel = 'a'.repeat(64);
+    const map = await hashModelPayloadFiles(modelDir, { 'weights.gguf': sentinel });
+
+    expect(map['weights.gguf']).toBe(sentinel);
+    expect(map['stale-shard.gguf']).toBe(createHash('sha256').update('leftover').digest('hex'));
+    expect(map['manifest.json']).toBeUndefined();
   });
 
   it('rehashes a shared model whenever file identity metadata changes', async () => {
@@ -166,6 +183,70 @@ describe('model storage overlay', () => {
     await mkdir(join(root, 'fresh'), { recursive: true });
     await writeFile(join(root, 'fresh', 'weights.gguf.partial'), 'young');
     expect(await reclaimAbandonedModelDownloads({ writableRoot: root })).toEqual([]);
+  });
+
+  it('lists incomplete downloads (no manifest, has bytes), excluding installs and active ids', async () => {
+    const root = await tempRoot();
+    // Installed: manifest present → never an incomplete row.
+    await mkdir(join(root, 'installed'), { recursive: true });
+    await writeFile(join(root, 'installed', 'manifest.json'), '{}');
+    await writeFile(join(root, 'installed', 'weights.gguf'), 'done');
+    // Interrupted: a .partial, no manifest → incomplete, hasPartial true.
+    await mkdir(join(root, 'interrupted'), { recursive: true });
+    await writeFile(join(root, 'interrupted', 'weights.gguf.partial'), 'partial-bytes'); // 13 B
+    // Stray payload with no manifest and no .partial → still hidden disk,
+    // surfaced with hasPartial false.
+    await mkdir(join(root, 'stray'), { recursive: true });
+    await writeFile(join(root, 'stray', 'weights.gguf'), 'orphaned-weights-bigger'); // 23 B
+    // In-flight install: excluded via activeIds (shows as live progress).
+    await mkdir(join(root, 'downloading'), { recursive: true });
+    await writeFile(join(root, 'downloading', 'weights.gguf.partial'), 'streaming');
+    // Empty dir: no bytes → not surfaced.
+    await mkdir(join(root, 'empty'), { recursive: true });
+
+    const rows = await listIncompleteModelDownloads({
+      writableRoot: root,
+      activeIds: new Set(['downloading']),
+    });
+    // Sorted largest-first; installed/downloading/empty excluded.
+    expect(rows.map((r) => r.id)).toEqual(['stray', 'interrupted']);
+    expect(rows[0]).toMatchObject({ id: 'stray', bytes: 23, hasPartial: false });
+    expect(rows[1]).toMatchObject({ id: 'interrupted', bytes: 13, hasPartial: true });
+    expect(typeof rows[0]?.updatedAt).toBe('string');
+  });
+
+  it('removeModelDir deletes the model directory recursively', async () => {
+    const parent = await tempRoot();
+    const modelDir = join(parent, 'gemma4-12b-q8');
+    await mkdir(modelDir, { recursive: true });
+    await writeFile(join(modelDir, 'weights.gguf'), 'bytes');
+    await writeFile(join(modelDir, 'manifest.json'), '{}');
+
+    await removeModelDir(modelDir);
+
+    expect(await listOverlayModelIds({ writableRoot: parent, readOnlyRoots: [] })).not.toContain(
+      'gemma4-12b-q8',
+    );
+  });
+
+  it('prunes stale payload files not referenced by the new install, keeping manifest and partials', async () => {
+    const modelDir = await tempRoot();
+    // Superseded quant from a prior install (should be pruned).
+    await writeFile(join(modelDir, 'old-Q4_K_M.gguf'), 'old-weights');
+    // Current weights (kept).
+    await writeFile(join(modelDir, 'new-qat-Q4_K_XL.gguf'), 'new-weights');
+    // Never candidates: the manifest and an in-flight partial.
+    await writeFile(join(modelDir, 'manifest.json'), '{}');
+    await writeFile(join(modelDir, 'other.gguf.partial'), 'in-flight');
+
+    const removed = await pruneModelPayloadFiles(modelDir, new Set(['new-qat-Q4_K_XL.gguf']));
+
+    expect(removed).toEqual(['old-Q4_K_M.gguf']);
+    const left = (await hashModelPayloadFiles(modelDir)) as Record<string, string>;
+    expect(Object.keys(left)).toEqual(['new-qat-Q4_K_XL.gguf']); // manifest + .partial excluded
+    // The kept and non-candidate files survive on disk.
+    expect(await readFile(join(modelDir, 'new-qat-Q4_K_XL.gguf'), 'utf8')).toBe('new-weights');
+    expect(await readFile(join(modelDir, 'other.gguf.partial'), 'utf8')).toBe('in-flight');
   });
 
   it('moves legacy system models and backfills their public payload hashes', async () => {

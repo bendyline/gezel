@@ -203,14 +203,89 @@ export function readOnlyModelError(id: string): Error {
   );
 }
 
-/** Hash every published payload file except the self-describing manifest. */
-export async function hashModelPayloadFiles(modelDir: string): Promise<Record<string, string>> {
+/**
+ * Remove a model directory, tolerating the file locks that make a naive
+ * `rm` flaky on Windows. Antivirus / Search-Indexer transient holds clear in
+ * a few hundred ms, so we retry with backoff. A *persistent* lock (a running
+ * llama-server has the GGUF open) never clears on its own — we surface an
+ * actionable message rather than the raw `EBUSY`/`EPERM` so the UI can tell
+ * the user to switch models first, instead of the delete looking like a no-op.
+ */
+export async function removeModelDir(itemDir: string): Promise<void> {
+  const maxAttempts = 4;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await rm(itemDir, { recursive: true, force: true });
+      return;
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException)?.code;
+      const locked =
+        code === 'EBUSY' || code === 'EPERM' || code === 'EACCES' || code === 'ENOTEMPTY';
+      if (locked && attempt < maxAttempts) {
+        await new Promise((r) => setTimeout(r, 150 * attempt));
+        continue;
+      }
+      if (locked) {
+        throw new Error(
+          'Could not delete the model files — a file is still in use. If this model is loaded in a running chat, switch to another model (or wait a moment), then try deleting again.',
+        );
+      }
+      throw err;
+    }
+  }
+}
+
+/**
+ * Hash every published payload file except the self-describing manifest.
+ *
+ * `precomputed` lets a caller that has *already* streamed a file through
+ * SHA-256 (the install path verifies every shard against the catalog hash
+ * before this runs) hand those digests in, keyed by the same '/'-joined
+ * relative path this returns. Matching files are taken from the cache
+ * instead of re-read — a multi-GB install would otherwise hash the whole
+ * payload from disk twice. Files on disk but absent from the cache (stale
+ * shards from a prior install, a dropped mmproj) are still enumerated and
+ * hashed, so the returned map always describes the real on-disk payload.
+ */
+export async function hashModelPayloadFiles(
+  modelDir: string,
+  precomputed?: Record<string, string>,
+): Promise<Record<string, string>> {
   const result: Record<string, string> = {};
   const root = resolve(modelDir);
   for (const path of await listModelPayloadFiles(root)) {
-    result[path] = await sha256File(join(root, ...path.split('/')));
+    result[path] = precomputed?.[path] ?? (await sha256File(join(root, ...path.split('/'))));
   }
   return Object.fromEntries(Object.entries(result).sort(([a], [b]) => a.localeCompare(b)));
+}
+
+/**
+ * Delete payload files in a model directory that the freshly-written install no
+ * longer references. When a model updates in place to a different quant/filename
+ * (e.g. gemma4-12b-q4 moving from `…-Q4_K_M.gguf` to `…-qat-UD-Q4_K_XL.gguf`),
+ * the rename publishes the new weights but the old file lingers — tens of GB of
+ * orphaned weights for one slot. `keep` is the set of '/'-joined relative paths
+ * the new manifest references (weights + shards + mmproj + draft). manifest.json
+ * and in-flight `.partial` files are never candidates (listModelPayloadFiles
+ * already excludes them). Returns the relative paths removed. Best-effort per
+ * file — a file we can't remove is left rather than aborting the install.
+ */
+export async function pruneModelPayloadFiles(
+  modelDir: string,
+  keep: ReadonlySet<string>,
+): Promise<string[]> {
+  const removed: string[] = [];
+  const root = resolve(modelDir);
+  for (const rel of await listModelPayloadFiles(root)) {
+    if (keep.has(rel)) continue;
+    try {
+      await rm(join(root, ...rel.split('/')), { force: true });
+      removed.push(rel);
+    } catch {
+      // Leave a file we can't remove; the reclaim/prune runs again later.
+    }
+  }
+  return removed;
 }
 
 /**
@@ -420,6 +495,76 @@ export async function reclaimAbandonedModelDownloads(opts: {
   return reclaimed;
 }
 
+export interface IncompleteModelDownload {
+  id: string;
+  /** Total bytes on disk across the directory (payload + `.partial`). */
+  bytes: number;
+  /** ISO timestamp of the newest write in the directory. */
+  updatedAt: string;
+  /** Whether a `.partial` is present (a resumable in-flight download vs
+   *  stray files left without one). */
+  hasPartial: boolean;
+}
+
+/**
+ * An incomplete download enriched with per-engine catalog context. Managers
+ * return this from `listIncomplete()`; the route serializes it as-is.
+ */
+export interface IncompleteModelDownloadInfo extends IncompleteModelDownload {
+  /**
+   * True when this id still resolves to a catalog entry the owning engine can
+   * source — a re-install resumes from the on-disk `.partial` files rather
+   * than starting over. False for stale/removed ids, where delete is the only
+   * sensible action.
+   */
+  resumable: boolean;
+  /** Display name from the catalog, when the id still resolves. */
+  name?: string;
+}
+
+/**
+ * List incomplete model downloads in the writable root — directories with no
+ * `manifest.json` (so they're invisible to `listInstalled` and every other
+ * listing surface) that nonetheless hold bytes. These are interrupted or
+ * unverified downloads: they can hold tens of GB yet the user has no way to
+ * see or manage them until the 7-day {@link reclaimAbandonedModelDownloads}
+ * sweep silently removes them. Surfacing them lets the UI offer resume/delete
+ * immediately. Currently-installing ids are excluded (they show as live
+ * progress elsewhere). Sorted largest-first — the most disk to reclaim.
+ */
+export async function listIncompleteModelDownloads(opts: {
+  writableRoot: string;
+  activeIds?: ReadonlySet<string>;
+}): Promise<IncompleteModelDownload[]> {
+  const out: IncompleteModelDownload[] = [];
+  let entries: string[];
+  try {
+    entries = await readdir(opts.writableRoot);
+  } catch {
+    return out;
+  }
+  for (const id of entries) {
+    if (id.startsWith('.') || opts.activeIds?.has(id)) continue;
+    const dir = join(opts.writableRoot, id);
+    try {
+      const info = await lstat(dir);
+      if (!info.isDirectory() || info.isSymbolicLink()) continue;
+      const scan = await scanAbandonedCandidate(dir);
+      if (!scan || scan.totalBytes === 0) continue;
+      out.push({
+        id,
+        bytes: scan.totalBytes,
+        updatedAt: new Date(scan.newestMtimeMs).toISOString(),
+        hasPartial: scan.hasPartial,
+      });
+    } catch {
+      // Skip directories we can't read; they simply don't surface.
+    }
+  }
+  out.sort((a, b) => b.bytes - a.bytes);
+  return out;
+}
+
 /**
  * Returns null when the directory holds a `manifest.json` (a real install —
  * never a reclamation candidate), else its abandoned-download profile.
@@ -491,10 +636,24 @@ function isSha256(value: string): boolean {
   return /^[a-f0-9]{64}$/i.test(value);
 }
 
+/**
+ * Read buffer for hashing multi-GB model files off disk. The default
+ * `createReadStream` highWaterMark is 64 KB, which for a 7 GB file means
+ * ~110k `'data'` events — one event-loop turn each. Inside the daemon's busy
+ * event loop (chat, scheduler, index scans) those turns queue behind other
+ * work and the hash starves: a file that hashes in ~9s idle took 15+ minutes
+ * in the running service. A 16 MB buffer cuts it to ~400 turns, so a
+ * congested loop barely affects wall time (measured: a 6.3 GB file that
+ * hashed in ~9s idle did not finish in 2 min at 64 KB under a busy loop, but
+ * stayed ~10s at 16 MB). Hash correctness with this buffer is covered by the
+ * hashModelPayloadFiles tests in storage-roots.test.ts.
+ */
+export const MODEL_HASH_READ_BUFFER_BYTES = 16 * 1024 * 1024;
+
 function sha256File(path: string): Promise<string> {
   return new Promise((resolveHash, reject) => {
     const hash = createHash('sha256');
-    const stream = createReadStream(path);
+    const stream = createReadStream(path, { highWaterMark: MODEL_HASH_READ_BUFFER_BYTES });
     stream.on('data', (chunk) => hash.update(chunk));
     stream.on('error', reject);
     stream.on('end', () => resolveHash(hash.digest('hex')));

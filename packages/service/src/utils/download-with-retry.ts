@@ -37,8 +37,9 @@
  * fails, yield progress so the caller can stream events".
  */
 
+import { createHash } from 'node:crypto';
 import { createWriteStream } from 'node:fs';
-import { rm } from 'node:fs/promises';
+import { rm, truncate } from 'node:fs/promises';
 import {
   DEFAULT_CHUNK_TIMEOUT_MS,
   DEFAULT_MAX_RETRIES,
@@ -154,6 +155,7 @@ export async function* downloadWithRetry(
         kind: 'ok',
         bytesWritten: attemptResult.bytesWritten,
         partialPath,
+        ...(attemptResult.sha256 ? { sha256: attemptResult.sha256 } : {}),
       };
     }
     if (attemptResult.kind === 'aborted') {
@@ -213,8 +215,22 @@ function isRedirect(status: number): boolean {
   return status === 301 || status === 302 || status === 303 || status === 307 || status === 308;
 }
 
+/**
+ * Parse the total size out of a `Content-Range` header — `bytes 100-499/500`
+ * (a 206) or `bytes * /500` (a 416). Returns null when absent or `*` (unknown
+ * total). This is the server's *authoritative* size, unlike the catalog's
+ * `approxSizeBytes`, so it's safe to key over-append repair on it.
+ */
+function parseContentRangeTotal(header: string | null): number | null {
+  if (!header) return null;
+  const m = header.match(/\/(\d+)\s*$/);
+  if (!m?.[1]) return null;
+  const total = Number.parseInt(m[1], 10);
+  return Number.isFinite(total) ? total : null;
+}
+
 type AttemptResult =
-  | { kind: 'ok'; bytesWritten: number }
+  | { kind: 'ok'; bytesWritten: number; sha256?: string }
   | { kind: 'aborted'; bytesWritten: number }
   | { kind: 'fatal'; friendlyError: string; bytesWritten: number }
   | { kind: 'transient'; friendlyError: string; rawError: string; bytesWritten: number }
@@ -303,8 +319,31 @@ async function* runSingleAttempt(opts: {
   //   4xx (other) → fatal; bad URL / auth / missing file. No retry.
   //   5xx → transient; retry.
   if (res.status === 416 && resumeFrom > 0) {
-    // Server says we already have everything. Let the caller validate.
+    // 416 means our Range start is at/past EOF: the `.partial` is either
+    // exactly complete OR over-sized (a prior resume appended past the true
+    // end — see the write-cap below for how that's now prevented, but old
+    // partials on disk predate it). The server's Content-Range carries the
+    // real size; if the partial exceeds it, trim the excess so the caller's
+    // sha256 check can pass instead of forcing a multi-GB re-download. If the
+    // trimmed bytes turn out to be wrong, that check fails and the caller
+    // discards + restarts. When the size is unknown, keep the file and let the
+    // caller validate.
     signal?.removeEventListener('abort', abortFromCaller);
+    const serverSize = parseContentRangeTotal(res.headers.get('content-range'));
+    if (serverSize != null && resumeFrom > serverSize) {
+      try {
+        await truncate(partialPath, serverSize);
+        return { kind: 'ok', bytesWritten: serverSize };
+      } catch {
+        await rm(partialPath, { force: true });
+        return {
+          kind: 'transient',
+          friendlyError: 'could not repair an over-sized partial download; restarting',
+          rawError: '416-truncate-failed',
+          bytesWritten: 0,
+        };
+      }
+    }
     return { kind: 'ok', bytesWritten: resumeFrom };
   }
   if (res.status === 200 && resumeFrom > 0) {
@@ -335,20 +374,33 @@ async function* runSingleAttempt(opts: {
   const contentRange = res.headers.get('content-range');
   const contentLength = res.headers.get('content-length');
   let bytesWritten = res.status === 200 ? 0 : resumeFrom;
-  let totalBytes = approxSizeBytes;
-  if (contentRange) {
-    const m = contentRange.match(/\/(\d+)$/);
-    if (m?.[1]) totalBytes = Number.parseInt(m[1], 10);
-  } else if (contentLength && res.status === 200) {
-    totalBytes = Number.parseInt(contentLength, 10);
-  } else if (contentLength && res.status === 206) {
-    totalBytes = resumeFrom + Number.parseInt(contentLength, 10);
+  // The server's authoritative total, when it tells us: Content-Range carries
+  // the full size on a 206; Content-Length is the full size on a 200 and the
+  // REMAINING size on a 206. Null when the server omits both (some HF mirrors)
+  // — then we fall back to the catalog's approximate size for the progress
+  // denominator only, never for the write cap (capping on an approximate size
+  // could truncate a legitimately-larger file).
+  let serverTotal: number | null = parseContentRangeTotal(contentRange);
+  if (serverTotal == null && contentLength) {
+    const len = Number.parseInt(contentLength, 10);
+    if (Number.isFinite(len)) {
+      serverTotal = res.status === 206 ? resumeFrom + len : len;
+    }
   }
+  const totalBytes = serverTotal ?? approxSizeBytes;
 
   // Append-mode stream so a resumed download just keeps writing.
   const fileStream = createWriteStream(partialPath, {
     flags: res.status === 200 ? 'w' : 'a',
   });
+
+  // Hash the bytes as they stream past — but ONLY on a fresh full transfer
+  // (HTTP 200 writes the whole file from offset 0). On a 206 resume the
+  // hasher never saw the earlier bytes already on disk, so an inline digest
+  // would be wrong; leave it null and let the caller read the file back.
+  // This turns the common single-pass install's "verifying" phase from a
+  // second full read of a multi-GB file into a free digest comparison.
+  const inlineHasher = res.status === 200 ? createHash('sha256') : null;
 
   // Capture stream errors instead of letting them surface as uncaught
   // exceptions in the (Electron) main process. The common case is benign:
@@ -427,9 +479,25 @@ async function* runSingleAttempt(opts: {
         // A real write error (disk full, etc.) recorded by the 'error'
         // handler — surface it so the catch below turns it into a retry.
         if (streamError) throw streamError;
-        bytesWritten += value.byteLength;
-        if (!fileStream.write(value)) await awaitDrain();
-        if (streamError) throw streamError;
+        // Never let the file grow past the size the server declared. Guards
+        // against a quirky CDN / Xet reconstruction over-delivering and
+        // leaving an over-sized `.partial` that can never match its sha256
+        // (the exact failure that stranded a download in "Checking…" forever).
+        // Only enforced when the server gave us an authoritative total.
+        let chunk: Uint8Array = value;
+        if (serverTotal != null && bytesWritten + chunk.byteLength > serverTotal) {
+          chunk = chunk.subarray(0, Math.max(0, serverTotal - bytesWritten));
+        }
+        if (chunk.byteLength > 0) {
+          inlineHasher?.update(chunk);
+          bytesWritten += chunk.byteLength;
+          if (!fileStream.write(chunk)) await awaitDrain();
+          if (streamError) throw streamError;
+        }
+        // Past the declared size the trim above zeroes every chunk, so the
+        // file can't grow further; we keep draining until the stream ends on
+        // its own rather than cancelling (cancelling here would strand a mock
+        // /server that under-declares Content-Length then resumes via Range).
         const now = Date.now();
         if (now - lastReportedAt > 250) {
           lastReportedAt = now;
@@ -476,5 +544,9 @@ async function* runSingleAttempt(opts: {
   // chunk on the close signal, after our 250ms throttle has fired
   // for the second-to-last chunk.
   yield { type: 'progress', bytesWritten, totalBytes };
-  return { kind: 'ok', bytesWritten };
+  return {
+    kind: 'ok',
+    bytesWritten,
+    ...(inlineHasher ? { sha256: inlineHasher.digest('hex') } : {}),
+  };
 }

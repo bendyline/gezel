@@ -16700,6 +16700,8 @@ export async function buildLlamaCppProvider(opts: {
         // disables llama-server's chat-template output parsing so mangled
         // model output reaches `delta.content` for provider-side salvage.
         reasoningFormat: process.env.GEZEL_LLAMA_REASONING_FORMAT?.trim() || undefined,
+        architecture: modelCatalogInfo?.architecture,
+        modelId: defaultModelId ?? undefined,
       });
       return {
         command: binary,

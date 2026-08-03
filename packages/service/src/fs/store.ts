@@ -4137,6 +4137,18 @@ export class Store {
    * file is missing (silent), and logs a warn before returning null when
    * the JSON or schema is malformed — corrupt sessions stay invisible to
    * the chat layer instead of cascading type errors deeper.
+   *
+   * A genuinely-unparseable file is *quarantined* (renamed to
+   * `<name>.json.corrupt-<ts>`), not just skipped: `listSessions`,
+   * `listTimeline`, and the task scheduler's re-drive all rescan these
+   * directories continuously, so a file left in place re-logs the same
+   * warning on every pass forever. The classic culprit is an all-NUL file
+   * left by a pre-`writeFileAtomic` crash — its bytes are already
+   * unrecoverable, so we move it aside (preserving it for inspection)
+   * rather than delete, and scans skip it because it no longer ends in
+   * `.json`. Same quarantine convention as `readGezelGrowth`. Valid JSON
+   * that merely fails schema validation is NOT quarantined below — that
+   * can be benign version skew worth keeping.
    */
   private async readSessionFile(path: string, label: string): Promise<ChatSession | null> {
     let raw: string;
@@ -4150,9 +4162,10 @@ export class Store {
       parsed = JSON.parse(raw);
     } catch (err) {
       log.warn(
-        `[store] session ${label} is not valid JSON:`,
+        `[store] session ${label} is not valid JSON — quarantining:`,
         err instanceof Error ? err.message : err,
       );
+      await rename(path, `${path}.corrupt-${Date.now()}`).catch(() => {});
       return null;
     }
     const result = ChatSessionSchema.safeParse(parsed);

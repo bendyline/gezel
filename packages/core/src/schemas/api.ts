@@ -2105,6 +2105,40 @@ export type GezelConfig = z.infer<typeof GezelConfigSchema>;
 export const UpdateConfigRequestSchema = GezelConfigSchema.extend({
   ollamaThink: z.boolean().nullable().optional(),
   firstRunInstallError: z.string().nullable().optional(),
+  // llama-cpp Advanced overrides the Settings UI can reset to their
+  // default. The read/on-disk shape stays non-null (`.optional()`); the
+  // request side accepts `null` so picking the default sentinel (Auto /
+  // q8_0 / Off) clears a previously-pinned value. `writeConfig` strips
+  // the null before persistence. Without this, sending `undefined` is
+  // dropped by JSON.stringify and the field can never be un-pinned.
+  llamaCppBaseUrl: z.string().nullable().optional(),
+  llamaCppModelPath: z.string().nullable().optional(),
+  llamaCppBackendOverride: z.enum(['auto', 'cuda', 'vulkan', 'metal', 'cpu']).nullable().optional(),
+  llamaCppKvCacheType: z.enum(['f16', 'q8_0', 'q4_0']).nullable().optional(),
+  llamaCppFlashAttn: z.union([z.boolean(), z.enum(['on', 'off', 'auto'])]).nullable().optional(),
+  llamaCppSpecType: z
+    .enum([
+      'none',
+      'draft-mtp',
+      'draft-eagle3',
+      'draft-dflash',
+      'draft-simple',
+      'ngram-mod',
+      'ngram-simple',
+      'ngram-map-k',
+      'ngram-map-k4v',
+      'ngram-cache',
+    ])
+    .nullable()
+    .optional(),
+  llamaCppCpuMoe: z.boolean().nullable().optional(),
+  llamaCppSwaFull: z.boolean().nullable().optional(),
+  // MLX Advanced overrides the Settings UI can reset to their default —
+  // same reset-on-null contract as the llama-cpp fields above.
+  mlxBaseUrl: z.string().nullable().optional(),
+  mlxModelPath: z.string().nullable().optional(),
+  mlxPackageSpec: z.string().nullable().optional(),
+  mlxKvBits: z.number().int().min(0).max(8).nullable().optional(),
   /**
    * Direct mutation is rejected by the route — the move worker is the
    * only writer, immediately before triggering a service restart. The

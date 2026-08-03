@@ -24,6 +24,7 @@ import { createLogger } from '@bendyline/gezel';
 import {
   type ModelStorageRoots,
   findModelRoot,
+  MODEL_HASH_READ_BUFFER_BYTES,
   hashModelPayloadFiles,
   listOverlayModelIds,
   makeSharedModelReadable,
@@ -530,7 +531,11 @@ export class StableDiffusionCppProvider implements ImageProvider {
     const partialPath = `${destPath}.partial`;
     const hasher = createHash('sha256');
     await new Promise<void>((resolve, reject) => {
-      const stream = createReadStream(partialPath);
+      // Big read buffer so the hash doesn't starve in the busy daemon event
+      // loop. See MODEL_HASH_READ_BUFFER_BYTES.
+      const stream = createReadStream(partialPath, {
+        highWaterMark: MODEL_HASH_READ_BUFFER_BYTES,
+      });
       stream.on('data', (chunk) => hasher.update(chunk));
       stream.on('end', () => resolve());
       stream.on('error', reject);

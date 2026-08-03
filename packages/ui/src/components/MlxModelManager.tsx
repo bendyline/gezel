@@ -1,9 +1,14 @@
 import type { CatalogItemSummary, ChatModelCategory, ChatModelManifest } from '@bendyline/gezel';
-import type { MlxInstallEvent, MlxInstalledModel } from '@bendyline/gezel-client';
+import type {
+  IncompleteModelDownload,
+  MlxInstallEvent,
+  MlxInstalledModel,
+} from '@bendyline/gezel-client';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
 import { CatalogBrowser } from './CatalogBrowser.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
+import { IncompleteDownloads } from './IncompleteDownloads.js';
 import { LicenseButton } from './LicenseButton.js';
 import { ExportModelBundleButton, ImportModelBundleButton } from './ModelBundleControls.js';
 import { RecommendedBadge } from './RecommendedBadge.js';
@@ -110,6 +115,9 @@ type CategoryTab = ChatModelCategory | 'all';
 export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
   const [models, setModels] = useState<MlxInstalledModel[]>([]);
   const [modelsError, setModelsError] = useState<string | null>(null);
+  // Interrupted/unverified downloads with no manifest — invisible to the
+  // installed list. Surfaced for resume/delete before the reclaim sweep.
+  const [incomplete, setIncomplete] = useState<IncompleteModelDownload[]>([]);
   const [installs, setInstalls] = useState<Map<string, ActiveInstall>>(new Map());
   const [installWarning, setInstallWarning] = useState<{ id: string; message: string } | null>(
     null,
@@ -129,6 +137,15 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
   const [activeCategory, setActiveCategory] = useState<CategoryTab>('all');
   const [catalogItems, setCatalogItems] = useState<CatalogItemSummary[]>([]);
 
+  const refreshIncomplete = useCallback(async () => {
+    try {
+      const res = await api.listIncompleteMlxModels();
+      setIncomplete(res.incomplete ?? []);
+    } catch {
+      /* advisory surface — a blip just keeps the last state */
+    }
+  }, []);
+
   const refresh = useCallback(async () => {
     try {
       const res = await api.listMlxModels();
@@ -137,7 +154,8 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
     } catch (err) {
       setModelsError(err instanceof Error ? err.message : String(err));
     }
-  }, []);
+    void refreshIncomplete();
+  }, [refreshIncomplete]);
 
   useEffect(() => {
     void refresh();
@@ -380,14 +398,21 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
   );
 
   const deleteOne = useCallback(async () => {
-    if (!toDelete) return;
+    const id = toDelete;
+    if (!id) return;
+    setToDelete(null);
+    setModelsError(null);
+    // Optimistically drop the row so the delete feels instant even when the
+    // daemon is busy; refresh restores it (and shows the error) on failure.
+    setModels((cur) => cur.filter((m) => m.id !== id));
+    setIncomplete((cur) => cur.filter((d) => d.id !== id));
     try {
-      await api.deleteMlxModel(toDelete);
-      setToDelete(null);
+      await api.deleteMlxModel(id);
       await refresh();
       onModelsChanged?.();
     } catch (err) {
       setModelsError(`delete failed: ${describe(err)}`);
+      void refresh();
     }
   }, [toDelete, refresh, onModelsChanged]);
 
@@ -443,6 +468,12 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
           </div>
         </div>
       )}
+
+      <IncompleteDownloads
+        items={incomplete.filter((d) => !installs.has(d.id))}
+        onResume={(id) => startInstall(id)}
+        onDelete={(id) => setToDelete(id)}
+      />
 
       {installMismatch && (
         <div className="ollama-section">

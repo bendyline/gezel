@@ -11,6 +11,7 @@ import {
   isMoEFromTags,
 } from '@bendyline/gezel';
 import type {
+  IncompleteModelDownload,
   LlamaCppInstallEvent,
   LlamaCppInstalledModel,
   ModelFitnessEntry,
@@ -19,6 +20,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { CatalogBrowser } from './CatalogBrowser.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
+import { IncompleteDownloads } from './IncompleteDownloads.js';
 import { LicenseButton } from './LicenseButton.js';
 import { ExportModelBundleButton, ImportModelBundleButton } from './ModelBundleControls.js';
 import { RecommendedBadge } from './RecommendedBadge.js';
@@ -161,6 +163,10 @@ type CategoryTab = ChatModelCategory | 'all';
 export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props) {
   const [models, setModels] = useState<LlamaCppInstalledModel[]>([]);
   const [modelsError, setModelsError] = useState<string | null>(null);
+  // Interrupted/unverified downloads holding disk with no install manifest —
+  // invisible to the installed list. Surfaced so the user can resume or
+  // delete them before the daemon's 7-day reclaim sweep.
+  const [incomplete, setIncomplete] = useState<IncompleteModelDownload[]>([]);
   const [installs, setInstalls] = useState<Map<string, ActiveInstall>>(new Map());
   const [installWarning, setInstallWarning] = useState<{ id: string; message: string } | null>(
     null,
@@ -194,6 +200,15 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
     }
   }, []);
 
+  const refreshIncomplete = useCallback(async () => {
+    try {
+      const res = await api.listIncompleteLlamaCppModels();
+      setIncomplete(res.incomplete ?? []);
+    } catch {
+      /* advisory surface — a blip just keeps the last state */
+    }
+  }, []);
+
   const refresh = useCallback(async () => {
     try {
       const res = await api.listLlamaCppModels();
@@ -203,7 +218,8 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
       setModelsError(err instanceof Error ? err.message : String(err));
     }
     void refreshFitness();
-  }, [refreshFitness]);
+    void refreshIncomplete();
+  }, [refreshFitness, refreshIncomplete]);
 
   useEffect(() => {
     void refresh();
@@ -465,14 +481,24 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
   );
 
   const deleteOne = useCallback(async () => {
-    if (!toDelete) return;
+    const id = toDelete;
+    if (!id) return;
+    setToDelete(null);
+    setModelsError(null);
+    // Optimistically drop the row (from both the installed and incomplete
+    // lists) so the delete feels instant even when the daemon is briefly busy
+    // — a concurrent download verify can otherwise delay the round-trip and
+    // make a successful delete look like a no-op. On failure we refresh (which
+    // restores whatever still exists) and surface the error.
+    setModels((cur) => cur.filter((m) => m.id !== id));
+    setIncomplete((cur) => cur.filter((d) => d.id !== id));
     try {
-      await api.deleteLlamaCppModel(toDelete);
-      setToDelete(null);
+      await api.deleteLlamaCppModel(id);
       await refresh();
       onModelsChanged?.();
     } catch (err) {
       setModelsError(`delete failed: ${describe(err)}`);
+      void refresh();
     }
   }, [toDelete, refresh, onModelsChanged]);
 
@@ -528,6 +554,12 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
           </div>
         </div>
       )}
+
+      <IncompleteDownloads
+        items={incomplete.filter((d) => !installs.has(d.id))}
+        onResume={(id) => startInstall(id)}
+        onDelete={(id) => setToDelete(id)}
+      />
 
       {installMismatch && (
         <div className="ollama-section">

@@ -30,6 +30,14 @@ export function ds4Routes(ctx: ServiceContext): Hono {
     return c.json({ installs: ctx.ds4Models.getActiveInstalls() });
   });
 
+  /** Incomplete downloads (mirrors llama-cpp `/incomplete`). Doubly relevant
+   *  here — ds4 models run to hundreds of GB, so a stalled download is a lot
+   *  of hidden disk. */
+  app.get('/incomplete', async (c) => {
+    const incomplete = await ctx.ds4Models.listIncomplete();
+    return c.json({ incomplete });
+  });
+
   /**
    * Install a chat-model entry's ds4 source. The install runs as a
    * background job owned by {@link ServiceContext.chatInstalls}; this SSE

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /** Fail when a checked-in Markdown link points at a missing local path. */
 import { readFile, readdir, stat } from 'node:fs/promises';
-import { dirname, join, relative, resolve } from 'node:path';
+import { dirname, join, relative, resolve, sep } from 'node:path';
 
 const repoRoot = resolve(import.meta.dirname, '..');
 const ignoredDirectories = new Set([
@@ -30,7 +30,8 @@ async function markdownFiles(root) {
       const path = join(dir, entry.name);
       if (
         entry.isDirectory() &&
-        (ignoredDirectories.has(entry.name) || ignoredRepoDirectories.has(relative(repoRoot, path)))
+        (ignoredDirectories.has(entry.name) ||
+          ignoredRepoDirectories.has(relative(repoRoot, path).split(sep).join('/')))
       ) {
         continue;
       }

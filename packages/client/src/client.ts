@@ -1369,6 +1369,27 @@ export interface LocalActiveInstall {
 }
 
 /**
+ * An incomplete on-disk download — bytes present but no install manifest, so
+ * it's invisible to the installed-model listings. Returned by the per-engine
+ * `listIncomplete*` methods so the Settings UI can surface resume/delete
+ * before the daemon's 7-day reclaim sweep removes it. Shape mirrors the
+ * service's `IncompleteModelDownloadInfo`.
+ */
+export interface IncompleteModelDownload {
+  id: string;
+  /** Total bytes on disk (payload + `.partial`). */
+  bytes: number;
+  /** ISO timestamp of the newest write in the directory. */
+  updatedAt: string;
+  /** Whether a `.partial` file is present. */
+  hasPartial: boolean;
+  /** True when re-installing this id would resume from the on-disk bytes. */
+  resumable: boolean;
+  /** Catalog display name, when the id still resolves. */
+  name?: string;
+}
+
+/**
  * One installed llama.cpp model on disk. Returned by
  * {@link GezelClient.listLlamaCppModels}.
  */
@@ -2556,6 +2577,11 @@ export class GezelClient {
     return this.request('GET', '/api/llama-cpp/models');
   }
 
+  /** Incomplete (interrupted/unverified) llama.cpp downloads on disk. */
+  listIncompleteLlamaCppModels(): Promise<{ incomplete: IncompleteModelDownload[] }> {
+    return this.request('GET', '/api/llama-cpp/incomplete');
+  }
+
   // ── portable `.gezmodel` bundles ──
 
   /** Fetch a streaming model export response. Callers must consume the body. */
@@ -2627,6 +2653,11 @@ export class GezelClient {
 
   listDs4Models(): Promise<{ models: LlamaCppInstalledModel[] }> {
     return this.request('GET', '/api/ds4/models');
+  }
+
+  /** Incomplete (interrupted/unverified) ds4 downloads on disk. */
+  listIncompleteDs4Models(): Promise<{ incomplete: IncompleteModelDownload[] }> {
+    return this.request('GET', '/api/ds4/incomplete');
   }
 
   listDs4ActiveInstalls(): Promise<{ installs: LocalActiveInstall[] }> {
@@ -2802,6 +2833,11 @@ export class GezelClient {
 
   listMlxModels(): Promise<{ models: MlxInstalledModel[] }> {
     return this.request('GET', '/api/mlx/models');
+  }
+
+  /** Incomplete (interrupted/unverified) MLX downloads on disk. */
+  listIncompleteMlxModels(): Promise<{ incomplete: IncompleteModelDownload[] }> {
+    return this.request('GET', '/api/mlx/incomplete');
   }
 
   /**

@@ -121,6 +121,66 @@ describe('operational API surface', () => {
       documentExportOptions,
     });
   });
+
+  it('round-trips llama-cpp Advanced overrides through PUT and GET, and clears on null', async () => {
+    // Regression: the GET/PUT config responses hand-pick a whitelist of
+    // fields. These llama-cpp Advanced knobs were written to disk but
+    // absent from both responses, so the Settings UI's optimistic
+    // setConfig(next) reverted the dropdowns to their defaults the instant
+    // the user changed them — they "didn't seem to change."
+    const overrides = {
+      llamaCppKvCacheType: 'f16',
+      llamaCppFlashAttn: 'on',
+      llamaCppSpecType: 'ngram-simple',
+      llamaCppCpuMoe: true,
+      llamaCppSwaFull: true,
+    };
+    const update = await api('PUT', '/api/config', overrides);
+    expect(update.status).toBe(200);
+    expect((await update.json()) as Record<string, unknown>).toMatchObject(overrides);
+
+    const read = await api('GET', '/api/config');
+    expect((await read.json()) as Record<string, unknown>).toMatchObject(overrides);
+
+    // Selecting the default sentinel sends null, which the store treats as
+    // "reset to default" (undefined would be stripped by JSON.stringify and
+    // never clear the pinned value).
+    const cleared = await api('PUT', '/api/config', {
+      llamaCppKvCacheType: null,
+      llamaCppFlashAttn: null,
+      llamaCppSpecType: null,
+      llamaCppCpuMoe: null,
+      llamaCppSwaFull: null,
+    });
+    expect(cleared.status).toBe(200);
+    const clearedBody = (await cleared.json()) as Record<string, unknown>;
+    expect(clearedBody.llamaCppKvCacheType).toBeUndefined();
+    expect(clearedBody.llamaCppFlashAttn).toBeUndefined();
+    expect(clearedBody.llamaCppSpecType).toBeUndefined();
+    expect(clearedBody.llamaCppCpuMoe).toBeUndefined();
+    expect(clearedBody.llamaCppSwaFull).toBeUndefined();
+  });
+
+  it('round-trips MLX Advanced overrides through PUT and GET, and clears on null', async () => {
+    // Same echo-bug class as the llama-cpp fields: mlxPackageSpec and
+    // mlxKvBits were written to disk but absent from both responses.
+    const overrides = { mlxPackageSpec: 'mlx-lm==0.25.3', mlxKvBits: 8 };
+    const update = await api('PUT', '/api/config', overrides);
+    expect(update.status).toBe(200);
+    expect((await update.json()) as Record<string, unknown>).toMatchObject(overrides);
+
+    const read = await api('GET', '/api/config');
+    expect((await read.json()) as Record<string, unknown>).toMatchObject(overrides);
+
+    const cleared = await api('PUT', '/api/config', {
+      mlxPackageSpec: null,
+      mlxKvBits: null,
+    });
+    expect(cleared.status).toBe(200);
+    const clearedBody = (await cleared.json()) as Record<string, unknown>;
+    expect(clearedBody.mlxPackageSpec).toBeUndefined();
+    expect(clearedBody.mlxKvBits).toBeUndefined();
+  });
 });
 
 describe('gezels API', () => {

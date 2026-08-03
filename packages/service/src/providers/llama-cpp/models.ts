@@ -45,19 +45,26 @@ import {
   safeBundleModelPath,
 } from '../../models/bundle-storage.js';
 import {
+  type IncompleteModelDownloadInfo,
   type ModelStorageRoots,
+  MODEL_HASH_READ_BUFFER_BYTES,
   findModelRoot,
   hashModelPayloadFiles,
+  listIncompleteModelDownloads,
   listOverlayModelIds,
   makeSharedModelReadable,
   modelExistsOnlyReadOnly,
   modelStorageRoots,
+  pruneModelPayloadFiles,
   readOnlyModelError,
+  removeModelDir,
   verifyReadOnlyModelPayload,
 } from '../../models/storage-roots.js';
 import { checkDiskSpace, describeDiskShortfall } from '../../utils/disk-space.js';
 import { downloadWithRetry } from '../../utils/download-with-retry.js';
 import { readGgufSummary } from './gguf-metadata.js';
+
+export type { IncompleteModelDownloadInfo } from '../../models/storage-roots.js';
 
 export interface InstalledLlamaCppModel {
   id: string;
@@ -377,6 +384,33 @@ export class LlamaCppModelManager {
   }
 
   /**
+   * List incomplete downloads for this engine — interrupted or unverified
+   * downloads that hold bytes on disk but have no `manifest.json`, so they
+   * never appear in {@link listInstalled}. Each is tagged `resumable` when
+   * its id still resolves to a catalog entry this engine can source, so the
+   * UI can offer resume (re-install picks up from the `.partial`) vs
+   * delete-only for stale ids. In-flight installs are excluded.
+   */
+  async listIncomplete(): Promise<IncompleteModelDownloadInfo[]> {
+    const activeIds = new Set(this.activeInstalls.keys());
+    const rows = await listIncompleteModelDownloads({ writableRoot: this.modelsRoot, activeIds });
+    const out: IncompleteModelDownloadInfo[] = [];
+    for (const row of rows) {
+      let resumable = false;
+      let name: string | undefined;
+      if (isSafeId(row.id)) {
+        const detail = await this.catalog.get('chat-model', row.id).catch(() => null);
+        if (detail && detail.manifest.kind === 'chat-model' && this.srcBlock(detail.manifest)) {
+          resumable = true;
+          name = detail.manifest.name;
+        }
+      }
+      out.push({ ...row, resumable, ...(name ? { name } : {}) });
+    }
+    return out;
+  }
+
+  /**
    * Path of the first installed model, or null when none exist. Phase 2
    * uses this to pick a default `--model` arg for the supervised
    * llama-server when the user hasn't explicitly chosen one. A "default
@@ -422,8 +456,7 @@ export class LlamaCppModelManager {
     if (await modelExistsOnlyReadOnly(this.storageRoots, id)) {
       throw readOnlyModelError(id);
     }
-    const itemDir = join(this.modelsRoot, id);
-    await rm(itemDir, { recursive: true, force: true });
+    await removeModelDir(join(this.modelsRoot, id));
   }
 
   /** Provider-owned snapshot used by the streaming `.gezmodel` exporter. */
@@ -606,6 +639,12 @@ export class LlamaCppModelManager {
     const totalPlanned = plan.reduce((sum, e) => sum + e.sizeBytes, 0) || src.approxSizeBytes;
     tracked.totalBytes = totalPlanned;
     let bytesCompleted = 0;
+    // sha256 of each verified file, keyed by its final relative path (flat,
+    // since planDownloads uses basename). Reused to build the fileSha256 map
+    // after publish so we don't re-hash the whole payload from disk a second
+    // time. `actual` (not the catalog hash) is stored so the skipSha path
+    // still records the true on-disk identity.
+    const verifiedDigests: Record<string, string> = {};
 
     // Preflight the disk before writing a byte. ds4 GGUFs run to 200+ GiB, so
     // discovering ENOSPC at 95% costs hours and leaves a `.partial` occupying
@@ -638,6 +677,7 @@ export class LlamaCppModelManager {
         fetchImpl: this.fetchImpl,
       });
       let entryBytesWritten = 0;
+      let inlineSha: string | undefined;
       while (true) {
         const step = await dlGen.next();
         if (step.done) {
@@ -656,6 +696,7 @@ export class LlamaCppModelManager {
             return;
           }
           entryBytesWritten = step.value.bytesWritten || entryBytesWritten;
+          inlineSha = step.value.sha256;
           break;
         }
         const ev = step.value;
@@ -681,16 +722,29 @@ export class LlamaCppModelManager {
       tracked.phase = 'verifying';
       yield { type: 'verifying' };
 
-      // sha256 verify by hashing the .partial — works correctly across
-      // resumed downloads (a chunk-time hasher would corrupt on resume).
-      const hasher = createHash('sha256');
-      await new Promise<void>((resolve, reject) => {
-        const stream = createReadStream(tmpPath);
-        stream.on('data', (chunk) => hasher.update(chunk));
-        stream.on('end', () => resolve());
-        stream.on('error', reject);
-      });
-      const actual = hasher.digest('hex');
+      // Prefer the digest the downloader computed inline while streaming —
+      // a clean single-pass (HTTP 200) transfer already hashed every byte,
+      // so re-reading a multi-GB file off disk just to hash it again is pure
+      // waste. Only fall back to the read-back pass when the inline digest
+      // is absent (a resumed/appended download, or the Xet path, where the
+      // hasher never saw the earlier bytes).
+      let actual = inlineSha;
+      if (!actual) {
+        const hasher = createHash('sha256');
+        await new Promise<void>((resolve, reject) => {
+          // Big read buffer: a 64 KB stream starves inside the busy daemon
+          // event loop (~110k turns for a 7 GB file → 15+ min). See
+          // MODEL_HASH_READ_BUFFER_BYTES.
+          const stream = createReadStream(tmpPath, {
+            highWaterMark: MODEL_HASH_READ_BUFFER_BYTES,
+          });
+          stream.on('data', (chunk) => hasher.update(chunk));
+          stream.on('end', () => resolve());
+          stream.on('error', reject);
+        });
+        actual = hasher.digest('hex');
+      }
+      verifiedDigests[entry.destFilename] = actual;
       if (actual !== entry.sha256.toLowerCase()) {
         if (skipSha) {
           // User opted in after a previous mismatch surfaced. Keep the
@@ -764,6 +818,20 @@ export class LlamaCppModelManager {
       return;
     }
 
+    // Drop weights left behind by a previous install of this id that used a
+    // different quant/filename — otherwise the old GGUF lingers alongside the
+    // new one (tens of GB for one slot). Runs before the fileSha256 map is
+    // built so the map describes exactly the current payload.
+    const pruned = await pruneModelPayloadFiles(
+      itemDir,
+      new Set(plan.map((entry) => entry.destFilename)),
+    );
+    if (pruned.length > 0) {
+      log.info(
+        `[models] [${this.engine}] pruned ${pruned.length} stale file(s) from "${catalogId}": ${pruned.join(', ')}`,
+      );
+    }
+
     const weightsShards = plan.filter((e) => e.role === 'weights' || e.role === 'weights-shard');
     const mmprojEntry = plan.find((e) => e.role === 'mmproj');
     const draftModelEntry = plan.find((e) => e.role === 'draft-model');
@@ -793,7 +861,7 @@ export class LlamaCppModelManager {
       ...(summary.architecture ? { architecture: summary.architecture } : {}),
       chatTemplatePresent: !summary.chatTemplateMissing,
     };
-    installed.fileSha256 = await hashModelPayloadFiles(itemDir);
+    installed.fileSha256 = await hashModelPayloadFiles(itemDir, verifiedDigests);
     await writeFile(join(itemDir, 'manifest.json'), JSON.stringify(installed, null, 2), 'utf8');
     await makeSharedModelReadable(itemDir);
 

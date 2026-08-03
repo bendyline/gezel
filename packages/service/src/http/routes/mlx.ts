@@ -34,6 +34,14 @@ export function mlxRoutes(ctx: ServiceContext): Hono {
     return c.json({ installs: ctx.mlxModels.getActiveInstalls() });
   });
 
+  /** Incomplete downloads (mirrors llama-cpp `/incomplete`) — interrupted or
+   *  unverified downloads with no `manifest.json`, surfaced so the user can
+   *  resume or delete them before the silent reclaim sweep. */
+  app.get('/incomplete', async (c) => {
+    const incomplete = await ctx.mlxModels.listIncomplete();
+    return c.json({ incomplete });
+  });
+
   /**
    * Install an MLX model directory from HuggingFace. Same SSE shape as
    * the llama-cpp install endpoint; event body carries `fileIndex` +

@@ -164,7 +164,7 @@ describe('LlamaCppSettings', () => {
     });
   });
 
-  it('selecting auto-detect clears the override (sends undefined)', async () => {
+  it('selecting auto-detect clears the override (sends null)', async () => {
     const cfgWithOverride = { ...BASE_CONFIG, llamaCppBackendOverride: 'cpu' } as ConfigResponse;
     render(
       <LlamaCppSettings config={cfgWithOverride} onConfigChanged={vi.fn()} health={BASE_HEALTH} />,
@@ -176,8 +176,10 @@ describe('LlamaCppSettings', () => {
     const selects = screen.getAllByRole('combobox') as HTMLSelectElement[];
     fireEvent.change(selects[1]!, { target: { value: 'auto' } });
 
+    // null, not undefined: undefined is stripped by JSON.stringify, so only
+    // an explicit null clears the pinned value on the store side.
     await waitFor(() => {
-      expect(api.updateConfig).toHaveBeenCalledWith({ llamaCppBackendOverride: undefined });
+      expect(api.updateConfig).toHaveBeenCalledWith({ llamaCppBackendOverride: null });
     });
   });
 
@@ -254,10 +256,16 @@ describe('LlamaCppSettings', () => {
       expect(screen.getByText(/using external engine/)).toBeInTheDocument();
     });
   });
-  // `--swa-full` is the precondition for llama-server accepting
-  // `--cache-reuse` on SWA models; without it the engine logs
-  // "cache_reuse is not supported by this context" and drops the flag.
-  it('toggling the full SWA cache saves llamaCppSwaFull', async () => {
+  // The SWA cache control is a tri-state select (Auto / On / Off). `--swa-full`
+  // is the precondition for llama-server accepting `--cache-reuse` on SWA
+  // models; without it the engine logs "cache_reuse is not supported by this
+  // context" and drops the flag.
+  const findSwaSelect = () =>
+    (screen.getAllByRole('combobox') as HTMLSelectElement[]).find((s) =>
+      within(s).queryByText(/Gemma family/),
+    )!;
+
+  it('setting the full SWA cache to On saves llamaCppSwaFull: true', async () => {
     render(
       <LlamaCppSettings config={BASE_CONFIG} onConfigChanged={vi.fn()} health={BASE_HEALTH} />,
     );
@@ -265,14 +273,29 @@ describe('LlamaCppSettings', () => {
       expect(screen.getByText(/Full SWA cache/)).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByLabelText(/full-size sliding-window KV cache/i));
+    fireEvent.change(findSwaSelect(), { target: { value: 'on' } });
 
     await waitFor(() => {
       expect(api.updateConfig).toHaveBeenCalledWith({ llamaCppSwaFull: true });
     });
   });
 
-  it('clearing the full SWA cache sends undefined, not false', async () => {
+  it('setting the full SWA cache to Off saves llamaCppSwaFull: false', async () => {
+    render(
+      <LlamaCppSettings config={BASE_CONFIG} onConfigChanged={vi.fn()} health={BASE_HEALTH} />,
+    );
+    await waitFor(() => {
+      expect(screen.getByText(/Full SWA cache/)).toBeInTheDocument();
+    });
+
+    fireEvent.change(findSwaSelect(), { target: { value: 'off' } });
+
+    await waitFor(() => {
+      expect(api.updateConfig).toHaveBeenCalledWith({ llamaCppSwaFull: false });
+    });
+  });
+
+  it('setting the full SWA cache to Auto clears the override (sends null)', async () => {
     render(
       <LlamaCppSettings
         config={{ ...BASE_CONFIG, llamaCppSwaFull: true } as ConfigResponse}
@@ -284,10 +307,10 @@ describe('LlamaCppSettings', () => {
       expect(screen.getByText(/Full SWA cache/)).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByLabelText(/full-size sliding-window KV cache/i));
+    fireEvent.change(findSwaSelect(), { target: { value: 'auto' } });
 
     await waitFor(() => {
-      expect(api.updateConfig).toHaveBeenCalledWith({ llamaCppSwaFull: undefined });
+      expect(api.updateConfig).toHaveBeenCalledWith({ llamaCppSwaFull: null });
     });
   });
 });

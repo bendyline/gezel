@@ -12198,6 +12198,12 @@ button.bench-step-foot:disabled {
 }
 
 .home-status-pill {
+  /* inline-block + nowrap so a long label (e.g. "dense — may respond slowly
+     here") stays one solid pill and wraps as a whole unit, instead of the
+     text breaking across lines and splitting the pill background/border. */
+  display: inline-block;
+  white-space: nowrap;
+  vertical-align: middle;
   font-size: 0.75rem;
   padding: 0.2rem 0.55rem;
   border-radius: 10px;

@@ -580,10 +580,17 @@ function parseSums(text: string): Map<string, string> {
   return map;
 }
 
+// Big read buffer so hashing a multi-hundred-MB engine archive doesn't starve
+// inside the busy daemon event loop — a 64 KB stream yields to the loop ~100k
+// times and the hash queues behind chat/scheduler/index work. Engines is a
+// lower layer than models, so this mirrors models' MODEL_HASH_READ_BUFFER_BYTES
+// rather than importing it.
+const HASH_READ_BUFFER_BYTES = 16 * 1024 * 1024;
+
 async function sha256File(path: string): Promise<string> {
   const hash = createHash('sha256');
   await new Promise<void>((resolve, reject) => {
-    const stream = createReadStream(path);
+    const stream = createReadStream(path, { highWaterMark: HASH_READ_BUFFER_BYTES });
     stream.on('data', (chunk) => hash.update(chunk));
     stream.on('end', () => resolve());
     stream.on('error', reject);

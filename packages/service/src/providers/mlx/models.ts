@@ -44,14 +44,19 @@ import {
   publishStagedModel,
 } from '../../models/bundle-storage.js';
 import {
+  type IncompleteModelDownloadInfo,
   type ModelStorageRoots,
+  MODEL_HASH_READ_BUFFER_BYTES,
   findModelRoot,
   hashModelPayloadFiles,
+  listIncompleteModelDownloads,
   listOverlayModelIds,
   makeSharedModelReadable,
   modelExistsOnlyReadOnly,
   modelStorageRoots,
+  pruneModelPayloadFiles,
   readOnlyModelError,
+  removeModelDir,
   verifyReadOnlyModelPayload,
 } from '../../models/storage-roots.js';
 import { checkDiskSpace, describeDiskShortfall } from '../../utils/disk-space.js';
@@ -289,6 +294,36 @@ export class MlxModelManager {
     return out;
   }
 
+  /**
+   * List incomplete MLX downloads — directories that hold bytes but no
+   * `manifest.json`, so they never surface in {@link listInstalled}. Tagged
+   * `resumable` when the id still resolves to an MLX-capable catalog entry.
+   * In-flight installs are excluded. See {@link LlamaCppModelManager.listIncomplete}.
+   */
+  async listIncomplete(): Promise<IncompleteModelDownloadInfo[]> {
+    const activeIds = new Set(this.activeInstalls.keys());
+    const rows = await listIncompleteModelDownloads({ writableRoot: this.modelsRoot, activeIds });
+    const out: IncompleteModelDownloadInfo[] = [];
+    for (const row of rows) {
+      let resumable = false;
+      let name: string | undefined;
+      if (isSafeId(row.id)) {
+        const detail = await this.catalog.get('chat-model', row.id).catch(() => null);
+        if (
+          detail &&
+          detail.manifest.kind === 'chat-model' &&
+          detail.manifest.mlx &&
+          !detail.manifest.mlx.disabledReason
+        ) {
+          resumable = true;
+          name = detail.manifest.name;
+        }
+      }
+      out.push({ ...row, resumable, ...(name ? { name } : {}) });
+    }
+    return out;
+  }
+
   async resolveDefaultModel(): Promise<InstalledMlxModel | null> {
     const models = await this.listInstalled();
     return models[0] ?? null;
@@ -313,7 +348,7 @@ export class MlxModelManager {
     if (await modelExistsOnlyReadOnly(this.storageRoots, id)) {
       throw readOnlyModelError(id);
     }
-    await rm(join(this.modelsRoot, id), { recursive: true, force: true });
+    await removeModelDir(join(this.modelsRoot, id));
   }
 
   /** Provider-owned snapshot used by the streaming `.gezmodel` exporter. */
@@ -562,6 +597,16 @@ export class MlxModelManager {
         }
       }
 
+      // Drop files a previous install of this id left behind that the new file
+      // set no longer references (e.g. shards from a different quant). Keeps the
+      // slot from accumulating orphaned multi-GB weights.
+      const pruned = await pruneModelPayloadFiles(itemDir, new Set(files.map((f) => f.name)));
+      if (pruned.length > 0) {
+        log.info(
+          `[models] [mlx] pruned ${pruned.length} stale file(s) from "${catalogId}": ${pruned.join(', ')}`,
+        );
+      }
+
       tracked.phase = 'extracting-metadata';
       yield { type: 'extracting-metadata' };
       let summary: Awaited<ReturnType<typeof readMlxSummary>>;
@@ -770,7 +815,9 @@ export class MlxModelManager {
     // miss the resumed prefix).
     const hasher = createHash('sha256');
     await new Promise<void>((resolve, reject) => {
-      const stream = createReadStream(tmpPath);
+      // Big read buffer so the hash doesn't starve inside the busy daemon
+      // event loop. See MODEL_HASH_READ_BUFFER_BYTES.
+      const stream = createReadStream(tmpPath, { highWaterMark: MODEL_HASH_READ_BUFFER_BYTES });
       stream.on('data', (chunk) => hasher.update(chunk));
       stream.on('end', () => resolve());
       stream.on('error', reject);

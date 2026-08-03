@@ -22,6 +22,8 @@
  * these shapes by construction.
  */
 
+import { isGemmaModel } from './kv-cache-type.js';
+
 /** The subset of `GezelConfig` this builder reads (global overrides). */
 export interface GlobalLlamaCppFlags {
   llamaCppFlashAttn?: boolean | 'on' | 'off' | 'auto';
@@ -107,6 +109,14 @@ export interface EngineFlagInput {
    * default behavior is unchanged.
    */
   reasoningFormat?: string | undefined;
+  /**
+   * The model's GGUF `general.architecture`, for the Gemma-family auto
+   * defaults (sliding-window full cache). Undefined disables the arch
+   * heuristic; an explicit config/manifest `swaFull` still applies.
+   */
+  architecture?: string | undefined;
+  /** The resolved model id, a fallback for `architecture` (see isGemmaModel). */
+  modelId?: string | undefined;
 }
 
 /** Default `--cache-reuse` chunk when neither config nor manifest set it. */
@@ -148,6 +158,8 @@ export function buildLlamaCppEngineArgs(input: EngineFlagInput): string[] {
     ggufHasMtp,
     installedDraftModelPath,
     reasoningFormat,
+    architecture,
+    modelId,
   } = input;
   const args: string[] = [];
 
@@ -158,8 +170,18 @@ export function buildLlamaCppEngineArgs(input: EngineFlagInput): string[] {
   }
 
   // ── MoE expert offload (`--cpu-moe` / `--n-cpu-moe`) ──────────────
-  const cpuMoe = config.llamaCppCpuMoe ?? perModel?.cpuMoe ?? planner?.cpuMoe;
-  const nCpuMoe = config.llamaCppNCpuMoe ?? perModel?.nCpuMoe ?? planner?.nCpuMoe;
+  // Tri-state: an explicit `true`/`false` in config or manifest wins;
+  // `undefined` at both layers falls through to the planner's auto
+  // decision. An explicit `false` is "force experts onto the GPU" — it
+  // must also suppress the planner's partial `--n-cpu-moe`, not just the
+  // all-experts `--cpu-moe`, or "Off" would silently still offload.
+  const explicitCpuMoe = config.llamaCppCpuMoe ?? perModel?.cpuMoe;
+  const cpuMoe = explicitCpuMoe ?? planner?.cpuMoe;
+  // An explicit partial split (config/manifest) is a specific opinion that
+  // always applies. Only the planner's suggested partial split is
+  // suppressed when experts are explicitly forced off.
+  const explicitNCpuMoe = config.llamaCppNCpuMoe ?? perModel?.nCpuMoe;
+  const nCpuMoe = explicitNCpuMoe ?? (explicitCpuMoe === false ? undefined : planner?.nCpuMoe);
   if (cpuMoe) {
     // All experts on CPU — the granular `--n-cpu-moe` would be redundant.
     args.push('--cpu-moe');
@@ -188,7 +210,14 @@ export function buildLlamaCppEngineArgs(input: EngineFlagInput): string[] {
   if (cacheReuse > 0) args.push('--cache-reuse', String(cacheReuse));
 
   // ── SWA full cache (`--swa-full`) ─────────────────────────────────
-  if (config.llamaCppSwaFull ?? perModel?.swaFull) args.push('--swa-full');
+  // Tri-state: explicit config/manifest `true`/`false` wins; `undefined`
+  // at both layers falls through to the Gemma-family auto-default. Gemma's
+  // sliding-window attention refuses cross-request prefix reuse under the
+  // memory-efficient windowed cache; the full cache trades ~30% KV memory
+  // (which the offload planner already budgets for) to enable it.
+  const swaFull =
+    config.llamaCppSwaFull ?? perModel?.swaFull ?? isGemmaModel({ architecture, modelId });
+  if (swaFull) args.push('--swa-full');
 
   // ── Thread / batch overrides ──────────────────────────────────────
   const threads = config.llamaCppThreads ?? perModel?.threads;

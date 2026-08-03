@@ -839,6 +839,29 @@ describe('memories', () => {
     expect(files.some((f) => f.startsWith('growth.json.corrupt-'))).toBe(true);
   });
 
+  it('quarantines an unparseable session file so scans stop re-reading it', async () => {
+    await store.createGezel({ name: 'Sessioneer' });
+    const { writeFile: wf, mkdir: md, readdir: rd } = await import('node:fs/promises');
+    const { join: jn } = await import('node:path');
+    const dir = jn(home, 'gezels', 'sessioneer', 'sessions');
+    await md(dir, { recursive: true });
+    // The all-NUL artifact a pre-atomic-write crash leaves behind.
+    await wf(jn(dir, 'dead.json'), Buffer.alloc(64, 0));
+
+    // First scan skips the corrupt file and quarantines it.
+    const first = await store.listSessions({ gezelId: 'sessioneer' });
+    expect(first).toEqual([]);
+    let files = await rd(dir);
+    expect(files).not.toContain('dead.json');
+    expect(files.some((f) => f.startsWith('dead.json.corrupt-'))).toBe(true);
+
+    // Second scan no longer sees a `.json` to re-read, so no new quarantine.
+    const before = files.filter((f) => f.startsWith('dead.json.corrupt-')).length;
+    await store.listSessions({ gezelId: 'sessioneer' });
+    files = await rd(dir);
+    expect(files.filter((f) => f.startsWith('dead.json.corrupt-')).length).toBe(before);
+  });
+
   it('adds and removes traits with slot-cap and duplicate guards', async () => {
     await store.createGezel({ name: 'Traity' });
     const detail = await store.addGezelTrait('traity', {

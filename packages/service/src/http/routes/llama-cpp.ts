@@ -34,6 +34,17 @@ export function llamaCppRoutes(ctx: ServiceContext): Hono {
   });
 
   /**
+   * Incomplete downloads: interrupted or unverified downloads that hold
+   * bytes on disk but have no `manifest.json`, so they never appear in
+   * `/models`. The Settings UI surfaces these so the user can resume or
+   * delete them instead of losing GBs to the silent 7-day reclaim sweep.
+   */
+  app.get('/incomplete', async (c) => {
+    const incomplete = await ctx.llamaCppModels.listIncomplete();
+    return c.json({ incomplete });
+  });
+
+  /**
    * Install a chat-model entry's llama.cpp source. The install itself runs
    * as a background job owned by {@link ServiceContext.chatInstalls} — this
    * SSE is just a subscriber, so a client disconnect detaches the consumer
