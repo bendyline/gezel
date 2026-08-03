@@ -7,6 +7,7 @@ import type {
 import {
   computeModelFit,
   isMoEFromTags,
+  isRecommendedModel,
   mediaModelFits,
   pickRecommendedModel,
 } from '@bendyline/gezel';
@@ -105,7 +106,9 @@ export function rankChatModels(
       provider,
       approxSizeBytes: source.approxSizeBytes,
       residentBytes,
-      recoScore: manifest.recoScore ?? 0,
+      // Effective score: a model the shared gate rejects (restricted license,
+      // no tool support) sorts as unscored rather than leading the list.
+      recoScore: isRecommendedModel(manifest) ? (manifest.recoScore ?? 0) : 0,
       fit,
     });
   }

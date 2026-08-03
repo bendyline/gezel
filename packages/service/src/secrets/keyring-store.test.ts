@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { type KeyringEntryFactory, KeyringSecretStore } from './keyring-store.js';
+import {
+  type KeyringEntryFactory,
+  KeyringSecretStore,
+  probeKeyringAvailable,
+} from './keyring-store.js';
 import type { ProviderCredentialName, SecretKey } from './types.js';
 
 // The store's positive TTL is 5s; advancing just past it forces a refresh.
@@ -144,5 +148,93 @@ describe('KeyringSecretStore caching', () => {
     t = 46_000;
     await expect(store.get(key)).rejects.toThrow(); // elapsed → read #3
     expect(kc.getCalls).toBe(3);
+  });
+});
+
+describe('KeyringSecretStore device identity migration', () => {
+  const identityScope = '0123456789abcdef';
+  const identityKey: SecretKey = { kind: 'deviceIdentity', scope: identityScope };
+
+  it('keeps the scoped identity out of the legacy global index', async () => {
+    const kc = new FakeKeychain();
+    const store = new KeyringSecretStore({
+      entryFactory: kc.factory,
+      identityScope,
+    });
+
+    await store.set(identityKey, 'private-key');
+
+    expect(kc.store.get(`deviceIdentity:${identityScope}`)).toBe('private-key');
+    expect(kc.store.has('__gezel_index__')).toBe(false);
+  });
+
+  it('exports the current scoped identity even though it is absent from the global index', async () => {
+    const kc = new FakeKeychain();
+    const store = new KeyringSecretStore({
+      entryFactory: kc.factory,
+      identityScope,
+    });
+    await store.set(identityKey, 'private-key');
+
+    expect(await store.exportEntries()).toEqual(
+      new Map([[`deviceIdentity:${identityScope}`, 'private-key']]),
+    );
+  });
+
+  it('falls back to the legacy identity during a backend migration', async () => {
+    const kc = new FakeKeychain();
+    kc.store.set('deviceIdentity', 'legacy-private-key');
+    const store = new KeyringSecretStore({
+      entryFactory: kc.factory,
+      identityScope,
+    });
+
+    expect(await store.exportEntries()).toEqual(
+      new Map([['deviceIdentity', 'legacy-private-key']]),
+    );
+  });
+
+  it('imports a legacy file-backed identity directly into the scoped account', async () => {
+    const kc = new FakeKeychain();
+    const store = new KeyringSecretStore({
+      entryFactory: kc.factory,
+      identityScope,
+    });
+
+    await store.importEntries(new Map([['deviceIdentity', 'legacy-private-key']]), true);
+
+    expect(kc.store.get(`deviceIdentity:${identityScope}`)).toBe('legacy-private-key');
+    expect(kc.store.has('deviceIdentity')).toBe(false);
+    expect(kc.store.has('__gezel_index__')).toBe(false);
+  });
+
+  it('prefers an already-scoped identity when a migration source contains both forms', async () => {
+    const kc = new FakeKeychain();
+    const store = new KeyringSecretStore({
+      entryFactory: kc.factory,
+      identityScope,
+    });
+
+    await store.importEntries(
+      new Map([
+        ['deviceIdentity', 'legacy-private-key'],
+        [`deviceIdentity:${identityScope}`, 'scoped-private-key'],
+      ]),
+      true,
+    );
+
+    expect(kc.store.get(`deviceIdentity:${identityScope}`)).toBe('scoped-private-key');
+    expect(kc.store.has('deviceIdentity')).toBe(false);
+  });
+});
+
+describe('probeKeyringAvailable', () => {
+  it('uses a unique account and ignores a retained fixed probe item', () => {
+    const kc = new FakeKeychain();
+    kc.store.set('__gezel_probe__', 'retained-by-an-old-build');
+
+    expect(probeKeyringAvailable({ entryFactory: kc.factory, probeId: 'test-run' })).toBeNull();
+    expect(kc.store.get('__gezel_probe__')).toBe('retained-by-an-old-build');
+    expect(kc.store.has('__gezel_probe__:test-run')).toBe(false);
   });
 });

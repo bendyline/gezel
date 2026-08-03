@@ -564,6 +564,29 @@ const MEESTER_TOOL_CAP_PRIORITY = [
   'list_artifacts',
   'read_artifact',
   'write_artifact',
+  // Tail of the curated list: reached at small tier (cap == list length),
+  // truncated away at tiny. `craftbook_read`'s own argument description
+  // reads "Craftbook id from list_craftbooks", so dropping this left the
+  // schema pointing at a tool the one craftbook-centric role couldn't see.
+  'list_craftbooks',
+  //
+  // Deliberately NOT curated here, so the small-tier trim is a decision
+  // rather than an omission:
+  //   - `craftbook_add_step` / `craftbook_remove_step` /
+  //     `craftbook_reorder_steps` / `set_step_deliverable` — redundant with
+  //     the curated `craftbook_read` + `craftbook_write` whole-document
+  //     path, which is the edit route the meester is actually taught.
+  //   - `list_suggested_work` / `enable_suggested_work` /
+  //     `disable_suggested_work` — a settings-shaped side surface; nothing
+  //     in the prompt stack names them, so their absence creates no
+  //     prompt-vs-runtime drift, and three more schemas is real prefill on
+  //     a 8B.
+  //   - the document search/intel tail (`search_documents`, `search_docs`,
+  //     `read_doc_as_markdown`, `find_entity`, …) — `search_memory` and
+  //     `read_document` cover recall for a coordinator that delegates the
+  //     reading work anyway.
+  // Revisit any of these by adding the name here; the cap follows the list
+  // length, so curating a tool in never squeezes another one out.
 ] as const;
 
 const VOORMAN_TOOL_CAP_PRIORITY = [
@@ -646,6 +669,36 @@ const IMPLEMENTATION_TOOL_CAP_PRIORITY = [
   'set_task_status',
   'advance_task_step',
 ] as const;
+
+// Ranking for the slots that remain after a role's curated priority list is
+// exhausted — and the entire ranking for a role that has no curated list
+// (any custom role at tiny tier). Previously these slots were filled by
+// `Set` iteration order, i.e. whichever toolset group happened to insert
+// first: the surviving surface silently depended on group ordering rather
+// than on any judgement about what a trimmed session needs. A generalist
+// read-then-write ladder is the considered answer — inspect, search, then
+// the artifact drawer and recall — with the actual mutation tools already
+// guaranteed by LOAD_BEARING_TOOL_CAP_ALWAYS_KEEP regardless of rank.
+// Anything past this list is filled alphabetically, so the outcome is a
+// function of the surface alone, never of iteration order.
+const GENERIC_TOOL_CAP_FALLBACK: readonly string[] = [
+  'read_file',
+  'list_dir',
+  'stat',
+  'search_files',
+  'find_files',
+  'list_artifacts',
+  'read_artifact',
+  'write_artifact',
+  'search_memory',
+  'save_memory',
+  'list_memories',
+  'list_documents',
+  'read_document',
+  'list_tasks',
+  'get_task',
+  'ask_specialist',
+];
 
 function isImplementationRole(role: string | undefined): boolean {
   const normalized = role?.toLowerCase().trim() ?? '';
@@ -1050,7 +1103,15 @@ function capToolAllowlist(opts: {
     if (nonExempt >= opts.cap) break;
     tryAdd(name);
   }
-  for (const name of opts.allowlist) {
+  const ranked = new Set(priority);
+  const fill = [
+    ...GENERIC_TOOL_CAP_FALLBACK.filter((name) => !ranked.has(name)),
+    ...[...opts.allowlist]
+      .filter((name) => !ranked.has(name) && !GENERIC_TOOL_CAP_FALLBACK.includes(name))
+      .sort(),
+  ];
+  for (const name of fill) {
+    if (!opts.allowlist.has(name)) continue;
     if (nonExempt >= opts.cap) break;
     tryAdd(name);
   }

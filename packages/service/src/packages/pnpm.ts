@@ -2,6 +2,7 @@ import { type ChildProcess, type SpawnOptions, spawn } from 'node:child_process'
 import { existsSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { type PnpmInvocation, resolvePnpmInvocation } from '@bendyline/gezel';
+import { windowsDetachedSpawnOptions } from '@bendyline/gezel/native';
 import { winShellSafe } from './win-shell.js';
 
 /**
@@ -16,10 +17,12 @@ import { winShellSafe } from './win-shell.js';
  *     exact supply-chain vector we're eliminating. Any legitimate
  *     post-install work (e.g. Playwright's chromium download) is invoked
  *     explicitly by the service in its own dedicated step.
- *  3. **Headless Windows launches** — the machine-wide daemon runs in
- *     non-interactive Session 0. Console-subsystem children must use
- *     CREATE_NO_WINDOW (`windowsHide: true`) or they can die during DLL
- *     initialization before pnpm itself starts.
+ *  3. **Console-free Windows launches** — the machine-wide daemon runs in
+ *     non-interactive Session 0 under a restricted service SID, where
+ *     console allocation fails and the launch dies as `spawn EPERM`.
+ *     Console-subsystem children must therefore be started with
+ *     DETACHED_PROCESS. This used to ask for CREATE_NO_WINDOW instead
+ *     (Node's `windowsHide`), which still allocates a console.
  */
 
 /** Buffered result of a pnpm run. */
@@ -102,16 +105,17 @@ function pnpmSpawnTarget(invocation: PnpmInvocation): {
   return winShellSafe(invocation.command, invocation.args, invocation.shell);
 }
 
-export type PnpmSpawnOptions = Omit<SpawnOptions, 'shell' | 'windowsHide'>;
+export type PnpmSpawnOptions = Omit<SpawnOptions, 'shell' | 'windowsHide' | 'detached'>;
 
 /**
  * The only supported way to spawn a resolved pnpm invocation from the
  * service. In addition to applying cmd.exe-safe quoting, this forces a
- * headless Windows launch. `windowsHide` maps to CREATE_NO_WINDOW for
- * console children and is ignored on other platforms.
+ * console-free Windows launch (DETACHED_PROCESS, via `detached`), which is
+ * what the Session 0 machine service needs. On other platforms `detached`
+ * means setsid(), so it stays win32-only.
  *
- * Keep `shell` and `windowsHide` out of the caller-owned options: both are
- * invocation/runtime invariants, not per-call policy.
+ * Keep `shell`, `windowsHide` and `detached` out of the caller-owned
+ * options: all three are invocation/runtime invariants, not per-call policy.
  */
 export function spawnPnpm(
   invocation: PnpmInvocation,
@@ -122,7 +126,7 @@ export function spawnPnpm(
   return spawnImpl(target.command, target.args, {
     ...options,
     shell: invocation.shell,
-    windowsHide: true,
+    ...windowsDetachedSpawnOptions(),
   });
 }
 

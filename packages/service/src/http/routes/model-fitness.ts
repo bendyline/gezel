@@ -21,10 +21,11 @@ export function modelFitnessRoutes(ctx: ServiceContext): Hono {
   app.post('/:provider/:modelId/probe', async (c) => {
     const provider = c.req.param('provider');
     const modelId = c.req.param('modelId');
-    if (provider !== 'llama-cpp' && provider !== 'ds4') {
+    if (provider !== 'llama-cpp' && provider !== 'ds4' && provider !== 'mlx') {
       return c.json({ error: `fitness probes are not supported for provider "${provider}"` }, 400);
     }
-    const models = provider === 'ds4' ? ctx.ds4Models : ctx.llamaCppModels;
+    const models =
+      provider === 'ds4' ? ctx.ds4Models : provider === 'mlx' ? ctx.mlxModels : ctx.llamaCppModels;
     const installed = await models.resolveModel(modelId);
     if (!installed) {
       return c.json({ error: `model "${modelId}" is not available locally for ${provider}` }, 404);

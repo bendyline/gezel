@@ -25,6 +25,7 @@ import type { ChildProcess } from 'node:child_process';
 import { spawn as nodeSpawn } from 'node:child_process';
 import { basename } from 'node:path';
 import { createLogger } from '@bendyline/gezel';
+import { windowsDetachedSpawnOptions } from '@bendyline/gezel/native';
 
 const log = createLogger('native');
 
@@ -574,12 +575,12 @@ export class NativeEngineSupervisor {
         env: { ...process.env, ...(launch.env ?? {}) },
         ...(launch.cwd ? { cwd: launch.cwd } : {}),
         stdio: ['ignore', 'pipe', 'pipe'],
-        // Native engines are console-subsystem executables on Windows.
-        // The machine-wide daemon runs in non-interactive Session 0, where
-        // allowing CreateProcess to allocate a console can fail with EPERM.
-        // CREATE_NO_WINDOW (Node's windowsHide option) keeps the launch
-        // headless; the option is ignored on other platforms.
-        windowsHide: true,
+        // Native engines are console-subsystem executables on Windows, so
+        // the loader allocates a console unless we opt out. Under the
+        // machine-wide Session 0 service that allocation fails and the
+        // launch dies as `spawn EPERM`. DETACHED_PROCESS is the opt-out;
+        // `windowsHide` (CREATE_NO_WINDOW) is not — it still allocates.
+        ...windowsDetachedSpawnOptions(),
       });
     } catch (err) {
       throw nativeSpawnError(this.logPrefix, launch, err);
@@ -1289,17 +1290,45 @@ export function parseNativeProcessSnapshot(stdout: string): NativeProcessSnapsho
   return out;
 }
 
+/** `code` stamped on every engine-launch failure. See {@link isEngineLaunchError}. */
+export const ENGINE_LAUNCH_ERROR_CODE = 'engine-launch';
+
+/**
+ * True when the engine binary itself never started, however deep the error
+ * was rewrapped. Matches the code first, then falls back to the stable
+ * message so a rewrapped error still classifies right (same belt-and-braces
+ * shape as the pool's `engine-busy` matcher).
+ */
+export function isEngineLaunchError(err: unknown): boolean {
+  if (
+    err &&
+    typeof err === 'object' &&
+    (err as { code?: unknown }).code === ENGINE_LAUNCH_ERROR_CODE
+  ) {
+    return true;
+  }
+  const message = err instanceof Error ? err.message : String(err);
+  return /could not launch /.test(message);
+}
+
 function nativeSpawnError(logPrefix: string, launch: NativeEngineLaunch, cause: unknown): Error {
   const code =
     cause && typeof cause === 'object' && 'code' in cause && typeof cause.code === 'string'
       ? cause.code
       : undefined;
   const detail = cause instanceof Error ? cause.message : String(cause);
-  return new Error(
+  const err = new Error(
     `${logPrefix} could not launch ${basename(launch.command)}${code ? ` (${code})` : ''}. ` +
       `Executable: ${launch.command}${launch.cwd ? `; cwd: ${launch.cwd}` : ''}. ${detail}`,
     { cause },
   );
+  // Consumers that report *why* a model failed need to tell "the engine
+  // never came up" apart from "the model answered badly". The engine starts
+  // lazily on the first turn, so without this marker a launch failure looks
+  // like a generation failure — which is how the fitness proeve came to
+  // report "engine spawned and served the probe session" for a model whose
+  // engine had never started.
+  return Object.assign(err, { code: ENGINE_LAUNCH_ERROR_CODE });
 }
 
 async function killGracefully(child: ChildProcess): Promise<void> {

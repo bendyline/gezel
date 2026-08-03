@@ -46,7 +46,7 @@ Order is fixed in `buildInstructions`. Conditions are the interesting part:
 | 9 | `### Current task` + `#### Step procedure` + `#### Phase gate` | task-scoped session | varies; procedures can be large |
 | 10 | `### Tasks assigned to you in this project` | not task-scoped, assignments exist | varies |
 | 11 | `### Recalled from prior sessions` (auto-recall memory hits; plus up to 3 `[workspace]` code hits from the content index when available — same query embedding, no extra embed) | recall enabled, hits ≥ min score | ~4–7 bullets |
-| 12 | Conduct core: **act-don't-narrate** (558 ch), **ask_user_question when stuck** incl. "a short message is not vague when task context is above" (1,414 ch), **markdown guidance** (152 ch) | always, every provider | ~2.1K ch / ~530 tok total |
+| 12 | Conduct core: **act-don't-narrate** (558 ch), **ask_user_question when stuck** incl. "a short message is not vague when task context is above" (1,414 ch), **markdown guidance** incl. the Squisq-dialect brief (`SQUISQ_DIALECT_BRIEF` from [prompts/squisq-dialect.ts](../packages/service/src/prompts/squisq-dialect.ts) — mermaid fences + `{[template]}` annotations; the long example-led sibling `SQUISQ_DIALECT_NOTE` goes into the transform one-shot prompt, context-gated) (~490 ch) | always, every provider | ~2.5K ch / ~620 tok total |
 | 13 | Browsing guidance (Playwright present vs "not installed, don't emit fake `browser_*`") | non-delegation roles | 1–3 lines |
 | 14 | `## Handling external (untrusted) content` | mail-enabled projects | ~850 ch |
 | 15 | **Behavior `promptAppend` walk** (the old "local hints") | per resolved model profile — see next section | 0 to ~9.4K ch |
@@ -283,7 +283,7 @@ they compete with text for context and prefill. Measured accounting:
 - Per-role count-caps ([session-tool-surface.ts](../packages/service/src/chat/session-tool-surface.ts)):
   tiny uses a broad cap (implementation 75, everything else 15). Small caps only
   coordinator roles, and does so **at the full curated orchestration-list length**
-  (Meester 34, Voorman 38); implementation and custom roles remain uncapped. Medium and
+  (Meester 33, Voorman 38); implementation and custom roles remain uncapped. Medium and
   large are uncapped by default, with the same full-list coordinator diet available behind
   `GEZEL_MEESTER_TOOL_DIET=1`. This replaced the unsafe old hand-tuned table (Meester 13,
   Voorman 22/80, unknown 30/40 across small/medium), which evicted load-bearing tools —
@@ -302,6 +302,21 @@ they compete with text for context and prefill. Measured accounting:
      seed cannot hide the `write_task_note` action its procedure requires first. A
      coordinator assigned a step (whose default kit is `tasks-readonly`) can still record
      notes and hand off.
+  3. **No incidental survivors.** Slots left over once a role's curated list is
+     exhausted — and every slot for a role that has no curated list, i.e. any custom role
+     at tiny — are filled from `GENERIC_TOOL_CAP_FALLBACK` (a read → search → artifact →
+     recall ladder) and then alphabetically. Previously they were filled in `Set`
+     iteration order, so which tools a trimmed session kept depended on which toolset
+     group the resolver happened to visit first, and reordering a group could silently
+     take a tool away. Everything the trim keeps is now a ranked decision; what it
+     deliberately drops (and why) is recorded inline next to each curated list.
+- **The trim is not a user-facing event.** `buildToolCapWarning` reaches the chat
+  transcript only under `config.debugMode`; ordinary installs get the unconditional
+  `tool-cap:` `log.warn` and nothing in the UI. The trim is the tier policy working as
+  designed, the dropped tool names mean nothing to someone who never chose tools by
+  name, and both remedies the text suggests (larger model, fewer toolsets) are settings
+  changes nobody should be asked to make mid-sentence. Same reasoning gates the
+  heavy-roster advisory in `refreshLiveToolSurface`.
 - **Measured decomposition (instrumented tictactoe kickoff, qwen-27b):**
   system text ~3,629 tok (localHints 1,344 — cookbook + private-reasoning, both since
   proven removable at this tier; meester persona 1,158; askWhenStuck 354; the rest

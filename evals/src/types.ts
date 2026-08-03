@@ -532,6 +532,15 @@ export interface TriageCluster {
 
 export interface BatchOptions extends TrialOptions {
   count: number;
+  /**
+   * Honor `count` exactly, ignoring each scenario's `suggestedTrials`
+   * saturation cap. `--count` is a required flag, so every count is an
+   * explicit operator ask — yet the cap silently reduced it (wild-caught
+   * twice: variance runs that needed n=3 got n=1 with only a "canary"
+   * log line). Default off: suite sweeps still benefit from not burning
+   * repeat trials on saturated anchors.
+   */
+  countStrict?: boolean;
   parallel?: number;
   /**
    * Skip the per-model preflight admission gate. The gate runs one cheap

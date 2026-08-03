@@ -3590,7 +3590,7 @@ server.tool(
     });
     const header = rich
       ? `${books.length} craftbook(s)${needle ? ` matching "${filter}"` : ''}:`
-      : `${books.length} craftbooks — descriptions omitted at this size. Use suggest_craftbook(query) for a ranked shortlist, or list_craftbooks({ filter }) to search. Do not re-list the full catalog.`;
+      : `${books.length} craftbooks — descriptions omitted at this size. Use suggest_craftbook({ query }) for a ranked shortlist, or list_craftbooks({ filter }) to search. Do not re-list the full catalog.`;
     let listing = `${header}\n${lines.join('\n')}`;
     const HARD_CAP_CHARS = 24_000;
     if (listing.length > HARD_CAP_CHARS) {

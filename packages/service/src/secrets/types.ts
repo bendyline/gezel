@@ -14,14 +14,27 @@
  * existing callers.
  */
 
+import { createHash } from 'node:crypto';
+import { resolve as resolvePath } from 'node:path';
+
 export type SecretKey =
   | { kind: 'toolset'; toolsetId: string; fieldId: string }
   | { kind: 'providerCredential'; name: ProviderCredentialName }
-  // Private half of this device's stable identity keypair (Ed25519, PEM
-  // PKCS#8). Signs the rotating TLS cert fingerprint so a paired client can
-  // verify continuity across reboots. The public half + deviceId live in the
-  // (non-secret) device-identity.json. Singleton per device.
-  | { kind: 'deviceIdentity' };
+  // Private record for this device's stable identity keypair (Ed25519 PKCS#8
+  // PEM plus deviceId in a versioned envelope; legacy entries are bare PEM).
+  // Signs the rotating TLS cert fingerprint so a paired client can verify
+  // continuity across reboots. The public half + deviceId also live in the
+  // non-secret device-identity.json.
+  //
+  // `scope` namespaces the entry to one GEZEL_HOME. It is REQUIRED for new
+  // writes and omitted only when addressing the legacy un-namespaced
+  // entry during migration. Without it, two homes under one OS login (and
+  // the desktop app vs a dev home) collide on a single login-global keychain
+  // account: the second one to initialize finds no public identity file,
+  // generates a fresh keypair, and its write lands on an entry the OS already
+  // holds — surfacing on macOS as "The specified item already exists in the
+  // keychain" and taking the daemon down at boot. See remotes/identity.ts.
+  | { kind: 'deviceIdentity'; scope?: string };
 
 export type ProviderCredentialName =
   | 'githubToken'
@@ -76,8 +89,23 @@ export function stringifySecretKey(key: SecretKey): string {
     case 'providerCredential':
       return `providerCredential:${key.name}`;
     case 'deviceIdentity':
-      return 'deviceIdentity';
+      return key.scope === undefined
+        ? LEGACY_DEVICE_IDENTITY_ACCOUNT
+        : `deviceIdentity:${key.scope}`;
   }
+}
+
+/** Account name of the legacy un-namespaced device identity entry. Only
+ *  the migration path in remotes/identity.ts may address it. */
+export const LEGACY_DEVICE_IDENTITY_ACCOUNT = 'deviceIdentity';
+
+/**
+ * Stable, opaque namespace for one GEZEL_HOME's private identity. The same
+ * path resolves to the same account after a home is deleted and recreated,
+ * while two intentional homes under one OS login do not share a key.
+ */
+export function deviceIdentityScope(home: string): string {
+  return createHash('sha256').update(resolvePath(home)).digest('hex').slice(0, 16);
 }
 
 /** Prefix used by listForToolset to match a toolset's entries. */

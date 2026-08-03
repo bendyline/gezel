@@ -4256,6 +4256,9 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
     await localStore.writeConfig({
       provider: 'llama-cpp',
       defaultModel: { 'llama-cpp': 'gemma4:e4b' },
+      // The trim notice is debug-only in the chat surface; opt in so this
+      // test can still assert the transparency half of the cap.
+      debugMode: true,
     });
     const localEvents = new ChatEventBus();
     const localMock = new MockProvider({ name: 'llama-cpp' });
@@ -4321,8 +4324,9 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
       expect(sys).toContain('`read_artifact`');
       expect(sys).toContain('never invent refs from the project name');
 
-      // The uncurated tail IS trimmed now (161 → curated list) and the
-      // trim surfaces as a warning — the transparency half of the cap.
+      // The uncurated tail IS trimmed now (161 → curated list) and under
+      // `debugMode` the trim surfaces as a warning — the transparency half
+      // of the cap. See the twin test below for the default (quiet) path.
       const disk = await localStore.getSession('leo', session.id);
       const assistant = disk?.messages.find((m) => m.role === 'assistant');
       expect(assistant?.warnings?.some((w) => w.includes('Tool cap trimmed'))).toBe(true);
@@ -4530,6 +4534,8 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
       meesterGezelId: 'mira',
       provider: 'llama-cpp',
       defaultModel: { 'llama-cpp': 'gemma4:e4b' },
+      // See the small-voorman twin: the notice only reaches chat in debug.
+      debugMode: true,
     });
     const localEvents = new ChatEventBus();
     const localMock = new MockProvider({ name: 'llama-cpp' });
@@ -4578,10 +4584,62 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
       expect(toolsBlock).toContain('`write_artifact`');
 
       // The uncurated tail IS trimmed (161 → curated list length) — see the
-      // small-voorman twin test for the two incidents this reconciles.
+      // small-voorman twin test for the two incidents this reconciles. The
+      // notice reaches chat only because this fixture set `debugMode`.
       const disk = await localStore.getSession('mira', session.id);
       const assistant = disk?.messages.find((m) => m.role === 'assistant');
       expect(assistant?.warnings?.some((w) => w.includes('Tool cap trimmed'))).toBe(true);
+    } finally {
+      await localMgr.drainBackground();
+      await localMgr.shutdown();
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it('the tier trim is silent in chat for an ordinary (non-debug) install', async () => {
+    // Wild-caught: a small-tier Meester on gemma4-e4b opened every reply
+    // with "Tool cap trimmed this small-tier Meester session from 74 to 51
+    // tools. Hidden tools include: `list_suggested_work`, ...". The trim is
+    // the tier policy working as designed, the tool names mean nothing to
+    // someone who never picked tools by name, and both suggested remedies
+    // (bigger model, fewer toolsets) are settings changes nobody should be
+    // asked to make mid-sentence. Debug installs still get it; the
+    // unconditional `log.warn` covers anyone tailing logs.
+    const home = await mkdtemp(join(tmpdir(), 'gezel-quiet-cap-'));
+    const localStore = new Store({ home });
+    await localStore.ensureLayout();
+    await localStore.createGezel({ name: 'Mira', role: 'Meester' });
+    await localStore.writeConfig({
+      meesterGezelId: 'mira',
+      provider: 'llama-cpp',
+      defaultModel: { 'llama-cpp': 'gemma4:e4b' },
+    });
+    const localEvents = new ChatEventBus();
+    const localMock = new MockProvider({ name: 'llama-cpp' });
+    const localMgr = new ChatManager({
+      store: localStore,
+      events: localEvents,
+      memory: noopMemory,
+      getPort: () => 0,
+      getToken: () => 'test-token',
+      home,
+      providers: [['llama-cpp', localMock]],
+      catalog: new CatalogService(),
+      secrets: new FileSecretStore(home),
+    });
+    try {
+      const session = await localMgr.createSession({ gezelId: 'mira', projectId: 'default' });
+      localMock.script('on it');
+      await localMgr.send(session.id, 'Can we create an ikari warriors arcade game?');
+
+      // The cap still fires — this is about who hears about it, not whether
+      // the surface is trimmed.
+      const create = localMock.calls.find((c) => c.kind === 'create');
+      expect(create).toBeTruthy();
+
+      const disk = await localStore.getSession('mira', session.id);
+      const assistant = disk?.messages.find((m) => m.role === 'assistant');
+      expect(assistant?.warnings?.some((w) => w.includes('Tool cap trimmed'))).not.toBe(true);
     } finally {
       await localMgr.drainBackground();
       await localMgr.shutdown();

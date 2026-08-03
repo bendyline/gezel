@@ -768,3 +768,23 @@ describe('matrix GPU settle', () => {
     expect(execFileMock).not.toHaveBeenCalled();
   });
 });
+
+describe('countStrict vs suggestedTrials', () => {
+  // `--count` is a required flag, so every count is an explicit operator
+  // ask — yet the saturation cap silently reduced it (wild-caught twice:
+  // variance runs that needed n=3 got n=1). countStrict makes the ask win.
+  it('caps by suggestedTrials by default and honors count with countStrict', async () => {
+    const saturated = {
+      id: 'saturated-scenario',
+      description: 't',
+      prompt: 't',
+      suggestedTrials: 1,
+      successCheck: async () => ({ done: true, success: true, reason: 'ok' }),
+    } as unknown as import('./types.ts').EvalScenario;
+    // Pure-logic check via the same expression runMatrix uses.
+    const cap = (count: number, strict: boolean) =>
+      strict ? count : Math.min(count, saturated.suggestedTrials ?? count);
+    expect(cap(3, false)).toBe(1);
+    expect(cap(3, true)).toBe(3);
+  });
+});

@@ -117,6 +117,30 @@ describe('runFitnessProbe', () => {
     expect(session.disconnected).toBe(true);
   });
 
+  // Regression: native engines start lazily on the FIRST TURN, not in
+  // createSession, so a launch failure arrives as a turn rejection. Filed
+  // under `throughput` it left `spawn` reading "engine spawned and served
+  // the probe session" — which is what the badge shows as the failure
+  // reason. Every packaged machine-service install reported an engine that
+  // had never started as a healthy spawn.
+  it('lazy engine-launch failure lands on spawn, not the turn that surfaced it', async () => {
+    const session = new FakeSession([
+      {
+        fail:
+          '[llama-server] could not launch gezel-llama-server.exe (EPERM). ' +
+          'Executable: C:\\native-bin\\win32-x64-cuda\\gezel-llama-server.exe. spawn EPERM',
+      },
+    ]);
+    const record = await runFitnessProbe(
+      deps({ getProviderForModel: async () => fakeProvider(session) }),
+      { provider: 'llama-cpp', modelId: 'gemma4-e4b-q4', trigger: 'install' },
+    );
+    expect(record.status).toBe('failed');
+    expect(record.checks.spawn.ok).toBe(false);
+    expect(record.checks.spawn.detail).toContain('could not launch');
+    expect(record.checks.throughput.detail).toBe('not reached — an earlier probe stage failed');
+  });
+
   it('spawn throw (capacity denial) → status failed with the denial in spawn.detail', async () => {
     const record = await runFitnessProbe(
       deps({
@@ -234,6 +258,31 @@ describe('runFitnessProbe', () => {
     expect(record.status).toBe('probed');
     expect(record.admitted).toBe(false);
     expect(record.checks.reasoningBudget.ok).toBe(false);
+  });
+
+  it('mlx probes ask for the mlx launch ctx and ignore GEZEL_LLAMA_NUM_CTX', async () => {
+    const session = new FakeSession([{ text: 'story', tokensPerSec: 42 }, { calls: [VALID_CALL] }]);
+    const asked: string[] = [];
+    const record = await runFitnessProbe(
+      deps({
+        getProviderForModel: async () => fakeProvider(session),
+        resolveInstalled: async () =>
+          ({ catalogVersion: '2.0.0', contextWindow: 256_000 }) as never,
+        configuredNumCtx: async (engine) => {
+          asked.push(engine);
+          return 40_960;
+        },
+        // The llama.cpp/ds4 supervisors read this; the MLX one never does.
+        env: { GEZEL_LLAMA_NUM_CTX: '8192' },
+      }),
+      { provider: 'mlx', modelId: 'gemma4-12b-q4', trigger: 'manual' },
+    );
+    expect(asked).toEqual(['mlx']);
+    expect(record.provider).toBe('mlx');
+    expect(record.status).toBe('probed');
+    expect(record.admitted).toBe(true);
+    expect(record.genTokensPerSec).toBeCloseTo(42);
+    expect(record.checks.contextFit.detail).toContain('40,960');
   });
 
   it('context fit uses min(GGUF ctx, launch ctx): small GGUF window fails the floor', async () => {

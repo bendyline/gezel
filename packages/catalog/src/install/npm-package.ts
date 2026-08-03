@@ -409,8 +409,12 @@ function runAndWait(command: string, args: string[], cwd: string, shell: boolean
     const child = spawn(command, args, {
       cwd,
       stdio: ['ignore', 'pipe', 'pipe'],
-      windowsHide: true,
-      detached: process.platform !== 'win32',
+      // DETACHED_PROCESS on Windows / a new process group on POSIX. The
+      // Windows half is load-bearing: the machine service's restricted SID
+      // cannot allocate a console, so a console-subsystem child started any
+      // other way dies as `spawn EPERM`. `windowsHide` (CREATE_NO_WINDOW)
+      // does not help — it still allocates one.
+      detached: true,
       shell,
     });
     let output = '';
@@ -446,7 +450,7 @@ function runAndWait(command: string, args: string[], cwd: string, shell: boolean
 function killProcessTree(child: import('node:child_process').ChildProcess): void {
   if (process.platform === 'win32' && child.pid) {
     const killer = spawn('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], {
-      windowsHide: true,
+      detached: true,
       stdio: 'ignore',
     });
     killer.once('error', () => child.kill('SIGKILL'));

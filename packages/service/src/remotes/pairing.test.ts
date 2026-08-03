@@ -53,7 +53,7 @@ async function signedIdentity() {
   const identity = await loadOrCreateDeviceIdentity(home, secrets);
   const cert = await generateLoopbackCert();
   const tlsCertFingerprint = certFingerprintFromPem(cert.certPem);
-  const sig = await signCertFingerprint(secrets, tlsCertFingerprint);
+  const sig = await signCertFingerprint(secrets, home, tlsCertFingerprint);
   return {
     ...identity,
     tlsCertPem: cert.certPem,

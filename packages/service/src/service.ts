@@ -605,6 +605,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     home,
     catalog,
     onInstallStart: () => warmMlxRuntime(),
+    onInstalled: scheduleInstallProbe,
   });
   // Backs `POST /v1/models/ensure` + `GET /v1/models/ensure/:jobId/events`.
   // Wraps the two local model managers above into a single uniform
@@ -724,7 +725,11 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   // probe rides the chat layer's pool-admitted provider resolution;
   // the model managers' install hooks reach it via `modelFitnessRef`.
   const resolveInstalledForFitness = (engine: FitnessEngine, modelId: string) =>
-    engine === 'ds4' ? ds4Models.resolveModel(modelId) : llamaCppModels.resolveModel(modelId);
+    engine === 'ds4'
+      ? ds4Models.resolveModel(modelId)
+      : engine === 'mlx'
+        ? mlxModels.resolveModel(modelId)
+        : llamaCppModels.resolveModel(modelId);
   const modelFitness = new ModelFitnessManager({
     store,
     runProbe: (args) =>
@@ -734,7 +739,10 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
           resolveInstalled: resolveInstalledForFitness,
           resolveReasoningBudget: (modelId) => resolveCatalogReasoningBudget(catalog, modelId),
           detectMemory: detectMemoryProfile,
-          configuredNumCtx: async () => (await store.readConfig()).llamaCppNumCtx,
+          configuredNumCtx: async (engine) => {
+            const cfg = await store.readConfig();
+            return engine === 'mlx' ? cfg.mlxNumCtx : cfg.llamaCppNumCtx;
+          },
         },
         args,
       ),

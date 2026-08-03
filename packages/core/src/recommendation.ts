@@ -2,10 +2,9 @@
  * First-run / on-device model RECOMMENDATION picker.
  *
  * Chooses which recommended model to install on a given machine. A model is a
- * "recommendation candidate" only if it carries a hand-curated `recoScore`
- * AND is fully open (`licenseClass === 'open'`) — the same two-part gate the
- * ★ Recommended badge uses, enforced here so a stray score on a restricted
- * model is never auto-installed.
+ * "recommendation candidate" only if it passes {@link isRecommendedModel} —
+ * the same gate the ★ Recommended badge uses, enforced here so a stray score
+ * on a restricted or tool-less model is never auto-installed.
  *
  * Among the candidates that comfortably fit the machine, the pick is by:
  *   1. `recoScore` (higher wins — the curated preference, e.g. Qwen over Gemma),
@@ -24,11 +23,50 @@
  *
  * Pure + deterministic → unit-tested. The service supplies the catalog
  * candidates (with provider-appropriate `residentBytes`) and the live memory
- * profile; the UI badge reuses only the `recoScore` + `open` gate.
+ * profile; the UI badge reuses `isRecommendedModel` alone.
  */
 import { computeModelFit, isMoEFromTags } from './model-fit.js';
 
 const GB = 1024 ** 3;
+
+/**
+ * The fields the recommendation gate reads — the structural subset every
+ * model manifest satisfies, so the same predicate covers chat, image, video
+ * and audio entries.
+ */
+export interface RecoGateInput {
+  /** Hand-curated recommendation weight; absent → never recommended. */
+  recoScore?: number;
+  /** Only `'open'` models are ever recommended. */
+  licenseClass?: string;
+  /** Chat models declare this; media manifests have no such field. */
+  supportsTools?: boolean;
+}
+
+/**
+ * The single "would we recommend this model?" gate. The first-run picker
+ * below, the ★ Recommended badge, the CLI bootstrap and the media pickers all
+ * call this so they can never drift apart.
+ *
+ * Three conditions:
+ *   1. a hand-curated positive `recoScore` — absent means no one nominated it;
+ *   2. a fully-open license, so a stray score on a restricted model is ignored;
+ *   3. tool support. Gezels do their work THROUGH the MCP toolset, so a model
+ *      that cannot call tools is never a sane default no matter how good its
+ *      prose is — it stays installable, but choosing it has to be the user's
+ *      deliberate act, not ours.
+ *
+ * Media manifests carry no `supportsTools` field, hence `!== false` rather
+ * than `=== true`: undefined passes, only an explicit refusal disqualifies.
+ */
+export function isRecommendedModel(m: RecoGateInput): boolean {
+  return (
+    typeof m.recoScore === 'number' &&
+    m.recoScore > 0 &&
+    m.licenseClass === 'open' &&
+    m.supportsTools !== false
+  );
+}
 
 /**
  * A discrete GPU with more than this much VRAM runs a dense model fully
@@ -36,12 +74,8 @@ const GB = 1024 ** 3;
  */
 export const DENSE_ONLY_VRAM_THRESHOLD = 24 * GB;
 
-export interface RecoModelInput {
+export interface RecoModelInput extends RecoGateInput {
   id: string;
-  /** Hand-curated recommendation weight; absent → not a candidate. */
-  recoScore?: number;
-  /** Only `'open'` models are ever recommended. */
-  licenseClass?: string;
   /** Catalog tags — MoE-ness is read from these via `isMoEFromTags`. */
   tags?: readonly string[];
   /** Provider-appropriate working set (manifest `residentBytes`, or on-disk × overhead). */
@@ -189,27 +223,25 @@ export function pickRecommendedModel(
   const preferMoE = prefersMoE(device);
   const excludeMoE = excludesMoE(device);
 
-  const scored: Scored[] = models
-    .filter((m) => typeof m.recoScore === 'number' && m.recoScore > 0 && m.licenseClass === 'open')
-    .map((m) => {
-      const isMoE = isMoEFromTags(m.tags);
-      const fit = computeModelFit({
-        residentBytes: m.residentBytes,
-        isMoE,
-        usableBytes: device.usableBytes,
-        totalRamBytes: device.totalRamBytes,
-        gpuVramBytes: device.gpuVramBytes,
-        ...(device.budgetBytes !== undefined ? { admissibleBytes: device.budgetBytes } : {}),
-        ...(m.nonExpertBytes !== undefined ? { nonExpertBytes: m.nonExpertBytes } : {}),
-      });
-      return {
-        m,
-        score: m.recoScore as number,
-        isMoE,
-        tier: fit.tier,
-        comfortable: fit.tier === 'fits' || fit.tier === 'fits-offload',
-      };
+  const scored: Scored[] = models.filter(isRecommendedModel).map((m) => {
+    const isMoE = isMoEFromTags(m.tags);
+    const fit = computeModelFit({
+      residentBytes: m.residentBytes,
+      isMoE,
+      usableBytes: device.usableBytes,
+      totalRamBytes: device.totalRamBytes,
+      gpuVramBytes: device.gpuVramBytes,
+      ...(device.budgetBytes !== undefined ? { admissibleBytes: device.budgetBytes } : {}),
+      ...(m.nonExpertBytes !== undefined ? { nonExpertBytes: m.nonExpertBytes } : {}),
     });
+    return {
+      m,
+      score: m.recoScore as number,
+      isMoE,
+      tier: fit.tier,
+      comfortable: fit.tier === 'fits' || fit.tier === 'fits-offload',
+    };
+  });
 
   if (scored.length === 0) return null;
 

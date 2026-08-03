@@ -1,7 +1,7 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { openSecretStore } from './index.js';
 
 describe('openSecretStore backend marker', () => {
@@ -12,6 +12,7 @@ describe('openSecretStore backend marker', () => {
   });
 
   afterEach(async () => {
+    vi.unstubAllEnvs();
     await rm(home, { recursive: true, force: true });
   });
 
@@ -20,5 +21,16 @@ describe('openSecretStore backend marker', () => {
     await expect(openSecretStore(home, { forceFile: true })).rejects.toThrow(
       /invalid backend marker/,
     );
+  });
+
+  it('fails closed when a previously selected keyring is unavailable', async () => {
+    vi.stubEnv('VITEST', 'false');
+    const marker = join(home, 'secrets.backend');
+    await writeFile(marker, 'keyring\n');
+
+    await expect(
+      openSecretStore(home, { keyringProbe: () => 'User interaction is not allowed.' }),
+    ).rejects.toThrow(/refusing to switch secret backends implicitly/);
+    expect(await readFile(marker, 'utf8')).toBe('keyring\n');
   });
 });

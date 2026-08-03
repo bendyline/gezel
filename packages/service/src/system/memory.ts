@@ -2,7 +2,10 @@ import { execFile } from 'node:child_process';
 import { freemem, platform as osPlatform, totalmem } from 'node:os';
 import { promisify } from 'node:util';
 import type { MachineMemoryUsage } from '@bendyline/gezel';
-import type { DeviceHealthStatusSnapshot } from '@bendyline/gezel/native';
+import {
+  type DeviceHealthStatusSnapshot,
+  windowsDetachedSpawnOptions,
+} from '@bendyline/gezel/native';
 import { detectLlamaGpuVram } from '../providers/llama-cpp/devices.js';
 import {
   autoDetectBudgetBytes,
@@ -369,7 +372,11 @@ async function probeNvidiaVram(): Promise<number | null> {
     const { stdout } = await exec(
       'nvidia-smi',
       ['--query-gpu=memory.total', '--format=csv,noheader,nounits'],
-      { timeout: 2000 },
+      // DETACHED_PROCESS: nvidia-smi is console-subsystem, and the machine
+      // service's restricted SID cannot allocate a console. Without this the
+      // probe throws, VRAM reads as unknown, and an NVIDIA box silently plans
+      // capacity as `system-ram-fallback`.
+      { timeout: 2000, ...windowsDetachedSpawnOptions() },
     );
     // `nvidia-smi` reports MiB per GPU, one per line. Sum across GPUs —
     // Ollama can split a model across GPUs when wired up correctly.

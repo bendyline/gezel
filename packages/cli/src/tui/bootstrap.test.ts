@@ -17,6 +17,7 @@ function chatModel(input: {
   bytes: number;
   mlx?: boolean;
   licenseClass?: string;
+  supportsTools?: boolean;
 }): CatalogItemSummary {
   const source = {
     huggingfaceRepo: 'test/model',
@@ -42,7 +43,7 @@ function chatModel(input: {
       releasedAt: '2026-01-01',
       parameterSize: '1B',
       approxSizeBytes: input.bytes,
-      supportsTools: true,
+      supportsTools: input.supportsTools ?? true,
       llamaCpp: source,
       ...(input.mlx
         ? {
@@ -100,6 +101,20 @@ describe('rankChatModels', () => {
     );
 
     expect(ranked.map((model) => model.id)).toEqual(['recommended', 'alternative']);
+  });
+
+  it('never leads with a tool-less model, though it stays offerable', () => {
+    const ranked = rankChatModels(
+      [
+        chatModel({ id: 'tool-less', score: 999, bytes: 2 * GB, supportsTools: false }),
+        chatModel({ id: 'recommended', score: 90, bytes: 8 * GB }),
+      ],
+      DEVICE,
+      'llama-cpp',
+    );
+
+    expect(ranked[0]?.id).toBe('recommended');
+    expect(ranked.map((model) => model.id)).toContain('tool-less');
   });
 
   it('only offers MLX choices that actually ship an enabled MLX source', () => {

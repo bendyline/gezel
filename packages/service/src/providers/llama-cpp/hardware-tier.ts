@@ -5,9 +5,10 @@ import { detectMemoryProfile } from '../../system/memory.js';
 /**
  * Pick the on-device model to install on first run.
  *
- * The choice is data-driven: every catalog chat-model that carries a
- * hand-curated `recoScore` AND a fully-open license is a candidate, and the
- * best one for THIS machine is chosen by `pickRecommendedModel` (core) —
+ * The choice is data-driven: every catalog chat-model that passes core's
+ * `isRecommendedModel` gate (curated `recoScore`, fully-open license, tool
+ * support) is a candidate, and the best one for THIS machine is chosen by
+ * `pickRecommendedModel` (core) —
  * highest score, MoE-vs-VRAM alignment, then the largest that comfortably
  * fits. See `packages/core/src/recommendation.ts` for the ranking rules; this
  * module just supplies the two live inputs:
@@ -61,6 +62,7 @@ export function toRecoCandidate(m: ChatModelManifest, platform: string): RecoMod
     id: m.id,
     ...(m.recoScore != null ? { recoScore: m.recoScore } : {}),
     ...(m.licenseClass != null ? { licenseClass: m.licenseClass } : {}),
+    supportsTools: m.supportsTools,
     tags: m.tags,
     residentBytes,
   };

@@ -227,7 +227,9 @@ export class ModelFitnessManager {
   }
 
   private async isStale(record: ModelFitnessRecord): Promise<boolean> {
-    if (record.provider !== 'llama-cpp' && record.provider !== 'ds4') return false;
+    if (record.provider !== 'llama-cpp' && record.provider !== 'ds4' && record.provider !== 'mlx') {
+      return false;
+    }
     const installed = await this.opts
       .resolveInstalled(record.provider, record.modelId)
       .catch(() => null);

@@ -1,5 +1,6 @@
 import { Dialog } from '../primitives/index.js';
 import { NeedsInputPanel } from './NeedsInputPanel.js';
+import { openQuestionInChat } from './question-nav.js';
 
 /**
  * Modal that resolves a single project's pending questions — opened from the
@@ -26,7 +27,14 @@ export function ProjectQuestionsDialog({
           aria-describedby={undefined}
         >
           <Dialog.Title className="sr-only">Needs your input</Dialog.Title>
-          <NeedsInputPanel projectId={projectId} onEmpty={onClose} onOpenInChat={onClose} />
+          <NeedsInputPanel
+            projectId={projectId}
+            onEmpty={onClose}
+            onOpenInChat={(question) => {
+              openQuestionInChat(question);
+              onClose();
+            }}
+          />
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>

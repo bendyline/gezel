@@ -6,7 +6,10 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../../api.js';
 import { GEZEL_LIGHT_SURFACE, gezelChatTheme } from '../../components/chat-theme.js';
 import { useEffectiveTheme } from '../../theme.js';
-import { createHandboekMediaProvider } from '../handboek/HandboekMediaProvider.js';
+import {
+  createHandboekMediaProvider,
+  inlineBundledAssets,
+} from '../handboek/HandboekMediaProvider.js';
 
 const ARTICLE_ID = 'welcome';
 
@@ -71,25 +74,29 @@ export function IntroHandboekArticle() {
   // durations — durations turn LinearDocView into a timed reader that
   // dims all but the active block, wrong for a static embed. The player
   // doc keeps them so the synthetic clock paces the video.
+  const markdown = useMemo(
+    () => (article ? inlineBundledAssets(article.markdown) : null),
+    [article],
+  );
   const doc = useMemo(() => {
-    if (!article) return null;
+    if (!markdown) return null;
     try {
-      return markdownToDoc(parseMarkdown(article.markdown));
+      return markdownToDoc(parseMarkdown(markdown));
     } catch {
       return null;
     }
-  }, [article]);
+  }, [markdown]);
   const playerDoc = useMemo(() => {
-    if (!article) return null;
+    if (!article || !markdown) return null;
     try {
-      return markdownToDoc(parseMarkdown(article.markdown), {
+      return markdownToDoc(parseMarkdown(markdown), {
         articleId: article.id,
         defaultDuration: article.defaultDuration ?? 6,
       });
     } catch {
       return null;
     }
-  }, [article]);
+  }, [article, markdown]);
 
   // Intra-article links (`the-crew.md`, `projects-and-threads.md`) can't
   // resolve inside the Home card — send them to the Handboek, landing on

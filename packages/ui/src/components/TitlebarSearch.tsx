@@ -3,8 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { Popover } from '../primitives/index.js';
 import { SearchPalette } from './SearchPalette.js';
-import { queueOpenFile } from './pending-open-file.js';
-import { queueOpenSession } from './pending-open-session.js';
+import { runNavActions } from './nav-actions.js';
 import { type SearchGroup, flattenGroups, groupResults, resultToActions } from './search-nav.js';
 
 type SearchMode = 'search' | 'quick-open';
@@ -103,15 +102,7 @@ export function TitlebarSearch() {
 
   const pick = useCallback(
     (result: UnifiedSearchResult) => {
-      for (const action of resultToActions(result)) {
-        if (action.kind === 'open-file') {
-          queueOpenFile(action.intent);
-        } else if (action.kind === 'open-session') {
-          queueOpenSession(action.intent);
-        } else {
-          window.dispatchEvent(new CustomEvent(action.type, { detail: action.detail }));
-        }
-      }
+      runNavActions(resultToActions(result));
       reset();
     },
     [reset],

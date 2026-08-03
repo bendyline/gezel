@@ -21,7 +21,7 @@ export function v1IdentityRoutes(ctx: ServiceContext): Hono {
 
   app.get('/', async (c) => {
     const sig = ctx.tlsCertSha256
-      ? await signCertFingerprint(ctx.secrets, ctx.tlsCertSha256)
+      ? await signCertFingerprint(ctx.secrets, ctx.home, ctx.tlsCertSha256)
       : null;
     return c.json({
       deviceId: ctx.deviceIdentity.deviceId,

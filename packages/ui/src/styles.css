@@ -711,9 +711,35 @@ html.embedded-chat #root {
   padding-left: 83px;
 }
 
+/* The native overlay's geometry is not a constant, so nothing here may
+   hardcode it. Chromium reports a 137px control cluster at 100% and 150%
+   display scale but 138px at 125%, and the band height is whatever
+   `titleBarOverlay.height` resolved to — so measured values drift by a
+   pixel between machines. The Window Controls Overlay env vars report the
+   real rect and update live on resize, maximize and DPI change; derive
+   both the layout reservation and the cordon rule from them.
+
+   `--wco-right` is the inset actually occupied by the buttons, computed
+   from the *far* edge of the draggable area so it stays correct on the
+   Linux window managers that mount controls on the left (there the inset
+   is 0 and the right-hand rule disappears on its own). The `max()` guard
+   keeps an absent or zero-valued env from reserving the whole bar. */
 :root[data-platform="win32"] .app-header,
 :root[data-platform="linux"] .app-header {
-  padding-right: 140px;
+  --wco-right: max(
+    0px,
+    calc(100% - env(titlebar-area-x, 0px) - env(titlebar-area-width, calc(100% - 137px)))
+  );
+  --wco-left: max(0px, env(titlebar-area-x, 0px));
+  --wco-height: max(39px, env(titlebar-area-height, 39px));
+  padding-right: calc(var(--wco-right) + 3px);
+  padding-left: calc(var(--wco-left) + 1rem);
+  /* Pin the band to the painted patch. The overlay only paints its own
+     height, so a taller header shows a strip of wood-grain *below* the
+     buttons — reading as a mis-sized titlebar rather than as the seam it
+     is. Locking the height means a future oversized pill overflows
+     visibly instead of silently reintroducing that seam. */
+  height: var(--wco-height);
 }
 
 /* Windows' native titlebar controls sit a touch lower optically than the
@@ -728,28 +754,44 @@ html.embedded-chat #root {
 }
 
 /* The native window-control overlay (min/max/close) paints a solid sage
-   patch over the right ~140px that the wood-grain can't reach — its API
-   only takes a flat color, not an image. Rather than fight that, cordon
-   the textured strip off from the button cluster with a faint cream rule
-   at the inner edge of the native controls (3px inside the 140px layout
-   reservation, matching where Electron starts painting the solid overlay).
-   The `::after` is a positioned, non-interactive 1px line — it never overlaps
-   a pill because `.app-header-right` carries a matching right gutter
-   below. Right-side only: macOS keeps its controls top-left. */
+   patch the wood-grain can't reach — its API only takes a flat color, not
+   an image. Rather than fight that, cordon the textured strip off from the
+   button cluster with a faint cream rule sitting exactly on the boundary
+   reported by `--wco-right` / `--wco-left` above, so the line lands on the
+   real edge at any display scale instead of a pixel beside it. The
+   pseudo-elements are positioned and non-interactive; they never overlap a
+   pill because `.app-header-right` carries a matching gutter below.
+
+   `width: min(1px, <inset>)` is what makes this safe on both sides at
+   once: the rule collapses to nothing when its side has no controls, so
+   the right-hand rule vanishes under a left-mounted Linux cluster and the
+   left-hand rule stays invisible everywhere else. macOS is excluded
+   entirely — its traffic lights sit on the texture with no painted patch
+   to cordon off. */
 :root[data-platform="win32"] .app-header::after,
-:root[data-platform="linux"] .app-header::after {
+:root[data-platform="linux"] .app-header::after,
+:root[data-platform="win32"] .app-header::before,
+:root[data-platform="linux"] .app-header::before {
   content: "";
   position: absolute;
   /* Span the full height of the title bar so the separator reads as a
-     clean edge running the entire band, right-aligned to the textured
-     region. Electron's painted overlay starts 137px from the right, while
-     the full 140px reservation remains available for layout clearance. */
+     clean edge running the entire band. */
   top: 0;
   bottom: 0;
-  right: 137px;
-  width: 1px;
   background: rgba(243, 237, 224, 0.3);
   pointer-events: none;
+}
+
+:root[data-platform="win32"] .app-header::after,
+:root[data-platform="linux"] .app-header::after {
+  right: var(--wco-right);
+  width: min(1px, var(--wco-right));
+}
+
+:root[data-platform="win32"] .app-header::before,
+:root[data-platform="linux"] .app-header::before {
+  left: var(--wco-left);
+  width: min(1px, var(--wco-left));
 }
 
 /* Keep the rightmost pill off the cordon rule so the line reads as a
@@ -9176,7 +9218,9 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
   display: flex;
   flex-direction: column;
   gap: 1rem;
-  padding: 1rem;
+  /* Bottom gets +2px so the pane's lower edge lines up with the chat
+     window's effective bottom padding when the two sit side by side. */
+  padding: 1rem 1rem calc(1rem + 2px);
   height: 100%;
   min-width: 0;
   overflow: hidden;
@@ -12205,8 +12249,11 @@ button.bench-step-foot:disabled {
   white-space: nowrap;
   vertical-align: middle;
   font-size: 0.75rem;
-  padding: 0.2rem 0.55rem;
-  border-radius: 10px;
+  padding: 0.2rem 0.7rem;
+  /* True capsule — the sanctioned exception to the small-radius rule for
+     non-interactive status badges (see docs/ux.md "Corners"). Interactive
+     chips like .license-button stay on the small radius. */
+  border-radius: 999px;
   border: 1px solid var(--border);
   background: rgba(255, 255, 255, 0.03);
 }
@@ -16274,6 +16321,129 @@ a.license-button:hover {
   margin: 0;
 }
 
+/* ── Transformation dialog (TransformDialog) ─────────────────────────
+   The unified AI rewrite/insert surface. Wider than the stock dialog so
+   the before/after panes and the monaco diff have room; everything
+   inside keeps the --text-* scale and radius tokens. */
+.gz-dialog.gz-transform-dialog {
+  min-width: 44rem;
+  max-width: min(64rem, 92vw);
+}
+.gz-transform-top {
+  display: flex;
+  align-items: stretch;
+  gap: 0.9rem;
+}
+.gz-transform-instruction {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.gz-transform-klerk-row {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  text-align: center;
+}
+.gz-transform-thinking {
+  font-size: var(--text-xs);
+  color: var(--text-muted, var(--muted));
+  max-height: 11rem;
+  overflow-y: auto;
+  border-left: 2px solid var(--border);
+  padding: 0.15rem 0 0.15rem 0.6rem;
+}
+/* The feed renders through Squisq's LinearDocView; rein its reading
+   register into the muted metacommentary scale so streamed thinking
+   reads as an aside, not a second document. */
+.gz-transform-thinking :is(p, li, h1, h2, h3, h4, strong) {
+  font-size: var(--text-xs) !important;
+  line-height: 1.5 !important;
+}
+.gz-transform-thinking-raw {
+  margin: 0;
+  font-family: var(--font-ui);
+  white-space: pre-wrap;
+}
+.gz-transform-error {
+  color: var(--danger, #d06a6a);
+  font-size: var(--text-sm);
+  margin: 0;
+}
+.gz-transform-view {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-height: 0;
+}
+.gz-transform-view-toggle {
+  align-self: flex-start;
+}
+.gz-transform-panes {
+  display: flex;
+  gap: 0.75rem;
+  min-height: 0;
+}
+.gz-transform-before,
+.gz-transform-after {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.gz-transform-pane-label {
+  font-size: var(--text-xs);
+}
+/* Both panes render Squisq content (read-only LinearDocView on the
+   left, an embedded WYSIWYG editor on the right) inside matching
+   bordered wells so the comparison reads symmetric. */
+.gz-transform-before-text {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 6px);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  overflow-y: auto;
+  max-height: min(45vh, 320px);
+  background: var(--panel);
+}
+.gz-transform-before-raw {
+  margin: 0;
+  padding: 0.5rem 0.6rem;
+  font-family: var(--font-ui);
+  white-space: pre-wrap;
+}
+.gz-transform-after-editor {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 6px);
+  min-height: 12rem;
+  max-height: min(45vh, 320px);
+  overflow-y: auto;
+  background: var(--surface, var(--panel));
+}
+.gz-transform-after-editor .gz-transform-after-wysiwyg {
+  min-height: 12rem;
+}
+.gz-transform-empty {
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-md, 6px);
+  padding: 0.75rem;
+  margin: 0;
+}
+.gz-transform-diff-host {
+  height: min(45vh, 320px);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 6px);
+  overflow: hidden;
+}
+.gz-transform-diff-error {
+  color: var(--danger, #d06a6a);
+  font-size: var(--text-sm);
+  margin: 0;
+}
+
 /* `.gz-dialog label textarea` already supplies width, padding, border, and
    resize; only the height and reading register are missing. Left in
    --font-ui rather than monospace: the body is prose with a few fenced
@@ -17128,12 +17298,22 @@ a.license-button:hover {
   background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
 
+/* Worn by both a real external <a> (View on npm) and the in-app <button>
+   navigators (Open task / Open document), so the button-neutralizing
+   declarations sit here rather than in a second class. Explicit
+   `font-family` over `font: inherit` — the shorthand would drag in a serif
+   from any display-font ancestor (see docs/ux.md, "Links stay sans"). */
 .pending-question-context-link {
   margin-left: auto;
   font-size: 0.8rem;
+  font-family: var(--font-ui);
   color: var(--accent);
   text-decoration: none;
+  background: transparent;
+  border: none;
   border-bottom: 1px dashed currentColor;
+  padding: 0;
+  cursor: pointer;
 }
 
 .pending-question-document-preview {
@@ -17473,7 +17653,12 @@ a.license-button:hover {
   justify-content: center;
   width: 34px;
   height: 34px;
-  margin: 4px 2px;
+  /* Horizontal only. `align-self: center` already handles the vertical
+     placement, so a vertical margin here bought nothing and instead grew
+     the whole titlebar past the native overlay height — the tallest child
+     sets the band, and the extra 8px surfaced as wood-grain peeking out
+     below the window-control patch. */
+  margin: 0 2px;
   padding: 0;
   background: transparent;
   border: 1px solid transparent;

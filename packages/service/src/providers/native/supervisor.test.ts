@@ -136,7 +136,12 @@ describe('NativeEngineSupervisor', () => {
     );
   });
 
-  it('launches native engines without a Windows console window', async () => {
+  // Regression: the engine spawn used to pass `windowsHide: true`, which is
+  // CREATE_NO_WINDOW — a console is still allocated, and that allocation
+  // fails under the restricted Session 0 service SID, so every launch died
+  // as `spawn EPERM` in packaged machine-service installs. DETACHED_PROCESS
+  // (Node's `detached`) is the flag that allocates no console at all.
+  it('launches native engines detached from any Windows console', async () => {
     let spawnOptions: Parameters<typeof import('node:child_process').spawn>[2] | undefined;
     const child = makeFakeChild(4242);
     const fakeSpawn = ((...args: Parameters<typeof import('node:child_process').spawn>) => {
@@ -158,10 +163,12 @@ describe('NativeEngineSupervisor', () => {
     });
 
     await sup.ensureRunning();
-    expect(spawnOptions).toMatchObject({
-      stdio: ['ignore', 'pipe', 'pipe'],
-      windowsHide: true,
-    });
+    expect(spawnOptions).toMatchObject({ stdio: ['ignore', 'pipe', 'pipe'] });
+    // CREATE_NO_WINDOW must never come back — it is what broke the machine
+    // service. `detached` is win32-only: on POSIX it means setsid(), and the
+    // supervisor's group/signal handling does not want that.
+    expect(spawnOptions?.windowsHide).toBeUndefined();
+    expect(spawnOptions?.detached).toBe(process.platform === 'win32' ? true : undefined);
     await sup.stop();
   });
 

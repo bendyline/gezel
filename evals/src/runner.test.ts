@@ -27,6 +27,7 @@ import {
   repeatedPoisonedSessionFailure,
   retryLoopSniffKey,
   shouldDeferRetryLoopForInflight,
+  shouldDeferRetryLoopForRecentEscalation,
   shouldDeferSoftWatchdog,
   slugifyForDirName,
   sniffArtifactHasScored,
@@ -1427,6 +1428,51 @@ describe('sniffArtifactHasScored', () => {
   it('does not carry scored state across unrelated sniff keys', () => {
     expect(
       sniffArtifactHasScored({ key: 'schema-migration', score: 0 }, new Set(['bookstore'])),
+    ).toBe(false);
+  });
+});
+
+describe('shouldDeferRetryLoopForRecentEscalation', () => {
+  // Intervention-based grace, not clock-based: each delivered ladder rung
+  // (stage) buys exactly one plateau reset, so a model that ignores every
+  // rung still dies after at most three extra windows.
+  it('grants a window for a fresh, ungranted stage', () => {
+    expect(
+      shouldDeferRetryLoopForRecentEscalation({
+        lastNudge: { at: 1_000_000, stage: 1 },
+        grantedStages: new Set(),
+        now: 1_000_000 + 60_000,
+      }),
+    ).toBe(true);
+  });
+
+  it('never grants the same stage twice', () => {
+    expect(
+      shouldDeferRetryLoopForRecentEscalation({
+        lastNudge: { at: 1_000_000, stage: 1 },
+        grantedStages: new Set([1]),
+        now: 1_000_000 + 60_000,
+      }),
+    ).toBe(false);
+  });
+
+  it('ignores stale deliveries beyond the grace window', () => {
+    expect(
+      shouldDeferRetryLoopForRecentEscalation({
+        lastNudge: { at: 1_000_000, stage: 2 },
+        grantedStages: new Set(),
+        now: 1_000_000 + 5 * 60_000,
+      }),
+    ).toBe(false);
+  });
+
+  it('does nothing when no nudge was ever delivered', () => {
+    expect(
+      shouldDeferRetryLoopForRecentEscalation({
+        lastNudge: null,
+        grantedStages: new Set(),
+        now: 1_000_000,
+      }),
     ).toBe(false);
   });
 });

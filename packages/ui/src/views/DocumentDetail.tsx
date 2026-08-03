@@ -2,7 +2,6 @@ import { EditorShell } from '@bendyline/squisq-editor-react';
 import '@bendyline/squisq-editor-react/styles';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
-import { AiToolbarButtons } from '../components/AiToolbarButtons.js';
 import { AutosaveStatus } from '../components/AutosaveStatus.js';
 import { ExportToolbarControls } from '../components/DocumentExport/index.js';
 import { PromoteToTabButton } from '../components/PromoteToTabButton.js';
@@ -12,6 +11,7 @@ import {
   deriveContainerScope,
 } from '../components/SquisqIntegration/index.js';
 import { normalizeMarkdownBaseline } from '../components/markdown-baseline.js';
+import { TransformToolbarButton } from '../components/transform/TransformToolbarButton.js';
 import { useSerializedAutosave } from '../hooks/useSerializedAutosave.js';
 import { useEffectiveTheme } from '../theme.js';
 
@@ -134,7 +134,7 @@ export function DocumentDetail({ path, standalone = false }: DocumentDetailProps
           toolbarSlotAfterActions={
             markdown || !standalone ? (
               <>
-                {markdown && <AiToolbarButtons context="generic" />}
+                {markdown && <TransformToolbarButton context="generic" />}
                 {!standalone && <PromoteToTabButton target={{ kind: 'document', path }} />}
               </>
             ) : undefined

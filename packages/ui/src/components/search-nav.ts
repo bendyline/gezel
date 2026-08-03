@@ -1,7 +1,7 @@
 import type { UnifiedSearchResult, UnifiedSearchResultKind } from '@bendyline/gezel';
+import { type NavAction, openTabAction as openTab } from './nav-actions.js';
 import type { OpenFileIntent } from './pending-open-file.js';
 import type { OpenSessionIntent } from './pending-open-session.js';
-import type { RecentTabInput } from './recent-tabs.js';
 
 /** Fixed display order + labels for the result groups in the palette. */
 const GROUP_ORDER: Array<{ kind: UnifiedSearchResultKind; label: string }> = [
@@ -37,18 +37,9 @@ export function flattenGroups(groups: SearchGroup[]): UnifiedSearchResult[] {
 /**
  * Pure mapping from a unified-search result to the navigation actions the
  * titlebar search should perform when the user picks it. Kept side-effect-free
- * so it can be unit-tested without rendering: `TitlebarSearch` interprets each
+ * so it can be unit-tested without rendering: `runNavActions` interprets each
  * action (queue a file intent / dispatch a window CustomEvent).
  */
-export type NavAction =
-  | { kind: 'event'; type: string; detail: unknown }
-  | { kind: 'open-file'; intent: OpenFileIntent }
-  | { kind: 'open-session'; intent: OpenSessionIntent };
-
-function openTab(detail: RecentTabInput): NavAction {
-  return { kind: 'event', type: 'gezel:open-tab', detail };
-}
-
 export function resultToActions(r: UnifiedSearchResult): NavAction[] {
   switch (r.kind) {
     case 'project':

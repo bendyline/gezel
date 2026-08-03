@@ -24,6 +24,7 @@ import { TabContent } from './components/TabContent.js';
 import { TabErrorBoundary } from './components/TabErrorBoundary.js';
 import { TitlebarSearch } from './components/TitlebarSearch.js';
 import { NIGHT_SHIFT_MOON_PATH } from './components/night-shift-glyph.js';
+import { openQuestionInChat } from './components/question-nav.js';
 import { type RecentTabInput, tabKey, toRecentTab } from './components/recent-tabs.js';
 import { EmbeddedChat } from './embedded/EmbeddedChat.js';
 import { UI_FALLBACK_PROVIDER } from './provider-default.js';
@@ -688,7 +689,12 @@ function FullApp() {
             >
               ×
             </button>
-            <NeedsInputPanel onOpenInChat={() => setQuestionsOpen(false)} />
+            <NeedsInputPanel
+              onOpenInChat={(question) => {
+                openQuestionInChat(question);
+                setQuestionsOpen(false);
+              }}
+            />
           </dialog>
         </>
       )}

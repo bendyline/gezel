@@ -59,7 +59,9 @@ vi.mock('../components/SquisqIntegration/index.js', () => ({
 }));
 
 // ProjectsView's many heavy children — mock them out to focused stand-ins.
-vi.mock('../components/AiToolbarButtons.js', () => ({ AiToolbarButtons: () => null }));
+vi.mock('../components/transform/TransformToolbarButton.js', () => ({
+  TransformToolbarButton: () => null,
+}));
 vi.mock('../components/CatalogBrowser.js', () => ({
   CatalogBrowser: () => <div data-testid="catalog-browser" />,
 }));

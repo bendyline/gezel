@@ -92,6 +92,115 @@ describe('toolCapForTierAndRole', () => {
 });
 
 /**
+ * What survives a trim must be a decision, not a side effect of how the
+ * toolset groups happened to be ordered. Before this, the slots left over
+ * after a role's curated priority list were filled by `Set` iteration
+ * order: `read_file` / `list_dir` reached a small-tier Meester purely as
+ * residue, and reordering a group would have taken them away with nothing
+ * in the code saying so.
+ */
+describe('tool-cap trim is deliberate, not incidental', () => {
+  const surface = async (over: {
+    role: string;
+    toolsetsGroupOverride?: readonly string[];
+  }): Promise<Set<string>> => {
+    const res = await resolveSessionToolSurface({
+      surface: 'bridge',
+      session: {
+        id: 's1',
+        gezelId: 'g1',
+        projectId: 'p1',
+        providerName: 'llama-cpp',
+        title: '',
+        messages: [],
+        createdAt: '2026-08-01T00:00:00.000Z',
+        lastActivityAt: '2026-08-01T00:00:00.000Z',
+      } as unknown as ChatSession,
+      mode: 'always',
+      provider: 'llama-cpp',
+      modelId: 'gemma4:e4b',
+      toolsetsGroupOverride: [],
+      githubLinked: false,
+      isGitRepo: false,
+      tier: 'small',
+      latestUserMessage: undefined,
+      ...over,
+    });
+    expect(res.allowlist).not.toBeNull();
+    return res.allowlist!;
+  };
+
+  it('the small-tier Meester keeps the tools its own schemas point at', async () => {
+    const allow = await surface({ role: 'Meester' });
+    // `craftbook_read`'s argument description reads "Craftbook id from
+    // list_craftbooks" — the cap used to drop the tool it names while
+    // keeping the pointer, on the one role built around craftbooks.
+    expect(allow.has('craftbook_read')).toBe(true);
+    expect(allow.has('craftbook_write')).toBe(true);
+    expect(allow.has('list_craftbooks')).toBe(true);
+    expect(allow.has('suggest_craftbook')).toBe(true);
+    expect(allow.has('invoke_craftbook')).toBe(true);
+  });
+
+  it('reordering the toolset groups does not change what survives', async () => {
+    const groups = [
+      'memory',
+      'workspace-fs-read',
+      'tasks',
+      'craftbooks',
+      'team-management',
+      'artifacts',
+      'documents',
+      'code-intel',
+    ] as const;
+    const forward = await surface({ role: 'Meester', toolsetsGroupOverride: groups });
+    const reversed = await surface({
+      role: 'Meester',
+      toolsetsGroupOverride: [...groups].reverse(),
+    });
+    expect([...forward].sort()).toEqual([...reversed].sort());
+  });
+
+  it('a custom role with no curated list still gets a coherent generalist kit', async () => {
+    // Tiny tier, cap 15, empty priority list — every slot comes from the
+    // generic fallback ladder. Previously this was whichever group the
+    // resolver visited first, so the 15 tools a custom gezel kept were
+    // effectively arbitrary.
+    const res = await resolveSessionToolSurface({
+      surface: 'bridge',
+      session: {
+        id: 's1',
+        gezelId: 'g1',
+        projectId: 'p1',
+        providerName: 'llama-cpp',
+        title: '',
+        messages: [],
+        createdAt: '2026-08-01T00:00:00.000Z',
+        lastActivityAt: '2026-08-01T00:00:00.000Z',
+      } as unknown as ChatSession,
+      role: 'Data Wizard',
+      mode: 'always',
+      provider: 'llama-cpp',
+      modelId: 'llama3.2:3b',
+      toolsetsGroupOverride: [],
+      githubLinked: false,
+      isGitRepo: false,
+      tier: 'tiny',
+      latestUserMessage: undefined,
+    });
+    const allow = res.allowlist!;
+    // Read before write, then somewhere to put the result — plus the
+    // load-bearing floor, which the cap never counts.
+    expect(allow.has('read_file')).toBe(true);
+    expect(allow.has('list_dir')).toBe(true);
+    expect(allow.has('write_artifact')).toBe(true);
+    expect(allow.has('search_memory')).toBe(true);
+    expect(allow.has('write_file')).toBe(true);
+    expect(allow.has('ask_user_question')).toBe(true);
+  });
+});
+
+/**
  * The two safeguards that keep a step-scoped session operable regardless of
  * role kit or cap: (1) the step-completion grant, and (2) the load-bearing
  * floor across every count-capped tier.

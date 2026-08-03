@@ -99,9 +99,13 @@ export const LicenseMetaShape = {
  * screen, and the first-run picker ranks recommended models by this score
  * (higher = preferred) when choosing what to install. Absent → not
  * recommended. Deliberately spread wherever {@link LicenseMetaShape} is, so
- * every model kind (chat / image / video / audio) inherits it. The picker
- * and the badge BOTH re-check `licenseClass === 'open'`, so a stray score on
- * a restricted model is ignored rather than trusted.
+ * every model kind (chat / image / video / audio) inherits it.
+ *
+ * A score alone is never enough: every surface routes through
+ * `isRecommendedModel` (`packages/core/src/recommendation.ts`), which also
+ * requires `licenseClass === 'open'` and — for chat models, which declare it —
+ * `supportsTools !== false`. So a stray score on a restricted or tool-less
+ * model is ignored rather than trusted.
  */
 export const RecoMetaShape = {
   recoScore: z.number().int().positive().optional(),

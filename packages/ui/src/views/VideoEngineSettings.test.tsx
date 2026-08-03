@@ -13,8 +13,30 @@ vi.mock('../components/VideoGeneratorGezelHint.js', () => ({
   VideoGeneratorGezelHint: () => <div data-testid="gezel-hint">hint</div>,
 }));
 
-const { VideoEngineSettings } = await import('./VideoEngineSettings.js');
+const { VideoEngineSettings, cpuFallbackCause } = await import('./VideoEngineSettings.js');
 const { api } = await import('../api.js');
+
+/** A Windows/Radeon profile — the shape that exposed the misleading copy. */
+const RADEON_PROFILE = {
+  platform: 'win32',
+  totalRamBytes: 64_000_000_000,
+  gpuVramBytes: 34_300_000_000,
+  source: 'gpu-vulkan',
+  usableBytes: 32_500_000_000,
+  gpuVendor: 'amd',
+} as never;
+
+function cpuEngine() {
+  vi.mocked(api.getVideoEngineStatus).mockResolvedValue({
+    engine: {
+      status: 'ok',
+      kind: 'local',
+      baseUrl: 'http://127.0.0.1:9101',
+      accelerator: 'cpu',
+    },
+    modelCount: 1,
+  } as never);
+}
 
 describe('VideoEngineSettings', () => {
   beforeEach(() => {
@@ -58,6 +80,67 @@ describe('VideoEngineSettings', () => {
         videoGenerationConfirmation: 'always-allow',
       });
       expect(alwaysAllow).toHaveAttribute('aria-checked', 'true');
+    });
+  });
+
+  describe('CPU fallback notice', () => {
+    it('blames PyTorch, not detection, when a non-NVIDIA GPU is present', async () => {
+      cpuEngine();
+      vi.mocked(api.getMemoryProfile).mockResolvedValue(RADEON_PROFILE);
+
+      render(<VideoEngineSettings />);
+
+      // The bug this replaced: gezel detects the Radeon fine for chat, so
+      // "No GPU detected" here reads as a gezel fault instead of an
+      // upstream one.
+      const notice = await screen.findByText(/Your AMD GPU can't be used for video generation/);
+      expect(notice).toHaveTextContent('PyTorch');
+      expect(notice).toHaveTextContent('Chat still runs on your GPU');
+      expect(screen.queryByText(/No GPU detected/)).not.toBeInTheDocument();
+    });
+
+    it('still says "no GPU detected" when the machine really has none', async () => {
+      cpuEngine();
+      vi.mocked(api.getMemoryProfile).mockResolvedValue({
+        platform: 'linux',
+        totalRamBytes: 16_000_000_000,
+        gpuVramBytes: null,
+        source: 'system-ram-fallback',
+        usableBytes: 8_000_000_000,
+      } as never);
+
+      render(<VideoEngineSettings />);
+
+      expect(await screen.findByText(/No GPU detected/)).toBeInTheDocument();
+    });
+
+    it('says nothing about the accelerator when the GPU is usable', async () => {
+      vi.mocked(api.getMemoryProfile).mockResolvedValue(RADEON_PROFILE);
+
+      render(<VideoEngineSettings />);
+
+      await screen.findByRole('radiogroup', { name: 'Video generation confirmation' });
+      expect(screen.queryByText(/can't be used for video generation/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/No GPU detected/)).not.toBeInTheDocument();
+    });
+  });
+
+  describe('cpuFallbackCause', () => {
+    it('falls back to the vague copy when the memory probe failed', () => {
+      expect(cpuFallbackCause(null)).toEqual({ kind: 'no-gpu' });
+    });
+
+    it('points an NVIDIA owner at their driver rather than at PyTorch', () => {
+      expect(cpuFallbackCause({ source: 'gpu-nvidia', gpuVendor: 'nvidia' } as never)).toEqual({
+        kind: 'cuda-unavailable',
+      });
+    });
+
+    it('omits the vendor when the device name was unrecognized', () => {
+      expect(cpuFallbackCause({ source: 'gpu-vulkan' } as never)).toEqual({
+        kind: 'unsupported-gpu',
+        vendorLabel: null,
+      });
     });
   });
 });

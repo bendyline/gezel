@@ -14,7 +14,6 @@ import { EditorShell } from '@bendyline/squisq-editor-react';
 import '@bendyline/squisq-editor-react/styles';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
-import { AiToolbarButtons } from '../components/AiToolbarButtons.js';
 import { GezelIcon } from '../components/GezelIcon.js';
 import { PromoteToTabButton } from '../components/PromoteToTabButton.js';
 import { PromptDialog } from '../components/PromptDialog.js';
@@ -22,6 +21,7 @@ import { TaskChatPane } from '../components/TaskChatPane.js';
 import { TaskStatusKeys } from '../components/TaskStatusKeys.js';
 import { TaskStepPanel } from '../components/TaskStepPanel.js';
 import { TaskStepTracker } from '../components/TaskStepTracker.js';
+import { TransformToolbarButton } from '../components/transform/TransformToolbarButton.js';
 import { Select } from '../primitives/index.js';
 import { useEffectiveTheme } from '../theme.js';
 
@@ -662,7 +662,7 @@ export function TaskDetail({
                 maxHeight="480px"
                 fullWidth
                 toolbarSlotAfterActions={
-                  <AiToolbarButtons
+                  <TransformToolbarButton
                     context="task-description"
                     subject={task.title}
                     parentContext={`Project: ${projectName}`}

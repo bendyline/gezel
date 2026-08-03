@@ -48,6 +48,14 @@ A model is **admitted** when all five pass. Every probe — success, failed
 checks, or machinery error (spawn throw, timeout) — produces a **persisted
 record**; a probe never silently vanishes.
 
+The probe runs against the engines gezel supervises itself — **llama.cpp, ds4,
+and MLX** — so an Apple Silicon install gets the same check its Windows/Linux
+counterpart does. Externally-managed engines (Ollama) and cloud providers are
+out of scope: we neither launch them nor own their context/reasoning settings,
+so the checks would measure someone else's configuration. The launch context the
+`contextFit` check reasons about is per-engine (`config.mlxNumCtx` for MLX,
+`config.llamaCppNumCtx` plus `GEZEL_LLAMA_NUM_CTX` for the GGUF engines).
+
 Records live in `config.modelFitness`, keyed `"<provider>:<modelId>"`, read and
 written through the Store by
 [ModelFitnessManager](../packages/service/src/fitness/manager.ts). The config

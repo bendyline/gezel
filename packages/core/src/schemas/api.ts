@@ -2393,6 +2393,51 @@ export const RewriteTextResponseSchema = z.object({
 });
 export type RewriteTextResponse = z.infer<typeof RewriteTextResponseSchema>;
 
+/**
+ * The streaming successor to `POST /api/ai/rewrite`. `rewrite` transforms
+ * an existing fragment (the user's selection); `insert` generates new
+ * content for a marked position inside a document. Whole-document rewrite
+ * is deliberately not a mode — callers select all instead.
+ */
+export const TransformTextModeSchema = z.enum(['rewrite', 'insert']);
+export type TransformTextMode = z.infer<typeof TransformTextModeSchema>;
+
+export const TransformTextRequestSchema = z.object({
+  mode: TransformTextModeSchema.default('rewrite'),
+  // The selected fragment to rewrite. Empty in insert mode.
+  text: z.string().default(''),
+  // The user's instruction. Optional for rewrites (context guidance
+  // alone suffices); the route rejects insert requests without one.
+  instruction: z.string().optional(),
+  context: RewriteTextContextSchema.optional(),
+  subject: z.string().optional(),
+  parentContext: z.string().optional(),
+  // Insert mode only: advisory document context around the insertion
+  // point (callers send a bounded tail/head, not the whole document).
+  textBefore: z.string().optional(),
+  textAfter: z.string().optional(),
+});
+export type TransformTextRequest = z.infer<typeof TransformTextRequestSchema>;
+
+/**
+ * SSE events streamed by `POST /api/ai/transform`. `thinking-delta`
+ * carries reasoning metacommentary where the provider exposes it;
+ * `output-delta` is a live preview only — the `done` event's `text`
+ * (fence-stripped, reasoning-free) is the authoritative result.
+ */
+export const TransformStreamEventSchema = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('status'),
+    phase: z.enum(['queued', 'started']),
+    detail: z.string().optional(),
+  }),
+  z.object({ type: z.literal('thinking-delta'), text: z.string() }),
+  z.object({ type: z.literal('output-delta'), text: z.string() }),
+  z.object({ type: z.literal('done'), text: z.string() }),
+  z.object({ type: z.literal('error'), error: z.string() }),
+]);
+export type TransformStreamEvent = z.infer<typeof TransformStreamEventSchema>;
+
 export const WriteDocumentRequestSchema = z.object({
   path: z.string().min(1),
   content: z.string(),

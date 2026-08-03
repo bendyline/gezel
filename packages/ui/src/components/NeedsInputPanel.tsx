@@ -19,7 +19,8 @@ export function NeedsInputPanel({
   projectId,
   onEmpty,
 }: {
-  onOpenInChat?: () => void;
+  /** Focus the thread a question came from, then close the host surface. */
+  onOpenInChat?: (question: Question) => void;
   /** When set, only this project's pending questions are shown (the sidebar
    *  intervene popup). Unset = every project (the global Home overlay). */
   projectId?: string;
@@ -223,7 +224,7 @@ export function NeedsInputPanel({
           key={active.id}
           question={active}
           onAnswered={advancePast}
-          onOpenInChat={onOpenInChat ?? (() => {})}
+          onOpenInChat={onOpenInChat}
         />
       </div>
     </section>

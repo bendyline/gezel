@@ -34,7 +34,9 @@ vi.mock('@bendyline/squisq-editor-react', () => ({
 }));
 vi.mock('@bendyline/squisq-editor-react/styles', () => ({}));
 
-vi.mock('../components/AiToolbarButtons.js', () => ({ AiToolbarButtons: () => null }));
+vi.mock('../components/transform/TransformToolbarButton.js', () => ({
+  TransformToolbarButton: () => null,
+}));
 vi.mock('../components/FixedFunctionAboutPanel.js', () => ({
   FixedFunctionAboutPanel: () => <div data-testid="ff-panel" />,
 }));
