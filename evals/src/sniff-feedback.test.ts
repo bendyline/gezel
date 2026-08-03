@@ -2278,8 +2278,18 @@ describe('score-plateau escalation (progressive failures)', () => {
   // fixes the named detail, a DIFFERENT check surfaces (new failReason,
   // often a new file), the signature resets, and no escalation ever fires
   // while the score sits still. These drive that exact shape.
-  const progressive = (n: number): { filePath: string; sniff: SniffResult; sourceText: string } => ({
-    filePath: ['src/store.ts', 'src/migrate.ts', 'src/handlers.ts', 'src/types.ts', 'src/extra.ts', 'src/more.ts', 'src/final.ts'][n % 7]!,
+  const progressive = (
+    n: number,
+  ): { filePath: string; sniff: SniffResult; sourceText: string } => ({
+    filePath: [
+      'src/store.ts',
+      'src/migrate.ts',
+      'src/handlers.ts',
+      'src/types.ts',
+      'src/extra.ts',
+      'src/more.ts',
+      'src/final.ts',
+    ][n % 7]!,
     sniff: {
       ok: false,
       signals: ['types-updated'],
