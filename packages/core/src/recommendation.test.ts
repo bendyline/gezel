@@ -5,6 +5,7 @@ import {
   excludesMoE,
   hardwareHint,
   isBandwidthBoundHost,
+  isRecommendedModel,
   isUnifiedMemoryDevice,
   mediaModelFits,
   pickRecommendedModel,
@@ -143,6 +144,38 @@ describe('pickRecommendedModel', () => {
     expect(pick?.id).not.toBe('llama3.2-3b-q4');
   });
 
+  it('never recommends a tool-less model, on either the comfortable or best-effort path', () => {
+    // A gezel works through its MCP toolset, so a no-tools model is a niche
+    // the user opts into by hand — never the first-run pick. This fixture is
+    // built to win both ranking paths if the gate were missing: the highest
+    // score (comfortable path) and the smallest working set (best-effort).
+    const withNiche: RecoModelInput[] = [
+      ...CANDIDATES,
+      {
+        id: 'talkie-1930-13b-q4',
+        recoScore: 99,
+        licenseClass: 'open',
+        supportsTools: false,
+        tags: [],
+        residentBytes: 1 * GB,
+      },
+    ];
+    const roomy = pickRecommendedModel(withNiche, {
+      platform: 'linux',
+      gpuVramBytes: null,
+      totalRamBytes: 64 * GB,
+      usableBytes: 32 * GB,
+    });
+    expect(roomy?.id).not.toBe('talkie-1930-13b-q4');
+    const tiny = pickRecommendedModel(withNiche, {
+      platform: 'linux',
+      gpuVramBytes: null,
+      totalRamBytes: 4 * GB,
+      usableBytes: 2 * GB,
+    });
+    expect(tiny?.id).toBe('gemma4-e2b-q4');
+  });
+
   it('returns null when nothing carries a recoScore', () => {
     const pick = pickRecommendedModel(
       [{ id: 'x', licenseClass: 'open', tags: [], residentBytes: 1 * GB }],
@@ -162,6 +195,28 @@ describe('pickRecommendedModel', () => {
     // first-run always has something.
     expect(pick?.id).toBe('gemma4-e2b-q4');
     expect(pick?.reason).toMatch(/best-effort/);
+  });
+});
+
+describe('isRecommendedModel (the one shared gate)', () => {
+  it('needs a positive score, an open license, and tool support together', () => {
+    expect(isRecommendedModel({ recoScore: 20, licenseClass: 'open', supportsTools: true })).toBe(
+      true,
+    );
+    expect(isRecommendedModel({ licenseClass: 'open', supportsTools: true })).toBe(false);
+    expect(isRecommendedModel({ recoScore: 0, licenseClass: 'open', supportsTools: true })).toBe(
+      false,
+    );
+    expect(
+      isRecommendedModel({ recoScore: 20, licenseClass: 'custom-restricted', supportsTools: true }),
+    ).toBe(false);
+    expect(isRecommendedModel({ recoScore: 20, licenseClass: 'open', supportsTools: false })).toBe(
+      false,
+    );
+  });
+
+  it('admits media manifests, which declare no supportsTools field at all', () => {
+    expect(isRecommendedModel({ recoScore: 10, licenseClass: 'open' })).toBe(true);
   });
 });
 

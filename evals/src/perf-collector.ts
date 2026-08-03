@@ -1215,8 +1215,9 @@ function sampleNvidia(): {
 /** One GPU reading, vendor-agnostic. */
 export interface GpuReading {
   utilPercent: number;
-  memUsedMb: number;
-  memTotalMb: number;
+  /** null when the vendor reports no readable memory pool (see {@link parseNvidiaSmiRow}). */
+  memUsedMb: number | null;
+  memTotalMb: number | null;
 }
 
 /**

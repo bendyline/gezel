@@ -1,5 +1,5 @@
 import type { CatalogItemSummary, RecoDevice } from '@bendyline/gezel';
-import { mediaModelFits } from '@bendyline/gezel';
+import { isRecommendedModel, mediaModelFits } from '@bendyline/gezel';
 import type { ConfigResponse } from '@bendyline/gezel-client';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
@@ -111,7 +111,7 @@ function pickMedia(
   let best: MediaManifest | null = null;
   for (const it of items) {
     const m = it.manifest as unknown as MediaManifest;
-    if (m.recoScore == null || m.licenseClass !== 'open') continue;
+    if (!isRecommendedModel(m)) continue;
     const req = kind === 'image' ? { minRamGB: m.minRamGB } : { minVramGB: m.minVramGB };
     if (!mediaModelFits(device, req)) continue;
     if (best == null || (m.recoScore ?? 0) > (best.recoScore ?? 0)) best = m;
@@ -122,7 +122,7 @@ function pickMedia(
 function pickAudio(list: AudioModel[]): AudioModel | null {
   let best: AudioModel | null = null;
   for (const m of list) {
-    if (m.recoScore == null || m.licenseClass !== 'open') continue;
+    if (!isRecommendedModel(m)) continue;
     if (best == null || (m.recoScore ?? 0) > (best.recoScore ?? 0)) best = m;
   }
   return best;

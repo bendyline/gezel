@@ -54,10 +54,16 @@ pacing of a transition. If a first-time user can't quite put a finger on
   radius tokens: `--radius-sm` (4px) for badges and chips, `--radius-md`
   (6px) for keys, buttons, and inputs, `--radius-lg` (10px) for trays and
   small surfaces; panels and dialogs may go a step larger. Never perfectly
-  square; never capsule-shaped. Fully-rounded (`999px` / `50%`) is reserved
-  for true circles: dots, avatars, scrollbar thumbs, and switch knobs.
-  There are no pill buttons — a capsule-shaped control is a bug, not a
-  variant.
+  square; never capsule-shaped for anything interactive. Fully-rounded
+  (`999px` / `50%`) is reserved for true circles — dots, avatars, scrollbar
+  thumbs, switch knobs — plus one flat exception: **non-interactive status
+  badges** (`.home-status-pill` and its variants) are true capsules. They
+  are read-only annotations, not controls, and the capsule silhouette is
+  what keeps them from being mistaken for buttons. There are no pill
+  buttons — a capsule-shaped *control* is a bug, not a variant; if a
+  capsule needs a click handler, it's a key or a small-radius chip
+  (`.license-button` is the reference: shares the badge recipe but keeps
+  the small radius because it's a link).
 - **Typography** is a two-font system — **Hanken Grotesk** (sans) for all
   UI chrome and **PT Serif** (serif) for the editorial register. Both are
   bundled woff2 (no CDN). The rules and the shared size scale live in

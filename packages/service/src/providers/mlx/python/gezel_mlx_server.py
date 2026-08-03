@@ -15,7 +15,10 @@ mlx_vlm/generate.py) for exactly this purpose — pass it as the
 `prompt_cache_state` kwarg to `stream_generate` and only the new
 tokens beyond the common prefix get prefilled. We hold one
 `PromptCacheState` per `cache_id` in a module-level dict, with bounded
-LRU eviction by total estimated bytes.
+LRU eviction by total estimated bytes. The batched path plans its own
+reuse via `cache_seed` (longest-common-prefix + protocol trim, plus an
+end-of-prompt KV snapshot for windowed models whose rotated caches
+can't rewind) — see cache_seed.py's module docstring for the why.
 
 Compatibility contract: we serve the same OpenAI-shape
 `/v1/chat/completions` endpoint as mlx_vlm.server, with the same SSE
@@ -67,6 +70,7 @@ from mlx_vlm.utils import load
 # extracts both .py files into the same dir).
 sys.path.insert(0, str(Path(__file__).parent))
 import cache_persist  # noqa: E402
+import cache_seed  # noqa: E402
 import tool_grammar  # noqa: E402
 
 
@@ -804,6 +808,14 @@ class _UnwrapLM:
 _PREFILL_LIVENESS_MIN_TOKENS = 2048
 _PREFILL_LIVENESS_INTERVAL_S = 4.0
 
+# Keep chunk-edge snapshots this many tokens clear of the prompt's end.
+# The final tokens (`…<start_of_turn>model\n`) re-merge differently once
+# the next turn's text continues past them (BPE boundary instability), so
+# a snapshot cut too close to the end misses by a couple of tokens — and
+# wrapped rotating layers can't trim even that. 16 is generous; the cost
+# is at most 16 re-prefilled tokens per turn.
+_SNAPSHOT_BOUNDARY_MARGIN = 16
+
 
 class _Sub:
     """One in-flight batched request: its decode queue, accumulated tokens,
@@ -813,6 +825,7 @@ class _Sub:
         "request", "prompt_tokens", "grammar", "seed_state", "request_id",
         "http_request", "uid", "queue", "cancelled", "token_ids", "emitted",
         "pinned_cache_ids", "prefill_total", "first_token_seen",
+        "reused_tokens", "seed_mode", "prompt_snapshot",
     )
 
     def __init__(self, request, prompt_tokens, grammar, seed_state, request_id, http_request):
@@ -830,6 +843,13 @@ class _Sub:
         self.pinned_cache_ids: List[str] = []  # eviction pins to release on stream end
         self.prefill_total = 0               # new tokens this sub must prefill
         self.first_token_seen = False        # flips once decode emits a token
+        self.reused_tokens = 0               # cache tokens actually served (seed plan)
+        self.seed_mode = "fresh"             # seed decision, for logs/diagnosis
+        # End-of-prompt KV snapshot (windowed models only) — captured at
+        # first token, before any generated token enters the cache, so
+        # the saved session entry stays a pure prefix of the next turn's
+        # re-templated prompt. See cache_seed.probe_needs_prompt_snapshot.
+        self.prompt_snapshot = None
 
 
 class BatchEngine:
@@ -879,6 +899,15 @@ class BatchEngine:
         self._pending = []         # _Sub awaiting insert
         self._wake = asyncio.Event()
         self._worker = None
+        # Windowed / state-cache models can't rewind their caches once
+        # the sequence outgrows the window, so a post-generation save is
+        # dead weight the moment history diverges from the raw tokens
+        # (reasoning stripping guarantees it does). For those models we
+        # capture an end-of-prompt KV snapshot per turn instead — see
+        # _maybe_snapshot_prompt_cache. Full-attention stacks skip the
+        # copy; LCP+trim covers them.
+        self._needs_snapshot = cache_seed.probe_needs_prompt_snapshot(model)
+        self._snapshot_warned = False
         # Prefill-liveness for the current wave. The batched path prefills the
         # whole prompt inside BatchGenerator with NO tqdm bar (unlike the
         # serial mlx_vlm path), so the TS watchdog saw zero prefill events and
@@ -887,11 +916,13 @@ class BatchEngine:
         # stdout-parser already understands so the watchdog knows the engine is
         # alive + prefilling N tokens, and the UI pill shows it.
         self._prefill_total = 0      # new tokens the active wave is prefilling
+        self._prefill_done = {}      # uid → tokens prefilled so far (this wave)
         self._last_prefill_emit = 0.0
         print(
             f"[batch] engine ready max_concurrency={self._max} "
             f"stop_tokens={len(stop_tokens)} (+{len(eos_from_cfg)} from generation_config"
-            f"{f', +{len(tool_close)} </tool_call>' if tool_close else ''})",
+            f"{f', +{len(tool_close)} </tool_call>' if tool_close else ''}) "
+            f"prompt_snapshot={'y' if self._needs_snapshot else 'n'}",
             flush=True,
         )
 
@@ -924,15 +955,25 @@ class BatchEngine:
         return procs or None
 
     def _seed_args(self, sub):
-        """(segment_tokens, caches, all_tokens): reuse the session's cached
-        prefix when it's a true prefix of this prompt; else fresh prefill."""
-        st = sub.seed_state
-        cached = list(st.token_ids or []) if st is not None else []
-        n = len(cached)
-        full = sub.prompt_tokens
-        if 0 < n < len(full) and getattr(st, "cache", None) and full[:n] == cached:
-            return full[n:], st.cache, cached
-        return full, None, []  # fresh: no seed cache, no prior tokens
+        """Plan cache reuse for this sub: longest-common-prefix with
+        trim-to-prefix, mirroring the serial path's semantics (the old
+        exact-prefix-only check re-prefilled entire 20K-token sessions
+        whenever one stripped reasoning character diverged the history
+        from the raw tokens). Delegates to cache_seed.seed_from_state;
+        stamps the authoritative prefill/reuse counts on the sub so the
+        liveness marker and usage frames report engine reality, and logs
+        the decision — the line to grep when turns re-prefill."""
+        plan = cache_seed.seed_from_state(sub.seed_state, sub.prompt_tokens)
+        sub.prefill_total = len(plan.segment)
+        sub.reused_tokens = plan.reused
+        sub.seed_mode = plan.mode
+        if sub.request.cache_id:
+            print(
+                f"[batch] seed cache_id={sub.request.cache_id} mode={plan.mode} "
+                f"reused={plan.reused} prefill={len(plan.segment)}",
+                flush=True,
+            )
+        return plan.segment, plan.caches, plan.all_tokens
 
     def _emit_prefill_liveness(self) -> None:
         """While the active wave is still prefilling (no token emitted yet),
@@ -943,10 +984,10 @@ class BatchEngine:
         (cleared the instant the first token lands), and only from the live
         worker loop — a genuinely wedged engine emits nothing and still trips.
 
-        We can't report a true mid-prefill percentage (BatchGenerator doesn't
-        expose one and may prefill in a single event-loop-blocking call), so
-        the marker carries 0% with the token total; the parser + watchdog only
-        need the liveness signal and the size for the abort message / UI."""
+        Progress is real: the worker consumes `BatchGenerator.next()` per
+        internal step, so each prompt chunk reports its (processed, total)
+        and the marker carries an actual percentage instead of a constant
+        0%."""
         total = self._prefill_total
         if total < _PREFILL_LIVENESS_MIN_TOKENS:
             return
@@ -954,9 +995,11 @@ class BatchEngine:
         if now - self._last_prefill_emit < _PREFILL_LIVENESS_INTERVAL_S:
             return
         self._last_prefill_emit = now
+        done = min(total, sum(self._prefill_done.values()))
+        pct = min(99, (100 * done) // total) if total > 0 else 0
         # Format MUST match stdout-parser's Prefill regex:
-        #   Prefill:   0%|   | 0/<total> [batched]
-        print(f"Prefill:   0%|          | 0/{total} [batched]", flush=True)
+        #   Prefill:  42%|   | 8192/<total> [batched]
+        print(f"Prefill: {pct:3d}%|          | {done}/{total} [batched]", flush=True)
 
     def _admit_count(self, pending: int) -> int:
         """How many of the `pending` co-arrived subs to start THIS wave.
@@ -1026,18 +1069,36 @@ class BatchEngine:
                         f"ceiling={_MEM_LIMIT_BYTES // (1024 * 1024)}MB)",
                         flush=True,
                     )
-                prompts, caches, alltoks, samplers, lps, maxtoks = [], [], [], [], [], []
+                segments, caches, alltoks, samplers, lps, maxtoks = [], [], [], [], [], []
                 for sub in batch:
                     seg, c, at = self._seed_args(sub)
-                    prompts.append(seg)
+                    if (
+                        self._needs_snapshot
+                        and sub.request.cache_id
+                        and len(seg) > _SNAPSHOT_BOUNDARY_MARGIN + 1
+                    ):
+                        # Deliberate segment cut MARGIN tokens before the
+                        # prompt's end. The prompt batch never crosses a
+                        # segment boundary in one prompt() call, so the cut
+                        # guarantees an end_of_segment flush there — the
+                        # stable, advancing boundary the KV snapshot needs
+                        # (the prompt's final tokens re-merge under the next
+                        # turn's continuation; a snapshot cut at the true end
+                        # misses by a couple of tokens, and wrapped rotating
+                        # layers can't trim even that). Cost: one extra tiny
+                        # forward for the tail segment.
+                        cut = len(seg) - _SNAPSHOT_BOUNDARY_MARGIN
+                        segments.append([seg[:cut], seg[cut:]])
+                    else:
+                        segments.append([seg])
                     caches.append(c)
                     alltoks.append(at)
                     samplers.append(self._sampler_for(sub.request))
                     lps.append(self._processors_for(sub.request, sub.grammar))
                     maxtoks.append(int(sub.request.max_tokens) if sub.request.max_tokens else 2048)
                 try:
-                    uids = self._gen.insert(
-                        prompts=prompts,
+                    uids = self._gen.insert_segments(
+                        segments=segments,
                         max_tokens=maxtoks,
                         caches=caches,
                         all_tokens=alltoks,
@@ -1054,21 +1115,29 @@ class BatchEngine:
                     sub.uid = uid
                     self._subs[uid] = sub
                 # Arm prefill-liveness for the wave: total new tokens to
-                # prefill across its subs. Reset the throttle so the first
-                # marker emits immediately (before the blocking decode below).
+                # prefill across its subs (authoritative — from the seed
+                # plans above). Reset the throttle so the first marker
+                # emits immediately (before the blocking decode below).
                 self._prefill_total = sum(
                     max(0, int(getattr(s, "prefill_total", 0))) for s in batch
                 )
+                self._prefill_done = {}
                 self._last_prefill_emit = 0.0
 
-            # One batched decode step across all active sequences.
+            # One engine step across all active sequences. `next()` (not
+            # `next_generated()`) so control returns after EVERY internal
+            # step — prompt chunks included. That is what makes the
+            # end-of-prompt snapshot capturable at its exact boundary
+            # (see _capture_prompt_snapshot), gives the liveness marker
+            # real per-chunk progress instead of a constant 0%, and lets
+            # the event loop breathe between prefill chunks.
             if self._subs:
                 # Emit a prefill marker before the (potentially long, event-
-                # loop-blocking) decode step so the watchdog sees liveness.
+                # loop-blocking) step so the watchdog sees liveness.
                 # No-op once the first token lands (_prefill_total → 0).
                 self._emit_prefill_liveness()
                 try:
-                    responses = self._gen.next_generated()
+                    prompt_responses, responses = self._gen.next()
                 except Exception as exc:  # noqa: BLE001
                     print(f"[batch] step failed: {exc}", flush=True)
                     traceback.print_exc()
@@ -1076,11 +1145,34 @@ class BatchEngine:
                         sub.queue.put_nowait(("err", str(exc)))
                     self._subs.clear()
                     continue
+                for pr in prompt_responses:
+                    progress = getattr(pr, "progress", None)
+                    has_progress = isinstance(progress, tuple) and len(progress) == 2
+                    if has_progress:
+                        self._prefill_done[pr.uid] = int(progress[0])
+                    psub = self._subs.get(pr.uid)
+                    if psub is None or not self._needs_snapshot or not psub.request.cache_id:
+                        continue
+                    if getattr(pr, "end_of_prompt", False):
+                        continue
+                    if has_progress and len(self._subs) == 1:
+                        # Segment/chunk edge: seeded prefix + tokens
+                        # prefilled so far. Later edges overwrite earlier
+                        # ones (longer stable prefix); the margin keeps the
+                        # capture clear of the prompt's re-merging tail.
+                        # Single-sub waves only — a multi-sub prompt batch
+                        # carries un-finalized right-padding that
+                        # extract_cache doesn't account for mid-prefill.
+                        boundary = psub.reused_tokens + int(progress[0])
+                        plen = len(psub.prompt_tokens)
+                        if 0 < boundary <= plen - _SNAPSHOT_BOUNDARY_MARGIN:
+                            self._capture_prompt_snapshot(psub, boundary)
                 if responses:
                     # A token came back → prefill for this wave is done; stop
                     # the liveness markers (the SSE first byte now drives the
                     # watchdog's tighter streaming-idle bound).
                     self._prefill_total = 0
+                    self._prefill_done = {}
                 for r in responses:
                     sub = self._subs.get(r.uid)
                     if sub is None:
@@ -1093,6 +1185,48 @@ class BatchEngine:
                         self._subs.pop(r.uid, None)
                 # Yield so SSE generators flush + new requests get admitted.
                 await asyncio.sleep(0)
+
+    def _capture_prompt_snapshot(self, sub, at_tokens):
+        """Capture the KV state at a mid-prompt boundary of `at_tokens`.
+
+        Called from the worker's prompt-response handling at segment /
+        chunk edges (the worker consumes `BatchGenerator.next()` per
+        internal step, so the batch is quiescent between calls). A
+        segment edge is a token-index cut deep inside text both turns
+        share, so it is immune to the BPE boundary problem — measured
+        live: the end-of-prompt token sequence `…<start_of_turn>model\\n`
+        re-merges differently once the next turn's text continues past
+        it, so a full-length snapshot misses by ~2 tokens and wrapped
+        rotating layers can't trim even that. The admission loop plants
+        a deliberate cut `_SNAPSHOT_BOUNDARY_MARGIN` tokens before the
+        prompt's end so every turn gets a stable, advancing boundary;
+        later edges overwrite earlier ones (longer prefix = better).
+
+        `extract_cache` materializes contiguous per-sequence copies, so
+        the snapshot doesn't alias the live batch buffers. The offset
+        check is the runtime proof of the boundary invariant — on any
+        mismatch the snapshot is dropped (logged once) and _finish falls
+        back to the post-gen save.
+        """
+        try:
+            got = self._gen.extract_cache([sub.uid]).get(sub.uid)
+            layers = got[0] if got else None
+            if not layers:
+                return
+            offsets = {getattr(c, "offset", None) for c in layers}
+            if offsets == {at_tokens}:
+                sub.prompt_snapshot = (list(layers), at_tokens)
+            elif not self._snapshot_warned:
+                self._snapshot_warned = True
+                print(
+                    f"[batch] prompt snapshot skipped: offsets {offsets} != "
+                    f"boundary {at_tokens} (post-gen save fallback)",
+                    flush=True,
+                )
+        except Exception as exc:  # noqa: BLE001 — snapshot is best-effort
+            if not self._snapshot_warned:
+                self._snapshot_warned = True
+                print(f"[batch] prompt snapshot failed: {exc}", flush=True)
 
     def _emit_delta(self, sub):
         # Full-decode-delta detokenization: correct across BPE merges /
@@ -1125,21 +1259,60 @@ class BatchEngine:
                 cache_layers = getattr(r, "prompt_cache", None)
                 all_tokens = getattr(r, "all_tokens", None)
                 if cache_layers is not None:
-                    state = PromptCacheState()
-                    state.cache = list(cache_layers)
-                    state.token_ids = (
-                        [int(t) for t in all_tokens]
-                        if all_tokens is not None
-                        else list(sub.prompt_tokens) + list(sub.token_ids)
-                    )
-                    if state.token_ids:
-                        _save_cache(sub.request.cache_id, state)
-                        _seed_prefix_from_session(sub.request, state)
+                    post_gen = list(cache_layers)
+                    # Save decision: a post-generation cache is only worth
+                    # keeping if a future turn can trim it back to wherever
+                    # the re-templated history diverges from these raw
+                    # tokens. Un-trimmable stacks (wrapped windowed layers)
+                    # get the mid-prompt snapshot instead — a stable prefix
+                    # of the next prompt, no trim ever needed. A tiny turn
+                    # whose segment was too short to capture one keeps the
+                    # PRIOR entry (still a valid prefix) rather than
+                    # overwriting it with un-trimmable full-length state.
+                    trimmable = cache_seed.all_trimmable(post_gen)
+                    if not trimmable and sub.prompt_snapshot is None and sub.reused_tokens > 0:
                         print(
-                            f"[batch] saved cache_id={sub.request.cache_id} "
-                            f"tokens={len(state.token_ids)}",
+                            f"[batch] kept prior cache entry for "
+                            f"cache_id={sub.request.cache_id} (segment too short "
+                            f"for a stable snapshot; post-turn cache not trimmable)",
                             flush=True,
                         )
+                    else:
+                        use_snapshot = sub.prompt_snapshot is not None and not trimmable
+                        state = PromptCacheState()
+                        if use_snapshot:
+                            snap_layers, snap_count = sub.prompt_snapshot
+                            state.cache = snap_layers
+                            state.token_ids = list(sub.prompt_tokens[:snap_count])
+                        else:
+                            state.cache = post_gen
+                            state.token_ids = (
+                                [int(t) for t in all_tokens]
+                                if all_tokens is not None
+                                else list(sub.prompt_tokens) + list(sub.token_ids)
+                            )
+                        if state.token_ids:
+                            _save_cache(sub.request.cache_id, state)
+                            _seed_prefix_from_session(sub.request, state)
+                            print(
+                                f"[batch] saved cache_id={sub.request.cache_id} "
+                                f"tokens={len(state.token_ids)}"
+                                + (
+                                    " (prompt snapshot; post-turn cache not trimmable)"
+                                    if use_snapshot
+                                    else ""
+                                ),
+                                flush=True,
+                            )
+                # Reuse parity with the serial path's terminal log — the
+                # line that makes "is the cache actually working?" a one-
+                # line grep instead of a timing investigation.
+                print(
+                    f"[cache] reuse cache_id={sub.request.cache_id} "
+                    f"cached_tokens={sub.reused_tokens} "
+                    f"prefilled_tokens={sub.prefill_total} [batched]",
+                    flush=True,
+                )
         except Exception as exc:  # noqa: BLE001
             print(f"[batch] cache save failed: {exc}", flush=True)
         sub.queue.put_nowait(("done", r.finish_reason))
@@ -1179,6 +1352,11 @@ async def _batched_stream_iter(sub: "_Sub"):
                             "total_tokens": in_toks + out_count,
                             "prompt_tps": 0.0,
                             "generation_tps": 0.0,
+                            # Cache tokens actually served per the seed
+                            # plan — parity with the serial path so the
+                            # TS session's cachedInputTokens works on
+                            # both. 0 means a genuinely cold prefill.
+                            "cached_tokens": sub.reused_tokens,
                         },
                     }
                 ) + "\n\n"
@@ -1203,6 +1381,7 @@ async def _batched_stream_iter(sub: "_Sub"):
                             "total_tokens": in_toks + len(sub.token_ids),
                             "prompt_tps": 0.0,
                             "generation_tps": 0.0,
+                            "cached_tokens": sub.reused_tokens,
                         },
                     }
                 ) + "\n\n"
@@ -1487,6 +1666,28 @@ async def cache_warm(req: CacheWarmRequest) -> JSONResponse:
     else:
         cache_state = existing.state
     prior_tokens = len(cache_state.token_ids or [])
+    # Same guard as the serial chat path: a diverged warm prompt against
+    # an un-trimmable cache would hit mlx_vlm's incoherent slice-trim
+    # and mutate the shared entry into garbage. The docstring's contract
+    # is "diverged → don't touch the prior entry", so skip the warm
+    # outright; the next real send rebuilds atomically.
+    if cache_state.cache is not None and (cache_state.token_ids or []):
+        _variants = _serial_prompt_token_variants(prompt_text)
+        if cache_seed.serial_reset_needed(cache_state.token_ids, cache_state.cache, _variants):
+            print(
+                f"[cache] warm skipped for cache_id={req.cache_id}: diverged "
+                f"prefix on untrimmable cache (prior={prior_tokens})",
+                flush=True,
+            )
+            return JSONResponse(
+                {
+                    "warmed": False,
+                    "cache_id": req.cache_id,
+                    "token_count": prior_tokens,
+                    "persisted": False,
+                    "skipped": "divergent-untrimmable",
+                }
+            )
     try:
         # Drain the generator fully — `max_tokens=1` makes it a
         # single-token cycle, but we MUST let stream_generate run to
@@ -1696,7 +1897,11 @@ def _build_prompt(
     Vision support is out of scope for v1; list-shaped content is
     flattened to text by extracting text parts.
     """
-    _probe_tokenizer = getattr(PROCESSOR, "tokenizer", None)
+    # Text-only models (e.g. laguna): load_processor returns the bare
+    # tokenizer itself — no `.tokenizer` attribute. Falling back to
+    # PROCESSOR keeps the canonical tools render; without it this
+    # function silently drops `tools` via the text-only path below.
+    _probe_tokenizer = getattr(PROCESSOR, "tokenizer", None) or PROCESSOR
     link_tools = (
         any(m.tool_calls or m.tool_call_id for m in messages)
         and _probe_tokenizer is not None
@@ -1721,7 +1926,7 @@ def _build_prompt(
                 entry["tool_call_id"] = m.tool_call_id
         raw.append(entry)
 
-    tokenizer = getattr(PROCESSOR, "tokenizer", None)
+    tokenizer = getattr(PROCESSOR, "tokenizer", None) or PROCESSOR
     use_tokenizer = (
         tokenizer is not None
         and hasattr(tokenizer, "apply_chat_template")
@@ -1766,6 +1971,30 @@ def _build_prompt(
     # mlx-vlm versions; the (processor, config, messages) form is stable.
     config = getattr(MODEL, "config", None) or {}
     return apply_chat_template(PROCESSOR, config, raw)
+
+
+def _serial_prompt_token_variants(prompt_text: str) -> "List[List[int]]":
+    """Best-effort re-encodings of the prompt for the serial-path guard.
+
+    mlx_vlm tokenizes the prompt itself (processor pipeline, possibly
+    BOS-prefixed), so our own `encode` can differ by exactly a leading
+    BOS. The guard takes the max LCP across both variants, absorbing
+    that edge without replicating the processor. Empty list = cannot
+    encode = the guard fails safe (reset, cold prefill).
+    """
+    tok = getattr(PROCESSOR, "tokenizer", None) or PROCESSOR
+    try:
+        base = [int(t) for t in tok.encode(prompt_text)]
+    except Exception:  # noqa: BLE001 — no encode, no verification
+        return []
+    variants = [base]
+    bos = getattr(tok, "bos_token_id", None)
+    if isinstance(bos, int) and not isinstance(bos, bool):
+        if base[:1] == [bos]:
+            variants.append(base[1:])
+        else:
+            variants.append([bos] + base)
+    return variants
 
 
 @app.post("/v1/chat/completions")
@@ -1851,9 +2080,12 @@ async def chat_completions(request: ChatRequest, http_request: Request):
             http_request=http_request,
         )
         sub.pinned_cache_ids = pinned_cache_ids
-        # New tokens this sub must prefill = full prompt minus the cached
-        # prefix it can reuse. Drives the batched-prefill liveness marker.
-        sub.prefill_total = max(0, len(prompt_tokens) - prior_tokens)
+        # Pessimistic placeholder until admission: the authoritative
+        # prefill count comes from the seed plan in _seed_args (the old
+        # entry-size arithmetic here under-reported by ~40× whenever the
+        # seed was rejected, which suppressed the liveness markers during
+        # the exact full re-prefills they exist to surface).
+        sub.prefill_total = len(prompt_tokens)
         try:
             _engine.submit(sub)
         except Exception:
@@ -1864,6 +2096,24 @@ async def chat_completions(request: ChatRequest, http_request: Request):
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
+
+    # Serial-path guard: mlx_vlm's divergent-prefix branch trims by
+    # slicing `keys[:, :, :lcp]`, which silently corrupts wrapped
+    # sliding-window layers (the rotated cache is SHORTER than the
+    # prefix, gets skipped, and its offset disagrees with the trimmed
+    # full-attention layers from then on). When the state can't be
+    # trimmed coherently and the prompt genuinely diverges, a cold
+    # prefill is the only correct outcome — reset before handing the
+    # state to stream_generate. Pure extensions pass through untouched.
+    if cache_state.cache is not None and (cache_state.token_ids or []):
+        _variants = _serial_prompt_token_variants(prompt_text)
+        if cache_seed.serial_reset_needed(cache_state.token_ids, cache_state.cache, _variants):
+            print(
+                f"[cache] serial divergence on untrimmable cache; cold prefill "
+                f"cache_id={request.cache_id}",
+                flush=True,
+            )
+            cache_state = PromptCacheState()
 
     # IMPORTANT: this MUST be `async def`, not `def`. Starlette iterates
     # sync generators via `iterate_in_threadpool` which can hop threads

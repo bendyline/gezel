@@ -12205,8 +12205,11 @@ button.bench-step-foot:disabled {
   white-space: nowrap;
   vertical-align: middle;
   font-size: 0.75rem;
-  padding: 0.2rem 0.55rem;
-  border-radius: 10px;
+  padding: 0.2rem 0.7rem;
+  /* True capsule — the sanctioned exception to the small-radius rule for
+     non-interactive status badges (see docs/ux.md "Corners"). Interactive
+     chips like .license-button stay on the small radius. */
+  border-radius: 999px;
   border: 1px solid var(--border);
   background: rgba(255, 255, 255, 0.03);
 }

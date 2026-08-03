@@ -65,6 +65,19 @@ describe('toRecoCandidate', () => {
     expect(c?.residentBytes).toBe(Math.round(8 * GB * 1.2));
   });
 
+  it('carries supportsTools through, so the picker can drop a tool-less model', () => {
+    const c = toRecoCandidate(
+      chatModel({
+        recoScore: 20,
+        licenseClass: 'open',
+        supportsTools: false,
+        llamaCpp: { huggingfaceRepo: 'r', filename: 'f', approxSizeBytes: 10 * GB },
+      }),
+      'win32',
+    );
+    expect(c?.supportsTools).toBe(false);
+  });
+
   it('returns null when the model ships no block for that platform', () => {
     const noMlx = chatModel({
       llamaCpp: { huggingfaceRepo: 'r', filename: 'f', approxSizeBytes: 10 * GB },

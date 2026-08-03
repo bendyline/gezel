@@ -24,7 +24,6 @@ import {
   staleInstallReason,
 } from './model-cache.ts';
 import { loadModelEvalHints } from './model-eval-hints.ts';
-import { lastDeliveredSniffNudge } from './sniff-feedback.ts';
 import { classifyEvalModelTier, modelBillionsForEval } from './model-tier.ts';
 import { repoRoot, resolveDs4Binary, resolveLlamaBinary, resolveSdBinary } from './native-bin.ts';
 import {
@@ -43,6 +42,7 @@ import {
   isSelfOrchestratingProvider,
   probeProviderAuth,
 } from './providers.ts';
+import { lastDeliveredSniffNudge } from './sniff-feedback.ts';
 import { shutdownTrialDaemon, spawnTrialDaemon } from './spawn.ts';
 import { writeTrialFacts } from './trial-facts.ts';
 import type {
@@ -125,11 +125,7 @@ function defaultRunsDir(): string {
 function evalLlamaKvCacheOverride(): GezelConfig['llamaCppKvCacheType'] | undefined {
   const raw = process.env.GEZEL_EVAL_LLAMA_KV_CACHE?.trim();
   if (!raw) return undefined;
-  const allowed = new Set<NonNullable<GezelConfig['llamaCppKvCacheType']>>([
-    'f16',
-    'q8_0',
-    'q4_0',
-  ]);
+  const allowed = new Set<NonNullable<GezelConfig['llamaCppKvCacheType']>>(['f16', 'q8_0', 'q4_0']);
   if (!allowed.has(raw as NonNullable<GezelConfig['llamaCppKvCacheType']>)) {
     throw new Error(
       `invalid GEZEL_EVAL_LLAMA_KV_CACHE="${raw}" (expected ${[...allowed].join(', ')})`,

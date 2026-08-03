@@ -85,6 +85,23 @@ describe('MLX sidecar tool-call linkage', () => {
     expect(probe).toMatch(/_TOOL_LINKAGE_PROBE\[key\] = needs/);
   });
 
+  it('falls back to PROCESSOR itself when load_processor returns a bare tokenizer', () => {
+    // Text-only models (laguna: transformers TokenizersBackend) come back
+    // from mlx_vlm's load_processor as the tokenizer itself — there is no
+    // `.tokenizer` attribute. Without the `or PROCESSOR` fallback,
+    // _build_prompt takes the text-only path and silently drops `tools`:
+    // laguna answered the fitness probe with "the write_file tool is not
+    // available in my current environment" because it genuinely never saw
+    // one. Both tokenizer resolutions in _build_prompt must carry the
+    // fallback; capability is still gated by hasattr(apply_chat_template).
+    const build = sliceBlock(SERVER_SRC, 'def _build_prompt(');
+    const resolutions = build.match(/getattr\(PROCESSOR, "tokenizer", None\)[^\n]*/g) ?? [];
+    expect(resolutions.length).toBeGreaterThanOrEqual(2);
+    for (const line of resolutions) {
+      expect(line).toMatch(/or PROCESSOR/);
+    }
+  });
+
   it('normalizes stringified function.arguments to a mapping', () => {
     const shaper = sliceBlock(SERVER_SRC, 'def _template_tool_calls(');
     expect(shaper).toMatch(/json\.loads/);

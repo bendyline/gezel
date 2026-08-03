@@ -82,9 +82,7 @@ const escalationMemory = new WeakMap<EvalContext, Map<string, SniffEscalationSta
  */
 const lastNudgeDelivery = new WeakMap<EvalContext, { at: number; stage: number }>();
 
-export function lastDeliveredSniffNudge(
-  ctx: EvalContext,
-): { at: number; stage: number } | null {
+export function lastDeliveredSniffNudge(ctx: EvalContext): { at: number; stage: number } | null {
   return lastNudgeDelivery.get(ctx) ?? null;
 }
 

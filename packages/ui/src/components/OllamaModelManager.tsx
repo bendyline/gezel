@@ -325,6 +325,10 @@ export function OllamaModelManager({ enabled, onModelsChanged, compact = false }
    * "All" tab we show all category winners, so users see Google's best +
    * Qwen's best side by side. On a specific-category tab, only that
    * category's winner shows up.
+   *
+   * Models that cannot call tools are never eligible, matching core's
+   * `isRecommendedModel` — a gezel works through its toolset, so recommending
+   * a tool-less model would hand the user a crew member with no hands.
    */
   const recommendedTags = useMemo<Set<string>>(() => {
     if (!memory) return new Set();
@@ -333,6 +337,7 @@ export function OllamaModelManager({ enabled, onModelsChanged, compact = false }
     for (const item of catalogItems) {
       const m = asOllamaChatModel(item.manifest);
       if (!m) continue;
+      if (m.supportsTools === false) continue;
       if (m.approxSizeBytes * MEMORY_OVERHEAD_FACTOR > budget) continue;
       const cat = (m.category ?? 'general') as ChatModelCategory;
       if (activeCategory !== 'all' && cat !== activeCategory) continue;
