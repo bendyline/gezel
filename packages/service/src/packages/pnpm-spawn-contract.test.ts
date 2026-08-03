@@ -57,10 +57,15 @@ describe('machine-service child-process contract', () => {
   });
 
   // CREATE_NO_WINDOW reads like the headless flag and is not one: it still
-  // allocates a console, and console allocation fails under the machine
-  // service's restricted SID. Every native engine launch in packaged
-  // installs died as `spawn EPERM` for as long as this option was set.
-  // DETACHED_PROCESS (`detached`) is the flag that allocates nothing.
+  // allocates a console, and the machine service's Session 0 can allocate
+  // none. DETACHED_PROCESS (`detached`) is the flag that asks for nothing.
+  //
+  // Note what this rule is not. It was adopted believing it fixed the
+  // `spawn EPERM` that killed every native launch under the machine service;
+  // v1.26215.31 shipped it and the failure continued, because the real cause
+  // was a write-restricted service token. Keep the rule — asking Session 0
+  // for a console it cannot give is still wrong — but do not read a passing
+  // test here as evidence that spawning works.
   it('never asks for CREATE_NO_WINDOW in production service code', () => {
     for (const caller of productionTypeScriptFiles()) {
       const name = relative(serviceSrc, caller).replaceAll('\\', '/');

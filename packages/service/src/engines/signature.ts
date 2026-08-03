@@ -81,11 +81,11 @@ const defaultRun: Runner = async (cmd, args) => {
   try {
     const { stdout, stderr } = await execFileAsync(cmd, args, {
       maxBuffer: 4 * 1024 * 1024,
-      // Signature tools (signtool/powershell/codesign) are console-subsystem.
-      // The machine service's restricted SID cannot allocate a console, so
-      // DETACHED_PROCESS is the only way they start; `windowsHide`
-      // (CREATE_NO_WINDOW) still allocates one. A failure here would reject
-      // a perfectly good bundled engine as unverifiable.
+      // Signature tools (signtool/powershell/codesign) are console-subsystem,
+      // and the Session 0 machine service can allocate no console, so they
+      // start with DETACHED_PROCESS; `windowsHide` (CREATE_NO_WINDOW) still
+      // allocates one. A failure here would reject a perfectly good bundled
+      // engine as unverifiable.
       ...windowsDetachedSpawnOptions(),
     });
     return { code: 0, stdout: String(stdout), stderr: String(stderr) };

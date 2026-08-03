@@ -22,7 +22,8 @@ export type SystemNoticeId =
   | 'service-unavailable'
   | 'update-install-failed'
   | 'update-check-failed'
-  | 'engine-backend-quarantined';
+  | 'engine-backend-quarantined'
+  | 'child-process-denied';
 
 export interface SystemNotice {
   id: SystemNoticeId;
@@ -192,6 +193,39 @@ export function engineBackendNotice(input: {
   };
 }
 
+/**
+ * The background service is running but cannot start any program of its own.
+ *
+ * The most severe notice here, and the only one where the honest summary is
+ * "most of Gezel does not work." Local models, GPU detection, gezel tools,
+ * scripts, and installs are all separate programs the service starts, so one
+ * cause produces a scatter of unrelated-looking failures. Without this the
+ * user reads them as five broken features.
+ *
+ * The copy leads with reinstalling because that is the fix a person can
+ * actually perform — the Windows installer that produced this state has been
+ * corrected, so running the current one repairs it. The `sc.exe` command is
+ * real and faster, but it needs an elevated prompt and a service name, so it
+ * belongs behind the technical disclosure where an administrator will look
+ * and nobody else has to.
+ */
+export function childProcessNotice(input: {
+  denied?: boolean;
+  platform?: string;
+}): SystemNotice | null {
+  if (!input.denied) return null;
+  return {
+    id: 'child-process-denied',
+    railLabel: 'Service cannot run programs',
+    title: 'Gezel’s background service is not allowed to start programs.',
+    body: `Your gezellen, projects, chats, and files are all safe and nothing has been lost. But the background service cannot start the programs it needs, so local models will not answer, your GPU is not detected, and gezel tools, scripts, and installs will fail. This comes from how the service was registered on this PC, which Gezel cannot change from inside. ${reinstallHint(input.platform)}`,
+    technical:
+      'Child-process creation is denied (spawn EPERM). The GezelService token is write-restricted; ' +
+      'from an elevated prompt: sc.exe sidtype GezelService unrestricted, then restart the service.',
+    reportable: true,
+  };
+}
+
 /** Every notice that belongs in the navigation rail, most severe first. */
 export function railSystemNotices(input: {
   reason?: string | null;
@@ -200,8 +234,16 @@ export function railSystemNotices(input: {
   update: UpdateState | null;
   quarantinedBackends?: readonly string[];
   runningBackend?: string;
+  childProcessDenied?: boolean;
 }): SystemNotice[] {
   return [
+    // Ahead of the service notices on purpose: those describe a service that
+    // is degraded or absent, this one a service that is present and unable to
+    // do the work. It is the more specific and the more severe diagnosis.
+    childProcessNotice({
+      ...(input.childProcessDenied ? { denied: input.childProcessDenied } : {}),
+      ...(input.platform ? { platform: input.platform } : {}),
+    }),
     serviceNotice(input),
     engineBackendNotice({
       ...(input.quarantinedBackends ? { quarantined: input.quarantinedBackends } : {}),

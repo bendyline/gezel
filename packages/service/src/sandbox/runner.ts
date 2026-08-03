@@ -287,9 +287,9 @@ async function readNodeHelp(nodeBin: string): Promise<string> {
     const child = spawn(nodeBin, ['--help'], {
       stdio: ['ignore', 'pipe', 'pipe'],
       env: sandboxEnv(process.env),
-      // Bundled Node is a console-subsystem executable, and the machine
-      // service cannot allocate a console under its restricted SID — so even
-      // this capability probe must start with DETACHED_PROCESS. `windowsHide`
+      // Bundled Node is a console-subsystem executable and the Session 0
+      // machine service can allocate no console — so even this capability
+      // probe starts with DETACHED_PROCESS. `windowsHide`
       // (CREATE_NO_WINDOW) does not do that; it still allocates.
       ...windowsDetachedSpawnOptions(),
     });
@@ -322,10 +322,10 @@ async function runSandboxChild(
       // group. Workspace commands already do this; doing the same
       // here prevents an unrelated process-group kill from closing a
       // short-lived derive/script child with a null exit code.
-      // On Windows the same option is DETACHED_PROCESS, which is also what
-      // lets a console-subsystem child start at all under the machine
-      // service's restricted SID — `windowsHide` (CREATE_NO_WINDOW) does not,
-      // because it still allocates a console. `taskkill /T` is unaffected:
+      // On Windows the same option is DETACHED_PROCESS, which also keeps a
+      // console-subsystem child from asking the Session 0 service for a
+      // console it cannot allocate — `windowsHide` (CREATE_NO_WINDOW) does
+      // not, because it still allocates one. `taskkill /T` is unaffected:
       // detaching changes console and process group, not the recorded parent.
       detached: true,
       // Allowlist-scrub the env — inheriting everything leaked tokens

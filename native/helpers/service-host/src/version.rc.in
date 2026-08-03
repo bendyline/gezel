@@ -1,0 +1,53 @@
+// Windows VERSIONINFO for gezel-service-host.exe.
+//
+// This binary is registered as the ImagePath of the `GezelService` machine
+// service, so it is permanently visible in Task Manager, services.msc,
+// Process Explorer, and any EDR console on the machine. Shipping it without
+// version metadata leaves all of those showing a blank publisher and no
+// description for a process running continuously as LocalService — which
+// reads as suspicious for exactly the kind of binary people scrutinise.
+// The Authenticode signature already proves origin; this makes it legible
+// without having to check the signature first.
+//
+// Configured by CMakeLists.txt. Strings are kept identical to the values
+// electron-builder stamps into gezel.exe (`author.name` in
+// packages/app/package.json) so the two binaries in $INSTDIR agree on
+// publisher and copyright.
+
+#pragma code_page(65001)
+
+#include <winver.h>
+
+VS_VERSION_INFO VERSIONINFO
+  FILEVERSION @GEZEL_SERVICE_HOST_VERSION_MAJOR@,@GEZEL_SERVICE_HOST_VERSION_MINOR@,@GEZEL_SERVICE_HOST_VERSION_PATCH@,0
+  PRODUCTVERSION @GEZEL_SERVICE_HOST_VERSION_MAJOR@,@GEZEL_SERVICE_HOST_VERSION_MINOR@,@GEZEL_SERVICE_HOST_VERSION_PATCH@,0
+  FILEFLAGSMASK VS_FFI_FILEFLAGSMASK
+#ifdef _DEBUG
+  FILEFLAGS VS_FF_DEBUG
+#else
+  FILEFLAGS 0x0L
+#endif
+  FILEOS VOS_NT_WINDOWS32
+  FILETYPE VFT_APP
+  FILESUBTYPE VFT2_UNKNOWN
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    // 040904B0 = U.S. English, Unicode.
+    BLOCK "040904B0"
+    BEGIN
+      VALUE "CompanyName",      "Bendyline LLC"
+      VALUE "FileDescription",  "Gezel Service Host"
+      VALUE "FileVersion",      "@GEZEL_SERVICE_HOST_VERSION@"
+      VALUE "InternalName",     "gezel-service-host"
+      VALUE "LegalCopyright",   "Copyright © 2026 Bendyline LLC"
+      VALUE "OriginalFilename", "gezel-service-host.exe"
+      VALUE "ProductName",      "Gezel"
+      VALUE "ProductVersion",   "@GEZEL_SERVICE_HOST_VERSION@"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x409, 1200
+  END
+END

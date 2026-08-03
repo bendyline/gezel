@@ -251,6 +251,7 @@ export function Sidebar({
       ? { quarantinedBackends: engineHealth.llamaCppQuarantinedBackends }
       : {}),
     ...(engineHealth?.llamaCppBackend ? { runningBackend: engineHealth.llamaCppBackend } : {}),
+    ...(engineHealth?.childProcessSpawn === 'denied' ? { childProcessDenied: true } : {}),
   });
 
   // ── Live entity lists ───────────────────────────────────────────

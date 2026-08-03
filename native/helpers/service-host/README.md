@@ -52,6 +52,25 @@ Studio Build Tools with the **Desktop development with C++** workload and the
 Elsewhere (self-test only): `cmake -S . -B .build -DBUILD_TESTING=ON &&
 cmake --build .build && ctest --test-dir .build`.
 
+### Version stamp
+
+The Windows build compiles [src/version.rc.in](src/version.rc.in) into a
+`VERSIONINFO` resource, so services.msc, Task Manager, Process Explorer, and
+EDR consoles show a publisher and description instead of blank fields — this
+binary runs continuously as LocalService, and an unlabelled always-on service
+process invites exactly the scrutiny the Authenticode signature is there to
+answer. The strings deliberately match what electron-builder stamps into
+`gezel.exe`, so the two binaries sitting together in `$INSTDIR` agree.
+
+`build.ps1` resolves the version in this order:
+
+1. `GEZEL_SERVICE_HOST_VERSION` (must be `X.Y.Z`) — explicit override;
+2. `GITHUB_REF_NAME` when it is `native-vX.Y.Z` — the release tag the native
+   pipeline is building, so the stamp cannot drift from the tag and no extra
+   workflow wiring is needed;
+3. `0.0.0` — manual dispatch runs and local builds, which are not part of any
+   release and should not claim to be.
+
 ## Invariants
 
 - The child's stdin must stay a host-held pipe. It is the only
@@ -63,12 +82,23 @@ cmake --build .build && ctest --test-dir .build`.
   (observed in v1.26210.15) with error **317** (`ERROR_MR_MID_NOT_FOUND`),
   reproduced twice against a real service install. It is deliberately
   logged rather than treated as fatal. Note it is *not* `ACCESS_DENIED`,
-  so the `restricted` service SID is not the cause — the console
-  subsystem simply is not available to a Session 0 service in a
-  non-interactive window station. Do not "fix" this by relaxing the SID
-  type: `sc sidtype GezelService restricted` is a deliberate security
-  control and would not bring the console back anyway. CTRL_BREAK is only
-  a best-effort secondary to the stdin channel.
+  so the service SID type is not the cause — the console subsystem simply
+  is not available to a Session 0 service in a non-interactive window
+  station. Relaxing the SID type would not bring the console back, and
+  the missing console has never been worth fixing: CTRL_BREAK is only a
+  best-effort secondary to the stdin channel.
+- The service SID is assigned `unrestricted`, and that is a correctness
+  requirement, not a weakened control. `restricted` write-restricts the
+  token, and libuv creates a named pipe per piped stdio handle before
+  every `CreateProcess` — a write the restricted SID list denies. Under
+  `restricted` the daemon could spawn nothing at all (engines, GPU
+  probes, the stdio MCP server, sandboxed scripts, pnpm, git), every one
+  surfacing as `spawn EPERM`; v1.26215.31 shipped that way. This host's
+  own `CreateProcessW` of gezeld kept working throughout, because it
+  redirects the child to log-file handles rather than pipes — which is
+  exactly why the daemon looked healthy while being unable to do any
+  work. See the comment above `sc sidtype` in
+  `packages/app/installer/nsis-hooks.nsh`.
 - The host never creates `C:\ProgramData\Gezel` (the installer owns its
   hardened ACL); a missing home stops the service with
   `ERROR_PATH_NOT_FOUND`.

@@ -132,9 +132,9 @@ function runGhAuthToken(bin: string): Promise<string | null> {
   return new Promise<string | null>((resolve, reject) => {
     const child = spawn(bin, ['auth', 'token', '--hostname', 'github.com'], {
       stdio: ['ignore', 'pipe', 'ignore'],
-      // `gh` is console-subsystem. Under the machine service's restricted
-      // SID console allocation fails, so start it with DETACHED_PROCESS;
-      // `windowsHide` (CREATE_NO_WINDOW) still allocates one and fails.
+      // `gh` is console-subsystem, and console allocation fails outright in
+      // the machine service's Session 0, so start it with DETACHED_PROCESS;
+      // `windowsHide` (CREATE_NO_WINDOW) still allocates one.
       ...windowsDetachedSpawnOptions(),
     });
     let stdout = '';

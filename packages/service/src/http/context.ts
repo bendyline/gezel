@@ -49,6 +49,7 @@ import type { SecretStore } from '../secrets/types.js';
 import type { SystemToolsetInstallRegistry } from '../system-toolsets/install-registry.js';
 import type { SystemStatusBus } from '../system-toolsets/status-bus.js';
 import type { SystemIdleState } from '../system/idle-state.js';
+import type { SpawnCapability } from '../system/spawn-capability.js';
 import type { TaskManager } from '../tasks/manager.js';
 import type { NightShiftManager } from '../tasks/night-shift-manager.js';
 import type { TaskRunner } from '../tasks/runner.js';
@@ -239,6 +240,13 @@ export interface ServiceContext {
    */
   ensureModel: EnsureModelOrchestrator;
   startedAt: string;
+  /**
+   * Whether this daemon may create child processes, probed once at boot.
+   * `null` off Windows, where the write-restricted-service-token failure
+   * mode this detects has no equivalent. See
+   * [spawn-capability.ts](../system/spawn-capability.ts).
+   */
+  childProcessSpawn?: SpawnCapability;
   uiDir?: string;
   /** In-memory job tracker for folder externalization moves. Lives only
    *  for the current service process — moves don't survive a restart

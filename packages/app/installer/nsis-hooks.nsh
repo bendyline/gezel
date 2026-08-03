@@ -400,15 +400,43 @@
     Goto SkipNssm
   ${EndIf}
 
-  ; A restricted service SID makes the LocalService token write-restricted.
-  ; Writes must be allowed to NT SERVICE\GezelService, not merely to the
-  ; generic LocalService account.
-  nsExec::ExecToLog '"$SYSDIR\sc.exe" sidtype ${GEZEL_SERVICE_NAME} restricted'
+  ; A per-service SID puts NT SERVICE\GezelService in the token, which is what
+  ; every ACL below grants.  It is load-bearing: without it the service holds
+  ; only the generic LocalService identity, and the private home — which
+  ; deliberately grants LocalService nothing — becomes unreadable to its own
+  ; daemon.  So this step still fails closed.
+  ;
+  ; `unrestricted`, NOT `restricted`, and the difference is not cosmetic.
+  ; `restricted` additionally makes the token *write-restricted*: every write
+  ; is second-checked against {service SID, World, WRITE RESTRICTED, logon
+  ; SID}, so a grant to BUILTIN\Users no longer satisfies it.  Node/libuv
+  ; creates a named pipe per piped stdio handle before every CreateProcess,
+  ; and that creation is a write into the NPFS namespace — which under the
+  ; write-restricted token is denied.  The daemon could then spawn NOTHING:
+  ; local engines, the GPU probes, the stdio MCP server, sandboxed scripts,
+  ; pnpm toolset installs and git all died as `spawn EPERM`.
+  ;
+  ; Observed on two v1.26215.31 machines — the first release whose installer
+  ; actually registered this service on a fresh install, so it is also the
+  ; first release where anyone ran under the write-restricted token.  The
+  ; daemon's own log named every one of them at once:
+  ;   device-health helper: spawn EPERM; nvidia-smi: spawn EPERM;
+  ;   amd-smi: spawn EPERM; rocm-smi: spawn EPERM
+  ; and `sc.exe sidtype GezelService unrestricted` + restart fixed all of it.
+  ;
+  ; Note what this does NOT give up.  The service keeps its own SID, keeps
+  ; LocalService, keeps the stripped privilege set below, and keeps the
+  ; private ProgramData home — those are the controls that bound the blast
+  ; radius.  Write-restriction bought hardening against a *compromised*
+  ; daemon writing outside its home; it cost the daemon its ability to run
+  ; any child process at all, which is most of what the product does.
+  ; Do not set `restricted` again without a per-user execution broker.
+  nsExec::ExecToLog '"$SYSDIR\sc.exe" sidtype ${GEZEL_SERVICE_NAME} unrestricted'
   Pop $0
   ${If} $0 != 0
-    DetailPrint "ERROR: failed to set restricted service SID (exit $0)."
+    DetailPrint "ERROR: failed to set the per-service SID (exit $0)."
     !insertmacro RemoveGezelService
-    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not restrict its machine-service identity (Windows error $0). The registration was removed; the desktop app will use its per-user fallback." /SD IDOK
+    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not give its machine service a dedicated identity (Windows error $0). The registration was removed; the desktop app will use its per-user fallback." /SD IDOK
     Goto SkipNssm
   ${EndIf}
 

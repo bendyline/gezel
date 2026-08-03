@@ -116,6 +116,7 @@ import { SystemStatusBus } from './system-toolsets/status-bus.js';
 import { reapOrphanedGezelEngineProcesses } from './system/gezel-process-cleanup.js';
 import { SystemIdleState } from './system/idle-state.js';
 import { detectMemoryProfile } from './system/memory.js';
+import { SPAWN_DENIED_MESSAGE, probeChildProcessSpawn } from './system/spawn-capability.js';
 import { dispatchTaskEntry } from './tasks/entry-dispatch.js';
 import type { GateWorkspaceReader } from './tasks/gate-eval.js';
 import { TaskManager } from './tasks/manager.js';
@@ -1764,6 +1765,13 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     device: createDaemonDeviceInfo({ store, chat }),
   });
 
+  // Ask once, at boot, whether this process may create children at all —
+  // before any feature discovers the answer the expensive way. A denied
+  // token is not a chat bug, an engine bug, or a GPU bug, but it presents as
+  // all three at once, each at a different call site. See spawn-capability.ts.
+  const childProcessSpawn = await probeChildProcessSpawn();
+  if (childProcessSpawn === 'denied') log.error(`[spawn] ${SPAWN_DENIED_MESSAGE}`);
+
   const context: ServiceContext = {
     home,
     store,
@@ -1820,6 +1828,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     ...(cert ? { tlsCertSha256: cert.sha256Hex, tlsCertPem: cert.certPem } : {}),
     ensureModel,
     startedAt: nowIso(),
+    childProcessSpawn,
     uiDir: opts.uiDir,
     folderJobs,
     workspaceIndex,

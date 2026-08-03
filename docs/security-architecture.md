@@ -443,7 +443,7 @@ fix and is not yet implemented.
   their user-owned home. Private machine-service config, gezels, projects, and tokens are
   never part of this overlay.
 - **Installers** run every machine service under a dedicated/restricted identity. Windows uses
-  LocalService plus a restricted service SID (never LocalSystem); macOS/Linux use dedicated
+  LocalService plus a dedicated per-service SID and a stripped privilege set (never LocalSystem); macOS/Linux use dedicated
   non-root accounts with platform hardening such as `NoNewPrivileges` / `ProtectSystem`.
   Per-user spawn remains available but is not the packaged default.
 - **`workingDir` validation** — rejects control characters / non-absolute paths at the store

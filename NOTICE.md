@@ -107,6 +107,26 @@ repository and linked into the workspace. Their license matches Squisq's
 - `@bendyline/squisq-video-react` — MIT (Gezel's editor consumes only its
   cover-image entry; the browser encoder and FFmpeg runtime are not shipped)
 
+### Icon fonts carried inside dependencies
+
+Two icon sets ship inside the packaged UI without being direct dependencies of
+this workspace: the bundler emits them from packages listed above. They are
+called out separately because their **icon artwork is CC BY 4.0**, which
+requires attribution, even though the surrounding package is MIT. They are not
+in `packages/ui/src/assets/fonts/` and so are deliberately absent from the
+**Bundled fonts and emoji** manifest, which inventories only the WOFF2 files
+vendored into this repository.
+
+| Asset | License | Arrives via | Source |
+|---|---|---|---|
+| **Font Awesome Free 7.2.0** (`fa-solid-900`, `fa-regular-400`, `fa-brands-400` WOFF2) | Icons [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/); fonts SIL OFL 1.1; code MIT — upstream expression `(CC-BY-4.0 AND OFL-1.1 AND MIT)` | `@bendyline/squisq-editor-react`, whose stylesheet bundles `@fortawesome/fontawesome-free` | [FortAwesome/Font-Awesome](https://github.com/FortAwesome/Font-Awesome) |
+| **Visual Studio Code icons** (`codicon.ttf`) | Icons [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/); the carrying package is MIT | `monaco-editor`, which embeds the codicon font in its distribution | [microsoft/vscode-codicons](https://github.com/microsoft/vscode-codicons) |
+
+Attribution notice, as CC BY 4.0 requires: Font Awesome Free is by
+[Fonticons, Inc.](https://fontawesome.com/); the Visual Studio Code icons are
+by [Microsoft Corporation](https://github.com/microsoft/vscode-codicons).
+Both are used unmodified.
+
 ### Reviewed unmodified component redistributions
 
 Gezel's release policy approves the following exact package versions for

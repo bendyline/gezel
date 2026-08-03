@@ -135,7 +135,7 @@ describe('Windows machine-service installer security', () => {
     }
   });
 
-  it('registers born-disabled LocalService and restricts the SID before startup', () => {
+  it('registers born-disabled LocalService and assigns the service SID before startup', () => {
     // One atomic sc.exe create: disabled AND LocalService AND a quoted
     // ImagePath from birth — no transient LocalSystem or enabled window.
     const createLine = commandLine('sc.exe" create ${GEZEL_SERVICE_NAME}');
@@ -144,7 +144,7 @@ describe('Windows machine-service installer security', () => {
     expect(createLine).toContain('binPath= "\\"$INSTDIR\\gezel-service-host.exe\\" run"');
 
     const create = position('sc.exe" create ${GEZEL_SERVICE_NAME}');
-    const restrictedSid = position('sidtype ${GEZEL_SERVICE_NAME} restricted');
+    const restrictedSid = position('sidtype ${GEZEL_SERVICE_NAME} unrestricted');
     const restrictedPrivileges = position('privs ${GEZEL_SERVICE_NAME} SeChangeNotifyPrivilege');
     const firstServiceSidAcl = position('NT SERVICE\\${GEZEL_SERVICE_NAME}:(OI)(CI)(M)');
     const enableAutostart = position('config ${GEZEL_SERVICE_NAME} start= auto');
@@ -158,6 +158,24 @@ describe('Windows machine-service installer security', () => {
     expect(hook).not.toMatch(/obj=\s+"(?:NT AUTHORITY\\)?LocalSystem"/i);
     // The installer must never invoke a general-purpose service wrapper.
     expect(hook).not.toMatch(/nsExec[^\n]*nssm/i);
+  });
+
+  // `restricted` makes the service token write-restricted, and libuv creates a
+  // named pipe per piped stdio handle before every CreateProcess. That pipe
+  // creation is a write the restricted SID list denies, so the daemon can
+  // spawn nothing at all: local engines, GPU probes, the stdio MCP server,
+  // sandboxed scripts, pnpm installs and git every one of them `spawn EPERM`.
+  // Shipped in v1.26215.31 — the first release whose installer actually
+  // registered the service on a fresh install, so the first release anyone
+  // ran it under. `unrestricted` keeps the per-service SID (every ACL below
+  // grants it) without write-restricting the token.
+  it('never write-restricts the service token', () => {
+    expect(hook).toContain('sidtype ${GEZEL_SERVICE_NAME} unrestricted');
+    expect(hook).not.toMatch(/sidtype \$\{GEZEL_SERVICE_NAME\}\s+restricted/);
+    // `none` would drop the SID entirely, and the private home grants the
+    // generic LocalService account nothing — the daemon would lose its own
+    // GEZEL_HOME rather than merely its children.
+    expect(hook).not.toMatch(/sidtype \$\{GEZEL_SERVICE_NAME\}\s+none/);
   });
 
   it('compiles the service environment contract into the service host', () => {
@@ -180,12 +198,12 @@ describe('Windows machine-service installer security', () => {
     // sc create failure leaves nothing registered — skip is enough.
     const createBlock = hook.slice(
       position('sc.exe" create ${GEZEL_SERVICE_NAME}'),
-      position('sidtype ${GEZEL_SERVICE_NAME} restricted'),
+      position('sidtype ${GEZEL_SERVICE_NAME} unrestricted'),
     );
     expect(createBlock).toContain('Goto SkipNssm');
 
     const sidTypeBlock = hook.slice(
-      position('sidtype ${GEZEL_SERVICE_NAME} restricted'),
+      position('sidtype ${GEZEL_SERVICE_NAME} unrestricted'),
       position('privs ${GEZEL_SERVICE_NAME} SeChangeNotifyPrivilege'),
     );
     expect(sidTypeBlock).toContain('!insertmacro RemoveGezelService');

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  childProcessNotice,
   engineBackendNotice,
   railSystemNotices,
   serviceNotice,
@@ -132,6 +133,45 @@ describe('railSystemNotices', () => {
     });
 
     expect(notices.map((n) => n.id)).toEqual(['service-unavailable']);
+  });
+});
+
+describe('childProcessNotice', () => {
+  it('is absent unless the daemon actually reported denied', () => {
+    expect(childProcessNotice({})).toBeNull();
+    expect(childProcessNotice({ denied: false, platform: 'win32' })).toBeNull();
+  });
+
+  it('names the scattered symptoms so they read as one cause', () => {
+    const notice = childProcessNotice({ denied: true, platform: 'win32' });
+    expect(notice?.id).toBe('child-process-denied');
+    expect(notice?.railLabel).toBe('Service cannot run programs');
+    for (const symptom of ['local models', 'GPU', 'scripts']) {
+      expect(notice?.body).toContain(symptom);
+    }
+    // Reassurance first: nothing the user made is at risk here.
+    expect(notice?.body).toContain('safe');
+    expect(notice?.reportable).toBe(true);
+  });
+
+  // The fix a person can perform goes in the body; the fix an administrator
+  // would rather run goes behind the disclosure. Neither may go missing.
+  it('offers the installer in the copy and the sc.exe repair in the technical detail', () => {
+    const notice = childProcessNotice({ denied: true, platform: 'win32' });
+    expect(notice?.body).toContain('Run the Gezel installer again');
+    expect(notice?.technical).toContain('sc.exe sidtype GezelService unrestricted');
+  });
+
+  // A daemon that cannot spawn is a more specific and more severe diagnosis
+  // than "the service is degraded", so it must not sort below it.
+  it('outranks the service notice in the rail', () => {
+    const notices = railSystemNotices({
+      reason: 'down',
+      platform: 'win32',
+      update: null,
+      childProcessDenied: true,
+    });
+    expect(notices.map((n) => n.id)).toEqual(['child-process-denied', 'service-unavailable']);
   });
 });
 

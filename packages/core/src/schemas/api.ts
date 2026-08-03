@@ -83,6 +83,21 @@ export const HealthResponseSchema = z.object({
    * offending binary is replaced (see `llama-quarantine.ts`).
    */
   llamaCppQuarantinedBackends: z.array(z.enum(['cuda', 'vulkan', 'metal', 'cpu'])).optional(),
+  /**
+   * Whether the daemon may create child processes, probed once at boot.
+   *
+   * `denied` is a whole-daemon condition rather than one feature's problem:
+   * local engines, GPU detection, the stdio MCP server, sandboxed scripts,
+   * package installs and git are all child processes, so the user sees a
+   * half-dozen unrelated-looking failures with one cause. It is reported
+   * here — on health, next to the engine fields — because the client that
+   * needs to explain it is the same one already reading them.
+   *
+   * Windows-only; `undefined` elsewhere and on daemons predating the probe.
+   * A denied token cannot be repaired by the daemon: it comes from the
+   * service registration, so the only correct response is to say so.
+   */
+  childProcessSpawn: z.enum(['ok', 'denied']).optional(),
 });
 export type HealthResponse = z.infer<typeof HealthResponseSchema>;
 

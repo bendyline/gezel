@@ -576,10 +576,11 @@ export class NativeEngineSupervisor {
         ...(launch.cwd ? { cwd: launch.cwd } : {}),
         stdio: ['ignore', 'pipe', 'pipe'],
         // Native engines are console-subsystem executables on Windows, so
-        // the loader allocates a console unless we opt out. Under the
-        // machine-wide Session 0 service that allocation fails and the
-        // launch dies as `spawn EPERM`. DETACHED_PROCESS is the opt-out;
+        // the loader allocates a console unless we opt out, and the Session 0
+        // service has none to give. DETACHED_PROCESS is the opt-out;
         // `windowsHide` (CREATE_NO_WINDOW) is not — it still allocates.
+        // It is not what makes this spawn succeed, though: see the
+        // "what this does not fix" note on windowsDetachedSpawnOptions.
         ...windowsDetachedSpawnOptions(),
       });
     } catch (err) {

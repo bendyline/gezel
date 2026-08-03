@@ -423,6 +423,11 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
       ...(llamaCppDetectedBackend ? { llamaCppDetectedBackend } : {}),
       ...(llamaCppDetectedVendor ? { llamaCppDetectedVendor } : {}),
       ...(llamaCppQuarantinedBackends.length > 0 ? { llamaCppQuarantinedBackends } : {}),
+      // Boot probe rather than an env var: this one is a property of the
+      // running process's own token, not something a supervisor could have
+      // told us. `null` (non-Windows) is omitted, not sent as a value —
+      // there is nothing to report where the condition cannot occur.
+      ...(ctx.childProcessSpawn ? { childProcessSpawn: ctx.childProcessSpawn } : {}),
     });
   });
 

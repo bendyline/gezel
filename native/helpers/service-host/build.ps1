@@ -97,10 +97,32 @@ function Reset-BuildDirIfGeneratorChanged {
   Remove-Item -LiteralPath $resolvedBuildDir.Path -Recurse -Force
 }
 
+function Resolve-VersionStamp {
+  # The Windows VERSIONINFO resource needs an X.Y.Z. The native pipeline builds
+  # on a `native-vX.Y.Z` tag push, so GITHUB_REF_NAME already carries the
+  # release being cut — no extra workflow wiring, and the stamp cannot drift
+  # from the tag. Manual dispatch runs and local builds have no tag and stay
+  # 0.0.0 rather than claiming a release they are not part of.
+  if ($env:GEZEL_SERVICE_HOST_VERSION) {
+    $explicit = $env:GEZEL_SERVICE_HOST_VERSION.Trim()
+    if ($explicit -notmatch '^\d+\.\d+\.\d+$') {
+      throw "GEZEL_SERVICE_HOST_VERSION must be X.Y.Z, got '$explicit'"
+    }
+    return $explicit
+  }
+  if ($env:GITHUB_REF_NAME -and $env:GITHUB_REF_NAME -match '^native-v(\d+\.\d+\.\d+)$') {
+    return $matches[1]
+  }
+  return '0.0.0'
+}
+
 Import-VsDevEnv
 Reset-BuildDirIfGeneratorChanged -BuildDir $buildDir -Generator 'Ninja'
 
-& cmake -S $helperDir -B $buildDir -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+$versionStamp = Resolve-VersionStamp
+Write-Host "[service-host] stamping VERSIONINFO $versionStamp"
+
+& cmake -S $helperDir -B $buildDir -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DGEZEL_SERVICE_HOST_VERSION="$versionStamp"
 if ($LASTEXITCODE -ne 0) {
   throw "cmake configure failed (exit $LASTEXITCODE)"
 }
