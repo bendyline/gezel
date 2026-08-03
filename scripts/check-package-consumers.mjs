@@ -226,13 +226,21 @@ try {
   }
 
   step('auditing the npm consumer graph');
-  const audit = runPackageManager('npm', ['audit', '--omit=dev', '--audit-level=high', '--json'], {
-    cwd: consumer,
-  });
+  // critical matches every other vulnerability gate (quality.yml, the release
+  // workflows) — advisories land on npm's clock, not ours, and must not fail
+  // an unrelated validate run. The scheduled supply-chain-audit workflow is
+  // what surfaces sub-critical advisories.
+  const audit = runPackageManager(
+    'npm',
+    ['audit', '--omit=dev', '--audit-level=critical', '--json'],
+    {
+      cwd: consumer,
+    },
+  );
   if (audit.status !== 0) {
-    fail(`npm audit found a high-severity issue\n${audit.stdout}\n${audit.stderr}`);
+    fail(`npm audit found a critical-severity issue\n${audit.stdout}\n${audit.stderr}`);
   } else {
-    ok('npm audit reports no high-severity vulnerabilities');
+    ok('npm audit reports no critical-severity vulnerabilities');
   }
 
   if (process.platform === 'darwin') {

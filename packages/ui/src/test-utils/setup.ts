@@ -18,6 +18,34 @@ afterEach(() => {
   cleanup();
 });
 
+// jsdom implements getClientRects/getBoundingClientRect on Element but not on
+// Range, and ProseMirror measures caret coordinates through ranges. Any test
+// where the DOM selection lands inside a tiptap editor when a transaction
+// requests scroll-to-selection (undo does) crashes with
+// "target.getClientRects is not a function" — and whether the selection is
+// inside the editor at that moment is timing-dependent, so this passed on fast
+// laptops and failed on contended CI runners. Layout is all zeros under jsdom
+// anyway; empty/zero rects keep ProseMirror's scroll math a harmless no-op.
+if (typeof Range !== 'undefined') {
+  if (typeof Range.prototype.getClientRects !== 'function') {
+    Range.prototype.getClientRects = () => [] as unknown as DOMRectList;
+  }
+  if (typeof Range.prototype.getBoundingClientRect !== 'function') {
+    Range.prototype.getBoundingClientRect = () =>
+      ({
+        x: 0,
+        y: 0,
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        width: 0,
+        height: 0,
+        toJSON: () => ({}),
+      }) as DOMRect;
+  }
+}
+
 /**
  * Stable shape for `window.__GEZEL__` so view code that reads `platform`,
  * `mode`, etc. doesn't crash before the test gets a chance to assert.
