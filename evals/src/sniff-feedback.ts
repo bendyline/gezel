@@ -72,6 +72,73 @@ interface SniffEscalationState {
 }
 const escalationMemory = new WeakMap<EvalContext, Map<string, SniffEscalationState>>();
 
+function ensureEscalationState(
+  escalation: Map<string, SniffEscalationState>,
+  key: string,
+  revisionKey: string,
+): SniffEscalationState {
+  let state = escalation.get(key);
+  if (!state) {
+    state = {
+      attempts: 1,
+      lastRevisionKey: revisionKey,
+      sentSinceLastCount: false,
+      suppressionLogged: false,
+    };
+    escalation.set(key, state);
+  }
+  return state;
+}
+
+/**
+ * Advance one escalation counter using the delivered-then-completed
+ * discipline: a new revision (or a later committed successful mutation
+ * turn) after a delivered nudge = one failed attempt. Shared verbatim by
+ * the per-signature ladder and the score-plateau ladder so the
+ * anti-inflation guarantees stay identical.
+ */
+async function advanceEscalationState(
+  ctx: EvalContext,
+  state: SniffEscalationState,
+  revisionKey: string,
+  filePath: string,
+  ladder: 'signature' | 'plateau',
+): Promise<void> {
+  let completedPostNudgeRepair = false;
+  if (state.sentSinceLastCount && state.pendingRepairAction && ctx.snapshotRepairActions) {
+    const checkpoint = state.pendingRepairAction;
+    try {
+      const snapshot = await ctx.snapshotRepairActions({
+        sessionId: checkpoint.sessionId,
+        gezelId: checkpoint.gezelId,
+        ...(checkpoint.projectId ? { projectId: checkpoint.projectId } : {}),
+      });
+      completedPostNudgeRepair =
+        snapshot !== null &&
+        !snapshot.inflight &&
+        snapshot.completedMutationTurns > checkpoint.completedMutationTurns;
+    } catch (err) {
+      ctx.log(
+        `[sniff-feedback] completed repair-action check failed for ${checkpoint.gezelId}/${checkpoint.sessionId.slice(0, 8)}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+  const revisionChanged = revisionKey !== state.lastRevisionKey;
+  if ((revisionChanged || completedPostNudgeRepair) && state.sentSinceLastCount) {
+    state.attempts += 1;
+    state.sentSinceLastCount = false;
+    state.lastRevisionKey = revisionKey;
+    state.pendingRepairAction = undefined;
+    if (completedPostNudgeRepair) {
+      ctx.log(
+        `[sniff-feedback] counted completed post-nudge file mutation for ${filePath}${revisionChanged ? ' alongside a checked-content revision' : ' despite byte-identical checked content'} (${ladder} attempt ${state.attempts})`,
+      );
+    }
+  } else if (revisionChanged) {
+    state.lastRevisionKey = revisionKey;
+  }
+}
+
 /**
  * Cheap content fingerprint (fnv-1a over the first 4 KB + length) — the
  * revision detector for the escalation counter and a ready-made
@@ -104,6 +171,27 @@ export function stageForSniffAttempts(attempts: number): 0 | 1 | 2 | 3 {
   if (attempts >= 4) return 3;
   if (attempts === 3) return 2;
   if (attempts === 2) return 1;
+  return 0;
+}
+
+/**
+ * Score-plateau ladder — one notch later than the signature ladder.
+ *
+ * The signature ladder counts repeats of one frozen failure; it is blind
+ * to the PROGRESSIVE shape, where every completed repair fixes the named
+ * detail only for a different check to surface (failReason class and even
+ * the checked file keep moving) while the scenario score never rises.
+ * Wild-caught as qwen3.5-9b × schema-migration 0/5: store.ts → migrate.ts
+ * → handlers.ts, a fresh signature each time, attempts never reached 2,
+ * and the harness retry-loop killed the trial before any escalation fired.
+ * Later thresholds are deliberate: a model grinding through subcontracts
+ * is making a kind of progress the frozen ladder never sees, so it earns
+ * more runway before the terminal rung.
+ */
+export function stageForSniffPlateau(attempts: number): 0 | 1 | 2 | 3 {
+  if (attempts >= 6) return 3;
+  if (attempts >= 4) return 2;
+  if (attempts === 3) return 1;
   return 0;
 }
 
@@ -294,48 +382,20 @@ export async function postSniffFeedback(
   }
   const coarseKey = coarseSniffSignature(filePath, sniff);
   const revisionKey = `${exactKey}::rev:${contentRevisionToken(opts.sourceText ?? '')}`;
-  let state = escalation.get(coarseKey);
-  if (!state) {
-    state = {
-      attempts: 1,
-      lastRevisionKey: revisionKey,
-      sentSinceLastCount: false,
-      suppressionLogged: false,
-    };
-    escalation.set(coarseKey, state);
-  }
-  let completedPostNudgeRepair = false;
-  if (state.sentSinceLastCount && state.pendingRepairAction && ctx.snapshotRepairActions) {
-    const checkpoint = state.pendingRepairAction;
-    try {
-      const snapshot = await ctx.snapshotRepairActions({
-        sessionId: checkpoint.sessionId,
-        gezelId: checkpoint.gezelId,
-        ...(checkpoint.projectId ? { projectId: checkpoint.projectId } : {}),
-      });
-      completedPostNudgeRepair =
-        snapshot !== null &&
-        !snapshot.inflight &&
-        snapshot.completedMutationTurns > checkpoint.completedMutationTurns;
-    } catch (err) {
-      ctx.log(
-        `[sniff-feedback] completed repair-action check failed for ${checkpoint.gezelId}/${checkpoint.sessionId.slice(0, 8)}: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-  }
-  const revisionChanged = revisionKey !== state.lastRevisionKey;
-  if ((revisionChanged || completedPostNudgeRepair) && state.sentSinceLastCount) {
-    state.attempts += 1;
-    state.sentSinceLastCount = false;
-    state.lastRevisionKey = revisionKey;
-    state.pendingRepairAction = undefined;
-    if (completedPostNudgeRepair) {
-      ctx.log(
-        `[sniff-feedback] counted completed post-nudge file mutation for ${filePath}${revisionChanged ? ' alongside a checked-content revision' : ' despite byte-identical checked content'} (attempt ${state.attempts})`,
-      );
-    }
-  } else if (revisionChanged) {
-    state.lastRevisionKey = revisionKey;
+  const state = ensureEscalationState(escalation, coarseKey, revisionKey);
+  await advanceEscalationState(ctx, state, revisionKey, filePath, 'signature');
+
+  // Scenario-level score-plateau counter. Keyed on the score alone — the
+  // one thing stable across a progressive failure — so churn in the
+  // failReason, the missing-signal set, or even the checked file itself
+  // still accumulates. Any score improvement lands on a new key, which IS
+  // the reset. Score 0 stays the hard-progress watchdog's territory.
+  const plateauKey =
+    typeof sniff.score === 'number' && sniff.score > 0 ? `__plateau__::score:${sniff.score}` : null;
+  let plateauState: SniffEscalationState | undefined;
+  if (plateauKey) {
+    plateauState = ensureEscalationState(escalation, plateauKey, revisionKey);
+    await advanceEscalationState(ctx, plateauState, revisionKey, filePath, 'plateau');
   }
   // A write_file clamp is the wrong order when the fix needs a non-write
   // tool first. Plain expectedDeliverable-null flows stay surgical; an
@@ -343,7 +403,14 @@ export async function postSniffFeedback(
   // escalation. Do not cap the LOGICAL ladder at stage 1: reusing its
   // already-posted dedupe key would make attempt 4 and the bounded
   // exhaustion terminal unreachable.
-  const stage = stageForSniffAttempts(state.attempts);
+  const signatureStage = stageForSniffAttempts(state.attempts);
+  const plateauStage = plateauState ? stageForSniffPlateau(plateauState.attempts) : 0;
+  // The plateau ladder only ever RAISES the stage — a frozen signature
+  // repeating is always at least as damning as a churning one.
+  const plateauDriven = plateauStage > signatureStage;
+  const stage = plateauDriven ? plateauStage : signatureStage;
+  const stagedAttempts = plateauDriven ? plateauState!.attempts : state.attempts;
+  const drivingState = plateauDriven ? plateauState! : state;
 
   // Stage transitions re-key the binary dedup so the escalated message
   // actually sends even when every other hash input is frozen; identical
@@ -373,15 +440,17 @@ export async function postSniffFeedback(
   }
 
   if (stage >= 3) {
-    const failure = exhaustedSniffFeedbackFailure(filePath, sniff, state.attempts);
-    if (!state.suppressionLogged) {
-      state.suppressionLogged = true;
+    const failure = plateauDriven
+      ? plateauExhaustedFailure(filePath, sniff, stagedAttempts)
+      : exhaustedSniffFeedbackFailure(filePath, sniff, stagedAttempts);
+    if (!drivingState.suppressionLogged) {
+      drivingState.suppressionLogged = true;
       ctx.log(
-        `[sniff-feedback] escalation stage 3 for ${filePath} (${(sniff.missingRequiredSignals ?? []).join(',') || sniff.failReason}): suppressing further model nudges after ${state.attempts} completed misses and requesting terminal failure`,
+        `[sniff-feedback] escalation stage 3${plateauDriven ? ' (score plateau)' : ''} for ${filePath} (${(sniff.missingRequiredSignals ?? []).join(',') || sniff.failReason}): suppressing further model nudges after ${stagedAttempts} completed misses and requesting terminal failure`,
       );
     }
     ctx.requestTerminalFailure?.(failure);
-    return { status: 'exhausted', attempts: state.attempts, failure };
+    return { status: 'exhausted', attempts: stagedAttempts, failure };
   }
 
   if (!target) {
@@ -394,24 +463,29 @@ export async function postSniffFeedback(
   const postReadMutationRepair = !!opts.postReadMutationTarget;
   const structuralRewriteRepair =
     structuralOrderRepairLine(filePath, sniff.failReason) !== undefined;
+  const repeatLine = plateauDriven
+    ? sniffPlateauEscalationLine(filePath, sniff, stagedAttempts)
+    : sniffEscalationLine(filePath, sniff, stagedAttempts);
   const text =
     appendOnlyRepair && stage > 0
-      ? `${sniffAppendEscalationLine(filePath, sniff, state.attempts)}\n\n${formatNudge(filePath, sniff, opts)}`
+      ? `${sniffAppendEscalationLine(filePath, sniff, stagedAttempts)}\n\n${formatNudge(filePath, sniff, opts)}`
       : combinedRepair && stage > 0
-        ? `${sniffCombinedEscalationLine(filePath, sniff, state.attempts)}\n\n${formatNudge(filePath, sniff, opts)}`
+        ? `${sniffCombinedEscalationLine(filePath, sniff, stagedAttempts)}\n\n${formatNudge(filePath, sniff, opts)}`
         : postReadMutationRepair && stage > 0
           ? `${sniffPostReadMutationEscalationLine(
               opts.postReadMutationTarget!,
               sniff,
-              state.attempts,
+              stagedAttempts,
               structuralRewriteRepair,
             )}\n\n${formatNudge(filePath, sniff, opts)}`
           : stage === 2
             ? opts.targetedEditsOnly || opts.expectedDeliverable === null
-              ? `${sniffEscalationLine(filePath, sniff, state.attempts)}\n\n${formatNudge(filePath, sniff, opts)}`
-              : formatFullRewriteNudge(filePath, sniff, opts, state.attempts)
+              ? `${repeatLine}\n\n${formatNudge(filePath, sniff, opts)}`
+              : plateauDriven
+                ? `${repeatLine}\n\n${formatFullRewriteNudge(filePath, sniff, opts, stagedAttempts)}`
+                : formatFullRewriteNudge(filePath, sniff, opts, stagedAttempts)
             : stage === 1
-              ? `${sniffEscalationLine(filePath, sniff, state.attempts)}\n\n${formatNudge(filePath, sniff, opts)}`
+              ? `${repeatLine}\n\n${formatNudge(filePath, sniff, opts)}`
               : formatNudge(filePath, sniff, opts);
   const expectedDeliverable =
     opts.expectedDeliverable === undefined
@@ -462,8 +536,13 @@ export async function postSniffFeedback(
       );
     }
     posted.add(key);
-    state.sentSinceLastCount = true;
-    state.pendingRepairAction = undefined;
+    // A delivered nudge arms BOTH ladders' delivered-then-completed
+    // counters — the plateau must keep counting across signature churn.
+    const armedStates = plateauState ? [state, plateauState] : [state];
+    for (const s of armedStates) {
+      s.sentSinceLastCount = true;
+      s.pendingRepairAction = undefined;
+    }
     if (ctx.snapshotRepairActions) {
       const deliveredSessionId = delivered.sessionId ?? target.sessionId;
       const existingSessionWasIdle =
@@ -472,19 +551,21 @@ export async function postSniffFeedback(
         !repairActionBaseline.inflight;
       const newlyCreatedSession = target.sessionId === undefined && !!deliveredSessionId;
       if (deliveredSessionId && (existingSessionWasIdle || newlyCreatedSession)) {
-        state.pendingRepairAction = {
-          sessionId: deliveredSessionId,
-          gezelId: target.gezelId,
-          ...(deliveryProjectId ? { projectId: deliveryProjectId } : {}),
-          completedMutationTurns: repairActionBaseline?.completedMutationTurns ?? 0,
-        };
+        for (const s of armedStates) {
+          s.pendingRepairAction = {
+            sessionId: deliveredSessionId,
+            gezelId: target.gezelId,
+            ...(deliveryProjectId ? { projectId: deliveryProjectId } : {}),
+            completedMutationTurns: repairActionBaseline?.completedMutationTurns ?? 0,
+          };
+        }
       }
     }
     ctx.log(
-      `[sniff-feedback] nudged ${target.gezelId} about ${filePath} sniff failure${stage > 0 ? ` (escalation stage ${stage}, attempt ${state.attempts})` : ''}: ` +
+      `[sniff-feedback] nudged ${target.gezelId} about ${filePath} sniff failure${stage > 0 ? ` (escalation stage ${stage}${plateauDriven ? ' via score plateau' : ''}, attempt ${stagedAttempts})` : ''}: ` +
         `missing=[${(sniff.missingRequiredSignals ?? []).join(', ')}]${sniff.failReason ? ` failReason="${sniff.failReason}"` : ''}`,
     );
-    return { status: 'sent', stage: stage as 0 | 1 | 2, attempts: state.attempts };
+    return { status: 'sent', stage: stage as 0 | 1 | 2, attempts: stagedAttempts };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     ctx.log(`[sniff-feedback] messageGezel failed for ${target.gezelId}: ${msg}`);
@@ -498,9 +579,50 @@ export async function postSniffFeedback(
  * a surgical patch, not a rewrite (the provider's repair modes reinforce
  * the same direction).
  */
+/**
+ * Plateau-stage prepend: the failing DETAIL keeps moving but the score
+ * does not — symptom-at-a-time patching from memory. Distinct teaching
+ * from the frozen-signature line: demand a fresh read plus one whole-
+ * deliverable sweep against the scenario's requirements, not another
+ * chase of the newest named check.
+ */
+function sniffPlateauEscalationLine(
+  filePath: string,
+  sniff: SniffResult,
+  attempts: number,
+): string {
+  const score = typeof sniff.score === 'number' ? sniff.score : 0;
+  return `SCORE PLATEAU — ${attempts} completed repairs and the scenario score is still ${score}. Each repair fixed the previously named detail only for a DIFFERENT check to fail; you are patching symptoms one at a time from memory. First call \`read_file({ path: ${JSON.stringify(filePath)} })\` to see the current content, then re-read the scenario prompt and mission objectives, and fix EVERY remaining gap in \`${filePath}\` in one pass — not just the failure named below.`;
+}
+
+/** Terminal reason for a plateau-driven exhaustion — names the shape honestly. */
+function plateauExhaustedFailure(
+  filePath: string,
+  sniff: SniffResult,
+  attempts: number,
+): EvalTerminalFailure {
+  const score = typeof sniff.score === 'number' ? sniff.score : 0;
+  const failure = sniff.failReason?.replace(/\s+/g, ' ').trim().slice(0, 700);
+  return {
+    reason: [
+      `repair-exhausted (score plateau): ${attempts} completed repairs with the scenario score frozen at ${score} while the failing detail kept changing; latest checked file ${filePath}.`,
+      failure ? `Last failure: ${failure}` : '',
+    ]
+      .filter(Boolean)
+      .join(' '),
+    failureMode: 'model-stuck',
+  };
+}
+
 function sniffEscalationLine(filePath: string, sniff: SniffResult, attempts: number): string {
   const missing = (sniff.missingRequiredSignals ?? []).join(', ');
-  return `REPEAT MISS — attempt ${attempts} on \`${filePath}\`: your completed repair left the exact same check failing${missing ? ` (${missing})` : ''}. Do not rewrite the whole file and do not reply that it is done. Make the smallest targeted edit that fixes the FIRST failure named below, using \`replace_in_file\` or \`replace_lines\` on the exact section the check names.`;
+  // The fresh-read requirement is load-bearing: a completed repair that
+  // left the same check failing means the model's mental copy of the file
+  // is wrong somewhere — it patched the wrong spot, or the edit didn't
+  // land the way it believes. Wild-caught on qwen3.5-9b × schema-migration
+  // (0/5): three rewrites of the checked file without sniff movement, each
+  // patching from memory of a file that no longer said what it thought.
+  return `REPEAT MISS — attempt ${attempts} on \`${filePath}\`: your completed repair left the exact same check failing${missing ? ` (${missing})` : ''}. Your last edit did not change what the check reads, so your mental copy of this file is stale — first call \`read_file({ path: ${JSON.stringify(filePath)} })\` and find the exact section the failure below names in the CURRENT content. Do not rewrite the whole file and do not reply that it is done. Then make the smallest targeted edit that fixes the FIRST failure named below, using \`replace_in_file\` or \`replace_lines\` on the exact section the check names.`;
 }
 
 function hasAppendOnlyRepairDirective(directive: string | undefined): boolean {
