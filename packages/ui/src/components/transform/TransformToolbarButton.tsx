@@ -45,7 +45,7 @@ export function TransformToolbarButton({
   subject,
   parentContext,
 }: TransformToolbarButtonProps) {
-  const { tiptapEditor, monacoEditor, activeView } = useEditorContext();
+  const { tiptapEditor, monacoEditor, activeView, insertAtCursor } = useEditorContext();
   const [snapshot, setSnapshot] = useState<SelectionSnapshot | null>(null);
 
   const supported =
@@ -58,7 +58,13 @@ export function TransformToolbarButton({
       if (from !== to) {
         const text = doc.textBetween(from, to, '\n');
         if (text.trim()) {
-          return { mode: 'rewrite', view: 'wysiwyg', text, tiptapRange: { from, to } };
+          return {
+            mode: 'rewrite',
+            view: 'wysiwyg',
+            text,
+            tiptapRange: { from, to },
+            tiptapAll: from === 0 && to === doc.content.size,
+          };
         }
       }
       return {
@@ -109,11 +115,20 @@ export function TransformToolbarButton({
     (snap: SelectionSnapshot, text: string) => {
       if (snap.view === 'wysiwyg' && tiptapEditor && snap.tiptapRange) {
         const { from, to } = snap.tiptapRange;
-        if (snap.mode === 'insert') {
-          tiptapEditor.chain().focus().insertContentAt(from, text).run();
+        // The dialog owns focus while the result is reviewed, so first restore
+        // the exact captured selection. Then delegate the insertion to
+        // Squisq: its public action runs Markdown through the same
+        // markdownToTiptap bridge as paste/drop. Passing the Markdown string
+        // directly to Tiptap's insertContentAt() treats it as literal text,
+        // escaping marks and nesting headings inside the selected block.
+        // insertContent replaces a non-empty selection in one history event,
+        // which also keeps the whole transform reversible with one Undo.
+        if (snap.tiptapAll) {
+          tiptapEditor.chain().focus().selectAll().run();
         } else {
-          tiptapEditor.chain().focus().insertContentAt({ from, to }, text).run();
+          tiptapEditor.chain().focus().setTextSelection({ from, to }).run();
         }
+        insertAtCursor(text);
       } else if (snap.view === 'raw' && monacoEditor && snap.monacoRange) {
         monacoEditor.executeEdits('ai-transform', [
           { range: snap.monacoRange, text, forceMoveMarkers: true },
@@ -121,7 +136,7 @@ export function TransformToolbarButton({
         monacoEditor.focus();
       }
     },
-    [tiptapEditor, monacoEditor],
+    [tiptapEditor, monacoEditor, insertAtCursor],
   );
 
   return (

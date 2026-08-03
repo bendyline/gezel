@@ -664,9 +664,9 @@ export function ChatTimelineView({
    * `queue_removed` SSE events; seeded from `/api/queues` on mount
    * and on scope change.
    */
-  const queuedRef = useRef<Map<string, Array<{ id: string; preview: string; enqueuedAt: string }>>>(
-    new Map(),
-  );
+  const queuedRef = useRef<
+    Map<string, Array<{ id: string; preview: string; enqueuedAt: string; nudge?: boolean }>>
+  >(new Map());
   /**
    * Per-session context-window status — sticky once set, shown as a
    * banner above the timeline when the session is the active one.
@@ -894,6 +894,7 @@ export function ChatTimelineView({
                 id: e.queueId,
                 preview: e.preview,
                 enqueuedAt: e.enqueuedAt,
+                ...(e.nudge ? { nudge: true } : {}),
               })),
             );
           }
@@ -1560,6 +1561,7 @@ export function ChatTimelineView({
           // Preserve the cross-gezel `from` sentinel so the live bubble
           // renders as a "Yusuf → Leo" handoff instead of "You".
           ...(event.message.from ? { from: event.message.from } : {}),
+          ...(event.message.nudge ? { nudge: true } : {}),
         };
         const dedupKey = `${sessionId}:${event.message.at}:${event.message.role}`;
         setMessages((prev) => {
@@ -1799,6 +1801,7 @@ export function ChatTimelineView({
           id: event.queueId,
           preview: event.preview,
           enqueuedAt: event.enqueuedAt,
+          ...(event.nudge ? { nudge: true } : {}),
         };
         const existing = list.findIndex((e) => e.id === event.queueId);
         if (existing >= 0) {
@@ -2874,6 +2877,7 @@ export function ChatTimelineView({
         })()}
         {...(!roleBasedNameOnlyMode && gezel?.role ? { authorRole: gezel.role } : {})}
         {...(m.from ? { from: m.from } : {})}
+        {...(m.nudge ? { nudge: true } : {})}
         receiverLabel={
           gezel
             ? displayName(
@@ -3051,6 +3055,7 @@ export function ChatTimelineView({
             queueId={entry.id}
             preview={entry.preview}
             enqueuedAt={entry.enqueuedAt}
+            {...(entry.nudge ? { nudge: true } : {})}
             onDiscard={async () => {
               try {
                 await api.cancelQueuedMessage(sessionId, entry.id);
@@ -3063,6 +3068,27 @@ export function ChatTimelineView({
                 await api.cancelChatSessionTurn(sessionId);
               } catch (err) {
                 console.warn('[timeline] failed to cancel current turn:', err);
+              }
+            }}
+            onLoadText={async () => {
+              // Lazy full-text fetch — the SSE event only carries a
+              // truncated preview. `null` when the entry is gone.
+              try {
+                const res = await api.listSessionQueue(sessionId);
+                return res.entries.find((e) => e.queueId === entry.id)?.text ?? null;
+              } catch {
+                return null;
+              }
+            }}
+            onSaveEdit={async (text) => {
+              try {
+                await api.updateQueuedMessage(sessionId, entry.id, { message: text });
+                return true;
+              } catch (err) {
+                // 404 → the entry started or was discarded mid-edit;
+                // the ghost is about to vanish via queue_removed.
+                if (/not found/i.test((err as Error).message ?? '')) return false;
+                throw err;
               }
             }}
           />,

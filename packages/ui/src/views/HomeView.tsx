@@ -433,9 +433,8 @@ export function HomeView({
         </section>
 
         {/* Optional local media models (image / speech / video) — recommended
-          picks that fit this device, plus a "Download all" that also grabs
-          the recommended chat model above. */}
-        <RecommendedMediaDownloads config={config} />
+          picks that fit this device, reviewed explicitly before download. */}
+        <RecommendedMediaDownloads />
 
         {/* ── 2. Experience ────────────────────────────────────────── */}
         {/* "Boring mode" is one toggle over the two existing display flags:

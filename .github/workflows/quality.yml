@@ -164,10 +164,13 @@ jobs:
       - name: Generate production SBOM
         run: pnpm audit:sbom
       - name: Production dependency vulnerability gate
-        # Runs here as well as in the release workflow so a new advisory
-        # lands on the PR that introduces the dependency, rather than
-        # surfacing for the first time as a blocked release.
-        run: pnpm audit:vulnerabilities
+        # Blocks at critical only, matching the release workflows exactly —
+        # publish must never fail on something CI passed. Advisories are
+        # published against our pinned versions on npm's clock, not ours, so
+        # anything below critical prints as a warning here and surfaces
+        # within a day via the scheduled supply-chain-audit workflow instead
+        # of failing whatever unrelated PR happens to be open.
+        run: pnpm audit:vulnerabilities --audit-level=critical
       - name: Dependency license policy gate
         run: pnpm audit:licenses
       - name: Preserve supply-chain inventory

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { MemoryProfile } from './memory.js';
-import { sampleMachineMemoryUsage } from './memory.js';
+import { sampleMachineMemoryUsage, summarizeResidentModels } from './memory.js';
 
 const GiB = 1024 ** 3;
 
@@ -26,6 +26,7 @@ describe('sampleMachineMemoryUsage', () => {
         source: 'darwin-unified',
       }),
       engineCommittedBytes: 10 * GiB,
+      engineBudgetBytes: 38 * GiB,
       engineModelWeightsBytes: 8 * GiB,
       serviceRssBytes: 2 * GiB,
       freeRamBytes: 20 * GiB,
@@ -42,6 +43,8 @@ describe('sampleMachineMemoryUsage', () => {
       gezelModelWeightsBytes: 8 * GiB,
       gezelModelCacheBytes: 2 * GiB,
       engineReservedBytes: 10 * GiB,
+      engineBudgetBytes: 38 * GiB,
+      residentModels: [],
       gezelEngineProcessCount: 0,
       orphanedGezelEngineProcessCount: 0,
       otherBytes: 32 * GiB,
@@ -188,10 +191,35 @@ describe('sampleMachineMemoryUsage', () => {
     });
   });
 
-  it('keeps other/free unknown when a driver exposes capacity but not use', () => {
+  it('attributes nothing to the pool when a driver exposes capacity but not use', () => {
+    // Regression: the reservation used to be clamped into the card's own
+    // capacity, so three resident models reserving more than the card holds
+    // drew a full bar and claimed Gezel was using every byte of VRAM.
     const usage = sampleMachineMemoryUsage({
       profile: profile({ source: 'gpu-vulkan', gpuVendor: 'amd' }),
-      engineCommittedBytes: 4 * GiB,
+      engineCommittedBytes: 50 * GiB,
+      engineBudgetBytes: 68 * GiB,
+      engineModelWeightsBytes: 40 * GiB,
+      residentModels: [
+        {
+          provider: 'llama-cpp',
+          modelId: 'qwen3.6-35b-a3b-q4',
+          reservedBytes: 25 * GiB,
+          replicaCount: 1,
+        },
+        {
+          provider: 'llama-cpp',
+          modelId: 'qwen3.6-27b-q4',
+          reservedBytes: 19 * GiB,
+          replicaCount: 1,
+        },
+        {
+          provider: 'llama-cpp',
+          modelId: 'gemma4-e4b-q4',
+          reservedBytes: 6 * GiB,
+          replicaCount: 1,
+        },
+      ],
       deviceHealth: {
         state: 'healthy',
         mode: 'observe',
@@ -213,9 +241,48 @@ describe('sampleMachineMemoryUsage', () => {
     expect(usage).toMatchObject({
       totalBytes: 16 * GiB,
       usedBytes: null,
-      gezelBytesEstimated: 4 * GiB,
+      gezelBytesEstimated: 0,
+      gezelInfraBytes: 0,
+      gezelModelWeightsBytes: 0,
+      gezelModelCacheBytes: 0,
+      engineReservedBytes: 50 * GiB,
+      engineBudgetBytes: 68 * GiB,
       otherBytes: null,
       freeBytes: null,
     });
+    expect(usage.residentModels).toHaveLength(3);
+  });
+});
+
+describe('summarizeResidentModels', () => {
+  it('collapses replicas of one model into a single heaviest-first row', () => {
+    expect(
+      summarizeResidentModels([
+        { provider: 'llama-cpp', modelId: 'gemma4-e4b-q4', residentBytes: 6 * GiB },
+        { provider: 'llama-cpp', modelId: 'qwen3.6-27b-q4', residentBytes: 19 * GiB },
+        { provider: 'llama-cpp', modelId: 'gemma4-e4b-q4', residentBytes: 6 * GiB },
+      ]),
+    ).toEqual([
+      {
+        provider: 'llama-cpp',
+        modelId: 'qwen3.6-27b-q4',
+        reservedBytes: 19 * GiB,
+        replicaCount: 1,
+      },
+      {
+        provider: 'llama-cpp',
+        modelId: 'gemma4-e4b-q4',
+        reservedBytes: 12 * GiB,
+        replicaCount: 2,
+      },
+    ]);
+  });
+
+  it('keeps the same model id under two engines apart', () => {
+    const rows = summarizeResidentModels([
+      { provider: 'llama-cpp', modelId: 'gemma4-e4b-q4', residentBytes: 6 * GiB },
+      { provider: 'mlx', modelId: 'gemma4-e4b-q4', residentBytes: 7 * GiB },
+    ]);
+    expect(rows.map((row) => row.provider)).toEqual(['mlx', 'llama-cpp']);
   });
 });

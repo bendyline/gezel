@@ -15,6 +15,11 @@
  * Anything above the auto mark is flagged, not blocked: a budget the
  * machine cannot really back shows up as heavy swapping rather than a
  * clean error, so the honest thing is to let people go there deliberately.
+ *
+ * The panel also carries the co-residency choice on discrete-GPU hosts
+ * ({@link RamSpilloverChoice}) — a related but separate question: not how
+ * much memory models may hold, but whether a second model may push the
+ * resident set off the card.
  */
 
 import type { EngineStatusResponse } from '@bendyline/gezel-client';
@@ -181,6 +186,88 @@ export function EngineMemoryBudgetPanel({ status, onSaved }: EngineMemoryBudgetP
           {message}
         </p>
       )}
+
+      {onCard && <RamSpilloverChoice status={status} onSaved={onSaved} />}
+    </div>
+  );
+}
+
+/**
+ * What happens when a second model won't fit beside the first on the card.
+ *
+ * Discrete-GPU hosts only: unified and CPU-only machines have one pool, so
+ * there is nothing to spill into and the choice would be noise. Deliberately
+ * three keys rather than a switch — "Automatic" has to stay a visible
+ * position, the same way the budget slider marks its auto point, or a user
+ * who tries the other two can never get back to the host's own judgement.
+ */
+function RamSpilloverChoice({ status, onSaved }: EngineMemoryBudgetPanelProps) {
+  const spillover = status.ramSpillover;
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const onPick = useCallback(
+    async (allow: boolean | null) => {
+      setSaving(true);
+      setError(null);
+      try {
+        await api.updateConfig({ allowRamSpillover: allow });
+        await onSaved();
+      } catch (err) {
+        setError(`Could not save: ${err instanceof Error ? err.message : String(err)}`);
+      } finally {
+        setSaving(false);
+      }
+    },
+    [onSaved],
+  );
+
+  // A daemon that predates the field tells us nothing to render honestly.
+  if (!spillover) return null;
+
+  const selected: 'auto' | 'card' | 'spill' = !spillover.overridden
+    ? 'auto'
+    : spillover.allowed
+      ? 'spill'
+      : 'card';
+  const keys: Array<{ id: typeof selected; label: string; value: boolean | null }> = [
+    { id: 'auto', label: 'Automatic', value: null },
+    { id: 'card', label: 'Unload one', value: false },
+    { id: 'spill', label: 'Use system memory', value: true },
+  ];
+
+  return (
+    <div className="engine-spillover">
+      <h4>When a second model won't fit the graphics card</h4>
+      <p className="muted small">
+        Gezel can unload the model you haven't used recently, or keep both loaded by spilling into
+        system memory. Spilling keeps everything available but slows every model sharing the card —
+        most noticeably with several chats or tasks running at once. A single model larger than the
+        card always uses system memory; this only applies once more than one is loaded.
+      </p>
+      <fieldset className="gz-tray engine-spillover-tray">
+        <legend className="sr-only">When a second model won't fit the graphics card</legend>
+        {keys.map((key) => (
+          <button
+            key={key.id}
+            type="button"
+            // biome-ignore lint/a11y/useSemanticElements: keys-in-trays choice control (docs/ux.md) — a native <input type=radio> can't carry the pressed-key shape.
+            role="radio"
+            aria-checked={selected === key.id}
+            className={`gz-key${selected === key.id ? ' gz-key-active' : ''}`}
+            disabled={saving}
+            onClick={() => void onPick(key.value)}
+          >
+            {key.label}
+          </button>
+        ))}
+      </fieldset>
+      <p className="muted small">
+        Automatic uses system memory on cards up to 12 GB, where models rarely fit together anyway,
+        and unloads on larger ones. On this machine that means{' '}
+        {spillover.auto ? 'using system memory' : 'unloading one'}.
+      </p>
+      {error && <p className="error">{error}</p>}
     </div>
   );
 }

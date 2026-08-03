@@ -14,7 +14,7 @@
  * will lean on: every generated craftbook must clear this same bar.
  */
 
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { CraftbookSchema, type StepGateUnion, normalizeStepGate } from '@bendyline/gezel';
 import { describe, expect, it } from 'vitest';
@@ -123,5 +123,64 @@ describe('bundled craftbook templates', () => {
       }
     }
     expect(missingFile, 'craftbooks whose logo file is absent or empty').toEqual([]);
+  });
+
+  // gstack-import.test.ts asserts this for the nine books the snapshot
+  // converter generates, which is why five hand-authored books in gilde drifted
+  // past it: they never go through `convertSnapshotSkill`. This checks the
+  // shipped bytes instead of the generator, so it covers both origins — and any
+  // future book, however it was authored.
+  //
+  // `basedOn` is the sanctioned home for upstream credit and is exempt.
+  // Everything else is prose a gezel user reads (tags render as chips in the
+  // catalog browser; the doc `description` is what the craftbook editor shows),
+  // and naming a CLI they do not have only confuses them.
+  it('shipped craftbooks keep upstream branding inside basedOn', async () => {
+    const manifests = await loadManifests();
+    const offenders: string[] = [];
+
+    const scan = (label: string, value: unknown, path = '') => {
+      if (typeof value === 'string') {
+        if (/gstack|gbrain/i.test(value)) offenders.push(`${label}${path}`);
+        return;
+      }
+      if (Array.isArray(value)) {
+        for (const entry of value) scan(label, entry, path);
+        return;
+      }
+      if (value && typeof value === 'object') {
+        for (const [key, entry] of Object.entries(value)) {
+          if (key === 'basedOn') continue;
+          scan(label, entry, `${path}/${key}`);
+        }
+      }
+    };
+
+    for (const m of manifests) scan(`manifest ${m.id}`, m);
+
+    // The index denormalizes manifests only; each version's full document sits
+    // beside it on disk and is what actually installs into a user's craftbook.
+    for (const m of manifests) {
+      const shard = m.id.slice(0, 2).toLowerCase();
+      const versionsDir = join(gildeDataDir(), 'craftbook-templates', shard, m.id, 'versions');
+      let versions: string[];
+      try {
+        versions = await readdir(versionsDir);
+      } catch {
+        continue;
+      }
+      for (const version of versions) {
+        const docPath = join(versionsDir, version, 'craftbook.json');
+        let doc: unknown;
+        try {
+          doc = JSON.parse(await readFile(docPath, 'utf8'));
+        } catch {
+          continue;
+        }
+        scan(`doc ${m.id}@${version}`, doc);
+      }
+    }
+
+    expect(offenders, 'craftbook fields naming upstream tooling outside basedOn').toEqual([]);
   });
 });

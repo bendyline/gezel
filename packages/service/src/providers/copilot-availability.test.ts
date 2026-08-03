@@ -1,6 +1,6 @@
 import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { systemToolsetsInstallDir } from '@bendyline/gezel/paths';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { SYSTEM_TOOLSETS } from '../system-toolsets/manifest.js';
@@ -37,7 +37,17 @@ async function writePackage(root: string, name: string, files: string[]): Promis
   return pkgDir;
 }
 
-async function seedManagedInstall(version: string, integrity: string): Promise<string> {
+/**
+ * Seeds a *healthy* managed install: tracking record, package root, and the
+ * manifest's entry file. The availability probe now verifies the tree loads
+ * (entry present, declared deps resolvable), so a bare directory reads as
+ * `damaged` — which is its own set of cases below.
+ */
+async function seedManagedInstall(
+  version: string,
+  integrity: string,
+  opts: { entryFile?: boolean; dependencies?: Record<string, string> } = {},
+): Promise<string> {
   await writeSystemTracking(home, {
     toolsets: {
       [COPILOT_TOOLSET_ID]: {
@@ -55,6 +65,19 @@ async function seedManagedInstall(version: string, integrity: string): Promise<s
     'package',
   );
   await mkdir(root, { recursive: true });
+  await writeFile(
+    join(root, 'package.json'),
+    JSON.stringify({
+      name: pinned().pkg,
+      version,
+      ...(opts.dependencies ? { dependencies: opts.dependencies } : {}),
+    }),
+  );
+  if (opts.entryFile !== false && pinned().entry) {
+    const entryPath = join(root, pinned().entry as string);
+    await mkdir(dirname(entryPath), { recursive: true });
+    await writeFile(entryPath, '');
+  }
   return root;
 }
 
@@ -144,6 +167,57 @@ describe('resolveCopilotAvailability', () => {
       cliPath: '/opt/copilot',
       // Still reports what we manage, so the settings card can show both.
       managed: 'current',
+    });
+  });
+
+  // The Settings-says-Installed / Test-connection-says-not-installed
+  // contradiction: a tree that exists on disk but cannot load. Presence must
+  // never be reported as working — that combination left the user with no
+  // repair affordance anywhere in the UI.
+  it('reports a tree whose entry file is missing as damaged, not current', async () => {
+    const entry = pinned();
+    await seedManagedInstall(entry.version, entry.integrity, { entryFile: false });
+    const result = await resolveCopilotAvailability(home, isolate());
+    expect(result).toMatchObject({
+      available: false,
+      source: null,
+      managed: 'damaged',
+      installedVersion: entry.version,
+      updateAvailable: false,
+    });
+    expect(result.damagedReason).toMatch(/entry file/);
+  });
+
+  // The pre-hoisted-linker Windows shape: junctions dangling after the
+  // staging rename, so a declared dependency no longer resolves.
+  it('reports a tree with an unresolvable declared dependency as damaged', async () => {
+    const entry = pinned();
+    await seedManagedInstall(entry.version, entry.integrity, {
+      dependencies: { '@github/copilot': '^1.0.0' },
+    });
+    const result = await resolveCopilotAvailability(home, isolate());
+    expect(result.managed).toBe('damaged');
+    expect(result.available).toBe(false);
+    expect(result.damagedReason).toMatch(/@github\/copilot/);
+  });
+
+  // Damage only disqualifies the managed rung — a CLI the user installed
+  // themselves still makes Copilot available.
+  it('falls through to a PATH CLI when the managed install is damaged', async () => {
+    const entry = pinned();
+    await seedManagedInstall(entry.version, entry.integrity, { entryFile: false });
+    const prefix = join(dir, 'npm-global');
+    const platform = await writePackage(join(prefix, 'node_modules'), PLATFORM_PKG, ['index.js']);
+    await writePackage(join(prefix, 'node_modules'), '@github/copilot', ['npm-loader.js']);
+    await writeFile(join(prefix, 'copilot.cmd'), '');
+
+    expect(
+      await resolveCopilotAvailability(home, isolate({ env: { PATH: prefix } })),
+    ).toMatchObject({
+      available: true,
+      source: 'path',
+      managed: 'damaged',
+      cliPath: join(platform, 'index.js'),
     });
   });
 

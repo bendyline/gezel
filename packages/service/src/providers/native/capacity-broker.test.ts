@@ -183,6 +183,127 @@ describe('CapacityBroker', () => {
     expect(b.canReserve(1 * GB)).toBe(true);
   });
 
+  describe('RAM spillover / co-residency', () => {
+    // 64 GB host, 32 GB card: usable VRAM 30.4 GB, RAM share 38.4 GB.
+    const discrete = (allowRamSpillover: boolean | null) =>
+      new CapacityBroker({
+        systemRamBytes: () => 64 * GB,
+        gpuVramBytes: 32 * GB,
+        unifiedMemory: false,
+        allowRamSpillover,
+      });
+    const vramUsable = Math.floor(32 * GB * 0.95);
+
+    it('auto-allows spilling up to a 12 GB card and refuses it above', () => {
+      const small = new CapacityBroker({
+        systemRamBytes: () => 32 * GB,
+        gpuVramBytes: 12 * GB,
+        unifiedMemory: false,
+      });
+      expect(small.ramSpilloverAllowed()).toBe(true);
+      expect(discrete(null).ramSpilloverAllowed()).toBe(false);
+    });
+
+    it('never binds on a host with one memory pool', () => {
+      const uma = new CapacityBroker({ systemRamBytes: () => 64 * GB, unifiedMemory: true });
+      expect(uma.ramSpilloverAllowed()).toBe(true);
+      expect(uma.coResidencyBytes()).toBe(uma.committed().budgetBytes);
+    });
+
+    it('lets ONE model exceed the card — the big-MoE case the budget exists for', () => {
+      const b = discrete(false);
+      // 40 GB is past the card but well inside the 68 GB budget: it streams
+      // experts from system RAM, which is the whole point of the RAM share.
+      expect(b.canReserve(40 * GB)).toBe(true);
+      expect(b.reserve('llama-cpp:big-moe:0', 40 * GB).granted).toBe(true);
+    });
+
+    it('refuses a SECOND model that would push the resident set off the card', () => {
+      const b = discrete(false);
+      b.reserve('llama-cpp:a:0', 20 * GB);
+      expect(b.canReserve(5 * GB)).toBe(true); // 25 GB still fits the card
+      expect(b.canReserve(12 * GB)).toBe(false); // 32 GB does not
+      const r = b.reserve('llama-cpp:b:0', 12 * GB);
+      expect(r.granted).toBe(false);
+      expect(r.reason).toMatch(/budget exhausted/);
+      expect(r.reason).toMatch(/co-residency ceiling/);
+      expect(b.committedBytes()).toBe(20 * GB);
+    });
+
+    it('allows the same pair once spilling is turned on', () => {
+      const b = discrete(true);
+      b.reserve('llama-cpp:a:0', 20 * GB);
+      expect(b.reserve('llama-cpp:b:0', 12 * GB).granted).toBe(true);
+      expect(b.committedBytes()).toBe(32 * GB);
+    });
+
+    it('setAllowRamSpillover re-points the rule live and null reverts to auto', () => {
+      const b = discrete(true);
+      b.reserve('llama-cpp:a:0', 20 * GB);
+      expect(b.canReserve(12 * GB)).toBe(true);
+
+      b.setAllowRamSpillover(false);
+      expect(b.canReserve(12 * GB)).toBe(false);
+      expect(b.committed().ramSpillover.overridden).toBe(true);
+
+      b.setAllowRamSpillover(null);
+      // Auto on a 32 GB card is "don't spill", so the answer stands.
+      expect(b.canReserve(12 * GB)).toBe(false);
+      expect(b.committed().ramSpillover).toMatchObject({
+        allowed: false,
+        auto: false,
+        overridden: false,
+        coResidencyBytes: vramUsable,
+      });
+    });
+
+    it('sizes the shortfall so the pool evicts exactly what the rule needs', () => {
+      const b = discrete(false);
+      b.reserve('llama-cpp:a:0', 20 * GB);
+      // Releasing a's 20 GB is enough to seat a 12 GB model beside nothing.
+      expect(b.shortfallFor(12 * GB)).toBeGreaterThan(0);
+      expect(b.shortfallFor(12 * GB)).toBeLessThanOrEqual(20 * GB);
+      // A model past the ceiling needs the pool empty — never more than that.
+      expect(b.shortfallFor(40 * GB)).toBe(20 * GB);
+      // A resize of the SAME key isn't an obstacle to itself.
+      expect(b.shortfallFor(25 * GB, 20 * GB)).toBe(0);
+    });
+
+    it('leaves the rule off entirely when enforcement is disabled', () => {
+      const b = new CapacityBroker({
+        budgetBytes: 0,
+        gpuVramBytes: 32 * GB,
+        unifiedMemory: false,
+        allowRamSpillover: false,
+      });
+      b.reserve('llama-cpp:a:0', 30 * GB);
+      expect(b.canReserve(30 * GB)).toBe(true);
+      expect(b.shortfallFor(30 * GB)).toBe(0);
+    });
+  });
+
+  it('formatCapacityDenial explains a co-residency refusal as a different problem', () => {
+    const msg = formatCapacityDenial({
+      modelLabel: 'qwen3.6-27b-q4',
+      requestedBytes: 20 * GB,
+      budgetBytes: 68 * GB,
+      committedBytes: 25 * GB,
+      systemRamBytes: 64 * GB,
+      coResidencyBytes: 30 * GB,
+      pools: {
+        kind: 'discrete-gpu',
+        vramBytes: 30 * GB,
+        ramShareBytes: 38 * GB,
+        fastBytes: 30 * GB,
+      },
+    });
+    expect(msg).toMatch(/keep models on the graphics card/);
+    expect(msg).toMatch(/every loaded model is busy right now/);
+    // Must not send someone shopping for a smaller model: the machine has
+    // the memory, it is the on-card policy plus busy engines that refused.
+    expect(msg).not.toMatch(/smaller or more-quantized/);
+  });
+
   it('formatCapacityDenial produces a human-readable, actionable message', () => {
     // The real-world case from the bug report: gemma 12b q4 on a 16 GB Mac.
     const msg = formatCapacityDenial({

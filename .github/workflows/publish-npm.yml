@@ -99,7 +99,9 @@ jobs:
       - name: Generate SBOM
         run: pnpm audit:sbom
       - name: Audit vulnerabilities
-        run: pnpm audit:vulnerabilities
+        # critical matches the PR-time gate in quality.yml — the two must
+        # stay in lockstep so a publish never fails on something CI passed.
+        run: pnpm audit:vulnerabilities --audit-level=critical
 
       - name: Upload SBOM
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

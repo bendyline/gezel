@@ -1432,8 +1432,8 @@
             46.7
           ],
           "p": "docs",
-          "h": "ce1112d2cce8aba4b57ce0b301cb7e9d962aa39ab035429539e3f13a5b0447f6",
-          "w": 633,
+          "h": "63958ce6c0ad2b6aee083d7b8cbebcb92fa081d28f948708cf5d0c3d2cba46ff",
+          "w": 643,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -14931,8 +14931,8 @@
             20.4
           ],
           "p": "packages/app/src/supervisor",
-          "h": "d318a5f5e06942e01ed84045000b4e3defea84e1385cd467437ba195a3e3f7d5",
-          "w": 91,
+          "h": "8481b8c8b011404b0c0320980b272d02f67d75c53e7b485c1e372c33edf41a95",
+          "w": 95,
           "a": "2026-07-31T17:30:53.594Z"
         },
         {
@@ -15799,8 +15799,8 @@
             39.6
           ],
           "p": "packages/catalog/src/install",
-          "h": "6f689aa050ddaf4f5672d71072f33ac57a95d75e23a50d5bd94da55f7c6f28c0",
-          "w": 481,
+          "h": "5165d28548eaacda5411a4bf0e85a1274a3d2eb782f24e38dfa2db7cf65860cc",
+          "w": 485,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -16933,8 +16933,8 @@
             28.6
           ],
           "p": "packages/core/src",
-          "h": "521ea4252f23b486c12e609166cab7f22dc323754a3b7cd191a2a276a00f4ecf",
-          "w": 183,
+          "h": "663dae8495ca93a6eb84f825d3ea333e19d7d23b891214cf87a3b049e1248e2c",
+          "w": 189,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -17149,6 +17149,20 @@
         },
         {
           "k": "block",
+          "id": "packages/core/src/native/console-detach.ts",
+          "r": [
+            1776.3,
+            1505.5,
+            22.1,
+            15.9
+          ],
+          "p": "packages/core/src/native",
+          "h": "381000978085b929324663810a577ae68e1423ae8f8a4a9c2fdcbab635b8c2a3",
+          "w": 26,
+          "a": "2026-08-03T16:21:18.505Z"
+        },
+        {
+          "k": "block",
           "id": "packages/core/src/native/device-health.ts",
           "r": [
             1707.3,
@@ -17157,8 +17171,8 @@
             56.1
           ],
           "p": "packages/core/src/native",
-          "h": "40a9da1e0383f6a42cebdb76c59f414a78d6ac686e21ed84be4b77a0e2b52698",
-          "w": 817,
+          "h": "fcf29e5b3fe7c1e6b9a8e3e1aed58cb361175e566df4cdff045213a35b47ee2d",
+          "w": 823,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -17199,8 +17213,8 @@
             19.8
           ],
           "p": "packages/core/src/native",
-          "h": "71c76bc44a175ec23e96e72ce3b4f7532f0dab8b203df7818d38ca375683b464",
-          "w": 77,
+          "h": "21bc65d6731493f1e59895d349ef4d7428bf83f4c1ccd5bb06a74005fcc23316",
+          "w": 78,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -17521,8 +17535,8 @@
             64.2
           ],
           "p": "packages/core/src/schemas",
-          "h": "227b143cea9ae289349b2a4d9bc948a1aab73bb24dbafc5c1633d1a0573bf28c",
-          "w": 6371,
+          "h": "df5062abcc8eedbb107ddc46c71b566e58a252f3750387617b36acd74768c28a",
+          "w": 6412,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -20545,8 +20559,8 @@
             32.6
           ],
           "p": "packages/service/src/engines",
-          "h": "6eeee90f3b44064ff6f01ffae3976c53dd21dc7d1a397f1d4569c121cfb9a694",
-          "w": 303,
+          "h": "c458db847c91a704c02a527246fd816aec0c7fd9f0f97539a8741080a501e3f1",
+          "w": 309,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -20783,8 +20797,8 @@
             25.6
           ],
           "p": "packages/service/src/fitness",
-          "h": "f7f9f72bd283698f2600f2bc886749aebd0ce66eab33d4fb87d086b702db8af3",
-          "w": 269,
+          "h": "5152c9d1b5f18dc83676bc7bcbd7f129468ac31562c056739e3d59eb309a0d78",
+          "w": 289,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -21217,8 +21231,8 @@
             23.9
           ],
           "p": "packages/service/src/github",
-          "h": "b93c1933794b8fbcc878a78cbbbc87cf7d1cb7cbb31f7e70e122ce446c8c657d",
-          "w": 163,
+          "h": "5a1aca7bf1ddaad584123ebe1b6d075a4d52ab339854f1c258c2c9453299de5c",
+          "w": 167,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -22634,8 +22648,8 @@
             37.9
           ],
           "p": "packages/service/src/http/routes",
-          "h": "9bfc7ee84cc37c9bada8d6241866f116a3ee1c9e8355c6177342bbe776ae791c",
-          "w": 505,
+          "h": "bdc9425a51f81f68527e5f73fda11ae82904f0c168da2fd6115e1250a7210744",
+          "w": 508,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -24580,8 +24594,8 @@
             31.9
           ],
           "p": "packages/service/src/packages",
-          "h": "2d3f467cd13bb330fa32fca9bce14bd344bfb1b044f66fdad6201fda7f672f9e",
-          "w": 186,
+          "h": "71342e515ba66202e9b6508aa53d2a05b0e4ddb4185666a3158b38137e2b94bb",
+          "w": 190,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -25574,8 +25588,8 @@
             34.4
           ],
           "p": "packages/service/src/providers/llama-cpp",
-          "h": "9ac4b923444cfb73d973ac827beae59484ad8c391cdb25c5c5c80f1ffc3d0ef5",
-          "w": 267,
+          "h": "ec45c685aed6872e8a9cc43e5f0f9d0b739a070a7b64e62e2c5e95e3109835a8",
+          "w": 272,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -26233,8 +26247,8 @@
             32.9
           ],
           "p": "packages/service/src/providers/native",
-          "h": "7e77949418015331f9f0480c70b40175fa501934195532a73e646928137f53b0",
-          "w": 506,
+          "h": "2c93f4d271c3bf7abab64db6e4870b92ec1bcdb88581eecabb71890f6094e743",
+          "w": 625,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -26247,8 +26261,8 @@
             16.3
           ],
           "p": "packages/service/src/providers/native",
-          "h": "ed8b700d2706bad463fdb82367d95a3ae48a7e9d2cd64a7c100e2a2a0f6f0138",
-          "w": 243,
+          "h": "d2abd3677d17eb2606a06aa0c672098c57d40b3fabfc85abc91f55ee883d165d",
+          "w": 269,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -26317,8 +26331,8 @@
             47.5
           ],
           "p": "packages/service/src/providers/native",
-          "h": "5322596623f59fc1bb352c5733db8519f60a6f68e6f754f7573e9d3f535c2d1a",
-          "w": 871,
+          "h": "12ee9eadb10bb7c415696a19e404ff75a9c0fadc387dc9d63f6805f3863aaaa4",
+          "w": 872,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -26331,8 +26345,8 @@
             51.1
           ],
           "p": "packages/service/src/providers/native",
-          "h": "aba0534bd674e8df58223a883e68a7c57693b6181d125ebd50d88609e1a86f92",
-          "w": 1331,
+          "h": "f239e0b588e744a85acfcf0ce2599b0653a5adccf146ba89a8ba05c03dc2c746",
+          "w": 1360,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -26989,8 +27003,8 @@
             26.3
           ],
           "p": "packages/service/src/providers/video",
-          "h": "48914640f83aafcab2b9fc7da9c5491261f76c37a5b9a55ce19f9f3a03b513a0",
-          "w": 190,
+          "h": "725790c99bd63746c932e98739497beaea56e39931ccce4b4b9dfa30653eeade",
+          "w": 196,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -27339,8 +27353,8 @@
             45.2
           ],
           "p": "packages/service/src/sandbox",
-          "h": "2b1d7326465c6591a2459ffc760e82146b88b0106e3a1a58a956fd09e7693a73",
-          "w": 789,
+          "h": "58522c3e66e684780a48a5af4801a55e72e1f99d00c54c997164ec73f197ad70",
+          "w": 792,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -27997,8 +28011,8 @@
             26.9
           ],
           "p": "packages/service/src/system",
-          "h": "dd23f2952bff7e250cdb5a1448446e3044db6815402f8fa2f9f65b8c8f5934a3",
-          "w": 387,
+          "h": "f5921d1abc7a2ff5992bf9fc00e83d8dde511242fdf117bcbce7909e983272df",
+          "w": 449,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -28431,8 +28445,8 @@
             36.5
           ],
           "p": "packages/service/src/workspace",
-          "h": "4cdcb47125730f3e8c56c6ade051f62a2f740cf9c2cdfbf26358dd1428f52bd8",
-          "w": 251,
+          "h": "7a7d7ad24e6bc2d4ebbbb428a851998e9515505a41e062bffc2e3b1d4c5faea2",
+          "w": 254,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -29708,8 +29722,8 @@
             51.5
           ],
           "p": "packages/ui/src/components",
-          "h": "edd16338872d2ceb321e2128c4ead5f779544fc37b06e479d08b0bd3d1ac1860",
-          "w": 946,
+          "h": "999e8153ea5ad6e2e72995d32838d7802b2ed0dbf12e6375d8cb39098bde6304",
+          "w": 953,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -30618,8 +30632,8 @@
             52
           ],
           "p": "packages/ui/src/components",
-          "h": "2ceb37cc1283445d5f617a99a5931fee335f0e9e91c739912e322a53afd10a87",
-          "w": 1009,
+          "h": "2570fe190001da17e8fb4e71458f8426d8060b873ecf156606fc85b5440181d2",
+          "w": 1026,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -30646,8 +30660,8 @@
             23
           ],
           "p": "packages/ui/src/components",
-          "h": "0da61302b36d8a495e2effcdb91cd5cabf804b2f96fb51987338f08cc4185912",
-          "w": 213,
+          "h": "3f835d0cf8d7b78a4beb124e827f3e923e6e83ee1bfcc4aa0e4eddc0f6ef644d",
+          "w": 269,
           "a": "2026-07-29T23:34:21.233Z"
         },
         {
@@ -30688,8 +30702,8 @@
             42.4
           ],
           "p": "packages/ui/src/components",
-          "h": "01519895f3986e96f862839a4c764af8c4bd86d8afab8eb2384e7f77f7b2e706",
-          "w": 890,
+          "h": "b67a6aaa47b6c6fbbd7a1bf6d24e1582e2f0ac229fce9fb48a72eb9b8215b78f",
+          "w": 904,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -33699,8 +33713,8 @@
             24.5
           ],
           "p": "packages/ui/src/views",
-          "h": "42d718b5ee7e7d136b49b45008f947ff5f7bbf925f8a17e29acf0c020c459f11",
-          "w": 183,
+          "h": "77549f52a0e07b5aace9b340ff5b77f71792548556ba60ca2a03c282a720faf6",
+          "w": 260,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {

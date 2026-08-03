@@ -543,9 +543,15 @@ handboek
   .command('export')
   .description('Render the Handboek as a static HTML site for gezel.com (no daemon)')
   .requiredOption('--out <dir>', 'output directory')
-  .action(async (opts: { out: string }) => {
+  .option(
+    '--css <href>',
+    'extra stylesheet to link on every page; relative hrefs resolve against the export root. Repeatable.',
+    (href: string, prior: string[]) => [...prior, href],
+    [] as string[],
+  )
+  .action(async (opts: { out: string; css: string[] }) => {
     const { runHandboekExport } = await import('../handboek-export.js');
-    const result = await runHandboekExport({ out: opts.out });
+    const result = await runHandboekExport({ out: opts.out, css: opts.css });
     console.log(`Handboek exported: ${result.pages} pages → ${result.out}`);
     for (const id of result.skipped) console.error(`  skipped (no body): ${id}`);
   });

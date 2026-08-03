@@ -1529,6 +1529,25 @@ html.embedded-chat #root {
   font-size: 0.66rem;
   line-height: 1.3;
 }
+.machine-memory-models-heading {
+  color: var(--text);
+}
+.machine-memory-models {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  margin: 0.15rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+.machine-memory-models > li {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+.machine-memory-model-name {
+  overflow-wrap: anywhere;
+}
 .machine-memory-device {
   overflow-wrap: anywhere;
 }
@@ -6145,6 +6164,22 @@ button.danger {
   min-width: 240px;
 }
 
+/* Same self-contained compose surface project chat and Home already use:
+   a warm header band grouping recipient + thread picker + toolbar above the
+   lighter draft, inside one rounded frame. The horizontal inset matches the
+   timeline's content gutter so the frame lines up with the bubbles above it.
+   Unlike project chat there are no attached @/> mode tabs here, so all four
+   corners stay rounded. */
+.gezel-chat-tab .chat-composer {
+  --compose-frame-bg: var(--chat-compose-header-bg);
+  --compose-frame-border: color-mix(in srgb, var(--accent) 62%, var(--border));
+  --compose-toolbar-bg: var(--chat-compose-header-bg);
+  margin: 0 0.75rem 0.25rem;
+  border: 1px solid var(--compose-frame-border);
+  border-radius: var(--radius-md);
+  background: var(--compose-frame-bg);
+}
+
 .chat-composer {
   padding: 0.5rem 0.25rem 0.25rem;
 }
@@ -6801,6 +6836,30 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
 .chat-send-btn:active:not(:disabled) {
   transform: translateY(1px);
   box-shadow: inset 0 1px 2px color-mix(in srgb, var(--text) 30%, transparent);
+}
+
+/* Mid-turn composer controls. Nudge reuses .chat-send-btn so terracotta
+   stays on the single primary; Stop and Interrupt take a quiet
+   secondary recipe (Stop previously inherited the filled global button
+   default and read as a second primary next to Send). */
+.chat-stop-btn,
+.chat-interrupt-btn {
+  margin: 1px 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--text-muted);
+  transition: border-color 120ms ease-out, color 120ms ease-out, background 120ms ease-out;
+}
+
+.chat-stop-btn:hover,
+.chat-interrupt-btn:hover {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  color: var(--text);
+}
+
+.chat-nudge-btn {
+  margin-left: calc(0.5rem + 2px);
 }
 
 .msg-body-rich {
@@ -12155,7 +12214,7 @@ button.bench-step-foot:disabled {
 
 /* First-run "on-device media" download list (RecommendedMediaDownloads).
    Indented slightly so the per-modality picks read as children of the
-   "Download all recommended models" button above them. */
+   size-aware download-plan button above them. */
 .home-media-downloads {
   display: flex;
   flex-direction: column;
@@ -12186,6 +12245,16 @@ button.bench-step-foot:disabled {
   width: 100%;
   max-width: var(--home-media-control-width);
 }
+.home-media-progress-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+.home-media-progress-heading .home-link {
+  flex: 0 0 auto;
+  font-size: var(--text-xs);
+}
 
 /* Media download buttons — "Download all" and each per-modality pick share
    one lighter look: a soft accent tint + accent outline (overrides the
@@ -12212,6 +12281,77 @@ button.bench-step-foot:disabled {
 }
 .home-media-btn-primary:hover:not(:disabled) {
   background: color-mix(in srgb, var(--accent) 88%, var(--titlebar-ink));
+}
+.home-media-plan-hint {
+  max-width: var(--home-media-control-width);
+  margin: 0.4rem 0 0;
+}
+
+.home-media-plan-dialog {
+  width: min(34rem, calc(100vw - 2rem));
+}
+.home-media-plan-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  margin: 1rem 0;
+  padding: 0;
+  border: 0;
+}
+.home-media-plan-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  cursor: pointer;
+}
+.home-media-plan-item:has(input:checked) {
+  border-color: color-mix(in srgb, var(--accent) 65%, var(--border));
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+}
+.home-media-plan-item input {
+  flex: 0 0 auto;
+  margin-top: 0.2rem;
+  accent-color: var(--accent);
+}
+.home-media-plan-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+.home-media-plan-name {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  font-weight: 600;
+}
+.home-media-plan-large {
+  flex: 0 0 auto;
+  padding: 0.1rem 0.35rem;
+  border: 1px solid color-mix(in srgb, var(--warning) 50%, var(--border));
+  border-radius: var(--radius-sm);
+  background: var(--warning-bg);
+  color: color-mix(in srgb, var(--warning) 55%, var(--text));
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.home-media-plan-summary {
+  display: flex;
+  min-height: 3.25rem;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel);
 }
 
 .home-probe {
@@ -13385,6 +13525,48 @@ button.bench-step-foot:disabled {
   border-color: rgba(176, 114, 76, 0.55);
   color: #e0b897;
   background: rgba(176, 114, 76, 0.1);
+}
+.msg-ghost-queued-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+/* Inline editor swapped in for the preview when the user edits a
+   queued message in place. Same dashed not-yet-sent vocabulary as the
+   ghost body, minus the italics (the user is writing, not skimming). */
+.msg-ghost-queued-editor {
+  width: 100%;
+  min-height: 3.4rem;
+  resize: vertical;
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  padding: 0.4rem 0.55rem;
+  border-radius: var(--radius-sm);
+  border: 1px dashed rgba(176, 114, 76, 0.55);
+  background: var(--surface);
+  color: var(--text);
+}
+.msg-ghost-queued-editor:focus {
+  outline: none;
+  border-style: solid;
+  border-color: rgba(176, 114, 76, 0.75);
+}
+.msg-ghost-queued-edit-error {
+  margin-top: 0.25rem;
+  font-size: var(--text-xs);
+  color: var(--danger);
+}
+
+/* Small "nudged" badge on user bubbles whose message was delivered
+   from the mid-turn queue. A badge, not a control — small radius. */
+.msg-nudge-chip {
+  margin-left: 0.35rem;
+  font-size: var(--text-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0 0.3rem;
+  border: 1px solid rgba(176, 114, 76, 0.35);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
 }
 
 /* Collapsible "tools that ran during this turn" expando at the top of a
@@ -23075,6 +23257,21 @@ button.linklike {
   display: flex;
   gap: 0.5rem;
   margin-top: 0.75rem;
+}
+.engine-spillover {
+  margin-top: 1.1rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--gz-color-border, var(--border));
+}
+.engine-spillover h4 {
+  margin: 0 0 0.25rem;
+  font-size: var(--text-md);
+}
+.engine-spillover p {
+  max-width: 34rem;
+}
+.engine-spillover-tray {
+  margin: 0.6rem 0;
 }
 
 /* ── Project Overview tab (index-derived gestalt) ─────────────────────── */

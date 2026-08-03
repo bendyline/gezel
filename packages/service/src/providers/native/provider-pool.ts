@@ -136,6 +136,8 @@ export interface PoolSnapshot {
   overridden: boolean;
   /** Which pools back the budget — see {@link CapacityCommitted.pools}. */
   pools: import('./capacity-broker.js').CapacityCommitted['pools'];
+  /** Whether co-resident models may spill into system RAM, and the ceiling if not. */
+  ramSpillover: import('./capacity-broker.js').CapacityCommitted['ramSpillover'];
 }
 
 /**
@@ -370,6 +372,7 @@ export class ProviderPool {
           committedBytes: c.committedBytes,
           systemRamBytes: c.systemRamBytes,
           pools: c.pools,
+          coResidencyBytes: c.ramSpillover.coResidencyBytes,
         }),
       );
     }
@@ -398,6 +401,7 @@ export class ProviderPool {
             committedBytes: c.committedBytes,
             systemRamBytes: c.systemRamBytes,
             pools: c.pools,
+            coResidencyBytes: c.ramSpillover.coResidencyBytes,
           }),
         );
       }
@@ -593,12 +597,12 @@ export class ProviderPool {
    * evictions in parallel instead of one-at-a-time.
    */
   private idleVictimsFor(needed: number): string[] {
-    const c = this.broker.committed();
-    if (!c.enforced) return [];
-    // Bytes we must release for `needed` to fit: canReserve(needed) is
-    // `committed + needed <= budget`, so the shortfall is
-    // `committed + needed - budget`.
-    let deficit = c.committedBytes + needed - c.budgetBytes;
+    // The broker owns the arithmetic: two constraints bind here (the total
+    // budget and, when RAM spillover is off, the co-residency ceiling) and
+    // sizing the batch against only the first left this returning no victims
+    // while `canReserve` stayed false — makeRoom would then fall through to
+    // evicting a BUSY engine instead of the idle ones sitting right there.
+    let deficit = this.broker.shortfallFor(needed);
     if (deficit <= 0) return [];
     const now = this.now();
     const idle: Array<{ key: string; at: number; bytes: number; demand: number }> = [];
@@ -790,6 +794,7 @@ export class ProviderPool {
       autoBudgetBytes: committed.autoBudgetBytes,
       overridden: committed.overridden,
       pools: committed.pools,
+      ramSpillover: committed.ramSpillover,
     };
   }
 

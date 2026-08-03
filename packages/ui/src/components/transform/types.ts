@@ -12,6 +12,8 @@ export interface SelectionSnapshot {
   text: string;
   /** WYSIWYG (tiptap) document positions. */
   tiptapRange?: { from: number; to: number };
+  /** Preserve ProseMirror's node-spanning Select All semantics on Apply. */
+  tiptapAll?: boolean;
   /** Raw (monaco) selection range, copied to a plain object. */
   monacoRange?: {
     startLineNumber: number;

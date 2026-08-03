@@ -116,6 +116,7 @@ import { SystemStatusBus } from './system-toolsets/status-bus.js';
 import { reapOrphanedGezelEngineProcesses } from './system/gezel-process-cleanup.js';
 import { SystemIdleState } from './system/idle-state.js';
 import { detectMemoryProfile } from './system/memory.js';
+import { SPAWN_DENIED_MESSAGE, probeChildProcessSpawn } from './system/spawn-capability.js';
 import { dispatchTaskEntry } from './tasks/entry-dispatch.js';
 import type { GateWorkspaceReader } from './tasks/gate-eval.js';
 import { TaskManager } from './tasks/manager.js';
@@ -1764,6 +1765,13 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     device: createDaemonDeviceInfo({ store, chat }),
   });
 
+  // Ask once, at boot, whether this process may create children at all —
+  // before any feature discovers the answer the expensive way. A denied
+  // token is not a chat bug, an engine bug, or a GPU bug, but it presents as
+  // all three at once, each at a different call site. See spawn-capability.ts.
+  const childProcessSpawn = await probeChildProcessSpawn();
+  if (childProcessSpawn === 'denied') log.error(`[spawn] ${SPAWN_DENIED_MESSAGE}`);
+
   const context: ServiceContext = {
     home,
     store,
@@ -1820,6 +1828,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     ...(cert ? { tlsCertSha256: cert.sha256Hex, tlsCertPem: cert.certPem } : {}),
     ensureModel,
     startedAt: nowIso(),
+    childProcessSpawn,
     uiDir: opts.uiDir,
     folderJobs,
     workspaceIndex,
@@ -1920,6 +1929,38 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     log.info(`[service] serving HTTPS+HTTP/2 on 127.0.0.1:${port} (TLS 1.3)`);
   } else {
     log.info(`[service] serving HTTP/1.1 on 127.0.0.1:${port}`);
+  }
+
+  // Connection-level failure visibility. Every renderer SSE stream and
+  // poll multiplexes over ONE h2 connection (that's the point of the ALPN
+  // order above), so a single session-level error drops them all at once
+  // — the UI sees a burst of "network error" with no server-side trace.
+  // These handlers are the trace. `sessionError` is the h2 death that
+  // matters; `tlsClientError`/`clientError` are handshake noise (port
+  // scanners, curl without -k) kept at debug.
+  const describeSocketError = (err: unknown): string => {
+    if (!(err instanceof Error)) return String(err);
+    const code = (err as NodeJS.ErrnoException).code;
+    return code && !err.message.includes(code) ? `${err.message} (${code})` : err.message;
+  };
+  const rawServer = server as unknown as NodeJS.EventEmitter;
+  if (cert) {
+    rawServer.on('sessionError', (err: unknown) => {
+      log.warn(
+        `[http] h2 session error — every stream multiplexed on that connection drops: ${describeSocketError(err)}`,
+      );
+    });
+    rawServer.on('tlsClientError', (err: unknown) => {
+      log.debug(`[http] TLS client error: ${describeSocketError(err)}`);
+    });
+  } else {
+    // Registering 'clientError' suppresses Node's default 400-and-destroy,
+    // so the listener must tear the socket down itself or bad connections
+    // leak.
+    rawServer.on('clientError', (err: unknown, socket: { destroy: () => void }) => {
+      log.debug(`[http] client connection error: ${describeSocketError(err)}`);
+      socket.destroy();
+    });
   }
 
   // Plain-HTTP preview sidecar (only when the main transport is TLS). Serves

@@ -1,7 +1,9 @@
 import {
   CreateChatSessionRequestSchema,
+  InterruptSessionRequestSchema,
   SearchSessionsRequestSchema,
   SendToSessionRequestSchema,
+  UpdateQueuedMessageRequestSchema,
   createLogger,
   getEngagementMode,
   isEngagementAllowed,
@@ -118,8 +120,11 @@ export function sessionRoutes(ctx: ServiceContext): Hono {
     // Accept immediately; the live reply streams over /events/chat.
     // Mentioned gezels (if any) get the same verbatim user text in their
     // own session via the fan-out helper — no `from` metadata, so their
-    // bubble renders as an ordinary user message.
-    if (body.mentions && body.mentions.length > 0) {
+    // bubble renders as an ordinary user message. Nudge sends always
+    // take the plain branch: the composer never combines a mid-turn
+    // nudge with mention fan-out, and fanning out a nudge would engage
+    // gezels on a message written to steer a turn they never ran.
+    if (body.mentions && body.mentions.length > 0 && body.nudge !== true) {
       ctx.chat.trackBackground(
         ctx.chat
           .sendWithMentions({
@@ -134,7 +139,7 @@ export function sessionRoutes(ctx: ServiceContext): Hono {
       );
     } else {
       ctx.chat.trackBackground(
-        ctx.chat.send(id, body.message).catch((err) => {
+        ctx.chat.send(id, body.message, body.nudge ? { nudge: true } : undefined).catch((err) => {
           const message = err instanceof Error ? err.message : String(err);
           log.warn(`[sessions] send failed for ${id}: ${message}`);
         }),
@@ -191,6 +196,50 @@ export function sessionRoutes(ctx: ServiceContext): Hono {
   app.post('/:id/cancel', async (c) => {
     const res = await ctx.chat.cancelInflight(c.req.param('id'));
     return c.json(res);
+  });
+
+  // Interrupt: cancel the in-flight turn (salvaged exactly like
+  // /cancel) and run `message` immediately, ahead of any queued
+  // entries. Same fire-and-forget 202 shape as /send — the reply
+  // streams over /events/chat. On an idle session this degrades to a
+  // plain send.
+  app.post('/:id/interrupt', async (c) => {
+    const id = c.req.param('id');
+    const body = InterruptSessionRequestSchema.parse(await c.req.json());
+    const cfg = await ctx.store.readConfig();
+    if (!isEngagementAllowed(cfg)) {
+      return c.json({ error: `engagement mode is ${getEngagementMode(cfg)}; AI is disabled` }, 403);
+    }
+    ctx.chat.trackBackground(
+      ctx.chat.interruptWithMessage(id, body.message).catch((err) => {
+        const message = err instanceof Error ? err.message : String(err);
+        log.warn(`[sessions] interrupt failed for ${id}: ${message}`);
+      }),
+    );
+    return c.json({ accepted: true, sessionId: id }, 202);
+  });
+
+  // Full-text snapshot of the session's pending queue — the ghost
+  // bubbles' edit affordance loads from here (the SSE event only
+  // carries a truncated preview). Lenient like the DELETE below:
+  // an idle or unknown session returns an empty list.
+  app.get('/:id/queue', (c) => {
+    const sessionId = c.req.param('id');
+    return c.json({ sessionId, entries: ctx.chat.listSessionQueue(sessionId) });
+  });
+
+  // Edit a queued entry in place (FIFO position preserved). 404 when
+  // the entry already started or was discarded — the UI treats that
+  // as "the moment passed" and drops its editor.
+  app.patch('/:id/queue/:queueId', async (c) => {
+    const sessionId = c.req.param('id');
+    const queueId = c.req.param('queueId');
+    const body = UpdateQueuedMessageRequestSchema.parse(await c.req.json());
+    const entry = ctx.chat.updateQueuedMessage(sessionId, queueId, body.message);
+    if (!entry) {
+      return c.json({ error: 'queued message not found (already started or removed)' }, 404);
+    }
+    return c.json({ updated: true, entry });
   });
 
   // Drop a specific queued entry without running it. Used by the

@@ -181,6 +181,7 @@ import type {
   ListProjectsResponse,
   ListQuestionsResponse,
   ListScriptsResponse,
+  ListSessionQueueResponse,
   ListSessionToolsResponse,
   ListTaskNotesResponse,
   ListTasksResponse,
@@ -194,6 +195,8 @@ import type {
   MessageGezelRequest,
   MessageGezelResponse,
   MlxRuntimeStatus,
+  ModelDownloadPreflightRequest,
+  ModelDownloadPreflightResponse,
   NativeEngineName,
   NativeEngineResolveEvent,
   NativeEngineStatusResponse,
@@ -302,6 +305,7 @@ import type {
   UpdateGezelPoppetjeRequest,
   UpdateGezelSettingsRequest,
   UpdateProjectRequest,
+  UpdateQueuedMessageResponse,
   UpdateTaskCraftbookRequest,
   UpdateTaskNoteRequest,
   UpdateTaskNoteResponse,
@@ -506,7 +510,7 @@ export interface TaskRunnerState {
    */
   scheduled?: TaskHandoffBucket;
   /** Why `dispatchable` work isn't moving. Absent when it is. */
-  holdReason?: 'engagement-off' | 'provider-busy';
+  holdReason?: 'engagement-off' | 'engagement-paused' | 'provider-busy';
   /** Night Shift state, for dating the `scheduled` bucket. */
   nightShift?: {
     active: boolean;
@@ -531,6 +535,8 @@ export interface SessionQueueState {
     queueId: string;
     preview: string;
     enqueuedAt: string;
+    /** Queued as a mid-turn nudge — merges with adjacent nudges on drain. */
+    nudge?: boolean;
   }>;
 }
 
@@ -621,6 +627,19 @@ export interface EngineStatusResponse {
     ramShareBytes: number;
     /** Fast (on-accelerator) memory — VRAM on a card, the budget otherwise. */
     fastBytes: number;
+  };
+  /**
+   * Whether models sharing a discrete card may spill into system RAM. Governs
+   * co-residency only — one model alone always gets the full budget. Absent
+   * pre-boot and on daemons that predate the field.
+   */
+  ramSpillover?: {
+    allowed: boolean;
+    /** What the host picks on its own; the toggle's "Automatic" position. */
+    auto: boolean;
+    overridden: boolean;
+    /** Ceiling the resident set fits under while more than one model is loaded. */
+    coResidencyBytes: number;
   };
 }
 
@@ -2584,6 +2603,12 @@ export class GezelClient {
     return this.request('GET', '/api/system/memory/usage');
   }
 
+  checkModelDownloadSpace(
+    body: ModelDownloadPreflightRequest,
+  ): Promise<ModelDownloadPreflightResponse> {
+    return this.request('POST', '/api/system/model-download-preflight', body);
+  }
+
   /**
    * Shareable machine profile for a bug report. Contains no paths, usernames,
    * hostnames, or user content — see `SystemDiagnosticsSchema`.
@@ -3568,7 +3593,9 @@ export class GezelClient {
 
   sendToChatSession(
     sessionId: string,
-    body: string | { message: string; mentions?: string[]; passiveCcGezelIds?: string[] },
+    body:
+      | string
+      | { message: string; mentions?: string[]; passiveCcGezelIds?: string[]; nudge?: boolean },
   ): Promise<{ accepted: true; sessionId: string }> {
     const payload = typeof body === 'string' ? { message: body } : body;
     return this.request('POST', `/api/sessions/${encodeURIComponent(sessionId)}/send`, payload);
@@ -3780,6 +3807,45 @@ export class GezelClient {
       'DELETE',
       `/api/sessions/${encodeURIComponent(sessionId)}/queue/${encodeURIComponent(queueId)}`,
     );
+  }
+
+  /**
+   * Full-text snapshot of one session's pending queue. The
+   * `queue_enqueued` event only carries a truncated preview; the
+   * ghost-bubble edit affordance loads the complete text from here.
+   */
+  listSessionQueue(sessionId: string): Promise<ListSessionQueueResponse> {
+    return this.request('GET', `/api/sessions/${encodeURIComponent(sessionId)}/queue`);
+  }
+
+  /**
+   * Edit a queued message in place (FIFO position preserved). Rejects
+   * with a 404-shaped error when the entry already started or was
+   * discarded — callers treat that as "the moment passed".
+   */
+  updateQueuedMessage(
+    sessionId: string,
+    queueId: string,
+    body: { message: string },
+  ): Promise<UpdateQueuedMessageResponse> {
+    return this.request(
+      'PATCH',
+      `/api/sessions/${encodeURIComponent(sessionId)}/queue/${encodeURIComponent(queueId)}`,
+      body,
+    );
+  }
+
+  /**
+   * Cancel the in-flight turn (partial reply salvaged, exactly like
+   * `cancelChatSessionTurn`) and send `message` immediately, ahead of
+   * any queued entries. The composer's "Interrupt" action. 202 shape —
+   * the reply streams over the session's SSE feed.
+   */
+  interruptChatSession(
+    sessionId: string,
+    body: { message: string },
+  ): Promise<{ accepted: true; sessionId: string }> {
+    return this.request('POST', `/api/sessions/${encodeURIComponent(sessionId)}/interrupt`, body);
   }
 
   // ── Memory (per-gezel + per-project daily files + summary) ──
@@ -4497,6 +4563,9 @@ export class GezelClient {
    * The gate every "should we offer Copilot?" decision in the UI reads. Note
    * `available: true` with `managed: 'absent'` is a normal state — it means
    * the user brought their own CLI and must not be offered a download.
+   * `managed: 'damaged'` means our install is on disk but won't load
+   * (`damagedReason` says why); it never satisfies `available` and the
+   * Settings card offers a repair for it.
    */
   getCopilotStatus(): Promise<CopilotAvailability> {
     return this.request('GET', '/api/system/copilot-status');

@@ -155,6 +155,8 @@ const DEFAULT_RESPONSES: Record<string, unknown> = {
     gezelModelWeightsBytes: 8_000_000_000,
     gezelModelCacheBytes: 2_000_000_000,
     engineReservedBytes: 10_000_000_000,
+    engineBudgetBytes: 76_800_000_000,
+    residentModels: [],
     gezelEngineProcessCount: 1,
     orphanedGezelEngineProcessCount: 0,
     otherBytes: 36_000_000_000,
@@ -163,6 +165,13 @@ const DEFAULT_RESPONSES: Record<string, unknown> = {
     sampledAt: '2026-07-29T12:00:00.000Z',
     source: 'system-memory',
     deviceNames: [],
+  },
+  checkModelDownloadSpace: {
+    known: true,
+    ok: true,
+    freeBytes: 80_000_000_000,
+    requiredBytes: 4_000_000_000,
+    storageLocation: 'Gezel model storage',
   },
   getQueueStatus: {
     providers: {},

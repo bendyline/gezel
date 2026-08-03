@@ -1,14 +1,20 @@
-import type { CatalogItemSummary, RecoDevice } from '@bendyline/gezel';
+import type {
+  CatalogItemSummary,
+  ModelDownloadPreflightResponse,
+  RecoDevice,
+} from '@bendyline/gezel';
 import { isRecommendedModel, mediaModelFits } from '@bendyline/gezel';
-import type { ConfigResponse } from '@bendyline/gezel-client';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
+import { AlertDialog } from '../primitives/index.js';
 
 /**
  * First-run "on-device media" section: one Download button per media modality
  * (image / speech-to-text / text-to-speech / video) for the RECOMMENDED model
- * of that kind that fits this device, plus a "Download all" that also kicks
- * off the recommended chat model.
+ * of that kind that fits this device. A size-aware plan dialog is the only
+ * start path: it defaults to the modest media set, leaves video opt-in, checks
+ * the model-store filesystem, and never starts the separately-managed chat
+ * model as a hidden side effect.
  *
  * "Recommended" = the highest-`recoScore`, fully-open catalog entry of that
  * kind (the same gate as the chat picker + ★ badge). Non-fitting modalities
@@ -42,12 +48,15 @@ interface PullEvent {
 
 interface Reco {
   key: ModalityKey;
+  id: string;
   /** Human label for the button, e.g. "image model" / "speech-to-text". */
   what: string;
   name: string;
   sizeBytes: number | null;
   installed: boolean;
   start: (onEvent: (ev: PullEvent) => void, signal: AbortSignal) => Promise<void>;
+  /** Explicit server-owned cancel for pulls that survive SSE detachment. */
+  cancel?: () => Promise<unknown>;
   /**
    * Present when the service reported this pull as already in flight.
    * Re-subscribing only attaches this view to the service-owned download;
@@ -140,10 +149,14 @@ function hasId(list: { models: Array<{ id: string }> }, id: string): boolean {
   return list.models.some((m) => m.id === id);
 }
 
-export function RecommendedMediaDownloads({ config }: { config: ConfigResponse | null }) {
+export function RecommendedMediaDownloads() {
   const [recos, setRecos] = useState<Reco[] | null>(null);
   const [states, setStates] = useState<Record<string, InstallState>>({});
-  const [chatInstalled, setChatInstalled] = useState(false);
+  const [planOpen, setPlanOpen] = useState(false);
+  const [selectedKeys, setSelectedKeys] = useState<Set<ModalityKey>>(new Set());
+  const [preflight, setPreflight] = useState<ModelDownloadPreflightResponse | null>(null);
+  const [preflightChecking, setPreflightChecking] = useState(false);
+  const [preflightError, setPreflightError] = useState<string | null>(null);
   const controllers = useRef<Map<string, AbortController>>(new Map());
 
   const setState = useCallback((key: string, s: InstallState) => {
@@ -247,11 +260,13 @@ export function RecommendedMediaDownloads({ config }: { config: ConfigResponse |
           const active = imgPulls.pulls.find((pull) => pull.id === img.id && !pull.finished);
           out.push({
             key: 'image',
+            id: img.id,
             what: 'image model',
             name: img.name,
             sizeBytes: imageTotalBytes(img),
             installed: hasId(imgInst, img.id),
             start: (cb, sig) => api.pullImageModel(img.id, cb, sig),
+            cancel: () => api.cancelImagePull(img.id),
             ...(active
               ? {
                   resume: {
@@ -271,6 +286,7 @@ export function RecommendedMediaDownloads({ config }: { config: ConfigResponse |
         if (reader) {
           out.push({
             key: 'recognition',
+            id: reader.id,
             what: 'image reading',
             name: reader.name,
             sizeBytes: reader.approxSizeBytes,
@@ -282,6 +298,7 @@ export function RecommendedMediaDownloads({ config }: { config: ConfigResponse |
         if (stt) {
           out.push({
             key: 'stt',
+            id: stt.id,
             what: 'speech-to-text',
             name: stt.name,
             sizeBytes: stt.approxSizeBytes,
@@ -293,6 +310,7 @@ export function RecommendedMediaDownloads({ config }: { config: ConfigResponse |
         if (tts) {
           out.push({
             key: 'tts',
+            id: tts.id,
             what: 'text-to-speech',
             name: tts.name,
             sizeBytes: tts.approxSizeBytes,
@@ -305,11 +323,13 @@ export function RecommendedMediaDownloads({ config }: { config: ConfigResponse |
           const active = vidPulls.pulls.find((pull) => pull.id === vid.id && !pull.finished);
           out.push({
             key: 'video',
+            id: vid.id,
             what: 'video model',
             name: vid.name,
             sizeBytes: vid.approxSizeBytes ?? null,
             installed: hasId(vidInst, vid.id),
             start: (cb, sig) => api.pullVideoModel(vid.id, cb, sig),
+            cancel: () => api.cancelVideoPull(vid.id),
             ...(active
               ? {
                   resume: {
@@ -344,20 +364,6 @@ export function RecommendedMediaDownloads({ config }: { config: ConfigResponse |
         for (const r of out) {
           if (!r.installed && r.resume) void attach(r, r.resume.subscribe);
         }
-
-        // Whether the pinned chat model is already on disk (so "Download all"
-        // doesn't re-trigger it).
-        const provider = config?.provider;
-        if (provider === 'llama-cpp' || provider === 'mlx') {
-          const pinned = config?.defaultModel?.[provider];
-          if (pinned) {
-            const installed =
-              provider === 'mlx'
-                ? await api.listMlxModels().catch(() => ({ models: [] }))
-                : await api.listLlamaCppModels().catch(() => ({ models: [] }));
-            if (!cancelled) setChatInstalled(installed.models.some((m) => m.name === pinned));
-          }
-        }
       } catch {
         if (!cancelled) setRecos([]);
       }
@@ -365,7 +371,7 @@ export function RecommendedMediaDownloads({ config }: { config: ConfigResponse |
     return () => {
       cancelled = true;
     };
-  }, [config, attach]);
+  }, [attach]);
 
   const install = useCallback(
     async (r: Reco) => {
@@ -379,26 +385,109 @@ export function RecommendedMediaDownloads({ config }: { config: ConfigResponse |
     [attach],
   );
 
-  const downloadAll = useCallback(() => {
-    // Also start the recommended chat model (its own banner shows progress).
-    const provider = config?.provider;
-    if (!chatInstalled && (provider === 'llama-cpp' || provider === 'mlx')) {
-      const id = config?.defaultModel?.[provider];
-      if (id) {
-        void (
-          provider === 'mlx'
-            ? api.installMlxModel(id, () => {})
-            : api.installLlamaCppModel(id, () => {})
-        ).catch(() => {
-          /* the chat banner surfaces chat-install errors */
+  const cancelInstall = useCallback(
+    async (r: Reco) => {
+      // Every pull is at least detached locally. Image/video pulls are owned
+      // by server registries, so explicit user cancellation also calls their
+      // dedicated endpoint; ordinary navigation continues to detach only.
+      controllers.current.get(r.key)?.abort();
+      try {
+        await r.cancel?.();
+        setState(r.key, { status: 'idle', pct: null });
+      } catch (err) {
+        setState(r.key, {
+          status: 'error',
+          pct: null,
+          error: err instanceof Error ? err.message : String(err),
         });
       }
+    },
+    [setState],
+  );
+
+  const pendingRecos = useMemo(
+    () =>
+      (recos ?? []).filter((r) => {
+        const status = states[r.key]?.status ?? 'idle';
+        return status === 'idle' || status === 'error';
+      }),
+    [recos, states],
+  );
+  const selectedRecos = useMemo(
+    () => pendingRecos.filter((r) => selectedKeys.has(r.key)),
+    [pendingRecos, selectedKeys],
+  );
+  const selectedKnownBytes = useMemo(
+    () => selectedRecos.reduce((sum, r) => sum + (r.sizeBytes ?? 0), 0),
+    [selectedRecos],
+  );
+  const selectedUnknownCount = useMemo(
+    () => selectedRecos.filter((r) => r.sizeBytes == null).length,
+    [selectedRecos],
+  );
+  const defaultPlanBytes = useMemo(
+    () =>
+      pendingRecos.filter((r) => r.key !== 'video').reduce((sum, r) => sum + (r.sizeBytes ?? 0), 0),
+    [pendingRecos],
+  );
+
+  const openPlan = useCallback(
+    (only?: ModalityKey) => {
+      const selected = only
+        ? pendingRecos.filter((r) => r.key === only)
+        : pendingRecos.filter((r) => r.key !== 'video');
+      setSelectedKeys(new Set(selected.map((r) => r.key)));
+      setPreflight(null);
+      setPreflightError(null);
+      setPreflightChecking(selected.length > 0);
+      setPlanOpen(true);
+    },
+    [pendingRecos],
+  );
+
+  useEffect(() => {
+    if (!planOpen || selectedRecos.length === 0) {
+      setPreflight(null);
+      setPreflightChecking(false);
+      setPreflightError(null);
+      return;
     }
-    for (const r of recos ?? []) {
-      const status = states[r.key]?.status ?? 'idle';
-      if (status === 'idle') void install(r);
+    if (selectedKnownBytes <= 0) {
+      setPreflight(null);
+      setPreflightChecking(false);
+      setPreflightError(
+        "Gezel couldn't determine this model's size. Its installer will check space again before writing.",
+      );
+      return;
     }
-  }, [recos, states, install, config, chatInstalled]);
+    let cancelled = false;
+    setPreflight(null);
+    setPreflightError(null);
+    setPreflightChecking(true);
+    void api
+      .checkModelDownloadSpace({ sizeBytes: Math.ceil(selectedKnownBytes) })
+      .then((result) => {
+        if (!cancelled) setPreflight(result);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setPreflightError(
+            `Gezel couldn't measure free space (${err instanceof Error ? err.message : String(err)}). Each installer will check again before writing.`,
+          );
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setPreflightChecking(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [planOpen, selectedKnownBytes, selectedRecos.length]);
+
+  const confirmPlan = useCallback(() => {
+    for (const r of selectedRecos) void install(r);
+    setPlanOpen(false);
+  }, [install, selectedRecos]);
 
   useEffect(() => {
     const map = controllers.current;
@@ -409,7 +498,9 @@ export function RecommendedMediaDownloads({ config }: { config: ConfigResponse |
 
   if (!recos || recos.length === 0) return null;
 
-  const anyPending = recos.some((r) => (states[r.key]?.status ?? 'idle') === 'idle');
+  const anyPending = pendingRecos.length > 0;
+  const canConfirm =
+    selectedRecos.length > 0 && !preflightChecking && (preflight === null || preflight.ok);
 
   return (
     <section className="setup-section home-media-section">
@@ -421,11 +512,14 @@ export function RecommendedMediaDownloads({ config }: { config: ConfigResponse |
       <button
         type="button"
         className="home-media-btn home-media-btn-primary"
-        onClick={downloadAll}
+        onClick={() => openPlan()}
         disabled={!anyPending}
       >
-        Download all recommended models
+        Choose downloads{defaultPlanBytes > 0 ? ` · ${fmtSize(defaultPlanBytes)}` : ''}
       </button>
+      <p className="muted small home-media-plan-hint">
+        Video stays off until you select it. Chat models are managed separately above.
+      </p>
       <div className="home-media-downloads">
         {recos.map((r) => {
           const st = states[r.key] ?? { status: 'idle', pct: null };
@@ -435,7 +529,17 @@ export function RecommendedMediaDownloads({ config }: { config: ConfigResponse |
                 <span className="home-probe home-probe-ok small">✓ {r.name} on device</span>
               ) : st.status === 'installing' ? (
                 <div className="home-media-progress">
-                  <span className="muted small">Downloading {r.name}…</span>
+                  <div className="home-media-progress-heading">
+                    <span className="muted small">Downloading {r.name}…</span>
+                    <button
+                      type="button"
+                      className="home-link"
+                      onClick={() => void cancelInstall(r)}
+                      aria-label={`Cancel ${r.name} download`}
+                    >
+                      Cancel
+                    </button>
+                  </div>
                   <div
                     className={
                       st.pct != null
@@ -455,7 +559,7 @@ export function RecommendedMediaDownloads({ config }: { config: ConfigResponse |
                   </span>
                 </div>
               ) : (
-                <button type="button" className="home-media-btn" onClick={() => void install(r)}>
+                <button type="button" className="home-media-btn" onClick={() => openPlan(r.key)}>
                   Download {r.what} ({r.name}
                   {r.sizeBytes ? `, ${fmtSize(r.sizeBytes)}` : ''})
                 </button>
@@ -467,6 +571,112 @@ export function RecommendedMediaDownloads({ config }: { config: ConfigResponse |
           );
         })}
       </div>
+      <AlertDialog.Root
+        open={planOpen}
+        onOpenChange={(open) => {
+          setPlanOpen(open);
+          if (!open) setSelectedKeys(new Set());
+        }}
+      >
+        <AlertDialog.Portal>
+          <AlertDialog.Overlay />
+          <AlertDialog.Content className="home-media-plan-dialog">
+            <AlertDialog.Title asChild>
+              <h3>Review model downloads</h3>
+            </AlertDialog.Title>
+            <AlertDialog.Description asChild>
+              <p className="muted small">
+                Nothing starts until you confirm this plan. Downloads go to Gezel model storage and
+                remain visible below while they run.
+              </p>
+            </AlertDialog.Description>
+            <fieldset className="home-media-plan-list">
+              <legend className="sr-only">Models to download</legend>
+              {pendingRecos.map((r) => {
+                const selected = selectedKeys.has(r.key);
+                return (
+                  <label key={r.key} className="home-media-plan-item">
+                    <input
+                      type="checkbox"
+                      checked={selected}
+                      onChange={(event) => {
+                        setSelectedKeys((current) => {
+                          const next = new Set(current);
+                          if (event.target.checked) next.add(r.key);
+                          else next.delete(r.key);
+                          return next;
+                        });
+                        setPreflight(null);
+                        setPreflightError(null);
+                        setPreflightChecking(true);
+                      }}
+                    />
+                    <span className="home-media-plan-copy">
+                      <span className="home-media-plan-name">
+                        {r.name}
+                        {r.key === 'video' && (
+                          <span className="home-media-plan-large">Large download</span>
+                        )}
+                      </span>
+                      <span className="muted small">
+                        {r.what}
+                        {r.sizeBytes ? ` · ${fmtSize(r.sizeBytes)}` : ' · size unavailable'}
+                      </span>
+                    </span>
+                  </label>
+                );
+              })}
+            </fieldset>
+            <div className="home-media-plan-summary" aria-live="polite">
+              <strong>
+                {selectedRecos.length === 0
+                  ? 'Select at least one model.'
+                  : `${selectedRecos.length} model${selectedRecos.length === 1 ? '' : 's'} · ${
+                      selectedKnownBytes > 0 ? fmtSize(selectedKnownBytes) : 'size unavailable'
+                    }${selectedUnknownCount > 0 ? ` + ${selectedUnknownCount} unknown` : ''}`}
+              </strong>
+              {preflightChecking ? (
+                <span className="muted small">Checking free space…</span>
+              ) : preflight?.known && preflight.ok ? (
+                <span className="muted small">
+                  {fmtBytes(preflight.freeBytes)} free in {preflight.storageLocation}; this plan
+                  needs {fmtBytes(preflight.requiredBytes)} including safety headroom.
+                </span>
+              ) : preflight?.known && !preflight.ok ? (
+                <span className="error small">
+                  Not enough free space: this plan needs {fmtBytes(preflight.requiredBytes)}, but{' '}
+                  {preflight.storageLocation} has {fmtBytes(preflight.freeBytes)} free.
+                </span>
+              ) : preflight && !preflight.known ? (
+                <span className="muted small">
+                  Free space could not be measured. Each installer will check again before writing.
+                </span>
+              ) : preflightError ? (
+                <span className="muted small">{preflightError}</span>
+              ) : null}
+            </div>
+            <AlertDialog.Actions>
+              <AlertDialog.Cancel asChild>
+                <button type="button">Cancel</button>
+              </AlertDialog.Cancel>
+              <AlertDialog.Action asChild>
+                <button
+                  type="button"
+                  className="primary"
+                  disabled={!canConfirm}
+                  onClick={confirmPlan}
+                >
+                  {preflightChecking
+                    ? 'Checking space…'
+                    : selectedRecos.length > 0
+                      ? `Download ${selectedRecos.length} model${selectedRecos.length === 1 ? '' : 's'}`
+                      : 'Choose models'}
+                </button>
+              </AlertDialog.Action>
+            </AlertDialog.Actions>
+          </AlertDialog.Content>
+        </AlertDialog.Portal>
+      </AlertDialog.Root>
     </section>
   );
 }

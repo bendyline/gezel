@@ -185,6 +185,33 @@ const cases: ContractCase[] = [
     invoke: (c) => c.sendToChatSession('session/one', 'hello'),
   },
   {
+    name: 'session send nudge flag',
+    method: 'POST',
+    path: '/api/sessions/session%2Fone/send',
+    body: { message: 'also add tests', nudge: true },
+    invoke: (c) => c.sendToChatSession('session/one', { message: 'also add tests', nudge: true }),
+  },
+  {
+    name: 'session queue list',
+    method: 'GET',
+    path: '/api/sessions/session%2Fone/queue',
+    invoke: (c) => c.listSessionQueue('session/one'),
+  },
+  {
+    name: 'session queue edit',
+    method: 'PATCH',
+    path: '/api/sessions/session%2Fone/queue/q%2F1',
+    body: { message: 'edited' },
+    invoke: (c) => c.updateQueuedMessage('session/one', 'q/1', { message: 'edited' }),
+  },
+  {
+    name: 'session interrupt',
+    method: 'POST',
+    path: '/api/sessions/session%2Fone/interrupt',
+    body: { message: 'do this instead' },
+    invoke: (c) => c.interruptChatSession('session/one', { message: 'do this instead' }),
+  },
+  {
     name: 'session archive',
     method: 'POST',
     path: '/api/sessions/session%2Fone/archive',

@@ -18,11 +18,11 @@ import { winShellSafe } from './win-shell.js';
  *     post-install work (e.g. Playwright's chromium download) is invoked
  *     explicitly by the service in its own dedicated step.
  *  3. **Console-free Windows launches** — the machine-wide daemon runs in
- *     non-interactive Session 0 under a restricted service SID, where
- *     console allocation fails and the launch dies as `spawn EPERM`.
- *     Console-subsystem children must therefore be started with
- *     DETACHED_PROCESS. This used to ask for CREATE_NO_WINDOW instead
- *     (Node's `windowsHide`), which still allocates a console.
+ *     non-interactive Session 0, where console allocation fails outright.
+ *     Console-subsystem children are therefore started with
+ *     DETACHED_PROCESS, which asks for none. This used to ask for
+ *     CREATE_NO_WINDOW instead (Node's `windowsHide`), which still
+ *     allocates a console.
  */
 
 /** Buffered result of a pnpm run. */

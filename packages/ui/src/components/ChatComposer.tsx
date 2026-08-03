@@ -250,6 +250,10 @@ export function ChatComposer({
     sessionId: string;
   } | null>(null);
   const draftRef = useRef<string>('');
+  // Render-triggering shadow of `draftRef.current.trim().length > 0`.
+  // The ref alone never re-renders, and the mid-turn button row (Nudge /
+  // Interrupt appear only when there's text) needs to react to typing.
+  const [draftNonEmpty, setDraftNonEmpty] = useState(false);
   // EditorShell reads initialMarkdown and configures its placeholder only
   // when it mounts. Bump this revision whenever the host needs to seed or
   // clear the editor; draftRef supplies the content for the fresh mount.
@@ -273,6 +277,7 @@ export function ChatComposer({
     const existing = draftRef.current.trim();
     const merged = existing ? `${existing}\n\n${queued}` : queued;
     draftRef.current = merged;
+    setDraftNonEmpty(merged.trim().length > 0);
     setEditorRevision((revision) => revision + 1);
   }, [projectId]);
   useEffect(() => {
@@ -540,6 +545,7 @@ export function ChatComposer({
       const prevLen = prevDraftLenRef.current;
       prevDraftLenRef.current = source.length;
       draftRef.current = source;
+      setDraftNonEmpty(source.trim().length > 0);
       // Terminal escape: user typed `> ` (markdown blockquote / shell
       // sigil) as the very start of a fresh draft. Hand the rest off
       // to the parent which will flip the compose surface into
@@ -605,6 +611,7 @@ export function ChatComposer({
     // pre-feature flow. Re-introduce sticky behavior when there's a
     // way to insert a Tiptap mention node directly post-mount.
     draftRef.current = '';
+    setDraftNonEmpty(false);
     setEditorRevision((revision) => revision + 1);
     setMentioned([]);
     setError(null);
@@ -614,7 +621,7 @@ export function ChatComposer({
     try {
       activeSessionId = await ensureSessionId();
     } catch (err) {
-      setError((err as Error).message);
+      setError(humanizeTransportError((err as Error).message));
       return;
     }
 
@@ -629,57 +636,93 @@ export function ChatComposer({
       accepted: false,
     };
     const streamPromise = (async () => {
-      try {
-        for await (const event of streamChatEvents({
-          url: api.sessionEventsUrl(activeSessionId),
-          headers: api.authHeader(),
-          signal: ctrl.signal,
-          fetch: api.getFetch(),
-        })) {
-          if (localTurnRef.current?.id !== localTurnId) return;
-          if (event.type === 'tool') {
-            const tool: ToolActivity = {
-              name: event.name,
-              durationMs: event.durationMs,
-              success: event.success,
-              ...(event.errorMessage ? { errorMessage: event.errorMessage } : {}),
-              ...(event.path ? { path: event.path } : {}),
-              ...(event.argsSummary ? { argsSummary: event.argsSummary } : {}),
-              ...(event.argsFull ? { argsFull: event.argsFull } : {}),
-              ...(event.diff !== undefined ? { diff: event.diff } : {}),
-              ...(event.addedLines !== undefined ? { addedLines: event.addedLines } : {}),
-              ...(event.removedLines !== undefined ? { removedLines: event.removedLines } : {}),
-              projectId,
-            };
-            onToolActivity?.(tool);
-          } else if (event.type === 'error') {
-            setError(humanizeChatError(event.error));
-            setQueuedAhead(null);
-          } else if (event.type === 'done') {
-            settleLocalTurn(localTurnId, { serverIdle: true });
-            return;
-          } else if (event.type === 'queued') {
-            // Service only fires this after a >200ms wait, so no
-            // debouncing needed here — flip to queued immediately.
-            setQueuedAhead(event.aheadOf);
-          } else if (event.type === 'delta') {
-            // First delta means the provider actually started this
-            // turn — clear the queued indicator. setState with null
-            // when already null is a no-op, so we can fire
-            // unconditionally and keep the closure simple.
-            setQueuedAhead(null);
+      // Reconnect-with-backoff. A transient socket break mid-turn (daemon
+      // restart, dropped h2 connection — every SSE stream in the renderer
+      // multiplexes over one connection, so one GOAWAY kills them all)
+      // used to surface Chromium's raw `TypeError: network error` in the
+      // composer with no retry, even though the turn usually completes
+      // fine server-side. The event bus replays the in-flight turn's
+      // history on resubscribe, so reconnecting is lossless; `toolsSeen`
+      // dedupes the replayed prefix so onToolActivity doesn't re-fire.
+      // The 10s keepalive (server pings at 1Hz) catches silently-dead
+      // sockets the same way the timeline envelope streams do. If the
+      // turn finished while we were disconnected the replay history is
+      // already cleared and no `done` will arrive — the 2s syncInflight
+      // poll settles the turn and aborts this reader.
+      const maxReconnects = 5;
+      let reconnects = 0;
+      let toolsSeen = 0;
+      while (true) {
+        let toolsThisConnection = 0;
+        try {
+          for await (const event of streamChatEvents({
+            url: api.sessionEventsUrl(activeSessionId),
+            headers: api.authHeader(),
+            signal: ctrl.signal,
+            fetch: api.getFetch(),
+            keepaliveTimeoutMs: 10_000,
+          })) {
+            if (localTurnRef.current?.id !== localTurnId) return;
+            if (event.type === 'tool') {
+              toolsThisConnection += 1;
+              if (toolsThisConnection <= toolsSeen) continue;
+              toolsSeen = toolsThisConnection;
+              const tool: ToolActivity = {
+                name: event.name,
+                durationMs: event.durationMs,
+                success: event.success,
+                ...(event.errorMessage ? { errorMessage: event.errorMessage } : {}),
+                ...(event.path ? { path: event.path } : {}),
+                ...(event.argsSummary ? { argsSummary: event.argsSummary } : {}),
+                ...(event.argsFull ? { argsFull: event.argsFull } : {}),
+                ...(event.diff !== undefined ? { diff: event.diff } : {}),
+                ...(event.addedLines !== undefined ? { addedLines: event.addedLines } : {}),
+                ...(event.removedLines !== undefined ? { removedLines: event.removedLines } : {}),
+                projectId,
+              };
+              onToolActivity?.(tool);
+            } else if (event.type === 'error') {
+              setError(humanizeChatError(event.error));
+              setQueuedAhead(null);
+            } else if (event.type === 'done') {
+              settleLocalTurn(localTurnId, { serverIdle: true });
+              return;
+            } else if (event.type === 'queued') {
+              // Service only fires this after a >200ms wait, so no
+              // debouncing needed here — flip to queued immediately.
+              setQueuedAhead(event.aheadOf);
+            } else if (event.type === 'delta') {
+              // First delta means the provider actually started this
+              // turn — clear the queued indicator. setState with null
+              // when already null is a no-op, so we can fire
+              // unconditionally and keep the closure simple.
+              setQueuedAhead(null);
+            }
+            // complete is rendered by the parent timeline via its
+            // project/global SSE stream — we don't need to handle it here.
           }
-          // complete is rendered by the parent timeline via its
-          // project/global SSE stream — we don't need to handle it here.
-        }
-      } catch (err) {
-        if ((err as Error).name === 'AbortError') {
-          settleLocalTurn(localTurnId);
           return;
+        } catch (err) {
+          if ((err as Error).name === 'AbortError') {
+            settleLocalTurn(localTurnId);
+            return;
+          }
+          if (localTurnRef.current?.id !== localTurnId) return;
+          reconnects += 1;
+          if (reconnects > maxReconnects) {
+            console.warn('[ChatComposer] chat event stream lost, giving up:', err);
+            setError(humanizeTransportError((err as Error).message));
+            settleLocalTurn(localTurnId);
+            return;
+          }
+          const backoffMs = Math.min(500 * 2 ** (reconnects - 1), 5_000);
+          console.warn(
+            `[ChatComposer] chat event stream lost (reconnect ${reconnects}/${maxReconnects} in ${backoffMs}ms):`,
+            err,
+          );
+          await new Promise<void>((resolve) => setTimeout(resolve, backoffMs));
+          if (ctrl.signal.aborted || localTurnRef.current?.id !== localTurnId) return;
         }
-        if (localTurnRef.current?.id !== localTurnId) return;
-        setError(humanizeChatError((err as Error).message));
-        settleLocalTurn(localTurnId);
       }
     })();
 
@@ -745,7 +788,10 @@ export function ChatComposer({
           setError(humanizeChatError(raw));
         }
       } else {
-        setError(humanizeChatError(raw));
+        // The send POST failing is a renderer↔service transport problem
+        // (or an HTTP error the client already labeled) — same treatment
+        // as a broken event stream.
+        setError(humanizeTransportError(raw));
       }
     }
     await streamPromise;
@@ -816,6 +862,73 @@ export function ChatComposer({
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [stopActiveTurn]);
+
+  /**
+   * Mid-turn Nudge: queue the draft behind the running turn. The
+   * service holds it as a pending-queue entry (ghost bubble in the
+   * timeline, editable + discardable there) and merges contiguous
+   * nudges into ONE follow-up turn when the current turn ends. No
+   * local SSE or optimistic publish — the server's `queue_enqueued`
+   * event reaches the timeline immediately, and this composer stays
+   * "busy" through the merged turn via the inflight poll.
+   */
+  const queueNudge = useCallback(async () => {
+    const userText = draftRef.current.trim();
+    const sid = liveSessionIdRef.current;
+    if (!gezelId || !userText || !sid || engagementOff) return;
+    draftRef.current = '';
+    setDraftNonEmpty(false);
+    setEditorRevision((revision) => revision + 1);
+    setMentioned([]);
+    setError(null);
+    try {
+      await api.sendToChatSession(sid, { message: userText, nudge: true });
+    } catch (err) {
+      // Restore the draft so the user's text isn't lost.
+      draftRef.current = userText;
+      setDraftNonEmpty(true);
+      setEditorRevision((revision) => revision + 1);
+      setError(humanizeChatError((err as Error).message ?? String(err)));
+    }
+  }, [gezelId, engagementOff]);
+
+  /**
+   * Interrupt: stop the running turn (partial reply is salvaged, same
+   * as Stop) and send the draft immediately, ahead of any queued
+   * nudges. Optimistically keep the composer busy — the old turn's
+   * `cancelled`/`done` settles the local stream, and without the flag
+   * the Send button could flash for up to 2s until the poll sees the
+   * replacement turn.
+   */
+  const interruptWithDraft = useCallback(async () => {
+    const userText = draftRef.current.trim();
+    const sid = liveSessionIdRef.current;
+    if (!gezelId || !userText || !sid || engagementOff) return;
+    draftRef.current = '';
+    setDraftNonEmpty(false);
+    setEditorRevision((revision) => revision + 1);
+    setMentioned([]);
+    setError(null);
+    setServerInflight(true);
+    try {
+      await api.interruptChatSession(sid, { message: userText });
+      void syncInflight(sid).catch(() => {
+        /* the periodic poll remains the recovery path */
+      });
+    } catch (err) {
+      draftRef.current = userText;
+      setDraftNonEmpty(true);
+      setEditorRevision((revision) => revision + 1);
+      setError(humanizeChatError((err as Error).message ?? String(err)));
+    }
+  }, [gezelId, engagementOff, syncInflight]);
+
+  // Enter routing. Squisq reads `submitOnEnter` when the editor mounts;
+  // the mid-turn/idle decision must be made at keypress time, not
+  // capture time, so the stable closure dereferences this ref. Mid-turn
+  // Enter queues a nudge — previously it silently did nothing.
+  const submitRef = useRef<() => void>(() => {});
+  submitRef.current = turnActive ? () => void queueNudge() : () => void send();
 
   return (
     <div ref={composerRef} className="chat-composer" data-testid="chat-composer">
@@ -963,17 +1076,41 @@ export function ChatComposer({
           showFilesToggle={false}
           fullWidth
           thinMargins
-          submitOnEnter={() => void send()}
+          submitOnEnter={() => submitRef.current()}
           toolbarSlotRight={
             turnActive ? (
-              <button
-                type="button"
-                className="chat-stop-btn"
-                onClick={() => void stopActiveTurn()}
-                title="Stop generating (Escape)"
-              >
-                ■ Stop
-              </button>
+              <>
+                {draftNonEmpty && !engagementOff && (
+                  <>
+                    <button
+                      type="button"
+                      className="chat-send-btn chat-nudge-btn"
+                      data-testid="chat-nudge"
+                      onClick={() => void queueNudge()}
+                      title="Queue for after this turn (Enter)"
+                    >
+                      Nudge
+                    </button>
+                    <button
+                      type="button"
+                      className="chat-interrupt-btn"
+                      data-testid="chat-interrupt"
+                      onClick={() => void interruptWithDraft()}
+                      title="Stop this turn and send now"
+                    >
+                      Interrupt
+                    </button>
+                  </>
+                )}
+                <button
+                  type="button"
+                  className="chat-stop-btn"
+                  onClick={() => void stopActiveTurn()}
+                  title="Stop generating (Escape)"
+                >
+                  ■ Stop
+                </button>
+              </>
             ) : (
               <button
                 type="button"
@@ -1040,4 +1177,35 @@ function humanizeChatError(raw: string): string {
     return "The model didn't respond in time. Your message is saved — try " + 'Send again.';
   }
   return raw;
+}
+
+/**
+ * Translate renderer-side transport failures (the per-turn SSE reader
+ * threw, as opposed to the service reporting a turn error) into one
+ * actionable sentence. The raw shapes are browser- and layer-specific:
+ * Chromium's mid-body break is the bare `network error`, its
+ * request-time failure is `Failed to fetch` (Firefox/Safari have their
+ * own spellings), and the SSE helper contributes stale-stream /
+ * premature-EOF messages. None of them mean anything to a user, and by
+ * the time this fires we already retried the connection several times.
+ * Only used for errors thrown by the local stream reader — server-sent
+ * `error` events go through {@link humanizeChatError} untouched, since
+ * a provider-side "fetch failed" points at the model host, not at us.
+ */
+function humanizeTransportError(raw: string): string {
+  const transportShaped =
+    /network\s?error/i.test(raw) ||
+    /failed to fetch/i.test(raw) ||
+    /load failed/i.test(raw) ||
+    /transport unavailable/i.test(raw) ||
+    /SSE stream (stale|failed)/i.test(raw) ||
+    /ended before a terminal event/i.test(raw);
+  if (transportShaped) {
+    return (
+      'Lost the connection to the gezel service and could not reconnect. ' +
+      'Your message is saved — if no reply appears, check that the ' +
+      'service is running and try Send again.'
+    );
+  }
+  return humanizeChatError(raw);
 }

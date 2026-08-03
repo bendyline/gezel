@@ -683,6 +683,14 @@ interface PendingSendEntry {
   continuationMaxTokens: number | undefined;
   /** Persist + deliver to the model but never render a transcript bubble. */
   hidden: boolean;
+  /**
+   * Queued as a mid-turn nudge. Nudges stay separate entries while
+   * queued (individually editable/discardable), then contiguous
+   * same-bucket nudges merge into ONE turn at drain time — the
+   * user-facing counterpart of enqueue-time coalescing. The persisted
+   * user message carries `ChatMessage.nudge` for the transcript chip.
+   */
+  nudge: boolean;
   waiters: Array<{ resolve: (msg: ChatMessage) => void; reject: (err: Error) => void }>;
 }
 
@@ -914,7 +922,15 @@ export class ChatManager {
    * Invariant: a session is either `inflight` (running a turn) or
    * has its turn in progress via the queue drain path. Both checked
    * before dispatch so a late-arriving send never jumps ahead of
-   * items already waiting.
+   * items already waiting — with one deliberate exception:
+   * `interruptWithMessage` unshifts to the queue FRONT (cancel the
+   * turn, run this next).
+   *
+   * Entries flagged `nudge` (the composer's mid-turn "Nudge" action)
+   * stay separate while queued — individually editable via
+   * `updateQueuedMessage`, discardable via `cancelQueuedMessage` —
+   * then contiguous same-bucket nudges merge into ONE turn at drain
+   * time (`drainNextQueued`).
    *
    * In-memory only — queued messages don't survive a service
    * restart. The persisted `record.messages` still contains prior
@@ -1914,14 +1930,14 @@ export class ChatManager {
     providerName?: ProviderName;
     depth: number;
     nextPreview: string;
-    entries: Array<{ queueId: string; preview: string; enqueuedAt: string }>;
+    entries: Array<{ queueId: string; preview: string; enqueuedAt: string; nudge?: boolean }>;
   }> {
     const out: Array<{
       sessionId: string;
       providerName?: ProviderName;
       depth: number;
       nextPreview: string;
-      entries: Array<{ queueId: string; preview: string; enqueuedAt: string }>;
+      entries: Array<{ queueId: string; preview: string; enqueuedAt: string; nudge?: boolean }>;
     }> = [];
     for (const [sessionId, q] of this.pendingSends) {
       if (q.length === 0) continue;
@@ -1931,6 +1947,7 @@ export class ChatManager {
         queueId: e.id,
         preview: e.userText.length > 160 ? `${e.userText.slice(0, 157)}…` : e.userText,
         enqueuedAt: new Date(e.enqueuedAt).toISOString(),
+        ...(e.nudge ? { nudge: true } : {}),
       }));
       const providerName = this.states.get(sessionId)?.record.providerName;
       out.push({
@@ -1942,6 +1959,27 @@ export class ChatManager {
       });
     }
     return out;
+  }
+
+  /**
+   * Full-text snapshot of one session's pending queue, for
+   * `GET /api/sessions/:id/queue`. Unlike {@link listQueued} (a
+   * cross-session preview surface polled by status pills), this
+   * carries the complete `text` so the ghost bubble's edit affordance
+   * can load it lazily. Empty array when the session has no queue.
+   */
+  listSessionQueue(
+    sessionId: string,
+  ): Array<{ queueId: string; text: string; preview: string; enqueuedAt: string; nudge: boolean }> {
+    const q = this.pendingSends.get(sessionId);
+    if (!q || q.length === 0) return [];
+    return q.map((e) => ({
+      queueId: e.id,
+      text: e.userText,
+      preview: e.userText.length > 160 ? `${e.userText.slice(0, 157)}…` : e.userText,
+      enqueuedAt: new Date(e.enqueuedAt).toISOString(),
+      nudge: e.nudge,
+    }));
   }
 
   /**
@@ -2039,6 +2077,25 @@ export class ChatManager {
     if (!pending) return;
     const router = await pending.catch(() => null);
     router?.broker.setBudgetBytes(bytes);
+  }
+
+  /**
+   * Live-update whether co-resident local models may spill into system RAM.
+   * `null` reverts to the host's auto choice. Same in-flight care as
+   * {@link setLocalEngineMemoryBudget}, and the same non-eviction contract:
+   * turning spillover off doesn't unload anything, it changes what the next
+   * spawn is allowed to add.
+   */
+  async setAllowRamSpillover(allow: boolean | null): Promise<void> {
+    const live = this.engineRouter ?? this.engineRouterCache;
+    if (live) {
+      live.broker.setAllowRamSpillover(allow);
+      return;
+    }
+    const pending = this.engineRouterInitPromise;
+    if (!pending) return;
+    const router = await pending.catch(() => null);
+    router?.broker.setAllowRamSpillover(allow);
   }
 
   /**
@@ -2184,12 +2241,20 @@ export class ChatManager {
       this.events.publish(scope, cancelledEvent);
       this.events.publish(scope, doneEvent);
       if (wired && state.session) {
+        // Null the reference BEFORE awaiting teardown. The salvage
+        // snapshot above already read everything this turn needs from
+        // the live session; leaving the pointer in place while
+        // `disconnect()` runs opens a window where a drained queued
+        // message (or an interrupt's front-of-queue entry) starts a
+        // turn, reuses the half-torn-down session via ensureState, and
+        // dies with "session already disconnected".
+        const doomed = state.session;
+        state.session = null;
         try {
-          await state.session.disconnect();
+          await doomed.disconnect();
         } catch {
           /* ignore — we're tearing this down anyway */
         }
-        state.session = null;
       }
     } else {
       // No live state — still publish to the session bus so any UI
@@ -2198,6 +2263,79 @@ export class ChatManager {
       this.events.publishSessionOnly(sessionId, doneEvent);
     }
     return { cancelled: true };
+  }
+
+  /**
+   * Interrupt: cancel the in-flight turn (identical salvage path to
+   * {@link cancelInflight} — the partial reply persists as a
+   * `turn-aborted` bubble) and send `userText` immediately, AHEAD of
+   * any queued entries. The composer's "Interrupt" button, for "stop
+   * what you're doing, do this instead".
+   *
+   * Ordering is the load-bearing part:
+   * 1. The entry is unshifted to the queue front synchronously —
+   *    before the cancel, with no await in between — so the aborted
+   *    turn's unwind drain can only ever pick it up first.
+   * 2. `cancelInflight` frees the inflight slot synchronously, so the
+   *    post-cancel drain below starts the interrupt turn right away
+   *    instead of waiting out the provider unwind (observed at ~16s
+   *    on Copilot). If the unwind's own `finishSessionTurn` drained
+   *    first during the cancel's await, the `inflight.has` check
+   *    skips — `drainNextQueued` shifts exactly once and
+   *    `runSendAndDrain` claims the slot synchronously, so dispatch
+   *    is exactly-once on this single-threaded path.
+   *
+   * The entry is NOT a nudge (`nudge: false`), so queued nudges behind
+   * it do not merge into the interrupt turn — they run as their own
+   * merged turn after it. On an idle session with an empty queue this
+   * degrades to a plain `send()`.
+   */
+  async interruptWithMessage(sessionId: string, userText: string): Promise<ChatMessage> {
+    if (this.shuttingDown) {
+      throw new Error('service shutting down');
+    }
+    if (!isEngagementAllowed({ aiEngagementMode: this.engagementMode })) {
+      throw new Error('engagement-off: AI is disabled in settings; re-enable to send');
+    }
+    const queueDepth = this.pendingSends.get(sessionId)?.length ?? 0;
+    if (!this.inflight.has(sessionId) && queueDepth === 0) {
+      return this.send(sessionId, userText);
+    }
+    return new Promise<ChatMessage>((resolve, reject) => {
+      const q = this.pendingSends.get(sessionId) ?? [];
+      const entry: PendingSendEntry = {
+        id: randomUUID(),
+        userText,
+        enqueuedAt: Date.now(),
+        from: undefined,
+        coalescable: false,
+        lane: undefined,
+        ambient: false,
+        continuationMaxTokens: undefined,
+        hidden: false,
+        nudge: false,
+        waiters: [{ resolve, reject }],
+      };
+      q.unshift(entry);
+      this.pendingSends.set(sessionId, q);
+      log.debug(
+        `queue#${sessionId.slice(0, 8)} INTERRUPT entry=${entry.id.slice(0, 8)} depth=${q.length}`,
+      );
+      this.publishQueueEnqueued(sessionId, entry);
+      void this.cancelInflight(sessionId)
+        .catch((err) => {
+          // Cancel is best-effort teardown; the entry is already queued
+          // and will drain either below or via the unwind. Never reject
+          // the waiter here — that would double-settle when it drains.
+          log.warn(
+            `interrupt: cancelInflight failed for ${sessionId}:`,
+            err instanceof Error ? err.message : String(err),
+          );
+        })
+        .then(() => {
+          if (!this.inflight.has(sessionId)) this.drainNextQueued(sessionId);
+        });
+    });
   }
 
   async getSessionRecord(sessionId: string): Promise<ChatSession | null> {
@@ -4619,6 +4757,36 @@ export class ChatManager {
   }
 
   /**
+   * Replace the text of a queued entry in place. FIFO position and
+   * `enqueuedAt` are preserved (so the ghost bubble's "waited Ns"
+   * doesn't reset), and the updated preview is re-published under the
+   * SAME queueId so the UI upserts its ghost bubble — the identical
+   * mechanism enqueue-time coalescing already uses. Returns the
+   * updated snapshot, or `null` when the queue is empty or the id is
+   * gone (the entry already started or was discarded — the PATCH
+   * route maps that to 404).
+   */
+  updateQueuedMessage(
+    sessionId: string,
+    queueId: string,
+    text: string,
+  ): { queueId: string; text: string; preview: string; enqueuedAt: string; nudge: boolean } | null {
+    const q = this.pendingSends.get(sessionId);
+    if (!q || q.length === 0) return null;
+    const entry = q.find((e) => e.id === queueId);
+    if (!entry) return null;
+    entry.userText = text;
+    this.publishQueueEnqueued(sessionId, entry);
+    return {
+      queueId: entry.id,
+      text: entry.userText,
+      preview: entry.userText.length > 160 ? `${entry.userText.slice(0, 157)}…` : entry.userText,
+      enqueuedAt: new Date(entry.enqueuedAt).toISOString(),
+      nudge: entry.nudge,
+    };
+  }
+
+  /**
    * Publish `queue_enqueued` on the session's project + global buses
    * so timelines can render a ghost bubble. If the session isn't in
    * `this.states` yet (possible during the enqueue-during-prologue
@@ -4627,7 +4795,7 @@ export class ChatManager {
    */
   private publishQueueEnqueued(
     sessionId: string,
-    entry: { id: string; userText: string; enqueuedAt: number },
+    entry: { id: string; userText: string; enqueuedAt: number; nudge?: boolean },
   ): void {
     const preview =
       entry.userText.length > 160 ? `${entry.userText.slice(0, 157)}…` : entry.userText;
@@ -4636,6 +4804,7 @@ export class ChatManager {
       queueId: entry.id,
       preview,
       enqueuedAt: new Date(entry.enqueuedAt).toISOString(),
+      ...(entry.nudge ? { nudge: true } : {}),
     };
     this.publishWithScopeLookup(sessionId, event);
   }
@@ -4812,6 +4981,15 @@ export class ChatManager {
        * `Store.listTimeline` and the live-timeline handler drop it.
        */
       hidden?: boolean;
+      /**
+       * Mid-turn nudge. Queues behind the in-flight turn like any
+       * other send, but contiguous same-bucket nudge entries merge
+       * into ONE turn at drain time (see `drainNextQueued`), and the
+       * persisted user message is marked `nudge: true` for the
+       * transcript chip. On an idle session the flag is stripped —
+       * the message never queued, so it renders as a normal send.
+       */
+      nudge?: boolean;
     },
   ): Promise<ChatMessage> {
     if (this.shuttingDown) {
@@ -4828,9 +5006,14 @@ export class ChatManager {
       return new Promise<ChatMessage>((resolve, reject) => {
         const q = this.pendingSends.get(sessionId) ?? [];
         const tail = q.length > 0 ? q[q.length - 1] : undefined;
+        // Enqueue-time coalescing never mixes nudge and non-nudge
+        // semantics — nudges stay separate entries so each remains
+        // individually editable/discardable until drain merges them.
         const canMerge =
           opts?.coalescable === true &&
+          opts?.nudge !== true &&
           tail?.coalescable === true &&
+          tail.nudge !== true &&
           sameFromBucket(tail.from, opts.from);
 
         if (canMerge && tail) {
@@ -4870,6 +5053,7 @@ export class ChatManager {
           ambient: opts?.ambient === true,
           continuationMaxTokens: opts?.continuationMaxTokens,
           hidden: opts?.hidden === true,
+          nudge: opts?.nudge === true,
           waiters: [{ resolve, reject }],
         };
         q.push(entry);
@@ -4878,15 +5062,18 @@ export class ChatManager {
           `queue#${sessionId.slice(0, 8)} ENQUEUED entry=${entry.id.slice(0, 8)} ` +
             `depth=${q.length} reason=${this.inflight.has(sessionId) ? 'inflight' : 'queue-non-empty'}`,
         );
-        this.publishQueueEnqueued(sessionId, {
-          id: entry.id,
-          userText: entry.userText,
-          enqueuedAt: entry.enqueuedAt,
-        });
+        this.publishQueueEnqueued(sessionId, entry);
       });
     }
 
-    return this.runSendAndDrain(sessionId, userText, opts);
+    // A nudge that never queued (session idle by the time it landed)
+    // is just a normal send — strip the flag so the persisted message
+    // doesn't claim mid-turn delivery.
+    return this.runSendAndDrain(
+      sessionId,
+      userText,
+      opts?.nudge ? { ...opts, nudge: false } : opts,
+    );
   }
 
   /**
@@ -4915,6 +5102,7 @@ export class ChatManager {
       ambient?: boolean;
       continuationMaxTokens?: number;
       hidden?: boolean;
+      nudge?: boolean;
     },
   ): Promise<ChatMessage> {
     const inflightTurn: InflightTurn = { userText, startedAt: Date.now() };
@@ -5002,9 +5190,27 @@ export class ChatManager {
     }
     const next = q.shift();
     if (!next) return;
+    // Merged nudge delivery: contiguous same-bucket nudges collapse
+    // into ONE user message / ONE turn, joined the same way
+    // enqueue-time coalescing joins ("all pending nudges get inserted
+    // in the context" rather than one reply per nudge). Non-nudge
+    // entries keep strict one-per-turn drain, and a non-nudge entry
+    // (or a bucket change) breaks the merge run.
+    if (next.nudge) {
+      while (q.length > 0) {
+        const peek = q[0]!;
+        if (!peek.nudge || peek.hidden !== next.hidden || !sameFromBucket(peek.from, next.from)) {
+          break;
+        }
+        q.shift();
+        next.userText = `${next.userText}\n\n${peek.userText}`;
+        next.waiters.push(...peek.waiters);
+        this.publishQueueRemoved(sessionId, peek.id, 'started');
+      }
+    }
     log.debug(
       `drain#${tag} dispatch entry=${next.id.slice(0, 8)} ` +
-        `remaining=${q.length} waiters=${next.waiters.length}`,
+        `remaining=${q.length} waiters=${next.waiters.length}${next.nudge ? ' nudge' : ''}`,
     );
     if (q.length === 0) this.pendingSends.delete(sessionId);
     // Tell listeners the ghost bubble is about to convert into a
@@ -5017,12 +5223,14 @@ export class ChatManager {
       ambient?: boolean;
       continuationMaxTokens?: number;
       hidden?: boolean;
+      nudge?: boolean;
     } = {};
     if (next.from) runOpts.from = next.from;
     if (next.lane) runOpts.lane = next.lane;
     if (next.ambient) runOpts.ambient = true;
     if (next.continuationMaxTokens) runOpts.continuationMaxTokens = next.continuationMaxTokens;
     if (next.hidden) runOpts.hidden = true;
+    if (next.nudge) runOpts.nudge = true;
     void this.runSendAndDrain(sessionId, next.userText, runOpts)
       .then((msg) => {
         // Every caller that coalesced into this entry gets the
@@ -5063,6 +5271,7 @@ export class ChatManager {
       ambient?: boolean;
       continuationMaxTokens?: number;
       hidden?: boolean;
+      nudge?: boolean;
     },
   ): Promise<ChatMessage> {
     // Fixed-function gezels skip the LLM entirely — dispatch BEFORE
@@ -5237,6 +5446,7 @@ export class ChatManager {
       at: nowIso(),
       ...(opts?.from ? { from: opts.from } : {}),
       ...(opts?.hidden ? { hidden: true } : {}),
+      ...(opts?.nudge ? { nudge: true } : {}),
     };
     state.record.messages.push(userMessage);
     if (!opts?.hidden && (!state.record.title || state.record.title === 'New session')) {
@@ -9012,6 +9222,7 @@ export class ChatManager {
     const broker = new CapacityBroker({
       ...(budgetBytes !== undefined ? { budgetBytes } : {}),
       gpuVramBytes,
+      allowRamSpillover: config.allowRamSpillover ?? null,
     });
     const pool = new ProviderPool({ broker, builders: {} });
 

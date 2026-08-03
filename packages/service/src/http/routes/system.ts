@@ -10,6 +10,8 @@ import {
   type GitHubRepoSummary,
   type GitHubReposResponse,
   MachineMemoryUsageSchema,
+  ModelDownloadPreflightRequestSchema,
+  ModelDownloadPreflightResponseSchema,
   PNPM_HOISTED_NODE_LINKER,
   SystemDiagnosticsSchema,
   createLogger,
@@ -30,6 +32,7 @@ import {
   InvalidGitHubUrlError,
   previewGitHubRepo,
 } from '../../github/repo-preview.js';
+import { modelStorageRoots } from '../../models/storage-roots.js';
 import { resolvePnpmCommand, spawnPnpm } from '../../packages/pnpm.js';
 import { resolveCopilotAvailability } from '../../providers/copilot-availability.js';
 import { resolveInstalledSystemLibrary } from '../../system-toolsets/resolve.js';
@@ -40,7 +43,9 @@ import {
   detectMemoryProfile,
   detectMemoryProfileCached,
   sampleMachineMemoryUsage,
+  summarizeResidentModels,
 } from '../../system/memory.js';
+import { checkDiskSpace } from '../../utils/disk-space.js';
 import type { ServiceContext } from '../context.js';
 
 const log = createLogger('http');
@@ -102,6 +107,8 @@ export function systemRoutes(ctx: ServiceContext): Hono {
       profile,
       ...(deviceHealth ? { deviceHealth } : {}),
       engineCommittedBytes: engineSnapshot?.committedBytes ?? 0,
+      engineBudgetBytes: engineSnapshot?.enforced ? engineSnapshot.budgetBytes : null,
+      residentModels: summarizeResidentModels(engineSnapshot?.entries ?? []),
       engineModelWeightsBytes,
       gezelProcessMemory,
       darwinSystemMemory,
@@ -119,6 +126,30 @@ export function systemRoutes(ctx: ServiceContext): Hono {
   app.get('/memory', async (c) => {
     const profile = await detectMemoryProfile();
     return c.json(profile);
+  });
+
+  /**
+   * Check one user-approved download plan against the filesystem that owns
+   * Gezel's writable media-model store. All media engines resolve beneath the
+   * same writable model-store parent in supported layouts, so checking the
+   * combined byte total here prevents several individually-valid downloads
+   * from collectively filling that volume.
+   */
+  app.post('/model-download-preflight', async (c) => {
+    const parsed = ModelDownloadPreflightRequestSchema.safeParse(
+      await c.req.json().catch(() => null),
+    );
+    if (!parsed.success) {
+      return c.json({ error: 'sizeBytes must be a positive integer no larger than 10 TiB' }, 400);
+    }
+    const writableRoot = modelStorageRoots({ home: ctx.home, engine: 'sd-cpp' }).writableRoot;
+    const check = await checkDiskSpace(writableRoot, parsed.data.sizeBytes);
+    return c.json(
+      ModelDownloadPreflightResponseSchema.parse({
+        ...check,
+        storageLocation: 'Gezel model storage',
+      }),
+    );
   });
 
   /**

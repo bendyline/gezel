@@ -83,6 +83,21 @@ export const HealthResponseSchema = z.object({
    * offending binary is replaced (see `llama-quarantine.ts`).
    */
   llamaCppQuarantinedBackends: z.array(z.enum(['cuda', 'vulkan', 'metal', 'cpu'])).optional(),
+  /**
+   * Whether the daemon may create child processes, probed once at boot.
+   *
+   * `denied` is a whole-daemon condition rather than one feature's problem:
+   * local engines, GPU detection, the stdio MCP server, sandboxed scripts,
+   * package installs and git are all child processes, so the user sees a
+   * half-dozen unrelated-looking failures with one cause. It is reported
+   * here — on health, next to the engine fields — because the client that
+   * needs to explain it is the same one already reading them.
+   *
+   * Windows-only; `undefined` elsewhere and on daemons predating the probe.
+   * A denied token cannot be repaired by the daemon: it comes from the
+   * service registration, so the only correct response is to say so.
+   */
+  childProcessSpawn: z.enum(['ok', 'denied']).optional(),
 });
 export type HealthResponse = z.infer<typeof HealthResponseSchema>;
 
@@ -97,14 +112,32 @@ export const MachineMemoryKindSchema = z.enum(['vram', 'unified', 'ram']);
 export type MachineMemoryKind = z.infer<typeof MachineMemoryKindSchema>;
 
 /**
+ * One local chat-model replica group holding a capacity reservation.
+ * Aggregated per (provider, model) so clones of the same model read as one
+ * row with `replicaCount > 1` rather than N indistinguishable lines.
+ */
+export const ResidentEngineModelSchema = z.object({
+  provider: z.string(),
+  modelId: z.string(),
+  /** Broker reservation summed across this model's replicas. */
+  reservedBytes: z.number().nonnegative(),
+  replicaCount: z.number().int().positive(),
+});
+export type ResidentEngineModel = z.infer<typeof ResidentEngineModelSchema>;
+
+/**
  * Lightweight, authenticated machine-memory telemetry for status surfaces.
  *
  * On macOS, `gezelBytesObserved` is the combined physical footprint of gezeld
  * and same-home engine processes — the metric Activity Monitor uses, including
- * Metal-backed allocations. Other platforms retain the portable reservation
- * estimate because GPU APIs do not expose consistent per-process accounting.
+ * Metal-backed allocations. Other platforms expose no consistent per-process
+ * accelerator accounting, so the Gezel attribution stays zero there unless the
+ * driver reports pool-wide use.
+ *
  * `engineReservedBytes` stays separate: it is capacity planning, not observed
- * use.
+ * use, and it is NOT a quantity of this pool. Attributing it to the pool once
+ * pegged a 32 GiB card at 100% because three resident models had reserved
+ * 50 GiB against a budget spanning VRAM and system RAM.
  */
 export const MachineMemoryUsageSchema = z.object({
   kind: MachineMemoryKindSchema,
@@ -122,6 +155,16 @@ export const MachineMemoryUsageSchema = z.object({
   gezelModelCacheBytes: z.number().nonnegative(),
   /** Capacity-broker reservation for local chat-model replicas. */
   engineReservedBytes: z.number().nonnegative(),
+  /**
+   * Total model budget `engineReservedBytes` is measured against. On a
+   * discrete card that budget spans VRAM *plus* a system-RAM share, so it is
+   * routinely larger than `totalBytes` — render the reservation against this,
+   * never as a fraction of the pool. Null when no local-engine pool is
+   * running or the budget is not enforced.
+   */
+  engineBudgetBytes: z.number().nonnegative().nullable(),
+  /** The resident models behind `engineReservedBytes`. */
+  residentModels: z.array(ResidentEngineModelSchema),
   gezelEngineProcessCount: z.number().int().nonnegative(),
   orphanedGezelEngineProcessCount: z.number().int().nonnegative(),
   otherBytes: z.number().nonnegative().nullable(),
@@ -133,6 +176,29 @@ export const MachineMemoryUsageSchema = z.object({
   deviceNames: z.array(z.string()),
 });
 export type MachineMemoryUsage = z.infer<typeof MachineMemoryUsageSchema>;
+
+/**
+ * Preflight a user-approved batch of model downloads against the filesystem
+ * that owns Gezel's writable model store. The response deliberately names the
+ * location generically: absolute service paths are not renderer data.
+ */
+export const ModelDownloadPreflightRequestSchema = z.object({
+  sizeBytes: z
+    .number()
+    .int()
+    .positive()
+    .max(10 * 1024 ** 4),
+});
+export type ModelDownloadPreflightRequest = z.infer<typeof ModelDownloadPreflightRequestSchema>;
+
+export const ModelDownloadPreflightResponseSchema = z.object({
+  known: z.boolean(),
+  ok: z.boolean(),
+  freeBytes: z.number().nonnegative(),
+  requiredBytes: z.number().positive(),
+  storageLocation: z.literal('Gezel model storage'),
+});
+export type ModelDownloadPreflightResponse = z.infer<typeof ModelDownloadPreflightResponseSchema>;
 
 /**
  * Shareable machine profile for a user-authored bug report.
@@ -1147,6 +1213,19 @@ export const GezelConfigSchema = z.object({
    * returns the broker to the auto-derived value.
    */
   localEngineMemoryGb: z.number().positive().nullable().optional(),
+  /**
+   * Whether models already sharing a discrete card may spill into system
+   * RAM. This governs CO-RESIDENCY only: one model on its own is always
+   * free to use the full budget, so a MoE larger than the card still runs
+   * by streaming experts. With this off, a second model that would push
+   * the resident set past the card's own memory causes an eviction instead
+   * — the pool serializes rather than running everything degraded.
+   *
+   * Unset = auto: on for cards at or below 12 GB (where nothing co-resides
+   * on-card anyway, so eviction would just mean a cold reload per switch),
+   * off above. Non-discrete hosts have one pool and ignore this entirely.
+   */
+  allowRamSpillover: z.boolean().nullable().optional(),
   /**
    * Per-model clone count, keyed by catalog `modelId`. Missing keys
    * default to 1 (one resident replica). Drives the warm-pool
@@ -3067,8 +3146,15 @@ export const CopilotAvailabilitySchema = z.object({
   available: z.boolean(),
   /** Which rung answered, or null when none did. */
   source: z.enum(['env', 'managed', 'path']).nullable(),
-  /** Our managed install specifically, independent of the other rungs. */
-  managed: z.enum(['current', 'outdated', 'absent']),
+  /**
+   * Our managed install specifically, independent of the other rungs.
+   * `damaged` means the tracking record and install directory exist but the
+   * tree won't load (dangling links, missing entry file) — the install must
+   * be repaired, and the managed rung never answers `available` from it.
+   */
+  managed: z.enum(['current', 'outdated', 'absent', 'damaged']),
+  /** Human-readable detail for `managed: 'damaged'` — what failed the probe. */
+  damagedReason: z.string().optional(),
   /** Version on disk, when `managed !== 'absent'`. */
   installedVersion: z.string().optional(),
   /** Version this build pins. */

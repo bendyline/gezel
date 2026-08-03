@@ -453,11 +453,12 @@ function defaultCommandRunner(
     nodeExecFile(
       command,
       args,
-      // nvidia-smi / amd-smi are console-subsystem. Under the machine
-      // service's restricted SID console allocation fails, so they must start
-      // with DETACHED_PROCESS; `windowsHide` (CREATE_NO_WINDOW) still
-      // allocates one. Without this the daemon sees no GPU at all and falls
-      // back to system-RAM capacity planning.
+      // nvidia-smi / amd-smi are console-subsystem, and the Session 0 service
+      // has no console for the loader to allocate from, so they start with
+      // DETACHED_PROCESS; `windowsHide` (CREATE_NO_WINDOW) still allocates
+      // one. When these probes fail the daemon sees no GPU at all and plans
+      // capacity against system RAM — the symptom that made a token-level
+      // spawn denial look like a GPU-detection bug.
       { timeout: timeoutMs, ...windowsDetachedSpawnOptions() },
       (error, stdout, stderr) => {
         if (error) {

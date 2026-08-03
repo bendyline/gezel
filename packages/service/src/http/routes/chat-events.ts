@@ -1,6 +1,9 @@
+import { createLogger } from '@bendyline/gezel';
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import type { ServiceContext } from '../context.js';
+
+const log = createLogger('chat-events');
 
 /**
  * Chat event SSE endpoints.
@@ -55,6 +58,12 @@ export function chatEventsRoutes(ctx: ServiceContext): Hono {
           // before the next rapid send opens another session stream.
           if (event.type === 'done') close();
         } catch {
+          // A write failure without a preceding abort means the socket died
+          // under the client (daemon restart doesn't hit this path; a
+          // dropped h2 connection or a vanished renderer does). Log it —
+          // this is the server-side trace for a "network error" the
+          // composer reports.
+          if (!closed) log.info(`session=${key} stream write failed (client connection lost)`);
           close();
         }
       });
@@ -68,6 +77,7 @@ export function chatEventsRoutes(ctx: ServiceContext): Hono {
         try {
           await stream.writeSSE({ event: 'ping', data: '' });
         } catch {
+          if (!closed) log.info(`session=${key} stream ping failed (client connection lost)`);
           close();
         }
       }
@@ -98,6 +108,7 @@ export function chatEventsRoutes(ctx: ServiceContext): Hono {
         try {
           await stream.writeSSE({ event: 'ping', data: '' });
         } catch {
+          log.debug(`project=${projectId} envelope stream ping failed (client connection lost)`);
           closed = true;
         }
       }
@@ -128,6 +139,7 @@ export function chatEventsRoutes(ctx: ServiceContext): Hono {
         try {
           await stream.writeSSE({ event: 'ping', data: '' });
         } catch {
+          log.debug(`gezel=${gezelId} envelope stream ping failed (client connection lost)`);
           closed = true;
         }
       }
@@ -156,6 +168,7 @@ export function chatEventsRoutes(ctx: ServiceContext): Hono {
         try {
           await stream.writeSSE({ event: 'ping', data: '' });
         } catch {
+          log.debug('global envelope stream ping failed (client connection lost)');
           closed = true;
         }
       }

@@ -28,21 +28,25 @@
 // The measured failure is error 317 (ERROR_MR_MID_NOT_FOUND), reproduced
 // twice against a real GezelService install with the error captured
 // directly from AllocConsole. Note what it is NOT: ACCESS_DENIED. The
-// restricted service SID was the obvious suspect (a write-restricted
+// then-restricted service SID was the obvious suspect (a write-restricted
 // token must also satisfy write checks against its restricted SID list),
 // but that would surface as error 5. 317 instead points at the console
 // subsystem being unavailable to a Session 0 service in a
 // non-interactive window station at all — i.e. a console was never a
 // dependable stop channel here, SID type or not.
 //
+// That reading held up. The SID type was later moved to `unrestricted`
+// for an unrelated and much larger reason — a write-restricted token
+// cannot create the named pipes libuv opens for child stdio, so the
+// daemon could not spawn anything (see nsis-hooks.nsh) — and the console
+// stayed exactly as unavailable afterwards. Session 0 is the cause.
+//
 // The fix is independent of that diagnosis either way. stdin needs no
 // console, no window station, no desktop, and no privilege: the host
 // holds the write end of a pipe, and closing it delivers EOF to gezeld
 // whatever session or token it runs under. CTRL_BREAK is kept as a
 // belt-and-braces secondary for the case a console does exist; it is
-// never the only path. Do not relax the SID type to "fix" the console —
-// the restriction is a deliberate security control, and the evidence says
-// it was not what broke the console anyway.
+// never the only path.
 //
 // The pure path/env/rotation/budget logic is platform-neutral and
 // exercised by `--self-test` (wired into CTest); all Win32 service code
@@ -582,7 +586,7 @@ bool spawn_child(const std::wstring& cmdline, const std::wstring& env_block,
   si.lpAttributeList = attrs;
 
   // Graceful stop rides on the stdin pipe above, NOT on the console —
-  // AllocConsole does not survive the restricted service SID, so the
+  // AllocConsole does not survive Session 0, so the
   // console path is a best-effort secondary. Keeping the child on the
   // host's console (no CREATE_NO_WINDOW / DETACHED_PROCESS /
   // CREATE_NEW_CONSOLE) only preserves that secondary; it is no longer
@@ -629,7 +633,7 @@ void stop_ladder(Child* child, HANDLE job) {
   if (child->process && WaitForSingleObject(child->process, 0) == WAIT_TIMEOUT) {
     // Primary signal: closing the host's write end delivers EOF on the
     // child's stdin, which gezeld handles as a graceful shutdown. Works
-    // under the restricted service SID, in session 0, with no console.
+    // under the least-privileged service token, in session 0, with no console.
     const bool signalled_via_stdin = child->stdin_write != nullptr;
     close_stdin_writer(child);
     if (signalled_via_stdin) host_log(L"closed gezeld stdin (graceful stop requested)");

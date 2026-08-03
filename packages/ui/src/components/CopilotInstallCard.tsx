@@ -20,7 +20,7 @@ type State =
  * should be made to accept just by launching the app. So this card is the
  * only place it gets fetched, and only when the user asks.
  *
- * Four states, driven entirely by {@link CopilotAvailability}:
+ * Five states, driven entirely by {@link CopilotAvailability}:
  *
  *   - `source: 'path'` or `'env'` — the user already has a Copilot CLI.
  *     **No install button.** Offering a second copy of the same proprietary
@@ -31,6 +31,11 @@ type State =
  *   - `managed: 'outdated'` — installed and working, but this build pins a
  *     different version. Offer an update, never a warning: the on-disk copy
  *     is fine.
+ *   - `managed: 'damaged'` — the install directory exists but won't load
+ *     (broken links from an old installer, truncated tree). This card is
+ *     the only repair surface there is: the provider's error says "choose
+ *     Repair" and points here, so a damaged state with no button would
+ *     strand the user in a loop between two contradicting screens.
  *   - not available — explain what will be downloaded, then one button.
  */
 export function CopilotInstallCard({
@@ -181,6 +186,24 @@ function IdleBody({
         ) : null}
         .
       </p>
+    );
+  }
+
+  if (availability.managed === 'damaged') {
+    return (
+      <>
+        <p className="error small" style={{ marginTop: 0 }}>
+          GitHub Copilot SDK {availability.installedVersion} is installed but its files are damaged
+          {availability.damagedReason ? <> — {availability.damagedReason}</> : null}. Repairing
+          downloads a fresh copy and replaces the broken install.
+        </p>
+        {failed && <InstallError error={failed.error} />}
+        <div className="home-copilot-login-actions">
+          <button type="button" className="primary" onClick={onInstall}>
+            {failed ? 'Try repair again' : 'Repair'}
+          </button>
+        </div>
+      </>
     );
   }
 

@@ -43,8 +43,8 @@ const defaultRegQuery: RegQuery = async (key, value) => {
   // and we would report "installed" for a machine that has no service.
   // `windowsHide` is right HERE and nowhere in the daemon: this runs in the
   // Electron main process, an ordinary interactive session where
-  // CREATE_NO_WINDOW just suppresses reg.exe's console flash. Under the
-  // machine service the same option fails — see windowsDetachedSpawnOptions.
+  // CREATE_NO_WINDOW just suppresses reg.exe's console flash. The daemon's
+  // Session 0 has no console to hide — see windowsDetachedSpawnOptions.
   const { stdout } = await execFileAsync('reg.exe', ['query', key, '/v', value, '/reg:64'], {
     windowsHide: true,
   });

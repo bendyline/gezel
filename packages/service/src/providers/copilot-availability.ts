@@ -1,7 +1,13 @@
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import type { CopilotAvailability } from '@bendyline/gezel';
+import { createLogger } from '@bendyline/gezel';
+import { checkInstallTree } from '../system-toolsets/install-health.js';
 import { SYSTEM_TOOLSETS } from '../system-toolsets/manifest.js';
 import { resolveInstalledSystemLibrary } from '../system-toolsets/resolve.js';
 import { resolveCopilotCliPath } from './copilot-cli.js';
+
+const log = createLogger('copilot-availability');
 
 export const COPILOT_TOOLSET_ID = '@github/copilot-sdk';
 
@@ -23,8 +29,42 @@ export function resetCopilotAvailabilityCache(): void {
   cached = null;
 }
 
+function pinnedEntry() {
+  return SYSTEM_TOOLSETS.find((e) => e.toolsetId === COPILOT_TOOLSET_ID);
+}
+
 function pinnedVersion(): string {
-  return SYSTEM_TOOLSETS.find((e) => e.toolsetId === COPILOT_TOOLSET_ID)?.version ?? '0.0.0';
+  return pinnedEntry()?.version ?? '0.0.0';
+}
+
+/**
+ * Does the managed install actually load, or does it merely exist?
+ *
+ * `resolveInstalledSystemLibrary` answers "is the directory there" — which
+ * is the right question for *presence*, but a tree can be present and still
+ * unloadable. Two known ways to get there:
+ *
+ *   - Installs from builds before the hoisted-linker fix left NTFS junctions
+ *     pointing at the vanished staging directory (see install-health.ts).
+ *     The boot bootstrap heals eager toolsets from exactly this state, but
+ *     the on-demand Copilot SDK never passes through that code.
+ *   - A truncated or partially-removed tree whose entry file is gone.
+ *
+ * Without this probe those installs reported `managed: 'current'` while the
+ * provider's real `import()` threw ERR_MODULE_NOT_FOUND — so Settings said
+ * "Installed" and Test connection said "isn't installed", with no repair
+ * affordance anywhere. Returns a human-readable reason, or null if healthy.
+ */
+async function detectManagedDamage(installRoot: string): Promise<string | null> {
+  const tree = await checkInstallTree(installRoot);
+  if (!tree.ok) {
+    return `dependency "${tree.missingDep}" cannot be resolved — the install tree is broken`;
+  }
+  const entryRel = pinnedEntry()?.entry;
+  if (entryRel && !existsSync(join(installRoot, entryRel))) {
+    return `entry file "${entryRel}" is missing from the install`;
+  }
+  return null;
 }
 
 /**
@@ -47,6 +87,10 @@ function pinnedVersion(): string {
  * `managed: 'outdated'` means an install exists at a version this build
  * doesn't pin. That is a working Copilot plus an update affordance, never
  * "not installed" — see {@link resolveInstalledSystemLibrary}.
+ *
+ * `managed: 'damaged'` means the install is on disk but won't load (see
+ * {@link detectManagedDamage}). It is reported with a `damagedReason` so the
+ * Settings card can offer a repair, and it never satisfies `available`.
  */
 export async function resolveCopilotAvailability(
   home: string,
@@ -72,17 +116,26 @@ async function probe(
   const env = opts.env ?? process.env;
   const pinned = pinnedVersion();
   const installed = await resolveInstalledSystemLibrary(home, COPILOT_TOOLSET_ID);
+  const damagedReason = installed ? await detectManagedDamage(installed.path) : null;
   const managed: CopilotAvailability['managed'] = !installed
     ? 'absent'
-    : installed.matchesPin
-      ? 'current'
-      : 'outdated';
+    : damagedReason
+      ? 'damaged'
+      : installed.matchesPin
+        ? 'current'
+        : 'outdated';
+  if (installed && damagedReason) {
+    log.warn(
+      `[copilot] managed install at ${installed.path} is damaged (${damagedReason}); it will not be offered until repaired from Settings`,
+    );
+  }
 
   const base = {
     managed,
     pinnedVersion: pinned,
     updateAvailable: managed === 'outdated',
     ...(installed ? { installedVersion: installed.version, installDir: installed.path } : {}),
+    ...(damagedReason ? { damagedReason } : {}),
   };
 
   const override = env.COPILOT_CLI_PATH;
@@ -90,11 +143,14 @@ async function probe(
     return { ...base, available: true, source: 'env', cliPath: override };
   }
 
-  if (installed) {
+  // A damaged managed install never answers "available" — the provider's
+  // import() of it would throw. Fall through to the PATH rung: a CLI the
+  // user installed themselves may still carry the day.
+  if (installed && !damagedReason) {
     return { ...base, available: true, source: 'managed' };
   }
 
-  // No managed install — ask whether the user brought their own. Pass
+  // No usable managed install — ask whether the user brought their own. Pass
   // `installRoot: null` so this is strictly the PATH rung; the managed rung
   // was already decided above.
   const onPath = resolveCopilotCliPath({

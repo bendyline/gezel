@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { createMockApi } from '../test-utils/mockApi.js';
 
@@ -54,6 +54,12 @@ const audioCatalog = {
     },
   ],
 };
+const recognitionModel = {
+  id: 'qwen3-vl-4b-q4',
+  name: 'Qwen3-VL 4B',
+  approxSizeBytes: 3.3 * GB,
+  recoScore: 20,
+};
 
 function seedApi(mem: {
   platform: string;
@@ -73,6 +79,19 @@ function seedApi(mem: {
   vi.mocked(api.listInstalledTtsModels).mockResolvedValue({ models: [] } as never);
   vi.mocked(api.listActiveImagePulls).mockResolvedValue({ pulls: [] } as never);
   vi.mocked(api.listActiveVideoPulls).mockResolvedValue({ pulls: [] } as never);
+  vi.mocked(api.listRecognitionCatalog).mockResolvedValue({ models: [recognitionModel] } as never);
+  vi.mocked(api.listInstalledRecognitionModels).mockResolvedValue({ models: [] } as never);
+  vi.mocked(api.checkModelDownloadSpace).mockImplementation((async ({
+    sizeBytes,
+  }: {
+    sizeBytes: number;
+  }) => ({
+    known: true,
+    ok: true,
+    freeBytes: 80 * GB,
+    requiredBytes: sizeBytes + 2 * GB,
+    storageLocation: 'Gezel model storage' as const,
+  })) as never);
 }
 
 describe('RecommendedMediaDownloads', () => {
@@ -83,14 +102,15 @@ describe('RecommendedMediaDownloads', () => {
       totalRamBytes: 64 * GB,
       usableBytes: 32 * GB,
     });
-    render(<RecommendedMediaDownloads config={null} />);
+    render(<RecommendedMediaDownloads />);
     await waitFor(() =>
       expect(screen.getByRole('button', { name: /Download image model/ })).toBeInTheDocument(),
     );
     expect(screen.getByRole('button', { name: /Download speech-to-text/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Download text-to-speech/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Download image reading/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Download video model/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Download all recommended/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Choose downloads/ })).toBeInTheDocument();
   });
 
   it('hides the video model when the device lacks the VRAM floor', async () => {
@@ -100,7 +120,7 @@ describe('RecommendedMediaDownloads', () => {
       totalRamBytes: 32 * GB,
       usableBytes: 16 * GB,
     });
-    render(<RecommendedMediaDownloads config={null} />);
+    render(<RecommendedMediaDownloads />);
     // Image (RAM 32 ≥ 16) + both audio still appear…
     await waitFor(() =>
       expect(screen.getByRole('button', { name: /Download image model/ })).toBeInTheDocument(),
@@ -151,7 +171,7 @@ describe('RecommendedMediaDownloads', () => {
       (() => new Promise<void>(() => {})) as never,
     );
 
-    render(<RecommendedMediaDownloads config={null} />);
+    render(<RecommendedMediaDownloads />);
 
     expect(await screen.findByText('1.1 GB of 4.3 GB · 25%')).toBeInTheDocument();
     expect(screen.getByText('18.3 GB of 36.5 GB · 50%')).toBeInTheDocument();
@@ -172,5 +192,109 @@ describe('RecommendedMediaDownloads', () => {
       onImageEvent?.({ type: 'progress', bytesWritten: 2 * GB, totalBytes: 4 * GB });
     });
     expect(screen.getByText('2.1 GB of 4.3 GB · 50%')).toBeInTheDocument();
+  });
+
+  it('reviews a size-aware default plan, leaves video out, and never starts a chat model', async () => {
+    seedApi({
+      platform: 'win32',
+      gpuVramBytes: 34 * GB,
+      totalRamBytes: 64 * GB,
+      usableBytes: 32 * GB,
+    });
+    render(<RecommendedMediaDownloads />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /Choose downloads/ }));
+
+    expect(screen.getByRole('alertdialog', { name: 'Review model downloads' })).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: /FLUX\.2 Klein/ })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: /Qwen3-VL/ })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: /Whisper Base/ })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: /Kokoro/ })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: /Wan 2\.2/ })).not.toBeChecked();
+
+    const defaultBytes =
+      (2.46 + 0.25 + 2.5) * GB + recognitionModel.approxSizeBytes + 147_900_000 + 95_000_000;
+    await waitFor(() =>
+      expect(api.checkModelDownloadSpace).toHaveBeenCalledWith({
+        sizeBytes: Math.ceil(defaultBytes),
+      }),
+    );
+    const confirm = await screen.findByRole('button', { name: 'Download 4 models' });
+    await waitFor(() => expect(confirm).toBeEnabled());
+    fireEvent.click(confirm);
+
+    await waitFor(() => expect(api.pullImageModel).toHaveBeenCalledTimes(1));
+    expect(api.pullRecognitionModel).toHaveBeenCalledTimes(1);
+    expect(api.pullAudioModel).toHaveBeenCalledTimes(2);
+    expect(api.pullVideoModel).not.toHaveBeenCalled();
+    expect(api.installMlxModel).not.toHaveBeenCalled();
+    expect(api.installLlamaCppModel).not.toHaveBeenCalled();
+  });
+
+  it('requires an explicit checked plan and disk preflight for the large video model', async () => {
+    seedApi({
+      platform: 'win32',
+      gpuVramBytes: 34 * GB,
+      totalRamBytes: 64 * GB,
+      usableBytes: 32 * GB,
+    });
+    render(<RecommendedMediaDownloads />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /Download video model/ }));
+    expect(screen.getByRole('checkbox', { name: /Wan 2\.2/ })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: /FLUX\.2 Klein/ })).not.toBeChecked();
+    expect(screen.getByText('Large download')).toBeInTheDocument();
+    await waitFor(() =>
+      expect(api.checkModelDownloadSpace).toHaveBeenCalledWith({
+        sizeBytes: Math.ceil(videoItem.manifest.approxSizeBytes),
+      }),
+    );
+    expect(await screen.findByRole('button', { name: 'Download 1 model' })).toBeEnabled();
+    expect(api.pullVideoModel).not.toHaveBeenCalled();
+  });
+
+  it('blocks confirmation when the model-store filesystem lacks space', async () => {
+    seedApi({
+      platform: 'win32',
+      gpuVramBytes: 34 * GB,
+      totalRamBytes: 64 * GB,
+      usableBytes: 32 * GB,
+    });
+    vi.mocked(api.checkModelDownloadSpace).mockResolvedValue({
+      known: true,
+      ok: false,
+      freeBytes: 2 * GB,
+      requiredBytes: 12 * GB,
+      storageLocation: 'Gezel model storage',
+    } as never);
+    render(<RecommendedMediaDownloads />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /Choose downloads/ }));
+    expect(await screen.findByText(/Not enough free space/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Download 4 models' })).toBeDisabled();
+    expect(api.pullImageModel).not.toHaveBeenCalled();
+  });
+
+  it('offers explicit cancellation for a confirmed server-owned download', async () => {
+    seedApi({
+      platform: 'win32',
+      gpuVramBytes: 34 * GB,
+      totalRamBytes: 64 * GB,
+      usableBytes: 32 * GB,
+    });
+    vi.mocked(api.pullImageModel).mockImplementation((() => new Promise<void>(() => {})) as never);
+    render(<RecommendedMediaDownloads />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /Download image model/ }));
+    const confirm = await screen.findByRole('button', { name: 'Download 1 model' });
+    await waitFor(() => expect(confirm).toBeEnabled());
+    fireEvent.click(confirm);
+
+    const cancel = await screen.findByRole('button', {
+      name: 'Cancel FLUX.2 Klein 4B download',
+    });
+    fireEvent.click(cancel);
+    await waitFor(() => expect(api.cancelImagePull).toHaveBeenCalledWith('flux-2-klein-4b-q4'));
+    expect(await screen.findByRole('button', { name: /Download image model/ })).toBeInTheDocument();
   });
 });

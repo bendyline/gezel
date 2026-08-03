@@ -4443,6 +4443,7 @@ export class Store {
           content: m.content,
           at: m.at,
           ...(m.from ? { from: m.from } : {}),
+          ...(m.nudge ? { nudge: true } : {}),
           ...(refs && refs.length > 0 ? { referencedArtifacts: refs } : {}),
           ...(tRefs && tRefs.length > 0 ? { referencedTasks: tRefs } : {}),
           ...(m.toolCalls && m.toolCalls.length > 0 ? { toolCalls: m.toolCalls } : {}),

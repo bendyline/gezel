@@ -7,6 +7,13 @@ import { formatBytes } from './engine-pill-stats.js';
 interface Props {
   /** Poll only while mounted (the engine dropdown mounts this on open). */
   pollMs?: number;
+  /**
+   * Catalog display names by model id, for the resident-model list. The
+   * memory endpoint carries ids only — resolving names there would put a
+   * catalog read in a once-a-second poll — so the host passes down the
+   * installed-model list it already holds. Unknown ids fall back to the id.
+   */
+  modelNames?: ReadonlyMap<string, string>;
 }
 
 function poolLabel(kind: MachineMemoryUsage['kind']): string {
@@ -21,16 +28,36 @@ function percent(bytes: number, totalBytes: number): number {
 }
 
 /**
+ * The broker reservation is not a quantity of this pool: on a discrete card
+ * its budget is the card's memory PLUS a share of system RAM, so it routinely
+ * exceeds what the bar can hold. State it against its own budget and never as
+ * a fraction of the pool.
+ */
+function describeReservation(usage: MachineMemoryUsage): string {
+  const reserved = `~${formatBytes(usage.engineReservedBytes)}`;
+  if (usage.engineBudgetBytes === null || usage.engineBudgetBytes <= 0) {
+    return `Models reserve ${reserved} for capacity planning`;
+  }
+  const budget = `~${formatBytes(usage.engineBudgetBytes)}`;
+  return usage.kind === 'vram'
+    ? `Models reserve ${reserved} of ${budget} — this card's memory plus a share of system memory`
+    : `Models reserve ${reserved} of ${budget} available to models`;
+}
+
+/**
  * Stacked live view of the physical memory pool backing local inference.
  *
  * macOS reports Gezel's observed physical footprint (including Metal-backed
  * allocations) separately from the engine broker's capacity reservation.
- * Platforms without portable per-process accelerator accounting retain the
- * reservation estimate. Aggregate used/free figures come from the OS on
- * UMA/CPU hosts and the GPU driver on discrete cards. macOS file cache stays
- * separate because it is reclaimable capacity, not "Other" app use.
+ * Aggregate used/free figures come from the OS on UMA/CPU hosts and the GPU
+ * driver on discrete cards. macOS file cache stays separate because it is
+ * reclaimable capacity, not "Other" app use.
+ *
+ * A discrete card whose driver reports capacity but not use leaves the bar
+ * hatched and empty rather than filling it from the reservation — see
+ * `describeReservation`, and the service-side note in `sampleMachineMemoryUsage`.
  */
-export function MachineMemoryStrip({ pollMs = 1_000 }: Props) {
+export function MachineMemoryStrip({ pollMs = 1_000, modelNames }: Props) {
   const [usage, setUsage] = useState<MachineMemoryUsage | null>(null);
   const [unavailable, setUnavailable] = useState(false);
 
@@ -100,14 +127,27 @@ export function MachineMemoryStrip({ pollMs = 1_000 }: Props) {
       bytes: usage.gezelModelCacheBytes,
     },
   ] as const;
+  const attributed = gezelBytes > 0;
+  const residentModels = usage.residentModels ?? [];
+  const reservationNote = usage.engineReservedBytes > 0 ? describeReservation(usage) : null;
   const ariaSummary = [
     `${label}: ${usedSummary}`,
-    observed
-      ? `Gezel observed footprint ${formatBytes(gezelBytes)}`
-      : `Gezel estimated ${formatBytes(gezelBytes)}`,
-    ...gezelSegments.map((segment) => `${segment.label} about ${formatBytes(segment.bytes)}`),
-    observed && usage.engineReservedBytes > 0
-      ? `models reserve about ${formatBytes(usage.engineReservedBytes)}`
+    !attributed
+      ? null
+      : observed
+        ? `Gezel observed footprint ${formatBytes(gezelBytes)}`
+        : `Gezel estimated ${formatBytes(gezelBytes)}`,
+    ...gezelSegments.map((segment) =>
+      segment.bytes > 0 ? `${segment.label} about ${formatBytes(segment.bytes)}` : null,
+    ),
+    reservationNote,
+    residentModels.length > 0
+      ? `${residentModels.length} ${residentModels.length === 1 ? 'model' : 'models'} loaded: ${residentModels
+          .map(
+            (model) =>
+              `${modelNames?.get(model.modelId) ?? model.modelId} ${formatBytes(model.reservedBytes)}`,
+          )
+          .join(', ')}`
       : null,
     usage.orphanedGezelEngineProcessCount > 0
       ? `${usage.orphanedGezelEngineProcessCount} leftover Gezel engine ${
@@ -165,11 +205,13 @@ export function MachineMemoryStrip({ pollMs = 1_000 }: Props) {
         </div>
       </Tooltip.Provider>
       <div className="machine-memory-legend">
-        <span>
-          <i className="machine-memory-swatch machine-memory-swatch-gezel" aria-hidden />
-          Gezel {observed ? '' : '~'}
-          {formatBytes(gezelBytes)}
-        </span>
+        {attributed && (
+          <span>
+            <i className="machine-memory-swatch machine-memory-swatch-gezel" aria-hidden />
+            Gezel {observed ? '' : '~'}
+            {formatBytes(gezelBytes)}
+          </span>
+        )}
         {usage.otherBytes !== null && (
           <span>
             <i className="machine-memory-swatch machine-memory-swatch-other" aria-hidden />
@@ -189,9 +231,23 @@ export function MachineMemoryStrip({ pollMs = 1_000 }: Props) {
           </span>
         )}
       </div>
-      {observed && usage.engineReservedBytes > 0 && (
+      {reservationNote && <div className="machine-memory-note">{reservationNote}</div>}
+      {residentModels.length > 0 && (
         <div className="machine-memory-note">
-          Models reserve ~{formatBytes(usage.engineReservedBytes)} for capacity planning
+          <div className="machine-memory-models-heading">
+            {residentModels.length} {residentModels.length === 1 ? 'model' : 'models'} loaded
+          </div>
+          <ul className="machine-memory-models">
+            {residentModels.map((model) => (
+              <li key={`${model.provider}:${model.modelId}`}>
+                <span className="machine-memory-model-name">
+                  {modelNames?.get(model.modelId) ?? model.modelId}
+                  {model.replicaCount > 1 && ` ×${model.replicaCount}`}
+                </span>
+                <span>{formatBytes(model.reservedBytes)}</span>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
       {usage.orphanedGezelEngineProcessCount > 0 && (
