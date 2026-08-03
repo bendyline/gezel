@@ -973,6 +973,93 @@ describe('TaskRunner — night-shift gating + priority', () => {
     expect(runner.snapshot().holdReason).toBe('engagement-off');
   });
 
+  it('holds every handoff under reactive engagement', async () => {
+    // "Reactive only" promises the AI answers the user and does nothing
+    // else. A handoff dispatch IS an unprompted turn, so the queue holds
+    // rather than chaining a craftbook through the setting.
+    await store.createProject({ name: 'p1' });
+    await store.createGezel({ name: 'Bea' });
+    await writeStepTask(1, {});
+    await store.writeConfig({ aiEngagementMode: 'reactive' });
+
+    const dispatcher = new FakeDispatcher(new Map([['bea', 'copilot']]));
+    dispatcher.setProvider('copilot', new ProviderQueue({ concurrency: 10 }));
+
+    const runner = new TaskRunner({ store, dispatcher });
+    runner.enqueueHandoff({ taskRef: 'p1/1', stepId: 'plan', gezelId: 'bea', projectId: 'p1' });
+    await runner.tick();
+
+    expect(dispatcher.dispatches).toHaveLength(0);
+    expect(runner.snapshot().pendingCount).toBe(1);
+    expect(runner.snapshot().holdReason).toBe('engagement-paused');
+  });
+
+  it('holds a user-launched entry handoff under reactive too', async () => {
+    // Letting `kind: 'entry'` through would run step 1 of a launched
+    // craftbook and then stall at step 2 — that reads as broken, not
+    // paused. The whole chain waits for the mode to come back up.
+    await store.createProject({ name: 'p1' });
+    await store.createGezel({ name: 'Bea' });
+    await writeStepTask(1, {});
+    await store.writeConfig({ aiEngagementMode: 'reactive' });
+
+    const dispatcher = new FakeDispatcher(new Map([['bea', 'copilot']]));
+    dispatcher.setProvider('copilot', new ProviderQueue({ concurrency: 10 }));
+
+    const runner = new TaskRunner({ store, dispatcher });
+    runner.enqueueHandoff({
+      taskRef: 'p1/1',
+      stepId: 'plan',
+      gezelId: 'bea',
+      projectId: 'p1',
+      kind: 'entry',
+    });
+    await runner.tick();
+
+    expect(dispatcher.dispatches).toHaveLength(0);
+    expect(runner.snapshot().pendingCount).toBe(1);
+  });
+
+  it('dispatches under scheduled engagement', async () => {
+    // "Scheduled + Reactive" still runs the work the user set up; only
+    // the proactive nudges are off.
+    await store.createProject({ name: 'p1' });
+    await store.createGezel({ name: 'Bea' });
+    await writeStepTask(1, {});
+    await store.writeConfig({ aiEngagementMode: 'scheduled' });
+
+    const dispatcher = new FakeDispatcher(new Map([['bea', 'copilot']]));
+    dispatcher.setProvider('copilot', new ProviderQueue({ concurrency: 10 }));
+
+    const runner = new TaskRunner({ store, dispatcher });
+    runner.enqueueHandoff({ taskRef: 'p1/1', stepId: 'plan', gezelId: 'bea', projectId: 'p1' });
+    await runner.tick();
+
+    expect(dispatcher.dispatches).toHaveLength(1);
+    expect(runner.snapshot().holdReason).toBeUndefined();
+  });
+
+  it('resumes held handoffs when engagement is raised again', async () => {
+    await store.createProject({ name: 'p1' });
+    await store.createGezel({ name: 'Bea' });
+    await writeStepTask(1, {});
+    await store.writeConfig({ aiEngagementMode: 'reactive' });
+
+    const dispatcher = new FakeDispatcher(new Map([['bea', 'copilot']]));
+    dispatcher.setProvider('copilot', new ProviderQueue({ concurrency: 10 }));
+
+    const runner = new TaskRunner({ store, dispatcher });
+    runner.enqueueHandoff({ taskRef: 'p1/1', stepId: 'plan', gezelId: 'bea', projectId: 'p1' });
+    await runner.tick();
+    expect(dispatcher.dispatches).toHaveLength(0);
+
+    await store.writeConfig({ aiEngagementMode: 'proactive' });
+    await runner.tick();
+
+    expect(dispatcher.dispatches).toHaveLength(1);
+    expect(runner.snapshot().pendingCount).toBe(0);
+  });
+
   it('holds a night-shift task that already ran today (not pending)', async () => {
     await store.createProject({ name: 'p1' });
     await store.createGezel({ name: 'Bea' });

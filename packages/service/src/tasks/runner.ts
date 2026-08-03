@@ -42,7 +42,8 @@ import {
   type ModelTier,
   type Task,
   createLogger,
-  isEngagementAllowed,
+  getEngagementMode,
+  isSchedulingAllowed,
   projectAllowsAmbientWork,
   roleCapabilityFloor,
 } from '@bendyline/gezel';
@@ -58,8 +59,13 @@ const log = createLogger('tasks');
  * `'night-shift'` is the one that is NOT a backlog: the work is parked
  * until tonight's window by design, so the UI files it under scheduled
  * work rather than counting it as something the user is waiting on.
+ *
+ * `'engagement-paused'` is the milder sibling of `'engagement-off'`:
+ * the AI is still answering the user, it just isn't allowed to start
+ * turns on its own. Split from `'engagement-off'` so the UI can name
+ * the setting the user actually chose.
  */
-export type TaskHandoffHoldReason = 'engagement-off' | 'provider-busy';
+export type TaskHandoffHoldReason = 'engagement-off' | 'engagement-paused' | 'provider-busy';
 
 export interface PendingHandoff {
   /** `{projectId}/{num}` ref of the task. */
@@ -412,11 +418,18 @@ export class TaskRunner {
       this.holdReason = undefined;
       return;
     }
-    // Engagement mode "off" pauses dispatch — leave items on the queue so
-    // they pick back up the moment the user flips engagement on.
+    // Every dispatch here starts an LLM turn nobody asked for in the
+    // moment, so this gate is `isSchedulingAllowed`, not
+    // `isEngagementAllowed`: `reactive` promises "AI replies to your
+    // messages; nothing else", and a chaining craftbook kept talking
+    // straight through it. Items stay on the queue either way and pick
+    // back up the moment the user raises the mode — including the
+    // user-launched entry handoffs, which stall rather than pass
+    // through, because a launch that runs step 1 and then silently
+    // stops mid-craftbook reads as broken, not as paused.
     const config = await this.store.readConfig().catch(() => ({}));
-    if (!isEngagementAllowed(config)) {
-      this.holdReason = 'engagement-off';
+    if (!isSchedulingAllowed(config)) {
+      this.holdReason = getEngagementMode(config) === 'off' ? 'engagement-off' : 'engagement-paused';
       return;
     }
 

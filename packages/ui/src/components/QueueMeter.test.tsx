@@ -434,6 +434,27 @@ describe('QueueMeter — night-shift handoffs', () => {
     expect(within(panel).getByText(/AI engagement is off/)).toBeInTheDocument();
   });
 
+  it('names the reactive setting rather than calling the AI off', async () => {
+    vi.mocked(api.getQueueStatus).mockResolvedValue({
+      ...SCHEDULED_ONLY,
+      taskRunner: {
+        pendingCount: 1,
+        pendingByGezel: { 'gez-1': 1 },
+        pendingByProject: { 'project-7': 1 },
+        dispatchable: { count: 1, byGezel: { 'gez-1': 1 } },
+        scheduled: { count: 0, byGezel: {} },
+        holdReason: 'engagement-paused',
+      },
+    });
+
+    render(<QueueMeter />);
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'AI chat queue — click for details' }),
+    );
+    const panel = await screen.findByLabelText('AI chat queue');
+    expect(within(panel).getByText(/Activity is set to reactive/)).toBeInTheDocument();
+  });
+
   // A daemon older than this UI sends only the totals. Falling back to
   // "everything is dispatchable" keeps the old behavior rather than
   // silently hiding work the UI can't classify.

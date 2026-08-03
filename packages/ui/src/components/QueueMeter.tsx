@@ -96,6 +96,9 @@ function handoffHoldNote(state: TaskRunnerState): string | undefined {
   if (state.holdReason === 'engagement-off') {
     return 'AI engagement is off — turn it back on in Settings to start these.';
   }
+  if (state.holdReason === 'engagement-paused') {
+    return 'Activity is set to reactive — gezels answer you, but nothing starts on its own.';
+  }
   if (state.holdReason === 'provider-busy') return 'Waiting for a free slot.';
   return undefined;
 }

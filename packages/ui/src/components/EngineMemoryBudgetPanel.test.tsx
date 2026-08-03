@@ -53,9 +53,7 @@ describe('EngineMemoryBudgetPanel — RAM spillover', () => {
   it('saves an explicit choice and reflects the override', async () => {
     const user = userEvent.setup();
     const onSaved = vi.fn();
-    const { rerender } = render(
-      <EngineMemoryBudgetPanel status={status()} onSaved={onSaved} />,
-    );
+    const { rerender } = render(<EngineMemoryBudgetPanel status={status()} onSaved={onSaved} />);
 
     await user.click(screen.getByRole('radio', { name: 'Use system memory' }));
 

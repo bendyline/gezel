@@ -506,7 +506,7 @@ export interface TaskRunnerState {
    */
   scheduled?: TaskHandoffBucket;
   /** Why `dispatchable` work isn't moving. Absent when it is. */
-  holdReason?: 'engagement-off' | 'provider-busy';
+  holdReason?: 'engagement-off' | 'engagement-paused' | 'provider-busy';
   /** Night Shift state, for dating the `scheduled` bucket. */
   nightShift?: {
     active: boolean;

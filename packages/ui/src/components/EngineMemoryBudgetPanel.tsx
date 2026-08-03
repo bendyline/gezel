@@ -251,6 +251,7 @@ function RamSpilloverChoice({ status, onSaved }: EngineMemoryBudgetPanelProps) {
           <button
             key={key.id}
             type="button"
+            // biome-ignore lint/a11y/useSemanticElements: keys-in-trays choice control (docs/ux.md) — a native <input type=radio> can't carry the pressed-key shape.
             role="radio"
             aria-checked={selected === key.id}
             className={`gz-key${selected === key.id ? ' gz-key-active' : ''}`}

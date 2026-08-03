@@ -158,15 +158,15 @@ export function formatCapacityDenial(opts: {
   // the room (every other model busy), so "wait or close a chat" is the fix,
   // not "buy a smaller model".
   if (opts.coResidencyBytes !== undefined && opts.coResidencyBytes < budgetBytes) {
-    return (
-      `Not enough graphics memory to add ${modelLabel} (about ${formatGb(requestedBytes)}) ` +
-      `next to the models already loaded (${formatGb(committedBytes)} of ` +
-      `${formatGb(opts.coResidencyBytes)}). Gezel is set to keep models on the graphics card ` +
-      'rather than let them spill into system memory, so it unloads one model to make room for ' +
-      'another — but every loaded model is busy right now. Wait for a turn to finish, or allow ' +
-      'system-memory spillover in Settings under the engine that runs it, which keeps them all ' +
-      'loaded at reduced speed.'
-    );
+    return [
+      `Not enough graphics memory to add ${modelLabel} (about ${formatGb(requestedBytes)}) `,
+      `next to the models already loaded (${formatGb(committedBytes)} of `,
+      `${formatGb(opts.coResidencyBytes)}). Gezel is set to keep models on the graphics card `,
+      'rather than let them spill into system memory, so it unloads one model to make room for ',
+      'another — but every loaded model is busy right now. Wait for a turn to finish, or allow ',
+      'system-memory spillover in Settings under the engine that runs it, which keeps them all ',
+      'loaded at reduced speed.',
+    ].join('');
   }
   const free = Math.max(0, budgetBytes - committedBytes);
   const parts = [
@@ -411,10 +411,8 @@ export class CapacityBroker {
     const wouldCommit = this.committedBytes() - priorBytes + bytes;
     const ceiling = this.coResidencyBytes();
     if (this.enforced && ceiling < this.budgetBytes && wouldCommit > ceiling) {
-      return (
-        `budget exhausted: would commit ${wouldCommit} against ${ceiling} ` +
-        '(co-residency ceiling — RAM spillover off)'
-      );
+      const clause = '(co-residency ceiling — RAM spillover off)';
+      return `budget exhausted: would commit ${wouldCommit} against ${ceiling} ${clause}`;
     }
     return `budget exhausted: would commit ${wouldCommit} against ${this.budgetBytes}`;
   }
