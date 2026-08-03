@@ -753,6 +753,16 @@ export async function runTrial(scenario: EvalScenario, opts: TrialOptions): Prom
             llamaCppSpecDraftNMax: 4,
           }
         : {}),
+      // KV-cache precision lever. Same shape as the spec-draft probe above:
+      // an explicit A/B knob for `--cache-type-k/v` so a run can pin f16 vs
+      // q8_0 vs q4_0 instead of taking `resolveLlamaCppKvCacheType`'s
+      // family-aware default (q8_0 everywhere except Gemma). Spread AFTER
+      // `llamaEvalLaunch.config` so it also overrides that path's q4_0.
+      ...(process.env.GEZEL_EVAL_KV_CACHE_TYPE
+        ? {
+            llamaCppKvCacheType: process.env.GEZEL_EVAL_KV_CACHE_TYPE as 'f16' | 'q8_0' | 'q4_0',
+          }
+        : {}),
       ...(imageModelId ? { imageProvider: 'sd-cpp' as const } : {}),
       ...(opts.executionDensity ? { executionDensity: opts.executionDensity } : {}),
       ...(opts.keurmeester

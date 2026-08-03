@@ -1,20 +1,31 @@
 {
-  "id": "deepseek-v4-flash-284b-q4",
-  "name": "DeepSeek V4 Flash (FP4)",
-  "description": "DeepSeek V4 Flash — 284B-parameter Mixture-of-Experts (~13B active per token) with 1M-token context, Compressed Sparse Attention, and configurable Non-think / Think-High / Think-Max reasoning modes. On the `ds4` engine this is the July 2026 0731 re-post-trained checkpoint, which is substantially stronger at agentic and coding work than the original release. The llama.cpp (native FP4+FP8) and MLX sources still carry the original V4 Flash weights — upstream has not republished those builds for 0731 — so pick the ds4 source to get the newer checkpoint. Frontier-tier on-device reasoning for workstations and Mac Studio-class hardware — needs ~200 GB of usable memory.",
-  "tags": ["deepseek", "reasoning", "agentic", "moe", "tools", "fp4", "long-context", "large"],
+  "id": "deepseek-v4-flash-284b-q2q4",
+  "name": "DeepSeek V4 Flash (mixed 2/4-bit)",
+  "description": "antirez's mixed-precision community GGUF of DeepSeek V4 Flash 0731 — the July 2026 re-post-trained 284B-parameter Mixture-of-Experts (~13B active per token) with 1M-token context and Compressed Sparse Attention. Layers 37-42 keep Q4_K routed experts while the remaining expert layers drop to IQ2_XXS gate/up + Q2_K down, landing at ~98 GB. This is the quality/size sweet spot antirez recommends for 128 GB MacBooks: noticeably better than the straight 2-bit build without the ~156 GB footprint of the full Q4_K one. Produced for antirez's `ds4` inference engine; whether it loads on stock llama depends on its DeepSeek-V4 support.",
+  "tags": [
+    "deepseek",
+    "reasoning",
+    "agentic",
+    "moe",
+    "tools",
+    "long-context",
+    "large",
+    "mixed-precision",
+    "iq2",
+    "q4"
+  ],
   "category": "reasoning",
   "maintainer": {
-    "name": "DeepSeek",
-    "url": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash"
+    "name": "antirez",
+    "url": "https://huggingface.co/antirez/deepseek-v4-gguf"
   },
-  "version": "1.1.0",
+  "version": "1.0.0",
   "updatedAt": "2026-08-02T00:00:00Z",
   "license": "MIT",
   "licenseClass": "open",
   "licenseShortName": "MIT",
   "parameterSize": "284B",
-  "approxSizeBytes": 156148189760,
+  "approxSizeBytes": 97591747456,
   "supportsTools": true,
   "contextWindow": 1000000,
   "upstream": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash",
@@ -86,20 +97,16 @@
     }
   },
   "llamaCpp": {
-    "huggingfaceRepo": "nsparks/DeepSeek-V4-Flash-FP4-FP8-GGUF",
-    "filename": "DeepSeek-V4-Flash-FP4-FP8-native.gguf",
-    "quantization": "FP4-FP8"
-  },
-  "mlx": {
-    "huggingfaceRepo": "mlx-community/deepseek-ai-DeepSeek-V4-Flash-4bit",
-    "quantization": "4bit"
+    "huggingfaceRepo": "antirez/deepseek-v4-gguf",
+    "filename": "DeepSeek-V4-Flash-Layers37-42Q4KExperts-OtherExpertLayersIQ2XXSGateUp-Q2KDown-AProjQ8-SExpQ8-OutQ8-chat-v2-imatrix-fixed-0731.gguf",
+    "quantization": "IQ2_XXS/Q4_K"
   },
   "ds4": {
     "huggingfaceRepo": "antirez/deepseek-v4-gguf",
-    "filename": "DeepSeek-V4-Flash-Q4KExperts-F16HC-F16Compressor-F16Indexer-Q8Attn-Q8Shared-Q8Out-chat-v2-imatrix-0731.gguf",
-    "quantization": "Q4_K",
-    "residentBytes": 85899345920,
-    "cacheExpertsBytes": 68719476736,
+    "filename": "DeepSeek-V4-Flash-Layers37-42Q4KExperts-OtherExpertLayersIQ2XXSGateUp-Q2KDown-AProjQ8-SExpQ8-OutQ8-chat-v2-imatrix-fixed-0731.gguf",
+    "quantization": "IQ2_XXS/Q4_K",
+    "residentBytes": 45097156608,
+    "cacheExpertsBytes": 38654705664,
     "ssdStreaming": true
   }
 }
