@@ -24,6 +24,7 @@ import {
   staleInstallReason,
 } from './model-cache.ts';
 import { loadModelEvalHints } from './model-eval-hints.ts';
+import { lastDeliveredSniffNudge } from './sniff-feedback.ts';
 import { classifyEvalModelTier, modelBillionsForEval } from './model-tier.ts';
 import { repoRoot, resolveDs4Binary, resolveLlamaBinary, resolveSdBinary } from './native-bin.ts';
 import {
@@ -112,6 +113,31 @@ function defaultRunsDir(): string {
  * config (rather than mutating catalog manifests between arms) guarantees the
  * model weights, prompts, behaviors, and scenario stay fixed.
  */
+/**
+ * `GEZEL_EVAL_LLAMA_KV_CACHE` — per-arm KV-cache precision override for
+ * A/Bs (`f16` | `q8_0` | `q4_0`), written into the trial config as
+ * `llamaCppKvCacheType` (the same operator override the product honors,
+ * so it beats the family default in kv-cache-type.ts). Exists to re-test
+ * the wild-caught "gemma + q8_0 KV garbles recalled prompt text"
+ * incident against current engine builds — same shape as the spec-type
+ * override below.
+ */
+function evalLlamaKvCacheOverride(): GezelConfig['llamaCppKvCacheType'] | undefined {
+  const raw = process.env.GEZEL_EVAL_LLAMA_KV_CACHE?.trim();
+  if (!raw) return undefined;
+  const allowed = new Set<NonNullable<GezelConfig['llamaCppKvCacheType']>>([
+    'f16',
+    'q8_0',
+    'q4_0',
+  ]);
+  if (!allowed.has(raw as NonNullable<GezelConfig['llamaCppKvCacheType']>)) {
+    throw new Error(
+      `invalid GEZEL_EVAL_LLAMA_KV_CACHE="${raw}" (expected ${[...allowed].join(', ')})`,
+    );
+  }
+  return raw as GezelConfig['llamaCppKvCacheType'];
+}
+
 function evalLlamaSpecTypeOverride(): GezelConfig['llamaCppSpecType'] | undefined {
   const raw = process.env.GEZEL_EVAL_LLAMA_SPEC_TYPE?.trim();
   if (!raw) return undefined;
@@ -256,6 +282,7 @@ export function localEvalDeviceSafetyConfig(
 export async function runTrial(scenario: EvalScenario, opts: TrialOptions): Promise<TrialResult> {
   const engine = opts.engine ?? 'llama-cpp';
   const evalLlamaSpecType = evalLlamaSpecTypeOverride();
+  const evalLlamaKvCache = evalLlamaKvCacheOverride();
   // Capability tier of the model under test (Theme E / E1-B) — stamped
   // onto every finalize so reporting can render tiny-tier cells as counts.
   const modelTier = classifyEvalModelTier({ engine, modelId: opts.modelId });
@@ -739,6 +766,7 @@ export async function runTrial(scenario: EvalScenario, opts: TrialOptions): Prom
       ...buildProviderConfig(engine, opts.modelId),
       ...(llamaEvalLaunch?.config ? llamaEvalLaunch.config : {}),
       ...(evalLlamaSpecType ? { llamaCppSpecType: evalLlamaSpecType } : {}),
+      ...(evalLlamaKvCache ? { llamaCppKvCacheType: evalLlamaKvCache } : {}),
       ...localEvalDeviceSafetyConfig(engine),
       // Theme-F lever probe: point `GEZEL_EVAL_SPEC_DRAFT_PATH` at a draft
       // GGUF to A/B speculative decoding on a real scenario via the
@@ -1666,6 +1694,9 @@ export async function pollUntilDone(
   let retryLoopNudgeSent = false;
   let sniffPlateauKey: string | null = null;
   let sniffPlateauStartedAt = Date.now();
+  // One plateau reset per delivered escalation rung (stage 0/1/2), cleared
+  // when the plateau key changes. See shouldDeferRetryLoopForRecentEscalation.
+  const retryLoopGrantedNudgeStages = new Set<number>();
   let sniffPlateauStartingToolCalls = 0;
   // Parallel to sniffPlateauStartingToolCalls, but counting only
   // artifact-WRITE tool calls — the FAST retry-loop path gates on
@@ -2036,6 +2067,7 @@ export async function pollUntilDone(
         sniffPlateauStartingToolCalls = currentToolCalls;
         sniffPlateauStartingWriteCalls = currentWriteCalls;
         sniffPlateauStartingTurnStarts = currentTurnStarts;
+        retryLoopGrantedNudgeStages.clear();
       } else if (currentSniffKey !== 'none') {
         const plateauMs = Date.now() - sniffPlateauStartedAt;
         const toolCallsInPlateau = currentToolCalls - sniffPlateauStartingToolCalls;
@@ -2174,6 +2206,24 @@ export async function pollUntilDone(
         }
         if (fastPathTripped || longPathTripped || stallPathTripped || chatterPathTripped) {
           if (imageGenerationActive) continue;
+          const lastNudge = lastDeliveredSniffNudge(ctx);
+          if (
+            shouldDeferRetryLoopForRecentEscalation({
+              lastNudge,
+              grantedStages: retryLoopGrantedNudgeStages,
+              now: Date.now(),
+            })
+          ) {
+            retryLoopGrantedNudgeStages.add(lastNudge!.stage);
+            args.log(
+              `[poll] retry-loop deferred: sniff "${currentSniffKey}" plateaued ${Math.round(plateauMs / 60_000)}m, but a stage-${lastNudge!.stage} scenario nudge landed ${Math.round((Date.now() - lastNudge!.at) / 1000)}s ago — granting one response window (granted stages: ${[...retryLoopGrantedNudgeStages].sort().join(',')})`,
+            );
+            sniffPlateauStartedAt = Date.now();
+            sniffPlateauStartingToolCalls = currentToolCalls;
+            sniffPlateauStartingWriteCalls = currentWriteCalls;
+            sniffPlateauStartingTurnStarts = currentTurnStarts;
+            continue;
+          }
           // STALL joins LONG here: both are wall-clock-only triggers, so both
           // have to check whether a turn is still running before calling it
           // stuck. FAST and CHATTER stay out — they are count-based and hold
@@ -2648,6 +2698,32 @@ const STALL_INFLIGHT_DEFER_MS = 15 * 60 * 1000;
  * or 50. STALL is a pure elapsed-time plateau with no count component at all —
  * it cannot distinguish "wedged" from "slow", so it must ask.
  */
+/**
+ * One bounded plateau reset per delivered escalation rung. Count-based
+ * retry-loop paths are throughput-invariant on purpose, but they must not
+ * fire while the intervention they would be judged by is still landing:
+ * on slow local models each sniff-feedback rung takes minutes to DELIVER
+ * (the target is perpetually mid-turn), and plateau-validate run 3 died
+ * exactly there — killed at 3 rewrites/8m with the handlers.ts nudge
+ * delivered 3 minutes earlier and the next rung still queued. The grace
+ * is intervention-based, not clock-based: each stage (0/1/2) earns at
+ * most ONE reset per plateau window, so a model that ignores every rung
+ * still dies after ≤3 extra windows.
+ */
+export function shouldDeferRetryLoopForRecentEscalation(args: {
+  lastNudge: { at: number; stage: number } | null;
+  grantedStages: ReadonlySet<number>;
+  now: number;
+  graceMs?: number;
+}): boolean {
+  if (!args.lastNudge) return false;
+  if (args.grantedStages.has(args.lastNudge.stage)) return false;
+  const grace = args.graceMs ?? RETRY_LOOP_ESCALATION_GRACE_MS;
+  return args.now - args.lastNudge.at < grace;
+}
+
+const RETRY_LOOP_ESCALATION_GRACE_MS = 4 * 60_000;
+
 export function shouldDeferRetryLoopForInflight(args: {
   fastPathTripped: boolean;
   longPathTripped: boolean;

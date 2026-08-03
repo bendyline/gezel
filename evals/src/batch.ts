@@ -352,9 +352,11 @@ export async function runMatrix(
     `[matrix] scenarios=${scenarios.map((s) => s.id).join(',')} count=${opts.count} runsDir=${root}`,
   );
 
+  const capTrials = (scenario: EvalScenario): number =>
+    opts.countStrict ? opts.count : Math.min(opts.count, scenario.suggestedTrials ?? opts.count);
   const requestedScenarios = scenarios.map((scenario) => ({
     scenarioId: scenario.id,
-    trials: Math.min(opts.count, scenario.suggestedTrials ?? opts.count),
+    trials: capTrials(scenario),
   }));
   const perScenario: MatrixSummary['scenarios'] = [];
   // All scenarios in a matrix run the same model, so preflight is checked
@@ -371,7 +373,7 @@ export async function runMatrix(
     }
     scenarioIndex++;
     const scenarioDir = join(root, scenario.id);
-    const scenarioCount = Math.min(opts.count, scenario.suggestedTrials ?? opts.count);
+    const scenarioCount = capTrials(scenario);
     // eslint-disable-next-line no-console
     console.log(
       `\n[matrix] === ${scenario.id} (${scenarioIndex}/${scenarios.length}) ===${scenarioCount < opts.count ? ` (canary: ${scenarioCount} trial${scenarioCount === 1 ? '' : 's'} — scenario is saturated; suggestedTrials caps it)` : ''}`,
