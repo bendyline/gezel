@@ -61,8 +61,8 @@ vi.mock('../components/SquisqIntegration/index.js', () => ({
   }),
 }));
 
-vi.mock('../components/AiToolbarButtons.js', () => ({
-  AiToolbarButtons: () => <span data-testid="ai-toolbar">ai</span>,
+vi.mock('../components/transform/TransformToolbarButton.js', () => ({
+  TransformToolbarButton: () => <span data-testid="ai-toolbar">ai</span>,
 }));
 vi.mock('../components/PromoteToTabButton.js', () => ({
   PromoteToTabButton: () => <span data-testid="promote-btn">promote</span>,
@@ -230,7 +230,7 @@ describe('DocumentDetail', () => {
     expect(screen.getByText(/not found/)).toBeInTheDocument();
   });
 
-  it('renders AiToolbarButtons for markdown files but not for non-markdown', async () => {
+  it('renders the AI transform button for markdown files but not for non-markdown', async () => {
     render(<DocumentDetail path="data.json" />);
     await waitFor(() => {
       expect(screen.getByTestId('editor-shell')).toBeInTheDocument();

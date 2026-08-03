@@ -290,6 +290,8 @@ import type {
   ToolsetsScope,
   TraceTaintRequest,
   TraceTaintResponse,
+  TransformStreamEvent,
+  TransformTextRequest,
   UnifiedSearchResponse,
   UpdateConfigRequest,
   UpdateCraftbookRequest,
@@ -1669,6 +1671,17 @@ const RunEvalEventSchema: z.ZodType<RunEvalEvent> = z.discriminatedUnion('type',
       runDir: z.string(),
     }),
   }),
+  z.object({ type: z.literal('error'), error: z.string() }),
+]);
+const TransformStreamEventSchema: z.ZodType<TransformStreamEvent> = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('status'),
+    phase: z.enum(['queued', 'started']),
+    detail: z.string().optional(),
+  }),
+  z.object({ type: z.literal('thinking-delta'), text: z.string() }),
+  z.object({ type: z.literal('output-delta'), text: z.string() }),
+  z.object({ type: z.literal('done'), text: z.string() }),
   z.object({ type: z.literal('error'), error: z.string() }),
 ]);
 const OllamaPullEventSchema: z.ZodType<OllamaPullEvent> = z.discriminatedUnion('type', [
@@ -3476,8 +3489,41 @@ export class GezelClient {
     return this.request('POST', '/api/gezels/ensure', body);
   }
 
+  /**
+   * @deprecated Blocking rewrite path. New callers use
+   * {@link transformTextStream}, which adds insert mode and live
+   * thinking/output deltas. Kept for published-client compatibility.
+   */
   rewriteText(body: RewriteTextRequest): Promise<RewriteTextResponse> {
     return this.request('POST', '/api/ai/rewrite', body);
+  }
+
+  /**
+   * Streaming transform behind the editor's transformation dialog.
+   * SSE events surface queue status, Klerk thinking metacommentary,
+   * and a live output preview; the terminal `done` event's `text` is
+   * the authoritative result. Resolves after `done` or `error`.
+   */
+  async transformTextStream(
+    body: TransformTextRequest,
+    onEvent: (event: TransformStreamEvent) => void,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    await consumeApiSseJson({
+      url: `${this.baseUrl}/api/ai/transform`,
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${this.token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+      signal,
+      fetch: this.fetchImpl,
+      schema: TransformStreamEventSchema,
+      onEvent,
+      isTerminal: (event) => event.type === 'done' || event.type === 'error',
+      label: 'Transform stream',
+    });
   }
 
   // ── Chat sessions (preferred) ──

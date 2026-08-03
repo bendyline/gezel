@@ -284,6 +284,18 @@ skeleton the same way — extend it rather than fork it. Lead the gallery
 with the curated, context-relevant subset (e.g. craftbooks recommended
 for the project's type) and keep the full catalog one rail-click away.
 
+**Transformation dialog.** AI edits to user text never land silently. The
+editor toolbar's single transform button opens the transformation dialog
+(`TransformDialog`, `gz-transform-*` block in styles.css): an instruction
+field, a "Transform with {Klerk}" row that shows the Klerk's poppetje
+pulsing plus a quiet live metacommentary feed while the model works, and a
+result area toggling (bare key tray) between an editable Before/After view
+and a Monaco diff. Nothing touches the document until the user presses
+Apply; Cancel/Escape discards everything. With no selection the dialog is
+in insert mode — the instruction becomes required and the result is added
+at the cursor. This is the pattern for any future "AI proposes, user
+disposes" text surface: preview + explicit commit, never in-place mutation.
+
 **Catalog artwork: Workshop Marks.** Craftbook thumbnails are quiet square
 still-lifes drawn from a circa-1905–1915 bindery and small-letterpress material
 language: laid rag paper, woven bookcloth, lightly printed charcoal ink, and

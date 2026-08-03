@@ -98,6 +98,7 @@ import {
   resolveProjectScriptTools,
   scriptToolNamesFromEnv,
 } from '../project-type/script-tools.js';
+import { SQUISQ_DIALECT_BRIEF } from '../prompts/squisq-dialect.js';
 import {
   AnthropicCliProvider,
   CLAUDE_CLI_EXCLUDED_MCP_TOOLS,
@@ -8451,6 +8452,18 @@ export class ChatManager {
        * expansion) — those must keep today's plain-background behavior.
        */
       ambient?: boolean;
+      /**
+       * Live streaming hooks for callers that surface progress (the
+       * transform dialog's metacommentary feed). `onDelta` is the
+       * visible output stream; `onReasoningDelta` fires only on
+       * providers with a separate reasoning channel — some providers
+       * stream `<think>` tags inline on `onDelta` instead, so callers
+       * that care must split those themselves. Advisory only: the
+       * returned string stays the authoritative result.
+       */
+      onDelta?: (chunk: string) => void;
+      onReasoningDelta?: (chunk: string) => void;
+      onQueueWait?: (info: { aheadOf: number }) => void;
     } = {},
   ): Promise<string> {
     oneShotLog.info(`requesting completion (${prompt.length} chars, ${timeoutMs}ms timeout)`);
@@ -8549,6 +8562,10 @@ export class ChatManager {
     const unsubUsage = session.onUsage((u) =>
       this.usageTracker.recordTurn(effectiveProviderName, u),
     );
+    const unsubDelta = opts.onDelta ? session.onDelta(opts.onDelta) : undefined;
+    const unsubReasoning = opts.onReasoningDelta
+      ? session.onReasoningDelta?.(opts.onReasoningDelta)
+      : undefined;
     try {
       // One-shot completions (icon / about generation, summarization,
       // rewrites) are background work — they shouldn't cut in front of
@@ -8563,12 +8580,15 @@ export class ChatManager {
           ...(gezelId ? { gezelId } : {}),
           ...(actorLabel ? { actorLabel } : {}),
           ...(opts.jobLabel ? { job: opts.jobLabel } : {}),
+          ...(opts.onQueueWait ? { onQueueWait: opts.onQueueWait } : {}),
         },
       });
       oneShotLog.info(`completed (${content.length} chars)`);
       return content;
     } finally {
       unsubUsage();
+      unsubDelta?.();
+      unsubReasoning?.();
       void session.disconnect().catch((err) => {
         oneShotLog.warn('disconnect error:', err);
       });
@@ -15067,8 +15087,7 @@ ${artifactsLine}
     documentsContext = `\n\n---\n\nShared documents library (cross-project guidelines, mission statements, style guides). Use \`list_documents\` / \`read_document\` to consult these, and \`write_document\` to add new ones:\n\`\`\`\n${listing}\n\`\`\``;
   }
 
-  const markdownGuidance =
-    'Replies render as rich markdown — use headings, tables, lists, code blocks, **bold**/*italic*, and blockquotes when they help. Keep short answers short.';
+  const markdownGuidance = `Replies render as rich markdown — use headings, tables, lists, code blocks, **bold**/*italic*, and blockquotes when they help. Keep short answers short. ${SQUISQ_DIALECT_BRIEF}`;
 
   const actDontNarrate = `**Act, don't narrate intent.** When you decide to do something, invoke the tool in the same turn — never announce "I will now read X" or "Processing…" and stop. The user can't tell you "go ahead"; they'll see your reply, assume you finished, and move on. The tools you have available are listed in your function-calling schema; trust the list — every entry is real and callable. Reach for one when the work needs it; chain multiple in a turn when the work needs it. Your turn ends when you've produced the final answer or you genuinely need a human decision.`;
 

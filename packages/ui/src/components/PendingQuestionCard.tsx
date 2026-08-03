@@ -7,6 +7,8 @@ import type {
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
 import { RenderedMarkdown } from './chat-bubbles.js';
+import { navigateToTab } from './nav-actions.js';
+import { questionChatTarget } from './question-nav.js';
 
 type NpmDecision = NpmInstallApprovalDecision['decision'];
 
@@ -93,6 +95,34 @@ export function PendingQuestionCard({
     return <NightShiftReviewCard question={question} onAnswered={onAnswered} />;
   }
   return <PendingForm question={question} onAnswered={onAnswered} onOpenInChat={onOpenInChat} />;
+}
+
+/**
+ * "Open in chat" — renders only when the host wants the affordance AND the
+ * question actually points at a thread. Service-synthesized cards carry no
+ * session (see `questionChatTarget`), and a button that navigates nowhere
+ * reads as broken rather than as "there's nothing here."
+ */
+function OpenInChatButton({
+  question,
+  onOpenInChat,
+  disabled,
+}: {
+  question: Question;
+  onOpenInChat?: (question: Question) => void;
+  disabled?: boolean;
+}) {
+  if (!onOpenInChat || !questionChatTarget(question)) return null;
+  return (
+    <button
+      type="button"
+      className="pending-question-open subtle"
+      onClick={() => onOpenInChat(question)}
+      disabled={disabled}
+    >
+      Open in chat
+    </button>
+  );
 }
 
 // ── Night-shift review (the morning summary) ───────────────────────
@@ -272,15 +302,7 @@ function ImageGenerationApprovalForm({
         >
           {submitting === 'decline' ? 'Declining…' : 'Decline'}
         </button>
-        {onOpenInChat && (
-          <button
-            type="button"
-            className="pending-question-open subtle"
-            onClick={() => onOpenInChat(question)}
-          >
-            Open in chat
-          </button>
-        )}
+        <OpenInChatButton question={question} onOpenInChat={onOpenInChat} />
       </div>
     </div>
   );
@@ -371,15 +393,7 @@ function ScheduleApprovalForm({
         >
           {submitting === 'keep' ? 'Saving…' : 'Keep paused'}
         </button>
-        {onOpenInChat && (
-          <button
-            type="button"
-            className="pending-question-open subtle"
-            onClick={() => onOpenInChat(question)}
-          >
-            Open in chat
-          </button>
-        )}
+        <OpenInChatButton question={question} onOpenInChat={onOpenInChat} />
       </div>
     </div>
   );
@@ -469,15 +483,7 @@ function ToolPermissionForm({
         >
           {submitting === 'deny' ? 'Denying…' : 'Deny'}
         </button>
-        {onOpenInChat && (
-          <button
-            type="button"
-            className="pending-question-open subtle"
-            onClick={() => onOpenInChat(question)}
-          >
-            Open in chat
-          </button>
-        )}
+        <OpenInChatButton question={question} onOpenInChat={onOpenInChat} />
       </div>
     </div>
   );
@@ -711,16 +717,11 @@ function PendingForm({
             </button>
           </>
         )}
-        {onOpenInChat && (
-          <button
-            type="button"
-            className="pending-question-open subtle"
-            onClick={() => onOpenInChat(question)}
-            disabled={autoSubmittingIdx !== null}
-          >
-            Open in chat
-          </button>
-        )}
+        <OpenInChatButton
+          question={question}
+          onOpenInChat={onOpenInChat}
+          disabled={autoSubmittingIdx !== null}
+        />
       </div>
     </div>
   );
@@ -893,15 +894,7 @@ function NpmInstallApprovalForm({
         >
           Skip
         </button>
-        {onOpenInChat && (
-          <button
-            type="button"
-            className="pending-question-open subtle"
-            onClick={() => onOpenInChat(question)}
-          >
-            Open in chat
-          </button>
-        )}
+        <OpenInChatButton question={question} onOpenInChat={onOpenInChat} />
       </div>
     </div>
   );
@@ -966,9 +959,13 @@ function TaskContext({ taskRef }: { taskRef: string }) {
       <span className="muted">Task</span>
       <span className="pending-question-context-title">{task.title}</span>
       <span className={`pending-question-context-status status-${task.status}`}>{task.status}</span>
-      <a className="pending-question-context-link" href={`#tasks/${taskRef}`}>
+      <button
+        type="button"
+        className="pending-question-context-link"
+        onClick={() => navigateToTab({ kind: 'task', ref: taskRef })}
+      >
         Open task
-      </a>
+      </button>
     </div>
   );
 }
@@ -1043,12 +1040,13 @@ function DocumentContext({
       <div className="pending-question-context-row">
         <span className="muted">{kindLabel}</span>
         <span className="pending-question-context-title">{documentPath.split('/').pop()}</span>
-        <a
+        <button
+          type="button"
           className="pending-question-context-link"
-          href={`#documents/${encodeURIComponent(fullPath)}`}
+          onClick={() => navigateToTab({ kind: 'document', path: fullPath })}
         >
           Open {kindLabel.toLowerCase()}
-        </a>
+        </button>
       </div>
       {error && <p className="muted small">Couldn't load preview: {error}</p>}
       {content !== null && (

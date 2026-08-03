@@ -11,7 +11,6 @@ import { getProjectType, listProjectTypes, resolveProjectTypeId } from '@bendyli
 import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
-import { AiToolbarButtons } from '../components/AiToolbarButtons.js';
 import { AutosaveStatus } from '../components/AutosaveStatus.js';
 import { queueComposerPrefill } from '../components/ChatComposer.js';
 import { ConfirmDialog } from '../components/ConfirmDialog.js';
@@ -38,6 +37,7 @@ import { normalizeMarkdownBaseline } from '../components/markdown-baseline.js';
 import { consumeCreate } from '../components/nav-intents.js';
 import { consumeOpenFile } from '../components/pending-open-file.js';
 import { makeReportActionFenceRenderers } from '../components/report-actions/ReportActionFence.js';
+import { TransformToolbarButton } from '../components/transform/TransformToolbarButton.js';
 import { useCompactLayout } from '../components/useCompactLayout.js';
 import { useSerializedAutosave } from '../hooks/useSerializedAutosave.js';
 import { crewLeadLabel, crewLeadLabelLower } from '../labels.js';
@@ -2406,7 +2406,9 @@ function ProjectMarkdownArtifactEditor({
         allowVersioning={!isReadOnly}
         versionBasename={primaryDocumentFilename}
         outline
-        toolbarSlotAfterActions={!isReadOnly ? <AiToolbarButtons context="generic" /> : undefined}
+        toolbarSlotAfterActions={
+          !isReadOnly ? <TransformToolbarButton context="generic" /> : undefined
+        }
         toolbarSlotRight={
           <>
             {!isReadOnly && (
@@ -2859,7 +2861,7 @@ function ProjectDocEditor({
           colorScheme={editorTheme}
           showPlayTab={false}
           fullWidth
-          toolbarSlotAfterActions={<AiToolbarButtons context="generic" />}
+          toolbarSlotAfterActions={<TransformToolbarButton context="generic" />}
           statusBarSlotRight={<AutosaveStatus autosave={autosave} />}
         />
       </div>

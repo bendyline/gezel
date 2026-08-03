@@ -33,8 +33,8 @@ vi.mock('@bendyline/squisq-editor-react', () => ({
 }));
 vi.mock('@bendyline/squisq-editor-react/styles', () => ({}));
 
-vi.mock('../components/AiToolbarButtons.js', () => ({
-  AiToolbarButtons: () => null,
+vi.mock('../components/transform/TransformToolbarButton.js', () => ({
+  TransformToolbarButton: () => null,
 }));
 vi.mock('../components/PromoteToTabButton.js', () => ({
   PromoteToTabButton: () => <span data-testid="promote">promote</span>,

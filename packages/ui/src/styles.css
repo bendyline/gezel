@@ -16274,6 +16274,129 @@ a.license-button:hover {
   margin: 0;
 }
 
+/* ── Transformation dialog (TransformDialog) ─────────────────────────
+   The unified AI rewrite/insert surface. Wider than the stock dialog so
+   the before/after panes and the monaco diff have room; everything
+   inside keeps the --text-* scale and radius tokens. */
+.gz-dialog.gz-transform-dialog {
+  min-width: 44rem;
+  max-width: min(64rem, 92vw);
+}
+.gz-transform-top {
+  display: flex;
+  align-items: stretch;
+  gap: 0.9rem;
+}
+.gz-transform-instruction {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.gz-transform-klerk-row {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  text-align: center;
+}
+.gz-transform-thinking {
+  font-size: var(--text-xs);
+  color: var(--text-muted, var(--muted));
+  max-height: 11rem;
+  overflow-y: auto;
+  border-left: 2px solid var(--border);
+  padding: 0.15rem 0 0.15rem 0.6rem;
+}
+/* The feed renders through Squisq's LinearDocView; rein its reading
+   register into the muted metacommentary scale so streamed thinking
+   reads as an aside, not a second document. */
+.gz-transform-thinking :is(p, li, h1, h2, h3, h4, strong) {
+  font-size: var(--text-xs) !important;
+  line-height: 1.5 !important;
+}
+.gz-transform-thinking-raw {
+  margin: 0;
+  font-family: var(--font-ui);
+  white-space: pre-wrap;
+}
+.gz-transform-error {
+  color: var(--danger, #d06a6a);
+  font-size: var(--text-sm);
+  margin: 0;
+}
+.gz-transform-view {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-height: 0;
+}
+.gz-transform-view-toggle {
+  align-self: flex-start;
+}
+.gz-transform-panes {
+  display: flex;
+  gap: 0.75rem;
+  min-height: 0;
+}
+.gz-transform-before,
+.gz-transform-after {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.gz-transform-pane-label {
+  font-size: var(--text-xs);
+}
+/* Both panes render Squisq content (read-only LinearDocView on the
+   left, an embedded WYSIWYG editor on the right) inside matching
+   bordered wells so the comparison reads symmetric. */
+.gz-transform-before-text {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 6px);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  overflow-y: auto;
+  max-height: min(45vh, 320px);
+  background: var(--panel);
+}
+.gz-transform-before-raw {
+  margin: 0;
+  padding: 0.5rem 0.6rem;
+  font-family: var(--font-ui);
+  white-space: pre-wrap;
+}
+.gz-transform-after-editor {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 6px);
+  min-height: 12rem;
+  max-height: min(45vh, 320px);
+  overflow-y: auto;
+  background: var(--surface, var(--panel));
+}
+.gz-transform-after-editor .gz-transform-after-wysiwyg {
+  min-height: 12rem;
+}
+.gz-transform-empty {
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-md, 6px);
+  padding: 0.75rem;
+  margin: 0;
+}
+.gz-transform-diff-host {
+  height: min(45vh, 320px);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 6px);
+  overflow: hidden;
+}
+.gz-transform-diff-error {
+  color: var(--danger, #d06a6a);
+  font-size: var(--text-sm);
+  margin: 0;
+}
+
 /* `.gz-dialog label textarea` already supplies width, padding, border, and
    resize; only the height and reading register are missing. Left in
    --font-ui rather than monospace: the body is prose with a few fenced
@@ -17128,12 +17251,22 @@ a.license-button:hover {
   background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
 
+/* Worn by both a real external <a> (View on npm) and the in-app <button>
+   navigators (Open task / Open document), so the button-neutralizing
+   declarations sit here rather than in a second class. Explicit
+   `font-family` over `font: inherit` — the shorthand would drag in a serif
+   from any display-font ancestor (see docs/ux.md, "Links stay sans"). */
 .pending-question-context-link {
   margin-left: auto;
   font-size: 0.8rem;
+  font-family: var(--font-ui);
   color: var(--accent);
   text-decoration: none;
+  background: transparent;
+  border: none;
   border-bottom: 1px dashed currentColor;
+  padding: 0;
+  cursor: pointer;
 }
 
 .pending-question-document-preview {

@@ -19,7 +19,6 @@ import {
 } from '@bendyline/gezel';
 import { type KeyboardEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
-import { AiToolbarButtons } from '../components/AiToolbarButtons.js';
 import { FixedFunctionAboutPanel } from '../components/FixedFunctionAboutPanel.js';
 import { GezelActionsMenu } from '../components/GezelActionsMenu.js';
 import { GezelChatTab } from '../components/GezelChatTab.js';
@@ -34,6 +33,7 @@ import { PromoteToTabButton } from '../components/PromoteToTabButton.js';
 import { ProviderModelSelect } from '../components/ProviderModelSelect.js';
 import { ToolsetsEditor } from '../components/ToolsetsEditor.js';
 import { normalizeMarkdownBaseline } from '../components/markdown-baseline.js';
+import { TransformToolbarButton } from '../components/transform/TransformToolbarButton.js';
 import { useSerializedAutosave } from '../hooks/useSerializedAutosave.js';
 import { type ItemSlot, Poppetje, PoppetjeItem } from '../poppetje/index.js';
 import { Dialog, Select, Tabs } from '../primitives/index.js';
@@ -333,7 +333,7 @@ export function GezelDetail({ gezelId, standalone = false, onDeleted }: GezelDet
             readOnly={generatingAbout || applyingAbout}
             toolbarSlotAfterActions={
               <>
-                <AiToolbarButtons context="about" />
+                <TransformToolbarButton context="about" />
                 <GezelTemplatePicker
                   {...(selected.role ? { gezelRole: selected.role } : {})}
                   {...(selected.templateId ? { gezelTemplateId: selected.templateId } : {})}
