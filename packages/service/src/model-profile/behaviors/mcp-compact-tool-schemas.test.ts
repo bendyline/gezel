@@ -60,8 +60,10 @@ function decorate(tool: OpenAIFunctionTool): OpenAIFunctionTool {
 }
 
 function checksUnion(tool: OpenAIFunctionTool): Array<Record<string, unknown>> {
-  const ed = (tool.parameters.properties as Record<string, unknown>)
-    .expectedDeliverable as Record<string, unknown>;
+  const ed = (tool.parameters.properties as Record<string, unknown>).expectedDeliverable as Record<
+    string,
+    unknown
+  >;
   const checks = (ed.properties as Record<string, unknown>).checks as Record<string, unknown>;
   return (checks.items as Record<string, unknown>).oneOf as Array<Record<string, unknown>>;
 }
@@ -73,7 +75,7 @@ describe('compact-tool-schemas checks-union slim', () => {
     // 4 head kinds + 1 folded tail variant.
     expect(union).toHaveLength(5);
     const kinds = union
-      .map((v) => ((v.properties as Record<string, unknown>).kind as Record<string, unknown>))
+      .map((v) => (v.properties as Record<string, unknown>).kind as Record<string, unknown>)
       .map((k) => k.const ?? k.enum);
     expect(kinds.slice(0, 4)).toEqual(['sniff', 'contains', 'minBytes', 'chat']);
     // The folded variant names every tail kind so they stay emittable.
@@ -82,8 +84,10 @@ describe('compact-tool-schemas checks-union slim', () => {
 
   it('drops the never-inline-authored scripts property from the wire', () => {
     const out = decorate(delegateTool());
-    const ed = (out.parameters.properties as Record<string, unknown>)
-      .expectedDeliverable as Record<string, unknown>;
+    const ed = (out.parameters.properties as Record<string, unknown>).expectedDeliverable as Record<
+      string,
+      unknown
+    >;
     expect(Object.keys(ed.properties as Record<string, unknown>)).not.toContain('scripts');
     // The real contract still accepts it — the wire schema is advisory.
   });

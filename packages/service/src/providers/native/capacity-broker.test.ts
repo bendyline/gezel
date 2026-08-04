@@ -796,7 +796,8 @@ describe('availableSystemRamBytes parsers', () => {
   });
 
   it('parses /proc/meminfo MemAvailable', () => {
-    const txt = 'MemTotal:       65536000 kB\nMemFree:         1000000 kB\nMemAvailable:   42000000 kB\n';
+    const txt =
+      'MemTotal:       65536000 kB\nMemFree:         1000000 kB\nMemAvailable:   42000000 kB\n';
     expect(parseMeminfoAvailableBytes(txt)).toBe(42_000_000 * 1024);
   });
 

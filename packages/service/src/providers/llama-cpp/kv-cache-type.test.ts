@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolveLlamaCppKvCacheType, planLlamaCppKv } from './kv-cache-type.js';
+import { planLlamaCppKv, resolveLlamaCppKvCacheType } from './kv-cache-type.js';
 
 describe('resolveLlamaCppKvCacheType', () => {
   it('defaults the Gemma family to f16 (q8_0 corrupts its KV cache)', () => {

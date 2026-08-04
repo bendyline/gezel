@@ -7,6 +7,7 @@
  *   packages/app/dist/service-bundle/         (intermediate, kept for inspection)
  *     package.json         — the service's package.json, workspace: refs resolved
  *     dist/                — pre-built service ESM (dist/index.js, dist/bin/gezeld.js)
+ *       ui/index.html      — browser UI served by user and legacy-full daemons
  *     node_modules/        — real, non-symlinked deps (incl. native binaries)
  *
  *   packages/app/dist/service-bundle.tar.gz   — shippable archive
@@ -201,6 +202,20 @@ async function main() {
   console.log(
     `[prune-runtime] verified ${declarationAssets.total} runtime declaration assets for script-editor IntelliSense`,
   );
+
+  // The installed machine service may remain `legacy-full` while an older
+  // machine-owned product home awaits migration. That process discovers the
+  // UI beside dist/bin/gezeld.js; it does not rely on GEZEL_UI_DIR from the
+  // platform service definition. Missing this file would therefore produce a
+  // healthy API that serves only the "web UI bundle was not included"
+  // placeholder. Assert the final, pruned deployment tree before archiving it.
+  const uiIndex = join(target, 'dist', 'ui', 'index.html');
+  if (!existsSync(uiIndex)) {
+    throw new Error(
+      `[build-service-bundle] expected ${uiIndex} after deploy; packaged service bundles must include the browser UI. Build @bendyline/gezel-ui before @bendyline/gezel-service and verify the service build stages dist/ui.`,
+    );
+  }
+  console.log('[build-service-bundle] verified bundled browser UI');
 
   console.log('[build-service-bundle] verifying the bundle imports cleanly');
   // Importing the service module resolves the whole dep graph, including

@@ -21,6 +21,7 @@ const INTEGRATION_SUITES = [
   // Full embedded-service / HTTPS boots.
   'src/integration.test.ts',
   'src/https-integration.test.ts',
+  'src/legacy-full-ui.integration.test.ts',
   'src/sessions-integration.test.ts',
   // ChatManager-driven suites (mock provider + MCP bridge subprocess).
   'src/chat/keurmeester-intervention.test.ts',

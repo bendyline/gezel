@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { basename, delimiter, dirname, join } from 'node:path';
-import { availableSystemRamBytes } from '../providers/native/capacity-broker.js';
 import {
   type AIEngagementMode,
   type ChatEvent,
@@ -159,6 +158,7 @@ import {
   mlxVenvPackages,
 } from '../providers/mlx/index.js';
 import { MockProvider } from '../providers/mock.js';
+import { availableSystemRamBytes } from '../providers/native/capacity-broker.js';
 import { type LocalProviderName, makeEngineKey } from '../providers/native/engine-key.js';
 import { pickFreePort } from '../providers/native/port.js';
 import { NativeEngineSupervisor } from '../providers/native/supervisor.js';

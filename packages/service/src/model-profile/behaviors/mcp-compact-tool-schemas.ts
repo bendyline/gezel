@@ -101,10 +101,9 @@ function compactChecksUnion(checksSchema: unknown): unknown {
   }
   const kindOf = (variant: unknown): string | null => {
     if (!variant || typeof variant !== 'object') return null;
-    const kind = ((variant as Record<string, unknown>).properties as Record<string, unknown>)?.[
-      'kind'
-    ];
-    const konst = (kind as Record<string, unknown>)?.const ?? (kind as Record<string, unknown>)?.enum;
+    const kind = ((variant as Record<string, unknown>).properties as Record<string, unknown>)?.kind;
+    const konst =
+      (kind as Record<string, unknown>)?.const ?? (kind as Record<string, unknown>)?.enum;
     if (typeof konst === 'string') return konst;
     if (Array.isArray(konst) && typeof konst[0] === 'string') return konst[0];
     return null;
