@@ -40,9 +40,32 @@ function compactSchema(value: unknown): unknown {
   const out: Record<string, unknown> = {};
   for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
     if (PROSE_SCHEMA_KEYS.has(key)) continue;
-    out[key] = key === 'checks' ? compactChecksUnion(compactSchema(child)) : compactSchema(child);
+    out[key] =
+      key === 'expectedDeliverable'
+        ? compactExpectedDeliverable(compactSchema(child))
+        : compactSchema(child);
   }
   return out;
+}
+
+/**
+ * The deliverable contract rides on all 13 delegation/messaging tools, so
+ * every char here is paid ~13× per request. Two targeted cuts, both
+ * census-backed (2026-08-03, every recorded delegation call):
+ *   - `checks`: slim the gate-kind union (see compactChecksUnion).
+ *   - `scripts`: drop from the wire entirely — 0 of 417 delegation calls
+ *     ever authored it inline (~278 chars × 13 tools). Still emittable:
+ *     wire schemas are advisory and the server validates real calls.
+ */
+function compactExpectedDeliverable(schema: unknown): unknown {
+  if (!schema || typeof schema !== 'object' || Array.isArray(schema)) return schema;
+  const node = schema as Record<string, unknown>;
+  const properties = node.properties;
+  if (!properties || typeof properties !== 'object' || Array.isArray(properties)) return schema;
+  const props = { ...(properties as Record<string, unknown>) };
+  delete props.scripts;
+  if (props.checks !== undefined) props.checks = compactChecksUnion(props.checks);
+  return { ...node, properties: props };
 }
 
 /**

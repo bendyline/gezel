@@ -17,7 +17,9 @@
  * false — typically: pick LRU and evict, then retry.
  */
 
-import { totalmem } from 'node:os';
+import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { freemem, totalmem } from 'node:os';
 import { createLogger } from '@bendyline/gezel';
 import {
   type CapacityBudget,
@@ -505,6 +507,65 @@ const GIB = 1024 ** 3;
  * ({@link llamaCppSlotCeiling}) clamps further on tight-RAM + big-model
  * combos; an explicit `providerConcurrency[engine]` config overrides verbatim.
  */
+/**
+ * RECLAIMABLE-aware free RAM. `os.freemem()` reports truly-free pages
+ * only: on macOS, file-backed cache and purgeable memory count as "used"
+ * even though the kernel hands them back on demand — and a just-exited
+ * llama engine's mmap'd weights ARE file-backed cache, so freemem()
+ * reads a few GB on a 64 GB box right after any model ran. Wild-caught
+ * 2026-08-04: the context memory-clamp saw "~6.6 GB available", floored
+ * gemma4-31b to 8,192 ctx, and all 11 trials died on context overflow —
+ * on a machine with >40 GB actually reclaimable. Linux freemem() has the
+ * same free-vs-MemAvailable trap.
+ *
+ * darwin: vm_stat free+inactive+speculative+purgeable+file-backed.
+ * linux: /proc/meminfo MemAvailable. Fallback: freemem().
+ */
+export function availableSystemRamBytes(): number {
+  // vm_stat categories overlap (file-backed pages span active+inactive),
+  // so the raw sum can exceed physical RAM; cap at 90% of totalmem — the
+  // consumers already hold back their own OS reserves on top.
+  const cap = totalmem() * 0.9;
+  try {
+    if (process.platform === 'darwin') {
+      const out = execFileSync('/usr/bin/vm_stat', { encoding: 'utf8', timeout: 3_000 });
+      const parsed = parseVmStatAvailableBytes(out);
+      if (parsed !== null) return Math.max(Math.min(parsed, cap), freemem());
+    } else if (process.platform === 'linux') {
+      const parsed = parseMeminfoAvailableBytes(readFileSync('/proc/meminfo', 'utf8'));
+      if (parsed !== null) return Math.max(Math.min(parsed, cap), freemem());
+    }
+  } catch {
+    // Probe failure falls through to the conservative number.
+  }
+  return freemem();
+}
+
+/** Pure vm_stat parser (exported for tests). Returns null when the output
+ *  doesn't look like vm_stat. */
+export function parseVmStatAvailableBytes(text: string): number | null {
+  const page = Number(/page size of (\d+) bytes/.exec(text)?.[1]);
+  if (!Number.isFinite(page) || page <= 0) return null;
+  const count = (label: string): number => {
+    const m = new RegExp(`${label}:\\s+(\\d+)`).exec(text);
+    return m ? Number(m[1]) : 0;
+  };
+  const pages =
+    count('Pages free') +
+    count('Pages inactive') +
+    count('Pages speculative') +
+    count('Pages purgeable') +
+    count('File-backed pages');
+  if (pages <= 0) return null;
+  return pages * page;
+}
+
+/** Pure /proc/meminfo parser (exported for tests). */
+export function parseMeminfoAvailableBytes(text: string): number | null {
+  const m = /MemAvailable:\s+(\d+)\s*kB/.exec(text);
+  return m ? Number(m[1]) * 1024 : null;
+}
+
 export function defaultLocalEngineSlots(systemRamBytes: number = totalmem()): number {
   const gb = systemRamBytes / GIB;
   if (gb < 16) return 1;

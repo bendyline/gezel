@@ -31,6 +31,7 @@ function delegateTool(): OpenAIFunctionTool {
           properties: {
             kind: { type: 'string' },
             filePath: { type: 'string' },
+            scripts: { type: 'array', items: { type: 'object' } },
             checks: {
               type: 'array',
               items: {
@@ -53,7 +54,8 @@ function delegateTool(): OpenAIFunctionTool {
 }
 
 function decorate(tool: OpenAIFunctionTool): OpenAIFunctionTool {
-  const wrapper = McpCompactToolSchemas.mcpWrapper!();
+  const factory = McpCompactToolSchemas.mcpWrapper;
+  const wrapper = typeof factory === 'function' ? factory(undefined as never) : factory!;
   return wrapper.decorateTools!([tool], { modelTier: 'medium' } as never)[0]!;
 }
 
@@ -76,6 +78,14 @@ describe('compact-tool-schemas checks-union slim', () => {
     expect(kinds.slice(0, 4)).toEqual(['sniff', 'contains', 'minBytes', 'chat']);
     // The folded variant names every tail kind so they stay emittable.
     expect(kinds[4]).toEqual(['nodeRuns', 'jsonPathEquals', 'testPasses']);
+  });
+
+  it('drops the never-inline-authored scripts property from the wire', () => {
+    const out = decorate(delegateTool());
+    const ed = (out.parameters.properties as Record<string, unknown>)
+      .expectedDeliverable as Record<string, unknown>;
+    expect(Object.keys(ed.properties as Record<string, unknown>)).not.toContain('scripts');
+    // The real contract still accepts it — the wire schema is advisory.
   });
 
   it('shrinks the delegate tool by more than half', () => {

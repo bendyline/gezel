@@ -11,6 +11,8 @@ import {
   llamaCppSlotCeiling,
   localEngineKvBudgetBytes,
   localEngineSlotCeiling,
+  parseMeminfoAvailableBytes,
+  parseVmStatAvailableBytes,
 } from './capacity-broker.js';
 
 const GB = 1024 ** 3;
@@ -765,5 +767,40 @@ describe('clampCtxTokensForMemory', () => {
     expect(clampCtxTokensForMemory({ ...INCIDENT, requestedPerTurnCtxTokens: 8_192 }).clamped).toBe(
       false,
     );
+  });
+});
+
+describe('availableSystemRamBytes parsers', () => {
+  // os.freemem() reports truly-free pages only; on macOS a just-exited
+  // engine's mmap'd weights are file-backed cache and count as "used".
+  // Wild-caught: the ctx clamp saw ~6.6GB on a 64GB box and floored
+  // gemma4-31b to 8,192 ctx — 11/11 trials died on context overflow.
+  it('parses vm_stat into reclaimable-aware bytes', () => {
+    const out = [
+      'Mach Virtual Memory Statistics: (page size of 16384 bytes)',
+      'Pages free:                                  100000.',
+      'Pages active:                               1500000.',
+      'Pages inactive:                              200000.',
+      'Pages speculative:                             1000.',
+      'Pages throttled:                                  0.',
+      'Pages wired down:                            210873.',
+      'Pages purgeable:                              20000.',
+      'File-backed pages:                          1000000.',
+    ].join('\n');
+    // (100000+200000+1000+20000+1000000) * 16384
+    expect(parseVmStatAvailableBytes(out)).toBe(1_321_000 * 16384);
+  });
+
+  it('returns null for non-vm_stat text', () => {
+    expect(parseVmStatAvailableBytes('command not found')).toBeNull();
+  });
+
+  it('parses /proc/meminfo MemAvailable', () => {
+    const txt = 'MemTotal:       65536000 kB\nMemFree:         1000000 kB\nMemAvailable:   42000000 kB\n';
+    expect(parseMeminfoAvailableBytes(txt)).toBe(42_000_000 * 1024);
+  });
+
+  it('returns null when MemAvailable is absent', () => {
+    expect(parseMeminfoAvailableBytes('MemFree: 12 kB')).toBeNull();
   });
 });

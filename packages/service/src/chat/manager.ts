@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
-import { freemem } from 'node:os';
 import { basename, delimiter, dirname, join } from 'node:path';
+import { availableSystemRamBytes } from '../providers/native/capacity-broker.js';
 import {
   type AIEngagementMode,
   type ChatEvent,
@@ -8941,7 +8941,7 @@ export class ChatManager {
     const GIB = 1024 ** 3;
     const envGb = Number.parseFloat(process.env.GEZEL_AMBIENT_COLD_LOAD_MIN_FREE_GB ?? '');
     const minFreeBytes = (Number.isFinite(envGb) && envGb >= 0 ? envGb : 8) * GIB;
-    const freeBytes = freemem();
+    const freeBytes = availableSystemRamBytes();
     if (freeBytes >= minFreeBytes) return null;
     const wantsGb = (minFreeBytes / GIB).toFixed(0);
     const freeGb = (freeBytes / GIB).toFixed(1);
@@ -17066,7 +17066,7 @@ export async function buildLlamaCppProvider(opts: {
           weightsResidentBytes: residentBytes,
           budgetBytes: brokerSnap?.enforced ? brokerSnap.budgetBytes : liveBudget.budgetBytes,
           committedOtherBytes,
-          freeSystemRamBytes: freemem(),
+          freeSystemRamBytes: availableSystemRamBytes(),
           vramBytes: liveBudget.vramBytes,
         });
         if (admission.clamped) {
