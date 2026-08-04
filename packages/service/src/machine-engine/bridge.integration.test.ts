@@ -106,7 +106,7 @@ describe('split user + machine services', () => {
     await expect(models.json()).resolves.toMatchObject({ provider: 'llama-cpp', models: [] });
   });
 
-  it('delegates every heavyweight multimodal provider without moving artifact ownership', async () => {
+  it('delegates native multimodal providers without moving artifact ownership', async () => {
     const providers = await Promise.all([
       user.context.imageProvider.current(),
       user.context.videoProvider.current(),
@@ -114,10 +114,41 @@ describe('split user + machine services', () => {
       user.context.tts.current(),
     ]);
     expect(providers.map((provider) => provider.name)).toEqual([
-      'remote:This machine',
+      // GEZEL_MOCK_PROVIDER is an effective non-native image provider, so it
+      // stays in the user daemon. The other managers use their remote mocks as
+      // stand-ins for heavyweight native execution in this integration suite.
+      'mock',
       'remote:This machine',
       'remote:This machine',
       'remote:This machine',
     ]);
+  });
+
+  it('keeps cloud image selection and status in the user daemon', async () => {
+    const mockFlag = process.env.GEZEL_MOCK_PROVIDER;
+    delete process.env.GEZEL_MOCK_PROVIDER;
+    await user.context.store.writeConfig({ imageProvider: 'openai' });
+    await user.context.imageProvider.reset();
+    try {
+      expect(await user.context.imageProvider.usesMachineEngine()).toBe(false);
+      expect((await user.context.imageProvider.current()).name).toBe('openai');
+
+      const status = await api('/api/image-gen/engine-status');
+      expect(status.status).toBe(200);
+      await expect(status.json()).resolves.toMatchObject({
+        engine: { provider: 'openai', kind: 'cloud', status: 'not-configured' },
+      });
+
+      const models = await api('/api/image-gen/models');
+      expect(models.status).toBe(200);
+      await expect(models.json()).resolves.toMatchObject({
+        models: expect.arrayContaining([expect.objectContaining({ id: 'gpt-image-2' })]),
+      });
+    } finally {
+      if (mockFlag === undefined) delete process.env.GEZEL_MOCK_PROVIDER;
+      else process.env.GEZEL_MOCK_PROVIDER = mockFlag;
+      await user.context.store.writeConfig({ imageProvider: 'sd-cpp' });
+      await user.context.imageProvider.reset();
+    }
   });
 });

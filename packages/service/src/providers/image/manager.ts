@@ -14,12 +14,12 @@
  * the next `current()` rebuilds from fresh config + secrets.
  */
 
-import { createLogger } from '@bendyline/gezel';
+import { type GezelConfig, createLogger } from '@bendyline/gezel';
 import type { Store } from '../../fs/store.js';
 import type { RemotesRegistry } from '../../remotes/registry.js';
 import type { SecretStore } from '../../secrets/types.js';
 import type { GpuArbiter } from '../gpu-arbiter.js';
-import { resolveRemoteTarget } from '../remote/resolve.js';
+import { type RemoteTarget, resolveRemoteTarget } from '../remote/resolve.js';
 import { createImageProvider } from './factory.js';
 import { RemoteImageProvider } from './remote-image.js';
 
@@ -82,13 +82,33 @@ export class ImageProviderManager {
   /**
    * Resolve the provider for a specific model id: a `remote:<remoteId>/…` id
    * routes to a cached {@link RemoteImageProvider} for the hosting server;
-   * everything else uses the local {@link current} provider. The image-gen
-   * route calls this with the request's model so GPU-heavy generation runs on
-   * the paired server while the artifact still persists into A's project.
+   * everything else uses the configured {@link current} provider. For a local
+   * sd-cpp selection, `current()` delegates to the machine broker when one is
+   * available. Cloud selections remain in this user daemon so their user-owned
+   * credentials never cross the machine-service boundary.
    */
   async providerForModel(model?: string): Promise<ImageProvider> {
-    const target = resolveRemoteTarget(model, this.remotes, this.machineEngineRemoteId?.());
+    // An explicit remote model always wins. Do not pass the machine broker as
+    // a preferred target here: resolveRemoteTarget would otherwise wrap every
+    // ordinary cloud model id (and undefined) as `remote:this-machine/…`
+    // before config.imageProvider was consulted.
+    const target = resolveRemoteTarget(model, this.remotes);
     if (!target) return this.current();
+    return this.providerForRemoteTarget(target);
+  }
+
+  /**
+   * Whether the configured image provider belongs on the machine broker.
+   * Shared with the HTTP management-route proxy so status/model operations and
+   * generation use exactly the same cloud-vs-native decision.
+   */
+  async usesMachineEngine(): Promise<boolean> {
+    if (!this.machineEngineRemoteId?.()) return false;
+    const config = await this.store.readConfig();
+    return isMachineImageProvider(config, this.env ?? process.env);
+  }
+
+  private providerForRemoteTarget(target: RemoteTarget): ImageProvider {
     const { remote, fetch } = target;
     const connectionKey = `${remote.baseUrl}\0${remote.token}\0${remote.pinnedIdentityFingerprint}`;
     let cached = this.remoteCache.get(remote.remoteId);
@@ -114,11 +134,15 @@ export class ImageProviderManager {
    * a leaked provider that never gets `shutdown()`.
    */
   async current(): Promise<ImageProvider> {
-    if (this.machineEngineRemoteId?.()) return this.providerForModel(undefined);
-    if (this.current_) return this.current_;
     if (this.buildPromise) return this.buildPromise;
     this.buildPromise = (async () => {
       const config = await this.store.readConfig();
+      const machineRemoteId = this.machineEngineRemoteId?.();
+      if (machineRemoteId && isMachineImageProvider(config, this.env ?? process.env)) {
+        const target = resolveRemoteTarget(undefined, this.remotes, machineRemoteId);
+        if (target) return this.providerForRemoteTarget(target);
+      }
+      if (this.current_) return this.current_;
       const provider = await createImageProvider({
         home: this.home,
         ...(this.env ? { env: this.env } : {}),
@@ -155,4 +179,15 @@ export class ImageProviderManager {
   async shutdown(): Promise<void> {
     await this.reset();
   }
+}
+
+/**
+ * Only native sd-cpp work belongs on the shared engine broker. Mock mode is an
+ * effective provider override (factory rule #1), so it must stay local just
+ * like explicit cloud/mock config instead of being mistaken for default
+ * sd-cpp during tests and headless flows.
+ */
+function isMachineImageProvider(config: GezelConfig, env: NodeJS.ProcessEnv): boolean {
+  if (env.GEZEL_MOCK_PROVIDER === '1') return false;
+  return (config.imageProvider ?? 'sd-cpp') === 'sd-cpp';
 }

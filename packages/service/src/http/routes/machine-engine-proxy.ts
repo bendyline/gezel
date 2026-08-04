@@ -11,9 +11,10 @@ export function machineEngineProxy(
   sourcePrefix: string,
   targetPrefix: string,
   localPaths: readonly string[] = [],
+  shouldProxy?: () => boolean | Promise<boolean>,
 ): MiddlewareHandler {
   return async (c, next) => {
-    if (localPaths.includes(c.req.path)) {
+    if (localPaths.includes(c.req.path) || (shouldProxy && !(await shouldProxy()))) {
       await next();
       return;
     }

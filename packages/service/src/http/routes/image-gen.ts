@@ -29,13 +29,19 @@ const log = createLogger('image-gen');
 export function imageGenRoutes(ctx: ServiceContext): Hono {
   const app = new Hono();
   // Generation remains on the user daemon so project inputs/artifacts never
-  // cross the machine data boundary. The provider itself delegates the heavy
-  // forward pass; model lifecycle/status routes proxy wholesale.
+  // cross the machine data boundary. The provider itself delegates native
+  // work to the broker. Model lifecycle/status routes proxy only while the
+  // effective provider is native; cloud providers and their credentials stay
+  // wholly in the user daemon.
   app.use(
     '*',
-    machineEngineProxy(ctx, '/api/image-gen', '/v1/remote/manage/image-gen', [
-      '/api/image-gen/generate',
-    ]),
+    machineEngineProxy(
+      ctx,
+      '/api/image-gen',
+      '/v1/remote/manage/image-gen',
+      ['/api/image-gen/generate'],
+      () => ctx.imageProvider.usesMachineEngine(),
+    ),
   );
 
   /**
@@ -67,8 +73,9 @@ export function imageGenRoutes(ctx: ServiceContext): Hono {
 
     let provider: ImageProvider;
     try {
-      // Route `remote:<id>/…` models to the paired server; everything else
-      // uses the local engine.
+      // Route explicit `remote:<id>/…` models to the paired server. Otherwise
+      // use the configured provider; native sd-cpp delegates to the machine
+      // broker while user-configured cloud providers stay here.
       provider = await ctx.imageProvider.providerForModel(req.model);
     } catch (err) {
       return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
