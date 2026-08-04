@@ -30,7 +30,8 @@ describe('shared Monaco runtime', () => {
     let editor: ReturnType<typeof squisqMonaco.editor.create> | null = null;
 
     try {
-      const { monaco } = await import('./monaco-base.js');
+      const { monaco, registerGezelMonacoThemes } = await import('./monaco-base.js');
+      registerGezelMonacoThemes();
       const host = document.createElement('div');
       document.body.append(host);
       editor = monaco.editor.create(host, {

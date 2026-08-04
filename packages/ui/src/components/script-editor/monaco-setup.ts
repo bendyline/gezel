@@ -1,5 +1,5 @@
 import { type SdkTypesResponse, setupLineSpan } from '@bendyline/gezel';
-import { monaco } from '../monaco-base.js';
+import { ensureGezelMonacoBase, monaco } from '../monaco-base.js';
 
 /**
  * Monaco wiring for the script editor — TypeScript language config + SDK
@@ -30,6 +30,7 @@ let sdkTypesVersion: string | null = null;
  * diagnostics are where those get caught.
  */
 export async function ensureScriptTypescript(fetchTypes: () => Promise<SdkTypesResponse>) {
+  await ensureGezelMonacoBase();
   await monaco.loadMonacoLanguages('typescript', { languageServices: true });
   const td = monaco.languages.typescript.typescriptDefaults;
   if (!tsConfigured) {

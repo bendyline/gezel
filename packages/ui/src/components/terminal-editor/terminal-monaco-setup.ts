@@ -1,5 +1,5 @@
 import { api } from '../../api.js';
-import { monaco } from '../monaco-base.js';
+import { ensureGezelMonacoBase, monaco } from '../monaco-base.js';
 import { getTerminalCompletionData } from './completion-data.js';
 import {
   type TerminalCompletionContext,
@@ -54,7 +54,7 @@ export function ensureTerminalMonaco(): Promise<void> {
 async function registerTerminalMonaco(): Promise<void> {
   // The compact Squisq profile keeps completion/snippet UI demand-loaded.
   // Load it before editor creation so the terminal's provider can display.
-  await monaco.loadMonacoSuggestions();
+  await ensureGezelMonacoBase();
 
   monaco.languages.register({ id: 'gezel-terminal' });
   monaco.languages.setMonarchTokensProvider('gezel-terminal', {
