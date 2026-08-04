@@ -23,6 +23,7 @@ test('Electron release configuration pins the audited packaging contracts', asyn
     rootPackage,
     readme,
     nativeWorkflow,
+    fixAsar,
   ] = await Promise.all([
     readFile(join(root, 'packages', 'app', 'electron-builder.yml'), 'utf8'),
     readFile(join(root, '.github', 'workflows', 'release-electron.yml'), 'utf8'),
@@ -38,6 +39,7 @@ test('Electron release configuration pins the audited packaging contracts', asyn
     readFile(join(root, 'package.json'), 'utf8'),
     readFile(join(root, 'README.md'), 'utf8'),
     readFile(join(root, '.github', 'workflows', 'build-native.yml'), 'utf8'),
+    readFile(join(root, 'packages', 'app', 'scripts', 'fix-asar.cjs'), 'utf8'),
   ]);
 
   assert.match(tsup, /noExternal:/);
@@ -86,6 +88,16 @@ test('Electron release configuration pins the audited packaging contracts', asyn
   );
 
   assert.match(builder, /minimumSystemVersion: '13\.5'/);
+  assert.match(
+    builder,
+    /^\s+- '!dist\/\*\.map'$/m,
+    'Electron-process source maps must not ship in installers',
+  );
+  assert.doesNotMatch(
+    fixAsar,
+    /main\.js\.map/,
+    'the afterPack workaround must not restore an excluded source map',
+  );
   assert.match(builder, /- target: pkg[\s\S]*?- target: zip/);
   const pkgSectionStart = builder.indexOf('\npkg:');
   const pkgSectionEnd = builder.indexOf('\n# ── Linux', pkgSectionStart);

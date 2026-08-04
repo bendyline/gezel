@@ -10,7 +10,7 @@
  *
  * Fix strategy: take advantage of Electron's "asar.unpacked overrides
  * asar" transparency. The critical Electron entry files (package.json,
- * dist/main.js, dist/main.js.map, dist/preload.cjs) are listed in
+ * dist/main.js, dist/preload.cjs) are listed in
  * electron-builder.yml's `asarUnpack` so electron-builder copies them to
  * `app.asar.unpacked/` in addition to packing them into the (corrupted)
  * asar. When Electron resolves `app.asar/<path>`, its patched fs first
@@ -52,7 +52,6 @@ module.exports = async function afterPack(context) {
     const overrides = [
       { src: path.join(appPkgRoot, 'package.json'), dest: 'package.json' },
       { src: path.join(appPkgRoot, 'dist', 'main.js'), dest: 'dist/main.js' },
-      { src: path.join(appPkgRoot, 'dist', 'main.js.map'), dest: 'dist/main.js.map' },
       { src: path.join(appPkgRoot, 'dist', 'preload.cjs'), dest: 'dist/preload.cjs' },
     ];
 

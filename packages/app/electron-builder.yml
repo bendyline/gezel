@@ -72,6 +72,10 @@ files:
   # Vite source maps are useful in the build tree but not loaded by the
   # packaged renderer. The RC shipped 215 of them (70.8 MiB) as loose files.
   - '!dist/ui/**/*.map'
+  # Keep Electron-process source maps available to local builds without
+  # carrying them in every installer. In particular, main.js.map alone is
+  # several MiB and the packaged main process never loads it.
+  - '!dist/*.map'
   - native-bin/**/*
   - assets/icon.png
   - assets/icon.ico
