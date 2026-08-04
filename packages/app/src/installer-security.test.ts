@@ -180,11 +180,13 @@ describe('Windows machine-service installer security', () => {
 
   it('compiles the service environment contract into the service host', () => {
     expect(serviceHost).toContain('L"GEZEL_SYSTEM_SCOPE", L"1"');
+    expect(serviceHost).toContain('L"GEZEL_SERVICE_ROLE", L"machine-engine"');
     expect(serviceHost).toContain('L"GEZEL_PORT", L"6228"');
     expect(serviceHost).toContain('L"GEZEL_SHARED_ASSETS_DIR", home + L"\\\\assets"');
     expect(serviceHost).toContain('L"ELECTRON_RUN_AS_NODE", L"1"');
     expect(serviceHost).toContain('{L"TEMP", home + L"\\\\tmp"}');
     expect(serviceHost).toContain('{L"TMP", home + L"\\\\tmp"}');
+    expect(serviceHost).not.toContain('L"GEZEL_UI_DIR"');
     expect(serviceHost).toContain('{L"TMPDIR", home + L"\\\\tmp"}');
     expect(serviceHost).toContain('{L"APPDATA", home + L"\\\\appdata"}');
     expect(serviceHost).toContain('{L"LOCALAPPDATA", home + L"\\\\localappdata"}');
@@ -249,6 +251,7 @@ describe('Windows machine-service installer security', () => {
     expect(runtimeCheck).toBeLessThan(cleanup);
     expect(hook).toContain('Delete "${GEZEL_DATA_DIR}\\runtime\\auth-token"');
     expect(hook).toContain('Delete "${GEZEL_DATA_DIR}\\runtime\\web-ui-token"');
+    expect(hook).toContain('Delete "${GEZEL_DATA_DIR}\\runtime\\service-role"');
   });
 
   it('waits for an old registration to disappear before replacing it', () => {

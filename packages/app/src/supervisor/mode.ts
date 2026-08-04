@@ -24,12 +24,16 @@ export type Mode =
        * instead of failing on the first read. This is what closes the
        * install-time race: the installer launches the app seconds after
        * enabling the service, 20-30s before the service publishes its
-       * runtime files. Without the wait the supervisor spawned a second,
-       * per-user daemon alongside the machine service.
+       * role/runtime files. Without the wait a user daemon can start a native
+       * engine just before the shared broker appears.
        */
       waitForStartup: boolean;
-      /** The user's hosting pin at resolution time (never `'per-user'` here). */
-      hostingPin: Exclude<HostingPin, 'per-user'>;
+      /**
+       * The user's legacy product-hosting pin at resolution time. A
+       * `'per-user'` pin still permits the split-architecture machine engine;
+       * it only declines an older machine-wide full product daemon.
+       */
+      hostingPin: HostingPin;
     }
   | { kind: 'local-adopt'; baseUrl: string; token: string; cert: string | null; pid: number }
   | { kind: 'local-spawn-packaged' }
@@ -76,8 +80,8 @@ export async function resolveMode(opts: ResolveModeOptions): Promise<Mode> {
     return { kind: 'remote', ...remote, cert: null };
   }
 
-  // Branch 1.5: system service (the default packaged path on every
-  // supported OS). Ask the OS service manager FIRST — it answers
+  // Branch 1.5: system engine discovery (plus compatibility with older
+  // full-product services). Ask the OS service manager FIRST — it answers
   // "registered? running?" immediately and authoritatively, where the
   // runtime files only appear once the daemon has fully booted. Deciding
   // from the files alone is the race that produced two daemons on fresh
@@ -89,17 +93,23 @@ export async function resolveMode(opts: ResolveModeOptions): Promise<Mode> {
     const sysHome = systemServiceHome();
     if (sysHome) {
       const pin = await readHostingPin(home);
-      if (pin === 'per-user') {
-        // The user (or a prior auto-decision, surfaced in Settings) chose
-        // the per-user daemon. Skip the machine service entirely — no SCM
-        // query, no wait.
-        logger?.info?.('[supervisor] hosting pin=per-user — skipping the machine service');
+      const readRuntimeFiles = opts.readSystemRuntime ?? readSystemServiceRuntime;
+      const registration = await (opts.queryMachineService ?? queryMachineServiceState)();
+      const runtime = await readRuntimeFiles(sysHome);
+      const startingOrUp =
+        registration.status === 'running' || registration.status === 'start-pending';
+      const splitEngine = runtime?.serviceRole === 'machine-engine';
+      const rolePending = startingOrUp && runtime === null;
+
+      // `hosting: 'per-user'` predates the engine-broker split. Preserve its
+      // promise for legacy full-product daemons, but do not let it disable
+      // shared downloads/GPU scheduling. When runtime is not published yet,
+      // wait long enough to learn which role the installed service has.
+      if (pin === 'per-user' && !splitEngine && !rolePending) {
+        logger?.info?.(
+          '[supervisor] hosting pin=per-user — ignoring the legacy machine product daemon',
+        );
       } else {
-        const readRuntimeFiles = opts.readSystemRuntime ?? readSystemServiceRuntime;
-        const registration = await (opts.queryMachineService ?? queryMachineServiceState)();
-        const runtime = await readRuntimeFiles(sysHome);
-        const startingOrUp =
-          registration.status === 'running' || registration.status === 'start-pending';
         if (startingOrUp || (registration.status === 'unknown' && runtime)) {
           // `unknown` (SCM unqueryable) preserves the pre-SCM behavior:
           // files present → connect, single health check, no wait.
@@ -139,8 +149,8 @@ export async function resolveMode(opts: ResolveModeOptions): Promise<Mode> {
 /**
  * Branches 2/4/5/embedded — the per-user tail of the decision tree.
  * Exported separately so the connect path can re-enter it when a
- * machine-service connection is deliberately declined (fresh machine home,
- * established user home) without re-running the machine-service branch.
+ * legacy machine-product connection is deliberately declined without
+ * re-running system-engine discovery.
  */
 export async function resolvePerUserMode(opts: ResolveModeOptions): Promise<Mode> {
   const { home, logger } = opts;

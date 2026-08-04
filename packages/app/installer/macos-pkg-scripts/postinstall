@@ -100,7 +100,9 @@ wait_for_service_health() {
             "https://127.0.0.1:${runtime_port}/api/health" 2>/dev/null
         ); then
           if printf '%s\n' "$health_response" |
-             grep -Eq '"ok"[[:space:]]*:[[:space:]]*true'; then
+             grep -Eq '"ok"[[:space:]]*:[[:space:]]*true' &&
+             printf '%s\n' "$health_response" |
+             grep -Eq '"serviceRole"[[:space:]]*:[[:space:]]*"(machine-engine|legacy-full)"'; then
             echo "[gezel postinstall] service health verified on port ${runtime_port}"
             return 0
           fi
@@ -259,9 +261,9 @@ if launchctl print "system/${DAEMON_LABEL}" >/dev/null 2>&1; then
 fi
 
 # 2. Create and migrate the system-scope data hierarchy. The parent is 0711:
-# desktop clients can traverse the known runtime path but cannot list or read
-# config/secrets/projects. runtime alone is 0755; its discovery files are the
-# only cross-account state gezeld explicitly publishes.
+# user daemons can traverse the known runtime path but cannot list private or
+# legacy state. runtime alone is 0755; its discovery files are the only
+# cross-account state gezeld explicitly publishes.
 assert_not_symlink "$DATA_DIR" "Gezel data directory"
 assert_not_symlink "$DATA_DIR/runtime" "Gezel runtime directory"
 assert_not_symlink "$ASSETS_DIR" "Gezel public asset directory"
@@ -305,6 +307,7 @@ rm -f \
   "$DATA_DIR/runtime/pid" \
   "$DATA_DIR/runtime/cert.pem" \
   "$DATA_DIR/runtime/cert-fingerprint" \
+  "$DATA_DIR/runtime/service-role" \
   "$DATA_DIR/runtime/lock"
 
 # 2b. Extract the shipped service bundle (gezeld + node_modules) into

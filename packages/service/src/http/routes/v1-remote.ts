@@ -73,7 +73,7 @@ function effectiveLane(
 }
 
 /** Local chat engines B can serve to paired clients. */
-const REMOTE_CHAT_PROVIDERS = ['llama-cpp', 'mlx', 'ollama'] as const;
+const REMOTE_CHAT_PROVIDERS = ['llama-cpp', 'mlx', 'ds4', 'ollama'] as const;
 
 export function v1RemoteRoutes(ctx: ServiceContext): Hono {
   const app = new Hono();
@@ -83,7 +83,10 @@ export function v1RemoteRoutes(ctx: ServiceContext): Hono {
   let limiter: TenantLimiter | null = null;
   const getLimiter = async (): Promise<TenantLimiter> => {
     if (!limiter) {
-      const cfg = await ctx.store.readConfig().catch(() => null);
+      const cfg =
+        ctx.serviceRole === 'machine-engine'
+          ? null
+          : await ctx.store.readConfig().catch(() => null);
       limiter = createTenantLimiter(cfg?.remoteServing?.limits);
     }
     return limiter;
@@ -92,7 +95,8 @@ export function v1RemoteRoutes(ctx: ServiceContext): Hono {
   // Inference-only model discovery: what this server will run for clients.
   // No project/session state — pure capability enumeration.
   app.get('/models', async (c) => {
-    const config = await ctx.store.readConfig().catch(() => null);
+    const config =
+      ctx.serviceRole === 'machine-engine' ? null : await ctx.store.readConfig().catch(() => null);
     const allow = config?.remoteServing?.allowModels;
     const allowSet = allow && allow.length > 0 ? new Set(allow) : null;
     const models: RemoteModelDescriptor[] = [];
@@ -242,7 +246,8 @@ export function v1RemoteRoutes(ctx: ServiceContext): Hono {
 
     const auth = c.get('auth') as { appId: string } | undefined;
     const originDeviceId = auth?.appId ?? 'unknown';
-    const cfg = await ctx.store.readConfig().catch(() => null);
+    const cfg =
+      ctx.serviceRole === 'machine-engine' ? null : await ctx.store.readConfig().catch(() => null);
 
     // Per-tenant admission: reject early (429) when this device is at its cap,
     // before we touch the GPU/engine. Released when the turn ends.

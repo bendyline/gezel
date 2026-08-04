@@ -55,9 +55,9 @@ if ! getent passwd "$GEZEL_USER" >/dev/null 2>&1; then
   useradd --system --no-create-home --shell /usr/sbin/nologin --user-group "$GEZEL_USER"
 fi
 
-# Never commandeer a pre-existing human account. The HTTP UI includes a real
-# terminal, so running under an interactive user's UID would hand that user's
-# files and credentials to every authorized machine-daemon client.
+# Never commandeer a pre-existing human account. Native engine and download
+# children must run in an isolated service identity, not with a person's file
+# and credential access.
 passwd_entry=$(getent passwd "$GEZEL_USER" 2>/dev/null || true)
 group_entry=$(getent group "$GEZEL_USER" 2>/dev/null || true)
 if [ -z "$passwd_entry" ] || [ -z "$group_entry" ]; then
@@ -134,7 +134,7 @@ fi
 
 # 2. Private system state with a narrow runtime discovery exception. The 0711
 # parent permits traversal to a known path but not directory listing; runtime
-# is 0755 so desktop clients can read only the metadata gezeld publishes.
+# is 0755 so user daemons can read only the metadata gezeld publishes.
 assert_not_symlink "$DATA_DIR" "Gezel data directory"
 assert_not_symlink "$DATA_DIR/runtime" "Gezel runtime directory"
 assert_not_symlink "$ASSETS_DIR" "Gezel public asset directory"
@@ -183,6 +183,7 @@ rm -f \
   "$DATA_DIR/runtime/pid" \
   "$DATA_DIR/runtime/cert.pem" \
   "$DATA_DIR/runtime/cert-fingerprint" \
+  "$DATA_DIR/runtime/service-role" \
   "$DATA_DIR/runtime/lock"
 
 # 2b. Extract the shipped service bundle into $SERVICE_TREE. Runs through

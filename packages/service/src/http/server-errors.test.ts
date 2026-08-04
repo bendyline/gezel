@@ -47,4 +47,13 @@ describe('opaqueServerErrors', () => {
     expect(response.status).toBe(502);
     expect(await response.json()).toMatchObject({ error: 'internal_error' });
   });
+
+  it('preserves the fixed machine-engine outage code without leaking details', async () => {
+    const app = new Hono();
+    app.use('*', opaqueServerErrors({ error: () => {} }));
+    app.get('/engine', (c) => c.json({ error: 'machine_engine_unavailable' }, 503));
+    const response = await app.request('/engine');
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ error: 'machine_engine_unavailable' });
+  });
 });

@@ -1,3 +1,4 @@
+import type { ServiceRole } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import type { ChannelManager } from '../channels/manager.js';
 import type { ChatEventBus } from '../chat/events.js';
@@ -60,6 +61,8 @@ import type { OllamaEmulationController } from './ollama-emulation.js';
 import type { TokenStore } from './token-store.js';
 
 export interface ServiceContext {
+  /** Process responsibility; used to keep the machine route table deny-by-default. */
+  serviceRole: ServiceRole;
   home: string;
   store: Store;
   chatEvents: ChatEventBus;
@@ -216,6 +219,13 @@ export interface ServiceContext {
    * the user pairs. See [remotes/registry.ts](../remotes/registry.ts).
    */
   remotes: RemotesRegistry;
+  /** Automatic local connection to the machine-wide inference broker. */
+  machineEngine?: {
+    isConnected(): boolean;
+    isRequired(): boolean;
+    proxy(request: Request, sourcePrefix: string, targetPrefix: string): Promise<Response>;
+    stop(): Promise<void>;
+  };
   /** Live owner of the optional LAN listener. */
   remoteServing: RemoteServingController;
   /**

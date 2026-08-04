@@ -1,11 +1,12 @@
 import { readFile } from 'node:fs/promises';
 import { join, posix, win32 } from 'node:path';
+import type { ServiceRole } from '@bendyline/gezel';
 
-/** Canonical port reserved for the machine-wide Gezel service. */
+/** Canonical port reserved for the machine-wide Gezel engine broker. */
 export const SYSTEM_SERVICE_PORT = 6228;
 
 /**
- * Platform-specific home used by the Electron-installed machine service.
+ * Platform-specific home used by the Electron-installed machine engine.
  *
  * Only `runtime/` beneath this directory is readable by ordinary desktop
  * clients. The rest remains private to the restricted service identity.
@@ -81,16 +82,21 @@ export interface SystemServiceEndpoint {
 
 export interface SystemServiceRuntime extends SystemServiceEndpoint {
   /**
-   * Per-launch first-party desktop credential. The Electron supervisor needs
-   * this; ordinary CLI connections deliberately use the revocable grant flow
-   * instead of borrowing it.
+   * Per-launch first-party broker credential. The Electron supervisor probes
+   * it, and the per-user daemon keeps it in memory while proxying model and
+   * inference calls. It is never surfaced to the renderer or ordinary CLIs.
    */
   token: string;
+  /**
+   * Responsibility advertised by the installed daemon. Missing on releases
+   * predating split services; callers must treat absence as `legacy-full`.
+   */
+  serviceRole?: ServiceRole;
 }
 
 /**
  * Read only the public endpoint metadata needed to discover and authorize
- * against the machine service. No private service state is accessed.
+ * against the machine engine. No private service state is accessed.
  */
 export async function readSystemServiceEndpoint(
   home: string | null = systemServiceHome(),
@@ -118,9 +124,9 @@ export async function readSystemServiceEndpoint(
 }
 
 /**
- * Electron's trusted supervisor path: endpoint metadata plus the scoped
- * desktop credential. Kept alongside endpoint discovery so the CLI and app
- * cannot drift on platform paths or TLS handling.
+ * Trusted local-broker path: endpoint metadata plus the scoped engine
+ * credential. Kept alongside endpoint discovery so the supervisor and user
+ * daemon cannot drift on platform paths or TLS handling.
  */
 export async function readSystemServiceRuntime(
   home: string | null = systemServiceHome(),
@@ -130,7 +136,17 @@ export async function readSystemServiceRuntime(
   try {
     const token = (await readFile(join(endpoint.home, 'runtime', 'auth-token'), 'utf8')).trim();
     if (!token) return null;
-    return { ...endpoint, token };
+    let serviceRole: ServiceRole | undefined;
+    try {
+      const raw = (await readFile(join(endpoint.home, 'runtime', 'service-role'), 'utf8')).trim();
+      if (raw === 'user' || raw === 'machine-engine' || raw === 'legacy-full') {
+        serviceRole = raw;
+      }
+    } catch {
+      // Older daemons did not publish a role. Absence is meaningful and is
+      // handled as `legacy-full` by the Electron supervisor.
+    }
+    return { ...endpoint, token, ...(serviceRole ? { serviceRole } : {}) };
   } catch {
     return null;
   }

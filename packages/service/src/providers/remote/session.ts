@@ -40,6 +40,12 @@ export interface RemoteSessionDeps {
   baseUrl: string;
   token: string;
   fetch: typeof fetch;
+  /**
+   * Refreshable connection for runtime-managed brokers. Existing chat
+   * sessions survive broker restarts (rotated port, cert, and token) by
+   * resolving this immediately before every forward pass.
+   */
+  resolveConnection?: () => { baseUrl: string; token: string; fetch: typeof fetch };
   queue: ProviderQueue;
   /** A's LOCAL tool bridge — tool calls execute here, on A's files. */
   bridges: McpBridgePool;
@@ -127,6 +133,7 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
     opts?: SendAndWaitOpts,
   ): Promise<{ text: string; toolCalls: ExternalToolCall[] }> {
     const start = Date.now();
+    const connection = this.deps.resolveConnection?.() ?? this.deps;
     const tools = this.deps.bridges.isEmpty()
       ? undefined
       : this.deps.bridges
@@ -164,11 +171,11 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
       },
     };
 
-    const res = await this.deps.fetch(`${this.deps.baseUrl}/v1/remote/infer`, {
+    const res = await connection.fetch(`${connection.baseUrl}/v1/remote/infer`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${this.deps.token}`,
+        Authorization: `Bearer ${connection.token}`,
         Accept: 'text/event-stream',
       },
       body: JSON.stringify(body),

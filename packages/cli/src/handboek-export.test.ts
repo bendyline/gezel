@@ -11,6 +11,7 @@ import {
   runHandboekExport,
   slugify,
   withHeadingIds,
+  wrapTables,
 } from './handboek-export.js';
 
 describe('rewriteSiteLinks', () => {
@@ -49,6 +50,22 @@ describe('extractBody', () => {
 
   it('falls back to the input when there is no body element', () => {
     expect(extractBody('<p>bare</p>')).toBe('<p>bare</p>');
+  });
+});
+
+describe('wrapTables', () => {
+  it('wraps every table in its own scroll container', () => {
+    const out = wrapTables(
+      '<p>a</p><table><tr><td>1</td></tr></table><p>b</p><table><tr><td>2</td></tr></table>',
+    );
+    expect(out).toBe(
+      '<p>a</p><div class="hb-table-scroll"><table><tr><td>1</td></tr></table></div>' +
+        '<p>b</p><div class="hb-table-scroll"><table><tr><td>2</td></tr></table></div>',
+    );
+  });
+
+  it('leaves table-free content untouched', () => {
+    expect(wrapTables('<p>no tables here</p>')).toBe('<p>no tables here</p>');
   });
 });
 
@@ -164,6 +181,14 @@ describe('runHandboekExport', () => {
       await rm(bare, { recursive: true, force: true }).catch(() => {});
     }
   }, 120_000);
+
+  it('puts generated catalog tables in a scroll container and lets cells wrap', async () => {
+    const page = await readFile(join(out, 'craftbooks-index', 'index.html'), 'utf8');
+    expect(page).toContain('<div class="hb-table-scroll"><table>');
+    const css = await readFile(join(out, 'assets', 'handboek.css'), 'utf8');
+    const rules = css.replace(/\/\*[\s\S]*?\*\//g, '');
+    expect(rules).not.toMatch(/white-space:\s*nowrap/);
+  });
 
   it('carries section navigation on every page', async () => {
     const page = await readFile(join(out, 'the-crew', 'index.html'), 'utf8');

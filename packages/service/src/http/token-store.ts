@@ -21,6 +21,10 @@ import { readSecurityJson, writeSecurityJson } from '../fs/security-json.js';
  *                audio generation); gets 403 on every `/api/*` project/fs
  *                route, so a remote client can never touch this host's
  *                projects, sessions, or filesystem.
+ *   - `machine-models` — reserved first-party authority for the automatic
+ *                user-daemon → machine-engine bridge. Adds model download,
+ *                deletion, native binary, and engine-pool management; never
+ *                grantable through `/v1/apps/register`.
  * `scopes` stays a `string[]` on records for forward-compat, but app
  * registration validates requests against {@link APP_GRANTABLE_SCOPES}.
  */
@@ -32,6 +36,7 @@ export const KNOWN_SCOPES = [
   'ui',
   'session',
   'remote-inference',
+  'machine-models',
 ] as const;
 export type GezelScope = (typeof KNOWN_SCOPES)[number];
 
@@ -49,6 +54,7 @@ export function isReservedTokenAppId(appId: string): boolean {
   return (
     appId === 'root' ||
     appId === 'desktop-client' ||
+    appId === 'machine-engine-client' ||
     appId === 'web-ui' ||
     appId.startsWith('session:')
   );
@@ -60,10 +66,7 @@ export function isReservedTokenAppId(appId: string): boolean {
  * also reloaded from disk and GrantManager has non-HTTP callers in tests and
  * headless flows.
  */
-export function assertGrantableAppToken(input: {
-  appId: string;
-  scopes: readonly string[];
-}): void {
+export function assertGrantableAppToken(input: { appId: string; scopes: readonly string[] }): void {
   if (isReservedTokenAppId(input.appId)) {
     throw new Error(`token-store: appId is reserved: ${input.appId}`);
   }

@@ -44,29 +44,41 @@ export class VideoProviderManager {
   private current_: VideoProvider | null = null;
   private buildPromise: Promise<VideoProvider> | null = null;
   private remotes: RemotesRegistry | undefined;
-  private readonly remoteCache = new Map<string, RemoteVideoProvider>();
+  private machineEngineRemoteId?: () => string | null;
+  private readonly remoteCache = new Map<
+    string,
+    { connectionKey: string; provider: RemoteVideoProvider }
+  >();
 
   setRemotes(remotes: RemotesRegistry): void {
     this.remotes = remotes;
   }
 
+  setMachineEngineRemoteResolver(resolve: (() => string | null) | undefined): void {
+    this.machineEngineRemoteId = resolve;
+  }
+
   /** Route `remote:<id>/…` video models to the hosting server; else local. */
   async providerForModel(model?: string): Promise<VideoProvider> {
-    const target = resolveRemoteTarget(model, this.remotes);
+    const target = resolveRemoteTarget(model, this.remotes, this.machineEngineRemoteId?.());
     if (!target) return this.current();
     const { remote, fetch } = target;
-    let provider = this.remoteCache.get(remote.remoteId);
-    if (!provider) {
-      provider = new RemoteVideoProvider({
-        remoteId: remote.remoteId,
-        label: remote.displayName,
-        baseUrl: remote.baseUrl,
-        token: remote.token,
-        fetch,
-      });
-      this.remoteCache.set(remote.remoteId, provider);
+    const connectionKey = `${remote.baseUrl}\0${remote.token}\0${remote.pinnedIdentityFingerprint}`;
+    let cached = this.remoteCache.get(remote.remoteId);
+    if (!cached || cached.connectionKey !== connectionKey) {
+      cached = {
+        connectionKey,
+        provider: new RemoteVideoProvider({
+          remoteId: remote.remoteId,
+          label: remote.displayName,
+          baseUrl: remote.baseUrl,
+          token: remote.token,
+          fetch,
+        }),
+      };
+      this.remoteCache.set(remote.remoteId, cached);
     }
-    return provider;
+    return cached.provider;
   }
 
   constructor(opts: VideoProviderManagerOptions) {
@@ -79,6 +91,7 @@ export class VideoProviderManager {
   }
 
   async current(): Promise<VideoProvider> {
+    if (this.machineEngineRemoteId?.()) return this.providerForModel(undefined);
     if (this.current_) return this.current_;
     if (this.buildPromise) return this.buildPromise;
     this.buildPromise = (async () => {

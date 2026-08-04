@@ -25,7 +25,11 @@ export class TextToSpeechProviderManager {
   private current_: TextToSpeechProvider | null = null;
   private buildPromise: Promise<TextToSpeechProvider> | null = null;
   private remotes: RemotesRegistry | undefined;
-  private readonly remoteCache = new Map<string, RemoteTtsProvider>();
+  private machineEngineRemoteId?: () => string | null;
+  private readonly remoteCache = new Map<
+    string,
+    { connectionKey: string; provider: RemoteTtsProvider }
+  >();
 
   constructor(opts: TextToSpeechManagerOptions) {
     this.home = opts.home;
@@ -36,26 +40,35 @@ export class TextToSpeechProviderManager {
     this.remotes = remotes;
   }
 
+  setMachineEngineRemoteResolver(resolve: (() => string | null) | undefined): void {
+    this.machineEngineRemoteId = resolve;
+  }
+
   /** Route `remote:<id>/…` TTS models to the hosting server; else local. */
   async providerForModel(model?: string): Promise<TextToSpeechProvider> {
-    const target = resolveRemoteTarget(model, this.remotes);
+    const target = resolveRemoteTarget(model, this.remotes, this.machineEngineRemoteId?.());
     if (!target) return this.current();
     const { remote, fetch } = target;
-    let provider = this.remoteCache.get(remote.remoteId);
-    if (!provider) {
-      provider = new RemoteTtsProvider({
-        remoteId: remote.remoteId,
-        label: remote.displayName,
-        baseUrl: remote.baseUrl,
-        token: remote.token,
-        fetch,
-      });
-      this.remoteCache.set(remote.remoteId, provider);
+    const connectionKey = `${remote.baseUrl}\0${remote.token}\0${remote.pinnedIdentityFingerprint}`;
+    let cached = this.remoteCache.get(remote.remoteId);
+    if (!cached || cached.connectionKey !== connectionKey) {
+      cached = {
+        connectionKey,
+        provider: new RemoteTtsProvider({
+          remoteId: remote.remoteId,
+          label: remote.displayName,
+          baseUrl: remote.baseUrl,
+          token: remote.token,
+          fetch,
+        }),
+      };
+      this.remoteCache.set(remote.remoteId, cached);
     }
-    return provider;
+    return cached.provider;
   }
 
   async current(): Promise<TextToSpeechProvider> {
+    if (this.machineEngineRemoteId?.()) return this.providerForModel(undefined);
     if (this.current_) return this.current_;
     if (this.buildPromise) return this.buildPromise;
     this.buildPromise = (async () => {

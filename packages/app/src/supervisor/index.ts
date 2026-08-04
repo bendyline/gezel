@@ -30,7 +30,11 @@ import { LogRotator } from './log-rotator.js';
 import { machineServiceInstallFailed } from './machine-service-state.js';
 import { type Mode, resolveMode, resolvePerUserMode } from './mode.js';
 import { nativeBinDir, resolveNativeBinaryPath } from './native-bin.js';
-import { readSystemServiceRuntime, systemServiceHome } from './system-service.js';
+import {
+  type SystemServiceRuntime,
+  readSystemServiceRuntime,
+  systemServiceHome,
+} from './system-service.js';
 
 export interface ConnectOptions {
   home: string;
@@ -49,6 +53,8 @@ export type ConnectionMode = Mode['kind'];
 export type ServiceFallbackCode =
   | 'machine-service-not-installed'
   | 'machine-service-home-fresh'
+  | 'machine-engine-unavailable'
+  | 'legacy-machine-data'
   | 'system-service-unhealthy'
   | 'system-service-version-mismatch'
   | 'adopted-daemon-stale'
@@ -62,14 +68,10 @@ export type ServiceFallbackCode =
 /**
  * A degraded service situation worth telling the user about, surfaced as a
  * persistent banner. Most codes mean "we fell back to embedded"; the
- * exceptions are `system-service-version-mismatch`, where we stayed connected
- * to the machine service on purpose and the banner is asking the user to
- * rerun the installer, `machine-service-not-installed`, where the daemon
- * is healthy but running per-user because the installer never registered the
- * machine service, and `machine-service-home-fresh`, where a healthy machine
- * service was deliberately declined because its home has never been used
- * while the per-user home holds the user's real data. Branch on `code`, not
- * on the mode, when the copy matters — see `FallbackBanner` in the UI.
+ * exceptions include machine-engine availability, where the user product
+ * daemon is healthy but model downloads/resource queues are not shared, and
+ * rolling-upgrade notices for a legacy full-product system daemon. Branch on
+ * `code`, not the connection mode, when the copy matters.
  *
  * `code` and `message` both cross to the renderer via the preload bridge.
  */
@@ -94,14 +96,13 @@ export const HEALTH_REQUEST_TIMEOUT_MS = 5_000;
 // verification and runtime initialization before publishing discovery files.
 // Keep routine health probes short, but give this one-time fallback path room.
 const PACKAGED_STARTUP_TIMEOUT_MS = 30_000;
-// How long to wait for a machine service the OS service manager reports as
-// running/starting to publish healthy runtime discovery. Sized from the
+// How long to wait for a machine engine the OS service manager reports as
+// running/starting to publish role + runtime discovery. Sized from the
 // observed fresh-install race: the installer launches the app ~4s after
 // enabling GezelService, and the service publishes runtime files 20-30s
 // after that (OS verification + first daemon boot). 45s covers that with
-// margin for slower disks. Spawning a per-user daemon inside this window is
-// strictly worse than waiting — it creates a second daemon on a second home
-// that survives until the next reboot.
+// margin for slower disks. The wait lets the user daemon route its very first
+// native request to the broker instead of briefly starting a duplicate engine.
 const MACHINE_SERVICE_STARTUP_WAIT_MS = 45_000;
 const MACHINE_SERVICE_STARTUP_POLL_MS = 1_000;
 
@@ -421,9 +422,21 @@ export class SupervisedService extends EventEmitter {
         })
       : new GezelClient({ baseUrl: this._baseUrl, token: this._token });
     try {
-      await healthWithTimeout(client, HEALTH_REQUEST_TIMEOUT_MS, probe.controller);
+      const health = await healthWithTimeout(client, HEALTH_REQUEST_TIMEOUT_MS, probe.controller);
       if (generation !== this.healthGeneration) return;
       this.consecutiveHealthFailures = 0;
+      if (
+        this._fallbackReason?.code === 'machine-engine-unavailable' &&
+        health.machineEngineConnected
+      ) {
+        this.opts.logger?.info?.(
+          '[supervisor] shared model engine recovered; clearing its install-health notice',
+        );
+        this._fallbackReason = null;
+        // Reload once so preload-derived shell state drops the stale notice.
+        // This does not restart either daemon or rotate the user token.
+        this.emit('restart');
+      }
     } catch {
       if (generation !== this.healthGeneration) return;
       this.consecutiveHealthFailures += 1;
@@ -581,10 +594,9 @@ export async function connectOrStart(opts: ConnectOptions): Promise<SupervisedSe
     process.env.GEZEL_NATIVE_BIN_DIR = nativeBinDir(import.meta.url);
   }
   // Mirror the CLI's defensive overlay (packages/cli/src/connection.ts): a
-  // user-context daemon may read immutable machine-published model bundles
-  // even when the machine service itself is unreachable. Without this, a
-  // fallback launch after a failed system-service health check comes up with
-  // an empty model list — every machine-scope model appears uninstalled.
+  // user daemon may validate/read immutable machine-published model bundles
+  // before the engine broker is adopted. Once adopted, execution and model
+  // lifecycle route through the broker rather than this overlay.
   // Spawned children inherit via `{ ...process.env }`; embedded reads it
   // directly. Operator-set values win.
   if (!process.env.GEZEL_SHARED_ASSETS_DIR) {
@@ -730,10 +742,26 @@ async function connectResolved(
     // service and the OS service manager says it is running or starting.
     // Wait (bounded) for healthy runtime discovery instead of failing on
     // the first read — the installer launches the app well before the
-    // service publishes its files, and losing that race used to mean a
-    // second, per-user daemon racing the machine service for the GPU.
+    // service publishes its role/files. Waiting avoids an account-local model
+    // launch just before the shared engine becomes available.
     const outcome = await connectSystemService(opts, mode);
     if (outcome.kind === 'connected') return outcome.service;
+    if (outcome.kind === 'engine-ready' || outcome.kind === 'per-user-selected') {
+      // The renderer never talks to the cross-account broker. Start/adopt the
+      // user's product daemon; it discovers the verified broker through the
+      // runtime-only inference bridge.
+      const perUser = await resolvePerUserMode({
+        home: opts.home,
+        packaged: opts.packaged,
+        devSpawn: opts.devSpawn,
+        forceEmbedded: opts.forceEmbedded,
+        ...(opts.logger ? { logger: opts.logger } : {}),
+      });
+      return connectResolved(opts, perUser, {
+        inheritedReason: null,
+        allowMachineRecheck: false,
+      });
+    }
     if (outcome.kind === 'prefer-per-user') {
       const perUser = await resolvePerUserMode({
         home: opts.home,
@@ -750,6 +778,23 @@ async function connectResolved(
     opts.logger?.warn?.(
       `[supervisor] machine service at ${mode.serviceHome} did not become healthy (${outcome.message}); falling back to embedded`,
     );
+    if (outcome.serviceRole === 'machine-engine') {
+      const perUser = await resolvePerUserMode({
+        home: opts.home,
+        packaged: opts.packaged,
+        devSpawn: opts.devSpawn,
+        forceEmbedded: opts.forceEmbedded,
+        ...(opts.logger ? { logger: opts.logger } : {}),
+      });
+      return connectResolved(opts, perUser, {
+        inheritedReason: {
+          code: 'machine-engine-unavailable',
+          sourceMode: 'system-service',
+          message: `The shared model engine was unavailable: ${outcome.message}. Gezel is using this account's service and will retry the engine automatically.`,
+        },
+        allowMachineRecheck: false,
+      });
+    }
     return buildEmbedded(opts, {
       code: 'system-service-unhealthy',
       sourceMode: 'system-service',
@@ -841,14 +886,12 @@ async function connectResolved(
   }
 
   if (mode.kind === 'local-spawn-packaged') {
-    // Last look before creating a second writer: bundle extraction and the
-    // steps above take real time, and the machine service may have finished
+    // Last look before creating the user product daemon: bundle extraction and
+    // the steps above take real time, and the machine service may have finished
     // publishing its runtime in the meantime (mode resolution's SCM query
     // can also have answered `unknown` on a machine where sc/systemctl is
-    // unavailable). Adopting it now is strictly better than spawning a
-    // parallel daemon on a different home. Skipped after a deliberate
-    // decline — `flow.allowMachineRecheck` — so a fresh-home bail cannot
-    // bounce straight back.
+    // unavailable). A split engine is probed but still returns here so the
+    // user daemon starts; a legacy full-product daemon may still be adopted.
     if (flow.allowMachineRecheck) {
       const adopted = await lateMachineServiceCheck(opts);
       if (adopted) return adopted;
@@ -911,8 +954,14 @@ async function connectResolved(
 
 type SystemServiceOutcome =
   | { kind: 'connected'; service: SupervisedService }
+  | { kind: 'engine-ready' }
+  | { kind: 'per-user-selected' }
   | { kind: 'prefer-per-user'; reason: ServiceFallbackReason }
-  | { kind: 'unhealthy'; message: string };
+  | {
+      kind: 'unhealthy';
+      message: string;
+      serviceRole?: 'user' | 'machine-engine' | 'legacy-full';
+    };
 
 /**
  * Connect to the machine service, waiting (when the SCM said it is running
@@ -926,39 +975,78 @@ async function connectSystemService(
 ): Promise<SystemServiceOutcome> {
   const deadline = Date.now() + (mode.waitForStartup ? MACHINE_SERVICE_STARTUP_WAIT_MS : 0);
   let lastError = 'runtime discovery files are not published yet';
+  let observedRole: SystemServiceRuntime['serviceRole'];
   let waitingAnnounced = false;
   for (;;) {
     const runtime = await readSystemServiceRuntime(mode.serviceHome);
     if (runtime) {
-      const client = buildHealthClient(runtime.baseUrl, runtime.token, runtime.cert);
-      try {
-        const health = await healthWithTimeout(client);
-        const preference = await decideHomePreference(opts, client, mode.hostingPin);
-        if (preference) return { kind: 'prefer-per-user', reason: preference };
-        opts.logger?.info?.(`[supervisor] connected to system service at ${runtime.baseUrl}`);
-        return {
-          kind: 'connected',
-          service: new SupervisedService(
-            'system-service',
-            runtime.baseUrl,
-            runtime.token,
-            runtime.cert,
+      observedRole = runtime.serviceRole;
+      if (runtime.serviceRole === 'machine-engine') {
+        try {
+          await probeMachineEngine(runtime);
+          opts.logger?.info?.(
+            `[supervisor] machine engine is ready at ${runtime.baseUrl}; using a per-user product daemon`,
+          );
+          return { kind: 'engine-ready' };
+        } catch (err) {
+          lastError = (err as Error).message;
+        }
+      } else {
+        if (mode.hostingPin === 'per-user') {
+          opts.logger?.info?.(
+            '[supervisor] hosting pin=per-user — using the user daemon instead of the legacy machine product daemon',
+          );
+          return { kind: 'per-user-selected' };
+        }
+        const client = buildHealthClient(runtime.baseUrl, runtime.token, runtime.cert);
+        try {
+          const health = await healthWithTimeout(client);
+          const preference = await decideHomePreference(opts, client, mode.hostingPin);
+          if (preference) return { kind: 'prefer-per-user', reason: preference };
+          opts.logger?.info?.(`[supervisor] connected to system service at ${runtime.baseUrl}`);
+          const versionSkew = await systemServiceVersionSkew(
+            health.version,
+            mode.serviceHome,
             opts,
-            {
-              systemServiceHome: mode.serviceHome,
-              fallbackReason: await systemServiceVersionSkew(
-                health.version,
-                mode.serviceHome,
-                opts,
-              ),
-            },
-          ),
-        };
-      } catch (err) {
-        lastError = (err as Error).message;
+          );
+          const legacyMachineData: ServiceFallbackReason | null =
+            runtime.serviceRole === 'legacy-full'
+              ? {
+                  code: 'legacy-machine-data',
+                  sourceMode: 'system-service',
+                  message:
+                    'Gezel preserved an established machine-wide product home in compatibility mode. Its projects remain available, but arbitrary user-owned folders still use the older restricted service boundary until they are migrated.',
+                }
+              : null;
+          return {
+            kind: 'connected',
+            service: new SupervisedService(
+              'system-service',
+              runtime.baseUrl,
+              runtime.token,
+              runtime.cert,
+              opts,
+              {
+                systemServiceHome: mode.serviceHome,
+                fallbackReason: versionSkew ?? legacyMachineData,
+              },
+            ),
+          };
+        } catch (err) {
+          lastError = (err as Error).message;
+        }
       }
     }
-    if (Date.now() >= deadline) return { kind: 'unhealthy', message: lastError };
+    if (Date.now() >= deadline) {
+      if (mode.hostingPin === 'per-user' && observedRole !== 'machine-engine') {
+        return { kind: 'per-user-selected' };
+      }
+      return {
+        kind: 'unhealthy',
+        message: lastError,
+        ...(observedRole ? { serviceRole: observedRole } : {}),
+      };
+    }
     if (!waitingAnnounced) {
       waitingAnnounced = true;
       opts.logger?.info?.(
@@ -968,6 +1056,26 @@ async function connectSystemService(
       );
     }
     await sleepMs(MACHINE_SERVICE_STARTUP_POLL_MS);
+  }
+}
+
+/** Verify the exact inference-only endpoint the user daemon will consume. */
+async function probeMachineEngine(runtime: SystemServiceRuntime): Promise<void> {
+  const fetchImpl = runtime.cert ? createTrustingFetch({ cert: runtime.cert }) : fetch;
+  const response = await fetchImpl(`${runtime.baseUrl}/v1/remote/models`, {
+    headers: { Authorization: `Bearer ${runtime.token}` },
+    signal: AbortSignal.timeout(HEALTH_REQUEST_TIMEOUT_MS),
+  });
+  try {
+    if (!response.ok) {
+      throw new Error(`machine inference probe returned HTTP ${response.status}`);
+    }
+    const body = (await response.json()) as { models?: unknown };
+    if (!Array.isArray(body.models)) {
+      throw new Error('machine inference probe returned an invalid model response');
+    }
+  } finally {
+    await response.body?.cancel().catch(() => undefined);
   }
 }
 
@@ -1024,22 +1132,21 @@ async function decideHomePreference(
 }
 
 /**
- * Pre-spawn re-check: adopt a machine service that became healthy after
- * mode resolution rather than spawning a second daemon beside it. Honors
- * the hosting pin and runs the same preference/version checks as the
- * primary path. Returns null when there is nothing to adopt — the caller
- * proceeds with its spawn.
+ * Pre-spawn re-check: discover a machine service that published after mode
+ * resolution. A split engine is only probed (the caller still starts its user
+ * daemon); a legacy full-product daemon may be adopted under its compatibility
+ * hosting preference.
  */
 async function lateMachineServiceCheck(opts: ConnectOptions): Promise<SupervisedService | null> {
   if (!opts.packaged) return null;
   const sysHome = systemServiceHome();
   if (!sysHome) return null;
   const pin = await readHostingPin(opts.home);
-  if (pin === 'per-user') return null;
   const runtime = await readSystemServiceRuntime(sysHome);
   if (!runtime) return null;
+  if (pin === 'per-user' && runtime.serviceRole !== 'machine-engine') return null;
   opts.logger?.info?.(
-    '[supervisor] machine service published its runtime while preparing to spawn; probing it before starting a second daemon',
+    '[supervisor] machine service published its runtime while preparing the user daemon; probing its declared role',
   );
   const outcome = await connectSystemService(opts, {
     kind: 'system-service',
@@ -1168,14 +1275,12 @@ async function systemServiceVersionSkew(
 }
 
 /**
- * The per-user daemon is healthy, but only because the installer failed to
- * register the machine service and said so in the registry.
+ * The per-user product daemon is healthy, but the installer failed to
+ * register the shared machine engine and said so in the registry.
  *
- * Worth a notice even though nothing is broken right now: the user loses
- * background work whenever the app is closed, keeps paying first-launch
- * bundle extraction, and runs without the service's restricted SID and
- * private home — none of which is visible anywhere else in the product.
- * Only the installer can fix it, so the copy points at rerunning it.
+ * Worth a notice even though the product data path is healthy: model
+ * downloads, engine residency, and GPU/RAM queues are no longer shared with
+ * other accounts on the machine. Only the installer can repair that broker.
  *
  * Packaged only, and only on a positive `MachineServiceInstalled = 0`. See
  * machine-service-state.ts for why absence is never treated as failure.
@@ -1188,14 +1293,14 @@ async function machineServiceMissing(
   if (!(await machineServiceInstallFailed())) return null;
   opts.logger?.warn?.(
     '[supervisor] the installer recorded a failed GezelService registration; ' +
-      'running the per-user daemon and flagging it in the UI',
+      'running engines through the per-user daemon and flagging it in the UI',
   );
   return {
     code: 'machine-service-not-installed',
     sourceMode,
     message:
-      'The Gezel installer could not register the machine-wide background service, ' +
-      'so Gezel is running its per-user background service instead.',
+      'The Gezel installer could not register the shared machine model engine, ' +
+      'so this account is running local engines itself instead.',
   };
 }
 
@@ -1332,7 +1437,11 @@ async function spawnChildFromInstall(opts: ConnectOptions): Promise<{
   // under `~/.gezel/service/` and the UI lives under
   // `app.asar.unpacked/dist/ui/` — different trees. Hand the daemon the
   // resolved UI path via env so it can serve `/`.
-  const env: NodeJS.ProcessEnv = { ...process.env, GEZEL_HOME: opts.home };
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    GEZEL_HOME: opts.home,
+    GEZEL_SERVICE_ROLE: 'user',
+  };
   if (opts.uiDir) env.GEZEL_UI_DIR = opts.uiDir;
   const result = await discoverOrSpawn({
     daemonEntry,
@@ -1363,7 +1472,11 @@ async function spawnChild(opts: ConnectOptions): Promise<{
   pid: number;
 }> {
   const daemonEntry = resolveDaemonEntry(import.meta.url);
-  const env: NodeJS.ProcessEnv = { ...process.env, GEZEL_HOME: opts.home };
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    GEZEL_HOME: opts.home,
+    GEZEL_SERVICE_ROLE: 'user',
+  };
   if (opts.uiDir) env.GEZEL_UI_DIR = opts.uiDir;
   const result = await discoverOrSpawn({
     daemonEntry,
@@ -1535,6 +1648,7 @@ async function startEmbeddedRaw(
       uiDir?: string;
       home?: string;
       preferCanonicalPort?: boolean;
+      role?: 'user' | 'machine-engine' | 'legacy-full';
       onRestartRequested?: (reason: string) => void;
     }) => Promise<{
       port: number;
@@ -1561,6 +1675,7 @@ async function startEmbeddedRaw(
     // connect to — claim the canonical fixed port (with ephemeral
     // fallback) so it has a stable base URL.
     preferCanonicalPort: true,
+    role: 'user',
     onRestartRequested,
   });
   const scheme = running.cert ? 'https' : 'http';

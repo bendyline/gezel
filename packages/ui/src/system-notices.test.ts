@@ -28,23 +28,47 @@ describe('serviceNotice', () => {
     expect(notice?.technical).toBe('System service was unavailable: SCM stopped');
   });
 
-  // The per-user daemon is a supported mode, so nothing is broken and the
-  // "Background work is off" copy would be wrong: work does run, just not
-  // once Gezel closes. Only the installer registers the machine service, so
-  // the advice has to be "rerun the installer", not "reopen Gezel".
-  it('distinguishes a per-user fallback from a dead service', () => {
+  // Product data and scheduled work are deliberately per-user. An installer
+  // failure only removes cross-account model/resource sharing.
+  it('distinguishes a missing machine engine from a dead product service', () => {
     const notice = serviceNotice({
-      reason: 'The Gezel installer could not register the machine-wide background service',
+      reason: 'The Gezel installer could not register the shared machine model engine',
       code: 'machine-service-not-installed',
       platform: 'win32',
     });
 
     expect(notice?.id).toBe('machine-service-not-installed');
     expect(notice?.title).not.toMatch(/off|unavailable|failed/i);
-    expect(notice?.body).not.toMatch(/will not start again by itself/);
-    expect(notice?.body).toMatch(/only runs while Gezel is open/);
+    expect(notice?.body).toMatch(/scheduled tasks.*stay in this account/i);
+    expect(notice?.body).toMatch(/not being shared/i);
     expect(notice?.body).toMatch(/Run the Gezel installer again/);
     expect(notice?.technical).toMatch(/could not register/);
+  });
+
+  it('keeps a temporarily unavailable machine engine separate from background-work failure', () => {
+    const notice = serviceNotice({
+      reason: 'engine probe returned HTTP 503',
+      code: 'machine-engine-unavailable',
+      platform: 'darwin',
+    });
+
+    expect(notice?.id).toBe('machine-engine-unavailable');
+    expect(notice?.body).toMatch(/scheduled work.*as usual/i);
+    expect(notice?.body).toMatch(/retry.*automatically/i);
+    expect(notice?.body).not.toMatch(/Background work is off/i);
+  });
+
+  it('explains the non-destructive compatibility path for established machine data', () => {
+    const notice = serviceNotice({
+      reason: 'established machine home preserved',
+      code: 'legacy-machine-data',
+      platform: 'darwin',
+    });
+
+    expect(notice?.id).toBe('legacy-machine-data');
+    expect(notice?.body).toMatch(/nothing is moved or hidden/i);
+    expect(notice?.body).toMatch(/per-user migration/i);
+    expect(notice?.reportable).toBe(false);
   });
 
   // A skewed machine service is healthy and still holding the user's data.

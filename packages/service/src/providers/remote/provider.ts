@@ -31,6 +31,14 @@ export interface RemoteGezelProviderOpts {
   token: string;
   /** Cert-pinned fetch to B (see remotes/pinned-fetch.ts). */
   fetch: typeof fetch;
+  /** Resolve rotated runtime-managed broker connection details on demand. */
+  resolveConnection?: () => { baseUrl: string; token: string; fetch: typeof fetch };
+  /**
+   * Engine namespace to add to ordinary model ids. The automatic machine
+   * broker uses this because the user-facing session remains `llama-cpp`,
+   * `mlx`, or `ds4` while B's inference wire requires `<provider>:<model>`.
+   */
+  modelPrefix?: string;
   /** B's models captured at pairing/discovery, already namespaced for A. */
   models?: ModelInfo[];
   /** A-side admission cap on concurrent sockets to B. */
@@ -67,8 +75,9 @@ export class RemoteGezelProvider implements LLMProvider {
     if (this.opts.models) return this.opts.models;
     if (this.cachedModels) return this.cachedModels;
     try {
-      const res = await this.opts.fetch(`${this.opts.baseUrl}/v1/remote/models`, {
-        headers: { Authorization: `Bearer ${this.opts.token}` },
+      const connection = this.opts.resolveConnection?.() ?? this.opts;
+      const res = await connection.fetch(`${connection.baseUrl}/v1/remote/models`, {
+        headers: { Authorization: `Bearer ${connection.token}` },
       });
       if (!res.ok) return [];
       const parsed = RemoteModelsResponseSchema.parse(await res.json());
@@ -94,12 +103,17 @@ export class RemoteGezelProvider implements LLMProvider {
   async createSession(opts: SessionOpts): Promise<LLMSession> {
     const bridges = await McpBridgePool.fromSessionOpts(opts, `[remote:${this.opts.label}]`);
     const requested = opts.model ?? this.getEffectiveModelId() ?? '';
-    const bLocal = parseRemoteModelId(requested)?.modelId ?? requested;
+    const remoteLocal = parseRemoteModelId(requested)?.modelId ?? requested;
+    const bLocal =
+      this.opts.modelPrefix && remoteLocal && !remoteLocal.startsWith(`${this.opts.modelPrefix}:`)
+        ? `${this.opts.modelPrefix}:${remoteLocal}`
+        : remoteLocal;
     this.log.info(`[remote-provider] session on ${this.opts.label} model=${bLocal}`);
     return new RemoteSession({
       baseUrl: this.opts.baseUrl,
       token: this.opts.token,
       fetch: this.opts.fetch,
+      ...(this.opts.resolveConnection ? { resolveConnection: this.opts.resolveConnection } : {}),
       queue: this.queue,
       bridges,
       systemMessage: opts.systemMessage,

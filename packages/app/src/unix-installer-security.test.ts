@@ -49,6 +49,7 @@ describe('macOS machine-service filesystem security', () => {
     expect(macPostinstall).toContain('find -x "$ASSETS_DIR" -type d -exec chmod 755 {} +');
     expect(macPostinstall).toContain('find -x "$ASSETS_DIR" -type f -exec chmod 644 {} +');
     expect(macPostinstall).toContain('"$DATA_DIR/runtime/auth-token"');
+    expect(macPostinstall).toContain('"$DATA_DIR/runtime/service-role"');
 
     const stop = position(macPostinstall, 'launchctl bootout "system/${DAEMON_LABEL}"');
     const inactiveGate = position(
@@ -94,6 +95,8 @@ describe('macOS machine-service filesystem security', () => {
     expect(macPostinstall).toContain('[ "$daemon_hidden" != "1" ]');
     expect(macPlist).toMatch(/<key>Umask<\/key>\s*<integer>63<\/integer>/);
     expect(macPlist).toMatch(/<key>GEZEL_PORT<\/key>\s*<string>6228<\/string>/);
+    expect(macPlist).toMatch(/<key>GEZEL_SERVICE_ROLE<\/key>\s*<string>machine-engine<\/string>/);
+    expect(macPlist).not.toContain('<key>GEZEL_UI_DIR</key>');
     expect(macPlist).toMatch(
       /<key>GEZEL_SHARED_ASSETS_DIR<\/key>\s*<string>\/Library\/Application Support\/Gezel\/assets<\/string>/,
     );
@@ -114,6 +117,9 @@ describe('macOS machine-service filesystem security', () => {
     expect(macPostinstall).toContain('--cacert "$RUNTIME_CERT"');
     expect(macPostinstall).toContain('"https://127.0.0.1:${runtime_port}/api/health"');
     expect(macPostinstall).toContain('grep -Eq \'"ok"[[:space:]]*:[[:space:]]*true\'');
+    expect(macPostinstall).toContain(
+      'grep -Eq \'"serviceRole"[[:space:]]*:[[:space:]]*"(machine-engine|legacy-full)"\'',
+    );
     expect(macPostinstall).toContain('dump_service_diagnostics');
     expect(macUninstall).toContain('launchctl enable "system/${DAEMON_LABEL}"');
   });
@@ -235,6 +241,7 @@ describe('Linux machine-service filesystem security', () => {
     expect(linuxPostinstall).toContain('find "$ASSETS_DIR" -xdev -type d -exec chmod 755 {} +');
     expect(linuxPostinstall).toContain('find "$ASSETS_DIR" -xdev -type f -exec chmod 644 {} +');
     expect(linuxPostinstall).toContain('"$DATA_DIR/runtime/auth-token"');
+    expect(linuxPostinstall).toContain('"$DATA_DIR/runtime/service-role"');
 
     const stop = position(linuxPostinstall, 'systemctl stop gezeld.service');
     const inactiveGate = position(linuxPostinstall, 'while service_still_active; do');
@@ -256,6 +263,8 @@ describe('Linux machine-service filesystem security', () => {
     expect(linuxPostinstall).toContain('assert_not_symlink "$SERVICE_TREE"');
     expect(linuxUnit).toContain('UMask=0077');
     expect(linuxUnit).toContain('Environment=GEZEL_PORT=6228');
+    expect(linuxUnit).toContain('Environment=GEZEL_SERVICE_ROLE=machine-engine');
+    expect(linuxUnit).not.toContain('Environment=GEZEL_UI_DIR=');
     expect(linuxUnit).toContain('Environment=GEZEL_SHARED_ASSETS_DIR=/var/lib/gezel/assets');
   });
 

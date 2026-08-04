@@ -125,7 +125,7 @@ export async function runHandboekExport(
     const parsed = parseMarkdown(markdown);
 
     const { html: body, headings } = withHeadingIds(
-      extractBody(markdownDocToPlainHtml(parsed, { title: article.title })),
+      wrapTables(extractBody(markdownDocToPlainHtml(parsed, { title: article.title }))),
     );
     const dir = join(out, ...entry.id.split('/'));
     await mkdir(dir, { recursive: true });
@@ -217,6 +217,20 @@ export interface ArticleHeading {
 export function extractBody(page: string): string {
   const match = page.match(/<body[^>]*>([\s\S]*)<\/body>/i);
   return (match?.[1] ?? page).trim();
+}
+
+/**
+ * Give each table its own horizontally-scrollable wrapper. Cells wrap, so
+ * most tables never scroll — but the generated catalog tables can carry more
+ * columns than a narrow viewport fits, and the overflow has to be contained
+ * somewhere or the whole page scrolls sideways. Markdown tables cannot nest,
+ * so a non-greedy match is sufficient here.
+ */
+export function wrapTables(body: string): string {
+  return body.replace(
+    /<table[\s>][\s\S]*?<\/table>/gi,
+    (table) => `<div class="hb-table-scroll">${table}</div>`,
+  );
 }
 
 export function slugify(text: string): string {

@@ -18,9 +18,11 @@ import { totalmem } from 'node:os';
 import { Hono } from 'hono';
 import { defaultCacheBudgetMb } from '../../cache/budget.js';
 import type { ServiceContext } from '../context.js';
+import { machineEngineProxy } from './machine-engine-proxy.js';
 
 export function cacheRoutes(ctx: ServiceContext): Hono {
   const app = new Hono();
+  app.use('*', machineEngineProxy(ctx, '/api/cache', '/v1/remote/manage/cache'));
 
   app.get('/stats', (c) => {
     // Surface the RAM-aware suggestion + system memory alongside each

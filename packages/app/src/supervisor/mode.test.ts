@@ -18,6 +18,7 @@ const ctx = vi.hoisted(() => ({
     token: string;
     cert: string | null;
     home: string;
+    serviceRole?: 'user' | 'machine-engine' | 'legacy-full';
   },
   scm: { status: 'not-installed' } as { status: string; detail?: string },
   localRuntime: null as null | {
@@ -68,12 +69,13 @@ function opts(overrides: Partial<Parameters<typeof resolveMode>[0]> = {}) {
   };
 }
 
-const runtime = () => ({
+const runtime = (serviceRole?: 'user' | 'machine-engine' | 'legacy-full') => ({
   port: 6228,
   baseUrl: 'https://127.0.0.1:6228',
   token: 'tok',
   cert: 'CERT',
   home: '/var/lib/gezel',
+  ...(serviceRole ? { serviceRole } : {}),
 });
 
 describe('resolveMode — machine-service decision table', () => {
@@ -126,14 +128,39 @@ describe('resolveMode — machine-service decision table', () => {
     expect(mode.kind).toBe('local-spawn-packaged');
   });
 
-  it('honors a per-user hosting pin without touching the SCM', async () => {
+  it('honors a per-user hosting pin for a legacy full-product daemon', async () => {
     const { queryMachineServiceState } = await import('./service-registration.js');
     await writeFile(join(home, 'config.json'), JSON.stringify({ hosting: 'per-user' }));
     ctx.scm = { status: 'running' };
     ctx.runtime = runtime();
     const mode = await resolveMode(opts());
     expect(mode.kind).toBe('local-spawn-packaged');
-    expect(vi.mocked(queryMachineServiceState)).not.toHaveBeenCalled();
+    expect(vi.mocked(queryMachineServiceState)).toHaveBeenCalledOnce();
+  });
+
+  it('does not let a legacy per-user pin disable the split machine engine', async () => {
+    await writeFile(join(home, 'config.json'), JSON.stringify({ hosting: 'per-user' }));
+    ctx.scm = { status: 'running' };
+    ctx.runtime = runtime('machine-engine');
+    const mode = await resolveMode(opts());
+    expect(mode).toMatchObject({
+      kind: 'system-service',
+      hostingPin: 'per-user',
+      waitForStartup: true,
+    });
+  });
+
+  it('waits to learn the service role when a per-user pin meets a cold machine start', async () => {
+    await writeFile(join(home, 'config.json'), JSON.stringify({ hosting: 'per-user' }));
+    ctx.scm = { status: 'start-pending' };
+    ctx.runtime = null;
+    const mode = await resolveMode(opts());
+    expect(mode).toMatchObject({
+      kind: 'system-service',
+      hostingPin: 'per-user',
+      waitForStartup: true,
+      runtime: null,
+    });
   });
 
   it('carries a machine-service pin into the mode for the preference check', async () => {

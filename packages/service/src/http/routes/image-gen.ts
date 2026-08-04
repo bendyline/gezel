@@ -13,6 +13,7 @@ import type { SSEStreamingApi } from 'hono/streaming';
 import { UnknownImageModelError } from '../../providers/image/pull-registry.js';
 import type { ImageInputBytes, ImageProvider } from '../../providers/image/types.js';
 import type { ServiceContext } from '../context.js';
+import { machineEngineProxy } from './machine-engine-proxy.js';
 
 const log = createLogger('image-gen');
 
@@ -27,6 +28,15 @@ const log = createLogger('image-gen');
  */
 export function imageGenRoutes(ctx: ServiceContext): Hono {
   const app = new Hono();
+  // Generation remains on the user daemon so project inputs/artifacts never
+  // cross the machine data boundary. The provider itself delegates the heavy
+  // forward pass; model lifecycle/status routes proxy wholesale.
+  app.use(
+    '*',
+    machineEngineProxy(ctx, '/api/image-gen', '/v1/remote/manage/image-gen', [
+      '/api/image-gen/generate',
+    ]),
+  );
 
   /**
    * Generate an image. The PNG is written into the project's artifacts

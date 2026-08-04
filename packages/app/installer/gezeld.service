@@ -3,9 +3,10 @@
 # /etc/systemd/system/gezeld.service by the deb/rpm afterInstall hook
 # (see installer/linux/after-install.sh).
 #
-# Runs at boot, before any user logs in. Hosts the loopback HTTP
-# service that the per-user Electron Gezel app connects to.
-Description=Gezel local-first AI service
+# Runs at boot, before any user logs in. Owns shared model downloads,
+# native-engine residency, and GPU/RAM queues. Electron never connects to
+# this broker directly; each account's user daemon verifies and proxies it.
+Description=Gezel shared model engine
 Documentation=https://github.com/bendyline/gezel
 After=network.target
 
@@ -14,7 +15,7 @@ Type=simple
 User=gezel
 Group=gezel
 # Private-by-default daemon state. gezeld explicitly widens only runtime
-# discovery metadata needed by cross-account desktop clients.
+# discovery metadata needed by cross-account user daemons.
 UMask=0077
 # ELECTRON_RUN_AS_NODE=1 turns the bundled Electron exe into a vanilla
 # Node interpreter for this child only — no UI, no Chromium. Saves the
@@ -24,10 +25,13 @@ Environment=GEZEL_HOME=/var/lib/gezel
 # Reserve the canonical machine-service endpoint. User-owned CLI fallbacks use
 # runtime-discovered ephemeral ports and therefore cannot block this service.
 Environment=GEZEL_PORT=6228
-# Service writes a scoped, non-root first-party credential to runtime/
-# auth-token with mode 0644 when this is set. The daemon root token remains
-# process-local; desktop clients receive only the credential they need.
+# Service writes a scoped, non-root inference/model-management credential to
+# runtime/auth-token with mode 0644. The root token remains process-local;
+# the user-daemon bridge keeps this rotating credential out of the renderer.
 Environment=GEZEL_SYSTEM_SCOPE=1
+# Split-service contract: this account owns native engines, model downloads,
+# and resource queues only. Product/project state stays in each user's daemon.
+Environment=GEZEL_SERVICE_ROLE=machine-engine
 # Public immutable model bundles live outside the daemon's private state
 # boundary. Only the `gezel` service identity can write this tree.
 Environment=GEZEL_SHARED_ASSETS_DIR=/var/lib/gezel/assets
@@ -44,13 +48,6 @@ Environment=HOME=/var/lib/gezel
 # tree inside /opt/Gezel; Node executes pnpm's ordinary JavaScript entry.
 Environment=GEZEL_PNPM_PATH=/opt/Gezel/resources/app.asar.unpacked/dist/pnpm-bundle/bin/pnpm.mjs
 Environment=GEZEL_NODE_PATH=/opt/Gezel/resources/app.asar.unpacked/dist/node-bundle/node
-# Static UI bundle. Lives at /opt/Gezel/resources/app.asar.unpacked/dist/ui.
-# The daemon's own findBundledUi searches relative to gezeld.js and would
-# land on `…/service/dist/ui` (wrong location — the service tree doesn't
-# include a UI subtree; UI is shipped separately), so we pin the right
-# path here. Without it the system service serves the "web UI bundle was
-# not included" placeholder.
-Environment=GEZEL_UI_DIR=/opt/Gezel/resources/app.asar.unpacked/dist/ui
 # Bundled native engines (llama.cpp variants, sd-cpp, whisper.cpp, uv)
 # live under /opt/Gezel/resources/app.asar.unpacked/native-bin/. The
 # service's native-discovery (packages/service/src/native/discover.ts)

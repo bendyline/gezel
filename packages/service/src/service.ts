@@ -1,11 +1,12 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { chmod, rm, writeFile } from 'node:fs/promises';
+import { chmod, readdir, rm, writeFile } from 'node:fs/promises';
 import { createSecureServer as createSecureHttp2Server } from 'node:http2';
 import { setDefaultAutoSelectFamilyAttemptTimeout } from 'node:net';
 import { delimiter, dirname, join } from 'node:path';
 import {
   type GezelConfig,
+  type ServiceRole,
   createLogger,
   isEngagementAllowed,
   normalizeStepGate,
@@ -69,6 +70,7 @@ import { GlobalIndex } from './index-store/global-index.js';
 import { IndexingJobControl, ensureIndexingJobTask } from './index-store/indexing-job.js';
 import { KeurmeesterDigestGenerator } from './keurmeester/digest.js';
 import { KeurmeesterManager } from './keurmeester/manager.js';
+import { startMachineEngineBridge } from './machine-engine/bridge.js';
 import { MailManager } from './mail/manager.js';
 import { registerMailAdapters } from './mail/registry.js';
 import { ensureNightShiftOversightTask } from './meester/night-shift-oversight.js';
@@ -153,6 +155,14 @@ const log = createLogger('service');
 export const DEFAULT_PORT = 6228;
 
 export interface StartServiceOptions {
+  /**
+   * Responsibility of this daemon. Installed machine services use
+   * `machine-engine`; Electron-owned daemons use `user`. `legacy-full` exists
+   * only so a new supervisor can safely coexist with an older installation.
+   */
+  role?: ServiceRole;
+  /** Test seam for a split-service pair; production discovers the OS path. */
+  machineEngineHome?: string;
   home?: string;
   /**
    * Bind to this exact port and FAIL if it's already in use (no
@@ -211,10 +221,11 @@ export interface RunningService {
   server: ServerType;
   port: number;
   /**
-   * First-party client credential written to `runtime/auth-token` and
-   * handed to the Electron renderer. It is deliberately distinct from
-   * `context.token`: the daemon root credential stays in process memory
-   * and is never used as the cross-process discovery credential.
+   * First-party client credential written to `runtime/auth-token`. A user
+   * daemon hands it to Electron; a machine engine exposes only its narrowly
+   * scoped inference/model-management credential to the trusted user-daemon
+   * bridge. It is deliberately distinct from `context.token`, which remains
+   * process-local.
    */
   clientToken: string;
   /**
@@ -294,6 +305,8 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   setDefaultAutoSelectFamilyAttemptTimeout(5000);
 
   const home = opts.home ?? gezelHome();
+  const serviceRole = await resolveEffectiveServiceRole(opts.role, process.env, home);
+  log.info(`[service] role=${serviceRole}`);
   // Publish the writable transformers.js cache dir so every on-device model
   // consumer pins the same managed location — including the memory embed
   // worker thread, which inherits `process.env` but has no other view of the
@@ -347,11 +360,13 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   const { HistoryManager } = await import('./history/manager.js');
   const history = new HistoryManager(home);
   const store = new Store({ home, history, external });
-  await recoverTypedProjectCreations(store);
+  if (serviceRole !== 'machine-engine') await recoverTypedProjectCreations(store);
   await store.ensureLayout();
-  await store.ensureDefaultProject();
-  await store.ensureDefaultMeester();
-  await store.ensureDefaultKlerk();
+  if (serviceRole !== 'machine-engine') {
+    await store.ensureDefaultProject();
+    await store.ensureDefaultMeester();
+    await store.ensureDefaultKlerk();
+  }
 
   const paths = gezelPaths(home);
   // Keep the daemon's root credential process-local. Cross-process clients
@@ -366,7 +381,8 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   // carries the root token. Same lifecycle as root (in-memory only, not
   // persisted). `appId: 'web-ui'` keeps it independently identifiable in
   // the Connected Apps roster and revocable.
-  const webUiEnabled = opts.webUi ?? process.env.GEZEL_WEB === '1';
+  const webUiEnabled =
+    serviceRole !== 'machine-engine' && (opts.webUi ?? process.env.GEZEL_WEB === '1');
   const webUiToken = webUiEnabled ? randomBytes(24).toString('base64url') : null;
   // Per-app bearer tokens (issued via /v1/apps/register) persist to
   // `<home>/tokens.json`; the per-launch root token above is registered
@@ -374,11 +390,15 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   // consults this store on every request.
   const ephemeralTokens = [
     {
-      appId: 'desktop-client',
-      appName: 'Gezel Desktop',
-      // The desktop/CLI discovery token needs the internal UI surface and
-      // the local OpenAI-compatible facade, but never the root scope.
-      scopes: ['ui', 'openai'],
+      appId: serviceRole === 'machine-engine' ? 'machine-engine-client' : 'desktop-client',
+      appName: serviceRole === 'machine-engine' ? 'Gezel User Daemon' : 'Gezel Desktop',
+      // A machine runtime credential is readable across local accounts, so
+      // it receives inference and model-lifecycle authority only. The user
+      // daemon's credential retains the first-party product API scopes.
+      scopes:
+        serviceRole === 'machine-engine'
+          ? ['remote-inference', 'machine-models']
+          : ['ui', 'openai'],
       token: clientToken,
     },
     ...(webUiToken
@@ -435,10 +455,13 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   // The Boekwachter is a full, catalog-backed gezel. This runs after catalog
   // construction (unlike the Store-owned Meester/Klerk ensures above) so the
   // canonical gilde about.md and template provenance are preserved.
-  await ensureDefaultBoekwachter(store, catalog);
+  if (serviceRole !== 'machine-engine') await ensureDefaultBoekwachter(store, catalog);
   const secrets = await openSecretStore(home);
   log.info(`[secrets] backend=${secrets.backend}`);
-  await seedSecretsFromEnvFile(secrets);
+  // The engine broker needs its device-identity key, but must never ingest
+  // cloud/provider credentials from an install-time env file. Those remain
+  // exclusively in each account's user daemon.
+  if (serviceRole !== 'machine-engine') await seedSecretsFromEnvFile(secrets);
   // Stable device identity (Ed25519) + the registry of servers this device has
   // paired with — both for remote model execution. Identity needs the secret
   // store (private key lives there); the registry is plain 0600 JSON.
@@ -862,6 +885,15 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   // for `remote:<remoteId>/<model>` ids against the paired-servers registry.
   // The multimodal managers get the same wiring after they're constructed.
   chat.setRemotesRegistry(remotes);
+  const machineEngine =
+    serviceRole === 'user'
+      ? await startMachineEngineBridge({
+          home,
+          remotes,
+          chat,
+          ...(opts.machineEngineHome ? { machineHome: opts.machineEngineHome } : {}),
+        })
+      : undefined;
   // Observable-progress auto-advance: ChatManager advances a craftbook step
   // (when its `advanceWhen` deliverable appears) by calling back into the
   // TaskManager's normal completion path. Injected, not a direct handle, to
@@ -1016,7 +1048,13 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   // rules. The cloud branches (`google-ai`, `openai`) read API keys
   // from the SecretStore; `reset()` is invoked from the config PUT
   // handler whenever image-related config or credentials change.
-  const imageProvider = new ImageProviderManager({ home, store, secrets, arbiter: gpuArbiter });
+  const imageProvider = new ImageProviderManager({
+    home,
+    store,
+    secrets,
+    arbiter: gpuArbiter,
+    localOnly: serviceRole === 'machine-engine',
+  });
   // Pull registry — owns the lifecycle of in-flight image-model pulls
   // so the download keeps running when the user navigates away from the
   // Settings → Image generation page. The HTTP routes are just consumers
@@ -1059,6 +1097,14 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   videoProvider.setRemotes(remotes);
   stt.setRemotes(remotes);
   tts.setRemotes(remotes);
+  const resolveMachineEngineRemoteId = () =>
+    remotes.list().find((remote) => remote.managed === 'machine-engine')?.remoteId ?? null;
+  if (machineEngine) {
+    imageProvider.setMachineEngineRemoteResolver(resolveMachineEngineRemoteId);
+    videoProvider.setMachineEngineRemoteResolver(resolveMachineEngineRemoteId);
+    stt.setMachineEngineRemoteResolver(resolveMachineEngineRemoteId);
+    tts.setMachineEngineRemoteResolver(resolveMachineEngineRemoteId);
+  }
 
   // Wire the phase-activation hook: when a phase advances and the new
   // step has a gezel assignee (or suggestedGezelId), auto-start a session
@@ -1773,6 +1819,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   if (childProcessSpawn === 'denied') log.error(`[spawn] ${SPAWN_DENIED_MESSAGE}`);
 
   const context: ServiceContext = {
+    serviceRole,
     home,
     store,
     chatEvents,
@@ -1823,13 +1870,14 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     grants,
     deviceIdentity,
     remotes,
+    ...(machineEngine ? { machineEngine } : {}),
     remoteServing,
     ollamaEmulation,
     ...(cert ? { tlsCertSha256: cert.sha256Hex, tlsCertPem: cert.certPem } : {}),
     ensureModel,
     startedAt: nowIso(),
     childProcessSpawn,
-    uiDir: opts.uiDir,
+    uiDir: serviceRole === 'machine-engine' ? undefined : opts.uiDir,
     folderJobs,
     workspaceIndex,
     contentIndex,
@@ -1888,7 +1936,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   // throws; bounded by a short timeout.
   const identifyCanonicalPortOccupant = async (
     occupiedPort: number,
-  ): Promise<'gezeld' | 'other-http' | 'unknown'> => {
+  ): Promise<'machine-engine' | 'gezeld' | 'other-http' | 'unknown'> => {
     const { request: httpsRequest } = await import('node:https');
     return new Promise((resolve) => {
       const req = httpsRequest(
@@ -1910,7 +1958,12 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
           res.on('end', () => {
             if (res.statusCode === 401) return resolve('gezeld');
             const body = Buffer.concat(chunks).toString('utf8');
-            if (res.statusCode === 200 && body.includes('"ok":true')) return resolve('gezeld');
+            if (res.statusCode === 200 && body.includes('"ok":true')) {
+              if (body.includes('"serviceRole":"machine-engine"')) {
+                return resolve('machine-engine');
+              }
+              return resolve('gezeld');
+            }
             resolve('other-http');
           });
           res.on('error', () => resolve('other-http'));
@@ -1965,18 +2018,20 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
       log.warn(
         `[service] canonical port ${requestedPort} is in use; falling back to an ephemeral port. Third-party clients should read the bound port from ~/.gezel/runtime/port.`,
       );
-      // Identify the occupant in the background. If another gezeld answers
-      // there, this process is a SECOND daemon — almost always the machine
-      // service plus a per-user daemon side by side, each with its own
-      // home, scheduler, and local models (observed: two llama-servers,
-      // ~20 GB combined, one 32 GB machine). The supervisor's SCM-aware
-      // mode resolution prevents this at launch; this log is the tripwire
-      // for whatever path still gets here. Fire-and-forget so a slow or
-      // wedged occupant cannot delay OUR boot.
+      // Identify the occupant in the background. A machine-engine broker plus
+      // one per-user product daemon is the intended split: the former owns the
+      // canonical port and GPU, the latter uses its runtime-discovered port.
+      // Two FULL product daemons remain the dangerous case (duplicate
+      // schedulers + engine ownership), so keep the old tripwire for legacy
+      // occupants. Fire-and-forget so a slow listener cannot delay our boot.
       void identifyCanonicalPortOccupant(requestedPort).then((occupant) => {
-        if (occupant === 'gezeld') {
+        if (occupant === 'machine-engine') {
+          log.info(
+            `[service] the machine engine owns canonical port ${requestedPort}; this user daemon is using its runtime-discovered port as expected`,
+          );
+        } else if (occupant === 'gezeld') {
           log.error(
-            `[service] another gezeld daemon is already serving the canonical port ${requestedPort} — two daemons are now running against two different homes. Background work, schedulers, and local model memory are all doubled. If this is not intentional, close this app and use the machine service, or stop/disable the machine service (GezelService / com.bendyline.gezeld / gezeld.service) to stay per-user.`,
+            `[service] another full gezeld daemon is already serving canonical port ${requestedPort}. Two product daemons may duplicate background work and contend for local engines. Upgrade the installed machine service to an engine-only build, or stop the stale service before continuing.`,
           );
         } else if (occupant === 'other-http') {
           log.warn(
@@ -2031,7 +2086,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   // the capability-gated `/preview` route on its own ephemeral loopback port
   // so external browsers open previews without the self-signed-cert warning.
   let previewServer: ServerType | null = null;
-  if (cert) {
+  if (cert && serviceRole !== 'machine-engine') {
     const previewApp = buildPreviewApp(context, previewCapabilities, {
       onUnexpectedHttpError: opts.onUnexpectedHttpError,
     });
@@ -2064,43 +2119,58 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     pid: process.pid,
     cert,
     webUiToken,
+    serviceRole,
   });
 
   // One live controller owns the LAN socket for startup, Settings changes,
   // rebinds, and shutdown. Persisted state can no longer drift from reality.
-  await remoteServing.reconfigure(config.remoteServing).catch((err) => {
-    log.error(
-      `[service] failed to start remote serving: ${err instanceof Error ? err.message : err}`,
-    );
-  });
+  if (serviceRole !== 'machine-engine') {
+    await remoteServing.reconfigure(config.remoteServing).catch((err) => {
+      log.error(
+        `[service] failed to start remote serving: ${err instanceof Error ? err.message : err}`,
+      );
+    });
+  }
   // Same contract for the Ollama emulation: non-fatal at boot (usually
   // means real Ollama grabbed 11434 since the toggle was set) — the
   // daemon still serves everything else; the toggle stays set and binds
   // on the next launch/config change once the port frees up.
-  await ollamaEmulation.reconfigure(config.openaiEndpoints).catch((err) => {
-    log.warn(`[service] ollama emulation not started: ${err instanceof Error ? err.message : err}`);
-  });
+  if (serviceRole !== 'machine-engine') {
+    await ollamaEmulation.reconfigure(config.openaiEndpoints).catch((err) => {
+      log.warn(
+        `[service] ollama emulation not started: ${err instanceof Error ? err.message : err}`,
+      );
+    });
+  }
 
-  scheduler.start();
-  nightShift.start();
+  if (serviceRole !== 'machine-engine') {
+    scheduler.start();
+    nightShift.start();
+  }
   // Install the always-bundled daily meester oversight task before runner
   // rehydration so a first-run install queues it in the same boot.
-  await ensureNightShiftOversightTask(store, tasks).catch((err) => {
-    log.warn('[night-shift] oversight ensure failed:', err instanceof Error ? err.message : err);
-  });
+  if (serviceRole !== 'machine-engine') {
+    await ensureNightShiftOversightTask(store, tasks).catch((err) => {
+      log.warn('[night-shift] oversight ensure failed:', err instanceof Error ? err.message : err);
+    });
+  }
   // Rehydrate pending handoffs from disk (any active task whose
   // current phase has an effective assignee) before starting the runner's
   // tick loop. Ensures work dropped by a prior process gets picked up.
-  await taskRunner.rehydrateFromStore().catch((err) => {
-    log.warn('[task-runner] rehydrate failed:', err instanceof Error ? err.message : err);
-  });
-  taskRunner.start();
+  if (serviceRole !== 'machine-engine') {
+    await taskRunner.rehydrateFromStore().catch((err) => {
+      log.warn('[task-runner] rehydrate failed:', err instanceof Error ? err.message : err);
+    });
+    taskRunner.start();
+  }
   // Install the boekwachter indexing job task (idempotent) — the visible,
   // pausable control surface for the background indexing loops.
-  await ensureIndexingJobTask(store, tasks).catch((err) => {
-    log.warn('[indexing-job] ensure failed:', err instanceof Error ? err.message : err);
-  });
-  await channels.start();
+  if (serviceRole !== 'machine-engine') {
+    await ensureIndexingJobTask(store, tasks).catch((err) => {
+      log.warn('[indexing-job] ensure failed:', err instanceof Error ? err.message : err);
+    });
+    await channels.start();
+  }
 
   // System-toolset bootstrap — installs pinned packages (e.g. @playwright/mcp)
   // and downloads Chromium in the background. Status progress is emitted on
@@ -2112,7 +2182,9 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   // real tarball downloads would only add teardown-time `EBUSY` races on
   // temp dirs).
   const skipBootstrap =
-    process.env.GEZEL_SKIP_SYSTEM_BOOTSTRAP === '1' || process.env.GEZEL_MOCK_PROVIDER === '1';
+    serviceRole === 'machine-engine' ||
+    process.env.GEZEL_SKIP_SYSTEM_BOOTSTRAP === '1' ||
+    process.env.GEZEL_MOCK_PROVIDER === '1';
   if (skipBootstrap) {
     systemStatus.publish({ phase: 'ready' });
   } else {
@@ -2169,7 +2241,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   // self-heals any indexes left empty by the previously-broken vector
   // wrapper. No-op if embeddings are disabled.
   const memoryHealth = new MemoryHealthMonitor({ memory, store });
-  memoryHealth.start();
+  if (serviceRole !== 'machine-engine') memoryHealth.start();
 
   // Periodic Klerk-driven memory compaction — dedups/merges aged daily
   // memory files (and refreshes each gezel's lessons.md) so the corpus
@@ -2182,7 +2254,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     growth,
     oneShot: (prompt, timeoutMs, opts) => chat.oneShotCompletion(prompt, timeoutMs, opts),
   });
-  memoryCompactor.start();
+  if (serviceRole !== 'machine-engine') memoryCompactor.start();
 
   // Weekly "what changed" digests per project — commits + history + sessions
   // distilled by the Klerk into reports/digest-YYYY-Www.md. Same gating
@@ -2201,13 +2273,15 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
       );
     },
   });
-  digestGenerator.start();
+  if (serviceRole !== 'machine-engine') digestGenerator.start();
 
   // Meester status report: idle-gated, budgeted, change-gated sweep.
   // The activity tracker starts with it — its stamps feed the change
   // gate and the nudge scheduler's cadence.
-  activityTracker.start();
-  meesterStatus.start();
+  if (serviceRole !== 'machine-engine') {
+    activityTracker.start();
+    meesterStatus.start();
+  }
 
   // Keurmeester harvest digest: aggregates supervision case records into
   // daily findings + proposed systemic improvements. Self-throttled
@@ -2219,40 +2293,49 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     home,
     oneShot: (prompt, timeoutMs, opts) => chat.oneShotCompletion(prompt, timeoutMs, opts),
   });
-  keurmeesterDigest.start();
+  if (serviceRole !== 'machine-engine') keurmeesterDigest.start();
 
   // Start the workspace indexer's sweep loop now that the service is
   // bound + booted. (The manager itself was constructed before
   // `context` so the HTTP routes can call into it.)
-  workspaceIndex.start();
-  workspaceWatch.start();
+  if (serviceRole !== 'machine-engine') {
+    workspaceIndex.start();
+    workspaceWatch.start();
+  }
   // Benchmarks (evals) disable the background tick and drive enrichment
   // explicitly via POST /:id/index/enrich, so tick-vs-drive contention can't
   // double-pay summarizer calls or skew cost measurements.
-  if (process.env.GEZEL_DISABLE_BACKGROUND_ENRICH !== '1') {
+  if (serviceRole !== 'machine-engine' && process.env.GEZEL_DISABLE_BACKGROUND_ENRICH !== '1') {
     indexEnrichment.start();
   }
-  globalIndexManager.start();
-  connectorSync.start();
+  if (serviceRole !== 'machine-engine') {
+    globalIndexManager.start();
+    connectorSync.start();
+  }
 
   // Idle-session summarization sweep: every hour, distill any non-archived
   // session that's been quiet for `config.summarization.idleHours` (default
   // 24h) into project memory. First pass runs ~60s after boot so a fresh
   // process doesn't block startup.
-  const idleSummarizerTimer = setInterval(
-    () => {
-      chat.runIdleSummarizationSweep().catch((err) => {
-        log.warn('[summarize] idle sweep crashed:', err instanceof Error ? err.message : err);
+  const idleSummarizerTimer =
+    serviceRole === 'machine-engine'
+      ? null
+      : setInterval(
+          () => {
+            chat.runIdleSummarizationSweep().catch((err) => {
+              log.warn('[summarize] idle sweep crashed:', err instanceof Error ? err.message : err);
+            });
+          },
+          60 * 60 * 1000,
+        );
+  idleSummarizerTimer?.unref();
+  if (serviceRole !== 'machine-engine') {
+    setTimeout(() => {
+      chat.runIdleSummarizationSweep().catch(() => {
+        /* swallow */
       });
-    },
-    60 * 60 * 1000,
-  );
-  idleSummarizerTimer.unref();
-  setTimeout(() => {
-    chat.runIdleSummarizationSweep().catch(() => {
-      /* swallow */
-    });
-  }, 60_000).unref();
+    }, 60_000).unref();
+  }
 
   return {
     context,
@@ -2293,10 +2376,11 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
       await videoProvider.shutdown();
       await stt.shutdown();
       await tts.shutdown();
-      clearInterval(idleSummarizerTimer);
+      if (idleSummarizerTimer) clearInterval(idleSummarizerTimer);
       await channels.stop();
       await remoteServing.stop();
       await ollamaEmulation.stop();
+      await machineEngine?.stop();
       await closePairedRemoteFetches(remotes);
       if (previewServer) {
         await new Promise<void>((resolve) => {
@@ -2367,13 +2451,14 @@ async function writeRuntime(args: {
   pid: number;
   cert: LoopbackCert | null;
   webUiToken: string | null;
+  serviceRole: ServiceRole;
 }): Promise<void> {
   const isSystemScope = process.env.GEZEL_SYSTEM_SCOPE === '1';
   const discoveryMode = isSystemScope ? 0o644 : 0o600;
   // Do not rely on the service manager's umask for discovery metadata.
-  // Machine-wide daemons run with umask 0077 so all non-runtime state stays
-  // private, while desktop clients still need these two files to adopt the
-  // loopback service. Per-user daemons keep them owner-only.
+  // Machine-wide brokers run with umask 0077 so all non-runtime state stays
+  // private, while user daemons still need the discovery files to adopt the
+  // loopback engine. Per-user daemons keep them owner-only.
   await writeFile(args.paths.runtime.port, `${args.port}\n`, {
     encoding: 'utf8',
     mode: discoveryMode,
@@ -2388,10 +2473,20 @@ async function writeRuntime(args: {
   } catch {
     /* windows, or a filesystem that doesn't care */
   }
+  const rolePath = join(dirname(args.paths.runtime.port), 'service-role');
+  await writeFile(rolePath, `${args.serviceRole}\n`, {
+    encoding: 'utf8',
+    mode: discoveryMode,
+  });
+  try {
+    await chmod(rolePath, discoveryMode);
+  } catch {
+    /* windows, or a filesystem that doesn't care */
+  }
   // This is the first-party client credential, never the daemon root
   // credential. Per-user installs lock it to 0600. System-scope installs
-  // use 0644 on POSIX because desktop clients run as a different account;
-  // the service itself is deliberately unprivileged in that mode.
+  // use 0644 on POSIX because user daemons run as different accounts; the
+  // engine broker itself is deliberately unprivileged in that mode.
   // Unlink before exclusive creation. On Windows, overwriting a file keeps
   // its existing DACL and owner; a planted runtime credential could
   // otherwise retain permissions inherited before installer hardening.
@@ -2449,4 +2544,50 @@ async function writeRuntime(args: {
       rm(args.paths.runtime.fingerprint, { force: true }),
     ]);
   }
+}
+
+export async function resolveEffectiveServiceRole(
+  explicit: ServiceRole | undefined,
+  env: NodeJS.ProcessEnv,
+  home: string,
+): Promise<ServiceRole> {
+  const configured = env.GEZEL_SERVICE_ROLE;
+  const requested =
+    explicit ??
+    (configured === 'user' || configured === 'machine-engine' || configured === 'legacy-full'
+      ? configured
+      : // A system service installed before split roles had the full product
+        // API. All ordinary/standalone launches are user daemons.
+        env.GEZEL_SYSTEM_SCOPE === '1'
+        ? 'legacy-full'
+        : 'user');
+
+  if (requested !== 'machine-engine' || env.GEZEL_SYSTEM_SCOPE !== '1') return requested;
+
+  // The installer changes its environment before the new binary starts. If
+  // an older full-product system service already has a product layout, never
+  // relabel it as engine-only: the next Electron launch would otherwise show
+  // an empty per-user home while established machine-home projects remain
+  // hidden behind the broker boundary. New brokers never create entries in
+  // either directory, so their subsequent starts stay machine-engine.
+  if (await hasLegacyMachineProductState(home)) {
+    log.warn(
+      '[service] established machine-home product state detected; preserving legacy-full compatibility until an explicit per-user migration is completed',
+    );
+    return 'legacy-full';
+  }
+  return requested;
+}
+
+async function hasLegacyMachineProductState(home: string): Promise<boolean> {
+  for (const directory of ['projects', 'gezels']) {
+    try {
+      const entries = await readdir(join(home, directory), { withFileTypes: true });
+      if (entries.some((entry) => entry.isDirectory())) return true;
+    } catch {
+      // Missing/unreadable means there is no established product layout that
+      // this process can safely identify.
+    }
+  }
+  return false;
 }

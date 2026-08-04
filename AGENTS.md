@@ -24,49 +24,64 @@ Three ideas are load-bearing:
 ┌─────────────────────────────────────────────────────────────┐
 │  Electron shell (packages/app)                              │
 │   ├─ BrowserWindow → React UI (packages/ui)                 │
-│   └─ Supervisor — resolves hosting + connects via HTTP      │
+│   └─ Supervisor — owns/connects the logged-in user's daemon │
 └──────────────────────────────┬──────────────────────────────┘
                                │ 127.0.0.1:<port>
-                               │ bearer token, loopback TLS
+                               │ user-scoped bearer token + pinned TLS
                                ▼
 ┌─────────────────────────────────────────────────────────────┐
-│  gezeld  (@bendyline/gezel-service)                         │
+│  per-user gezeld (`GEZEL_SERVICE_ROLE=user`)                │
 │   ├─ Hono HTTP API                                          │
-│   ├─ Store (fs) — reads/writes GEZEL_HOME                   │
+│   ├─ Store — projects, gezels, sessions, credentials        │
 │   ├─ ChatManager — owns sessions + provider routing         │
-│   ├─ Providers (Copilot, OpenAI, Anthropic, llama.cpp, …)   │
+│   ├─ MCP/tools/terminal/schedulers/background work          │
+│   ├─ Cloud providers                                        │
 │   │    └─ per-session MCP bridge (stdio → mcp server)       │
-│   └─ UsageTracker / MemoryManager / TaskRunner              │
+│   └─ verified in-memory bridge to this machine's engine ────┼──┐
+└─────────────────────────────────────────────────────────────┘  │
+                                                                 │ loopback TLS,
+                                                                 │ broker token
+                                                                 ▼
+┌─────────────────────────────────────────────────────────────┐
+│  machine gezeld (`GEZEL_SERVICE_ROLE=machine-engine`)       │
+│   ├─ native chat/image/video/audio inference                │
+│   ├─ centralized model downloads and immutable model store  │
+│   └─ engine lifecycle plus GPU/RAM/resource queues          │
+│   (no projects, credentials, tools, terminals, UI, or jobs) │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-**Production (packaged installs) hosts `gezeld` as a machine-wide system service by default on Windows, macOS, and Linux.** Windows registers `GezelService` (hosted by the first-party `gezel-service-host` helper) under a least-privileged LocalService identity with a dedicated per-service SID and system-scope home at `C:\ProgramData\Gezel\`; macOS installs `com.bendyline.gezeld` under `/Library/Application Support/Gezel/`; Linux installs `gezeld.service` under `/var/lib/gezel/`. Private daemon state is readable only by the service/admin identity. `runtime/` exposes discovery metadata, while `assets/models/` is a separate service-writable, user-readable immutable model store that standalone clients may adopt after integrity validation. The daemon root token remains process-local, while `runtime/auth-token` is a scoped first-party client credential. Per-user spawn remains supported (and is the development default), and Settings → Daemon can register user-level autostart. See **Architectural intent — hosting modes** below.
+**Production is deliberately split.** Every logged-in account gets a per-user product daemon under `~/.gezel`; the installer also registers one machine-wide engine broker on Windows, macOS, and Linux. Windows hosts it as least-privileged LocalService with a dedicated service SID at `C:\ProgramData\Gezel\`, macOS as `_gezeld` at `/Library/Application Support/Gezel/`, and Linux as `gezel` at `/var/lib/gezel/`. The broker's private state is service/admin-only. Its separately protected `assets/models/` tree is the canonical shared model store.
 
-**Process scope and client membership are separate security choices.** A machine-wide daemon may serve approved local users, every local user, or a single user; do not equate its service-manager placement with authorization. The current shared runtime credential treats every account that can read it as a first-party client. A future installer membership choice/group or OS-authenticated broker must make that trust explicit. Never regain multi-user convenience by elevating the daemon or exposing its root credential.
+The machine broker publishes only runtime discovery, its pinned certificate, its declared `machine-engine` role, and a rotating credential scoped to inference plus model management. The per-user daemon validates the broker's stable identity and certificate before installing an ephemeral in-memory remote named `this-machine`; it never persists or sends the broker credential to the renderer. Ordinary paired-device inference grants cannot mutate the machine's model store. The current installer admits every local account that can read the runtime directory; narrower membership requires an installer-managed group or OS-authenticated broker. Never expand the broker back into a product daemon: it must not receive project paths, cloud credentials, tools, terminals, artifacts, schedulers, or general UI/API routes.
 
-Auth is a random bearer token rotated per service start, surfaced to the UI via a synchronous `ipcMain` preload bridge. The HTTP transport is loopback-only TLS in packaged installs; the cert is pinned via `session.setCertificateVerifyProc` so the renderer trusts only that one self-signed cert.
+The Electron UI authenticates only to its per-user daemon using a random bearer token surfaced via the synchronous preload bridge. Both local hops use loopback-only TLS and pin the expected self-signed certificate. Process scope and authorization remain separate security choices; future machine membership policy must use an installer-managed group or OS-authenticated broker, never elevation or the daemon root credential.
 
 ## Architectural intent — hosting modes
 
-The Electron shell runs a **supervisor** ([packages/app/src/supervisor/](packages/app/src/supervisor/)) that decides how `gezeld` runs each launch. Six concrete modes — five tried in order, with **embedded** as the fallback when none apply or a spawn fails. The mode kinds themselves live in [packages/app/src/supervisor/mode.ts](packages/app/src/supervisor/mode.ts).
+The Electron shell runs a **supervisor** ([packages/app/src/supervisor/](packages/app/src/supervisor/)) that finds the product daemon for the logged-in user. The mode kinds live in [packages/app/src/supervisor/mode.ts](packages/app/src/supervisor/mode.ts).
 
 1. **Remote** — user has `service: { url, token }` in `~/.gezel/config.json`. Probe `/api/health` with that token. Success → connect. **Failure does NOT fall through** — a misconfigured remote URL must surface as a loud error, not silently drift into embedded mode.
 
-2. **System service** — the default packaged path on every supported OS. Windows uses LocalService with a dedicated per-service SID and a stripped privilege set, macOS uses the `_gezeld` LaunchDaemon account, and Linux uses the dedicated `gezel` systemd account. Electron discovers runtime metadata through [systemServiceHome](packages/app/src/supervisor/system-service.ts), probes `/api/health`, and falls back on failure. Never run the Windows service as LocalSystem, and never put the process-local root credential in the runtime directory.
+2. **System engine discovery** — packaged installs consult the OS service manager early so a just-installed broker can finish startup before a user daemon starts loading engines. A `machine-engine` runtime is probed at its exact inference boundary, then the supervisor continues to a per-user product mode. Missing/unhealthy brokers do not block the product daemon; it runs engines locally and retries broker discovery in the background. A runtime with no role is an older `legacy-full` service and follows the compatibility behavior below. On upgrade, a system home that already contains product directories also stays `legacy-full`; never relabel it engine-only and make its projects appear to vanish behind a fresh user home. Never run the Windows broker as LocalSystem or expose its process-local root credential.
 
 3. **Local adopt** — `~/.gezel/runtime/{pid,port,auth-token}` exist and the pid is alive. Probe `/api/health`. In **packaged** mode, compare `health.version` to the shipped bundle version; on mismatch, SIGTERM the stale daemon and fall through to step 5 (the user's Electron is newer than the running service). In dev mode, adopt regardless.
 
-4. **Local spawn (packaged)** — the supported per-user path and production fallback when the machine service is unavailable. Extract `app.asar.unpacked/dist/service-bundle/` to `~/.gezel/service/` and spawn it under the logged-in user. The Copilot login flow runs inside the app via `POST /api/system/copilot-login` under the bundled pnpm + Node.
+4. **Local spawn (packaged)** — the standard production product path. Extract `app.asar.unpacked/dist/service-bundle/` to `~/.gezel/service/` and spawn it as the logged-in user with `GEZEL_SERVICE_ROLE=user`. Copilot login and every project/workspace operation therefore run with that user's permissions.
 
 5. **Local spawn (dev)** — `GEZEL_SPAWN=1` is set in dev mode. Spawn from `packages/service/dist/bin/gezeld.js` via `require.resolve`. No extraction. Watch-mode rebuilds of the service package aren't picked up until the child is restarted — if you're iterating on service code, set `GEZEL_EMBEDDED=1` instead.
 
 6. **Embedded** (fallback or forced) — `GEZEL_EMBEDDED=1` env var is set, OR we're in dev mode and `GEZEL_SPAWN=1` is *not* set, OR any of the spawn branches above fail inside the health-wait budget. Boot the service in-process via `@bendyline/gezel-service`'s `startService()`. Fast iteration, no child process. When this branch is reached because of a spawn failure (not by force), the UI shows a persistent red banner (`.app-fallback-banner`) noting that background features (autostart, scheduled jobs) are unavailable.
 
-The supervisor also runs a health-watch on spawned children (15s interval, 3 consecutive failures trigger a restart). Restart budget: 3 attempts in 60s, then fall back to embedded. On each restart, the BrowserWindow reloads so the UI picks up the rotated auth token via the preload's synchronous `ipcMain.on('gezel:current-connection')` bridge.
+The supervisor also runs a health-watch on spawned user daemons (15s interval, 3 consecutive failures trigger a restart). Restart budget: 3 attempts in 60s, then fall back to embedded. On each restart, the BrowserWindow reloads so the UI picks up the rotated user token via the preload's synchronous `ipcMain.on('gezel:current-connection')` bridge.
 
 **Autostart** ([packages/app/src/autostart/](packages/app/src/autostart/)) is an opt-in toggle in Settings → Daemon. Writes a user-level LaunchAgent / systemd `--user` unit / Task Scheduler on-logon task — no admin required. Enabling it makes gezeld run independently of Electron, unlocking scheduled jobs and other "always on" features. Disabling uninstalls the unit. This is the "mode 2" of the original intent — packaged spawn (branch 4) is the foundation; autostart is the operational flip that keeps gezeld running when the app is closed.
 
 **Remote mode (branch 1)** is wire-complete — the supervisor probes and connects — but the UI for configuring a remote URL is not yet built. The service-side work (TLS, non-loopback binding, stronger auth than a per-launch bearer token) is deliberately deferred.
+
+**Rolling-upgrade compatibility:** the `hosting` config field (`auto`, `machine-service`, `per-user`) still governs older full-product machine daemons so existing machine homes are not silently abandoned. An installed service requested as `machine-engine` detects an established `projects/` or `gezels/` layout before initialization and remains `legacy-full`; the UI identifies the pending migration. It does not disable a genuinely fresh, role-declared machine engine. New product data always stays per-user. A future “machine-wide project” option must be explicit per project, use a separately authorized shared storage root, and must never grant the engine broker access to user folders.
+
+See [docs/service-boundaries.md](docs/service-boundaries.md) for the ownership table, proxy flows, degraded behavior, and the constraints for a future explicit machine-wide project option.
 
 Do not bake "the service is in-process" assumptions into new code — go through the HTTP API (via `@bendyline/gezel-client`) and you'll be fine across every branch.
 

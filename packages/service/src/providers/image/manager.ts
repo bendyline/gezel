@@ -30,6 +30,8 @@ export interface ImageProviderManagerOptions {
   home: string;
   store: Store;
   secrets: SecretStore;
+  /** Ignore cloud provider config; used by the machine-only engine broker. */
+  localOnly?: boolean;
   /** Override env for tests. */
   env?: NodeJS.ProcessEnv;
   /**
@@ -47,11 +49,16 @@ export class ImageProviderManager {
   private readonly secrets: SecretStore;
   private readonly env: NodeJS.ProcessEnv | undefined;
   private readonly arbiter: GpuArbiter | undefined;
+  private readonly localOnly: boolean;
 
   private current_: ImageProvider | null = null;
   private buildPromise: Promise<ImageProvider> | null = null;
   private remotes: RemotesRegistry | undefined;
-  private readonly remoteCache = new Map<string, RemoteImageProvider>();
+  private machineEngineRemoteId?: () => string | null;
+  private readonly remoteCache = new Map<
+    string,
+    { connectionKey: string; provider: RemoteImageProvider }
+  >();
 
   constructor(opts: ImageProviderManagerOptions) {
     this.home = opts.home;
@@ -59,12 +66,17 @@ export class ImageProviderManager {
     this.secrets = opts.secrets;
     this.env = opts.env;
     this.arbiter = opts.arbiter;
+    this.localOnly = opts.localOnly ?? false;
   }
 
   /** Wire the paired-servers registry so `remote:<id>/…` image models route
    *  to the hosting server. Injected by `service.ts`. */
   setRemotes(remotes: RemotesRegistry): void {
     this.remotes = remotes;
+  }
+
+  setMachineEngineRemoteResolver(resolve: (() => string | null) | undefined): void {
+    this.machineEngineRemoteId = resolve;
   }
 
   /**
@@ -75,21 +87,25 @@ export class ImageProviderManager {
    * the paired server while the artifact still persists into A's project.
    */
   async providerForModel(model?: string): Promise<ImageProvider> {
-    const target = resolveRemoteTarget(model, this.remotes);
+    const target = resolveRemoteTarget(model, this.remotes, this.machineEngineRemoteId?.());
     if (!target) return this.current();
     const { remote, fetch } = target;
-    let provider = this.remoteCache.get(remote.remoteId);
-    if (!provider) {
-      provider = new RemoteImageProvider({
-        remoteId: remote.remoteId,
-        label: remote.displayName,
-        baseUrl: remote.baseUrl,
-        token: remote.token,
-        fetch,
-      });
-      this.remoteCache.set(remote.remoteId, provider);
+    const connectionKey = `${remote.baseUrl}\0${remote.token}\0${remote.pinnedIdentityFingerprint}`;
+    let cached = this.remoteCache.get(remote.remoteId);
+    if (!cached || cached.connectionKey !== connectionKey) {
+      cached = {
+        connectionKey,
+        provider: new RemoteImageProvider({
+          remoteId: remote.remoteId,
+          label: remote.displayName,
+          baseUrl: remote.baseUrl,
+          token: remote.token,
+          fetch,
+        }),
+      };
+      this.remoteCache.set(remote.remoteId, cached);
     }
-    return provider;
+    return cached.provider;
   }
 
   /**
@@ -98,6 +114,7 @@ export class ImageProviderManager {
    * a leaked provider that never gets `shutdown()`.
    */
   async current(): Promise<ImageProvider> {
+    if (this.machineEngineRemoteId?.()) return this.providerForModel(undefined);
     if (this.current_) return this.current_;
     if (this.buildPromise) return this.buildPromise;
     this.buildPromise = (async () => {
@@ -107,6 +124,7 @@ export class ImageProviderManager {
         ...(this.env ? { env: this.env } : {}),
         config,
         secrets: this.secrets,
+        localOnly: this.localOnly,
         ...(this.arbiter ? { arbiter: this.arbiter } : {}),
       });
       this.current_ = provider;

@@ -29,7 +29,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const ctx = vi.hoisted(() => ({
   health: undefined as
     | undefined
-    | ((signal?: AbortSignal) => Promise<{ ok: boolean; version: string }>),
+    | ((
+        signal?: AbortSignal,
+      ) => Promise<{ ok: boolean; version: string; machineEngineConnected?: boolean }>),
   runtime: null as null | {
     pid: number;
     port: number;
@@ -43,7 +45,9 @@ const ctx = vi.hoisted(() => ({
     token: string;
     cert: string | null;
     home: string;
+    serviceRole?: 'user' | 'machine-engine' | 'legacy-full';
   },
+  machineProbeStatus: 200,
   systemHomeInfo: null as null | {
     home: string;
     scope: 'machine' | 'user';
@@ -179,7 +183,19 @@ vi.mock('@bendyline/gezel-client/node', () => ({
       return Promise.resolve(ctx.systemHomeInfo);
     }
   },
-  createTrustingFetch: () => fetch,
+  createTrustingFetch: () =>
+    vi.fn(async (input: string | URL | Request) => {
+      if (String(input).includes('/v1/remote/models')) {
+        return new Response(
+          JSON.stringify(ctx.machineProbeStatus === 200 ? { models: [] } : { error: 'offline' }),
+          {
+            status: ctx.machineProbeStatus,
+            headers: { 'content-type': 'application/json' },
+          },
+        );
+      }
+      return fetch(input);
+    }),
   discoverOrSpawn: vi.fn(),
   readRuntime: vi.fn(() => Promise.resolve(ctx.runtime)),
   isProcessAlive: vi.fn(() => ctx.processAlive),
@@ -230,6 +246,7 @@ beforeEach(async () => {
   ctx.runtime = null;
   ctx.systemRuntime = null;
   ctx.systemHomeInfo = null;
+  ctx.machineProbeStatus = 200;
   ctx.processAlive = true;
   ctx.llamaProbe = {
     backend: 'cpu',
@@ -349,7 +366,7 @@ function sysMode(
   overrides: Partial<{
     serviceHome: string;
     waitForStartup: boolean;
-    hostingPin: 'auto' | 'machine-service';
+    hostingPin: 'auto' | 'machine-service' | 'per-user';
   }> = {},
 ) {
   return {
@@ -361,17 +378,77 @@ function sysMode(
   };
 }
 
-function sysRuntime(home = '/var/lib/gezel') {
+function sysRuntime(
+  home = '/var/lib/gezel',
+  serviceRole?: 'user' | 'machine-engine' | 'legacy-full',
+) {
   return {
     port: 5555,
     baseUrl: 'https://127.0.0.1:5555',
     token: 'svc-tok',
     cert: 'CERT',
     home,
+    ...(serviceRole ? { serviceRole } : {}),
   };
 }
 
 describe('Branch 1.5 — system-service', () => {
+  it('uses the machine daemon only as an engine and starts a per-user product service', async () => {
+    ctx.systemRuntime = sysRuntime('/var/lib/gezel', 'machine-engine');
+    vi.mocked(resolveMode).mockResolvedValue(sysMode());
+    const { resolvePerUserMode } = await import('./mode.js');
+    vi.mocked(resolvePerUserMode).mockResolvedValue({ kind: 'embedded' });
+
+    const svc = await connectOrStart(baseOpts({ packaged: true }));
+
+    expect(svc.mode).toBe('embedded');
+    expect(svc.baseUrl).toBe('https://127.0.0.1:11111');
+    await svc.shutdown();
+  });
+
+  it('keeps the user product daemon healthy when the machine engine probe fails', async () => {
+    ctx.systemRuntime = sysRuntime('/var/lib/gezel', 'machine-engine');
+    ctx.machineProbeStatus = 503;
+    vi.mocked(resolveMode).mockResolvedValue(sysMode());
+    const { resolvePerUserMode } = await import('./mode.js');
+    vi.mocked(resolvePerUserMode).mockResolvedValue({ kind: 'embedded' });
+
+    const svc = await connectOrStart(baseOpts({ packaged: true }));
+
+    expect(svc.mode).toBe('embedded');
+    expect(svc.fallbackReason).toMatchObject({
+      code: 'machine-engine-unavailable',
+      sourceMode: 'system-service',
+    });
+    await svc.shutdown();
+  });
+
+  it('keeps a per-user hosting pin for legacy full-product machine daemons', async () => {
+    ctx.systemRuntime = sysRuntime('/var/lib/gezel', 'legacy-full');
+    vi.mocked(resolveMode).mockResolvedValue(sysMode({ hostingPin: 'per-user' }));
+    const { resolvePerUserMode } = await import('./mode.js');
+    vi.mocked(resolvePerUserMode).mockResolvedValue({ kind: 'embedded' });
+
+    const svc = await connectOrStart(baseOpts({ packaged: true }));
+
+    expect(svc.mode).toBe('embedded');
+    await svc.shutdown();
+  });
+
+  it('keeps established machine-home data visible in explicit compatibility mode', async () => {
+    ctx.systemRuntime = sysRuntime('/var/lib/gezel', 'legacy-full');
+    vi.mocked(resolveMode).mockResolvedValue(sysMode());
+
+    const svc = await connectOrStart(baseOpts({ packaged: true }));
+
+    expect(svc.mode).toBe('system-service');
+    expect(svc.fallbackReason).toMatchObject({
+      code: 'legacy-machine-data',
+      sourceMode: 'system-service',
+    });
+    await svc.shutdown();
+  });
+
   it('returns mode "system-service" when health succeeds', async () => {
     ctx.systemRuntime = sysRuntime();
     vi.mocked(resolveMode).mockResolvedValue(sysMode());
@@ -950,6 +1027,34 @@ describe('mode-aware restart', () => {
 });
 
 describe('health lifecycle', () => {
+  it('clears the machine-engine notice after the user daemon reconnects to it', async () => {
+    const svc = new SupervisedService(
+      'local-spawn-packaged',
+      'http://127.0.0.1:1234',
+      'token',
+      null,
+      baseOpts({ packaged: true }),
+      {
+        fallbackReason: {
+          code: 'machine-engine-unavailable',
+          sourceMode: 'system-service',
+          message: 'engine starting',
+        },
+      },
+    );
+    svc.attachSpawned(makeFakeChild());
+    ctx.health = () =>
+      Promise.resolve({ ok: true, version: '1.0.0', machineEngineConnected: true });
+    const reloaded = vi.fn();
+    svc.onRestart(reloaded);
+
+    await (svc as unknown as { tick: () => Promise<void> }).tick();
+
+    expect(svc.fallbackReason).toBeNull();
+    expect(reloaded).toHaveBeenCalledOnce();
+    await svc.shutdown();
+  });
+
   it('bounds a health implementation that ignores AbortSignal', async () => {
     vi.useFakeTimers();
     try {

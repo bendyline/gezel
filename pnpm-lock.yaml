@@ -455,6 +455,9 @@ importers:
       '@bendyline/gezel':
         specifier: workspace:*
         version: link:../core
+      '@bendyline/gezel-client':
+        specifier: workspace:*
+        version: link:../client
       '@bendyline/gezel-catalog':
         specifier: workspace:*
         version: link:../catalog
@@ -564,9 +567,6 @@ importers:
         specifier: ^4.4.3
         version: 4.4.3
     devDependencies:
-      '@bendyline/gezel-client':
-        specifier: workspace:*
-        version: link:../client
       '@github/copilot-sdk':
         specifier: ^1.0.7
         version: 1.0.7

@@ -116,11 +116,11 @@ std::wstring build_child_cmdline(const std::wstring& instdir, const std::wstring
 
 // The service environment contract, formerly NSSM's AppEnvironmentExtra
 // in installer/nsis-hooks.nsh. GEZEL_PORT=6228 reserves the canonical
-// machine-service endpoint; CLI-owned fallback daemons use ephemeral ports.
-// GEZEL_SYSTEM_SCOPE=1 tells gezeld the runtime auth-token is a cross-account
-// client credential. The TEMP/TMP overrides matter too — without them
-// Chromium/Node temp writes land in the unwritable LocalService
-// profile.
+// machine-engine endpoint; user-owned product daemons use discovered ports.
+// GEZEL_SYSTEM_SCOPE=1 makes the runtime auth-token a cross-account credential
+// narrowly scoped to inference and model lifecycle. The TEMP/TMP overrides
+// matter too — without them Chromium/Node temp writes land in the unwritable
+// LocalService profile.
 std::vector<EnvEntry> env_overrides(const std::wstring& instdir, const std::wstring& home) {
   const std::wstring unpacked = instdir + L"\\resources\\app.asar.unpacked";
   return {
@@ -128,13 +128,13 @@ std::vector<EnvEntry> env_overrides(const std::wstring& instdir, const std::wstr
       {L"GEZEL_HOME", home},
       {L"GEZEL_PORT", L"6228"},
       {L"GEZEL_SYSTEM_SCOPE", L"1"},
+      {L"GEZEL_SERVICE_ROLE", L"machine-engine"},
       // Opt gezeld into treating stdin EOF as "shut down gracefully".
       // Explicit rather than implicit: a foreground `gezel start` inherits
       // a terminal whose stdin can end for unrelated reasons, and only the
       // service host actually owns the write end of a dedicated pipe.
       {L"GEZEL_SHUTDOWN_ON_STDIN_EOF", L"1"},
       {L"GEZEL_SHARED_ASSETS_DIR", home + L"\\assets"},
-      {L"GEZEL_UI_DIR", unpacked + L"\\dist\\ui"},
       {L"GEZEL_PNPM_PATH", unpacked + L"\\dist\\pnpm-bundle\\bin\\pnpm.mjs"},
       {L"GEZEL_NODE_PATH", unpacked + L"\\dist\\node-bundle\\node.exe"},
       {L"GEZEL_NATIVE_BIN_DIR", unpacked + L"\\native-bin"},
@@ -284,10 +284,9 @@ int self_test() {
       {L"GEZEL_HOME", L"C:\\ProgramData\\Gezel"},
       {L"GEZEL_PORT", L"6228"},
       {L"GEZEL_SYSTEM_SCOPE", L"1"},
+      {L"GEZEL_SERVICE_ROLE", L"machine-engine"},
       {L"GEZEL_SHUTDOWN_ON_STDIN_EOF", L"1"},
       {L"GEZEL_SHARED_ASSETS_DIR", L"C:\\ProgramData\\Gezel\\assets"},
-      {L"GEZEL_UI_DIR",
-       L"C:\\Program Files\\Gezel\\resources\\app.asar.unpacked\\dist\\ui"},
       {L"GEZEL_PNPM_PATH",
        L"C:\\Program Files\\Gezel\\resources\\app.asar.unpacked\\dist\\pnpm-bundle\\bin\\pnpm.mjs"},
       {L"GEZEL_NODE_PATH",

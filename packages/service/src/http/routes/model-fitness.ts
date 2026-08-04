@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import type { ServiceContext } from '../context.js';
+import { machineEngineProxy } from './machine-engine-proxy.js';
 
 /**
  * Model fitness (the proeve) — read persisted per-model fitness
@@ -12,6 +13,7 @@ import type { ServiceContext } from '../context.js';
  */
 export function modelFitnessRoutes(ctx: ServiceContext): Hono {
   const app = new Hono();
+  app.use('*', machineEngineProxy(ctx, '/api/model-fitness', '/v1/remote/manage/model-fitness'));
 
   app.get('/', async (c) => {
     const records = await ctx.modelFitness.list();

@@ -1349,13 +1349,46 @@ export class ChatManager {
     this.remotes = remotes;
   }
   private remotes?: RemotesRegistry;
+  /**
+   * Runtime-managed machine broker. Kept as a resolver because its bearer
+   * token and TLS cert rotate independently of this user daemon.
+   */
+  setMachineEngineRemoteResolver(resolveRemoteId: (() => string | null) | undefined): void {
+    this.machineEngineRemoteId = resolveRemoteId;
+  }
+  private machineEngineRemoteId?: () => string | null;
+  private machineEngineRetireTimer?: NodeJS.Timeout;
+
+  /**
+   * Retire any user-owned native engines after the machine broker appears.
+   * Active turns are allowed to finish; new turns already resolve through the
+   * broker, then a hard reset releases the old pool once the manager is idle.
+   */
+  async retireLocalEnginesForMachineBroker(): Promise<void> {
+    if (this.isAnyActive()) {
+      await this.resetClient({ deferBusy: true });
+      if (!this.machineEngineRetireTimer) {
+        this.machineEngineRetireTimer = setTimeout(() => {
+          this.machineEngineRetireTimer = undefined;
+          void this.retireLocalEnginesForMachineBroker();
+        }, 1_000);
+        this.machineEngineRetireTimer.unref();
+      }
+      return;
+    }
+    if (this.machineEngineRetireTimer) {
+      clearTimeout(this.machineEngineRetireTimer);
+      this.machineEngineRetireTimer = undefined;
+    }
+    await this.resetClient();
+  }
   private readonly remoteProviders = new Map<
     string,
     { connectionKey: string; provider: RemoteGezelProvider }
   >();
 
   /** Resolve a connection-aware provider for a namespaced remote model id. */
-  private getRemoteProvider(modelId: string | undefined): LLMProvider {
+  private getRemoteProvider(modelId: string | undefined, modelPrefix?: string): LLMProvider {
     const parsed = modelId ? parseRemoteModelId(modelId) : null;
     if (!parsed) {
       throw new Error(
@@ -1363,15 +1396,16 @@ export class ChatManager {
       );
     }
     const remote = this.remotes?.get(parsed.remoteId) ?? null;
+    const providerKey = `${parsed.remoteId}\0${modelPrefix ?? ''}`;
     if (!remote) {
-      this.remoteProviders.delete(parsed.remoteId);
+      this.remoteProviders.delete(providerKey);
       throw new Error(`not paired with remote server "${parsed.remoteId}" — pair it in Settings`);
     }
     // Re-pairing must not reuse credentials captured from the previous pairing.
     const connectionKey = [remote.baseUrl, remote.token, remote.pinnedIdentityFingerprint].join(
       '\0',
     );
-    const cached = this.remoteProviders.get(parsed.remoteId);
+    const cached = this.remoteProviders.get(providerKey);
     if (cached?.connectionKey === connectionKey) return cached.provider;
     const fetchImpl = getPairedRemoteFetch(remote, this.remotes!);
     const provider = new RemoteGezelProvider({
@@ -1380,8 +1414,20 @@ export class ChatManager {
       baseUrl: remote.baseUrl,
       token: remote.token,
       fetch: fetchImpl,
+      ...(modelPrefix ? { modelPrefix } : {}),
+      resolveConnection: () => {
+        const latest = this.remotes?.get(remote.remoteId);
+        if (!latest) {
+          throw new Error(`remote server "${remote.displayName}" is unavailable`);
+        }
+        return {
+          baseUrl: latest.baseUrl,
+          token: latest.token,
+          fetch: getPairedRemoteFetch(latest, this.remotes!),
+        };
+      },
     });
-    this.remoteProviders.set(parsed.remoteId, { connectionKey, provider });
+    this.remoteProviders.set(providerKey, { connectionKey, provider });
     this.remotes?.touch(parsed.remoteId);
     return provider;
   }
@@ -8547,6 +8593,8 @@ export class ChatManager {
   async shutdown(): Promise<void> {
     await this.beginShutdown();
     this.telemetryGpuUnsub?.();
+    if (this.machineEngineRetireTimer) clearTimeout(this.machineEngineRetireTimer);
+    this.machineEngineRetireTimer = undefined;
     this.telemetryGpuUnsub = null;
     // Fire any deferred memory extractions immediately so any
     // mid-conversation work that was waiting on idle gets persisted
@@ -8561,6 +8609,16 @@ export class ChatManager {
 
   /** List the models available on the given provider (for the UI dropdown). */
   async listModelsForProvider(name: ProviderName): Promise<ModelInfo[]> {
+    const machineRemoteId = this.machineEngineRemoteId?.() ?? null;
+    if (machineRemoteId && (name === 'llama-cpp' || name === 'mlx' || name === 'ds4')) {
+      const prefix = `${name}:`;
+      const remoteModels = await this.listRemoteModels(machineRemoteId);
+      return remoteModels.flatMap((model) => {
+        const parsed = parseRemoteModelId(model.id);
+        if (!parsed?.modelId.startsWith(prefix)) return [];
+        return [{ ...model, id: parsed.modelId.slice(prefix.length) }];
+      });
+    }
     // Installed on-device models are disk metadata, not an engine health
     // check. Reading them must not build the provider: MLX provider creation
     // provisions its managed Python environment, which made merely opening
@@ -9630,6 +9688,18 @@ export class ChatManager {
     const { isLocalProvider } = await import('../providers/native/engine-key.js');
     if (!isLocalProvider(name)) return this.ensureProvider(name);
 
+    const machineRemoteId = this.machineEngineRemoteId?.() ?? null;
+    if (machineRemoteId) {
+      const config = await this.store.readConfig();
+      const fmModel = gezel?.parsed.frontmatter.model;
+      const modelId = record.model ?? fmModel ?? config.defaultModel?.[name];
+      if (!modelId) {
+        throw new Error(`No ${name} model is selected for the machine engine service`);
+      }
+      record.engineKey = undefined;
+      return this.getRemoteProvider(makeRemoteModelId(machineRemoteId, `${name}:${modelId}`), name);
+    }
+
     const router = await this.getEngineRouter();
     if (!router) return this.ensureProvider(name);
 
@@ -9710,6 +9780,19 @@ export class ChatManager {
     if (seeded) return seeded;
     const { isLocalProvider } = await import('../providers/native/engine-key.js');
     if (!isLocalProvider(name)) return this.ensureProvider(name);
+
+    const machineRemoteId = this.machineEngineRemoteId?.() ?? null;
+    if (machineRemoteId) {
+      const config = await this.store.readConfig();
+      const resolved = modelId ?? config.defaultModel?.[name];
+      if (!resolved) {
+        throw new Error(`No ${name} model is selected for the machine engine service`);
+      }
+      return this.getRemoteProvider(
+        makeRemoteModelId(machineRemoteId, `${name}:${resolved}`),
+        name,
+      );
+    }
 
     const router = await this.getEngineRouter();
     if (!router) return this.ensureProvider(name);
@@ -10047,6 +10130,21 @@ export class ChatManager {
     }
     const existing = this.providers.get(name);
     if (existing) return existing;
+
+    if (name === 'llama-cpp' || name === 'mlx' || name === 'ds4') {
+      const machineRemoteId = this.machineEngineRemoteId?.() ?? null;
+      if (machineRemoteId) {
+        const config = await this.store.readConfig();
+        const modelId = config.defaultModel?.[name];
+        if (!modelId) {
+          throw new Error(`No ${name} model is selected for the machine engine service`);
+        }
+        return this.getRemoteProvider(
+          makeRemoteModelId(machineRemoteId, `${name}:${modelId}`),
+          name,
+        );
+      }
+    }
 
     // Backstop against unbudgeted local-engine spawns. Building a local
     // provider here creates a NativeEngineSupervisor that is invisible to
@@ -14294,9 +14392,11 @@ function truncate(s: string, max: number): string {
  * scope, we fall back to the project id (skipping the implicit
  * `default` bucket — surfacing it would just be noise).
  */
-function chatTurnJobLabel(record: { taskRef?: string; stepId?: string; projectId: string }):
-  | string
-  | undefined {
+function chatTurnJobLabel(record: {
+  taskRef?: string;
+  stepId?: string;
+  projectId: string;
+}): string | undefined {
   if (record.taskRef) {
     return record.stepId ? `${record.taskRef} · ${record.stepId}` : record.taskRef;
   }

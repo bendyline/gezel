@@ -63,6 +63,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.113.0",
     "@bendyline/gezel": "workspace:*",
+    "@bendyline/gezel-client": "workspace:*",
     "@bendyline/gezel-catalog": "workspace:*",
     "@bendyline/gezel-connectors-spectral": "workspace:*",
     "@bendyline/gezel-mcp": "workspace:*",
@@ -113,7 +114,6 @@
     }
   },
   "devDependencies": {
-    "@bendyline/gezel-client": "workspace:*",
     "@github/copilot-sdk": "^1.0.7",
     "@huggingface/transformers": "^3.8.1",
     "@types/mailparser": "^3.4.6",

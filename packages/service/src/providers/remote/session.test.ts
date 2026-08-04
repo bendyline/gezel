@@ -156,4 +156,37 @@ describe('RemoteSession', () => {
     });
     expect(text).toBe('just text');
   });
+
+  it('resolves rotated broker ports and credentials before every turn', async () => {
+    const calls: Array<{ url: string; authorization: string | null }> = [];
+    const fetchImpl = (async (url: string, init?: RequestInit) => {
+      calls.push({
+        url,
+        authorization: new Headers(init?.headers).get('authorization'),
+      });
+      return sseResponse([{ type: 'delta', text: 'ok' }, { type: 'done' }]);
+    }) as unknown as typeof fetch;
+    let connection = { baseUrl: 'https://127.0.0.1:7001', token: 'first', fetch: fetchImpl };
+    const session = new RemoteSession({
+      baseUrl: 'https://stale.invalid',
+      token: 'stale',
+      fetch: fetchImpl,
+      resolveConnection: () => connection,
+      queue: new ProviderQueue({ concurrency: 1 }),
+      bridges: fakeBridge({}),
+      systemMessage: 's',
+      model: 'm',
+      priorMessages: [],
+      timeoutMs: 60_000,
+    });
+
+    await session.sendAndWait('one');
+    connection = { baseUrl: 'https://127.0.0.1:7002', token: 'second', fetch: fetchImpl };
+    await session.sendAndWait('two');
+
+    expect(calls).toEqual([
+      { url: 'https://127.0.0.1:7001/v1/remote/infer', authorization: 'Bearer first' },
+      { url: 'https://127.0.0.1:7002/v1/remote/infer', authorization: 'Bearer second' },
+    ]);
+  });
 });

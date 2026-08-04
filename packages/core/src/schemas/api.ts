@@ -27,9 +27,23 @@ import { ExpectedDeliverableSchema } from './session.js';
 import { TaskRefSchema } from './task.js';
 import { TuningProfileIdSchema } from './tuning-profile-registry.js';
 
+/**
+ * Runtime responsibility of a gezeld process.
+ *
+ * `legacy-full` is intentionally retained for rolling upgrades: machine
+ * services installed by older releases own both product data and inference,
+ * while new installs split those responsibilities between a per-user daemon
+ * and a machine-wide engine broker.
+ */
+export const ServiceRoleSchema = z.enum(['user', 'machine-engine', 'legacy-full']);
+export type ServiceRole = z.infer<typeof ServiceRoleSchema>;
+
 export const HealthResponseSchema = z.object({
   ok: z.literal(true),
   version: z.string(),
+  serviceRole: ServiceRoleSchema.optional(),
+  /** Present on user daemons that can route native work to the shared broker. */
+  machineEngineConnected: z.boolean().optional(),
   startedAt: z.string(),
   nodeVersion: z.string().optional(),
   platform: z.string().optional(),
@@ -455,23 +469,15 @@ export const GezelConfigSchema = z.object({
   /** Default LLM provider. Missing → 'copilot' for backwards compatibility. */
   provider: ProviderNameSchema.optional(),
   /**
-   * Which daemon the packaged desktop app attaches to.
+   * Compatibility preference for full-product daemons installed before the
+   * service-role split. New desktop releases always attach the UI to a user
+   * daemon and may independently use a machine-wide `machine-engine` broker.
+   * In particular, `'per-user'` declines a legacy machine product home but
+   * does not disable shared model downloads or GPU/RAM scheduling.
    *
-   * - `'auto'` (default, also when absent) — prefer the machine-wide
-   *   service when the OS service manager says it is registered and
-   *   running, waiting briefly for it to publish runtime discovery on a
-   *   fresh boot. When the machine home has never been used while this
-   *   per-user home holds real gezels/projects/sessions, the supervisor
-   *   declines the machine service, pins `'per-user'`, and surfaces a
-   *   notice — adopting it would present an empty app while everything
-   *   the user made sits in `~/.gezel`.
-   * - `'machine-service'` — always prefer the machine service; the
-   *   fresh-home auto-decline is disabled.
-   * - `'per-user'` — skip the machine service entirely.
-   *
-   * Read by the Electron supervisor before any daemon starts (bare JSON
-   * read, same pattern as `llamaCppBackendOverride`); declared here so a
-   * Store rewrite round-trips it.
+   * Retained so rolling upgrades do not strand data or discard an existing
+   * preference. A future project-level machine-wide storage choice is a
+   * separate authorization/storage setting and must not reuse this field.
    */
   hosting: z.enum(['auto', 'machine-service', 'per-user']).optional(),
   /**

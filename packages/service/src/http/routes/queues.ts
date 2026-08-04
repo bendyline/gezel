@@ -15,6 +15,7 @@
 
 import { Hono } from 'hono';
 import type { ServiceContext } from '../context.js';
+import { machineEngineProxy } from './machine-engine-proxy.js';
 
 type ProviderName =
   | 'copilot'
@@ -29,6 +30,7 @@ type ProviderName =
 
 export function queueRoutes(ctx: ServiceContext): Hono {
   const app = new Hono();
+  app.use('*', machineEngineProxy(ctx, '/api/queues', '/v1/remote/manage/queues'));
 
   const PROVIDER_NAMES: readonly ProviderName[] = [
     'copilot',
