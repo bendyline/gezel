@@ -134,7 +134,18 @@ describe('ChatManager — clamped first-turn context', () => {
       writeSummary: async () => {},
       getRecent: async () => '',
     } as unknown as MemoryManager;
-    const llama = new MockProvider({ name: 'llama-cpp' });
+    let admissionCalls = 0;
+    class AdmissionOnlyMockProvider extends MockProvider {
+      override getContextWindow(): number | undefined {
+        return undefined;
+      }
+
+      async prepareContextWindow(): Promise<number | undefined> {
+        admissionCalls += 1;
+        return this.ollamaContextConfig?.numCtx;
+      }
+    }
+    const llama = new AdmissionOnlyMockProvider({ name: 'llama-cpp' });
     llama.ollamaContextConfig = { numCtx: 35_840, promptChars: () => 0 };
     const testManager = new ChatManager({
       store: testStore,
@@ -162,7 +173,9 @@ describe('ChatManager — clamped first-turn context', () => {
       );
 
       // 35,840 is below the 48K full-roster floor, so the provider's actual
-      // admitted context must activate the curated coordinator surface.
+      // asynchronously-admitted context must activate the curated coordinator
+      // surface before the first prompt is built.
+      expect(admissionCalls).toBeGreaterThan(0);
       expect(recalled?.toolAllowlist?.has('start_project')).toBe(true);
       expect(recalled?.toolAllowlist?.has('read_task_notes')).toBe(true);
       expect(recalled?.toolAllowlist?.size).toBeLessThan(60);

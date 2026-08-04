@@ -111,6 +111,30 @@ export const RemoteInferRequestSchema = z.object({
 export type RemoteInferRequest = z.infer<typeof RemoteInferRequestSchema>;
 
 // ---------------------------------------------------------------------------
+// Pre-session admission — `POST /v1/remote/admit`.
+// ---------------------------------------------------------------------------
+
+/**
+ * Ask B to resolve/load a model and report the context window it could
+ * actually admit under current RAM/VRAM pressure. A uses this result before
+ * constructing its system prompt and tool surface; model-catalog metadata is
+ * only the requested/native ceiling and can be substantially larger.
+ */
+export const RemoteAdmissionRequestSchema = z.object({
+  protocolVersion: z.number(),
+  /** B-native `<provider>:<model>` id. */
+  model: z.string(),
+});
+export type RemoteAdmissionRequest = z.infer<typeof RemoteAdmissionRequestSchema>;
+
+export const RemoteAdmissionResponseSchema = z.object({
+  model: z.string(),
+  /** Post-admission, per-session context window in tokens. */
+  contextWindow: z.number().int().positive(),
+});
+export type RemoteAdmissionResponse = z.infer<typeof RemoteAdmissionResponseSchema>;
+
+// ---------------------------------------------------------------------------
 // Streamed response frames (SSE `data:` payloads), discriminated on `type`.
 // ---------------------------------------------------------------------------
 

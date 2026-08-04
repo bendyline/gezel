@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { RemoteGezelProvider } from './provider.js';
+import { LEGACY_REMOTE_CONTEXT_WINDOW, RemoteGezelProvider } from './provider.js';
 
 function doneResponse(): Response {
   const body = new ReadableStream<Uint8Array>({
@@ -11,10 +11,17 @@ function doneResponse(): Response {
   return new Response(body, { status: 200, headers: { 'content-type': 'text/event-stream' } });
 }
 
+function admissionResponse(model: string, contextWindow = 35_840): Response {
+  return Response.json({ model, contextWindow });
+}
+
 describe('RemoteGezelProvider', () => {
   it('adds the local engine namespace for automatic machine-broker sessions', async () => {
     const requests: Array<Record<string, unknown>> = [];
-    const fetchImpl = (async (_url: string | URL | Request, init?: RequestInit) => {
+    const fetchImpl = (async (url: string | URL | Request, init?: RequestInit) => {
+      if (String(url).endsWith('/v1/remote/admit')) {
+        return admissionResponse('llama-cpp:qwen.gguf');
+      }
       requests.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
       return doneResponse();
     }) as typeof fetch;
@@ -32,12 +39,15 @@ describe('RemoteGezelProvider', () => {
 
     expect(requests).toHaveLength(1);
     expect(requests[0]).toMatchObject({ model: 'llama-cpp:qwen.gguf' });
+    expect(provider.getContextWindow()).toBe(35_840);
+    expect(session.numCtx).toBe(35_840);
     await session.disconnect();
   });
 
   it('does not duplicate an engine namespace already present on the wire', async () => {
     const requests: Array<Record<string, unknown>> = [];
-    const fetchImpl = (async (_url: string | URL | Request, init?: RequestInit) => {
+    const fetchImpl = (async (url: string | URL | Request, init?: RequestInit) => {
+      if (String(url).endsWith('/v1/remote/admit')) return admissionResponse('mlx:qwen');
       requests.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
       return doneResponse();
     }) as typeof fetch;
@@ -55,5 +65,41 @@ describe('RemoteGezelProvider', () => {
 
     expect(requests[0]).toMatchObject({ model: 'mlx:qwen' });
     await session.disconnect();
+  });
+
+  it('fails safe to a diet-sized window when a rolling-upgrade broker lacks admission', async () => {
+    const fetchImpl = (async (url: string | URL | Request) => {
+      if (String(url).endsWith('/v1/remote/admit')) {
+        return Response.json({ error: 'not_found' }, { status: 404 });
+      }
+      return doneResponse();
+    }) as typeof fetch;
+    const provider = new RemoteGezelProvider({
+      remoteId: 'this-machine',
+      label: 'This machine',
+      baseUrl: 'https://127.0.0.1:6228',
+      token: 'token',
+      fetch: fetchImpl,
+      modelPrefix: 'llama-cpp',
+      defaultModel: 'llama-cpp:qwen.gguf',
+    });
+
+    await expect(provider.prepareContextWindow()).resolves.toBe(LEGACY_REMOTE_CONTEXT_WINDOW);
+    expect(provider.getContextWindow()).toBe(LEGACY_REMOTE_CONTEXT_WINDOW);
+  });
+
+  it('does not disguise a model-not-loaded response as legacy compatibility', async () => {
+    const fetchImpl = (async () =>
+      Response.json({ error: 'model_not_loaded' }, { status: 404 })) as typeof fetch;
+    const provider = new RemoteGezelProvider({
+      remoteId: 'this-machine',
+      label: 'This machine',
+      baseUrl: 'https://127.0.0.1:6228',
+      token: 'token',
+      fetch: fetchImpl,
+      defaultModel: 'llama-cpp:missing.gguf',
+    });
+
+    await expect(provider.prepareContextWindow()).rejects.toThrow(/model_not_loaded/);
   });
 });

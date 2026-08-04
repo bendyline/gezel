@@ -15,6 +15,7 @@ import { streamSSE } from 'hono/streaming';
 import type { ResolvedTuning } from '../../model-profile/index.js';
 import {
   PROTOCOL_VERSION,
+  RemoteAdmissionRequestSchema,
   RemoteImageGenRequestSchema,
   RemoteInferRequestSchema,
   type RemoteModelDescriptor,
@@ -232,6 +233,58 @@ export function v1RemoteRoutes(ctx: ServiceContext): Hono {
     c.json({ models: await (await ctx.tts.current()).listInstalledModels() }),
   );
   app.get('/audio/tts/health', async (c) => c.json(await (await ctx.tts.current()).health()));
+
+  // Resolve the model through the same native-engine router used by /infer,
+  // then return the context window AFTER the capacity broker has applied its
+  // live RAM/VRAM clamp. Device A calls this before it builds the coordinator
+  // prompt; discovery metadata alone is only the model-native/requested cap.
+  app.post('/admit', async (c) => {
+    const body = RemoteAdmissionRequestSchema.parse(await c.req.json());
+    if (body.protocolVersion > PROTOCOL_VERSION) {
+      return c.json({ error: 'protocol_version_unsupported', supported: PROTOCOL_VERSION }, 426);
+    }
+    const target = resolveModelTarget(body.model);
+    if (!target) {
+      return c.json({ error: 'invalid_model', hint: 'expected <provider>:<model>' }, 400);
+    }
+
+    const auth = c.get('auth') as { appId: string } | undefined;
+    const originDeviceId = auth?.appId ?? 'unknown';
+    const release = (await getLimiter()).tryAcquire(originDeviceId, 'chat');
+    if (!release) {
+      return c.json({ error: 'tenant_concurrency_exceeded' }, 429);
+    }
+    let probe: LLMSession | null = null;
+    try {
+      const provider = await ctx.chat.getProviderForModel(target.provider, target.model);
+      const prepared = await provider.prepareContextWindow?.(target.model);
+      let contextWindow = prepared ?? provider.getContextWindow?.();
+
+      // Ollama resolves num_ctx asynchronously while creating a session. Keep
+      // the wire contract provider-agnostic by probing a bridge-free session
+      // when the provider cannot report a window directly.
+      if (!contextWindow) {
+        probe = await provider.createSession({
+          systemMessage: '',
+          model: target.model,
+          priorMessages: [],
+        });
+        contextWindow = probe.numCtx;
+      }
+      if (!contextWindow || !Number.isFinite(contextWindow) || contextWindow <= 0) {
+        return c.json({ error: 'context_window_unavailable', model: body.model }, 503);
+      }
+      return c.json({ model: body.model, contextWindow: Math.floor(contextWindow) });
+    } catch (err) {
+      if (err instanceof ModelNotInstalledError) {
+        return c.json({ error: 'model_not_loaded', model: body.model }, 404);
+      }
+      throw err;
+    } finally {
+      await probe?.disconnect().catch(() => {});
+      release();
+    }
+  });
 
   app.post('/infer', async (c) => {
     const body = RemoteInferRequestSchema.parse(await c.req.json());

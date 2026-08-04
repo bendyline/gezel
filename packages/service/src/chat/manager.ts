@@ -1400,7 +1400,10 @@ export class ChatManager {
       );
     }
     const remote = this.remotes?.get(parsed.remoteId) ?? null;
-    const providerKey = `${parsed.remoteId}\0${modelPrefix ?? ''}`;
+    // Context admission is model-specific. Keeping one provider per remote
+    // model makes synchronous getContextWindow() unambiguous even when the
+    // same broker hosts several differently-clamped engines.
+    const providerKey = `${parsed.remoteId}\0${modelPrefix ?? ''}\0${parsed.modelId}`;
     if (!remote) {
       this.remoteProviders.delete(providerKey);
       throw new Error(`not paired with remote server "${parsed.remoteId}" — pair it in Settings`);
@@ -1419,6 +1422,7 @@ export class ChatManager {
       token: remote.token,
       fetch: fetchImpl,
       ...(modelPrefix ? { modelPrefix } : {}),
+      defaultModel: parsed.modelId,
       resolveConnection: () => {
         const latest = this.remotes?.get(remote.remoteId);
         if (!latest) {
@@ -1434,6 +1438,19 @@ export class ChatManager {
     this.remoteProviders.set(providerKey, { connectionKey, provider });
     this.remotes?.touch(parsed.remoteId);
     return provider;
+  }
+
+  /**
+   * Obtain the context window that should size the prompt built for this
+   * provider. Remote providers perform a broker admission preflight here;
+   * native in-process providers simply return their already-clamped value.
+   */
+  private async resolveEffectiveContextWindow(
+    provider: LLMProvider,
+    model?: string,
+  ): Promise<number | undefined> {
+    const prepared = await provider.prepareContextWindow?.(model);
+    return prepared ?? provider.getContextWindow?.();
   }
 
   /**
@@ -2506,7 +2523,7 @@ export class ChatManager {
         ? await this.buildToolsOverrideForLiveSession(record, registeredTools)
         : undefined;
     const cachedProvider = this.providers.get(record.providerName);
-    const effectiveContextWindow = cachedProvider?.getContextWindow?.();
+    const effectiveContextWindow = liveSession?.numCtx ?? cachedProvider?.getContextWindow?.();
     const sessionOpts = await this.buildSessionOpts(
       record,
       gezel.about,
@@ -7830,7 +7847,10 @@ export class ChatManager {
     // ensureProviderForSession may have written `engineKey` onto the
     // record — persist so a restart routes to the same replica.
     if (record.engineKey) await this.store.writeSession(record);
-    const effectiveContextWindow = provider.getContextWindow?.();
+    const effectiveContextWindow = await this.resolveEffectiveContextWindow(
+      provider,
+      record.model ?? gezel.parsed.frontmatter.model,
+    );
     const sessionOpts = await this.buildSessionOpts(
       record,
       gezel.about,
@@ -7957,9 +7977,9 @@ export class ChatManager {
    *     "forgot the user's question" symptom traces back to (see
    *     ollama.ts header).
    *
-   * For non-Ollama providers this is a no-op: Copilot's SDK and
-   * OpenAI's Responses API both manage history server- or
-   * SDK-side, so we have nothing to manage.
+   * Copilot/OpenAI/CLI providers remain no-ops because they manage history
+   * outside this process. RemoteGezelProvider is included: its transport is
+   * remote, but B is stateless and the A-side session owns the transcript.
    *
    * Char-based prompt-size estimate (~4 chars/token); coarse but
    * fine for threshold gating. The post-hoc check in
@@ -7988,12 +8008,12 @@ export class ChatManager {
     // message list and have no server-side compaction — they're the
     // providers that can genuinely overflow. Copilot and OpenAI manage
     // history server-/SDK-side, so we have nothing to do for them here.
-    if (!isLocalProvider(record.providerName)) {
+    if (!isLocalProvider(record.providerName) && record.providerName !== 'remote') {
       return { rebuilt: false };
     }
-    const numCtx = (liveSession as { numCtx?: number }).numCtx;
-    const estimator = (liveSession as { estimatePromptChars?: () => number }).estimatePromptChars;
-    const model = (liveSession as { model?: string }).model ?? record.model ?? record.providerName;
+    const numCtx = liveSession.numCtx;
+    const estimator = liveSession.estimatePromptChars;
+    const model = liveSession.model ?? record.model ?? record.providerName;
     if (!numCtx || !estimator) return { rebuilt: false };
     const chars = estimator.call(liveSession) + pendingPrompt.length;
     const estimatedTokens = Math.ceil(chars / 4);
@@ -8013,7 +8033,9 @@ export class ChatManager {
     // on the looser shared default since their cache reuse means
     // long contexts don't cost a fresh prefill every turn.
     const compactRatio =
-      record.providerName === 'mlx' ? MLX_CONTEXT_COMPACT_RATIO : CONTEXT_COMPACT_RATIO;
+      record.providerName === 'mlx' || liveSession.model?.startsWith('mlx:')
+        ? MLX_CONTEXT_COMPACT_RATIO
+        : CONTEXT_COMPACT_RATIO;
     if (!opts?.force && ratio < CONTEXT_WARN_RATIO) return { rebuilt: false };
 
     if (!opts?.force && ratio < compactRatio) {
@@ -10592,7 +10614,10 @@ export class ChatManager {
       pendingUserText,
     );
     const gateRepairConstrained = await this.gateRepairConstraintActive(record);
-    const effectiveContextWindow = provider.getContextWindow?.();
+    const effectiveContextWindow = await this.resolveEffectiveContextWindow(
+      provider,
+      record.model ?? gezel.parsed.frontmatter.model,
+    );
     const sessionOpts = await this.buildSessionOpts(
       record,
       gezel.about,
@@ -10985,6 +11010,7 @@ export class ChatManager {
           { availableTools: [], thirdPartyToolsetIds: [] },
           { bridgeFailed: true },
           pendingUserText,
+          session,
         );
         if (refreshedSystem) {
           session.setSystemMessage(refreshedSystem);
@@ -11065,6 +11091,7 @@ export class ChatManager {
         toolsOverride,
         undefined,
         pendingUserText,
+        session,
       );
       if (refreshedSystem && refreshedSystem !== sessionOpts.systemMessage) {
         session.setSystemMessage(refreshedSystem);
@@ -11130,8 +11157,10 @@ export class ChatManager {
     },
     promptExtras?: { bridgeFailed?: boolean },
     pendingUserText?: string,
+    liveSession?: LLMSession,
   ): Promise<string | null> {
-    const effectiveContextWindow = this.providers.get(record.providerName)?.getContextWindow?.();
+    const effectiveContextWindow =
+      liveSession?.numCtx ?? this.providers.get(record.providerName)?.getContextWindow?.();
     const opts = await this.buildSessionOpts(
       record,
       gezel.about,
@@ -12071,13 +12100,16 @@ export class ChatManager {
     // context and the model asks "what were we talking about?" on the
     // very next turn. Filter out tool/system roles: the model only needs
     // user+assistant turns to recover conversational context. Both local
-    // engines (Ollama / llama-cpp / mlx) and Anthropic's Messages API
-    // qualify — Anthropic is cloud but the API requires the client to
-    // replay history every turn, mitigated by prompt caching at the
-    // provider layer. Copilot / OpenAI manage history server-side via
-    // their resume tokens, so duplicating it here would be wrong.
+    // engines (Ollama / llama-cpp / mlx), RemoteGezelProvider (B is
+    // deliberately stateless), and Anthropic's Messages API qualify —
+    // Anthropic is cloud but the API requires the client to replay history
+    // every turn, mitigated by prompt caching at the provider layer. Copilot /
+    // OpenAI manage history server-side via resume tokens, so duplicating it
+    // here would be wrong.
     const providerIsStateless =
-      isLocalProvider(record.providerName) || record.providerName === 'anthropic';
+      isLocalProvider(record.providerName) ||
+      record.providerName === 'remote' ||
+      record.providerName === 'anthropic';
     if (providerIsStateless && record.messages.length > 0) {
       const replayMessages = runtime?.omitLastUserFromPriorMessages
         ? record.messages.slice(0, -1)
@@ -12776,9 +12808,10 @@ export class ChatManager {
     // ~70% of `numCtx`, the session calls back here to get a
     // synthesis of older turns it can swap in for the prior history.
     // Cloud providers manage context server-side and don't accumulate
-    // transcripts client-side; gating on isLocalProvider keeps the
-    // hook out of those code paths entirely.
-    if (isLocalProvider(record.providerName)) {
+    // transcripts client-side. RemoteGezelProvider is the exception to its
+    // cloud-like transport shape: B is stateless and A owns the transcript,
+    // so it needs the same compaction callback as an in-process local.
+    if (isLocalProvider(record.providerName) || record.providerName === 'remote') {
       const sessionRef = record;
       opts.requestCompaction = async ({ priorMessages, estimatedTokens, numCtx }) => {
         const transcript = renderTranscript(

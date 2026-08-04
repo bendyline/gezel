@@ -1,7 +1,28 @@
 import { describe, expect, it } from 'vitest';
-import { PROTOCOL_VERSION, RemoteInferFrameSchema, RemoteInferRequestSchema } from './wire.js';
+import {
+  PROTOCOL_VERSION,
+  RemoteAdmissionRequestSchema,
+  RemoteAdmissionResponseSchema,
+  RemoteInferFrameSchema,
+  RemoteInferRequestSchema,
+} from './wire.js';
 
 describe('remote wire contract', () => {
+  it('parses pre-session admission with a post-clamp context window', () => {
+    expect(
+      RemoteAdmissionRequestSchema.parse({
+        protocolVersion: PROTOCOL_VERSION,
+        model: 'llama-cpp:qwen.gguf',
+      }),
+    ).toMatchObject({ model: 'llama-cpp:qwen.gguf' });
+    expect(
+      RemoteAdmissionResponseSchema.parse({
+        model: 'llama-cpp:qwen.gguf',
+        contextWindow: 35_840,
+      }).contextWindow,
+    ).toBe(35_840);
+  });
+
   it('parses a minimal valid infer request and defaults priorMessages', () => {
     const parsed = RemoteInferRequestSchema.parse({
       protocolVersion: PROTOCOL_VERSION,

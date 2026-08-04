@@ -658,6 +658,20 @@ export interface SendAndWaitOpts {
 
 export interface LLMSession {
   /**
+   * Effective context window for this concrete session, after any native
+   * engine admission clamp. Stateless/local-history providers expose this so
+   * ChatManager can run the same proactive pressure checks regardless of
+   * whether inference is in-process or routed through a machine broker.
+   */
+  readonly numCtx?: number;
+  /** Model actually used by this session (diagnostics + pressure warnings). */
+  readonly model?: string;
+  /**
+   * Cheap estimate of the complete prompt currently held by this session,
+   * including system bands, prior messages, and tool schemas.
+   */
+  estimatePromptChars?(): number;
+  /**
    * Send a user prompt, stream deltas via onDelta subscribers, resolve with
    * the full text response. Implementations should tolerate the SDK's
    * idle-timeout quirks and fall back to accumulated deltas when possible.
@@ -949,6 +963,16 @@ export interface LLMProvider {
    * requested ceiling.
    */
   getContextWindow?(): number | undefined;
+  /**
+   * Resolve the effective context window before a session prompt is built.
+   *
+   * Native providers usually know this synchronously via
+   * {@link getContextWindow}. A broker-backed provider must first ask the
+   * broker to admit/load the selected model, because live RAM/VRAM pressure
+   * can clamp the configured window. Implementations should cache the result;
+   * ChatManager may call this again while refreshing a warm session prompt.
+   */
+  prepareContextWindow?(model?: string): Promise<number | undefined>;
   /**
    * The concurrency/priority gate this provider's sessions acquire
    * from before invoking the underlying API. Sessions produced by

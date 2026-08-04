@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createTrustingFetch } from '@bendyline/gezel-client/node';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import type { MockProvider } from '../../providers/mock.js';
 import { type RunningService, startService } from '../../service.js';
 
 let svc: RunningService;
@@ -133,5 +134,32 @@ describe('remote model execution — B-side surface (e2e)', () => {
     expect(text).toContain('data:');
     expect(text).toContain('"type":"done"');
     expect(text).not.toContain('"type":"error"');
+  });
+
+  it('reports the provider post-admission context before inference', async () => {
+    const token = await pairDevice('device-admit');
+    const provider = (await svc.context.chat.getProviderForModel(
+      'copilot',
+      'mock-fast',
+    )) as MockProvider;
+    provider.ollamaContextConfig = { numCtx: 35_840, promptChars: () => 0 };
+
+    const res = await httpFetch(`${baseUrl}/v1/remote/admit`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        protocolVersion: 1,
+        model: 'copilot:mock-fast',
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({
+      model: 'copilot:mock-fast',
+      contextWindow: 35_840,
+    });
   });
 });

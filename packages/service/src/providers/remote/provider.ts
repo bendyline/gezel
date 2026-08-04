@@ -12,7 +12,11 @@ import { ProviderQueue } from '../queue.js';
 import type { LLMProvider, LLMSession, ModelInfo, SessionOpts } from '../types.js';
 import { makeRemoteModelId, parseRemoteModelId } from './model-id.js';
 import { RemoteSession } from './session.js';
-import { RemoteModelsResponseSchema } from './wire.js';
+import {
+  PROTOCOL_VERSION,
+  RemoteAdmissionResponseSchema,
+  RemoteModelsResponseSchema,
+} from './wire.js';
 
 /**
  * Generous per-turn ceiling for remote inference — an 80B on a paired server
@@ -20,6 +24,14 @@ import { RemoteModelsResponseSchema } from './wire.js';
  * local-engine-class timeout, not the tight cloud one.
  */
 export const REMOTE_TURN_TIMEOUT_MS = 20 * 60 * 1000;
+
+/**
+ * Mixed-version safety floor. Brokers predating `/v1/remote/admit` cannot
+ * reveal their live capacity clamp, so A deliberately assumes a small window
+ * and applies the coordinator/tool diet. This may under-use an old broker,
+ * but it cannot recreate the first-turn OOM class during rolling upgrades.
+ */
+export const LEGACY_REMOTE_CONTEXT_WINDOW = 8_192;
 
 export interface RemoteGezelProviderOpts {
   /** Stable id of the paired server this provider talks to. */
@@ -39,6 +51,8 @@ export interface RemoteGezelProviderOpts {
    * `mlx`, or `ds4` while B's inference wire requires `<provider>:<model>`.
    */
   modelPrefix?: string;
+  /** B-native model selected when the provider was constructed. */
+  defaultModel?: string;
   /** B's models captured at pairing/discovery, already namespaced for A. */
   models?: ModelInfo[];
   /** A-side admission cap on concurrent sockets to B. */
@@ -54,6 +68,8 @@ export class RemoteGezelProvider implements LLMProvider {
   readonly supportsPriorMessages = true;
   private readonly log = createLogger('remote-provider');
   private cachedModels: ModelInfo[] | null = null;
+  private readonly admittedContextWindows = new Map<string, number>();
+  private lastAdmittedContextWindow: number | undefined;
 
   constructor(private readonly opts: RemoteGezelProviderOpts) {
     this.queue = new ProviderQueue({ concurrency: opts.concurrency ?? 8 });
@@ -68,7 +84,70 @@ export class RemoteGezelProvider implements LLMProvider {
   }
 
   getEffectiveModelId(): string | undefined {
-    return this.opts.models?.[0]?.id;
+    return this.opts.models?.[0]?.id ?? this.opts.defaultModel;
+  }
+
+  getContextWindow(): number | undefined {
+    return this.lastAdmittedContextWindow;
+  }
+
+  /** Resolve A's model spelling to the B-native `<provider>:<model>` id. */
+  private brokerModel(model?: string): string {
+    const requested = model ?? this.opts.defaultModel ?? this.getEffectiveModelId() ?? '';
+    const remoteLocal = parseRemoteModelId(requested)?.modelId ?? requested;
+    return this.opts.modelPrefix &&
+      remoteLocal &&
+      !remoteLocal.startsWith(`${this.opts.modelPrefix}:`)
+      ? `${this.opts.modelPrefix}:${remoteLocal}`
+      : remoteLocal;
+  }
+
+  async prepareContextWindow(model?: string): Promise<number | undefined> {
+    const bLocal = this.brokerModel(model);
+    if (!bLocal) return undefined;
+    const connection = this.opts.resolveConnection?.() ?? this.opts;
+    // A broker restart rotates URL/token and may admit a different window
+    // under the machine's new live pressure. Never carry the prior process's
+    // clamp across that identity boundary.
+    const admissionKey = `${connection.baseUrl}\0${connection.token}\0${bLocal}`;
+    const cached = this.admittedContextWindows.get(admissionKey);
+    if (cached !== undefined) {
+      this.lastAdmittedContextWindow = cached;
+      return cached;
+    }
+
+    const res = await connection.fetch(`${connection.baseUrl}/v1/remote/admit`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${connection.token}`,
+      },
+      body: JSON.stringify({ protocolVersion: PROTOCOL_VERSION, model: bLocal }),
+    });
+    if (!res.ok) {
+      const detail = await res.text().catch(() => '');
+      let code: string | undefined;
+      try {
+        code = (JSON.parse(detail) as { error?: string }).error;
+      } catch {
+        /* old brokers commonly return a plain 404 body */
+      }
+      if (res.status === 404 && code !== 'model_not_loaded') {
+        this.log.warn(
+          `[remote-provider] ${this.opts.label} predates context admission; using conservative ${LEGACY_REMOTE_CONTEXT_WINDOW}-token window for ${bLocal}`,
+        );
+        this.admittedContextWindows.set(admissionKey, LEGACY_REMOTE_CONTEXT_WINDOW);
+        this.lastAdmittedContextWindow = LEGACY_REMOTE_CONTEXT_WINDOW;
+        return LEGACY_REMOTE_CONTEXT_WINDOW;
+      }
+      throw new Error(
+        `[remote] /v1/remote/admit returned HTTP ${res.status}${detail ? ` ${detail}` : ''}`,
+      );
+    }
+    const admitted = RemoteAdmissionResponseSchema.parse(await res.json()).contextWindow;
+    this.admittedContextWindows.set(admissionKey, admitted);
+    this.lastAdmittedContextWindow = admitted;
+    return admitted;
   }
 
   async listModels(): Promise<ModelInfo[]> {
@@ -101,13 +180,9 @@ export class RemoteGezelProvider implements LLMProvider {
   }
 
   async createSession(opts: SessionOpts): Promise<LLMSession> {
+    const numCtx = (await this.prepareContextWindow(opts.model)) ?? LEGACY_REMOTE_CONTEXT_WINDOW;
     const bridges = await McpBridgePool.fromSessionOpts(opts, `[remote:${this.opts.label}]`);
-    const requested = opts.model ?? this.getEffectiveModelId() ?? '';
-    const remoteLocal = parseRemoteModelId(requested)?.modelId ?? requested;
-    const bLocal =
-      this.opts.modelPrefix && remoteLocal && !remoteLocal.startsWith(`${this.opts.modelPrefix}:`)
-        ? `${this.opts.modelPrefix}:${remoteLocal}`
-        : remoteLocal;
+    const bLocal = this.brokerModel(opts.model);
     this.log.info(`[remote-provider] session on ${this.opts.label} model=${bLocal}`);
     return new RemoteSession({
       baseUrl: this.opts.baseUrl,
@@ -123,6 +198,8 @@ export class RemoteGezelProvider implements LLMProvider {
       ...(opts.reasoningEffort ? { reasoningEffort: opts.reasoningEffort } : {}),
       ...(opts.tuning ? { tuning: opts.tuning as unknown as Record<string, unknown> } : {}),
       priorMessages: opts.priorMessages ?? [],
+      numCtx,
+      ...(opts.requestCompaction ? { requestCompaction: opts.requestCompaction } : {}),
       timeoutMs: REMOTE_TURN_TIMEOUT_MS,
     });
   }

@@ -19,6 +19,7 @@ function mockInner(overrides: Partial<LlamaCppProvider> = {}): LlamaCppProvider 
     createSession: vi.fn().mockResolvedValue(session),
     listModels: vi.fn().mockResolvedValue([{ id: 'deepseek-v4-flash-284b-q2' }]),
     getEffectiveModelId: vi.fn().mockReturnValue('deepseek-v4-flash-284b-q2'),
+    getContextWindow: vi.fn().mockReturnValue(35_840),
     queue: { concurrency: 1 },
     batch: { maxConcurrency: 1 },
     supportsExternalTools: true,
@@ -48,6 +49,7 @@ describe('Ds4Provider (composition over llama.cpp)', () => {
 
     expect(await p.listModels()).toEqual([{ id: 'deepseek-v4-flash-284b-q2' }]);
     expect(p.getEffectiveModelId()).toBe('deepseek-v4-flash-284b-q2');
+    expect(p.getContextWindow()).toBe(35_840);
 
     await p.shutdown();
     expect(inner.shutdown).toHaveBeenCalledOnce();

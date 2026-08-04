@@ -9,6 +9,7 @@ describe('isRemoteServingRoute', () => {
     ['GET', '/v1/apps/grant/grant-1/events'],
     ['DELETE', '/v1/apps/device-1/token'],
     ['GET', '/v1/remote/models'],
+    ['POST', '/v1/remote/admit'],
     ['POST', '/v1/remote/infer'],
   ])('allows the pairing and inference surface: %s %s', (method, path) => {
     expect(isRemoteServingRoute(method, path)).toBe(true);
