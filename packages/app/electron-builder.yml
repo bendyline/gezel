@@ -237,6 +237,11 @@ nsis:
   installerIcon: assets/icon.ico
   uninstallerIcon: assets/icon.ico
   installerHeaderIcon: assets/icon.ico
+  # Assisted-mode NSIS reserves a fixed 164x314 sidebar. Keep the paired
+  # workshop scenes at that exact size so NSIS neither stretches them nor
+  # falls back to electron-builder's stock blue software-box artwork.
+  installerSidebar: assets/installerSidebar.bmp
+  uninstallerSidebar: assets/uninstallerSidebar.bmp
   createDesktopShortcut: true
   createStartMenuShortcut: true
   license: EULA.txt

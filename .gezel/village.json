@@ -421,8 +421,8 @@
             27.4
           ],
           "p": ".github/workflows",
-          "h": "bdc6b193d5cb1875d2015219a4fa4b2f0dda1e4be453c5a1664fb190394e75cb",
-          "w": 163,
+          "h": "4160eeac6c06bd9e3896f2b93179ca79ea37dfa1a4a58091b0332d7e13aa412e",
+          "w": 165,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -435,8 +435,8 @@
             35.1
           ],
           "p": ".github/workflows",
-          "h": "98bb32d869a9beb32b4ac5891009c69a70b957ef606e676ccc7e03afafdda63a",
-          "w": 234,
+          "h": "a8441f1634dd9a6c3e72d8a4a0f3a55c0ce34b0d04e79b1dc43a5b8dc1901989",
+          "w": 237,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -449,9 +449,23 @@
             53
           ],
           "p": ".github/workflows",
-          "h": "a49a859de3ed26da90afac0a53e13e0f4c3233af2f8e0e4048f4b1b9e9eeede6",
-          "w": 1233,
+          "h": "1e3e8eba92cfbe0b3fc2045982348b774ecaace0dc3fa4e5911f682e539d6360",
+          "w": 1235,
           "a": "2026-07-29T12:45:34.302Z"
+        },
+        {
+          "k": "block",
+          "id": ".github/workflows/supply-chain-audit.yml",
+          "r": [
+            4911.5,
+            4324.3,
+            21.9,
+            15.4
+          ],
+          "p": ".github/workflows",
+          "h": "84012547f22c944c437f3f74d459c4bc23153572c5ae5381dab7a45afd57481f",
+          "w": 34,
+          "a": "2026-08-03T23:27:25.388Z"
         },
         {
           "k": "block",
@@ -561,7 +575,7 @@
             38.5,
             40.1
           ],
-          "h": "9a1dfcd865cc0bcf9199196bf76f26c80e73f8a37aee032ac6b74adc8c174586",
+          "h": "5e36de5632b152341769399fa068417af6522b414cc57212f1ef9af2368cce1e",
           "w": 416,
           "a": "2026-07-29T12:45:34.302Z"
         },
@@ -574,7 +588,7 @@
             40.7,
             38.6
           ],
-          "h": "eea1e4dba348a55998a44829aab154dbc9abd8a8cf6b650c7656261150e4fb01",
+          "h": "b55ec38160a269e2226e9bd6f0a8ff5cc2a0b6812fc6c54d89ac45bb9f4199ad",
           "w": 439,
           "a": "2026-07-29T12:45:34.302Z"
         },
@@ -626,8 +640,8 @@
             42.2,
             35.1
           ],
-          "h": "c3d6976c18b8ff5405a0dd0d1ef5defc24eac190e040b42f1637d13cce99789e",
-          "w": 451,
+          "h": "d5b645de2860429b859936bc8abf6b4fbca46f88fef7e3419d9f7ec3e617e89b",
+          "w": 471,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -791,6 +805,20 @@
           "h": "aa1e0c077e3c6d949631c0df49697db6bc29f2fb2560164ed8099d3078ffc927",
           "w": 13,
           "a": "2026-07-29T12:45:34.302Z"
+        },
+        {
+          "k": "block",
+          "id": "docs/design-guidelines.md",
+          "r": [
+            5255.7,
+            3800.9,
+            44,
+            38.9
+          ],
+          "p": "docs",
+          "h": "6eebb50a72a04990308363b313a71e081dcbcc0ca2060b10f93ee6fc25926a83",
+          "w": 468,
+          "a": "2026-08-03T21:55:35.432Z"
         },
         {
           "k": "block",
@@ -1404,7 +1432,7 @@
             37.9
           ],
           "p": "docs",
-          "h": "60a83a183c9f1d157858b961eab276f5064c2404f53aa3fa2da4df282d9b69ae",
+          "h": "ac1fb4d56b2db3864212bfdee36ab846bc23e77d416ab2f0643847e35ea26982",
           "w": 576,
           "a": "2026-07-29T12:45:34.302Z"
         },
@@ -1432,8 +1460,8 @@
             46.7
           ],
           "p": "docs",
-          "h": "63958ce6c0ad2b6aee083d7b8cbebcb92fa081d28f948708cf5d0c3d2cba46ff",
-          "w": 643,
+          "h": "ca5eb2be065796737bdad8b8e28518f0145282d383a46be81109d9a158d5e58a",
+          "w": 658,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -12973,7 +13001,8 @@
           "p": "native/helpers/service-host/.build/win32-x64",
           "h": "caedc99d3a92df3182a2ff20649480d799688cb4d244b34d30c7d58eeed4493f",
           "w": 5,
-          "a": "2026-07-29T18:50:41.070Z"
+          "a": "2026-07-29T18:50:41.070Z",
+          "d": "2026-08-03T21:55:35.432Z"
         },
         {
           "k": "block",
@@ -12987,7 +13016,8 @@
           "p": "native/helpers/service-host/.build/win32-x64",
           "h": "46e4ea61c7aeaf2d182c282ebbbde0d274c18ae341951b1c3785de20cd1f4072",
           "w": 6,
-          "a": "2026-07-29T18:50:41.070Z"
+          "a": "2026-07-29T18:50:41.070Z",
+          "d": "2026-08-03T21:55:35.432Z"
         },
         {
           "k": "block",
@@ -13001,7 +13031,8 @@
           "p": "native/helpers/service-host/.build/win32-x64",
           "h": "bb357b029879ad9092718700a75fc6efb2074f142544ab3c17a96914eb9bb1fb",
           "w": 377,
-          "a": "2026-07-29T18:50:41.070Z"
+          "a": "2026-07-29T18:50:41.070Z",
+          "d": "2026-08-03T21:55:35.432Z"
         },
         {
           "k": "block",
@@ -13015,7 +13046,8 @@
           "p": "native/helpers/service-host/.build/win32-x64/CMakeFiles/4.3.1-msvc1",
           "h": "68414f35cb2f63882f12ce14ec04c1cf06448b2f93f25974c989441adad1872f",
           "w": 103,
-          "a": "2026-07-29T18:50:41.070Z"
+          "a": "2026-07-29T18:50:41.070Z",
+          "d": "2026-08-03T21:55:35.432Z"
         },
         {
           "k": "block",
@@ -13029,7 +13061,8 @@
           "p": "native/helpers/service-host/.build/win32-x64/CMakeFiles/4.3.1-msvc1",
           "h": "f1c96e7b6bc035d04a44733638743f28bf70450e870a3095a55cff6ad81924fa",
           "w": 7,
-          "a": "2026-07-29T18:50:41.070Z"
+          "a": "2026-07-29T18:50:41.070Z",
+          "d": "2026-08-03T21:55:35.432Z"
         },
         {
           "k": "block",
@@ -13043,7 +13076,8 @@
           "p": "native/helpers/service-host/.build/win32-x64/CMakeFiles/4.3.1-msvc1",
           "h": "cb655f074177502b26612fa979ee72c606731a0b59f300e936ebba161d8cce09",
           "w": 16,
-          "a": "2026-07-29T18:50:41.070Z"
+          "a": "2026-07-29T18:50:41.070Z",
+          "d": "2026-08-03T21:55:35.432Z"
         },
         {
           "k": "block",
@@ -13057,7 +13091,8 @@
           "p": "native/helpers/service-host/.build/win32-x64/CMakeFiles/4.3.1-msvc1/CompilerIdCXX",
           "h": "9e26b0f20786a2d59935f5dddb7dbeceb54e40f39ffd6996b2fc0e339431808d",
           "w": 950,
-          "a": "2026-07-29T18:50:41.070Z"
+          "a": "2026-07-29T18:50:41.070Z",
+          "d": "2026-08-03T21:55:35.432Z"
         },
         {
           "k": "block",
@@ -13071,7 +13106,8 @@
           "p": "native/helpers/service-host/.build/win32-x64/CMakeFiles",
           "h": "38be5e1594433c0ec887ebf4194c65ad3cf918b00cbabe1869249d7d4df89956",
           "w": 2700,
-          "a": "2026-07-29T18:50:41.070Z"
+          "a": "2026-07-29T18:50:41.070Z",
+          "d": "2026-08-03T21:55:35.432Z"
         },
         {
           "k": "block",
@@ -13085,7 +13121,8 @@
           "p": "native/helpers/service-host/.build/win32-x64/CMakeFiles",
           "h": "71becdb6766408ff929f187ca8124ff42f081348b6d506fb9a02f52e60ad7b50",
           "w": 168,
-          "a": "2026-07-29T18:50:41.070Z"
+          "a": "2026-07-29T18:50:41.070Z",
+          "d": "2026-08-03T21:55:35.432Z"
         },
         {
           "k": "block",
@@ -13099,7 +13136,8 @@
           "p": "native/helpers/service-host/.build/win32-x64/CMakeFiles/ShowIncludes",
           "h": "7eb70257593da06f682a3ddda54a9d260d4fc514f645237f5ca74b08f8da61a6",
           "w": 2,
-          "a": "2026-07-29T18:50:41.070Z"
+          "a": "2026-07-29T18:50:41.070Z",
+          "d": "2026-08-03T21:55:35.432Z"
         },
         {
           "k": "block",
@@ -13113,7 +13151,8 @@
           "p": "native/helpers/service-host/.build/win32-x64/CMakeFiles/ShowIncludes",
           "h": "cdfab295fc8e12c3ecfb6982f99058f032ee8284926ad71a829e70ea3bf02549",
           "w": 3,
-          "a": "2026-07-29T18:50:41.070Z"
+          "a": "2026-07-29T18:50:41.070Z",
+          "d": "2026-08-03T21:55:35.432Z"
         },
         {
           "k": "block",
@@ -13127,7 +13166,8 @@
           "p": "native/helpers/service-host/.build/win32-x64/CMakeFiles",
           "h": "82f00f647bb022487db1b546447ff2db6f0be84cc54eaf93edf80a4759935e28",
           "w": 33,
-          "a": "2026-07-29T18:50:41.070Z"
+          "a": "2026-07-29T18:50:41.070Z",
+          "d": "2026-08-03T21:55:35.432Z"
         },
         {
           "k": "block",
@@ -13141,7 +13181,8 @@
           "p": "native/helpers/service-host/.build/win32-x64/CMakeFiles",
           "h": "95079b44bcef481d601432c2fd3c654d7fe85b9c8386c355f2874502b47441d7",
           "w": 2,
-          "a": "2026-07-29T18:50:41.070Z"
+          "a": "2026-07-29T18:50:41.070Z",
+          "d": "2026-08-03T21:55:35.432Z"
         },
         {
           "k": "block",
@@ -13155,7 +13196,8 @@
           "p": "native/helpers/service-host/.build/win32-x64/CMakeFiles",
           "h": "2ae1047af5cea1b0dc3fd9e6797002cc589ee5c1428da52e03269bb2e28919e7",
           "w": 70,
-          "a": "2026-07-29T18:50:41.070Z"
+          "a": "2026-07-29T18:50:41.070Z",
+          "d": "2026-08-03T21:55:35.432Z"
         },
         {
           "k": "block",
@@ -13169,7 +13211,8 @@
           "p": "native/helpers/service-host/.build/win32-x64",
           "h": "d9a96d2ea8de7e05f0f2bffae9f2c68b61f678db82daf8c23582a06690ab3e8c",
           "w": 9,
-          "a": "2026-07-29T18:50:41.070Z"
+          "a": "2026-07-29T18:50:41.070Z",
+          "d": "2026-08-03T21:55:35.432Z"
         },
         {
           "k": "block",
@@ -13183,7 +13226,8 @@
           "p": "native/helpers/service-host/.build/win32-x64",
           "h": "d603557b02a6a36c504bbab107fea0b11aeff818197afec76a070575a7919982",
           "w": 110,
-          "a": "2026-07-29T18:50:41.070Z"
+          "a": "2026-07-29T18:50:41.070Z",
+          "d": "2026-08-03T21:55:35.432Z"
         },
         {
           "k": "block",
@@ -13197,7 +13241,8 @@
           "p": "native/helpers/service-host/.build/win32-x64",
           "h": "df403b84e9e4af59ab3df0948d87e6b4551576b2d0a3adba04c5e1efff9cf84a",
           "w": 558,
-          "a": "2026-07-29T18:50:41.070Z"
+          "a": "2026-07-29T18:50:41.070Z",
+          "d": "2026-08-03T21:55:35.432Z"
         },
         {
           "k": "block",
@@ -13211,7 +13256,8 @@
           "p": "native/helpers/service-host/.build/win32-x64",
           "h": "e694bd7e6f7479c8fff42a96789571ea7d8be5c9df44191089db7264c4b6f655",
           "w": 57,
-          "a": "2026-07-29T18:50:41.070Z"
+          "a": "2026-07-29T18:50:41.070Z",
+          "d": "2026-08-03T21:55:35.432Z"
         },
         {
           "k": "block",
@@ -13223,8 +13269,8 @@
             18.2
           ],
           "p": "native/helpers/service-host",
-          "h": "a2e2a1a0df1da622a3dd293c370f7316355c553c257f4522521d5a0e5436571a",
-          "w": 26,
+          "h": "da14bd2445d57873d3eb0a2c2557fa9a33365100f9c7ffe4c651873a6d9a86f6",
+          "w": 46,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -13237,8 +13283,8 @@
             19.4
           ],
           "p": "native/helpers/service-host",
-          "h": "721a8c482c27c9d89c96067aff6452f9ad91ae342c55995e0346ac073ed42192",
-          "w": 79,
+          "h": "3cef8aa4e11ad8a5b184fec14f4ac575666adeec12198e8062d78ee4ce3f880f",
+          "w": 109,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -13251,8 +13297,8 @@
             27.2
           ],
           "p": "native/helpers/service-host",
-          "h": "f1c1577917553de9c7e2b55558757b771cfc8cea91666c76050fa7688a3fc144",
-          "w": 125,
+          "h": "c9e31c686cc83fed4b1f01dc8ef74099b80c9cef3216cd1e1083b41a603401cf",
+          "w": 147,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -13265,9 +13311,23 @@
             47.6
           ],
           "p": "native/helpers/service-host/src",
-          "h": "47b360025c7f930eec640198ff9036c476aab4f18330450bc82a85db838235fd",
-          "w": 898,
+          "h": "db0e6552dde04ff79812420b75048b36fcfec143ff1f44262d464a94b8b09893",
+          "w": 902,
           "a": "2026-07-29T12:45:34.302Z"
+        },
+        {
+          "k": "block",
+          "id": "native/helpers/service-host/src/version.rc.in",
+          "r": [
+            4937.3,
+            4027.2,
+            21.4,
+            21.2
+          ],
+          "p": "native/helpers/service-host/src",
+          "h": "4aba3ec46242a3d3cdbeff63b0f5ad344336141f3bcf7a929d09a4817e8d751f",
+          "w": 54,
+          "a": "2026-08-03T21:55:35.432Z"
         },
         {
           "k": "block",
@@ -13909,8 +13969,8 @@
             47.5
           ],
           "p": "packages/app/installer",
-          "h": "0b1aac366822ea3ea5ba01ef2d32c36927f3b985cf5b381fc7ad2af81b95b63c",
-          "w": 541,
+          "h": "ca7935c72c69934c202b141deaae7900d51667fd02f155824e258ca59e3ca781",
+          "w": 569,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -14931,7 +14991,7 @@
             20.4
           ],
           "p": "packages/app/src/supervisor",
-          "h": "8481b8c8b011404b0c0320980b272d02f67d75c53e7b485c1e372c33edf41a95",
+          "h": "10e9eaf2f70cd20071eadbdded67d56d594f2e5c5e082ace3d6ec814fe361f9e",
           "w": 95,
           "a": "2026-07-31T17:30:53.594Z"
         },
@@ -15897,8 +15957,8 @@
             61.8
           ],
           "p": "packages/cli/src/bin",
-          "h": "209f9e30d7bf1320327bd3c39596dede175790c9ca4ab9d8ba169bb76209cd1e",
-          "w": 966,
+          "h": "8f43ab7cf58b3a83f907bb8f14990d2261ae03b045d756e2c295a5c360286c6f",
+          "w": 972,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -15939,9 +15999,23 @@
             29.6
           ],
           "p": "packages/cli/src",
-          "h": "d9623a8c42be9097ac6699c2d5c8d92be73de0eea54a390e694042fbabefcd9f",
-          "w": 190,
+          "h": "3eee02a110ba48b2d11556607ccb2fa1e0cedb9c999f95f57e38fd939c23cb00",
+          "w": 461,
           "a": "2026-07-29T12:45:34.302Z"
+        },
+        {
+          "k": "block",
+          "id": "packages/cli/src/handboek-site-css.ts",
+          "r": [
+            1775.8,
+            700.7,
+            38.5,
+            31.7
+          ],
+          "p": "packages/cli/src",
+          "h": "3e0e260ae2774d7f36a73a6b13da768995aaa0819e8b5e5434886ea7df800e1a",
+          "w": 283,
+          "a": "2026-08-03T21:55:35.432Z"
         },
         {
           "k": "block",
@@ -16177,8 +16251,8 @@
             68.1
           ],
           "p": "packages/client/src",
-          "h": "32844746d3d3618f3751abafc63e34bc84473317a2a000eb1118533adbe24f6a",
-          "w": 6490,
+          "h": "3ce170b4beb1d2c2657cea39a921f02acdd9017d1d23b7be7ac13766bb9e24da",
+          "w": 6559,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -17157,8 +17231,8 @@
             15.9
           ],
           "p": "packages/core/src/native",
-          "h": "381000978085b929324663810a577ae68e1423ae8f8a4a9c2fdcbab635b8c2a3",
-          "w": 26,
+          "h": "83f2e90aad113378ae90ac9edc88d79a3d402631122dd9c553bbd6b8d31012a8",
+          "w": 43,
           "a": "2026-08-03T16:21:18.505Z"
         },
         {
@@ -17171,8 +17245,8 @@
             56.1
           ],
           "p": "packages/core/src/native",
-          "h": "fcf29e5b3fe7c1e6b9a8e3e1aed58cb361175e566df4cdff045213a35b47ee2d",
-          "w": 823,
+          "h": "06ec841353ef8657dc135754f7535236d2751f93ade2c210c267eee033db6553",
+          "w": 824,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -17535,8 +17609,8 @@
             64.2
           ],
           "p": "packages/core/src/schemas",
-          "h": "df5062abcc8eedbb107ddc46c71b566e58a252f3750387617b36acd74768c28a",
-          "w": 6412,
+          "h": "96ffb4d75ec872fc602bd4e12f44bebb54ebbab7d6aacac1e25e3f73dca90f50",
+          "w": 6457,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -17675,8 +17749,8 @@
             48.2
           ],
           "p": "packages/core/src/schemas",
-          "h": "d2d7563d11e71726795e36152602fb3186d409c97c6fb781d2d0997fc0a45fe8",
-          "w": 1216,
+          "h": "674503042b44ae84ed512d017b08afffee9c314232631d0fd2fcd843a3cf7654",
+          "w": 1232,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -17997,8 +18071,8 @@
             50.1
           ],
           "p": "packages/core/src/schemas",
-          "h": "629d0c6dee4115524fa7a9fb511ad734898014ee1ebeff6769134063e5d4bd3b",
-          "w": 504,
+          "h": "90ae7df5e4d9bb7998ace74c18d3b0473d3a79fac20ba24efa432dedb0128ac2",
+          "w": 564,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -20559,7 +20633,7 @@
             32.6
           ],
           "p": "packages/service/src/engines",
-          "h": "c458db847c91a704c02a527246fd816aec0c7fd9f0f97539a8741080a501e3f1",
+          "h": "9148de6da97d90348359074c66791cccfc81cc851dc7b9d77fb4f479ebc5f5b1",
           "w": 309,
           "a": "2026-07-29T12:45:34.302Z"
         },
@@ -21021,8 +21095,8 @@
             63.7
           ],
           "p": "packages/service/src/fs",
-          "h": "2224ddac52085e96d1bbd3f79b4647686ac76b847b40fbed7658c18e757e7583",
-          "w": 6112,
+          "h": "7d33d974a065fb4889d2710706bd746161e6ddb63521492ab2529b039e1525cb",
+          "w": 6113,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -21231,7 +21305,7 @@
             23.9
           ],
           "p": "packages/service/src/github",
-          "h": "5a1aca7bf1ddaad584123ebe1b6d075a4d52ab339854f1c258c2c9453299de5c",
+          "h": "55d40aec044a318eb9a154b2b3a4303da2116c1f74c5737af043f69dd6d157bb",
           "w": 167,
           "a": "2026-07-29T12:45:34.302Z"
         },
@@ -21598,8 +21672,8 @@
             30.3
           ],
           "p": "packages/service/src/http",
-          "h": "633fd8e39edb7a451f2d448ab4f422c47ca467d20575b85c0a91f6e3728326e1",
-          "w": 271,
+          "h": "603d90fb3dcf296ed47ef76bdc8419b2923743193833aa0a047cea61c96f1aa1",
+          "w": 279,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -21878,8 +21952,8 @@
             23.1
           ],
           "p": "packages/service/src/http/routes",
-          "h": "2b596c37a76700887d9ba367cc4e3fa9ddb84556f5b2a91fa3ff6072b65f9991",
-          "w": 168,
+          "h": "f7cee1f7bc333a333fd7a5d8d504862ab960f11c9affd1d2d7d08dd34af411bd",
+          "w": 181,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -21906,8 +21980,8 @@
             55.5
           ],
           "p": "packages/service/src/http/routes",
-          "h": "ffd929cf5770980605d91d3fc8623ef084813cbb7287168c2a5811b4e7b04c0a",
-          "w": 823,
+          "h": "0f5dc850a15c5cf489f02c0b50dbb484e713e29ed388a53e9657731859440fca",
+          "w": 826,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -22606,8 +22680,8 @@
             36.2
           ],
           "p": "packages/service/src/http/routes",
-          "h": "bf629a228add62c9a8a5351d9142c1eca9f340b4596b1e4aa3a7884cd9f07317",
-          "w": 220,
+          "h": "791ed29e44286dd2e6885d0174ba63f50a718e647e1e18e620116d98a326c774",
+          "w": 269,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -22648,8 +22722,8 @@
             37.9
           ],
           "p": "packages/service/src/http/routes",
-          "h": "bdc9425a51f81f68527e5f73fda11ae82904f0c168da2fd6115e1250a7210744",
-          "w": 508,
+          "h": "8d1411f31f3b8708c0437721f7af31aa3f8776503bbf9492fc6d3a6f54462342",
+          "w": 536,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -22886,8 +22960,8 @@
             39.3
           ],
           "p": "packages/service/src/http",
-          "h": "71b3a88cfa251e67201160e8218872015fd994fb953c299e644a2e3b8c9a2329",
-          "w": 720,
+          "h": "d0070a096eedc50911e03fe194bdfe32e0a1f97d5658d9dd16ae6f848edfef5b",
+          "w": 725,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -24594,7 +24668,7 @@
             31.9
           ],
           "p": "packages/service/src/packages",
-          "h": "71342e515ba66202e9b6508aa53d2a05b0e4ddb4185666a3158b38137e2b94bb",
+          "h": "1ded73bf45d44cc48526ee78f515d52c926edc1a81f87ee009c4e7378235b2a5",
           "w": 190,
           "a": "2026-07-29T12:45:34.302Z"
         },
@@ -25266,8 +25340,8 @@
             22.9
           ],
           "p": "packages/service/src/providers",
-          "h": "59650d704c93d1d2e32fa6e9de5c06bd06dd51f85ac4089b2397551b2aaf10b7",
-          "w": 112,
+          "h": "55186882bc802c61daf035c732a5639d88bc7140166d1329688730c25c0be1f3",
+          "w": 168,
           "a": "2026-08-02T15:53:27.759Z"
         },
         {
@@ -25294,8 +25368,8 @@
             61.9
           ],
           "p": "packages/service/src/providers",
-          "h": "a5626cbb1b921d7a8e5ae7ab3a49f6f543b85c7db1a328e7c756a4eb379be04d",
-          "w": 993,
+          "h": "4b33f6bfff03219b61f9b2de2df0c50ed26b34e74989808e40eccbd73a03ce31",
+          "w": 1013,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -26247,8 +26321,8 @@
             32.9
           ],
           "p": "packages/service/src/providers/native",
-          "h": "2c93f4d271c3bf7abab64db6e4870b92ec1bcdb88581eecabb71890f6094e743",
-          "w": 625,
+          "h": "84a10e0db77684e554a607f708563c955fb42d6e09cb84bee8d3b5a84381463f",
+          "w": 623,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -26331,8 +26405,8 @@
             47.5
           ],
           "p": "packages/service/src/providers/native",
-          "h": "12ee9eadb10bb7c415696a19e404ff75a9c0fadc387dc9d63f6805f3863aaaa4",
-          "w": 872,
+          "h": "5a86e43f8b0de4bc819618ecfc5345d14eb3bd58af8c651e80066e3eccc2c209",
+          "w": 876,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -26345,8 +26419,8 @@
             51.1
           ],
           "p": "packages/service/src/providers/native",
-          "h": "f239e0b588e744a85acfcf0ce2599b0653a5adccf146ba89a8ba05c03dc2c746",
-          "w": 1360,
+          "h": "68bd06d1cb00d29306cc24adaa7c5c3de831e33805415aa7259a520c8f9d9e3a",
+          "w": 1361,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -27353,7 +27427,7 @@
             45.2
           ],
           "p": "packages/service/src/sandbox",
-          "h": "58522c3e66e684780a48a5af4801a55e72e1f99d00c54c997164ec73f197ad70",
+          "h": "a925d41ac7d277725bca44a51fadfe4b45f9887af9d5ee62a516d2939b5cceab",
           "w": 792,
           "a": "2026-07-29T12:45:34.302Z"
         },
@@ -27717,8 +27791,8 @@
             66.9
           ],
           "p": "packages/service/src",
-          "h": "e189fb7af5848d320a9f590e6097c9afe8caebb9a608f6c60fe02f75bf44d346",
-          "w": 2348,
+          "h": "00736d274d5129fefac17c36e860e090f1220fcb5e20e9dac7a6a3e6f4ec5da3",
+          "w": 2389,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -28017,6 +28091,20 @@
         },
         {
           "k": "block",
+          "id": "packages/service/src/system/spawn-capability.ts",
+          "r": [
+            1205.5,
+            3059,
+            28.3,
+            25.7
+          ],
+          "p": "packages/service/src/system",
+          "h": "0f61b10283004eca792f16126236e697ea2131eba832ebb7a00280b32c6962a2",
+          "w": 127,
+          "a": "2026-08-03T21:55:35.432Z"
+        },
+        {
+          "k": "block",
           "id": "packages/service/src/tasks/cron.ts",
           "r": [
             673.7,
@@ -28151,8 +28239,8 @@
             42.5
           ],
           "p": "packages/service/src/tasks",
-          "h": "8a4c76dc63151488afe8ae1103761a8642e28a6e5759519156e2f5ec277e35fb",
-          "w": 644,
+          "h": "53cae0968dbfabcf8c7ecccf7db58250c6697da46b18978e0c04af006347e3c2",
+          "w": 658,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -29342,8 +29430,8 @@
             46
           ],
           "p": "packages/ui/src/components",
-          "h": "f9804da524a0a313780f4a3ad20b73167fc76bc317d94e84da1df81984841bae",
-          "w": 1044,
+          "h": "bc4eb2338bef48ddf5803ba484aeae3b7a58452dc41f15db926297a34d57fc2a",
+          "w": 1212,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -29384,8 +29472,8 @@
             59
           ],
           "p": "packages/ui/src/components",
-          "h": "7399ceea03bc2b0cbb1ee43bbf9ebc0e7faaab2e864fee9dd63f92c8772451e7",
-          "w": 3830,
+          "h": "c169ab1ed55252741f2978e0315ea1bfc4e9d9c733b4bcbf471730f0557cb284",
+          "w": 3856,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -29454,8 +29542,8 @@
             28.8
           ],
           "p": "packages/ui/src/components",
-          "h": "66f2fff3557e3ea9223596b12dfc25dfc194351836092f7c7a6559f3b90c8938",
-          "w": 280,
+          "h": "e09781590d249ccdac9012e44dcd90e835160be3cc04237cc4242211722ef6a3",
+          "w": 303,
           "a": "2026-08-02T15:53:27.759Z"
         },
         {
@@ -29708,8 +29796,8 @@
             28.9
           ],
           "p": "packages/ui/src/components",
-          "h": "0c003c1fb30346e84da2d782bfbaf9132ceba07ca5788d499bde33fbd8eeb151",
-          "w": 187,
+          "h": "5097549253aa5f3ba4e3db5dd23742c32edac997591e3761d2d1e72fcb6f8d5a",
+          "w": 274,
           "a": "2026-08-02T15:53:27.759Z"
         },
         {
@@ -31010,8 +31098,8 @@
             38.6
           ],
           "p": "packages/ui/src/components",
-          "h": "a36789f08b87ae5921a51e0189b608f10aa621b57364abaf8fc22d66b326a8e4",
-          "w": 1023,
+          "h": "4159e07b07e821aa2a2d2950c16abab0c7929d166741be215e3b54ea2407d003",
+          "w": 1026,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -31038,8 +31126,8 @@
             33.9
           ],
           "p": "packages/ui/src/components",
-          "h": "ea58df74ec74a61c8360236794467993f3d205450c9d98b458631e317144d67d",
-          "w": 473,
+          "h": "7e1d38560f14b00012829bca2b695c148728eba807d83621faa8cb03669d3e9c",
+          "w": 683,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -31136,8 +31224,8 @@
             46.6
           ],
           "p": "packages/ui/src/components",
-          "h": "b7327bddef0388cce7bf6495513fbc272aebb741ff3f7077530539a25185b994",
-          "w": 972,
+          "h": "7ba6d5d78e8453cecf0f047f456dbd9056f5a76acf2e34f5c5cde16ec3632dce",
+          "w": 973,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -31500,8 +31588,8 @@
             55.8
           ],
           "p": "packages/ui/src/components",
-          "h": "7406c152a568fe24a3d2132c5834e041acf06f4ade3ccbe247b01552ace6d975",
-          "w": 3166,
+          "h": "e98fdd57acbad8a18986d0615a80db9e273ce2c9c7a00a05457f5430e1b98127",
+          "w": 3286,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -32452,8 +32540,8 @@
             29.3
           ],
           "p": "packages/ui/src/components/transform",
-          "h": "1b5a418dc2c591a68009a221d028a9d7b33605ec2cca81b5edba9e374be16907",
-          "w": 159,
+          "h": "b0a912bb47c4fcdbfa36268df4bab11f3a90d770df0e7c9ec03446bfdad2ec43",
+          "w": 174,
           "a": "2026-08-03T14:26:57.350Z"
         },
         {
@@ -32480,8 +32568,8 @@
             17.9
           ],
           "p": "packages/ui/src/components/transform",
-          "h": "2d759a8c1f8db313cbf39104a11cd1194e09ea23872b0c85cfbdea7f9f9e6257",
-          "w": 26,
+          "h": "080a44c7f4bc7406b543cab5e9b3c96af506eebdc769c371b6cce5dc23cc8050",
+          "w": 28,
           "a": "2026-08-03T14:26:57.350Z"
         },
         {
@@ -33223,8 +33311,8 @@
             24.1
           ],
           "p": "packages/ui/src",
-          "h": "9b082116aeb66571c01d3482d4591e46278354146130f1e5aea1cb1a71a306dc",
-          "w": 213,
+          "h": "c0075bb977a6bf7a587f16e4d00e5a1ad419a318195dd0ec01a40785103dff08",
+          "w": 255,
           "a": "2026-07-31T17:30:53.594Z"
         },
         {
@@ -33489,8 +33577,8 @@
             53.4
           ],
           "p": "packages/ui/src/views",
-          "h": "5c95ac5ea95fa169968d9f9e3e12b7559540b52cb84d5867049477ac2a148080",
-          "w": 781,
+          "h": "53fdd8aa897a8fce1fe3525df4590629fe4711f300a7f436376f678778636351",
+          "w": 780,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -34286,8 +34374,8 @@
             21.8,
             21.7
           ],
-          "h": "fb3e41044bdffa5d1918cf72cc6bf9872f9812fc45d268dd95576773963a2f56",
-          "w": 82,
+          "h": "80a2fc0344dd7b2ab57c13d42e97b149c2fe7d206f6e4d1ec0148bc60bd79fff",
+          "w": 83,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -34608,8 +34696,8 @@
             32.5
           ],
           "p": "scripts",
-          "h": "c7d09de9c3bef81eee8a7a1d271fcc21ddaee13b29e182ee5ad5469255573fb3",
-          "w": 437,
+          "h": "23720a4b4fdba2330faf3abc80e62332bb771e4e83ab4644770dea0ed6d12670",
+          "w": 445,
           "a": "2026-07-29T12:45:34.302Z"
         },
         {
@@ -34709,6 +34797,20 @@
           "h": "58f31426ed37b1ac3259beee361b9530790cc7f2413eb90512abac13b2a3ef7d",
           "w": 52,
           "a": "2026-07-29T12:45:34.302Z"
+        },
+        {
+          "k": "block",
+          "id": "scripts/export-handboek-site.mjs",
+          "r": [
+            3490,
+            3768.4,
+            30.7,
+            21.2
+          ],
+          "p": "scripts",
+          "h": "bc52bcdae697c78d5f961f7c57ee96ac74b6b47a00e035f6f4eb0ae92717b75a",
+          "w": 113,
+          "a": "2026-08-03T21:55:35.432Z"
         },
         {
           "k": "block",
