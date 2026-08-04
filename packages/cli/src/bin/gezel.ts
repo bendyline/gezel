@@ -549,9 +549,17 @@ handboek
     (href: string, prior: string[]) => [...prior, href],
     [] as string[],
   )
-  .action(async (opts: { out: string; css: string[] }) => {
+  .option(
+    '--site-url <url>',
+    'URL of the surrounding site; adds a wordmark link back out of the docs',
+  )
+  .action(async (opts: { out: string; css: string[]; siteUrl?: string }) => {
     const { runHandboekExport } = await import('../handboek-export.js');
-    const result = await runHandboekExport({ out: opts.out, css: opts.css });
+    const result = await runHandboekExport({
+      out: opts.out,
+      css: opts.css,
+      siteUrl: opts.siteUrl,
+    });
     console.log(`Handboek exported: ${result.pages} pages → ${result.out}`);
     for (const id of result.skipped) console.error(`  skipped (no body): ${id}`);
   });

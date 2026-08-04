@@ -4446,7 +4446,11 @@ export class GezelClient {
     id: string,
     subpath?: string,
     recursive?: boolean,
-  ): Promise<{ files: Array<{ name: string; path: string; isDirectory: boolean }> }> {
+  ): Promise<{
+    files: Array<{ name: string; path: string; isDirectory: boolean }>;
+    /** Present on recursive listings: true when the walker's entry cap dropped files. */
+    truncated?: boolean;
+  }> {
     const params = new URLSearchParams();
     if (subpath) params.set('path', subpath);
     if (recursive) params.set('recursive', '1');
@@ -4652,7 +4656,11 @@ export class GezelClient {
     id: string,
     subpath?: string,
     recursive?: boolean,
-  ): Promise<{ files: Array<{ name: string; path: string; isDirectory: boolean }> }> {
+  ): Promise<{
+    files: Array<{ name: string; path: string; isDirectory: boolean }>;
+    /** Present on recursive listings: true when the walker's entry cap dropped files. */
+    truncated?: boolean;
+  }> {
     const params = new URLSearchParams();
     if (subpath) params.set('path', subpath);
     if (recursive) params.set('recursive', '1');

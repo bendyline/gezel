@@ -165,12 +165,13 @@ import {
 } from './project-artifacts-store.js';
 import { intoWorkspaceRelative, resolveInside, safeJoin } from './safe-paths.js';
 import {
+  type WalkDirResult,
   findHtmlPages,
   listDirEntries,
   safeReadBinaryFile,
   safeReadTextFile,
   safeResolveRead,
-  walkDir,
+  walkDirDetailed,
 } from './tree.js';
 
 const log = createLogger('store');
@@ -3128,6 +3129,13 @@ export class Store {
     return this.artifacts.listProjectArtifactsRecursive(id, opts);
   }
 
+  async listProjectArtifactsRecursiveDetailed(
+    id: string,
+    opts?: { withStats?: boolean },
+  ): Promise<WalkDirResult> {
+    return this.artifacts.listProjectArtifactsRecursiveDetailed(id, opts);
+  }
+
   async readProjectArtifact(id: string, filePath: string): Promise<string | null> {
     return this.artifacts.readProjectArtifact(id, filePath);
   }
@@ -3450,8 +3458,14 @@ export class Store {
   }
 
   async listProjectWorkspaceRecursive(id: string): Promise<ProjectFileEntry[]> {
+    return (await this.listProjectWorkspaceRecursiveDetailed(id)).entries;
+  }
+
+  /** Recursive listing plus the truncation flag, for surfaces that must
+   *  tell the user/model when the walker's entry cap dropped files. */
+  async listProjectWorkspaceRecursiveDetailed(id: string): Promise<WalkDirResult> {
     const base = await this.projectWorkspaceDir(id);
-    return walkDir(base);
+    return walkDirDetailed(base);
   }
 
   async listProjectWorkspaceHtmlPages(id: string): Promise<ProjectFileEntry[]> {

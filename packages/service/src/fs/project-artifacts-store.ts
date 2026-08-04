@@ -5,7 +5,14 @@ import { type ExternalFolders, projectArtifactsDir } from '@bendyline/gezel/path
 import { writeFileAtomic } from './atomic.js';
 import { mimeTypeForFilename } from './media-types.js';
 import { safeJoin } from './safe-paths.js';
-import { listDirEntries, safeReadTextFile, safeResolveRead, walkDir } from './tree.js';
+import {
+  type WalkDirResult,
+  listDirEntries,
+  safeReadTextFile,
+  safeResolveRead,
+  walkDir,
+  walkDirDetailed,
+} from './tree.js';
 
 export type ProjectArtifactResolveResult =
   | { kind: 'found'; content: string; path: string; fuzzy: boolean }
@@ -82,7 +89,17 @@ export class ProjectArtifactsStore {
     id: string,
     opts?: { withStats?: boolean },
   ): Promise<ProjectFileEntry[]> {
-    return walkDir(this.projectArtifactsDir(id), opts?.withStats ? { withStats: true } : {});
+    return (await this.listProjectArtifactsRecursiveDetailed(id, opts)).entries;
+  }
+
+  async listProjectArtifactsRecursiveDetailed(
+    id: string,
+    opts?: { withStats?: boolean },
+  ): Promise<WalkDirResult> {
+    return walkDirDetailed(
+      this.projectArtifactsDir(id),
+      opts?.withStats ? { withStats: true } : {},
+    );
   }
 
   async readProjectArtifact(id: string, filePath: string): Promise<string | null> {

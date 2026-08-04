@@ -468,6 +468,8 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   const [workspaceFiles, setWorkspaceFiles] = useState<FileEntry[]>([]);
   const [workspaceHtmlFiles, setWorkspaceHtmlFiles] = useState<string[]>([]);
   const [artifactFiles, setArtifactFiles] = useState<FileEntry[]>([]);
+  const [workspaceTruncated, setWorkspaceTruncated] = useState(false);
+  const [artifactsTruncated, setArtifactsTruncated] = useState(false);
   const [openFile, setOpenFile] = useState<{
     path: string;
     content: string;
@@ -621,6 +623,8 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
     ]);
     setWorkspaceFiles(ws.files);
     setArtifactFiles(art.files);
+    setWorkspaceTruncated(ws.truncated === true);
+    setArtifactsTruncated(art.truncated === true);
   }, []);
 
   // Output discovery has deliberately tighter traversal rules than the full
@@ -2159,6 +2163,13 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                             onSelect={(e) => void openFileEntry(e, fileTab)}
                             onDelete={fileTab === 'artifacts' ? deleteArtifact : undefined}
                           />
+                          {(fileTab === 'workspace' ? workspaceTruncated : artifactsTruncated) && (
+                            <p className="muted" style={{ padding: '0.5rem', fontSize: '0.8rem' }}>
+                              This folder has more files than can be shown — the listing is
+                              incomplete. Use "Open" above to browse everything in your file
+                              manager.
+                            </p>
+                          )}
                         </div>
                       </div>
 

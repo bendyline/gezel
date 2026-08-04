@@ -50,6 +50,13 @@ export interface HandboekExportOptions {
    * against the export root and picks up the right `../` depth per page.
    */
   css?: string[];
+  /**
+   * URL of the surrounding site. When set, the masthead carries a `gezel`
+   * wordmark linking there, so readers can get back out of the docs. Emitted
+   * verbatim — a project-scoped GitHub Pages deploy wants `/<repo>/`, not `/`.
+   * Omitted by default: a standalone export has nowhere to go.
+   */
+  siteUrl?: string;
 }
 
 /**
@@ -69,11 +76,15 @@ const AREA_BLURBS: Record<HandboekArea, string> = {
 
 const START_HERE = ['welcome', 'the-crew', 'projects-and-threads', 'craftbooks-overview'];
 
+/** Set lowercase and italic by the baseline sheet — the product name, not a title. */
+const WORDMARK = 'gezel';
+
 export async function runHandboekExport(
   opts: HandboekExportOptions,
 ): Promise<HandboekExportResult> {
   const out = resolve(opts.out);
   const css = opts.css ?? [];
+  const siteUrl = opts.siteUrl;
   const contentDir = findHandboekContent();
   if (!contentDir) {
     throw new Error(
@@ -120,7 +131,7 @@ export async function runHandboekExport(
     await mkdir(dir, { recursive: true });
     await writeFile(
       join(dir, 'index.html'),
-      articlePage({ entry, body, headings, areas, depth, css }),
+      articlePage({ entry, body, headings, areas, depth, css, siteUrl }),
       'utf8',
     );
 
@@ -142,7 +153,7 @@ export async function runHandboekExport(
     pages += 2;
   }
 
-  await writeFile(join(out, 'index.html'), landingPage(areas, css), 'utf8');
+  await writeFile(join(out, 'index.html'), landingPage(areas, css, siteUrl), 'utf8');
   pages += 1;
 
   const assetsSrc = join(contentDir, 'assets');
@@ -282,7 +293,12 @@ ${cssLinks(css, depth)}
 </head>`;
 }
 
-function masthead(areas: HandboekTocArea[], depth: number, currentArea?: HandboekArea): string {
+function masthead(
+  areas: HandboekTocArea[],
+  depth: number,
+  siteUrl: string | undefined,
+  currentArea?: HandboekArea,
+): string {
   const links = areas
     .map((a) => {
       const target = areaLanding(a);
@@ -290,8 +306,9 @@ function masthead(areas: HandboekTocArea[], depth: number, currentArea?: Handboe
       return `<a${current} href="${up(depth)}${esc(target)}/">${esc(a.title)}</a>`;
     })
     .join('\n');
+  const wordmark = siteUrl ? `<a class="hb-wordmark" href="${esc(siteUrl)}">${WORDMARK}</a>\n` : '';
   return `<header class="hb-masthead">
-<a class="hb-brand" href="${up(depth)}">Gezel Handboek</a>
+${wordmark}<a class="hb-brand" href="${up(depth)}">Gezel Handboek</a>
 <nav class="hb-areanav">
 ${links}
 </nav>
@@ -364,13 +381,14 @@ function articlePage(args: {
   areas: HandboekTocArea[];
   depth: number;
   css: string[];
+  siteUrl: string | undefined;
 }): string {
-  const { entry, body, headings, areas, depth, css } = args;
+  const { entry, body, headings, areas, depth, css, siteUrl } = args;
   const area = areas.find((a) => a.area === entry.area);
   const aside = onThisPage(headings);
   return `${head(`${entry.title} — Gezel Handboek`, css, depth, entry.summary)}
 <body class="hb hb-article-page">
-${masthead(areas, depth, entry.area)}
+${masthead(areas, depth, siteUrl, entry.area)}
 <div class="hb-layout">
 ${sidebar(areas, entry, depth)}
 <main class="hb-main">
@@ -400,7 +418,7 @@ function footer(depth: number): string {
  * buries the ten things a newcomer actually needs under ~300 catalog
  * entries, so generated areas link to their own index article instead.
  */
-function landingPage(areas: HandboekTocArea[], css: string[]): string {
+function landingPage(areas: HandboekTocArea[], css: string[], siteUrl: string | undefined): string {
   const byId = new Map(areas.flatMap((a) => a.entries).map((e) => [e.id, e]));
   const startHere = START_HERE.map((id) => byId.get(id)).filter(
     (e): e is HandboekTocEntry => e !== undefined,
@@ -443,7 +461,7 @@ ${list}
 
   return `${head('Gezel Handboek', css, 0, 'Documentation for gezel — a crew of AI companions that works for you, from your own computer.')}
 <body class="hb hb-home">
-${masthead(areas, 0)}
+${masthead(areas, 0, siteUrl)}
 <main class="hb-main hb-home-main">
 <section class="hb-hero">
 <h1>The Gezel Handboek</h1>

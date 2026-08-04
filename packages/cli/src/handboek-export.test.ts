@@ -108,7 +108,7 @@ describe('runHandboekExport', () => {
 
   beforeAll(async () => {
     out = await mkdtemp(join(tmpdir(), 'gezel-handboek-site-'));
-    result = await runHandboekExport({ out, css: ['../house.css'] });
+    result = await runHandboekExport({ out, css: ['../house.css'], siteUrl: '/' });
   }, 120_000);
 
   afterAll(async () => {
@@ -141,6 +141,29 @@ describe('runHandboekExport', () => {
     expect(anchors.length).toBeGreaterThan(0);
     for (const id of anchors) expect(page).toContain(`href="#${id}"`);
   });
+
+  it('links the masthead wordmark out to the surrounding site', async () => {
+    for (const page of [
+      'index.html',
+      join('the-crew', 'index.html'),
+      join('role', 'meester', 'index.html'),
+    ]) {
+      const html = await readFile(join(out, page), 'utf8');
+      expect(html).toContain('<a class="hb-wordmark" href="/">gezel</a>');
+    }
+  });
+
+  it('omits the wordmark entirely when no site url is given', async () => {
+    const bare = await mkdtemp(join(tmpdir(), 'gezel-handboek-bare-'));
+    try {
+      await runHandboekExport({ out: bare });
+      const html = await readFile(join(bare, 'index.html'), 'utf8');
+      expect(html).not.toContain('hb-wordmark');
+      expect(html).toContain('class="hb-brand"');
+    } finally {
+      await rm(bare, { recursive: true, force: true }).catch(() => {});
+    }
+  }, 120_000);
 
   it('carries section navigation on every page', async () => {
     const page = await readFile(join(out, 'the-crew', 'index.html'), 'utf8');

@@ -89,6 +89,23 @@ body.hb {
   font-size: 1.15rem;
   font-weight: 700;
 }
+
+/* The product wordmark, back out to the surrounding site. Lowercase italic
+   serif at PT Serif's natural 400 — the family ships only 400 and 700, so
+   anything between synthesizes a weight. Set apart from the Handboek title
+   by a hairline rule rather than by size. */
+.hb-wordmark {
+  font-family: var(--hb-font-display);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 1.15rem;
+  text-transform: lowercase;
+  padding-right: 0.6rem;
+  margin-right: 0.1rem;
+  border-right: 1px solid rgba(243, 237, 224, 0.35);
+  opacity: 0.9;
+}
+.hb-wordmark:hover { opacity: 1; }
 .hb-masthead a, .hb-masthead a:hover { color: var(--hb-cream-ink); }
 .hb-areanav { display: flex; flex-wrap: wrap; gap: 0.25rem 1rem; font-size: 0.9rem; }
 .hb-areanav a { opacity: 0.85; }

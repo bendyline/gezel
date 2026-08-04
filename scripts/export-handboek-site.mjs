@@ -30,12 +30,18 @@ const values = (name) => argv.flatMap((a, i) => (a === name && argv[i + 1] ? [ar
 // level above `docs/`, and therefore outside the directory this script wipes.
 const DEFAULT_CSS = '../handboek.css';
 
+// The docs sit under the site root, so the wordmark links back to the
+// landing page. A project-scoped Pages deploy would need '/<repo>/'.
+const DEFAULT_SITE_URL = '/';
+
 if (flag('--help') || flag('-h')) {
   console.log(`Usage: node scripts/export-handboek-site.mjs [options]
 
   --out <dir>    output directory (default: ../gezel-site/docs)
   --css <href>   extra stylesheet linked on every page, relative to the export
                  root (default: ${DEFAULT_CSS}). Repeatable; --no-css disables.
+  --site-url <u> site URL behind the masthead wordmark (default: ${DEFAULT_SITE_URL});
+                 --no-site-url omits the wordmark
   --skip-build   reuse the current packages/cli/dist instead of rebuilding
   --force        wipe the output directory even without an export marker
 `);
@@ -44,6 +50,7 @@ if (flag('--help') || flag('-h')) {
 
 const out = resolve(repoRoot, value('--out') ?? join('..', 'gezel-site', 'docs'));
 const cssHrefs = flag('--no-css') ? [] : values('--css').length ? values('--css') : [DEFAULT_CSS];
+const siteUrl = flag('--no-site-url') ? null : (value('--site-url') ?? DEFAULT_SITE_URL);
 
 const run = (label, cmd, args) => {
   console.log(`[handboek-site] ${label}`);
@@ -98,6 +105,7 @@ run('rendering handboek', process.execPath, [
   '--out',
   out,
   ...cssHrefs.flatMap((href) => ['--css', href]),
+  ...(siteUrl ? ['--site-url', siteUrl] : []),
 ]);
 
 await writeFile(

@@ -780,10 +780,11 @@ export function projectRoutes(ctx: ServiceContext): Hono {
     const id = c.req.param('id');
     const subpath = c.req.query('path') ?? '';
     const recursive = c.req.query('recursive') === '1';
-    const entries = recursive
-      ? await ctx.store.listProjectArtifactsRecursive(id)
-      : await ctx.store.listProjectArtifacts(id, subpath);
-    return c.json({ files: entries });
+    if (recursive) {
+      const detailed = await ctx.store.listProjectArtifactsRecursiveDetailed(id);
+      return c.json({ files: detailed.entries, truncated: detailed.truncated });
+    }
+    return c.json({ files: await ctx.store.listProjectArtifacts(id, subpath) });
   });
 
   app.get('/:id/artifacts/read', async (c) => {
@@ -1099,10 +1100,11 @@ export function projectRoutes(ctx: ServiceContext): Hono {
     const subpath = c.req.query('path') ?? '';
     const recursive = c.req.query('recursive') === '1';
     try {
-      const entries = recursive
-        ? await ctx.store.listProjectWorkspaceRecursive(id)
-        : await ctx.store.listProjectWorkspace(id, subpath);
-      return c.json({ files: entries });
+      if (recursive) {
+        const detailed = await ctx.store.listProjectWorkspaceRecursiveDetailed(id);
+        return c.json({ files: detailed.entries, truncated: detailed.truncated });
+      }
+      return c.json({ files: await ctx.store.listProjectWorkspace(id, subpath) });
     } catch (err) {
       const mapped = mapWorkspaceError(err);
       return c.json(mapped.body, mapped.status as 400 | 403 | 500);

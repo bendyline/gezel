@@ -11015,9 +11015,10 @@ export class ChatManager {
     requiredBridgeTool?: string,
   ): Promise<BuiltSessionOpts> {
     const project = await this.store.getProject(record.projectId);
-    const workspaceFiles = project
-      ? await this.store.listProjectWorkspaceRecursive(record.projectId)
-      : [];
+    const workspaceListing = project
+      ? await this.store.listProjectWorkspaceRecursiveDetailed(record.projectId)
+      : { entries: [], truncated: false };
+    const workspaceFiles = workspaceListing.entries;
     // Artifacts are intentionally NOT enumerated in the prompt. They drift
     // every time anyone (including a parallel gezel) writes one, and a
     // baked-in listing goes stale immediately. The prompt teaches the
@@ -11579,6 +11580,7 @@ export class ChatManager {
       ),
       project,
       workspaceFiles,
+      ...(workspaceListing.truncated ? { workspaceFilesTruncated: true } : {}),
       documentFiles,
       voormanName: voorman?.name,
       ...(voorman?.roleBasedName ? { voormanRoleBasedName: voorman.roleBasedName } : {}),
@@ -14705,6 +14707,13 @@ export interface BuildInstructionsOptions {
   executionDensity?: ExecutionDensity;
   project?: import('@bendyline/gezel').ProjectDetail | null;
   workspaceFiles?: ProjectFileEntry[];
+  /**
+   * True when the recursive workspace walk hit its entry cap, i.e.
+   * `workspaceFiles` is an incomplete inventory (shallow entries first).
+   * Changes the listing's truncation note from an exact "N more" count
+   * to "more exist — search for what you don't see".
+   */
+  workspaceFilesTruncated?: boolean;
   documentFiles?: ProjectFileEntry[];
   voormanName?: string;
   /**
@@ -14951,6 +14960,7 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
     providerName,
     project,
     workspaceFiles,
+    workspaceFilesTruncated,
     documentFiles,
     voormanName,
     voormanRoleBasedName,
@@ -15323,7 +15333,13 @@ ${artifactsLine}
       .map((f) => `${f.isDirectory ? '\u{1F4C1}' : ' '} ${f.path}`)
       .join('\n');
     workspaceFilesBlock = `\n\n---\n\n### Workspace files\n\nFiles currently in the project:\n\`\`\`\n${listing}\n\`\`\``;
-    if (workspaceFiles.length > 200) {
+    if (workspaceFilesTruncated) {
+      // The walker's own entry cap dropped part of the tree, so the total
+      // is unknown — an exact "N more" count here would be a lie. The
+      // listing is breadth-first, so what's missing is the deep tail.
+      workspaceFilesBlock +=
+        '\n(listing incomplete — deeper files exist beyond these; a path absent above may still exist)';
+    } else if (workspaceFiles.length > 200) {
       workspaceFilesBlock += `\n(${workspaceFiles.length - 200} more files truncated)`;
     }
     if (retrievalFirstHint) {
