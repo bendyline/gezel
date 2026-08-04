@@ -56,6 +56,17 @@ import { createHash } from 'node:crypto';
 import { copyFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 
+import { createLogger } from '@bendyline/gezel';
+
+// This layer is best-effort by design, but silent best-effort is
+// unauditable: the 2026-08-03 KV-thrash investigation could not tell from
+// any log whether save/restore ever ran, fired-and-failed, or latched
+// unsupported — the answer had to be reverse-engineered from llama-server
+// binary help and prefill chunk traces. Debug-level so steady-state stays
+// quiet; the unsupported latch is a warn because it silently disables the
+// whole disk layer for the process lifetime.
+const log = createLogger('llama-kv-cache');
+
 import type {
   CacheWarmMessage,
   EngineCacheAdapter,
@@ -382,7 +393,10 @@ export class LlamaCppCacheAdapter implements EngineCacheAdapter {
       }
       const victimSession = this.slotToSession.get(chosen);
       if (victimSession !== undefined) {
-        await this.saveSlotForSession(chosen, victimSession);
+        const saved = await this.saveSlotForSession(chosen, victimSession);
+        log.debug(
+          `slot ${chosen} recycled: evicting session ${victimSession.slice(0, 8)} for ${sessionId.slice(0, 8)} (disk save: ${saved ? 'ok' : 'MISSED'})`,
+        );
         this.sessionToSlot.delete(victimSession);
         this.slotToSession.delete(chosen);
       }
@@ -394,6 +408,9 @@ export class LlamaCppCacheAdapter implements EngineCacheAdapter {
     // next request just prefills from scratch.
     const restored = await this.tryRestoreForSession(chosen, sessionId);
     if (restored) this.restoredSessions.add(sessionId);
+    log.debug(
+      `slot ${chosen} bound to session ${sessionId.slice(0, 8)} (disk restore: ${restored ? 'hit' : 'none — next request prefills from scratch'})`,
+    );
 
     this.bind(sessionId, chosen);
     return chosen;
@@ -563,6 +580,13 @@ export class LlamaCppCacheAdapter implements EngineCacheAdapter {
           } catch {
             // ignore — `res.ok` is already false, the action failed
           }
+        }
+        if (this.slotActionsUnsupported) {
+          log.warn(
+            `slot ${action} returned ${res.status}: server refuses slot save/restore — disk persistence disabled for this process`,
+          );
+        } else {
+          log.debug(`slot ${action} slot=${slot} file=${filename} failed: HTTP ${res.status}`);
         }
       }
       return res.ok;

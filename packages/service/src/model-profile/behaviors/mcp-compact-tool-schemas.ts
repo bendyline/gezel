@@ -40,9 +40,71 @@ function compactSchema(value: unknown): unknown {
   const out: Record<string, unknown> = {};
   for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
     if (PROSE_SCHEMA_KEYS.has(key)) continue;
-    out[key] = compactSchema(child);
+    out[key] = key === 'checks' ? compactChecksUnion(compactSchema(child)) : compactSchema(child);
   }
   return out;
+}
+
+/**
+ * Gate-check kinds that keep their full per-variant schema on the wire.
+ * Chosen from a census of every recorded delegation call (2026-08-03):
+ * sniff 57, contains 26, minBytes 19, chat 11 — 84% of all inline usage.
+ * The remaining ~10 kinds each appeared ≤5 times; they collapse into one
+ * permissive variant that still NAMES every kind (enum), so a model
+ * following a craftbook that specifies an exotic gate can still emit it —
+ * wire schemas are advisory (server-side zod validates real calls, and
+ * llama does not grammar-constrain tool args today).
+ */
+const CHECK_KINDS_KEPT_VERBOSE = new Set(['sniff', 'contains', 'minBytes', 'chat']);
+
+/**
+ * The `expectedDeliverable.checks` oneOf is the single heaviest structure
+ * on the tool wire: ~7.1K chars of per-kind variants, stamped into all 13
+ * delegation/messaging tools — ~54% of the ENTIRE compacted tool surface
+ * (measured 2026-08-03: 74-tool Developer wire was ~100K chars, most of it
+ * this union). Keep full schemas for the head kinds models actually author
+ * inline; fold the tail into one variant with every kind name preserved.
+ */
+function compactChecksUnion(checksSchema: unknown): unknown {
+  if (!checksSchema || typeof checksSchema !== 'object' || Array.isArray(checksSchema)) {
+    return checksSchema;
+  }
+  const schema = checksSchema as Record<string, unknown>;
+  const items = schema.items;
+  if (!items || typeof items !== 'object' || Array.isArray(items)) return checksSchema;
+  const union = (items as Record<string, unknown>).oneOf;
+  if (!Array.isArray(union) || union.length <= CHECK_KINDS_KEPT_VERBOSE.size + 1) {
+    return checksSchema;
+  }
+  const kindOf = (variant: unknown): string | null => {
+    if (!variant || typeof variant !== 'object') return null;
+    const kind = ((variant as Record<string, unknown>).properties as Record<string, unknown>)?.[
+      'kind'
+    ];
+    const konst = (kind as Record<string, unknown>)?.const ?? (kind as Record<string, unknown>)?.enum;
+    if (typeof konst === 'string') return konst;
+    if (Array.isArray(konst) && typeof konst[0] === 'string') return konst[0];
+    return null;
+  };
+  const kept: unknown[] = [];
+  const folded: string[] = [];
+  for (const variant of union) {
+    const kind = kindOf(variant);
+    if (kind && CHECK_KINDS_KEPT_VERBOSE.has(kind)) kept.push(variant);
+    else if (kind) folded.push(kind);
+    else kept.push(variant);
+  }
+  if (folded.length === 0) return checksSchema;
+  kept.push({
+    type: 'object',
+    properties: {
+      kind: { type: 'string', enum: folded },
+      file: { type: 'string' },
+    },
+    required: ['kind'],
+    additionalProperties: true,
+  });
+  return { ...schema, items: { ...(items as Record<string, unknown>), oneOf: kept } };
 }
 
 function compactTool(

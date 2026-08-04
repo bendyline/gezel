@@ -138,7 +138,11 @@ import {
 } from '../providers/llama-cpp/engine-flags.js';
 import { readGgufSummary } from '../providers/llama-cpp/gguf-metadata.js';
 import { LlamaCppProvider, createLlamaCppPatientFetch } from '../providers/llama-cpp/index.js';
-import { resolveLlamaCppKvCacheType } from '../providers/llama-cpp/kv-cache-type.js';
+import {
+  type LlamaCppKvCacheType,
+  planLlamaCppKv,
+  resolveLlamaCppKvCacheType,
+} from '../providers/llama-cpp/kv-cache-type.js';
 import {
   degradeMoeOffloadDecision,
   estimateKvReserveBytes,
@@ -9578,10 +9582,13 @@ export class ChatManager {
       const llamaSlotSavePath = llamaProvider.getSlotSavePath();
       const adapter = new LlamaCppCacheAdapter({
         resolveBaseUrl: async () => llamaProvider.currentBaseUrl(),
-        // Read the live slot count off the provider's queue so the adapter
-        // can never desync from the launched `--parallel N` (the supervised
-        // path auto-sizes N from RAM + KV headroom).
-        slotCount: llamaProvider.queue.concurrency,
+        // The ENGINE slot count (`--parallel N`), not `queue.concurrency`:
+        // the queue reserves a background lane above the engine slots, so
+        // on a single-slot launch it reads 2 and the adapter would bind
+        // sessions to slot ids the server doesn't have (wild-caught
+        // 2026-08-03 — save/restore against the phantom slot 400s
+        // silently).
+        slotCount: llamaProvider.getLaunchedSlots(),
         ...(llamaSlotSavePath ? { slotSavePath: llamaSlotSavePath } : {}),
       });
       this.cacheController.registerAdapter(adapter);
@@ -16717,7 +16724,7 @@ export async function buildLlamaCppProvider(opts: {
   // `config.llamaCppKvCacheType` always wins. f16 KV costs ~2x the cache
   // memory on Gemma — the slot-ceiling math below reads THIS value so slot
   // sizing stays consistent with what the engine actually allocates.
-  const kvCacheType = resolveLlamaCppKvCacheType({
+  let kvCacheType = resolveLlamaCppKvCacheType({
     architecture: modelCatalogInfo?.architecture,
     modelId: defaultModelId ?? undefined,
     override: config.llamaCppKvCacheType,
@@ -16838,18 +16845,35 @@ export async function buildLlamaCppProvider(opts: {
     ? (opts.broker?.fastBudgetBytes() ?? brokerSnap.budgetBytes)
     : fastMemoryBudgetBytes();
   const committedOtherBytes = brokerSnap?.enforced ? brokerSnap.committedBytes : 0;
-  let slots =
-    configuredSlots ??
-    Math.min(
-      defaultLocalEngineSlots(),
-      llamaCppSlotCeiling({
-        budgetBytes,
-        weightsBytes: modelCatalogInfo?.approxSizeBytes ?? 8 * 1024 ** 3,
-        perTurnCtxTokens: effectiveNumCtx,
-        kvCacheType,
-        committedOtherBytes,
-      }),
+  // Gemma f16-KV vs a second slot: when memory alone forces single-slot,
+  // trade to q8_0 KV if that buys ≥2 slots — SWA models get no rescue
+  // from llama-server's prompt cache, so single-slot session alternation
+  // re-prefills the other session's whole context (~41K tok ≈ 79s,
+  // wild-caught). Policy + evidence in planLlamaCppKv; explicit
+  // kvCacheType or slot config disables the trade.
+  const ceilingFor = (kv: LlamaCppKvCacheType) =>
+    llamaCppSlotCeiling({
+      budgetBytes,
+      weightsBytes: modelCatalogInfo?.approxSizeBytes ?? 8 * 1024 ** 3,
+      perTurnCtxTokens: effectiveNumCtx,
+      kvCacheType: kv,
+      committedOtherBytes,
+    });
+  const kvPlan = planLlamaCppKv({
+    architecture: modelCatalogInfo?.architecture,
+    modelId: defaultModelId ?? undefined,
+    override: config.llamaCppKvCacheType,
+    slotsConfigured: configuredSlots !== undefined,
+    ceilingFor,
+    maxSlots: defaultLocalEngineSlots(),
+  });
+  if (kvPlan.upgraded) {
+    kvCacheType = kvPlan.kvCacheType;
+    log.info(
+      `[llama-cpp] ${modelCatalogInfo?.id ?? defaultModelId ?? 'model'}: trading f16 KV for q8_0 to fit a second engine slot (single-slot SWA session alternation re-prefills wholesale; KV A/B 2026-08-03 showed no measurable q8_0 fidelity cost)`,
     );
+  }
+  let slots = configuredSlots ?? Math.min(defaultLocalEngineSlots(), ceilingFor(kvCacheType));
   // The bundled llama.cpp line still has known multi-slot MTP allocation
   // failures. Keep an explicitly selected MTP mode on one slot so its first
   // decode is reliable; `spec.mtp` alone is capability metadata, not an

@@ -1878,6 +1878,7 @@ export class LlamaCppProvider implements LLMProvider {
     if (opts.logFile) this.logFile = opts.logFile;
     if (opts.slotSavePath) this.slotSavePath = opts.slotSavePath;
     const slots = opts.concurrency ?? 2;
+    this.launchedSlots = slots;
     const batchMax = Math.max(1, opts.batchMaxConcurrency ?? 1);
     this.batchMaxConcurrency = batchMax;
     const batching = batchMax > 1;
@@ -1932,6 +1933,7 @@ export class LlamaCppProvider implements LLMProvider {
    */
   private cacheAdapter: import('./cache-adapter.js').LlamaCppCacheAdapter | null = null;
   private slotSavePath?: string;
+  private readonly launchedSlots: number;
 
   setCacheAdapter(adapter: import('./cache-adapter.js').LlamaCppCacheAdapter): void {
     this.cacheAdapter = adapter;
@@ -1948,6 +1950,21 @@ export class LlamaCppProvider implements LLMProvider {
    */
   getSlotSavePath(): string | undefined {
     return this.slotSavePath;
+  }
+
+  /**
+   * The `--parallel` slot count this provider was constructed for — the
+   * ENGINE's slot space, which is what the cache adapter must size its
+   * slot model to. Deliberately NOT `queue.concurrency`: the queue
+   * reserves a background lane ABOVE the engine slots
+   * (`max(slots, interactive+1)`), so on a single-slot launch the queue
+   * reads 2 — and an adapter sized off it binds sessions to slot ids the
+   * server doesn't have. Wild-caught 2026-08-03: the adapter "bound"
+   * slot 1 on a `--parallel 1` server; every save/restore against it
+   * would 400 silently, and the debug probe's slot narration was fiction.
+   */
+  getLaunchedSlots(): number {
+    return this.launchedSlots;
   }
 
   /**
