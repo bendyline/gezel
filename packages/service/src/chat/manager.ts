@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
+import { freemem } from 'node:os';
 import { basename, delimiter, dirname, join } from 'node:path';
 import {
   type AIEngagementMode,
@@ -8761,6 +8762,24 @@ export class ChatManager {
       provider = await this.resolveOneShotProvider(providerName, model);
     }
 
+    // Ambient chores must never COLD-LOAD a local engine into a machine
+    // already tight on memory. The queue's quiet-window gate decides WHEN
+    // housekeeping dispatches; this decides whether dispatching would pull
+    // a multi-GB model off disk to do it. Observed failure: a freshly
+    // booted daemon's index enrichment fired one-shots ~20s after start
+    // and cold-loaded the default model while the user was setting the
+    // machine up. Ambient work is deferrable by definition — it can wait
+    // for headroom or for the model to be loaded by real use.
+    if (opts.ambient) {
+      const denial = this.denyAmbientColdLoad(effectiveProviderName, model);
+      if (denial) {
+        oneShotLog.info(`deferred${opts.jobLabel ? ` (${opts.jobLabel})` : ''}: ${denial}`);
+        const err = new Error(`Deferred background work: ${denial}`);
+        (err as Error & { isActionable: boolean }).isActionable = true;
+        throw err;
+      }
+    }
+
     const baseSystem =
       'You respond to a single self-contained prompt. Follow the output format requested by the user exactly.';
     const systemMessage = personaAbout ? `${personaAbout}\n\n---\n\n${baseSystem}` : baseSystem;
@@ -8803,6 +8822,38 @@ export class ChatManager {
         oneShotLog.warn('disconnect error:', err);
       });
     }
+  }
+
+  /**
+   * Would running an ambient one-shot on `providerName` require cold-loading
+   * a local model while free memory is scarce? Returns the human-readable
+   * deferral reason, or null to proceed.
+   *
+   * Deliberately coarse: a resident engine for the target (or an
+   * unavailable pool snapshot) always admits, and the floor is a flat
+   * free-RAM threshold rather than per-model math — the context-admission
+   * clamp bounds what an admitted load can consume, so the only question
+   * here is "is there visibly room to bring ANY model up for chores?".
+   * `GEZEL_AMBIENT_COLD_LOAD_MIN_FREE_GB` tunes the floor (default 8).
+   */
+  private denyAmbientColdLoad(providerName: ProviderName, model?: string): string | null {
+    if (providerName !== 'llama-cpp' && providerName !== 'mlx' && providerName !== 'ds4') {
+      return null;
+    }
+    const snapshot = this.peekEngineStatus();
+    if (!snapshot) return null;
+    const resident = snapshot.entries.some(
+      (e) => e.provider === providerName && (!model || e.modelId === model),
+    );
+    if (resident) return null;
+    const GIB = 1024 ** 3;
+    const envGb = Number.parseFloat(process.env.GEZEL_AMBIENT_COLD_LOAD_MIN_FREE_GB ?? '');
+    const minFreeBytes = (Number.isFinite(envGb) && envGb >= 0 ? envGb : 8) * GIB;
+    const freeBytes = freemem();
+    if (freeBytes >= minFreeBytes) return null;
+    const wantsGb = (minFreeBytes / GIB).toFixed(0);
+    const freeGb = (freeBytes / GIB).toFixed(1);
+    return `loading ${model ?? providerName} for background work wants at least ${wantsGb} GB of free memory and only ${freeGb} GB is free right now; it will run once memory frees up or the model is loaded for interactive use`;
   }
 
   /**
@@ -16586,7 +16637,9 @@ export async function buildLlamaCppProvider(opts: {
   // can only opt a model UP toward its own window, never past it.
   const preferredCap = numCtx ?? manifestEngineConfig?.contextSize ?? PREFERRED_CTX_DEFAULT;
   const modelCtx = modelCatalogInfo?.contextWindow ?? preferredCap;
-  const effectiveNumCtx = Math.min(modelCtx, preferredCap);
+  // `let`: the RAM-aware admission clamp below (inside the GGUF-summary
+  // block) may lower this before anything launch-visible consumes it.
+  let effectiveNumCtx = Math.min(modelCtx, preferredCap);
 
   // Auto-size supervised slots now that the model + context window are
   // known: a RAM-tier demand default, clamped by a per-model KV memory
@@ -16594,9 +16647,14 @@ export async function buildLlamaCppProvider(opts: {
   // Explicit `providerConcurrency['llama-cpp']` overrides verbatim.
   // (Co-resident pool models aren't subtracted here — the broker still
   // denies an over-commit at spawn; threading committed bytes is a TODO.)
-  const { fastMemoryBudgetBytes, defaultLocalEngineSlots, llamaCppSlotCeiling } = await import(
-    '../providers/native/capacity-broker.js'
-  );
+  const {
+    fastMemoryBudgetBytes,
+    defaultLocalEngineSlots,
+    llamaCppSlotCeiling,
+    clampCtxTokensForMemory,
+    computeCapacityBudget,
+    estimatePerSlotKvBytes,
+  } = await import('../providers/native/capacity-broker.js');
   // Subtract co-resident model reservations from the budget when the pool
   // broker is wired (multi-model path), using its actual (possibly config-
   // overridden) budget. Caveat: the broker tracks each model's resident
@@ -16776,6 +16834,56 @@ export async function buildLlamaCppProvider(opts: {
               expertBytesByLayer: summary.expertBytesByLayer,
             }
           : undefined;
+      // ── RAM-aware context admission ──
+      // The slot ceiling sizes the slot COUNT and the broker admits
+      // WEIGHTS; neither asks whether one slot at the requested context
+      // fits at all. On models with outsized attention geometry that gap
+      // is enormous — gemma4-12b at f16 KV is ~380 KB/token, so a 64K
+      // default projects ~25 GB of KV and turned a 6.7 GB model into a
+      // ~25 GB process that paged a 32 GB machine to a standstill
+      // (2026-08-03, two daemons × one model each). Clamp the per-turn
+      // context so weights + total KV + compute headroom fit both the
+      // capacity budget and live free memory. Exact per-token KV from the
+      // GGUF header; the weights-scaled heuristic only as fallback.
+      // Skipped under GEZEL_LLAMA_NUM_CTX — eval runs lift ceilings
+      // deliberately and accept the memory consequences.
+      if (envNumCtx === undefined) {
+        const REFERENCE_CTX = 4096;
+        const exactKvAtReference = estimateKvReserveBytes({
+          blockCount: summary.blockCount,
+          embeddingLength: summary.embeddingLength,
+          headCount: summary.headCount,
+          headCountKv: summary.headCountKv,
+          keyLength: summary.keyLength,
+          valueLength: summary.valueLength,
+          ctxTokens: REFERENCE_CTX,
+          kvCacheType,
+        });
+        const kvBytesPerToken =
+          exactKvAtReference !== undefined
+            ? exactKvAtReference / REFERENCE_CTX
+            : estimatePerSlotKvBytes({
+                perTurnCtxTokens: REFERENCE_CTX,
+                weightsBytes: approxBytes,
+                kvCacheType,
+              }) / REFERENCE_CTX;
+        const liveBudget = computeCapacityBudget({ gpuVramBytes: vramBytes || null });
+        const admission = clampCtxTokensForMemory({
+          requestedPerTurnCtxTokens: effectiveNumCtx,
+          slots,
+          kvBytesPerToken,
+          weightsResidentBytes: residentBytes,
+          budgetBytes: brokerSnap?.enforced ? brokerSnap.budgetBytes : liveBudget.budgetBytes,
+          committedOtherBytes,
+          freeSystemRamBytes: freemem(),
+          vramBytes: liveBudget.vramBytes,
+        });
+        if (admission.clamped) {
+          log.warn(`[llama-cpp] ${modelCatalogInfo?.id ?? 'model'}: ${admission.reason}`);
+          effectiveNumCtx = admission.perTurnCtxTokens;
+        }
+      }
+
       const kvReserveBytes = estimateKvReserveBytes({
         blockCount: summary.blockCount,
         embeddingLength: summary.embeddingLength,

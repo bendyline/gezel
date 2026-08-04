@@ -252,7 +252,8 @@ describe('Windows machine-service installer security', () => {
   });
 
   it('waits for an old registration to disappear before replacing it', () => {
-    const removeMacro = hook.slice(position('!macro RemoveGezelService'), position('!macroend'));
+    const removeStart = position('!macro RemoveGezelService');
+    const removeMacro = hook.slice(removeStart, hook.indexOf('!macroend', removeStart));
     expect(removeMacro).toContain('config ${GEZEL_SERVICE_NAME} start= disabled');
     expect(removeMacro).toContain('delete ${GEZEL_SERVICE_NAME}');
     expect(removeMacro).toContain('query ${GEZEL_SERVICE_NAME}');
@@ -262,12 +263,41 @@ describe('Windows machine-service installer security', () => {
     expect(removeMacro.indexOf('delete ${GEZEL_SERVICE_NAME}')).toBeLessThan(
       removeMacro.indexOf('query ${GEZEL_SERVICE_NAME}'),
     );
+    // The stop must be confirmed before delete: deleting a service whose
+    // stop is still in flight marks it delete-pending until reboot.
+    const stopInRemove = removeMacro.indexOf('stop ${GEZEL_SERVICE_NAME}');
+    const waitInRemove = removeMacro.indexOf('!insertmacro WaitGezelServiceStopped');
+    const deleteInRemove = removeMacro.indexOf('delete ${GEZEL_SERVICE_NAME}');
+    expect(stopInRemove).toBeGreaterThanOrEqual(0);
+    expect(waitInRemove).toBeGreaterThan(stopInRemove);
+    expect(deleteInRemove).toBeGreaterThan(waitInRemove);
 
     const installBody = hook.slice(position('!macro customInstall'));
     const absenceGate = installBody.indexOf('${If} $9 != 1060');
     const replacement = installBody.indexOf('create ${GEZEL_SERVICE_NAME}');
     expect(absenceGate).toBeGreaterThanOrEqual(0);
     expect(absenceGate).toBeLessThan(replacement);
+  });
+
+  it('stops the running service gracefully at installer init, before file replacement', () => {
+    // Regression: without a customInit stop, electron-builder's app-closing
+    // and file-copy steps hit a still-running service host, logging event
+    // 7034 ("terminated unexpectedly") on every upgrade and skipping the
+    // host's orderly gezeld shutdown.
+    const initStart = position('!macro customInit');
+    const initMacro = hook.slice(initStart, hook.indexOf('!macroend', initStart));
+    const guard = initMacro.indexOf('query ${GEZEL_SERVICE_NAME}');
+    const stop = initMacro.indexOf('stop ${GEZEL_SERVICE_NAME}');
+    const wait = initMacro.indexOf('!insertmacro WaitGezelServiceStopped');
+    expect(guard).toBeGreaterThanOrEqual(0);
+    expect(stop).toBeGreaterThan(guard);
+    expect(wait).toBeGreaterThan(stop);
+    // The wait itself is bounded — a wedged service must not hang setup.
+    const waitStart = position('!macro WaitGezelServiceStopped');
+    const waitMacro = hook.slice(waitStart, hook.indexOf('!macroend', waitStart));
+    expect(waitMacro).toContain('${If} $8 >= 20');
+    expect(waitMacro).toContain('Sleep 500');
+    expect(waitMacro).toContain('"STOPPED"');
   });
 
   it('keeps restricted-service temporary files below the private root', () => {

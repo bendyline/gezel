@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   CapacityBroker,
   autoDetectBudgetBytes,
+  clampCtxTokensForMemory,
   computeCapacityBudget,
   defaultLocalEngineSlots,
   estimatePerSlotKvBytes,
@@ -674,5 +675,95 @@ describe('discrete-GPU hosts — VRAM is memory, not a rounding error', () => {
     });
     expect(msg).toMatch(/about 63% of your 16\.0 GB machine/);
     expect(msg).not.toMatch(/macOS/);
+  });
+});
+
+describe('clampCtxTokensForMemory', () => {
+  // The 2026-08-03 incident, in numbers: gemma4-12b Q4 (6.7 GB weights,
+  // ~8 GB resident) at f16 KV on a 32 GB / 12 GB-VRAM machine. Real KV
+  // geometry is ~380 KB/token — a 64K single-slot launch projects ~25 GB
+  // of KV and became a ~25 GB process that paged the whole desktop out.
+  const INCIDENT = {
+    requestedPerTurnCtxTokens: 65_536,
+    slots: 1,
+    kvBytesPerToken: 380 * 1024,
+    weightsResidentBytes: 8 * GB,
+    budgetBytes: 30.7 * GB,
+    freeSystemRamBytes: 15 * GB,
+    vramBytes: 11.6 * GB,
+  };
+
+  it('clamps the incident launch to something the machine can hold', () => {
+    const result = clampCtxTokensForMemory(INCIDENT);
+    expect(result.clamped).toBe(true);
+    // cap = min(budget 30.7, vram 11.6 + (15-2) free) = 24.6 GB;
+    // allowance = (24.6 - 8) * 0.8 = 13.3 GB → ~36.6K tokens → 1024-floor.
+    expect(result.perTurnCtxTokens).toBeLessThanOrEqual(36_864);
+    expect(result.perTurnCtxTokens).toBeGreaterThanOrEqual(8_192);
+    expect(result.perTurnCtxTokens % 1024).toBe(0);
+    expect(result.reason).toMatch(/context clamped 65536/);
+    expect(result.reason).toMatch(/KV/);
+  });
+
+  it('clamps much harder when the machine is already under pressure', () => {
+    // Second daemon of the night: another engine already ate the RAM.
+    const result = clampCtxTokensForMemory({
+      ...INCIDENT,
+      freeSystemRamBytes: 4.5 * GB,
+    });
+    expect(result.clamped).toBe(true);
+    // cap = min(30.7, 11.6 + 2.5) = 14.1; allowance = 4.9 GB → ~13.5K.
+    expect(result.perTurnCtxTokens).toBeLessThanOrEqual(13_312);
+  });
+
+  it('leaves a launch that fits untouched', () => {
+    const result = clampCtxTokensForMemory({
+      requestedPerTurnCtxTokens: 65_536,
+      slots: 1,
+      kvBytesPerToken: 30 * 1024,
+      weightsResidentBytes: 4 * GB,
+      budgetBytes: 30 * GB,
+      freeSystemRamBytes: 24 * GB,
+      vramBytes: 11.6 * GB,
+    });
+    expect(result).toEqual({ perTurnCtxTokens: 65_536, clamped: false, reason: null });
+  });
+
+  it('never clamps below the floor even when nothing fits', () => {
+    const result = clampCtxTokensForMemory({
+      ...INCIDENT,
+      freeSystemRamBytes: 1 * GB,
+      vramBytes: 0,
+      budgetBytes: 6 * GB,
+    });
+    expect(result.clamped).toBe(true);
+    expect(result.perTurnCtxTokens).toBe(8_192);
+  });
+
+  it('honors the budget when it is tighter than live memory', () => {
+    const result = clampCtxTokensForMemory({
+      ...INCIDENT,
+      budgetBytes: 12 * GB,
+      committedOtherBytes: 2 * GB,
+      freeSystemRamBytes: 64 * GB,
+    });
+    expect(result.clamped).toBe(true);
+    // budgetCap = 10 GB binds; allowance = (10 - 8) * 0.8 = 1.6 GB → ~4.4K
+    // → floor wins.
+    expect(result.perTurnCtxTokens).toBe(8_192);
+    expect(result.reason).toMatch(/held by other models/);
+  });
+
+  it('accounts for slot multiplication', () => {
+    const one = clampCtxTokensForMemory({ ...INCIDENT, slots: 1 });
+    const two = clampCtxTokensForMemory({ ...INCIDENT, slots: 2 });
+    expect(two.perTurnCtxTokens).toBeLessThan(one.perTurnCtxTokens);
+  });
+
+  it('is inert without a usable KV rate or when already at the floor', () => {
+    expect(clampCtxTokensForMemory({ ...INCIDENT, kvBytesPerToken: 0 }).clamped).toBe(false);
+    expect(clampCtxTokensForMemory({ ...INCIDENT, requestedPerTurnCtxTokens: 8_192 }).clamped).toBe(
+      false,
+    );
   });
 });

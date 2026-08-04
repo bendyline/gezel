@@ -43,6 +43,47 @@
 !define GEZEL_NSSM "$INSTDIR\gezel-nssm.exe"
 !define GEZEL_NSSM_LEGACY "$INSTDIR\nssm.exe"
 
+; Gracefully stop a registered service and wait (bounded) for STOPPED.
+; `sc stop` only REQUESTS the stop; returning immediately used to leave the
+; host running while electron-builder killed app processes and replaced
+; files, so every upgrade logged event 7034 ("terminated unexpectedly") for
+; a service that was actually healthy. `find` on the query output is the
+; least-fragile completion check available to NSIS: sc.exe state tokens
+; (STOPPED) are unlocalized. A service that does not exist never enters the
+; wait — the caller guards on a plain query first.
+!macro WaitGezelServiceStopped
+  StrCpy $8 0
+  ${Do}
+    nsExec::ExecToLog '"$SYSDIR\cmd.exe" /D /C ""$SYSDIR\sc.exe" query ${GEZEL_SERVICE_NAME} | "$SYSDIR\find.exe" "STOPPED" >NUL"'
+    Pop $9
+    ${If} $9 == 0
+      ${ExitDo}
+    ${EndIf}
+    IntOp $8 $8 + 1
+    ${If} $8 >= 20
+      ${ExitDo}
+    ${EndIf}
+    Sleep 500
+  ${Loop}
+!macroend
+
+; Runs in .onInit — BEFORE electron-builder closes running app processes and
+; long before customInstall replaces files. Stopping the service here means
+; the SCM delivers a clean SERVICE_CONTROL_STOP while every binary is still
+; on disk, the host shuts its gezeld child down in order, and the later
+; RemoveGezelService in customInstall finds an already-stopped service to
+; delete. No elevation concern: perMachine already forced an admin token by
+; the time .onInit runs.
+!macro customInit
+  nsExec::ExecToLog '"$SYSDIR\sc.exe" query ${GEZEL_SERVICE_NAME}'
+  Pop $0
+  ${If} $0 == 0
+    nsExec::ExecToLog '"$SYSDIR\sc.exe" stop ${GEZEL_SERVICE_NAME}'
+    Pop $0
+    !insertmacro WaitGezelServiceStopped
+  ${EndIf}
+!macroend
+
 ; Stop/remove both current and legacy registrations via sc.exe.
 ; Missing-service errors are expected.  NSSM-era registrations are
 ; ordinary SCM services, so the same stop/delete path covers them.
@@ -53,6 +94,10 @@
   Pop $0
   nsExec::ExecToLog '"$SYSDIR\sc.exe" stop ${GEZEL_SERVICE_NAME}'
   Pop $0
+  ; Deleting a service whose stop is still in flight marks it
+  ; delete-pending and can strand the registration until reboot; wait for
+  ; STOPPED first (customInit usually already did, making this instant).
+  !insertmacro WaitGezelServiceStopped
   nsExec::ExecToLog '"$SYSDIR\sc.exe" delete ${GEZEL_SERVICE_NAME}'
   Pop $0
   ; A successful delete is asynchronous when another process still holds an

@@ -18,6 +18,7 @@ export { releaseUrl };
 
 export type SystemNoticeId =
   | 'machine-service-not-installed'
+  | 'machine-service-home-fresh'
   | 'service-version-mismatch'
   | 'service-unavailable'
   | 'update-install-failed'
@@ -85,6 +86,23 @@ export function serviceNotice(input: {
       body: `Everything works and all of your gezellen, projects, chats, and files are here. The difference is that background work — scheduled tasks and night shift — only runs while Gezel is open, and first launch after an update takes longer. The machine-wide service is installed by the installer, so this is the one thing Gezel cannot fix from inside. ${reinstallHint(platform)}`,
       technical: reason,
       reportable: true,
+    };
+  }
+
+  if (code === 'machine-service-home-fresh') {
+    return {
+      id: 'machine-service-home-fresh',
+      railLabel: 'Using your per-user data',
+      title: 'Gezel is using your per-user data.',
+      // A deliberate choice, not a failure: the machine-wide service is
+      // healthy but has never held any data, while this account's home has
+      // the user's real gezellen and projects. Connecting to the empty one
+      // would look like everything vanished.
+      body: 'The machine-wide background service is running, but it has never held any data — while this account already has gezellen, projects, and chats. Gezel connected to your existing data and will keep doing so. Everything works normally; the machine-wide service simply sits idle. This choice is saved, and you can revisit it under Settings.',
+      technical: reason,
+      // Working as intended — a bug report would only say "my data is where
+      // I left it".
+      reportable: false,
     };
   }
 

@@ -284,6 +284,7 @@ import type {
   SuggestedWorkResponse,
   SystemBootstrapStatus,
   SystemDiagnostics,
+  SystemHomeInfo,
   SystemToolsetInstallEvent,
   SystemToolsetInstallSnapshot,
   Task,
@@ -2615,6 +2616,17 @@ export class GezelClient {
    */
   getSystemDiagnostics(signal?: AbortSignal): Promise<SystemDiagnostics> {
     return this.request('GET', '/api/system/diagnostics', undefined, undefined, signal);
+  }
+
+  /**
+   * Identity card for the connected daemon: which home it serves, whether
+   * that home has ever actually been used, and what is resident right now.
+   * The Electron supervisor consults this before committing to a
+   * machine-service adoption; it is also the only window into a machine
+   * daemon whose home directories are ACL-private to the service identity.
+   */
+  getSystemHomeInfo(signal?: AbortSignal): Promise<SystemHomeInfo> {
+    return this.request('GET', '/api/system/home', undefined, undefined, signal);
   }
 
   deleteOllamaModel(name: string): Promise<{ ok: true }> {

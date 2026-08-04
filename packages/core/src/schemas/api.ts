@@ -291,6 +291,62 @@ export const SystemDiagnosticsSchema = z.object({
 export type SystemDiagnostics = z.infer<typeof SystemDiagnosticsSchema>;
 
 /**
+ * Identity card for a running daemon: which home it serves, whether that
+ * home has ever actually been used, and what it has resident right now.
+ *
+ * `GET /api/system/home`. Two audiences:
+ *
+ *   1. The Electron supervisor's home-preference decision. A machine
+ *      service whose home was never used must not win over a per-user
+ *      home full of real gezels and projects — adopting it presents an
+ *      empty app. The supervisor asks this endpoint before committing.
+ *   2. Humans debugging split-home installs. The machine home's config
+ *      and state directories are ACL-private to the service identity, so
+ *      without this endpoint there is no way to see which home, model,
+ *      or config a machine daemon is actually serving.
+ *
+ * Deliberately separate from {@link SystemDiagnosticsSchema}: that schema
+ * is the privacy boundary for public GitHub bug reports and must never
+ * carry home paths; this one exists precisely to name them, and stays on
+ * the authenticated local API.
+ *
+ * `usage.everUsed` is structural evidence ("a person worked here"), not
+ * `config.firstRunCompleted` — the first-run bootstrap sets that flag on
+ * every daemon boot, including headless machine services no human has
+ * ever seen. Gezel count is bootstrap noise too (the whole system crew is
+ * auto-created); a persisted session or a project beyond the auto-created
+ * `default` is what only ever comes from use.
+ */
+export const SystemHomeInfoSchema = z.object({
+  home: z.string(),
+  /** `machine` when the daemon runs under the system service identity. */
+  scope: z.enum(['machine', 'user']),
+  version: z.string(),
+  startedAt: z.string(),
+  firstRunCompleted: z.boolean(),
+  usage: z.object({
+    gezelCount: z.number().int().nonnegative(),
+    projectCount: z.number().int().nonnegative(),
+    sessionCount: z.number().int().nonnegative(),
+    everUsed: z.boolean(),
+  }),
+  provider: ProviderNameSchema.optional(),
+  defaultModel: z.string().optional(),
+  memory: z.object({
+    totalBytes: z.number().nonnegative(),
+    freeBytes: z.number().nonnegative(),
+  }),
+  /** Local engines currently holding capacity reservations. */
+  engines: z.array(
+    z.object({
+      key: z.string(),
+      residentBytes: z.number().nonnegative(),
+    }),
+  ),
+});
+export type SystemHomeInfo = z.infer<typeof SystemHomeInfoSchema>;
+
+/**
  * Non-secret metadata about the user's GitHub auth state. The token itself
  * lives in the SecretStore (see `applyCredentialPatch`); this slot holds
  * the parts the UI wants to render without unmasking the token (login,
@@ -398,6 +454,26 @@ export type DocumentExportOptions = z.infer<typeof DocumentExportOptionsSchema>;
 export const GezelConfigSchema = z.object({
   /** Default LLM provider. Missing → 'copilot' for backwards compatibility. */
   provider: ProviderNameSchema.optional(),
+  /**
+   * Which daemon the packaged desktop app attaches to.
+   *
+   * - `'auto'` (default, also when absent) — prefer the machine-wide
+   *   service when the OS service manager says it is registered and
+   *   running, waiting briefly for it to publish runtime discovery on a
+   *   fresh boot. When the machine home has never been used while this
+   *   per-user home holds real gezels/projects/sessions, the supervisor
+   *   declines the machine service, pins `'per-user'`, and surfaces a
+   *   notice — adopting it would present an empty app while everything
+   *   the user made sits in `~/.gezel`.
+   * - `'machine-service'` — always prefer the machine service; the
+   *   fresh-home auto-decline is disabled.
+   * - `'per-user'` — skip the machine service entirely.
+   *
+   * Read by the Electron supervisor before any daemon starts (bare JSON
+   * read, same pattern as `llamaCppBackendOverride`); declared here so a
+   * Store rewrite round-trips it.
+   */
+  hosting: z.enum(['auto', 'machine-service', 'per-user']).optional(),
   /**
    * Idle timeout (ms) before the supervisor stops a running local LLM engine
    * (llama-cpp, mlx) to free VRAM. Applied to both `NativeEngineSupervisor`

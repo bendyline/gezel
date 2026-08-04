@@ -1,5 +1,7 @@
+import { freemem, totalmem } from 'node:os';
 import { delimiter, dirname } from 'node:path';
 import {
+  GEZEL_VERSION,
   type GitHubIdentity,
   type GitHubIdentityResponse,
   GitHubLoginPollRequestSchema,
@@ -14,6 +16,8 @@ import {
   ModelDownloadPreflightResponseSchema,
   PNPM_HOISTED_NODE_LINKER,
   SystemDiagnosticsSchema,
+  type SystemHomeInfo,
+  SystemHomeInfoSchema,
   createLogger,
 } from '@bendyline/gezel';
 import { Octokit } from '@octokit/rest';
@@ -35,6 +39,7 @@ import {
 import { modelStorageRoots } from '../../models/storage-roots.js';
 import { resolvePnpmCommand, spawnPnpm } from '../../packages/pnpm.js';
 import { resolveCopilotAvailability } from '../../providers/copilot-availability.js';
+import { resolveDefaultProviderName } from '../../providers/default-provider.js';
 import { resolveInstalledSystemLibrary } from '../../system-toolsets/resolve.js';
 import { sampleDarwinSystemMemoryCached } from '../../system/darwin-memory.js';
 import { collectSystemDiagnosticsCached } from '../../system/diagnostics.js';
@@ -167,6 +172,61 @@ export function systemRoutes(ctx: ServiceContext): Hono {
       chat: ctx.chat,
     });
     return c.json(SystemDiagnosticsSchema.parse(diagnostics));
+  });
+
+  /**
+   * Identity card for this daemon: which home it serves, whether that home
+   * has ever actually been used, and what is resident right now. The
+   * Electron supervisor reads this before committing to a machine-service
+   * adoption (a factory-fresh machine home must not shadow a per-user home
+   * full of real work), and it is the only window into a machine daemon
+   * whose config/state directories are ACL-private to the service identity.
+   *
+   * Deliberately NOT part of `/diagnostics` — that schema is the privacy
+   * boundary for public bug reports and must never carry home paths.
+   *
+   * `everUsed` is structural: a persisted session or a project beyond the
+   * auto-created `default` only ever comes from use. Gezel count says
+   * nothing (boot auto-creates the whole system crew), and
+   * `firstRunCompleted` cannot serve either — the bootstrap sets it on
+   * every daemon boot, including headless machine services no human has
+   * ever opened.
+   */
+  app.get('/home', async (c) => {
+    const [config, gezels, projects, sessions] = await Promise.all([
+      ctx.store.readConfig(),
+      ctx.store.listGezels(),
+      ctx.store.listProjects(),
+      ctx.store.listSessions(),
+    ]);
+    const provider = resolveDefaultProviderName(config);
+    const defaultModel =
+      typeof config.defaultModel === 'object' && config.defaultModel !== null
+        ? (config.defaultModel as Record<string, string | undefined>)[provider]
+        : undefined;
+    const engineSnapshot = ctx.chat.peekEngineStatus();
+    return c.json(
+      SystemHomeInfoSchema.parse({
+        home: ctx.home,
+        scope: process.env.GEZEL_SYSTEM_SCOPE === '1' ? 'machine' : 'user',
+        version: GEZEL_VERSION,
+        startedAt: ctx.startedAt,
+        firstRunCompleted: config.firstRunCompleted === true,
+        usage: {
+          gezelCount: gezels.length,
+          projectCount: projects.length,
+          sessionCount: sessions.length,
+          everUsed: sessions.length > 0 || projects.length > 1,
+        },
+        ...(provider ? { provider } : {}),
+        ...(defaultModel ? { defaultModel } : {}),
+        memory: { totalBytes: totalmem(), freeBytes: freemem() },
+        engines: (engineSnapshot?.entries ?? []).map((entry) => ({
+          key: entry.key,
+          residentBytes: entry.residentBytes,
+        })),
+      } satisfies SystemHomeInfo),
+    );
   });
 
   /**

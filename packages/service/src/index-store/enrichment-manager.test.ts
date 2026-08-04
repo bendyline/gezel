@@ -15,7 +15,24 @@ const BOOK = {
   parsed: { frontmatter: { name: 'Noor' } },
 } as unknown as GezelDetail;
 
-function make(opts: { active: boolean; indexingEnabled?: boolean }) {
+/**
+ * An idle state whose unreported-boot grace has already lapsed — the
+ * steady-state headless daemon most of these tests model. The injected
+ * clock answers the constructor's start-time capture with "31 minutes
+ * ago" and real time afterwards.
+ */
+function agedIdleState(): SystemIdleState {
+  let constructing = true;
+  return new SystemIdleState(() => {
+    if (constructing) {
+      constructing = false;
+      return Date.now() - 31 * 60_000;
+    }
+    return Date.now();
+  });
+}
+
+function make(opts: { active: boolean; indexingEnabled?: boolean; freshBoot?: boolean }) {
   const enrich = vi.fn().mockResolvedValue({ files: 1, summarized: 1, embedded: 1 });
   const chat = {
     isAnyActive: () => opts.active,
@@ -31,7 +48,7 @@ function make(opts: { active: boolean; indexingEnabled?: boolean }) {
     readConfig: async () => ({}),
   } as unknown as Store;
   const contentIndex = { enrich } as unknown as ContentIndex;
-  const idle = new SystemIdleState();
+  const idle = opts.freshBoot ? new SystemIdleState() : agedIdleState();
   const mgr = new IndexEnrichmentManager({
     store,
     chat,
@@ -49,8 +66,23 @@ describe('IndexEnrichmentManager idle gating', () => {
     expect(enrich).not.toHaveBeenCalled();
   });
 
-  it('runs when session-idle and OS-idle is unknown (headless)', async () => {
+  it('runs when session-idle and OS-idle is unknown, once past the boot grace (headless)', async () => {
     const { mgr, enrich } = make({ active: false });
+    await mgr.tick();
+    expect(enrich).toHaveBeenCalledTimes(1);
+  });
+
+  // The 2026-08-03 regression: a machine service that never hears an idle
+  // report used to conclude "user away" the moment it booted, firing
+  // enrichment one-shots ~20s after start and cold-loading a multi-GB
+  // model while the user was actively logging in / installing.
+  it('holds off during the unreported boot grace on a freshly started daemon', async () => {
+    const { mgr, enrich, idle } = make({ active: false, freshBoot: true });
+    await mgr.tick();
+    expect(enrich).not.toHaveBeenCalled();
+    // A real idle report ends the grace immediately — the desktop is
+    // connected and the normal OS-idle gate takes over.
+    idle.report(600);
     await mgr.tick();
     expect(enrich).toHaveBeenCalledTimes(1);
   });
@@ -132,7 +164,7 @@ describe('review tier scheduling', () => {
       listIndexRubrics: async () => ({}),
     } as unknown as Store;
     const contentIndex = { enrich, enrichAreas, review } as unknown as ContentIndex;
-    const idle = new SystemIdleState();
+    const idle = agedIdleState();
     const mgr = new IndexEnrichmentManager({
       store,
       chat,

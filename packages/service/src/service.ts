@@ -1880,6 +1880,51 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     allowEphemeralFallback = true;
   }
 
+  // Classify what answers on the canonical port when we lose the bind.
+  // A 200 with the health body or a 401 on exactly `/api/health` over
+  // loopback TLS is another gezeld (health sits behind bearerAuth, so an
+  // unauthenticated probe of a live daemon yields 401). TLS/socket
+  // failures and non-HTTP listeners classify as unknown/other. Never
+  // throws; bounded by a short timeout.
+  const identifyCanonicalPortOccupant = async (
+    occupiedPort: number,
+  ): Promise<'gezeld' | 'other-http' | 'unknown'> => {
+    const { request: httpsRequest } = await import('node:https');
+    return new Promise((resolve) => {
+      const req = httpsRequest(
+        {
+          host: '127.0.0.1',
+          port: occupiedPort,
+          path: '/api/health',
+          method: 'GET',
+          timeout: 3_000,
+          // The occupant's loopback cert is self-signed by a different
+          // daemon; identification, not trust, is the goal here.
+          rejectUnauthorized: false,
+        },
+        (res) => {
+          const chunks: Buffer[] = [];
+          res.on('data', (c: Buffer) => {
+            if (chunks.reduce((n, b) => n + b.length, 0) < 4096) chunks.push(c);
+          });
+          res.on('end', () => {
+            if (res.statusCode === 401) return resolve('gezeld');
+            const body = Buffer.concat(chunks).toString('utf8');
+            if (res.statusCode === 200 && body.includes('"ok":true')) return resolve('gezeld');
+            resolve('other-http');
+          });
+          res.on('error', () => resolve('other-http'));
+        },
+      );
+      req.on('timeout', () => {
+        req.destroy();
+        resolve('unknown');
+      });
+      req.on('error', () => resolve('unknown'));
+      req.end();
+    });
+  };
+
   // ALPN order matters: list `h2` first so browsers/Electron pick it (the
   // whole point of this exercise — multiplex SSE streams over one
   // connection and dodge Chromium's 6-conn-per-origin cap). Keep
@@ -1920,6 +1965,25 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
       log.warn(
         `[service] canonical port ${requestedPort} is in use; falling back to an ephemeral port. Third-party clients should read the bound port from ~/.gezel/runtime/port.`,
       );
+      // Identify the occupant in the background. If another gezeld answers
+      // there, this process is a SECOND daemon — almost always the machine
+      // service plus a per-user daemon side by side, each with its own
+      // home, scheduler, and local models (observed: two llama-servers,
+      // ~20 GB combined, one 32 GB machine). The supervisor's SCM-aware
+      // mode resolution prevents this at launch; this log is the tripwire
+      // for whatever path still gets here. Fire-and-forget so a slow or
+      // wedged occupant cannot delay OUR boot.
+      void identifyCanonicalPortOccupant(requestedPort).then((occupant) => {
+        if (occupant === 'gezeld') {
+          log.error(
+            `[service] another gezeld daemon is already serving the canonical port ${requestedPort} — two daemons are now running against two different homes. Background work, schedulers, and local model memory are all doubled. If this is not intentional, close this app and use the machine service, or stop/disable the machine service (GezelService / com.bendyline.gezeld / gezeld.service) to stay per-user.`,
+          );
+        } else if (occupant === 'other-http') {
+          log.warn(
+            `[service] port ${requestedPort} is held by a non-Gezel local HTTP server; leaving it alone`,
+          );
+        }
+      });
       ({ server, port } = await bindOnce(0));
     } else {
       throw err;

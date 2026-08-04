@@ -25,11 +25,12 @@ import { gezelPaths } from '@bendyline/gezel/paths';
 import { defaultBundlePaths, extractBundleIfNeeded, readBundleMeta } from './extract-bundle.js';
 import { defaultNodeBundleDir, installNodeIfNeeded } from './extract-node.js';
 import { defaultPnpmBundleDir, installPnpmIfNeeded } from './extract-pnpm.js';
+import { readHomeUsageSignals, readHostingPin, writeHostingPin } from './home-signals.js';
 import { LogRotator } from './log-rotator.js';
 import { machineServiceInstallFailed } from './machine-service-state.js';
-import { type Mode, resolveMode } from './mode.js';
+import { type Mode, resolveMode, resolvePerUserMode } from './mode.js';
 import { nativeBinDir, resolveNativeBinaryPath } from './native-bin.js';
-import { readSystemServiceRuntime } from './system-service.js';
+import { readSystemServiceRuntime, systemServiceHome } from './system-service.js';
 
 export interface ConnectOptions {
   home: string;
@@ -47,6 +48,7 @@ export type ConnectionMode = Mode['kind'];
 
 export type ServiceFallbackCode =
   | 'machine-service-not-installed'
+  | 'machine-service-home-fresh'
   | 'system-service-unhealthy'
   | 'system-service-version-mismatch'
   | 'adopted-daemon-stale'
@@ -62,10 +64,12 @@ export type ServiceFallbackCode =
  * persistent banner. Most codes mean "we fell back to embedded"; the
  * exceptions are `system-service-version-mismatch`, where we stayed connected
  * to the machine service on purpose and the banner is asking the user to
- * rerun the installer, and `machine-service-not-installed`, where the daemon
+ * rerun the installer, `machine-service-not-installed`, where the daemon
  * is healthy but running per-user because the installer never registered the
- * machine service. Branch on `code`, not on the mode, when the copy
- * matters — see `FallbackBanner` in the UI.
+ * machine service, and `machine-service-home-fresh`, where a healthy machine
+ * service was deliberately declined because its home has never been used
+ * while the per-user home holds the user's real data. Branch on `code`, not
+ * on the mode, when the copy matters — see `FallbackBanner` in the UI.
  *
  * `code` and `message` both cross to the renderer via the preload bridge.
  */
@@ -90,6 +94,16 @@ export const HEALTH_REQUEST_TIMEOUT_MS = 5_000;
 // verification and runtime initialization before publishing discovery files.
 // Keep routine health probes short, but give this one-time fallback path room.
 const PACKAGED_STARTUP_TIMEOUT_MS = 30_000;
+// How long to wait for a machine service the OS service manager reports as
+// running/starting to publish healthy runtime discovery. Sized from the
+// observed fresh-install race: the installer launches the app ~4s after
+// enabling GezelService, and the service publishes runtime files 20-30s
+// after that (OS verification + first daemon boot). 45s covers that with
+// margin for slower disks. Spawning a per-user daemon inside this window is
+// strictly worse than waiting — it creates a second daemon on a second home
+// that survives until the next reboot.
+const MACHINE_SERVICE_STARTUP_WAIT_MS = 45_000;
+const MACHINE_SERVICE_STARTUP_POLL_MS = 1_000;
 
 interface SupervisedServiceInit {
   systemServiceHome?: string;
@@ -687,6 +701,25 @@ export async function connectOrStart(opts: ConnectOptions): Promise<SupervisedSe
     logger: opts.logger,
   });
 
+  return connectResolved(opts, mode, { inheritedReason: null, allowMachineRecheck: true });
+}
+
+/**
+ * State threaded through the mode dispatch so a deliberate machine-service
+ * decline (fresh machine home) carries its notice into whichever per-user
+ * branch ends up serving, and so the pre-spawn machine re-check cannot
+ * bounce straight back to a service we just declined.
+ */
+interface ConnectFlow {
+  inheritedReason: ServiceFallbackReason | null;
+  allowMachineRecheck: boolean;
+}
+
+async function connectResolved(
+  opts: ConnectOptions,
+  mode: Mode,
+  flow: ConnectFlow,
+): Promise<SupervisedService> {
   if (mode.kind === 'remote') {
     await probeRemote(mode.baseUrl, mode.token);
     return new SupervisedService('remote', mode.baseUrl, mode.token, mode.cert, opts);
@@ -694,28 +727,34 @@ export async function connectOrStart(opts: ConnectOptions): Promise<SupervisedSe
 
   if (mode.kind === 'system-service') {
     // The Windows / macOS / Linux installer registered gezeld as a system
-    // service. Probe /api/health before adopting — if the service is
-    // installed but not running (e.g. SCM stopped it, or the service
-    // crashed), we fall through to the per-user paths so the user still
-    // gets a working app instead of an indefinite spinner.
-    const client = buildHealthClient(mode.baseUrl, mode.token, mode.cert);
-    try {
-      const health = await healthWithTimeout(client);
-      opts.logger?.info?.(`[supervisor] connected to system service at ${mode.baseUrl}`);
-      return new SupervisedService('system-service', mode.baseUrl, mode.token, mode.cert, opts, {
-        systemServiceHome: mode.serviceHome,
-        fallbackReason: await systemServiceVersionSkew(health.version, mode.serviceHome, opts),
+    // service and the OS service manager says it is running or starting.
+    // Wait (bounded) for healthy runtime discovery instead of failing on
+    // the first read — the installer launches the app well before the
+    // service publishes its files, and losing that race used to mean a
+    // second, per-user daemon racing the machine service for the GPU.
+    const outcome = await connectSystemService(opts, mode);
+    if (outcome.kind === 'connected') return outcome.service;
+    if (outcome.kind === 'prefer-per-user') {
+      const perUser = await resolvePerUserMode({
+        home: opts.home,
+        packaged: opts.packaged,
+        devSpawn: opts.devSpawn,
+        forceEmbedded: opts.forceEmbedded,
+        ...(opts.logger ? { logger: opts.logger } : {}),
       });
-    } catch (err) {
-      opts.logger?.warn?.(
-        `[supervisor] system service runtime files exist at ${mode.serviceHome} but health check failed (${(err as Error).message}); falling back to embedded`,
-      );
-      return buildEmbedded(opts, {
-        code: 'system-service-unhealthy',
-        sourceMode: 'system-service',
-        message: `System service was unavailable: ${(err as Error).message}`,
+      return connectResolved(opts, perUser, {
+        inheritedReason: outcome.reason,
+        allowMachineRecheck: false,
       });
     }
+    opts.logger?.warn?.(
+      `[supervisor] machine service at ${mode.serviceHome} did not become healthy (${outcome.message}); falling back to embedded`,
+    );
+    return buildEmbedded(opts, {
+      code: 'system-service-unhealthy',
+      sourceMode: 'system-service',
+      message: `System service was unavailable: ${outcome.message}`,
+    });
   }
 
   if (mode.kind === 'local-adopt') {
@@ -778,7 +817,7 @@ export async function connectOrStart(opts: ConnectOptions): Promise<SupervisedSe
         }
       }
       return new SupervisedService('local-adopt', mode.baseUrl, mode.token, mode.cert, opts, {
-        fallbackReason: await machineServiceMissing(opts, 'local-adopt'),
+        fallbackReason: flow.inheritedReason ?? (await machineServiceMissing(opts, 'local-adopt')),
       });
     } catch (err) {
       if (isProcessAlive(mode.pid)) {
@@ -802,6 +841,18 @@ export async function connectOrStart(opts: ConnectOptions): Promise<SupervisedSe
   }
 
   if (mode.kind === 'local-spawn-packaged') {
+    // Last look before creating a second writer: bundle extraction and the
+    // steps above take real time, and the machine service may have finished
+    // publishing its runtime in the meantime (mode resolution's SCM query
+    // can also have answered `unknown` on a machine where sc/systemctl is
+    // unavailable). Adopting it now is strictly better than spawning a
+    // parallel daemon on a different home. Skipped after a deliberate
+    // decline — `flow.allowMachineRecheck` — so a fresh-home bail cannot
+    // bounce straight back.
+    if (flow.allowMachineRecheck) {
+      const adopted = await lateMachineServiceCheck(opts);
+      if (adopted) return adopted;
+    }
     try {
       const result = await spawnChildFromInstall(opts);
       const svc = new SupervisedService(
@@ -810,7 +861,10 @@ export async function connectOrStart(opts: ConnectOptions): Promise<SupervisedSe
         result.token,
         result.cert,
         opts,
-        { fallbackReason: await machineServiceMissing(opts, 'local-spawn-packaged') },
+        {
+          fallbackReason:
+            flow.inheritedReason ?? (await machineServiceMissing(opts, 'local-spawn-packaged')),
+        },
       );
       svc.attachSpawned(result.child);
       return svc;
@@ -852,7 +906,153 @@ export async function connectOrStart(opts: ConnectOptions): Promise<SupervisedSe
     }
   }
 
-  return buildEmbedded(opts);
+  return buildEmbedded(opts, flow.inheritedReason);
+}
+
+type SystemServiceOutcome =
+  | { kind: 'connected'; service: SupervisedService }
+  | { kind: 'prefer-per-user'; reason: ServiceFallbackReason }
+  | { kind: 'unhealthy'; message: string };
+
+/**
+ * Connect to the machine service, waiting (when the SCM said it is running
+ * or starting) for it to publish healthy runtime discovery. Re-reads the
+ * runtime files on every attempt — the auth token rotates per service
+ * start, so a snapshot taken mid-boot can be one generation stale.
+ */
+async function connectSystemService(
+  opts: ConnectOptions,
+  mode: Extract<Mode, { kind: 'system-service' }>,
+): Promise<SystemServiceOutcome> {
+  const deadline = Date.now() + (mode.waitForStartup ? MACHINE_SERVICE_STARTUP_WAIT_MS : 0);
+  let lastError = 'runtime discovery files are not published yet';
+  let waitingAnnounced = false;
+  for (;;) {
+    const runtime = await readSystemServiceRuntime(mode.serviceHome);
+    if (runtime) {
+      const client = buildHealthClient(runtime.baseUrl, runtime.token, runtime.cert);
+      try {
+        const health = await healthWithTimeout(client);
+        const preference = await decideHomePreference(opts, client, mode.hostingPin);
+        if (preference) return { kind: 'prefer-per-user', reason: preference };
+        opts.logger?.info?.(`[supervisor] connected to system service at ${runtime.baseUrl}`);
+        return {
+          kind: 'connected',
+          service: new SupervisedService(
+            'system-service',
+            runtime.baseUrl,
+            runtime.token,
+            runtime.cert,
+            opts,
+            {
+              systemServiceHome: mode.serviceHome,
+              fallbackReason: await systemServiceVersionSkew(
+                health.version,
+                mode.serviceHome,
+                opts,
+              ),
+            },
+          ),
+        };
+      } catch (err) {
+        lastError = (err as Error).message;
+      }
+    }
+    if (Date.now() >= deadline) return { kind: 'unhealthy', message: lastError };
+    if (!waitingAnnounced) {
+      waitingAnnounced = true;
+      opts.logger?.info?.(
+        `[supervisor] machine service is starting; waiting up to ${Math.round(
+          MACHINE_SERVICE_STARTUP_WAIT_MS / 1000,
+        )}s for it to publish a healthy runtime...`,
+      );
+    }
+    await sleepMs(MACHINE_SERVICE_STARTUP_POLL_MS);
+  }
+}
+
+/**
+ * Should this launch decline a healthy machine service in favor of the
+ * per-user home? Only when the evidence is unambiguous: the user's home
+ * has real work in it (gezels/projects/sessions beyond the auto-created
+ * baseline) while the machine home has never been used. Adopting the
+ * machine service in that state presents an empty app with the user's
+ * actual data stranded in `~/.gezel` — the worst possible first
+ * impression after an update.
+ *
+ * The decision is persisted as `hosting: 'per-user'` so later launches
+ * skip the machine service (and its startup wait) outright; Settings →
+ * Daemon is the way back. An explicit `'machine-service'` pin disables
+ * the check entirely. Any probe failure — including a daemon predating
+ * `GET /api/system/home` — keeps today's behavior of connecting.
+ */
+async function decideHomePreference(
+  opts: ConnectOptions,
+  client: GezelClient,
+  hostingPin: 'auto' | 'machine-service',
+): Promise<ServiceFallbackReason | null> {
+  if (hostingPin === 'machine-service') return null;
+  const local = await readHomeUsageSignals(opts.home);
+  if (!local.everUsed) return null;
+  let machineUsed: boolean;
+  let machineHome = 'the machine service home';
+  try {
+    const info = await client.getSystemHomeInfo();
+    machineUsed = info.usage.everUsed;
+    machineHome = info.home;
+  } catch (err) {
+    opts.logger?.info?.(
+      `[supervisor] machine home-info probe unavailable (${(err as Error).message}); staying on the machine service`,
+    );
+    return null;
+  }
+  if (machineUsed) return null;
+  const pinned = await writeHostingPin(opts.home, 'per-user');
+  opts.logger?.warn?.(
+    `[supervisor] machine service home at ${machineHome} has never been used, while ` +
+      `${opts.home} holds ${local.gezelCount} gezels / ${local.projectCount} projects — ` +
+      `staying on the per-user daemon${pinned ? " (pinned hosting='per-user')" : ''}`,
+  );
+  return {
+    code: 'machine-service-home-fresh',
+    sourceMode: 'system-service',
+    message:
+      'The machine-wide background service is healthy but its data home has never been used, ' +
+      `while this account's per-user home has your gezellen and projects. Gezel connected to ` +
+      'your per-user data and will keep doing so; change Hosting in Settings to switch.',
+  };
+}
+
+/**
+ * Pre-spawn re-check: adopt a machine service that became healthy after
+ * mode resolution rather than spawning a second daemon beside it. Honors
+ * the hosting pin and runs the same preference/version checks as the
+ * primary path. Returns null when there is nothing to adopt — the caller
+ * proceeds with its spawn.
+ */
+async function lateMachineServiceCheck(opts: ConnectOptions): Promise<SupervisedService | null> {
+  if (!opts.packaged) return null;
+  const sysHome = systemServiceHome();
+  if (!sysHome) return null;
+  const pin = await readHostingPin(opts.home);
+  if (pin === 'per-user') return null;
+  const runtime = await readSystemServiceRuntime(sysHome);
+  if (!runtime) return null;
+  opts.logger?.info?.(
+    '[supervisor] machine service published its runtime while preparing to spawn; probing it before starting a second daemon',
+  );
+  const outcome = await connectSystemService(opts, {
+    kind: 'system-service',
+    serviceHome: sysHome,
+    runtime,
+    waitForStartup: false,
+    hostingPin: pin,
+  });
+  return outcome.kind === 'connected' ? outcome.service : null;
+}
+
+function sleepMs(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function shippedServiceVersion(): Promise<string | null> {

@@ -18,7 +18,7 @@
 
 import type { ChildProcess } from 'node:child_process';
 import { EventEmitter } from 'node:events';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -43,6 +43,21 @@ const ctx = vi.hoisted(() => ({
     token: string;
     cert: string | null;
     home: string;
+  },
+  systemHomeInfo: null as null | {
+    home: string;
+    scope: 'machine' | 'user';
+    version: string;
+    startedAt: string;
+    firstRunCompleted: boolean;
+    usage: {
+      gezelCount: number;
+      projectCount: number;
+      sessionCount: number;
+      everUsed: boolean;
+    };
+    memory: { totalBytes: number; freeBytes: number };
+    engines: Array<{ key: string; residentBytes: number }>;
   },
   processAlive: true,
   llamaProbe: {
@@ -136,9 +151,12 @@ vi.mock('@bendyline/gezel/native', () => ({
     return null;
   },
 }));
-vi.mock('./mode.js', () => ({ resolveMode: vi.fn() }));
+vi.mock('./mode.js', () => ({ resolveMode: vi.fn(), resolvePerUserMode: vi.fn() }));
 vi.mock('./system-service.js', () => ({
   readSystemServiceRuntime: vi.fn(() => Promise.resolve(ctx.systemRuntime)),
+  // Null keeps the pre-spawn machine re-check inert for the per-user branch
+  // tests; the system-service tests drive everything through ctx.systemRuntime.
+  systemServiceHome: vi.fn(() => null),
 }));
 vi.mock('./log-rotator.js', () => ({
   LogRotator: class {
@@ -151,6 +169,14 @@ vi.mock('@bendyline/gezel-client/node', () => ({
     health(signal?: AbortSignal) {
       if (!ctx.health) throw new Error('test forgot to set ctx.health');
       return ctx.health(signal);
+    }
+    getSystemHomeInfo() {
+      if (!ctx.systemHomeInfo) {
+        // Mirrors a daemon predating GET /api/system/home — the caller
+        // treats it as "no evidence" and stays on the machine service.
+        return Promise.reject(new Error('404 Not Found'));
+      }
+      return Promise.resolve(ctx.systemHomeInfo);
     }
   },
   createTrustingFetch: () => fetch,
@@ -203,6 +229,7 @@ beforeEach(async () => {
   ctx.health = () => Promise.resolve({ ok: true, version: '1.0.0' });
   ctx.runtime = null;
   ctx.systemRuntime = null;
+  ctx.systemHomeInfo = null;
   ctx.processAlive = true;
   ctx.llamaProbe = {
     backend: 'cpu',
@@ -317,29 +344,48 @@ describe('Branch 1 — remote', () => {
 
 // ── Branch 1.5: system-service ──────────────────────────────────────
 
+/** The post-SCM mode shape: connection details come from runtime files. */
+function sysMode(
+  overrides: Partial<{
+    serviceHome: string;
+    waitForStartup: boolean;
+    hostingPin: 'auto' | 'machine-service';
+  }> = {},
+) {
+  return {
+    kind: 'system-service' as const,
+    serviceHome: overrides.serviceHome ?? '/var/lib/gezel',
+    runtime: ctx.systemRuntime,
+    waitForStartup: overrides.waitForStartup ?? false,
+    hostingPin: overrides.hostingPin ?? ('auto' as const),
+  };
+}
+
+function sysRuntime(home = '/var/lib/gezel') {
+  return {
+    port: 5555,
+    baseUrl: 'https://127.0.0.1:5555',
+    token: 'svc-tok',
+    cert: 'CERT',
+    home,
+  };
+}
+
 describe('Branch 1.5 — system-service', () => {
   it('returns mode "system-service" when health succeeds', async () => {
-    vi.mocked(resolveMode).mockResolvedValue({
-      kind: 'system-service',
-      baseUrl: 'https://127.0.0.1:5555',
-      token: 'svc-tok',
-      cert: 'CERT',
-      serviceHome: '/var/lib/gezel',
-    });
+    ctx.systemRuntime = sysRuntime();
+    vi.mocked(resolveMode).mockResolvedValue(sysMode());
     ctx.health = () => Promise.resolve({ ok: true, version: '1.0.0' });
     const svc = await connectOrStart(baseOpts({ packaged: true }));
     expect(svc.mode).toBe('system-service');
+    expect(svc.baseUrl).toBe('https://127.0.0.1:5555');
+    expect(svc.token).toBe('svc-tok');
     await svc.shutdown();
   });
 
   it('falls through to embedded when system-service health check fails', async () => {
-    vi.mocked(resolveMode).mockResolvedValue({
-      kind: 'system-service',
-      baseUrl: 'https://127.0.0.1:5555',
-      token: 'svc-tok',
-      cert: null,
-      serviceHome: '/var/lib/gezel',
-    });
+    ctx.systemRuntime = sysRuntime();
+    vi.mocked(resolveMode).mockResolvedValue(sysMode());
     ctx.health = () => Promise.reject(new Error('SCM stopped'));
     const svc = await connectOrStart(baseOpts({ packaged: true }));
     // Distinct from the remote contract: system-service IS allowed to
@@ -352,19 +398,35 @@ describe('Branch 1.5 — system-service', () => {
     await svc.shutdown();
   });
 
+  // The install-race contract: when the SCM says the service is coming up,
+  // the supervisor WAITS for runtime discovery instead of spawning a second
+  // daemon beside it. Runtime files appearing mid-wait must be adopted.
+  it('waits for runtime files when the service manager says the service is starting', async () => {
+    ctx.systemRuntime = null;
+    vi.mocked(resolveMode).mockResolvedValue(sysMode({ waitForStartup: true }));
+    ctx.health = () => Promise.resolve({ ok: true, version: '1.0.0' });
+    // Publish the runtime files "while the service boots" — after the
+    // first poll misses.
+    setTimeout(() => {
+      ctx.systemRuntime = sysRuntime();
+    }, 150);
+    const svc = await connectOrStart(baseOpts({ packaged: true }));
+    expect(svc.mode).toBe('system-service');
+    expect(svc.baseUrl).toBe('https://127.0.0.1:5555');
+    expect(discoverOrSpawn).not.toHaveBeenCalled();
+    await svc.shutdown();
+  }, 15_000);
+
   // The machine service's gezeld tree is written only by the platform
   // installer, so an app-only update (macOS ZIP via Squirrel) leaves it on
   // the previous release. We cannot stop or replace it, and falling back to
   // embedded would point the user at a different GEZEL_HOME — so we stay
   // connected and raise a banner instead.
   it('flags a version mismatch but stays connected to the system service', async () => {
-    vi.mocked(resolveMode).mockResolvedValue({
-      kind: 'system-service',
-      baseUrl: 'https://127.0.0.1:5555',
-      token: 'svc-tok',
-      cert: 'CERT',
-      serviceHome: '/Library/Application Support/Gezel',
-    });
+    ctx.systemRuntime = sysRuntime('/Library/Application Support/Gezel');
+    vi.mocked(resolveMode).mockResolvedValue(
+      sysMode({ serviceHome: '/Library/Application Support/Gezel' }),
+    );
     vi.mocked(readBundleMeta).mockResolvedValue(bundleMeta('1.26211.23'));
     ctx.health = () => Promise.resolve({ ok: true, version: '1.26210.19' });
 
@@ -385,13 +447,8 @@ describe('Branch 1.5 — system-service', () => {
   });
 
   it('stays quiet when the system service matches the shipped version', async () => {
-    vi.mocked(resolveMode).mockResolvedValue({
-      kind: 'system-service',
-      baseUrl: 'https://127.0.0.1:5555',
-      token: 'svc-tok',
-      cert: 'CERT',
-      serviceHome: '/var/lib/gezel',
-    });
+    ctx.systemRuntime = sysRuntime();
+    vi.mocked(resolveMode).mockResolvedValue(sysMode());
     vi.mocked(readBundleMeta).mockResolvedValue(bundleMeta('1.26211.23'));
     ctx.health = () => Promise.resolve({ ok: true, version: '1.26211.23' });
 
@@ -405,13 +462,8 @@ describe('Branch 1.5 — system-service', () => {
   // Dev workspaces move version-to-version constantly and any system service
   // present is a leftover from a real install, so the check would be noise.
   it('skips the version check outside packaged mode', async () => {
-    vi.mocked(resolveMode).mockResolvedValue({
-      kind: 'system-service',
-      baseUrl: 'https://127.0.0.1:5555',
-      token: 'svc-tok',
-      cert: null,
-      serviceHome: '/var/lib/gezel',
-    });
+    ctx.systemRuntime = sysRuntime();
+    vi.mocked(resolveMode).mockResolvedValue(sysMode());
     vi.mocked(readBundleMeta).mockResolvedValue(bundleMeta('9.9.9'));
     ctx.health = () => Promise.resolve({ ok: true, version: '1.0.0' });
 
@@ -426,28 +478,85 @@ describe('Branch 1.5 — system-service', () => {
   // reconnect that follows has to clear it rather than carry the boot-time
   // verdict for the rest of the session.
   it('clears the mismatch once the service reports a matching version', async () => {
-    vi.mocked(resolveMode).mockResolvedValue({
-      kind: 'system-service',
-      baseUrl: 'https://127.0.0.1:5555',
-      token: 'svc-tok',
-      cert: 'CERT',
-      serviceHome: '/Library/Application Support/Gezel',
-    });
+    ctx.systemRuntime = sysRuntime('/Library/Application Support/Gezel');
+    vi.mocked(resolveMode).mockResolvedValue(
+      sysMode({ serviceHome: '/Library/Application Support/Gezel' }),
+    );
     vi.mocked(readBundleMeta).mockResolvedValue(bundleMeta('1.26211.23'));
     ctx.health = () => Promise.resolve({ ok: true, version: '1.26210.19' });
     const svc = await connectOrStart(baseOpts({ packaged: true }));
     expect(svc.fallbackReason?.code).toBe('system-service-version-mismatch');
 
-    ctx.systemRuntime = {
-      port: 5555,
-      baseUrl: 'https://127.0.0.1:5555',
-      token: 'svc-tok',
-      cert: 'CERT',
-      home: '/Library/Application Support/Gezel',
-    };
     ctx.health = () => Promise.resolve({ ok: true, version: '1.26211.23' });
 
     await svc.restart('after reinstall');
+
+    expect(svc.mode).toBe('system-service');
+    expect(svc.fallbackReason).toBeNull();
+    await svc.shutdown();
+  });
+
+  // The fresh-home guard: a healthy machine service whose home has never
+  // been used must not shadow a per-user home holding real work — that
+  // combination is exactly the split tonight's install race produced, and
+  // adopting the machine side presents an empty app.
+  it('declines a never-used machine home when the user home has real data', async () => {
+    // Make the user home "established": two gezels and a session.
+    await mkdir(join(testHome, 'gezels', 'fenton', 'sessions'), { recursive: true });
+    await writeFile(join(testHome, 'gezels', 'fenton', 'sessions', 's1.json'), '{}');
+    await mkdir(join(testHome, 'gezels', 'adler'), { recursive: true });
+
+    ctx.systemRuntime = sysRuntime();
+    ctx.systemHomeInfo = {
+      home: '/var/lib/gezel',
+      scope: 'machine',
+      version: '1.0.0',
+      startedAt: new Date().toISOString(),
+      firstRunCompleted: true,
+      usage: { gezelCount: 1, projectCount: 1, sessionCount: 0, everUsed: false },
+      memory: { totalBytes: 1, freeBytes: 1 },
+      engines: [],
+    };
+    vi.mocked(resolveMode).mockResolvedValue(sysMode());
+    const { resolvePerUserMode } = await import('./mode.js');
+    vi.mocked(resolvePerUserMode).mockResolvedValue({ kind: 'embedded' });
+    ctx.health = () => Promise.resolve({ ok: true, version: '1.0.0' });
+
+    const svc = await connectOrStart(baseOpts({ packaged: true }));
+
+    expect(svc.mode).toBe('embedded');
+    expect(svc.fallbackReason).toMatchObject({
+      code: 'machine-service-home-fresh',
+      sourceMode: 'system-service',
+    });
+    // The decision must persist so later launches skip the machine wait.
+    const config = JSON.parse(await readFile(join(testHome, 'config.json'), 'utf8')) as {
+      hosting?: string;
+    };
+    expect(config.hosting).toBe('per-user');
+    await svc.shutdown();
+  });
+
+  it('stays on the machine service when BOTH homes have real data', async () => {
+    await mkdir(join(testHome, 'gezels', 'fenton', 'sessions'), { recursive: true });
+    await writeFile(join(testHome, 'gezels', 'fenton', 'sessions', 's1.json'), '{}');
+    await mkdir(join(testHome, 'gezels', 'adler'), { recursive: true });
+
+    ctx.systemRuntime = sysRuntime();
+    ctx.systemHomeInfo = {
+      home: '/var/lib/gezel',
+      scope: 'machine',
+      version: '1.0.0',
+      startedAt: new Date().toISOString(),
+      firstRunCompleted: true,
+      usage: { gezelCount: 4, projectCount: 2, sessionCount: 12, everUsed: true },
+      memory: { totalBytes: 1, freeBytes: 1 },
+      engines: [],
+    };
+    vi.mocked(resolveMode).mockResolvedValue(sysMode());
+    ctx.health = () => Promise.resolve({ ok: true, version: '1.0.0' });
+
+    const svc = await connectOrStart(baseOpts({ packaged: true }));
 
     expect(svc.mode).toBe('system-service');
     expect(svc.fallbackReason).toBeNull();
@@ -711,12 +820,19 @@ describe('mode-aware restart', () => {
   });
 
   it('re-reads rotated system-service runtime without spawning locally', async () => {
-    vi.mocked(resolveMode).mockResolvedValue({
-      kind: 'system-service',
+    ctx.systemRuntime = {
+      port: 5555,
       baseUrl: 'https://127.0.0.1:5555',
       token: 'old-token',
       cert: 'OLD-CERT',
+      home: 'C:/ProgramData/Gezel',
+    };
+    vi.mocked(resolveMode).mockResolvedValue({
+      kind: 'system-service',
       serviceHome: 'C:/ProgramData/Gezel',
+      runtime: ctx.systemRuntime,
+      waitForStartup: false,
+      hostingPin: 'auto',
     });
     const svc = await connectOrStart(baseOpts({ packaged: true }));
     ctx.systemRuntime = {
