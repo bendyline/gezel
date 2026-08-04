@@ -2563,7 +2563,7 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
    * this method itself does no queueing — it is best-effort
    * background work and must never contend with a real turn.
    */
-  async prefillOnly(opts?: { timeoutMs?: number }): Promise<void> {
+  async prefillOnly(opts?: { timeoutMs?: number; sessionId?: string }): Promise<void> {
     const baseUrl = await this.deps.resolveBaseUrl();
     let wireMessages: ChatMessage[] = this.flattenToolMessagesForStrictAlternation
       ? flattenToolMessagesForStrictAlternation(this.messages)
@@ -2590,6 +2590,17 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
     // After tuning so a catalog `maxTokens` can't re-widen the decode.
     body.max_tokens = 1;
     if (tools.length > 0) body.tools = tools;
+    if (opts?.sessionId) {
+      const adapter = this.deps.provider.getCacheAdapter();
+      if (adapter) {
+        await adapter.prepareForSend(
+          opts.sessionId,
+          this.deps.systemMessage,
+          this.deps.systemPromptLayers,
+        );
+        Object.assign(body, adapter.buildRequestExtras(opts.sessionId));
+      }
+    }
     const res = await this.deps.fetchImpl(`${baseUrl}/v1/chat/completions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

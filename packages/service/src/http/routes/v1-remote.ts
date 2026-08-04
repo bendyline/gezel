@@ -10,12 +10,15 @@
  * tool results. B persists nothing for the client.
  */
 
+import { createLogger } from '@bendyline/gezel';
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import type { ResolvedTuning } from '../../model-profile/index.js';
 import {
   PROTOCOL_VERSION,
   RemoteAdmissionRequestSchema,
+  RemoteCacheEvictRequestSchema,
+  RemoteCacheWarmRequestSchema,
   RemoteImageGenRequestSchema,
   RemoteInferRequestSchema,
   type RemoteModelDescriptor,
@@ -26,6 +29,7 @@ import {
 } from '../../providers/remote/wire.js';
 import {
   ExternalToolsUnsupportedError,
+  type LLMProvider,
   type LLMSession,
   ModelNotInstalledError,
   type TurnUsage,
@@ -34,18 +38,24 @@ import { type TenantLimiter, createTenantLimiter } from '../../remotes/tenant-li
 import type { ServiceContext } from '../context.js';
 import { resolveModelTarget } from '../openai-compat/translate.js';
 
+const log = createLogger('remote-cache');
+
 /**
  * Namespace the client's affinity keys by its authenticated origin device, so
  * one tenant's prompt-cache prefix can never be served to another and two
  * tenants' identical sessionIds don't collide in B's queue.
  */
+function namespaceRemoteId(value: string, originDeviceId: string): string {
+  return `dev:${originDeviceId}:${value}`;
+}
+
 function mapWireQueueToB(
   q: WireQueueHints,
   originDeviceId: string,
   signal: AbortSignal,
   lane: 'interactive' | 'background',
 ) {
-  const ns = (v: string) => `dev:${originDeviceId}:${v}`;
+  const ns = (v: string) => namespaceRemoteId(v, originDeviceId);
   return {
     lane,
     ...(q.sessionId ? { sessionId: ns(q.sessionId) } : {}),
@@ -75,6 +85,60 @@ function effectiveLane(
 
 /** Local chat engines B can serve to paired clients. */
 const REMOTE_CHAT_PROVIDERS = ['llama-cpp', 'mlx', 'ds4', 'ollama'] as const;
+
+function residentBaseUrl(provider: LLMProvider): string | null {
+  if (provider.name === 'llama-cpp' || provider.name === 'mlx') {
+    return (
+      provider as LLMProvider & {
+        currentBaseUrl(): string | null;
+      }
+    ).currentBaseUrl();
+  }
+  if (provider.name === 'ds4') {
+    return (
+      provider as LLMProvider & {
+        llamaCpp: { currentBaseUrl(): string | null };
+      }
+    ).llamaCpp.currentBaseUrl();
+  }
+  return null;
+}
+
+async function prewarmRemoteCache(
+  ctx: ServiceContext,
+  body: ReturnType<typeof RemoteCacheWarmRequestSchema.parse>,
+  originDeviceId: string,
+): Promise<void> {
+  const target = resolveModelTarget(body.model);
+  if (!target || !['llama-cpp', 'mlx', 'ds4'].includes(target.provider)) return;
+  // Session focus must never start a cold multi-GB engine. A warm only uses a
+  // process that is already resident; the next real turn remains responsible
+  // for normal lazy startup.
+  const provider = ctx.chat
+    .peekResidentLocalProviders(target.provider, target.model)
+    .find((candidate) => residentBaseUrl(candidate));
+  if (!provider) return;
+  const queue = provider.queue?.snapshot();
+  if (queue && queue.running + queue.queuedInteractive + queue.queuedBackground > 0) {
+    return;
+  }
+  const session = await provider.createSession({
+    systemMessage: body.systemMessage,
+    model: target.model,
+    priorMessages: body.priorMessages,
+    ...(body.systemPromptLayers ? { systemPromptLayers: body.systemPromptLayers } : {}),
+    ...(body.volatileContext ? { volatileContext: body.volatileContext } : {}),
+    ...(body.tools && body.tools.length > 0 ? { externalTools: body.tools } : {}),
+    ...(body.tuning ? { tuning: body.tuning as unknown as ResolvedTuning } : {}),
+  });
+  try {
+    await session.prefillOnly?.({
+      sessionId: namespaceRemoteId(body.sessionId, originDeviceId),
+    });
+  } finally {
+    await session.disconnect().catch(() => {});
+  }
+}
 
 export function v1RemoteRoutes(ctx: ServiceContext): Hono {
   const app = new Hono();
@@ -233,6 +297,40 @@ export function v1RemoteRoutes(ctx: ServiceContext): Hono {
     c.json({ models: await (await ctx.tts.current()).listInstalledModels() }),
   );
   app.get('/audio/tts/health', async (c) => c.json(await (await ctx.tts.current()).health()));
+
+  // User daemon A owns the session and prepares its exact prompt. B receives
+  // only the renderable inference payload and performs a best-effort prefill
+  // against an already-resident native engine.
+  app.post('/cache/warm', async (c) => {
+    const body = RemoteCacheWarmRequestSchema.parse(await c.req.json());
+    if (body.protocolVersion > PROTOCOL_VERSION) {
+      return c.json({ error: 'protocol_version_unsupported', supported: PROTOCOL_VERSION }, 426);
+    }
+    const target = resolveModelTarget(body.model);
+    if (!target || !['llama-cpp', 'mlx', 'ds4'].includes(target.provider)) {
+      return c.json({ error: 'invalid_model', hint: 'expected a native <provider>:<model>' }, 400);
+    }
+    const auth = c.get('auth') as { appId: string } | undefined;
+    const originDeviceId = auth?.appId ?? 'unknown';
+    void prewarmRemoteCache(ctx, body, originDeviceId).catch((error) => {
+      log.warn(
+        `warm failed for ${body.model}/${body.sessionId.slice(0, 8)}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    });
+    return c.json({ ok: true, sessionId: body.sessionId }, 202);
+  });
+
+  // Session-specific eviction also begins with A's id. Namespace it here so
+  // it targets the same engine key remote inference used.
+  app.post('/cache/evict', async (c) => {
+    const body = RemoteCacheEvictRequestSchema.parse(await c.req.json());
+    const auth = c.get('auth') as { appId: string } | undefined;
+    const originDeviceId = auth?.appId ?? 'unknown';
+    ctx.chat.invalidateSessionCache(namespaceRemoteId(body.sessionId, originDeviceId));
+    return c.json({ ok: true, sessionId: body.sessionId });
+  });
 
   // Resolve the model through the same native-engine router used by /infer,
   // then return the context window AFTER the capacity broker has applied its

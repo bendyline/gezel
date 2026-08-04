@@ -18,6 +18,11 @@ import type {
 } from '@bendyline/gezel-client';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
+import {
+  MODEL_INVENTORY_CHANGED_EVENT,
+  announceModelInventoryChanged,
+  changedModelInventoryEngine,
+} from '../model-inventory.js';
 import { CatalogBrowser } from './CatalogBrowser.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
 import { IncompleteDownloads } from './IncompleteDownloads.js';
@@ -232,11 +237,11 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
 
   useEffect(() => {
     const onChanged = (event: Event) => {
-      const engine = (event as CustomEvent<{ engine?: string }>).detail?.engine;
+      const engine = changedModelInventoryEngine(event);
       if (engine === 'llama-cpp') void refresh();
     };
-    window.addEventListener('gezel:models-changed', onChanged);
-    return () => window.removeEventListener('gezel:models-changed', onChanged);
+    window.addEventListener(MODEL_INVENTORY_CHANGED_EVENT, onChanged);
+    return () => window.removeEventListener(MODEL_INVENTORY_CHANGED_EVENT, onChanged);
   }, [refresh]);
 
   // Poll the service for installs that another path kicked off — the
@@ -433,6 +438,7 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
             controller.signal,
             opts?.skipSha ? { skipSha: true } : undefined,
           );
+          announceModelInventoryChanged('llama-cpp');
         } catch (err) {
           if (!controller.signal.aborted) {
             const message = `download failed: ${describe(err)}`;
@@ -512,6 +518,7 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
     setIncomplete((cur) => cur.filter((d) => d.id !== id));
     try {
       await api.deleteLlamaCppModel(id);
+      announceModelInventoryChanged('llama-cpp');
       await refresh();
       onModelsChanged?.();
     } catch (err) {

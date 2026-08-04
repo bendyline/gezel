@@ -1,30 +1,55 @@
-import type { ModelInfo, ProviderName } from '@bendyline/gezel';
+import type { GezmodelEngine, ModelInfo, ProviderName } from '@bendyline/gezel';
 import { composeFitnessBadge } from '@bendyline/gezel';
 import type { ModelFitnessEntry } from '@bendyline/gezel-client';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
+import {
+  MODEL_INVENTORY_CHANGED_EVENT,
+  changedModelInventoryEngine,
+  modelInventoryRevision,
+} from '../model-inventory.js';
 import { Select } from '../primitives/index.js';
 
 // Cache models per-provider for the lifetime of the page load so multiple
 // <ModelPicker /> instances don't each issue their own request.
 const inflight = new Map<ProviderName, Promise<ModelInfo[]>>();
 const cached = new Map<ProviderName, ModelInfo[]>();
+const cacheGeneration = new Map<ProviderName, number>();
 
-async function loadModels(provider: ProviderName): Promise<ModelInfo[]> {
-  const hit = cached.get(provider);
-  if (hit) return hit;
-  const existing = inflight.get(provider);
-  if (existing) return existing;
+function invalidateModels(provider: ProviderName): void {
+  cacheGeneration.set(provider, (cacheGeneration.get(provider) ?? 0) + 1);
+  cached.delete(provider);
+  inflight.delete(provider);
+}
+
+async function loadModels(provider: ProviderName, refresh = false): Promise<ModelInfo[]> {
+  if (refresh) invalidateModels(provider);
+  if (!refresh) {
+    const hit = cached.get(provider);
+    if (hit) return hit;
+    const existing = inflight.get(provider);
+    if (existing) return existing;
+  }
+  const generation = cacheGeneration.get(provider) ?? 0;
   const source =
     provider === 'remote'
       ? loadRemoteModels()
-      : api.listProviderModels(provider).then((res) => res.models);
+      : api
+          .listProviderModels(provider, refresh ? { refresh: true } : undefined)
+          .then((res) => res.models);
   const p = source
     .then((models) => {
-      cached.set(provider, models);
+      // An older request may finish after an install event and the forced
+      // refresh it triggered. Never let that stale response repopulate the
+      // page-lifetime cache.
+      if ((cacheGeneration.get(provider) ?? 0) === generation) {
+        cached.set(provider, models);
+      }
       return models;
     })
-    .finally(() => inflight.delete(provider));
+    .finally(() => {
+      if (inflight.get(provider) === p) inflight.delete(provider);
+    });
   inflight.set(provider, p);
   return p;
 }
@@ -59,6 +84,10 @@ async function loadRemoteModels(): Promise<ModelInfo[]> {
 
 function isLocalProvider(p: ProviderName): p is 'mlx' | 'llama-cpp' {
   return p === 'mlx' || p === 'llama-cpp';
+}
+
+function isNativeInventoryProvider(p: ProviderName): p is GezmodelEngine {
+  return p === 'mlx' || p === 'llama-cpp' || p === 'ds4';
 }
 
 // Fitness records, fetched once per page load (same lifetime as the
@@ -122,6 +151,20 @@ export function ModelPicker({
   const [otherMode, setOtherMode] = useState(false);
   const [otherDraft, setOtherDraft] = useState(value ?? '');
   const [fitness, setFitness] = useState<Map<string, ModelFitnessEntry> | null>(fitnessCache);
+  const [inventoryEpoch, setInventoryEpoch] = useState(0);
+  const changedEngineRef = useRef<GezmodelEngine | null>(null);
+
+  useEffect(() => {
+    const onChanged = (event: Event) => {
+      const engine = changedModelInventoryEngine(event);
+      if (engine !== provider) return;
+      changedEngineRef.current = engine;
+      invalidateModels(provider);
+      setInventoryEpoch((value) => value + 1);
+    };
+    window.addEventListener(MODEL_INVENTORY_CHANGED_EVENT, onChanged);
+    return () => window.removeEventListener(MODEL_INVENTORY_CHANGED_EVENT, onChanged);
+  }, [provider]);
 
   useEffect(() => {
     if (provider !== 'llama-cpp' && provider !== 'ds4') return;
@@ -149,7 +192,11 @@ export function ModelPicker({
     // falsely set an error. Ignore any result for a provider we've
     // already moved past.
     let cancelled = false;
-    loadModels(provider)
+    const refresh =
+      isNativeInventoryProvider(provider) &&
+      ((changedEngineRef.current === provider && inventoryEpoch > 0) ||
+        modelInventoryRevision(provider) > 0);
+    loadModels(provider, refresh)
       .then(async (m) => {
         if (cancelled) return;
         // For local providers (MLX, llama.cpp), `listProviderModels`
@@ -195,7 +242,7 @@ export function ModelPicker({
     return () => {
       cancelled = true;
     };
-  }, [provider]);
+  }, [provider, inventoryEpoch]);
 
   useEffect(() => {
     setOtherDraft(value ?? '');

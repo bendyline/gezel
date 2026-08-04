@@ -116,6 +116,8 @@ describe('ProviderPool', () => {
     const a = await pool.ensure('mlx', 'gemma4-26b', 0, 10 * GB);
     const b = await pool.ensure('mlx', 'gemma4-26b', 0, 10 * GB);
     expect(a).toBe(b);
+    expect(pool.peekProvidersForModel('mlx', 'gemma4-26b')).toEqual([a]);
+    expect(pool.peekProvidersForModel('mlx', 'other')).toEqual([]);
     expect(builder).toHaveBeenCalledTimes(1);
     const snapshot = pool.snapshot();
     expect(snapshot.committedBytes).toBe(10 * GB);

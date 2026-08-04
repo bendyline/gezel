@@ -36,6 +36,50 @@ function fakeBridge(
 }
 
 describe('RemoteSession', () => {
+  it('prepares the exact user-owned prompt and posts it to the broker warm endpoint', async () => {
+    let request:
+      | { url: string; authorization: string | null; body: Record<string, unknown> }
+      | undefined;
+    const fetchImpl = (async (url: string, init?: RequestInit) => {
+      request = {
+        url,
+        authorization: new Headers(init?.headers).get('authorization'),
+        body: JSON.parse(String(init?.body)) as Record<string, unknown>,
+      };
+      return Response.json({ ok: true }, { status: 202 });
+    }) as unknown as typeof fetch;
+    const session = new RemoteSession({
+      baseUrl: 'https://broker',
+      token: 'broker-token',
+      fetch: fetchImpl,
+      queue: new ProviderQueue({ concurrency: 1 }),
+      bridges: fakeBridge({ read_file: async () => 'x' }),
+      systemMessage: 'stable system',
+      systemPromptLayers: { gezel: 'gezel layer', project: 'project layer' },
+      volatileContext: 'volatile state',
+      tuning: { sampling: { temperature: 0.2 } },
+      model: 'mlx:qwen',
+      priorMessages: [{ role: 'user', content: 'earlier turn' }],
+      numCtx: 32_768,
+      timeoutMs: 60_000,
+    });
+
+    await session.prewarm('session-a');
+
+    expect(request?.url).toBe('https://broker/v1/remote/cache/warm');
+    expect(request?.authorization).toBe('Bearer broker-token');
+    expect(request?.body).toMatchObject({
+      model: 'mlx:qwen',
+      sessionId: 'session-a',
+      systemMessage: 'stable system',
+      systemPromptLayers: { gezel: 'gezel layer', project: 'project layer' },
+      volatileContext: 'volatile state',
+      priorMessages: [{ role: 'user', content: 'earlier turn' }],
+      tools: [{ name: 'read_file' }],
+      tuning: { sampling: { temperature: 0.2 } },
+    });
+  });
+
   it('streams deltas, executes a tool LOCALLY, and loops to completion', async () => {
     const calls: Array<Record<string, unknown>> = [];
     let n = 0;

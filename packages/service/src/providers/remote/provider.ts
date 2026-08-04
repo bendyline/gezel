@@ -67,7 +67,6 @@ export class RemoteGezelProvider implements LLMProvider {
   readonly supportsExternalTools = false;
   readonly supportsPriorMessages = true;
   private readonly log = createLogger('remote-provider');
-  private cachedModels: ModelInfo[] | null = null;
   private readonly admittedContextWindows = new Map<string, number>();
   private lastAdmittedContextWindow: number | undefined;
 
@@ -152,7 +151,6 @@ export class RemoteGezelProvider implements LLMProvider {
 
   async listModels(): Promise<ModelInfo[]> {
     if (this.opts.models) return this.opts.models;
-    if (this.cachedModels) return this.cachedModels;
     try {
       const connection = this.opts.resolveConnection?.() ?? this.opts;
       const res = await connection.fetch(`${connection.baseUrl}/v1/remote/models`, {
@@ -162,7 +160,7 @@ export class RemoteGezelProvider implements LLMProvider {
       const parsed = RemoteModelsResponseSchema.parse(await res.json());
       // Surface only chat models here (multimodal flows through the remote
       // image/video/audio providers). Re-namespace each B id for A.
-      this.cachedModels = parsed.models
+      return parsed.models
         .filter((m) => m.modality === 'chat')
         .map((m) => ({
           id: makeRemoteModelId(this.opts.remoteId, m.id),
@@ -172,7 +170,6 @@ export class RemoteGezelProvider implements LLMProvider {
           ...(m.supportsReasoning !== undefined ? { supportsReasoning: m.supportsReasoning } : {}),
           ...(m.parameterSize ? { parameterSize: m.parameterSize } : {}),
         }));
-      return this.cachedModels;
     } catch (err) {
       this.log.warn(`[remote-provider] listModels(${this.opts.label}) failed: ${String(err)}`);
       return [];

@@ -60,7 +60,7 @@ export async function authorizeLocal(input: LocalConnectInput): Promise<LocalAut
     };
   }
 
-  let resolved;
+  let resolved: Awaited<ReturnType<typeof discoverOrSpawn>>;
   try {
     resolved = await discoverOrSpawn({
       daemonEntry: daemon.daemonEntry,
@@ -107,7 +107,7 @@ async function configuredTransport(
     const cert = await readFile(tlsCertPath, 'utf8');
     return { fetch: createTrustingFetch({ cert }), cert };
   } catch (cause) {
-    throw new GezelSdkError(`could not read the configured Gezel TLS certificate`, {
+    throw new GezelSdkError('could not read the configured Gezel TLS certificate', {
       code: 'tls_cert_unreadable',
       cause,
     });

@@ -16,6 +16,34 @@ function admissionResponse(model: string, contextWindow = 35_840): Response {
 }
 
 describe('RemoteGezelProvider', () => {
+  it('re-reads broker inventory so a completed pull appears without reconnecting', async () => {
+    let requests = 0;
+    const fetchImpl = (async () => {
+      requests += 1;
+      const models = [{ id: 'llama-cpp:qwen.gguf', name: 'Qwen', modality: 'chat' as const }];
+      if (requests > 1) {
+        models.push({ id: 'llama-cpp:gemma.gguf', name: 'Gemma', modality: 'chat' });
+      }
+      return Response.json({ deviceId: 'broker', models });
+    }) as typeof fetch;
+    const provider = new RemoteGezelProvider({
+      remoteId: 'this-machine',
+      label: 'This machine',
+      baseUrl: 'https://127.0.0.1:6228',
+      token: 'token',
+      fetch: fetchImpl,
+    });
+
+    await expect(provider.listModels()).resolves.toEqual([
+      expect.objectContaining({ id: 'remote:this-machine/llama-cpp:qwen.gguf' }),
+    ]);
+    await expect(provider.listModels()).resolves.toEqual([
+      expect.objectContaining({ id: 'remote:this-machine/llama-cpp:qwen.gguf' }),
+      expect.objectContaining({ id: 'remote:this-machine/llama-cpp:gemma.gguf' }),
+    ]);
+    expect(requests).toBe(2);
+  });
+
   it('adds the local engine namespace for automatic machine-broker sessions', async () => {
     const requests: Array<Record<string, unknown>> = [];
     const fetchImpl = (async (url: string | URL | Request, init?: RequestInit) => {

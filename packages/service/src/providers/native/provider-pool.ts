@@ -847,6 +847,21 @@ export class ProviderPool {
   }
 
   /**
+   * Return already-created replicas for one exact model without allocating,
+   * initializing, touching LRU state, or evicting anything. Cache warming and
+   * telemetry use this peek so a read-like request cannot cold-start an engine.
+   */
+  peekProvidersForModel(provider: LocalProviderName, modelId: string): LLMProvider[] {
+    return [...this.entries.values()]
+      .filter(
+        (entry) =>
+          !entry.draining && entry.parsed.provider === provider && entry.parsed.modelId === modelId,
+      )
+      .sort((a, b) => b.lastUsedAt - a.lastUsedAt)
+      .map((entry) => entry.provider);
+  }
+
+  /**
    * Fold every resident replica's live queue into one summary per
    * {@link LocalProviderName}. Under the pool architecture local
    * providers aren't seeded as singletons in `ChatManager.providers`, so

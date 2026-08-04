@@ -2070,8 +2070,12 @@ export class GezelClient {
     return this.request('GET', `/api/models/test?provider=${encodeURIComponent(provider)}`);
   }
 
-  listProviderModels(provider: ProviderName): Promise<ListModelsResponse> {
-    return this.request('GET', `/api/models?provider=${encodeURIComponent(provider)}`);
+  listProviderModels(
+    provider: ProviderName,
+    opts?: { refresh?: boolean },
+  ): Promise<ListModelsResponse> {
+    const refresh = opts?.refresh ? '&refresh=1' : '';
+    return this.request('GET', `/api/models?provider=${encodeURIComponent(provider)}${refresh}`);
   }
 
   // ── Communication channels ──

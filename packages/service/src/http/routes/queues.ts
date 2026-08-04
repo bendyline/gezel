@@ -15,7 +15,12 @@
 
 import { Hono } from 'hono';
 import type { ServiceContext } from '../context.js';
-import { machineEngineProxy } from './machine-engine-proxy.js';
+import {
+  MACHINE_ENGINE_PROVIDER_NAMES,
+  isMachineEngineProvider,
+  userOwnedIdFromBroker,
+  usesMachineEngine,
+} from './machine-engine-proxy.js';
 
 type ProviderName =
   | 'copilot'
@@ -30,7 +35,6 @@ type ProviderName =
 
 export function queueRoutes(ctx: ServiceContext): Hono {
   const app = new Hono();
-  app.use('*', machineEngineProxy(ctx, '/api/queues', '/v1/remote/manage/queues'));
 
   const PROVIDER_NAMES: readonly ProviderName[] = [
     'copilot',
@@ -81,11 +85,11 @@ export function queueRoutes(ctx: ServiceContext): Hono {
     // the EngineStatusPill's popover ("warm sessions: N, cache memory:
     // X MB"). Empty array when no controller is wired or no local
     // provider is initialized.
-    const cache = ctx.chat.getCacheStats();
+    let cache = ctx.chat.getCacheStats();
     // Claude CLI worker pool snapshot — drives the dedicated
     // `ClaudeCliPoolPill` in the header. Null when the provider hasn't
     // been initialized yet (no Claude CLI session has hit it).
-    const [anthropicCliPool, deviceHealth] = await Promise.all([
+    const [anthropicCliPool, localDeviceHealth] = await Promise.all([
       ctx.chat.getAnthropicCliPoolSnapshot(),
       ctx.gpuArbiter.getDeviceHealthStatus(),
     ]);
@@ -96,6 +100,33 @@ export function queueRoutes(ctx: ServiceContext): Hono {
       active: ctx.nightShift.isActive(),
       opensAt: ctx.nightShift.nextStartIso(),
     };
+    let deviceHealth = localDeviceHealth;
+
+    // The product response is assembled HERE, in the user daemon. Only the
+    // three broker-owned native provider queues/cache/device-health blocks are
+    // imported from the machine service. Product state (cloud queues, session
+    // ghosts, task handoffs, Night Shift, Claude CLI workers) never crosses
+    // that boundary.
+    if (usesMachineEngine(ctx)) {
+      for (const name of MACHINE_ENGINE_PROVIDER_NAMES) delete providers[name];
+      const bridge = ctx.machineEngine!;
+      const upstream = await bridge.proxy(c.req.raw, '/api/queues', '/v1/remote/manage/queues');
+      if (upstream.ok) {
+        const broker = await upstream.json().catch(() => null);
+        if (isRecord(broker)) {
+          const brokerProviders = isRecord(broker.providers) ? broker.providers : {};
+          for (const name of MACHINE_ENGINE_PROVIDER_NAMES) {
+            const state = sanitizeBrokerProviderQueue(brokerProviders[name]);
+            if (state) providers[name] = state;
+          }
+          if (Array.isArray(broker.cache)) cache = sanitizeBrokerCacheStats(broker.cache);
+          if (isRecord(broker.deviceHealth)) {
+            deviceHealth = broker.deviceHealth as unknown as typeof deviceHealth;
+          }
+        }
+      }
+    }
+
     return c.json({
       providers,
       taskRunner: { ...ctx.taskRunner.snapshot(), nightShift },
@@ -127,6 +158,9 @@ export function queueRoutes(ctx: ServiceContext): Hono {
     }
     const id = Number.parseInt(c.req.param('id'), 10);
     if (!Number.isFinite(id)) return c.json({ error: 'id must be a number' }, 400);
+    if (isMachineEngineProvider(provider) && usesMachineEngine(ctx)) {
+      return ctx.machineEngine!.proxy(c.req.raw, '/api/queues', '/v1/remote/manage/queues');
+    }
     const cancelled = ctx.chat.cancelProviderQueueItem(provider as ProviderName, id);
     return c.json({ cancelled });
   });
@@ -144,6 +178,9 @@ export function queueRoutes(ctx: ServiceContext): Hono {
     }
     const id = Number.parseInt(c.req.param('id'), 10);
     if (!Number.isFinite(id)) return c.json({ error: 'id must be a number' }, 400);
+    if (isMachineEngineProvider(provider) && usesMachineEngine(ctx)) {
+      return ctx.machineEngine!.proxy(c.req.raw, '/api/queues', '/v1/remote/manage/queues');
+    }
     const body = await c.req.json().catch(() => null);
     const direction = (body && typeof body === 'object' ? body.direction : null) as
       | 'up'
@@ -157,4 +194,121 @@ export function queueRoutes(ctx: ServiceContext): Hono {
   });
 
   return app;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+}
+
+function finiteNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function brokerIdentityFields(value: Record<string, unknown>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const key of ['sessionId', 'gezelId', 'projectId'] as const) {
+    if (typeof value[key] === 'string') out[key] = userOwnedIdFromBroker(value[key]);
+  }
+  if (typeof value.actorLabel === 'string') out.actorLabel = value.actorLabel;
+  if (typeof value.job === 'string') out.job = value.job;
+  return out;
+}
+
+/** Reconstruct the public queue shape and translate every broker affinity id. */
+function sanitizeBrokerProviderQueue(value: unknown): Record<string, unknown> | null {
+  if (!isRecord(value)) return null;
+  const running = finiteNumber(value.running);
+  const queuedInteractive = finiteNumber(value.queuedInteractive);
+  const queuedBackground = finiteNumber(value.queuedBackground);
+  const concurrency = finiteNumber(value.concurrency);
+  if (
+    running === undefined ||
+    queuedInteractive === undefined ||
+    queuedBackground === undefined ||
+    concurrency === undefined
+  ) {
+    return null;
+  }
+  const active = Array.isArray(value.active)
+    ? value.active.flatMap((entry) => {
+        if (!isRecord(entry)) return [];
+        const runningForMs = finiteNumber(entry.runningForMs);
+        if (runningForMs === undefined) return [];
+        return [{ ...brokerIdentityFields(entry), runningForMs }];
+      })
+    : [];
+  const pending = Array.isArray(value.pending)
+    ? value.pending.flatMap((entry) => {
+        if (!isRecord(entry)) return [];
+        const id = finiteNumber(entry.id);
+        const waitedMs = finiteNumber(entry.waitedMs);
+        const lane = entry.lane;
+        if (
+          id === undefined ||
+          waitedMs === undefined ||
+          (lane !== 'interactive' && lane !== 'background')
+        ) {
+          return [];
+        }
+        return [
+          {
+            id,
+            lane,
+            ...(entry.ambient === true ? { ambient: true } : {}),
+            ...brokerIdentityFields(entry),
+            waitedMs,
+          },
+        ];
+      })
+    : [];
+  return {
+    running,
+    queuedInteractive,
+    queuedBackground,
+    concurrency,
+    ...(finiteNumber(value.ambientHeld) !== undefined
+      ? { ambientHeld: finiteNumber(value.ambientHeld) }
+      : {}),
+    ...(finiteNumber(value.interactiveConcurrency) !== undefined
+      ? { interactiveConcurrency: finiteNumber(value.interactiveConcurrency) }
+      : {}),
+    ...(finiteNumber(value.backgroundConcurrency) !== undefined
+      ? { backgroundConcurrency: finiteNumber(value.backgroundConcurrency) }
+      : {}),
+    ...(finiteNumber(value.maxConcurrency) !== undefined
+      ? { maxConcurrency: finiteNumber(value.maxConcurrency) }
+      : {}),
+    active,
+    pending,
+  };
+}
+
+export function sanitizeBrokerCacheStats(
+  values: unknown[],
+): ReturnType<ServiceContext['chat']['getCacheStats']> {
+  return values.flatMap((value) => {
+    if (!isRecord(value)) return [];
+    const sessions = Array.isArray(value.sessions)
+      ? value.sessions.flatMap((session) => {
+          if (!isRecord(session) || typeof session.sessionId !== 'string') return [];
+          return [
+            {
+              ...session,
+              sessionId: userOwnedIdFromBroker(session.sessionId),
+              ...(typeof session.gezelId === 'string'
+                ? { gezelId: userOwnedIdFromBroker(session.gezelId) }
+                : {}),
+            },
+          ];
+        })
+      : [];
+    const gezels = Array.isArray(value.gezels)
+      ? value.gezels.map((gezel) =>
+          isRecord(gezel) && typeof gezel.gezelId === 'string'
+            ? { ...gezel, gezelId: userOwnedIdFromBroker(gezel.gezelId) }
+            : gezel,
+        )
+      : value.gezels;
+    return [{ ...value, sessions, ...(gezels !== undefined ? { gezels } : {}) }];
+  }) as ReturnType<ServiceContext['chat']['getCacheStats']>;
 }

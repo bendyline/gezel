@@ -29,6 +29,7 @@ import { buildTurnUsage } from '../usage-builder.js';
 import {
   PROTOCOL_VERSION,
   type PriorMessageWire,
+  type RemoteCacheWarmRequest,
   RemoteInferFrameSchema,
   type RemoteInferRequest,
 } from './wire.js';
@@ -113,6 +114,45 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
       this.activePriorMessages ?? this.transcript,
       this.pendingPrompt,
     );
+  }
+
+  /**
+   * Ask B to prefill this session's exact current prefix. Unlike the old
+   * `/api/cache/warm` proxy, this carries every prompt component B cannot read
+   * from disk: system bands, transcript, tuning, and A's local tool schemas.
+   */
+  async prewarm(sessionId: string): Promise<void> {
+    const connection = this.deps.resolveConnection?.() ?? this.deps;
+    const tools = this.deps.bridges.isEmpty()
+      ? undefined
+      : this.deps.bridges
+          .getOpenAITools()
+          .map((t) => ({ name: t.name, description: t.description, parameters: t.parameters }));
+    const body: RemoteCacheWarmRequest = {
+      protocolVersion: PROTOCOL_VERSION,
+      model: this.deps.model,
+      sessionId,
+      systemMessage: this.systemMessage,
+      ...(this.deps.systemPromptLayers ? { systemPromptLayers: this.deps.systemPromptLayers } : {}),
+      ...(this.deps.volatileContext ? { volatileContext: this.deps.volatileContext } : {}),
+      priorMessages: [...this.transcript],
+      ...(tools ? { tools } : {}),
+      ...(this.deps.tuning ? { tuning: this.deps.tuning } : {}),
+    };
+    const res = await connection.fetch(`${connection.baseUrl}/v1/remote/cache/warm`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${connection.token}`,
+      },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const detail = await res.text().catch(() => '');
+      throw new Error(
+        `[remote] /v1/remote/cache/warm returned HTTP ${res.status}${detail ? ` ${detail}` : ''}`,
+      );
+    }
   }
 
   private estimatePromptCharsFor(priorMessages: PriorMessageWire[], prompt: string): number {

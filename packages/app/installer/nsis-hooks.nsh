@@ -43,14 +43,19 @@
 !define GEZEL_NSSM "$INSTDIR\gezel-nssm.exe"
 !define GEZEL_NSSM_LEGACY "$INSTDIR\nssm.exe"
 
+; Set only when this installer successfully stops an existing broker. Abort
+; and failure callbacks use it to restart an intact registration; once the
+; install takes ownership of the service lifecycle it is cleared.
+Var GezelServiceStoppedForInstall
+
 ; Gracefully stop a registered service and wait (bounded) for STOPPED.
 ; `sc stop` only REQUESTS the stop; returning immediately used to leave the
 ; host running while electron-builder killed app processes and replaced
 ; files, so every upgrade logged event 7034 ("terminated unexpectedly") for
 ; a service that was actually healthy. `find` on the query output is the
 ; least-fragile completion check available to NSIS: sc.exe state tokens
-; (STOPPED) are unlocalized. A service that does not exist never enters the
-; wait — the caller guards on a plain query first.
+; (STOPPED) are unlocalized. Callers must query first so a missing service
+; never burns this macro's full ten-second budget.
 !macro WaitGezelServiceStopped
   StrCpy $8 0
   ${Do}
@@ -67,56 +72,107 @@
   ${Loop}
 !macroend
 
-; Runs in .onInit — BEFORE electron-builder closes running app processes and
-; long before customInstall replaces files. Stopping the service here means
-; the SCM delivers a clean SERVICE_CONTROL_STOP while every binary is still
-; on disk, the host shuts its gezeld child down in order, and the later
-; RemoveGezelService in customInstall finds an already-stopped service to
-; delete. No elevation concern: perMachine already forced an admin token by
-; the time .onInit runs.
-!macro customInit
+; Stop only when the registration exists. Shared by the assisted install's
+; InstFiles pre-hook and silent updates. The former runs after the user has
+; accepted the installer flow but before electron-builder closes processes,
+; uninstalls the old version, or replaces files. The latter has no assisted
+; confirmation page; UAC has already authorized the elevated process before
+; .onInit runs.
+!macro StopGezelServiceForInstall
   nsExec::ExecToLog '"$SYSDIR\sc.exe" query ${GEZEL_SERVICE_NAME}'
   Pop $0
   ${If} $0 == 0
     nsExec::ExecToLog '"$SYSDIR\sc.exe" stop ${GEZEL_SERVICE_NAME}'
     Pop $0
+    ${If} $0 == 0
+      StrCpy $GezelServiceStoppedForInstall 1
+    ${EndIf}
     !insertmacro WaitGezelServiceStopped
   ${EndIf}
 !macroend
+
+; Best-effort rollback for the narrow window after the committed stop but
+; before the old registration is removed. If removal already quarantined the
+; service with start=disabled, `sc start` safely refuses; if it was deleted,
+; the existence query skips the attempt. Never recreate an old registration.
+!macro RestartGezelServiceAfterAbortedInstall
+  ${If} $GezelServiceStoppedForInstall == 1
+    nsExec::ExecToLog '"$SYSDIR\sc.exe" query ${GEZEL_SERVICE_NAME}'
+    Pop $0
+    ${If} $0 == 0
+      nsExec::ExecToLog '"$SYSDIR\sc.exe" start ${GEZEL_SERVICE_NAME}'
+      Pop $0
+    ${EndIf}
+    StrCpy $GezelServiceStoppedForInstall 0
+  ${EndIf}
+!macroend
+
+; electron-builder expands this immediately before MUI_PAGE_INSTFILES. Its
+; PRE callback is therefore the last pre-install boundary in assisted mode:
+; cancelling on the welcome/license pages leaves a healthy broker untouched.
+!macro customPageAfterChangeDir
+  !define MUI_PAGE_CUSTOMFUNCTION_PRE GezelBeforeInstall
+!macroend
+
+Function GezelBeforeInstall
+  !insertmacro StopGezelServiceForInstall
+FunctionEnd
+
+; Silent auto-updates do not traverse the MUI page callbacks, so retain the
+; orderly pre-file-replacement stop for that committed, non-interactive path.
+!macro customInit
+  ${If} ${Silent}
+    !insertmacro StopGezelServiceForInstall
+  ${EndIf}
+!macroend
+
+Function .onUserAbort
+  !insertmacro RestartGezelServiceAfterAbortedInstall
+FunctionEnd
+
+Function .onInstFailed
+  !insertmacro RestartGezelServiceAfterAbortedInstall
+FunctionEnd
 
 ; Stop/remove both current and legacy registrations via sc.exe.
 ; Missing-service errors are expected.  NSSM-era registrations are
 ; ordinary SCM services, so the same stop/delete path covers them.
 !macro RemoveGezelService
-  ; Quarantine first. If deletion later fails, SCM still cannot auto-start a
-  ; partially configured legacy/default-LocalSystem registration on reboot.
-  nsExec::ExecToLog '"$SYSDIR\sc.exe" config ${GEZEL_SERVICE_NAME} start= disabled'
-  Pop $0
-  nsExec::ExecToLog '"$SYSDIR\sc.exe" stop ${GEZEL_SERVICE_NAME}'
-  Pop $0
-  ; Deleting a service whose stop is still in flight marks it
-  ; delete-pending and can strand the registration until reboot; wait for
-  ; STOPPED first (customInit usually already did, making this instant).
-  !insertmacro WaitGezelServiceStopped
-  nsExec::ExecToLog '"$SYSDIR\sc.exe" delete ${GEZEL_SERVICE_NAME}'
-  Pop $0
-  ; A successful delete is asynchronous when another process still holds an
-  ; SCM handle.  Poll for bounded time before deciding that a legacy service
-  ; survived.  sc.exe returns ERROR_SERVICE_DOES_NOT_EXIST (1060) only once
-  ; the registration is no longer queryable. Preserve the final result in $9.
-  StrCpy $8 0
-  ${Do}
-    nsExec::ExecToLog '"$SYSDIR\sc.exe" query ${GEZEL_SERVICE_NAME}'
-    Pop $9
-    ${If} $9 == 1060
-      ${ExitDo}
-    ${EndIf}
-    IntOp $8 $8 + 1
-    ${If} $8 >= 30
-      ${ExitDo}
-    ${EndIf}
-    Sleep 1000
-  ${Loop}
+  ; A fresh install or fallback uninstall has no service. Preserve 1060 in
+  ; $9 for callers and skip both bounded waits instead of idling for 10-40s.
+  nsExec::ExecToLog '"$SYSDIR\sc.exe" query ${GEZEL_SERVICE_NAME}'
+  Pop $9
+  ${If} $9 != 1060
+    ; Quarantine first. If deletion later fails, SCM still cannot auto-start a
+    ; partially configured legacy/default-LocalSystem registration on reboot.
+    nsExec::ExecToLog '"$SYSDIR\sc.exe" config ${GEZEL_SERVICE_NAME} start= disabled'
+    Pop $0
+    nsExec::ExecToLog '"$SYSDIR\sc.exe" stop ${GEZEL_SERVICE_NAME}'
+    Pop $0
+    ; Deleting a service whose stop is still in flight marks it
+    ; delete-pending and can strand the registration until reboot; wait for
+    ; STOPPED first (the committed-install pre-hook usually made this instant).
+    !insertmacro WaitGezelServiceStopped
+    nsExec::ExecToLog '"$SYSDIR\sc.exe" delete ${GEZEL_SERVICE_NAME}'
+    Pop $0
+    ; A successful delete is asynchronous when another process still holds an
+    ; SCM handle. Poll for bounded time before deciding that a legacy service
+    ; survived. sc.exe returns ERROR_SERVICE_DOES_NOT_EXIST (1060) only once
+    ; the registration is no longer queryable. Preserve the final result in $9.
+    StrCpy $8 0
+    ${Do}
+      nsExec::ExecToLog '"$SYSDIR\sc.exe" query ${GEZEL_SERVICE_NAME}'
+      Pop $9
+      ${If} $9 == 1060
+        ${ExitDo}
+      ${EndIf}
+      IntOp $8 $8 + 1
+      ${If} $8 >= 30
+        ${ExitDo}
+      ${EndIf}
+      Sleep 1000
+    ${Loop}
+  ${EndIf}
 !macroend
 
 ; Remove stale discovery material after stopping a prior service.  Older
@@ -317,6 +373,9 @@
   DetailPrint "Installing least-privileged GezelService..."
 
   !insertmacro RemoveGezelService
+  ; From here the old registration is either gone or deliberately
+  ; quarantined; an installer abort must not try to revive it.
+  StrCpy $GezelServiceStoppedForInstall 0
   ${If} $9 != 1060
     DetailPrint "ERROR: the prior GezelService registration is still present (sc.exe exit $9)."
     MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not fully remove the prior shared model engine. It has been disabled and a replacement will not be installed; reboot or inspect the service before retrying." /SD IDOK

@@ -672,6 +672,18 @@ export interface LLMSession {
    */
   estimatePromptChars?(): number;
   /**
+   * Best-effort prompt-cache prefill for the session's current exact prompt.
+   * Remote sessions use this to send their A-owned prompt/transcript/tool
+   * surface to B's inference-only warm endpoint. Implementations must not
+   * mutate the conversation transcript.
+   */
+  prewarm?(sessionId: string): Promise<void>;
+  /**
+   * Native prefill primitive used by the broker after it receives a prepared
+   * remote warm payload. `sessionId` is already tenant-namespaced by B.
+   */
+  prefillOnly?(opts?: { timeoutMs?: number; sessionId?: string }): Promise<void>;
+  /**
    * Send a user prompt, stream deltas via onDelta subscribers, resolve with
    * the full text response. Implementations should tolerate the SDK's
    * idle-timeout quirks and fall back to accumulated deltas when possible.

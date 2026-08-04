@@ -6,6 +6,11 @@ import type {
 import { GezelApiError } from '@bendyline/gezel-client';
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
+import {
+  MODEL_INVENTORY_CHANGED_EVENT,
+  announceModelInventoryChanged,
+  changedModelInventoryEngine,
+} from '../model-inventory.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
 
 export function SharedModelMigrationPanel({
@@ -40,11 +45,11 @@ export function SharedModelMigrationPanel({
   useEffect(() => {
     void refresh();
     const onChanged = (event: Event) => {
-      const changedEngine = (event as CustomEvent<{ engine?: string }>).detail?.engine;
+      const changedEngine = changedModelInventoryEngine(event);
       if (changedEngine === engine) void refresh();
     };
-    window.addEventListener('gezel:models-changed', onChanged);
-    return () => window.removeEventListener('gezel:models-changed', onChanged);
+    window.addEventListener(MODEL_INVENTORY_CHANGED_EVENT, onChanged);
+    return () => window.removeEventListener(MODEL_INVENTORY_CHANGED_EVENT, onChanged);
   }, [engine, refresh]);
 
   const move = useCallback(
@@ -60,9 +65,7 @@ export function SharedModelMigrationPanel({
           id: candidate.id,
         });
         setNotice(noticeFor(result, candidate.name));
-        window.dispatchEvent(
-          new CustomEvent('gezel:models-changed', { detail: { engine: candidate.engine } }),
-        );
+        announceModelInventoryChanged(candidate.engine);
         onModelsChanged?.();
         await refresh();
       } catch (error) {

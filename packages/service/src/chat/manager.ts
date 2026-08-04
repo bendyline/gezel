@@ -2294,6 +2294,23 @@ export class ChatManager {
     // multi-minute engine load.
     const provider = await this.ensureProviderForSession(record).catch(() => null);
     if (!provider) return;
+
+    // Under machine-broker adoption the persisted provider name remains the
+    // user-facing native name (`llama-cpp` / `mlx` / `ds4`), while the live
+    // provider is RemoteGezelProvider. Build/reuse the A-side live session so
+    // it can send B the exact prompt bands, transcript, and local MCP tool
+    // schemas. B still reads no product state; it receives a prepared prefill
+    // payload over the inference-only protocol.
+    if (provider.name === 'remote') {
+      const state = await this.ensureState(sessionId).catch(() => null);
+      if (!state?.session?.prewarm) return;
+      try {
+        await state.session.prewarm(sessionId);
+      } catch {
+        // Same best-effort contract as local adapter warming.
+      }
+      return;
+    }
     type WarmFn = (sid: string, msgs: Array<{ role: string; content: string }>) => Promise<void>;
     const adapter = (
       provider as unknown as {
@@ -9677,9 +9694,7 @@ export class ChatManager {
         // session — work the real turn needs anyway, done early.
         prefillSession: async (sessionId) => {
           const state = await this.ensureState(sessionId);
-          const session = state.session as
-            | (LLMSession & { prefillOnly?: (o?: { timeoutMs?: number }) => Promise<void> })
-            | null;
+          const session = state.session;
           if (!session || typeof session.prefillOnly !== 'function') return false;
           await session.prefillOnly();
           return true;
@@ -10177,6 +10192,20 @@ export class ChatManager {
     const router = this.engineRouter ?? this.engineRouterCache;
     if (!router) return new Map();
     return router.pool.queueSummaries();
+  }
+
+  /**
+   * Non-building lookup for an already-created native provider. Unlike
+   * `getProviderForModel`, this cannot allocate a replica, evict another model,
+   * or start an engine. The caller still checks the provider's live base URL
+   * because a retained provider object may currently have no resident process.
+   */
+  peekResidentLocalProviders(name: ProviderName, modelId?: string): LLMProvider[] {
+    if (!isMachineEngineChatProvider(name) || !modelId) return [];
+    const singleton = this.providers.get(name);
+    const router = this.engineRouter ?? this.engineRouterCache;
+    const pooled = router?.pool.peekProvidersForModel(name, modelId) ?? [];
+    return singleton ? [singleton, ...pooled.filter((provider) => provider !== singleton)] : pooled;
   }
 
   /**
