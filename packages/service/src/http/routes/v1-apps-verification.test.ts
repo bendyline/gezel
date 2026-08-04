@@ -27,7 +27,11 @@ beforeEach(async () => {
     ],
   });
   const grants = await createGrantManager({ home, tokenStore });
-  context = { tokenStore, grants } as ServiceContext;
+  context = {
+    tokenStore,
+    grants,
+    store: { readConfig: async () => ({}) },
+  } as unknown as ServiceContext;
   app = new Hono().route('/v1/apps', v1AppsRoutes(context));
 });
 
