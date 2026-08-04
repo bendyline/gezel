@@ -48,6 +48,11 @@ describe('macOS machine-service filesystem security', () => {
     expect(macPostinstall).toContain('chmod 700 "$DATA_DIR/logs"');
     expect(macPostinstall).toContain('find -x "$ASSETS_DIR" -type d -exec chmod 755 {} +');
     expect(macPostinstall).toContain('find -x "$ASSETS_DIR" -type f -exec chmod 644 {} +');
+    expect(macPostinstall).toContain('--source="$DATA_DIR"');
+    expect(macPostinstall).toContain('--dest="$SHARED_DIR"');
+    expect(macPostinstall).toContain('chmod 1777 "$SHARED_DIR"');
+    expect(macPostinstall).toContain('${DAEMON_USER} deny list,search,read,write');
+    expect(macPostinstall).toContain('.gezel-machine-shared-v1.json');
     expect(macPostinstall).toContain('"$DATA_DIR/runtime/auth-token"');
     expect(macPostinstall).toContain('"$DATA_DIR/runtime/service-role"');
 
@@ -56,12 +61,21 @@ describe('macOS machine-service filesystem security', () => {
       macPostinstall,
       'if launchctl print "system/${DAEMON_LABEL}" >/dev/null 2>&1; then',
     );
+    const sharedMigration = position(
+      macPostinstall,
+      'ELECTRON_RUN_AS_NODE=1 "$ELECTRON_EXE" "$MIGRATE_SHARED_CLI"',
+    );
     const migration = position(macPostinstall, 'find -x "$DATA_DIR"');
-    const extraction = position(macPostinstall, 'ELECTRON_RUN_AS_NODE=1 "$ELECTRON_EXE"');
+    const extraction = position(
+      macPostinstall,
+      'ELECTRON_RUN_AS_NODE=1 "$ELECTRON_EXE" "$EXTRACT_CLI"',
+    );
     expect(macPostinstall.slice(inactiveGate, migration)).toContain('exit 1');
     expect(stop).toBeLessThan(migration);
     expect(stop).toBeLessThan(inactiveGate);
     expect(inactiveGate).toBeLessThan(migration);
+    expect(inactiveGate).toBeLessThan(sharedMigration);
+    expect(sharedMigration).toBeLessThan(migration);
     expect(migration).toBeLessThan(extraction);
   });
 
@@ -234,24 +248,40 @@ describe('Linux machine-service filesystem security', () => {
     expect(linuxPostinstall).not.toContain('chown -R');
     expect(linuxPostinstall).toContain('find "$DATA_DIR" -xdev ! -type l -exec setfacl -b -- {} +');
     expect(linuxPostinstall).toContain('find "$DATA_DIR" -xdev -type d -exec setfacl -k -- {} +');
-    expect(linuxPostinstall).toContain('find "$DATA_DIR" -xdev ! -type l -exec chmod go-rwx {} +');
+    expect(linuxPostinstall).toContain(
+      'find "$DATA_DIR" -xdev -path "$SHARED_DIR" -prune -o ! -type l -exec chmod go-rwx {} +',
+    );
     expect(linuxPostinstall).toContain('chmod 711 "$DATA_DIR"');
     expect(linuxPostinstall).toContain('chmod 755 "$DATA_DIR/runtime"');
     expect(linuxPostinstall).toContain('chmod 700 "$DATA_DIR/logs"');
     expect(linuxPostinstall).toContain('find "$ASSETS_DIR" -xdev -type d -exec chmod 755 {} +');
     expect(linuxPostinstall).toContain('find "$ASSETS_DIR" -xdev -type f -exec chmod 644 {} +');
+    expect(linuxPostinstall).toContain('--source="$DATA_DIR"');
+    expect(linuxPostinstall).toContain('--dest="$SHARED_DIR"');
+    expect(linuxPostinstall).toContain('chmod 3777 "$SHARED_DIR"');
+    expect(linuxPostinstall).toContain('.gezel-machine-shared-v1.json');
+    expect(linuxUnit).toContain('InaccessiblePaths=/var/lib/gezel/shared');
     expect(linuxPostinstall).toContain('"$DATA_DIR/runtime/auth-token"');
     expect(linuxPostinstall).toContain('"$DATA_DIR/runtime/service-role"');
 
     const stop = position(linuxPostinstall, 'systemctl stop gezeld.service');
     const inactiveGate = position(linuxPostinstall, 'while service_still_active; do');
     const migration = position(linuxPostinstall, 'find "$DATA_DIR" -xdev');
-    const extraction = position(linuxPostinstall, 'ELECTRON_RUN_AS_NODE=1 "$ELECTRON_EXE"');
+    const sharedMigration = position(
+      linuxPostinstall,
+      'ELECTRON_RUN_AS_NODE=1 "$ELECTRON_EXE" "$MIGRATE_SHARED_CLI"',
+    );
+    const extraction = position(
+      linuxPostinstall,
+      'ELECTRON_RUN_AS_NODE=1 "$ELECTRON_EXE" "$EXTRACT_CLI"',
+    );
     expect(linuxPostinstall.slice(inactiveGate, migration)).toContain('exit 1');
     expect(linuxPostinstall).toContain('active|activating|reloading|deactivating');
     expect(stop).toBeLessThan(migration);
     expect(stop).toBeLessThan(inactiveGate);
     expect(inactiveGate).toBeLessThan(migration);
+    expect(inactiveGate).toBeLessThan(sharedMigration);
+    expect(sharedMigration).toBeLessThan(migration);
     expect(migration).toBeLessThan(extraction);
   });
 

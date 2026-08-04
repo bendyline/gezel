@@ -33,7 +33,7 @@ export function GezelActionsMenu({
   onDeleted,
   compact = false,
 }: {
-  gezel: { id: string; name: string };
+  gezel: { id: string; name: string; storageScope?: 'user' | 'machine-shared' };
   onDeleted?: (gezelId: string) => void;
   /** Row menus are smaller and reveal on row hover/focus. */
   compact?: boolean;
@@ -43,6 +43,10 @@ export function GezelActionsMenu({
   const [euphemism] = useState(randomGezelRemovalEuphemism);
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // This menu currently contains only account-destructive removal. A shared
+  // identity cannot be removed safely without a distinct machine-wide flow.
+  if (gezel.storageScope === 'machine-shared') return null;
 
   const openConfirm = () => {
     setError(null);

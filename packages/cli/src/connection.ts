@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
+import type { HealthResponse, ServiceRole } from '@bendyline/gezel';
 import {
   GezelApiError,
   GezelClient,
@@ -101,8 +102,10 @@ export function resolveDevHome(globals: CliGlobals): void {
 
 /**
  * Connection for management commands (agent/env/task): use an explicitly
- * approved service when configured, otherwise the system service, otherwise
- * a user-owned fallback daemon.
+ * approved service when configured, otherwise a legacy full-product system
+ * service, otherwise the user-owned daemon. A machine-engine system service
+ * is compute-only and is discovered by the user daemon, never used directly
+ * as the CLI's product API.
  */
 export async function connectOwned(globals: CliGlobals): Promise<GezelClient> {
   applyHome(globals);
@@ -125,7 +128,7 @@ export type RunConnection = {
 /**
  * Connection for `gezel run`:
  *   - `--connect <url>` → explicitly authorized full CLI connection.
- *   - else use the healthy Electron-installed machine service when available.
+ *   - else use a healthy legacy full-product machine service when available.
  *   - else adopt a running user-local daemon,
  *   - else start the service in-process for this single turn (root `/api`),
  *     returning a `stop` to tear it down — a self-cleaning one-shot.
@@ -196,6 +199,23 @@ export interface HealthySystemService {
   home: string;
 }
 
+interface SystemServiceDiscoveryDeps {
+  readEndpoint?: typeof readSystemServiceEndpoint;
+  probeHealth?: (input: {
+    endpoint: NonNullable<Awaited<ReturnType<typeof readSystemServiceEndpoint>>>;
+    fetch: typeof fetch;
+    signal: AbortSignal;
+  }) => Promise<HealthResponse>;
+}
+
+/**
+ * Only pre-split services are product endpoints. Missing role is deliberately
+ * legacy-full compatibility for releases that predate role publication.
+ */
+export function isSystemProductServiceRole(role: ServiceRole | undefined): boolean {
+  return role === undefined || role === 'legacy-full';
+}
+
 /**
  * Explicit connection/home choices always win over system-service discovery.
  * An explicit home is necessarily standalone: a machine service owns its home
@@ -217,21 +237,27 @@ export function shouldTrySystemService(
 /** Find and health-check the Electron-installed machine service. */
 export async function findHealthySystemService(
   globals: CliGlobals,
+  deps: SystemServiceDiscoveryDeps = {},
 ): Promise<HealthySystemService | null> {
   if (!shouldTrySystemService(globals)) return null;
-  const endpoint = await readSystemServiceEndpoint();
+  const endpoint = await (deps.readEndpoint ?? readSystemServiceEndpoint)();
   if (!endpoint) return null;
   const fetchImpl = endpoint.cert ? createTrustingFetch({ cert: endpoint.cert }) : globalThis.fetch;
-  const probe = new GezelClient({
-    baseUrl: endpoint.baseUrl,
-    token: '',
-    fetch: fetchImpl,
-  });
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 1_500);
   timeout.unref?.();
   try {
-    await probe.health(controller.signal);
+    const health = deps.probeHealth
+      ? await deps.probeHealth({ endpoint, fetch: fetchImpl, signal: controller.signal })
+      : await new GezelClient({
+          baseUrl: endpoint.baseUrl,
+          token: '',
+          fetch: fetchImpl,
+        }).health(controller.signal);
+    // The fixed system port now normally hosts the engine boundary. Falling
+    // through makes connectOwned/connectForRun adopt or spawn ~/.gezel's
+    // dynamic per-user daemon, which then brokers native work to this engine.
+    if (!isSystemProductServiceRole(health.serviceRole)) return null;
     return {
       baseUrl: endpoint.baseUrl,
       fetch: fetchImpl,

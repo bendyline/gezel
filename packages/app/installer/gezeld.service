@@ -71,6 +71,9 @@ PrivateTmp=true
 ProtectSystem=full
 ProtectHome=read-only
 ReadWritePaths=/var/lib/gezel
+# Shared projects/gezels belong to interactive user daemons. Hide this child
+# even though the broker's private home is otherwise writable.
+InaccessiblePaths=/var/lib/gezel/shared
 
 [Install]
 WantedBy=multi-user.target

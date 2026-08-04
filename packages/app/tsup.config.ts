@@ -11,6 +11,7 @@ export default defineConfig({
     // the bundled Electron exe. Bundled as a sibling to main.js so the
     // installer can reference it at a stable path.
     'extract-service-bundle': 'src/extract-service-bundle.ts',
+    'migrate-legacy-shared': 'src/migrate-legacy-shared.ts',
   },
   format: ['esm'],
   dts: false,

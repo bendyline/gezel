@@ -3,6 +3,7 @@ import {
   appendFile,
   chmod,
   copyFile,
+  cp,
   mkdir,
   readFile,
   readdir,
@@ -11,7 +12,7 @@ import {
   stat,
   writeFile,
 } from 'node:fs/promises';
-import { dirname, isAbsolute, join, normalize } from 'node:path';
+import { dirname, isAbsolute, join, normalize, sep } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import {
   type ChatModelTuning,
@@ -82,6 +83,7 @@ import {
 } from '@bendyline/gezel';
 import {
   type ExternalFolders,
+  activeMachineSharedHome,
   craftbookTemplateDir,
   craftbookTemplateManifestFile,
   craftbookTemplateVersionDir,
@@ -94,8 +96,10 @@ import {
   gezelPaths,
   gezelSessionFile,
   gezelSessionsDir,
+  gezelStorageScope,
   gezelToolsetsFile,
   gezelToolsetsInstallDir,
+  machineSharedGezelDir,
   meesterStatusDir,
   meesterStatusFile,
   meesterStatusStateFile,
@@ -117,6 +121,7 @@ import {
   projectMemoriesDir,
   projectMetaFile,
   projectQuestionsFile,
+  projectStorageScope,
   projectTaskAboutFile,
   projectTaskFile,
   projectTaskNextIdFile,
@@ -132,6 +137,7 @@ import {
   systemToolsetsFile,
   systemToolsetsInstallDir,
   toolsetConfigFile,
+  userGezelDir,
 } from '@bendyline/gezel/paths';
 import { applyPatch, parsePatch } from 'diff';
 import { matchReferencedArtifactsInContent } from '../chat/artifact-references.js';
@@ -309,11 +315,11 @@ export class ConfigCorruptionError extends Error {
   }
 }
 
-/** Thrown by {@link Store.deleteProject} for the two refusable cases. */
+/** Thrown by {@link Store.deleteProject} for refusable cases. */
 export class ProjectDeleteError extends Error {
   constructor(
     message: string,
-    readonly reason: 'default_project' | 'not_found',
+    readonly reason: 'default_project' | 'machine_shared' | 'not_found',
   ) {
     super(message);
     this.name = 'ProjectDeleteError';
@@ -507,11 +513,78 @@ export class Store {
       mkdir(p.projects, { recursive: true }),
       mkdir(p.documents, { recursive: true }),
     ]);
+    await this.adoptMachineSharedGezelPrivateState();
     await this.backfillRoleBasedNames();
     await this.backfillVoices();
     await this.migrateLegacyTemperatureField();
     await this.migrateLegacyGhCheckouts();
     await this.cleanStaleWorkspaceBootstraps();
+  }
+
+  /**
+   * A pre-split machine daemon stored identity and personal runtime state in
+   * the same gezel directory. The installer preserves those bytes under the
+   * shared root; the first user-daemon boot copies the legacy transcripts,
+   * memories, and growth state into that account's private sidecar. From then
+   * on, new activity is private while the shared root owns only identity.
+   *
+   * Local files win on collision so a retry can never replace newer work.
+   * The memory vector index is derived and intentionally rebuilt per user.
+   */
+  private async adoptMachineSharedGezelPrivateState(): Promise<void> {
+    const shared = activeMachineSharedHome();
+    if (!shared) return;
+    const ids = await safeReaddir(join(shared, 'gezels'));
+    let adopted = 0;
+    for (const id of ids) {
+      const sharedDir = machineSharedGezelDir(id);
+      if (!sharedDir || !(await pathExists(join(sharedDir, 'gezel.md')))) continue;
+      const localDir = gezelLocalDir(this.home, id);
+      // A real private definition shadows the shared entity and owns its own
+      // runtime state; do not import unrelated machine history into it.
+      if (await pathExists(join(userGezelDir(this.home, id, this.external), 'gezel.md'))) continue;
+      const marker = join(localDir, '.machine-shared-import-v1.json');
+      if (await pathExists(marker)) continue;
+      await mkdir(localDir, { recursive: true });
+
+      const sharedSessions = join(sharedDir, 'sessions');
+      if (await pathExists(sharedSessions)) {
+        await cp(sharedSessions, join(localDir, 'sessions'), {
+          recursive: true,
+          force: false,
+          errorOnExist: false,
+          preserveTimestamps: true,
+        });
+      }
+
+      const sharedMemories = join(sharedDir, 'memories');
+      const sharedMemoryIndex = join(sharedMemories, 'index');
+      if (await pathExists(sharedMemories)) {
+        await cp(sharedMemories, join(localDir, 'memories'), {
+          recursive: true,
+          force: false,
+          errorOnExist: false,
+          preserveTimestamps: true,
+          filter: (source) =>
+            source !== sharedMemoryIndex && !source.startsWith(`${sharedMemoryIndex}${sep}`),
+        });
+      }
+
+      const sharedGrowth = join(sharedDir, 'growth.json');
+      const localGrowth = join(localDir, 'growth.json');
+      if ((await pathExists(sharedGrowth)) && !(await pathExists(localGrowth))) {
+        await copyFile(sharedGrowth, localGrowth);
+      }
+      await writeFileAtomic(
+        marker,
+        `${JSON.stringify({ version: 1, sharedGezelId: id, importedAt: nowIso() }, null, 2)}\n`,
+        { durable: true },
+      );
+      adopted++;
+    }
+    if (adopted > 0) {
+      log.info(`[store] adopted private runtime state for ${adopted} machine-shared gezel(s)`);
+    }
   }
 
   /**
@@ -1122,7 +1195,26 @@ export class Store {
 
   async listGezels(): Promise<GezelSummary[]> {
     const p = gezelPaths(this.home, this.external);
-    const dirs = await safeReaddir(p.gezels);
+    const shared = activeMachineSharedHome();
+    const [userDirs, sharedDirs] = await Promise.all([
+      safeReaddir(p.gezels),
+      shared ? safeReaddir(join(shared, 'gezels')) : Promise.resolve([]),
+    ]);
+    // Local definition wins on collision. A local sidecar containing only
+    // sessions/memories does not count as a definition and must not hide the
+    // shared identity it belongs to.
+    const localDefinitions = new Set<string>();
+    for (const id of userDirs) {
+      try {
+        await stat(join(p.gezels, id, 'gezel.md'));
+        localDefinitions.add(id);
+      } catch {
+        // Sidecar-only shared state.
+      }
+    }
+    const dirs = Array.from(
+      new Set([...localDefinitions, ...sharedDirs.filter((id) => !localDefinitions.has(id))]),
+    );
     // Skip encoded project-local ids that happen to have an app-data
     // sidecar dir (poppetje/sessions live there keyed by the encoded id) —
     // they are NOT global gezels and must not leak into the global roster.
@@ -1159,6 +1251,7 @@ export class Store {
       iconOverride: d.iconOverride,
       recognition: d.parsed.frontmatter.recognition,
       ...(scope ? { scope } : {}),
+      ...(d.storageScope ? { storageScope: d.storageScope } : {}),
       updatedAt: d.updatedAt,
     };
   }
@@ -1234,8 +1327,10 @@ export class Store {
      */
     frontmatter?: Partial<import('@bendyline/gezel').GezelFrontmatter>;
   }): Promise<GezelDetail> {
-    const id = slugify(input.name) || randomUUID().slice(0, 8);
-    const dir = gezelDir(this.home, id, this.external);
+    const id = await this.uniqueGezelId(slugify(input.name) || randomUUID().slice(0, 8));
+    // Creation is always private. In particular, never let the shared-path
+    // resolver turn a same-name create into an overwrite of a migrated gezel.
+    const dir = userGezelDir(this.home, id, this.external);
     await mkdir(dir, { recursive: true });
     await mkdir(join(dir, 'memories'), { recursive: true });
     await mkdir(join(dir, 'resources'), { recursive: true });
@@ -1313,6 +1408,11 @@ export class Store {
   async deleteGezel(id: string): Promise<{ id: string; name: string }> {
     const existing = await this.tryGetGezel(id);
     if (!existing) throw new Error(`agent ${id} not found`);
+    if (existing.storageScope === 'machine-shared') {
+      throw new Error(
+        'Machine-shared gezels cannot be removed from an individual account. Shared removal is not available yet.',
+      );
+    }
 
     const projects = await this.listProjects();
     for (const project of projects) {
@@ -1380,6 +1480,28 @@ export class Store {
   async renameGezel(oldId: string, newName: string): Promise<GezelDetail> {
     const existing = await this.tryGetGezel(oldId);
     if (!existing) throw new Error(`agent ${oldId} not found`);
+    // A shared gezel's id anchors every account's private transcript/memory
+    // sidecar. Keep that id stable across a display-name edit so one user's
+    // rename cannot orphan every other user's private state.
+    if (existing.storageScope === 'machine-shared') {
+      const updated = {
+        ...existing.parsed,
+        frontmatter: { ...existing.parsed.frontmatter, id: oldId, name: newName },
+      };
+      await writeFileAtomic(
+        join(gezelDir(this.home, oldId, this.external), 'gezel.md'),
+        serializeGezelMarkdown(updated),
+      );
+      const detail = await this.getGezel(oldId);
+      if (!detail) throw new Error(`agent ${oldId} not found after rename`);
+      await this.history?.log({
+        kind: 'gezel.renamed',
+        gezelId: oldId,
+        summary: `Renamed ${existing.name} → ${detail.name}`,
+        details: { oldName: existing.name, newName: detail.name, storageScope: 'machine-shared' },
+      });
+      return detail;
+    }
     const newId = slugify(newName) || randomUUID().slice(0, 8);
     if (newId === oldId) {
       // Slug didn't change — just update the name in frontmatter.
@@ -1494,6 +1616,16 @@ export class Store {
       if (g.roleBasedName) taken.add(g.roleBasedName);
     }
     return pickRoleBasedName(role, taken);
+  }
+
+  private async uniqueGezelId(base: string): Promise<string> {
+    const ids = new Set((await this.listGezels()).map((gezel) => gezel.id));
+    if (!ids.has(base)) return base;
+    for (let i = 2; i < 10000; i++) {
+      const candidate = `${base}-${i}`;
+      if (!ids.has(candidate)) return candidate;
+    }
+    throw new Error(`gezel id collision overflow for "${base}"`);
   }
 
   /**
@@ -1709,7 +1841,10 @@ export class Store {
     const dec = decodeProjectGezelId(id);
     if (dec) return this.tryGetProjectGezel(dec.projectId, dec.localId);
     const dir = gezelDir(this.home, id, this.external);
-    return this.hydrateGezelDetail(id, dir, {});
+    const storageScope = gezelStorageScope(this.home, id, this.external);
+    return this.hydrateGezelDetail(id, dir, {
+      ...(storageScope === 'machine-shared' ? { storageScope } : {}),
+    });
   }
 
   /**
@@ -1724,7 +1859,11 @@ export class Store {
   private async hydrateGezelDetail(
     id: string,
     dir: string,
-    opts: { aboutOverride?: string; scope?: 'project' },
+    opts: {
+      aboutOverride?: string;
+      scope?: 'project';
+      storageScope?: 'machine-shared';
+    },
   ): Promise<GezelDetail | null> {
     const mdPath = join(dir, 'gezel.md');
     const aboutPath = join(dir, 'about.md');
@@ -1807,6 +1946,7 @@ export class Store {
         traits: parsed.frontmatter.traits,
         ...(growth ? { growth } : {}),
         ...(opts.scope ? { scope: opts.scope } : {}),
+        ...(opts.storageScope ? { storageScope: opts.storageScope } : {}),
         updatedAt: s.mtime.toISOString(),
         parsed,
         about,
@@ -2180,7 +2320,23 @@ export class Store {
 
   async listProjects(): Promise<Project[]> {
     const p = gezelPaths(this.home);
-    const dirs = await safeReaddir(p.projects);
+    const shared = activeMachineSharedHome();
+    const [userDirs, sharedDirs] = await Promise.all([
+      safeReaddir(p.projects),
+      shared ? safeReaddir(join(shared, 'projects')) : Promise.resolve([]),
+    ]);
+    const localDefinitions = new Set<string>();
+    for (const id of userDirs) {
+      try {
+        await stat(join(p.projects, id, 'project.json'));
+        localDefinitions.add(id);
+      } catch {
+        // A definition-less leftover must not hide a migrated project.
+      }
+    }
+    const dirs = Array.from(
+      new Set([...localDefinitions, ...sharedDirs.filter((id) => !localDefinitions.has(id))]),
+    );
     const metas = await Promise.all(dirs.map((id) => this.tryGetProjectMeta(id)));
     const projects = metas.filter((m): m is Project => m !== null);
     projects.sort((a, b) => a.name.localeCompare(b.name));
@@ -2802,6 +2958,12 @@ export class Store {
     if (!meta) {
       throw new ProjectDeleteError(`project ${id} not found`, 'not_found');
     }
+    if (meta.storageScope === 'machine-shared') {
+      throw new ProjectDeleteError(
+        'Machine-shared projects cannot be removed from an individual account. Shared removal is not available yet.',
+        'machine_shared',
+      );
+    }
     const { source } = this.resolveWorkspaceDir(id, meta);
     const removeWorkspace = !!opts?.removeWorkspace && source === 'internal';
 
@@ -3109,7 +3271,9 @@ export class Store {
       log.warn(`[store] project.json for ${id} failed schema validation:`, result.error.message);
       return null;
     }
-    return result.data;
+    return projectStorageScope(this.home, id) === 'machine-shared'
+      ? { ...result.data, storageScope: 'machine-shared' }
+      : result.data;
   }
 
   // ---------- project artifacts ----------

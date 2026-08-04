@@ -1389,7 +1389,21 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                     onClick={() => handleProjectRowClick(p.id)}
                     title={p.name}
                   >
-                    {sidebarCollapsed ? projectInitial(p.name) : p.name}
+                    {sidebarCollapsed ? (
+                      projectInitial(p.name)
+                    ) : (
+                      <>
+                        {p.name}
+                        {p.storageScope === 'machine-shared' && (
+                          <span
+                            className="machine-shared-badge"
+                            title="Shared with accounts on this machine"
+                          >
+                            Shared
+                          </span>
+                        )}
+                      </>
+                    )}
                   </button>
                   {!sidebarCollapsed && (
                     <ProjectActionsMenu project={p} onDeleted={() => void refresh()} />

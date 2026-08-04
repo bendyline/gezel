@@ -1,5 +1,139 @@
+import { existsSync, lstatSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, posix, win32 } from 'node:path';
+
+/**
+ * Marker written by the privileged installer after a legacy machine-home
+ * migration has completed. Merely finding a writable-looking directory is
+ * not enough to mount it: the marker is the installer's assertion that the
+ * root has the intended cross-account ACL and contains migrated product data.
+ */
+export const MACHINE_SHARED_MARKER = '.gezel-machine-shared-v1.json';
+
+/**
+ * Canonical root for explicit machine-shared product data. This is separate
+ * from the machine engine broker's private home: user daemons perform every
+ * project/gezel filesystem operation with the logged-in user's permissions.
+ *
+ * GEZEL_MACHINE_SHARED_HOME is primarily an operator/test override. A root is
+ * mounted only when {@link MACHINE_SHARED_MARKER} exists beneath it.
+ */
+export function machineSharedHome(
+  platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env,
+): string | null {
+  const override = env.GEZEL_MACHINE_SHARED_HOME;
+  if (override?.trim()) return override;
+  if (platform === 'win32') {
+    const base = env.ProgramData || env.PROGRAMDATA || 'C:\\ProgramData';
+    return win32.join(base, 'Gezel', 'shared');
+  }
+  if (platform === 'darwin') return '/Users/Shared/Gezel';
+  if (platform === 'linux') return '/var/lib/gezel/shared';
+  return null;
+}
+
+export function machineSharedMarkerFile(
+  platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env,
+): string | null {
+  const root = machineSharedHome(platform, env);
+  if (!root) return null;
+  return platform === 'win32'
+    ? win32.join(root, MACHINE_SHARED_MARKER)
+    : posix.join(root, MACHINE_SHARED_MARKER);
+}
+
+/** A shared root is trusted only after the installer publishes its marker. */
+export function activeMachineSharedHome(env: NodeJS.ProcessEnv = process.env): string | null {
+  const root = machineSharedHome(process.platform, env);
+  const marker = machineSharedMarkerFile(process.platform, env);
+  if (!root || !marker || !existsSync(marker)) return null;
+  // An explicit operator/test override is itself the trust decision.
+  if (env.GEZEL_MACHINE_SHARED_HOME?.trim()) return root;
+
+  // Default discovery is coupled to a live split-role installation. A marker
+  // planted in a broadly writable conventional directory must not be enough
+  // to inject gezel prompts/projects into another account's daemon.
+  const systemHome =
+    process.platform === 'win32'
+      ? win32.dirname(root)
+      : process.platform === 'darwin'
+        ? '/Library/Application Support/Gezel'
+        : process.platform === 'linux'
+          ? '/var/lib/gezel'
+          : null;
+  if (!systemHome) return null;
+  const roleFile = join(systemHome, 'runtime', 'service-role');
+  try {
+    if (readFileSync(roleFile, 'utf8').trim() !== 'machine-engine') return null;
+    if (process.platform !== 'win32') {
+      const markerStat = lstatSync(marker);
+      const roleStat = lstatSync(roleFile);
+      if (
+        !markerStat.isFile() ||
+        !roleStat.isFile() ||
+        markerStat.uid !== 0 ||
+        (markerStat.mode & 0o022) !== 0 ||
+        (roleStat.mode & 0o022) !== 0
+      ) {
+        return null;
+      }
+    }
+    return root;
+  } catch {
+    return null;
+  }
+}
+
+export type MachineStorageScope = 'user' | 'machine-shared';
+
+/** Explicit user-home entity locations, bypassing shared-root resolution. */
+export function userGezelDir(root: string, gezelId: string, external?: ExternalFolders): string {
+  return join(external?.gezels ?? join(root, 'gezels'), gezelId);
+}
+
+export function userProjectDir(root: string, projectId: string): string {
+  return join(root, 'projects', projectId);
+}
+
+export function machineSharedGezelDir(gezelId: string): string | null {
+  const shared = activeMachineSharedHome();
+  return shared ? join(shared, 'gezels', gezelId) : null;
+}
+
+export function machineSharedProjectDir(projectId: string): string | null {
+  const shared = activeMachineSharedHome();
+  return shared ? join(shared, 'projects', projectId) : null;
+}
+
+/**
+ * Local definition wins on id collision. Sidecar-only user directories (for
+ * private sessions/memories belonging to a shared gezel) deliberately do not:
+ * `gezel.md` is the definition/ownership signal.
+ */
+export function gezelStorageScope(
+  root: string,
+  gezelId: string,
+  external?: ExternalFolders,
+): MachineStorageScope {
+  const local = userGezelDir(root, gezelId, external);
+  if (existsSync(join(local, 'gezel.md'))) return 'user';
+  const shared = machineSharedGezelDir(gezelId);
+  if (shared && shared !== local && existsSync(join(shared, 'gezel.md'))) return 'machine-shared';
+  return 'user';
+}
+
+/** `project.json` is the project definition/ownership signal. */
+export function projectStorageScope(root: string, projectId: string): MachineStorageScope {
+  const local = userProjectDir(root, projectId);
+  if (existsSync(join(local, 'project.json'))) return 'user';
+  const shared = machineSharedProjectDir(projectId);
+  if (shared && shared !== local && existsSync(join(shared, 'project.json'))) {
+    return 'machine-shared';
+  }
+  return 'user';
+}
 
 /**
  * Resolve the root of the Gezel user directory. Defaults to `~/.gezel`
@@ -126,7 +260,10 @@ export function projectCreateTransactionsRoot(root: string): string {
  * dir when externalized — they stay local (see {@link gezelLocalDir}).
  */
 export function gezelDir(root: string, gezelId: string, external?: ExternalFolders): string {
-  return join(gezelPaths(root, external).gezels, gezelId);
+  if (gezelStorageScope(root, gezelId, external) === 'machine-shared') {
+    return machineSharedGezelDir(gezelId)!;
+  }
+  return userGezelDir(root, gezelId, external);
 }
 
 /**
@@ -143,6 +280,11 @@ export function gezelSessionsDir(
   gezelId: string,
   external?: ExternalFolders,
 ): string {
+  // Character identity may be shared, but transcripts are account-private.
+  // Migrated legacy transcripts are copied into this sidecar on first mount.
+  if (gezelStorageScope(root, gezelId, external) === 'machine-shared') {
+    return join(gezelLocalDir(root, gezelId), 'sessions');
+  }
   return join(gezelDir(root, gezelId, external), 'sessions');
 }
 
@@ -164,6 +306,9 @@ export function gezelMemoriesDir(
   gezelId: string,
   external?: ExternalFolders,
 ): string {
+  if (gezelStorageScope(root, gezelId, external) === 'machine-shared') {
+    return join(gezelLocalDir(root, gezelId), 'memories');
+  }
   return join(gezelDir(root, gezelId, external), 'memories');
 }
 
@@ -172,6 +317,9 @@ export function gezelMemoriesDir(
  * with the gezel when externalized, like the memories dir.
  */
 export function gezelGrowthPath(root: string, gezelId: string, external?: ExternalFolders): string {
+  if (gezelStorageScope(root, gezelId, external) === 'machine-shared') {
+    return join(gezelLocalDir(root, gezelId), 'growth.json');
+  }
   return join(gezelDir(root, gezelId, external), 'growth.json');
 }
 
@@ -237,6 +385,9 @@ export function gezelPoppetjePath(
  *     `workspace-writes.jsonl`, `package.json`
  */
 export function projectDir(root: string, projectId: string, external?: ExternalFolders): string {
+  if (projectStorageScope(root, projectId) === 'machine-shared') {
+    return machineSharedProjectDir(projectId)!;
+  }
   return join(gezelPaths(root, external).projects, projectId);
 }
 
@@ -246,7 +397,10 @@ export function projectDir(root: string, projectId: string, external?: ExternalF
  * storage.
  */
 export function projectLocalDir(root: string, projectId: string): string {
-  return join(root, 'projects', projectId);
+  if (projectStorageScope(root, projectId) === 'machine-shared') {
+    return machineSharedProjectDir(projectId)!;
+  }
+  return userProjectDir(root, projectId);
 }
 
 /** Per-project `project.json` metadata file. Always local. */

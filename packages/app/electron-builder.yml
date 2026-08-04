@@ -64,6 +64,7 @@ files:
   - dist/main.js
   - dist/preload.cjs
   - dist/extract-service-bundle.js
+  - dist/migrate-legacy-shared.js
   - dist/service-bundle.tar.gz
   - dist/service-bundle.meta.json
   - dist/pnpm-bundle/**/*
@@ -140,6 +141,7 @@ asarUnpack:
   - dist/preload.cjs
   - package.json
   - dist/extract-service-bundle.js
+  - dist/migrate-legacy-shared.js
   - dist/service-bundle.tar.gz
   - dist/service-bundle.meta.json
   - dist/pnpm-bundle/**/*
@@ -440,6 +442,7 @@ deb:
   # distros use it. List explicitly so package managers refuse to
   # install on init-system-other systems instead of silently failing.
   depends:
+    - acl
     - libgtk-3-0
     - libnotify4
     - libnss3
@@ -458,6 +461,7 @@ rpm:
   fpm:
     - assets/com.bendyline.gezel.metainfo.xml=/usr/share/metainfo/com.bendyline.gezel.metainfo.xml
   depends:
+    - acl
     - libnotify
     # Fedora/RHEL package and RPM provide name. `libgtk-3-0` is Debian-only.
     - gtk3

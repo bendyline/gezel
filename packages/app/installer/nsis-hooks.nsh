@@ -18,6 +18,7 @@
 
 !define GEZEL_SERVICE_NAME "GezelService"
 !define GEZEL_DATA_DIR "C:\ProgramData\Gezel"
+!define GEZEL_SHARED_DIR "${GEZEL_DATA_DIR}\shared"
 
 ; Where customInstall records whether the shared model engine registered.
 ; Read by the desktop app (ordinary users can read HKLM) so a silent
@@ -28,6 +29,7 @@
 !define GEZEL_SERVICE_TREE "${GEZEL_DATA_DIR}\service"
 !define GEZEL_INTERPRETER "$INSTDIR\Gezel.exe"
 !define GEZEL_EXTRACT_CLI "$INSTDIR\resources\app.asar.unpacked\dist\extract-service-bundle.js"
+!define GEZEL_MIGRATE_SHARED_CLI "$INSTDIR\resources\app.asar.unpacked\dist\migrate-legacy-shared.js"
 !define GEZEL_BUNDLE_TARBALL "$INSTDIR\resources\app.asar.unpacked\dist\service-bundle.tar.gz"
 !define GEZEL_BUNDLE_META "$INSTDIR\resources\app.asar.unpacked\dist\service-bundle.meta.json"
 ; The first-party service host is GezelService's ImagePath.  It spawns
@@ -367,6 +369,54 @@
   ; after the no-follow ACL operations; the private DACL then closes the race
   ; before any child is created, deleted, or extracted through this path.
   !insertmacro RejectReparsePoint "${GEZEL_DATA_DIR}" "Gezel data directory" SkipNssm
+
+  ${IfNot} ${FileExists} "${GEZEL_MIGRATE_SHARED_CLI}"
+    DetailPrint "ERROR: migrate-legacy-shared.js is missing; legacy product data cannot be moved safely."
+    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel was built without its shared-data migration tool. The shared model engine will not be changed, so existing machine-wide projects remain available through compatibility mode." /SD IDOK
+    Goto SkipNssm
+  ${EndIf}
+  !insertmacro RejectReparsePoint "${GEZEL_SHARED_DIR}" "Gezel machine-shared data directory" SkipNssm
+  DetailPrint "Migrating legacy machine-wide projects and gezels..."
+  System::Call 'Kernel32::SetEnvironmentVariable(t "ELECTRON_RUN_AS_NODE", t "1")i'
+  nsExec::ExecToLog '"${GEZEL_INTERPRETER}" "${GEZEL_MIGRATE_SHARED_CLI}" --source="${GEZEL_DATA_DIR}" --dest="${GEZEL_SHARED_DIR}"'
+  Pop $0
+  System::Call 'Kernel32::SetEnvironmentVariable(t "ELECTRON_RUN_AS_NODE", i 0)i'
+  ${If} $0 != 0
+    DetailPrint "ERROR: legacy shared-data migration failed (exit $0)."
+    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not safely migrate existing machine-wide projects (exit $0). Nothing was overwritten; the shared model engine will not be replaced until the migration can complete." /SD IDOK
+    Goto SkipNssm
+  ${EndIf}
+  !insertmacro RejectReparsePoint "${GEZEL_SHARED_DIR}" "Gezel machine-shared data directory" SkipNssm
+
+  ; The marker sits at the root under the private parent's traverse-only ACE,
+  ; so users can read but cannot replace it. Product scope directories receive
+  ; inherited Modify access and are operated on only by per-user daemons.
+  !insertmacro TakeTrustedOwnership "${GEZEL_SHARED_DIR}" "its machine-shared product directory" SkipNssm
+  !insertmacro SanitizeDescendants "${GEZEL_SHARED_DIR}" "machine-shared product"
+  nsExec::ExecToLog '"$SYSDIR\icacls.exe" "${GEZEL_SHARED_DIR}" /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)(F)" "*S-1-5-32-544:(OI)(CI)(F)" "*S-1-5-32-545:(RX)" /remove:g "*S-1-5-11" "*S-1-1-0" "*S-1-5-19" /L'
+  Pop $0
+  ${If} $0 != 0
+    DetailPrint "ERROR: failed to protect the shared-data root (icacls exit $0)."
+    Goto SkipNssm
+  ${EndIf}
+  nsExec::ExecToLog '"$SYSDIR\icacls.exe" "${GEZEL_SHARED_DIR}\.gezel-machine-shared-v1.json" /inheritance:r /grant:r "*S-1-5-18:(F)" "*S-1-5-32-544:(F)" "*S-1-5-32-545:(R)" /L'
+  Pop $0
+  ${If} $0 != 0
+    DetailPrint "ERROR: failed to publish the shared-data marker (icacls exit $0)."
+    Goto SkipNssm
+  ${EndIf}
+  nsExec::ExecToLog '"$SYSDIR\icacls.exe" "${GEZEL_SHARED_DIR}\projects" /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)(F)" "*S-1-5-32-544:(OI)(CI)(F)" "*S-1-5-32-545:(OI)(CI)(M)" /L'
+  Pop $0
+  ${If} $0 != 0
+    DetailPrint "ERROR: failed to publish shared projects (icacls exit $0)."
+    Goto SkipNssm
+  ${EndIf}
+  nsExec::ExecToLog '"$SYSDIR\icacls.exe" "${GEZEL_SHARED_DIR}\gezels" /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)(F)" "*S-1-5-32-544:(OI)(CI)(F)" "*S-1-5-32-545:(OI)(CI)(M)" /L'
+  Pop $0
+  ${If} $0 != 0
+    DetailPrint "ERROR: failed to publish shared gezels (icacls exit $0)."
+    Goto SkipNssm
+  ${EndIf}
 
   CreateDirectory "${GEZEL_DATA_DIR}\runtime"
   CreateDirectory "${GEZEL_DATA_DIR}\assets"

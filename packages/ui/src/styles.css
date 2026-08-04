@@ -7340,6 +7340,25 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
   white-space: nowrap;
 }
 
+/* Read-only provenance annotation for grandfathered machine-wide entities.
+   This is a status badge, not a control, so the capsule exception applies. */
+.machine-shared-badge {
+  display: inline-flex;
+  align-items: center;
+  margin-inline-start: 0.4rem;
+  padding: 0.04rem 0.36rem;
+  border: 1px solid color-mix(in srgb, var(--warning) 48%, var(--border));
+  border-radius: 999px;
+  color: color-mix(in srgb, var(--warning) 70%, var(--text));
+  background: color-mix(in srgb, var(--warning) 9%, transparent);
+  font-family: var(--font-ui);
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  line-height: 1.35;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
 /* ---------- Detail header with icon ---------- */
 
 .detail-header {

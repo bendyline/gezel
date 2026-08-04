@@ -335,6 +335,12 @@ export const GezelSummarySchema = z.object({
    * their own project.
    */
   scope: z.enum(['global', 'project']).optional(),
+  /**
+   * Filesystem ownership boundary, distinct from `scope` above. Shared gezel
+   * identity lives in the installer-managed machine root; chats, memories,
+   * growth, credentials, and installed toolsets remain in the user home.
+   */
+  storageScope: z.enum(['user', 'machine-shared']).optional(),
   /** Mirrors `GezelFrontmatter.traits`. */
   traits: z.array(GezelTraitSchema).optional(),
   /**

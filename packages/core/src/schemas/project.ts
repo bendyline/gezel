@@ -406,6 +406,13 @@ export const ProjectSchema = z.object({
    * inherits. Absent on projects created without a custom type.
    */
   projectType: ProjectTypeProvenanceSchema.optional(),
+  /**
+   * Filesystem ownership boundary. Missing/`user` is ordinary per-account
+   * state. `machine-shared` is a grandfathered project mounted from the
+   * installer-managed shared root and operated on by this user's daemon.
+   * The engine broker never opens the project or receives its paths.
+   */
+  storageScope: z.enum(['user', 'machine-shared']).optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });

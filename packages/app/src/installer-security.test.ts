@@ -73,6 +73,32 @@ describe('Windows machine-service installer security', () => {
     expect(hook.match(/NT SERVICE\\\${GEZEL_SERVICE_NAME}:\(OI\)\(CI\)\(M\)/g)).toHaveLength(3);
   });
 
+  it('publishes migrated product data through a separate shared ACL boundary', () => {
+    expect(hook).toContain('migrate-legacy-shared.js');
+    expect(hook).toContain('--source="${GEZEL_DATA_DIR}" --dest="${GEZEL_SHARED_DIR}"');
+
+    const sharedRoot = commandLine('"${GEZEL_SHARED_DIR}" /inheritance:r');
+    expect(sharedRoot).toContain('*S-1-5-32-545:(RX)');
+    expect(sharedRoot).not.toContain('*S-1-5-32-545:(OI)(CI)(M)');
+
+    const marker = commandLine('"${GEZEL_SHARED_DIR}\\.gezel-machine-shared-v1.json"');
+    expect(marker).toContain('*S-1-5-32-545:(R)');
+    expect(marker).not.toContain('*S-1-5-32-545:(M)');
+
+    for (const scope of ['projects', 'gezels']) {
+      const acl = commandLine(`"\${GEZEL_SHARED_DIR}\\${scope}" /inheritance:r`);
+      expect(acl).toContain('*S-1-5-32-545:(OI)(CI)(M)');
+      expect(acl).not.toContain('NT SERVICE\\${GEZEL_SERVICE_NAME}');
+    }
+
+    expect(position('!insertmacro RemoveGezelService')).toBeLessThan(
+      position('Migrating legacy machine-wide projects and gezels'),
+    );
+    expect(position('Migrating legacy machine-wide projects and gezels')).toBeLessThan(
+      position('sc.exe" create ${GEZEL_SERVICE_NAME}'),
+    );
+  });
+
   it('applies every load-bearing ACL to the container itself, not by recursion', () => {
     // A recursive icacls pass fails as a unit — one MAX_PATH entry inside a
     // preserved GEZEL_HOME (uv venvs, cloned repos, sandbox node_modules) is

@@ -84,6 +84,19 @@ export function gezelRoutes(ctx: ServiceContext): Hono {
     const id = c.req.param('id');
     const agent = await ctx.store.getGezel(id);
     if (!agent) return c.json({ error: 'not found' }, 404);
+    // Shared identity belongs to every local account. Refuse before closing
+    // this account's private sessions; machine-wide removal needs its own
+    // explicit administration flow.
+    if (agent.storageScope === 'machine-shared') {
+      return c.json(
+        {
+          error:
+            'Machine-shared gezels cannot be removed from an individual account. Shared removal is not available yet.',
+          reason: 'machine_shared',
+        },
+        400,
+      );
+    }
 
     // Close provider sessions before their on-disk records disappear so
     // in-flight work, queues, and prompt caches cannot outlive the gezel.

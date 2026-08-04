@@ -24,6 +24,11 @@ the protected system runtime directory, pins its loopback certificate, verifies 
 device-identity signature, and installs an ephemeral `this-machine` remote. The broker credential is
 held in memory and is not written to the user's `remotes.json` or sent to the renderer.
 
+The `gezel` CLI follows the same product boundary. An explicit `--connect` URL wins; otherwise it
+uses a system service directly only when health identifies the rolling-upgrade `legacy-full` role
+(or an old release omits the role). A `machine-engine` response makes the CLI adopt or spawn the
+dynamic per-user runtime under `~/.gezel`; that daemon then discovers the broker for shared compute.
+
 For chat, the complete prompt and native model forward pass go to the broker. Tool declarations may
 accompany the request, but tool calls are returned to the user daemon and execute there. The broker
 is stateless with respect to the chat session and never receives a workspace path.
@@ -42,34 +47,49 @@ broker.
   next forward pass.
 - A broker discovered after an account-local engine started drains active turns, then retires the
   local engine pool.
-- A service installed before roles existed is treated as `legacy-full`. On upgrade, the new service
-  also detects an established machine-home product layout and stays `legacy-full` rather than hiding
-  those projects behind a fresh per-user home. The UI calls out that migration is still needed. The
-  old `hosting` preference applies only to this compatibility path; it cannot disable a genuinely
-  fresh, role-declared machine engine.
+- A service installed before roles existed is treated as `legacy-full` until the privileged
+  installer migrates its product trees. The migration stops the service, moves `projects/` and
+  `gezels/` into the separately ACL-protected shared root, verifies cross-filesystem copies, and
+  publishes the shared-root marker last. The same service then restarts as `machine-engine`.
+  `legacy-full` remains the fail-safe if migration has not completed.
 - Existing per-user model files are not copied or deleted automatically. The shared broker becomes
   the owner for new model lifecycle operations; an explicit, integrity-checked migration can be
   added separately without risking multi-gigabyte surprise copies during app startup.
 
-## Machine-wide projects (future, explicit opt-in)
+## Machine-wide projects and gezels
 
-A machine-wide project must not be implemented by giving the engine broker project APIs or access to
-arbitrary user folders. Keep compute sharing and data sharing independent.
+A release upgrade preserves pre-split machine data as explicitly labeled shared entities at:
+
+- Windows: `%ProgramData%\Gezel\shared`
+- macOS: `/Users/Shared/Gezel`
+- Linux: `/var/lib/gezel/shared`
+
+Every user daemon mounts that marked root alongside its private home. Local definitions win id
+collisions and all new UI/API creation remains private. A migrated gezel's identity is shared, while
+legacy chats, memories, and growth state are copied once into each account's private sidecar; all
+new personal activity stays per-user. Account-local delete controls refuse shared entities; their
+eventual removal requires a deliberately machine-wide administration flow.
+
+A machine-wide project must not give the engine broker project APIs or access to arbitrary user
+folders. Keep compute sharing and data sharing independent.
 
 The intended shape is:
 
-1. Add a distinct per-project storage scope (`user` or `machine-shared`); do not reuse the legacy
+1. Surface hydrated `storageScope` provenance (`user` or `machine-shared`); do not reuse the legacy
    daemon `hosting` field.
 2. Put shared project content in an installer-managed shared-project root with an explicit OS group
    or ACL. The logged-in user's daemon still performs all file operations under that user's OS
    identity.
 3. Store portable shared project metadata inside that project root. Each participating user's
    private chats, credentials, approvals, and personal preferences remain in their own `~/.gezel`.
-4. Add cross-process locking and transaction/version checks before allowing two user daemons to
-   mutate shared project metadata concurrently.
-5. Make creation/joining/removal explicit in the UI, show who can access it, and never widen an
-   arbitrary existing folder's permissions silently.
+4. Phase one keeps metadata publication atomic but has last-writer semantics if two accounts edit
+   the same shared metadata simultaneously. Add cross-process transaction/version checks before
+   exposing shared creation or presenting this as a high-concurrency collaboration mode.
+5. Add explicit creation/joining/removal UI later, show who can access it, and never widen an
+   arbitrary existing folder's permissions silently. The migration release intentionally keeps
+   shared creation out of the ordinary new-project/new-gezel flow.
 
-This future mode needs an installer/administrator membership decision. The current runtime
-credential is readable by accounts allowed through the system runtime directory, so it is adequate
-for shared compute but is not an authorization model for shared project data.
+The current migration grants the machine's ordinary interactive accounts access to the shared root,
+matching the old full-product daemon's machine-wide visibility. Narrower membership remains an
+installer/administrator policy decision. The broker runtime credential is adequate for shared
+compute but is not an authorization model for shared project data.
