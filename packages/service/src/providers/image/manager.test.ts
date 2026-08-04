@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Store } from '../../fs/store.js';
 import { createRemotesRegistry } from '../../remotes/registry.js';
 import type { SecretKey, SecretStore } from '../../secrets/types.js';
@@ -191,5 +191,62 @@ describe('ImageProviderManager', () => {
 
     expect(await mgr.usesMachineEngine()).toBe(false);
     expect((await mgr.current()).name).toBe('mock');
+  });
+
+  it('drains a cached native provider on late broker adoption', async () => {
+    const mgr = new ImageProviderManager({ home, store, secrets: fakeSecrets(), env: {} });
+    const local = await mgr.current();
+    let release!: () => void;
+    const active = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    local.generate = async () => {
+      await active;
+      return {} as Awaited<ReturnType<typeof local.generate>>;
+    };
+    const shutdown = vi.fn(async () => {});
+    local.shutdown = shutdown;
+    const generation = local.generate({ prompt: 'still rendering' });
+
+    await attachMachineRemote(mgr);
+    const retirement = mgr.retireLocalForMachineBroker();
+    await Promise.resolve();
+    expect(shutdown).not.toHaveBeenCalled();
+
+    release();
+    await generation;
+    await retirement;
+    expect(shutdown).toHaveBeenCalledTimes(1);
+    expect((await mgr.current()).name).toBe('remote:This machine');
+  });
+
+  it('does not retire a cached user-owned cloud provider', async () => {
+    await store.writeConfig({ imageProvider: 'openai' });
+    const mgr = new ImageProviderManager({ home, store, secrets: fakeSecrets(), env: {} });
+    const cloud = await mgr.current();
+    const shutdown = vi.fn(async () => {});
+    cloud.shutdown = shutdown;
+
+    await attachMachineRemote(mgr);
+    await mgr.retireLocalForMachineBroker();
+
+    expect(shutdown).not.toHaveBeenCalled();
+    expect(await mgr.current()).toBe(cloud);
+  });
+
+  it('retries shutdown of the same native provider after a retirement failure', async () => {
+    const mgr = new ImageProviderManager({ home, store, secrets: fakeSecrets(), env: {} });
+    const local = await mgr.current();
+    const shutdown = vi
+      .fn<() => Promise<void>>()
+      .mockRejectedValueOnce(new Error('transient shutdown failure'))
+      .mockResolvedValue(undefined);
+    local.shutdown = shutdown;
+    await attachMachineRemote(mgr);
+
+    await expect(mgr.retireLocalForMachineBroker()).rejects.toThrow(/transient/);
+    await expect(mgr.retireLocalForMachineBroker()).resolves.toBeUndefined();
+
+    expect(shutdown).toHaveBeenCalledTimes(2);
   });
 });

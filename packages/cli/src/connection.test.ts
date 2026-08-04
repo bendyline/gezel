@@ -129,7 +129,7 @@ describe('CLI grant token storage', () => {
     expect(first).toMatch(/^gezel-cli\.[0-9a-f-]{36}$/);
   });
 
-  it('persists tokens per service origin and supports revocation cleanup', async () => {
+  it('persists tokens per logical target and supports SDK revocation cleanup', async () => {
     const home = await mkdtemp(join(tmpdir(), 'gezel-cli-token-'));
     homes.push(home);
     process.env.GEZEL_HOME = home;
@@ -141,7 +141,7 @@ describe('CLI grant token storage', () => {
 
     await expect(first.load('gezel-cli')).resolves.toBe('local-token');
     await expect(second.load('gezel-cli')).resolves.toBe('remote-token');
-    await first.remove('gezel-cli');
+    await first.delete('gezel-cli');
     await expect(first.load('gezel-cli')).resolves.toBeNull();
     await expect(second.load('gezel-cli')).resolves.toBe('remote-token');
   });

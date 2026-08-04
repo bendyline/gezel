@@ -275,6 +275,9 @@ import type {
   SessionDebugSnapshot,
   SessionTelemetry,
   SessionTelemetryListResponse,
+  SharedModelMigrationCandidatesResponse,
+  SharedModelMigrationRequest,
+  SharedModelMigrationResult,
   SpawnTaskInstancesRequest,
   StartCodeReviewRequest,
   StartCodeReviewResponse,
@@ -2695,6 +2698,21 @@ export class GezelClient {
 
   cancelModelBundleImport(importId: string): Promise<{ ok: true }> {
     return this.request('DELETE', `/api/model-bundles/imports/${encodeURIComponent(importId)}`);
+  }
+
+  // ── private → shared model migration ──
+
+  /** Current, complete per-user models eligible for the machine shared store. */
+  listSharedModelMigrationCandidates(
+    engine?: GezmodelEngine,
+  ): Promise<SharedModelMigrationCandidatesResponse> {
+    const query = engine ? `?engine=${encodeURIComponent(engine)}` : '';
+    return this.request('GET', `/api/model-migrations/candidates${query}`);
+  }
+
+  /** Safely copy, broker-verify, publish, then remove one per-user model. */
+  moveModelToShared(request: SharedModelMigrationRequest): Promise<SharedModelMigrationResult> {
+    return this.request('POST', '/api/model-migrations/move', request);
   }
 
   // ── model fitness (the proeve) ──

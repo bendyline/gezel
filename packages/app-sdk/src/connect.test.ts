@@ -152,4 +152,126 @@ describe('connect verification codes', () => {
       }),
     ).rejects.toMatchObject({ code: 'grant_expired', status: 410 });
   });
+
+  it('reuses a stored token only after verifying every requested scope', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ provider: 'mock' }))
+      .mockResolvedValueOnce(jsonResponse({ data: [] })) as unknown as typeof fetch;
+
+    const authorized = await authorize({
+      appId: 'vscode',
+      appName: 'Visual Studio Code',
+      scopes: ['product', 'openai'],
+      baseUrl: 'http://127.0.0.1:6228',
+      fetch: fetchImpl,
+      existingToken: 'stored-token',
+      onVerificationCode: () => {},
+    });
+
+    expect(authorized.token).toBe('stored-token');
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      1,
+      'http://127.0.0.1:6228/api/config',
+      expect.objectContaining({ headers: { Authorization: 'Bearer stored-token' } }),
+    );
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      2,
+      'http://127.0.0.1:6228/v1/models',
+      expect.objectContaining({ headers: { Authorization: 'Bearer stored-token' } }),
+    );
+  });
+
+  it('self-revokes a stored narrow token and re-runs consent for expanded scopes', async () => {
+    const save = vi.fn();
+    const remove = vi.fn();
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ error: 'forbidden' }, 403))
+      .mockResolvedValueOnce(jsonResponse({ ok: true }))
+      .mockResolvedValueOnce(
+        jsonResponse(
+          {
+            grantRequestId: 'expanded-grant',
+            status: 'pending',
+            verificationRequired: true,
+            verificationCode: 'XA2-M6N',
+          },
+          201,
+        ),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({ id: 'expanded-grant', status: 'approved', token: 'expanded-token' }),
+      ) as unknown as typeof fetch;
+
+    const authorized = await authorize({
+      appId: 'vscode',
+      appName: 'Visual Studio Code',
+      scopes: ['product', 'openai'],
+      baseUrl: 'http://127.0.0.1:6228',
+      fetch: fetchImpl,
+      onVerificationCode: () => {},
+      tokenStorage: {
+        load: () => 'old-openai-token',
+        save,
+        delete: remove,
+      },
+    });
+
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      2,
+      'http://127.0.0.1:6228/v1/apps/vscode/token',
+      expect.objectContaining({
+        method: 'DELETE',
+        headers: { Authorization: 'Bearer old-openai-token' },
+      }),
+    );
+    expect(remove).toHaveBeenCalledWith('vscode');
+    expect(save).toHaveBeenCalledWith('vscode', 'expanded-token');
+    expect(authorized.token).toBe('expanded-token');
+  });
+
+  it('does not mistake a disabled API surface for a stale token', async () => {
+    const fetchImpl = vi.fn().mockResolvedValueOnce(
+      jsonResponse(
+        {
+          error: {
+            message: 'OpenAI-compatible endpoints are turned off in Gezel.',
+            code: 'openai_endpoints_disabled',
+          },
+        },
+        403,
+      ),
+    ) as unknown as typeof fetch;
+
+    await expect(
+      authorize({
+        appId: 'notes',
+        appName: 'Notes',
+        scopes: ['openai'],
+        baseUrl: 'http://127.0.0.1:6228',
+        fetch: fetchImpl,
+        existingToken: 'valid-token',
+      }),
+    ).rejects.toMatchObject({ code: 'openai_endpoints_disabled', status: 403 });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not revoke a stale stateful token before the caller can display a new code', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ error: 'forbidden' }, 403)) as unknown as typeof fetch;
+
+    await expect(
+      authorize({
+        appId: 'editor',
+        appName: 'Editor',
+        scopes: ['product'],
+        baseUrl: 'http://127.0.0.1:6228',
+        fetch: fetchImpl,
+        existingToken: 'narrow-token',
+      }),
+    ).rejects.toMatchObject({ code: 'verification_code_handler_required' });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
 });

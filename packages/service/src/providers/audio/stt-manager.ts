@@ -7,6 +7,7 @@
 import { createLogger } from '@bendyline/gezel';
 import type { RemotesRegistry } from '../../remotes/registry.js';
 import { resolveRemoteTarget } from '../remote/resolve.js';
+import { ProviderRetirementGate, trackProviderOperations } from '../retirement-gate.js';
 import { RemoteSttProvider } from './remote-stt.js';
 import { createSpeechToTextProvider } from './stt-factory.js';
 import type { SpeechToTextProvider } from './types.js';
@@ -23,7 +24,11 @@ export class SpeechToTextProviderManager {
   private readonly env: NodeJS.ProcessEnv | undefined;
 
   private current_: SpeechToTextProvider | null = null;
+  private currentView_: SpeechToTextProvider | null = null;
+  private retiring_: SpeechToTextProvider | null = null;
   private buildPromise: Promise<SpeechToTextProvider> | null = null;
+  private machineRetirement: Promise<void> | null = null;
+  private readonly activity = new ProviderRetirementGate();
   private remotes: RemotesRegistry | undefined;
   private machineEngineRemoteId?: () => string | null;
   private readonly remoteCache = new Map<
@@ -69,7 +74,7 @@ export class SpeechToTextProviderManager {
 
   async current(): Promise<SpeechToTextProvider> {
     if (this.machineEngineRemoteId?.()) return this.providerForModel(undefined);
-    if (this.current_) return this.current_;
+    if (this.current_) return this.currentView_ ?? this.current_;
     if (this.buildPromise) return this.buildPromise;
     this.buildPromise = (async () => {
       const provider = await createSpeechToTextProvider({
@@ -77,7 +82,8 @@ export class SpeechToTextProviderManager {
         ...(this.env ? { env: this.env } : {}),
       });
       this.current_ = provider;
-      return provider;
+      this.currentView_ = trackProviderOperations(provider, this.activity, new Set(['transcribe']));
+      return this.currentView_;
     })().finally(() => {
       this.buildPromise = null;
     });
@@ -87,6 +93,7 @@ export class SpeechToTextProviderManager {
   async reset(): Promise<void> {
     const prev = this.current_;
     this.current_ = null;
+    this.currentView_ = null;
     if (prev?.shutdown) {
       await prev.shutdown().catch((err: unknown) => {
         log.warn(
@@ -94,6 +101,27 @@ export class SpeechToTextProviderManager {
           err instanceof Error ? err.message : String(err),
         );
       });
+    }
+  }
+
+  async retireLocalForMachineBroker(): Promise<void> {
+    if (this.machineRetirement) return this.machineRetirement;
+    const run = (async () => {
+      this.activity.beginRetirement();
+      await this.buildPromise;
+      this.retiring_ ??= this.current_;
+      this.current_ = null;
+      this.currentView_ = null;
+      await this.activity.waitForIdle();
+      if (this.retiring_?.shutdown) await this.retiring_.shutdown();
+      this.retiring_ = null;
+    })();
+    this.machineRetirement = run;
+    try {
+      await run;
+    } catch (error) {
+      if (this.machineRetirement === run) this.machineRetirement = null;
+      throw error;
     }
   }
 

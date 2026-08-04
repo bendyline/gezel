@@ -15,8 +15,8 @@ import type { SdkError } from './types.js';
 export class GezelSdkError extends Error implements SdkError {
   readonly code?: string;
   readonly status?: number;
-  constructor(message: string, opts: { code?: string; status?: number } = {}) {
-    super(message);
+  constructor(message: string, opts: { code?: string; status?: number; cause?: unknown } = {}) {
+    super(message, opts.cause !== undefined ? { cause: opts.cause } : undefined);
     this.name = 'GezelSdkError';
     if (opts.code) this.code = opts.code;
     if (opts.status) this.status = opts.status;

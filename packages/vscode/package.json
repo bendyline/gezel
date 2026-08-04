@@ -57,10 +57,6 @@
         "title": "Gezel: Show Status"
       },
       {
-        "command": "gezel.approvePendingApp",
-        "title": "Gezel: Approve Pending App Connection"
-      },
-      {
         "command": "gezel.resetConnection",
         "title": "Gezel: Reset App Connection"
       },

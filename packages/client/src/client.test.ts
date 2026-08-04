@@ -49,6 +49,34 @@ describe('GezelClient health', () => {
   });
 });
 
+describe('GezelClient shared model migration', () => {
+  it('uses the typed candidate and move endpoints', async () => {
+    const fetchImpl = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      if (String(url).endsWith('/api/model-migrations/candidates?engine=mlx')) {
+        expect(init?.method).toBe('GET');
+        return Response.json({ available: true, candidates: [] });
+      }
+      expect(String(url)).toBe('http://test/api/model-migrations/move');
+      expect(init?.method).toBe('POST');
+      expect(JSON.parse(String(init?.body))).toEqual({
+        source: 'development',
+        engine: 'mlx',
+        id: 'model-id',
+      });
+      return Response.json({ ok: true, engine: 'mlx', id: 'model-id', localRemoved: true });
+    }) as unknown as typeof fetch;
+    const client = new GezelClient({ baseUrl: 'http://test', token: 't', fetch: fetchImpl });
+
+    await expect(client.listSharedModelMigrationCandidates('mlx')).resolves.toEqual({
+      available: true,
+      candidates: [],
+    });
+    await expect(
+      client.moveModelToShared({ source: 'development', engine: 'mlx', id: 'model-id' }),
+    ).resolves.toMatchObject({ ok: true, localRemoved: true });
+  });
+});
+
 describe('GezelClient typed project creation', () => {
   it('uses the server-owned atomic creation endpoint', async () => {
     const fetchImpl = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {

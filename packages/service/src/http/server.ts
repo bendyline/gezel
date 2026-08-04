@@ -52,6 +52,7 @@ import { memoryRoutes } from './routes/memory.js';
 import { mlxRoutes } from './routes/mlx.js';
 import { modelBundleRoutes } from './routes/model-bundles.js';
 import { modelFitnessRoutes } from './routes/model-fitness.js';
+import { modelMigrationRoutes } from './routes/model-migrations.js';
 import { modelsRoutes } from './routes/models.js';
 import { nightShiftRoutes } from './routes/night-shift.js';
 import { ollamaCompatRoutes } from './routes/ollama-compat.js';
@@ -550,6 +551,7 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   app.route('/api/ds4', ds4Routes(ctx));
   app.route('/api/mlx', mlxRoutes(ctx));
   app.route('/api/model-bundles', modelBundleRoutes(ctx));
+  app.route('/api/model-migrations', modelMigrationRoutes(ctx));
   app.route('/api/engines', enginesRoutes(ctx));
   app.route('/api/eval', evalRoutes(ctx));
   app.route('/api/image-gen', imageGenRoutes(ctx));

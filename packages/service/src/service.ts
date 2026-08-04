@@ -885,15 +885,6 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   // for `remote:<remoteId>/<model>` ids against the paired-servers registry.
   // The multimodal managers get the same wiring after they're constructed.
   chat.setRemotesRegistry(remotes);
-  const machineEngine =
-    serviceRole === 'user'
-      ? await startMachineEngineBridge({
-          home,
-          remotes,
-          chat,
-          ...(opts.machineEngineHome ? { machineHome: opts.machineEngineHome } : {}),
-        })
-      : undefined;
   // Observable-progress auto-advance: ChatManager advances a craftbook step
   // (when its `advanceWhen` deliverable appears) by calling back into the
   // TaskManager's normal completion path. Injected, not a direct handle, to
@@ -1099,12 +1090,33 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   tts.setRemotes(remotes);
   const resolveMachineEngineRemoteId = () =>
     remotes.list().find((remote) => remote.managed === 'machine-engine')?.remoteId ?? null;
-  if (machineEngine) {
+  if (serviceRole === 'user') {
     imageProvider.setMachineEngineRemoteResolver(resolveMachineEngineRemoteId);
     videoProvider.setMachineEngineRemoteResolver(resolveMachineEngineRemoteId);
     stt.setMachineEngineRemoteResolver(resolveMachineEngineRemoteId);
     tts.setMachineEngineRemoteResolver(resolveMachineEngineRemoteId);
   }
+  // Start discovery only after every native provider manager is wired. The
+  // bridge publishes the verified remote before invoking this single drain,
+  // so new work routes machine-wide while existing local work finishes.
+  const machineEngine =
+    serviceRole === 'user'
+      ? await startMachineEngineBridge({
+          home,
+          remotes,
+          chat,
+          retireLocalEnginesForMachineBroker: async () => {
+            await Promise.all([
+              chat.retireLocalEnginesForMachineBroker(),
+              imageProvider.retireLocalForMachineBroker(),
+              videoProvider.retireLocalForMachineBroker(),
+              stt.retireLocalForMachineBroker(),
+              tts.retireLocalForMachineBroker(),
+            ]);
+          },
+          ...(opts.machineEngineHome ? { machineHome: opts.machineEngineHome } : {}),
+        })
+      : undefined;
 
   // Wire the phase-activation hook: when a phase advances and the new
   // step has a gezel assignee (or suggestedGezelId), auto-start a session

@@ -15532,6 +15532,41 @@ button.timeline-session-divider-continuing::before {
   margin: 0 0 0.5rem 0;
 }
 
+.shared-model-migration-copy {
+  margin: 0 0 0.65rem;
+  max-width: 48rem;
+}
+
+.shared-model-migration-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.shared-model-migration-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.shared-model-migration-list li > div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+@media (max-width: 640px) {
+  .shared-model-migration-list li {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
 .ollama-model-table {
   width: 100%;
   border-collapse: collapse;

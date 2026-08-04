@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
 import { IncompleteDownloads } from './IncompleteDownloads.js';
 import { ExportModelBundleButton, ImportModelBundleButton } from './ModelBundleControls.js';
+import { SharedModelMigrationPanel } from './SharedModelMigrationPanel.js';
 
 /**
  * Install/list/delete the GGUFs ds4 can run, straight from the catalog — so
@@ -280,6 +281,7 @@ export function Ds4ModelManager({ onModelsChanged }: { onModelsChanged?: () => v
 
   return (
     <div>
+      <SharedModelMigrationPanel engine="ds4" onModelsChanged={onModelsChanged} />
       <IncompleteDownloads
         items={incomplete.filter((d) => !installing.has(d.id))}
         onResume={(id) => startInstall(id)}

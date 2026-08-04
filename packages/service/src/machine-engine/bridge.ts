@@ -40,6 +40,8 @@ export async function startMachineEngineBridge(args: {
   machineHome?: string;
   remotes: RemotesRegistry;
   chat: ChatManager;
+  /** Service-level drain covering chat plus native media providers. */
+  retireLocalEnginesForMachineBroker?: () => Promise<void>;
 }): Promise<MachineEngineBridge | undefined> {
   const machineHome = args.machineHome ?? systemServiceHome();
   if (!machineHome || machineHome === args.home) return undefined;
@@ -49,6 +51,28 @@ export async function startMachineEngineBridge(args: {
   let healthy = false;
   let stopped = false;
   let refreshInFlight: Promise<void> | null = null;
+  let retirementComplete = false;
+  let retirementInFlight: Promise<void> | null = null;
+
+  // Install routing before the first discovery pass. Once `current` is set,
+  // every newly-started chat turn chooses the broker while old work drains.
+  args.chat.setMachineEngineRemoteResolver(() => current?.remoteId ?? null);
+
+  const retireLocalEngines = async (): Promise<void> => {
+    if (retirementComplete) return;
+    if (retirementInFlight) return retirementInFlight;
+    const run = (
+      args.retireLocalEnginesForMachineBroker?.() ?? args.chat.retireLocalEnginesForMachineBroker()
+    )
+      .then(() => {
+        retirementComplete = true;
+      })
+      .finally(() => {
+        if (retirementInFlight === run) retirementInFlight = null;
+      });
+    retirementInFlight = run;
+    return run;
+  };
 
   const refresh = async (): Promise<void> => {
     if (stopped || refreshInFlight) return refreshInFlight ?? Promise.resolve();
@@ -73,7 +97,6 @@ export async function startMachineEngineBridge(args: {
         return;
       }
       const remote = await inspectMachineRuntime(runtime);
-      const firstAdoption = current === null;
       const changed =
         !current ||
         current.baseUrl !== remote.baseUrl ||
@@ -84,7 +107,17 @@ export async function startMachineEngineBridge(args: {
       current = remote;
       machineOwnershipObserved = true;
       healthy = true;
-      if (firstAdoption) await args.chat.retireLocalEnginesForMachineBroker();
+      if (!retirementComplete) {
+        try {
+          await retireLocalEngines();
+        } catch (error) {
+          // Keep the verified broker route authoritative, but retry the local
+          // drain on the next discovery pass until the transaction completes.
+          log.warn(
+            `[machine-engine] local engine retirement failed; will retry: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      }
       if (changed) {
         await closePairedRemoteFetches(args.remotes, MACHINE_REMOTE_ID);
         log.info(
@@ -108,8 +141,13 @@ export async function startMachineEngineBridge(args: {
   };
 
   await refresh();
-  args.chat.setMachineEngineRemoteResolver(() => current?.remoteId ?? null);
-  const timer = setInterval(() => void refresh(), REFRESH_INTERVAL_MS);
+  const timer = setInterval(() => {
+    void refresh().catch((error) => {
+      log.warn(
+        `[machine-engine] refresh timer failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    });
+  }, REFRESH_INTERVAL_MS);
   timer.unref();
 
   return {
@@ -172,6 +210,7 @@ export async function startMachineEngineBridge(args: {
       stopped = true;
       clearInterval(timer);
       await refreshInFlight?.catch(() => undefined);
+      await retirementInFlight?.catch(() => undefined);
       args.chat.setMachineEngineRemoteResolver(undefined);
       args.remotes.removeEphemeral(MACHINE_REMOTE_ID);
       current = null;

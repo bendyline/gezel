@@ -27,6 +27,8 @@ const app = await connect({
   appId: 'docblocks',
   appName: 'DocBlocks',
   scopes: ['openai'],
+  // Back this with Keychain, Credential Manager, libsecret, etc.
+  tokenStorage: keychainStorage,
 });
 
 // Make sure the model is downloaded and warm.
@@ -83,17 +85,18 @@ Inference-only clients can opt into the same stronger handshake by setting
 
 ## Product clients
 
-`authorize()` exposes the generic client side of the protocol when your
+`authorizeLocal()` is the complete Node-native connection path when your
 integration needs Gezel's product API rather than only the OpenAI-compatible
-facade. It performs the same discovery, registration, code delivery, polling,
-and token persistence as `connect()`, then returns the scoped token and
-transport:
+facade. It discovers the logged-in user's dynamic daemon port, pins that
+daemon's per-launch TLS certificate, verifies any persisted token still has
+the requested scopes, and otherwise performs registration, code delivery,
+approval polling, and token persistence:
 
 ```ts
-import { authorize } from '@bendyline/gezel-app-sdk';
+import { authorizeLocal } from '@bendyline/gezel-app-sdk';
 import { GezelClient } from '@bendyline/gezel-client/node';
 
-const authorized = await authorize({
+const authorized = await authorizeLocal({
   appId: 'acme.editor',
   appName: 'Acme Editor',
   scopes: ['product', 'openai'],
@@ -105,6 +108,42 @@ const authorized = await authorize({
 
 const client = new GezelClient(authorized);
 ```
+
+This path connects directly to the per-user daemon described by
+`~/.gezel/runtime`; it never connects to or bootstraps through the machine
+engine broker on port 6228. The returned object contains only the app's scoped
+token plus non-sensitive daemon diagnostics. It never exposes the daemon's
+first-party discovery credential.
+
+`authorize()` remains the transport-level primitive for callers that already
+resolved a base URL or do not need daemon diagnostics.
+
+### Optional native launcher
+
+Ordinary third-party apps should omit `daemon`: when Gezel is not running the
+SDK throws `daemon_not_running`, and the app should ask the user to start
+Gezel. A native integration that deliberately bundles the matching `gezeld`
+package can opt into safe start-if-missing behavior:
+
+```ts
+const authorized = await authorizeLocal({
+  appId: 'acme.editor',
+  appName: 'Acme Editor',
+  scopes: ['product', 'openai'],
+  onVerificationCode: showConnectionCode,
+  tokenStorage: keychainStorage,
+  daemon: {
+    daemonEntry: bundledGezeldEntry,
+    spawnIfMissing: true,
+  },
+});
+```
+
+SDK-owned launches are always detached per-user daemons with
+`GEZEL_SERVICE_ROLE=user` and `GEZEL_PORT=0`. They therefore publish their
+actual dynamic address through the user's runtime directory and cannot race
+the machine broker for port 6228. VS Code is the reference implementation of
+this optional launcher path.
 
 Use `product` for ordinary stateful product access and add `openai` only when
 the same app also calls the OpenAI-compatible inference routes. `product` does
@@ -135,6 +174,8 @@ Browser apps can't trust the loopback self-signed cert without OS-level interven
 | `detectGezel()` | Probe runtime files + health |
 | `connect()` | Register + consent + token storage |
 | `authorize()` | Generic discovery + consent result (`baseUrl`, scoped token, fetch) |
+| `connectLocal()` | Complete Node-native discovery + consent, returning `GezelApp` and diagnostics |
+| `authorizeLocal()` | Complete Node-native discovery + consent for typed product clients |
 | `app.chat()` | OpenAI-compatible chat (streaming + non) |
 | `app.embeddings()` | OpenAI-compatible embeddings |
 | `app.models()` | List available models |

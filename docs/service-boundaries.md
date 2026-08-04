@@ -45,16 +45,21 @@ broker.
 - Once a broker is adopted, a transient broker restart does not silently create a second engine
   owner. Existing sessions resolve the broker's rotated port, certificate, and token before their
   next forward pass.
-- A broker discovered after an account-local engine started drains active turns, then retires the
-  local engine pool.
+- A broker discovered after account-local engines started routes new native work to the broker,
+  drains interactive chat, background one-shots, and active image/video/speech inference, then
+  retires the local engine providers. User-configured cloud image providers remain per-user.
 - A service installed before roles existed is treated as `legacy-full` until the privileged
   installer migrates its product trees. The migration stops the service, moves `projects/` and
   `gezels/` into the separately ACL-protected shared root, verifies cross-filesystem copies, and
   publishes the shared-root marker last. The same service then restarts as `machine-engine`.
   `legacy-full` remains the fail-safe if migration has not completed.
-- Existing per-user model files are not copied or deleted automatically. The shared broker becomes
-  the owner for new model lifecycle operations; an explicit, integrity-checked migration can be
-  added separately without risking multi-gigabyte surprise copies during app startup.
+- Existing per-user model files are not copied or deleted automatically. When the broker is
+  connected, Settings → Models offers **Move to shared location** for complete models in the active
+  user home and the well-known `.gezel` / `.gezel-dev` homes. Candidates must match the current
+  catalog version; the move hashes the payload against the catalog pins, streams it through the
+  broker's security-scanned `.gezmodel` import boundary, publishes atomically, and only then removes
+  the private copy. An alternate home with a live daemon is skipped so an in-use model is never
+  removed behind that process.
 
 ## Machine-wide projects and gezels
 

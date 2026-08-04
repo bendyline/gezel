@@ -28,21 +28,30 @@ continues directly into the TUI without a restart.
 
 With no connection flags, the CLI follows this order:
 
-1. Use the Electron-installed machine service on port `6228` when it is
-   healthy. On first use, the terminal waits while the Gezel app asks you to
-   approve **Gezel CLI**. The terminal shows a six-character code that you must
-   enter in the app to confirm that you initiated the request. The resulting
-   revocable credential is saved under the user-owned
-   `~/.gezel/cli/tokens/` directory.
-2. If the machine service is not installed or is down, adopt or start a
-   user-owned runtime using `~/.gezel`. CLI-owned runtimes use a discoverable
-   ephemeral port so they never prevent the machine service from starting.
+1. During rolling-upgrade compatibility only, use an older `legacy-full`
+   machine service when one is present. A modern machine service on port
+   `6228` is an engine broker, not a product API, so the CLI never sends it
+   projects, credentials, tools, or terminal requests.
+2. Discover the logged-in user's product daemon through the Gezel app SDK.
+   Its actual dynamic port and pinned TLS certificate come from
+   `~/.gezel/runtime`; management commands may start that user-role daemon
+   when it is absent.
+3. On first use, the terminal waits while the Gezel app asks you to approve
+   **Gezel CLI**. The terminal shows a six-character code that you enter in
+   the app to confirm that you initiated the request. The resulting revocable,
+   CLI-scoped credential is saved under `~/.gezel/cli/tokens/`. Its logical
+   local key survives daemon port and certificate rotation.
 
-Connecting to the machine service shares its gezels, projects, settings,
-models, and conversations through the service API. The standalone fallback
-does **not** open the machine service's private data directory directly:
-machine-service state is protected for its restricted OS account, and two
-processes must not write the same file-backed state concurrently.
+`gezel run` has one deliberate lifecycle exception: if no user daemon exists,
+it starts a user-role service in-process for that one invocation and stops it
+afterward. It does not take that fallback after a denied grant or when a live
+daemon is unhealthy.
+
+The per-user daemon owns gezels, projects, settings, credentials, and
+conversations with ordinary user filesystem permissions. It discovers the
+machine engine broker independently for centralized model downloads and local
+inference. The CLI does **not** open the machine service's private data
+directory directly.
 
 It may reuse two deliberately public asset surfaces:
 
@@ -60,7 +69,7 @@ The global overrides are:
 ```bash
 gezel --connect https://host:6228        # explicit service; approval on first use
 gezel --connect https://host:6228 --token "$TOKEN"
-gezel --standalone                        # skip machine-service discovery
+gezel --standalone                        # skip legacy-full compatibility
 gezel --home /path/to/another-home        # standalone with an alternate home
 ```
 

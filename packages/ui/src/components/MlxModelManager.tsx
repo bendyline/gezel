@@ -14,6 +14,7 @@ import { IncompleteDownloads } from './IncompleteDownloads.js';
 import { LicenseButton } from './LicenseButton.js';
 import { ExportModelBundleButton, ImportModelBundleButton } from './ModelBundleControls.js';
 import { RecommendedBadge } from './RecommendedBadge.js';
+import { SharedModelMigrationPanel } from './SharedModelMigrationPanel.js';
 import { mlxFitsMemoryBudget } from './mlx-model-fit.js';
 import { approximateQuantizationLabel, quantizationTitle } from './model-quantization.js';
 
@@ -554,6 +555,8 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
           </div>
         </div>
       )}
+
+      {!compact && <SharedModelMigrationPanel engine="mlx" onModelsChanged={onModelsChanged} />}
 
       {(models.length > 0 || modelsError) && (
         <div className="ollama-section">

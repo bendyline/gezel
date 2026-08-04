@@ -224,6 +224,12 @@ export class EngineRouter {
   async shutdown(): Promise<void> {
     await this.pool.shutdown();
   }
+
+  /** Gracefully drain every admitted turn, including background one-shots,
+   * and permanently prevent this user daemon from spawning another engine. */
+  async retire(): Promise<void> {
+    await this.pool.retire();
+  }
 }
 
 /**

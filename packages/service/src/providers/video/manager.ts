@@ -12,6 +12,7 @@ import type { UvRuntime } from '../../python/uv-runtime.js';
 import type { RemotesRegistry } from '../../remotes/registry.js';
 import type { GpuArbiter } from '../gpu-arbiter.js';
 import { resolveRemoteTarget } from '../remote/resolve.js';
+import { ProviderRetirementGate, trackProviderOperations } from '../retirement-gate.js';
 import { createVideoProvider } from './factory.js';
 import { RemoteVideoProvider } from './remote-video.js';
 import type { VideoProvider } from './types.js';
@@ -42,7 +43,11 @@ export class VideoProviderManager {
   private readonly arbiter: GpuArbiter | undefined;
 
   private current_: VideoProvider | null = null;
+  private currentView_: VideoProvider | null = null;
+  private retiring_: VideoProvider | null = null;
   private buildPromise: Promise<VideoProvider> | null = null;
+  private machineRetirement: Promise<void> | null = null;
+  private readonly activity = new ProviderRetirementGate();
   private remotes: RemotesRegistry | undefined;
   private machineEngineRemoteId?: () => string | null;
   private readonly remoteCache = new Map<
@@ -92,7 +97,7 @@ export class VideoProviderManager {
 
   async current(): Promise<VideoProvider> {
     if (this.machineEngineRemoteId?.()) return this.providerForModel(undefined);
-    if (this.current_) return this.current_;
+    if (this.current_) return this.currentView_ ?? this.current_;
     if (this.buildPromise) return this.buildPromise;
     this.buildPromise = (async () => {
       const config = await this.store.readConfig();
@@ -105,7 +110,8 @@ export class VideoProviderManager {
         ...(this.arbiter ? { arbiter: this.arbiter } : {}),
       });
       this.current_ = provider;
-      return provider;
+      this.currentView_ = trackProviderOperations(provider, this.activity, new Set(['generate']));
+      return this.currentView_;
     })().finally(() => {
       this.buildPromise = null;
     });
@@ -115,6 +121,7 @@ export class VideoProviderManager {
   async reset(): Promise<void> {
     const prev = this.current_;
     this.current_ = null;
+    this.currentView_ = null;
     if (prev?.shutdown) {
       await prev.shutdown().catch((err: unknown) => {
         log.warn(
@@ -122,6 +129,27 @@ export class VideoProviderManager {
           err instanceof Error ? err.message : String(err),
         );
       });
+    }
+  }
+
+  async retireLocalForMachineBroker(): Promise<void> {
+    if (this.machineRetirement) return this.machineRetirement;
+    const run = (async () => {
+      this.activity.beginRetirement();
+      await this.buildPromise;
+      this.retiring_ ??= this.current_;
+      this.current_ = null;
+      this.currentView_ = null;
+      await this.activity.waitForIdle();
+      if (this.retiring_?.shutdown) await this.retiring_.shutdown();
+      this.retiring_ = null;
+    })();
+    this.machineRetirement = run;
+    try {
+      await run;
+    } catch (error) {
+      if (this.machineRetirement === run) this.machineRetirement = null;
+      throw error;
     }
   }
 

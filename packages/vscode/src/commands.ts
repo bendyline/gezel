@@ -95,122 +95,26 @@ export function registerCommands(ctx: CommandContext): vscode.Disposable[] {
       else if (pick === 'Reconnect') await ctx.reconnect();
     }),
     /**
-     * Recovery path when the desktop consent dialog is unavailable.
-     * Lists and approves grants with the host-only discovery credential;
-     * the code is still required, so approval remains bound to the request
-     * initiated by this extension.
-     */
-    vscode.commands.registerCommand('gezel.approvePendingApp', async () => {
-      const conn = ctx.getConnection();
-      if (!conn) {
-        void vscode.window.showWarningMessage('Gezel: daemon not connected yet.');
-        return;
-      }
-      const res = await conn.fetch(`${conn.baseUrl}/v1/apps`, {
-        headers: { Authorization: `Bearer ${conn.firstPartyToken}` },
-      });
-      if (!res.ok) {
-        void vscode.window.showErrorMessage(`Gezel: couldn't list apps — HTTP ${res.status}`);
-        return;
-      }
-      const body = (await res.json()) as {
-        grants: Array<{
-          id: string;
-          appId: string;
-          appName: string;
-          status: string;
-          verificationRequired?: boolean;
-        }>;
-      };
-      const pending = body.grants.filter((g) => g.status === 'pending');
-      if (pending.length === 0) {
-        void vscode.window.showInformationMessage(
-          'No pending app connections. If VS Code logged a 300s consent timeout, hit "Gezel: Reconnect Daemon" first to file a fresh request.',
-        );
-        return;
-      }
-      const pick = await vscode.window.showQuickPick(
-        pending.map((g) => ({
-          label: `${g.appName}`,
-          description: g.appId,
-          detail: `Approve grant ${g.id.slice(0, 8)}…`,
-          grant: g,
-        })),
-        { placeHolder: 'Select a pending connection to approve' },
-      );
-      if (!pick) return;
-      let verificationCode: string | undefined;
-      if (pick.grant.verificationRequired) {
-        const entered = await vscode.window.showInputBox({
-          title: `Approve ${pick.grant.appName}`,
-          prompt: 'Enter the six-character connection code shown by the requesting application.',
-          placeHolder: '___-___',
-          ignoreFocusOut: true,
-          validateInput: (value) =>
-            normalizeVerificationCode(value)
-              ? null
-              : 'Enter a valid six-character connection code.',
-        });
-        if (entered === undefined) return;
-        verificationCode = normalizeVerificationCode(entered) ?? undefined;
-      }
-      const approve = await conn.fetch(
-        `${conn.baseUrl}/v1/apps/grant/${encodeURIComponent(pick.grant.id)}/approve`,
-        {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${conn.firstPartyToken}`,
-            ...(verificationCode ? { 'Content-Type': 'application/json' } : {}),
-          },
-          ...(verificationCode ? { body: JSON.stringify({ verificationCode }) } : {}),
-        },
-      );
-      if (!approve.ok) {
-        const error = (await approve.json().catch(() => null)) as {
-          error?: string;
-          attemptsRemaining?: number;
-        } | null;
-        const remaining =
-          typeof error?.attemptsRemaining === 'number'
-            ? ` ${error.attemptsRemaining} attempt${error.attemptsRemaining === 1 ? '' : 's'} remaining.`
-            : '';
-        void vscode.window.showErrorMessage(
-          error?.error === 'verification_code_invalid'
-            ? `Gezel: that connection code did not match.${remaining}`
-            : `Gezel: approval failed — ${error?.error ?? `HTTP ${approve.status}`}`,
-        );
-        return;
-      }
-      void vscode.window.showInformationMessage(
-        `Approved ${pick.grant.appName}. Reconnecting the Gezel extension…`,
-      );
-      await ctx.reconnect();
-    }),
-    /**
-     * Recover from `already_connected`: the daemon has a `vscode` app
-     * token from an earlier session, but VS Code's secrets store
-     * doesn't have the matching string (different dev-host profile,
-     * approved via `Approve Pending App Connection` after the SDK had
-     * already given up, …). Every fresh launch then hits 409 on
-     * `POST /v1/apps/register` and we never register a language model.
-     *
-     * Fix: DELETE the daemon-side token using the host-only discovery bearer, clear
-     * the (likely empty) VS Code secret, then reconnect — which fires
-     * a fresh `register`, lands a brand-new grant, and either
-     * auto-approves (env var) or surfaces the normal consent flow.
+     * Revoke VS Code's own scoped credential and run consent again. This is
+     * intentionally the same self-service capability available to any
+     * third-party app; the extension never receives first-party grant-admin
+     * authority.
      */
     vscode.commands.registerCommand('gezel.resetConnection', async () => {
       const conn = ctx.getConnection();
       if (!conn) {
-        void vscode.window.showWarningMessage('Gezel: daemon not connected yet.');
+        await ctx.clearAppTokenSecret();
+        void vscode.window.showInformationMessage(
+          'Gezel: the local VS Code token was cleared. If Gezel still lists Visual Studio Code under Connected Apps, revoke it there, then reconnect.',
+        );
         return;
       }
       const appId = 'vscode';
       const del = await conn.fetch(`${conn.baseUrl}/v1/apps/${encodeURIComponent(appId)}/token`, {
         method: 'DELETE',
-        headers: { Authorization: `Bearer ${conn.firstPartyToken}` },
+        headers: { Authorization: `Bearer ${conn.token}` },
       });
-      if (!del.ok && del.status !== 404) {
+      if (!del.ok && del.status !== 401 && del.status !== 404) {
         void vscode.window.showErrorMessage(
           `Gezel: couldn't revoke daemon token — HTTP ${del.status}`,
         );
@@ -223,11 +127,4 @@ export function registerCommands(ctx: CommandContext): vscode.Disposable[] {
       await ctx.reconnect();
     }),
   ];
-}
-
-function normalizeVerificationCode(value: string): string | null {
-  const normalized = value.replace(/[-\s]/g, '').toUpperCase();
-  return /^[2-9A-HJ-KM-NP-TV-Z]{6}$/.test(normalized)
-    ? `${normalized.slice(0, 3)}-${normalized.slice(3)}`
-    : null;
 }

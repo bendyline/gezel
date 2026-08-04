@@ -20,6 +20,7 @@ import type { RemotesRegistry } from '../../remotes/registry.js';
 import type { SecretStore } from '../../secrets/types.js';
 import type { GpuArbiter } from '../gpu-arbiter.js';
 import { type RemoteTarget, resolveRemoteTarget } from '../remote/resolve.js';
+import { ProviderRetirementGate, trackProviderOperations } from '../retirement-gate.js';
 import { createImageProvider } from './factory.js';
 import { RemoteImageProvider } from './remote-image.js';
 
@@ -52,7 +53,11 @@ export class ImageProviderManager {
   private readonly localOnly: boolean;
 
   private current_: ImageProvider | null = null;
+  private currentView_: ImageProvider | null = null;
+  private retiring_: ImageProvider | null = null;
   private buildPromise: Promise<ImageProvider> | null = null;
+  private machineRetirement: Promise<void> | null = null;
+  private readonly activity = new ProviderRetirementGate();
   private remotes: RemotesRegistry | undefined;
   private machineEngineRemoteId?: () => string | null;
   private readonly remoteCache = new Map<
@@ -142,7 +147,7 @@ export class ImageProviderManager {
         const target = resolveRemoteTarget(undefined, this.remotes, machineRemoteId);
         if (target) return this.providerForRemoteTarget(target);
       }
-      if (this.current_) return this.current_;
+      if (this.current_) return this.currentView_ ?? this.current_;
       const provider = await createImageProvider({
         home: this.home,
         ...(this.env ? { env: this.env } : {}),
@@ -152,7 +157,10 @@ export class ImageProviderManager {
         ...(this.arbiter ? { arbiter: this.arbiter } : {}),
       });
       this.current_ = provider;
-      return provider;
+      this.currentView_ = isMachineImageProvider(config, this.env ?? process.env)
+        ? trackProviderOperations(provider, this.activity, new Set(['generate']))
+        : provider;
+      return this.currentView_;
     })().finally(() => {
       this.buildPromise = null;
     });
@@ -166,6 +174,7 @@ export class ImageProviderManager {
   async reset(): Promise<void> {
     const prev = this.current_;
     this.current_ = null;
+    this.currentView_ = null;
     if (prev?.shutdown) {
       await prev.shutdown().catch((err: unknown) => {
         log.warn(
@@ -173,6 +182,31 @@ export class ImageProviderManager {
           err instanceof Error ? err.message : String(err),
         );
       });
+    }
+  }
+
+  /** Drain and retire only the native sd-cpp provider. User-owned cloud
+   * providers remain live in this daemon and retain their secret-store scope. */
+  async retireLocalForMachineBroker(): Promise<void> {
+    if (this.machineRetirement) return this.machineRetirement;
+    const run = (async () => {
+      const config = await this.store.readConfig();
+      if (!isMachineImageProvider(config, this.env ?? process.env)) return;
+      this.activity.beginRetirement();
+      await this.buildPromise;
+      this.retiring_ ??= this.current_;
+      this.current_ = null;
+      this.currentView_ = null;
+      await this.activity.waitForIdle();
+      if (this.retiring_?.shutdown) await this.retiring_.shutdown();
+      this.retiring_ = null;
+    })();
+    this.machineRetirement = run;
+    try {
+      await run;
+    } catch (error) {
+      if (this.machineRetirement === run) this.machineRetirement = null;
+      throw error;
     }
   }
 

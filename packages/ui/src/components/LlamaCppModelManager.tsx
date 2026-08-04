@@ -24,6 +24,7 @@ import { IncompleteDownloads } from './IncompleteDownloads.js';
 import { LicenseButton } from './LicenseButton.js';
 import { ExportModelBundleButton, ImportModelBundleButton } from './ModelBundleControls.js';
 import { RecommendedBadge } from './RecommendedBadge.js';
+import { SharedModelMigrationPanel } from './SharedModelMigrationPanel.js';
 import { approximateQuantizationLabel, quantizationTitle } from './model-quantization.js';
 
 interface MemoryProfile {
@@ -620,6 +621,10 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
             ⚠ {installWarning.id}: {installWarning.message}
           </div>
         </div>
+      )}
+
+      {!compact && (
+        <SharedModelMigrationPanel engine="llama-cpp" onModelsChanged={onModelsChanged} />
       )}
 
       {(models.length > 0 || modelsError) && (

@@ -25,6 +25,13 @@ export class LiveDaemonUnhealthyError extends Error {
   }
 }
 
+export class DaemonNotRunningError extends Error {
+  constructor() {
+    super('no running gezel daemon was found for this user');
+    this.name = 'DaemonNotRunningError';
+  }
+}
+
 export interface DiscoverOrSpawnResult {
   client: GezelClient;
   baseUrl: string;
@@ -93,6 +100,13 @@ export interface DiscoverOrSpawnOptions {
   forceSpawn?: boolean;
   /** `GEZEL_HOME` — forwarded to `readRuntime` for per-test isolation. */
   home?: string;
+  /**
+   * Whether discovery may start a daemon when this user's runtime is absent
+   * or stale. Defaults to `true` for the historical first-party behavior.
+   * Public app integrations set this to `false` unless they deliberately ship
+   * a compatible daemon entry of their own.
+   */
+  spawnIfMissing?: boolean;
   logger?: { info?: (msg: string) => void; warn?: (msg: string) => void };
   // Test-only injection points. Defaults wire to the real implementations.
   spawnFn?: SpawnLike;
@@ -129,6 +143,7 @@ export async function discoverOrSpawn(
     healthTimeoutMs = Math.min(1000, timeoutMs),
     forceSpawn = false,
     home,
+    spawnIfMissing = true,
     logger,
     spawnFn = nodeSpawn,
     readRuntimeFn = defaultReadRuntime,
@@ -169,6 +184,10 @@ export async function discoverOrSpawn(
       // discovery must fail loudly rather than manufacture a second writer.
       throw new LiveDaemonUnhealthyError(existing.pid, existing.baseUrl, { cause: err });
     }
+  }
+
+  if (!spawnIfMissing) {
+    throw new DaemonNotRunningError();
   }
 
   logger?.info?.(`[gezel] spawning daemon from ${daemonEntry}`);

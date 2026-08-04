@@ -26,13 +26,6 @@ export interface DetectResult {
    * Present when the runtime files exist, regardless of `running`.
    */
   baseUrl?: string;
-  /**
-   * The root bearer token from `~/.gezel/runtime/auth-token`. Apps
-   * SHOULD NOT use this; it's surfaced so dev/debug tools can talk to
-   * the daemon as root. Public app integrations register via
-   * {@link connect} instead, getting a per-app scoped token.
-   */
-  rootToken?: string;
   /** Daemon version (semver) when health probe succeeded. */
   version?: string;
 }
@@ -79,14 +72,20 @@ export interface ConnectInput {
   existingToken?: string;
   /**
    * Persistence hooks for the issued token. The SDK calls
-   * `save(appId, token)` on successful approval; subsequent runs
-   * should call `connect({existingToken: await load(appId)})`.
-   * Default is no persistence. Call {@link authorize} when your integration
-   * needs the raw authorized connection to pass into another client.
+   * `save(appId, token)` on successful approval and automatically calls
+   * `load(appId)` on subsequent connections. Default is no persistence.
+   * Call {@link authorize} when your integration needs the raw authorized
+   * connection to pass into another client.
    */
   tokenStorage?: {
     save(appId: string, token: string): Promise<void> | void;
     load?(appId: string): Promise<string | null> | string | null;
+    /**
+     * Remove a rejected or superseded token. When omitted, the SDK still
+     * replaces it through `save`, but stores with an explicit delete operation
+     * can avoid briefly retaining a credential that the daemon rejected.
+     */
+    delete?(appId: string): Promise<void> | void;
   };
   /**
    * Max seconds to wait for the user to approve the grant. Default
@@ -114,6 +113,51 @@ export interface AuthorizedConnection {
   baseUrl: string;
   token: string;
   fetch: typeof fetch;
+}
+
+/** How the Node SDK reached the logged-in user's product daemon. */
+export type LocalDaemonMode = 'configured' | 'adopted' | 'spawned';
+
+/**
+ * Optional lifecycle support for native clients that bundle a compatible
+ * `gezeld` entry. Ordinary third-party apps omit `daemonEntry`; they discover
+ * the daemon started by Gezel and return `daemon_not_running` when it is off.
+ */
+export interface LocalDaemonOptions {
+  /** Path to the Node entry that starts `gezeld`. */
+  daemonEntry?: string;
+  /** Start the bundled entry when no live per-user runtime exists. Default false. */
+  spawnIfMissing?: boolean;
+  /** Alternate `GEZEL_HOME`, primarily for managed installs and tests. */
+  home?: string;
+  /** Startup/adoption deadline. Default 20 seconds. */
+  timeoutMs?: number;
+  /** Optional host logger. */
+  logger?: {
+    info?(message: string): void;
+    warn?(message: string): void;
+  };
+}
+
+/** Input for the complete Node-native discovery + consent protocol. */
+export interface LocalConnectInput extends ConnectInput {
+  daemon?: LocalDaemonOptions;
+  /**
+   * PEM certificate path for an explicitly configured self-signed HTTPS
+   * daemon. Runtime-discovered daemons do not need this; their certificate is
+   * loaded automatically from the per-user runtime directory.
+   */
+  tlsCertPath?: string;
+}
+
+/** Authorized app transport plus non-sensitive local-daemon diagnostics. */
+export interface LocalAuthorizedConnection extends AuthorizedConnection {
+  daemon: {
+    mode: LocalDaemonMode;
+    pid?: number;
+    /** Public loopback trust anchor; never the daemon's private key. */
+    cert: string | null;
+  };
 }
 
 export type ChatMessageRole = 'system' | 'user' | 'assistant' | 'tool';

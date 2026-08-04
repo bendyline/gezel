@@ -845,6 +845,17 @@ export {
   type LocalModelTier,
 } from './local-model-tier.js';
 
+function isMachineEngineChatProvider(name: string): name is LocalProviderName {
+  return name === 'llama-cpp' || name === 'mlx' || name === 'ds4';
+}
+
+function providerQueueIsBusy(provider: LLMProvider): boolean {
+  const snapshot = provider.queue?.snapshot();
+  return Boolean(
+    snapshot && snapshot.running + snapshot.queuedInteractive + snapshot.queuedBackground > 0,
+  );
+}
+
 export class ChatManager {
   /** Cached provider instances keyed by provider name. */
   private readonly providers = new Map<ProviderName, LLMProvider>();
@@ -1361,30 +1372,108 @@ export class ChatManager {
     this.machineEngineRemoteId = resolveRemoteId;
   }
   private machineEngineRemoteId?: () => string | null;
-  private machineEngineRetireTimer?: NodeJS.Timeout;
+  private machineEngineRetirement: Promise<void> | null = null;
+  private readonly machineEngineSessionTeardowns = new Map<string, Promise<void>>();
+  private readonly machineEngineRetiringProviders = new Map<ProviderName, LLMProvider>();
 
   /**
    * Retire any user-owned native engines after the machine broker appears.
    * Active turns are allowed to finish; new turns already resolve through the
-   * broker, then a hard reset releases the old pool once the manager is idle.
+   * broker. Session bridges close once per session, then provider queues drain
+   * both interactive and background work before their engines shut down.
    */
   async retireLocalEnginesForMachineBroker(): Promise<void> {
-    if (this.isAnyActive()) {
-      await this.resetClient({ deferBusy: true });
-      if (!this.machineEngineRetireTimer) {
-        this.machineEngineRetireTimer = setTimeout(() => {
-          this.machineEngineRetireTimer = undefined;
-          void this.retireLocalEnginesForMachineBroker();
-        }, 1_000);
-        this.machineEngineRetireTimer.unref();
+    if (this.machineEngineRetirement) return this.machineEngineRetirement;
+    const run = (async () => {
+      // Session activity is the backstop for queue-bypassing turns. Only
+      // after those are idle may the provider queue drain + engine shutdown
+      // begin; background one-shots remain visible to the queue itself.
+      await this.retireMachineEngineSessions();
+      await Promise.all([
+        this.retireOwnedEngineRouter(),
+        this.retireSingletonMachineEngineProviders(),
+      ]);
+    })();
+    this.machineEngineRetirement = run;
+    try {
+      await run;
+    } catch (error) {
+      if (this.machineEngineRetirement === run) this.machineEngineRetirement = null;
+      throw error;
+    }
+  }
+
+  /** Tear down only sessions backed by broker-owned chat engines. A busy
+   * session gets one after-idle callback; queued follow-up sends are held
+   * until its bridges have closed, then rebuild against the remote provider. */
+  private async retireMachineEngineSessions(): Promise<void> {
+    const waits: Promise<void>[] = [];
+    for (const [sessionId, state] of this.states) {
+      if (!isMachineEngineChatProvider(state.record.providerName)) continue;
+      if (this.inflight.has(sessionId)) {
+        waits.push(
+          new Promise<void>((resolve, reject) => {
+            this.runAfterSessionIdle(sessionId, () => {
+              void this.tearDownMachineEngineSession(sessionId, state).then(resolve, reject);
+            });
+          }),
+        );
+      } else {
+        waits.push(this.tearDownMachineEngineSession(sessionId, state));
       }
-      return;
     }
-    if (this.machineEngineRetireTimer) {
-      clearTimeout(this.machineEngineRetireTimer);
-      this.machineEngineRetireTimer = undefined;
+    await Promise.all(waits);
+  }
+
+  private tearDownMachineEngineSession(sessionId: string, state: LiveSessionState): Promise<void> {
+    const existing = this.machineEngineSessionTeardowns.get(sessionId);
+    if (existing) return existing;
+    const session = state.session;
+    state.session = null;
+    this.revokeSessionToken?.(`session:${sessionId}`);
+    const run = Promise.allSettled([
+      ...(session ? [session.disconnect()] : []),
+      this.disposeFixedFunctionBridge(sessionId),
+      this.disposeCliToolBridge(sessionId),
+    ])
+      .then(() => undefined)
+      .finally(() => {
+        if (this.machineEngineSessionTeardowns.get(sessionId) === run) {
+          this.machineEngineSessionTeardowns.delete(sessionId);
+        }
+        if (!this.inflight.has(sessionId)) this.drainNextQueued(sessionId);
+      });
+    this.machineEngineSessionTeardowns.set(sessionId, run);
+    return run;
+  }
+
+  private async retireOwnedEngineRouter(): Promise<void> {
+    let router = this.engineRouter ?? this.engineRouterCache;
+    if (!router && this.engineRouterInitPromise) {
+      router = await this.engineRouterInitPromise;
     }
-    await this.resetClient();
+    if (!router) return;
+    await router.retire();
+    if (!this.engineRouter && this.engineRouterCache === router) {
+      this.engineRouterCache = null;
+      this.engineRouterInitPromise = null;
+    }
+  }
+
+  private async retireSingletonMachineEngineProviders(): Promise<void> {
+    for (const [name, provider] of this.providers) {
+      if (!isMachineEngineChatProvider(name)) continue;
+      this.providers.delete(name);
+      this.machineEngineRetiringProviders.set(name, provider);
+    }
+    for (const [name, provider] of this.machineEngineRetiringProviders) {
+      while (providerQueueIsBusy(provider)) {
+        await new Promise<void>((resolve) => setTimeout(resolve, 100));
+      }
+      await provider.shutdown();
+      this.cacheController?.invalidateProvider(name);
+      this.machineEngineRetiringProviders.delete(name);
+    }
   }
   private readonly remoteProviders = new Map<
     string,
@@ -5258,6 +5347,9 @@ export class ChatManager {
    * / `reject` callbacks captured at enqueue time.
    */
   private drainNextQueued(sessionId: string): void {
+    // Broker adoption closes the old local session + its tool bridges before
+    // a queued follow-up is allowed to rebuild on the machine remote.
+    if (this.machineEngineSessionTeardowns.has(sessionId)) return;
     const tag = sessionId.slice(0, 8);
     const q = this.pendingSends.get(sessionId);
     if (!q || q.length === 0) {
@@ -8619,8 +8711,6 @@ export class ChatManager {
   async shutdown(): Promise<void> {
     await this.beginShutdown();
     this.telemetryGpuUnsub?.();
-    if (this.machineEngineRetireTimer) clearTimeout(this.machineEngineRetireTimer);
-    this.machineEngineRetireTimer = undefined;
     this.telemetryGpuUnsub = null;
     // Fire any deferred memory extractions immediately so any
     // mid-conversation work that was waiting on idle gets persisted
@@ -9805,8 +9895,6 @@ export class ChatManager {
    */
   async getProviderForModel(name: ProviderName, modelId?: string): Promise<LLMProvider> {
     if (name === 'remote') return this.getRemoteProvider(modelId);
-    const seeded = this.providers.get(name);
-    if (seeded) return seeded;
     const { isLocalProvider } = await import('../providers/native/engine-key.js');
     if (!isLocalProvider(name)) return this.ensureProvider(name);
 
@@ -9822,6 +9910,9 @@ export class ChatManager {
         name,
       );
     }
+
+    const seeded = this.providers.get(name);
+    if (seeded) return seeded;
 
     const router = await this.getEngineRouter();
     if (!router) return this.ensureProvider(name);
@@ -10157,9 +10248,6 @@ export class ChatManager {
         'remote provider must be resolved from a "remote:<remoteId>/<model>" id, not as a singleton',
       );
     }
-    const existing = this.providers.get(name);
-    if (existing) return existing;
-
     if (name === 'llama-cpp' || name === 'mlx' || name === 'ds4') {
       const machineRemoteId = this.machineEngineRemoteId?.() ?? null;
       if (machineRemoteId) {
@@ -10174,6 +10262,9 @@ export class ChatManager {
         );
       }
     }
+
+    const existing = this.providers.get(name);
+    if (existing) return existing;
 
     // Backstop against unbudgeted local-engine spawns. Building a local
     // provider here creates a NativeEngineSupervisor that is invisible to

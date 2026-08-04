@@ -257,6 +257,9 @@ export class ProviderPool {
   // In-flight evictions per key — parallel evict() calls join the
   // same teardown instead of double-shutting-down the provider.
   private readonly evicting = new Map<string, Promise<void>>();
+  /** Closed permanently once this user daemon adopts the machine broker. */
+  private retiring = false;
+  private retirementPromise: Promise<void> | null = null;
 
   constructor(opts: ProviderPoolOptions) {
     this.broker = opts.broker;
@@ -306,6 +309,9 @@ export class ProviderPool {
     replicaIdx: number,
     residentBytes: number,
   ): Promise<LLMProvider> {
+    if (this.retiring) {
+      throw new Error('local engine pool retired after machine engine adoption');
+    }
     const key = makeEngineKey(provider, modelId, replicaIdx);
     const hit = this.entries.get(key);
     if (hit && !hit.draining) {
@@ -491,24 +497,37 @@ export class ProviderPool {
    *
    * Parallel `evict` calls for the same key join the same teardown.
    */
-  async evict(key: string, opts?: { force?: boolean }): Promise<void> {
+  async evict(
+    key: string,
+    opts?: {
+      force?: boolean;
+      /** Adoption drain has no turn-length deadline. */
+      drainWaitMs?: number;
+    },
+  ): Promise<void> {
     const inFlight = this.evicting.get(key);
     if (inFlight && !opts?.force) return inFlight;
-    const run = this.evictInner(key, opts?.force === true).finally(() => {
+    const run = this.evictInner(
+      key,
+      opts?.force === true,
+      opts?.drainWaitMs ?? this.drainWaitMs,
+    ).finally(() => {
       if (this.evicting.get(key) === run) this.evicting.delete(key);
     });
     this.evicting.set(key, run);
     return run;
   }
 
-  private async evictInner(key: string, force: boolean): Promise<void> {
+  private async evictInner(key: string, force: boolean, drainWaitMs: number): Promise<void> {
     const entry = this.entries.get(key);
     if (!entry) return;
     if (!force && isBusy(entry)) {
       entry.draining = true;
       this.fireChange();
-      const deadline = this.now() + this.drainWaitMs;
-      log.info(`evict ${key}: engine busy — draining (cap ${this.drainWaitMs}ms)`);
+      const deadline = this.now() + drainWaitMs;
+      log.info(
+        `evict ${key}: engine busy — draining (${Number.isFinite(drainWaitMs) ? `cap ${drainWaitMs}ms` : 'until idle'})`,
+      );
       while (isBusy(entry)) {
         // A force-evict (service shutdown) may have torn the entry
         // down underneath this drain — if our entry is no longer the
@@ -519,7 +538,7 @@ export class ProviderPool {
           this.fireChange();
           throw new EngineBusyError(
             `engine ${key} is busy serving requests and did not drain within ${Math.round(
-              this.drainWaitMs / 1000,
+              drainWaitMs / 1000,
             )}s — not evicting. Retry shortly, or wait for current turns to finish.`,
           );
         }
@@ -653,8 +672,37 @@ export class ProviderPool {
    * forces eviction without waiting for busy engines to drain.
    */
   async shutdown(): Promise<void> {
+    this.retiring = true;
     const keys = [...this.entries.keys()];
     await Promise.all(keys.map((k) => this.evict(k, { force: true })));
+  }
+
+  /**
+   * Permanently close the pool to new work, wait for builds already admitted,
+   * then drain every interactive and background queue before shutdown. Unlike
+   * service shutdown this never force-kills a turn and has no turn-length cap.
+   */
+  async retire(): Promise<void> {
+    if (this.retirementPromise) return this.retirementPromise;
+    this.retiring = true;
+    const run = (async () => {
+      while (this.buildLocks.size > 0) {
+        await Promise.allSettled(Array.from(this.buildLocks.values()));
+      }
+      while (this.entries.size > 0) {
+        const keys = [...this.entries.keys()];
+        await Promise.all(
+          keys.map((key) => this.evict(key, { drainWaitMs: Number.POSITIVE_INFINITY })),
+        );
+      }
+    })();
+    this.retirementPromise = run;
+    try {
+      await run;
+    } catch (error) {
+      if (this.retirementPromise === run) this.retirementPromise = null;
+      throw error;
+    }
   }
 
   /**

@@ -20,17 +20,13 @@ export interface DetectGezelOptions {
 
 interface RuntimeFiles {
   baseUrl: string;
-  rootToken: string;
   cert: string | null;
 }
 
 async function readRuntimeFiles(home: string): Promise<RuntimeFiles | null> {
   const runtimeDir = join(home, 'runtime');
   try {
-    const [portRaw, tokenRaw] = await Promise.all([
-      readFile(join(runtimeDir, 'port'), 'utf8'),
-      readFile(join(runtimeDir, 'auth-token'), 'utf8'),
-    ]);
+    const portRaw = await readFile(join(runtimeDir, 'port'), 'utf8');
     const port = Number.parseInt(portRaw.trim(), 10);
     if (!Number.isFinite(port)) return null;
     let cert: string | null = null;
@@ -42,7 +38,6 @@ async function readRuntimeFiles(home: string): Promise<RuntimeFiles | null> {
     const scheme = cert ? 'https' : 'http';
     return {
       baseUrl: `${scheme}://127.0.0.1:${port}`,
-      rootToken: tokenRaw.trim(),
       cert,
     };
   } catch {
@@ -88,7 +83,6 @@ export async function detectGezel(opts: DetectGezelOptions = {}): Promise<Detect
     installed: true,
     running,
     baseUrl: runtime.baseUrl,
-    rootToken: runtime.rootToken,
     ...(version ? { version } : {}),
   };
 }

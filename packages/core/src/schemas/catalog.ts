@@ -2119,6 +2119,52 @@ export const GezmodelImportReviewSchema = z.object({
 });
 export type GezmodelImportReview = z.infer<typeof GezmodelImportReviewSchema>;
 
+// ─ Private → shared model migration ─────────────────────────────────────
+//
+// A user daemon may discover complete models in its own writable store (or
+// in one of Gezel's well-known per-user homes) while a machine engine broker
+// owns the canonical shared store. The source is deliberately an enum rather
+// than a filesystem path: callers cannot use this API to make the daemon read
+// an arbitrary directory.
+
+export const SharedModelMigrationSourceSchema = z.enum(['current', 'default', 'development']);
+export type SharedModelMigrationSource = z.infer<typeof SharedModelMigrationSourceSchema>;
+
+export const SharedModelMigrationCandidateSchema = z.object({
+  source: SharedModelMigrationSourceSchema,
+  sourceLabel: z.string().min(1).max(128),
+  engine: GezmodelEngineSchema,
+  id: z.string().regex(IdRegex),
+  name: z.string().min(1).max(256),
+  approxSizeBytes: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+  catalogVersion: z.string().min(1),
+});
+export type SharedModelMigrationCandidate = z.infer<typeof SharedModelMigrationCandidateSchema>;
+
+export const SharedModelMigrationCandidatesResponseSchema = z.object({
+  available: z.boolean(),
+  candidates: z.array(SharedModelMigrationCandidateSchema),
+});
+export type SharedModelMigrationCandidatesResponse = z.infer<
+  typeof SharedModelMigrationCandidatesResponseSchema
+>;
+
+export const SharedModelMigrationRequestSchema = z.object({
+  source: SharedModelMigrationSourceSchema,
+  engine: GezmodelEngineSchema,
+  id: z.string().regex(IdRegex),
+});
+export type SharedModelMigrationRequest = z.infer<typeof SharedModelMigrationRequestSchema>;
+
+export const SharedModelMigrationResultSchema = z.object({
+  ok: z.literal(true),
+  engine: GezmodelEngineSchema,
+  id: z.string().regex(IdRegex),
+  localRemoved: z.boolean(),
+  warning: z.string().min(1).optional(),
+});
+export type SharedModelMigrationResult = z.infer<typeof SharedModelMigrationResultSchema>;
+
 // ─ Semver helpers ───────────────────────────────────────────────────
 //
 // Tiny inline comparator. We don't need full semver-tools — just the
