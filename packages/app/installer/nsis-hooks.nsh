@@ -126,7 +126,12 @@ FunctionEnd
   ${EndIf}
 !macroend
 
-Function .onUserAbort
+; Modern UI owns .onUserAbort and generates it when electron-builder inserts
+; the language macros. Register our rollback through its supported hook so the
+; generated wrapper and this include do not define the same NSIS callback.
+!define MUI_CUSTOMFUNCTION_ABORT GezelOnUserAbort
+
+Function GezelOnUserAbort
   !insertmacro RestartGezelServiceAfterAbortedInstall
 FunctionEnd
 

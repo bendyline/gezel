@@ -352,7 +352,9 @@ describe('Windows machine-service installer security', () => {
     expect(restartMacro).toContain('query ${GEZEL_SERVICE_NAME}');
     expect(restartMacro).toContain('start ${GEZEL_SERVICE_NAME}');
     expect(restartMacro).not.toContain('create ${GEZEL_SERVICE_NAME}');
-    for (const callback of ['Function .onUserAbort', 'Function .onInstFailed']) {
+    expect(hook).toContain('!define MUI_CUSTOMFUNCTION_ABORT GezelOnUserAbort');
+    expect(hook).not.toContain('Function .onUserAbort');
+    for (const callback of ['Function GezelOnUserAbort', 'Function .onInstFailed']) {
       const callbackStart = position(callback);
       const callbackBody = hook.slice(callbackStart, hook.indexOf('FunctionEnd', callbackStart));
       expect(callbackBody).toContain('!insertmacro RestartGezelServiceAfterAbortedInstall');
