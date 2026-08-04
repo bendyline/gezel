@@ -284,8 +284,10 @@ they compete with text for context and prefill. Measured accounting:
   tiny uses a broad cap (implementation 75, everything else 15). Small caps only
   coordinator roles, and does so **at the full curated orchestration-list length**
   (Meester 33, Voorman 38); implementation and custom roles remain uncapped. Medium and
-  large are uncapped by default, with the same full-list coordinator diet available behind
-  `GEZEL_MEESTER_TOOL_DIET=1`. This replaced the unsafe old hand-tuned table (Meester 13,
+  large are uncapped when their admitted context is at least 49,152 tokens. If RAM-aware
+  admission clamps a coordinator below that floor, the same full-list diet activates
+  automatically; it also remains available behind `GEZEL_MEESTER_TOOL_DIET=1`. This
+  replaced the unsafe old hand-tuned table (Meester 13,
   Voorman 22/80, unknown 30/40 across small/medium), which evicted load-bearing tools —
   the imara office-hours kickoff looped `list_projects` (priority rank 6, kept) because
   `read_task_notes` (rank 26) was trimmed out from under the "resume via read_task_notes"
