@@ -73,6 +73,32 @@ describe('Windows machine-service installer security', () => {
     expect(hook.match(/NT SERVICE\\\${GEZEL_SERVICE_NAME}:\(OI\)\(CI\)\(M\)/g)).toHaveLength(3);
   });
 
+  it('publishes migrated product data through a separate shared ACL boundary', () => {
+    expect(hook).toContain('migrate-legacy-shared.js');
+    expect(hook).toContain('--source="${GEZEL_DATA_DIR}" --dest="${GEZEL_SHARED_DIR}"');
+
+    const sharedRoot = commandLine('"${GEZEL_SHARED_DIR}" /inheritance:r');
+    expect(sharedRoot).toContain('*S-1-5-32-545:(RX)');
+    expect(sharedRoot).not.toContain('*S-1-5-32-545:(OI)(CI)(M)');
+
+    const marker = commandLine('"${GEZEL_SHARED_DIR}\\.gezel-machine-shared-v1.json"');
+    expect(marker).toContain('*S-1-5-32-545:(R)');
+    expect(marker).not.toContain('*S-1-5-32-545:(M)');
+
+    for (const scope of ['projects', 'gezels']) {
+      const acl = commandLine(`"\${GEZEL_SHARED_DIR}\\${scope}" /inheritance:r`);
+      expect(acl).toContain('*S-1-5-32-545:(OI)(CI)(M)');
+      expect(acl).not.toContain('NT SERVICE\\${GEZEL_SERVICE_NAME}');
+    }
+
+    expect(position('!insertmacro RemoveGezelService')).toBeLessThan(
+      position('Migrating legacy machine-wide projects and gezels'),
+    );
+    expect(position('Migrating legacy machine-wide projects and gezels')).toBeLessThan(
+      position('sc.exe" create ${GEZEL_SERVICE_NAME}'),
+    );
+  });
+
   it('applies every load-bearing ACL to the container itself, not by recursion', () => {
     // A recursive icacls pass fails as a unit — one MAX_PATH entry inside a
     // preserved GEZEL_HOME (uv venvs, cloned repos, sandbox node_modules) is
@@ -148,7 +174,8 @@ describe('Windows machine-service installer security', () => {
     const restrictedPrivileges = position('privs ${GEZEL_SERVICE_NAME} SeChangeNotifyPrivilege');
     const firstServiceSidAcl = position('NT SERVICE\\${GEZEL_SERVICE_NAME}:(OI)(CI)(M)');
     const enableAutostart = position('config ${GEZEL_SERVICE_NAME} start= auto');
-    const start = position('start ${GEZEL_SERVICE_NAME}');
+    const start = hook.indexOf('sc.exe" start ${GEZEL_SERVICE_NAME}', enableAutostart);
+    expect(start, 'missing post-registration service start').toBeGreaterThanOrEqual(0);
 
     expect(create).toBeLessThan(restrictedSid);
     expect(restrictedSid).toBeLessThan(restrictedPrivileges);
@@ -180,11 +207,13 @@ describe('Windows machine-service installer security', () => {
 
   it('compiles the service environment contract into the service host', () => {
     expect(serviceHost).toContain('L"GEZEL_SYSTEM_SCOPE", L"1"');
+    expect(serviceHost).toContain('L"GEZEL_SERVICE_ROLE", L"machine-engine"');
     expect(serviceHost).toContain('L"GEZEL_PORT", L"6228"');
     expect(serviceHost).toContain('L"GEZEL_SHARED_ASSETS_DIR", home + L"\\\\assets"');
     expect(serviceHost).toContain('L"ELECTRON_RUN_AS_NODE", L"1"');
     expect(serviceHost).toContain('{L"TEMP", home + L"\\\\tmp"}');
     expect(serviceHost).toContain('{L"TMP", home + L"\\\\tmp"}');
+    expect(serviceHost).not.toContain('L"GEZEL_UI_DIR"');
     expect(serviceHost).toContain('{L"TMPDIR", home + L"\\\\tmp"}');
     expect(serviceHost).toContain('{L"APPDATA", home + L"\\\\appdata"}');
     expect(serviceHost).toContain('{L"LOCALAPPDATA", home + L"\\\\localappdata"}');
@@ -218,7 +247,10 @@ describe('Windows machine-service installer security', () => {
 
     const enableBlock = hook.slice(
       position('config ${GEZEL_SERVICE_NAME} start= auto'),
-      position('sc.exe" start ${GEZEL_SERVICE_NAME}'),
+      hook.indexOf(
+        'sc.exe" start ${GEZEL_SERVICE_NAME}',
+        position('config ${GEZEL_SERVICE_NAME} start= auto'),
+      ),
     );
     expect(enableBlock).toContain('!insertmacro RemoveGezelService');
     expect(enableBlock).toContain('Goto SkipNssm');
@@ -249,25 +281,88 @@ describe('Windows machine-service installer security', () => {
     expect(runtimeCheck).toBeLessThan(cleanup);
     expect(hook).toContain('Delete "${GEZEL_DATA_DIR}\\runtime\\auth-token"');
     expect(hook).toContain('Delete "${GEZEL_DATA_DIR}\\runtime\\web-ui-token"');
+    expect(hook).toContain('Delete "${GEZEL_DATA_DIR}\\runtime\\service-role"');
   });
 
   it('waits for an old registration to disappear before replacing it', () => {
-    const removeMacro = hook.slice(position('!macro RemoveGezelService'), position('!macroend'));
+    const removeStart = position('!macro RemoveGezelService');
+    const removeMacro = hook.slice(removeStart, hook.indexOf('!macroend', removeStart));
     expect(removeMacro).toContain('config ${GEZEL_SERVICE_NAME} start= disabled');
     expect(removeMacro).toContain('delete ${GEZEL_SERVICE_NAME}');
     expect(removeMacro).toContain('query ${GEZEL_SERVICE_NAME}');
     expect(removeMacro).toContain('${If} $9 == 1060');
     expect(removeMacro).toContain('${If} $8 >= 30');
     expect(removeMacro).toContain('Sleep 1000');
-    expect(removeMacro.indexOf('delete ${GEZEL_SERVICE_NAME}')).toBeLessThan(
-      removeMacro.indexOf('query ${GEZEL_SERVICE_NAME}'),
-    );
+    const firstQuery = removeMacro.indexOf('query ${GEZEL_SERVICE_NAME}');
+    const missingServiceGate = removeMacro.indexOf('${If} $9 != 1060');
+    // The stop must be confirmed before delete: deleting a service whose
+    // stop is still in flight marks it delete-pending until reboot.
+    const stopInRemove = removeMacro.indexOf('stop ${GEZEL_SERVICE_NAME}');
+    const waitInRemove = removeMacro.indexOf('!insertmacro WaitGezelServiceStopped');
+    const deleteInRemove = removeMacro.indexOf('delete ${GEZEL_SERVICE_NAME}');
+    const finalQuery = removeMacro.lastIndexOf('query ${GEZEL_SERVICE_NAME}');
+    // A nonexistent service leaves $9=1060 and skips every stop/delete wait.
+    expect(firstQuery).toBeGreaterThanOrEqual(0);
+    expect(missingServiceGate).toBeGreaterThan(firstQuery);
+    expect(stopInRemove).toBeGreaterThan(missingServiceGate);
+    expect(waitInRemove).toBeGreaterThan(stopInRemove);
+    expect(deleteInRemove).toBeGreaterThan(waitInRemove);
+    expect(finalQuery).toBeGreaterThan(deleteInRemove);
 
     const installBody = hook.slice(position('!macro customInstall'));
     const absenceGate = installBody.indexOf('${If} $9 != 1060');
     const replacement = installBody.indexOf('create ${GEZEL_SERVICE_NAME}');
     expect(absenceGate).toBeGreaterThanOrEqual(0);
     expect(absenceGate).toBeLessThan(replacement);
+  });
+
+  it('stops only after assisted-install confirmation while preserving silent upgrades', () => {
+    // .onInit runs before the welcome/license pages. An unconditional stop
+    // there strands a healthy broker if the user cancels. Interactive setup
+    // instead wires the stop to the InstFiles PRE callback — after acceptance,
+    // but before electron-builder closes processes or replaces files.
+    const initStart = position('!macro customInit');
+    const initMacro = hook.slice(initStart, hook.indexOf('!macroend', initStart));
+    expect(initMacro).toContain('${If} ${Silent}');
+    expect(initMacro).toContain('!insertmacro StopGezelServiceForInstall');
+    expect(initMacro).not.toContain('stop ${GEZEL_SERVICE_NAME}');
+
+    const pageStart = position('!macro customPageAfterChangeDir');
+    const pageMacro = hook.slice(pageStart, hook.indexOf('!macroend', pageStart));
+    expect(pageMacro).toContain('!define MUI_PAGE_CUSTOMFUNCTION_PRE GezelBeforeInstall');
+    const preStart = position('Function GezelBeforeInstall');
+    const preFunction = hook.slice(preStart, hook.indexOf('FunctionEnd', preStart));
+    expect(preFunction).toContain('!insertmacro StopGezelServiceForInstall');
+
+    const stopStart = position('!macro StopGezelServiceForInstall');
+    const stopMacro = hook.slice(stopStart, hook.indexOf('!macroend', stopStart));
+    const guard = stopMacro.indexOf('query ${GEZEL_SERVICE_NAME}');
+    const stop = stopMacro.indexOf('stop ${GEZEL_SERVICE_NAME}');
+    const wait = stopMacro.indexOf('!insertmacro WaitGezelServiceStopped');
+    expect(guard).toBeGreaterThanOrEqual(0);
+    expect(stop).toBeGreaterThan(guard);
+    expect(wait).toBeGreaterThan(stop);
+    expect(stopMacro).toContain('StrCpy $GezelServiceStoppedForInstall 1');
+
+    // If the user aborts after the InstFiles transition but before the old
+    // registration is removed, restore only that intact registration. The
+    // rollback must never recreate a deleted or quarantined service.
+    const restartStart = position('!macro RestartGezelServiceAfterAbortedInstall');
+    const restartMacro = hook.slice(restartStart, hook.indexOf('!macroend', restartStart));
+    expect(restartMacro).toContain('query ${GEZEL_SERVICE_NAME}');
+    expect(restartMacro).toContain('start ${GEZEL_SERVICE_NAME}');
+    expect(restartMacro).not.toContain('create ${GEZEL_SERVICE_NAME}');
+    for (const callback of ['Function .onUserAbort', 'Function .onInstFailed']) {
+      const callbackStart = position(callback);
+      const callbackBody = hook.slice(callbackStart, hook.indexOf('FunctionEnd', callbackStart));
+      expect(callbackBody).toContain('!insertmacro RestartGezelServiceAfterAbortedInstall');
+    }
+    // The wait itself is bounded — a wedged service must not hang setup.
+    const waitStart = position('!macro WaitGezelServiceStopped');
+    const waitMacro = hook.slice(waitStart, hook.indexOf('!macroend', waitStart));
+    expect(waitMacro).toContain('${If} $8 >= 20');
+    expect(waitMacro).toContain('Sleep 500');
+    expect(waitMacro).toContain('"STOPPED"');
   });
 
   it('keeps restricted-service temporary files below the private root', () => {

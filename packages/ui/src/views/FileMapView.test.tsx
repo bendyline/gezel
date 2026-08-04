@@ -328,6 +328,8 @@ describe('FileMapView code context', () => {
   });
 
   it('delegates a finding to a developer gezel task', async () => {
+    const opened = vi.fn();
+    window.addEventListener('gezel:open-tab', opened);
     vi.mocked(api.toolScanFindings).mockResolvedValue({
       findings: [FINDING],
       counts: { total: 1, bySeverity: { high: 1 }, byCategory: {}, bySource: {} },
@@ -346,10 +348,18 @@ describe('FileMapView code context', () => {
     await screen.findByText(FINDING.title);
 
     fireEvent.click(screen.getByRole('button', { name: 'Ask a developer gezel' }));
-    expect(await screen.findByText('Developer gezel working · p1/1')).toBeInTheDocument();
+    const taskLink = await screen.findByRole('button', { name: 'Open task p1/1' });
+    expect(taskLink).toHaveTextContent('p1/1');
     expect(api.delegateSecurityFinding).toHaveBeenCalledWith('p1', {
       fingerprint: FINDING.fingerprint,
     });
     expect(screen.getByRole('button', { name: 'Developer working' })).toBeDisabled();
+
+    fireEvent.click(taskLink);
+    window.removeEventListener('gezel:open-tab', opened);
+    expect((opened.mock.calls[0]?.[0] as CustomEvent).detail).toEqual({
+      kind: 'task',
+      ref: 'p1/1',
+    });
   });
 });

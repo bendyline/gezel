@@ -1,16 +1,39 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { isProcessAlive, readRuntime } from '@bendyline/gezel-client/node';
+import { type HostingPin, readHostingPin } from './home-signals.js';
+import { type MachineServiceState, queryMachineServiceState } from './service-registration.js';
 import { readSystemServiceRuntime, systemServiceHome } from './system-service.js';
+import type { SystemServiceRuntime } from './system-service.js';
 
 export type Mode =
   | { kind: 'remote'; baseUrl: string; token: string; cert: string | null }
   | {
       kind: 'system-service';
-      baseUrl: string;
-      token: string;
-      cert: string | null;
       serviceHome: string;
+      /**
+       * Runtime files as of mode resolution — evidence, not the connection
+       * contract. The connect path re-reads them (and re-reads while
+       * waiting): the auth token rotates on every service start, so a
+       * snapshot taken during startup can be one generation stale.
+       */
+      runtime: SystemServiceRuntime | null;
+      /**
+       * True when the service manager reports the service running or
+       * starting — the connect path polls for healthy runtime metadata
+       * instead of failing on the first read. This is what closes the
+       * install-time race: the installer launches the app seconds after
+       * enabling the service, 20-30s before the service publishes its
+       * role/runtime files. Without the wait a user daemon can start a native
+       * engine just before the shared broker appears.
+       */
+      waitForStartup: boolean;
+      /**
+       * The user's legacy product-hosting pin at resolution time. A
+       * `'per-user'` pin still permits the split-architecture machine engine;
+       * it only declines an older machine-wide full product daemon.
+       */
+      hostingPin: HostingPin;
     }
   | { kind: 'local-adopt'; baseUrl: string; token: string; cert: string | null; pid: number }
   | { kind: 'local-spawn-packaged' }
@@ -26,6 +49,10 @@ export interface ResolveModeOptions {
   /** Forces embedded regardless of everything else. */
   forceEmbedded: boolean;
   logger?: { info?: (m: string) => void; warn?: (m: string) => void };
+  /** Test seam for the OS service-manager query. */
+  queryMachineService?: () => Promise<MachineServiceState>;
+  /** Test seam for runtime-file discovery. */
+  readSystemRuntime?: (home: string) => Promise<SystemServiceRuntime | null>;
 }
 
 /**
@@ -53,27 +80,80 @@ export async function resolveMode(opts: ResolveModeOptions): Promise<Mode> {
     return { kind: 'remote', ...remote, cert: null };
   }
 
-  // Branch 1.5: system service (Windows installer registers GezelService;
-  // macOS/Linux land in later Pass 2 chunks). Probe the platform-scope
-  // runtime dir; if found, we connect to that service rather than spawning
-  // our own. Only enabled in packaged mode — in dev we want fast-iteration
-  // embedded mode, not a stale background service from a prior install.
+  // Branch 1.5: system engine discovery (plus compatibility with older
+  // full-product services). Ask the OS service manager FIRST — it answers
+  // "registered? running?" immediately and authoritatively, where the
+  // runtime files only appear once the daemon has fully booted. Deciding
+  // from the files alone is the race that produced two daemons on fresh
+  // installs (installer enables the service, launches the app 4s later,
+  // files appear 20-30s after that). Only enabled in packaged mode — in
+  // dev we want fast-iteration embedded mode, not a stale background
+  // service from a prior install.
   if (opts.packaged) {
     const sysHome = systemServiceHome();
     if (sysHome) {
-      const sys = await readSystemServiceRuntime(sysHome);
-      if (sys) {
-        logger?.info?.(`[supervisor] mode=system-service home=${sys.home} port=${sys.port}`);
-        return {
-          kind: 'system-service',
-          baseUrl: sys.baseUrl,
-          token: sys.token,
-          cert: sys.cert,
-          serviceHome: sys.home,
-        };
+      const pin = await readHostingPin(home);
+      const readRuntimeFiles = opts.readSystemRuntime ?? readSystemServiceRuntime;
+      const registration = await (opts.queryMachineService ?? queryMachineServiceState)();
+      const runtime = await readRuntimeFiles(sysHome);
+      const startingOrUp =
+        registration.status === 'running' || registration.status === 'start-pending';
+      const splitEngine = runtime?.serviceRole === 'machine-engine';
+      const rolePending = startingOrUp && runtime === null;
+
+      // `hosting: 'per-user'` predates the engine-broker split. Preserve its
+      // promise for legacy full-product daemons, but do not let it disable
+      // shared downloads/GPU scheduling. When runtime is not published yet,
+      // wait long enough to learn which role the installed service has.
+      if (pin === 'per-user' && !splitEngine && !rolePending) {
+        logger?.info?.(
+          '[supervisor] hosting pin=per-user — ignoring the legacy machine product daemon',
+        );
+      } else {
+        if (startingOrUp || (registration.status === 'unknown' && runtime)) {
+          // `unknown` (SCM unqueryable) preserves the pre-SCM behavior:
+          // files present → connect, single health check, no wait.
+          logger?.info?.(
+            `[supervisor] mode=system-service home=${sysHome} service=${registration.status}` +
+              `${runtime ? ` port=${runtime.port}` : ' (runtime not published yet)'}`,
+          );
+          return {
+            kind: 'system-service',
+            serviceHome: sysHome,
+            runtime,
+            waitForStartup: startingOrUp,
+            hostingPin: pin,
+          };
+        }
+        if (runtime) {
+          // Files without a live registration are leftovers — from an
+          // uninstalled service or one the SCM has stopped. Connecting to
+          // them health-fails into the embedded fallback; the per-user
+          // paths below are the supported production answer.
+          logger?.warn?.(
+            `[supervisor] ignoring stale machine-service runtime files at ${sysHome} ` +
+              `(service is ${registration.status}${registration.detail ? `: ${registration.detail}` : ''})`,
+          );
+        } else if (registration.status !== 'not-installed') {
+          logger?.info?.(
+            `[supervisor] machine service is ${registration.status}; using per-user paths`,
+          );
+        }
       }
     }
   }
+
+  return resolvePerUserMode(opts);
+}
+
+/**
+ * Branches 2/4/5/embedded — the per-user tail of the decision tree.
+ * Exported separately so the connect path can re-enter it when a
+ * legacy machine-product connection is deliberately declined without
+ * re-running system-engine discovery.
+ */
+export async function resolvePerUserMode(opts: ResolveModeOptions): Promise<Mode> {
+  const { home, logger } = opts;
 
   // Branch 2: live local daemon we can adopt.
   const runtime = await readRuntime(home);

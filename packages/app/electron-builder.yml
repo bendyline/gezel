@@ -64,6 +64,7 @@ files:
   - dist/main.js
   - dist/preload.cjs
   - dist/extract-service-bundle.js
+  - dist/migrate-legacy-shared.js
   - dist/service-bundle.tar.gz
   - dist/service-bundle.meta.json
   - dist/pnpm-bundle/**/*
@@ -72,6 +73,10 @@ files:
   # Vite source maps are useful in the build tree but not loaded by the
   # packaged renderer. The RC shipped 215 of them (70.8 MiB) as loose files.
   - '!dist/ui/**/*.map'
+  # Keep Electron-process source maps available to local builds without
+  # carrying them in every installer. In particular, main.js.map alone is
+  # several MiB and the packaged main process never loads it.
+  - '!dist/*.map'
   - native-bin/**/*
   - assets/icon.png
   - assets/icon.ico
@@ -136,6 +141,7 @@ asarUnpack:
   - dist/preload.cjs
   - package.json
   - dist/extract-service-bundle.js
+  - dist/migrate-legacy-shared.js
   - dist/service-bundle.tar.gz
   - dist/service-bundle.meta.json
   - dist/pnpm-bundle/**/*
@@ -237,6 +243,11 @@ nsis:
   installerIcon: assets/icon.ico
   uninstallerIcon: assets/icon.ico
   installerHeaderIcon: assets/icon.ico
+  # Assisted-mode NSIS reserves a fixed 164x314 sidebar. Keep the paired
+  # workshop scenes at that exact size so NSIS neither stretches them nor
+  # falls back to electron-builder's stock blue software-box artwork.
+  installerSidebar: assets/installerSidebar.bmp
+  uninstallerSidebar: assets/uninstallerSidebar.bmp
   createDesktopShortcut: true
   createStartMenuShortcut: true
   license: EULA.txt
@@ -431,6 +442,7 @@ deb:
   # distros use it. List explicitly so package managers refuse to
   # install on init-system-other systems instead of silently failing.
   depends:
+    - acl
     - libgtk-3-0
     - libnotify4
     - libnss3
@@ -449,6 +461,7 @@ rpm:
   fpm:
     - assets/com.bendyline.gezel.metainfo.xml=/usr/share/metainfo/com.bendyline.gezel.metainfo.xml
   depends:
+    - acl
     - libnotify
     # Fedora/RHEL package and RPM provide name. `libgtk-3-0` is Debian-only.
     - gtk3

@@ -44,6 +44,7 @@ import { historyRoutes } from './routes/history.js';
 import { imageGenRoutes } from './routes/image-gen.js';
 import { imagesRoutes } from './routes/images.js';
 import { llamaCppRoutes } from './routes/llama-cpp.js';
+import { machineEngineProxy } from './routes/machine-engine-proxy.js';
 import { mailRoutes } from './routes/mail.js';
 import { mcpToolRoutes } from './routes/mcp-tools.js';
 import { meesterStatusRoutes } from './routes/meester-status.js';
@@ -51,6 +52,7 @@ import { memoryRoutes } from './routes/memory.js';
 import { mlxRoutes } from './routes/mlx.js';
 import { modelBundleRoutes } from './routes/model-bundles.js';
 import { modelFitnessRoutes } from './routes/model-fitness.js';
+import { modelMigrationRoutes } from './routes/model-migrations.js';
 import { modelsRoutes } from './routes/models.js';
 import { nightShiftRoutes } from './routes/night-shift.js';
 import { ollamaCompatRoutes } from './routes/ollama-compat.js';
@@ -163,6 +165,15 @@ export function opaqueServerErrors(
     try {
       const parsed = JSON.parse(raw) as { error?: unknown; requestId?: unknown };
       if (parsed.error === 'internal_error' && typeof parsed.requestId === 'string') return;
+      // A broker outage is an expected, actionable degraded state rather than
+      // a route exception. Preserve only its fixed code; the bridge logs the
+      // underlying socket/TLS detail and never puts that detail in this body.
+      if (
+        parsed.error === 'machine_engine_unavailable' &&
+        Object.keys(parsed as Record<string, unknown>).length === 1
+      ) {
+        return;
+      }
     } catch {
       /* sanitize non-JSON and malformed JSON errors too */
     }
@@ -416,6 +427,8 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
     return c.json({
       ok: true as const,
       version: GEZEL_VERSION,
+      serviceRole: ctx.serviceRole,
+      ...(ctx.machineEngine ? { machineEngineConnected: ctx.machineEngine.isConnected() } : {}),
       startedAt: ctx.startedAt,
       nodeVersion: process.versions.node,
       platform: process.platform,
@@ -430,6 +443,43 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
       ...(ctx.childProcessSpawn ? { childProcessSpawn: ctx.childProcessSpawn } : {}),
     });
   });
+
+  // A machine engine is deliberately not a smaller-flavored product daemon.
+  // Its route table is a capability boundary: identity, inference, managed
+  // model lifecycle, and engine telemetry only. In particular there is no
+  // static UI, project/session API, terminal, credential, connector, or file
+  // route to accidentally authorize with the cross-account runtime token.
+  if (ctx.serviceRole === 'machine-engine') {
+    app.route('/v1/identity', v1IdentityRoutes(ctx));
+    app.use('/v1/remote/*', bearerAuth(ctx.tokenStore));
+    app.use('/v1/remote/*', requireScope('remote-inference'));
+    app.use('/v1/remote/models/ensure', requireScope('machine-models'));
+    app.use('/v1/remote/models/ensure/*', requireScope('machine-models'));
+    app.use('/v1/remote/manage/*', requireScope('machine-models'));
+    // Model ensure must win over the exact `/models` discovery handler.
+    app.route('/v1/remote/models/ensure', v1ModelsEnsureRoutes(ctx));
+    app.route('/v1/remote/manage/llama-cpp', llamaCppRoutes(ctx));
+    app.route('/v1/remote/manage/ds4', ds4Routes(ctx));
+    app.route('/v1/remote/manage/mlx', mlxRoutes(ctx));
+    app.route('/v1/remote/manage/engines', enginesRoutes(ctx));
+    app.route('/v1/remote/manage/queues', queueRoutes(ctx));
+    app.route('/v1/remote/manage/cache', cacheRoutes(ctx));
+    app.route('/v1/remote/manage/model-fitness', modelFitnessRoutes(ctx));
+    app.route('/v1/remote/manage/model-bundles', modelBundleRoutes(ctx));
+    // These routers mix project-persisting execution with model lifecycle.
+    // Block the execution endpoints here; inference goes through the dedicated
+    // `/v1/remote/image|video|audio/*` handlers, which persist nothing.
+    app.all('/v1/remote/manage/image-gen/generate', (c) => c.json({ error: 'not_found' }, 404));
+    app.all('/v1/remote/manage/video-gen/generate', (c) => c.json({ error: 'not_found' }, 404));
+    app.all('/v1/remote/manage/audio/transcribe', (c) => c.json({ error: 'not_found' }, 404));
+    app.all('/v1/remote/manage/audio/synthesize', (c) => c.json({ error: 'not_found' }, 404));
+    app.route('/v1/remote/manage/image-gen', imageGenRoutes(ctx));
+    app.route('/v1/remote/manage/video-gen', videoGenRoutes(ctx));
+    app.route('/v1/remote/manage/audio', audioRoutes(ctx));
+    app.route('/v1/remote', v1RemoteRoutes(ctx));
+    app.get('*', (c) => c.json({ error: 'not_found' }, 404));
+    return app;
+  }
 
   app.route('/api/gezels', gezelRoutes(ctx));
   // Chat sub-routes (history/send/reset) are mounted under /api/agents too
@@ -501,6 +551,7 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   app.route('/api/ds4', ds4Routes(ctx));
   app.route('/api/mlx', mlxRoutes(ctx));
   app.route('/api/model-bundles', modelBundleRoutes(ctx));
+  app.route('/api/model-migrations', modelMigrationRoutes(ctx));
   app.route('/api/engines', enginesRoutes(ctx));
   app.route('/api/eval', evalRoutes(ctx));
   app.route('/api/image-gen', imageGenRoutes(ctx));
@@ -528,11 +579,10 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   app.route('/events/chat', chatEventsRoutes(ctx));
 
   // Master switch for the OpenAI-compatible facade (Settings →
-  // Connected Apps). Gates inference surfaces AND new app registrations
-  // below; the rest of `/v1/apps/*` (list/approve/revoke) stays
-  // reachable so the panel works while the facade is off.
+  // Connected Apps). Registration remains reachable because non-OpenAI
+  // first-party clients (notably the CLI) use the same consent router; the
+  // register route itself rejects only requests that include `openai`.
   const openaiEndpointsGate = requireOpenAiEndpointsEnabled(ctx);
-  app.use('/v1/apps/register', openaiEndpointsGate);
 
   // `/v1/apps/*` is the public registration + consent surface. Routes
   // inside declare their own auth (some unauth, some root-only, some
@@ -559,8 +609,8 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   // `/v1/chat/*` and `/v1/models/*` are the OpenAI-compatible inference
   // surface. Gated by bearer auth + the `openai` scope (root passes
   // any scope check). Third-party apps acquire a token through
-  // `/v1/apps/register`; the desktop/CLI discovery credential explicitly
-  // carries `openai`. Session/MCP tokens do not reach this facade, while the
+  // `/v1/apps/register`; the desktop discovery credential explicitly carries
+  // `openai`. Session/MCP tokens do not reach this facade, while the
   // process-local root remains the deliberate wildcard.
   app.use('/v1/chat/*', openAiErrorEnvelope());
   app.use('/v1/chat/*', openaiEndpointsGate);
@@ -603,6 +653,14 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   app.use('/v1/models/*', openaiEndpointsGate);
   app.use('/v1/models/*', bearerAuth(ctx.tokenStore));
   app.use('/v1/models/*', requireScope('openai'));
+  app.use(
+    '/v1/models/ensure',
+    machineEngineProxy(ctx, '/v1/models/ensure', '/v1/remote/models/ensure'),
+  );
+  app.use(
+    '/v1/models/ensure/*',
+    machineEngineProxy(ctx, '/v1/models/ensure', '/v1/remote/models/ensure'),
+  );
   // `/v1/models/ensure*` MUST mount BEFORE the bare `/v1/models` route
   // so its more specific paths win — Hono's nested routers don't
   // intercept extensions otherwise.

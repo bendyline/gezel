@@ -149,6 +149,21 @@ describe('discoverOrSpawn', () => {
     expect(result.child).toBeUndefined();
   });
 
+  it('can require an already-running daemon without spawning a replacement', async () => {
+    const spawnFn = vi.fn(() => makeFakeChild());
+    await expect(
+      discoverOrSpawn({
+        daemonEntry: '/fake/gezeld.js',
+        spawnIfMissing: false,
+        spawnFn,
+        readRuntimeFn: async () => null,
+        isProcessAliveFn: () => false,
+        clientFactory: fakeClient,
+      }),
+    ).rejects.toMatchObject({ name: 'DaemonNotRunningError' });
+    expect(spawnFn).not.toHaveBeenCalled();
+  });
+
   it('refuses to spawn beside a live pid whose daemon fails its health check', async () => {
     const spawnFn = vi.fn(() => makeFakeChild());
     let reads = 0;

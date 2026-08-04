@@ -27,6 +27,7 @@
 import type { ConfigResponse, LocalActiveInstall } from '@bendyline/gezel-client';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
+import { announceModelInventoryChanged } from '../model-inventory.js';
 import { ReportErrorLink } from './ReportErrorLink.js';
 import { useCopilotAvailability } from './useCopilotAvailability.js';
 
@@ -154,6 +155,7 @@ export function FirstRunInstallBanner({ config, onConfigChanged, onModelInstalle
         setState({ kind: 'hidden' });
         if (!installedNotifiedRef.current) {
           installedNotifiedRef.current = true;
+          announceModelInventoryChanged(provider);
           onModelInstalled?.();
         }
         return;

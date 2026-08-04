@@ -85,6 +85,7 @@ export const IdentityResponseSchema = z.object({
   sig: z.string().optional(),
   gezelVersion: z.string().optional(),
   protocolVersion: z.number().optional(),
+  serviceRole: z.enum(['user', 'machine-engine', 'legacy-full']).optional(),
 });
 export type IdentityResponse = z.infer<typeof IdentityResponseSchema>;
 

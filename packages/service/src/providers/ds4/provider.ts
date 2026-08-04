@@ -78,6 +78,10 @@ export class Ds4Provider implements LLMProvider {
     return this.inner.getEffectiveModelId();
   }
 
+  getContextWindow(): number | undefined {
+    return this.inner.getContextWindow();
+  }
+
   /** Persistent ds4-server stdout/stderr, exposed to diagnostics/routes. */
   getLogFile(): LlamaCppLogFile | undefined {
     return this.inner.getLogFile();

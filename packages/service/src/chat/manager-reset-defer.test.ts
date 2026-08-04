@@ -125,4 +125,41 @@ describe('ChatManager.resetClient — deferred (model-preference) reset', () => 
     // turn rebuilds against the new default.
     expect(disconnects(liveSessionId)).toBeGreaterThan(before);
   });
+
+  it('broker retirement waits for a queue-bypassing local turn and registers one teardown', async () => {
+    await manager.shutdown();
+    mock = new MockProvider({ name: 'llama-cpp' });
+    await store.writeConfig({
+      provider: 'llama-cpp',
+      defaultModel: { 'llama-cpp': 'mock-local' },
+    });
+    manager = new ChatManager({
+      store,
+      events,
+      memory: noopMemory,
+      getPort: () => 0,
+      getToken: () => 'test-token',
+      home,
+      providers: [['llama-cpp', mock]],
+      catalog: new CatalogService(),
+      secrets: new FileSecretStore(home),
+    });
+    await store.createGezel({ name: 'Nia', role: 'Builder' });
+    const session = await manager.createSession({ gezelId: 'nia' });
+    mock.script('finished locally');
+    mock.scriptSendDelay(250);
+
+    const send = manager.send(session.id, 'long local turn');
+    await waitFor(() => mock.calls.some((call) => call.kind === 'send'));
+    const liveSessionId = mock.calls.find((call) => call.kind === 'send')?.sessionId ?? '';
+
+    const firstRetirement = manager.retireLocalEnginesForMachineBroker();
+    const joinedRetirement = manager.retireLocalEnginesForMachineBroker();
+    await new Promise<void>((resolve) => setTimeout(resolve, 25));
+    expect(disconnects(liveSessionId)).toBe(0);
+
+    await send;
+    await Promise.all([firstRetirement, joinedRetirement]);
+    expect(disconnects(liveSessionId)).toBe(1);
+  });
 });

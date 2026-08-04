@@ -2,8 +2,14 @@ import type { CatalogItemSummary, ChatModelManifest } from '@bendyline/gezel';
 import type { IncompleteModelDownload, LlamaCppInstallEvent } from '@bendyline/gezel-client';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
+import {
+  MODEL_INVENTORY_CHANGED_EVENT,
+  announceModelInventoryChanged,
+  changedModelInventoryEngine,
+} from '../model-inventory.js';
 import { IncompleteDownloads } from './IncompleteDownloads.js';
 import { ExportModelBundleButton, ImportModelBundleButton } from './ModelBundleControls.js';
+import { SharedModelMigrationPanel } from './SharedModelMigrationPanel.js';
 
 /**
  * Install/list/delete the GGUFs ds4 can run, straight from the catalog — so
@@ -107,11 +113,11 @@ export function Ds4ModelManager({ onModelsChanged }: { onModelsChanged?: () => v
 
   useEffect(() => {
     const onChanged = (event: Event) => {
-      const engine = (event as CustomEvent<{ engine?: string }>).detail?.engine;
+      const engine = changedModelInventoryEngine(event);
       if (engine === 'ds4') void refresh();
     };
-    window.addEventListener('gezel:models-changed', onChanged);
-    return () => window.removeEventListener('gezel:models-changed', onChanged);
+    window.addEventListener(MODEL_INVENTORY_CHANGED_EVENT, onChanged);
+    return () => window.removeEventListener(MODEL_INVENTORY_CHANGED_EVENT, onChanged);
   }, [refresh]);
 
   // Reconnect to in-flight installs after a remount (you navigated to another
@@ -200,6 +206,7 @@ export function Ds4ModelManager({ onModelsChanged }: { onModelsChanged?: () => v
               return next;
             });
           });
+          announceModelInventoryChanged('ds4');
         } catch (e) {
           setInstalling((p) => {
             const n = new Map(p);
@@ -239,6 +246,7 @@ export function Ds4ModelManager({ onModelsChanged }: { onModelsChanged?: () => v
       setIncomplete((cur) => cur.filter((d) => d.id !== id));
       try {
         await api.deleteDs4Model(id);
+        announceModelInventoryChanged('ds4');
         await refresh();
         onModelsChanged?.();
       } catch (e) {
@@ -280,6 +288,7 @@ export function Ds4ModelManager({ onModelsChanged }: { onModelsChanged?: () => v
 
   return (
     <div>
+      <SharedModelMigrationPanel engine="ds4" onModelsChanged={onModelsChanged} />
       <IncompleteDownloads
         items={incomplete.filter((d) => !installing.has(d.id))}
         onResume={(id) => startInstall(id)}

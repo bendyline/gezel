@@ -1,6 +1,7 @@
 import type { GezmodelEngine, GezmodelImportReview } from '@bendyline/gezel';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
+import { announceModelInventoryChanged } from '../model-inventory.js';
 import { Dialog } from '../primitives/index.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
 
@@ -145,7 +146,7 @@ export function ModelBundleImportController({
       const engine = review.manifest.engine;
       setReview(null);
       setError(null);
-      window.dispatchEvent(new CustomEvent('gezel:models-changed', { detail: { engine } }));
+      announceModelInventoryChanged(engine);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }

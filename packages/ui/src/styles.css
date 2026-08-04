@@ -855,7 +855,7 @@ html.embedded-chat #root {
    rightmost edge of the cluster. */
 .app-header-right {
   margin-left: auto;
-  margin-bottom: 3px;
+  margin-bottom: 2px;
   display: flex;
   align-items: center;
   gap: 0.45rem;
@@ -1452,14 +1452,86 @@ html.embedded-chat #root {
   background: color-mix(in srgb, var(--surface) 75%, var(--panel));
   box-shadow: inset 0 1px 2px color-mix(in srgb, var(--text) 12%, transparent);
 }
-.machine-memory-bar-unknown {
+.machine-memory-reservation {
+  display: flex;
+  flex-direction: column;
+  gap: 0.22rem;
+  margin-top: 0.15rem;
+}
+.machine-memory-reservation-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  font-size: 0.68rem;
+}
+.machine-memory-reservation-heading > :first-child {
+  color: var(--text);
+  font-weight: 600;
+}
+.machine-memory-reservation-heading > :last-child {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.machine-memory-reservation-bar {
+  position: relative;
+  width: 100%;
+  height: 0.48rem;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--surface) 75%, var(--panel));
+  box-shadow: inset 0 1px 2px color-mix(in srgb, var(--text) 10%, transparent);
+}
+.machine-memory-reservation-pools,
+.machine-memory-reservation-segments {
+  position: absolute;
+  inset: 0;
+  display: flex;
+}
+.machine-memory-reservation-pool {
+  display: block;
+  height: 100%;
+}
+.machine-memory-reservation-pool-vram {
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+}
+.machine-memory-reservation-pool-ram {
+  background: color-mix(in srgb, var(--warning) 10%, var(--surface));
+}
+.machine-memory-reservation-segment {
+  display: block;
+  height: 100%;
+  min-width: 0;
   background: repeating-linear-gradient(
-      -45deg,
-      transparent 0,
-      transparent 4px,
-      color-mix(in srgb, var(--border) 35%, transparent) 4px,
-      color-mix(in srgb, var(--border) 35%, transparent) 6px
-    ), color-mix(in srgb, var(--surface) 75%, var(--panel));
+    -45deg,
+    color-mix(in srgb, var(--accent) 82%, var(--surface)) 0,
+    color-mix(in srgb, var(--accent) 82%, var(--surface)) 4px,
+    color-mix(in srgb, var(--accent) 62%, var(--surface)) 4px,
+    color-mix(in srgb, var(--accent) 62%, var(--surface)) 6px
+  );
+  transition: width 240ms ease-out;
+}
+.machine-memory-reservation-segment + .machine-memory-reservation-segment {
+  box-shadow: inset 1px 0 color-mix(in srgb, var(--surface) 65%, transparent);
+}
+.machine-memory-reservation-boundary {
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: color-mix(in srgb, var(--text-muted) 60%, transparent);
+}
+.machine-memory-reservation-pools-label,
+.machine-memory-reservation-caption {
+  color: var(--text-muted);
+  font-size: 0.64rem;
+  line-height: 1.25;
+}
+.machine-memory-reservation-caption {
+  font-style: italic;
 }
 .machine-memory-segment {
   display: block;
@@ -2522,9 +2594,10 @@ html.embedded-chat #root {
   padding: 1rem 1.25rem;
 }
 
-/* The Gezels and Projects screens (both render a .two-col layout) go
-   edge-to-edge with no surrounding margin. Other views keep the inset. */
-.app-main:has(> .two-col) {
+/* The crew/project split screens and the Craftbooks workspace go edge-to-edge
+   with no surrounding margin. Other views keep the inset. */
+.app-main:has(> .two-col),
+.app-main:has(> .craftbooks-view) {
   padding: 0;
 }
 
@@ -2712,8 +2785,11 @@ html.embedded-chat #root {
   position: relative;
   left: -1px;
 }
-/* Match the group header's 22px add button + 0.2rem outer margin so every
-   signal variant shares its center x with the New project "+" above it. */
+.app-sidebar-proj-row > .app-sidebar-proj-signal {
+  left: -2px;
+}
+/* Match the group header's 22px add button + 0.2rem outer margin, with the
+   project signals optically offset 1px left of the New project "+" above. */
 .app-sidebar-proj-signal {
   flex: 0 0 auto;
   width: 22px;
@@ -7340,6 +7416,25 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
   white-space: nowrap;
 }
 
+/* Read-only provenance annotation for grandfathered machine-wide entities.
+   This is a status badge, not a control, so the capsule exception applies. */
+.machine-shared-badge {
+  display: inline-flex;
+  align-items: center;
+  margin-inline-start: 0.4rem;
+  padding: 0.04rem 0.36rem;
+  border: 1px solid color-mix(in srgb, var(--warning) 48%, var(--border));
+  border-radius: 999px;
+  color: color-mix(in srgb, var(--warning) 70%, var(--text));
+  background: color-mix(in srgb, var(--warning) 9%, transparent);
+  font-family: var(--font-ui);
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  line-height: 1.35;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
 /* ---------- Detail header with icon ---------- */
 
 .detail-header {
@@ -10035,8 +10130,9 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
      are out of flow (centered above a peg, or beside the active figure),
      so they don't add to the column height. */
   --bench-pad-top: 0.5rem;
-  --bench-stage-h: 96px;
+  --bench-stage-h: 84px;
   --bench-rail-h: 9px;
+  --bench-tab-gap: 4px;
 
   /* Carved-wood palette (day). */
   --bench-rail-hi: #dcc79c;
@@ -10124,21 +10220,6 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
   z-index: 2;
 }
 
-/* Few-step tracks have wide columns, so every caption sits beside its station
-   — to the right of where the gezel's head is or would be, vertically centered
-   — so the assignment selectors line up consistently. Crowded tracks keep the
-   caption centered above the peg (constrained to the column) instead, where a
-   beside caption would spill into the neighbour. */
-.step-bench.bench-few .bench-step-assignee {
-  top: 50%;
-  left: 50%;
-  transform: translate(34px, -50%);
-  width: max-content;
-  max-width: 11rem;
-  align-items: flex-start;
-  text-align: left;
-}
-
 .bench-step-assignee-name {
   font-family: Georgia, "Times New Roman", serif;
   font-style: italic;
@@ -10185,11 +10266,6 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
   cursor: pointer;
   text-align: center;
   text-align-last: center;
-}
-
-.step-bench.bench-few .bench-step-assignee .bench-step-select {
-  text-align: left;
-  text-align-last: left;
 }
 
 .step-bench .bench-step-assignee .bench-step-select:hover:not(:disabled),
@@ -10318,7 +10394,7 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
 }
 
 .bench-step-foot {
-  margin-top: calc(var(--bench-rail-h) + 0.5rem);
+  margin-top: calc(var(--bench-rail-h) + 0.5rem + var(--bench-tab-gap));
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -10423,7 +10499,7 @@ button.bench-step-foot:disabled {
    padding: the card's downward growth is also what
    `.task-bench-row.has-selected-step .task-tab-rail` compensates for. */
 .step-bench .bench-step.selected .bench-step-foot {
-  margin-top: calc(var(--bench-rail-h) + 0.1rem - 1px);
+  margin-top: calc(var(--bench-rail-h) + 0.1rem + var(--bench-tab-gap) - 1px);
   padding: 0.4rem 0.6rem;
   background: var(--panel, var(--surface));
   border: 1px solid var(--border);
@@ -10860,6 +10936,12 @@ button.bench-step-foot:disabled {
    via the `showStatusBar={editing}` prop. Edit mode restores both. */
 .task-note-card.read-only .squisq-toolbar {
   display: none;
+}
+
+/* Task notes are supporting history, not long-form document prose. Keep the
+   read-only body and its edit state at the dense secondary-copy size. */
+.task-note-card .squisq-editor-shell {
+  --squisq-write-text-size: var(--text-sm);
 }
 
 .task-note-edit-actions {
@@ -15233,9 +15315,13 @@ button.timeline-session-divider-continuing::before {
 .chat-rail-task {
   display: flex;
   flex-direction: column;
+  flex: 1;
+  width: 100%;
   gap: 0.5rem;
   padding: 0.75rem;
   overflow-y: auto;
+  box-sizing: border-box;
+  min-width: 0;
   min-height: 0;
 }
 
@@ -15243,11 +15329,20 @@ button.timeline-session-divider-continuing::before {
   padding: 0.75rem;
 }
 
+.chat-rail-task-topbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
 .chat-rail-task-header {
   display: flex;
   align-items: center;
   gap: 0.5rem;
   flex-wrap: wrap;
+  min-width: 0;
 }
 
 .chat-rail-task-ref {
@@ -15333,11 +15428,10 @@ button.timeline-session-divider-continuing::before {
 }
 
 .chat-rail-task-open {
-  align-self: flex-start;
-  margin-top: 0.25rem;
+  flex-shrink: 0;
   font-size: 0.78rem;
   padding: 0.3rem 0.7rem;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
   background: rgba(255, 255, 255, 0.04);
   color: var(--text);
@@ -15346,6 +15440,83 @@ button.timeline-session-divider-continuing::before {
 
 .chat-rail-task-open:hover {
   background: rgba(255, 255, 255, 0.08);
+}
+
+.chat-rail-task-history {
+  margin-top: 0.25rem;
+  padding-top: 0.65rem;
+  border-top: 1px solid var(--border);
+}
+
+.chat-rail-task-history > h5 {
+  margin: 0 0 0.5rem;
+  font-size: var(--text-sm);
+}
+
+.chat-rail-task-history > p {
+  margin: 0;
+}
+
+.chat-rail-task-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chat-rail-task-note {
+  min-width: 0;
+  padding: 0.55rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.chat-rail-task-note-header {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  margin-bottom: 0.35rem;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  flex-wrap: wrap;
+}
+
+.chat-rail-task-note-header > span:first-child {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.chat-rail-task-note-step::before {
+  content: "\00b7";
+  margin-right: 0.4rem;
+}
+
+.chat-rail-task-note .chat-rail-viewer-markdown .squisq-linear-content {
+  /* LinearDocView writes 16px inline, so the compact rail needs the same
+     targeted override used by chat bubbles with custom text scaling. */
+  font-size: var(--text-sm) !important;
+  padding: 0;
+}
+
+.chat-rail-task-note .chat-rail-viewer-markdown .squisq-page-section-inner {
+  padding: 0;
+}
+
+.chat-rail-task-note .chat-rail-viewer-markdown :is(p, ul, ol, pre, blockquote) {
+  margin-block: 0.35rem;
+}
+
+.chat-rail-task-note .chat-rail-viewer-markdown > :first-child,
+.chat-rail-task-note .chat-rail-viewer-markdown .squisq-linear-content > :first-child {
+  margin-top: 0;
+}
+
+.chat-rail-task-note .chat-rail-viewer-markdown > :last-child,
+.chat-rail-task-note .chat-rail-viewer-markdown .squisq-linear-content > :last-child {
+  margin-bottom: 0;
 }
 
 .chat-rail-viewer {
@@ -15511,6 +15682,41 @@ button.timeline-session-divider-continuing::before {
 
 .ollama-section h4 {
   margin: 0 0 0.5rem 0;
+}
+
+.shared-model-migration-copy {
+  margin: 0 0 0.65rem;
+  max-width: 48rem;
+}
+
+.shared-model-migration-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.shared-model-migration-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.shared-model-migration-list li > div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+@media (max-width: 640px) {
+  .shared-model-migration-list li {
+    align-items: flex-start;
+    flex-direction: column;
+  }
 }
 
 .ollama-model-table {
@@ -22208,10 +22414,75 @@ a.license-button:hover {
   margin: 2px 0 0;
 }
 
-/* ── Craftbook editor ──────────────────────────────────────────────── */
-.craftbook-search {
-  flex: 1;
+/* ── Craftbook editor ───────────────────────────────────────────────── */
+.craftbooks-view {
+  gap: 0;
+  padding: 0;
+}
+.craftbooks-layout {
+  grid-template-columns: minmax(280px, 320px) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  height: 100%;
+}
+.craftbooks-sidebar {
+  display: flex;
+  flex-direction: column;
   min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+.craftbooks-toolbar {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.7rem;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface) 72%, var(--panel));
+}
+.craftbooks-search-field {
+  display: block;
+  min-width: 0;
+}
+.craftbook-search {
+  width: 100%;
+  min-width: 0;
+  padding: 0.4rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  color: var(--text);
+  font-size: var(--text-md);
+}
+.craftbooks-toolbar button {
+  width: 100%;
+  border-radius: var(--radius-md);
+  font-size: var(--text-md);
+}
+.craftbooks-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.craftbooks-list-error {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 0.6rem 0.7rem;
+  border-bottom: 1px solid var(--border);
+  font-size: var(--text-sm);
+}
+.craftbooks-empty {
+  margin: 0;
+  padding: 0.75rem;
+  font-size: var(--text-sm);
+}
+.craftbooks-detail {
+  min-height: 0;
 }
 .craftbook-group + .craftbook-group {
   margin-top: 10px;
@@ -22934,6 +23205,15 @@ a.license-button:hover {
 .filemap-finding-task {
   color: var(--accent);
   font-weight: 600;
+}
+.filemap-finding-task-link {
+  border-bottom: 1px dashed currentColor;
+  font-family: var(--font-ui);
+  text-decoration: none;
+}
+.filemap-finding-task-link:hover {
+  border-bottom-style: solid;
+  text-decoration: none;
 }
 .filemap-finding-actions {
   display: flex;

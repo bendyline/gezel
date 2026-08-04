@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { appendFile, mkdir, readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import { projectLocalDir } from '@bendyline/gezel/paths';
+import { projectPrivateDir } from '@bendyline/gezel/paths';
 
 /**
  * Append-only write journal for gezel mutations against the project
@@ -36,7 +36,7 @@ export interface JournalContext {
 }
 
 function journalFile(home: string, projectId: string): string {
-  return join(projectLocalDir(home, projectId), 'workspace-writes.jsonl');
+  return join(projectPrivateDir(home, projectId), 'workspace-writes.jsonl');
 }
 
 export async function appendJournalEntry(

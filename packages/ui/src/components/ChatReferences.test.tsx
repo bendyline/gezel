@@ -1,11 +1,12 @@
 import type { Task } from '@bendyline/gezel';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CHAT_RAIL_MIN_SPLIT_PX, ChatReferences } from './ChatReferences.js';
 
 const apiMocks = vi.hoisted(() => ({
   getTaskByRef: vi.fn(),
+  listTaskNotes: vi.fn(),
   readProjectArtifact: vi.fn(),
   readDocument: vi.fn(),
   readProjectWorkspaceFile: vi.fn(),
@@ -20,9 +21,23 @@ vi.mock('./CommandsPanel.js', () => ({
 let activeWidth = 0;
 
 beforeEach(() => {
+  apiMocks.listTaskNotes.mockResolvedValue({ notes: [] });
   apiMocks.readProjectArtifact.mockImplementation(async (_projectId, path) => ({
     content: `# ${path}`,
   }));
+  Object.defineProperty(window, 'matchMedia', {
+    configurable: true,
+    value: vi.fn().mockImplementation((query: string) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })),
+  });
   Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
     configurable: true,
     get: () => activeWidth,
@@ -39,6 +54,7 @@ beforeEach(() => {
 
 afterEach(() => {
   delete (globalThis as { ResizeObserver?: typeof ResizeObserver }).ResizeObserver;
+  delete (window as { matchMedia?: typeof window.matchMedia }).matchMedia;
 });
 
 function renderProjectRail() {
@@ -157,6 +173,60 @@ describe('ChatReferences task picker', () => {
 
     expect(await screen.findByText('Second task')).toBeInTheDocument();
     expect(apiMocks.getTaskByRef).toHaveBeenLastCalledWith('project-1/2');
+  });
+
+  it('puts the full-task action at the top and shows notes newest first', async () => {
+    activeWidth = CHAT_RAIL_MIN_SPLIT_PX;
+    const user = userEvent.setup();
+    apiMocks.getTaskByRef.mockResolvedValue(task('project-1/1', 'First task'));
+    apiMocks.listTaskNotes.mockResolvedValue({
+      notes: [
+        {
+          id: 'older',
+          at: '2026-07-27T10:00:00.000Z',
+          author: { kind: 'user' },
+          text: 'Older note',
+        },
+        {
+          id: 'newer',
+          at: '2026-07-28T10:00:00.000Z',
+          author: { kind: 'gezel', gezelId: 'maya', name: 'Maya' },
+          stepId: 'step-1',
+          text: 'Newest note',
+        },
+      ],
+    });
+
+    const { container } = render(
+      <ChatReferences chatKey="project-1" projectId="project-1">
+        {({ onTaskReference }) => (
+          <button type="button" onClick={() => onTaskReference('project-1/1')}>
+            Add task reference
+          </button>
+        )}
+      </ChatReferences>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Add task reference' }));
+
+    expect(await screen.findByRole('heading', { name: 'History & notes' })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(apiMocks.listTaskNotes).toHaveBeenCalledWith('project-1', 1);
+    });
+
+    const rail = container.querySelector('.chat-rail-task');
+    const topbar = rail?.firstElementChild;
+    expect(topbar).toHaveClass('chat-rail-task-topbar');
+    expect(
+      within(topbar as HTMLElement).getByRole('button', { name: 'Open full task' }),
+    ).toBeVisible();
+
+    const noteBodies = Array.from(container.querySelectorAll('.chat-rail-task-note'));
+    expect(noteBodies).toHaveLength(2);
+    expect(noteBodies[0]).toHaveTextContent('Newest note');
+    expect(noteBodies[0]).toHaveTextContent('Maya');
+    expect(noteBodies[0]).toHaveTextContent('Inspect');
+    expect(noteBodies[1]).toHaveTextContent('Older note');
   });
 });
 

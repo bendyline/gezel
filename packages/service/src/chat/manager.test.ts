@@ -25,6 +25,7 @@ import {
   detectChatCodedFileWithoutWrite,
   detectProseDeliverableWithoutWrite,
   detectUnsavedFileClaim,
+  effectiveSessionModel,
   isNoopConfirmationResponse,
   isSubstantiveExistingWorkspaceFile,
   isValidationRepairPrompt,
@@ -33,6 +34,48 @@ import {
   shouldRefreshLeanGameState,
   unresolvedFailedToolCalls,
 } from './manager.js';
+
+describe('effectiveSessionModel', () => {
+  const record = {
+    providerName: 'llama-cpp' as const,
+    model: 'historical-model',
+  };
+
+  it('uses the same live-default precedence for admission and inference', () => {
+    expect(
+      effectiveSessionModel({
+        record,
+        config: { defaultModel: { 'llama-cpp': 'current-default' } },
+      }),
+    ).toBe('current-default');
+    expect(
+      effectiveSessionModel({
+        record,
+        frontmatterModel: 'gezel-model',
+        config: { defaultModel: { 'llama-cpp': 'current-default' } },
+      }),
+    ).toBe('gezel-model');
+  });
+
+  it('honors the Night Shift model ahead of the ordinary install default', () => {
+    expect(
+      effectiveSessionModel({
+        record: { ...record, nightShift: true },
+        config: {
+          defaultModel: { 'llama-cpp': 'current-default' },
+          nightShift: {
+            enabled: true,
+            modelOverride: {
+              enabled: true,
+              provider: 'llama-cpp',
+              model: 'night-model',
+            },
+          },
+        },
+      }),
+    ).toBe('night-model');
+  });
+});
 
 describe('consultationIdleTimeoutMsForModel', () => {
   it('protects DS4 and frontier local models from too-short caller guesses', () => {
@@ -97,6 +140,99 @@ describe('resolveMlxEffectiveNumCtx', () => {
 
   it('falls back to 64K for a manual model path with no catalog metadata', () => {
     expect(resolveMlxEffectiveNumCtx({})).toBe(65_536);
+  });
+});
+
+describe('ChatManager — clamped first-turn context', () => {
+  it('does not replay the current user during auto-recall and diets a clamped Meester', async () => {
+    const testHome = await mkdtemp(join(tmpdir(), 'gezel-first-turn-context-test-'));
+    const testStore = new Store({ home: testHome });
+    await testStore.ensureLayout();
+    await testStore.writeConfig({ provider: 'copilot' });
+    await testStore.createGezel({ name: 'Imara', role: 'Meester' });
+    await testStore.createProject({ name: 'Default' });
+    await testStore.writeConfig({
+      provider: 'llama-cpp',
+      defaultModel: { 'llama-cpp': 'qwen3.6-35b-a3b-q4' },
+    });
+
+    const recallMemory = {
+      hasIndex: () => true,
+      embedQuery: async () => [0.1, 0.2],
+      searchVector: async (scope: 'gezel' | 'project') =>
+        scope === 'project'
+          ? [
+              {
+                id: 'memory-1',
+                text: 'The project uses a local model.',
+                scope: 'project',
+                day: '2026-08-03',
+                score: 0.9,
+                kind: 'fact',
+              },
+            ]
+          : [],
+      save: async () => {},
+      reindex: async () => 0,
+      writeSummary: async () => {},
+      getRecent: async () => '',
+    } as unknown as MemoryManager;
+    let admissionCalls = 0;
+    class AdmissionOnlyMockProvider extends MockProvider {
+      override getContextWindow(): number | undefined {
+        return undefined;
+      }
+
+      async prepareContextWindow(): Promise<number | undefined> {
+        admissionCalls += 1;
+        return this.ollamaContextConfig?.numCtx;
+      }
+    }
+    const llama = new AdmissionOnlyMockProvider({ name: 'llama-cpp' });
+    llama.ollamaContextConfig = { numCtx: 35_840, promptChars: () => 0 };
+    const testManager = new ChatManager({
+      store: testStore,
+      events: new ChatEventBus(),
+      memory: recallMemory,
+      getPort: () => 0,
+      getToken: () => 'test-token',
+      home: testHome,
+      providers: [['llama-cpp', llama]],
+      catalog: new CatalogService(),
+      secrets: new FileSecretStore(testHome),
+    });
+
+    try {
+      const session = await testManager.createSession({ gezelId: 'imara' });
+      llama.script('Hello from Imara');
+      await testManager.send(session.id, 'hello');
+
+      const creates = llama.calls.filter((call) => call.kind === 'create');
+      expect(creates.length).toBeGreaterThanOrEqual(2);
+      const recalled = creates.at(-1)?.opts;
+      expect(recalled?.priorMessages).toEqual([]);
+      expect(`${recalled?.systemMessage ?? ''}\n${recalled?.volatileContext ?? ''}`).toContain(
+        'Recalled from prior sessions',
+      );
+
+      // 35,840 is below the 48K full-roster floor, so the provider's actual
+      // asynchronously-admitted context must activate the curated coordinator
+      // surface before the first prompt is built.
+      expect(admissionCalls).toBeGreaterThan(0);
+      expect(recalled?.toolAllowlist?.has('start_project')).toBe(true);
+      expect(recalled?.toolAllowlist?.has('read_task_notes')).toBe(true);
+      expect(recalled?.toolAllowlist?.size).toBeLessThan(60);
+
+      const persisted = await testStore.getSession('imara', session.id);
+      expect(persisted?.messages.map((message) => [message.role, message.content])).toEqual([
+        ['user', 'hello'],
+        ['assistant', 'Hello from Imara'],
+      ]);
+    } finally {
+      await testManager.drainBackground();
+      await testManager.shutdown();
+      await rm(testHome, { recursive: true, force: true });
+    }
   });
 });
 
@@ -3299,6 +3435,36 @@ describe('ChatManager — one-shot attribution', () => {
       job: 'maintenance',
     });
   });
+
+  it('does not apply user-daemon RAM pressure to broker-routed ambient work', () => {
+    const denial = (
+      manager as unknown as {
+        denyAmbientColdLoad(
+          providerName: 'llama-cpp',
+          model: string,
+          provider: { name: string },
+        ): string | null;
+      }
+    ).denyAmbientColdLoad('llama-cpp', 'shared-model', { name: 'remote' });
+
+    expect(denial).toBeNull();
+  });
+
+  it('previews a cold native context from install metadata without binding a provider', async () => {
+    await store.writeConfig({ mlxNumCtx: 32_768 });
+    Object.defineProperty(manager, 'mlxModels', {
+      configurable: true,
+      value: {
+        resolveModel: async () => ({ contextWindow: 65_536 }),
+      },
+    });
+    const inferenceBind = vi.spyOn(manager, 'getProviderForModel');
+
+    await expect(manager.previewContextWindowForModel('mlx', 'installed-mlx')).resolves.toBe(
+      32_768,
+    );
+    expect(inferenceBind).not.toHaveBeenCalled();
+  });
 });
 
 describe('ChatManager — memory extraction isolation', () => {
@@ -3646,6 +3812,12 @@ describe('ChatManager — context-window pressure (Ollama)', () => {
       expect(synthCount).toBe(1);
       const synth = rec?.messages.find((m) => m.synthetic === 'compaction-summary');
       expect(synth?.content).toContain('compacted bullet');
+      const rebuilt = mock.calls.filter((call) => call.kind === 'create').at(-1);
+      expect(
+        rebuilt?.opts?.priorMessages?.filter(
+          (message) => message.role === 'user' && message.content === 'continue please',
+        ),
+      ).toHaveLength(0);
     } finally {
       await manager.drainBackground();
       await manager.shutdown();

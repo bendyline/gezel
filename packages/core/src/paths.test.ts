@@ -5,6 +5,8 @@ import {
   gezelDir,
   gezelHome,
   gezelPaths,
+  machineSharedHome,
+  machineSharedMarkerFile,
   projectDir,
   projectScriptFile,
   projectScriptRunFile,
@@ -26,6 +28,25 @@ describe('gezelHome', () => {
   it('respects GEZEL_HOME override', () => {
     const home = gezelHome({ GEZEL_HOME: '/tmp/lv-test' });
     expect(home).toBe('/tmp/lv-test');
+  });
+});
+
+describe('machineSharedHome', () => {
+  it('keeps shared product data separate from the broker home on every platform', () => {
+    expect(machineSharedHome('win32', { ProgramData: 'D:\\MachineData' })).toBe(
+      'D:\\MachineData\\Gezel\\shared',
+    );
+    expect(machineSharedHome('darwin', {})).toBe('/Users/Shared/Gezel');
+    expect(machineSharedHome('linux', {})).toBe('/var/lib/gezel/shared');
+  });
+
+  it('honors the explicit operator/test override', () => {
+    expect(machineSharedHome('darwin', { GEZEL_MACHINE_SHARED_HOME: '/tmp/shared-gezel' })).toBe(
+      '/tmp/shared-gezel',
+    );
+    expect(
+      machineSharedMarkerFile('darwin', { GEZEL_MACHINE_SHARED_HOME: '/tmp/shared-gezel' }),
+    ).toBe('/tmp/shared-gezel/.gezel-machine-shared-v1.json');
   });
 });
 

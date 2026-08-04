@@ -13,6 +13,7 @@ umask 077
 
 GEZEL_USER=gezel
 DATA_DIR=/var/lib/gezel
+SHARED_DIR="$DATA_DIR/shared"
 ASSETS_DIR="$DATA_DIR/assets"
 SERVICE_TREE="$DATA_DIR/service"
 UNIT_SRC=/opt/Gezel/gezeld.service
@@ -23,10 +24,18 @@ APPARMOR_PROFILE_SOURCE=/opt/Gezel/resources/apparmor-profile
 APPARMOR_PROFILE_TARGET=/etc/apparmor.d/gezel
 UNPACKED_DIR=/opt/Gezel/resources/app.asar.unpacked/dist
 EXTRACT_CLI="$UNPACKED_DIR/extract-service-bundle.js"
+MIGRATE_SHARED_CLI="$UNPACKED_DIR/migrate-legacy-shared.js"
 BUNDLE_TARBALL="$UNPACKED_DIR/service-bundle.tar.gz"
 BUNDLE_META="$UNPACKED_DIR/service-bundle.meta.json"
 
 echo "[gezel after-install] starting"
+
+# The package declares `acl` as a dependency. Default ACL inheritance is
+# load-bearing for multi-user writes in the machine-shared product root.
+if ! command -v setfacl >/dev/null 2>&1; then
+  echo "[gezel after-install] ERROR: setfacl is required for safe shared-data permissions" >&2
+  exit 1
+fi
 
 assert_not_symlink() {
   path=$1
@@ -55,9 +64,9 @@ if ! getent passwd "$GEZEL_USER" >/dev/null 2>&1; then
   useradd --system --no-create-home --shell /usr/sbin/nologin --user-group "$GEZEL_USER"
 fi
 
-# Never commandeer a pre-existing human account. The HTTP UI includes a real
-# terminal, so running under an interactive user's UID would hand that user's
-# files and credentials to every authorized machine-daemon client.
+# Never commandeer a pre-existing human account. Native engine and download
+# children must run in an isolated service identity, not with a person's file
+# and credential access.
 passwd_entry=$(getent passwd "$GEZEL_USER" 2>/dev/null || true)
 group_entry=$(getent group "$GEZEL_USER" 2>/dev/null || true)
 if [ -z "$passwd_entry" ] || [ -z "$group_entry" ]; then
@@ -134,13 +143,24 @@ fi
 
 # 2. Private system state with a narrow runtime discovery exception. The 0711
 # parent permits traversal to a known path but not directory listing; runtime
-# is 0755 so desktop clients can read only the metadata gezeld publishes.
+# is 0755 so user daemons can read only the metadata gezeld publishes.
 assert_not_symlink "$DATA_DIR" "Gezel data directory"
 assert_not_symlink "$DATA_DIR/runtime" "Gezel runtime directory"
 assert_not_symlink "$ASSETS_DIR" "Gezel public asset directory"
 assert_not_symlink "$ASSETS_DIR/models" "Gezel shared model directory"
 assert_not_symlink "$DATA_DIR/logs" "Gezel logs directory"
 assert_not_symlink "$SERVICE_TREE" "Gezel service tree"
+
+if [ ! -f "$MIGRATE_SHARED_CLI" ]; then
+  echo "[gezel after-install] ERROR: shared-data migration CLI is missing: $MIGRATE_SHARED_CLI" >&2
+  exit 1
+fi
+assert_not_symlink "$SHARED_DIR" "Gezel machine-shared data directory"
+echo "[gezel after-install] migrating legacy projects and gezels into $SHARED_DIR"
+ELECTRON_RUN_AS_NODE=1 "$ELECTRON_EXE" "$MIGRATE_SHARED_CLI" \
+  --source="$DATA_DIR" \
+  --dest="$SHARED_DIR"
+assert_not_symlink "$SHARED_DIR" "Gezel machine-shared data directory"
 install -d -o "$GEZEL_USER" -g "$GEZEL_USER" -m 700 "$DATA_DIR"
 install -d -o "$GEZEL_USER" -g "$GEZEL_USER" -m 700 "$DATA_DIR/runtime"
 install -d -o "$GEZEL_USER" -g "$GEZEL_USER" -m 700 "$DATA_DIR/logs"
@@ -159,11 +179,9 @@ find "$DATA_DIR" -xdev -exec chown --no-dereference "$GEZEL_USER:$GEZEL_USER" --
 # alone can leave dormant named entries that regain access after a later mode
 # change. On minimal systems without ACL tooling, the mode mask still denies
 # all group/other access.
-if command -v setfacl >/dev/null 2>&1; then
-  find "$DATA_DIR" -xdev ! -type l -exec setfacl -b -- {} +
-  find "$DATA_DIR" -xdev -type d -exec setfacl -k -- {} +
-fi
-find "$DATA_DIR" -xdev ! -type l -exec chmod go-rwx {} +
+find "$DATA_DIR" -xdev ! -type l -exec setfacl -b -- {} +
+find "$DATA_DIR" -xdev -type d -exec setfacl -k -- {} +
+find "$DATA_DIR" -xdev -path "$SHARED_DIR" -prune -o ! -type l -exec chmod go-rwx {} +
 chmod 711 "$DATA_DIR"
 chmod 755 "$DATA_DIR/runtime"
 chmod 700 "$DATA_DIR/logs"
@@ -174,6 +192,20 @@ fi
 find "$ASSETS_DIR" -xdev -type d -exec chmod 755 {} +
 find "$ASSETS_DIR" -xdev -type f -exec chmod 644 {} +
 
+# The broker owns no product routes and never receives these paths. Interactive
+# accounts collaborate through their own user daemons. Sticky/setgid roots and
+# default ACLs keep newly-created nested content writable across accounts.
+find "$SHARED_DIR" -xdev -exec chown --no-dereference root:root -- {} +
+find "$SHARED_DIR" -xdev ! -type l -exec chmod a+rwX {} +
+find "$SHARED_DIR" -xdev -type d -exec chmod 2777 {} +
+chmod 3777 "$SHARED_DIR"
+find "$SHARED_DIR" -xdev -type d -exec setfacl -m d:u::rwx,d:g::rwx,d:o::rwx,d:m::rwx -- {} +
+# Defense in depth beyond systemd's InaccessiblePaths: the non-login broker
+# identity cannot even traverse the shared root outside its service sandbox.
+setfacl -m "u:$GEZEL_USER:---" "$SHARED_DIR"
+chown root:root "$SHARED_DIR/.gezel-machine-shared-v1.json"
+chmod 644 "$SHARED_DIR/.gezel-machine-shared-v1.json"
+
 # Remove any root-equivalent token left by a pre-split release before runtime
 # becomes readable. gezeld recreates it as a scoped first-party credential.
 rm -f \
@@ -183,6 +215,7 @@ rm -f \
   "$DATA_DIR/runtime/pid" \
   "$DATA_DIR/runtime/cert.pem" \
   "$DATA_DIR/runtime/cert-fingerprint" \
+  "$DATA_DIR/runtime/service-role" \
   "$DATA_DIR/runtime/lock"
 
 # 2b. Extract the shipped service bundle into $SERVICE_TREE. Runs through

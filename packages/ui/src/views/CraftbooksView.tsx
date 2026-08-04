@@ -80,67 +80,73 @@ export function CraftbooksView() {
   );
 
   return (
-    <div className="tasks-view" data-testid="craftbooks-view">
-      <header className="tasks-header">
-        <div className="tasks-filters">
-          <input
-            className="craftbook-search"
-            placeholder="Search craftbooks…"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
-          <button type="button" className="primary" onClick={() => setCreating(true)}>
-            + New craftbook
-          </button>
-        </div>
-      </header>
+    <div className="tasks-view craftbooks-view" data-testid="craftbooks-view">
+      <div className="tasks-layout craftbooks-layout">
+        <aside className="craftbooks-sidebar" aria-label="Craftbook library">
+          <div className="craftbooks-toolbar">
+            <label className="craftbooks-search-field">
+              <span className="sr-only">Search craftbooks</span>
+              <input
+                type="search"
+                className="craftbook-search"
+                placeholder="Search craftbooks…"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+              />
+            </label>
+            <button type="button" className="primary" onClick={() => setCreating(true)}>
+              + New craftbook
+            </button>
+          </div>
 
-      {error && <p className="error">{error}</p>}
+          {error && <p className="error craftbooks-list-error">{error}</p>}
 
-      <div className="tasks-layout">
-        <aside className="tasks-list">
-          {SOURCE_GROUPS.map((group) => {
-            const items = filtered.filter((c) => c.source === group.source);
-            if (items.length === 0) return null;
-            return (
-              <div key={group.source} className="craftbook-group">
-                <div className="craftbook-group-header small muted">
-                  {group.label} <span className="craftbook-group-hint">· {group.hint}</span>
-                </div>
-                <ul>
-                  {items.map((c) => (
-                    <li key={`${c.source}:${c.id}`}>
-                      <button
-                        type="button"
-                        className={`task-row${
-                          selected?.id === c.id && selected?.source === c.source
-                            ? ' task-row-selected'
-                            : ''
-                        }`}
-                        onClick={() => open(c.id, c.source)}
-                      >
-                        <span className="task-row-body">
-                          <span className="task-title">{c.name}</span>
-                          <span className="task-row-meta">
-                            <span className="task-ref">{c.id}</span>
-                            <span className="task-assignee">
-                              {c.stepCount} step{c.stepCount === 1 ? '' : 's'}
+          <div className="tasks-list craftbooks-list">
+            {SOURCE_GROUPS.map((group) => {
+              const items = filtered.filter((c) => c.source === group.source);
+              if (items.length === 0) return null;
+              return (
+                <div key={group.source} className="craftbook-group">
+                  <div className="craftbook-group-header small muted">
+                    {group.label} <span className="craftbook-group-hint">· {group.hint}</span>
+                  </div>
+                  <ul>
+                    {items.map((c) => (
+                      <li key={`${c.source}:${c.id}`}>
+                        <button
+                          type="button"
+                          className={`task-row${
+                            selected?.id === c.id && selected?.source === c.source
+                              ? ' task-row-selected'
+                              : ''
+                          }`}
+                          onClick={() => open(c.id, c.source)}
+                        >
+                          <span className="task-row-body">
+                            <span className="task-title">{c.name}</span>
+                            <span className="task-row-meta">
+                              <span className="task-ref">{c.id}</span>
+                              <span className="task-assignee">
+                                {c.stepCount} step{c.stepCount === 1 ? '' : 's'}
+                              </span>
                             </span>
                           </span>
-                        </span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            );
-          })}
-          {filtered.length === 0 && (
-            <p className="muted">No craftbooks{query ? ' match your search' : ' yet'}.</p>
-          )}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              );
+            })}
+            {filtered.length === 0 && (
+              <p className="muted craftbooks-empty">
+                No craftbooks{query ? ' match your search' : ' yet'}.
+              </p>
+            )}
+          </div>
         </aside>
 
-        <section className="task-detail-panel">
+        <section className="task-detail-panel craftbooks-detail" aria-label="Craftbook editor">
           {selected ? (
             <CraftbookEditor
               key={`${selected.source}:${selected.id}`}

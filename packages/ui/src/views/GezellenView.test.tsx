@@ -68,6 +68,25 @@ describe('GezellenView', () => {
     });
   });
 
+  it('labels a machine-shared gezel without implying their chats are shared', async () => {
+    vi.mocked(api.listGezels).mockResolvedValue({
+      gezels: [
+        {
+          id: 'shared-ada',
+          name: 'Ada',
+          role: 'Developer',
+          storageScope: 'machine-shared',
+        } as GezelSummary,
+      ],
+    } as never);
+    render(<GezellenView />);
+    const badge = await screen.findByText('Shared');
+    expect(badge).toHaveAttribute(
+      'title',
+      'Shared with accounts on this machine; chats and memories stay private',
+    );
+  });
+
   it('shows the meester ⭐ badge next to the configured Meester', async () => {
     render(<GezellenView />);
     await waitFor(() => {

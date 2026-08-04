@@ -49,6 +49,18 @@ describe('RemotesRegistry', () => {
     expect(reloaded.get('a')?.scopes).toEqual(['remote-inference']);
   });
 
+  it('keeps managed machine connections in memory only', async () => {
+    const reg = await createRemotesRegistry({ home });
+    reg.setEphemeral({ ...sample('this-machine'), managed: 'machine-engine' });
+    expect(reg.get('this-machine')?.managed).toBe('machine-engine');
+    expect(await reg.update('this-machine', { token: 'rotated' })).toBe(true);
+    expect(reg.get('this-machine')?.token).toBe('rotated');
+
+    const reloaded = await createRemotesRegistry({ home });
+    expect(reloaded.get('this-machine')).toBeNull();
+    expect(reg.removeEphemeral('this-machine')).toBe(true);
+  });
+
   it('upserts on re-add (re-pairing replaces)', async () => {
     const reg = await createRemotesRegistry({ home });
     await reg.add(sample('a'));

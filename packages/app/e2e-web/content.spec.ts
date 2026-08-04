@@ -11,9 +11,31 @@ test.describe('craftbooks', () => {
     await gotoHome(page);
     await openAreaView(page, 'craftbooks');
     await expect(page.getByTestId('craftbooks-view')).toBeVisible();
+
+    const workspace = page.getByTestId('craftbooks-view');
+    const library = page.getByRole('complementary', { name: 'Craftbook library' });
+    const editor = page.getByRole('region', { name: 'Craftbook editor' });
+    const [workspaceBox, libraryBox, editorBox] = await Promise.all([
+      workspace.boundingBox(),
+      library.boundingBox(),
+      editor.boundingBox(),
+    ]);
+    expect(workspaceBox).not.toBeNull();
+    expect(libraryBox).not.toBeNull();
+    expect(editorBox).not.toBeNull();
+    expect(Math.abs(libraryBox!.x - workspaceBox!.x)).toBeLessThanOrEqual(1);
+    expect(Math.abs(libraryBox!.y - workspaceBox!.y)).toBeLessThanOrEqual(1);
+    expect(Math.abs(libraryBox!.height - workspaceBox!.height)).toBeLessThanOrEqual(1);
+    expect(editorBox!.x).toBeGreaterThan(libraryBox!.x + libraryBox!.width);
+    expect(Math.abs(editorBox!.y - libraryBox!.y)).toBeLessThanOrEqual(1);
+    expect(Math.abs(editorBox!.height - libraryBox!.height)).toBeLessThanOrEqual(1);
+    expect(await library.evaluate((element) => getComputedStyle(element).borderRadius)).not.toBe(
+      '0px',
+    );
+
     await shot(page, 'list', {
       area: 'craftbooks',
-      description: 'Craftbooks gallery — My craftbooks / Project / Gilde catalog',
+      description: 'Craftbooks workspace — library rail and full-height editor',
     });
 
     if (world?.craftbookId) {

@@ -5,23 +5,13 @@ import { OPEN_FILE_COMMAND } from './code-intel-core.js';
 import { registerCodeIntel } from './code-intel.js';
 import { registerCommands } from './commands.js';
 import { readConfig } from './config.js';
-import {
-  type AppConnection,
-  type Connection,
-  acquireAppConnection,
-  resolveDaemon,
-} from './daemon.js';
+import { type AppConnection, type Connection, acquireAppConnection } from './daemon.js';
 import { GezelLanguageModelProvider } from './lm-provider.js';
 import { createLogger } from './log.js';
 import { WebviewRpc } from './webview-rpc.js';
 import { ensureDevGezel, ensureProjectForWorkspace } from './workspace.js';
 
 interface ExtensionState {
-  /**
-   * Discovery credential retained only while app authorization is pending or
-   * for the explicit approve/reset commands. Never exposed to the webview.
-   */
-  bootstrapConnection: Connection | null;
   connection: Connection | null;
   activeFolder: vscode.WorkspaceFolder | null;
   activeProjectId: string | null;
@@ -63,7 +53,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   );
 
   const state: ExtensionState = {
-    bootstrapConnection: null,
     connection: null,
     activeFolder: vscode.workspace.workspaceFolders?.[0] ?? null,
     activeProjectId: null,
@@ -131,7 +120,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   };
 
   const reconnect = async (): Promise<void> => {
-    state.bootstrapConnection = null;
     state.connection = null;
     state.activeProjectId = null;
     state.projectCache.clear();
@@ -149,7 +137,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     ...registerCommands({
       view,
       getClient: () => state.connection?.client ?? null,
-      getConnection: () => state.connection ?? state.bootstrapConnection,
+      getConnection: () => state.connection,
       getActiveGezel: () => state.activeGezel,
       setActiveGezel,
       getActiveFolder: () => state.activeFolder,
@@ -213,13 +201,7 @@ async function connect(
   state.lastError = null;
   try {
     const cfg = readConfig();
-    const bootstrapConnection = await resolveDaemon(cfg, logger);
-    state.bootstrapConnection = bootstrapConnection;
-    const appConnection = await acquireVerifiedExtensionAccess(
-      bootstrapConnection,
-      context,
-      logger,
-    );
+    const appConnection = await acquireVerifiedExtensionAccess(cfg, context, logger);
     const conn = appConnection.connection;
     state.connection = conn;
     const gezel = await ensureDevGezel(conn.client, cfg.defaultGezel, logger);
@@ -250,24 +232,19 @@ async function connect(
         logger.warn(`Language Model Chat Provider not registered: ${message}`);
         // `already_connected` means the daemon has a token for the
         // `vscode` appId but VS Code's secrets store doesn't have the
-        // matching string. Offer the Reset button up front — that's
-        // the actual unblock; the regular Reconnect just hits the
-        // same 409 again.
+        // matching string. A third-party client cannot revoke an unknown
+        // token; the user must remove it in Gezel's Connected Apps settings.
         const alreadyConnected = /already_connected/i.test(message);
-        const actions = alreadyConnected
-          ? (['Reset Connection', 'Show Logs', 'Show Status'] as const)
-          : (['Show Logs', 'Show Status'] as const);
+        const actions = ['Show Logs', 'Show Status'] as const;
         void vscode.window
           .showWarningMessage(
             alreadyConnected
-              ? 'Gezel: daemon thinks VS Code is already connected, but the local token is missing. Click Reset to re-issue.'
+              ? 'Gezel: Visual Studio Code is already authorized, but its local token is missing. Revoke Visual Studio Code in Gezel Settings → Connected Apps, then reconnect.'
               : `Gezel: language models not registered — ${message}`,
             ...actions,
           )
           .then((pick) => {
-            if (pick === 'Reset Connection')
-              void vscode.commands.executeCommand('gezel.resetConnection');
-            else if (pick === 'Show Logs') void vscode.commands.executeCommand('gezel.showLogs');
+            if (pick === 'Show Logs') void vscode.commands.executeCommand('gezel.showLogs');
             else if (pick === 'Show Status')
               void vscode.commands.executeCommand('gezel.showStatus');
           });
@@ -284,19 +261,17 @@ async function connect(
     view.post({ type: 'connection-error', message, retryable: true });
     const alreadyConnected = /already_connected/i.test(message);
     const actions = alreadyConnected
-      ? (['Reset Connection', 'Show Logs', 'Show Status'] as const)
+      ? (['Show Logs', 'Show Status'] as const)
       : (['Show Logs', 'Show Status', 'Reconnect'] as const);
     void vscode.window
       .showErrorMessage(
         alreadyConnected
-          ? 'Gezel: the daemon has a VS Code authorization, but this extension no longer has its token. Reset the connection to approve it again.'
+          ? 'Gezel: Visual Studio Code is already authorized, but its local token is missing. Revoke Visual Studio Code in Gezel Settings → Connected Apps, then reconnect.'
           : `Gezel: couldn't connect — ${message}`,
         ...actions,
       )
       .then((pick) => {
-        if (pick === 'Reset Connection')
-          void vscode.commands.executeCommand('gezel.resetConnection');
-        else if (pick === 'Show Logs') void vscode.commands.executeCommand('gezel.showLogs');
+        if (pick === 'Show Logs') void vscode.commands.executeCommand('gezel.showLogs');
         else if (pick === 'Show Status') void vscode.commands.executeCommand('gezel.showStatus');
         else if (pick === 'Reconnect') void vscode.commands.executeCommand('gezel.refresh');
       });
@@ -338,7 +313,7 @@ async function ensureLanguageModelProvider(
 }
 
 async function acquireVerifiedExtensionAccess(
-  conn: Connection,
+  config: ReturnType<typeof readConfig>,
   context: vscode.ExtensionContext,
   logger: ReturnType<typeof createLogger>,
 ): Promise<AppConnection> {
@@ -361,7 +336,7 @@ async function acquireVerifiedExtensionAccess(
 
   try {
     logger.info('authorization: requesting product + inference access through the app SDK...');
-    return await acquireAppConnection(conn, context, logger, async (code) => {
+    return await acquireAppConnection(config, context, logger, async (code) => {
       verificationCodeShown.value = true;
       clearTimeout(waitToastTimer);
       logger.info('authorization: daemon issued a requester-side connection code');

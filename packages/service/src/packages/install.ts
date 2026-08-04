@@ -1,4 +1,4 @@
-import { projectLocalDir } from '@bendyline/gezel/paths';
+import { projectPrivateDir } from '@bendyline/gezel/paths';
 import { runPnpm } from './pnpm.js';
 
 export interface InstallPackageOptions {
@@ -22,7 +22,7 @@ export interface InstallResult {
  * script + Node runtime, falling back to `pnpm` on PATH.
  */
 export async function installPackage(opts: InstallPackageOptions): Promise<InstallResult> {
-  const cwd = projectLocalDir(opts.home, opts.projectId);
+  const cwd = projectPrivateDir(opts.home, opts.projectId);
   const spec = opts.version ? `${opts.packageName}@${opts.version}` : opts.packageName;
   const result = await runPnpm(['add', spec], { cwd });
   if (result.ok) return { ok: true, log: result.log };

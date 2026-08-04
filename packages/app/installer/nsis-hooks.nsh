@@ -1,27 +1,26 @@
 ; Gezel NSIS installer hooks
 ;
-; Registers gezeld as a machine-wide Windows service hosted by the
+; Registers the machine-wide model engine hosted by the
 ; first-party gezel-service-host (native/helpers/service-host/).  The
-; service intentionally runs as LocalService, never LocalSystem: the daemon
-; exposes a user-facing terminal, so its child processes must inherit a
-; least-privileged token.
+; service intentionally runs as LocalService, never LocalSystem: native model
+; engines and download helpers must inherit a least-privileged token.
 ;
 ; State lives at C:\ProgramData\Gezel.  Its ACL has two distinct boundaries:
 ;   - the home itself is private to SYSTEM, Administrators, and the
 ;     per-service NT SERVICE\GezelService SID;
 ;   - runtime\ is additionally readable (never writable) by BUILTIN\Users so
-;     desktop clients can discover port/cert/auth-token.
-; runtime/auth-token is a non-root first-party client credential.  The daemon
-; root token remains process-local.  Do not broaden the root data ACL merely
-; to make client discovery convenient.
+;     user daemons can discover port/cert/auth-token/service-role.
+; runtime/auth-token is scoped to inference and model lifecycle.  Electron
+; never receives it, and the daemon root token remains process-local.
 
 !include "FileFunc.nsh"
 !include "LogicLib.nsh"
 
 !define GEZEL_SERVICE_NAME "GezelService"
 !define GEZEL_DATA_DIR "C:\ProgramData\Gezel"
+!define GEZEL_SHARED_DIR "${GEZEL_DATA_DIR}\shared"
 
-; Where customInstall records whether the machine service actually registered.
+; Where customInstall records whether the shared model engine registered.
 ; Read by the desktop app (ordinary users can read HKLM) so a silent
 ; auto-update that lost the service can still be surfaced in the UI. Not under
 ; GEZEL_DATA_DIR: the failures worth recording are usually ACL problems in that
@@ -30,6 +29,7 @@
 !define GEZEL_SERVICE_TREE "${GEZEL_DATA_DIR}\service"
 !define GEZEL_INTERPRETER "$INSTDIR\Gezel.exe"
 !define GEZEL_EXTRACT_CLI "$INSTDIR\resources\app.asar.unpacked\dist\extract-service-bundle.js"
+!define GEZEL_MIGRATE_SHARED_CLI "$INSTDIR\resources\app.asar.unpacked\dist\migrate-legacy-shared.js"
 !define GEZEL_BUNDLE_TARBALL "$INSTDIR\resources\app.asar.unpacked\dist\service-bundle.tar.gz"
 !define GEZEL_BUNDLE_META "$INSTDIR\resources\app.asar.unpacked\dist\service-bundle.meta.json"
 ; The first-party service host is GezelService's ImagePath.  It spawns
@@ -43,35 +43,136 @@
 !define GEZEL_NSSM "$INSTDIR\gezel-nssm.exe"
 !define GEZEL_NSSM_LEGACY "$INSTDIR\nssm.exe"
 
+; Set only when this installer successfully stops an existing broker. Abort
+; and failure callbacks use it to restart an intact registration; once the
+; install takes ownership of the service lifecycle it is cleared.
+Var GezelServiceStoppedForInstall
+
+; Gracefully stop a registered service and wait (bounded) for STOPPED.
+; `sc stop` only REQUESTS the stop; returning immediately used to leave the
+; host running while electron-builder killed app processes and replaced
+; files, so every upgrade logged event 7034 ("terminated unexpectedly") for
+; a service that was actually healthy. `find` on the query output is the
+; least-fragile completion check available to NSIS: sc.exe state tokens
+; (STOPPED) are unlocalized. Callers must query first so a missing service
+; never burns this macro's full ten-second budget.
+!macro WaitGezelServiceStopped
+  StrCpy $8 0
+  ${Do}
+    nsExec::ExecToLog '"$SYSDIR\cmd.exe" /D /C ""$SYSDIR\sc.exe" query ${GEZEL_SERVICE_NAME} | "$SYSDIR\find.exe" "STOPPED" >NUL"'
+    Pop $9
+    ${If} $9 == 0
+      ${ExitDo}
+    ${EndIf}
+    IntOp $8 $8 + 1
+    ${If} $8 >= 20
+      ${ExitDo}
+    ${EndIf}
+    Sleep 500
+  ${Loop}
+!macroend
+
+; Stop only when the registration exists. Shared by the assisted install's
+; InstFiles pre-hook and silent updates. The former runs after the user has
+; accepted the installer flow but before electron-builder closes processes,
+; uninstalls the old version, or replaces files. The latter has no assisted
+; confirmation page; UAC has already authorized the elevated process before
+; .onInit runs.
+!macro StopGezelServiceForInstall
+  nsExec::ExecToLog '"$SYSDIR\sc.exe" query ${GEZEL_SERVICE_NAME}'
+  Pop $0
+  ${If} $0 == 0
+    nsExec::ExecToLog '"$SYSDIR\sc.exe" stop ${GEZEL_SERVICE_NAME}'
+    Pop $0
+    ${If} $0 == 0
+      StrCpy $GezelServiceStoppedForInstall 1
+    ${EndIf}
+    !insertmacro WaitGezelServiceStopped
+  ${EndIf}
+!macroend
+
+; Best-effort rollback for the narrow window after the committed stop but
+; before the old registration is removed. If removal already quarantined the
+; service with start=disabled, `sc start` safely refuses; if it was deleted,
+; the existence query skips the attempt. Never recreate an old registration.
+!macro RestartGezelServiceAfterAbortedInstall
+  ${If} $GezelServiceStoppedForInstall == 1
+    nsExec::ExecToLog '"$SYSDIR\sc.exe" query ${GEZEL_SERVICE_NAME}'
+    Pop $0
+    ${If} $0 == 0
+      nsExec::ExecToLog '"$SYSDIR\sc.exe" start ${GEZEL_SERVICE_NAME}'
+      Pop $0
+    ${EndIf}
+    StrCpy $GezelServiceStoppedForInstall 0
+  ${EndIf}
+!macroend
+
+; electron-builder expands this immediately before MUI_PAGE_INSTFILES. Its
+; PRE callback is therefore the last pre-install boundary in assisted mode:
+; cancelling on the welcome/license pages leaves a healthy broker untouched.
+!macro customPageAfterChangeDir
+  !define MUI_PAGE_CUSTOMFUNCTION_PRE GezelBeforeInstall
+!macroend
+
+Function GezelBeforeInstall
+  !insertmacro StopGezelServiceForInstall
+FunctionEnd
+
+; Silent auto-updates do not traverse the MUI page callbacks, so retain the
+; orderly pre-file-replacement stop for that committed, non-interactive path.
+!macro customInit
+  ${If} ${Silent}
+    !insertmacro StopGezelServiceForInstall
+  ${EndIf}
+!macroend
+
+Function .onUserAbort
+  !insertmacro RestartGezelServiceAfterAbortedInstall
+FunctionEnd
+
+Function .onInstFailed
+  !insertmacro RestartGezelServiceAfterAbortedInstall
+FunctionEnd
+
 ; Stop/remove both current and legacy registrations via sc.exe.
 ; Missing-service errors are expected.  NSSM-era registrations are
 ; ordinary SCM services, so the same stop/delete path covers them.
 !macro RemoveGezelService
-  ; Quarantine first. If deletion later fails, SCM still cannot auto-start a
-  ; partially configured legacy/default-LocalSystem registration on reboot.
-  nsExec::ExecToLog '"$SYSDIR\sc.exe" config ${GEZEL_SERVICE_NAME} start= disabled'
-  Pop $0
-  nsExec::ExecToLog '"$SYSDIR\sc.exe" stop ${GEZEL_SERVICE_NAME}'
-  Pop $0
-  nsExec::ExecToLog '"$SYSDIR\sc.exe" delete ${GEZEL_SERVICE_NAME}'
-  Pop $0
-  ; A successful delete is asynchronous when another process still holds an
-  ; SCM handle.  Poll for bounded time before deciding that a legacy service
-  ; survived.  sc.exe returns ERROR_SERVICE_DOES_NOT_EXIST (1060) only once
-  ; the registration is no longer queryable. Preserve the final result in $9.
-  StrCpy $8 0
-  ${Do}
-    nsExec::ExecToLog '"$SYSDIR\sc.exe" query ${GEZEL_SERVICE_NAME}'
-    Pop $9
-    ${If} $9 == 1060
-      ${ExitDo}
-    ${EndIf}
-    IntOp $8 $8 + 1
-    ${If} $8 >= 30
-      ${ExitDo}
-    ${EndIf}
-    Sleep 1000
-  ${Loop}
+  ; A fresh install or fallback uninstall has no service. Preserve 1060 in
+  ; $9 for callers and skip both bounded waits instead of idling for 10-40s.
+  nsExec::ExecToLog '"$SYSDIR\sc.exe" query ${GEZEL_SERVICE_NAME}'
+  Pop $9
+  ${If} $9 != 1060
+    ; Quarantine first. If deletion later fails, SCM still cannot auto-start a
+    ; partially configured legacy/default-LocalSystem registration on reboot.
+    nsExec::ExecToLog '"$SYSDIR\sc.exe" config ${GEZEL_SERVICE_NAME} start= disabled'
+    Pop $0
+    nsExec::ExecToLog '"$SYSDIR\sc.exe" stop ${GEZEL_SERVICE_NAME}'
+    Pop $0
+    ; Deleting a service whose stop is still in flight marks it
+    ; delete-pending and can strand the registration until reboot; wait for
+    ; STOPPED first (the committed-install pre-hook usually made this instant).
+    !insertmacro WaitGezelServiceStopped
+    nsExec::ExecToLog '"$SYSDIR\sc.exe" delete ${GEZEL_SERVICE_NAME}'
+    Pop $0
+    ; A successful delete is asynchronous when another process still holds an
+    ; SCM handle. Poll for bounded time before deciding that a legacy service
+    ; survived. sc.exe returns ERROR_SERVICE_DOES_NOT_EXIST (1060) only once
+    ; the registration is no longer queryable. Preserve the final result in $9.
+    StrCpy $8 0
+    ${Do}
+      nsExec::ExecToLog '"$SYSDIR\sc.exe" query ${GEZEL_SERVICE_NAME}'
+      Pop $9
+      ${If} $9 == 1060
+        ${ExitDo}
+      ${EndIf}
+      IntOp $8 $8 + 1
+      ${If} $8 >= 30
+        ${ExitDo}
+      ${EndIf}
+      Sleep 1000
+    ${Loop}
+  ${EndIf}
 !macroend
 
 ; Remove stale discovery material after stopping a prior service.  Older
@@ -84,6 +185,7 @@
   Delete "${GEZEL_DATA_DIR}\runtime\pid"
   Delete "${GEZEL_DATA_DIR}\runtime\cert.pem"
   Delete "${GEZEL_DATA_DIR}\runtime\cert-fingerprint"
+  Delete "${GEZEL_DATA_DIR}\runtime\service-role"
   Delete "${GEZEL_DATA_DIR}\runtime\lock"
 !macroend
 
@@ -116,7 +218,7 @@
     IntOp $1 $0 & 0x400
     ${If} $1 != 0
       DetailPrint "ERROR: ${DESCRIPTION} is a reparse point; refusing machine-service install."
-      MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel found an unsafe reparse point at ${PATH}. The machine service will not be installed; remove or inspect that path before retrying." /SD IDOK
+      MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel found an unsafe reparse point at ${PATH}. The shared model engine will not be installed; remove or inspect that path before retrying." /SD IDOK
       Goto ${FAILURE_LABEL}
     ${EndIf}
   ${EndIf}
@@ -142,7 +244,7 @@
   ${EndIf}
   ${If} $0 != 0
     DetailPrint "ERROR: failed to set a trusted owner on ${PATH} (exit $0)."
-    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not take secure ownership of ${SUBJECT} (Windows error $0). The service will not be installed; the desktop app will use its per-user fallback." /SD IDOK
+    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not take secure ownership of ${SUBJECT} (Windows error $0). The shared model engine will not be installed; Gezel will use an account-local model engine." /SD IDOK
     Goto ${FAILURE_LABEL}
   ${EndIf}
 !macroend
@@ -190,7 +292,7 @@
   Pop $0
   ${If} $0 == 0
     DetailPrint "ERROR: ${DESCRIPTION} contains a reparse point; refusing machine-service install."
-    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel found an unsafe reparse point below ${PATH}. The machine service will not be installed; remove or inspect that path before retrying." /SD IDOK
+    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel found an unsafe reparse point below ${PATH}. The shared model engine will not be installed; remove or inspect that path before retrying." /SD IDOK
     Goto ${FAILURE_LABEL}
   ${EndIf}
 !macroend
@@ -271,15 +373,18 @@
   DetailPrint "Installing least-privileged GezelService..."
 
   !insertmacro RemoveGezelService
+  ; From here the old registration is either gone or deliberately
+  ; quarantined; an installer abort must not try to revive it.
+  StrCpy $GezelServiceStoppedForInstall 0
   ${If} $9 != 1060
     DetailPrint "ERROR: the prior GezelService registration is still present (sc.exe exit $9)."
-    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not fully remove the prior machine service. It has been disabled and a replacement will not be installed; reboot or inspect the service before retrying." /SD IDOK
+    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not fully remove the prior shared model engine. It has been disabled and a replacement will not be installed; reboot or inspect the service before retrying." /SD IDOK
     Goto SkipNssm
   ${EndIf}
 
   ${IfNot} ${FileExists} "${GEZEL_SERVICE_HOST}"
-    DetailPrint "ERROR: gezel-service-host.exe is missing; the machine service cannot be registered."
-    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel was built without gezel-service-host.exe. The machine service will not be installed; the desktop app will use its per-user fallback." /SD IDOK
+    DetailPrint "ERROR: gezel-service-host.exe is missing; the shared model engine cannot be registered."
+    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel was built without gezel-service-host.exe. The shared model engine will not be installed; Gezel will use an account-local model engine." /SD IDOK
     Goto SkipNssm
   ${EndIf}
 
@@ -306,7 +411,7 @@
   Pop $0
   ${If} $0 != 0
     DetailPrint "ERROR: failed to harden ${GEZEL_DATA_DIR} ACL (icacls exit $0)."
-    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not secure its machine-service data directory (Windows error $0). The service will not be installed; the desktop app will use its per-user fallback." /SD IDOK
+    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not secure its shared-engine data directory (Windows error $0). The shared model engine will not be installed; Gezel will use an account-local model engine." /SD IDOK
     Goto SkipNssm
   ${EndIf}
   ; POSIX-0711 equivalent: let desktop users traverse this exact directory to
@@ -316,13 +421,61 @@
   Pop $0
   ${If} $0 != 0
     DetailPrint "ERROR: failed to grant traverse-only client access (icacls exit $0)."
-    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not configure safe client traversal to runtime discovery (Windows error $0). The service will not be installed; the desktop app will use its per-user fallback." /SD IDOK
+    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not configure safe user-daemon access to engine discovery (Windows error $0). The shared model engine will not be installed; Gezel will use an account-local model engine." /SD IDOK
     Goto SkipNssm
   ${EndIf}
   ; The root may have been attacker-owned when the first check ran. Re-check
   ; after the no-follow ACL operations; the private DACL then closes the race
   ; before any child is created, deleted, or extracted through this path.
   !insertmacro RejectReparsePoint "${GEZEL_DATA_DIR}" "Gezel data directory" SkipNssm
+
+  ${IfNot} ${FileExists} "${GEZEL_MIGRATE_SHARED_CLI}"
+    DetailPrint "ERROR: migrate-legacy-shared.js is missing; legacy product data cannot be moved safely."
+    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel was built without its shared-data migration tool. The shared model engine will not be changed, so existing machine-wide projects remain available through compatibility mode." /SD IDOK
+    Goto SkipNssm
+  ${EndIf}
+  !insertmacro RejectReparsePoint "${GEZEL_SHARED_DIR}" "Gezel machine-shared data directory" SkipNssm
+  DetailPrint "Migrating legacy machine-wide projects and gezels..."
+  System::Call 'Kernel32::SetEnvironmentVariable(t "ELECTRON_RUN_AS_NODE", t "1")i'
+  nsExec::ExecToLog '"${GEZEL_INTERPRETER}" "${GEZEL_MIGRATE_SHARED_CLI}" --source="${GEZEL_DATA_DIR}" --dest="${GEZEL_SHARED_DIR}"'
+  Pop $0
+  System::Call 'Kernel32::SetEnvironmentVariable(t "ELECTRON_RUN_AS_NODE", i 0)i'
+  ${If} $0 != 0
+    DetailPrint "ERROR: legacy shared-data migration failed (exit $0)."
+    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not safely migrate existing machine-wide projects (exit $0). Nothing was overwritten; the shared model engine will not be replaced until the migration can complete." /SD IDOK
+    Goto SkipNssm
+  ${EndIf}
+  !insertmacro RejectReparsePoint "${GEZEL_SHARED_DIR}" "Gezel machine-shared data directory" SkipNssm
+
+  ; The marker sits at the root under the private parent's traverse-only ACE,
+  ; so users can read but cannot replace it. Product scope directories receive
+  ; inherited Modify access and are operated on only by per-user daemons.
+  !insertmacro TakeTrustedOwnership "${GEZEL_SHARED_DIR}" "its machine-shared product directory" SkipNssm
+  !insertmacro SanitizeDescendants "${GEZEL_SHARED_DIR}" "machine-shared product"
+  nsExec::ExecToLog '"$SYSDIR\icacls.exe" "${GEZEL_SHARED_DIR}" /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)(F)" "*S-1-5-32-544:(OI)(CI)(F)" "*S-1-5-32-545:(RX)" /remove:g "*S-1-5-11" "*S-1-1-0" "*S-1-5-19" /L'
+  Pop $0
+  ${If} $0 != 0
+    DetailPrint "ERROR: failed to protect the shared-data root (icacls exit $0)."
+    Goto SkipNssm
+  ${EndIf}
+  nsExec::ExecToLog '"$SYSDIR\icacls.exe" "${GEZEL_SHARED_DIR}\.gezel-machine-shared-v1.json" /inheritance:r /grant:r "*S-1-5-18:(F)" "*S-1-5-32-544:(F)" "*S-1-5-32-545:(R)" /L'
+  Pop $0
+  ${If} $0 != 0
+    DetailPrint "ERROR: failed to publish the shared-data marker (icacls exit $0)."
+    Goto SkipNssm
+  ${EndIf}
+  nsExec::ExecToLog '"$SYSDIR\icacls.exe" "${GEZEL_SHARED_DIR}\projects" /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)(F)" "*S-1-5-32-544:(OI)(CI)(F)" "*S-1-5-32-545:(OI)(CI)(M)" /L'
+  Pop $0
+  ${If} $0 != 0
+    DetailPrint "ERROR: failed to publish shared projects (icacls exit $0)."
+    Goto SkipNssm
+  ${EndIf}
+  nsExec::ExecToLog '"$SYSDIR\icacls.exe" "${GEZEL_SHARED_DIR}\gezels" /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)(F)" "*S-1-5-32-544:(OI)(CI)(F)" "*S-1-5-32-545:(OI)(CI)(M)" /L'
+  Pop $0
+  ${If} $0 != 0
+    DetailPrint "ERROR: failed to publish shared gezels (icacls exit $0)."
+    Goto SkipNssm
+  ${EndIf}
 
   CreateDirectory "${GEZEL_DATA_DIR}\runtime"
   CreateDirectory "${GEZEL_DATA_DIR}\assets"
@@ -343,7 +496,7 @@
   ; elevated would otherwise turn upgrade cleanup into an arbitrary-file
   ; deletion primitive.
   !insertmacro ClearGezelRuntime
-  !insertmacro TakeTrustedOwnership "${GEZEL_DATA_DIR}\runtime" "its machine-service runtime directory" SkipNssm
+  !insertmacro TakeTrustedOwnership "${GEZEL_DATA_DIR}\runtime" "its shared-engine runtime directory" SkipNssm
 
   ; Public immutable asset boundary. Users may traverse and read/execute
   ; published models, but cannot create, replace, or delete them. The service
@@ -354,21 +507,21 @@
   Pop $0
   ${If} $0 != 0
     DetailPrint "ERROR: failed to apply the read-only asset-store ACL (icacls exit $0)."
-    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not secure its shared model store (Windows error $0). The service will not be installed; the desktop app will use its per-user fallback." /SD IDOK
+    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not secure its shared model store (Windows error $0). The shared model engine will not be installed; Gezel will use an account-local model engine." /SD IDOK
     Goto SkipNssm
   ${EndIf}
   ; No recursive pass here: SanitizeDescendants above already reset every
   ; reachable model back to pure inheritance, so the container ACEs — which
   ; are (OI)(CI) — propagate to them.
 
-  ; Client discovery boundary.  BUILTIN\Users receives read/execute only on
+  ; User-daemon discovery boundary.  BUILTIN\Users receives read/execute only on
   ; runtime and its files.  It receives no access to config, secrets, gezels,
   ; projects, service code, or logs under the private parent.
   nsExec::ExecToLog '"$SYSDIR\icacls.exe" "${GEZEL_DATA_DIR}\runtime" /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)(F)" "*S-1-5-32-544:(OI)(CI)(F)" "*S-1-5-32-545:(OI)(CI)(RX)" /remove:g "*S-1-5-11" "*S-1-1-0" "*S-1-5-19"'
   Pop $0
   ${If} $0 != 0
     DetailPrint "ERROR: failed to apply the runtime discovery ACL (icacls exit $0)."
-    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not secure its machine-service runtime discovery directory (Windows error $0). The service will not be installed; the desktop app will use its per-user fallback." /SD IDOK
+    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not secure its shared-engine discovery directory (Windows error $0). The shared model engine will not be installed; Gezel will use an account-local model engine." /SD IDOK
     Goto SkipNssm
   ${EndIf}
 
@@ -381,7 +534,7 @@
   System::Call 'Kernel32::SetEnvironmentVariable(t "ELECTRON_RUN_AS_NODE", i 0)i'
   ${If} $0 != 0
     DetailPrint "ERROR: service bundle extraction failed (exit $0)."
-    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not extract its machine-service bundle (exit code $0). The service will not be installed; the desktop app will use its per-user fallback." /SD IDOK
+    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not extract its shared-engine bundle (exit code $0). The shared model engine will not be installed; Gezel will use an account-local model engine." /SD IDOK
     Goto SkipNssm
   ${EndIf}
 
@@ -392,11 +545,11 @@
   ; `"C:\...\gezel-service-host.exe" run` — quoted-with-spaces, not
   ; hijackable via C:\Program.exe.  sc.exe requires the space after each
   ; `option=`.
-  nsExec::ExecToLog '"$SYSDIR\sc.exe" create ${GEZEL_SERVICE_NAME} type= own start= disabled obj= "NT AUTHORITY\LocalService" DisplayName= "Gezel Service" binPath= "\"$INSTDIR\gezel-service-host.exe\" run"'
+  nsExec::ExecToLog '"$SYSDIR\sc.exe" create ${GEZEL_SERVICE_NAME} type= own start= disabled obj= "NT AUTHORITY\LocalService" DisplayName= "Gezel Shared Model Engine" binPath= "\"$INSTDIR\gezel-service-host.exe\" run"'
   Pop $0
   ${If} $0 != 0
     DetailPrint "ERROR: service registration failed (sc create exit $0)."
-    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not register its machine service (Windows error $0). The desktop app will use its per-user fallback." /SD IDOK
+    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not register its shared model engine (Windows error $0). Gezel will use an account-local model engine." /SD IDOK
     Goto SkipNssm
   ${EndIf}
 
@@ -436,14 +589,14 @@
   ${If} $0 != 0
     DetailPrint "ERROR: failed to set the per-service SID (exit $0)."
     !insertmacro RemoveGezelService
-    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not give its machine service a dedicated identity (Windows error $0). The registration was removed; the desktop app will use its per-user fallback." /SD IDOK
+    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not give its shared model engine a dedicated identity (Windows error $0). The registration was removed; Gezel will use an account-local model engine." /SD IDOK
     Goto SkipNssm
   ${EndIf}
 
   ; LocalService normally carries privileges the daemon does not need,
-  ; notably SeImpersonatePrivilege.  An arbitrary-command terminal must not
-  ; inherit those.  Keep only traverse-change notification, which Node/NSSM
-  ; need for ordinary filesystem path traversal.  An empty/failed required-
+  ; notably SeImpersonatePrivilege.  Native engine/download children must not
+  ; inherit those.  Keep only traverse-change notification, which Node needs
+  ; for ordinary filesystem path traversal.  An empty/failed required-
   ; privileges policy would silently restore the account default, so fail
   ; closed and remove the registration on any error.
   nsExec::ExecToLog '"$SYSDIR\sc.exe" privs ${GEZEL_SERVICE_NAME} SeChangeNotifyPrivilege'
@@ -451,7 +604,7 @@
   ${If} $0 != 0
     DetailPrint "ERROR: failed to restrict service privileges (exit $0)."
     !insertmacro RemoveGezelService
-    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not remove unnecessary privileges from its machine service (Windows error $0). The registration was removed; the desktop app will use its per-user fallback." /SD IDOK
+    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not remove unnecessary privileges from its shared model engine (Windows error $0). The registration was removed; Gezel will use an account-local model engine." /SD IDOK
     Goto SkipNssm
   ${EndIf}
 
@@ -462,7 +615,7 @@
   ${If} $0 != 0
     DetailPrint "ERROR: failed to grant the service SID access to private state (exit $0)."
     !insertmacro RemoveGezelService
-    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not grant its restricted service access to private state (Windows error $0). The registration was removed; the desktop app will use its per-user fallback." /SD IDOK
+    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not grant its restricted model engine access to private state (Windows error $0). The registration was removed; Gezel will use an account-local model engine." /SD IDOK
     Goto SkipNssm
   ${EndIf}
   nsExec::ExecToLog '"$SYSDIR\icacls.exe" "${GEZEL_DATA_DIR}\runtime" /grant:r "NT SERVICE\${GEZEL_SERVICE_NAME}:(OI)(CI)(M)"'
@@ -470,7 +623,7 @@
   ${If} $0 != 0
     DetailPrint "ERROR: failed to grant the service SID access to runtime state (exit $0)."
     !insertmacro RemoveGezelService
-    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not grant its restricted service access to runtime state (Windows error $0). The registration was removed; the desktop app will use its per-user fallback." /SD IDOK
+    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not grant its restricted model engine access to runtime state (Windows error $0). The registration was removed; Gezel will use an account-local model engine." /SD IDOK
     Goto SkipNssm
   ${EndIf}
   nsExec::ExecToLog '"$SYSDIR\icacls.exe" "${GEZEL_DATA_DIR}\assets" /grant:r "NT SERVICE\${GEZEL_SERVICE_NAME}:(OI)(CI)(M)" /L'
@@ -478,7 +631,7 @@
   ${If} $0 != 0
     DetailPrint "ERROR: failed to grant the service SID access to shared assets (exit $0)."
     !insertmacro RemoveGezelService
-    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not grant its restricted service access to shared model assets (Windows error $0). The registration was removed; the desktop app will use its per-user fallback." /SD IDOK
+    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not grant its restricted model engine access to shared model assets (Windows error $0). The registration was removed; Gezel will use an account-local model engine." /SD IDOK
     Goto SkipNssm
   ${EndIf}
 
@@ -498,14 +651,14 @@
   ${If} $0 != 0
     DetailPrint "ERROR: failed to enable GezelService autostart (exit $0)."
     !insertmacro RemoveGezelService
-    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not enable its machine service (Windows error $0). The registration was removed; the desktop app will use its per-user fallback." /SD IDOK
+    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not enable its shared model engine (Windows error $0). The registration was removed; Gezel will use an account-local model engine." /SD IDOK
     Goto SkipNssm
   ${EndIf}
 
   nsExec::ExecToLog '"$SYSDIR\sc.exe" start ${GEZEL_SERVICE_NAME}'
   Pop $0
   ${If} $0 != 0
-    DetailPrint "WARNING: GezelService failed to start (exit $0); the desktop app will use its per-user fallback."
+    DetailPrint "WARNING: GezelService failed to start (exit $0); Gezel will use an account-local model engine."
   ${Else}
     DetailPrint "GezelService installed under restricted LocalService."
   ${EndIf}
@@ -526,7 +679,7 @@
   ; Every path reaching this label has already shown the user a dialog — except
   ; under `/S`, and electron-updater runs the NSIS installer silently for every
   ; Windows auto-update. NSIS skips MessageBox entirely in silent mode, so
-  ; without this an update can delete a working machine service, fail to
+  ; without this an update can delete a working shared model engine, fail to
   ; replace it, and leave no dialog, no service, and no trace. The user just
   ; gets slow launches and no background work.
   ;
@@ -547,7 +700,7 @@
   !insertmacro RemoveGezelService
   ${If} $9 != 1060
     DetailPrint "WARNING: GezelService is still registered (sc.exe exit $9). It remains disabled; runtime cleanup was skipped."
-    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not fully remove its machine service. The registration was disabled, but it may require a reboot or administrator cleanup." /SD IDOK
+    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not fully remove its shared model engine. The registration was disabled, but it may require a reboot or administrator cleanup." /SD IDOK
     Goto SkipUninstallRuntimeCleanup
   ${EndIf}
   ; Uninstall is elevated too.  Apply the same no-follow rule before deleting
@@ -563,6 +716,6 @@
   SetRegView 64
   DeleteRegKey SHELL_CONTEXT "${GEZEL_STATE_REGISTRY_KEY}"
   SetRegView 32
-  ; Preserve user data and the extracted service tree for recovery/migration.
-  DetailPrint "GezelService removed. User data at ${GEZEL_DATA_DIR} preserved."
+  ; Preserve shared models, engine state, and any legacy data for recovery.
+  DetailPrint "GezelService removed. Shared model and legacy data at ${GEZEL_DATA_DIR} preserved."
 !macroend

@@ -103,6 +103,39 @@ describe('GET /api/system/copilot-status', () => {
   });
 });
 
+describe('GET /api/system/home', () => {
+  // The supervisor's home-preference decision reads this before committing
+  // to a machine-service adoption. A fresh home MUST report everUsed=false
+  // even though boot auto-creates the whole system crew (Meester, Klerk,
+  // Boekwachter) and the default project — none of that is evidence a
+  // person worked here. Only sessions and extra projects are.
+  it('reports a fresh home as never used', async () => {
+    const res = await httpFetch(`${baseUrl}/api/system/home`, { headers: auth() });
+    expect(res.status).toBe(200);
+    const info = (await res.json()) as {
+      home: string;
+      scope: string;
+      usage: { gezelCount: number; projectCount: number; everUsed: boolean };
+      memory: { totalBytes: number; freeBytes: number };
+      engines: unknown[];
+    };
+    expect(info.home).toBe(home);
+    expect(info.scope).toBe('user');
+    // Bootstrap crew — present on every fresh boot, deliberately not part
+    // of the everUsed signal.
+    expect(info.usage.gezelCount).toBeGreaterThanOrEqual(1);
+    expect(info.usage.projectCount).toBeLessThanOrEqual(1);
+    expect(info.usage.everUsed).toBe(false);
+    expect(info.memory.totalBytes).toBeGreaterThan(0);
+    expect(Array.isArray(info.engines)).toBe(true);
+  });
+
+  it('requires auth like the rest of the internal API', async () => {
+    const res = await httpFetch(`${baseUrl}/api/system/home`);
+    expect(res.status).toBe(401);
+  });
+});
+
 describe('GET /api/system-toolsets/status', () => {
   // On-demand entries must not move the boot health bus, or a user-triggered
   // Copilot install would knock the Home pill out of "Runtime ready".

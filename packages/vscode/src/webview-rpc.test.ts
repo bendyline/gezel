@@ -26,7 +26,6 @@ function harness(fetchImpl: typeof fetch) {
   const connection = {
     baseUrl: 'https://127.0.0.1:6228',
     token: 'HOST-ONLY-TOKEN',
-    firstPartyToken: 'FIRST-PARTY-HOST-ONLY-TOKEN',
     fetch: fetchImpl,
   } as Connection;
   const logger = { warn: vi.fn() } as unknown as Logger;

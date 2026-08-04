@@ -111,6 +111,57 @@ export const RemoteInferRequestSchema = z.object({
 export type RemoteInferRequest = z.infer<typeof RemoteInferRequestSchema>;
 
 // ---------------------------------------------------------------------------
+// User-prepared prompt-cache operations — `POST /v1/remote/cache/*`.
+// ---------------------------------------------------------------------------
+
+/**
+ * Pre-warm one user-owned session on B without giving B access to A's store.
+ * A prepares the exact stable prompt bands, transcript, and advertised tool
+ * schemas; B only renders/prefills them through its native provider.
+ */
+export const RemoteCacheWarmRequestSchema = z.object({
+  protocolVersion: z.number(),
+  /** B-native `<provider>:<model>` id. */
+  model: z.string().min(1),
+  /** A-owned id. B namespaces it by the authenticated origin before use. */
+  sessionId: z.string().min(1),
+  systemMessage: z.string(),
+  systemPromptLayers: SystemPromptLayersWireSchema.optional(),
+  volatileContext: z.string().optional(),
+  priorMessages: z.array(PriorMessageWireSchema).default([]),
+  tools: z.array(ExternalToolSpecWireSchema).optional(),
+  tuning: z.record(z.string(), z.unknown()).optional(),
+});
+export type RemoteCacheWarmRequest = z.infer<typeof RemoteCacheWarmRequestSchema>;
+
+export const RemoteCacheEvictRequestSchema = z.object({ sessionId: z.string().min(1) });
+export type RemoteCacheEvictRequest = z.infer<typeof RemoteCacheEvictRequestSchema>;
+
+// ---------------------------------------------------------------------------
+// Pre-session admission — `POST /v1/remote/admit`.
+// ---------------------------------------------------------------------------
+
+/**
+ * Ask B to resolve/load a model and report the context window it could
+ * actually admit under current RAM/VRAM pressure. A uses this result before
+ * constructing its system prompt and tool surface; model-catalog metadata is
+ * only the requested/native ceiling and can be substantially larger.
+ */
+export const RemoteAdmissionRequestSchema = z.object({
+  protocolVersion: z.number(),
+  /** B-native `<provider>:<model>` id. */
+  model: z.string(),
+});
+export type RemoteAdmissionRequest = z.infer<typeof RemoteAdmissionRequestSchema>;
+
+export const RemoteAdmissionResponseSchema = z.object({
+  model: z.string(),
+  /** Post-admission, per-session context window in tokens. */
+  contextWindow: z.number().int().positive(),
+});
+export type RemoteAdmissionResponse = z.infer<typeof RemoteAdmissionResponseSchema>;
+
+// ---------------------------------------------------------------------------
 // Streamed response frames (SSE `data:` payloads), discriminated on `type`.
 // ---------------------------------------------------------------------------
 

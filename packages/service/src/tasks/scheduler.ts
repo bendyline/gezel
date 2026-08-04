@@ -632,7 +632,10 @@ export class TaskScheduler {
 
     const cfg = mergeNudgeConfig(project.nudgeConfig, globalDefaults, tempo);
     if (cfg.enabled === false) {
-      trace('skip — nudges disabled for this project');
+      // This is a durable steady state and it never produces `lastNudgedAt`,
+      // so the ordinary first-nudge trace would repeat every 30 seconds
+      // forever. Keep it available in explicit debug mode only.
+      if (debugOn) log.info(`[scheduler] ${project.id}: skip — nudges disabled for this project`);
       return;
     }
     // Skip the nudge if either (a) someone's mid-turn anywhere in this

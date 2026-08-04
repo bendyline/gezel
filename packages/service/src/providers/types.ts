@@ -658,6 +658,32 @@ export interface SendAndWaitOpts {
 
 export interface LLMSession {
   /**
+   * Effective context window for this concrete session, after any native
+   * engine admission clamp. Stateless/local-history providers expose this so
+   * ChatManager can run the same proactive pressure checks regardless of
+   * whether inference is in-process or routed through a machine broker.
+   */
+  readonly numCtx?: number;
+  /** Model actually used by this session (diagnostics + pressure warnings). */
+  readonly model?: string;
+  /**
+   * Cheap estimate of the complete prompt currently held by this session,
+   * including system bands, prior messages, and tool schemas.
+   */
+  estimatePromptChars?(): number;
+  /**
+   * Best-effort prompt-cache prefill for the session's current exact prompt.
+   * Remote sessions use this to send their A-owned prompt/transcript/tool
+   * surface to B's inference-only warm endpoint. Implementations must not
+   * mutate the conversation transcript.
+   */
+  prewarm?(sessionId: string): Promise<void>;
+  /**
+   * Native prefill primitive used by the broker after it receives a prepared
+   * remote warm payload. `sessionId` is already tenant-namespaced by B.
+   */
+  prefillOnly?(opts?: { timeoutMs?: number; sessionId?: string }): Promise<void>;
+  /**
    * Send a user prompt, stream deltas via onDelta subscribers, resolve with
    * the full text response. Implementations should tolerate the SDK's
    * idle-timeout quirks and fall back to accumulated deltas when possible.
@@ -941,6 +967,24 @@ export interface LLMProvider {
    * known, or pre-init state).
    */
   getEffectiveModelId?(): string | undefined;
+  /**
+   * Effective per-turn context window the provider actually gives a
+   * session. Supervised local engines may lower the configured/model-native
+   * value at launch time to fit live RAM + VRAM; callers that size prompts
+   * or tool surfaces must use this post-admission number rather than the
+   * requested ceiling.
+   */
+  getContextWindow?(): number | undefined;
+  /**
+   * Resolve the effective context window before a session prompt is built.
+   *
+   * Native providers usually know this synchronously via
+   * {@link getContextWindow}. A broker-backed provider must first ask the
+   * broker to admit/load the selected model, because live RAM/VRAM pressure
+   * can clamp the configured window. Implementations should cache the result;
+   * ChatManager may call this again while refreshing a warm session prompt.
+   */
+  prepareContextWindow?(model?: string): Promise<number | undefined>;
   /**
    * The concurrency/priority gate this provider's sessions acquire
    * from before invoking the underlying API. Sessions produced by

@@ -87,6 +87,18 @@ describe('system service runtime discovery', () => {
     });
   });
 
+  it('reads the split-service role when a new machine daemon publishes it', async () => {
+    const home = await runtimeHome();
+    await writeFile(join(home, 'runtime', 'port'), '6228\n');
+    await writeFile(join(home, 'runtime', 'auth-token'), 'engine-token\n');
+    await writeFile(join(home, 'runtime', 'service-role'), 'machine-engine\n');
+
+    await expect(readSystemServiceRuntime(home)).resolves.toMatchObject({
+      token: 'engine-token',
+      serviceRole: 'machine-engine',
+    });
+  });
+
   it('rejects invalid and out-of-range ports', async () => {
     const home = await runtimeHome();
     await writeFile(join(home, 'runtime', 'port'), '70000\n');

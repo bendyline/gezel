@@ -115,6 +115,10 @@ export class MockProvider implements LLMProvider {
     this.name = opts.name ?? 'copilot';
   }
 
+  getContextWindow(): number | undefined {
+    return this.ollamaContextConfig?.numCtx;
+  }
+
   async initialize(): Promise<void> {
     /* no-op */
   }

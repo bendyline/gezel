@@ -36,6 +36,12 @@ export interface PairedRemote {
   pairedAt: number;
   /** Last time A successfully reached this server (in-memory unless flushed). */
   lastSeenAt?: number;
+  /**
+   * Runtime-managed connections are never persisted and cannot be removed by
+   * the ordinary pairing UI. Today the only managed peer is this computer's
+   * machine-wide engine broker.
+   */
+  managed?: 'machine-engine';
 }
 
 export interface RemotesRegistry {
@@ -43,6 +49,10 @@ export interface RemotesRegistry {
   get(remoteId: string): PairedRemote | null;
   /** Upsert a paired server. Re-pairing the same id or base URL replaces it atomically. */
   add(remote: PairedRemote): Promise<void>;
+  /** Install/replace a runtime-only peer without writing its rotating token. */
+  setEphemeral(remote: PairedRemote): void;
+  /** Remove a runtime-only peer. Persisted pairings are never affected. */
+  removeEphemeral(remoteId: string): boolean;
   /** Patch fields of an existing entry (token rotation, cert refresh, re-pin). */
   update(remoteId: string, patch: Partial<Omit<PairedRemote, 'remoteId'>>): Promise<boolean>;
   /** Forget a server. Returns true if a record was removed. */
@@ -66,11 +76,14 @@ export async function createRemotesRegistry(
   opts: CreateRemotesRegistryOptions,
 ): Promise<RemotesRegistry> {
   const filePath = opts.filePath ?? defaultRemotesFile(opts.home);
-  const byId = new Map<string, PairedRemote>();
-  for (const r of await loadPersisted(filePath)) byId.set(r.remoteId, r);
+  const persisted = new Map<string, PairedRemote>();
+  const ephemeral = new Map<string, PairedRemote>();
+  for (const r of await loadPersisted(filePath)) persisted.set(r.remoteId, r);
+
+  const combined = (): Map<string, PairedRemote> => new Map([...persisted, ...ephemeral]);
 
   const persist = async (): Promise<void> => {
-    const snapshot: PersistedShape = { version: 1, remotes: Array.from(byId.values()) };
+    const snapshot: PersistedShape = { version: 1, remotes: Array.from(persisted.values()) };
     await writeSecurityJson(filePath, `${JSON.stringify(snapshot, null, 2)}\n`);
   };
   let mutationChain: Promise<void> = Promise.resolve();
@@ -85,40 +98,51 @@ export async function createRemotesRegistry(
 
   return {
     list() {
-      return Array.from(byId.values());
+      return Array.from(combined().values());
     },
     get(remoteId) {
-      return byId.get(remoteId) ?? null;
+      return ephemeral.get(remoteId) ?? persisted.get(remoteId) ?? null;
     },
     async add(remote) {
       return mutate(async () => {
-        const previous = byId.get(remote.remoteId);
+        const previous = persisted.get(remote.remoteId);
         const normalizedBaseUrl = remote.baseUrl.replace(/\/+$/, '');
-        const displaced = Array.from(byId.entries()).filter(
+        const displaced = Array.from(persisted.entries()).filter(
           ([id, entry]) =>
             id !== remote.remoteId && entry.baseUrl.replace(/\/+$/, '') === normalizedBaseUrl,
         );
-        for (const [id] of displaced) byId.delete(id);
-        byId.set(remote.remoteId, { ...remote });
+        for (const [id] of displaced) persisted.delete(id);
+        persisted.set(remote.remoteId, { ...remote, managed: undefined });
         try {
           await persist();
         } catch (err) {
-          if (previous) byId.set(remote.remoteId, previous);
-          else byId.delete(remote.remoteId);
-          for (const [id, entry] of displaced) byId.set(id, entry);
+          if (previous) persisted.set(remote.remoteId, previous);
+          else persisted.delete(remote.remoteId);
+          for (const [id, entry] of displaced) persisted.set(id, entry);
           throw err;
         }
       });
     },
+    setEphemeral(remote) {
+      ephemeral.set(remote.remoteId, { ...remote });
+    },
+    removeEphemeral(remoteId) {
+      return ephemeral.delete(remoteId);
+    },
     async update(remoteId, patch) {
       return mutate(async () => {
-        const existing = byId.get(remoteId);
+        const transient = ephemeral.get(remoteId);
+        if (transient) {
+          ephemeral.set(remoteId, { ...transient, ...patch, remoteId });
+          return true;
+        }
+        const existing = persisted.get(remoteId);
         if (!existing) return false;
-        byId.set(remoteId, { ...existing, ...patch, remoteId });
+        persisted.set(remoteId, { ...existing, ...patch, remoteId });
         try {
           await persist();
         } catch (err) {
-          byId.set(remoteId, existing);
+          persisted.set(remoteId, existing);
           throw err;
         }
         return true;
@@ -126,20 +150,20 @@ export async function createRemotesRegistry(
     },
     async remove(remoteId) {
       return mutate(async () => {
-        const existing = byId.get(remoteId);
+        const existing = persisted.get(remoteId);
         if (!existing) return false;
-        byId.delete(remoteId);
+        persisted.delete(remoteId);
         try {
           await persist();
         } catch (err) {
-          byId.set(remoteId, existing);
+          persisted.set(remoteId, existing);
           throw err;
         }
         return true;
       });
     },
     touch(remoteId) {
-      const r = byId.get(remoteId);
+      const r = ephemeral.get(remoteId) ?? persisted.get(remoteId);
       if (r) r.lastSeenAt = Date.now();
     },
   };

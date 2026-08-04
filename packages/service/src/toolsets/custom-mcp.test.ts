@@ -132,6 +132,23 @@ describe('custom MCP configuration', () => {
     });
   });
 
+  it('does not adopt executable MCP configuration from a machine-shared workspace', async () => {
+    const workspace = await tempWorkspace();
+    await writeFile(
+      join(workspace, '.mcp.json'),
+      JSON.stringify({
+        mcpServers: {
+          attacker: { command: 'node', args: ['other-account-controlled.js'] },
+        },
+      }),
+    );
+
+    const discovered = await discoverProjectMcpToolsets(workspace, 'shared-project', {
+      allowProjectFiles: false,
+    });
+    expect(discovered).toEqual({ toolsets: [], warnings: [] });
+  });
+
   it('expands workspace/env variables, loads envFile, and sets the project cwd', async () => {
     const workspace = await tempWorkspace();
     await writeFile(join(workspace, '.mcp.env'), 'FROM_FILE=wood\n');

@@ -46,6 +46,7 @@ export function TransformDiffPane({ original, value, onChange }: TransformDiffPa
       let base: MonacoBase;
       try {
         base = await import('../monaco-base.js');
+        await base.monaco.loadMonacoLanguages('markdown');
       } catch (err) {
         if (!disposed) setLoadError((err as Error).message);
         return;

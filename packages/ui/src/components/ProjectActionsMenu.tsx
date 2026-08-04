@@ -5,7 +5,7 @@ import { ContextMenu, DropdownMenu } from '../primitives/index.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
 
 interface ProjectActionProps {
-  project: Pick<Project, 'id' | 'name' | 'workingDir' | 'github'>;
+  project: Pick<Project, 'id' | 'name' | 'workingDir' | 'github' | 'storageScope'>;
   /**
    * Whether the project currently shows the red failed-turn indicator.
    * Gates the "Clear error indicator" item so the menu never offers a
@@ -25,6 +25,7 @@ function useProjectActions({ project, onDeleted }: ProjectActionProps) {
   const [error, setError] = useState<string | null>(null);
 
   const isDefault = project.id === 'default';
+  const isShared = project.storageScope === 'machine-shared';
   const hasInternalWorkspace = !project.workingDir && !project.github?.checkoutDir;
 
   const openConfirm = () => {
@@ -73,6 +74,7 @@ function useProjectActions({ project, onDeleted }: ProjectActionProps) {
     error,
     hasInternalWorkspace,
     isDefault,
+    isShared,
     openConfirm,
     removeWorkspace,
     runDelete,
@@ -108,13 +110,13 @@ function ProjectMenuItems({
       )}
       <Item
         className="app-nav-menu-item danger"
-        disabled={actions.isDefault}
+        disabled={actions.isDefault || actions.isShared}
         onSelect={() => {
-          if (actions.isDefault) return;
+          if (actions.isDefault || actions.isShared) return;
           actions.openConfirm();
         }}
       >
-        Delete project…
+        {actions.isShared ? 'Shared project removal is unavailable' : 'Delete project…'}
       </Item>
     </>
   );

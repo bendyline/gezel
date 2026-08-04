@@ -37,8 +37,10 @@ import { nowIso } from '@bendyline/gezel';
 import {
   fallbackProjectIndexDir,
   fallbackProjectVillageFile,
+  projectContentIndexDbFile,
   projectLocalIndexDbFile,
   projectLocalVillageFile,
+  projectStorageScope,
 } from '@bendyline/gezel/paths';
 import {
   resolveImportEdges,
@@ -120,7 +122,9 @@ export class ContentIndex {
     const opened = await this.open(projectId);
     if (!opened) return null;
     try {
-      await ensureIndexGitignore(opened.workspaceDir);
+      if (projectStorageScope(this.home, projectId) !== 'machine-shared') {
+        await ensureIndexGitignore(opened.workspaceDir);
+      }
       const stats = await indexWorkspaceContent(opened.index, opened.workspaceDir);
       // Scanner rows are rebuildable; lifecycle is durable Store state. A
       // completed refresh prunes lifecycle for findings that truly vanished,
@@ -1051,11 +1055,13 @@ export class ContentIndex {
    * db). Recall consults it before paying the query-embed cost.
    */
   async hasIndex(projectId: string): Promise<boolean> {
-    try {
-      const workspaceDir = await this.store.projectWorkspaceDir(projectId);
-      if (existsSync(projectLocalIndexDbFile(workspaceDir))) return true;
-    } catch {
-      /* fall through to the home-scoped fallback */
+    if (projectStorageScope(this.home, projectId) !== 'machine-shared') {
+      try {
+        const workspaceDir = await this.store.projectWorkspaceDir(projectId);
+        if (existsSync(projectLocalIndexDbFile(workspaceDir))) return true;
+      } catch {
+        /* fall through to the home-scoped fallback */
+      }
     }
     return existsSync(join(fallbackProjectIndexDir(this.home, projectId), 'index.db'));
   }
@@ -1492,7 +1498,10 @@ export class ContentIndex {
         rootPath: workspaceDir,
       }).catch(() => null);
 
-    let index = await open(projectLocalIndexDbFile(workspaceDir));
+    // A machine-shared workspace is a collaborative content tree, not a safe
+    // home for a mutable SQLite database opened by every account daemon.
+    // Build the same derived index independently in each account's sidecar.
+    let index = await open(projectContentIndexDbFile(this.home, projectId, workspaceDir));
     if (!index) {
       // Workspace `.gezel/` not writable — fall back to the home-local dir.
       index = await open(join(fallbackProjectIndexDir(this.home, projectId), 'index.db'));

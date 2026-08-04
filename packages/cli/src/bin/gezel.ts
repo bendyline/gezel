@@ -40,12 +40,9 @@ program
   .option('--token <token>', 'Bearer token for --connect (must have CLI access).')
   .option(
     '--standalone',
-    'Skip the Electron-installed system service and use the user-owned local runtime.',
+    'Skip legacy full-product machine-service compatibility and use the per-user daemon.',
   )
-  .option(
-    '--home <dir>',
-    'Use this user-owned Gezel home instead of the system service (default fallback: $GEZEL_HOME or ~/.gezel).',
-  )
+  .option('--home <dir>', 'Use this user-owned Gezel home (default: $GEZEL_HOME or ~/.gezel).')
   .option('--project [folder]', 'For `run`: ensure this folder is the project (bare flag = cwd).');
 
 /** Global flags, read off the root program. */
@@ -62,8 +59,9 @@ program.hook('preAction', () => {
 // Default command: a bare `gezel` (no subcommand) launches the interactive
 // TUI bound to the current folder's project. Honors developer mode for the
 // home dir (.gezel-dev). Otherwise it prefers the Electron-installed system
-// service and falls back to a user-owned daemon. Ink/React are lazily imported
-// so the other subcommands don't pay their load cost.
+// legacy full-product service during rolling upgrades, then uses the app SDK
+// to authorize against the per-user daemon. Ink/React are lazily imported so
+// the other subcommands don't pay their load cost.
 program.action(async () => {
   const globals = cliGlobals();
   resolveDevHome(globals);
@@ -107,11 +105,15 @@ program
     // Web mode serves HTTP on loopback (a browser can't trust our
     // self-signed cert) and mints a dedicated browser token. Both flow
     // to the spawned daemon as env so they apply to fresh + foreground.
+    const userEnv = { ...process.env };
+    delete userEnv.GEZEL_SERVICE_ROLE;
+    delete userEnv.GEZEL_SYSTEM_SCOPE;
     const spawnEnv: NodeJS.ProcessEnv = {
-      ...process.env,
+      ...userEnv,
       // A CLI-owned foreground/web daemon must not reserve the canonical
       // machine-service port unless the user explicitly asks for it.
       GEZEL_PORT: port !== undefined ? String(port) : '0',
+      GEZEL_SERVICE_ROLE: 'user',
     };
     if (opts.web) {
       spawnEnv.GEZEL_WEB = '1';
@@ -271,7 +273,9 @@ program
     if (!alive) return;
     const client = new GezelClient({
       baseUrl: runtime.baseUrl,
-      token: runtime.token,
+      // Health is intentionally unauthenticated; diagnostics do not need to
+      // consume the per-launch first-party runtime credential.
+      token: '',
       ...(runtime.cert ? { fetch: createTrustingFetch({ cert: runtime.cert }) } : {}),
     });
     try {
@@ -549,9 +553,17 @@ handboek
     (href: string, prior: string[]) => [...prior, href],
     [] as string[],
   )
-  .action(async (opts: { out: string; css: string[] }) => {
+  .option(
+    '--site-url <url>',
+    'URL of the surrounding site; adds a wordmark link back out of the docs',
+  )
+  .action(async (opts: { out: string; css: string[]; siteUrl?: string }) => {
     const { runHandboekExport } = await import('../handboek-export.js');
-    const result = await runHandboekExport({ out: opts.out, css: opts.css });
+    const result = await runHandboekExport({
+      out: opts.out,
+      css: opts.css,
+      siteUrl: opts.siteUrl,
+    });
     console.log(`Handboek exported: ${result.pages} pages → ${result.out}`);
     for (const id of result.skipped) console.error(`  skipped (no body): ${id}`);
   });

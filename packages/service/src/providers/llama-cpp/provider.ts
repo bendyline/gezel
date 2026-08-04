@@ -1878,6 +1878,7 @@ export class LlamaCppProvider implements LLMProvider {
     if (opts.logFile) this.logFile = opts.logFile;
     if (opts.slotSavePath) this.slotSavePath = opts.slotSavePath;
     const slots = opts.concurrency ?? 2;
+    this.launchedSlots = slots;
     const batchMax = Math.max(1, opts.batchMaxConcurrency ?? 1);
     this.batchMaxConcurrency = batchMax;
     const batching = batchMax > 1;
@@ -1932,6 +1933,7 @@ export class LlamaCppProvider implements LLMProvider {
    */
   private cacheAdapter: import('./cache-adapter.js').LlamaCppCacheAdapter | null = null;
   private slotSavePath?: string;
+  private readonly launchedSlots: number;
 
   setCacheAdapter(adapter: import('./cache-adapter.js').LlamaCppCacheAdapter): void {
     this.cacheAdapter = adapter;
@@ -1948,6 +1950,21 @@ export class LlamaCppProvider implements LLMProvider {
    */
   getSlotSavePath(): string | undefined {
     return this.slotSavePath;
+  }
+
+  /**
+   * The `--parallel` slot count this provider was constructed for — the
+   * ENGINE's slot space, which is what the cache adapter must size its
+   * slot model to. Deliberately NOT `queue.concurrency`: the queue
+   * reserves a background lane ABOVE the engine slots
+   * (`max(slots, interactive+1)`), so on a single-slot launch the queue
+   * reads 2 — and an adapter sized off it binds sessions to slot ids the
+   * server doesn't have. Wild-caught 2026-08-03: the adapter "bound"
+   * slot 1 on a `--parallel 1` server; every save/restore against it
+   * would 400 silently, and the debug probe's slot narration was fiction.
+   */
+  getLaunchedSlots(): number {
+    return this.launchedSlots;
   }
 
   /**
@@ -2041,6 +2058,10 @@ export class LlamaCppProvider implements LLMProvider {
       ...(opts.tuning ? { tuning: opts.tuning } : {}),
       ...(opts.terminalToolPolicy ? { terminalToolPolicy: opts.terminalToolPolicy } : {}),
     });
+  }
+
+  getContextWindow(): number {
+    return this.numCtx;
   }
 
   /**
@@ -2542,7 +2563,7 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
    * this method itself does no queueing — it is best-effort
    * background work and must never contend with a real turn.
    */
-  async prefillOnly(opts?: { timeoutMs?: number }): Promise<void> {
+  async prefillOnly(opts?: { timeoutMs?: number; sessionId?: string }): Promise<void> {
     const baseUrl = await this.deps.resolveBaseUrl();
     let wireMessages: ChatMessage[] = this.flattenToolMessagesForStrictAlternation
       ? flattenToolMessagesForStrictAlternation(this.messages)
@@ -2569,6 +2590,17 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
     // After tuning so a catalog `maxTokens` can't re-widen the decode.
     body.max_tokens = 1;
     if (tools.length > 0) body.tools = tools;
+    if (opts?.sessionId) {
+      const adapter = this.deps.provider.getCacheAdapter();
+      if (adapter) {
+        await adapter.prepareForSend(
+          opts.sessionId,
+          this.deps.systemMessage,
+          this.deps.systemPromptLayers,
+        );
+        Object.assign(body, adapter.buildRequestExtras(opts.sessionId));
+      }
+    }
     const res = await this.deps.fetchImpl(`${baseUrl}/v1/chat/completions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -2646,14 +2678,26 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
     // error already proved we're over the line, so skip the ratio
     // gate. The proactive iteration-2 hook leaves `force` unset.
     if (!opts?.force && ratio < MID_LOOP_COMPACT_RATIO) return false;
-    // Slice prior = messages between the system msg (idx 0) and the
-    // current turn's user msg (currentTurnStartIdx). String-only
-    // content; the manager's compaction prompt expects role + text,
-    // not tool_calls / images.
+    // Slice prior = conversational messages after ALL leading system bands
+    // and before the current turn's user msg. Layered prefix caching seeds a
+    // stable + volatile system pair; treating the volatile band as prior
+    // conversation made a recalled first turn appear to have two old messages
+    // and emitted a bogus compaction warning on `hello`.
+    let priorStartIdx = 0;
+    while (
+      priorStartIdx < this.currentTurnStartIdx &&
+      this.messages[priorStartIdx]?.role === 'system'
+    ) {
+      priorStartIdx++;
+    }
     const prior: Array<{ role: string; content: string }> = [];
-    for (let i = 1; i < this.currentTurnStartIdx; i++) {
+    for (let i = priorStartIdx; i < this.currentTurnStartIdx; i++) {
       const m = this.messages[i]!;
-      if (typeof m.content === 'string' && m.content.length > 0) {
+      if (
+        (m.role === 'user' || m.role === 'assistant') &&
+        typeof m.content === 'string' &&
+        m.content.length > 0
+      ) {
         prior.push({ role: m.role, content: m.content });
       }
     }
@@ -2678,15 +2722,15 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
       this.compactedThisTurn = true;
       return false;
     }
-    // Replace [1..currentTurnStartIdx) with one synthesis assistant
-    // message. Splice keeps the array reference stable (other parts
-    // of the code may iterate over it; we mutate in place).
-    const removed = this.currentTurnStartIdx - 1;
-    this.messages.splice(1, removed, {
+    // Replace the prior conversation with one synthesis assistant message,
+    // preserving every leading system band verbatim. Splice keeps the array
+    // reference stable (other parts may iterate over it; we mutate in place).
+    const removed = this.currentTurnStartIdx - priorStartIdx;
+    this.messages.splice(priorStartIdx, removed, {
       role: 'assistant',
       content: result.syntheticContent,
     });
-    this.currentTurnStartIdx = 2;
+    this.currentTurnStartIdx = priorStartIdx + 1;
     this.compactedThisTurn = true;
     log.info(
       `[llama-cpp] mid-loop compacted ${removed} prior message(s) → 1 synthesis (${result.syntheticContent.length} chars)${opts?.force ? ' (reactive recovery)' : ''}`,

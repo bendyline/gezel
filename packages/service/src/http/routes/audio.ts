@@ -9,6 +9,7 @@ import { KOKORO_DEFAULT_MODEL_ID, KOKORO_DEFAULT_VOICES } from '../../providers/
 import type { AudioModelPullSpec } from '../../providers/audio/types.js';
 import { WHISPER_MODEL_CATALOG } from '../../providers/audio/whisper-cpp.js';
 import type { ServiceContext } from '../context.js';
+import { machineEngineProxy } from './machine-engine-proxy.js';
 
 const log = createLogger('audio');
 
@@ -30,6 +31,13 @@ const log = createLogger('audio');
  */
 export function audioRoutes(ctx: ServiceContext): Hono {
   const app = new Hono();
+  app.use(
+    '*',
+    machineEngineProxy(ctx, '/api/audio', '/v1/remote/manage/audio', [
+      '/api/audio/transcribe',
+      '/api/audio/synthesize',
+    ]),
+  );
 
   app.post('/transcribe', async (c) => {
     const body = await c.req.json().catch(() => null);

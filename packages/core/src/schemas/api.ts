@@ -27,9 +27,23 @@ import { ExpectedDeliverableSchema } from './session.js';
 import { TaskRefSchema } from './task.js';
 import { TuningProfileIdSchema } from './tuning-profile-registry.js';
 
+/**
+ * Runtime responsibility of a gezeld process.
+ *
+ * `legacy-full` is intentionally retained for rolling upgrades: machine
+ * services installed by older releases own both product data and inference,
+ * while new installs split those responsibilities between a per-user daemon
+ * and a machine-wide engine broker.
+ */
+export const ServiceRoleSchema = z.enum(['user', 'machine-engine', 'legacy-full']);
+export type ServiceRole = z.infer<typeof ServiceRoleSchema>;
+
 export const HealthResponseSchema = z.object({
   ok: z.literal(true),
   version: z.string(),
+  serviceRole: ServiceRoleSchema.optional(),
+  /** Present on user daemons that can route native work to the shared broker. */
+  machineEngineConnected: z.boolean().optional(),
   startedAt: z.string(),
   nodeVersion: z.string().optional(),
   platform: z.string().optional(),
@@ -163,6 +177,21 @@ export const MachineMemoryUsageSchema = z.object({
    * running or the budget is not enforced.
    */
   engineBudgetBytes: z.number().nonnegative().nullable(),
+  /**
+   * The memory pools behind `engineBudgetBytes`. Optional for compatibility
+   * with daemons that predate the split. This describes capacity planning,
+   * not measured placement: a reservation may use either pool depending on
+   * the model and backend.
+   */
+  enginePools: z
+    .object({
+      kind: z.enum(['unified', 'discrete-gpu', 'system-ram']),
+      vramBytes: z.number().nonnegative(),
+      ramShareBytes: z.number().nonnegative(),
+      fastBytes: z.number().nonnegative(),
+    })
+    .nullable()
+    .optional(),
   /** The resident models behind `engineReservedBytes`. */
   residentModels: z.array(ResidentEngineModelSchema),
   gezelEngineProcessCount: z.number().int().nonnegative(),
@@ -291,6 +320,62 @@ export const SystemDiagnosticsSchema = z.object({
 export type SystemDiagnostics = z.infer<typeof SystemDiagnosticsSchema>;
 
 /**
+ * Identity card for a running daemon: which home it serves, whether that
+ * home has ever actually been used, and what it has resident right now.
+ *
+ * `GET /api/system/home`. Two audiences:
+ *
+ *   1. The Electron supervisor's home-preference decision. A machine
+ *      service whose home was never used must not win over a per-user
+ *      home full of real gezels and projects — adopting it presents an
+ *      empty app. The supervisor asks this endpoint before committing.
+ *   2. Humans debugging split-home installs. The machine home's config
+ *      and state directories are ACL-private to the service identity, so
+ *      without this endpoint there is no way to see which home, model,
+ *      or config a machine daemon is actually serving.
+ *
+ * Deliberately separate from {@link SystemDiagnosticsSchema}: that schema
+ * is the privacy boundary for public GitHub bug reports and must never
+ * carry home paths; this one exists precisely to name them, and stays on
+ * the authenticated local API.
+ *
+ * `usage.everUsed` is structural evidence ("a person worked here"), not
+ * `config.firstRunCompleted` — the first-run bootstrap sets that flag on
+ * every daemon boot, including headless machine services no human has
+ * ever seen. Gezel count is bootstrap noise too (the whole system crew is
+ * auto-created); a persisted session or a project beyond the auto-created
+ * `default` is what only ever comes from use.
+ */
+export const SystemHomeInfoSchema = z.object({
+  home: z.string(),
+  /** `machine` when the daemon runs under the system service identity. */
+  scope: z.enum(['machine', 'user']),
+  version: z.string(),
+  startedAt: z.string(),
+  firstRunCompleted: z.boolean(),
+  usage: z.object({
+    gezelCount: z.number().int().nonnegative(),
+    projectCount: z.number().int().nonnegative(),
+    sessionCount: z.number().int().nonnegative(),
+    everUsed: z.boolean(),
+  }),
+  provider: ProviderNameSchema.optional(),
+  defaultModel: z.string().optional(),
+  memory: z.object({
+    totalBytes: z.number().nonnegative(),
+    freeBytes: z.number().nonnegative(),
+  }),
+  /** Local engines currently holding capacity reservations. */
+  engines: z.array(
+    z.object({
+      key: z.string(),
+      residentBytes: z.number().nonnegative(),
+    }),
+  ),
+});
+export type SystemHomeInfo = z.infer<typeof SystemHomeInfoSchema>;
+
+/**
  * Non-secret metadata about the user's GitHub auth state. The token itself
  * lives in the SecretStore (see `applyCredentialPatch`); this slot holds
  * the parts the UI wants to render without unmasking the token (login,
@@ -398,6 +483,18 @@ export type DocumentExportOptions = z.infer<typeof DocumentExportOptionsSchema>;
 export const GezelConfigSchema = z.object({
   /** Default LLM provider. Missing → 'copilot' for backwards compatibility. */
   provider: ProviderNameSchema.optional(),
+  /**
+   * Compatibility preference for full-product daemons installed before the
+   * service-role split. New desktop releases always attach the UI to a user
+   * daemon and may independently use a machine-wide `machine-engine` broker.
+   * In particular, `'per-user'` declines a legacy machine product home but
+   * does not disable shared model downloads or GPU/RAM scheduling.
+   *
+   * Retained so rolling upgrades do not strand data or discard an existing
+   * preference. A future project-level machine-wide storage choice is a
+   * separate authorization/storage setting and must not reuse this field.
+   */
+  hosting: z.enum(['auto', 'machine-service', 'per-user']).optional(),
   /**
    * Idle timeout (ms) before the supervisor stops a running local LLM engine
    * (llama-cpp, mlx) to free VRAM. Applied to both `NativeEngineSupervisor`

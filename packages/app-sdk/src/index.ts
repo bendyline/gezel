@@ -1,10 +1,10 @@
 /**
  * `@bendyline/gezel-app-sdk` — Node entry.
  *
- * Build a third-party app against Gezel. {@link authorize} implements the
- * generic discovery + consent protocol for any grantable scope; {@link connect}
- * wraps its result as a {@link GezelApp} with OpenAI-compatible `chat`,
- * `embeddings`, `models`, and `ensureModel`.
+ * Build a third-party app against Gezel. {@link authorizeLocal} implements the
+ * complete Node-native discovery + consent protocol for any grantable scope;
+ * {@link connectLocal} wraps its result as a {@link GezelApp} with
+ * OpenAI-compatible `chat`, `embeddings`, `models`, and `ensureModel`.
  *
  * Quickstart:
  *
@@ -41,6 +41,7 @@
  */
 export { detectGezel } from './detect.js';
 export { authorize, connect } from './connect.js';
+export { authorizeLocal, authorizeLocalOwner, connectLocal } from './local.js';
 export { GezelApp } from './client.js';
 export { GezelSdkError } from './errors.js';
 export {
@@ -51,6 +52,11 @@ export type {
   DetectResult,
   ConnectInput,
   AuthorizedConnection,
+  LocalConnectInput,
+  LocalDaemonOptions,
+  LocalDaemonMode,
+  LocalAuthorizedConnection,
+  LocalOwnerConnectInput,
   ChatMessage,
   ChatMessageContent,
   ChatMessageRole,

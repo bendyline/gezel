@@ -44,6 +44,18 @@ function describeReservation(usage: MachineMemoryUsage): string {
     : `Models reserve ${reserved} of ${budget} available to models`;
 }
 
+function describeCapacityPools(usage: MachineMemoryUsage): string | null {
+  const pools = usage.enginePools;
+  if (!pools) return null;
+  if (pools.kind === 'discrete-gpu') {
+    return `Capacity: ~${formatBytes(pools.vramBytes)} VRAM + ~${formatBytes(pools.ramShareBytes)} system RAM`;
+  }
+  if (pools.kind === 'unified') {
+    return `Capacity: ~${formatBytes(pools.ramShareBytes)} unified memory`;
+  }
+  return `Capacity: ~${formatBytes(pools.ramShareBytes)} system RAM`;
+}
+
 /**
  * Stacked live view of the physical memory pool backing local inference.
  *
@@ -53,9 +65,11 @@ function describeReservation(usage: MachineMemoryUsage): string {
  * driver on discrete cards. macOS file cache stays separate because it is
  * reclaimable capacity, not "Other" app use.
  *
- * A discrete card whose driver reports capacity but not use leaves the bar
- * hatched and empty rather than filling it from the reservation — see
- * `describeReservation`, and the service-side note in `sampleMachineMemoryUsage`.
+ * A discrete card whose driver reports capacity but not use omits the live-use
+ * bar rather than showing an unactionable unknown meter or filling it from the
+ * reservation. The broker reservation gets a separate capacity meter with its
+ * own combined-pool denominator — see the service-side note in
+ * `sampleMachineMemoryUsage`.
  */
 export function MachineMemoryStrip({ pollMs = 1_000, modelNames }: Props) {
   const [usage, setUsage] = useState<MachineMemoryUsage | null>(null);
@@ -98,6 +112,13 @@ export function MachineMemoryStrip({ pollMs = 1_000, modelNames }: Props) {
   }
 
   const label = poolLabel(usage.kind);
+  const hasMeasuredUsage = usage.usedBytes !== null;
+  const measuredUsageLabel =
+    usage.kind === 'vram'
+      ? 'Current VRAM use'
+      : usage.kind === 'ram'
+        ? 'Current RAM use'
+        : 'Current memory use';
   const usedSummary =
     usage.usedBytes === null
       ? `${formatBytes(usage.totalBytes)} total`
@@ -127,11 +148,58 @@ export function MachineMemoryStrip({ pollMs = 1_000, modelNames }: Props) {
       bytes: usage.gezelModelCacheBytes,
     },
   ] as const;
-  const attributed = gezelBytes > 0;
   const residentModels = usage.residentModels ?? [];
-  const reservationNote = usage.engineReservedBytes > 0 ? describeReservation(usage) : null;
+  const attributed = gezelBytes > 0;
+  const hasMeasuredLegend =
+    attributed || usage.otherBytes !== null || cachedBytes !== null || usage.freeBytes !== null;
+  const reservationBudgetBytes = usage.engineBudgetBytes ?? 0;
+  const hasReservationMeter = usage.engineReservedBytes > 0 && reservationBudgetBytes > 0;
+  const reservationNote =
+    usage.engineReservedBytes > 0 && !hasReservationMeter ? describeReservation(usage) : null;
+  const capacityPoolSummary = describeCapacityPools(usage);
+  const vramCapacityPercent =
+    hasReservationMeter && usage.enginePools?.kind === 'discrete-gpu'
+      ? percent(usage.enginePools.vramBytes, reservationBudgetBytes)
+      : 0;
+  const ramCapacityPercent =
+    hasReservationMeter && usage.enginePools
+      ? Math.min(
+          100 - vramCapacityPercent,
+          percent(usage.enginePools.ramShareBytes, reservationBudgetBytes),
+        )
+      : 0;
+  const reservationSegments =
+    residentModels.length > 0
+      ? residentModels.map((model) => ({
+          key: `${model.provider}:${model.modelId}`,
+          label: `${modelNames?.get(model.modelId) ?? model.modelId}${
+            model.replicaCount > 1 ? ` ×${model.replicaCount}` : ''
+          }`,
+          bytes: model.reservedBytes,
+        }))
+      : [
+          {
+            key: 'all-models',
+            label: 'Local models',
+            bytes: usage.engineReservedBytes,
+          },
+        ];
+  const reservationAriaSummary = hasReservationMeter
+    ? [
+        `Model capacity: about ${formatBytes(usage.engineReservedBytes)} of ${formatBytes(
+          reservationBudgetBytes,
+        )} reserved`,
+        capacityPoolSummary,
+        ...reservationSegments.map(
+          (segment) => `${segment.label} about ${formatBytes(segment.bytes)} reserved`,
+        ),
+        'Reservation is capacity planning, not measured use',
+      ]
+        .filter(Boolean)
+        .join(', ')
+    : '';
   const ariaSummary = [
-    `${label}: ${usedSummary}`,
+    `${hasMeasuredUsage ? measuredUsageLabel : label}: ${usedSummary}`,
     !attributed
       ? null
       : observed
@@ -165,72 +233,126 @@ export function MachineMemoryStrip({ pollMs = 1_000, modelNames }: Props) {
     <div className="machine-memory-strip">
       <div className="machine-memory-heading">
         <span>
-          {label}
+          {hasMeasuredUsage ? measuredUsageLabel : label}
           {usage.kind === 'ram' && <span className="machine-memory-context"> · CPU inference</span>}
         </span>
         <span>{usedSummary}</span>
       </div>
-      <Tooltip.Provider delayDuration={150}>
-        <div
-          className={`machine-memory-bar${usage.usedBytes === null ? ' machine-memory-bar-unknown' : ''}`}
-          role="img"
-          aria-label={ariaSummary}
-        >
-          {gezelSegments.map((segment) =>
-            segment.bytes > 0 ? (
-              <Tooltip.Root key={segment.key}>
-                <Tooltip.Trigger asChild>
-                  <span
-                    className={`machine-memory-segment machine-memory-segment-gezel machine-memory-segment-gezel-${segment.key}`}
-                    style={{ width: `${percent(segment.bytes, usage.totalBytes)}%` }}
-                    aria-label={`${segment.label}, about ${formatBytes(segment.bytes)}`}
-                  />
-                </Tooltip.Trigger>
-                <Tooltip.Content>
-                  {segment.label} · ~{formatBytes(segment.bytes)} ({segment.detail})
-                </Tooltip.Content>
-              </Tooltip.Root>
-            ) : null,
-          )}
-          <span
-            className="machine-memory-segment machine-memory-segment-other"
-            style={{ width: `${otherPercent}%` }}
-          />
-          {cachedBytes !== null && cachedBytes > 0 && (
+      {hasMeasuredUsage && (
+        <Tooltip.Provider delayDuration={150}>
+          <div className="machine-memory-bar" role="img" aria-label={ariaSummary}>
+            {gezelSegments.map((segment) =>
+              segment.bytes > 0 ? (
+                <Tooltip.Root key={segment.key}>
+                  <Tooltip.Trigger asChild>
+                    <span
+                      className={`machine-memory-segment machine-memory-segment-gezel machine-memory-segment-gezel-${segment.key}`}
+                      style={{ width: `${percent(segment.bytes, usage.totalBytes)}%` }}
+                      aria-label={`${segment.label}, about ${formatBytes(segment.bytes)}`}
+                    />
+                  </Tooltip.Trigger>
+                  <Tooltip.Content>
+                    {segment.label} · ~{formatBytes(segment.bytes)} ({segment.detail})
+                  </Tooltip.Content>
+                </Tooltip.Root>
+              ) : null,
+            )}
             <span
-              className="machine-memory-segment machine-memory-segment-cached"
-              style={{ width: `${cachedPercent}%` }}
+              className="machine-memory-segment machine-memory-segment-other"
+              style={{ width: `${otherPercent}%` }}
             />
+            {cachedBytes !== null && cachedBytes > 0 && (
+              <span
+                className="machine-memory-segment machine-memory-segment-cached"
+                style={{ width: `${cachedPercent}%` }}
+              />
+            )}
+          </div>
+        </Tooltip.Provider>
+      )}
+      {hasMeasuredLegend && (
+        <div className="machine-memory-legend">
+          {attributed && (
+            <span>
+              <i className="machine-memory-swatch machine-memory-swatch-gezel" aria-hidden />
+              Gezel {observed ? '' : '~'}
+              {formatBytes(gezelBytes)}
+            </span>
+          )}
+          {usage.otherBytes !== null && (
+            <span>
+              <i className="machine-memory-swatch machine-memory-swatch-other" aria-hidden />
+              Other {formatBytes(usage.otherBytes)}
+            </span>
+          )}
+          {cachedBytes !== null && (
+            <span title="Reclaimable file cache available to apps">
+              <i className="machine-memory-swatch machine-memory-swatch-cached" aria-hidden />
+              Cached {formatBytes(cachedBytes)}
+            </span>
+          )}
+          {usage.freeBytes !== null && (
+            <span>
+              <i className="machine-memory-swatch machine-memory-swatch-free" aria-hidden />
+              Free {formatBytes(usage.freeBytes)}
+            </span>
           )}
         </div>
-      </Tooltip.Provider>
-      <div className="machine-memory-legend">
-        {attributed && (
-          <span>
-            <i className="machine-memory-swatch machine-memory-swatch-gezel" aria-hidden />
-            Gezel {observed ? '' : '~'}
-            {formatBytes(gezelBytes)}
-          </span>
-        )}
-        {usage.otherBytes !== null && (
-          <span>
-            <i className="machine-memory-swatch machine-memory-swatch-other" aria-hidden />
-            Other {formatBytes(usage.otherBytes)}
-          </span>
-        )}
-        {cachedBytes !== null && (
-          <span title="Reclaimable file cache available to apps">
-            <i className="machine-memory-swatch machine-memory-swatch-cached" aria-hidden />
-            Cached {formatBytes(cachedBytes)}
-          </span>
-        )}
-        {usage.freeBytes !== null && (
-          <span>
-            <i className="machine-memory-swatch machine-memory-swatch-free" aria-hidden />
-            Free {formatBytes(usage.freeBytes)}
-          </span>
-        )}
-      </div>
+      )}
+      {hasReservationMeter && (
+        <div className="machine-memory-reservation">
+          <div className="machine-memory-reservation-heading">
+            <span>Model capacity</span>
+            <span>
+              ~{formatBytes(usage.engineReservedBytes)} of ~{formatBytes(reservationBudgetBytes)}{' '}
+              reserved
+            </span>
+          </div>
+          <div
+            className="machine-memory-reservation-bar"
+            role="img"
+            aria-label={reservationAriaSummary}
+          >
+            {usage.enginePools && (
+              <span className="machine-memory-reservation-pools" aria-hidden>
+                <i
+                  className="machine-memory-reservation-pool machine-memory-reservation-pool-vram"
+                  style={{ width: `${vramCapacityPercent}%` }}
+                />
+                <i
+                  className="machine-memory-reservation-pool machine-memory-reservation-pool-ram"
+                  style={{ width: `${ramCapacityPercent}%` }}
+                />
+              </span>
+            )}
+            <span className="machine-memory-reservation-segments" aria-hidden>
+              {reservationSegments.map((segment) => (
+                <i
+                  key={segment.key}
+                  className="machine-memory-reservation-segment"
+                  style={{ width: `${percent(segment.bytes, reservationBudgetBytes)}%` }}
+                  title={`${segment.label} · ~${formatBytes(segment.bytes)} reserved`}
+                />
+              ))}
+            </span>
+            {vramCapacityPercent > 0 && ramCapacityPercent > 0 && (
+              <i
+                className="machine-memory-reservation-boundary"
+                style={{ left: `${vramCapacityPercent}%` }}
+                aria-hidden
+              />
+            )}
+          </div>
+          {capacityPoolSummary && (
+            <div className="machine-memory-reservation-pools-label">{capacityPoolSummary}</div>
+          )}
+          <div className="machine-memory-reservation-caption">
+            {hasMeasuredUsage
+              ? 'Reserved model capacity; the current-use meter above includes all apps.'
+              : 'Reserved capacity for loaded models; not live usage.'}
+          </div>
+        </div>
+      )}
       {reservationNote && <div className="machine-memory-note">{reservationNote}</div>}
       {residentModels.length > 0 && (
         <div className="machine-memory-note">

@@ -18,6 +18,7 @@ import {
   GezelClient,
   createTrustingFetch,
   discoverOrSpawn,
+  isProcessAlive,
   readRuntime,
   resolveDaemonEntry,
 } from '@bendyline/gezel-client/node';
@@ -30,11 +31,18 @@ const execFileAsync = promisify(execFile);
 const cliEntry = fileURLToPath(new URL('../dist/bin/gezel.js', import.meta.url));
 
 async function runCli(...args: string[]): Promise<{ stdout: string; stderr: string }> {
-  return execFileAsync(process.execPath, [cliEntry, '--home', gezelHome, ...args], {
+  return runCliAtHome(gezelHome, ...args);
+}
+
+async function runCliAtHome(
+  home: string,
+  ...args: string[]
+): Promise<{ stdout: string; stderr: string }> {
+  return execFileAsync(process.execPath, [cliEntry, '--home', home, ...args], {
     cwd: process.cwd(),
     env: {
       ...process.env,
-      GEZEL_HOME: gezelHome,
+      GEZEL_HOME: home,
       GEZEL_MOCK_PROVIDER: '1',
     },
     timeout: 15_000,
@@ -60,6 +68,7 @@ beforeAll(async () => {
       // cross-process test hermetic and off the shared port so it can't
       // race a real local daemon or another spawning suite.
       GEZEL_PORT: '0',
+      GEZEL_SERVICE_ROLE: 'user',
     },
     timeoutMs: 15_000,
   });
@@ -122,6 +131,34 @@ describe('gezeld cross-process integration', { timeout: 30_000 }, () => {
     // The service auto-creates a Meester on first boot.
     expect(Array.isArray(gezels.gezels)).toBe(true);
     expect(gezels.gezels.length).toBeGreaterThan(0);
+  });
+
+  it('authorizes same-user CLI product calls without a headless consent loop', async () => {
+    const result = await runCli('agent', 'list');
+    expect(result.stderr).toBe('');
+    expect(result.stdout.trim().length).toBeGreaterThan(0);
+  });
+
+  it('spawns a missing user daemon and completes headlessly without desktop approval', async () => {
+    const headlessHome = await mkdtemp(join(tmpdir(), 'gezel-cli-headless-'));
+    try {
+      const result = await runCliAtHome(headlessHome, 'agent', 'list');
+      expect(result.stderr).toBe('');
+      expect(result.stdout.trim().length).toBeGreaterThan(0);
+      const runtime = await readRuntime(headlessHome);
+      expect(runtime).not.toBeNull();
+      expect(runtime?.port).not.toBe(6228);
+      expect(runtime ? isProcessAlive(runtime.pid) : false).toBe(true);
+    } finally {
+      const runtime = await readRuntime(headlessHome).catch(() => null);
+      if (runtime && isProcessAlive(runtime.pid)) {
+        process.kill(runtime.pid, 'SIGTERM');
+        for (let attempt = 0; attempt < 40 && isProcessAlive(runtime.pid); attempt += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 25));
+        }
+      }
+      await rm(headlessHome, { recursive: true, force: true });
+    }
   });
 
   it('persists config writes across HTTP requests', async () => {

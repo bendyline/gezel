@@ -6,8 +6,9 @@
     installer's postinstall script (see installer/macos-pkg-scripts/
     postinstall).
 
-    Runs at boot, before any user logs in. Hosts the loopback HTTP
-    service that the per-user Electron Gezel.app connects to.
+    Runs at boot, before any user logs in. Owns shared model downloads,
+    native-engine residency, and GPU/RAM queues. Electron never connects
+    directly; each account's user daemon verifies and proxies the broker.
 
     Why ELECTRON_RUN_AS_NODE=1: the Electron exe inside Gezel.app
     behaves as a plain Node interpreter when this env var is set, so we
@@ -16,9 +17,10 @@
 
     Why _gezeld and not root: standard daemon hygiene. The _gezeld user
     is a non-login system account created by the PKG postinstall.
-    The runtime/auth-token file written by the service is a non-root,
-    first-party client credential. It is mode 0o644 so logged-in desktop
-    clients can read it; the daemon root token never leaves process memory.
+    The runtime/auth-token file is a non-root, narrowly scoped inference and
+    model-management credential. It is mode 0o644 so user daemons can read
+    it; Electron renderers never receive it and the daemon root token never
+    leaves process memory.
     GEZEL_SYSTEM_SCOPE=1 selects this split runtime policy.
     GEZEL_PORT=6228 reserves the canonical machine-service endpoint; any
     user-owned CLI fallback runs on a discoverable ephemeral port.
@@ -44,6 +46,8 @@
         <string>6228</string>
         <key>GEZEL_SYSTEM_SCOPE</key>
         <string>1</string>
+        <key>GEZEL_SERVICE_ROLE</key>
+        <string>machine-engine</string>
         <key>GEZEL_SHARED_ASSETS_DIR</key>
         <string>/Library/Application Support/Gezel/assets</string>
         <!-- Override the launchd default $HOME of /var/empty (the
@@ -62,20 +66,11 @@
              asar-unpacked tree; Node is code-signed and executes pnpm's
              ordinary JavaScript entry directly. The
              postinstall pinning these to /Applications/Gezel.app
-             matches how ProgramArguments and GEZEL_UI_DIR are pinned. -->
+             matches how ProgramArguments is pinned. -->
         <key>GEZEL_PNPM_PATH</key>
         <string>/Applications/Gezel.app/Contents/Resources/app.asar.unpacked/dist/pnpm-bundle/bin/pnpm.mjs</string>
         <key>GEZEL_NODE_PATH</key>
         <string>/Applications/Gezel.app/Contents/Resources/app.asar.unpacked/dist/node-bundle/node</string>
-        <!-- Static UI bundle. Lives at app.asar.unpacked/dist/ui/
-             inside the .app. The daemon's own findBundledUi searches
-             relative to gezeld.js and would land on `…/service/dist/ui`
-             (wrong location — the service tree doesn't include a UI
-             subtree; UI is shipped separately), so we pin the right
-             path here. Without it the system service serves the
-             "web UI bundle was not included" placeholder. -->
-        <key>GEZEL_UI_DIR</key>
-        <string>/Applications/Gezel.app/Contents/Resources/app.asar.unpacked/dist/ui</string>
         <!-- Bundled native engines (llama.cpp Metal, sd-cpp, whisper.cpp,
              uv) live under app.asar.unpacked/native-bin/. The service's
              native-discovery (packages/service/src/native/discover.ts)
@@ -101,7 +96,7 @@
 
     <!-- Private-by-default daemon state. gezeld explicitly chmods only the
          runtime discovery metadata (scoped client token, port, public cert)
-         that desktop clients must read across accounts. Decimal 63 = 077. -->
+         that user daemons must read across accounts. Decimal 63 = 077. -->
     <key>Umask</key>
     <integer>63</integer>
 

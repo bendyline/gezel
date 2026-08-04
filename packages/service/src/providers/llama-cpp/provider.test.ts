@@ -8423,6 +8423,80 @@ describe('LlamaCppSession graceful context-overflow handling', () => {
     expect(internal.currentTurnStartIdx).toBe(2);
   });
 
+  it('preserves layered system bands when compacting prior conversation', async () => {
+    const provider = new LlamaCppProvider({ baseUrl: 'http://llama.test', numCtx: 100 });
+    const seen: Array<Array<{ role: string; content: string }>> = [];
+    const session = await provider.createSession({
+      systemMessage: 'stable system',
+      volatileContext: 'volatile project + recall context',
+      priorMessages: [
+        { role: 'user', content: 'A'.repeat(80) },
+        { role: 'assistant', content: 'B'.repeat(80) },
+      ],
+      requestCompaction: async ({ priorMessages }) => {
+        seen.push(priorMessages);
+        return { syntheticContent: 'conversation synthesis' };
+      },
+    });
+    const internal = session as unknown as {
+      currentTurnStartIdx: number;
+      compactedThisTurn: boolean;
+      maybeCompactMidLoop: (opts?: { force?: boolean }) => Promise<boolean>;
+      messages: Array<{ role: string; content: string }>;
+    };
+    internal.currentTurnStartIdx = internal.messages.length;
+    internal.compactedThisTurn = false;
+    internal.messages.push({ role: 'user', content: 'current turn' });
+
+    expect(await internal.maybeCompactMidLoop({ force: true })).toBe(true);
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toEqual([
+      { role: 'user', content: 'A'.repeat(80) },
+      { role: 'assistant', content: 'B'.repeat(80) },
+    ]);
+    expect(internal.messages.map((m) => [m.role, m.content])).toEqual([
+      ['system', 'stable system'],
+      ['system', 'volatile project + recall context'],
+      ['assistant', 'conversation synthesis'],
+      ['user', 'current turn'],
+    ]);
+    expect(internal.currentTurnStartIdx).toBe(3);
+  });
+
+  it('does not call a volatile band plus duplicated first user turn prior conversation', async () => {
+    const provider = new LlamaCppProvider({ baseUrl: 'http://llama.test', numCtx: 100 });
+    let compactionCalls = 0;
+    const session = await provider.createSession({
+      systemMessage: 'stable system',
+      volatileContext: 'volatile recall context',
+      // Reproduces the old auto-recall replay bug. Even if a caller seeds the
+      // current user once, it is only one conversational message—not enough
+      // history to summarize, and the system band must never count toward it.
+      priorMessages: [{ role: 'user', content: 'hello' }],
+      requestCompaction: async () => {
+        compactionCalls++;
+        return { syntheticContent: 'should not happen' };
+      },
+    });
+    const warnings: string[] = [];
+    session.onWarning?.((warning) => warnings.push(warning));
+    const internal = session as unknown as {
+      currentTurnStartIdx: number;
+      compactedThisTurn: boolean;
+      maybeCompactMidLoop: (opts?: { force?: boolean }) => Promise<boolean>;
+      messages: Array<{ role: string; content: string }>;
+    };
+    internal.currentTurnStartIdx = internal.messages.length;
+    internal.compactedThisTurn = false;
+    internal.messages.push({ role: 'user', content: 'hello' });
+
+    expect(await internal.maybeCompactMidLoop({ force: true })).toBe(false);
+    expect(compactionCalls).toBe(0);
+    expect(warnings).not.toContain(
+      'Compacted earlier conversation to free up working window for the current turn.',
+    );
+  });
+
   it("condenses THIS turn's older tool results — the blind spot prior-fold cannot reach", async () => {
     // The in-turn overflow shape: no prior transcript to fold (msgs=1),
     // so `maybeCompactMidLoop` returns false and the manager's force-fit

@@ -217,6 +217,14 @@ export function GezellenView() {
                       {a.growth && (
                         <LevelBadge level={a.growth.level} pending={!!a.growth.pending} />
                       )}
+                      {a.storageScope === 'machine-shared' && (
+                        <span
+                          className="machine-shared-badge"
+                          title="Shared with accounts on this machine; chats and memories stay private"
+                        >
+                          Shared
+                        </span>
+                      )}
                       {a.id === meesterId && (
                         <span
                           className="meester-badge"

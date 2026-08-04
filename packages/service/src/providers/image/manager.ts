@@ -14,12 +14,13 @@
  * the next `current()` rebuilds from fresh config + secrets.
  */
 
-import { createLogger } from '@bendyline/gezel';
+import { type GezelConfig, createLogger } from '@bendyline/gezel';
 import type { Store } from '../../fs/store.js';
 import type { RemotesRegistry } from '../../remotes/registry.js';
 import type { SecretStore } from '../../secrets/types.js';
 import type { GpuArbiter } from '../gpu-arbiter.js';
-import { resolveRemoteTarget } from '../remote/resolve.js';
+import { type RemoteTarget, resolveRemoteTarget } from '../remote/resolve.js';
+import { ProviderRetirementGate, trackProviderOperations } from '../retirement-gate.js';
 import { createImageProvider } from './factory.js';
 import { RemoteImageProvider } from './remote-image.js';
 
@@ -30,6 +31,8 @@ export interface ImageProviderManagerOptions {
   home: string;
   store: Store;
   secrets: SecretStore;
+  /** Ignore cloud provider config; used by the machine-only engine broker. */
+  localOnly?: boolean;
   /** Override env for tests. */
   env?: NodeJS.ProcessEnv;
   /**
@@ -47,11 +50,20 @@ export class ImageProviderManager {
   private readonly secrets: SecretStore;
   private readonly env: NodeJS.ProcessEnv | undefined;
   private readonly arbiter: GpuArbiter | undefined;
+  private readonly localOnly: boolean;
 
   private current_: ImageProvider | null = null;
+  private currentView_: ImageProvider | null = null;
+  private retiring_: ImageProvider | null = null;
   private buildPromise: Promise<ImageProvider> | null = null;
+  private machineRetirement: Promise<void> | null = null;
+  private readonly activity = new ProviderRetirementGate();
   private remotes: RemotesRegistry | undefined;
-  private readonly remoteCache = new Map<string, RemoteImageProvider>();
+  private machineEngineRemoteId?: () => string | null;
+  private readonly remoteCache = new Map<
+    string,
+    { connectionKey: string; provider: RemoteImageProvider }
+  >();
 
   constructor(opts: ImageProviderManagerOptions) {
     this.home = opts.home;
@@ -59,6 +71,7 @@ export class ImageProviderManager {
     this.secrets = opts.secrets;
     this.env = opts.env;
     this.arbiter = opts.arbiter;
+    this.localOnly = opts.localOnly ?? false;
   }
 
   /** Wire the paired-servers registry so `remote:<id>/…` image models route
@@ -67,29 +80,57 @@ export class ImageProviderManager {
     this.remotes = remotes;
   }
 
+  setMachineEngineRemoteResolver(resolve: (() => string | null) | undefined): void {
+    this.machineEngineRemoteId = resolve;
+  }
+
   /**
    * Resolve the provider for a specific model id: a `remote:<remoteId>/…` id
    * routes to a cached {@link RemoteImageProvider} for the hosting server;
-   * everything else uses the local {@link current} provider. The image-gen
-   * route calls this with the request's model so GPU-heavy generation runs on
-   * the paired server while the artifact still persists into A's project.
+   * everything else uses the configured {@link current} provider. For a local
+   * sd-cpp selection, `current()` delegates to the machine broker when one is
+   * available. Cloud selections remain in this user daemon so their user-owned
+   * credentials never cross the machine-service boundary.
    */
   async providerForModel(model?: string): Promise<ImageProvider> {
+    // An explicit remote model always wins. Do not pass the machine broker as
+    // a preferred target here: resolveRemoteTarget would otherwise wrap every
+    // ordinary cloud model id (and undefined) as `remote:this-machine/…`
+    // before config.imageProvider was consulted.
     const target = resolveRemoteTarget(model, this.remotes);
     if (!target) return this.current();
+    return this.providerForRemoteTarget(target);
+  }
+
+  /**
+   * Whether the configured image provider belongs on the machine broker.
+   * Shared with the HTTP management-route proxy so status/model operations and
+   * generation use exactly the same cloud-vs-native decision.
+   */
+  async usesMachineEngine(): Promise<boolean> {
+    if (!this.machineEngineRemoteId?.()) return false;
+    const config = await this.store.readConfig();
+    return isMachineImageProvider(config, this.env ?? process.env);
+  }
+
+  private providerForRemoteTarget(target: RemoteTarget): ImageProvider {
     const { remote, fetch } = target;
-    let provider = this.remoteCache.get(remote.remoteId);
-    if (!provider) {
-      provider = new RemoteImageProvider({
-        remoteId: remote.remoteId,
-        label: remote.displayName,
-        baseUrl: remote.baseUrl,
-        token: remote.token,
-        fetch,
-      });
-      this.remoteCache.set(remote.remoteId, provider);
+    const connectionKey = `${remote.baseUrl}\0${remote.token}\0${remote.pinnedIdentityFingerprint}`;
+    let cached = this.remoteCache.get(remote.remoteId);
+    if (!cached || cached.connectionKey !== connectionKey) {
+      cached = {
+        connectionKey,
+        provider: new RemoteImageProvider({
+          remoteId: remote.remoteId,
+          label: remote.displayName,
+          baseUrl: remote.baseUrl,
+          token: remote.token,
+          fetch,
+        }),
+      };
+      this.remoteCache.set(remote.remoteId, cached);
     }
-    return provider;
+    return cached.provider;
   }
 
   /**
@@ -98,19 +139,28 @@ export class ImageProviderManager {
    * a leaked provider that never gets `shutdown()`.
    */
   async current(): Promise<ImageProvider> {
-    if (this.current_) return this.current_;
     if (this.buildPromise) return this.buildPromise;
     this.buildPromise = (async () => {
       const config = await this.store.readConfig();
+      const machineRemoteId = this.machineEngineRemoteId?.();
+      if (machineRemoteId && isMachineImageProvider(config, this.env ?? process.env)) {
+        const target = resolveRemoteTarget(undefined, this.remotes, machineRemoteId);
+        if (target) return this.providerForRemoteTarget(target);
+      }
+      if (this.current_) return this.currentView_ ?? this.current_;
       const provider = await createImageProvider({
         home: this.home,
         ...(this.env ? { env: this.env } : {}),
         config,
         secrets: this.secrets,
+        localOnly: this.localOnly,
         ...(this.arbiter ? { arbiter: this.arbiter } : {}),
       });
       this.current_ = provider;
-      return provider;
+      this.currentView_ = isMachineImageProvider(config, this.env ?? process.env)
+        ? trackProviderOperations(provider, this.activity, new Set(['generate']))
+        : provider;
+      return this.currentView_;
     })().finally(() => {
       this.buildPromise = null;
     });
@@ -124,6 +174,7 @@ export class ImageProviderManager {
   async reset(): Promise<void> {
     const prev = this.current_;
     this.current_ = null;
+    this.currentView_ = null;
     if (prev?.shutdown) {
       await prev.shutdown().catch((err: unknown) => {
         log.warn(
@@ -134,7 +185,43 @@ export class ImageProviderManager {
     }
   }
 
+  /** Drain and retire only the native sd-cpp provider. User-owned cloud
+   * providers remain live in this daemon and retain their secret-store scope. */
+  async retireLocalForMachineBroker(): Promise<void> {
+    if (this.machineRetirement) return this.machineRetirement;
+    const run = (async () => {
+      const config = await this.store.readConfig();
+      if (!isMachineImageProvider(config, this.env ?? process.env)) return;
+      this.activity.beginRetirement();
+      await this.buildPromise;
+      this.retiring_ ??= this.current_;
+      this.current_ = null;
+      this.currentView_ = null;
+      await this.activity.waitForIdle();
+      if (this.retiring_?.shutdown) await this.retiring_.shutdown();
+      this.retiring_ = null;
+    })();
+    this.machineRetirement = run;
+    try {
+      await run;
+    } catch (error) {
+      if (this.machineRetirement === run) this.machineRetirement = null;
+      throw error;
+    }
+  }
+
   async shutdown(): Promise<void> {
     await this.reset();
   }
+}
+
+/**
+ * Only native sd-cpp work belongs on the shared engine broker. Mock mode is an
+ * effective provider override (factory rule #1), so it must stay local just
+ * like explicit cloud/mock config instead of being mistaken for default
+ * sd-cpp during tests and headless flows.
+ */
+function isMachineImageProvider(config: GezelConfig, env: NodeJS.ProcessEnv): boolean {
+  if (env.GEZEL_MOCK_PROVIDER === '1') return false;
+  return (config.imageProvider ?? 'sd-cpp') === 'sd-cpp';
 }

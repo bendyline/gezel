@@ -9,9 +9,9 @@ import { type RunningService, startService } from '../../service.js';
 /**
  * Settings → Connected Apps controls for the OpenAI-compatible facade:
  *
- *   - `openaiEndpoints.enabled: false` gates every inference surface AND
- *     new app registrations with `403 openai_endpoints_disabled`, while
- *     the panel's own management surface (`GET /v1/apps`) stays up.
+ *   - `openaiEndpoints.enabled: false` gates every inference surface and
+ *     OpenAI-scoped registrations, while CLI registration and the panel's
+ *     management surface (`GET /v1/apps`) stay up.
  *   - `openaiEndpoints.servingGezelId` optionally overrides the
  *     Meester-backed fallback for requests naming an unknown model (a
  *     client's hardcoded "gpt-4o").
@@ -91,11 +91,15 @@ describe('openaiEndpoints.enabled = false', () => {
     expect(tags.status).toBe(403);
   });
 
-  it('gates new app registrations but keeps the management surface up', async () => {
+  it('gates OpenAI registrations but keeps CLI registration and management up', async () => {
     const register = await call('POST', '/v1/apps/register', {
       body: { appId: 'blocked-app', appName: 'Blocked App', scopes: ['openai'] },
     });
     expect(register.status).toBe(403);
+    const cliRegister = await call('POST', '/v1/apps/register', {
+      body: { appId: 'headless-cli', appName: 'Gezel CLI', scopes: ['cli'] },
+    });
+    expect(cliRegister.status).toBe(201);
     // The Connected Apps panel still needs its listing while the facade
     // is off — that's how the user turns it back on.
     const list = await call('GET', '/v1/apps', { token: rootToken });

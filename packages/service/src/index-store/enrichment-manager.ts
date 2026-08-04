@@ -267,6 +267,14 @@ export class IndexEnrichmentManager {
     // OS-idle threshold so enrichment runs through the window without
     // waiting for the user to step away from the keyboard.
     if (this.isNightShiftActive()) return true;
+    // A daemon that has never heard an idle report and only just booted is
+    // NOT evidence of an away user — it is what login, install, and update
+    // look like from a headless machine service. Enrichment one-shots
+    // cold-load local models, so firing them in that window put a
+    // multi-GB engine on the machine while the user was actively setting
+    // it up. Wait out the grace; a genuinely headless always-on daemon
+    // still gets its enrichment once the grace lapses.
+    if (this.idle.unreportedBootGraceActive()) return false;
     const os = this.idle.osIdleSeconds();
     if (os !== null && os * 1000 < this.osIdleThresholdMs) return false;
     return true;

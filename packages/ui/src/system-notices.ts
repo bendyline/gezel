@@ -18,6 +18,9 @@ export { releaseUrl };
 
 export type SystemNoticeId =
   | 'machine-service-not-installed'
+  | 'machine-service-home-fresh'
+  | 'machine-engine-unavailable'
+  | 'legacy-machine-data'
   | 'service-version-mismatch'
   | 'service-unavailable'
   | 'update-install-failed'
@@ -76,15 +79,50 @@ export function serviceNotice(input: {
   if (code === 'machine-service-not-installed') {
     return {
       id: 'machine-service-not-installed',
-      railLabel: 'Background service is per-user',
-      title: 'Gezel is running its per-user background service.',
-      // Deliberately not the "Background work is off" copy below. That one is
-      // for the embedded fallback, where the service dies with the window.
-      // Here a real daemon is running and background work does happen — until
-      // Gezel is closed. Saying it is off would be its own inaccuracy.
-      body: `Everything works and all of your gezellen, projects, chats, and files are here. The difference is that background work — scheduled tasks and night shift — only runs while Gezel is open, and first launch after an update takes longer. The machine-wide service is installed by the installer, so this is the one thing Gezel cannot fix from inside. ${reinstallHint(platform)}`,
+      railLabel: 'Model sharing is off',
+      title: 'Gezel is using this account’s model engine.',
+      body: `Everything works and all of your gezellen, projects, chats, files, scheduled tasks, and night shift stay in this account. Local model downloads, memory use, and GPU work are not being shared with other Gezel users on this machine. The shared engine is installed for the whole machine, so Gezel cannot repair it from inside the app. ${reinstallHint(platform)}`,
       technical: reason,
       reportable: true,
+    };
+  }
+
+  if (code === 'machine-engine-unavailable') {
+    return {
+      id: 'machine-engine-unavailable',
+      railLabel: 'Model sharing is off',
+      title: 'The shared model engine is unavailable.',
+      body: `Gezel is keeping your projects, chats, tools, scheduled work, and credentials in this account as usual. Local model work is running here instead, so downloads, memory use, and GPU queues are not shared with other Gezel users on this machine. Gezel will retry the shared engine automatically; if it remains unavailable, ${reinstallHint(platform).replace(/^./, (letter) => letter.toLowerCase())}`,
+      technical: reason,
+      reportable: true,
+    };
+  }
+
+  if (code === 'legacy-machine-data') {
+    return {
+      id: 'legacy-machine-data',
+      railLabel: 'Data migration needed',
+      title: 'Gezel preserved your machine-wide projects.',
+      body: 'This installation contains projects made by an older machine-wide Gezel service. They remain available in compatibility mode, so nothing is moved or hidden during the upgrade. User-owned folders outside that service home still have the older access limitation. Keep this installation and its machine data in place until Gezel offers an explicit per-user migration.',
+      technical: reason,
+      reportable: false,
+    };
+  }
+
+  if (code === 'machine-service-home-fresh') {
+    return {
+      id: 'machine-service-home-fresh',
+      railLabel: 'Using your per-user data',
+      title: 'Gezel is using your per-user data.',
+      // A deliberate choice, not a failure: the machine-wide service is
+      // healthy but has never held any data, while this account's home has
+      // the user's real gezellen and projects. Connecting to the empty one
+      // would look like everything vanished.
+      body: 'The machine-wide background service is running, but it has never held any data — while this account already has gezellen, projects, and chats. Gezel connected to your existing data and will keep doing so. Everything works normally; the machine-wide service simply sits idle. This choice is saved, and you can revisit it under Settings.',
+      technical: reason,
+      // Working as intended — a bug report would only say "my data is where
+      // I left it".
+      reportable: false,
     };
   }
 

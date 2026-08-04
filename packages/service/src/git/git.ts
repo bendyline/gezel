@@ -32,6 +32,8 @@ export class GitError extends Error {
 
 export interface RunGitOptions {
   cwd?: string;
+  /** Optional stdin payload for commands that accept bulk input. */
+  stdin?: string | Buffer;
   /** Tokens to redact from any error/log surfaces. */
   redact?: string[];
   /** Extra env vars on top of the always-on safety set. */
@@ -111,11 +113,30 @@ export async function runGit(args: string[], opts: RunGitOptions = {}): Promise<
     ...cleanedArgs,
   ];
   return new Promise<RunGitResult>((resolve, reject) => {
-    const child = spawn('git', gitArgs, {
-      cwd: opts.cwd,
-      env,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
+    const hasStdinPayload = opts.stdin !== undefined;
+    const child = hasStdinPayload
+      ? spawn('git', gitArgs, {
+          cwd: opts.cwd,
+          env,
+          stdio: ['pipe', 'pipe', 'pipe'],
+        })
+      : spawn('git', gitArgs, {
+          cwd: opts.cwd,
+          env,
+          stdio: ['ignore', 'pipe', 'pipe'],
+        });
+    const stdinState: { error?: Error } = {};
+    if (hasStdinPayload) {
+      // A command can reject its input before the parent finishes writing it
+      // (for example, check-ignore exits immediately outside a Git repo).
+      // Capture the pipe error so it cannot become an unhandled exception;
+      // the child exit below remains the authoritative command result.
+      const stdin = child.stdin!;
+      stdin.on('error', (err) => {
+        stdinState.error = err;
+      });
+      stdin.end(opts.stdin);
+    }
     let stdout = '';
     let stderr = '';
     let killedForTimeout = false;
@@ -149,6 +170,13 @@ export async function runGit(args: string[], opts: RunGitOptions = {}): Promise<
             redact(stderr, opts.redact),
           ),
         );
+        return;
+      }
+      if (
+        stdinState.error &&
+        (code === 0 || (code !== null && opts.acceptExitCodes?.includes(code)))
+      ) {
+        reject(redactError(stdinState.error, opts.redact));
         return;
       }
       if (code === 0) {

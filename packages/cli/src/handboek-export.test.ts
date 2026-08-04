@@ -11,6 +11,7 @@ import {
   runHandboekExport,
   slugify,
   withHeadingIds,
+  wrapTables,
 } from './handboek-export.js';
 
 describe('rewriteSiteLinks', () => {
@@ -49,6 +50,22 @@ describe('extractBody', () => {
 
   it('falls back to the input when there is no body element', () => {
     expect(extractBody('<p>bare</p>')).toBe('<p>bare</p>');
+  });
+});
+
+describe('wrapTables', () => {
+  it('wraps every table in its own scroll container', () => {
+    const out = wrapTables(
+      '<p>a</p><table><tr><td>1</td></tr></table><p>b</p><table><tr><td>2</td></tr></table>',
+    );
+    expect(out).toBe(
+      '<p>a</p><div class="hb-table-scroll"><table><tr><td>1</td></tr></table></div>' +
+        '<p>b</p><div class="hb-table-scroll"><table><tr><td>2</td></tr></table></div>',
+    );
+  });
+
+  it('leaves table-free content untouched', () => {
+    expect(wrapTables('<p>no tables here</p>')).toBe('<p>no tables here</p>');
   });
 });
 
@@ -108,7 +125,7 @@ describe('runHandboekExport', () => {
 
   beforeAll(async () => {
     out = await mkdtemp(join(tmpdir(), 'gezel-handboek-site-'));
-    result = await runHandboekExport({ out, css: ['../house.css'] });
+    result = await runHandboekExport({ out, css: ['../house.css'], siteUrl: '/' });
   }, 120_000);
 
   afterAll(async () => {
@@ -140,6 +157,37 @@ describe('runHandboekExport', () => {
     const anchors = [...page.matchAll(/<h2 id="([^"]+)"/g)].map((m) => m[1]);
     expect(anchors.length).toBeGreaterThan(0);
     for (const id of anchors) expect(page).toContain(`href="#${id}"`);
+  });
+
+  it('links the masthead wordmark out to the surrounding site', async () => {
+    for (const page of [
+      'index.html',
+      join('the-crew', 'index.html'),
+      join('role', 'meester', 'index.html'),
+    ]) {
+      const html = await readFile(join(out, page), 'utf8');
+      expect(html).toContain('<a class="hb-wordmark" href="/">gezel</a>');
+    }
+  });
+
+  it('omits the wordmark entirely when no site url is given', async () => {
+    const bare = await mkdtemp(join(tmpdir(), 'gezel-handboek-bare-'));
+    try {
+      await runHandboekExport({ out: bare });
+      const html = await readFile(join(bare, 'index.html'), 'utf8');
+      expect(html).not.toContain('hb-wordmark');
+      expect(html).toContain('class="hb-brand"');
+    } finally {
+      await rm(bare, { recursive: true, force: true }).catch(() => {});
+    }
+  }, 120_000);
+
+  it('puts generated catalog tables in a scroll container and lets cells wrap', async () => {
+    const page = await readFile(join(out, 'craftbooks-index', 'index.html'), 'utf8');
+    expect(page).toContain('<div class="hb-table-scroll"><table>');
+    const css = await readFile(join(out, 'assets', 'handboek.css'), 'utf8');
+    const rules = css.replace(/\/\*[\s\S]*?\*\//g, '');
+    expect(rules).not.toMatch(/white-space:\s*nowrap/);
   });
 
   it('carries section navigation on every page', async () => {

@@ -137,7 +137,11 @@ import {
 } from '../providers/llama-cpp/engine-flags.js';
 import { readGgufSummary } from '../providers/llama-cpp/gguf-metadata.js';
 import { LlamaCppProvider, createLlamaCppPatientFetch } from '../providers/llama-cpp/index.js';
-import { resolveLlamaCppKvCacheType } from '../providers/llama-cpp/kv-cache-type.js';
+import {
+  type LlamaCppKvCacheType,
+  planLlamaCppKv,
+  resolveLlamaCppKvCacheType,
+} from '../providers/llama-cpp/kv-cache-type.js';
 import {
   degradeMoeOffloadDecision,
   estimateKvReserveBytes,
@@ -154,6 +158,7 @@ import {
   mlxVenvPackages,
 } from '../providers/mlx/index.js';
 import { MockProvider } from '../providers/mock.js';
+import { availableSystemRamBytes } from '../providers/native/capacity-broker.js';
 import { type LocalProviderName, makeEngineKey } from '../providers/native/engine-key.js';
 import { pickFreePort } from '../providers/native/port.js';
 import { NativeEngineSupervisor } from '../providers/native/supervisor.js';
@@ -407,6 +412,30 @@ async function resolveCatalogContextWindow(
   } catch {
     return undefined;
   }
+}
+
+/**
+ * Resolve one model id for every stage of a session build. Keeping this pure
+ * prevents provider binding/admission from drifting away from the model later
+ * placed in SessionOpts when the install default changes.
+ */
+export function effectiveSessionModel(args: {
+  record: Pick<ChatSession, 'providerName' | 'model' | 'nightShift'>;
+  frontmatterModel?: string;
+  config: Pick<GezelConfig, 'defaultModel' | 'nightShift'>;
+}): string | undefined {
+  const nightShiftModel =
+    args.record.nightShift === true &&
+    args.config.nightShift?.modelOverride?.enabled === true &&
+    args.config.nightShift.modelOverride.provider === args.record.providerName
+      ? args.config.nightShift.modelOverride.model
+      : undefined;
+  return (
+    args.frontmatterModel ??
+    nightShiftModel ??
+    args.config.defaultModel?.[args.record.providerName] ??
+    args.record.model
+  );
 }
 
 /**
@@ -839,6 +868,17 @@ export {
   parseBillionsFromModelId,
   type LocalModelTier,
 } from './local-model-tier.js';
+
+function isMachineEngineChatProvider(name: string): name is LocalProviderName {
+  return name === 'llama-cpp' || name === 'mlx' || name === 'ds4';
+}
+
+function providerQueueIsBusy(provider: LLMProvider): boolean {
+  const snapshot = provider.queue?.snapshot();
+  return Boolean(
+    snapshot && snapshot.running + snapshot.queuedInteractive + snapshot.queuedBackground > 0,
+  );
+}
 
 export class ChatManager {
   /** Cached provider instances keyed by provider name. */
@@ -1348,13 +1388,124 @@ export class ChatManager {
     this.remotes = remotes;
   }
   private remotes?: RemotesRegistry;
+  /**
+   * Runtime-managed machine broker. Kept as a resolver because its bearer
+   * token and TLS cert rotate independently of this user daemon.
+   */
+  setMachineEngineRemoteResolver(resolveRemoteId: (() => string | null) | undefined): void {
+    this.machineEngineRemoteId = resolveRemoteId;
+  }
+  private machineEngineRemoteId?: () => string | null;
+  private machineEngineRetirement: Promise<void> | null = null;
+  private readonly machineEngineSessionTeardowns = new Map<string, Promise<void>>();
+  private readonly machineEngineRetiringProviders = new Map<ProviderName, LLMProvider>();
+
+  /**
+   * Retire any user-owned native engines after the machine broker appears.
+   * Active turns are allowed to finish; new turns already resolve through the
+   * broker. Session bridges close once per session, then provider queues drain
+   * both interactive and background work before their engines shut down.
+   */
+  async retireLocalEnginesForMachineBroker(): Promise<void> {
+    if (this.machineEngineRetirement) return this.machineEngineRetirement;
+    const run = (async () => {
+      // Session activity is the backstop for queue-bypassing turns. Only
+      // after those are idle may the provider queue drain + engine shutdown
+      // begin; background one-shots remain visible to the queue itself.
+      await this.retireMachineEngineSessions();
+      await Promise.all([
+        this.retireOwnedEngineRouter(),
+        this.retireSingletonMachineEngineProviders(),
+      ]);
+    })();
+    this.machineEngineRetirement = run;
+    try {
+      await run;
+    } catch (error) {
+      if (this.machineEngineRetirement === run) this.machineEngineRetirement = null;
+      throw error;
+    }
+  }
+
+  /** Tear down only sessions backed by broker-owned chat engines. A busy
+   * session gets one after-idle callback; queued follow-up sends are held
+   * until its bridges have closed, then rebuild against the remote provider. */
+  private async retireMachineEngineSessions(): Promise<void> {
+    const waits: Promise<void>[] = [];
+    for (const [sessionId, state] of this.states) {
+      if (!isMachineEngineChatProvider(state.record.providerName)) continue;
+      if (this.inflight.has(sessionId)) {
+        waits.push(
+          new Promise<void>((resolve, reject) => {
+            this.runAfterSessionIdle(sessionId, () => {
+              void this.tearDownMachineEngineSession(sessionId, state).then(resolve, reject);
+            });
+          }),
+        );
+      } else {
+        waits.push(this.tearDownMachineEngineSession(sessionId, state));
+      }
+    }
+    await Promise.all(waits);
+  }
+
+  private tearDownMachineEngineSession(sessionId: string, state: LiveSessionState): Promise<void> {
+    const existing = this.machineEngineSessionTeardowns.get(sessionId);
+    if (existing) return existing;
+    const session = state.session;
+    state.session = null;
+    this.revokeSessionToken?.(`session:${sessionId}`);
+    const run = Promise.allSettled([
+      ...(session ? [session.disconnect()] : []),
+      this.disposeFixedFunctionBridge(sessionId),
+      this.disposeCliToolBridge(sessionId),
+    ])
+      .then(() => undefined)
+      .finally(() => {
+        if (this.machineEngineSessionTeardowns.get(sessionId) === run) {
+          this.machineEngineSessionTeardowns.delete(sessionId);
+        }
+        if (!this.inflight.has(sessionId)) this.drainNextQueued(sessionId);
+      });
+    this.machineEngineSessionTeardowns.set(sessionId, run);
+    return run;
+  }
+
+  private async retireOwnedEngineRouter(): Promise<void> {
+    let router = this.engineRouter ?? this.engineRouterCache;
+    if (!router && this.engineRouterInitPromise) {
+      router = await this.engineRouterInitPromise;
+    }
+    if (!router) return;
+    await router.retire();
+    if (!this.engineRouter && this.engineRouterCache === router) {
+      this.engineRouterCache = null;
+      this.engineRouterInitPromise = null;
+    }
+  }
+
+  private async retireSingletonMachineEngineProviders(): Promise<void> {
+    for (const [name, provider] of this.providers) {
+      if (!isMachineEngineChatProvider(name)) continue;
+      this.providers.delete(name);
+      this.machineEngineRetiringProviders.set(name, provider);
+    }
+    for (const [name, provider] of this.machineEngineRetiringProviders) {
+      while (providerQueueIsBusy(provider)) {
+        await new Promise<void>((resolve) => setTimeout(resolve, 100));
+      }
+      await provider.shutdown();
+      this.cacheController?.invalidateProvider(name);
+      this.machineEngineRetiringProviders.delete(name);
+    }
+  }
   private readonly remoteProviders = new Map<
     string,
     { connectionKey: string; provider: RemoteGezelProvider }
   >();
 
   /** Resolve a connection-aware provider for a namespaced remote model id. */
-  private getRemoteProvider(modelId: string | undefined): LLMProvider {
+  private getRemoteProvider(modelId: string | undefined, modelPrefix?: string): LLMProvider {
     const parsed = modelId ? parseRemoteModelId(modelId) : null;
     if (!parsed) {
       throw new Error(
@@ -1362,15 +1513,19 @@ export class ChatManager {
       );
     }
     const remote = this.remotes?.get(parsed.remoteId) ?? null;
+    // Context admission is model-specific. Keeping one provider per remote
+    // model makes synchronous getContextWindow() unambiguous even when the
+    // same broker hosts several differently-clamped engines.
+    const providerKey = `${parsed.remoteId}\0${modelPrefix ?? ''}\0${parsed.modelId}`;
     if (!remote) {
-      this.remoteProviders.delete(parsed.remoteId);
+      this.remoteProviders.delete(providerKey);
       throw new Error(`not paired with remote server "${parsed.remoteId}" — pair it in Settings`);
     }
     // Re-pairing must not reuse credentials captured from the previous pairing.
     const connectionKey = [remote.baseUrl, remote.token, remote.pinnedIdentityFingerprint].join(
       '\0',
     );
-    const cached = this.remoteProviders.get(parsed.remoteId);
+    const cached = this.remoteProviders.get(providerKey);
     if (cached?.connectionKey === connectionKey) return cached.provider;
     const fetchImpl = getPairedRemoteFetch(remote, this.remotes!);
     const provider = new RemoteGezelProvider({
@@ -1379,10 +1534,47 @@ export class ChatManager {
       baseUrl: remote.baseUrl,
       token: remote.token,
       fetch: fetchImpl,
+      ...(modelPrefix ? { modelPrefix } : {}),
+      defaultModel: parsed.modelId,
+      resolveConnection: () => {
+        const latest = this.remotes?.get(remote.remoteId);
+        if (!latest) {
+          throw new Error(`remote server "${remote.displayName}" is unavailable`);
+        }
+        return {
+          baseUrl: latest.baseUrl,
+          token: latest.token,
+          fetch: getPairedRemoteFetch(latest, this.remotes!),
+        };
+      },
     });
-    this.remoteProviders.set(parsed.remoteId, { connectionKey, provider });
+    this.remoteProviders.set(providerKey, { connectionKey, provider });
     this.remotes?.touch(parsed.remoteId);
     return provider;
+  }
+
+  /**
+   * Obtain the context window that should size the prompt built for this
+   * provider. Remote providers perform a broker admission preflight here;
+   * native in-process providers simply return their already-clamped value.
+   */
+  private async resolveEffectiveContextWindow(
+    provider: LLMProvider,
+    model?: string,
+  ): Promise<number | undefined> {
+    const prepared = await provider.prepareContextWindow?.(model);
+    return prepared ?? provider.getContextWindow?.();
+  }
+
+  private async resolveEffectiveSessionModel(
+    record: ChatSession,
+    gezel?: { parsed: { frontmatter: { model?: string } } } | null,
+  ): Promise<string | undefined> {
+    return effectiveSessionModel({
+      record,
+      frontmatterModel: gezel?.parsed.frontmatter.model,
+      config: await this.store.readConfig(),
+    });
   }
 
   /**
@@ -2137,6 +2329,23 @@ export class ChatManager {
     // multi-minute engine load.
     const provider = await this.ensureProviderForSession(record).catch(() => null);
     if (!provider) return;
+
+    // Under machine-broker adoption the persisted provider name remains the
+    // user-facing native name (`llama-cpp` / `mlx` / `ds4`), while the live
+    // provider is RemoteGezelProvider. Build/reuse the A-side live session so
+    // it can send B the exact prompt bands, transcript, and local MCP tool
+    // schemas. B still reads no product state; it receives a prepared prefill
+    // payload over the inference-only protocol.
+    if (provider.name === 'remote') {
+      const state = await this.ensureState(sessionId).catch(() => null);
+      if (!state?.session?.prewarm) return;
+      try {
+        await state.session.prewarm(sessionId);
+      } catch {
+        // Same best-effort contract as local adapter warming.
+      }
+      return;
+    }
     type WarmFn = (sid: string, msgs: Array<{ role: string; content: string }>) => Promise<void>;
     const adapter = (
       provider as unknown as {
@@ -2454,14 +2663,23 @@ export class ChatManager {
       registeredTools.length > 0
         ? await this.buildToolsOverrideForLiveSession(record, registeredTools)
         : undefined;
-    const sessionOpts = await this.buildSessionOpts(record, gezel.about, toolsOverride);
+    const cachedProvider = this.providers.get(record.providerName);
+    const effectiveContextWindow = liveSession?.numCtx ?? cachedProvider?.getContextWindow?.();
+    const sessionOpts = await this.buildSessionOpts(
+      record,
+      gezel.about,
+      toolsOverride,
+      undefined,
+      undefined,
+      undefined,
+      effectiveContextWindow !== undefined ? { effectiveContextWindow } : undefined,
+    );
     // Effective model id for display: prefer what the session was
     // configured with, else fall back to the provider's auto-picked
     // default. Without the provider fallback, sessions where the user
     // never explicitly selected a model in Settings → AI show as
     // model-unset in the bundle even though a real model is loaded.
     // Mirrors the logic in `buildSessionOpts` for tier resolution.
-    const cachedProvider = this.providers.get(record.providerName);
     const modelId = sessionOpts.model ?? cachedProvider?.getEffectiveModelId?.();
     const parameterSize = await resolveCatalogParameterSize(this.catalog, modelId);
 
@@ -5181,6 +5399,9 @@ export class ChatManager {
    * / `reject` callbacks captured at enqueue time.
    */
   private drainNextQueued(sessionId: string): void {
+    // Broker adoption closes the old local session + its tool bridges before
+    // a queued follow-up is allowed to rebuild on the machine remote.
+    if (this.machineEngineSessionTeardowns.has(sessionId)) return;
     const tag = sessionId.slice(0, 8);
     const q = this.pendingSends.get(sessionId);
     if (!q || q.length === 0) {
@@ -7760,14 +7981,34 @@ export class ChatManager {
    * stored `providerState` (use when the stored one is known dead). Used by
    * the mid-conversation "session gone" recovery path in `send`.
    */
-  private async createFreshSessionForRecord(record: ChatSession): Promise<LLMSession> {
+  private async createFreshSessionForRecord(
+    record: ChatSession,
+    runtime?: { pendingUserText?: string; omitLastUserFromPriorMessages?: boolean },
+  ): Promise<LLMSession> {
     const gezel = await this.store.getGezel(record.gezelId);
     if (!gezel) throw new Error(`agent ${record.gezelId} not found`);
-    const provider = await this.ensureProviderForSession(record, gezel);
+    const effectiveModel = await this.resolveEffectiveSessionModel(record, gezel);
+    const provider = await this.ensureProviderForSession(record, gezel, effectiveModel);
     // ensureProviderForSession may have written `engineKey` onto the
     // record — persist so a restart routes to the same replica.
     if (record.engineKey) await this.store.writeSession(record);
-    const sessionOpts = await this.buildSessionOpts(record, gezel.about);
+    const effectiveContextWindow = await this.resolveEffectiveContextWindow(
+      provider,
+      effectiveModel,
+    );
+    const sessionOpts = await this.buildSessionOpts(
+      record,
+      gezel.about,
+      undefined,
+      undefined,
+      runtime?.pendingUserText,
+      undefined,
+      {
+        ...(effectiveContextWindow !== undefined ? { effectiveContextWindow } : {}),
+        ...(effectiveModel !== undefined ? { effectiveModel } : {}),
+        ...(runtime?.omitLastUserFromPriorMessages ? { omitLastUserFromPriorMessages: true } : {}),
+      },
+    );
     return provider.createSession(sessionOpts);
   }
 
@@ -7830,7 +8071,13 @@ export class ChatManager {
           /* ignore */
         }
       }
-      state.session = await this.createFreshSessionForRecord(record);
+      state.session = await this.createFreshSessionForRecord(record, {
+        pendingUserText: userText,
+        // runSend persisted the first user message before recall completed.
+        // sendAndWait is about to supply that same message live, so replaying
+        // it here duplicates turn one and creates fake prior conversation.
+        omitLastUserFromPriorMessages: true,
+      });
       state.session.onUsage((u) => {
         this.usageTracker.recordTurn(record.providerName, u);
         this.accountTaskBudget(record, u);
@@ -7876,9 +8123,9 @@ export class ChatManager {
    *     "forgot the user's question" symptom traces back to (see
    *     ollama.ts header).
    *
-   * For non-Ollama providers this is a no-op: Copilot's SDK and
-   * OpenAI's Responses API both manage history server- or
-   * SDK-side, so we have nothing to manage.
+   * Copilot/OpenAI/CLI providers remain no-ops because they manage history
+   * outside this process. RemoteGezelProvider is included: its transport is
+   * remote, but B is stateless and the A-side session owns the transcript.
    *
    * Char-based prompt-size estimate (~4 chars/token); coarse but
    * fine for threshold gating. The post-hoc check in
@@ -7907,12 +8154,12 @@ export class ChatManager {
     // message list and have no server-side compaction — they're the
     // providers that can genuinely overflow. Copilot and OpenAI manage
     // history server-/SDK-side, so we have nothing to do for them here.
-    if (!isLocalProvider(record.providerName)) {
+    if (!isLocalProvider(record.providerName) && record.providerName !== 'remote') {
       return { rebuilt: false };
     }
-    const numCtx = (liveSession as { numCtx?: number }).numCtx;
-    const estimator = (liveSession as { estimatePromptChars?: () => number }).estimatePromptChars;
-    const model = (liveSession as { model?: string }).model ?? record.model ?? record.providerName;
+    const numCtx = liveSession.numCtx;
+    const estimator = liveSession.estimatePromptChars;
+    const model = liveSession.model ?? record.model ?? record.providerName;
     if (!numCtx || !estimator) return { rebuilt: false };
     const chars = estimator.call(liveSession) + pendingPrompt.length;
     const estimatedTokens = Math.ceil(chars / 4);
@@ -7932,7 +8179,9 @@ export class ChatManager {
     // on the looser shared default since their cache reuse means
     // long contexts don't cost a fresh prefill every turn.
     const compactRatio =
-      record.providerName === 'mlx' ? MLX_CONTEXT_COMPACT_RATIO : CONTEXT_COMPACT_RATIO;
+      record.providerName === 'mlx' || liveSession.model?.startsWith('mlx:')
+        ? MLX_CONTEXT_COMPACT_RATIO
+        : CONTEXT_COMPACT_RATIO;
     if (!opts?.force && ratio < CONTEXT_WARN_RATIO) return { rebuilt: false };
 
     if (!opts?.force && ratio < compactRatio) {
@@ -8037,7 +8286,12 @@ export class ChatManager {
     state.session = null;
     // If `createFreshSessionForRecord` throws, the error propagates up to the
     // runSend turn loop — genuinely fatal (we already disconnected the old one).
-    const fresh = await this.createFreshSessionForRecord(record);
+    const fresh = await this.createFreshSessionForRecord(record, {
+      pendingUserText: pendingPrompt,
+      // runSend persisted this user message before pressure was checked. The
+      // rebuilt stateless session must receive it only as the live prompt.
+      omitLastUserFromPriorMessages: true,
+    });
     state.session = fresh;
     if (compacted) {
       this.events.publish(scope, {
@@ -8530,6 +8784,16 @@ export class ChatManager {
 
   /** List the models available on the given provider (for the UI dropdown). */
   async listModelsForProvider(name: ProviderName): Promise<ModelInfo[]> {
+    const machineRemoteId = this.machineEngineRemoteId?.() ?? null;
+    if (machineRemoteId && (name === 'llama-cpp' || name === 'mlx' || name === 'ds4')) {
+      const prefix = `${name}:`;
+      const remoteModels = await this.listRemoteModels(machineRemoteId);
+      return remoteModels.flatMap((model) => {
+        const parsed = parseRemoteModelId(model.id);
+        if (!parsed?.modelId.startsWith(prefix)) return [];
+        return [{ ...model, id: parsed.modelId.slice(prefix.length) }];
+      });
+    }
     // Installed on-device models are disk metadata, not an engine health
     // check. Reading them must not build the provider: MLX provider creation
     // provisions its managed Python environment, which made merely opening
@@ -8761,6 +9025,24 @@ export class ChatManager {
       provider = await this.resolveOneShotProvider(providerName, model);
     }
 
+    // Ambient chores must never COLD-LOAD a local engine into a machine
+    // already tight on memory. The queue's quiet-window gate decides WHEN
+    // housekeeping dispatches; this decides whether dispatching would pull
+    // a multi-GB model off disk to do it. Observed failure: a freshly
+    // booted daemon's index enrichment fired one-shots ~20s after start
+    // and cold-loaded the default model while the user was setting the
+    // machine up. Ambient work is deferrable by definition — it can wait
+    // for headroom or for the model to be loaded by real use.
+    if (opts.ambient) {
+      const denial = this.denyAmbientColdLoad(effectiveProviderName, model, provider);
+      if (denial) {
+        oneShotLog.info(`deferred${opts.jobLabel ? ` (${opts.jobLabel})` : ''}: ${denial}`);
+        const err = new Error(`Deferred background work: ${denial}`);
+        (err as Error & { isActionable: boolean }).isActionable = true;
+        throw err;
+      }
+    }
+
     const baseSystem =
       'You respond to a single self-contained prompt. Follow the output format requested by the user exactly.';
     const systemMessage = personaAbout ? `${personaAbout}\n\n---\n\n${baseSystem}` : baseSystem;
@@ -8803,6 +9085,47 @@ export class ChatManager {
         oneShotLog.warn('disconnect error:', err);
       });
     }
+  }
+
+  /**
+   * Would running an ambient one-shot on `providerName` require cold-loading
+   * a local model while free memory is scarce? Returns the human-readable
+   * deferral reason, or null to proceed.
+   *
+   * Deliberately coarse: a resident engine for the target (or an
+   * unavailable pool snapshot) always admits, and the floor is a flat
+   * free-RAM threshold rather than per-model math — the context-admission
+   * clamp bounds what an admitted load can consume, so the only question
+   * here is "is there visibly room to bring ANY model up for chores?".
+   * `GEZEL_AMBIENT_COLD_LOAD_MIN_FREE_GB` tunes the floor (default 8).
+   */
+  private denyAmbientColdLoad(
+    providerName: ProviderName,
+    model: string | undefined,
+    provider: LLMProvider,
+  ): string | null {
+    // Under machine-broker adoption the user-facing provider name deliberately
+    // remains llama-cpp/mlx/ds4, but the selected provider object is remote.
+    // This daemon's empty retired pool and free RAM say nothing about whether
+    // the broker already has the model resident.
+    if (provider.name === 'remote') return null;
+    if (providerName !== 'llama-cpp' && providerName !== 'mlx' && providerName !== 'ds4') {
+      return null;
+    }
+    const snapshot = this.peekEngineStatus();
+    if (!snapshot) return null;
+    const resident = snapshot.entries.some(
+      (e) => e.provider === providerName && (!model || e.modelId === model),
+    );
+    if (resident) return null;
+    const GIB = 1024 ** 3;
+    const envGb = Number.parseFloat(process.env.GEZEL_AMBIENT_COLD_LOAD_MIN_FREE_GB ?? '');
+    const minFreeBytes = (Number.isFinite(envGb) && envGb >= 0 ? envGb : 8) * GIB;
+    const freeBytes = availableSystemRamBytes();
+    if (freeBytes >= minFreeBytes) return null;
+    const wantsGb = (minFreeBytes / GIB).toFixed(0);
+    const freeGb = (freeBytes / GIB).toFixed(1);
+    return `loading ${model ?? providerName} for background work wants at least ${wantsGb} GB of free memory and only ${freeGb} GB is free right now; it will run once memory frees up or the model is loaded for interactive use`;
   }
 
   /**
@@ -9422,9 +9745,7 @@ export class ChatManager {
         // session — work the real turn needs anyway, done early.
         prefillSession: async (sessionId) => {
           const state = await this.ensureState(sessionId);
-          const session = state.session as
-            | (LLMSession & { prefillOnly?: (o?: { timeoutMs?: number }) => Promise<void> })
-            | null;
+          const session = state.session;
           if (!session || typeof session.prefillOnly !== 'function') return false;
           await session.prefillOnly();
           return true;
@@ -9439,10 +9760,13 @@ export class ChatManager {
       const llamaSlotSavePath = llamaProvider.getSlotSavePath();
       const adapter = new LlamaCppCacheAdapter({
         resolveBaseUrl: async () => llamaProvider.currentBaseUrl(),
-        // Read the live slot count off the provider's queue so the adapter
-        // can never desync from the launched `--parallel N` (the supervised
-        // path auto-sizes N from RAM + KV headroom).
-        slotCount: llamaProvider.queue.concurrency,
+        // The ENGINE slot count (`--parallel N`), not `queue.concurrency`:
+        // the queue reserves a background lane above the engine slots, so
+        // on a single-slot launch it reads 2 and the adapter would bind
+        // sessions to slot ids the server doesn't have (wild-caught
+        // 2026-08-03 — save/restore against the phantom slot 400s
+        // silently).
+        slotCount: llamaProvider.getLaunchedSlots(),
         ...(llamaSlotSavePath ? { slotSavePath: llamaSlotSavePath } : {}),
       });
       this.cacheController.registerAdapter(adapter);
@@ -9539,26 +9863,33 @@ export class ChatManager {
   async ensureProviderForSession(
     record: ChatSession,
     gezel?: { parsed: { frontmatter: { model?: string } } } | null,
+    effectiveModel?: string,
   ): Promise<LLMProvider> {
     const name = record.providerName;
+    const modelId = effectiveModel ?? (await this.resolveEffectiveSessionModel(record, gezel));
     // Remote models route to a per-server RemoteGezelProvider (turn loop +
     // tools stay local; only the forward-pass is remoted).
     if (name === 'remote') {
-      return this.getRemoteProvider(record.model ?? gezel?.parsed.frontmatter.model);
+      return this.getRemoteProvider(modelId);
     }
     const { isLocalProvider } = await import('../providers/native/engine-key.js');
     if (!isLocalProvider(name)) return this.ensureProvider(name);
 
+    const machineRemoteId = this.machineEngineRemoteId?.() ?? null;
+    if (machineRemoteId) {
+      if (!modelId) {
+        throw new Error(`No ${name} model is selected for the machine engine service`);
+      }
+      record.engineKey = undefined;
+      return this.getRemoteProvider(makeRemoteModelId(machineRemoteId, `${name}:${modelId}`), name);
+    }
+
     const router = await this.getEngineRouter();
     if (!router) return this.ensureProvider(name);
 
-    // Resolve the modelId in the same precedence the rest of the
-    // manager uses: `record.model` > gezel frontmatter > config
-    // default. Bail to the singleton path when nothing resolves —
-    // we can't pool-route without a modelId.
-    const config = await this.store.readConfig();
-    const fmModel = gezel?.parsed.frontmatter.model;
-    const modelId = record.model ?? fmModel ?? config.defaultModel?.[name];
+    // `modelId` was resolved once for this build (gezel / Night Shift / live
+    // install default / historical record). Bail to the singleton path when
+    // nothing resolves — we can't pool-route without a modelId.
     if (!modelId) return this.ensureProvider(name);
 
     const { engineKey, provider } = await this.bindLocalReplica(router, name, modelId, {
@@ -9625,10 +9956,24 @@ export class ChatManager {
    */
   async getProviderForModel(name: ProviderName, modelId?: string): Promise<LLMProvider> {
     if (name === 'remote') return this.getRemoteProvider(modelId);
-    const seeded = this.providers.get(name);
-    if (seeded) return seeded;
     const { isLocalProvider } = await import('../providers/native/engine-key.js');
     if (!isLocalProvider(name)) return this.ensureProvider(name);
+
+    const machineRemoteId = this.machineEngineRemoteId?.() ?? null;
+    if (machineRemoteId) {
+      const config = await this.store.readConfig();
+      const resolved = modelId ?? config.defaultModel?.[name];
+      if (!resolved) {
+        throw new Error(`No ${name} model is selected for the machine engine service`);
+      }
+      return this.getRemoteProvider(
+        makeRemoteModelId(machineRemoteId, `${name}:${resolved}`),
+        name,
+      );
+    }
+
+    const seeded = this.providers.get(name);
+    if (seeded) return seeded;
 
     const router = await this.getEngineRouter();
     if (!router) return this.ensureProvider(name);
@@ -9896,6 +10241,165 @@ export class ChatManager {
   }
 
   /**
+   * Non-building lookup for an already-created native provider. Unlike
+   * `getProviderForModel`, this cannot allocate a replica, evict another model,
+   * or start an engine. The caller still checks the provider's live base URL
+   * because a retained provider object may currently have no resident process.
+   */
+  peekResidentLocalProviders(name: ProviderName, modelId?: string): LLMProvider[] {
+    if (!isMachineEngineChatProvider(name) || !modelId) return [];
+    const singleton = this.providers.get(name);
+    const router = this.engineRouter ?? this.engineRouterCache;
+    const pooled = router?.pool.peekProvidersForModel(name, modelId) ?? [];
+    return singleton ? [singleton, ...pooled.filter((provider) => provider !== singleton)] : pooled;
+  }
+
+  /**
+   * Resolve the context window a native model would receive without binding a
+   * pool replica. This is the broker-side half of remote admission: focusing a
+   * chat needs the live memory clamp so the user daemon can size its prompt,
+   * but it must not load the model or evict somebody else's resident engine.
+   */
+  async previewContextWindowForModel(
+    name: LocalProviderName,
+    modelId: string,
+  ): Promise<number | undefined> {
+    for (const resident of this.peekResidentLocalProviders(name, modelId)) {
+      const residentModel = resident.getEffectiveModelId?.();
+      if (residentModel && residentModel !== modelId) continue;
+      const prepared = await resident.prepareContextWindow?.(modelId);
+      const live = prepared ?? resident.getContextWindow?.();
+      if (live && Number.isFinite(live) && live > 0) return Math.floor(live);
+    }
+
+    const config = await this.store.readConfig();
+    if (name === 'mlx') {
+      const installed = await this.mlxModels?.resolveModel(modelId);
+      if (!installed) throw new ModelNotInstalledError(name, modelId);
+      return resolveMlxEffectiveNumCtx({
+        ...(installed.contextWindow ? { modelContextWindow: installed.contextWindow } : {}),
+        ...(config.mlxNumCtx ? { configuredLimit: config.mlxNumCtx } : {}),
+      });
+    }
+
+    if (name === 'ds4') {
+      const installed = await this.ds4Models?.resolveModel(modelId);
+      const hasExplicitSource = Boolean(
+        process.env.GEZEL_DS4_MODEL ||
+          process.env.GEZEL_DS4_SERVER_URL ||
+          config.ds4ModelPath ||
+          config.ds4BaseUrl,
+      );
+      if (!installed && !hasExplicitSource) throw new ModelNotInstalledError(name, modelId);
+      const detail = await this.catalog.get('chat-model', modelId).catch(() => null);
+      const ds4Source = detail?.manifest.kind === 'chat-model' ? detail.manifest.ds4 : undefined;
+      const { totalmem } = await import('node:os');
+      const ramTieredCtx = totalmem() / 1024 ** 3 >= 192 ? 262_144 : 131_072;
+      return resolveDs4LaunchCtx({
+        configured: config.ds4NumCtx,
+        ramTieredCtx,
+        catalogMaxCtx: ds4Source?.maxLaunchCtx,
+      });
+    }
+
+    const installed = await this.llamaCppModels?.resolveModel(modelId);
+    if (!installed) throw new ModelNotInstalledError(name, modelId);
+
+    const envNumCtx = (() => {
+      const raw = process.env.GEZEL_LLAMA_NUM_CTX;
+      if (!raw) return undefined;
+      const parsed = Number.parseInt(raw, 10);
+      return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+    })();
+    const manifestEngineConfig = await resolveCatalogLlamaCppEngineConfig(this.catalog, modelId);
+    const preferredCap =
+      envNumCtx ?? config.llamaCppNumCtx ?? manifestEngineConfig?.contextSize ?? 65_536;
+    let effectiveNumCtx = Math.min(installed.contextWindow ?? preferredCap, preferredCap);
+    if (envNumCtx !== undefined) return effectiveNumCtx;
+
+    const {
+      clampCtxTokensForMemory,
+      computeCapacityBudget,
+      defaultLocalEngineSlots,
+      estimatePerSlotKvBytes,
+      llamaCppSlotCeiling,
+    } = await import('../providers/native/capacity-broker.js');
+    const router = this.engineRouter ?? this.engineRouterCache;
+    const brokerSnap = router?.broker.committed();
+    const liveBudget = computeCapacityBudget();
+    const fastBudgetBytes = brokerSnap?.enforced
+      ? (router?.broker.fastBudgetBytes() ?? brokerSnap.budgetBytes)
+      : liveBudget.fastBytes;
+    const admissionBudgetBytes = brokerSnap?.enforced
+      ? brokerSnap.budgetBytes
+      : liveBudget.budgetBytes;
+    const committedOtherBytes = brokerSnap?.enforced ? brokerSnap.committedBytes : 0;
+    const configuredSlots = config.providerConcurrency?.['llama-cpp'];
+    let kvCacheType = resolveLlamaCppKvCacheType({
+      architecture: installed.architecture,
+      modelId,
+      override: config.llamaCppKvCacheType,
+    });
+    const ceilingFor = (kv: LlamaCppKvCacheType) =>
+      llamaCppSlotCeiling({
+        budgetBytes: fastBudgetBytes,
+        weightsBytes: installed.approxSizeBytes,
+        perTurnCtxTokens: effectiveNumCtx,
+        kvCacheType: kv,
+        committedOtherBytes,
+      });
+    const kvPlan = planLlamaCppKv({
+      architecture: installed.architecture,
+      modelId,
+      override: config.llamaCppKvCacheType,
+      slotsConfigured: configuredSlots !== undefined,
+      ceilingFor,
+      maxSlots: defaultLocalEngineSlots(),
+    });
+    kvCacheType = kvPlan.kvCacheType;
+    let slots = configuredSlots ?? Math.min(defaultLocalEngineSlots(), ceilingFor(kvCacheType));
+    if ((config.llamaCppSpecType ?? manifestEngineConfig?.spec?.type) === 'draft-mtp') slots = 1;
+
+    try {
+      const summary = readGgufSummary(installed.weightsPath, { includeTensorSizes: true });
+      const referenceCtx = 4096;
+      const exactKvAtReference = estimateKvReserveBytes({
+        blockCount: summary.blockCount,
+        embeddingLength: summary.embeddingLength,
+        headCount: summary.headCount,
+        headCountKv: summary.headCountKv,
+        keyLength: summary.keyLength,
+        valueLength: summary.valueLength,
+        ctxTokens: referenceCtx,
+        kvCacheType,
+      });
+      const kvBytesPerToken =
+        exactKvAtReference !== undefined
+          ? exactKvAtReference / referenceCtx
+          : estimatePerSlotKvBytes({
+              perTurnCtxTokens: referenceCtx,
+              weightsBytes: installed.approxSizeBytes,
+              kvCacheType,
+            }) / referenceCtx;
+      effectiveNumCtx = clampCtxTokensForMemory({
+        requestedPerTurnCtxTokens: effectiveNumCtx,
+        slots,
+        kvBytesPerToken,
+        weightsResidentBytes: Math.round(installed.approxSizeBytes * 1.2),
+        budgetBytes: admissionBudgetBytes,
+        committedOtherBytes,
+        freeSystemRamBytes: availableSystemRamBytes(),
+        vramBytes: brokerSnap?.enforced ? brokerSnap.pools.vramBytes : liveBudget.vramBytes,
+      }).perTurnCtxTokens;
+    } catch (error) {
+      log.warn(
+        `[llama-cpp] could not inspect ${modelId} while previewing admission: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    return effectiveNumCtx;
+  }
+
+  /**
    * Cancel a pending provider-queue entry by (provider, id). Resolves
    * the queue the SAME two ways {@link localEngineQueueSummaries} +
    * `/api/queues` surface it: the singleton `providers` map first
@@ -9964,6 +10468,21 @@ export class ChatManager {
         'remote provider must be resolved from a "remote:<remoteId>/<model>" id, not as a singleton',
       );
     }
+    if (name === 'llama-cpp' || name === 'mlx' || name === 'ds4') {
+      const machineRemoteId = this.machineEngineRemoteId?.() ?? null;
+      if (machineRemoteId) {
+        const config = await this.store.readConfig();
+        const modelId = config.defaultModel?.[name];
+        if (!modelId) {
+          throw new Error(`No ${name} model is selected for the machine engine service`);
+        }
+        return this.getRemoteProvider(
+          makeRemoteModelId(machineRemoteId, `${name}:${modelId}`),
+          name,
+        );
+      }
+    }
+
     const existing = this.providers.get(name);
     if (existing) return existing;
 
@@ -10381,7 +10900,8 @@ export class ChatManager {
       await this.store.writeSession(record);
     }
 
-    const provider = await this.ensureProviderForSession(record, gezel);
+    const effectiveModel = await this.resolveEffectiveSessionModel(record, gezel);
+    const provider = await this.ensureProviderForSession(record, gezel, effectiveModel);
     // Pool-route may have rebound the session; persist the new
     // engineKey so a restart routes consistently.
     if (record.engineKey) await this.store.writeSession(record);
@@ -10406,12 +10926,23 @@ export class ChatManager {
       pendingUserText,
     );
     const gateRepairConstrained = await this.gateRepairConstraintActive(record);
+    const effectiveContextWindow = await this.resolveEffectiveContextWindow(
+      provider,
+      effectiveModel,
+    );
     const sessionOpts = await this.buildSessionOpts(
       record,
       gezel.about,
       undefined,
       undefined,
       pendingUserText,
+      undefined,
+      effectiveContextWindow !== undefined || effectiveModel !== undefined
+        ? {
+            ...(effectiveContextWindow !== undefined ? { effectiveContextWindow } : {}),
+            ...(effectiveModel !== undefined ? { effectiveModel } : {}),
+          }
+        : undefined,
     );
 
     // Try resume first if we have state. Fall back to fresh on failure.
@@ -10796,6 +11327,7 @@ export class ChatManager {
           { availableTools: [], thirdPartyToolsetIds: [] },
           { bridgeFailed: true },
           pendingUserText,
+          session,
         );
         if (refreshedSystem) {
           session.setSystemMessage(refreshedSystem);
@@ -10876,6 +11408,7 @@ export class ChatManager {
         toolsOverride,
         undefined,
         pendingUserText,
+        session,
       );
       if (refreshedSystem && refreshedSystem !== sessionOpts.systemMessage) {
         session.setSystemMessage(refreshedSystem);
@@ -10941,13 +11474,18 @@ export class ChatManager {
     },
     promptExtras?: { bridgeFailed?: boolean },
     pendingUserText?: string,
+    liveSession?: LLMSession,
   ): Promise<string | null> {
+    const effectiveContextWindow =
+      liveSession?.numCtx ?? this.providers.get(record.providerName)?.getContextWindow?.();
     const opts = await this.buildSessionOpts(
       record,
       gezel.about,
       toolsOverride,
       promptExtras,
       pendingUserText,
+      undefined,
+      effectiveContextWindow !== undefined ? { effectiveContextWindow } : undefined,
     );
     return opts.systemMessage ?? null;
   }
@@ -10962,11 +11500,20 @@ export class ChatManager {
     promptExtras?: { bridgeFailed?: boolean },
     pendingUserText?: string,
     requiredBridgeTool?: string,
+    runtime?: {
+      /** Post-admission per-turn context exposed by the selected provider. */
+      effectiveContextWindow?: number;
+      /** One model decision shared by binding, admission, tuning, and inference. */
+      effectiveModel?: string;
+      /** Current user message will be supplied by sendAndWait; don't replay it. */
+      omitLastUserFromPriorMessages?: boolean;
+    },
   ): Promise<BuiltSessionOpts> {
     const project = await this.store.getProject(record.projectId);
-    const workspaceFiles = project
-      ? await this.store.listProjectWorkspaceRecursive(record.projectId)
-      : [];
+    const workspaceListing = project
+      ? await this.store.listProjectWorkspaceRecursiveDetailed(record.projectId)
+      : { entries: [], truncated: false };
+    const workspaceFiles = workspaceListing.entries;
     // Artifacts are intentionally NOT enumerated in the prompt. They drift
     // every time anyone (including a parallel gezel) writes one, and a
     // baked-in listing goes stale immediately. The prompt teaches the
@@ -11069,17 +11616,13 @@ export class ChatManager {
     // family hints + correctly-sized prompt cookbook. Cheap: providers
     // are cached in `this.providers`.
     const cachedProvider = this.providers.get(record.providerName);
-    const nightShiftDefaultModel =
-      record.nightShift === true &&
-      globalConfig.nightShift?.modelOverride?.enabled === true &&
-      globalConfig.nightShift.modelOverride.provider === record.providerName
-        ? globalConfig.nightShift.modelOverride.model
-        : undefined;
     const modelForTier =
-      gezel?.parsed.frontmatter.model ??
-      nightShiftDefaultModel ??
-      globalConfig.defaultModel?.[record.providerName] ??
-      record.model ??
+      runtime?.effectiveModel ??
+      effectiveSessionModel({
+        record,
+        frontmatterModel: gezel?.parsed.frontmatter.model,
+        config: globalConfig,
+      }) ??
       cachedProvider?.getEffectiveModelId?.();
     // Catalog manifest parameter-size is authoritative — the bare model
     // tag often drops the size suffix (e.g. `qwen3.6` is 27B but the
@@ -11291,6 +11834,7 @@ export class ChatManager {
     const discoveredProjectMcp = await discoverProjectMcpToolsets(
       projectWorkspaceDirForMcp,
       record.projectId,
+      { allowProjectFiles: project?.storageScope !== 'machine-shared' },
     );
     for (const warning of discoveredProjectMcp.warnings) {
       log.warn(
@@ -11438,6 +11982,9 @@ export class ChatManager {
       securityPolicy,
       workspaceWritable,
       tier: localModelTier,
+      ...(runtime?.effectiveContextWindow !== undefined
+        ? { effectiveContextWindow: runtime.effectiveContextWindow }
+        : {}),
       latestUserMessage: latestUserTextForToolFilter,
       ...(taskContext?.step ? { activeStep: taskContext.step } : {}),
       forceDirectFileWork: directFileWorkConstrained,
@@ -11528,6 +12075,7 @@ export class ChatManager {
       ),
       project,
       workspaceFiles,
+      ...(workspaceListing.truncated ? { workspaceFilesTruncated: true } : {}),
       documentFiles,
       voormanName: voorman?.name,
       ...(voorman?.roleBasedName ? { voormanRoleBasedName: voorman.roleBasedName } : {}),
@@ -11624,10 +12172,12 @@ export class ChatManager {
     const gezelFm = gezel?.parsed.frontmatter;
     const providerName = record.providerName;
     const resolvedModel =
-      gezelFm?.model ??
-      nightShiftDefaultModel ??
-      config.defaultModel?.[providerName] ??
-      record.model;
+      runtime?.effectiveModel ??
+      effectiveSessionModel({
+        record,
+        frontmatterModel: gezelFm?.model,
+        config,
+      });
     const resolvedReasoningEffort =
       gezelFm?.reasoningEffort ??
       config.defaultReasoningEffort?.[providerName] ??
@@ -11868,15 +12418,21 @@ export class ChatManager {
     // context and the model asks "what were we talking about?" on the
     // very next turn. Filter out tool/system roles: the model only needs
     // user+assistant turns to recover conversational context. Both local
-    // engines (Ollama / llama-cpp / mlx) and Anthropic's Messages API
-    // qualify — Anthropic is cloud but the API requires the client to
-    // replay history every turn, mitigated by prompt caching at the
-    // provider layer. Copilot / OpenAI manage history server-side via
-    // their resume tokens, so duplicating it here would be wrong.
+    // engines (Ollama / llama-cpp / mlx), RemoteGezelProvider (B is
+    // deliberately stateless), and Anthropic's Messages API qualify —
+    // Anthropic is cloud but the API requires the client to replay history
+    // every turn, mitigated by prompt caching at the provider layer. Copilot /
+    // OpenAI manage history server-side via resume tokens, so duplicating it
+    // here would be wrong.
     const providerIsStateless =
-      isLocalProvider(record.providerName) || record.providerName === 'anthropic';
+      isLocalProvider(record.providerName) ||
+      record.providerName === 'remote' ||
+      record.providerName === 'anthropic';
     if (providerIsStateless && record.messages.length > 0) {
-      opts.priorMessages = record.messages
+      const replayMessages = runtime?.omitLastUserFromPriorMessages
+        ? record.messages.slice(0, -1)
+        : record.messages;
+      opts.priorMessages = replayMessages
         .filter((m) => m.role === 'user' || m.role === 'assistant')
         .map((m) => ({
           role: m.role as 'user' | 'assistant',
@@ -12516,6 +13072,9 @@ export class ChatManager {
       securityPolicy,
       workspaceWritable,
       tier: localModelTier,
+      ...(runtime?.effectiveContextWindow !== undefined
+        ? { effectiveContextWindow: runtime.effectiveContextWindow }
+        : {}),
       latestUserMessage: latestUserTextForToolFilter,
       ...(taskContext?.step ? { activeStep: taskContext.step } : {}),
       forceDirectFileWork: directFileWorkConstrained,
@@ -12567,9 +13126,10 @@ export class ChatManager {
     // ~70% of `numCtx`, the session calls back here to get a
     // synthesis of older turns it can swap in for the prior history.
     // Cloud providers manage context server-side and don't accumulate
-    // transcripts client-side; gating on isLocalProvider keeps the
-    // hook out of those code paths entirely.
-    if (isLocalProvider(record.providerName)) {
+    // transcripts client-side. RemoteGezelProvider is the exception to its
+    // cloud-like transport shape: B is stateless and A owns the transcript,
+    // so it needs the same compaction callback as an in-process local.
+    if (isLocalProvider(record.providerName) || record.providerName === 'remote') {
       const sessionRef = record;
       opts.requestCompaction = async ({ priorMessages, estimatedTokens, numCtx }) => {
         const transcript = renderTranscript(
@@ -14190,9 +14750,11 @@ function truncate(s: string, max: number): string {
  * scope, we fall back to the project id (skipping the implicit
  * `default` bucket — surfacing it would just be noise).
  */
-function chatTurnJobLabel(record: { taskRef?: string; stepId?: string; projectId: string }):
-  | string
-  | undefined {
+function chatTurnJobLabel(record: {
+  taskRef?: string;
+  stepId?: string;
+  projectId: string;
+}): string | undefined {
   if (record.taskRef) {
     return record.stepId ? `${record.taskRef} · ${record.stepId}` : record.taskRef;
   }
@@ -14654,6 +15216,13 @@ export interface BuildInstructionsOptions {
   executionDensity?: ExecutionDensity;
   project?: import('@bendyline/gezel').ProjectDetail | null;
   workspaceFiles?: ProjectFileEntry[];
+  /**
+   * True when the recursive workspace walk hit its entry cap, i.e.
+   * `workspaceFiles` is an incomplete inventory (shallow entries first).
+   * Changes the listing's truncation note from an exact "N more" count
+   * to "more exist — search for what you don't see".
+   */
+  workspaceFilesTruncated?: boolean;
   documentFiles?: ProjectFileEntry[];
   voormanName?: string;
   /**
@@ -14900,6 +15469,7 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
     providerName,
     project,
     workspaceFiles,
+    workspaceFilesTruncated,
     documentFiles,
     voormanName,
     voormanRoleBasedName,
@@ -15272,7 +15842,13 @@ ${artifactsLine}
       .map((f) => `${f.isDirectory ? '\u{1F4C1}' : ' '} ${f.path}`)
       .join('\n');
     workspaceFilesBlock = `\n\n---\n\n### Workspace files\n\nFiles currently in the project:\n\`\`\`\n${listing}\n\`\`\``;
-    if (workspaceFiles.length > 200) {
+    if (workspaceFilesTruncated) {
+      // The walker's own entry cap dropped part of the tree, so the total
+      // is unknown — an exact "N more" count here would be a lie. The
+      // listing is breadth-first, so what's missing is the deep tail.
+      workspaceFilesBlock +=
+        '\n(listing incomplete — deeper files exist beyond these; a path absent above may still exist)';
+    } else if (workspaceFiles.length > 200) {
       workspaceFilesBlock += `\n(${workspaceFiles.length - 200} more files truncated)`;
     }
     if (retrievalFirstHint) {
@@ -16499,7 +17075,7 @@ export async function buildLlamaCppProvider(opts: {
   // `config.llamaCppKvCacheType` always wins. f16 KV costs ~2x the cache
   // memory on Gemma — the slot-ceiling math below reads THIS value so slot
   // sizing stays consistent with what the engine actually allocates.
-  const kvCacheType = resolveLlamaCppKvCacheType({
+  let kvCacheType = resolveLlamaCppKvCacheType({
     architecture: modelCatalogInfo?.architecture,
     modelId: defaultModelId ?? undefined,
     override: config.llamaCppKvCacheType,
@@ -16586,7 +17162,9 @@ export async function buildLlamaCppProvider(opts: {
   // can only opt a model UP toward its own window, never past it.
   const preferredCap = numCtx ?? manifestEngineConfig?.contextSize ?? PREFERRED_CTX_DEFAULT;
   const modelCtx = modelCatalogInfo?.contextWindow ?? preferredCap;
-  const effectiveNumCtx = Math.min(modelCtx, preferredCap);
+  // `let`: the RAM-aware admission clamp below (inside the GGUF-summary
+  // block) may lower this before anything launch-visible consumes it.
+  let effectiveNumCtx = Math.min(modelCtx, preferredCap);
 
   // Auto-size supervised slots now that the model + context window are
   // known: a RAM-tier demand default, clamped by a per-model KV memory
@@ -16594,9 +17172,14 @@ export async function buildLlamaCppProvider(opts: {
   // Explicit `providerConcurrency['llama-cpp']` overrides verbatim.
   // (Co-resident pool models aren't subtracted here — the broker still
   // denies an over-commit at spawn; threading committed bytes is a TODO.)
-  const { fastMemoryBudgetBytes, defaultLocalEngineSlots, llamaCppSlotCeiling } = await import(
-    '../providers/native/capacity-broker.js'
-  );
+  const {
+    fastMemoryBudgetBytes,
+    defaultLocalEngineSlots,
+    llamaCppSlotCeiling,
+    clampCtxTokensForMemory,
+    computeCapacityBudget,
+    estimatePerSlotKvBytes,
+  } = await import('../providers/native/capacity-broker.js');
   // Subtract co-resident model reservations from the budget when the pool
   // broker is wired (multi-model path), using its actual (possibly config-
   // overridden) budget. Caveat: the broker tracks each model's resident
@@ -16613,18 +17196,35 @@ export async function buildLlamaCppProvider(opts: {
     ? (opts.broker?.fastBudgetBytes() ?? brokerSnap.budgetBytes)
     : fastMemoryBudgetBytes();
   const committedOtherBytes = brokerSnap?.enforced ? brokerSnap.committedBytes : 0;
-  let slots =
-    configuredSlots ??
-    Math.min(
-      defaultLocalEngineSlots(),
-      llamaCppSlotCeiling({
-        budgetBytes,
-        weightsBytes: modelCatalogInfo?.approxSizeBytes ?? 8 * 1024 ** 3,
-        perTurnCtxTokens: effectiveNumCtx,
-        kvCacheType,
-        committedOtherBytes,
-      }),
+  // Gemma f16-KV vs a second slot: when memory alone forces single-slot,
+  // trade to q8_0 KV if that buys ≥2 slots — SWA models get no rescue
+  // from llama-server's prompt cache, so single-slot session alternation
+  // re-prefills the other session's whole context (~41K tok ≈ 79s,
+  // wild-caught). Policy + evidence in planLlamaCppKv; explicit
+  // kvCacheType or slot config disables the trade.
+  const ceilingFor = (kv: LlamaCppKvCacheType) =>
+    llamaCppSlotCeiling({
+      budgetBytes,
+      weightsBytes: modelCatalogInfo?.approxSizeBytes ?? 8 * 1024 ** 3,
+      perTurnCtxTokens: effectiveNumCtx,
+      kvCacheType: kv,
+      committedOtherBytes,
+    });
+  const kvPlan = planLlamaCppKv({
+    architecture: modelCatalogInfo?.architecture,
+    modelId: defaultModelId ?? undefined,
+    override: config.llamaCppKvCacheType,
+    slotsConfigured: configuredSlots !== undefined,
+    ceilingFor,
+    maxSlots: defaultLocalEngineSlots(),
+  });
+  if (kvPlan.upgraded) {
+    kvCacheType = kvPlan.kvCacheType;
+    log.info(
+      `[llama-cpp] ${modelCatalogInfo?.id ?? defaultModelId ?? 'model'}: trading f16 KV for q8_0 to fit a second engine slot (single-slot SWA session alternation re-prefills wholesale; KV A/B 2026-08-03 showed no measurable q8_0 fidelity cost)`,
     );
+  }
+  let slots = configuredSlots ?? Math.min(defaultLocalEngineSlots(), ceilingFor(kvCacheType));
   // The bundled llama.cpp line still has known multi-slot MTP allocation
   // failures. Keep an explicitly selected MTP mode on one slot so its first
   // decode is reliable; `spec.mtp` alone is capability metadata, not an
@@ -16776,6 +17376,56 @@ export async function buildLlamaCppProvider(opts: {
               expertBytesByLayer: summary.expertBytesByLayer,
             }
           : undefined;
+      // ── RAM-aware context admission ──
+      // The slot ceiling sizes the slot COUNT and the broker admits
+      // WEIGHTS; neither asks whether one slot at the requested context
+      // fits at all. On models with outsized attention geometry that gap
+      // is enormous — gemma4-12b at f16 KV is ~380 KB/token, so a 64K
+      // default projects ~25 GB of KV and turned a 6.7 GB model into a
+      // ~25 GB process that paged a 32 GB machine to a standstill
+      // (2026-08-03, two daemons × one model each). Clamp the per-turn
+      // context so weights + total KV + compute headroom fit both the
+      // capacity budget and live free memory. Exact per-token KV from the
+      // GGUF header; the weights-scaled heuristic only as fallback.
+      // Skipped under GEZEL_LLAMA_NUM_CTX — eval runs lift ceilings
+      // deliberately and accept the memory consequences.
+      if (envNumCtx === undefined) {
+        const REFERENCE_CTX = 4096;
+        const exactKvAtReference = estimateKvReserveBytes({
+          blockCount: summary.blockCount,
+          embeddingLength: summary.embeddingLength,
+          headCount: summary.headCount,
+          headCountKv: summary.headCountKv,
+          keyLength: summary.keyLength,
+          valueLength: summary.valueLength,
+          ctxTokens: REFERENCE_CTX,
+          kvCacheType,
+        });
+        const kvBytesPerToken =
+          exactKvAtReference !== undefined
+            ? exactKvAtReference / REFERENCE_CTX
+            : estimatePerSlotKvBytes({
+                perTurnCtxTokens: REFERENCE_CTX,
+                weightsBytes: approxBytes,
+                kvCacheType,
+              }) / REFERENCE_CTX;
+        const liveBudget = computeCapacityBudget({ gpuVramBytes: vramBytes || null });
+        const admission = clampCtxTokensForMemory({
+          requestedPerTurnCtxTokens: effectiveNumCtx,
+          slots,
+          kvBytesPerToken,
+          weightsResidentBytes: residentBytes,
+          budgetBytes: brokerSnap?.enforced ? brokerSnap.budgetBytes : liveBudget.budgetBytes,
+          committedOtherBytes,
+          freeSystemRamBytes: availableSystemRamBytes(),
+          vramBytes: liveBudget.vramBytes,
+        });
+        if (admission.clamped) {
+          log.warn(`[llama-cpp] ${modelCatalogInfo?.id ?? 'model'}: ${admission.reason}`);
+          effectiveNumCtx = admission.perTurnCtxTokens;
+        }
+      }
+
       const kvReserveBytes = estimateKvReserveBytes({
         blockCount: summary.blockCount,
         embeddingLength: summary.embeddingLength,
@@ -17111,6 +17761,11 @@ export async function buildLlamaCppProvider(opts: {
         }
       : {}),
     ...baseProviderOpts,
+    // The RAM-aware admission pass may have lowered the launch from the
+    // configured/default ceiling. Keep the session-side pressure checks,
+    // tool budgets, and user-facing diagnostics on the exact per-slot value
+    // passed to llama-server instead of falling back to the pre-clamp 65K.
+    numCtx: effectiveNumCtx,
     // Same value that decides `--mmproj` above, so the wire shape and the
     // launch flag can never disagree: typed image parts are only emitted for
     // a server that was actually started with a projector.

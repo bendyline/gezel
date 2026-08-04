@@ -504,6 +504,10 @@ export class MlxProvider implements LLMProvider {
     // No-op — supervisor starts the child lazily on first sendAndWait.
   }
 
+  getContextWindow(): number {
+    return this.numCtx;
+  }
+
   async shutdown(): Promise<void> {
     // Poison FIRST so a turn racing the shutdown can't lazily respawn
     // the engine after the stop below. The engine pool evicts replicas
@@ -892,6 +896,83 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
       }
     }
     return total;
+  }
+
+  /**
+   * Prefill the exact standing `[system][tools][transcript]` prefix without
+   * appending a user turn or mutating this session. Used by the machine broker
+   * after a user daemon prepares `/v1/remote/cache/warm`.
+   */
+  async prefillOnly(opts?: { timeoutMs?: number; sessionId?: string }): Promise<void> {
+    // Focusing a chat must not cold-start MLX. The real turn owns normal lazy
+    // startup; warming only accelerates an already-resident server.
+    const baseUrl = this.deps.provider.currentBaseUrl();
+    if (!baseUrl) return;
+    const bridgeTools = this.deps.bridges.isEmpty()
+      ? []
+      : toChatCompletionsTools(this.deps.bridges);
+    const externalAsChatCompletions: ChatCompletionTool[] = (this.deps.externalTools ?? []).map(
+      (tool) => ({
+        type: 'function' as const,
+        function: {
+          name: tool.name,
+          description: tool.description ?? '',
+          parameters: tool.parameters,
+        },
+      }),
+    );
+    const tools = [...bridgeTools, ...externalAsChatCompletions];
+    const body: Record<string, unknown> = {
+      model: this.deps.model,
+      messages: this.messages,
+      stream: false,
+      max_tokens: 1,
+    };
+    if (this.deps.tuning) applyTuning(body, this.deps.tuning, MLX_TUNING_MAP);
+    // A warm must remain a one-token prefill even when catalog tuning carries
+    // a wider output cap.
+    body.max_tokens = 1;
+    if (tools.length > 0) {
+      body.tools = tools;
+      if (profileHasBehavior(this.deps.profile, 'tools.mlx-grammar')) {
+        const grammarHint = familyToToolGrammarHint(this.deps.profile?.style);
+        if (grammarHint) body.tool_grammar = grammarHint;
+      }
+    }
+    const templateFix = profileBehaviorConfig<ToolsMlxTemplateFixConfig>(
+      this.deps.profile,
+      'tools.mlx-template-fix',
+    );
+    if (templateFix?.template) body.chat_template_override = templateFix.template;
+    if (opts?.sessionId) {
+      const adapter = this.deps.provider.getCacheAdapter();
+      if (adapter) {
+        await adapter.prepareForSend(
+          opts.sessionId,
+          this.deps.systemMessage,
+          this.deps.systemPromptLayers,
+        );
+        Object.assign(body, adapter.buildRequestExtras(opts.sessionId));
+      }
+    }
+    const releaseEngineRequest = await this.deps.provider.acquireExclusiveEngineRequest(
+      `cache-warm:${opts?.sessionId ?? 'anonymous'}`,
+    );
+    try {
+      const res = await this.deps.fetchImpl(`${baseUrl}/v1/chat/completions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(opts?.timeoutMs ?? 10 * 60_000),
+      });
+      if (!res.ok) {
+        const detail = await res.text().catch(() => '');
+        throw new Error(`prefillOnly: HTTP ${res.status} ${detail.slice(0, 200)}`);
+      }
+      await res.text().catch(() => '');
+    } finally {
+      releaseEngineRequest();
+    }
   }
 
   getLastTurnReasoning(): string | undefined {

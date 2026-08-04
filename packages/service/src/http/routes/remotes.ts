@@ -87,6 +87,12 @@ export function remotesRoutes(ctx: ServiceContext): Hono {
     const remoteId = c.req.param('remoteId');
     const remote = ctx.remotes.get(remoteId);
     if (!remote) return c.json({ error: 'not_found' }, 404);
+    if (remote.managed) {
+      return c.json(
+        { error: 'managed_remote', hint: 'This connection is managed by the local service host.' },
+        409,
+      );
+    }
     // Best-effort: ask B to revoke the token it issued us, so unpairing is
     // mutual. Failure (B offline) is non-fatal — we forget it locally anyway.
     try {

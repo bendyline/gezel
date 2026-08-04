@@ -4,6 +4,8 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   fileTokenStorage,
+  findHealthySystemService,
+  isSystemProductServiceRole,
   normalizeServiceUrl,
   resolveCliAppId,
   shouldTrySystemService,
@@ -48,6 +50,70 @@ describe('system-service selection', () => {
       /must not contain credentials/,
     );
   });
+
+  it('uses only legacy full-product roles as CLI product endpoints', () => {
+    expect(isSystemProductServiceRole(undefined)).toBe(true);
+    expect(isSystemProductServiceRole('legacy-full')).toBe(true);
+    expect(isSystemProductServiceRole('machine-engine')).toBe(false);
+    expect(isSystemProductServiceRole('user')).toBe(false);
+  });
+
+  it.each(['machine-engine', 'user'] as const)(
+    'skips a healthy %s system service so the caller falls through to the user daemon',
+    async (serviceRole) => {
+      const endpoint = {
+        port: 6228,
+        baseUrl: 'http://127.0.0.1:6228',
+        cert: null,
+        home: '/machine/gezel',
+      };
+      await expect(
+        findHealthySystemService(
+          {},
+          {
+            readEndpoint: async () => endpoint,
+            probeHealth: async () => ({
+              ok: true,
+              version: 'test',
+              serviceRole,
+              startedAt: new Date(0).toISOString(),
+            }),
+          },
+        ),
+      ).resolves.toBeNull();
+    },
+  );
+
+  it.each([undefined, 'legacy-full'] as const)(
+    'keeps %s system-role compatibility as a product endpoint',
+    async (serviceRole) => {
+      const endpoint = {
+        port: 6228,
+        baseUrl: 'http://127.0.0.1:6228',
+        cert: null,
+        home: '/machine/gezel',
+      };
+      await expect(
+        findHealthySystemService(
+          {},
+          {
+            readEndpoint: async () => endpoint,
+            probeHealth: async () => ({
+              ok: true,
+              version: 'test',
+              ...(serviceRole ? { serviceRole } : {}),
+              startedAt: new Date(0).toISOString(),
+            }),
+          },
+        ),
+      ).resolves.toEqual({
+        port: endpoint.port,
+        baseUrl: endpoint.baseUrl,
+        home: endpoint.home,
+        fetch: globalThis.fetch,
+      });
+    },
+  );
 });
 
 describe('CLI grant token storage', () => {
@@ -63,7 +129,7 @@ describe('CLI grant token storage', () => {
     expect(first).toMatch(/^gezel-cli\.[0-9a-f-]{36}$/);
   });
 
-  it('persists tokens per service origin and supports revocation cleanup', async () => {
+  it('persists tokens per logical target and supports SDK revocation cleanup', async () => {
     const home = await mkdtemp(join(tmpdir(), 'gezel-cli-token-'));
     homes.push(home);
     process.env.GEZEL_HOME = home;
@@ -75,7 +141,7 @@ describe('CLI grant token storage', () => {
 
     await expect(first.load('gezel-cli')).resolves.toBe('local-token');
     await expect(second.load('gezel-cli')).resolves.toBe('remote-token');
-    await first.remove('gezel-cli');
+    await first.delete('gezel-cli');
     await expect(first.load('gezel-cli')).resolves.toBeNull();
     await expect(second.load('gezel-cli')).resolves.toBe('remote-token');
   });

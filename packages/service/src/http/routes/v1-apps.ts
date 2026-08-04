@@ -152,6 +152,30 @@ export function v1AppsRoutes(ctx: ServiceContext): Hono {
         );
       }
 
+      // The Connected Apps switch disables only the public OpenAI facade.
+      // Registration is also the consent waist for CLI/product/device
+      // clients, so gating the whole route makes those unrelated clients
+      // disappear with the inference switch. Reject only grants that would
+      // authorize the disabled facade.
+      if (body.scopes.includes('openai')) {
+        const config = await ctx.store
+          .readConfig()
+          .catch(() => ({}) as { openaiEndpoints?: { enabled?: boolean } });
+        if (config.openaiEndpoints?.enabled === false) {
+          return c.json(
+            {
+              error: {
+                message:
+                  'OpenAI-compatible endpoints are turned off in Gezel. Enable them under Settings → Connected Apps.',
+                type: 'invalid_request_error',
+                code: 'openai_endpoints_disabled',
+              },
+            },
+            403,
+          );
+        }
+      }
+
       if (ctx.tokenStore.list().some((r) => r.appId === body.appId)) {
         return c.json(
           {

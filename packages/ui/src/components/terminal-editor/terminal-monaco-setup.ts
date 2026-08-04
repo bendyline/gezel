@@ -39,12 +39,22 @@ function projectIdFromUri(uri: monaco.Uri): string {
   return decodeURIComponent(uri.path.replace(/^\//, ''));
 }
 
-let registered = false;
+let registration: Promise<void> | null = null;
 
 /** Register the `gezel-terminal` language, themes, and completion provider. Idempotent. */
-export function ensureTerminalMonaco(): void {
-  if (registered) return;
-  registered = true;
+export function ensureTerminalMonaco(): Promise<void> {
+  if (registration) return registration;
+  registration = registerTerminalMonaco().catch((error) => {
+    registration = null;
+    throw error;
+  });
+  return registration;
+}
+
+async function registerTerminalMonaco(): Promise<void> {
+  // The compact Squisq profile keeps completion/snippet UI demand-loaded.
+  // Load it before editor creation so the terminal's provider can display.
+  await monaco.loadMonacoSuggestions();
 
   monaco.languages.register({ id: 'gezel-terminal' });
   monaco.languages.setMonarchTokensProvider('gezel-terminal', {

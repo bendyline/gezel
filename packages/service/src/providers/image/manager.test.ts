@@ -1,8 +1,9 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Store } from '../../fs/store.js';
+import { createRemotesRegistry } from '../../remotes/registry.js';
 import type { SecretKey, SecretStore } from '../../secrets/types.js';
 import { ImageProviderManager } from './manager.js';
 import { MockImageProvider } from './mock.js';
@@ -37,6 +38,23 @@ function fakeSecrets(): SecretStore {
 
 let home: string;
 let store: Store;
+
+async function attachMachineRemote(manager: ImageProviderManager): Promise<void> {
+  const remotes = await createRemotesRegistry({ home });
+  remotes.setEphemeral({
+    remoteId: 'this-machine',
+    baseUrl: 'https://127.0.0.1:6229',
+    displayName: 'This machine',
+    token: 'machine-token',
+    pinnedIdentityKey: 'test-key',
+    pinnedIdentityFingerprint: 'test-fingerprint',
+    scopes: ['remote-inference', 'machine-models'],
+    pairedAt: Date.now(),
+    managed: 'machine-engine',
+  });
+  manager.setRemotes(remotes);
+  manager.setMachineEngineRemoteResolver(() => 'this-machine');
+}
 
 beforeEach(async () => {
   home = await mkdtemp(join(tmpdir(), 'gezel-image-manager-'));
@@ -113,5 +131,122 @@ describe('ImageProviderManager', () => {
     await mgr.shutdown();
     const p2 = await mgr.current();
     expect(p1).not.toBe(p2);
+  });
+
+  it('delegates the default native provider to the machine broker', async () => {
+    const mgr = new ImageProviderManager({
+      home,
+      store,
+      secrets: fakeSecrets(),
+      env: {},
+    });
+    await attachMachineRemote(mgr);
+
+    expect(await mgr.usesMachineEngine()).toBe(true);
+    expect((await mgr.current()).name).toBe('remote:This machine');
+    expect((await mgr.providerForModel('sdxl-base-1.0')).name).toBe('remote:This machine');
+  });
+
+  it.each([
+    ['openai', 'gpt-image-2'],
+    ['google-ai', 'gemini-3.1-flash-image-preview'],
+  ] as const)('keeps configured %s generation in the user daemon', async (imageProvider, model) => {
+    await store.writeConfig({ imageProvider });
+    const mgr = new ImageProviderManager({
+      home,
+      store,
+      secrets: fakeSecrets(),
+      env: {},
+    });
+    await attachMachineRemote(mgr);
+
+    expect(await mgr.usesMachineEngine()).toBe(false);
+    expect((await mgr.current()).name).toBe(imageProvider);
+    expect((await mgr.providerForModel(model)).name).toBe(imageProvider);
+  });
+
+  it('honors an explicit remote model even when the configured provider is cloud', async () => {
+    await store.writeConfig({ imageProvider: 'openai' });
+    const mgr = new ImageProviderManager({
+      home,
+      store,
+      secrets: fakeSecrets(),
+      env: {},
+    });
+    await attachMachineRemote(mgr);
+
+    expect((await mgr.providerForModel('remote:this-machine/sdxl-base-1.0')).name).toBe(
+      'remote:This machine',
+    );
+  });
+
+  it('keeps the effective mock provider local when a broker is present', async () => {
+    const mgr = new ImageProviderManager({
+      home,
+      store,
+      secrets: fakeSecrets(),
+      env: { GEZEL_MOCK_PROVIDER: '1' },
+    });
+    await attachMachineRemote(mgr);
+
+    expect(await mgr.usesMachineEngine()).toBe(false);
+    expect((await mgr.current()).name).toBe('mock');
+  });
+
+  it('drains a cached native provider on late broker adoption', async () => {
+    const mgr = new ImageProviderManager({ home, store, secrets: fakeSecrets(), env: {} });
+    const local = await mgr.current();
+    let release!: () => void;
+    const active = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    local.generate = async () => {
+      await active;
+      return {} as Awaited<ReturnType<typeof local.generate>>;
+    };
+    const shutdown = vi.fn(async () => {});
+    local.shutdown = shutdown;
+    const generation = local.generate({ prompt: 'still rendering' });
+
+    await attachMachineRemote(mgr);
+    const retirement = mgr.retireLocalForMachineBroker();
+    await Promise.resolve();
+    expect(shutdown).not.toHaveBeenCalled();
+
+    release();
+    await generation;
+    await retirement;
+    expect(shutdown).toHaveBeenCalledTimes(1);
+    expect((await mgr.current()).name).toBe('remote:This machine');
+  });
+
+  it('does not retire a cached user-owned cloud provider', async () => {
+    await store.writeConfig({ imageProvider: 'openai' });
+    const mgr = new ImageProviderManager({ home, store, secrets: fakeSecrets(), env: {} });
+    const cloud = await mgr.current();
+    const shutdown = vi.fn(async () => {});
+    cloud.shutdown = shutdown;
+
+    await attachMachineRemote(mgr);
+    await mgr.retireLocalForMachineBroker();
+
+    expect(shutdown).not.toHaveBeenCalled();
+    expect(await mgr.current()).toBe(cloud);
+  });
+
+  it('retries shutdown of the same native provider after a retirement failure', async () => {
+    const mgr = new ImageProviderManager({ home, store, secrets: fakeSecrets(), env: {} });
+    const local = await mgr.current();
+    const shutdown = vi
+      .fn<() => Promise<void>>()
+      .mockRejectedValueOnce(new Error('transient shutdown failure'))
+      .mockResolvedValue(undefined);
+    local.shutdown = shutdown;
+    await attachMachineRemote(mgr);
+
+    await expect(mgr.retireLocalForMachineBroker()).rejects.toThrow(/transient/);
+    await expect(mgr.retireLocalForMachineBroker()).resolves.toBeUndefined();
+
+    expect(shutdown).toHaveBeenCalledTimes(2);
   });
 });

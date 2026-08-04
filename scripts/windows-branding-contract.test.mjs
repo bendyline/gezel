@@ -68,6 +68,33 @@ test('the Windows installer uses the product name in the UAC prompt', async () =
   );
 });
 
+test('the assisted installer and uninstaller ship Gezel sidebar art', async () => {
+  const builder = await readFile(join(root, 'packages', 'app', 'electron-builder.yml'), 'utf8');
+  const sidebars = {
+    installerSidebar: 'assets/installerSidebar.bmp',
+    uninstallerSidebar: 'assets/uninstallerSidebar.bmp',
+  };
+
+  for (const [setting, relativePath] of Object.entries(sidebars)) {
+    assert.match(
+      builder,
+      new RegExp(`^  ${setting}: ${relativePath.replace('.', '\\.')}$`, 'm'),
+      `nsis.${setting} must name Gezel's custom sidebar so electron-builder does not restore its stock artwork`,
+    );
+
+    const bitmap = await readFile(join(root, 'packages', 'app', relativePath));
+    assert.equal(bitmap.toString('ascii', 0, 2), 'BM', `${relativePath} must be a BMP`);
+    assert.equal(bitmap.readInt32LE(18), 164, `${relativePath} must be exactly 164px wide`);
+    assert.equal(
+      Math.abs(bitmap.readInt32LE(22)),
+      314,
+      `${relativePath} must be exactly 314px tall`,
+    );
+    assert.equal(bitmap.readUInt16LE(28), 24, `${relativePath} must be a 24-bit BMP`);
+    assert.equal(bitmap.readUInt32LE(30), 0, `${relativePath} must be uncompressed`);
+  }
+});
+
 test('the installer records InstallLocation for Add/Remove Programs', async () => {
   const hook = await readFile(join(root, 'packages', 'app', 'installer', 'nsis-hooks.nsh'), 'utf8');
 

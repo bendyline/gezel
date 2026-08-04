@@ -13,6 +13,7 @@ import type { SSEStreamingApi } from 'hono/streaming';
 import { UnknownVideoModelError } from '../../providers/video/pull-registry.js';
 import type { VideoInputBytes, VideoProvider } from '../../providers/video/types.js';
 import type { ServiceContext } from '../context.js';
+import { machineEngineProxy } from './machine-engine-proxy.js';
 
 const log = createLogger('video-gen');
 
@@ -27,6 +28,12 @@ const log = createLogger('video-gen');
  */
 export function videoGenRoutes(ctx: ServiceContext): Hono {
   const app = new Hono();
+  app.use(
+    '*',
+    machineEngineProxy(ctx, '/api/video-gen', '/v1/remote/manage/video-gen', [
+      '/api/video-gen/generate',
+    ]),
+  );
 
   app.post('/generate', async (c) => {
     const body = await c.req.json().catch(() => null);

@@ -1,6 +1,11 @@
-import type { ModelInfo, ProviderName } from '@bendyline/gezel';
+import type { GezmodelEngine, ModelInfo, ProviderName } from '@bendyline/gezel';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
+import {
+  MODEL_INVENTORY_CHANGED_EVENT,
+  changedModelInventoryEngine,
+  modelInventoryRevision,
+} from '../model-inventory.js';
 import { Select } from '../primitives/index.js';
 import { requestSettingsSection } from '../settings-nav.js';
 import { detectDs4Availability } from '../views/ds4-availability.js';
@@ -112,12 +117,25 @@ export function ProviderModelSelect({
 }) {
   const [entries, setEntries] = useState<ProviderEntry[] | null>(null);
   const [loading, setLoading] = useState(true);
+  const [inventoryEpoch, setInventoryEpoch] = useState(0);
+  const refreshEngineRef = useRef<GezmodelEngine | null>(null);
 
   // Read through a ref rather than an effect dependency: whether Copilot is
   // already the chosen provider must be current when the fetch runs, but it
   // is not a reason to re-fetch every provider's model list.
   const copilotAlreadyChosenRef = useRef(false);
   copilotAlreadyChosenRef.current = globalProvider === 'copilot' || provider === 'copilot';
+
+  useEffect(() => {
+    const onChanged = (event: Event) => {
+      const engine = changedModelInventoryEngine(event);
+      if (!engine) return;
+      refreshEngineRef.current = engine;
+      setInventoryEpoch((value) => value + 1);
+    };
+    window.addEventListener(MODEL_INVENTORY_CHANGED_EVENT, onChanged);
+    return () => window.removeEventListener(MODEL_INVENTORY_CHANGED_EVENT, onChanged);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -191,7 +209,11 @@ export function ProviderModelSelect({
       const settled = await Promise.all(
         candidates.map(async (p): Promise<ProviderEntry | null> => {
           try {
-            const res = await api.listProviderModels(p);
+            const refresh =
+              (p === 'llama-cpp' || p === 'mlx' || p === 'ds4') &&
+              ((refreshEngineRef.current === p && inventoryEpoch > 0) ||
+                modelInventoryRevision(p) > 0);
+            const res = await api.listProviderModels(p, refresh ? { refresh: true } : undefined);
             if (res.models.length === 0) return null;
             return { provider: p, label: providerLabelFor(p), models: res.models };
           } catch {
@@ -223,7 +245,7 @@ export function ProviderModelSelect({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [inventoryEpoch]);
 
   const selectValue = useMemo(() => compositeValue(provider, model), [provider, model]);
 

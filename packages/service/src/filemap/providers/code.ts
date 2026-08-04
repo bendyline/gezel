@@ -26,11 +26,16 @@ export interface CollectedMap {
   edges: ResolvedEdge[];
 }
 
-export function collectCodeMap(index: IndexStore, scope: FileMapScope = 'core'): CollectedMap {
+export function collectCodeMap(
+  index: IndexStore,
+  scope: FileMapScope = 'core',
+  ignoredPaths: ReadonlySet<string> = new Set(),
+): CollectedMap {
   const files: LayoutFileInput[] = [];
   const meta = new Map<string, { lang: string | null; kind: string | null }>();
   for (const f of index.allFiles()) {
     if (f.trivial || f.modality === 'image') continue; // images aren't city blocks
+    if (ignoredPaths.has(f.path)) continue; // workspace Git ignore policy
     if (isExcludedFromCodeMap(f.path, scope)) continue; // JSON always; tests per scope
     // loc is the block size; estimate from bytes when we never line-counted it.
     const loc = f.loc ?? Math.max(1, Math.round((f.size ?? 0) / 40));
@@ -45,6 +50,7 @@ export function collectCodeMap(index: IndexStore, scope: FileMapScope = 'core'):
 
   const symbolsByFile = new Map<string, CollectedSymbol[]>();
   for (const s of index.allSymbols()) {
+    if (!meta.has(s.filePath)) continue;
     const arr = symbolsByFile.get(s.filePath);
     const sym = { name: s.name, kind: s.kind, lineStart: s.lineStart, lineEnd: s.lineEnd };
     if (arr) arr.push(sym);

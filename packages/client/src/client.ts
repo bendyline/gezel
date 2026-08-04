@@ -275,6 +275,9 @@ import type {
   SessionDebugSnapshot,
   SessionTelemetry,
   SessionTelemetryListResponse,
+  SharedModelMigrationCandidatesResponse,
+  SharedModelMigrationRequest,
+  SharedModelMigrationResult,
   SpawnTaskInstancesRequest,
   StartCodeReviewRequest,
   StartCodeReviewResponse,
@@ -284,6 +287,7 @@ import type {
   SuggestedWorkResponse,
   SystemBootstrapStatus,
   SystemDiagnostics,
+  SystemHomeInfo,
   SystemToolsetInstallEvent,
   SystemToolsetInstallSnapshot,
   Task,
@@ -2066,8 +2070,12 @@ export class GezelClient {
     return this.request('GET', `/api/models/test?provider=${encodeURIComponent(provider)}`);
   }
 
-  listProviderModels(provider: ProviderName): Promise<ListModelsResponse> {
-    return this.request('GET', `/api/models?provider=${encodeURIComponent(provider)}`);
+  listProviderModels(
+    provider: ProviderName,
+    opts?: { refresh?: boolean },
+  ): Promise<ListModelsResponse> {
+    const refresh = opts?.refresh ? '&refresh=1' : '';
+    return this.request('GET', `/api/models?provider=${encodeURIComponent(provider)}${refresh}`);
   }
 
   // ── Communication channels ──
@@ -2617,6 +2625,17 @@ export class GezelClient {
     return this.request('GET', '/api/system/diagnostics', undefined, undefined, signal);
   }
 
+  /**
+   * Identity card for the connected daemon: which home it serves, whether
+   * that home has ever actually been used, and what is resident right now.
+   * The Electron supervisor consults this before committing to a
+   * machine-service adoption; it is also the only window into a machine
+   * daemon whose home directories are ACL-private to the service identity.
+   */
+  getSystemHomeInfo(signal?: AbortSignal): Promise<SystemHomeInfo> {
+    return this.request('GET', '/api/system/home', undefined, undefined, signal);
+  }
+
   deleteOllamaModel(name: string): Promise<{ ok: true }> {
     return this.request('DELETE', `/api/ollama/models/${encodeURIComponent(name)}`);
   }
@@ -2683,6 +2702,21 @@ export class GezelClient {
 
   cancelModelBundleImport(importId: string): Promise<{ ok: true }> {
     return this.request('DELETE', `/api/model-bundles/imports/${encodeURIComponent(importId)}`);
+  }
+
+  // ── private → shared model migration ──
+
+  /** Current, complete per-user models eligible for the machine shared store. */
+  listSharedModelMigrationCandidates(
+    engine?: GezmodelEngine,
+  ): Promise<SharedModelMigrationCandidatesResponse> {
+    const query = engine ? `?engine=${encodeURIComponent(engine)}` : '';
+    return this.request('GET', `/api/model-migrations/candidates${query}`);
+  }
+
+  /** Safely copy, broker-verify, publish, then remove one per-user model. */
+  moveModelToShared(request: SharedModelMigrationRequest): Promise<SharedModelMigrationResult> {
+    return this.request('POST', '/api/model-migrations/move', request);
   }
 
   // ── model fitness (the proeve) ──
@@ -4434,7 +4468,11 @@ export class GezelClient {
     id: string,
     subpath?: string,
     recursive?: boolean,
-  ): Promise<{ files: Array<{ name: string; path: string; isDirectory: boolean }> }> {
+  ): Promise<{
+    files: Array<{ name: string; path: string; isDirectory: boolean }>;
+    /** Present on recursive listings: true when the walker's entry cap dropped files. */
+    truncated?: boolean;
+  }> {
     const params = new URLSearchParams();
     if (subpath) params.set('path', subpath);
     if (recursive) params.set('recursive', '1');
@@ -4640,7 +4678,11 @@ export class GezelClient {
     id: string,
     subpath?: string,
     recursive?: boolean,
-  ): Promise<{ files: Array<{ name: string; path: string; isDirectory: boolean }> }> {
+  ): Promise<{
+    files: Array<{ name: string; path: string; isDirectory: boolean }>;
+    /** Present on recursive listings: true when the walker's entry cap dropped files. */
+    truncated?: boolean;
+  }> {
     const params = new URLSearchParams();
     if (subpath) params.set('path', subpath);
     if (recursive) params.set('recursive', '1');

@@ -12,7 +12,7 @@ import {
   gezelPaths,
   projectCreateTransactionsRoot,
   projectDir,
-  projectLocalDir,
+  projectStorageDir,
 } from '@bendyline/gezel/paths';
 import { writeFileAtomic } from '../fs/atomic.js';
 import { Store } from '../fs/store.js';
@@ -177,7 +177,7 @@ function expectedCommitSteps(
     hidden: join(actualGezelsRoot, '.gezel-create-staging', operationId, id),
     target: gezelDir(store.homePath, id, store.externalFolders),
   }));
-  const localTarget = projectLocalDir(store.homePath, projectId);
+  const localTarget = projectStorageDir(store.homePath, projectId);
   const externalTarget = projectDir(store.homePath, projectId, store.externalFolders);
   if (!samePath(localTarget, externalTarget)) {
     steps.push({
@@ -362,7 +362,7 @@ export async function createTypedProject(
     const operationRoot = join(projectCreateTransactionsRoot(store.homePath), operationId);
     const stageHome = join(operationRoot, 'home');
     const projectId = await chooseProjectId(store, input.name);
-    const actualLocalProject = projectLocalDir(store.homePath, projectId);
+    const actualLocalProject = projectStorageDir(store.homePath, projectId);
     const actualExternalProject = projectDir(store.homePath, projectId, store.externalFolders);
     const localProjectsRoot = join(store.homePath, 'projects');
     const externalProjectsRoot = gezelPaths(store.homePath, store.externalFolders).projects;
@@ -424,7 +424,7 @@ export async function createTypedProject(
         );
       }
 
-      const stagedProjectDir = projectLocalDir(stageHome, projectId);
+      const stagedProjectDir = projectStorageDir(stageHome, projectId);
       await copyDirectory(stagedProjectDir, hiddenLocalProject);
       const splitExternal = normalize(actualExternalProject) !== normalize(actualLocalProject);
       if (splitExternal) {

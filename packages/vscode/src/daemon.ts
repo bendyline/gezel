@@ -1,28 +1,18 @@
-import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import { GezelApp, authorize as sdkAuthorize } from '@bendyline/gezel-app-sdk';
-import {
-  type DiscoverOrSpawnResult,
-  GezelClient,
-  createTrustingFetch,
-  discoverOrSpawn,
-} from '@bendyline/gezel-client/node';
+import { GezelApp, authorizeLocal } from '@bendyline/gezel-app-sdk';
+import type { LocalDaemonMode } from '@bendyline/gezel-app-sdk';
+import { GezelClient } from '@bendyline/gezel-client/node';
 import type * as vscode from 'vscode';
 import type { ResolvedConfig } from './config.js';
 import type { Logger } from './log.js';
 
-export type ConnectMode = 'configured' | 'adopted' | 'spawned';
+export type ConnectMode = LocalDaemonMode;
 
 export interface Connection {
   client: GezelClient;
   baseUrl: string;
   /** Revocable app token used by the webview and other ordinary extension calls. */
   token: string;
-  /**
-   * Per-launch discovery credential used only to administer the extension's
-   * own grant (approval/reset). It is never forwarded into the webview.
-   */
-  firstPartyToken: string;
   /** PEM-encoded loopback cert; null when daemon serves plain HTTP. */
   cert: string | null;
   /** Fetch implementation bound to the daemon's TLS trust anchor. */
@@ -32,13 +22,9 @@ export interface Connection {
 }
 
 /**
- * Code-verified app connection used by the complete VS Code extension.
- *
- * `connection` is rebuilt around the revocable app token: its `product`
- * scope powers the embedded chat UX and its `openai` scope powers the
- * Language Model Provider. `firstPartyToken` remains host-only so the
- * extension can approve or reset its own grant without exposing that
- * discovery credential to the webview.
+ * Code-verified, third-party-style connection used by the complete VS Code
+ * extension. The extension receives only its revocable app token; daemon
+ * discovery credentials never leave the shared SDK bootstrap.
  */
 export interface AppConnection {
   app: GezelApp;
@@ -47,169 +33,71 @@ export interface AppConnection {
 }
 
 /**
- * Resolve a connection to gezeld. Order:
- *   1. Explicit `gezel.daemonUrl` + `gezel.daemonToken` settings → use directly.
- *   2. discoverOrSpawn → adopts a running desktop-app daemon if present
- *      (reads ~/.gezel/runtime/{port,token,pid}), else spawns a fresh one
- *      detached so it outlives the VSCode session.
- *   3. If `gezel.spawnIfMissing` is false and no daemon is running, throw.
- */
-export async function resolveDaemon(config: ResolvedConfig, logger: Logger): Promise<Connection> {
-  if (config.daemonUrl && config.daemonToken) {
-    logger.info(`using configured daemon at ${config.daemonUrl}`);
-    const { cert, fetchImpl } = await resolveCertAndFetchForUrl(config.daemonUrl);
-    const client = new GezelClient({
-      baseUrl: config.daemonUrl,
-      token: config.daemonToken,
-      fetch: fetchImpl,
-    });
-    await client.health();
-    return {
-      client,
-      baseUrl: config.daemonUrl,
-      token: config.daemonToken,
-      firstPartyToken: config.daemonToken,
-      cert,
-      fetch: fetchImpl,
-      mode: 'configured',
-    };
-  }
-
-  const daemonEntry = resolveDaemonEntryFromExtension();
-  const opts: Parameters<typeof discoverOrSpawn>[0] = {
-    daemonEntry,
-    detached: true,
-    logger: { info: (m) => logger.info(m), warn: (m) => logger.warn(m) },
-    timeoutMs: 20000,
-  };
-  let result: DiscoverOrSpawnResult;
-  try {
-    result = await discoverOrSpawn(opts);
-  } catch (err) {
-    if (!config.spawnIfMissing) {
-      throw new Error(
-        'No running gezel daemon and gezel.spawnIfMissing is disabled. Start the gezel desktop app or enable spawn.',
-      );
-    }
-    throw err;
-  }
-  logger.info(`daemon ${result.outcome} pid=${result.pid} url=${result.baseUrl}`);
-  const certPem = result.cert;
-  const fetchImpl = certPem
-    ? createTrustingFetch({ cert: certPem })
-    : (globalThis.fetch as typeof fetch);
-  return {
-    client: result.client,
-    baseUrl: result.baseUrl,
-    token: result.token,
-    firstPartyToken: result.token,
-    cert: certPem,
-    fetch: fetchImpl,
-    mode: result.outcome,
-    pid: result.pid,
-  };
-}
-
-/**
- * Acquire one per-app token for the complete VS Code integration.
+ * Discover/start the per-user daemon and acquire one per-app token for the
+ * complete VS Code integration through the public app SDK.
  *
  * Uses the SDK's consent flow (`POST /v1/apps/register` → poll grant)
  * with `tokenStorage` backed by VS Code's secret store so the user
  * only sees the approval dialog once per machine.
  *
- * Older extension builds stored an inference-only `openai` token under
- * the same app id. Probe a saved token against the product API and
- * self-revoke it before requesting the expanded, code-verified grant.
+ * The SDK owns runtime discovery, pinned TLS, safe optional user-daemon
+ * startup, persisted-token scope validation, and consent polling. Keeping
+ * that protocol here to a single call makes VS Code the reference integration
+ * other native third-party clients can follow.
  */
 export async function acquireAppConnection(
-  connection: Connection,
+  config: ResolvedConfig,
   context: vscode.ExtensionContext,
   logger: Logger,
   onVerificationCode: (code: string) => Promise<void> | void,
 ): Promise<AppConnection> {
   const appId = 'vscode';
-  const secretKey = `gezel:${appId}`;
-  const existingToken = await context.secrets.get(secretKey);
-  if (existingToken) {
-    const productProbe = await connection.fetch(`${connection.baseUrl}/api/config`, {
-      headers: { Authorization: `Bearer ${existingToken}` },
-    });
-    const inferenceProbe = productProbe.ok
-      ? await connection.fetch(`${connection.baseUrl}/v1/models`, {
-          headers: { Authorization: `Bearer ${existingToken}` },
-        })
-      : null;
-    const lacksRequiredScope =
-      productProbe.status === 401 ||
-      productProbe.status === 403 ||
-      inferenceProbe?.status === 401 ||
-      inferenceProbe?.status === 403;
-    if (lacksRequiredScope) {
-      logger.info(
-        'saved VS Code token lacks product or inference access; replacing it through consent',
-      );
-      const revoke = await connection.fetch(
-        `${connection.baseUrl}/v1/apps/${encodeURIComponent(appId)}/token`,
-        {
-          method: 'DELETE',
-          headers: { Authorization: `Bearer ${existingToken}` },
-        },
-      );
-      if (!revoke.ok && revoke.status !== 401 && revoke.status !== 404) {
-        throw new Error(`could not replace the legacy VS Code token (HTTP ${revoke.status})`);
-      }
-      await context.secrets.delete(secretKey);
-    } else if (!productProbe.ok || !inferenceProbe?.ok) {
-      throw new Error(
-        `could not validate the saved VS Code token (HTTP ${productProbe.status}/${inferenceProbe?.status ?? 'not-run'})`,
-      );
-    }
-  }
-
-  const authorized = await sdkAuthorize({
+  const daemonEntry = config.daemonUrl ? undefined : resolveDaemonEntryFromExtension();
+  const authorized = await authorizeLocal({
     appId,
     appName: 'Visual Studio Code',
     scopes: ['product', 'openai'],
-    baseUrl: connection.baseUrl,
-    fetch: connection.fetch,
+    ...(config.daemonUrl ? { baseUrl: config.daemonUrl } : {}),
+    ...(config.daemonUrl && config.daemonToken ? { existingToken: config.daemonToken } : {}),
+    ...(process.env.GEZEL_CERT_PATH ? { tlsCertPath: process.env.GEZEL_CERT_PATH } : {}),
     onVerificationCode,
     tokenStorage: {
       save: async (id, t) => context.secrets.store(`gezel:${id}`, t),
       load: async (id) => (await context.secrets.get(`gezel:${id}`)) ?? null,
+      delete: async (id) => context.secrets.delete(`gezel:${id}`),
     },
     approvalTimeoutSec: 300,
+    ...(daemonEntry
+      ? {
+          daemon: {
+            daemonEntry,
+            spawnIfMissing: config.spawnIfMissing,
+            timeoutMs: 20_000,
+            logger: { info: (m: string) => logger.info(m), warn: (m: string) => logger.warn(m) },
+          },
+        }
+      : {}),
   });
   const appToken = authorized.token;
   const app = new GezelApp(authorized);
-  const authorizedConnection: Connection = {
-    ...connection,
+  const connection: Connection = {
     client: new GezelClient({
-      baseUrl: connection.baseUrl,
+      baseUrl: authorized.baseUrl,
       token: appToken,
-      fetch: connection.fetch,
+      fetch: authorized.fetch,
     }),
+    baseUrl: authorized.baseUrl,
     token: appToken,
+    cert: authorized.daemon.cert,
+    fetch: authorized.fetch,
+    mode: authorized.daemon.mode,
+    ...(authorized.daemon.pid !== undefined ? { pid: authorized.daemon.pid } : {}),
   };
+  logger.info(
+    `daemon ${connection.mode}${connection.pid ? ` pid=${connection.pid}` : ''} url=${connection.baseUrl}`,
+  );
   logger.info('acquired code-verified product + inference token for Visual Studio Code');
-  return { app, appToken, connection: authorizedConnection };
-}
-
-async function resolveCertAndFetchForUrl(
-  baseUrl: string,
-): Promise<{ cert: string | null; fetchImpl: typeof fetch }> {
-  // For an explicitly-configured daemon URL we can't infer the cert
-  // path. Users who point gezel.daemonUrl at HTTPS-with-self-signed
-  // should set NODE_EXTRA_CA_CERTS themselves; here we just use the
-  // global fetch.
-  if (baseUrl.startsWith('https://') && process.env.GEZEL_CERT_PATH) {
-    try {
-      const cert = await readFile(process.env.GEZEL_CERT_PATH, 'utf8');
-      return { cert, fetchImpl: createTrustingFetch({ cert }) };
-    } catch {
-      /* fall through */
-    }
-  }
-  return { cert: null, fetchImpl: globalThis.fetch as typeof fetch };
+  return { app, appToken, connection };
 }
 
 /**

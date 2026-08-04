@@ -79,6 +79,8 @@ export interface ImageProviderFactoryOptions {
   config?: GezelConfig;
   /** SecretStore the cloud branches read API keys from. Required for cloud providers. */
   secrets?: SecretStore;
+  /** Force the native provider even when a legacy config selected cloud. */
+  localOnly?: boolean;
   /**
    * Cross-engine GPU coordinator. Forwarded only to the supervised
    * sd-cpp branch — cloud providers and the user-runs-their-own
@@ -98,7 +100,7 @@ export async function createImageProvider(
     return new MockImageProvider();
   }
 
-  const choice = opts.config?.imageProvider;
+  const choice = opts.localOnly ? undefined : opts.config?.imageProvider;
   if (choice === 'google-ai') {
     const apiKey = opts.secrets
       ? await opts.secrets.get({ kind: 'providerCredential', name: 'googleAiApiKey' })

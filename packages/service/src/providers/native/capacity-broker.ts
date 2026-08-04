@@ -17,7 +17,9 @@
  * false — typically: pick LRU and evict, then retry.
  */
 
-import { totalmem } from 'node:os';
+import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { freemem, totalmem } from 'node:os';
 import { createLogger } from '@bendyline/gezel';
 import {
   type CapacityBudget,
@@ -505,6 +507,65 @@ const GIB = 1024 ** 3;
  * ({@link llamaCppSlotCeiling}) clamps further on tight-RAM + big-model
  * combos; an explicit `providerConcurrency[engine]` config overrides verbatim.
  */
+/**
+ * RECLAIMABLE-aware free RAM. `os.freemem()` reports truly-free pages
+ * only: on macOS, file-backed cache and purgeable memory count as "used"
+ * even though the kernel hands them back on demand — and a just-exited
+ * llama engine's mmap'd weights ARE file-backed cache, so freemem()
+ * reads a few GB on a 64 GB box right after any model ran. Wild-caught
+ * 2026-08-04: the context memory-clamp saw "~6.6 GB available", floored
+ * gemma4-31b to 8,192 ctx, and all 11 trials died on context overflow —
+ * on a machine with >40 GB actually reclaimable. Linux freemem() has the
+ * same free-vs-MemAvailable trap.
+ *
+ * darwin: vm_stat free+inactive+speculative+purgeable+file-backed.
+ * linux: /proc/meminfo MemAvailable. Fallback: freemem().
+ */
+export function availableSystemRamBytes(): number {
+  // vm_stat categories overlap (file-backed pages span active+inactive),
+  // so the raw sum can exceed physical RAM; cap at 90% of totalmem — the
+  // consumers already hold back their own OS reserves on top.
+  const cap = totalmem() * 0.9;
+  try {
+    if (process.platform === 'darwin') {
+      const out = execFileSync('/usr/bin/vm_stat', { encoding: 'utf8', timeout: 3_000 });
+      const parsed = parseVmStatAvailableBytes(out);
+      if (parsed !== null) return Math.max(Math.min(parsed, cap), freemem());
+    } else if (process.platform === 'linux') {
+      const parsed = parseMeminfoAvailableBytes(readFileSync('/proc/meminfo', 'utf8'));
+      if (parsed !== null) return Math.max(Math.min(parsed, cap), freemem());
+    }
+  } catch {
+    // Probe failure falls through to the conservative number.
+  }
+  return freemem();
+}
+
+/** Pure vm_stat parser (exported for tests). Returns null when the output
+ *  doesn't look like vm_stat. */
+export function parseVmStatAvailableBytes(text: string): number | null {
+  const page = Number(/page size of (\d+) bytes/.exec(text)?.[1]);
+  if (!Number.isFinite(page) || page <= 0) return null;
+  const count = (label: string): number => {
+    const m = new RegExp(`${label}:\\s+(\\d+)`).exec(text);
+    return m ? Number(m[1]) : 0;
+  };
+  const pages =
+    count('Pages free') +
+    count('Pages inactive') +
+    count('Pages speculative') +
+    count('Pages purgeable') +
+    count('File-backed pages');
+  if (pages <= 0) return null;
+  return pages * page;
+}
+
+/** Pure /proc/meminfo parser (exported for tests). */
+export function parseMeminfoAvailableBytes(text: string): number | null {
+  const m = /MemAvailable:\s+(\d+)\s*kB/.exec(text);
+  return m ? Number(m[1]) * 1024 : null;
+}
+
 export function defaultLocalEngineSlots(systemRamBytes: number = totalmem()): number {
   const gb = systemRamBytes / GIB;
   if (gb < 16) return 1;
@@ -619,4 +680,113 @@ export function llamaCppSlotCeiling(opts: {
   committedOtherBytes?: number;
 }): number {
   return localEngineSlotCeiling({ engine: 'llama-cpp', ...opts });
+}
+
+/**
+ * Physical memory held back from the live-RAM half of the context clamp:
+ * the OS, the desktop shell, and whatever the user is actually doing.
+ * Deliberately small — `freeSystemRamBytes` is already net of everything
+ * resident, so this only guards against the engine consuming the last
+ * gigabytes and pushing the machine into the pagefile.
+ */
+const CTX_CLAMP_OS_RESERVE_BYTES = 2 * GIB;
+
+/** Never clamp a turn's working window below this — sessions compact, tools
+ * cap their output, and small-context failure modes are well handled; a
+ * machine paging itself to death is not. */
+const CTX_CLAMP_FLOOR_TOKENS = 8_192;
+
+export interface CtxMemoryClampInput {
+  /** The per-turn context the launch wants (`effectiveNumCtx`). */
+  requestedPerTurnCtxTokens: number;
+  /** `--parallel` slot count; total KV is per-turn ctx × slots. */
+  slots: number;
+  /**
+   * KV bytes per token for ONE slot at the dtype the engine will actually
+   * run. Pass the exact GGUF-derived figure when the model header is
+   * readable (`estimateKvReserveBytes(...) / ctx`) — the weights-scaled
+   * heuristic underestimates models with outsized attention geometry by
+   * up to ~10× (a Gemma-12B at f16 KV is ~380 KB/token against the
+   * heuristic's 40 KB), and that gap is exactly how a 6.7 GB model became
+   * a 25 GB process on a 32 GB machine.
+   */
+  kvBytesPerToken: number;
+  /** Resident weight footprint (post-multiplier — see estimateResidentBytes). */
+  weightsResidentBytes: number;
+  /** Admission budget for the resident set (broker or auto-derived). */
+  budgetBytes: number;
+  /** Reservations other resident models already hold. */
+  committedOtherBytes?: number;
+  /** Live free physical RAM (`os.freemem()`) at launch time. */
+  freeSystemRamBytes: number;
+  /**
+   * Usable VRAM on a discrete card; MUST be 0 on unified/shared-pool
+   * hosts, where the "VRAM" is the same physical RAM `freeSystemRamBytes`
+   * measures and adding it would double-count. `computeCapacityBudget`
+   * already reports `vramBytes: 0` for those hosts — pass its value.
+   */
+  vramBytes: number;
+  minPerTurnCtxTokens?: number;
+}
+
+export interface CtxMemoryClampResult {
+  perTurnCtxTokens: number;
+  clamped: boolean;
+  /** Human-readable rationale, set only when clamped. */
+  reason: string | null;
+}
+
+/**
+ * Clamp the per-turn context window so the engine's projected footprint —
+ * resident weights plus total KV plus the compute-headroom reserve — fits
+ * BOTH the capacity budget and what the machine can actually give right
+ * now (live free RAM + discrete VRAM).
+ *
+ * This is the missing admission check behind the 2026-08-03 incident: the
+ * slot ceiling sizes the slot COUNT and the broker admits WEIGHTS, but
+ * nothing asked whether one slot at the requested context fit at all.
+ * A 64K-token default on an f16-KV model sailed through both and put a
+ * ~19 GB KV cache into system RAM. Clamping context degrades gracefully
+ * (sessions compact sooner); paging does not degrade at all — it takes
+ * the whole desktop with it.
+ *
+ * Never clamps below the floor: if even the floor doesn't fit, the engine
+ * still launches at the floor and the existing OOM/recovery paths own the
+ * outcome. Returns multiples of 1024 for tidy engine arguments.
+ */
+export function clampCtxTokensForMemory(input: CtxMemoryClampInput): CtxMemoryClampResult {
+  const requested = input.requestedPerTurnCtxTokens;
+  const floor = Math.max(1, input.minPerTurnCtxTokens ?? CTX_CLAMP_FLOOR_TOKENS);
+  const slots = Math.max(1, input.slots);
+  if (!(input.kvBytesPerToken > 0) || requested <= floor) {
+    return { perTurnCtxTokens: requested, clamped: false, reason: null };
+  }
+  const committedOther = Math.max(0, input.committedOtherBytes ?? 0);
+  const budgetCap = input.budgetBytes - committedOther;
+  const liveCap =
+    Math.max(0, input.vramBytes) +
+    Math.max(0, input.freeSystemRamBytes - CTX_CLAMP_OS_RESERVE_BYTES);
+  const cap = Math.min(budgetCap, liveCap);
+  const kvAllowance = (cap - input.weightsResidentBytes) * (1 - LOCAL_ENGINE_COMPUTE_HEADROOM);
+  const maxTotalTokens = kvAllowance > 0 ? kvAllowance / input.kvBytesPerToken : 0;
+  const maxPerTurn = Math.floor(maxTotalTokens / slots / 1024) * 1024;
+  const clampedTo = Math.max(floor, Math.min(requested, maxPerTurn));
+  if (clampedTo >= requested) {
+    return { perTurnCtxTokens: requested, clamped: false, reason: null };
+  }
+  const gb = (bytes: number) => `${(bytes / GIB).toFixed(1)} GB`;
+  const kvAtRequested = requested * slots * input.kvBytesPerToken;
+  const kvAtClamped = clampedTo * slots * input.kvBytesPerToken;
+  return {
+    perTurnCtxTokens: clampedTo,
+    clamped: true,
+    reason:
+      `context clamped ${requested} → ${clampedTo} tokens/turn (${slots} slot${slots === 1 ? '' : 's'}): ` +
+      `weights ~${gb(input.weightsResidentBytes)} + KV at the requested context ~${gb(kvAtRequested)} ` +
+      `exceeds available memory ~${gb(Math.max(0, cap))} ` +
+      `(budget ${gb(budgetCap)}, live free RAM ${gb(Math.max(0, input.freeSystemRamBytes))}` +
+      `${input.vramBytes > 0 ? ` + VRAM ${gb(input.vramBytes)}` : ''}` +
+      `${committedOther > 0 ? `, ${gb(committedOther)} held by other models` : ''}); ` +
+      `KV now ~${gb(kvAtClamped)}. Sessions compact sooner instead of the machine paging.`,
+  };
 }

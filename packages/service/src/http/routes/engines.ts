@@ -6,6 +6,7 @@ import { type SSEStreamingApi, streamSSE } from 'hono/streaming';
 import { effectiveEngineRelease, isEnginePinned } from '../../engines/native-manifest.js';
 import { KNOWN_ENGINES, isKnownEngine } from '../../engines/registry.js';
 import type { ServiceContext } from '../context.js';
+import { machineEngineProxy } from './machine-engine-proxy.js';
 
 const ENGINE_ENV_VAR: Record<NativeEngineName, string> = {
   'llama-server': 'GEZEL_LLAMA_SERVER_BIN',
@@ -27,6 +28,7 @@ const ENGINE_ENV_VAR: Record<NativeEngineName, string> = {
  */
 export function enginesRoutes(ctx: ServiceContext): Hono {
   const app = new Hono();
+  app.use('*', machineEngineProxy(ctx, '/api/engines', '/v1/remote/manage/engines'));
 
   /**
    * Source pin + executable availability for first-run clients. This is a

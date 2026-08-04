@@ -4,6 +4,7 @@ import { streamSSE } from 'hono/streaming';
 import { tailLatestEngineLog } from '../../providers/llama-cpp/log.js';
 import type { ServiceContext } from '../context.js';
 import { subscribeToInstallSse } from './install-sse.js';
+import { machineEngineProxy } from './machine-engine-proxy.js';
 import { invalidateModelsCache } from './models.js';
 
 /**
@@ -19,6 +20,7 @@ import { invalidateModelsCache } from './models.js';
  */
 export function ds4Routes(ctx: ServiceContext): Hono {
   const app = new Hono();
+  app.use('*', machineEngineProxy(ctx, '/api/ds4', '/v1/remote/manage/ds4'));
 
   app.get('/models', async (c) => {
     const models = await ctx.ds4Models.listInstalled();

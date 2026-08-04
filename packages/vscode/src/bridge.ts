@@ -22,7 +22,7 @@ export interface ConnectionReady {
   gezelId: string | null;
   workingDir: string | null;
   /** How the host got the daemon. Surface in error UIs only. */
-  mode: 'configured' | 'adopted' | 'spawned';
+  mode: 'configured' | 'legacy-full' | 'adopted' | 'spawned';
 }
 
 export interface ProjectChanged {

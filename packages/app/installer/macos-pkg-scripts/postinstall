@@ -22,6 +22,7 @@ umask 077
 DAEMON_USER="_gezeld"
 DAEMON_LABEL="com.bendyline.gezeld"
 DATA_DIR="/Library/Application Support/Gezel"
+SHARED_DIR="/Users/Shared/Gezel"
 ASSETS_DIR="${DATA_DIR}/assets"
 SERVICE_TREE="${DATA_DIR}/service"
 PLIST_DST="/Library/LaunchDaemons/${DAEMON_LABEL}.plist"
@@ -29,6 +30,7 @@ PLIST_SRC="/Applications/Gezel.app/Contents/Resources/${DAEMON_LABEL}.plist"
 ELECTRON_EXE="/Applications/Gezel.app/Contents/MacOS/Gezel"
 UNPACKED_DIR="/Applications/Gezel.app/Contents/Resources/app.asar.unpacked/dist"
 EXTRACT_CLI="${UNPACKED_DIR}/extract-service-bundle.js"
+MIGRATE_SHARED_CLI="${UNPACKED_DIR}/migrate-legacy-shared.js"
 BUNDLE_TARBALL="${UNPACKED_DIR}/service-bundle.tar.gz"
 BUNDLE_META="${UNPACKED_DIR}/service-bundle.meta.json"
 RUNTIME_PORT="${DATA_DIR}/runtime/port"
@@ -100,7 +102,9 @@ wait_for_service_health() {
             "https://127.0.0.1:${runtime_port}/api/health" 2>/dev/null
         ); then
           if printf '%s\n' "$health_response" |
-             grep -Eq '"ok"[[:space:]]*:[[:space:]]*true'; then
+             grep -Eq '"ok"[[:space:]]*:[[:space:]]*true' &&
+             printf '%s\n' "$health_response" |
+             grep -Eq '"serviceRole"[[:space:]]*:[[:space:]]*"(machine-engine|legacy-full)"'; then
             echo "[gezel postinstall] service health verified on port ${runtime_port}"
             return 0
           fi
@@ -259,9 +263,9 @@ if launchctl print "system/${DAEMON_LABEL}" >/dev/null 2>&1; then
 fi
 
 # 2. Create and migrate the system-scope data hierarchy. The parent is 0711:
-# desktop clients can traverse the known runtime path but cannot list or read
-# config/secrets/projects. runtime alone is 0755; its discovery files are the
-# only cross-account state gezeld explicitly publishes.
+# user daemons can traverse the known runtime path but cannot list private or
+# legacy state. runtime alone is 0755; its discovery files are the only
+# cross-account state gezeld explicitly publishes.
 assert_not_symlink "$DATA_DIR" "Gezel data directory"
 assert_not_symlink "$DATA_DIR/runtime" "Gezel runtime directory"
 assert_not_symlink "$ASSETS_DIR" "Gezel public asset directory"
@@ -275,6 +279,21 @@ assert_not_symlink "$ASSETS_DIR" "Gezel public asset directory"
 assert_not_symlink "$ASSETS_DIR/models" "Gezel shared model directory"
 assert_not_symlink "$DATA_DIR/logs" "Gezel logs directory"
 assert_not_symlink "$SERVICE_TREE" "Gezel service tree"
+
+# Compatibility exit for pre-split installs. The old full-product daemon is
+# stopped above, so the bundled verifier can atomically move projects/gezels
+# out of the broker's private home. Its root marker is published only after
+# every entity has moved (or a partial prior run has been byte-verified).
+if [ ! -f "$MIGRATE_SHARED_CLI" ]; then
+  echo "[gezel postinstall] ERROR: shared-data migration CLI is missing: $MIGRATE_SHARED_CLI" >&2
+  exit 1
+fi
+assert_not_symlink "$SHARED_DIR" "Gezel machine-shared data directory"
+echo "[gezel postinstall] migrating legacy projects and gezels into $SHARED_DIR"
+ELECTRON_RUN_AS_NODE=1 "$ELECTRON_EXE" "$MIGRATE_SHARED_CLI" \
+  --source="$DATA_DIR" \
+  --dest="$SHARED_DIR"
+assert_not_symlink "$SHARED_DIR" "Gezel machine-shared data directory"
 
 # Upgrade migration: remove legacy world/group permissions without following
 # symlinks into user-controlled targets, and make the daemon the trusted owner.
@@ -296,6 +315,20 @@ fi
 find -x "$ASSETS_DIR" -type d -exec chmod 755 {} +
 find -x "$ASSETS_DIR" -type f -exec chmod 644 {} +
 
+# Shared product data is intentionally writable by interactive local accounts;
+# the engine broker never opens it. The sticky root protects the root-owned
+# trust marker and top-level migrated entity directories from replacement,
+# while inherited ACLs keep new nested files collaborative across accounts.
+find -x "$SHARED_DIR" ! -type l -exec chmod -N {} +
+find -x "$SHARED_DIR" ! -type l -exec chmod a+rwX {} +
+chmod 1777 "$SHARED_DIR"
+find -x "$SHARED_DIR" -type d -exec chmod +a "everyone allow read,write,execute,append,readattr,writeattr,readextattr,writeextattr,readsecurity,file_inherit,directory_inherit" {} +
+# The shared root is for interactive user daemons, not the engine identity.
+# Put this inherited deny first; root still performs future installer repairs.
+chmod +a# 0 "${DAEMON_USER} deny list,search,read,write,execute,append,delete,delete_child,readattr,writeattr,readextattr,writeextattr,readsecurity,file_inherit,directory_inherit" "$SHARED_DIR"
+chown root:wheel "$SHARED_DIR/.gezel-machine-shared-v1.json"
+chmod 644 "$SHARED_DIR/.gezel-machine-shared-v1.json"
+
 # Invalidate legacy root-equivalent discovery material before making runtime
 # traversable. The replacement auth-token is a scoped first-party credential.
 rm -f \
@@ -305,6 +338,7 @@ rm -f \
   "$DATA_DIR/runtime/pid" \
   "$DATA_DIR/runtime/cert.pem" \
   "$DATA_DIR/runtime/cert-fingerprint" \
+  "$DATA_DIR/runtime/service-role" \
   "$DATA_DIR/runtime/lock"
 
 # 2b. Extract the shipped service bundle (gezeld + node_modules) into

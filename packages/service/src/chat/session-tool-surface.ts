@@ -80,6 +80,13 @@ export interface ResolveSessionToolSurfaceOptions {
    * so it can exercise both medium/large surfaces deterministically.
    */
   coordinatorToolDiet?: boolean;
+  /**
+   * Post-admission per-turn context window for a local engine. A medium/large
+   * coordinator whose engine was memory-clamped below the full-roster floor
+   * automatically uses its complete curated orchestration kit; otherwise its
+   * standing prompt + schemas can exceed the slot before turn one.
+   */
+  effectiveContextWindow?: number;
   latestUserMessage: string | undefined;
   /**
    * The persisted active craftbook step for a step-scoped session
@@ -280,6 +287,9 @@ export async function resolveSessionToolSurface(
     ...(opts.rolesAsTools ? { rolesAsTools: true } : {}),
     ...(opts.coordinatorToolDiet !== undefined
       ? { coordinatorToolDiet: opts.coordinatorToolDiet }
+      : {}),
+    ...(opts.effectiveContextWindow !== undefined
+      ? { effectiveContextWindow: opts.effectiveContextWindow }
       : {}),
     ...(opts.onCapTrim ? { onTrim: opts.onCapTrim } : {}),
   });
@@ -714,7 +724,7 @@ function isImplementationRole(role: string | undefined): boolean {
 export function toolCapForTierAndRole(
   tier: LocalModelTier | undefined,
   role: string | undefined,
-  opts?: { coordinatorToolDiet?: boolean },
+  opts?: { coordinatorToolDiet?: boolean; effectiveContextWindow?: number },
 ): number | null {
   // Count-capping applies broadly at tiny tier. On tiny local models (sub-5B)
   // the full tool-schema prefill measurably stalls first-token, so a hard
@@ -761,13 +771,17 @@ export function toolCapForTierAndRole(
   // execution/browser tools while keeping EVERY curated tool, crucially
   // `read_task_notes` (rank ~26), whose trimming under the old cap-of-13
   // broke a 12B meester (the incident above). Capping AT the list length
-  // (never below it) is exactly what makes that safe. Keep this opt-in:
-  // medium/large roles are documented as receiving their full kit, and
-  // coordinator priority lists drift whenever new task/craftbook tools land.
-  // GEZEL_MEESTER_TOOL_DIET=1 remains available for targeted prompt-cost
-  // experiments without silently weakening the production coordinator kit.
+  // (never below it) is exactly what makes that safe. Medium/large sessions
+  // keep the full kit when their admitted context can hold it. A local engine
+  // clamped below the full-roster floor enables this same safe diet
+  // automatically; GEZEL_MEESTER_TOOL_DIET=1 remains available for explicit
+  // prompt-cost experiments at larger windows.
   if (tier === 'medium' || tier === 'large') {
-    const diet = coordinatorToolDietCap(role, opts?.coordinatorToolDiet);
+    const diet = coordinatorToolDietCap(
+      role,
+      opts?.coordinatorToolDiet,
+      opts?.effectiveContextWindow,
+    );
     if (diet !== null) return diet;
   }
   // cloud / non-coordinator small+medium+large: uncapped — schema cost
@@ -788,8 +802,17 @@ export function toolCapForTierAndRole(
 function coordinatorToolDietCap(
   role: string | undefined,
   enabledOverride?: boolean,
+  effectiveContextWindow?: number,
 ): number | null {
-  const enabled = enabledOverride ?? process.env.GEZEL_MEESTER_TOOL_DIET === '1';
+  // A 71-tool compact schema is ~98K chars before the chat template. On
+  // Qwen-family tokenizers the complete Meester prefix measures ~40K tokens,
+  // so a slot below 48K cannot both ingest it and retain useful generation
+  // headroom. The curated coordinator lists keep every orchestration tool the
+  // prompt depends on while shedding the incidental workspace/browser tail.
+  const contextRequiresDiet =
+    effectiveContextWindow !== undefined && effectiveContextWindow < 49_152;
+  const enabled =
+    enabledOverride ?? (process.env.GEZEL_MEESTER_TOOL_DIET === '1' || contextRequiresDiet);
   if (!enabled) return null;
   return coordinatorPriorityLength(role);
 }
@@ -840,6 +863,8 @@ function capToolAllowlistForTier(opts: {
   deliverableKind?: import('@bendyline/gezel').DeliverableKind;
   /** Explicit matrix/test override for the env-gated coordinator diet. */
   coordinatorToolDiet?: boolean;
+  /** Post-admission local context window; see ResolveSessionToolSurfaceOptions. */
+  effectiveContextWindow?: number;
   /**
    * Active `toolFilterMode`. When `'never'` the user explicitly opted out of
    * role-based reduction, so the count cap is skipped even when gates produce
@@ -853,6 +878,9 @@ function capToolAllowlistForTier(opts: {
   const cap = toolCapForTierAndRole(opts.tier, opts.role, {
     ...(opts.coordinatorToolDiet !== undefined
       ? { coordinatorToolDiet: opts.coordinatorToolDiet }
+      : {}),
+    ...(opts.effectiveContextWindow !== undefined
+      ? { effectiveContextWindow: opts.effectiveContextWindow }
       : {}),
   });
   if (cap === null) return opts.allowlist;

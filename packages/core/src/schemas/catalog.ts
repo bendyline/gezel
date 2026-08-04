@@ -1990,16 +1990,44 @@ export type ListCatalogItemVersionsResponse = z.infer<typeof ListCatalogItemVers
  * toolsetId in a separate file (see ToolsetConfigSchema); secrets live in
  * the SecretStore keyed by `(toolsetId, fieldId)`.
  */
-export const InstalledToolsetSchema = z.object({
+const InstalledToolsetFields = {
   toolsetId: z.string(),
   sourceId: z.string(),
   version: z.string(),
   installedAt: z.string(),
   /** Local install path (for npm-package / stdio-mcp-binary kinds). */
   installPath: z.string().optional(),
+};
+
+const StandardInstalledToolsetSchema = z.object({
+  ...InstalledToolsetFields,
   /** Snapshot of the runtime at install time — the live source of truth for spawning. */
   runtime: ToolsetRuntimeSchema,
 });
+
+/**
+ * The system bootstrap pins npm tarballs with registry SRI strings (normally
+ * SHA-512), rather than the catalog installer's SHA-256 hex digest. Existing
+ * system records persist that stronger pin in the historical `sha256` slot.
+ * Keep this compatibility shape scoped to `sourceId: 'system'` so catalog and
+ * user-installed runtimes remain subject to the ordinary SHA-256 schema.
+ */
+const SystemNpmPackageRuntimeSchema = NpmPackageRuntimeSchema.extend({
+  sha256: z
+    .string()
+    .regex(/^(?:sha256-[A-Za-z0-9+/]{43}=|sha384-[A-Za-z0-9+/]{64}|sha512-[A-Za-z0-9+/]{86}==)$/),
+});
+
+const SystemInstalledToolsetSchema = z.object({
+  ...InstalledToolsetFields,
+  sourceId: z.literal('system'),
+  runtime: SystemNpmPackageRuntimeSchema,
+});
+
+export const InstalledToolsetSchema = z.union([
+  StandardInstalledToolsetSchema,
+  SystemInstalledToolsetSchema,
+]);
 export type InstalledToolset = z.infer<typeof InstalledToolsetSchema>;
 
 /**
@@ -2118,6 +2146,52 @@ export const GezmodelImportReviewSchema = z.object({
   warnings: z.array(z.string()),
 });
 export type GezmodelImportReview = z.infer<typeof GezmodelImportReviewSchema>;
+
+// ─ Private → shared model migration ─────────────────────────────────────
+//
+// A user daemon may discover complete models in its own writable store (or
+// in one of Gezel's well-known per-user homes) while a machine engine broker
+// owns the canonical shared store. The source is deliberately an enum rather
+// than a filesystem path: callers cannot use this API to make the daemon read
+// an arbitrary directory.
+
+export const SharedModelMigrationSourceSchema = z.enum(['current', 'default', 'development']);
+export type SharedModelMigrationSource = z.infer<typeof SharedModelMigrationSourceSchema>;
+
+export const SharedModelMigrationCandidateSchema = z.object({
+  source: SharedModelMigrationSourceSchema,
+  sourceLabel: z.string().min(1).max(128),
+  engine: GezmodelEngineSchema,
+  id: z.string().regex(IdRegex),
+  name: z.string().min(1).max(256),
+  approxSizeBytes: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+  catalogVersion: z.string().min(1),
+});
+export type SharedModelMigrationCandidate = z.infer<typeof SharedModelMigrationCandidateSchema>;
+
+export const SharedModelMigrationCandidatesResponseSchema = z.object({
+  available: z.boolean(),
+  candidates: z.array(SharedModelMigrationCandidateSchema),
+});
+export type SharedModelMigrationCandidatesResponse = z.infer<
+  typeof SharedModelMigrationCandidatesResponseSchema
+>;
+
+export const SharedModelMigrationRequestSchema = z.object({
+  source: SharedModelMigrationSourceSchema,
+  engine: GezmodelEngineSchema,
+  id: z.string().regex(IdRegex),
+});
+export type SharedModelMigrationRequest = z.infer<typeof SharedModelMigrationRequestSchema>;
+
+export const SharedModelMigrationResultSchema = z.object({
+  ok: z.literal(true),
+  engine: GezmodelEngineSchema,
+  id: z.string().regex(IdRegex),
+  localRemoved: z.boolean(),
+  warning: z.string().min(1).optional(),
+});
+export type SharedModelMigrationResult = z.infer<typeof SharedModelMigrationResultSchema>;
 
 // ─ Semver helpers ───────────────────────────────────────────────────
 //

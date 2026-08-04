@@ -8,12 +8,18 @@ import type {
 } from '@bendyline/gezel-client';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
+import {
+  MODEL_INVENTORY_CHANGED_EVENT,
+  announceModelInventoryChanged,
+  changedModelInventoryEngine,
+} from '../model-inventory.js';
 import { CatalogBrowser } from './CatalogBrowser.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
 import { IncompleteDownloads } from './IncompleteDownloads.js';
 import { LicenseButton } from './LicenseButton.js';
 import { ExportModelBundleButton, ImportModelBundleButton } from './ModelBundleControls.js';
 import { RecommendedBadge } from './RecommendedBadge.js';
+import { SharedModelMigrationPanel } from './SharedModelMigrationPanel.js';
 import { mlxFitsMemoryBudget } from './mlx-model-fit.js';
 import { approximateQuantizationLabel, quantizationTitle } from './model-quantization.js';
 
@@ -184,11 +190,11 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
 
   useEffect(() => {
     const onChanged = (event: Event) => {
-      const engine = (event as CustomEvent<{ engine?: string }>).detail?.engine;
+      const engine = changedModelInventoryEngine(event);
       if (engine === 'mlx') void refresh();
     };
-    window.addEventListener('gezel:models-changed', onChanged);
-    return () => window.removeEventListener('gezel:models-changed', onChanged);
+    window.addEventListener(MODEL_INVENTORY_CHANGED_EVENT, onChanged);
+    return () => window.removeEventListener(MODEL_INVENTORY_CHANGED_EVENT, onChanged);
   }, [refresh]);
 
   // Mirror server-driven installs (most importantly the first-run
@@ -369,6 +375,7 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
             controller.signal,
             opts?.skipSha ? { skipSha: true } : undefined,
           );
+          announceModelInventoryChanged('mlx');
         } catch (err) {
           if (!controller.signal.aborted) {
             const message = `download failed: ${describe(err)}`;
@@ -444,6 +451,7 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
     setIncomplete((cur) => cur.filter((d) => d.id !== id));
     try {
       await api.deleteMlxModel(id);
+      announceModelInventoryChanged('mlx');
       await refresh();
       onModelsChanged?.();
     } catch (err) {
@@ -554,6 +562,8 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
           </div>
         </div>
       )}
+
+      {!compact && <SharedModelMigrationPanel engine="mlx" onModelsChanged={onModelsChanged} />}
 
       {(models.length > 0 || modelsError) && (
         <div className="ollama-section">

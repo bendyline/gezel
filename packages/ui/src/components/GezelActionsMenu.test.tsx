@@ -37,4 +37,11 @@ describe('GezelActionsMenu', () => {
     await waitFor(() => expect(api.deleteGezel).toHaveBeenCalledWith('maya'));
     expect(onDeleted).toHaveBeenCalledWith('maya');
   });
+
+  it('does not offer account-local removal for a machine-shared gezel', () => {
+    const { container } = render(
+      <GezelActionsMenu gezel={{ id: 'maya', name: 'Maya', storageScope: 'machine-shared' }} />,
+    );
+    expect(container).toBeEmptyDOMElement();
+  });
 });

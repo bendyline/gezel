@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { PREVIEW_LOG_SHIM, PREVIEW_SCROLLBAR_SHIM } from './preview.js';
+import { PREVIEW_LOG_SHIM, PREVIEW_SCROLLBAR_SHIM, preparePreviewHtml } from './preview.js';
 
 /**
  * The preview log shim is browser JS injected as a string into every
@@ -249,5 +249,24 @@ describe('PREVIEW_SCROLLBAR_SHIM', () => {
     );
 
     expect(classes.size).toBe(0);
+  });
+});
+
+describe('preparePreviewHtml', () => {
+  it('drops browser-internal link resources without altering portable links or body text', () => {
+    const html = `<!doctype html><html><head>
+      <link rel="stylesheet" href="chrome://resources/css/text_defaults.css">
+      <link href='chrome://credits/credits.css' rel='stylesheet'>
+      <link rel="stylesheet" href="./portable.css">
+    </head><body>See chrome://credits for the built-in page.</body></html>`;
+
+    const prepared = preparePreviewHtml(html);
+
+    expect(prepared).not.toContain('href="chrome://');
+    expect(prepared).not.toContain("href='chrome://");
+    expect(prepared).toContain('href="./portable.css"');
+    expect(prepared).toContain('See chrome://credits for the built-in page.');
+    expect(prepared).toContain(PREVIEW_LOG_SHIM);
+    expect(prepared).toContain(PREVIEW_SCROLLBAR_SHIM);
   });
 });

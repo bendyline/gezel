@@ -203,11 +203,6 @@ export function StepTracker<T extends StepTrackerStep>({
     }${onReorder ? ' — drag or Alt+Arrow to reorder' : ''}`;
 
   if (variant === 'bench') {
-    // With few steps the columns are wide enough to seat every assignee caption
-    // beside its station (right of where the gezel's head is/would be), the way
-    // the active step already does — so the selectors line up consistently
-    // instead of some floating above the peg. Crowded tracks keep them centered.
-    const benchFew = steps.length > 0 && steps.length < 5;
     return (
       <div className="bench-scroll">
         {benchOverflowing && (
@@ -226,11 +221,7 @@ export function StepTracker<T extends StepTrackerStep>({
           </div>
         )}
         <div className="bench-viewport" ref={benchViewportRef} onScroll={measureBench}>
-          <nav
-            className={`step-tracker step-bench${benchFew ? ' bench-few' : ''}`}
-            aria-label={ariaLabel}
-            role="tablist"
-          >
+          <nav className="step-tracker step-bench" aria-label={ariaLabel} role="tablist">
             <span className="step-rail" aria-hidden="true" />
             {steps.length === 0 && (
               <span className="step-tracker-empty muted small">No steps yet —</span>

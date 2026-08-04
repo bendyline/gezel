@@ -5,13 +5,14 @@
  * the next `current()` rebuilds from fresh config.
  */
 
-import { createLogger } from '@bendyline/gezel';
+import { type GezelConfig, createLogger } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import type { Store } from '../../fs/store.js';
 import type { UvRuntime } from '../../python/uv-runtime.js';
 import type { RemotesRegistry } from '../../remotes/registry.js';
 import type { GpuArbiter } from '../gpu-arbiter.js';
-import { resolveRemoteTarget } from '../remote/resolve.js';
+import { type RemoteTarget, resolveRemoteTarget } from '../remote/resolve.js';
+import { ProviderRetirementGate, trackProviderOperations } from '../retirement-gate.js';
 import { createVideoProvider } from './factory.js';
 import { RemoteVideoProvider } from './remote-video.js';
 import type { VideoProvider } from './types.js';
@@ -42,31 +43,51 @@ export class VideoProviderManager {
   private readonly arbiter: GpuArbiter | undefined;
 
   private current_: VideoProvider | null = null;
+  private currentView_: VideoProvider | null = null;
+  private retiring_: VideoProvider | null = null;
   private buildPromise: Promise<VideoProvider> | null = null;
+  private machineRetirement: Promise<void> | null = null;
+  private readonly activity = new ProviderRetirementGate();
   private remotes: RemotesRegistry | undefined;
-  private readonly remoteCache = new Map<string, RemoteVideoProvider>();
+  private machineEngineRemoteId?: () => string | null;
+  private readonly remoteCache = new Map<
+    string,
+    { connectionKey: string; provider: RemoteVideoProvider }
+  >();
 
   setRemotes(remotes: RemotesRegistry): void {
     this.remotes = remotes;
+  }
+
+  setMachineEngineRemoteResolver(resolve: (() => string | null) | undefined): void {
+    this.machineEngineRemoteId = resolve;
   }
 
   /** Route `remote:<id>/…` video models to the hosting server; else local. */
   async providerForModel(model?: string): Promise<VideoProvider> {
     const target = resolveRemoteTarget(model, this.remotes);
     if (!target) return this.current();
+    return this.providerForRemoteTarget(target);
+  }
+
+  private providerForRemoteTarget(target: RemoteTarget): VideoProvider {
     const { remote, fetch } = target;
-    let provider = this.remoteCache.get(remote.remoteId);
-    if (!provider) {
-      provider = new RemoteVideoProvider({
-        remoteId: remote.remoteId,
-        label: remote.displayName,
-        baseUrl: remote.baseUrl,
-        token: remote.token,
-        fetch,
-      });
-      this.remoteCache.set(remote.remoteId, provider);
+    const connectionKey = `${remote.baseUrl}\0${remote.token}\0${remote.pinnedIdentityFingerprint}`;
+    let cached = this.remoteCache.get(remote.remoteId);
+    if (!cached || cached.connectionKey !== connectionKey) {
+      cached = {
+        connectionKey,
+        provider: new RemoteVideoProvider({
+          remoteId: remote.remoteId,
+          label: remote.displayName,
+          baseUrl: remote.baseUrl,
+          token: remote.token,
+          fetch,
+        }),
+      };
+      this.remoteCache.set(remote.remoteId, cached);
     }
-    return provider;
+    return cached.provider;
   }
 
   constructor(opts: VideoProviderManagerOptions) {
@@ -79,10 +100,15 @@ export class VideoProviderManager {
   }
 
   async current(): Promise<VideoProvider> {
-    if (this.current_) return this.current_;
+    const config = await this.store.readConfig();
+    const machineRemoteId = this.machineEngineRemoteId?.();
+    if (machineRemoteId && usesMachineVideo(config, this.env ?? process.env)) {
+      const target = resolveRemoteTarget(undefined, this.remotes, machineRemoteId);
+      if (target) return this.providerForRemoteTarget(target);
+    }
+    if (this.current_) return this.currentView_ ?? this.current_;
     if (this.buildPromise) return this.buildPromise;
     this.buildPromise = (async () => {
-      const config = await this.store.readConfig();
       const provider = await createVideoProvider({
         home: this.home,
         catalog: this.catalog,
@@ -92,7 +118,8 @@ export class VideoProviderManager {
         ...(this.arbiter ? { arbiter: this.arbiter } : {}),
       });
       this.current_ = provider;
-      return provider;
+      this.currentView_ = trackProviderOperations(provider, this.activity, new Set(['generate']));
+      return this.currentView_;
     })().finally(() => {
       this.buildPromise = null;
     });
@@ -102,6 +129,7 @@ export class VideoProviderManager {
   async reset(): Promise<void> {
     const prev = this.current_;
     this.current_ = null;
+    this.currentView_ = null;
     if (prev?.shutdown) {
       await prev.shutdown().catch((err: unknown) => {
         log.warn(
@@ -112,7 +140,36 @@ export class VideoProviderManager {
     }
   }
 
+  async retireLocalForMachineBroker(): Promise<void> {
+    if (this.machineRetirement) return this.machineRetirement;
+    const run = (async () => {
+      const config = await this.store.readConfig();
+      if (!usesMachineVideo(config, this.env ?? process.env)) return;
+      this.activity.beginRetirement();
+      await this.buildPromise;
+      this.retiring_ ??= this.current_;
+      this.current_ = null;
+      this.currentView_ = null;
+      await this.activity.waitForIdle();
+      if (this.retiring_?.shutdown) await this.retiring_.shutdown();
+      this.retiring_ = null;
+    })();
+    this.machineRetirement = run;
+    try {
+      await run;
+    } catch (error) {
+      if (this.machineRetirement === run) this.machineRetirement = null;
+      throw error;
+    }
+  }
+
   async shutdown(): Promise<void> {
     await this.reset();
   }
+}
+
+/** Explicit mock/custom-server selections stay in the user daemon. */
+export function usesMachineVideo(config: GezelConfig, env: NodeJS.ProcessEnv): boolean {
+  if (env.GEZEL_MOCK_PROVIDER === '1' || env.GEZEL_VIDEO_SERVER_URL) return false;
+  return config.videoProvider !== 'mock';
 }

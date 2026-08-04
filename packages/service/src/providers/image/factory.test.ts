@@ -134,6 +134,19 @@ describe('createImageProvider selection rules', () => {
     const provider = await createImageProvider({ home, env: {}, config: {} as GezelConfig });
     expect(provider).toBeInstanceOf(StableDiffusionCppProvider);
   });
+
+  it('forces the native provider for an engine broker with legacy cloud config', async () => {
+    const config = { imageProvider: 'openai' } as GezelConfig;
+    const secrets = fakeSecrets({ 'pc:openaiApiKey': 'must-not-be-used' });
+    const provider = await createImageProvider({
+      home,
+      env: {},
+      config,
+      secrets,
+      localOnly: true,
+    });
+    expect(provider).toBeInstanceOf(StableDiffusionCppProvider);
+  });
 });
 
 /**

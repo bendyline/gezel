@@ -566,7 +566,17 @@ export function Sidebar({
                     >
                       {projectInitial(p.name)}
                     </span>
-                    <span className="app-sidebar-item-label">{p.name}</span>
+                    <span className="app-sidebar-item-label">
+                      {p.name}
+                      {p.storageScope === 'machine-shared' && (
+                        <span
+                          className="machine-shared-badge"
+                          title="Shared with accounts on this machine"
+                        >
+                          Shared
+                        </span>
+                      )}
+                    </span>
                   </button>
                   <ProjectActionsMenu
                     project={p}
@@ -751,7 +761,17 @@ export function Sidebar({
                       />
                     </span>
                     <span className="app-sidebar-gezel-text">
-                      <span className="app-sidebar-item-label">{name}</span>
+                      <span className="app-sidebar-item-label">
+                        {name}
+                        {g.storageScope === 'machine-shared' && (
+                          <span
+                            className="machine-shared-badge"
+                            title="Shared with accounts on this machine; chats and memories stay private"
+                          >
+                            Shared
+                          </span>
+                        )}
+                      </span>
                       {subtitle && <span className="app-sidebar-item-role">{subtitle}</span>}
                     </span>
                   </button>

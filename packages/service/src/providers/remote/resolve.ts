@@ -7,7 +7,7 @@
 
 import { getPairedRemoteFetch } from '../../remotes/pinned-fetch.js';
 import type { PairedRemote, RemotesRegistry } from '../../remotes/registry.js';
-import { parseRemoteModelId } from './model-id.js';
+import { makeRemoteModelId, parseRemoteModelId } from './model-id.js';
 
 export interface RemoteTarget {
   remote: PairedRemote;
@@ -17,8 +17,15 @@ export interface RemoteTarget {
 export function resolveRemoteTarget(
   model: string | undefined,
   remotes: RemotesRegistry | undefined,
+  preferredRemoteId?: string | null,
 ): RemoteTarget | null {
-  const parsed = model ? parseRemoteModelId(model) : null;
+  const effectiveModel =
+    model && parseRemoteModelId(model)
+      ? model
+      : preferredRemoteId
+        ? makeRemoteModelId(preferredRemoteId, model ?? '_')
+        : model;
+  const parsed = effectiveModel ? parseRemoteModelId(effectiveModel) : null;
   if (!parsed || !remotes) return null;
   const remote = remotes.get(parsed.remoteId);
   if (!remote) return null;

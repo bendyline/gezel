@@ -13,6 +13,7 @@
 
 import { createLogger } from '@bendyline/gezel';
 import type { McpBridgePool } from '../mcp-bridge-pool.js';
+import { computeToolBudgetChars } from '../mcp-bridge.js';
 import type { ProviderQueue } from '../queue.js';
 import { runInQueue } from '../queue.js';
 import { StreamingSessionBase } from '../streaming-session.js';
@@ -22,11 +23,13 @@ import type {
   LLMSession,
   ProviderSessionState,
   SendAndWaitOpts,
+  SessionOpts,
 } from '../types.js';
 import { buildTurnUsage } from '../usage-builder.js';
 import {
   PROTOCOL_VERSION,
   type PriorMessageWire,
+  type RemoteCacheWarmRequest,
   RemoteInferFrameSchema,
   type RemoteInferRequest,
 } from './wire.js';
@@ -35,11 +38,19 @@ const log = createLogger('remote-session');
 
 /** Hard bound on local tool-call loops so a runaway remote model can't hang. */
 const MAX_TOOL_LOOPS = 24;
+const MID_LOOP_COMPACT_RATIO = 0.7;
+const MID_LOOP_COMPACT_MIN_PRIOR = 2;
 
 export interface RemoteSessionDeps {
   baseUrl: string;
   token: string;
   fetch: typeof fetch;
+  /**
+   * Refreshable connection for runtime-managed brokers. Existing chat
+   * sessions survive broker restarts (rotated port, cert, and token) by
+   * resolving this immediately before every forward pass.
+   */
+  resolveConnection?: () => { baseUrl: string; token: string; fetch: typeof fetch };
   queue: ProviderQueue;
   /** A's LOCAL tool bridge — tool calls execute here, on A's files. */
   bridges: McpBridgePool;
@@ -51,14 +62,30 @@ export interface RemoteSessionDeps {
   reasoningEffort?: string;
   tuning?: Record<string, unknown>;
   priorMessages: PriorMessageWire[];
+  /** Broker-reported post-admission context window. */
+  numCtx: number;
+  requestCompaction?: NonNullable<SessionOpts['requestCompaction']>;
   timeoutMs: number;
 }
 
 export class RemoteSession extends StreamingSessionBase implements LLMSession {
   private lastReasoning: string | undefined;
+  private systemMessage: string;
+  /** Full A-owned transcript; B deliberately remains stateless. */
+  private transcript: PriorMessageWire[];
+  /** In-flight view used by pressure estimation during a tool loop. */
+  private activePriorMessages: PriorMessageWire[] | null = null;
+  private pendingPrompt = '';
+  private compactedThisTurn = false;
+  numCtx: number;
+  readonly model: string;
 
   constructor(private readonly deps: RemoteSessionDeps) {
     super();
+    this.systemMessage = deps.systemMessage;
+    this.transcript = [...deps.priorMessages];
+    this.numCtx = deps.numCtx;
+    this.model = deps.model;
   }
 
   providerState(): ProviderSessionState {
@@ -78,47 +105,186 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
     return this.deps.bridges.isEmpty() ? [] : this.deps.bridges.getOpenAITools().map((t) => t.name);
   }
 
+  setSystemMessage(text: string): void {
+    this.systemMessage = text;
+  }
+
+  estimatePromptChars(): number {
+    return this.estimatePromptCharsFor(
+      this.activePriorMessages ?? this.transcript,
+      this.pendingPrompt,
+    );
+  }
+
+  /**
+   * Ask B to prefill this session's exact current prefix. Unlike the old
+   * `/api/cache/warm` proxy, this carries every prompt component B cannot read
+   * from disk: system bands, transcript, tuning, and A's local tool schemas.
+   */
+  async prewarm(sessionId: string): Promise<void> {
+    const connection = this.deps.resolveConnection?.() ?? this.deps;
+    const tools = this.deps.bridges.isEmpty()
+      ? undefined
+      : this.deps.bridges
+          .getOpenAITools()
+          .map((t) => ({ name: t.name, description: t.description, parameters: t.parameters }));
+    const body: RemoteCacheWarmRequest = {
+      protocolVersion: PROTOCOL_VERSION,
+      model: this.deps.model,
+      sessionId,
+      systemMessage: this.systemMessage,
+      ...(this.deps.systemPromptLayers ? { systemPromptLayers: this.deps.systemPromptLayers } : {}),
+      ...(this.deps.volatileContext ? { volatileContext: this.deps.volatileContext } : {}),
+      priorMessages: [...this.transcript],
+      ...(tools ? { tools } : {}),
+      ...(this.deps.tuning ? { tuning: this.deps.tuning } : {}),
+    };
+    const res = await connection.fetch(`${connection.baseUrl}/v1/remote/cache/warm`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${connection.token}`,
+      },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const detail = await res.text().catch(() => '');
+      throw new Error(
+        `[remote] /v1/remote/cache/warm returned HTTP ${res.status}${detail ? ` ${detail}` : ''}`,
+      );
+    }
+  }
+
+  private estimatePromptCharsFor(priorMessages: PriorMessageWire[], prompt: string): number {
+    let total =
+      this.systemMessage.length + (this.deps.volatileContext?.length ?? 0) + prompt.length;
+    for (const message of priorMessages) {
+      total += message.content.length;
+      if ('toolCalls' in message) total += JSON.stringify(message.toolCalls).length;
+      if ('toolCallId' in message) total += message.toolCallId.length;
+    }
+    if (!this.deps.bridges.isEmpty()) {
+      for (const tool of this.deps.bridges.getOpenAITools()) total += JSON.stringify(tool).length;
+    }
+    return total;
+  }
+
   async sendAndWait(prompt: string, opts?: SendAndWaitOpts): Promise<string> {
     return runInQueue(this.deps.queue, opts?.queue, () => this.sendAndWaitInner(prompt, opts));
   }
 
   private async sendAndWaitInner(prompt: string, opts?: SendAndWaitOpts): Promise<string> {
     this.lastReasoning = undefined;
+    this.compactedThisTurn = false;
     const deadline = Date.now() + (opts?.timeoutMs ?? this.deps.timeoutMs);
-    const priorMessages: PriorMessageWire[] = [...this.deps.priorMessages];
+    const priorMessages: PriorMessageWire[] = [...this.transcript];
+    let currentTurnStartIdx = priorMessages.length;
+    let userMessageAdded = false;
     let nextPrompt = prompt;
     let fullText = '';
+    this.activePriorMessages = priorMessages;
+    this.pendingPrompt = prompt;
 
-    for (let turn = 0; turn < MAX_TOOL_LOOPS; turn++) {
-      if (Date.now() > deadline) {
-        throw new Error(`[remote] turn timed out after ${Math.round(this.deps.timeoutMs / 1000)}s`);
-      }
-      const { text, toolCalls } = await this.postInfer(nextPrompt, priorMessages, opts);
-      fullText += text;
-      if (toolCalls.length === 0) return fullText;
+    try {
+      for (let turn = 0; turn < MAX_TOOL_LOOPS; turn++) {
+        if (Date.now() > deadline) {
+          throw new Error(
+            `[remote] turn timed out after ${Math.round(this.deps.timeoutMs / 1000)}s`,
+          );
+        }
+        const { text, toolCalls } = await this.postInfer(nextPrompt, priorMessages, opts);
+        fullText += text;
 
-      // Execute the model's tool calls LOCALLY on A, then continue the loop.
-      const toolResults: PriorMessageWire[] = [];
-      for (const call of toolCalls) {
-        let args: Record<string, unknown> = {};
-        try {
-          args = call.arguments ? JSON.parse(call.arguments) : {};
-        } catch {
-          /* leave empty — the tool will surface its own validation error */
+        // The first forward pass carries the user message in `prompt`; every
+        // continuation must move it into priorMessages because B is stateless.
+        if (!userMessageAdded) {
+          priorMessages.push({ role: 'user', content: prompt });
+          userMessageAdded = true;
         }
-        let output: string;
-        try {
-          const rich = await this.deps.bridges.callToolRich(call.name, args);
-          output = rich.text;
-        } catch (err) {
-          output = `ERROR: ${err instanceof Error ? err.message : String(err)}`;
+        this.pendingPrompt = '';
+
+        if (toolCalls.length === 0) {
+          priorMessages.push({ role: 'assistant', content: text });
+          this.transcript = [...priorMessages];
+          return fullText;
         }
-        toolResults.push({ role: 'tool', content: output, toolCallId: call.id });
+
+        priorMessages.push({ role: 'assistant', content: text, toolCalls });
+
+        // Execute the model's tool calls LOCALLY on A, then continue the loop.
+        // The adaptive cap uses the broker-admitted numCtx, exactly like the
+        // in-process llama.cpp/MLX/Ollama sessions.
+        for (const call of toolCalls) {
+          let args: Record<string, unknown> = {};
+          try {
+            args = call.arguments ? JSON.parse(call.arguments) : {};
+          } catch {
+            /* leave empty — the tool will surface its own validation error */
+          }
+          let output: string;
+          try {
+            const budgetChars = computeToolBudgetChars(this.numCtx, this.estimatePromptChars());
+            const rich = await this.deps.bridges.callToolRich(call.name, args, {
+              budgetChars,
+              numCtxTokens: this.numCtx,
+            });
+            output = rich.text;
+          } catch (err) {
+            output = `ERROR: ${err instanceof Error ? err.message : String(err)}`;
+          }
+          priorMessages.push({ role: 'tool', content: output, toolCallId: call.id });
+        }
+        currentTurnStartIdx = await this.maybeCompactMidLoop(priorMessages, currentTurnStartIdx);
+        nextPrompt = ''; // tool results drive the next forward-pass
       }
-      priorMessages.push({ role: 'assistant', content: text, toolCalls }, ...toolResults);
-      nextPrompt = ''; // tool results drive the next forward-pass
+      throw new Error('[remote] too many tool-call loops; aborting');
+    } finally {
+      this.activePriorMessages = null;
+      this.pendingPrompt = '';
     }
-    throw new Error('[remote] too many tool-call loops; aborting');
+  }
+
+  /** Compact older turns while a single remote tool loop is still running. */
+  private async maybeCompactMidLoop(
+    priorMessages: PriorMessageWire[],
+    currentTurnStartIdx: number,
+  ): Promise<number> {
+    if (this.compactedThisTurn || !this.deps.requestCompaction) return currentTurnStartIdx;
+    const estimatedTokens = Math.ceil(this.estimatePromptChars() / 4);
+    if (estimatedTokens / this.numCtx < MID_LOOP_COMPACT_RATIO) return currentTurnStartIdx;
+    const prior = priorMessages
+      .slice(0, currentTurnStartIdx)
+      .filter(
+        (m): m is Extract<PriorMessageWire, { role: 'user' | 'assistant' }> =>
+          (m.role === 'user' || m.role === 'assistant') && m.content.length > 0,
+      )
+      .map((m) => ({ role: m.role, content: m.content }));
+    if (prior.length < MID_LOOP_COMPACT_MIN_PRIOR) return currentTurnStartIdx;
+    this.compactedThisTurn = true;
+    try {
+      const result = await this.deps.requestCompaction({
+        priorMessages: prior,
+        estimatedTokens,
+        numCtx: this.numCtx,
+      });
+      if (!result) return currentTurnStartIdx;
+      priorMessages.splice(0, currentTurnStartIdx, {
+        role: 'assistant',
+        content: result.syntheticContent,
+      });
+      this.emitWarning(
+        'Compacted earlier conversation to free up working window for the current turn.',
+      );
+      log.info(
+        `[remote] mid-loop compacted ${currentTurnStartIdx} prior message(s) → 1 synthesis (${result.syntheticContent.length} chars)`,
+      );
+      return 1;
+    } catch (err) {
+      log.warn(
+        `[remote] mid-loop compaction request failed (continuing un-compacted): ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return currentTurnStartIdx;
+    }
   }
 
   private async postInfer(
@@ -127,6 +293,7 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
     opts?: SendAndWaitOpts,
   ): Promise<{ text: string; toolCalls: ExternalToolCall[] }> {
     const start = Date.now();
+    const connection = this.deps.resolveConnection?.() ?? this.deps;
     const tools = this.deps.bridges.isEmpty()
       ? undefined
       : this.deps.bridges
@@ -136,7 +303,7 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
     const body: RemoteInferRequest = {
       protocolVersion: PROTOCOL_VERSION,
       model: this.deps.model,
-      systemMessage: this.deps.systemMessage,
+      systemMessage: this.systemMessage,
       ...(this.deps.systemPromptLayers ? { systemPromptLayers: this.deps.systemPromptLayers } : {}),
       ...(this.deps.volatileContext ? { volatileContext: this.deps.volatileContext } : {}),
       prompt,
@@ -164,11 +331,11 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
       },
     };
 
-    const res = await this.deps.fetch(`${this.deps.baseUrl}/v1/remote/infer`, {
+    const res = await connection.fetch(`${connection.baseUrl}/v1/remote/infer`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${this.deps.token}`,
+        Authorization: `Bearer ${connection.token}`,
         Accept: 'text/event-stream',
       },
       body: JSON.stringify(body),
@@ -199,6 +366,11 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
           toolCalls = frame.calls.map((c) => ({ id: c.id, name: c.name, arguments: c.arguments }));
           break;
         case 'usage':
+          if (frame.contextUtilization?.limit && frame.contextUtilization.limit > 0) {
+            // Capacity can change between admission and inference. Keep A's
+            // next pressure check calibrated to B's latest empirical limit.
+            this.numCtx = frame.contextUtilization.limit;
+          }
           this.emitUsage(
             buildTurnUsage({
               model: frame.model,

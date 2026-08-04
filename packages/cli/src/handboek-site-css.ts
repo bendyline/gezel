@@ -89,6 +89,23 @@ body.hb {
   font-size: 1.15rem;
   font-weight: 700;
 }
+
+/* The product wordmark, back out to the surrounding site. Lowercase italic
+   serif at PT Serif's natural 400 — the family ships only 400 and 700, so
+   anything between synthesizes a weight. Set apart from the Handboek title
+   by a hairline rule rather than by size. */
+.hb-wordmark {
+  font-family: var(--hb-font-display);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 1.15rem;
+  text-transform: lowercase;
+  padding-right: 0.6rem;
+  margin-right: 0.1rem;
+  border-right: 1px solid rgba(243, 237, 224, 0.35);
+  opacity: 0.9;
+}
+.hb-wordmark:hover { opacity: 1; }
 .hb-masthead a, .hb-masthead a:hover { color: var(--hb-cream-ink); }
 .hb-areanav { display: flex; flex-wrap: wrap; gap: 0.25rem 1rem; font-size: 0.9rem; }
 .hb-areanav a { opacity: 0.85; }
@@ -197,20 +214,33 @@ body.hb {
 }
 .hb-article pre code { background: none; padding: 0; font-size: 0.85rem; }
 
-/* Wide content scrolls inside its own box; the page never scrolls sideways. */
-.hb-table-scroll, .hb-article table { display: block; overflow-x: auto; max-width: 100%; }
+/* Wide content scrolls inside its own box; the page never scrolls sideways.
+   The scroll lives on a wrapper, not on the table itself: display:block
+   on a table makes it shrink-to-content and stop filling the column. */
+.hb-table-scroll {
+  overflow-x: auto;
+  max-width: 100%;
+  margin: 0 0 1.25rem;
+}
 .hb-article table {
   border-collapse: collapse;
-  margin: 0 0 1.25rem;
+  width: 100%;
   font-size: 0.9rem;
-  white-space: nowrap;
 }
+/* Prose cells wrap. Catalog tables pair a short name against a full sentence
+   of description, so white-space:nowrap would push the description off the
+   page and force a horizontal scroll to read every row. */
 .hb-article th, .hb-article td {
   border: 1px solid var(--hb-border);
-  padding: 0.4rem 0.7rem;
+  padding: 0.45rem 0.7rem;
   text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
 }
 .hb-article th { background: var(--hb-inset); font-weight: 600; }
+/* Keep the leading label column from collapsing to one word per line while
+   the description column takes the slack. */
+.hb-article tbody td:first-child { min-width: 11rem; }
 
 .hb-watch { max-width: var(--hb-measure); margin: 1.25rem 0 0; font-size: 0.9rem; }
 
