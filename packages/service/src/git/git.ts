@@ -32,6 +32,8 @@ export class GitError extends Error {
 
 export interface RunGitOptions {
   cwd?: string;
+  /** Optional stdin payload for commands that accept bulk input. */
+  stdin?: string | Buffer;
   /** Tokens to redact from any error/log surfaces. */
   redact?: string[];
   /** Extra env vars on top of the always-on safety set. */
@@ -114,8 +116,12 @@ export async function runGit(args: string[], opts: RunGitOptions = {}): Promise<
     const child = spawn('git', gitArgs, {
       cwd: opts.cwd,
       env,
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: ['pipe', 'pipe', 'pipe'],
     });
+    // Always close stdin immediately. This preserves the old non-interactive
+    // behavior while allowing callers such as `git check-ignore --stdin` to
+    // pass a large path list without hitting command-line length limits.
+    child.stdin.end(opts.stdin);
     let stdout = '';
     let stderr = '';
     let killedForTimeout = false;

@@ -8,7 +8,8 @@ Adapters:
 
 - NVIDIA on Windows/Linux: dynamically loads the driver-provided NVML library.
 - AMD on Windows: dynamically loads the driver-provided AMD Display Library
-  (ADL) and queries its performance log.
+  (ADL), queries its performance log, and reads the driver's dedicated-VRAM
+  usage counter.
 - AMD and Intel on Linux: reads the kernel's DRM/hwmon sysfs telemetry.
 
 No vendor library is redistributed. An unavailable driver/API is reported in

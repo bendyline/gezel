@@ -150,9 +150,10 @@ addEventListener('pagehide',function(){if(timer)clearTimeout(timer);},false);
 /**
  * Prepare an HTML response for the sandboxed preview iframe:
  *
- *   1. Inject the log-capture and embedded-scrollbar shims at the
+ *   1. Strip browser-internal stylesheet links that cannot load in an iframe.
+ *   2. Inject the log-capture and embedded-scrollbar shims at the
  *      earliest viable point.
- *   2. Mark every `<script src=…>` tag `crossorigin="anonymous"`
+ *   3. Mark every `<script src=…>` tag `crossorigin="anonymous"`
  *      unless it already carries a `crossorigin` attribute. Combined
  *      with the narrow `Access-Control-Allow-Origin: null` header the preview
  *      route sets on all responses, this unlocks real error detail
@@ -160,8 +161,21 @@ addEventListener('pagehide',function(){if(timer)clearTimeout(timer);},false);
  *      Without this pair, the null-origin iframe sees every runtime
  *      error as the useless `"Script error."`.
  */
-function injectPreviewShims(html: string): string {
-  let out = html;
+const BROWSER_INTERNAL_LINK_RE =
+  /<link\b(?=[^>]*\bhref\s*=\s*(?:"chrome:\/\/[^"\r\n]*"|'chrome:\/\/[^'\r\n]*'|chrome:\/\/[^\s>]+))[^>]*>/gi;
+
+/**
+ * Prepare standalone HTML for the preview sandbox.
+ *
+ * Chromium's generated `LICENSES.chromium.html` is authored for the privileged
+ * `chrome://credits` page and links to internal `chrome://` stylesheets. Those
+ * resources can never load from an ordinary HTTPS document; leaving the tags
+ * in place produces renderer errors and feeds false failures into the preview
+ * log. Strip only browser-internal `<link>` resources while preserving normal
+ * relative/HTTPS links and literal `chrome://` text in the document body.
+ */
+export function preparePreviewHtml(html: string): string {
+  let out = html.replace(BROWSER_INTERNAL_LINK_RE, '');
   const headMatch = out.match(/<head[^>]*>/i);
   const shims = PREVIEW_LOG_SHIM + PREVIEW_SCROLLBAR_SHIM;
   if (headMatch) {
@@ -248,7 +262,7 @@ export function previewRoutes(ctx: ServiceContext, capabilities: PreviewCapabili
       if (!buf) return c.json({ error: 'not found' }, 404);
       const mime = mimeTypeForPath(filePath);
       if (mime.startsWith('text/html')) {
-        return c.body(injectPreviewShims(buf.toString('utf8')), 200, previewHeaders(mime));
+        return c.body(preparePreviewHtml(buf.toString('utf8')), 200, previewHeaders(mime));
       }
       return c.body(new Uint8Array(buf), 200, previewHeaders(mime));
     }
@@ -271,7 +285,7 @@ export function previewRoutes(ctx: ServiceContext, capabilities: PreviewCapabili
       }
       const mime = mimeTypeForPath(filePath);
       if (mime.startsWith('text/html')) {
-        const html = injectPreviewShims((await readFile(full)).toString('utf8'));
+        const html = preparePreviewHtml((await readFile(full)).toString('utf8'));
         return c.body(html, 200, previewHeaders(mime));
       }
       const buf = await readFile(full);

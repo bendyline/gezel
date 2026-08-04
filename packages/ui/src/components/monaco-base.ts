@@ -1,21 +1,20 @@
-import * as monaco from 'monaco-editor/esm/vs/editor/editor.main.js';
+import * as monaco from '@bendyline/squisq-editor-react/monaco';
 import '../squisq-monaco-workers.js';
 
 /**
- * Shared monaco base — the heavy `editor.main.js` import and the gezel
- * paper-palette themes. Every monaco surface (the script
+ * Shared Monaco base — Squisq's canonical compact editor profile and the
+ * gezel paper-palette themes. Every Monaco surface (the script
  * editor's `monaco-setup.ts`, the terminal editor's `terminal-monaco-setup.ts`)
  * imports this so they share one monaco instance and one theme registration.
  * Worker routing lives in `squisq-monaco-workers.ts`, shared with Squisq.
  *
- * Like its importers this module is HEAVY (it pulls in monaco's full editor +
- * language services) — it must only ever be reached via `import('…')` from a
- * mount-time effect, never the static graph, so the app bundle and jsdom tests
- * stay monaco-free.
- *
- * `editor.main.js` (not `editor.api.js`) is deliberate: the api entry has zero
- * language contributions, so syntax highlighting would be dead. Same reasoning
- * as squisq's useMonacoLoader.
+ * Do not import Monaco's `editor.main.js` alongside this entry. Squisq can
+ * initialize the standalone service collection before one of Gezel's lazy
+ * editors mounts; contributions registered later by `editor.main.js` then
+ * depend on services absent from that already-frozen collection (the
+ * `UNKNOWN service IInlayHintsCache` family of failures). Language grammars,
+ * worker-backed services, and suggestions are requested explicitly by each
+ * surface before it creates an editor.
  */
 
 export { monaco };

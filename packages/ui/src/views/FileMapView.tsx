@@ -17,6 +17,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { FileMap, type MapRendererKind, defaultRenderer } from '../components/FileMap/FileMap.js';
 import { townStyleForBlock, townStyleLabel } from '../components/FileMap/iso/town-style.js';
+import { navigateToTab } from '../components/nav-actions.js';
 import { DropdownChevron } from '../primitives/index.js';
 import { useEffectiveTheme } from '../theme.js';
 
@@ -673,7 +674,17 @@ export function FileMapView({ projectId }: { projectId: string }) {
                               </span>
                               {finding.taskRef && (
                                 <span className="filemap-finding-task">
-                                  Developer gezel working · {finding.taskRef}
+                                  Developer gezel working ·{' '}
+                                  <button
+                                    type="button"
+                                    className="link-button filemap-finding-task-link"
+                                    aria-label={`Open task ${finding.taskRef}`}
+                                    onClick={() =>
+                                      navigateToTab({ kind: 'task', ref: finding.taskRef! })
+                                    }
+                                  >
+                                    {finding.taskRef}
+                                  </button>
                                 </span>
                               )}
                               <div className="filemap-finding-actions">

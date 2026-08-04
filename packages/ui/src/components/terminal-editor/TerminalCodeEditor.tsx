@@ -108,13 +108,13 @@ const TerminalCodeEditor = forwardRef<TerminalCodeEditorHandle, TerminalCodeEdit
         let setup: TerminalSetup;
         try {
           setup = await import('./terminal-monaco-setup.js');
+          await setup.ensureTerminalMonaco();
         } catch {
           return;
         }
         if (disposed || !containerRef.current) return;
         const monaco = setup.monaco;
         monacoRef.current = monaco;
-        setup.ensureTerminalMonaco();
 
         const uri = setup.terminalModelUri(projectId);
         // A stale model can survive an unclean unmount (hot reload); reuse-by-replace.

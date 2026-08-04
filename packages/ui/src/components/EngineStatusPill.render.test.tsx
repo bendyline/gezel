@@ -196,8 +196,9 @@ describe('EngineStatusPill — simultaneous local engines', () => {
     );
 
     const strip = await screen.findByRole('img', {
-      name: /VRAM: 9\.0 GiB of 24\.0 GiB used, Gezel estimated 5\.0 GiB/i,
+      name: /Current VRAM use: 9\.0 GiB of 24\.0 GiB used, Gezel estimated 5\.0 GiB/i,
     });
+    expect(screen.getByText('Current VRAM use')).toBeInTheDocument();
     expect(strip).toBeInTheDocument();
     expect(screen.getByText('Gezel ~5.0 GiB')).toBeInTheDocument();
     // Zero-byte pieces of the breakdown stay out of the announcement.
@@ -229,6 +230,12 @@ describe('EngineStatusPill — simultaneous local engines', () => {
       gezelModelCacheBytes: 0,
       engineReservedBytes: 50 * GiB,
       engineBudgetBytes: 68.4 * GiB,
+      enginePools: {
+        kind: 'discrete-gpu',
+        vramBytes: 30.4 * GiB,
+        ramShareBytes: 38 * GiB,
+        fastBytes: 30.4 * GiB,
+      },
       residentModels: [
         {
           provider: 'llama-cpp',
@@ -256,19 +263,22 @@ describe('EngineStatusPill — simultaneous local engines', () => {
 
     await user.click(await screen.findByRole('button', { name: /Talkie 1930 13B/i }));
 
-    const strip = await screen.findByRole('img', { name: /VRAM: 31\.9 GiB total/i });
-    // The pool is unmeasured, so nothing is attributed to it — the old
+    // The pool is unmeasured, so its unactionable meter is omitted — the old
     // behaviour clamped the reservation to the card and drew a full bar.
-    expect(strip).not.toHaveAccessibleName(/Gezel estimated/i);
-    expect(strip).not.toHaveAccessibleName(/other use/i);
-    expect(strip.querySelector('.machine-memory-segment-gezel')).toBeNull();
-    expect(strip).toHaveClass('machine-memory-bar-unknown');
+    expect(screen.getByText('VRAM')).toBeInTheDocument();
+    expect(screen.getByText('31.9 GiB total')).toBeInTheDocument();
+    expect(document.querySelector('.machine-memory-bar')).toBeNull();
     expect(document.querySelector('.machine-memory-swatch-gezel')).toBeNull();
 
+    const capacityMeter = screen.getByRole('img', {
+      name: /Model capacity: about 50\.0 GiB of 68\.4 GiB reserved/i,
+    });
+    expect(capacityMeter).toHaveAccessibleName(/30\.4 GiB VRAM \+ ~38\.0 GiB system RAM/i);
+    expect(capacityMeter.querySelectorAll('.machine-memory-reservation-segment')).toHaveLength(2);
+    expect(screen.getByText('Model capacity')).toBeInTheDocument();
+    expect(screen.getByText('Capacity: ~30.4 GiB VRAM + ~38.0 GiB system RAM')).toBeInTheDocument();
     expect(
-      screen.getByText(
-        "Models reserve ~50.0 GiB of ~68.4 GiB — this card's memory plus a share of system memory",
-      ),
+      screen.getByText('Reserved capacity for loaded models; not live usage.'),
     ).toBeInTheDocument();
     expect(screen.getByText('2 models loaded')).toBeInTheDocument();
     // Known ids take their catalog name; the rest fall back to the id.

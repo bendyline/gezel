@@ -157,6 +157,12 @@ const DEFAULT_RESPONSES: Record<string, unknown> = {
     gezelModelCacheBytes: 2_000_000_000,
     engineReservedBytes: 10_000_000_000,
     engineBudgetBytes: 76_800_000_000,
+    enginePools: {
+      kind: 'unified',
+      vramBytes: 0,
+      ramShareBytes: 76_800_000_000,
+      fastBytes: 76_800_000_000,
+    },
     residentModels: [],
     gezelEngineProcessCount: 1,
     orphanedGezelEngineProcessCount: 0,

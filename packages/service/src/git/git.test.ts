@@ -9,10 +9,12 @@ const { runGit } = await import('./git.js');
 
 function fakeChild() {
   const child = new EventEmitter() as EventEmitter & {
+    stdin: { end: ReturnType<typeof vi.fn> };
     stdout: EventEmitter;
     stderr: EventEmitter;
     kill: ReturnType<typeof vi.fn>;
   };
+  child.stdin = { end: vi.fn() };
   child.stdout = new EventEmitter();
   child.stderr = new EventEmitter();
   child.kill = vi.fn();
@@ -59,5 +61,16 @@ describe('runGit credential prompting', () => {
         }),
       }),
     );
+  });
+
+  it('writes an optional bulk-input payload to stdin and closes it', async () => {
+    const child = fakeChild();
+    spawnMock.mockReturnValue(child);
+
+    const pending = runGit(['check-ignore', '--stdin'], { stdin: 'dist/a.js\0' });
+    queueMicrotask(() => child.emit('close', 0));
+    await pending;
+
+    expect(child.stdin.end).toHaveBeenCalledWith('dist/a.js\0');
   });
 });

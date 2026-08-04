@@ -108,17 +108,20 @@ export function systemRoutes(ctx: ServiceContext): Hono {
         sum + Math.min(entry.modelWeightsBytes ?? entry.residentBytes, entry.residentBytes),
       0,
     );
-    const snapshot = sampleMachineMemoryUsage({
-      profile,
-      ...(deviceHealth ? { deviceHealth } : {}),
-      engineCommittedBytes: engineSnapshot?.committedBytes ?? 0,
-      engineBudgetBytes: engineSnapshot?.enforced ? engineSnapshot.budgetBytes : null,
-      residentModels: summarizeResidentModels(engineSnapshot?.entries ?? []),
-      engineModelWeightsBytes,
-      gezelProcessMemory,
-      darwinSystemMemory,
-      forceMainMemory,
-    });
+    const snapshot = {
+      ...sampleMachineMemoryUsage({
+        profile,
+        ...(deviceHealth ? { deviceHealth } : {}),
+        engineCommittedBytes: engineSnapshot?.committedBytes ?? 0,
+        engineBudgetBytes: engineSnapshot?.enforced ? engineSnapshot.budgetBytes : null,
+        residentModels: summarizeResidentModels(engineSnapshot?.entries ?? []),
+        engineModelWeightsBytes,
+        gezelProcessMemory,
+        darwinSystemMemory,
+        forceMainMemory,
+      }),
+      enginePools: engineSnapshot?.pools ?? null,
+    };
     return c.json(MachineMemoryUsageSchema.parse(snapshot));
   });
 

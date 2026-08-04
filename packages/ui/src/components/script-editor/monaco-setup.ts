@@ -3,12 +3,10 @@ import { monaco } from '../monaco-base.js';
 
 /**
  * Monaco wiring for the script editor — TypeScript language config + SDK
- * type injection + the preamble folding region. The heavy `editor.main.js`
- * import, web-worker setup, and the gezel themes live in the shared
- * `../monaco-base.js` (imported below). Like that module, this one is HEAVY
- * and must only ever be loaded via `import('./monaco-setup.js')` from a
- * mount-time effect, never the static graph, so the app bundle and jsdom
- * tests stay monaco-free.
+ * type injection + the preamble folding region. The shared compact editor
+ * profile, web-worker setup, and gezel themes live in `../monaco-base.js`.
+ * This module requests TypeScript's grammar, completion UI, and worker-backed
+ * language service before callers create an editor.
  */
 
 export { monaco };
@@ -32,6 +30,7 @@ let sdkTypesVersion: string | null = null;
  * diagnostics are where those get caught.
  */
 export async function ensureScriptTypescript(fetchTypes: () => Promise<SdkTypesResponse>) {
+  await monaco.loadMonacoLanguages('typescript', { languageServices: true });
   const td = monaco.languages.typescript.typescriptDefaults;
   if (!tsConfigured) {
     tsConfigured = true;

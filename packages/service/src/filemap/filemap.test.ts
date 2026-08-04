@@ -519,6 +519,44 @@ describe('buildFileMap (end-to-end over a real index)', () => {
   });
 
   it.skipIf(!gitOk)(
+    'excludes .gitignore matches and purges blocks placed before the rule existed',
+    async () => {
+      await mkdir(join(dir, 'src'), { recursive: true });
+      await mkdir(join(dir, 'generated'), { recursive: true });
+      await writeFile(join(dir, 'src', 'kept.ts'), 'export const kept = true;\n');
+      await writeFile(join(dir, 'generated', 'hidden.ts'), 'export const hidden = true;\n');
+      await runGit(['init', '-q'], { cwd: dir });
+
+      const store = (await IndexStore.open(join(dir, '.gezel', 'index.db'), {
+        collectionId: 'proj-1',
+        kind: 'workspace',
+        rootPath: dir,
+      }))!;
+      try {
+        await indexWorkspaceContent(store, dir);
+        const beforeIgnore = await buildFileMap(store, dir, { persist: true });
+        expect(beforeIgnore.blocks.some((block) => block.id === 'generated/hidden.ts')).toBe(true);
+        expect(
+          store.layoutNodes('code').some((node) => node.nodeId === 'generated/hidden.ts'),
+        ).toBe(true);
+
+        // The ignore rule is read live by Village; no content re-index is
+        // necessary for an updated `.gitignore` to take effect.
+        await writeFile(join(dir, '.gitignore'), 'generated/\n');
+        const afterIgnore = await buildFileMap(store, dir, { persist: true });
+
+        expect(afterIgnore.blocks.some((block) => block.id === 'src/kept.ts')).toBe(true);
+        expect(afterIgnore.blocks.some((block) => block.id === 'generated/hidden.ts')).toBe(false);
+        expect(
+          store.layoutNodes('code').some((node) => node.nodeId === 'generated/hidden.ts'),
+        ).toBe(false);
+      } finally {
+        store.close();
+      }
+    },
+  );
+
+  it.skipIf(!gitOk)(
     'carries git churn + last-commit onto the wire when the workspace is a repo',
     async () => {
       resetGitProbeForTests();

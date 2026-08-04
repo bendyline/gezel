@@ -177,6 +177,21 @@ export const MachineMemoryUsageSchema = z.object({
    * running or the budget is not enforced.
    */
   engineBudgetBytes: z.number().nonnegative().nullable(),
+  /**
+   * The memory pools behind `engineBudgetBytes`. Optional for compatibility
+   * with daemons that predate the split. This describes capacity planning,
+   * not measured placement: a reservation may use either pool depending on
+   * the model and backend.
+   */
+  enginePools: z
+    .object({
+      kind: z.enum(['unified', 'discrete-gpu', 'system-ram']),
+      vramBytes: z.number().nonnegative(),
+      ramShareBytes: z.number().nonnegative(),
+      fastBytes: z.number().nonnegative(),
+    })
+    .nullable()
+    .optional(),
   /** The resident models behind `engineReservedBytes`. */
   residentModels: z.array(ResidentEngineModelSchema),
   gezelEngineProcessCount: z.number().int().nonnegative(),

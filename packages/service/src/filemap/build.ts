@@ -28,6 +28,7 @@ import { importRoads } from './affinity.js';
 import { computeImportance } from './centrality.js';
 import { composeFileMapScopes } from './compose.js';
 import { computeLevels, landmarkLevels, selectLandmarks } from './elevation.js';
+import { gitIgnoredVillagePaths } from './gitignore.js';
 import { civicThreshold, computeHealth, normalizeSeverity } from './health.js';
 import { collectCodeMap } from './providers/code.js';
 import { isExcludedFromCodeMap } from './sections.js';
@@ -80,9 +81,15 @@ export interface BuildFileMapOptions {
 }
 
 /** Hydrate engine prior rows from a village-file journal (index-loss recovery). */
-function journalToPrior(journal: VillageJournalNode[], scope: FileMapScope): PriorNode[] {
+function journalToPrior(
+  journal: VillageJournalNode[],
+  scope: FileMapScope,
+  ignoredPaths: ReadonlySet<string>,
+): PriorNode[] {
   return journal
-    .filter((j) => !(j.k === 'block' && isExcludedFromCodeMap(j.id, scope)))
+    .filter(
+      (j) => !(j.k === 'block' && (ignoredPaths.has(j.id) || isExcludedFromCodeMap(j.id, scope))),
+    )
     .map((j) => ({
       nodeKind: j.k,
       nodeId: j.id,
@@ -129,19 +136,42 @@ export async function buildFileMap(
   root: string,
   options: BuildFileMapOptions = {},
 ): Promise<FileMapResponse> {
+  const ignoredPaths = await gitIgnoredVillagePaths(
+    root,
+    index.allFiles().map((file) => file.path),
+  );
+  return buildFileMapWithIgnores(index, root, options, ignoredPaths);
+}
+
+async function buildFileMapWithIgnores(
+  index: IndexStore,
+  root: string,
+  options: BuildFileMapOptions,
+  ignoredPaths: ReadonlySet<string>,
+): Promise<FileMapResponse> {
   const scope = options.scope ?? 'core';
   // "All" is deliberately not a third layout. Build the two durable cities
   // separately, then compose them with a rigid translation so switching scope
   // never changes either neighborhood's internal shape.
   if (scope === 'all') {
-    const code = await buildFileMap(index, root, { ...options, scope: 'core' });
-    const tests = await buildFileMap(index, root, { ...options, scope: 'tests' });
+    const code = await buildFileMapWithIgnores(
+      index,
+      root,
+      { ...options, scope: 'core' },
+      ignoredPaths,
+    );
+    const tests = await buildFileMapWithIgnores(
+      index,
+      root,
+      { ...options, scope: 'tests' },
+      ignoredPaths,
+    );
     return composeFileMapScopes(code, tests);
   }
 
   // Code and Tests are independently persisted, stable cities.
   const domain = scope === 'core' ? 'code' : `code:${scope}`;
-  const provider = collectCodeMap(index, scope);
+  const provider = collectCodeMap(index, scope, ignoredPaths);
   const now = nowIso();
   const cutoff = new Date(Date.now() - TOMBSTONE_TTL_MS).toISOString();
 
@@ -228,7 +258,13 @@ export async function buildFileMap(
     // before the exclusion existed): filtering them out of `prior` means the
     // engine never tombstones them and `replaceLayout` purges them.
     prior = sqliteRows
-      .filter((r) => !(r.nodeKind === 'block' && isExcludedFromCodeMap(r.nodeId, scope)))
+      .filter(
+        (r) =>
+          !(
+            r.nodeKind === 'block' &&
+            (ignoredPaths.has(r.nodeId) || isExcludedFromCodeMap(r.nodeId, scope))
+          ),
+      )
       .map((r) => ({
         nodeKind: r.nodeKind,
         nodeId: r.nodeId,
@@ -243,7 +279,7 @@ export async function buildFileMap(
   } else if (journalUsable && dom.journal.length > 0) {
     // Index db was rebuilt/deleted: the journal restores the whole city —
     // tombstones, transplant hashes, and the age lens included.
-    prior = journalToPrior(dom.journal, scope);
+    prior = journalToPrior(dom.journal, scope, ignoredPaths);
     stale = false;
   } else {
     prior = [];

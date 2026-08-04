@@ -2,7 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { securityPolicyForLevel } from '@bendyline/gezel';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatEventBus } from '../chat/events.js';
 import { ActivityTracker } from '../fs/activity-tracker.js';
 import { Store } from '../fs/store.js';
@@ -998,7 +998,7 @@ describe('TaskScheduler — ambient project nudges', () => {
     expect(chat.delivered[0]?.toGezelIdOrName).toBe('leo');
   });
 
-  it('skips nudging when config.enabled is false', async () => {
+  it('skips nudging silently when config.enabled is false', async () => {
     const now = new Date('2026-05-01T12:00:00Z');
     await setupProject({
       voormanGezelId: 'leo',
@@ -1014,8 +1014,17 @@ describe('TaskScheduler — ambient project nudges', () => {
       store,
       now: () => now,
     });
-    await scheduler.tick();
-    expect(chat.delivered).toHaveLength(0);
+    const stdout = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    try {
+      await scheduler.tick();
+      await scheduler.tick();
+      expect(chat.delivered).toHaveLength(0);
+      expect(stdout.mock.calls.flat().join('')).not.toContain(
+        'skip — nudges disabled for this project',
+      );
+    } finally {
+      stdout.mockRestore();
+    }
   });
 
   it('a human message after the nudge resets the rapid counter (cadence from chat traffic)', async () => {

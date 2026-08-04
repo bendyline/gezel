@@ -357,6 +357,7 @@ void probe_amd_adl(ProbeReport& report) {
   using AdapterInfo = int(__stdcall*)(AdlContext, AdlAdapterInfo*, int);
   using QueryPmLog = int(__stdcall*)(AdlContext, int, AdlPmLogDataOutput*);
   using MemoryInfo = int(__stdcall*)(AdlContext, int, AdlMemoryInfo2*);
+  using MemoryUsage = int(__stdcall*)(AdlContext, int, int*);
 
   const Create create = load_symbol<Create>(library, "ADL2_Main_Control_Create");
   const Destroy destroy = load_symbol<Destroy>(library, "ADL2_Main_Control_Destroy");
@@ -368,6 +369,15 @@ void probe_amd_adl(ProbeReport& report) {
       load_symbol<QueryPmLog>(library, "ADL2_New_QueryPMLogData_Get");
   const MemoryInfo memory_info =
       load_symbol<MemoryInfo>(library, "ADL2_Adapter_MemoryInfo2_Get");
+  // DedicatedVRAMUsage is the pool-wide Windows counter behind Radeon
+  // Software's memory meter. Older drivers may expose only VRAMUsage, whose
+  // signature and MB unit are identical, so keep it as a compatibility
+  // fallback. Either query is optional: temperature safety must still work
+  // on a driver that exposes neither memory counter.
+  const MemoryUsage dedicated_memory_usage = load_symbol<MemoryUsage>(
+      library, "ADL2_Adapter_DedicatedVRAMUsage_Get");
+  const MemoryUsage memory_usage =
+      load_symbol<MemoryUsage>(library, "ADL2_Adapter_VRAMUsage_Get");
 
   if (!create || !destroy || !number_of_adapters || !adapter_info || !query_pm_log) {
     report.errors.push_back("amd-adl: required entry points are missing");
@@ -432,6 +442,20 @@ void probe_amd_adl(ProbeReport& report) {
           memory.memory_size > 0) {
         reading.memory_total_mb = static_cast<double>(memory.memory_size) / (1024.0 * 1024.0);
       }
+    }
+    int used_mb = 0;
+    const bool has_dedicated_usage =
+        dedicated_memory_usage &&
+        dedicated_memory_usage(context, adapter.adapter_index, &used_mb) == kAdlOk &&
+        used_mb >= 0;
+    if (!has_dedicated_usage) {
+      used_mb = 0;
+    }
+    const bool has_compatible_usage =
+        !has_dedicated_usage && memory_usage &&
+        memory_usage(context, adapter.adapter_index, &used_mb) == kAdlOk && used_mb >= 0;
+    if (has_dedicated_usage || has_compatible_usage) {
+      reading.memory_used_mb = static_cast<double>(used_mb);
     }
     if (data.sensors[kAdlPmThrottlerStatus].supported) {
       const int throttle = data.sensors[kAdlPmThrottlerStatus].value;

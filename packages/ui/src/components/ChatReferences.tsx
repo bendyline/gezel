@@ -1,4 +1,4 @@
-import type { Task } from '@bendyline/gezel';
+import type { Task, TaskNote } from '@bendyline/gezel';
 import { hasReportActionFence } from '@bendyline/gezel';
 import { GezelApiError } from '@bendyline/gezel-client';
 import { EditorShell } from '@bendyline/squisq-editor-react';
@@ -664,6 +664,8 @@ function TaskRailCard({
 }) {
   const [task, setTask] = useState<Task | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [notes, setNotes] = useState<TaskNote[]>([]);
+  const [notesState, setNotesState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
 
   useEffect(() => {
     let cancelled = false;
@@ -685,6 +687,35 @@ function TaskRailCard({
     };
   }, [taskRef]);
 
+  useEffect(() => {
+    if (!task) {
+      setNotes([]);
+      setNotesState('idle');
+      return;
+    }
+
+    let cancelled = false;
+    setNotesState('loading');
+    api
+      .listTaskNotes(task.projectId, task.num)
+      .then((res) => {
+        if (cancelled) return;
+        // Keep the compact history deterministic even if a future API source
+        // stops returning task notes in its current newest-first order.
+        setNotes([...res.notes].sort((a, b) => b.at.localeCompare(a.at)));
+        setNotesState('ready');
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setNotes([]);
+        setNotesState('error');
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [task]);
+
   if (!loaded) return <p className="muted small chat-rail-task-empty">Loading task…</p>;
   if (!task)
     return (
@@ -699,12 +730,21 @@ function TaskRailCard({
   const displayTitle = legacyGeneratedTitle ? cb.name : task.title;
   return (
     <div className="chat-rail-task">
-      <header className="chat-rail-task-header">
-        <code className="chat-rail-task-ref">{task.ref}</code>
-        <span className={`chat-rail-task-status chat-rail-task-status-${task.status}`}>
-          {task.status}
-        </span>
-      </header>
+      <div className="chat-rail-task-topbar">
+        <header className="chat-rail-task-header">
+          <code className="chat-rail-task-ref">{task.ref}</code>
+          <span className={`chat-rail-task-status chat-rail-task-status-${task.status}`}>
+            {task.status}
+          </span>
+        </header>
+        <button
+          type="button"
+          className="chat-rail-task-open"
+          onClick={() => onOpenTask?.(task.ref)}
+        >
+          Open full task
+        </button>
+      </div>
       <h4 className="chat-rail-task-title">{displayTitle}</h4>
       {task.description && <p className="chat-rail-task-desc">{task.description}</p>}
       {cb && (
@@ -725,11 +765,46 @@ function TaskRailCard({
           </ol>
         </>
       )}
-      <button type="button" className="chat-rail-task-open" onClick={() => onOpenTask?.(task.ref)}>
-        Open full task
-      </button>
+      <section className="chat-rail-task-history" aria-label="History and notes">
+        <h5>History &amp; notes</h5>
+        {notesState === 'loading' && <p className="muted small">Loading notes…</p>}
+        {notesState === 'error' && <p className="muted small">Notes unavailable.</p>}
+        {notesState === 'ready' && notes.length === 0 && (
+          <p className="muted small">No notes yet.</p>
+        )}
+        {notes.length > 0 && (
+          <ol className="chat-rail-task-notes">
+            {notes.map((note) => {
+              const step = note.stepId
+                ? task.craftbook.steps.find((candidate) => candidate.id === note.stepId)
+                : undefined;
+              return (
+                <li key={note.id} className="chat-rail-task-note">
+                  <header className="chat-rail-task-note-header">
+                    <span>{note.author.kind === 'user' ? 'You' : note.author.name}</span>
+                    <time dateTime={note.at} title={note.at}>
+                      {formatTaskNoteTime(note.at)}
+                    </time>
+                    {step && <span className="chat-rail-task-note-step">{step.name}</span>}
+                  </header>
+                  <RenderedMarkdownPreview
+                    markdown={note.text}
+                    projectId={task.projectId}
+                    articleId={`task-note-${note.id}`}
+                  />
+                </li>
+              );
+            })}
+          </ol>
+        )}
+      </section>
     </div>
   );
+}
+
+function formatTaskNoteTime(at: string): string {
+  const date = new Date(at);
+  return Number.isNaN(date.getTime()) ? at : date.toLocaleString();
 }
 
 function TaskTabMenu({
@@ -1165,20 +1240,23 @@ function RenderedMarkdownPreview({
   markdown,
   projectId,
   reportPath,
+  articleId = 'ref-preview',
 }: {
   markdown: string;
   projectId: string;
   /** Artifacts-relative path when this preview shows an artifact — enables gezel-action cards. */
   reportPath?: string;
+  /** Keeps multiple compact Markdown documents from sharing generated ids. */
+  articleId?: string;
 }) {
   const doc = useMemo(() => {
     try {
       const mdDoc = parseMarkdown(markdown);
-      return markdownToDoc(mdDoc, { articleId: 'ref-preview' });
+      return markdownToDoc(mdDoc, { articleId });
     } catch {
       return null;
     }
-  }, [markdown]);
+  }, [articleId, markdown]);
   const effective = useEffectiveTheme();
   // Report artifacts may embed gezel-action blocks — register the fence
   // renderer so recommendations render as fireable cards in the rail.
